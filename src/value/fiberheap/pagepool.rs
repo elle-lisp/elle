@@ -353,8 +353,9 @@ static PAGE_CLAIM_BYTES: [AtomicU64; NUM_CLASSES + 1] =
 
 /// Whether `--stats` is active (the histogram's gate). Off ⇒ `record_claim` and
 /// `dump_page_hist` are no-ops, so the histogram costs nothing in normal runs.
-/// Read live from the global config like `has_trace`; config is installed before
-/// any region (and therefore any page) is created.
+/// Read live from the global config like `has_trace`. A page claimed before
+/// `config::init` reads the defaults and does not freeze them
+/// (`config::get`), so this needs no ordering rule.
 fn page_hist_enabled() -> bool {
     crate::config::get().stats
 }

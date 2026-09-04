@@ -32,7 +32,7 @@ fn makecell_walk_is_transparent_pass_through() {
     use crate::syntax::Span;
     let arena = BindingArena::new();
     let span = Span::synthetic();
-    let value = Hir::silent(HirKind::Int(42), span.clone());
+    let value = Hir::silent(HirKind::Int(42), span);
     let mc = Hir::silent(
         HirKind::MakeCell {
             value: Box::new(value),

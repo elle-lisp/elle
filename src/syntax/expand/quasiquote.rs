@@ -18,7 +18,7 @@ impl Expander {
     ) -> Result<Syntax, String> {
         match &syntax.kind {
             // Unquote at depth 1 - evaluate the expression
-            SyntaxKind::Unquote(inner) if depth == 1 => self.expand((**inner).clone(), symbols, vm),
+            SyntaxKind::Unquote(inner) if depth == 1 => self.expand(**inner, symbols, vm),
 
             // Nested unquote - decrease depth
             SyntaxKind::Unquote(inner) if depth > 1 => {
@@ -26,17 +26,17 @@ impl Expander {
                 // Wrap in (list (quote unquote) expanded)
                 Ok(self.make_list(
                     vec![
-                        self.make_symbol("list", span.clone()),
+                        self.make_symbol("list", *span),
                         self.make_list(
                             vec![
-                                self.make_symbol("quote", span.clone()),
-                                self.make_symbol("unquote", span.clone()),
+                                self.make_symbol("quote", *span),
+                                self.make_symbol("unquote", *span),
                             ],
-                            span.clone(),
+                            *span,
                         ),
                         expanded,
                     ],
-                    span.clone(),
+                    *span,
                 ))
             }
 
@@ -45,17 +45,17 @@ impl Expander {
                 let expanded = self.quasiquote_to_code(inner, depth + 1, span, symbols, vm)?;
                 Ok(self.make_list(
                     vec![
-                        self.make_symbol("list", span.clone()),
+                        self.make_symbol("list", *span),
                         self.make_list(
                             vec![
-                                self.make_symbol("quote", span.clone()),
-                                self.make_symbol("quasiquote", span.clone()),
+                                self.make_symbol("quote", *span),
+                                self.make_symbol("quasiquote", *span),
                             ],
-                            span.clone(),
+                            *span,
                         ),
                         expanded,
                     ],
-                    span.clone(),
+                    *span,
                 ))
             }
 
@@ -73,10 +73,9 @@ impl Expander {
             }
 
             // StructMut — quasiquote treats it as data (quoted)
-            SyntaxKind::StructMut(_) => Ok(self.make_list(
-                vec![self.make_symbol("quote", span.clone()), syntax.clone()],
-                span.clone(),
-            )),
+            SyntaxKind::StructMut(_) => {
+                Ok(self.make_list(vec![self.make_symbol("quote", *span), *syntax], *span))
+            }
 
             // Symbols: wrap as SyntaxLiteral to preserve definition-site
             // scopes through the Value round-trip (Flatt 2016 §3). Without
@@ -89,15 +88,12 @@ impl Expander {
                 // set rides along in the `Syntax`), NOT a heap `Value`. The
                 // analyzer materializes it as a fresh ordinary allocation per
                 // execution.
-                SyntaxKind::SyntaxLiteral(std::rc::Rc::new(syntax.clone())),
-                span.clone(),
+                SyntaxKind::SyntaxLiteral(self.arena().node(*syntax)),
+                *span,
             )),
 
             // Everything else gets quoted (atoms don't participate in binding)
-            _ => Ok(self.make_list(
-                vec![self.make_symbol("quote", span.clone()), syntax.clone()],
-                span.clone(),
-            )),
+            _ => Ok(self.make_list(vec![self.make_symbol("quote", *span), *syntax], *span)),
         }
     }
 
@@ -115,11 +111,11 @@ impl Expander {
         symbols: &mut SymbolTable,
         vm: &mut VM,
     ) -> Result<Syntax, String> {
-        let mut array_call = vec![self.make_symbol("array", span.clone())];
+        let mut array_call = vec![self.make_symbol("array", *span)];
         for item in items {
             array_call.push(self.quasiquote_to_code(item, depth, span, symbols, vm)?);
         }
-        Ok(self.make_list(array_call, span.clone()))
+        Ok(self.make_list(array_call, *span))
     }
 
     /// Convert a quasiquoted list to code
@@ -134,10 +130,10 @@ impl Expander {
         if items.is_empty() {
             return Ok(self.make_list(
                 vec![
-                    self.make_symbol("quote", span.clone()),
-                    self.make_list(vec![], span.clone()),
+                    self.make_symbol("quote", *span),
+                    self.make_list(vec![], *span),
                 ],
-                span.clone(),
+                *span,
             ));
         }
 
@@ -155,13 +151,13 @@ impl Expander {
                 if let SyntaxKind::UnquoteSplicing(inner) = &item.kind {
                     // Flush current segment
                     if !current_segment.is_empty() {
-                        let mut list_call = vec![self.make_symbol("list", span.clone())];
+                        let mut list_call = vec![self.make_symbol("list", *span)];
                         list_call.append(&mut current_segment);
-                        segments.push(self.make_list(list_call, span.clone()));
+                        segments.push(self.make_list(list_call, *span));
                     }
                     // Add spliced expression
                     if depth == 1 {
-                        segments.push(self.expand((**inner).clone(), symbols, vm)?);
+                        segments.push(self.expand(**inner, symbols, vm)?);
                     } else {
                         segments.push(self.quasiquote_to_code(
                             inner,
@@ -178,30 +174,28 @@ impl Expander {
 
             // Flush remaining segment
             if !current_segment.is_empty() {
-                let mut list_call = vec![self.make_symbol("list", span.clone())];
+                let mut list_call = vec![self.make_symbol("list", *span)];
                 list_call.extend(current_segment);
-                segments.push(self.make_list(list_call, span.clone()));
+                segments.push(self.make_list(list_call, *span));
             }
 
             // Build nested binary append calls: (append seg1 (append seg2 (append seg3 ...)))
             // append is now binary, so we need to nest the calls
-            let mut result = segments.pop().unwrap_or(
-                self.make_list(vec![self.make_symbol("list", span.clone())], span.clone()),
-            );
+            let mut result = segments
+                .pop()
+                .unwrap_or(self.make_list(vec![self.make_symbol("list", *span)], *span));
             while let Some(seg) = segments.pop() {
-                result = self.make_list(
-                    vec![self.make_symbol("append", span.clone()), seg, result],
-                    span.clone(),
-                );
+                result =
+                    self.make_list(vec![self.make_symbol("append", *span), seg, result], *span);
             }
             Ok(result)
         } else {
             // Simple case - just use list
-            let mut list_call = vec![self.make_symbol("list", span.clone())];
+            let mut list_call = vec![self.make_symbol("list", *span)];
             for item in items {
                 list_call.push(self.quasiquote_to_code(item, depth, span, symbols, vm)?);
             }
-            Ok(self.make_list(list_call, span.clone()))
+            Ok(self.make_list(list_call, *span))
         }
     }
 }

@@ -142,7 +142,11 @@ These are loaded by `Expander::load_prelude()` before user code expansion.
 
 ## Syntax objects in the Value system
 
-`SyntaxKind::SyntaxLiteral(Value)` is an internal-only variant used by `expand_macro_call_inner` to inject `Value::syntax(arg)` into the compilation pipeline. This preserves scope sets through the Value round-trip during macro expansion. The Analyzer handles it by producing `HirKind::Quote(value)`.
+`SyntaxKind::SyntaxLiteral(SynRef)` is an internal-only variant that carries a hygiene-bearing template symbol as plain compile-time data. Quasiquote creates it so a template symbol's scope set survives the Value round-trip during macro expansion; the Analyzer materializes it as an ordinary allocation per execution via `ConstTemplate::SyntaxSymbol`.
+
+## Arenas
+
+The expander holds two: `arena` is the working arena of the unit under expansion (the pipeline sets it per unit), and `templates` is the instance's process-root arena, where `handle_defmacro` copies a macro template so it outlives the unit that defined it. `map_scope_recursive` COPIES — subtrees are shared by pointer, so a walk that wrote through the source would stamp trees the caller still holds. See docs/impl/syntax.md § "Where a node lives".
 
 ## Hygiene escape hatch: `datum->syntax`
 

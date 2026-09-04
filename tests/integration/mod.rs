@@ -149,6 +149,9 @@ mod census {
 mod image {
     include!("image.rs");
 }
+mod syntax_regions {
+    include!("syntax_regions.rs");
+}
 mod timeout_capture {
     include!("timeout_capture.rs");
 }

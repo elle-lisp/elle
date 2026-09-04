@@ -17,7 +17,7 @@ fn assert_no_panic(name: &str, programs: &[&str]) {
     let mut panics: Vec<String> = Vec::new();
     let mut check = |src: &str| {
         let res = catch_unwind(AssertUnwindSafe(|| {
-            let _ = elle::reader::read_syntax_all_for(src, name);
+            let _ = elle::reader::read_syntax_all_for(elle::syntax::thread_arena(), src, name);
         }));
         if res.is_err() {
             panics.push(src.to_string());

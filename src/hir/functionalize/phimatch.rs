@@ -65,14 +65,14 @@ impl<'a> FnCtx<'a> {
         let new_clauses: Vec<(Hir, Hir)> = cond_temps
             .iter()
             .zip(bodies)
-            .map(|(&t, body)| (Hir::silent(HirKind::Var(t), span.clone()), body))
+            .map(|(&t, body)| (Hir::silent(HirKind::Var(t), span), body))
             .collect();
         let cond_node = Hir::new(
             HirKind::Cond {
                 clauses: new_clauses,
                 else_branch: new_else.map(Box::new),
             },
-            span.clone(),
+            span,
             signal,
         );
 
@@ -90,27 +90,27 @@ impl<'a> FnCtx<'a> {
                     // There's an else branch
                     all_versions[else_idx]
                         .get(&orig)
-                        .map(|&b| Hir::silent(HirKind::Var(b), span.clone()))
-                        .unwrap_or_else(|| Hir::silent(HirKind::Var(pre), span.clone()))
+                        .map(|&b| Hir::silent(HirKind::Var(b), span))
+                        .unwrap_or_else(|| Hir::silent(HirKind::Var(pre), span))
                 } else {
                     // No else → use pre-cond version
-                    Hir::silent(HirKind::Var(pre), span.clone())
+                    Hir::silent(HirKind::Var(pre), span)
                 };
 
                 // Wrap in (if tN x_vN ...) from last clause to first
                 for i in (0..clauses.len()).rev() {
                     let clause_val = all_versions[i]
                         .get(&orig)
-                        .map(|&b| Hir::silent(HirKind::Var(b), span.clone()))
-                        .unwrap_or_else(|| Hir::silent(HirKind::Var(pre), span.clone()));
+                        .map(|&b| Hir::silent(HirKind::Var(b), span))
+                        .unwrap_or_else(|| Hir::silent(HirKind::Var(pre), span));
 
                     phi_val = Hir::new(
                         HirKind::If {
-                            cond: Box::new(Hir::silent(HirKind::Var(cond_temps[i]), span.clone())),
+                            cond: Box::new(Hir::silent(HirKind::Var(cond_temps[i]), span)),
                             then_branch: Box::new(clause_val),
                             else_branch: Box::new(phi_val),
                         },
-                        span.clone(),
+                        span,
                         Signal::silent(),
                     );
                 }
@@ -123,7 +123,7 @@ impl<'a> FnCtx<'a> {
 
         // 5. Build continuation
         let has_continuation = start + 1 < exprs.len();
-        let mut result = self.transform_begin_at(exprs, start + 1, span.clone(), signal);
+        let mut result = self.transform_begin_at(exprs, start + 1, span, signal);
 
         // Wrap: (let [phi1 ...] (let [phi2 ...] continuation))
         for (binding, phi_val) in phi_bindings.into_iter().rev() {
@@ -132,7 +132,7 @@ impl<'a> FnCtx<'a> {
                     bindings: vec![(binding, phi_val)],
                     body: Box::new(result),
                 },
-                span.clone(),
+                span,
                 signal,
             );
         }
@@ -143,25 +143,21 @@ impl<'a> FnCtx<'a> {
         //    t3 = (if t1 false (if t2 false test3))
         //    ...
         let inner = if has_continuation {
-            Hir::new(
-                HirKind::Begin(vec![cond_node, result]),
-                span.clone(),
-                signal,
-            )
+            Hir::new(HirKind::Begin(vec![cond_node, result]), span, signal)
         } else {
             // Last expression: capture cond result in a temp
             let result_binding = self.gensym();
-            let result_var = Hir::silent(HirKind::Var(result_binding), span.clone());
+            let result_var = Hir::silent(HirKind::Var(result_binding), span);
             Hir::new(
                 HirKind::Let {
                     bindings: vec![(result_binding, cond_node)],
                     body: Box::new(Hir::new(
                         HirKind::Begin(vec![result, result_var]),
-                        span.clone(),
+                        span,
                         signal,
                     )),
                 },
-                span.clone(),
+                span,
                 signal,
             )
         };
@@ -182,11 +178,11 @@ impl<'a> FnCtx<'a> {
                 for j in (0..i).rev() {
                     short_circuit = Hir::new(
                         HirKind::If {
-                            cond: Box::new(Hir::silent(HirKind::Var(cond_temps[j]), span.clone())),
-                            then_branch: Box::new(Hir::silent(HirKind::Bool(false), span.clone())),
+                            cond: Box::new(Hir::silent(HirKind::Var(cond_temps[j]), span)),
+                            then_branch: Box::new(Hir::silent(HirKind::Bool(false), span)),
                             else_branch: Box::new(short_circuit),
                         },
-                        span.clone(),
+                        span,
                         Signal::silent(),
                     );
                 }
@@ -198,7 +194,7 @@ impl<'a> FnCtx<'a> {
                     bindings: vec![(cond_temps[i], cond_init)],
                     body: Box::new(wrapped),
                 },
-                span.clone(),
+                span,
                 signal,
             );
         }
@@ -226,7 +222,7 @@ impl<'a> FnCtx<'a> {
         // 1. Transform the match value
         let new_value = self.transform(value);
         let value_binding = self.gensym();
-        let value_var = Hir::silent(HirKind::Var(value_binding), span.clone());
+        let value_var = Hir::silent(HirKind::Var(value_binding), span);
 
         // 2. Transform each arm body, extracting assign versions
         let mut new_arms = Vec::new();
@@ -247,7 +243,7 @@ impl<'a> FnCtx<'a> {
                 value: Box::new(value_var.clone()),
                 arms: new_arms,
             },
-            span.clone(),
+            span,
             signal,
         );
 
@@ -264,8 +260,8 @@ impl<'a> FnCtx<'a> {
                     .map(|((pat, guard, _), versions)| {
                         let phi_val = versions
                             .get(&orig)
-                            .map(|&b| Hir::silent(HirKind::Var(b), span.clone()))
-                            .unwrap_or_else(|| Hir::silent(HirKind::Var(pre), span.clone()));
+                            .map(|&b| Hir::silent(HirKind::Var(b), span))
+                            .unwrap_or_else(|| Hir::silent(HirKind::Var(pre), span));
                         // Replicate guards for the phi-select match
                         let phi_guard = guard.as_ref().map(|g| self.transform(g));
                         (pat.clone(), phi_guard, phi_val)
@@ -281,7 +277,7 @@ impl<'a> FnCtx<'a> {
                 phi_arms.push((
                     HirPattern::Wildcard,
                     None,
-                    Hir::silent(HirKind::Var(pre), span.clone()),
+                    Hir::silent(HirKind::Var(pre), span),
                 ));
 
                 let phi_match = Hir::new(
@@ -289,7 +285,7 @@ impl<'a> FnCtx<'a> {
                         value: Box::new(value_var.clone()),
                         arms: phi_arms,
                     },
-                    span.clone(),
+                    span,
                     Signal::silent(),
                 );
 
@@ -301,7 +297,7 @@ impl<'a> FnCtx<'a> {
 
         // 5. Build continuation
         let has_continuation = start + 1 < exprs.len();
-        let mut result = self.transform_begin_at(exprs, start + 1, span.clone(), signal);
+        let mut result = self.transform_begin_at(exprs, start + 1, span, signal);
 
         // Wrap: (let [phi1 ...] continuation)
         for (binding, phi_val) in phi_bindings.into_iter().rev() {
@@ -310,31 +306,27 @@ impl<'a> FnCtx<'a> {
                     bindings: vec![(binding, phi_val)],
                     body: Box::new(result),
                 },
-                span.clone(),
+                span,
                 signal,
             );
         }
 
         // 6. Wrap with match and value binding
         let inner = if has_continuation {
-            Hir::new(
-                HirKind::Begin(vec![match_node, result]),
-                span.clone(),
-                signal,
-            )
+            Hir::new(HirKind::Begin(vec![match_node, result]), span, signal)
         } else {
             let result_binding = self.gensym();
-            let result_var = Hir::silent(HirKind::Var(result_binding), span.clone());
+            let result_var = Hir::silent(HirKind::Var(result_binding), span);
             Hir::new(
                 HirKind::Let {
                     bindings: vec![(result_binding, match_node)],
                     body: Box::new(Hir::new(
                         HirKind::Begin(vec![result, result_var]),
-                        span.clone(),
+                        span,
                         signal,
                     )),
                 },
-                span.clone(),
+                span,
                 signal,
             )
         };

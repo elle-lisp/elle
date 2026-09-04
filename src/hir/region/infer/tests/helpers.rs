@@ -227,8 +227,10 @@ pub(super) fn analyze_with_hir(source: &str) -> (Hir, BindingArena, SymbolTable,
         "(letrec [cond_var (fn () nil) f (fn (& args) args) g (fn (& args) args)] {})",
         source
     );
-    let syntax = read_syntax(&wrapped, "<test>").expect("parse");
-    let mut expander = Expander::new();
+    let arena = crate::syntax::SyntaxArena::mint(vm.heap());
+    let syntax = read_syntax(arena, &wrapped, "<test>").expect("parse");
+    let mut expander = Expander::on_vm(&mut vm);
+    expander.set_arena(arena);
     let expanded = expander
         .expand(syntax, &mut symbols, &mut vm)
         .expect("expand");
@@ -378,8 +380,10 @@ pub(super) fn analyze_with_class(source: &str) -> (Hir, BindingArena, SymbolTabl
         "(letrec [cond_var (fn () nil) f (fn (& args) args) g (fn (& args) args)] {})",
         source
     );
-    let syntax = read_syntax(&wrapped, "<test>").expect("parse");
-    let mut expander = Expander::new();
+    let arena = crate::syntax::SyntaxArena::mint(vm.heap());
+    let syntax = read_syntax(arena, &wrapped, "<test>").expect("parse");
+    let mut expander = Expander::on_vm(&mut vm);
+    expander.set_arena(arena);
     let expanded = expander
         .expand(syntax, &mut symbols, &mut vm)
         .expect("expand");
@@ -419,8 +423,10 @@ pub(super) fn analyze_with_effect(
         "(letrec [cond_var (fn () nil) f (fn (& args) args) g (fn (& args) args)] {})",
         source
     );
-    let syntax = read_syntax(&wrapped, "<test>").expect("parse");
-    let mut expander = Expander::new();
+    let arena = crate::syntax::SyntaxArena::mint(vm.heap());
+    let syntax = read_syntax(arena, &wrapped, "<test>").expect("parse");
+    let mut expander = Expander::on_vm(&mut vm);
+    expander.set_arena(arena);
     let expanded = expander
         .expand(syntax, &mut symbols, &mut vm)
         .expect("expand");

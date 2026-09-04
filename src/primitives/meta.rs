@@ -88,7 +88,7 @@ pub(crate) fn prim_datum_to_syntax(
     // normal lexical scoping still applies, and empty scopes are a subset of
     // everything, so the binding will be visible at the call site.
     let (scopes, span) = match context.as_syntax() {
-        Some(stx) => (stx.scopes.clone(), stx.span.clone()),
+        Some(stx) => (stx.scopes().to_vec(), stx.span),
         None => (Vec::new(), crate::syntax::Span::synthetic()),
     };
     // The context's scopes at transformer time include the expansion's
@@ -112,7 +112,11 @@ pub(crate) fn prim_datum_to_syntax(
     }
     let symbols = unsafe { &*symbols_ptr };
 
-    let mut syntax = match Syntax::from_value(datum, symbols, span) {
+    // The tree is built directly in the call's region, so the syntax `Value`
+    // below owns it and the scope rewrite below has a uniquely owned tree to
+    // write through.
+    let arena = ctx.syntax_arena();
+    let mut syntax = match Syntax::from_value(&arena, datum, symbols, span) {
         Ok(s) => s,
         Err(e) => {
             return (
@@ -122,7 +126,7 @@ pub(crate) fn prim_datum_to_syntax(
         }
     };
 
-    syntax.set_scopes_recursive(&scopes);
+    syntax.set_scopes_recursive(&arena, &scopes);
 
     (SIG_OK, ctx.syntax(syntax))
 }
@@ -168,7 +172,7 @@ fn require_syntax(
     ctx: &mut NativeCtx,
 ) -> Result<Syntax, (SignalBits, Value)> {
     match args[0].as_syntax() {
-        Some(stx) => Ok(stx.clone()),
+        Some(stx) => Ok(*stx),
         None => Err((
             SIG_ERROR,
             ctx.error(

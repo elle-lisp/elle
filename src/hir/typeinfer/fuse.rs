@@ -202,8 +202,8 @@ fn rewrite(
 ) {
     if let Some(plan) = validate_chain(hir, arena, bases, fns) {
         let sig = hir.signal;
-        let span = hir.span.clone();
-        let owned = std::mem::replace(hir, Hir::error(span.clone()));
+        let span = hir.span;
+        let owned = std::mem::replace(hir, Hir::error(span));
         let chain = take_chain(owned, plan, arena, fns);
         *hir = build_loop(chain, arena, ops, sig, span);
     }

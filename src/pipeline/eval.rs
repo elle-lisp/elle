@@ -83,10 +83,24 @@ pub fn eval(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<crate::value::Value, String> {
-    let syntax = read_syntax(source, source_name)?;
+    let arena = unsafe { crate::syntax::SyntaxArena::mint(&mut *cctx.heap_ptr()) };
+    let out = eval_in_arena(arena, source, symbols, vm, cctx, source_name);
+    unsafe { (*cctx.heap_ptr()).decref_region_if_present(arena.region()) };
+    out
+}
+
+fn eval_in_arena(
+    arena: crate::syntax::SyntaxArena,
+    source: &str,
+    symbols: &mut SymbolTable,
+    vm: &mut VM,
+    cctx: &mut CompileCtx,
+    source_name: &str,
+) -> Result<crate::value::Value, String> {
+    let syntax = read_syntax(arena, source, source_name)?;
 
     // The instance's expander + compile meta; expansion runs on the caller's vm.
-    let (mut expander, meta) = cctx.expander_and_meta();
+    let (mut expander, meta) = cctx.expander_and_meta(arena);
 
     let scoped = if source_name.starts_with('<') {
         syntax

@@ -4,7 +4,6 @@ use super::*;
 use crate::hir::expr::ParamBound;
 use crate::signals::registry;
 use crate::syntax::{Syntax, SyntaxKind};
-use std::rc::Rc;
 
 impl<'a> Analyzer<'a> {
     pub(crate) fn analyze_lambda(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
@@ -228,7 +227,7 @@ impl<'a> Analyzer<'a> {
 
         // Analyze body — restrict forms within will populate
         // current_param_bounds and current_declared_ceiling
-        let body = self.analyze_body(body_start, span.clone())?;
+        let body = self.analyze_body(body_start, span)?;
 
         // If there are destructured parameters, wrap the body
         let body = if param_destructures.is_empty() {
@@ -242,14 +241,14 @@ impl<'a> Analyzer<'a> {
                         HirKind::Destructure {
                             pattern,
                             strict,
-                            value: Box::new(Hir::silent(HirKind::Var(tmp), span.clone())),
+                            value: Box::new(Hir::silent(HirKind::Var(tmp), span)),
                         },
-                        span.clone(),
+                        span,
                     )
                 })
                 .collect();
             exprs.push(body);
-            Hir::new(HirKind::Begin(exprs), span.clone(), body_signal)
+            Hir::new(HirKind::Begin(exprs), span, body_signal)
         };
 
         let num_locals = self.current_local_count();
@@ -375,11 +374,8 @@ impl<'a> Analyzer<'a> {
             self.current_captures.push(propagated_cap);
         }
 
-        // Capture the original lambda syntax for eval environment reconstruction
-        let original_syntax = Some(Rc::new(Syntax::new(
-            SyntaxKind::List(items.to_vec()),
-            span.clone(),
-        )));
+        // Where the lambda was written, for `(meta/origin f)`.
+        let origin = Some(span);
 
         // Lambda itself is pure, but captures the body's signal
         Ok(Hir::new(
@@ -394,7 +390,7 @@ impl<'a> Analyzer<'a> {
                 inferred_signals,
                 param_bounds,
                 doc,
-                syntax: original_syntax,
+                origin,
                 assert_numeric,
             },
             span,

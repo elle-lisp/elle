@@ -17,14 +17,14 @@ fn a_declaration_from_the_future_stops_the_reader() {
     // and only the pipeline's extract_epoch objects — long after the
     // reader produced tokens it had no rules to produce.
     let src = format!("{}\n(def x 1)", too_new());
-    let err = read_syntax_all(&src, "t.lisp").unwrap_err();
+    let err = read_syntax_all(crate::syntax::thread_arena(), &src, "t.lisp").unwrap_err();
     assert!(err.contains("only supports up to"), "{err}");
 }
 
 #[test]
 fn a_shebang_does_not_hide_the_declaration_from_the_reader() {
     let src = format!("#!/usr/bin/env elle\n{}\n(def x 1)", too_new());
-    let err = read_syntax_all(&src, "t.lisp").unwrap_err();
+    let err = read_syntax_all(crate::syntax::thread_arena(), &src, "t.lisp").unwrap_err();
     assert!(err.contains("only supports up to"), "{err}");
 }
 
@@ -38,7 +38,7 @@ fn a_literate_document_prescans_the_stripped_text() {
         "# Title\n\nProse.\n\n```lisp\n{}\n(def x 1)\n```\n",
         too_new()
     );
-    let err = read_syntax_all_for(&src, "t.md").unwrap_err();
+    let err = read_syntax_all_for(crate::syntax::thread_arena(), &src, "t.md").unwrap_err();
     assert!(err.contains("only supports up to"), "{err}");
 }
 
@@ -55,13 +55,18 @@ fn read_str_stops_on_a_declaration_from_the_future() {
 fn a_supported_declaration_reads_as_an_ordinary_form() {
     // The prescan only picks the lexicon. The declaration stays in the
     // tree for extract_epoch to consume.
-    let forms = read_syntax_all("(elle/epoch 3)\n(def x 1)", "t.lisp").unwrap();
+    let forms = read_syntax_all(
+        crate::syntax::thread_arena(),
+        "(elle/epoch 3)\n(def x 1)",
+        "t.lisp",
+    )
+    .unwrap();
     assert_eq!(forms.len(), 2);
 }
 
 #[test]
 fn an_undeclared_source_reads_under_the_current_lexicon() {
-    let forms = read_syntax_all("# c\n(def x 1)", "t.lisp").unwrap();
+    let forms = read_syntax_all(crate::syntax::thread_arena(), "# c\n(def x 1)", "t.lisp").unwrap();
     assert_eq!(forms.len(), 1);
 }
 
@@ -111,8 +116,8 @@ fn the_current_lexicon_entry_point_ignores_a_declaration() {
     // declaration is an ordinary form there, not a choice of lexer, so the
     // text the prescanning entry point refuses must still read.
     let src = format!("{}\n(def x 1)", too_new());
-    assert!(read_syntax_all(&src, "<repl>").is_err());
-    let forms = read_syntax_all_current(&src, "<repl>").unwrap();
+    assert!(read_syntax_all(crate::syntax::thread_arena(), &src, "<repl>").is_err());
+    let forms = read_syntax_all_current(crate::syntax::thread_arena(), &src, "<repl>").unwrap();
     assert_eq!(forms.len(), 2);
 }
 

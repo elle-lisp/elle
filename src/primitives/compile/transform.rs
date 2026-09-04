@@ -382,7 +382,10 @@ pub(super) fn prim_compile_read_forms(
             )
         }
     };
-    match crate::reader::read_syntax_all_for(&source, &name) {
+    // Read into the call's region; each `ctx.syntax` wrapper then owns its
+    // own copy of the form it wraps.
+    let arena = ctx.syntax_arena();
+    match crate::reader::read_syntax_all_for(arena, &source, &name) {
         Ok(forms) => {
             let vals: Vec<Value> = forms.into_iter().map(|s| ctx.syntax(s)).collect();
             (SIG_OK, ctx.list(vals))

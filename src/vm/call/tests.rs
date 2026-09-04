@@ -17,11 +17,13 @@ fn test_call_closure_identity() {
     use crate::syntax::Expander;
 
     let (mut vm, mut symbols) = make_vm_with_primitives();
-    let mut expander = Expander::new();
+    let arena = crate::syntax::SyntaxArena::mint(vm.heap());
+    let mut expander = Expander::on_vm(&mut vm);
+    expander.set_arena(arena);
     expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
     // Compile (fn (x) x) to a closure
-    let syntax = crate::reader::read_syntax("(fn (x) x)", "<test>").unwrap();
+    let syntax = crate::reader::read_syntax(arena, "(fn (x) x)", "<test>").unwrap();
     let closure_val = eval_syntax(syntax, &mut expander, &mut symbols, &mut vm).unwrap();
     assert!(closure_val.as_closure().is_some(), "should be a closure");
 
@@ -38,12 +40,15 @@ fn test_call_closure_error_propagation() {
         use crate::syntax::Expander;
 
         let (mut vm, mut symbols) = make_vm_with_primitives();
-        let mut expander = Expander::new();
+        let arena = crate::syntax::SyntaxArena::mint(vm.heap());
+        let mut expander = Expander::on_vm(&mut vm);
+        expander.set_arena(arena);
         expander.set_eval_meta(crate::primitives::build_primitive_meta(&mut symbols));
         expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
         // Compile (fn () (error "boom")) — always errors
-        let syntax = crate::reader::read_syntax(r#"(fn () (error "boom"))"#, "<test>").unwrap();
+        let syntax =
+            crate::reader::read_syntax(arena, r#"(fn () (error "boom"))"#, "<test>").unwrap();
         let closure_val = eval_syntax(syntax, &mut expander, &mut symbols, &mut vm).unwrap();
         assert!(closure_val.as_closure().is_some(), "should be a closure");
 
@@ -93,10 +98,12 @@ fn test_call_closure_counterfactual() {
     use crate::syntax::Expander;
 
     let (mut vm, mut symbols) = make_vm_with_primitives();
-    let mut expander = Expander::new();
+    let arena = crate::syntax::SyntaxArena::mint(vm.heap());
+    let mut expander = Expander::on_vm(&mut vm);
+    expander.set_arena(arena);
     expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
-    let syntax = crate::reader::read_syntax("(fn (x) x)", "<test>").unwrap();
+    let syntax = crate::reader::read_syntax(arena, "(fn (x) x)", "<test>").unwrap();
     let closure_val = eval_syntax(syntax, &mut expander, &mut symbols, &mut vm).unwrap();
     assert!(closure_val.as_closure().is_some(), "should be a closure");
 

@@ -5,7 +5,7 @@ fn compute_order_ranks_by_structure_not_hirid_magnitude() {
     use crate::syntax::Span;
     let sp = Span::synthetic();
     let mk = |kind, id| {
-        let mut h = Hir::silent(kind, sp.clone());
+        let mut h = Hir::silent(kind, sp);
         h.id = HirId(id);
         h
     };
@@ -65,7 +65,7 @@ fn compute_order_indexes_parameterize_key() {
     use crate::syntax::Span;
     let sp = Span::synthetic();
     let mk = |kind, id| {
-        let mut h = Hir::silent(kind, sp.clone());
+        let mut h = Hir::silent(kind, sp);
         h.id = HirId(id);
         h
     };

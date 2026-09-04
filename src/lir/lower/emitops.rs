@@ -111,7 +111,7 @@ impl<'a> Lowerer<'a> {
     pub(super) fn emit(&mut self, instr: LirInstr) {
         self.current_block
             .instructions
-            .push(SpannedInstr::new(instr, self.current_span.clone()));
+            .push(SpannedInstr::new(instr, self.current_span));
     }
 
     /// Emit a heap-allocating instruction, building it with the region
@@ -174,7 +174,7 @@ impl<'a> Lowerer<'a> {
         self.emitted_alloc_regions.insert(region);
         self.current_block
             .instructions
-            .push(SpannedInstr::new(instr, self.current_span.clone()));
+            .push(SpannedInstr::new(instr, self.current_span));
     }
 
     /// The solver-minted region for `binding`'s pre-allocated capture cell at
@@ -286,7 +286,7 @@ impl<'a> Lowerer<'a> {
     }
 
     pub(super) fn terminate(&mut self, term: Terminator) {
-        self.current_block.terminator = SpannedTerminator::new(term, self.current_span.clone());
+        self.current_block.terminator = SpannedTerminator::new(term, self.current_span);
     }
 
     pub(super) fn finish_block(&mut self) {

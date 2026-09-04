@@ -62,7 +62,9 @@ const WASM_DUMP_PATH: &str = "/dev/shm/elle-wasm-dump.wasm";
 /// visible here and would fall through to the single wrap — none exist in the
 /// corpus, whose redefinitions are all source-level defs.
 fn has_toplevel_redefinition(source: &str, source_name: &str) -> bool {
-    let forms = match crate::reader::read_syntax_all(source, source_name) {
+    // Source in, a yes/no out: the tree gets its own heap and dies with it.
+    let mut home = crate::syntax::SyntaxHeap::new();
+    let forms = match crate::reader::read_syntax_all(home.arena(), source, source_name) {
         Ok(f) => f,
         Err(_) => return false,
     };
@@ -119,7 +121,10 @@ fn has_toplevel_redefinition(source: &str, source_name: &str) -> bool {
 /// `def` is treated as one — better to leave a form at top level than to nest a
 /// binding wrongly. Unparseable source falls back to a single scheduled thunk.
 fn build_scheduled_toplevel(source: &str, source_name: &str) -> String {
-    let forms = match crate::reader::read_syntax_all(source, source_name) {
+    // Source text in, source text out: the tree only picks the split points,
+    // so it gets its own heap and dies with it.
+    let mut home = crate::syntax::SyntaxHeap::new();
+    let forms = match crate::reader::read_syntax_all(home.arena(), source, source_name) {
         Ok(f) => f,
         Err(_) => return format!("(ev/run (fn []\n{}\n))", source),
     };
@@ -153,7 +158,7 @@ fn build_scheduled_toplevel(source: &str, source_name: &str) -> String {
     };
 
     for form in &forms {
-        let slice = &source[form.span.start..form.span.end];
+        let slice = &source[form.span.start as usize..form.span.end as usize];
         if is_def(form) {
             flush(&mut output, &mut expr_run);
             output.push_str(slice);
@@ -212,7 +217,8 @@ fn compile_or_cache_module(
 /// tests that need to inspect the compiled LIR.
 fn build_full_source(source: &str, source_name: &str) -> Result<(String, usize), String> {
     // Count stdlib forms so epoch migration skips them.
-    let mut stdlib_form_count = crate::reader::read_syntax_all(STDLIB, "<stdlib>")
+    let mut home = crate::syntax::SyntaxHeap::new();
+    let mut stdlib_form_count = crate::reader::read_syntax_all(home.arena(), STDLIB, "<stdlib>")
         .map(|s| s.len())
         .unwrap_or(0);
     // Splice include/include-file directives in user source BEFORE

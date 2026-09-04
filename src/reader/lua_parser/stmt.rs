@@ -23,15 +23,18 @@ impl LuaParser {
                         self.advance();
                         let method = self.expect_ident()?;
                         let func = self.parse_method_body(&loc)?;
-                        let span = func.span.clone();
-                        let kw = Syntax::new(SyntaxKind::Keyword(method), self.span_from(&loc));
+                        let span = func.span;
+                        let kw = Syntax::new(
+                            SyntaxKind::Keyword(self.arena.text(&method)),
+                            self.span_from(&loc),
+                        );
                         return Ok(self.list(
                             vec![self.sym("put", &loc), self.sym(&name, &loc), kw, func],
                             span,
                         ));
                     }
                     let func = self.parse_function_body(&loc)?;
-                    let span = func.span.clone();
+                    let span = func.span;
                     // assignment: (assign name func)
                     Ok(self.list(
                         vec![self.sym("assign", &loc), self.sym(&name, &loc), func],
@@ -67,10 +70,9 @@ impl LuaParser {
                         temp_names.push(tname.clone());
                         temps.push(self.sym(&tname, &loc));
                     }
-                    let temp_pat = Syntax::new(SyntaxKind::Array(temps), span.clone());
-                    let rhs_arr = Syntax::new(SyntaxKind::Array(rhs), span.clone());
-                    let bind =
-                        self.list(vec![self.sym("def", &loc), temp_pat, rhs_arr], span.clone());
+                    let temp_pat = self.arr(temps, span);
+                    let rhs_arr = self.arr(rhs, span);
+                    let bind = self.list(vec![self.sym("def", &loc), temp_pat, rhs_arr], span);
                     let mut stmts = vec![self.sym("begin", &loc), bind];
                     for (i, lval) in lhs.into_iter().enumerate() {
                         let assign = self.list(
@@ -79,7 +81,7 @@ impl LuaParser {
                                 lval,
                                 self.sym(&temp_names[i], &loc),
                             ],
-                            span.clone(),
+                            span,
                         );
                         stmts.push(assign);
                     }
@@ -92,15 +94,8 @@ impl LuaParser {
                     //                         t[k] = v → (put t k v)
                     if let SyntaxKind::List(ref items) = expr.kind {
                         if items.len() == 3 && items[0].is_symbol("get") {
-                            return Ok(self.list(
-                                vec![
-                                    self.sym("put", &loc),
-                                    items[1].clone(),
-                                    items[2].clone(),
-                                    rhs,
-                                ],
-                                span,
-                            ));
+                            return Ok(self
+                                .list(vec![self.sym("put", &loc), items[1], items[2], rhs], span));
                         }
                     }
                     // Plain variable assignment: x = v → (assign x v)
@@ -134,8 +129,8 @@ impl LuaParser {
             } else {
                 self.nil_syntax(loc)
             };
-            let span = value.span.clone();
-            let pattern = Syntax::new(SyntaxKind::Array(names), self.span_from(loc));
+            let span = value.span;
+            let pattern = self.arr(names, self.span_from(loc));
             Ok(self.list(vec![self.sym("var", loc), pattern, value], span))
         } else {
             // Single name: local x = expr → (var x expr)
@@ -145,7 +140,7 @@ impl LuaParser {
             } else {
                 self.nil_syntax(loc)
             };
-            let span = value.span.clone();
+            let span = value.span;
             Ok(self.list(
                 vec![self.sym("var", loc), self.sym(&first_name, loc), value],
                 span,
@@ -237,12 +232,12 @@ impl LuaParser {
         let end_var = format!("{}__end", var_name);
         let span = self.span_from(&loc);
 
-        let end_binding = self.list(vec![self.sym(&end_var, &loc), stop], span.clone());
-        let bindings = self.list(vec![end_binding], span.clone());
+        let end_binding = self.list(vec![self.sym(&end_var, &loc), stop], span);
+        let bindings = self.list(vec![end_binding], span);
 
         let var_decl = self.list(
             vec![self.sym("var", &loc), self.sym(&var_name, &loc), start],
-            span.clone(),
+            span,
         );
 
         let cond = self.list(
@@ -251,7 +246,7 @@ impl LuaParser {
                 self.sym(&var_name, &loc),
                 self.sym(&end_var, &loc),
             ],
-            span.clone(),
+            span,
         );
 
         let incr = self.list(
@@ -260,18 +255,15 @@ impl LuaParser {
                 self.sym(&var_name, &loc),
                 self.list(
                     vec![self.sym("+", &loc), self.sym(&var_name, &loc), step],
-                    span.clone(),
+                    span,
                 ),
             ],
-            span.clone(),
+            span,
         );
 
-        let while_body = self.list(vec![self.sym("begin", &loc), body, incr], span.clone());
+        let while_body = self.list(vec![self.sym("begin", &loc), body, incr], span);
 
-        let while_form = self.list(
-            vec![self.sym("while", &loc), cond, while_body],
-            span.clone(),
-        );
+        let while_form = self.list(vec![self.sym("while", &loc), cond, while_body], span);
 
         let let_form = self.list(
             vec![self.sym("let", &loc), bindings, var_decl, while_form],
@@ -304,7 +296,7 @@ impl LuaParser {
             self.sym(&names[0], loc)
         } else {
             let name_syms: Vec<Syntax> = names.iter().map(|n| self.sym(n, loc)).collect();
-            self.list(name_syms, span.clone())
+            self.list(name_syms, span)
         };
 
         Ok(self.list(
@@ -328,7 +320,7 @@ impl LuaParser {
         let cond = self.parse_expr()?;
 
         let span = self.span_from(&loc);
-        let break_call = self.list(vec![self.sym("break", &loc)], span.clone());
+        let break_call = self.list(vec![self.sym("break", &loc)], span);
         let check = self.list(
             vec![
                 self.sym("if", &loc),
@@ -336,9 +328,9 @@ impl LuaParser {
                 break_call,
                 self.nil_syntax(&loc),
             ],
-            span.clone(),
+            span,
         );
-        let loop_body = self.list(vec![self.sym("begin", &loc), body, check], span.clone());
+        let loop_body = self.list(vec![self.sym("begin", &loc), body, check], span);
         Ok(self.list(vec![self.sym("forever", &loc), loop_body], span))
     }
 
@@ -384,7 +376,7 @@ impl LuaParser {
         self.expect(&LuaToken::End)?;
 
         let span = self.span_from(loc);
-        let param_list = self.list(params, span.clone());
+        let param_list = self.list(params, span);
         Ok(self.list(vec![self.sym("fn", loc), param_list, body], span))
     }
 
@@ -422,7 +414,7 @@ impl LuaParser {
         self.expect(&LuaToken::End)?;
 
         let span = self.span_from(loc);
-        let param_list = self.list(params, span.clone());
+        let param_list = self.list(params, span);
         Ok(self.list(vec![self.sym("fn", loc), param_list, body], span))
     }
 

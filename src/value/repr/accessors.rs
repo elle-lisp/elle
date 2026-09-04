@@ -199,7 +199,7 @@ impl Value {
                 let region = heap.new_runtime_region();
                 return Ok(items
                     .iter()
-                    .map(|item| crate::value::build::syntax(&mut *heap, item.clone(), region))
+                    .map(|item| crate::value::build::syntax(&mut *heap, *item, region))
                     .collect());
             }
             return Err("Not a proper list");

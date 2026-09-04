@@ -148,7 +148,10 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
         SendValue::Immediate(v) => v,
 
         SendValue::String(s) => ctx.ctx.string(s),
-        SendValue::Syntax(ss) => ctx.ctx.syntax(send_to_syntax(*ss)),
+        SendValue::Syntax(ss) => {
+            let arena = ctx.ctx.syntax_arena();
+            ctx.ctx.syntax(send_to_syntax(&arena, *ss))
+        }
         SendValue::Pair(first, rest, traits) => {
             let f = into_value_inner(*first, ctx);
             let r = into_value_inner(*rest, ctx);

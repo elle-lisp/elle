@@ -7,16 +7,21 @@ impl Expander {
     pub(super) fn expand_seq(
         &mut self,
         items: &[Syntax],
-        span: Span,
-        scopes: Vec<ScopeId>,
+        node: &Syntax,
         symbols: &mut SymbolTable,
         vm: &mut VM,
-        kind: fn(Vec<Syntax>) -> SyntaxKind,
+        kind: crate::syntax::SeqCtor,
     ) -> Result<Syntax, String> {
         let expanded: Result<Vec<Syntax>, String> = items
             .iter()
-            .map(|item| self.expand(item.clone(), symbols, vm))
+            .map(|item| self.expand(*item, symbols, vm))
             .collect();
-        Ok(Syntax::with_scopes(kind(expanded?), span, scopes))
+        // The rebuilt node keeps `node`'s scope slice rather than copying it:
+        // both live in this expansion's working arena.
+        Ok(Syntax::with_scope_slice(
+            kind(self.arena().nodes(&expanded?)),
+            node.span,
+            node.scope_slice(),
+        ))
     }
 }

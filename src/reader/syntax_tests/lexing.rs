@@ -6,7 +6,7 @@ fn with_byte_offsets_keeps_each_token_aligned_with_its_span() {
     // shifted column would attach a neighbour's byte offset to an element.
     // "(11 222 3)": '(' @0, "11" @1, "222" @4, "3" @8.
     let (t, l, len, off) = lex_columns("(11 222 3)");
-    let mut reader = SyntaxReader::with_byte_offsets(t, l, len, off);
+    let mut reader = SyntaxReader::with_byte_offsets(t, l, len, off, crate::syntax::thread_arena());
     let items = match reader.read().unwrap().kind {
         SyntaxKind::List(items) => items,
         other => panic!("expected list, got {other:?}"),
@@ -26,7 +26,7 @@ fn new_defaults_byte_offsets_to_zero() {
     // The no-byte-offsets constructor must leave every token at offset 0, the
     // all-zero-offset behaviour.
     let (t, l, len, _off) = lex_columns("42");
-    let mut reader = SyntaxReader::new(t, l, len);
+    let mut reader = SyntaxReader::new(t, l, len, crate::syntax::thread_arena());
     assert_eq!(reader.read().unwrap().span.start, 0);
 }
 
@@ -36,7 +36,8 @@ fn ragged_columns_do_not_panic_and_fall_back_to_defaults() {
     // (the desync the collapse is meant to make impossible internally) must
     // still be absorbed at the constructor without indexing out of range.
     let (t, _l, _len, _off) = lex_columns("(1 2 3)");
-    let mut reader = SyntaxReader::with_byte_offsets(t, vec![], vec![], vec![]);
+    let mut reader =
+        SyntaxReader::with_byte_offsets(t, vec![], vec![], vec![], crate::syntax::thread_arena());
     // Parses without panicking; spans fall back to the documented defaults.
     let form = reader.read().unwrap();
     assert!(matches!(form.kind, SyntaxKind::List(_)));

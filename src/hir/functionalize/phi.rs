@@ -82,7 +82,7 @@ impl<'a> FnCtx<'a> {
             .iter()
             .map(|&(orig, fresh)| {
                 let current = self.resolve(orig);
-                (fresh, Hir::silent(HirKind::Var(current), span.clone()))
+                (fresh, Hir::silent(HirKind::Var(current), span))
             })
             .collect();
 
@@ -116,13 +116,13 @@ impl<'a> FnCtx<'a> {
             .iter()
             .map(|&(orig, _)| {
                 let current = self.resolve(orig);
-                Hir::silent(HirKind::Var(current), span.clone())
+                Hir::silent(HirKind::Var(current), span)
             })
             .collect();
-        let recur_node = Hir::silent(HirKind::Recur { args: recur_args }, span.clone());
+        let recur_node = Hir::silent(HirKind::Recur { args: recur_args }, span);
         let body_with_recur = Hir::new(
             HirKind::Begin(vec![transformed_body, recur_node]),
-            span.clone(),
+            span,
             body.signal,
         );
 
@@ -142,9 +142,9 @@ impl<'a> FnCtx<'a> {
                     HirKind::If {
                         cond: Box::new(new_cond),
                         then_branch: Box::new(body_with_recur),
-                        else_branch: Box::new(Hir::silent(HirKind::Nil, span.clone())),
+                        else_branch: Box::new(Hir::silent(HirKind::Nil, span)),
                     },
-                    span.clone(),
+                    span,
                     signal,
                 )),
             },
@@ -189,7 +189,7 @@ impl<'a> FnCtx<'a> {
                 let new_value = self.transform(value);
                 let fresh = self.fresh_version(resolved_target);
                 self.renames.insert(resolved_target, fresh);
-                let continuation = self.transform_begin_at(exprs, start + 1, span.clone(), signal);
+                let continuation = self.transform_begin_at(exprs, start + 1, span, signal);
                 return Hir::new(
                     HirKind::Let {
                         bindings: vec![(fresh, new_value)],
@@ -304,7 +304,7 @@ impl<'a> FnCtx<'a> {
                 }
             }
             let mut transformed =
-                self.transform_while(cond, body, expr.span.clone(), expr.signal, &scope_defines);
+                self.transform_while(cond, body, expr.span, expr.signal, &scope_defines);
             // Re-wrap in Block if the original While was Block-wrapped
             if let HirKind::Block { name, block_id, .. } = &expr.kind {
                 transformed = Hir::new(
@@ -313,14 +313,14 @@ impl<'a> FnCtx<'a> {
                         block_id: *block_id,
                         body: vec![transformed],
                     },
-                    expr.span.clone(),
+                    expr.span,
                     expr.signal,
                 );
             }
             if start + 1 >= exprs.len() {
                 return transformed;
             }
-            let rest = self.transform_begin_at(exprs, start + 1, span.clone(), signal);
+            let rest = self.transform_begin_at(exprs, start + 1, span, signal);
             return Hir::new(HirKind::Begin(vec![transformed, rest]), span, signal);
         }
 
@@ -330,7 +330,7 @@ impl<'a> FnCtx<'a> {
             // Last expression — its value is the Begin's result
             return transformed;
         }
-        let rest = self.transform_begin_at(exprs, start + 1, span.clone(), signal);
+        let rest = self.transform_begin_at(exprs, start + 1, span, signal);
         Hir::new(HirKind::Begin(vec![transformed, rest]), span, signal)
     }
     /// Transform an If that contains assigns in its branches, inserting
@@ -360,7 +360,7 @@ impl<'a> FnCtx<'a> {
         // re-evaluate it (the condition may reference mutable cells that
         // the then-branch modifies).
         let cond_binding = self.gensym();
-        let cond_var = Hir::silent(HirKind::Var(cond_binding), cond.span.clone());
+        let cond_var = Hir::silent(HirKind::Var(cond_binding), cond.span);
 
         // Transform each branch, extracting the final SSA value of
         // each assigned binding. Assigns are removed from the branch
@@ -382,7 +382,7 @@ impl<'a> FnCtx<'a> {
                 then_branch: Box::new(new_then),
                 else_branch: Box::new(new_else),
             },
-            cond.span.clone(),
+            cond.span,
             signal,
         );
 
@@ -395,18 +395,18 @@ impl<'a> FnCtx<'a> {
             .map(|&orig| {
                 let then_val = then_versions
                     .get(&orig)
-                    .map(|&b| Hir::silent(HirKind::Var(b), span.clone()))
+                    .map(|&b| Hir::silent(HirKind::Var(b), span))
                     .unwrap_or_else(|| {
                         // Not assigned in then → use pre-if version
                         let pre = saved.get(&orig).copied().unwrap_or(orig);
-                        Hir::silent(HirKind::Var(pre), span.clone())
+                        Hir::silent(HirKind::Var(pre), span)
                     });
                 let else_val = else_versions
                     .get(&orig)
-                    .map(|&b| Hir::silent(HirKind::Var(b), span.clone()))
+                    .map(|&b| Hir::silent(HirKind::Var(b), span))
                     .unwrap_or_else(|| {
                         let pre = saved.get(&orig).copied().unwrap_or(orig);
-                        Hir::silent(HirKind::Var(pre), span.clone())
+                        Hir::silent(HirKind::Var(pre), span)
                     });
 
                 let fresh = self.fresh_version(orig);
@@ -418,7 +418,7 @@ impl<'a> FnCtx<'a> {
                         then_branch: Box::new(then_val),
                         else_branch: Box::new(else_val),
                     },
-                    span.clone(),
+                    span,
                     Signal::silent(),
                 );
                 (fresh, phi_val)
@@ -427,7 +427,7 @@ impl<'a> FnCtx<'a> {
 
         // Transform the continuation with the phi bindings active
         let has_continuation = start + 1 < exprs.len();
-        let mut result = self.transform_begin_at(exprs, start + 1, span.clone(), signal);
+        let mut result = self.transform_begin_at(exprs, start + 1, span, signal);
 
         // Wrap: if_expr; (let [phis...] continuation)
         for (binding, phi_val) in phi_bindings.into_iter().rev() {
@@ -436,14 +436,14 @@ impl<'a> FnCtx<'a> {
                     bindings: vec![(binding, phi_val)],
                     body: Box::new(result),
                 },
-                span.clone(),
+                span,
                 signal,
             );
         }
 
         if has_continuation {
             // Wrap in let for the condition binding, then prepend the if
-            let inner = Hir::new(HirKind::Begin(vec![if_expr, result]), span.clone(), signal);
+            let inner = Hir::new(HirKind::Begin(vec![if_expr, result]), span, signal);
             Hir::new(
                 HirKind::Let {
                     bindings: vec![(cond_binding, new_cond)],
@@ -458,7 +458,7 @@ impl<'a> FnCtx<'a> {
             // evaluate to nil. Capture the if's value in a temp, nest the
             // phi-lets inside the temp's body, and return the temp.
             let result_binding = self.gensym();
-            let result_var = Hir::silent(HirKind::Var(result_binding), span.clone());
+            let result_var = Hir::silent(HirKind::Var(result_binding), span);
             // (let [cond_binding new_cond]
             //   (let [result_binding if_expr]
             //     (let [phi1 ...]
@@ -472,11 +472,11 @@ impl<'a> FnCtx<'a> {
                             bindings: vec![(result_binding, if_expr)],
                             body: Box::new(Hir::new(
                                 HirKind::Begin(vec![result, result_var]),
-                                span.clone(),
+                                span,
                                 signal,
                             )),
                         },
-                        span.clone(),
+                        span,
                         signal,
                     )),
                 },

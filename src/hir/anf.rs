@@ -106,10 +106,10 @@ impl<'a> AnfCtx<'a> {
         if !hir.allocates() {
             return hir;
         }
-        let span = hir.span.clone();
+        let span = hir.span;
         let signal = hir.signal;
         let b = self.gensym();
-        let var = Hir::silent(HirKind::Var(b), span.clone());
+        let var = Hir::silent(HirKind::Var(b), span);
         if crate::config::get().trace_bits() & crate::config::trace_bits::ANF != 0 {
             eprintln!(
                 "[trace:anf] wrap {} @{:?} (span={})",
@@ -201,7 +201,7 @@ impl<'a> AnfCtx<'a> {
                 inferred_signals,
                 param_bounds,
                 doc,
-                syntax,
+                origin,
                 assert_numeric,
             } => HirKind::Lambda {
                 params: params.clone(),
@@ -214,7 +214,7 @@ impl<'a> AnfCtx<'a> {
                 inferred_signals: *inferred_signals,
                 param_bounds: param_bounds.clone(),
                 doc: doc.clone(),
-                syntax: syntax.clone(),
+                origin: *origin,
                 assert_numeric: *assert_numeric,
             },
 
@@ -373,7 +373,7 @@ impl<'a> AnfCtx<'a> {
 
         Hir {
             kind: new_kind,
-            span: hir.span.clone(),
+            span: hir.span,
             signal: hir.signal,
             id: hir.id,
         }

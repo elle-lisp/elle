@@ -1,5 +1,5 @@
 use super::*;
-use crate::syntax::ScopeId;
+use crate::syntax::{ScopeId, SyntaxArena};
 
 /// The fault-barrier transform (see `compile_barrier_module`). Runs on the
 /// macro-EXPANDED top-level forms — so binding macros like `defn`/`def-` have
@@ -19,23 +19,21 @@ use crate::syntax::ScopeId;
 /// (but not invoked) when the module runs on the bytecode tier, then run by the
 /// runner on each tier. Setup forms run eagerly, so a later test form — and a
 /// later thunk — sees earlier defs.
-pub(super) fn barrier_transform(expanded: Vec<Syntax>, acc_scope: ScopeId) -> Vec<Syntax> {
+pub(super) fn barrier_transform(
+    arena: &SyntaxArena,
+    expanded: Vec<Syntax>,
+    acc_scope: ScopeId,
+) -> Vec<Syntax> {
     let sp = Span::synthetic();
-    let sym = |s: &str| Syntax::new(SyntaxKind::Symbol(s.to_string()), sp.clone());
-    let slist = |items: Vec<Syntax>| Syntax::new(SyntaxKind::List(items), sp.clone());
+    let sym = |s: &str| Syntax::symbol(arena, s, sp);
+    let slist = |items: Vec<Syntax>| Syntax::list(arena, &items, sp);
     // The accumulator is compiler-injected, not written by the user. Scope-stamp
     // every occurrence with a fresh scope so it is *hygienic*: a reference the
     // user writes (which never carries this scope) can never resolve to it, so
     // `(environment)` excludes it — the same scope-subset rule that hides
     // macro-introduced bindings — and a test file that binds its own
     // `__test-out` does not collide with the harness.
-    let acc = |s: &str| {
-        Syntax::with_scopes(
-            SyntaxKind::Symbol(s.to_string()),
-            sp.clone(),
-            vec![acc_scope],
-        )
-    };
+    let acc = |s: &str| Syntax::symbol_scoped(arena, s, sp, &[acc_scope]);
     let acc_name = "__test-out";
 
     let mut out: Vec<Syntax> = Vec::with_capacity(expanded.len() + 2);
@@ -55,15 +53,11 @@ pub(super) fn barrier_transform(expanded: Vec<Syntax>, acc_scope: ScopeId) -> Ve
             out.push(form);
         } else {
             // (fn [] E)
-            let thunk = slist(vec![
-                sym("fn"),
-                Syntax::new(SyntaxKind::Array(vec![]), sp.clone()),
-                form,
-            ]);
+            let thunk = slist(vec![sym("fn"), Syntax::array(arena, &[], sp), form]);
             // (array IDX thunk)
             let pair = slist(vec![
                 sym("array"),
-                Syntax::new(SyntaxKind::Int(idx as i64), sp.clone()),
+                Syntax::new(SyntaxKind::Int(idx as i64), sp),
                 thunk,
             ]);
             // (push __test-out pair)
@@ -97,18 +91,16 @@ pub(super) fn barrier_transform(expanded: Vec<Syntax>, acc_scope: ScopeId) -> Ve
 /// (push __test-out (array 0 (fn () (%file-body form1 form2 … formN))))
 /// __test-out
 /// ```
-pub(super) fn whole_module_transform(expanded: Vec<Syntax>, acc_scope: ScopeId) -> Vec<Syntax> {
+pub(super) fn whole_module_transform(
+    arena: &SyntaxArena,
+    expanded: Vec<Syntax>,
+    acc_scope: ScopeId,
+) -> Vec<Syntax> {
     let sp = Span::synthetic();
-    let sym = |s: &str| Syntax::new(SyntaxKind::Symbol(s.to_string()), sp.clone());
-    let slist = |items: Vec<Syntax>| Syntax::new(SyntaxKind::List(items), sp.clone());
+    let sym = |s: &str| Syntax::symbol(arena, s, sp);
+    let slist = |items: Vec<Syntax>| Syntax::list(arena, &items, sp);
     // Hygienic accumulator symbol (see `barrier_transform`).
-    let acc = |s: &str| {
-        Syntax::with_scopes(
-            SyntaxKind::Symbol(s.to_string()),
-            sp.clone(),
-            vec![acc_scope],
-        )
-    };
+    let acc = |s: &str| Syntax::symbol_scoped(arena, s, sp, &[acc_scope]);
     let acc_name = "__test-out";
 
     // (fn () (%file-body form1 … formN)) — all forms become the thunk body,
@@ -121,11 +113,7 @@ pub(super) fn whole_module_transform(expanded: Vec<Syntax>, acc_scope: ScopeId) 
         fb.extend(expanded);
         slist(fb)
     };
-    let thunk = slist(vec![
-        sym("fn"),
-        Syntax::new(SyntaxKind::Array(vec![]), sp.clone()),
-        body,
-    ]);
+    let thunk = slist(vec![sym("fn"), Syntax::array(arena, &[], sp), body]);
 
     vec![
         // (def __test-out (@array))
@@ -136,7 +124,7 @@ pub(super) fn whole_module_transform(expanded: Vec<Syntax>, acc_scope: ScopeId) 
             acc(acc_name),
             slist(vec![
                 sym("array"),
-                Syntax::new(SyntaxKind::Int(0), sp.clone()),
+                Syntax::new(SyntaxKind::Int(0), sp),
                 thunk,
             ]),
         ]),
@@ -179,13 +167,17 @@ pub fn compile_whole_module_forms(
 /// with all included content inlined. Used by the WASM backend to resolve
 /// includes before wrapping user code in ev/run.
 pub fn splice_includes(source: &str, source_name: &str) -> Result<String, String> {
-    let syntaxes = read_syntax_all_for(source, source_name)?;
+    // Text in, text out: the trees exist only to be re-rendered, so they get
+    // their own heap and die with it.
+    let mut home = crate::syntax::SyntaxHeap::new();
+    let arena = home.arena();
+    let syntaxes = read_syntax_all_for(arena, source, source_name)?;
     let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
     let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
     let mut parts: Vec<String> = Vec::new();
 
     while let Some(syntax) = pending.pop_front() {
-        if resolve_and_splice_include(&syntax, source_name, &mut pending, &mut included)? {
+        if resolve_and_splice_include(&arena, &syntax, source_name, &mut pending, &mut included)? {
             continue;
         }
         parts.push(format!("{}", syntax));
@@ -198,6 +190,7 @@ pub fn splice_includes(source: &str, source_name: &str) -> Result<String, String
 /// Returns `Ok(true)` if the syntax was an include (resolved and spliced),
 /// `Ok(false)` if it was not an include, or `Err` on resolution failure.
 pub(super) fn resolve_and_splice_include(
+    arena: &SyntaxArena,
     syntax: &Syntax,
     source_name: &str,
     pending: &mut std::collections::VecDeque<Syntax>,
@@ -221,7 +214,7 @@ pub(super) fn resolve_and_splice_include(
     }
     let contents = std::fs::read_to_string(&path)
         .map_err(|e| format!("{}: include: failed to read '{}': {}", syntax.span, path, e))?;
-    let forms = read_syntax_all_for(&contents, &path)?;
+    let forms = read_syntax_all_for(*arena, &contents, &path)?;
     for (i, form) in forms.into_iter().enumerate() {
         pending.insert(i, form);
     }
@@ -240,7 +233,7 @@ pub(super) fn extract_include(syntax: &Syntax) -> Option<(String, bool)> {
                     _ => return None,
                 };
                 if let SyntaxKind::String(s) = &items[1].kind {
-                    return Some((s.clone(), is_include));
+                    return Some((s.to_string(), is_include));
                 }
             }
         }

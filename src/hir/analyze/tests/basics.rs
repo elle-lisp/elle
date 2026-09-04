@@ -41,10 +41,7 @@ fn test_analyze_let() {
     // Flat bindings: (let [x 10] x)
     let syntax = make_list(vec![
         make_symbol("let"),
-        Syntax::new(
-            SyntaxKind::Array(vec![make_symbol("x"), make_int(10)]),
-            make_span(),
-        ),
+        make_array(vec![make_symbol("x"), make_int(10)]),
         make_symbol("x"),
     ]);
 
@@ -294,8 +291,8 @@ fn an_array_literal_spreads_a_splice() {
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
 
-    let spliced = Syntax::new(SyntaxKind::Splice(Box::new(make_int(1))), make_span());
-    let syntax = Syntax::new(SyntaxKind::Array(vec![make_int(0), spliced]), make_span());
+    let spliced = make_splice(make_int(1));
+    let syntax = make_array(vec![make_int(0), spliced]);
 
     let result = analyzer.analyze(&syntax).unwrap();
     match result.hir.kind {
@@ -312,41 +309,19 @@ fn an_array_literal_spreads_a_splice() {
 /// so it rejects one, and the message names the construct.
 #[test]
 fn the_unordered_literals_reject_a_splice() {
-    for (kind, expected) in [
-        (
-            SyntaxKind::Struct(vec![Syntax::new(
-                SyntaxKind::Splice(Box::new(make_int(1))),
-                make_span(),
-            )]),
-            "struct constructors",
-        ),
-        (
-            SyntaxKind::StructMut(vec![Syntax::new(
-                SyntaxKind::Splice(Box::new(make_int(1))),
-                make_span(),
-            )]),
-            "struct constructors",
-        ),
-        (
-            SyntaxKind::Set(vec![Syntax::new(
-                SyntaxKind::Splice(Box::new(make_int(1))),
-                make_span(),
-            )]),
-            "set constructors",
-        ),
-        (
-            SyntaxKind::SetMut(vec![Syntax::new(
-                SyntaxKind::Splice(Box::new(make_int(1))),
-                make_span(),
-            )]),
-            "mutable set constructors",
-        ),
-    ] {
+    let cases: [(SeqCtor, &str); 4] = [
+        (SyntaxKind::Struct, "struct constructors"),
+        (SyntaxKind::StructMut, "struct constructors"),
+        (SyntaxKind::Set, "set constructors"),
+        (SyntaxKind::SetMut, "mutable set constructors"),
+    ];
+    for (make, expected) in cases {
+        let literal = make_seq(make, vec![make_splice(make_int(1))]);
         let mut symbols = SymbolTable::new();
         let mut arena = BindingArena::new();
         let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
 
-        let err = match analyzer.analyze(&Syntax::new(kind, make_span())) {
+        let err = match analyzer.analyze(&literal) {
             Err(e) => e,
             Ok(_) => panic!("a splice in {expected} must be rejected"),
         };

@@ -234,16 +234,24 @@ pub(crate) fn bytes_mut(heap: &mut FiberHeap, data: Vec<u8>, region: RuntimeRegi
     )
 }
 
-/// Allocate a syntax object into `region` on `heap`.
+/// Allocate a syntax object into `region` on `heap`, copying `s`'s tree into
+/// that same region.
+///
+/// The copy is what makes the object self-contained: the source tree lives in
+/// a compile-time arena whose life has nothing to do with this value's, and
+/// sharing its child slices would be a cross-region reference into a region
+/// that is free to die first (see `RegionSlice`'s module docs).
 #[inline]
 pub(crate) fn syntax(
     heap: &mut FiberHeap,
     s: crate::syntax::Syntax,
     region: RuntimeRegion,
 ) -> Value {
+    let arena = unsafe { crate::syntax::SyntaxArena::from_raw(heap as *mut FiberHeap, region) };
+    let owned = s.copy_into(&arena);
     heap.alloc_in_region(
         HeapObject::Syntax {
-            syntax: Box::new(s),
+            syntax: owned,
             traits: Value::NIL,
         },
         region,

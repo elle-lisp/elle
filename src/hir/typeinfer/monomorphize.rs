@@ -539,9 +539,9 @@ fn rewrite(
     let HirKind::Call { args, .. } = std::mem::replace(&mut hir.kind, HirKind::Error) else {
         unreachable!("just matched Call");
     };
-    let span = hir.span.clone();
+    let span = hir.span;
     let signal = hir.signal;
-    let new_func = Box::new(Hir::silent(HirKind::Var(native), span.clone()));
+    let new_func = Box::new(Hir::silent(HirKind::Var(native), span));
     *hir = Hir::new(
         HirKind::Call {
             func: new_func,

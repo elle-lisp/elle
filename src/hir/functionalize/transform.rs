@@ -3,13 +3,13 @@ use super::*;
 impl<'a> FnCtx<'a> {
     /// The main transform.
     pub(super) fn transform(&mut self, hir: &Hir) -> Hir {
-        let span = hir.span.clone();
+        let span = hir.span;
         let signal = hir.signal;
 
         match &hir.kind {
             HirKind::Var(b) => {
                 let resolved = self.resolve(*b);
-                let var_node = Hir::new(HirKind::Var(resolved), span.clone(), signal);
+                let var_node = Hir::new(HirKind::Var(resolved), span, signal);
                 if self.cell_bindings.contains(&resolved) {
                     Hir::new(
                         HirKind::DerefCell {
@@ -31,11 +31,7 @@ impl<'a> FnCtx<'a> {
                 if self.cell_bindings.contains(&resolved_target) {
                     Hir::new(
                         HirKind::SetCell {
-                            cell: Box::new(Hir::new(
-                                HirKind::Var(resolved_target),
-                                span.clone(),
-                                signal,
-                            )),
+                            cell: Box::new(Hir::new(HirKind::Var(resolved_target), span, signal)),
                             value: Box::new(new_value),
                         },
                         span,
@@ -71,7 +67,7 @@ impl<'a> FnCtx<'a> {
                 inferred_signals,
                 param_bounds,
                 doc,
-                syntax,
+                origin,
                 assert_numeric,
             } => {
                 let saved_renames = self.renames.clone();
@@ -103,7 +99,7 @@ impl<'a> FnCtx<'a> {
                         inferred_signals: *inferred_signals,
                         param_bounds: param_bounds.clone(),
                         doc: doc.clone(),
-                        syntax: syntax.clone(),
+                        origin: *origin,
                         assert_numeric: *assert_numeric,
                     },
                     span,

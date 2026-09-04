@@ -24,7 +24,7 @@ impl<'a> Lowerer<'a> {
         inferred_signal: crate::signals::Signal,
         param_bounds: &[ParamBound],
         doc: Option<std::rc::Rc<str>>,
-        syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
+        origin: Option<crate::syntax::Span>,
     ) -> Result<LirFunction, String> {
         // Compute arity
         let arity = Arity::for_lambda(rest_param.is_some(), num_required, params.len());
@@ -97,7 +97,7 @@ impl<'a> Lowerer<'a> {
         self.num_local_params = 0;
         self.discard_slot = None;
         self.current_func.doc = doc;
-        self.current_func.syntax = syntax;
+        self.current_func.origin = origin;
         self.current_func.vararg_kind = vararg_kind.clone();
         self.current_func.num_params = params.len();
 

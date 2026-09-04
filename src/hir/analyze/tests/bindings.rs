@@ -8,15 +8,12 @@ fn letrec_duplicate_same_identity_errors() {
     let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
     let syntax = make_list(vec![
         make_symbol("letrec"),
-        Syntax::new(
-            SyntaxKind::Array(vec![
-                make_symbol("x"),
-                make_int(1),
-                make_symbol("x"),
-                make_int(2),
-            ]),
-            make_span(),
-        ),
+        make_array(vec![
+            make_symbol("x"),
+            make_int(1),
+            make_symbol("x"),
+            make_int(2),
+        ]),
         make_symbol("x"),
     ]);
     let Err(err) = analyzer.analyze(&syntax) else {
@@ -34,15 +31,12 @@ fn letrec_hygiene_distinct_scopes_resolve_to_their_own() {
     let make = |body: Syntax| {
         make_list(vec![
             make_symbol("letrec"),
-            Syntax::new(
-                SyntaxKind::Array(vec![
-                    make_symbol_scoped("x", &[3]),
-                    make_int(1),
-                    make_symbol("x"),
-                    make_int(2),
-                ]),
-                make_span(),
-            ),
+            make_array(vec![
+                make_symbol_scoped("x", &[3]),
+                make_int(1),
+                make_symbol("x"),
+                make_int(2),
+            ]),
             body,
         ])
     };
@@ -149,15 +143,12 @@ fn letrec_use_before_init_errors() {
     let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
     let syntax = make_list(vec![
         make_symbol("letrec"),
-        Syntax::new(
-            SyntaxKind::Array(vec![
-                make_symbol("a"),
-                make_symbol("b"),
-                make_symbol("b"),
-                make_int(7),
-            ]),
-            make_span(),
-        ),
+        make_array(vec![
+            make_symbol("a"),
+            make_symbol("b"),
+            make_symbol("b"),
+            make_int(7),
+        ]),
         make_symbol("a"),
     ]);
     let Err(err) = analyzer.analyze(&syntax) else {
@@ -177,15 +168,12 @@ fn letrec_backward_dep_ok() {
     let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
     let syntax = make_list(vec![
         make_symbol("letrec"),
-        Syntax::new(
-            SyntaxKind::Array(vec![
-                make_symbol("a"),
-                make_int(1),
-                make_symbol("b"),
-                make_symbol("a"),
-            ]),
-            make_span(),
-        ),
+        make_array(vec![
+            make_symbol("a"),
+            make_int(1),
+            make_symbol("b"),
+            make_symbol("a"),
+        ]),
         make_symbol("b"),
     ]);
     let result = analyzer.analyze(&syntax).unwrap();
@@ -201,15 +189,12 @@ fn letrec_forward_ref_through_lambda_ok() {
     let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
     let syntax = make_list(vec![
         make_symbol("letrec"),
-        Syntax::new(
-            SyntaxKind::Array(vec![
-                make_symbol("a"),
-                make_list(vec![make_symbol("fn"), make_list(vec![]), make_symbol("b")]),
-                make_symbol("b"),
-                make_int(7),
-            ]),
-            make_span(),
-        ),
+        make_array(vec![
+            make_symbol("a"),
+            make_list(vec![make_symbol("fn"), make_list(vec![]), make_symbol("b")]),
+            make_symbol("b"),
+            make_int(7),
+        ]),
         make_list(vec![make_symbol("a")]),
     ]);
     let result = analyzer.analyze(&syntax).unwrap();
@@ -234,10 +219,7 @@ fn letrec_self_reference_classifies_recursive() {
     ]);
     let syntax = make_list(vec![
         make_symbol("letrec"),
-        Syntax::new(
-            SyntaxKind::Array(vec![make_symbol("loop"), lambda]),
-            make_span(),
-        ),
+        make_array(vec![make_symbol("loop"), lambda]),
         make_list(vec![make_symbol("loop"), make_int(3)]),
     ]);
     let result = analyzer.analyze(&syntax).unwrap();
@@ -283,15 +265,12 @@ fn letrec_mutual_sibling_is_not_recursive() {
     ]);
     let syntax = make_list(vec![
         make_symbol("letrec"),
-        Syntax::new(
-            SyntaxKind::Array(vec![
-                make_symbol("ev"),
-                ev_lambda,
-                make_symbol("od"),
-                od_lambda,
-            ]),
-            make_span(),
-        ),
+        make_array(vec![
+            make_symbol("ev"),
+            ev_lambda,
+            make_symbol("od"),
+            od_lambda,
+        ]),
         make_list(vec![make_symbol("ev"), make_int(3)]),
     ]);
     let result = analyzer.analyze(&syntax).unwrap();
@@ -339,10 +318,7 @@ fn nested_lambda_reference_to_outer_binding_is_not_recursive() {
     ]);
     let inner_let = make_list(vec![
         make_symbol("let"),
-        Syntax::new(
-            SyntaxKind::Array(vec![make_symbol("g"), g_lambda]),
-            make_span(),
-        ),
+        make_array(vec![make_symbol("g"), g_lambda]),
         make_list(vec![make_symbol("g")]),
     ]);
     let loop_lambda = make_list(vec![
@@ -352,10 +328,7 @@ fn nested_lambda_reference_to_outer_binding_is_not_recursive() {
     ]);
     let syntax = make_list(vec![
         make_symbol("letrec"),
-        Syntax::new(
-            SyntaxKind::Array(vec![make_symbol("loop"), loop_lambda]),
-            make_span(),
-        ),
+        make_array(vec![make_symbol("loop"), loop_lambda]),
         make_list(vec![make_symbol("loop"), make_int(3)]),
     ]);
     let result = analyzer.analyze(&syntax).unwrap();

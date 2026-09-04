@@ -4,7 +4,7 @@
 //! - Runtime quote (Syntax → Value)
 //! - Macro results that return runtime Values (Value → Syntax)
 
-use super::{Span, Syntax, SyntaxKind};
+use super::{Span, Syntax, SyntaxArena, SyntaxKind};
 use crate::primitives::ctx::NativeCtx;
 use crate::symbol::SymbolTable;
 use crate::value::{TableKey, Value};
@@ -16,19 +16,7 @@ use crate::value::{TableKey, Value};
 pub(crate) fn contains_syntax_literal(s: &Syntax) -> bool {
     match &s.kind {
         SyntaxKind::SyntaxLiteral(_) => true,
-        SyntaxKind::List(items)
-        | SyntaxKind::Array(items)
-        | SyntaxKind::ArrayMut(items)
-        | SyntaxKind::Struct(items)
-        | SyntaxKind::StructMut(items)
-        | SyntaxKind::Set(items)
-        | SyntaxKind::SetMut(items) => items.iter().any(contains_syntax_literal),
-        SyntaxKind::Quote(inner)
-        | SyntaxKind::Quasiquote(inner)
-        | SyntaxKind::Unquote(inner)
-        | SyntaxKind::UnquoteSplicing(inner)
-        | SyntaxKind::Splice(inner) => contains_syntax_literal(inner),
-        _ => false,
+        other => other.children().iter().any(contains_syntax_literal),
     }
 }
 
@@ -43,31 +31,20 @@ pub(crate) fn learn_keywords(syntax: &Syntax, symbols: &mut SymbolTable) {
         SyntaxKind::Keyword(name) => {
             symbols.keyword(name);
         }
-        SyntaxKind::List(items)
-        | SyntaxKind::Array(items)
-        | SyntaxKind::ArrayMut(items)
-        | SyntaxKind::Struct(items)
-        | SyntaxKind::StructMut(items)
-        | SyntaxKind::Set(items)
-        | SyntaxKind::SetMut(items)
-        | SyntaxKind::Bytes(items)
-        | SyntaxKind::BytesMut(items) => {
-            for item in items {
+        // A syntax literal reports no children to the shared walk, but its
+        // captured node can hold keywords, so it is named here.
+        SyntaxKind::SyntaxLiteral(inner) => learn_keywords(inner, symbols),
+        other => {
+            for item in other.children() {
                 learn_keywords(item, symbols);
             }
         }
-        SyntaxKind::Quote(inner)
-        | SyntaxKind::Quasiquote(inner)
-        | SyntaxKind::Unquote(inner)
-        | SyntaxKind::UnquoteSplicing(inner)
-        | SyntaxKind::Splice(inner) => learn_keywords(inner, symbols),
-        SyntaxKind::SyntaxLiteral(inner) => learn_keywords(inner, symbols),
-        _ => {}
     }
 }
 
-/// Convert a TableKey back to a Syntax node.
+/// Convert a TableKey back to a Syntax node born in `arena`.
 fn table_key_to_syntax(
+    arena: &SyntaxArena,
     key: &TableKey,
     symbols: &SymbolTable,
     span: &Span,
@@ -78,17 +55,17 @@ fn table_key_to_syntax(
         TableKey::Int(n) => SyntaxKind::Int(*n),
         TableKey::Symbol(id) => {
             let name = symbols.name(*id).ok_or("Unknown symbol in table key")?;
-            SyntaxKind::Symbol(name.to_string())
+            SyntaxKind::Symbol(arena.text(name))
         }
         TableKey::String(v) => {
-            SyntaxKind::String(v.as_str().expect("a string key holds a string").to_string())
+            SyntaxKind::String(arena.text(v.as_str().expect("a string key holds a string")))
         }
         TableKey::Keyword(hash) => {
             let name = crate::value::keyword::resolve_keyword_name(Some(symbols), *hash)
                 .ok_or_else(|| format!("Unknown keyword {:#x} in table key", hash))?;
-            SyntaxKind::Keyword(name.to_string())
+            SyntaxKind::Keyword(arena.text(name))
         }
-        TableKey::EmptyList => SyntaxKind::List(vec![]),
+        TableKey::EmptyList => SyntaxKind::List(arena.nodes(&[])),
         TableKey::Array(v) => {
             let elements: Result<Vec<_>, String> = v
                 .as_array()
@@ -96,16 +73,16 @@ fn table_key_to_syntax(
                 .iter()
                 .map(|elem| {
                     let k = TableKey::from_value(elem).expect("from_value validated every element");
-                    table_key_to_syntax(&k, symbols, span)
+                    table_key_to_syntax(arena, &k, symbols, span)
                 })
                 .collect();
-            return Ok(Syntax::new(SyntaxKind::Array(elements?), span.clone()));
+            return Ok(Syntax::array(arena, &elements?, *span));
         }
         TableKey::Heap(_) => {
             return Err("Cannot convert heap key to Syntax".to_string());
         }
     };
-    Ok(Syntax::new(kind, span.clone()))
+    Ok(Syntax::new(kind, *span))
 }
 
 impl Syntax {
@@ -126,7 +103,7 @@ impl Syntax {
     /// every heap leaf (`String`, the list spine, `Array`, the `Rc`-backed mutable
     /// aggregates, syntax) is born in the ctx's region via the `ctx.*`
     /// constructors.
-    fn to_value_in(&self, symbols: &mut SymbolTable, ctx: &mut NativeCtx) -> Value {
+    fn to_value_in(self, symbols: &mut SymbolTable, ctx: &mut NativeCtx) -> Value {
         match &self.kind {
             SyntaxKind::Nil => Value::NIL,
             SyntaxKind::Bool(b) => Value::bool(*b),
@@ -236,7 +213,7 @@ impl Syntax {
             // A hygiene-bearing template symbol. Materialize a fresh syntax object
             // (ordinary allocation into the ctx's region) wrapping the carried
             // `Syntax` — processed by from_value() after VM evaluation.
-            SyntaxKind::SyntaxLiteral(s) => ctx.syntax((**s).clone()),
+            SyntaxKind::SyntaxLiteral(s) => ctx.syntax(**s),
         }
     }
 
@@ -275,10 +252,10 @@ impl Syntax {
             SyntaxKind::Bool(b) => T::Bool(*b),
             SyntaxKind::Int(n) => T::Int(*n),
             SyntaxKind::Float(n) => T::Float(*n),
-            SyntaxKind::Symbol(s) => T::Symbol(s.clone()),
-            SyntaxKind::Keyword(s) => T::Keyword(s.clone()),
-            SyntaxKind::String(s) => T::String(s.clone()),
-            SyntaxKind::StringMut(s) => T::StringMut(s.clone()),
+            SyntaxKind::Symbol(s) => T::Symbol(s.to_string()),
+            SyntaxKind::Keyword(s) => T::Keyword(s.to_string()),
+            SyntaxKind::String(s) => T::String(s.to_string()),
+            SyntaxKind::StringMut(s) => T::StringMut(s.to_string()),
             SyntaxKind::List(items) => {
                 list_template(items.iter().map(|i| i.to_const_template()).collect())
             }
@@ -322,9 +299,9 @@ impl Syntax {
             SyntaxKind::SyntaxLiteral(s) => {
                 if let SyntaxKind::Symbol(name) = &s.kind {
                     T::SyntaxSymbol {
-                        name: name.clone(),
-                        scopes: s.scopes.iter().map(|sc| sc.0).collect(),
-                        span: s.span.clone(),
+                        name: name.to_string(),
+                        scopes: s.scopes().iter().map(|sc| sc.0).collect(),
+                        span: s.span,
                         scope_exempt: s.scope_exempt,
                     }
                 } else {
@@ -341,7 +318,12 @@ impl Syntax {
     /// When encountering a syntax object, returns it directly — preserving
     /// scopes from the original Syntax. The passed `span` is ignored in
     /// this case; the syntax object carries its own (more accurate) span.
-    pub fn from_value(value: &Value, symbols: &SymbolTable, span: Span) -> Result<Syntax, String> {
+    pub fn from_value(
+        arena: &SyntaxArena,
+        value: &Value,
+        symbols: &SymbolTable,
+        span: Span,
+    ) -> Result<Syntax, String> {
         // Syntax objects pass through directly, preserving scopes — the
         // post-expansion hygiene FLIP (flip_scope_recursive) relies on
         // them arriving intact: argument-origin nodes carry their use-site
@@ -351,16 +333,20 @@ impl Syntax {
         // scope_exempt flag and dodge the flip — do NOT blanket-exempt here:
         // blanket-exempting disables hygiene entirely by shielding every
         // identifier from the intro scope.
-        if let Some(syntax_rc) = value.as_syntax() {
-            let s = syntax_rc.clone();
-            // Safety check: the cloned Syntax must not contain SyntaxLiteral
+        if let Some(embedded) = value.as_syntax() {
+            // COPY, do not share: the value's tree lives in the value's own
+            // region, and the macro-scope reclaim frees that region as soon as
+            // this conversion returns. The copy lands in `arena`, which
+            // outlives the expansion.
+            let s = embedded.copy_into(arena);
+            // Safety check: the copied Syntax must not contain SyntaxLiteral
             // children. SyntaxLiteral holds a heap-pointer Value that may be
             // arena-allocated; if it survives into the result Syntax, it will
             // dangle after arena release. Current code paths don't produce
             // nested SyntaxLiterals, but this assertion catches future regressions.
             debug_assert!(
                 !contains_syntax_literal(&s),
-                "from_value: cloned Syntax contains SyntaxLiteral (arena pointer would escape)"
+                "from_value: copied Syntax contains SyntaxLiteral (arena pointer would escape)"
             );
             return Ok(s);
         }
@@ -374,81 +360,81 @@ impl Syntax {
             SyntaxKind::Float(n)
         } else if let Some(id) = value.as_symbol() {
             let name = symbols.name(id).ok_or("Unknown symbol")?;
-            SyntaxKind::Symbol(name.to_string())
+            SyntaxKind::Symbol(arena.text(name))
         } else if let Some(hash) = value.keyword_hash() {
             let name = crate::value::keyword::resolve_keyword_name(Some(symbols), hash)
                 .ok_or_else(|| format!("Unknown keyword {:#x}", hash))?;
-            SyntaxKind::Keyword(name.to_string())
-        } else if let Some(s) = value.with_string(|s| s.to_string()) {
+            SyntaxKind::Keyword(arena.text(name))
+        } else if let Some(s) = value.with_string(|s| arena.text(s)) {
             SyntaxKind::String(s)
         } else if let Some(data) = value.as_string_mut() {
             let bytes = data.borrow();
-            let s = String::from_utf8(bytes.clone())
+            let s = std::str::from_utf8(&bytes)
                 .map_err(|_| "Cannot convert non-UTF-8 @string to Syntax")?;
-            SyntaxKind::StringMut(s)
+            SyntaxKind::StringMut(arena.text(s))
         } else if value.is_empty_list() {
-            SyntaxKind::List(vec![])
+            SyntaxKind::List(arena.nodes(&[]))
         } else if value.as_pair().is_some() {
             let items = value.list_to_vec().map_err(|e| e.to_string())?;
             let syntaxes: Result<Vec<Syntax>, String> = items
                 .iter()
-                .map(|v| Syntax::from_value(v, symbols, span.clone()))
+                .map(|v| Syntax::from_value(arena, v, symbols, span))
                 .collect();
-            SyntaxKind::List(syntaxes?)
+            SyntaxKind::List(arena.nodes(&syntaxes?))
         } else if let Some(elems) = value.as_array() {
             let syntaxes: Result<Vec<Syntax>, String> = elems
                 .iter()
-                .map(|v| Syntax::from_value(v, symbols, span.clone()))
+                .map(|v| Syntax::from_value(arena, v, symbols, span))
                 .collect();
-            SyntaxKind::Array(syntaxes?)
+            SyntaxKind::Array(arena.nodes(&syntaxes?))
         } else if let Some(vec_ref) = value.as_array_mut() {
             let items = vec_ref.borrow().clone();
             let syntaxes: Result<Vec<Syntax>, String> = items
                 .iter()
-                .map(|v| Syntax::from_value(v, symbols, span.clone()))
+                .map(|v| Syntax::from_value(arena, v, symbols, span))
                 .collect();
-            SyntaxKind::ArrayMut(syntaxes?)
+            SyntaxKind::ArrayMut(arena.nodes(&syntaxes?))
         } else if let Some(data) = value.as_bytes() {
             let syntaxes: Vec<Syntax> = data
                 .iter()
-                .map(|b| Syntax::new(SyntaxKind::Int(*b as i64), span.clone()))
+                .map(|b| Syntax::new(SyntaxKind::Int(*b as i64), span))
                 .collect();
-            SyntaxKind::Bytes(syntaxes)
+            SyntaxKind::Bytes(arena.nodes(&syntaxes))
         } else if let Some(data) = value.as_bytes_mut() {
             let bytes = data.borrow();
             let syntaxes: Vec<Syntax> = bytes
                 .iter()
-                .map(|b| Syntax::new(SyntaxKind::Int(*b as i64), span.clone()))
+                .map(|b| Syntax::new(SyntaxKind::Int(*b as i64), span))
                 .collect();
-            SyntaxKind::BytesMut(syntaxes)
+            SyntaxKind::BytesMut(arena.nodes(&syntaxes))
         } else if let Some(elems) = value.as_set() {
             let syntaxes: Result<Vec<Syntax>, String> = elems
                 .iter()
-                .map(|v| Syntax::from_value(v, symbols, span.clone()))
+                .map(|v| Syntax::from_value(arena, v, symbols, span))
                 .collect();
-            SyntaxKind::Set(syntaxes?)
+            SyntaxKind::Set(arena.nodes(&syntaxes?))
         } else if let Some(set_ref) = value.as_set_mut() {
             let items = set_ref.borrow();
             let syntaxes: Result<Vec<Syntax>, String> = items
                 .iter()
-                .map(|v| Syntax::from_value(v, symbols, span.clone()))
+                .map(|v| Syntax::from_value(arena, v, symbols, span))
                 .collect();
-            SyntaxKind::SetMut(syntaxes?)
+            SyntaxKind::SetMut(arena.nodes(&syntaxes?))
         } else if let Some(struct_ref) = value.as_struct() {
             let mut syntaxes = Vec::with_capacity(struct_ref.len() * 2);
             for (k, v) in struct_ref.iter() {
-                syntaxes.push(table_key_to_syntax(k, symbols, &span)?);
-                syntaxes.push(Syntax::from_value(v, symbols, span.clone())?);
+                syntaxes.push(table_key_to_syntax(arena, k, symbols, &span)?);
+                syntaxes.push(Syntax::from_value(arena, v, symbols, span)?);
             }
-            SyntaxKind::Struct(syntaxes)
+            SyntaxKind::Struct(arena.nodes(&syntaxes))
         } else if let Some(table_ref) = value.as_struct_mut() {
             let items = table_ref.borrow();
             let mut syntaxes = Vec::with_capacity(items.len() * 2);
             for (k, v) in items.iter() {
-                syntaxes.push(table_key_to_syntax(k, symbols, &span)?);
-                syntaxes.push(Syntax::from_value(v, symbols, span.clone())?);
+                syntaxes.push(table_key_to_syntax(arena, k, symbols, &span)?);
+                syntaxes.push(Syntax::from_value(arena, v, symbols, span)?);
             }
-            SyntaxKind::StructMut(syntaxes)
+            SyntaxKind::StructMut(arena.nodes(&syntaxes))
         } else {
             return Err(format!("Cannot convert {:?} to Syntax", value));
         };

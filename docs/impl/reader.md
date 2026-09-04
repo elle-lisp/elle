@@ -8,8 +8,12 @@ markdown (`.md`).
 
 ```text
 Source text → [shebang strip] → [epoch prescan] → Lexer(Lexicon) → Tokens
-            → Parser → Vec<Syntax>
+            → Parser(SyntaxArena) → Vec<Syntax>
 ```
+
+The parser takes the arena its nodes are born in: a `Syntax` is region data
+(see [impl/syntax.md](syntax.md)), so every `read_syntax*` entry point names
+the arena the tree lives in and the caller owns that region's lifetime.
 
 The entry points in `src/reader/mod.rs` prescan the source for its
 `(elle/epoch N)` declaration and lex under the lexicon that epoch selects

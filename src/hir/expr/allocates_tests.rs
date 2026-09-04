@@ -62,7 +62,7 @@ fn lambda_allocates() {
             inferred_signals: crate::signals::Signal::silent(),
             param_bounds: vec![],
             doc: None,
-            syntax: None,
+            origin: None,
             assert_numeric: false,
         },
         Span::synthetic(),

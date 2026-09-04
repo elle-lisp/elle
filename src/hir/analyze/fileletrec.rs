@@ -109,9 +109,9 @@ impl<'a> Analyzer<'a> {
             // the RHS, so the RHS sees the previous binding.
             let sym = self.symbols.intern(name);
             let b = self.arena.alloc(sym, BindingScope::Local);
-            (b, Some((name.to_string(), name_syntax.scopes.clone())))
+            (b, Some((name.to_string(), name_syntax.scopes().to_vec())))
         } else {
-            let b = self.bind(name, name_syntax.scopes.as_slice(), BindingScope::Local);
+            let b = self.bind(name, name_syntax.scopes(), BindingScope::Local);
             (b, None)
         };
 

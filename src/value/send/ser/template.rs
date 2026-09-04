@@ -30,7 +30,6 @@ pub(in crate::value::send) fn sendable_from_template(
         Some(lir) => {
             let mut lir = (**lir).clone();
             lir.doc = None;
-            lir.syntax = None;
             match convert_lir_for_send(&mut lir, ctx)? {
                 Some(pool) => (Some(lir), pool),
                 None => (None, Vec::new()),

@@ -49,7 +49,11 @@ impl Nav for LuaParser {
     }
 }
 
-impl SynBuild for LuaParser {}
+impl SynBuild for LuaParser {
+    fn arena(&self) -> &crate::syntax::SyntaxArena {
+        &self.arena
+    }
+}
 
 /// Lua compatibility prelude, compiled into the binary.
 /// These definitions are prepended to every .lua file so that
@@ -58,7 +62,11 @@ const LUA_PRELUDE: &str = include_str!("../lua_prelude.lisp");
 
 /// Parse a `.lua` file into top-level `Syntax` forms.
 /// Automatically prepends the Lua compat prelude definitions.
-pub fn parse_lua_file(input: &str, source_name: &str) -> Result<Vec<Syntax>, String> {
+pub fn parse_lua_file(
+    arena: crate::syntax::SyntaxArena,
+    input: &str,
+    source_name: &str,
+) -> Result<Vec<Syntax>, String> {
     // Strip shebang if present
     let input_clean = if input.starts_with("#!") {
         input.lines().skip(1).collect::<Vec<_>>().join("\n")
@@ -67,11 +75,11 @@ pub fn parse_lua_file(input: &str, source_name: &str) -> Result<Vec<Syntax>, Str
     };
 
     // Parse the prelude as s-expressions
-    let mut prelude_forms = crate::reader::read_syntax_all(LUA_PRELUDE, "<lua-prelude>")?;
+    let mut prelude_forms = crate::reader::read_syntax_all(arena, LUA_PRELUDE, "<lua-prelude>")?;
 
     let mut lexer = LuaLexer::new(&input_clean, source_name);
     let tokens = lexer.tokenize()?;
-    let mut parser = LuaParser::new(tokens, source_name);
+    let mut parser = LuaParser::new(tokens, source_name, arena);
     let user_forms = parser.parse_file()?;
 
     prelude_forms.extend(user_forms);
@@ -81,13 +89,15 @@ pub fn parse_lua_file(input: &str, source_name: &str) -> Result<Vec<Syntax>, Str
 struct LuaParser {
     cursor: TokenCursor<LuaTokenLoc>,
     file: String,
+    arena: crate::syntax::SyntaxArena,
 }
 
 impl LuaParser {
-    fn new(tokens: Vec<LuaTokenLoc>, file: &str) -> Self {
+    fn new(tokens: Vec<LuaTokenLoc>, file: &str, arena: crate::syntax::SyntaxArena) -> Self {
         LuaParser {
             cursor: TokenCursor::new(tokens),
             file: file.to_string(),
+            arena,
         }
     }
 
@@ -155,8 +165,11 @@ impl LuaParser {
                     self.advance();
                     let method = self.expect_ident()?;
                     let func = self.parse_method_body(&loc)?;
-                    let span = func.span.clone();
-                    let kw = Syntax::new(SyntaxKind::Keyword(method), self.span_from(&loc));
+                    let span = func.span;
+                    let kw = Syntax::new(
+                        SyntaxKind::Keyword(self.arena.text(&method)),
+                        self.span_from(&loc),
+                    );
                     let put = self.list(
                         vec![self.sym("put", &loc), self.sym(&name, &loc), kw, func],
                         span,
@@ -164,7 +177,7 @@ impl LuaParser {
                     Ok(vec![put])
                 } else {
                     let func = self.parse_function_body(&loc)?;
-                    let span = func.span.clone();
+                    let span = func.span;
                     let def = self.list(
                         vec![self.sym("def", &loc), self.sym(&name, &loc), func],
                         span,
@@ -182,7 +195,7 @@ impl LuaParser {
                     self.advance();
                     let name = self.expect_ident()?;
                     let func = self.parse_function_body(&loc)?;
-                    let span = func.span.clone();
+                    let span = func.span;
                     let def = self.list(
                         vec![self.sym("def", &loc), self.sym(&name, &loc), func],
                         span,
@@ -246,7 +259,7 @@ impl LuaParser {
                                 self.advance();
                                 vals.push(self.parse_expr()?);
                             }
-                            Syntax::new(SyntaxKind::Array(vals), self.span_from(&loc))
+                            self.arr(vals, self.span_from(&loc))
                         } else {
                             first
                         }

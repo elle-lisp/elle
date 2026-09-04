@@ -149,7 +149,7 @@ impl<'a> Analyzer<'a> {
         // If parsing fails, fall back to Exact (the error will be caught later
         // during actual lambda analysis).
         let span = if let Some(first) = params.first() {
-            first.span.clone()
+            first.span
         } else {
             Span::synthetic()
         };
@@ -406,7 +406,7 @@ impl<'a> Analyzer<'a> {
                 let mut entries = Vec::new();
                 for pair in key_val_items.chunks(2) {
                     let key = match &pair[0].kind {
-                        SyntaxKind::Keyword(k) => PatternKey::Keyword(k.clone()),
+                        SyntaxKind::Keyword(k) => PatternKey::Keyword(k.to_string()),
                         SyntaxKind::Quote(inner) => match &inner.kind {
                             SyntaxKind::Symbol(name) => {
                                 PatternKey::Symbol(self.symbols.intern(name))

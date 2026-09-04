@@ -6,7 +6,7 @@ use crate::hir::{classify_form, Analyzer, BindingArena, FileForm};
 use crate::lir::{Emitter, Lowerer};
 use crate::reader::{read_syntax, read_syntax_all_for};
 use crate::symbol::SymbolTable;
-use crate::syntax::{Span, Syntax, SyntaxKind};
+use crate::syntax::{Span, Syntax, SyntaxArena, SyntaxKind};
 use std::collections::HashSet;
 
 mod frontend;
@@ -28,10 +28,20 @@ use frontend::{
 /// and is reclaimed when the result is promoted out. The macro expander mints its
 /// OWN per-expansion transient (`expand_macro_call`), so nothing the surviving
 /// compile result references lives in this region.
-fn with_transient<R>(heap: *mut crate::value::fiberheap::FiberHeap, f: impl FnOnce() -> R) -> R {
-    let region = unsafe { (*heap).new_runtime_region() };
-    let out = f();
-    unsafe { (*heap).decref_region_if_present(region) };
+///
+/// This region is also the unit's **syntax working arena**: `f` receives it as
+/// a [`SyntaxArena`], and the parsed tree, every intermediate expansion, and
+/// the expanded tree are born in it. Nothing that outlives the unit points
+/// into it — macro templates are copied to the template arena when they are
+/// defined, and a syntax `Value` owns its own copy
+/// (docs/impl/syntax.md § "Where a node lives").
+fn with_syntax_arena<R>(
+    heap: *mut crate::value::fiberheap::FiberHeap,
+    f: impl FnOnce(SyntaxArena) -> R,
+) -> R {
+    let arena = SyntaxArena::mint(unsafe { &mut *heap });
+    let out = f(arena);
+    unsafe { (*heap).decref_region_if_present(arena.region()) };
     out
 }
 
@@ -45,12 +55,13 @@ pub fn compile(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<CompileResult, String> {
-    with_transient(cctx.heap_ptr(), || {
-        compile_inner(source, symbols, cctx, source_name)
+    with_syntax_arena(cctx.heap_ptr(), |arena| {
+        compile_inner(arena, source, symbols, cctx, source_name)
     })
 }
 
 fn compile_inner(
+    arena: SyntaxArena,
     source: &str,
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
@@ -60,11 +71,11 @@ fn compile_inner(
     // SymbolIds match the compile context's PrimitiveMeta.
 
     // Phase 1: Parse to Syntax
-    let syntax = read_syntax(source, source_name)?;
+    let syntax = read_syntax(arena, source, source_name)?;
 
     // Phase 2: Macro expansion (the compile context's macro VM)
     let (expanded, meta, core_env) =
-        cctx.with_macro_expansion(|macro_vm, mut expander, meta| {
+        cctx.with_macro_expansion(arena, |macro_vm, mut expander, meta| {
             let expanded = expander.expand(syntax, symbols, macro_vm)?;
             Ok::<_, String>((expanded, meta, expander.core_env.clone()))
         })?;
@@ -132,38 +143,45 @@ pub fn compile_file_to_lir(
     source_name: &str,
     epoch_skip: usize,
 ) -> Result<crate::lir::LirModule, String> {
-    with_transient(cctx.heap_ptr(), || {
-        compile_file_to_lir_inner(source, symbols, cctx, source_name, epoch_skip)
+    with_syntax_arena(cctx.heap_ptr(), |arena| {
+        compile_file_to_lir_inner(arena, source, symbols, cctx, source_name, epoch_skip)
     })
 }
 
 fn compile_file_to_lir_inner(
+    arena: SyntaxArena,
     source: &str,
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
     epoch_skip: usize,
 ) -> Result<crate::lir::LirModule, String> {
-    let mut syntaxes = read_syntax_all_for(source, source_name)?;
+    let mut syntaxes = read_syntax_all_for(arena, source, source_name)?;
     crate::epoch::check_lexicon_agreement(&syntaxes, source, source_name)?;
 
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
     if let Some(epoch) = source_epoch {
         if epoch_skip > 0 && epoch_skip < syntaxes.len() {
-            crate::epoch::migrate_forms(&mut syntaxes[epoch_skip..], epoch)?;
+            crate::epoch::migrate_forms(&arena, &mut syntaxes[epoch_skip..], epoch)?;
         } else {
-            crate::epoch::migrate_forms(&mut syntaxes, epoch)?;
+            crate::epoch::migrate_forms(&arena, &mut syntaxes, epoch)?;
         }
     }
 
     // Expand all forms, splicing include/include-file inline
     let (expanded_forms, meta, core_env) =
-        cctx.with_macro_expansion(|macro_vm, mut expander, meta| {
+        cctx.with_macro_expansion(arena, |macro_vm, mut expander, meta| {
             let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
             let mut expanded_forms = Vec::new();
             let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
             while let Some(syntax) = pending.pop_front() {
-                if resolve_and_splice_include(&syntax, source_name, &mut pending, &mut included)? {
+                if resolve_and_splice_include(
+                    &arena,
+                    &syntax,
+                    source_name,
+                    &mut pending,
+                    &mut included,
+                )? {
                     continue;
                 }
                 expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
@@ -354,7 +372,7 @@ fn compile_module_with_transform(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-    xform: impl FnOnce(Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
+    xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> Result<CompileResult, String> {
     let frontend = compile_file_frontend_xform(source, symbols, cctx, source_name, xform)?;
     lower_test_frontend(frontend, symbols, cctx)
@@ -369,7 +387,7 @@ fn compile_syntaxes_with_transform(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-    xform: impl FnOnce(Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
+    xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> Result<CompileResult, String> {
     let frontend = compile_syntaxes_frontend_xform(syntaxes, symbols, cctx, source_name, xform)?;
     lower_test_frontend(frontend, symbols, cctx)

@@ -423,7 +423,7 @@ impl<'a> Analyzer<'a> {
     /// Used at recoverable error sites to continue analysis.
     fn accumulate_error(&mut self, error: LError, span: &Span) -> Hir {
         self.errors.push(error);
-        Hir::error(span.clone())
+        Hir::error(*span)
     }
 
     /// Return accumulated errors (for the pipeline to check).

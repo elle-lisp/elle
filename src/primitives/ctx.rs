@@ -129,6 +129,16 @@ impl<'h> Alloc<'h> {
         self.heap().alloc_region_slice_in_region(items, region)
     }
 
+    /// The call's region as a syntax arena, for a native body that BUILDS a
+    /// syntax tree rather than copying one it was handed. The tree lands in
+    /// the same region the wrapping `ctx.syntax` object will, which is the
+    /// invariant a syntax `Value` keeps (docs/impl/syntax.md § "A syntax
+    /// `Value` owns its tree").
+    pub fn syntax_arena(&self) -> crate::syntax::SyntaxArena {
+        let region = self.region;
+        crate::syntax::SyntaxArena::new(self.heap(), region)
+    }
+
     /// Build the stored form of a struct key in the ctx's region — the
     /// forwarder a native body uses before putting a key into a struct it
     /// builds here (docs/impl/values.md § "Struct keys").

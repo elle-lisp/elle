@@ -30,7 +30,13 @@ pub(super) fn compile_file_frontend(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> FrontendResult {
-    compile_file_frontend_xform(source, symbols, cctx, source_name, |forms, _scope| forms)
+    compile_file_frontend_xform(
+        source,
+        symbols,
+        cctx,
+        source_name,
+        |_arena, forms, _scope| forms,
+    )
 }
 
 /// Like `compile_file_frontend`, but applies `xform` to the macro-expanded
@@ -47,11 +53,11 @@ pub(super) fn compile_file_frontend_xform(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-    xform: impl FnOnce(Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
+    xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> FrontendResult {
-    with_transient(cctx.heap_ptr(), || {
+    with_syntax_arena(cctx.heap_ptr(), |arena| {
         let t = std::time::Instant::now();
-        let syntaxes = read_syntax_all_for(source, source_name)?;
+        let syntaxes = read_syntax_all_for(arena, source, source_name)?;
         crate::phase!(
             crate::trace::compile(),
             "compile",
@@ -60,7 +66,7 @@ pub(super) fn compile_file_frontend_xform(
             source_name
         );
         crate::epoch::check_lexicon_agreement(&syntaxes, source, source_name)?;
-        compile_syntaxes_frontend_xform_inner(syntaxes, symbols, cctx, source_name, xform)
+        compile_syntaxes_frontend_xform_inner(arena, syntaxes, symbols, cctx, source_name, xform)
     })
 }
 
@@ -76,34 +82,40 @@ pub(super) fn compile_syntaxes_frontend_xform(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-    xform: impl FnOnce(Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
+    xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> FrontendResult {
-    with_transient(cctx.heap_ptr(), || {
-        compile_syntaxes_frontend_xform_inner(syntaxes, symbols, cctx, source_name, xform)
+    with_syntax_arena(cctx.heap_ptr(), |arena| {
+        // The incoming forms live in the regions of the `Value`s that carried
+        // them here. Copy them into this unit's working arena, so the unit
+        // owns its own tree and nothing it builds points at a value that may
+        // be released while it compiles.
+        let syntaxes: Vec<Syntax> = syntaxes.iter().map(|s| s.copy_into(&arena)).collect();
+        compile_syntaxes_frontend_xform_inner(arena, syntaxes, symbols, cctx, source_name, xform)
     })
 }
 
 /// Shared frontend worker (epoch-migrate → expand → `xform` → classify →
-/// analyze). Run inside `with_transient` by every public caller so
+/// analyze). Run inside `with_syntax_arena` by every public caller so
 /// per-compilation scratch is reclaimed while the result is promoted out.
 #[allow(clippy::type_complexity)]
 fn compile_syntaxes_frontend_xform_inner(
+    arena: SyntaxArena,
     mut syntaxes: Vec<Syntax>,
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-    xform: impl FnOnce(Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
+    xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> FrontendResult {
     let ct = crate::trace::compile();
     let t = std::time::Instant::now();
 
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
     if let Some(epoch) = source_epoch {
-        crate::epoch::migrate_forms(&mut syntaxes, epoch)?;
+        crate::epoch::migrate_forms(&arena, &mut syntaxes, epoch)?;
     }
 
     let (expanded_forms, mut expander, meta) =
-        cctx.with_macro_expansion(|macro_vm, mut expander, meta| {
+        cctx.with_macro_expansion(arena, |macro_vm, mut expander, meta| {
             let mut pending: std::collections::VecDeque<Syntax> = if source_name.starts_with('<') {
                 syntaxes.into()
             } else {
@@ -116,7 +128,13 @@ fn compile_syntaxes_frontend_xform_inner(
             let mut expanded_forms = Vec::new();
             let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
             while let Some(syntax) = pending.pop_front() {
-                if resolve_and_splice_include(&syntax, source_name, &mut pending, &mut included)? {
+                if resolve_and_splice_include(
+                    &arena,
+                    &syntax,
+                    source_name,
+                    &mut pending,
+                    &mut included,
+                )? {
                     continue;
                 }
                 expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
@@ -131,7 +149,7 @@ fn compile_syntaxes_frontend_xform_inner(
     // Stamping the injected symbols with it makes them hygienic (invisible to
     // user references and to `(environment)`); the identity xform ignores it.
     let acc_scope = expander.fresh_scope();
-    let expanded_forms = xform(expanded_forms, acc_scope);
+    let expanded_forms = xform(&arena, expanded_forms, acc_scope);
 
     let forms: Vec<FileForm> = expanded_forms.iter().map(classify_form).collect();
     let span = if expanded_forms.is_empty() {

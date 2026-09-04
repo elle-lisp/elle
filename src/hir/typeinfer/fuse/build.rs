@@ -33,22 +33,22 @@ pub(super) struct Build<'a> {
 
 impl Build<'_> {
     pub(super) fn node(&self, kind: HirKind) -> Hir {
-        Hir::new(kind, self.span.clone(), self.sig)
+        Hir::new(kind, self.span, self.sig)
     }
     pub(super) fn var(&self, b: Binding) -> Hir {
-        Hir::new(HirKind::Var(b), self.span.clone(), Signal::silent())
+        Hir::new(HirKind::Var(b), self.span, Signal::silent())
     }
     pub(super) fn int(&self, n: i64) -> Hir {
-        Hir::new(HirKind::Int(n), self.span.clone(), Signal::silent())
+        Hir::new(HirKind::Int(n), self.span, Signal::silent())
     }
     pub(super) fn nil(&self) -> Hir {
-        Hir::new(HirKind::Nil, self.span.clone(), Signal::silent())
+        Hir::new(HirKind::Nil, self.span, Signal::silent())
     }
     pub(super) fn bool(&self, b: bool) -> Hir {
-        Hir::new(HirKind::Bool(b), self.span.clone(), Signal::silent())
+        Hir::new(HirKind::Bool(b), self.span, Signal::silent())
     }
     pub(super) fn empty_list(&self) -> Hir {
-        Hir::new(HirKind::EmptyList, self.span.clone(), Signal::silent())
+        Hir::new(HirKind::EmptyList, self.span, Signal::silent())
     }
     pub(super) fn call(&self, f: Binding, args: Vec<Hir>) -> Hir {
         self.node(HirKind::Call {

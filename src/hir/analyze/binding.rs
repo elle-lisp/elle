@@ -108,7 +108,7 @@ impl<'a> Analyzer<'a> {
         }
 
         // Recursively analyze remaining bindings + body as the inner expression
-        let inner = self.analyze_sequential_let(rest, body_items, span.clone())?;
+        let inner = self.analyze_sequential_let(rest, body_items, span)?;
         signal = signal.combine(inner.signal);
 
         self.pop_scope();
@@ -118,12 +118,12 @@ impl<'a> Analyzer<'a> {
             let destr = Hir::silent(
                 HirKind::Destructure {
                     pattern,
-                    value: Box::new(Hir::silent(HirKind::Var(tmp), span.clone())),
+                    value: Box::new(Hir::silent(HirKind::Var(tmp), span)),
                     strict: true,
                 },
-                span.clone(),
+                span,
             );
-            Hir::new(HirKind::Begin(vec![destr, inner]), span.clone(), signal)
+            Hir::new(HirKind::Begin(vec![destr, inner]), span, signal)
         } else {
             inner
         };

@@ -26,7 +26,9 @@ pub fn format_code(source: &str, config: &FormatterConfig) -> Result<String, Str
     //    this source's own epoch declares (docs/impl/lexicon.md)
     let lexed = lex_for_format(stripped, "<format>", lexicon_for(stripped)?)?;
 
-    // 3. Parse regular tokens to Syntax tree
+    // 3. Parse regular tokens to Syntax tree. `elle fmt` runs without a
+    //    runtime, so the tree gets its own heap, freed when this returns.
+    let mut home = crate::syntax::SyntaxHeap::new();
     let forms = if lexed.tokens.is_empty() {
         Vec::new()
     } else {
@@ -35,6 +37,7 @@ pub fn format_code(source: &str, config: &FormatterConfig) -> Result<String, Str
             lexed.locations,
             lexed.lengths,
             lexed.byte_offsets,
+            home.arena(),
         );
         parser.read_all()?
     };

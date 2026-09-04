@@ -29,7 +29,7 @@ impl Expander {
         for form in &items[1..] {
             self.process_bfs_form(form, span, symbols, vm)?;
         }
-        Ok(Syntax::new(SyntaxKind::Nil, span.clone()))
+        Ok(Syntax::new(SyntaxKind::Nil, *span))
     }
 
     fn process_bfs_form(
@@ -72,7 +72,7 @@ impl Expander {
 
         // Value expression at position 2. Do NOT pre-expand — eval_syntax
         // calls expander.expand() internally. Pre-expanding would double-expand.
-        let value_syntax = parts[2].clone();
+        let value_syntax = parts[2];
 
         // Evaluate the value expression in the macro VM.
         let value = crate::pipeline::eval_syntax(value_syntax, self, symbols, vm).map_err(|e| {

@@ -49,10 +49,18 @@ impl Nav for PyParser {
     }
 }
 
-impl SynBuild for PyParser {}
+impl SynBuild for PyParser {
+    fn arena(&self) -> &crate::syntax::SyntaxArena {
+        &self.arena
+    }
+}
 
 /// Parse a `.py` file into top-level `Syntax` forms.
-pub fn parse_py_file(input: &str, source_name: &str) -> Result<Vec<Syntax>, String> {
+pub fn parse_py_file(
+    arena: crate::syntax::SyntaxArena,
+    input: &str,
+    source_name: &str,
+) -> Result<Vec<Syntax>, String> {
     // Strip shebang if present
     let input_clean = if input.starts_with("#!") {
         input.lines().skip(1).collect::<Vec<_>>().join("\n")
@@ -62,13 +70,14 @@ pub fn parse_py_file(input: &str, source_name: &str) -> Result<Vec<Syntax>, Stri
 
     let mut lexer = PyLexer::new(&input_clean, source_name);
     let tokens = lexer.tokenize()?;
-    let mut parser = PyParser::new(tokens, source_name);
+    let mut parser = PyParser::new(tokens, source_name, arena);
     parser.parse_file()
 }
 
 struct PyParser {
     cursor: TokenCursor<PyTokenLoc>,
     file: String,
+    arena: crate::syntax::SyntaxArena,
     /// Nesting depth: 0 = top-level, >0 = inside function/loop/if.
     /// At depth 0, `x = val` emits `(var x val)` (new binding).
     /// At depth >0, `x = val` emits `(assign x val)` (mutation).
@@ -76,10 +85,11 @@ struct PyParser {
 }
 
 impl PyParser {
-    fn new(tokens: Vec<PyTokenLoc>, file: &str) -> Self {
+    fn new(tokens: Vec<PyTokenLoc>, file: &str, arena: crate::syntax::SyntaxArena) -> Self {
         PyParser {
             cursor: TokenCursor::new(tokens),
             file: file.to_string(),
+            arena,
             depth: 0,
         }
     }
@@ -136,7 +146,7 @@ impl PyParser {
                 self.advance();
                 let name = self.expect_ident()?;
                 let func = self.parse_function_def(&loc)?;
-                let span = func.span.clone();
+                let span = func.span;
                 let def = self.list(
                     vec![self.sym("def", &loc), self.sym(&name, &loc), func],
                     span,
@@ -150,9 +160,8 @@ impl PyParser {
                 let span = self.span_from(&loc);
                 // import foo → (def foo (import "lib/foo"))
                 let import_path = format!("lib/{}", name);
-                let import_str = Syntax::new(SyntaxKind::String(import_path), span.clone());
-                let import_call =
-                    self.list(vec![self.sym("import", &loc), import_str], span.clone());
+                let import_str = self.str_lit(&import_path, span);
+                let import_call = self.list(vec![self.sym("import", &loc), import_str], span);
                 Ok(vec![self.list(
                     vec![self.sym("def", &loc), self.sym(&name, &loc), import_call],
                     span,

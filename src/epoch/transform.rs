@@ -5,7 +5,7 @@
 //! forms by head symbol and arity, then restructure using a template. The
 //! tree is walked once regardless of how many epochs are being crossed.
 
-use crate::syntax::{Span, Syntax, SyntaxKind};
+use crate::syntax::{Span, Syntax, SyntaxArena, SyntaxKind};
 use std::collections::HashMap;
 
 use super::rules::{
@@ -71,7 +71,12 @@ impl Rules<'_> {
 ///
 /// Applies all renames and replacements in one pass. Returns the number
 /// of nodes rewritten. Returns `Err` if a removed form is encountered.
-pub fn migrate(forms: &mut [Syntax], from_epoch: u64, to_epoch: u64) -> Result<usize, String> {
+pub fn migrate(
+    arena: &SyntaxArena,
+    forms: &mut [Syntax],
+    from_epoch: u64,
+    to_epoch: u64,
+) -> Result<usize, String> {
     let rules = Rules::for_range(from_epoch, to_epoch);
     if rules.is_empty() {
         return Ok(0);
@@ -79,13 +84,24 @@ pub fn migrate(forms: &mut [Syntax], from_epoch: u64, to_epoch: u64) -> Result<u
 
     let mut count = 0;
     for form in forms.iter_mut() {
-        count += rewrite_node(form, &rules)?;
+        count += rewrite_node(arena, form, &rules)?;
     }
     Ok(count)
 }
 
-/// Recursively rewrite a single syntax node.
-pub(super) fn rewrite_node(syntax: &mut Syntax, rules: &Rules<'_>) -> Result<usize, String> {
+/// Recursively rewrite a single syntax node, in place.
+///
+/// Writing through the tree is legal here because the forms come straight
+/// from the reader and nobody else holds them: migration runs before
+/// expansion, which is where sharing begins (docs/impl/syntax.md § "Mutation,
+/// sharing, and the stamped copy"). A rewrite that changes a node's shape
+/// still allocates its new child slice in `arena` — a region slice is
+/// fixed-length once built.
+pub(super) fn rewrite_node(
+    arena: &SyntaxArena,
+    syntax: &mut Syntax,
+    rules: &Rules<'_>,
+) -> Result<usize, String> {
     let Rules {
         renames,
         removals,
@@ -99,12 +115,10 @@ pub(super) fn rewrite_node(syntax: &mut Syntax, rules: &Rules<'_>) -> Result<usi
     // Check for FlattenClauses match: (cond (test body) ...) → (cond test body ...)
     // and (match val (pat body) ...) → (match val pat body ...)
     if !flatten_clauses.is_empty() {
-        if let SyntaxKind::List(items) = &mut syntax.kind {
-            if let Some(head_sym) = items.first().and_then(|s| s.as_symbol()).map(String::from) {
-                if let Some(&(_, skip)) = flatten_clauses
-                    .iter()
-                    .find(|(s, _)| *s == head_sym.as_str())
-                {
+        let mut rebuilt: Option<Vec<Syntax>> = None;
+        if let SyntaxKind::List(items) = &syntax.kind {
+            if let Some(head_sym) = items.first().and_then(|s| s.as_symbol()) {
+                if let Some(&(_, skip)) = flatten_clauses.iter().find(|(s, _)| *s == head_sym) {
                     let clause_start = 1 + skip; // skip head symbol + skip args
                     if items.len() > clause_start {
                         let mut new_items: Vec<Syntax> = items[..clause_start].to_vec();
@@ -117,78 +131,61 @@ pub(super) fn rewrite_node(syntax: &mut Syntax, rules: &Rules<'_>) -> Result<usi
                                 // (else body) in cond → just the body as trailing default
                                 if parts[0].as_symbol() == Some("else") {
                                     if parts.len() == 2 {
-                                        new_items.push(parts[1].clone());
+                                        new_items.push(parts[1]);
                                     } else if parts.len() > 2 {
-                                        let span = clause.span.clone();
-                                        let mut begin_items = vec![Syntax::new(
-                                            SyntaxKind::Symbol("begin".to_string()),
-                                            span,
-                                        )];
-                                        begin_items.extend(parts[1..].to_vec());
-                                        new_items.push(Syntax::new(
-                                            SyntaxKind::List(begin_items),
-                                            clause.span.clone(),
-                                        ));
+                                        new_items.push(begin_form(arena, clause.span, &parts[1..]));
                                     }
                                     changed = true;
                                     continue;
                                 }
                                 // 2-element clause: (test body) → test body
                                 if parts.len() == 2 {
-                                    new_items.push(parts[0].clone());
-                                    new_items.push(parts[1].clone());
+                                    new_items.push(parts[0]);
+                                    new_items.push(parts[1]);
                                     changed = true;
                                 } else if parts.len() > 2 {
                                     // Multi-element: (pat body1 body2) → pat (begin body1 body2)
                                     // But check for 'when' guard in match:
                                     // (pat when guard body) → pat when guard body
-                                    new_items.push(parts[0].clone());
+                                    new_items.push(parts[0]);
                                     if parts.len() >= 3 && parts[1].as_symbol() == Some("when") {
                                         // Guard: splice all remaining elements
-                                        for part in &parts[1..] {
-                                            new_items.push(part.clone());
-                                        }
+                                        new_items.extend_from_slice(&parts[1..]);
                                     } else {
                                         // Multi-body: wrap in begin
-                                        let span = clause.span.clone();
-                                        let mut begin_items = vec![Syntax::new(
-                                            SyntaxKind::Symbol("begin".to_string()),
-                                            span,
-                                        )];
-                                        begin_items.extend(parts[1..].to_vec());
-                                        new_items.push(Syntax::new(
-                                            SyntaxKind::List(begin_items),
-                                            clause.span.clone(),
-                                        ));
+                                        new_items.push(begin_form(arena, clause.span, &parts[1..]));
                                     }
                                     changed = true;
                                 } else {
                                     // Single-element clause — shouldn't happen, pass through
-                                    new_items.push(clause.clone());
+                                    new_items.push(*clause);
                                 }
                             } else {
                                 // Not a parenthesized clause — already flat, pass through
-                                new_items.push(clause.clone());
+                                new_items.push(*clause);
                             }
                         }
                         if changed {
-                            *items = new_items;
-                            count += 1;
+                            rebuilt = Some(new_items);
                         }
                     }
                 }
             }
+        }
+        if let Some(new_items) = rebuilt {
+            syntax.kind = SyntaxKind::List(arena.nodes(&new_items));
+            count += 1;
         }
     }
 
     // Check for FlattenBindings match: (let|letrec [[p1 v1] [p2 v2] ...] body...)
     // Detect nested-pair format and flatten to (let|letrec [p1 v1 p2 v2 ...] body...)
     if !flattens.is_empty() {
-        if let SyntaxKind::List(items) = &mut syntax.kind {
-            if let Some(head_sym) = items.first().and_then(|s| s.as_symbol()).map(String::from) {
-                if flattens.contains(&head_sym.as_str()) && items.len() >= 2 {
-                    if let SyntaxKind::Array(bindings) | SyntaxKind::List(bindings) =
-                        &mut items[1].kind
+        let mut flattened: Option<Vec<Syntax>> = None;
+        if let SyntaxKind::List(items) = &syntax.kind {
+            if let Some(head_sym) = items.first().and_then(|s| s.as_symbol()) {
+                if flattens.contains(&head_sym) && items.len() >= 2 {
+                    if let SyntaxKind::Array(bindings) | SyntaxKind::List(bindings) = &items[1].kind
                     {
                         // Detect nested-pair format: every child is a 2-element list/array
                         let all_pairs = !bindings.is_empty()
@@ -198,20 +195,23 @@ pub(super) fn rewrite_node(syntax: &mut Syntax, rules: &Rules<'_>) -> Result<usi
                         if all_pairs {
                             // Flatten: splice each pair's contents into parent
                             let mut flat = Vec::with_capacity(bindings.len() * 2);
-                            for binding in bindings.drain(..) {
-                                match binding.kind {
-                                    SyntaxKind::List(mut pair) | SyntaxKind::Array(mut pair) => {
-                                        flat.append(&mut pair);
-                                    }
-                                    _ => unreachable!(),
-                                }
+                            for binding in bindings.iter() {
+                                flat.extend_from_slice(binding.kind.children());
                             }
-                            *bindings = flat;
-                            count += 1;
+                            flattened = Some(flat);
                         }
                     }
                 }
             }
+        }
+        if let Some(flat) = flattened {
+            let slice = arena.nodes(&flat);
+            let bindings = &mut syntax.children_mut()[1];
+            bindings.kind = match bindings.kind {
+                SyntaxKind::Array(_) => SyntaxKind::Array(slice),
+                _ => SyntaxKind::List(slice),
+            };
+            count += 1;
         }
     }
 
@@ -232,19 +232,14 @@ pub(super) fn rewrite_node(syntax: &mut Syntax, rules: &Rules<'_>) -> Result<usi
                         });
                         if is_fn && has_empty_params && lambda_items.len() >= 3 {
                             let body: Vec<Syntax> = lambda_items[2..].to_vec();
-                            let span = syntax.span.clone();
+                            let span = syntax.span;
                             if body.len() == 1 {
-                                syntax.kind = body.into_iter().next().unwrap().kind;
+                                syntax.kind = body[0].kind;
                             } else {
-                                let mut begin_items = vec![Syntax::new(
-                                    SyntaxKind::Symbol("begin".to_string()),
-                                    span,
-                                )];
-                                begin_items.extend(body);
-                                syntax.kind = SyntaxKind::List(begin_items);
+                                syntax.kind = begin_form(arena, span, &body).kind;
                             }
                             count += 1;
-                            count += rewrite_node(syntax, rules)?;
+                            count += rewrite_node(arena, syntax, rules)?;
                             return Ok(count);
                         }
                     }
@@ -266,13 +261,13 @@ pub(super) fn rewrite_node(syntax: &mut Syntax, rules: &Rules<'_>) -> Result<usi
             if let Some(&(_, arity, template)) = replaces.iter().find(|(s, _, _)| *s == head_sym) {
                 if items.len() - 1 == arity {
                     let args: Vec<Syntax> = items[1..].to_vec();
-                    let span = syntax.span.clone();
-                    let replacement = instantiate_template(template, &args, &span)?;
+                    let span = syntax.span;
+                    let replacement = instantiate_template(arena, template, &args, &span)?;
                     syntax.kind = replacement.kind;
                     count += 1;
                     // Recurse into the replacement so renames and nested
                     // replacements still apply.
-                    count += rewrite_node(syntax, rules)?;
+                    count += rewrite_node(arena, syntax, rules)?;
                     return Ok(count);
                 }
             }
@@ -288,53 +283,42 @@ pub(super) fn rewrite_node(syntax: &mut Syntax, rules: &Rules<'_>) -> Result<usi
                 ));
             }
             if let Some(new_name) = renames.get(name.as_str()) {
-                *name = new_name.to_string();
+                *name = arena.text(new_name);
                 count += 1;
             }
         }
 
-        SyntaxKind::List(items)
-        | SyntaxKind::Array(items)
-        | SyntaxKind::ArrayMut(items)
-        | SyntaxKind::Struct(items)
-        | SyntaxKind::StructMut(items)
-        | SyntaxKind::Set(items)
-        | SyntaxKind::SetMut(items)
-        | SyntaxKind::Bytes(items)
-        | SyntaxKind::BytesMut(items) => {
-            for item in items.iter_mut() {
-                count += rewrite_node(item, rules)?;
-            }
-        }
-
-        // Don't rewrite inside quotes — quoted symbols are data.
+        // Don't rewrite inside quotes — quoted symbols are data. Every other
+        // compound recurses into its children; atoms report none, and a
+        // quasiquote template does recurse, so generated code uses current
+        // names.
         SyntaxKind::Quote(_) => {}
 
-        // Quasiquote templates construct code; rewrite so generated
-        // code uses current names.
-        SyntaxKind::Quasiquote(inner)
-        | SyntaxKind::Unquote(inner)
-        | SyntaxKind::UnquoteSplicing(inner)
-        | SyntaxKind::Splice(inner) => {
-            count += rewrite_node(inner, rules)?;
+        _ => {
+            for item in syntax.children_mut() {
+                count += rewrite_node(arena, item, rules)?;
+            }
         }
-
-        // Atoms — nothing to rewrite.
-        SyntaxKind::Nil
-        | SyntaxKind::Bool(_)
-        | SyntaxKind::Int(_)
-        | SyntaxKind::Float(_)
-        | SyntaxKind::Keyword(_)
-        | SyntaxKind::String(_)
-        | SyntaxKind::StringMut(_)
-        | SyntaxKind::SyntaxLiteral(_) => {}
     }
 
     Ok(count)
 }
 
+/// A `(begin body…)` form spanned at `span`.
+fn begin_form(arena: &SyntaxArena, span: Span, body: &[Syntax]) -> Syntax {
+    let mut items = Vec::with_capacity(body.len() + 1);
+    items.push(Syntax::symbol(arena, "begin", span));
+    items.extend_from_slice(body);
+    Syntax::list(arena, &items, span)
+}
+
 /// Parse a template string and substitute `$N` placeholders with argument nodes.
-fn instantiate_template(template: &str, args: &[Syntax], span: &Span) -> Result<Syntax, String> {
+fn instantiate_template(
+    arena: &SyntaxArena,
+    template: &str,
+    args: &[Syntax],
+    span: &Span,
+) -> Result<Syntax, String> {
     // Build the instantiated source by replacing $N with Display output
     // of each argument. Iterate in reverse so $10 is replaced before $1.
     let mut source = template.to_string();
@@ -343,7 +327,7 @@ fn instantiate_template(template: &str, args: &[Syntax], span: &Span) -> Result<
         source = source.replace(&placeholder, &arg.to_string());
     }
 
-    let mut parsed = crate::reader::read_syntax(&source, "<epoch-template>")
+    let mut parsed = crate::reader::read_syntax(*arena, &source, "<epoch-template>")
         .map_err(|e| format!("epoch migration template error: {}", e))?;
 
     set_span_recursive(&mut parsed, span);
@@ -353,29 +337,9 @@ fn instantiate_template(template: &str, args: &[Syntax], span: &Span) -> Result<
 /// Propagate a span onto all nodes in a tree so error messages point
 /// to the original source location.
 fn set_span_recursive(syntax: &mut Syntax, span: &Span) {
-    syntax.span = span.clone();
-    match &mut syntax.kind {
-        SyntaxKind::List(items)
-        | SyntaxKind::Array(items)
-        | SyntaxKind::ArrayMut(items)
-        | SyntaxKind::Struct(items)
-        | SyntaxKind::StructMut(items)
-        | SyntaxKind::Set(items)
-        | SyntaxKind::SetMut(items)
-        | SyntaxKind::Bytes(items)
-        | SyntaxKind::BytesMut(items) => {
-            for item in items.iter_mut() {
-                set_span_recursive(item, span);
-            }
-        }
-        SyntaxKind::Quote(inner)
-        | SyntaxKind::Quasiquote(inner)
-        | SyntaxKind::Unquote(inner)
-        | SyntaxKind::UnquoteSplicing(inner)
-        | SyntaxKind::Splice(inner) => {
-            set_span_recursive(inner, span);
-        }
-        _ => {}
+    syntax.span = *span;
+    for item in syntax.children_mut() {
+        set_span_recursive(item, span);
     }
 }
 

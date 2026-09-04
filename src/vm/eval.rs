@@ -69,9 +69,26 @@ fn eval_inner(
     env_value: Value,
     symbols: &mut SymbolTable,
 ) -> LResult<Value> {
+    // This eval is one compilation unit, so it gets one working syntax arena,
+    // released when the bytecode is built (docs/impl/syntax.md § "Where a node
+    // lives"). Every early return below goes through `finish`, which frees it.
+    let heap_ptr = vm.heap_ptr;
+    let arena = crate::syntax::SyntaxArena::mint(unsafe { &mut *heap_ptr });
+    let out = eval_in_arena(vm, arena, expr_value, env_value, symbols);
+    unsafe { (*heap_ptr).decref_region_if_present(arena.region()) };
+    out
+}
+
+fn eval_in_arena(
+    vm: &mut VM,
+    arena: crate::syntax::SyntaxArena,
+    expr_value: Value,
+    env_value: Value,
+    symbols: &mut SymbolTable,
+) -> LResult<Value> {
     // Convert value to Syntax
     let span = Span::synthetic();
-    let syntax = Syntax::from_value(&expr_value, symbols, span)?;
+    let syntax = Syntax::from_value(&arena, &expr_value, symbols, span)?;
 
     // The runtime `eval` instruction compiles against the owning instance's
     // compile context (core.lisp env + macro-body metadata). Cloned upfront so
@@ -91,12 +108,15 @@ fn eval_inner(
     let mut expander = match vm.eval_expander.take() {
         Some(e) => e,
         None => {
-            let mut e = crate::syntax::Expander::new();
+            let mut e = crate::syntax::Expander::on_vm(vm);
             e.core_env = core_env;
             e.set_eval_meta(eval_meta.clone());
             e
         }
     };
+    // Point the cached expander at THIS eval's working arena; its macro
+    // templates stay in the instance's template arena.
+    expander.set_arena(arena);
 
     // Save the caller's stack before macro expansion. load_prelude and
     // expand both execute VM bytecode (via eval_syntax → vm.execute)

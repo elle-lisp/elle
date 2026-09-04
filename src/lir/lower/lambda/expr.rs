@@ -25,7 +25,7 @@ impl<'a> Lowerer<'a> {
         inferred_signal: &crate::signals::Signal,
         param_bounds: &[ParamBound],
         doc: Option<std::rc::Rc<str>>,
-        syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
+        origin: Option<crate::syntax::Span>,
         assert_numeric: bool,
     ) -> Result<Reg, String> {
         // Collect capture registers
@@ -144,7 +144,7 @@ impl<'a> Lowerer<'a> {
             *inferred_signal,
             param_bounds,
             doc,
-            syntax,
+            origin,
         )?;
         nested_lir.closure_id = Some(closure_id);
 

@@ -126,15 +126,13 @@ fn obj_with_value_in_every_channel(
             both,
         ),
         HeapTag::Syntax => (
-            // Syntax holds only compile-time data (String / Vec<Syntax>
-            // / Rc<Syntax>) — no `Value` content channel; traits only.
+            // Syntax holds only region-resident compile-time data — no
+            // `Value` content channel; traits only.
             HeapObject::Syntax {
-                syntax: Box::new(crate::syntax::Syntax {
-                    kind: crate::syntax::SyntaxKind::Nil,
-                    span: crate::syntax::Span::new(0, 0, 0, 0),
-                    scopes: Vec::new(),
-                    scope_exempt: false,
-                }),
+                syntax: crate::syntax::Syntax::new(
+                    crate::syntax::SyntaxKind::Nil,
+                    crate::syntax::Span::new(0, 0, 0, 0),
+                ),
                 traits: vt,
             },
             traits_only,

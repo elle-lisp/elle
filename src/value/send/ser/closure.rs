@@ -78,17 +78,16 @@ pub(super) fn send_closure(
     // Serialize doc (optional) — plain string data, not a heap Value.
     let doc = closure_rc.template.doc().map(str::to_string);
 
-    // Clone LIR for JIT in spawned threads. Strip doc (Value/Rc) and
-    // syntax (Rc<Syntax>), then convert every cross-thread-unsafe
-    // ValueConst: scalars inline, closures → ClosureRef, compounds →
-    // ValueRef into `lir_value_pool` (serialized through `ctx` so nested
-    // closures intern correctly). The LIR is preserved unconditionally —
-    // a spawned closure keeps its JIT-able body across the boundary.
+    // Clone LIR for JIT in spawned threads. Strip doc (a Value/Rc), then
+    // convert every cross-thread-unsafe ValueConst: scalars inline, closures →
+    // ClosureRef, compounds → ValueRef into `lir_value_pool` (serialized
+    // through `ctx` so nested closures intern correctly). The LIR is preserved
+    // unconditionally — a spawned closure keeps its JIT-able body across the
+    // boundary, and its `origin` span rides along as plain bytes.
     let (lir_function, lir_value_pool) = match closure_rc.template.lir_function() {
         Some(lir) => {
             let mut lir = (**lir).clone();
             lir.doc = None;
-            lir.syntax = None;
             match convert_lir_for_send(&mut lir, ctx)? {
                 Some(pool) => (Some(lir), pool),
                 // A closure-valued ValueConst couldn't be interned — drop

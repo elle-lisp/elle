@@ -233,20 +233,20 @@ fn attach_trivia_to_forms(
     // Pre-compute span starts for looking ahead to next form
     let form_spans: Vec<(ByteOffset, ByteOffset)> = forms
         .iter()
-        .map(|f| (ByteOffset::new(f.span.start), ByteOffset::new(f.span.end)))
+        .map(|f| (ByteOffset::start_of(&f.span), ByteOffset::end_of(&f.span)))
         .collect();
 
     let mut all_attached = Vec::new();
     let mut trivia_idx: usize = 0;
 
     for (form_idx, form) in forms.into_iter().enumerate() {
-        let span = form.span.clone();
+        let span = form.span;
 
         // Collect leading trivia: items before this form's span start
         let mut leading = Vec::new();
         while trivia_idx < trivia.len() {
             let t = &trivia[trivia_idx];
-            if t.byte_offset() >= ByteOffset::new(span.start) {
+            if t.byte_offset() >= ByteOffset::start_of(&span) {
                 break;
             }
             leading.push(t.clone());
@@ -262,7 +262,7 @@ fn attach_trivia_to_forms(
         let mut trailing = Vec::new();
         let is_last_form = form_idx + 1 >= form_spans.len();
         if !is_last_form {
-            let form_end_line = line_at_offset(source, ByteOffset::new(span.end));
+            let form_end_line = line_at_offset(source, ByteOffset::end_of(&span));
             let next_start = form_spans
                 .get(form_idx + 1)
                 .map(|(s, _)| *s)
@@ -340,7 +340,7 @@ fn attach_to_children(
         let mut leading = Vec::new();
         while *trivia_idx < trivia.len() {
             let t = &trivia[*trivia_idx];
-            if t.byte_offset() >= ByteOffset::new(span.start) {
+            if t.byte_offset() >= ByteOffset::start_of(span) {
                 break;
             }
             leading.push(t.clone());
@@ -353,7 +353,7 @@ fn attach_to_children(
         // Skip trivia items that fall inside this child's span but were
         // not consumed by grandchildren (e.g. blank lines inside strings).
         while *trivia_idx < trivia.len()
-            && trivia[*trivia_idx].byte_offset() < ByteOffset::new(span.end)
+            && trivia[*trivia_idx].byte_offset() < ByteOffset::end_of(span)
         {
             *trivia_idx += 1;
         }
@@ -368,9 +368,9 @@ fn attach_to_children(
         let is_last = i + 1 == children.len();
         let next_start = children
             .get(i + 1)
-            .map(|c| ByteOffset::new(c.span.start))
-            .unwrap_or(ByteOffset::new(parent.span.end));
-        let child_end_line = line_at_offset(source, ByteOffset::new(span.end));
+            .map(|c| ByteOffset::start_of(&c.span))
+            .unwrap_or(ByteOffset::end_of(&parent.span));
+        let child_end_line = line_at_offset(source, ByteOffset::end_of(span));
         let mut trailing = Vec::new();
         while *trivia_idx < trivia.len() {
             let t = &trivia[*trivia_idx];
@@ -392,7 +392,7 @@ fn attach_to_children(
         }
 
         annotated.push(AnnotatedSyntax {
-            syntax: (*child).clone(),
+            syntax: *(*child),
             leading,
             trailing,
             children: grandchildren,

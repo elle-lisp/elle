@@ -5,60 +5,14 @@ use super::*;
 #[test]
 fn test_expand_macro_basic() {
     crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm) = setup();
-        let span = Span::new(0, 5, 1, 1);
+        let (mut expander, mut symbols, mut vm, arena) = setup();
 
         // Define a macro: (defmacro double (x) `(+ ,x ,x))
-        let template = Syntax::new(
-            SyntaxKind::Quasiquote(Box::new(Syntax::new(
-                SyntaxKind::List(vec![
-                    Syntax::new(SyntaxKind::Symbol("+".to_string()), span.clone()),
-                    Syntax::new(
-                        SyntaxKind::Unquote(Box::new(Syntax::new(
-                            SyntaxKind::Symbol("x".to_string()),
-                            span.clone(),
-                        ))),
-                        span.clone(),
-                    ),
-                    Syntax::new(
-                        SyntaxKind::Unquote(Box::new(Syntax::new(
-                            SyntaxKind::Symbol("x".to_string()),
-                            span.clone(),
-                        ))),
-                        span.clone(),
-                    ),
-                ]),
-                span.clone(),
-            ))),
-            span.clone(),
-        );
-        let macro_def = MacroDef {
-            name: "double".to_string(),
-            params: vec!["x".to_string()],
-            optional_params: vec![],
-            rest_param: None,
-            template,
-            cached_transformer: std::rc::Rc::new(RefCell::new(None)),
-        };
-        expander.define_macro(macro_def);
+        let defmacro = read_syntax(arena, "(defmacro double (x) `(+ ,x ,x))", "<test>").unwrap();
+        expander.expand(defmacro, &mut symbols, &mut vm).unwrap();
 
         // (expand-macro '(double 5)) should return '(+ 5 5)
-        let expand_call = Syntax::new(
-            SyntaxKind::List(vec![
-                Syntax::new(SyntaxKind::Symbol("expand-macro".to_string()), span.clone()),
-                Syntax::new(
-                    SyntaxKind::Quote(Box::new(Syntax::new(
-                        SyntaxKind::List(vec![
-                            Syntax::new(SyntaxKind::Symbol("double".to_string()), span.clone()),
-                            Syntax::new(SyntaxKind::Int(5), span.clone()),
-                        ]),
-                        span.clone(),
-                    ))),
-                    span.clone(),
-                ),
-            ]),
-            span,
-        );
+        let expand_call = read_syntax(arena, "(expand-macro '(double 5))", "<test>").unwrap();
 
         let result = expander.expand(expand_call, &mut symbols, &mut vm);
         assert!(result.is_ok());
@@ -71,27 +25,10 @@ fn test_expand_macro_basic() {
 #[test]
 fn test_expand_macro_non_macro() {
     crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm) = setup();
-        let span = Span::new(0, 5, 1, 1);
+        let (mut expander, mut symbols, mut vm, arena) = setup();
 
         // (expand-macro '(+ 1 2)) should return '(+ 1 2) unchanged
-        let expand_call = Syntax::new(
-            SyntaxKind::List(vec![
-                Syntax::new(SyntaxKind::Symbol("expand-macro".to_string()), span.clone()),
-                Syntax::new(
-                    SyntaxKind::Quote(Box::new(Syntax::new(
-                        SyntaxKind::List(vec![
-                            Syntax::new(SyntaxKind::Symbol("+".to_string()), span.clone()),
-                            Syntax::new(SyntaxKind::Int(1), span.clone()),
-                            Syntax::new(SyntaxKind::Int(2), span.clone()),
-                        ]),
-                        span.clone(),
-                    ))),
-                    span.clone(),
-                ),
-            ]),
-            span,
-        );
+        let expand_call = read_syntax(arena, "(expand-macro '(+ 1 2))", "<test>").unwrap();
 
         let result = expander.expand(expand_call, &mut symbols, &mut vm);
         assert!(result.is_ok());
@@ -104,17 +41,10 @@ fn test_expand_macro_non_macro() {
 #[test]
 fn test_expand_macro_wrong_arity() {
     crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm) = setup();
-        let span = Span::new(0, 5, 1, 1);
+        let (mut expander, mut symbols, mut vm, arena) = setup();
 
         // (expand-macro) with no arguments should error
-        let expand_call = Syntax::new(
-            SyntaxKind::List(vec![Syntax::new(
-                SyntaxKind::Symbol("expand-macro".to_string()),
-                span.clone(),
-            )]),
-            span,
-        );
+        let expand_call = read_syntax(arena, "(expand-macro)", "<test>").unwrap();
 
         let result = expander.expand(expand_call, &mut symbols, &mut vm);
         assert!(result.is_err());
@@ -125,17 +55,10 @@ fn test_expand_macro_wrong_arity() {
 #[test]
 fn test_expand_macro_unquoted_arg() {
     crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm) = setup();
-        let span = Span::new(0, 5, 1, 1);
+        let (mut expander, mut symbols, mut vm, arena) = setup();
 
         // (expand-macro x) with unquoted arg returns the arg unchanged
-        let expand_call = Syntax::new(
-            SyntaxKind::List(vec![
-                Syntax::new(SyntaxKind::Symbol("expand-macro".to_string()), span.clone()),
-                Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone()),
-            ]),
-            span,
-        );
+        let expand_call = read_syntax(arena, "(expand-macro x)", "<test>").unwrap();
 
         let result = expander.expand(expand_call, &mut symbols, &mut vm);
         assert!(result.is_ok());
@@ -149,13 +72,13 @@ fn test_expand_macro_unquoted_arg() {
 #[test]
 fn test_macro_cache_populated_after_first_call() {
     crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm) = setup();
+        let (mut expander, mut symbols, mut vm, arena) = setup();
         // Register prelude so that quasiquote is available
         expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
         // Define a simple macro: (defmacro double (x) `(+ ,x ,x))
         let defmacro_src = "(defmacro double (x) `(+ ,x ,x))";
-        let defmacro_syn = crate::reader::read_syntax(defmacro_src, "<test>").unwrap();
+        let defmacro_syn = read_syntax(arena, defmacro_src, "<test>").unwrap();
         expander
             .expand(defmacro_syn, &mut symbols, &mut vm)
             .unwrap();
@@ -171,7 +94,7 @@ fn test_macro_cache_populated_after_first_call() {
 
         // Invoke once.
         let call_src = "(double 5)";
-        let call_syn = crate::reader::read_syntax(call_src, "<test>").unwrap();
+        let call_syn = read_syntax(arena, call_src, "<test>").unwrap();
         expander.expand(call_syn, &mut symbols, &mut vm).unwrap();
 
         // After first invocation, cache should be populated.
@@ -190,12 +113,12 @@ fn test_macro_cache_populated_after_first_call() {
 #[test]
 fn test_macro_cache_different_args_no_leakage() {
     crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm) = setup();
+        let (mut expander, mut symbols, mut vm, arena) = setup();
         expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
         // (defmacro double (x) `(+ ,x ,x))
         let defmacro_syn =
-            crate::reader::read_syntax("(defmacro double (x) `(+ ,x ,x))", "<test>").unwrap();
+            read_syntax(arena, "(defmacro double (x) `(+ ,x ,x))", "<test>").unwrap();
         expander
             .expand(defmacro_syn, &mut symbols, &mut vm)
             .unwrap();
@@ -204,7 +127,7 @@ fn test_macro_cache_different_args_no_leakage() {
         // to a list containing the correct integer twice.
         for n in [1i64, 2, 3] {
             let src = format!("(double {})", n);
-            let syn = crate::reader::read_syntax(&src, "<test>").unwrap();
+            let syn = read_syntax(arena, &src, "<test>").unwrap();
             let result = expander.expand(syn, &mut symbols, &mut vm).unwrap();
             let result_str = result.to_string();
             // Should expand to (+ n n) — check n appears in the output.
@@ -227,12 +150,13 @@ fn test_macro_cache_different_args_no_leakage() {
 #[test]
 fn test_macro_cache_atom_args_falsy() {
     crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm) = setup();
+        let (mut expander, mut symbols, mut vm, arena) = setup();
         expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
         // (defmacro echo-cond (test) `(if ,test true false))
         // Expands echo-cond so we can inspect what value 'test' had.
-        let defmacro_syn = crate::reader::read_syntax(
+        let defmacro_syn = read_syntax(
+            arena,
             "(defmacro echo-cond (test) `(if ,test true false))",
             "<test>",
         )
@@ -246,7 +170,7 @@ fn test_macro_cache_atom_args_falsy() {
         // boolean false literal, not a truthy syntax object.
         for _ in 0..3 {
             // Call multiple times to exercise both miss and hit paths.
-            let syn = crate::reader::read_syntax("(echo-cond false)", "<test>").unwrap();
+            let syn = read_syntax(arena, "(echo-cond false)", "<test>").unwrap();
             let result = expander.expand(syn, &mut symbols, &mut vm).unwrap();
             let result_str = result.to_string();
             // The result should contain 'false' as a literal.
@@ -291,7 +215,7 @@ fn test_macro_cache_rest_params() {
 #[test]
 fn test_macro_arg_wrapping_does_not_leak() {
     crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm) = setup();
+        let (mut expander, mut symbols, mut vm, arena) = setup();
         let span = Span::new(0, 5, 1, 1);
 
         // (defmacro idmac (x) x) — an identity template, so each expansion's only
@@ -301,28 +225,14 @@ fn test_macro_arg_wrapping_does_not_leak() {
             params: vec!["x".to_string()],
             optional_params: vec![],
             rest_param: None,
-            template: Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone()),
+            template: Syntax::symbol(&arena, "x", span),
             cached_transformer: std::rc::Rc::new(RefCell::new(None)),
         };
         expander.define_macro(macro_def);
 
         // A macro call with a COMPOUND arg `(foo)` — wrap_macro_arg_value takes the
         // `_ => Value::syntax(...)` arm (an immediate arg would never allocate).
-        let make_call = || {
-            Syntax::new(
-                SyntaxKind::List(vec![
-                    Syntax::new(SyntaxKind::Symbol("idmac".to_string()), span.clone()),
-                    Syntax::new(
-                        SyntaxKind::List(vec![Syntax::new(
-                            SyntaxKind::Symbol("foo".to_string()),
-                            span.clone(),
-                        )]),
-                        span.clone(),
-                    ),
-                ]),
-                span.clone(),
-            )
-        };
+        let make_call = || read_syntax(arena, "(idmac (foo))", "<test>").unwrap();
 
         // Warm up: the first expansion compiles + caches the transformer (one-time
         // resident constants) so the measured window isolates wrap_macro_arg_value.

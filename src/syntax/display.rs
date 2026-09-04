@@ -9,6 +9,18 @@ impl fmt::Display for Syntax {
     }
 }
 
+/// Write `items` space-separated between `open` and `close`.
+fn delimited(f: &mut fmt::Formatter<'_>, open: &str, items: &[Syntax], close: &str) -> fmt::Result {
+    f.write_str(open)?;
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            f.write_str(" ")?;
+        }
+        write!(f, "{}", item)?;
+    }
+    f.write_str(close)
+}
+
 impl fmt::Display for SyntaxKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -28,102 +40,21 @@ impl fmt::Display for SyntaxKind {
             SyntaxKind::Keyword(s) => write!(f, ":{}", s),
             SyntaxKind::String(s) => write!(f, "\"{}\"", s.escape_default()),
             SyntaxKind::StringMut(s) => write!(f, "@\"{}\"", s.escape_default()),
-            SyntaxKind::List(items) => {
-                write!(f, "(")?;
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{}", item)?;
-                }
-                write!(f, ")")
-            }
-            SyntaxKind::Array(items) => {
-                write!(f, "[")?;
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{}", item)?;
-                }
-                write!(f, "]")
-            }
-            SyntaxKind::ArrayMut(items) => {
-                write!(f, "@[")?;
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{}", item)?;
-                }
-                write!(f, "]")
-            }
-            SyntaxKind::Struct(items) => {
-                write!(f, "{{")?;
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{}", item)?;
-                }
-                write!(f, "}}")
-            }
-            SyntaxKind::StructMut(items) => {
-                write!(f, "@{{")?;
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{}", item)?;
-                }
-                write!(f, "}}")
-            }
-            SyntaxKind::Set(items) => {
-                write!(f, "|")?;
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{}", item)?;
-                }
-                write!(f, "|")
-            }
-            SyntaxKind::SetMut(items) => {
-                write!(f, "@|")?;
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{}", item)?;
-                }
-                write!(f, "|")
-            }
-            SyntaxKind::Bytes(items) => {
-                write!(f, "b[")?;
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{}", item)?;
-                }
-                write!(f, "]")
-            }
-            SyntaxKind::BytesMut(items) => {
-                write!(f, "@b[")?;
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{}", item)?;
-                }
-                write!(f, "]")
-            }
-            SyntaxKind::Quote(inner) => write!(f, "'{}", inner),
-            SyntaxKind::Quasiquote(inner) => write!(f, "`{}", inner),
-            SyntaxKind::Unquote(inner) => write!(f, ",{}", inner),
-            SyntaxKind::UnquoteSplicing(inner) => write!(f, ",;{}", inner),
-            SyntaxKind::Splice(inner) => write!(f, ";{}", inner),
-            SyntaxKind::SyntaxLiteral(v) => write!(f, "#<syntax-literal:{:?}>", v),
+            SyntaxKind::List(items) => delimited(f, "(", items, ")"),
+            SyntaxKind::Array(items) => delimited(f, "[", items, "]"),
+            SyntaxKind::ArrayMut(items) => delimited(f, "@[", items, "]"),
+            SyntaxKind::Struct(items) => delimited(f, "{", items, "}"),
+            SyntaxKind::StructMut(items) => delimited(f, "@{", items, "}"),
+            SyntaxKind::Set(items) => delimited(f, "|", items, "|"),
+            SyntaxKind::SetMut(items) => delimited(f, "@|", items, "|"),
+            SyntaxKind::Bytes(items) => delimited(f, "b[", items, "]"),
+            SyntaxKind::BytesMut(items) => delimited(f, "@b[", items, "]"),
+            SyntaxKind::Quote(inner) => write!(f, "'{}", **inner),
+            SyntaxKind::Quasiquote(inner) => write!(f, "`{}", **inner),
+            SyntaxKind::Unquote(inner) => write!(f, ",{}", **inner),
+            SyntaxKind::UnquoteSplicing(inner) => write!(f, ",;{}", **inner),
+            SyntaxKind::Splice(inner) => write!(f, ";{}", **inner),
+            SyntaxKind::SyntaxLiteral(v) => write!(f, "#<syntax-literal:{:?}>", **v),
         }
     }
 }

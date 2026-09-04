@@ -182,7 +182,7 @@ impl<'a> Analyzer<'a> {
         let value = if items.len() == 3 {
             self.analyze_expr(&items[2])?
         } else {
-            Hir::silent(HirKind::Nil, span.clone())
+            Hir::silent(HirKind::Nil, span)
         };
 
         // Track direct signal emission — inherent to this function.
@@ -282,7 +282,7 @@ impl<'a> Analyzer<'a> {
             }
 
             self.push_scope(false);
-            arm_spans.push(args[i].span.clone());
+            arm_spans.push(args[i].span);
             let pattern = self.analyze_pattern(&args[i])?;
 
             // Check for guard: pattern when guard body
@@ -401,11 +401,20 @@ impl<'a> Analyzer<'a> {
         let locked = self.unicode_generation;
         if items.len() == 1 {
             let (major, minor, patch) = locked.version();
+            // Fold to the same HIR the literal `[major minor patch]` produces,
+            // by analyzing its elements rather than synthesizing an `Array`
+            // node: the analyzer holds no syntax arena, and it needs none —
+            // integers carry no region payload.
             let elems: Vec<Syntax> = [major, minor, patch]
                 .iter()
-                .map(|c| Syntax::new(SyntaxKind::Int(*c as i64), span.clone()))
+                .map(|c| Syntax::new(SyntaxKind::Int(*c as i64), span))
                 .collect();
-            return self.analyze_expr(&Syntax::new(SyntaxKind::Array(elems), span));
+            return self.analyze_collection_literal(
+                "array",
+                &elems,
+                crate::hir::analyze::forms::expr::SpliceRule::Spread,
+                span,
+            );
         }
         if items.len() > 4 {
             return Err(format!(

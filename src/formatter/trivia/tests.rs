@@ -82,12 +82,14 @@ fn test_annotated_with_leading_comment() {
 
 #[test]
 fn test_annotated_list_children() {
-    let syntax = Syntax::new(
-        SyntaxKind::List(vec![
-            Syntax::new(SyntaxKind::Symbol("+".into()), Span::new(1, 2, 1, 2)),
+    let arena = crate::syntax::thread_arena();
+    let syntax = Syntax::list(
+        &arena,
+        &[
+            Syntax::symbol(&arena, "+", Span::new(1, 2, 1, 2)),
             Syntax::new(SyntaxKind::Int(1), Span::new(3, 4, 1, 4)),
             Syntax::new(SyntaxKind::Int(2), Span::new(5, 6, 1, 6)),
-        ]),
+        ],
         Span::new(0, 7, 1, 1),
     );
     let (annotated, _dangling) = AnnotatedSyntax::build_toplevel(vec![syntax], &[], "(+ 1 2)");

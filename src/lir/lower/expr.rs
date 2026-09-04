@@ -12,9 +12,9 @@ mod var;
 impl<'a> Lowerer<'a> {
     /// Lower a HIR expression to LIR
     pub(super) fn lower_expr(&mut self, hir: &Hir) -> Result<Reg, String> {
-        let saved_span = self.current_span.clone();
+        let saved_span = self.current_span;
         let saved_hir_id = self.current_hir_id;
-        self.current_span = hir.span.clone();
+        self.current_span = hir.span;
         self.current_hir_id = Some(hir.id);
 
         // Per-path branch compensation: if this node is a branch arm body whose
@@ -62,7 +62,7 @@ impl<'a> Lowerer<'a> {
                 inferred_signals,
                 param_bounds,
                 doc,
-                syntax,
+                origin,
                 assert_numeric,
             } => self.lower_lambda_expr(
                 params,
@@ -75,7 +75,7 @@ impl<'a> Lowerer<'a> {
                 inferred_signals,
                 param_bounds,
                 doc.clone(),
-                syntax.clone(),
+                *origin,
                 *assert_numeric,
             ),
 

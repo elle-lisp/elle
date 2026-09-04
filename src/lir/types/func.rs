@@ -40,9 +40,14 @@ pub struct LirFunction {
     /// (reclaimable) allocation on `(doc f)`.
     #[serde(skip)]
     pub doc: Option<std::rc::Rc<str>>,
-    /// Original lambda Syntax node for eval environment reconstruction
+    /// Where this lambda was written, for `(meta/origin f)`.
+    ///
+    /// Skipped by serde, like `doc` beside it: nothing rebuilds a
+    /// `ClosureTemplate` from serialized LIR — the stdlib cache restores
+    /// templates from cached bytecode — so encoding it would grow every cache
+    /// file for a field no restore path reads.
     #[serde(skip)]
-    pub syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
+    pub origin: Option<crate::syntax::Span>,
     /// How varargs are collected: List (pair chain) or Struct (immutable struct).
     /// Only meaningful when arity is AtLeast.
     pub vararg_kind: crate::hir::VarargKind,
@@ -150,7 +155,7 @@ impl LirFunction {
             capture_locals_mask: crate::value::CaptureMask::empty(),
             signal: Signal::silent(),
             doc: None,
-            syntax: None,
+            origin: None,
             vararg_kind: crate::hir::VarargKind::List,
             num_params,
             num_local_params: 0,

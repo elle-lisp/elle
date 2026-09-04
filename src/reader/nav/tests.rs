@@ -22,20 +22,23 @@ fn assert_located_expect_error(err: &str) {
 #[test]
 fn js_unmet_expectation_is_a_located_error() {
     // `(` with no closing `)` before end-of-input.
-    let err = js_parser::parse_js_file("f(1", "t.js").unwrap_err();
+    let err = js_parser::parse_js_file(crate::syntax::thread_arena(), "f(1", "t.js").unwrap_err();
     assert_located_expect_error(&err);
 }
 
 #[test]
 fn py_unmet_expectation_is_a_located_error() {
     // `(` with no closing `)`.
-    let err = py_parser::parse_py_file("x = (1", "t.py").unwrap_err();
+    let err =
+        py_parser::parse_py_file(crate::syntax::thread_arena(), "x = (1", "t.py").unwrap_err();
     assert_located_expect_error(&err);
 }
 
 #[test]
 fn lua_unmet_expectation_is_a_located_error() {
     // `if` with no `then`.
-    let err = lua_parser::parse_lua_file("if x return 1 end", "t.lua").unwrap_err();
+    let err =
+        lua_parser::parse_lua_file(crate::syntax::thread_arena(), "if x return 1 end", "t.lua")
+            .unwrap_err();
     assert_located_expect_error(&err);
 }

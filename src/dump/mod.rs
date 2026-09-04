@@ -121,7 +121,9 @@ pub fn render_all(
 
 /// AST — parsed syntax forms (one per line), the cheapest stage.
 pub fn render_ast(contents: &str, source_name: &str) -> Result<String, String> {
-    let forms = crate::reader::read_syntax_all_for(contents, source_name)?;
+    // A dump renders and discards: its own heap, freed when this returns.
+    let mut home = crate::syntax::SyntaxHeap::new();
+    let forms = crate::reader::read_syntax_all_for(home.arena(), contents, source_name)?;
     let mut s = String::new();
     for form in &forms {
         let _ = writeln!(s, "{}", form);
@@ -149,8 +151,8 @@ pub fn hir_module(module: &LirModule) -> String {
             "; {} {} (arity={}, signal={:?})",
             tag, name, f.arity, f.signal
         );
-        if let Some(syn) = &f.syntax {
-            let _ = writeln!(s, "{}", syn);
+        if let Some(origin) = &f.origin {
+            let _ = writeln!(s, "; at {}", origin);
         }
     }
     s

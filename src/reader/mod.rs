@@ -126,16 +126,25 @@ fn lex_all_under(input: &str, source_name: &str, lexicon: Lexicon) -> Result<Lex
     })
 }
 
-/// Parse source code into a Syntax tree
-pub fn read_syntax(input: &str, source_name: &str) -> Result<Syntax, String> {
+/// Parse source code into a Syntax tree, born in `arena`
+pub fn read_syntax(
+    arena: crate::syntax::SyntaxArena,
+    input: &str,
+    source_name: &str,
+) -> Result<Syntax, String> {
     let lex = lex_all(input, source_name)?;
 
     if lex.tokens.is_empty() {
         return Err("No input".to_string());
     }
 
-    let mut parser =
-        SyntaxReader::with_byte_offsets(lex.tokens, lex.locations, lex.lengths, lex.byte_offsets);
+    let mut parser = SyntaxReader::with_byte_offsets(
+        lex.tokens,
+        lex.locations,
+        lex.lengths,
+        lex.byte_offsets,
+        arena,
+    );
     let result = parser.read()?;
 
     if let Some(err) = parser.check_exhausted() {
@@ -145,9 +154,13 @@ pub fn read_syntax(input: &str, source_name: &str) -> Result<Syntax, String> {
     Ok(result)
 }
 
-/// Parse source code into multiple Syntax trees
-pub fn read_syntax_all(input: &str, source_name: &str) -> Result<Vec<Syntax>, String> {
-    parse_all(lex_all(input, source_name)?)
+/// Parse source code into multiple Syntax trees, born in `arena`
+pub fn read_syntax_all(
+    arena: crate::syntax::SyntaxArena,
+    input: &str,
+    source_name: &str,
+) -> Result<Vec<Syntax>, String> {
+    parse_all(lex_all(input, source_name)?, arena)
 }
 
 /// Parse source code into multiple Syntax trees under the current epoch's
@@ -155,18 +168,30 @@ pub fn read_syntax_all(input: &str, source_name: &str) -> Result<Vec<Syntax>, St
 ///
 /// The REPL reads this way. A declaration pasted at the prompt is a form in
 /// the session, not a choice of lexer for the prompt that follows it.
-pub fn read_syntax_all_current(input: &str, source_name: &str) -> Result<Vec<Syntax>, String> {
-    parse_all(lex_all_under(input, source_name, Lexicon::current())?)
+pub fn read_syntax_all_current(
+    arena: crate::syntax::SyntaxArena,
+    input: &str,
+    source_name: &str,
+) -> Result<Vec<Syntax>, String> {
+    parse_all(
+        lex_all_under(input, source_name, Lexicon::current())?,
+        arena,
+    )
 }
 
 /// Parse a lexed token stream into every form it holds.
-fn parse_all(lex: LexedTokens) -> Result<Vec<Syntax>, String> {
+fn parse_all(lex: LexedTokens, arena: crate::syntax::SyntaxArena) -> Result<Vec<Syntax>, String> {
     if lex.tokens.is_empty() {
         return Ok(Vec::new());
     }
 
-    let mut parser =
-        SyntaxReader::with_byte_offsets(lex.tokens, lex.locations, lex.lengths, lex.byte_offsets);
+    let mut parser = SyntaxReader::with_byte_offsets(
+        lex.tokens,
+        lex.locations,
+        lex.lengths,
+        lex.byte_offsets,
+        arena,
+    );
     parser.read_all()
 }
 
@@ -218,15 +243,19 @@ pub fn prescanned_epoch_for(input: &str, source_name: &str) -> Result<u64, Strin
 /// Parse source, dispatching by file extension:
 /// `.lua` → Lua reader, `.js` → JavaScript reader, `.py` → Python reader,
 /// `.md` → markdown code-block extraction, anything else → s-expressions.
-pub fn read_syntax_all_for(input: &str, source_name: &str) -> Result<Vec<Syntax>, String> {
+pub fn read_syntax_all_for(
+    arena: crate::syntax::SyntaxArena,
+    input: &str,
+    source_name: &str,
+) -> Result<Vec<Syntax>, String> {
     if source_name.ends_with(".lua") {
-        lua_parser::parse_lua_file(input, source_name)
+        lua_parser::parse_lua_file(arena, input, source_name)
     } else if source_name.ends_with(".js") {
-        js_parser::parse_js_file(input, source_name)
+        js_parser::parse_js_file(arena, input, source_name)
     } else if source_name.ends_with(".py") {
-        py_parser::parse_py_file(input, source_name)
+        py_parser::parse_py_file(arena, input, source_name)
     } else {
-        read_syntax_all(&sexp_text(input, source_name), source_name)
+        read_syntax_all(arena, &sexp_text(input, source_name), source_name)
     }
 }
 

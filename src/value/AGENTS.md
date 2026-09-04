@@ -110,7 +110,9 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
      header a closure references. One payload serves every header made from one
      blueprint, so `MakeClosure` copies two words whatever the size of the
      function's body. Accessors are methods (`template.bytecode()`,
-     `template.arity()`, …), not fields.
+     `template.arity()`, …), not fields. The blueprint keeps `origin:
+     Option<Span>` — where the lambda was written, read by `(meta/origin f)` —
+     as 20 bytes of POD, not the lambda's syntax tree.
 
 6. **Thread transfer uses `SendValue`.** `SendValue` wraps values for safe
      transfer between threads, cloning `Rc` contents as needed. Trait tables
@@ -140,10 +142,13 @@ The tagged union uses a `(tag: u64, payload: u64)` pair:
 
 ### Syntax objects
 
-`HeapObject::Syntax(Rc<Syntax>)` preserves scope sets through the Value
-round-trip during macro expansion. Created by `Value::syntax()`, accessed
-by `Value::as_syntax()`. Not sendable across threads (contains `Rc`).
-`from_value()` unwraps syntax objects back to `Syntax`, preserving scopes.
+`HeapObject::Syntax { syntax: Syntax, .. }` preserves scope sets through the
+Value round-trip during macro expansion. Created by `Value::syntax()`, accessed
+by `Value::as_syntax()`. The node is stored inline and `value::build::syntax`
+**copies** the whole tree into the value's own region, so the object is
+self-contained page bytes (docs/impl/syntax.md § "A syntax `Value` owns its
+tree"). `from_value()` copies the other way, into the caller's arena,
+preserving scopes.
 
 **Note:** `Value` depends on `Syntax` (for `HeapObject::Syntax`) and
 `Syntax` depends on `Value` (for `SyntaxKind::SyntaxLiteral`). This is
@@ -215,7 +220,7 @@ The field is **invisible to structural equality, ordering, and hashing**:
 | `LBox` | mutable box — RefCell data shared on `with-traits` |
 | `CaptureCell` | compiler-created mutable-capture cell |
 | `Fiber` | fiber — FiberHandle (Rc) cloned on `with-traits` |
-| `Syntax` | syntax object — Box<Syntax> cloned on `with-traits` |
+| `Syntax` | syntax object — the inline node is `Copy`, so `with-traits` copies it |
 | `ManagedPointer` | managed FFI pointer — Cell<Option<usize>> cloned on `with-traits` |
 | `External` | opaque plugin object — Rc<dyn Any> cloned on `with-traits` |
 | `Parameter` | dynamic parameter |

@@ -8,7 +8,7 @@ impl PyParser {
                 self.advance();
                 let name = self.expect_ident()?;
                 let func = self.parse_function_def(&loc)?;
-                let span = func.span.clone();
+                let span = func.span;
                 Ok(self.list(
                     vec![self.sym("def", &loc), self.sym(&name, &loc), func],
                     span,
@@ -62,25 +62,22 @@ impl PyParser {
                     self.advance();
                     self.parse_expr()?
                 } else {
-                    Syntax::new(
-                        SyntaxKind::String("assertion failed".to_string()),
-                        self.span_from(&loc),
-                    )
+                    self.str_lit("assertion failed", self.span_from(&loc))
                 };
                 self.eat_newlines();
                 let span = self.span_from(&loc);
                 // (if (not cond) (error {:error :assertion-failed :message msg}) nil)
-                let not_cond = self.list(vec![self.sym("not", &loc), cond], span.clone());
+                let not_cond = self.list(vec![self.sym("not", &loc), cond], span);
                 let err_struct = Syntax::new(
-                    SyntaxKind::Struct(vec![
-                        Syntax::new(SyntaxKind::Keyword("error".into()), span.clone()),
-                        Syntax::new(SyntaxKind::Keyword("assertion-failed".into()), span.clone()),
-                        Syntax::new(SyntaxKind::Keyword("message".into()), span.clone()),
+                    SyntaxKind::Struct(self.arena.nodes(&[
+                        self.kw("error", span),
+                        self.kw("assertion-failed", span),
+                        self.kw("message", span),
                         msg,
-                    ]),
-                    span.clone(),
+                    ])),
+                    span,
                 );
-                let error_call = self.list(vec![self.sym("error", &loc), err_struct], span.clone());
+                let error_call = self.list(vec![self.sym("error", &loc), err_struct], span);
                 Ok(self.list(
                     vec![
                         self.sym("if", &loc),
@@ -97,9 +94,8 @@ impl PyParser {
                 self.eat_newlines();
                 let span = self.span_from(&loc);
                 let import_path = format!("lib/{}", name);
-                let import_str = Syntax::new(SyntaxKind::String(import_path), span.clone());
-                let import_call =
-                    self.list(vec![self.sym("import", &loc), import_str], span.clone());
+                let import_str = self.str_lit(&import_path, span);
+                let import_call = self.list(vec![self.sym("import", &loc), import_str], span);
                 Ok(self.list(
                     vec![self.sym("def", &loc), self.sym(&name, &loc), import_call],
                     span,
@@ -118,12 +114,7 @@ impl PyParser {
                         if let SyntaxKind::List(ref items) = expr.kind {
                             if items.len() == 3 && items[0].is_symbol("get") {
                                 return Ok(self.list(
-                                    vec![
-                                        self.sym("put", &loc),
-                                        items[1].clone(),
-                                        items[2].clone(),
-                                        rhs,
-                                    ],
+                                    vec![self.sym("put", &loc), items[1], items[2], rhs],
                                     span,
                                 ));
                             }
@@ -144,8 +135,7 @@ impl PyParser {
                         let rhs = self.parse_expr()?;
                         self.eat_newlines();
                         let span = expr.span.merge(&rhs.span);
-                        let add =
-                            self.list(vec![self.sym("+", &loc), expr.clone(), rhs], span.clone());
+                        let add = self.list(vec![self.sym("+", &loc), expr, rhs], span);
                         Ok(self.list(vec![self.sym("assign", &loc), expr, add], span))
                     }
                     PyToken::MinusAssign => {
@@ -153,8 +143,7 @@ impl PyParser {
                         let rhs = self.parse_expr()?;
                         self.eat_newlines();
                         let span = expr.span.merge(&rhs.span);
-                        let sub =
-                            self.list(vec![self.sym("-", &loc), expr.clone(), rhs], span.clone());
+                        let sub = self.list(vec![self.sym("-", &loc), expr, rhs], span);
                         Ok(self.list(vec![self.sym("assign", &loc), expr, sub], span))
                     }
                     PyToken::StarAssign => {
@@ -162,8 +151,7 @@ impl PyParser {
                         let rhs = self.parse_expr()?;
                         self.eat_newlines();
                         let span = expr.span.merge(&rhs.span);
-                        let mul =
-                            self.list(vec![self.sym("*", &loc), expr.clone(), rhs], span.clone());
+                        let mul = self.list(vec![self.sym("*", &loc), expr, rhs], span);
                         Ok(self.list(vec![self.sym("assign", &loc), expr, mul], span))
                     }
                     PyToken::SlashAssign => {
@@ -171,8 +159,7 @@ impl PyParser {
                         let rhs = self.parse_expr()?;
                         self.eat_newlines();
                         let span = expr.span.merge(&rhs.span);
-                        let div =
-                            self.list(vec![self.sym("/", &loc), expr.clone(), rhs], span.clone());
+                        let div = self.list(vec![self.sym("/", &loc), expr, rhs], span);
                         Ok(self.list(vec![self.sym("assign", &loc), expr, div], span))
                     }
                     _ => {
@@ -253,7 +240,7 @@ impl PyParser {
             self.sym(&names[0], &loc)
         } else {
             let name_syms: Vec<Syntax> = names.iter().map(|n| self.sym(n, &loc)).collect();
-            self.list(name_syms, span.clone())
+            self.list(name_syms, span)
         };
 
         Ok(self.list(
@@ -301,34 +288,27 @@ impl PyParser {
         // Build: (let (([__ok __val] (protect ((fn () try_body)))))
         //          (if __ok __val ((fn (err_name) catch_body) __val)))
         let try_fn = self.list(
-            vec![
-                self.sym("fn", &loc),
-                self.list(vec![], span.clone()),
-                try_body,
-            ],
-            span.clone(),
+            vec![self.sym("fn", &loc), self.list(vec![], span), try_body],
+            span,
         );
         let protect_call = self.list(
-            vec![
-                self.sym("protect", &loc),
-                self.list(vec![try_fn], span.clone()),
-            ],
-            span.clone(),
+            vec![self.sym("protect", &loc), self.list(vec![try_fn], span)],
+            span,
         );
 
         let ok_sym = self.sym(TRY_OK, &loc);
         let val_sym = self.sym(TRY_VAL, &loc);
-        let pattern = Syntax::new(SyntaxKind::Array(vec![ok_sym, val_sym]), span.clone());
+        let pattern = self.arr(vec![ok_sym, val_sym], span);
 
         let catch_fn = self.list(
             vec![
                 self.sym("fn", &loc),
-                self.list(vec![self.sym(&err_name, &loc)], span.clone()),
+                self.list(vec![self.sym(&err_name, &loc)], span),
                 catch_body,
             ],
-            span.clone(),
+            span,
         );
-        let catch_call = self.list(vec![catch_fn, self.sym(TRY_VAL, &loc)], span.clone());
+        let catch_call = self.list(vec![catch_fn, self.sym(TRY_VAL, &loc)], span);
 
         let if_expr = self.list(
             vec![
@@ -337,15 +317,15 @@ impl PyParser {
                 self.sym(TRY_VAL, &loc),
                 catch_call,
             ],
-            span.clone(),
+            span,
         );
 
-        let binding = self.list(vec![pattern, protect_call], span.clone());
-        let bindings = self.list(vec![binding], span.clone());
+        let binding = self.list(vec![pattern, protect_call], span);
+        let bindings = self.list(vec![binding], span);
 
         let mut let_items = vec![self.sym("let", &loc), bindings, if_expr];
         if let Some(fin) = finally_body {
-            let inner = self.list(let_items, span.clone());
+            let inner = self.list(let_items, span);
             let_items = vec![self.sym("begin", &loc), inner, fin];
         }
 
@@ -368,7 +348,7 @@ impl PyParser {
         let body = self.parse_function_block()?;
 
         let span = self.span_from(loc);
-        let param_list = self.list(params, span.clone());
+        let param_list = self.list(params, span);
         Ok(self.list(vec![self.sym("fn", loc), param_list, body], span))
     }
 

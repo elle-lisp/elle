@@ -198,35 +198,30 @@ syntax foundation and the LIR side-stream remove two; the image milestone's own
 dump removes the third by making child templates body data; the fourth is the
 GPU cache this design already drops.
 
-### Region-native syntax
+### Region-native syntax — landed
 
 Syntax is load-bearing for images, not a reconstruction nicety: a macro *is*
 its template (`MacroDef.template: Syntax` plus parameter lists; the compiled
 transformer is a lazily filled cache), so the expander cannot be rebuilt
-without syntax. Today `Syntax` is a Rust-heap `Box` tree, which would force a
-side-stream codec (an extended `SendSyntax`) and a lazy-decode seam — a
-serializer whose entire job is to work around the representation.
+without syntax. A Rust-heap `Box` tree would force a side-stream codec and a
+lazy-decode seam — a serializer whose entire job is to work around the
+representation.
 
-Make syntax a region-native immutable tree instead: nodes and child slices
-inline in region pages, spans and hygiene scopes as plain fields. This is
-the largest foundation — it touches the expander's core type — but it pays
-three times: syntax objects become ordinary sealed values (macro templates,
-closure syntax, and inline-fn syntax are just body data, demand-paged like
-everything else); `send` gets real syntax support, fixing its
-syntax-dropping defect at the root rather than at a boundary; and the
-`SyntaxLiteral` case (post-expansion syntax embedding a value) becomes an
-ordinary child `Value` instead of an unencodable special case.
+Syntax is a region-native immutable tree instead: nodes and child slices
+inline in region pages, `Copy` POD with no `Drop`, spans and hygiene scopes as
+plain fields ([syntax.md](syntax.md) owns the model). Macro templates, the
+syntax a `Value` wraps, and inline-fn syntax are body data, demand-paged like
+everything else, and `HeapObject::Syntax` owns its tree inline rather than
+through a `Box` no image could seal around.
 
-The migration is whole, not boundary-only: the expander's working tree
-moves too. Keeping a mutable Rust tree in the compiler and a region-native
-form at the value boundary would mean two representations of one datum —
-conversion seams, double maintenance, and a standing invitation for the two
-to drift. The performance bar for the migration is **parity**: building and
-mutating syntax trees in regions must be comparably fast to the Rust-heap
-tree they replace, since expansion is compile-path-hot and the fallback
-compile pays it too. Risk item 5 measured the bar and retired it: the
-prototype region tree beats the Rust-heap tree on every expansion-hot
-operation by 2–5×, so the boundary-only split is off the table.
+The tree is region-native everywhere, not only at the value boundary — the
+expander's working tree included. A mutable Rust tree in the compiler beside a
+region-native form at the boundary would be two representations of one datum:
+conversion seams, double maintenance, and a standing invitation for the two to
+drift. The bar is **parity**, since expansion is compile-path-hot and the
+fallback compile pays it too; risk item 5 measured the prototype at 2–5×
+faster than a Rust-heap tree on every expansion-hot operation, so the
+boundary-only split never had a case.
 
 Hygiene scope ids minted by the expander remain process-local counters; the
 image records a scope watermark so a fresh expander mints above every scope
@@ -728,7 +723,11 @@ wrong about. Run these before the foundations land, in this order:
    relies on). To redo: counter patch at the sites above, plus a
    `#[cfg(test)]` bench under `src/syntax/expand/` building the prototype
    node from `read_syntax_all` output and running stamp/flip/add/build/
-   teardown against `stamp_scope`/`flip_scope_recursive`.
+   teardown against `stamp_scope`/`flip_scope_recursive`. The shipped node
+   differs from the prototype in two ways [syntax.md](syntax.md) argues for:
+   it carries a symbol's spelling as a region string rather than a hash, and
+   its scope set has no inline capacity (the prototype measured the
+   difference at 8 ns per visit). It is 64 bytes, not 56.
 6. **Fingerprint strength — dispatched, probes landed.** Size/align probes
    do not pin field offsets; the fingerprint now records, per dumpable
    variant, the discriminant byte and every leaf field's offset and length
@@ -772,8 +771,10 @@ code, and each deletes image machinery:
    ([region/template.md](region/template.md)); deleted the per-creation
    blueprint clone, the `HashMap` location map, and the `Rc`-shared template
    variant that no image could dump.
-4. **syntax** — the region-native syntax tree; deletes the syntax codec and
-   fixes `send`'s syntax defect at the root.
+4. **syntax** — landed. The region-native syntax tree ([syntax.md](syntax.md));
+   deleted the side-stream syntax codec this design would otherwise have
+   needed, the `Box<Syntax>` inside `HeapObject::Syntax`, and the retained
+   lambda tree on every closure template.
 
 Then the image milestones:
 

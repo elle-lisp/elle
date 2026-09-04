@@ -104,7 +104,7 @@ impl Bytecode {
 
         let offset = self.current_pos();
         let loc = SourceLoc::new(
-            span.file.clone().unwrap_or_else(|| "<input>".to_string()),
+            span.file().unwrap_or("<input>"),
             span.line as usize,
             span.col as usize,
         );

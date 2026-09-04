@@ -173,3 +173,108 @@ impl<'a, T: 'static> IntoIterator for &'a RegionSlice<T> {
         self.as_slice().iter()
     }
 }
+
+/// A UTF-8 string owned by a region: [`RegionSlice<u8>`] that promises its
+/// bytes are valid UTF-8.
+///
+/// The promise is kept at the one construction point — `SyntaxArena::text`,
+/// which copies a `&str` — so every read is a plain `from_utf8_unchecked`.
+/// It exists so a region-resident node can hold a name or a literal without a
+/// Rust-heap `String` (docs/impl/syntax.md § "The node"), and it carries the
+/// same aliasing rule as the slice it wraps: a copy points at the SAME bytes
+/// in the SAME region, so a holder in another region must copy rather than
+/// share (see this module's docs).
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct RegionStr(RegionSlice<u8>);
+
+impl RegionStr {
+    /// The empty string, with no backing page.
+    pub fn empty() -> Self {
+        RegionStr(RegionSlice::empty())
+    }
+
+    /// Wrap bytes already copied into a region.
+    ///
+    /// # Safety
+    /// `bytes` must be valid UTF-8 for the life of its region.
+    pub unsafe fn from_utf8_slice(bytes: RegionSlice<u8>) -> Self {
+        RegionStr(bytes)
+    }
+
+    /// The bytes behind this string, for a caller that copies it onward.
+    pub fn bytes(&self) -> RegionSlice<u8> {
+        self.0
+    }
+
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        // Safe by construction: the only constructors copy from a `&str` or
+        // take the unsafe promise above.
+        unsafe { std::str::from_utf8_unchecked(self.0.as_slice()) }
+    }
+}
+
+impl std::ops::Deref for RegionStr {
+    type Target = str;
+    #[inline]
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl AsRef<str> for RegionStr {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl PartialEq for RegionStr {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl Eq for RegionStr {}
+
+impl PartialEq<str> for RegionStr {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<&str> for RegionStr {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl std::hash::Hash for RegionStr {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_str().hash(state)
+    }
+}
+
+impl PartialOrd for RegionStr {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for RegionStr {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_str().cmp(other.as_str())
+    }
+}
+
+impl fmt::Debug for RegionStr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.as_str(), f)
+    }
+}
+
+impl fmt::Display for RegionStr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}

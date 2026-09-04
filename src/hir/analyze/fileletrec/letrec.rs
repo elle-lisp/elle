@@ -54,7 +54,7 @@ impl<'a> Analyzer<'a> {
                 }
                 FileForm::Signal(keyword_syntax) => {
                     let keyword = match &keyword_syntax.kind {
-                        crate::syntax::SyntaxKind::Keyword(k) => k.clone(),
+                        crate::syntax::SyntaxKind::Keyword(k) => *k,
                         _ => {
                             return Err(format!(
                                 "{}: signal requires a keyword argument, got {}",
@@ -174,7 +174,7 @@ impl<'a> Analyzer<'a> {
                     self.pre_bindings.clear();
 
                     for leaf_binding in &pattern.bindings().bindings {
-                        bindings.push((*leaf_binding, Hir::silent(HirKind::Nil, span.clone())));
+                        bindings.push((*leaf_binding, Hir::silent(HirKind::Nil, span)));
                         last_binding = Some(*leaf_binding);
                     }
 
@@ -184,10 +184,10 @@ impl<'a> Analyzer<'a> {
                     let destructure_hir = Hir::silent(
                         HirKind::Destructure {
                             pattern,
-                            value: Box::new(Hir::silent(HirKind::Var(tmp), span.clone())),
+                            value: Box::new(Hir::silent(HirKind::Var(tmp), span)),
                             strict: true,
                         },
-                        span.clone(),
+                        span,
                     );
                     let destr_gensym = format!("__file_destr_{}", gensym_counter);
                     gensym_counter += 1;
@@ -287,8 +287,8 @@ impl<'a> Analyzer<'a> {
 
         // Body: reference to the last binding (the file's return value).
         let body = match last_binding {
-            Some(binding) => Hir::silent(HirKind::Var(binding), span.clone()),
-            None => Hir::silent(HirKind::Nil, span.clone()),
+            Some(binding) => Hir::silent(HirKind::Var(binding), span),
+            None => Hir::silent(HirKind::Nil, span),
         };
 
         self.pop_scope();

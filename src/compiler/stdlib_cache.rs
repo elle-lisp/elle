@@ -843,11 +843,12 @@ mod tests {
         );
     }
 
-    /// `ClosureTemplate.syntax` does not cross the cache, and `(meta/origin f)`
-    /// — its only reader — reports a closure's source location from it. So a
-    /// stdlib closure has an origin on the compiled path and none on the cached
-    /// one. Nothing in the tree depends on that; it is pinned here rather than
-    /// left to be rediscovered as a surprise.
+    /// `ClosureTemplate.origin` does not cross the cache — a restore rebuilds
+    /// templates from cached bytecode, not from the LIR the emitter set it on
+    /// — and `(meta/origin f)`, its only reader, reports a closure's source
+    /// location from it. So a stdlib closure has an origin on the compiled
+    /// path and none on the cached one. Nothing in the tree depends on that;
+    /// it is pinned here rather than left to be rediscovered as a surprise.
     ///
     /// The second half is what bounds it: a closure the hit runtime compiles
     /// itself still knows where it came from, so the loss stays with the values
@@ -870,7 +871,7 @@ mod tests {
         assert_eq!(compiled.stdlib_source(), StdlibSource::Compiled);
         assert!(
             !origin_is_nil(&mut compiled, "(meta/origin map)"),
-            "a compiled stdlib closure carries its syntax, so it has an origin"
+            "a compiled stdlib closure carries its origin span"
         );
         drop(compiled);
 
@@ -878,8 +879,8 @@ mod tests {
         assert_eq!(hit.stdlib_source(), StdlibSource::Cache);
         assert!(
             origin_is_nil(&mut hit, "(meta/origin map)"),
-            "the cache does not carry syntax, so a restored closure has no \
-             origin — a known difference between the two paths"
+            "the cache does not carry the origin span, so a restored closure \
+             has none — a known difference between the two paths"
         );
         assert!(
             !origin_is_nil(&mut hit, "(meta/origin (fn [] nil))"),

@@ -5,19 +5,10 @@ use super::*;
 #[test]
 fn test_quasiquote_simple_list() {
     crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm) = setup();
-        let span = Span::new(0, 10, 1, 1);
+        let (mut expander, mut symbols, mut vm, arena) = setup();
 
         // `(a b c)
-        let items = vec![
-            Syntax::new(SyntaxKind::Symbol("a".to_string()), span.clone()),
-            Syntax::new(SyntaxKind::Symbol("b".to_string()), span.clone()),
-            Syntax::new(SyntaxKind::Symbol("c".to_string()), span.clone()),
-        ];
-        let syntax = Syntax::new(
-            SyntaxKind::Quasiquote(Box::new(Syntax::new(SyntaxKind::List(items), span.clone()))),
-            span.clone(),
-        );
+        let syntax = read_syntax(arena, "`(a b c)", "<test>").unwrap();
 
         let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
         // Symbols in a quasiquoted list become `SyntaxLiteral(Value::syntax(...))`
@@ -40,25 +31,10 @@ fn test_quasiquote_simple_list() {
 #[test]
 fn test_quasiquote_with_unquote() {
     crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm) = setup();
-        let span = Span::new(0, 10, 1, 1);
+        let (mut expander, mut symbols, mut vm, arena) = setup();
 
         // `(a ,x b)
-        let items = vec![
-            Syntax::new(SyntaxKind::Symbol("a".to_string()), span.clone()),
-            Syntax::new(
-                SyntaxKind::Unquote(Box::new(Syntax::new(
-                    SyntaxKind::Symbol("x".to_string()),
-                    span.clone(),
-                ))),
-                span.clone(),
-            ),
-            Syntax::new(SyntaxKind::Symbol("b".to_string()), span.clone()),
-        ];
-        let syntax = Syntax::new(
-            SyntaxKind::Quasiquote(Box::new(Syntax::new(SyntaxKind::List(items), span.clone()))),
-            span.clone(),
-        );
+        let syntax = read_syntax(arena, "`(a ,x b)", "<test>").unwrap();
 
         let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
         // `(a ,x b) expands to `(list <syntax-literal a> x <syntax-literal b>)` —
@@ -86,25 +62,10 @@ fn test_quasiquote_with_unquote() {
 #[test]
 fn test_quasiquote_with_splicing() {
     crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm) = setup();
-        let span = Span::new(0, 10, 1, 1);
+        let (mut expander, mut symbols, mut vm, arena) = setup();
 
         // `(a ,;xs b)
-        let items = vec![
-            Syntax::new(SyntaxKind::Symbol("a".to_string()), span.clone()),
-            Syntax::new(
-                SyntaxKind::UnquoteSplicing(Box::new(Syntax::new(
-                    SyntaxKind::Symbol("xs".to_string()),
-                    span.clone(),
-                ))),
-                span.clone(),
-            ),
-            Syntax::new(SyntaxKind::Symbol("b".to_string()), span.clone()),
-        ];
-        let syntax = Syntax::new(
-            SyntaxKind::Quasiquote(Box::new(Syntax::new(SyntaxKind::List(items), span.clone()))),
-            span.clone(),
-        );
+        let syntax = read_syntax(arena, "`(a ,;xs b)", "<test>").unwrap();
 
         let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
         let result_str = result.to_string();
@@ -129,17 +90,10 @@ fn test_quasiquote_with_splicing() {
 #[test]
 fn test_quasiquote_non_list() {
     crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm) = setup();
-        let span = Span::new(0, 5, 1, 1);
+        let (mut expander, mut symbols, mut vm, arena) = setup();
 
         // `x
-        let syntax = Syntax::new(
-            SyntaxKind::Quasiquote(Box::new(Syntax::new(
-                SyntaxKind::Symbol("x".to_string()),
-                span.clone(),
-            ))),
-            span.clone(),
-        );
+        let syntax = read_syntax(arena, "`x", "<test>").unwrap();
 
         let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
         let result_str = result.to_string();
@@ -162,13 +116,12 @@ fn test_quasiquote_non_list() {
 #[test]
 fn test_keyword_not_qualified() {
     crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm) = setup();
-        let span = Span::new(0, 5, 1, 1);
+        let (mut expander, mut symbols, mut vm, arena) = setup();
 
         // :keyword should remain a keyword, not be treated as qualified
-        let syntax = Syntax::new(SyntaxKind::Keyword("foo".to_string()), span);
+        let syntax = read_syntax(arena, ":foo", "<test>").unwrap();
         let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
         // Keywords are stored without the leading colon in SyntaxKind::Keyword
-        assert!(matches!(result.kind, SyntaxKind::Keyword(ref s) if s == "foo"));
+        assert!(matches!(result.kind, SyntaxKind::Keyword(s) if s.as_str() == "foo"));
     });
 }

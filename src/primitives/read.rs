@@ -25,8 +25,10 @@ pub(crate) fn prim_read(
         return type_error!(ctx, args[0], "read", "string");
     };
 
-    // Parse the first form
-    let syntax = match read_syntax(&source, "<read>") {
+    // Parse the first form into the call's region: the tree is converted to a
+    // `Value` below and discarded, so it lives exactly as long as the call.
+    let arena = ctx.syntax_arena();
+    let syntax = match read_syntax(arena, &source, "<read>") {
         Ok(s) => s,
         Err(e) => return (SIG_ERROR, ctx.error("read-error", e)),
     };
@@ -64,7 +66,8 @@ pub(crate) fn prim_read_all(
         return type_error!(ctx, args[0], "read-all", "string");
     };
 
-    let syntaxes = match read_syntax_all(&source, "<read>") {
+    let arena = ctx.syntax_arena();
+    let syntaxes = match read_syntax_all(arena, &source, "<read>") {
         Ok(s) => s,
         Err(e) => return (SIG_ERROR, ctx.error("read-error", e)),
     };

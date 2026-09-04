@@ -47,8 +47,7 @@ fn syntax_symbol_roundtrips_with_scopes_and_span() {
     // set is load-bearing for hygiene and its span for error reporting, so the
     // bytecode encoding must reproduce both exactly. A decode that drops a
     // scope id silently breaks macro hygiene after a recompile.
-    let mut span = crate::syntax::Span::new(10, 20, 3, 7);
-    span.file = Some("macro.elle".into());
+    let span = crate::syntax::Span::new(10, 20, 3, 7).with_file("macro.elle");
     let t = ConstTemplate::SyntaxSymbol {
         name: "template-sym".into(),
         scopes: vec![1, 4, 9, 16],

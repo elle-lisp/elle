@@ -15,7 +15,7 @@ fn lex_and_parse(input: &str) -> Result<Syntax, String> {
         lengths.push(token_with_loc.len);
     }
 
-    let mut reader = SyntaxReader::new(tokens, locations, lengths);
+    let mut reader = SyntaxReader::new(tokens, locations, lengths, crate::syntax::thread_arena());
     reader.read()
 }
 
@@ -31,7 +31,7 @@ fn lex_and_parse_all(input: &str) -> Result<Vec<Syntax>, String> {
         lengths.push(token_with_loc.len);
     }
 
-    let mut reader = SyntaxReader::new(tokens, locations, lengths);
+    let mut reader = SyntaxReader::new(tokens, locations, lengths, crate::syntax::thread_arena());
     reader.read_all()
 }
 

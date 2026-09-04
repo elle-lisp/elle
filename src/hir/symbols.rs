@@ -43,8 +43,8 @@ impl<'a> HirSymbolExtractor<'a> {
     /// URIs and rename filters out every edit (the URI never matches the
     /// document).
     fn span_to_loc(span: &crate::syntax::Span) -> SourceLoc {
-        match &span.file {
-            Some(file) => SourceLoc::new(file.clone(), span.line as usize, span.col as usize),
+        match span.file() {
+            Some(file) => SourceLoc::new(file, span.line as usize, span.col as usize),
             None => SourceLoc::from_line_col(span.line as usize, span.col as usize),
         }
     }

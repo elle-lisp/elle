@@ -8,7 +8,7 @@
 //! This is a parallel implementation to the existing Value-producing parser.
 
 use super::token::{OwnedToken, SourceLoc};
-use crate::syntax::{Span, Syntax, SyntaxKind};
+use crate::syntax::{Span, Syntax, SyntaxArena, SyntaxKind};
 
 /// A lexed token together with everything the syntax parser needs in order to
 /// span it: its source location, its source byte length, and its start byte
@@ -34,6 +34,10 @@ const DEFAULT_TOKEN_LEN: usize = 1;
 pub struct SyntaxReader {
     tokens: Vec<LexedToken>,
     pos: usize,
+    /// Where the nodes this reader builds are born. A field rather than a
+    /// per-call argument: one source parses into one arena
+    /// (docs/impl/syntax.md § "Where a node lives").
+    arena: SyntaxArena,
 }
 
 impl SyntaxReader {
@@ -48,6 +52,7 @@ impl SyntaxReader {
         locations: Vec<SourceLoc>,
         lengths: Vec<usize>,
         byte_offsets: Vec<usize>,
+        arena: SyntaxArena,
     ) -> Self {
         let tokens = tokens
             .into_iter()
@@ -59,12 +64,21 @@ impl SyntaxReader {
                 byte_offset: byte_offsets.get(i).copied().unwrap_or(0),
             })
             .collect();
-        SyntaxReader { tokens, pos: 0 }
+        SyntaxReader {
+            tokens,
+            pos: 0,
+            arena,
+        }
     }
 
-    pub fn new(tokens: Vec<OwnedToken>, locations: Vec<SourceLoc>, lengths: Vec<usize>) -> Self {
+    pub fn new(
+        tokens: Vec<OwnedToken>,
+        locations: Vec<SourceLoc>,
+        lengths: Vec<usize>,
+        arena: SyntaxArena,
+    ) -> Self {
         // No byte offsets supplied: every token defaults to offset 0, as before.
-        Self::from_columns(tokens, locations, lengths, Vec::new())
+        Self::from_columns(tokens, locations, lengths, Vec::new(), arena)
     }
 
     pub fn with_byte_offsets(
@@ -72,8 +86,9 @@ impl SyntaxReader {
         locations: Vec<SourceLoc>,
         lengths: Vec<usize>,
         byte_offsets: Vec<usize>,
+        arena: SyntaxArena,
     ) -> Self {
-        Self::from_columns(tokens, locations, lengths, byte_offsets)
+        Self::from_columns(tokens, locations, lengths, byte_offsets, arena)
     }
 
     fn current(&self) -> Option<&OwnedToken> {
@@ -187,35 +202,44 @@ impl SyntaxReader {
             OwnedToken::Quote => {
                 self.advance();
                 let inner = self.read()?;
-                let span = self.make_span(boff, inner.span.end, loc);
-                Ok(Syntax::new(SyntaxKind::Quote(Box::new(inner)), span))
+                let span = self.make_span(boff, inner.span.end as usize, loc);
+                Ok(Syntax::new(SyntaxKind::Quote(self.arena.node(inner)), span))
             }
             OwnedToken::Quasiquote => {
                 self.advance();
                 let inner = self.read()?;
-                let span = self.make_span(boff, inner.span.end, loc);
-                Ok(Syntax::new(SyntaxKind::Quasiquote(Box::new(inner)), span))
+                let span = self.make_span(boff, inner.span.end as usize, loc);
+                Ok(Syntax::new(
+                    SyntaxKind::Quasiquote(self.arena.node(inner)),
+                    span,
+                ))
             }
             OwnedToken::Unquote => {
                 self.advance();
                 let inner = self.read()?;
-                let span = self.make_span(boff, inner.span.end, loc);
-                Ok(Syntax::new(SyntaxKind::Unquote(Box::new(inner)), span))
+                let span = self.make_span(boff, inner.span.end as usize, loc);
+                Ok(Syntax::new(
+                    SyntaxKind::Unquote(self.arena.node(inner)),
+                    span,
+                ))
             }
             OwnedToken::UnquoteSplicing => {
                 self.advance();
                 let inner = self.read()?;
-                let span = self.make_span(boff, inner.span.end, loc);
+                let span = self.make_span(boff, inner.span.end as usize, loc);
                 Ok(Syntax::new(
-                    SyntaxKind::UnquoteSplicing(Box::new(inner)),
+                    SyntaxKind::UnquoteSplicing(self.arena.node(inner)),
                     span,
                 ))
             }
             OwnedToken::Splice => {
                 self.advance();
                 let inner = self.read()?;
-                let span = self.make_span(boff, inner.span.end, loc);
-                Ok(Syntax::new(SyntaxKind::Splice(Box::new(inner)), span))
+                let span = self.make_span(boff, inner.span.end as usize, loc);
+                Ok(Syntax::new(
+                    SyntaxKind::Splice(self.arena.node(inner)),
+                    span,
+                ))
             }
 
             OwnedToken::Integer(n) => {
@@ -231,7 +255,7 @@ impl SyntaxReader {
             OwnedToken::String(s) => {
                 let span = self.make_span(boff, boff + self.current_length(), loc);
                 self.advance();
-                Ok(Syntax::new(SyntaxKind::String(s.clone()), span))
+                Ok(Syntax::new(SyntaxKind::String(self.arena.text(s)), span))
             }
             OwnedToken::Bool(b) => {
                 let span = self.make_span(boff, boff + self.current_length(), loc);
@@ -246,12 +270,12 @@ impl SyntaxReader {
             OwnedToken::Symbol(s) => {
                 let span = self.make_span(boff, boff + self.current_length(), loc);
                 self.advance();
-                Ok(Syntax::new(SyntaxKind::Symbol(s.clone()), span))
+                Ok(Syntax::new(SyntaxKind::Symbol(self.arena.text(s)), span))
             }
             OwnedToken::Keyword(s) => {
                 let span = self.make_span(boff, boff + self.current_length(), loc);
                 self.advance();
-                Ok(Syntax::new(SyntaxKind::Keyword(s.clone()), span))
+                Ok(Syntax::new(SyntaxKind::Keyword(self.arena.text(s)), span))
             }
 
             OwnedToken::RightParen => Err(format!(
@@ -281,7 +305,10 @@ impl SyntaxReader {
                     let end = self.current_byte_offset() + self.current_length();
                     self.advance();
                     let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(SyntaxKind::Set(elements), span));
+                    return Ok(Syntax::new(
+                        SyntaxKind::Set(self.arena.nodes(&elements)),
+                        span,
+                    ));
                 }
                 Some(OwnedToken::Comment(_)) => {
                     self.advance();
@@ -308,7 +335,10 @@ impl SyntaxReader {
                     let end = self.current_byte_offset() + self.current_length();
                     self.advance();
                     let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(SyntaxKind::SetMut(elements), span));
+                    return Ok(Syntax::new(
+                        SyntaxKind::SetMut(self.arena.nodes(&elements)),
+                        span,
+                    ));
                 }
                 Some(OwnedToken::Comment(_)) => {
                     self.advance();
@@ -334,7 +364,10 @@ impl SyntaxReader {
                     let end = self.current_byte_offset() + self.current_length();
                     self.advance();
                     let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(SyntaxKind::Bytes(elements), span));
+                    return Ok(Syntax::new(
+                        SyntaxKind::Bytes(self.arena.nodes(&elements)),
+                        span,
+                    ));
                 }
                 Some(OwnedToken::Comment(_)) => {
                     self.advance();
@@ -364,7 +397,10 @@ impl SyntaxReader {
                     let end = self.current_byte_offset() + self.current_length();
                     self.advance();
                     let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(SyntaxKind::BytesMut(elements), span));
+                    return Ok(Syntax::new(
+                        SyntaxKind::BytesMut(self.arena.nodes(&elements)),
+                        span,
+                    ));
                 }
                 Some(OwnedToken::Comment(_)) => {
                     self.advance();
@@ -402,7 +438,10 @@ impl SyntaxReader {
                     let end = self.current_byte_offset() + self.current_length();
                     self.advance();
                     let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(SyntaxKind::List(elements), span));
+                    return Ok(Syntax::new(
+                        SyntaxKind::List(self.arena.nodes(&elements)),
+                        span,
+                    ));
                 }
                 Some(OwnedToken::Comment(_)) => {
                     self.advance();
@@ -440,7 +479,10 @@ impl SyntaxReader {
                     let end = self.current_byte_offset() + self.current_length();
                     self.advance();
                     let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(SyntaxKind::Array(elements), span));
+                    return Ok(Syntax::new(
+                        SyntaxKind::Array(self.arena.nodes(&elements)),
+                        span,
+                    ));
                 }
                 Some(OwnedToken::Comment(_)) => {
                     self.advance();
@@ -473,7 +515,10 @@ impl SyntaxReader {
                     let end = self.current_byte_offset() + self.current_length();
                     self.advance();
                     let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(SyntaxKind::Struct(elements), span));
+                    return Ok(Syntax::new(
+                        SyntaxKind::Struct(self.arena.nodes(&elements)),
+                        span,
+                    ));
                 }
                 Some(OwnedToken::Comment(_)) => {
                     self.advance();
@@ -515,7 +560,10 @@ impl SyntaxReader {
                             let end = self.current_byte_offset() + self.current_length();
                             self.advance();
                             let span = self.make_span(start_boff, end, start_loc);
-                            return Ok(Syntax::new(SyntaxKind::ArrayMut(elements), span));
+                            return Ok(Syntax::new(
+                                SyntaxKind::ArrayMut(self.arena.nodes(&elements)),
+                                span,
+                            ));
                         }
                         Some(OwnedToken::Comment(_)) => {
                             self.advance();
@@ -542,7 +590,10 @@ impl SyntaxReader {
                             let end = self.current_byte_offset() + self.current_length();
                             self.advance();
                             let span = self.make_span(start_boff, end, start_loc);
-                            return Ok(Syntax::new(SyntaxKind::StructMut(elements), span));
+                            return Ok(Syntax::new(
+                                SyntaxKind::StructMut(self.arena.nodes(&elements)),
+                                span,
+                            ));
                         }
                         Some(OwnedToken::Comment(_)) => {
                             self.advance();
@@ -554,7 +605,7 @@ impl SyntaxReader {
             }
             Some(OwnedToken::String(s)) => {
                 // @"..." is a mutable string literal
-                let string_val = s.clone();
+                let string_val = self.arena.text(s);
                 let end = self.current_byte_offset() + self.current_length();
                 self.advance(); // skip the string token
                 let span = self.make_span(start_boff, end, start_loc);

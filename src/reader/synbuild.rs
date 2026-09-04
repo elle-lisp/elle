@@ -8,7 +8,7 @@
 //! methods, the call sites (`self.sym(...)`, `self.list(...)`) read naturally.
 
 use super::token::SourceLoc;
-use crate::syntax::{Span, Syntax, SyntaxKind};
+use crate::syntax::{Span, Syntax, SyntaxArena, SyntaxKind};
 
 /// Parameter-list marker for a rest/variadic parameter (the `&` before the
 /// final name in the emitted `(fn (a b & rest) …)`). One spelling, shared by
@@ -22,12 +22,16 @@ pub(super) const REST_PARAM: &str = "&";
 /// `is_unknown` guard would attach a bogus file to every span. Centralising it
 /// here removes that hazard.
 pub(super) trait SynBuild {
+    /// Where this parser's nodes are born. Every node-building default below
+    /// allocates through it, so a frontend states its arena once.
+    fn arena(&self) -> &SyntaxArena;
+
     /// Build a span at `loc` covering `len` source columns, tagging it with the
     /// originating file unless the location is the unknown-origin sentinel.
     fn make_span(&self, loc: &SourceLoc, len: usize) -> Span {
         let mut span = Span::new(0, len, loc.line as u32, loc.col as u32);
         if !loc.is_unknown() {
-            span = span.with_file(loc.file.clone());
+            span = span.with_file(&loc.file);
         }
         span
     }
@@ -39,12 +43,27 @@ pub(super) trait SynBuild {
 
     /// A symbol node named `name`, spanned at `loc`.
     fn sym(&self, name: &str, loc: &SourceLoc) -> Syntax {
-        Syntax::new(SyntaxKind::Symbol(name.to_string()), self.span_from(loc))
+        Syntax::symbol(self.arena(), name, self.span_from(loc))
+    }
+
+    /// A keyword node named `name`, with the given span.
+    fn kw(&self, name: &str, span: Span) -> Syntax {
+        Syntax::keyword(self.arena(), name, span)
+    }
+
+    /// A string-literal node, with the given span.
+    fn str_lit(&self, text: &str, span: Span) -> Syntax {
+        Syntax::string(self.arena(), text, span)
     }
 
     /// A list node wrapping `items`, with the given span.
     fn list(&self, items: Vec<Syntax>, span: Span) -> Syntax {
-        Syntax::new(SyntaxKind::List(items), span)
+        Syntax::list(self.arena(), &items, span)
+    }
+
+    /// An immutable-array node wrapping `items`, with the given span.
+    fn arr(&self, items: Vec<Syntax>, span: Span) -> Syntax {
+        Syntax::array(self.arena(), &items, span)
     }
 
     /// A `nil` node, spanned at `loc`.
