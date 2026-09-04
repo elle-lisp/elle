@@ -63,8 +63,8 @@
 # delta must fit under. Shrink-only — see "The pins" above.
 (def residue-small 10)
 (def residue-large 30)
-(def max-objects-per-request 16)
-(def max-regions-per-request 16)
+(def max-objects-per-request 9)
+(def max-regions-per-request 9)
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
