@@ -10,6 +10,9 @@ use crate::value::{sorted_struct_get, Value};
 mod exec;
 use exec::*;
 
+#[cfg(test)]
+mod tests;
+
 /// Exit the process with an optional exit code
 ///
 /// (exit)       ; exits with code 0
@@ -276,7 +279,7 @@ primitive! {
     "subprocess/kill" => prim_subprocess_kill {
         signal: Signal::errors(),
         arity: Arity::Range(1, 2),
-        doc: "Send a signal to a subprocess. signal is an integer or a keyword like :sigterm, :sigkill, :sighup, :sigint, :sigquit, :sigpipe, :sigalrm, :sigusr1, :sigusr2, :sigchld, :sigcont, :sigstop, :sigtstp, :sigttin, :sigttou, :sigwinch (default: :sigterm).",
+        doc: "Send a signal to a subprocess. signal is an integer or a keyword like :sigterm, :sigkill, :sighup, :sigint, :sigquit, :sigpipe, :sigalrm, :sigusr1, :sigusr2, :sigchld, :sigcont, :sigstop, :sigtstp, :sigttin, :sigttou, :sigwinch (default: :sigterm). Returns :signaled when kill(2) took the signal, :exited when the handle holds the child's status and nothing was sent, :missing when no process holds the pid.",
         params: &["handle", "signal"],
         category: "sys",
         example: "(subprocess/kill proc :sigterm)",

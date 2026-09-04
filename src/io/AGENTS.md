@@ -291,6 +291,18 @@ and the record is already there.
 exit status is delivered to a waiter, or held until one asks — which also
 covers a child legitimately waited on twice.
 
+The record is also what says whether a **pid still names this child**, which is
+the other question a reap settles. The kernel returns a reaped pid to the pool
+and hands it out again, so `subprocess/kill` reads the record before it makes a
+`kill(2)`: a handle holding a status has no child of its own left, and the call
+sends nothing rather than signalling whatever holds that number now. The two
+readings of the record are the same fact — the child is gone — asked by a
+waiter and by a killer. `docs/io.md` § "Killing a child that may already be
+gone" carries the argument and the answers the primitive gives, and
+`a_kill_on_a_reaped_child_sends_no_signal`
+(`src/primitives/subprocess/tests.rs`) is the pin — a handle built over a pid
+that names somebody else, since a test cannot recycle a pid on demand.
+
 Each mechanism is pinned on its own, because each fails on its own.
 `a_stopped_wait_that_reaped_the_child_keeps_its_status` and
 `a_wait_on_an_already_reaped_child_answers_from_the_record`
