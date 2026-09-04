@@ -585,6 +585,29 @@ fn wasm_full_uncaught_error_fails() {
 }
 
 #[test]
+fn wasm_full_uncaught_error_report_spells_the_names_it_carries() {
+    // The report an uncaught error prints is all the author gets, and a keyword
+    // in the raised value is a name hash: only the instance memo can spell it
+    // (docs/impl/symbol.md § "Reading a name, and not reading one"). The trap:
+    // the keywords the Rust runtime mints from fixed strings — `:error`,
+    // `:message` — resolve through the static vocabulary with no memo at all, so
+    // a test written with those names goes green while every name the program
+    // itself coined prints as `#<keyword:hash>`. The counter-factual: assert
+    // only that the report is an `Err`, and a report of raw hashes passes for
+    // the error the author named.
+    let report = super::eval_wasm_with_stdlib("(error {:sigil-wasm-kind 9})", "<uncaught>")
+        .expect_err("an uncaught error must fail under --wasm=full");
+    assert!(
+        report.contains(":sigil-wasm-kind"),
+        "the report must spell the keyword the raised value carries, got: {report}"
+    );
+    assert!(
+        !report.contains("#<keyword:"),
+        "no keyword in the report may fall back to its hash, got: {report}"
+    );
+}
+
+#[test]
 fn wasm_full_gated_skip_is_not_a_failure() {
     // A `(gate! …)` whose condition is unmet raises a `:gated` error that the
     // harness records as SKIP (an unbuilt plugin/feature), NOT a failure. The

@@ -398,7 +398,16 @@ pub fn run_module(
             eprintln!("SKIP (gated): {}", reason);
             return Ok(value);
         }
-        return Err(wasmtime::Error::msg(format!("Runtime error: {}", value)));
+        // Shown through the driving VM's `show_value`, the same spelling the
+        // bytecode tier's report gives the author: a symbol or keyword in the
+        // raised value is a name hash only this instance's memo can spell
+        // (docs/impl/symbol.md § "Reading a name, and not reading one"). The
+        // host's VM pointer is the memo's only route in here.
+        let shown = match unsafe { store.data().vm.as_ref() } {
+            Some(vm) => vm.show_value(value),
+            None => format!("{:?}", value),
+        };
+        return Err(wasmtime::Error::msg(format!("Runtime error: {}", shown)));
     }
 
     Ok(value)

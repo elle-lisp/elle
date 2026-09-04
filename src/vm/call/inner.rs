@@ -501,14 +501,10 @@ impl VM {
         }
 
         // Cannot call this value
-        eprintln!(
-            "[DEBUG] Cannot call: tag={:#x} payload={:#x} type={} on_fiber_heap={}",
-            func.tag,
-            func.payload,
-            func.type_name(),
-            self.heap().value_in_region_store(func)
+        self.set_error(
+            "type-error",
+            format!("Cannot call {}", self.show_value(func)),
         );
-        self.set_error("type-error", format!("Cannot call {:?}", func));
         self.fiber.stack.push(Value::NIL);
         None
     }

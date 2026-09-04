@@ -425,6 +425,44 @@ fn an_unhandled_signal_at_the_root_is_named_by_its_keyword() {
 }
 
 #[test]
+fn an_uncaught_errors_value_is_reported_with_the_names_it_carries() {
+    // An error that no handler catches is printed, and the print is all the
+    // author gets. The trap: a keyword the Rust runtime mints from a fixed
+    // string (`:error`, `:message`) resolves through the static vocabulary with
+    // no memo at all, so a report can read perfectly well while every name the
+    // program itself coined prints as `#<keyword:hash>`. The names below are
+    // coined here and appear in no vocabulary. The counter-factual: assert only
+    // that the report is an error, or that it mentions `:error`, and a report of
+    // raw hashes passes for the error the author named.
+    crate::common::eval_source(
+        "(error {:error :sigil-root-kind :form 'sigil-root-form})",
+        |result| {
+            let report = result.expect_err("nothing catches the error, so it reaches the root");
+            assert!(
+                report.contains(":sigil-root-kind"),
+                "the report must spell the keyword the error carries, got:\n{}",
+                report,
+            );
+            assert!(
+                report.contains("sigil-root-form"),
+                "the report must spell the symbol the error carries, got:\n{}",
+                report,
+            );
+            assert!(
+                !report.contains("#<keyword:"),
+                "no keyword in the report may fall back to its hash, got:\n{}",
+                report,
+            );
+            assert!(
+                !report.contains("#<symbol:"),
+                "no symbol in the report may fall back to its hash, got:\n{}",
+                report,
+            );
+        },
+    );
+}
+
+#[test]
 fn test_closure_has_location_map() {
 
     let mut symbols = SymbolTable::new();
