@@ -124,18 +124,22 @@ long as the record lasts.
 
 One invariant governs the records:
 
-- **A record lasts only as long as a reader needs it.** A delivered join
-  or abort drops both records for that fiber. Nothing reads them
-  afterwards: the status is re-derived from the fiber itself whenever the
-  record is absent, the value was always read from the fiber rather than
-  from the record, and the unjoined-error tail at the end of the loop
-  looks only at fibers nobody joined. A record that outlives its readers
-  makes every `ev/spawn` a permanent allocation, which a long-running
-  program pays for once per fiber it ever ran.
+- **A record lasts only as long as a reader needs it.** A fiber that ends
+  in success drops both records the moment it completes, joined or not.
+  Nothing reads a success record: the status is re-derived from the fiber
+  itself whenever the record is absent, the value was always read from
+  the fiber rather than from the record, and the unjoined-error tail at
+  the end of the loop looks only at failures. A record that outlives its
+  readers makes every `ev/spawn` a permanent allocation, which a
+  long-running program pays for once per fiber it ever ran — and a server
+  that spawns a handler fiber per request and never joins it pays that
+  once per request.
 
-The program's own fibers — the thunks `ev/run` hands the loop — are the
-exception. Their records are what tells the loop the program finished,
-so they last until the loop ends.
+Two kinds of fiber keep their records. A **failed** one, because the mark
+is what stops the tail from re-raising an error its joiner already took.
+And the program's own fibers — the thunks `ev/run` hands the loop —
+because their records are what tells the loop the program finished, so
+they last until the loop ends.
 
 `tests/elle/sched-completion-records.lisp` pins the bound through
 `ev/report`'s `:records` / `:marks`; `tests/elle/ev-unjoined-error.lisp` pins

@@ -7,11 +7,11 @@
 # fiber closed over — for as long as the loop runs. A server that spawns
 # a fiber per request would then pay for every request it ever served.
 #
-# Nothing reads a record once the result is delivered: a later join
-# re-derives the status from the fiber itself, and the unjoined-error
-# tail at the end of the loop looks only at fibers NOBODY joined. So a
-# delivered join or abort must retire both records. The program's own
-# fibers are the exception — the loop reads their record to know the
+# Nothing reads a SUCCESS record: a later join re-derives the status from
+# the fiber itself, and the unjoined-error tail at the end of the loop
+# looks only at failures. So a fiber that ends `:ok` retires both records
+# the moment it finishes, whether or not anyone joined it. The program's
+# own fibers are the exception — the loop reads their record to know the
 # program finished.
 #
 # `ev/report` exposes the two counts (`:records`, `:marks`), which is
@@ -106,11 +106,66 @@
 
 (println "an unobserved failure keeps its record...")
 
-(let [before (get (ev/report) :records)]
-  (ev/spawn (fn [] 7))
+(def unjoined-failure-base (get (ev/report) :records))
+(ev/abort (ev/spawn (fn [] (ev/sleep 30))))
+(assert (> (get (ev/report) :records) unjoined-failure-base)
+        "a fiber that FAILED keeps the record the loop's tail reads")
+
+# ── 5. A fiber nobody joins leaves nothing behind either ─────────────
+# The success record has no reader at all, so it is retired at completion
+# rather than at a join that may never come. A server that spawns one
+# handler fiber per request and never joins it is the shape this bound
+# exists for: without it the loop holds that fiber, its closure, and
+# everything the closure captured, for every request it ever served.
+#
+# The trap the record count alone would miss: a bounded record count is
+# not a bounded heap, because the record is one entry in a struct the
+# loop keeps. Both gauges are read, over two windows of the same size, so
+# a per-spawn cost reads `churn` and a one-off reads about 0.
+
+(println "a fiber nobody joins leaves no record...")
+
+(def churn 200)
+
+(defn spawn-churn [n]
+  (def @i 0)
+  (while (< i n)
+    (ev/spawn (fn [] 7))
+    (assign i (+ i 1))))
+
+(spawn-churn churn)
+(ev/sleep 0)
+(def unjoined-base-records (get (ev/report) :records))
+(def unjoined-base-objects (arena/count))
+(def unjoined-base-regions (arena/region-count))
+
+(spawn-churn churn)
+(ev/sleep 0)
+(def unjoined-records (- (get (ev/report) :records) unjoined-base-records))
+(def unjoined-objects (- (arena/count) unjoined-base-objects))
+(def unjoined-regions (- (arena/region-count) unjoined-base-regions))
+
+(println "  " churn " unjoined spawns: records=" unjoined-records " objects="
+         unjoined-objects " regions=" unjoined-regions)
+
+(assert (< unjoined-records 5)
+        (string churn " unjoined fibers left " unjoined-records
+                " new completion records (must stay bounded)"))
+(assert (< unjoined-objects 20)
+        (string churn " unjoined fibers left " unjoined-objects
+                " objects behind (must stay bounded)"))
+(assert (< unjoined-regions 20)
+        (string churn " unjoined fibers left " unjoined-regions
+                " regions behind (must stay bounded)"))
+
+# Retiring at completion loses nothing: a join that arrives after the
+# record is gone re-derives the answer from the fiber itself.
+
+(println "a retired unjoined fiber still answers a later join...")
+
+(let [f (ev/spawn (fn [] 42))]
   (ev/sleep 0)
-  (let [after (get (ev/report) :records)]
-    (assert (>= after before)
-            "a fiber nobody joined keeps the record the loop reads")))
+  (assert (= (fiber/status f) :dead) "the fiber ran without being joined")
+  (assert (= (ev/join f) 42) "and a later join reads its value from itself"))
 
 (println "sched-completion-records: ok")
