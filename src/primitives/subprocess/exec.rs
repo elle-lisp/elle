@@ -383,7 +383,10 @@ pub(super) fn prim_subprocess_wait(
 /// (subprocess/kill handle-or-struct 15)        ; integer (must round-trip to a named signal)
 /// (subprocess/kill handle-or-struct :sigterm)  ; keyword signal name
 ///
-/// Synchronous — returns (SIG_OK, nil) on success, (SIG_ERROR, error) on failure.
+/// Synchronous. Each answer reports what the call observed: (SIG_OK,
+/// `:signaled`) when `kill(2)` took the signal, (SIG_OK, `:exited`) when the
+/// handle's record holds a status and no signal was sent, (SIG_OK, `:missing`)
+/// when no process holds the pid. (SIG_ERROR, error) on failure.
 pub(super) fn prim_subprocess_kill(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -424,12 +427,22 @@ pub(super) fn prim_subprocess_kill(
     } else {
         libc::SIGTERM
     };
+    // The handle decides whether there is a child to signal, not the kernel. A
+    // reap gives the pid back to the OS, which hands the number out again, so a
+    // `kill(2)` on a handle whose record holds a status would reach whoever
+    // holds that number now (src/io/AGENTS.md § "A reap is never wasted").
+    if handle.exit().status().is_some() {
+        return (SIG_OK, ctx.keyword("exited"));
+    }
     let ret = unsafe { libc::kill(handle.pid() as i32, signal) };
     if ret < 0 {
         let err = std::io::Error::last_os_error();
         if err.raw_os_error() == Some(libc::ESRCH) {
-            // Process already exited — treat as success
-            (SIG_OK, Value::NIL)
+            // Nothing holds the number, so nothing was signalled. A separate
+            // answer from `:exited` because it is separate evidence: a pid
+            // carries no record of who used to hold it, so `ESRCH` cannot say
+            // the process it names was ever this handle's child.
+            (SIG_OK, ctx.keyword("missing"))
         } else {
             (
                 SIG_ERROR,
@@ -437,7 +450,7 @@ pub(super) fn prim_subprocess_kill(
             )
         }
     } else {
-        (SIG_OK, Value::NIL)
+        (SIG_OK, ctx.keyword("signaled"))
     }
 }
 

@@ -1,19 +1,7 @@
 //! `subprocess/wait` through the async backend.
 
 use super::*;
-use crate::io::request::zombie_child;
-
-/// A reaped placeholder child for a `ProcessHandle` whose real child is already
-/// gone. `ProcessHandle::new` demands a `Child`, and its `Drop` calls
-/// `try_wait`, so the stand-in is a process that has already exited.
-fn child_stub() -> std::process::Child {
-    // Resolved through `PATH`, not hardcoded: no absolute path is right
-    // everywhere. macOS ships no `/bin/true`, and a busybox image ships no
-    // `/usr/bin/true`.
-    let mut child = std::process::Command::new("true").spawn().unwrap();
-    child.wait().unwrap();
-    child
-}
+use crate::io::request::{reaped_child, zombie_child};
 
 /// Submit a wait on `handle` through `backend`.
 fn submit_wait(backend: &AsyncBackend, handle: Value) -> Result<SubmissionId, String> {
@@ -94,15 +82,15 @@ fn test_async_submit_process_wait_uring() {
 #[test]
 fn a_failed_pool_process_wait_names_waitpid() {
     crate::value::arena::with_test_region(|| {
-        // Already reaped by `child_stub`, so the pool worker's own `waitpid`
-        // has no child left — and the stub's `ProcessHandle` carries an empty
-        // record, because nothing in this process reaped through one.
-        let pid = child_stub().id();
+        // Already reaped by `reaped_child`, so the pool worker's own `waitpid`
+        // has no child left — and the stand-in's `ProcessHandle` carries an
+        // empty record, because nothing in this process reaped through one.
+        let pid = reaped_child().id();
 
         let h = crate::primitives::ctx::TestHeap::new();
         let handle_val = h
             .ctx()
-            .external("process", ProcessHandle::new(pid, child_stub()));
+            .external("process", ProcessHandle::new(pid, reaped_child()));
 
         let backend = AsyncBackend::new_thread_pool().unwrap();
         let id = submit_wait(&backend, handle_val).unwrap();

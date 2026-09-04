@@ -309,9 +309,12 @@ Syntax: `{[name][:spec]}` where spec is `[[fill]align][width][.precision][type]`
 
 - `subprocess/wait handle` — Waits for a subprocess to exit. Returns exit code as integer (0 = success). Emits `SIG_EXEC | SIG_IO | SIG_YIELD`. Accepts either a process handle (external) or an exec result struct (extracts `:process` key).
 
-- `subprocess/kill handle [signal]` — Sends a signal to a subprocess synchronously. Returns `nil` on success. Emits `SIG_ERROR` only (no yield). Default signal is `SIGTERM` (15). Accepts either a process handle or an exec result struct.
+- `subprocess/kill handle [signal]` — Sends a signal to a subprocess synchronously. Emits `SIG_ERROR` only (no yield). Default signal is `SIGTERM` (15). Accepts either a process handle or an exec result struct. Three answers, each reporting what the call observed and nothing beyond it:
+  - `:signaled` — `kill(2)` took the signal for this handle's child.
+  - `:exited` — the handle's `ExitRecord` holds a status, so no `kill(2)` was made. The handle decides this, not the kernel: a reaped pid belongs to the OS again and gets handed out again, so the syscall would reach whatever holds that number now. See `src/io/AGENTS.md` § "A reap is never wasted" for the record, and `docs/io.md` § "Killing a child that may already be gone" for the argument.
+  - `:missing` — `kill(2)` reported `ESRCH`. Separate from `:exited` because it is separate evidence: a pid carries no record of who used to hold it, so `ESRCH` says the number named nobody at that moment and cannot say the process it names was ever this handle's child.
 
-- `subprocess/pid handle` — Extracts the OS process ID from a process handle or exec result struct. Returns integer PID. Emits `SIG_ERROR` only (no yield). Accepts either a process handle (external) or an exec result struct (extracts `:process` key).
+- `subprocess/pid handle` — Extracts the OS process ID from a process handle or exec result struct. Returns integer PID, whether or not the child has been reaped — the same number the exec result's `:pid` field carries. Emits `SIG_ERROR` only (no yield). Accepts either a process handle (external) or an exec result struct (extracts `:process` key).
 
 **Handle extraction pattern:** `subprocess/wait`, `subprocess/kill`, and `subprocess/pid` all accept either:
 1. A direct process handle (external with type name "process")

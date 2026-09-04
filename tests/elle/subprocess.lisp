@@ -60,6 +60,16 @@
   (subprocess/kill proc 15)
   (subprocess/wait proc))
 
+# subprocess/pid: a reaped child still reports the number it had
+#
+# The counter-factual: answering nil or raising once the status is in would
+# split one fact into two answers, since the exec result's :pid field keeps
+# handing out the same number regardless.
+(let [proc (subprocess/exec "true" [])]
+  (subprocess/wait proc)
+  (assert (= (subprocess/pid proc) (get proc :pid))
+          "subprocess/pid: still matches :pid after the child is reaped"))
+
 # ── subprocess/kill ──────────────────────────────────────────────────────────────
 
 # subprocess/kill: send SIGTERM, wait, exit is nonzero
@@ -79,6 +89,26 @@
              (subprocess/kill proc :sigterm)
              (subprocess/wait proc))]
   (assert (not (= exit 0)) "subprocess/kill :sigterm: nonzero exit"))
+
+# subprocess/kill: the answer says whether a signal was sent
+#
+# The trap: a pid names a child only until somebody reaps it, and the kernel
+# then hands the number out again. The second kill below must therefore make no
+# syscall — the status the wait left on the handle is what says there is no
+# child of ours left to signal.
+#
+# The counter-factual is :missing, which the ESRCH path answers. On this quiet
+# machine the reaped pid names nobody, so a kill that DID reach the kernel would
+# report :missing rather than raising; reading :exited is what says the record
+# answered and the syscall never happened. Which process a kill would have
+# reached needs a pid naming somebody else, and that is
+# `a_kill_on_a_reaped_child_sends_no_signal` (src/primitives/subprocess/tests.rs).
+(let [proc (subprocess/exec "sleep" ["60"])]
+  (assert (= (subprocess/kill proc :sigterm) :signaled)
+          "subprocess/kill: a live child is signaled")
+  (subprocess/wait proc)
+  (assert (= (subprocess/kill proc :sigterm) :exited)
+          "subprocess/kill: a reaped child answers :exited"))
 
 # ── child signal mask is reset ───────────────────────────────────────────────
 #

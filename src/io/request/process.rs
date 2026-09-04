@@ -173,6 +173,21 @@ pub(crate) unsafe fn exit_code_from_siginfo(si: &libc::siginfo_t) -> i32 {
     }
 }
 
+/// A child that has exited and has already been reaped.
+///
+/// `ProcessHandle::new` demands a `Child`, so a test that builds a handle over
+/// a pid of its own choosing still has to supply one. This stand-in is already
+/// reaped, so it leaves no zombie and its `Drop` has nothing to do.
+#[cfg(test)]
+pub(crate) fn reaped_child() -> Child {
+    // Resolved through `PATH`, not hardcoded: no absolute path is right
+    // everywhere. macOS ships no `/bin/true`, and a busybox image ships no
+    // `/usr/bin/true`.
+    let mut child = std::process::Command::new("true").spawn().unwrap();
+    child.wait().unwrap();
+    child
+}
+
 /// A child that has exited and is still waiting to be reaped.
 ///
 /// The trap the tests here depend on: `waitpid` cannot leave a status in place.

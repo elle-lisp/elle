@@ -460,9 +460,53 @@ send signals.
 
 # Spawn, kill, reap
 (def proc (subprocess/exec "sleep" ["60"]))
-(subprocess/kill proc :sigterm)
+(subprocess/kill proc :sigterm)              # => :signaled
 (subprocess/wait proc)                       # => non-zero
 ```
+
+### Killing a child that may already be gone
+
+A pid names a child only until somebody reaps it. The kernel then returns the
+number to the pool and hands it out again, so a signal sent on a reaped child's
+pid reaches whatever holds that number now — nothing on a quiet machine, another
+child of this program or an unrelated process on a busy one.
+
+So `subprocess/kill` asks the handle before it asks the kernel. When the handle
+holds the child's exit status, the child is gone, and the call sends no signal
+at all. The status gets there by `subprocess/wait` — or by any other reap, since
+a reap is recorded rather than spent (see the wait section above).
+
+The answer says which happened, so a caller that cares can tell them apart.
+Each one reports what the call observed, and nothing beyond it:
+
+| Answer | What it means |
+|---|---|
+| `:signaled` | `kill(2)` took the signal for this handle's child. |
+| `:exited` | The handle holds the child's exit status. No signal was sent. |
+| `:missing` | No process holds that pid. Nothing was signalled. |
+
+`:exited` and `:missing` are two different pieces of evidence, which is why they
+are two answers. The handle's status says the child is gone and says whose child
+it was; `ESRCH` says only that the number named nobody at that moment, and a pid
+carries no record of who used to hold it.
+
+All three are success. Killing a child that is already dead is not an error —
+the state the kill asked for already holds — and a program that kills on a timer
+while a fiber waits reaches this as a race rather than a mistake:
+
+```lisp
+(ev/run (fn []
+          (let [child (subprocess/exec "sleep" ["30"])]
+            (assert (= :signaled (subprocess/kill child :sigterm))
+                    "the child is still there, so the signal goes to it")
+            (subprocess/wait child)
+            (assert (= :exited (subprocess/kill child :sigterm))
+                    "the wait reaped it, so this kill has nothing to signal"))))
+```
+
+`subprocess/pid` still answers the number after a reap, and so does the `:pid`
+field of the exec result. The number is what the child had; what a caller does
+with it afterwards is outside this runtime.
 
 ### Subprocess options
 
