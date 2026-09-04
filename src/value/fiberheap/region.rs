@@ -304,6 +304,13 @@ impl FiberHeap {
         self.region_store.region_tags(id)
     }
 
+    /// File where physical id `id` was just minted, for the `--trace=arena`
+    /// attribution `debug_dump` prints beside a region's tags. Only the VM's
+    /// mint sites call this, and only while that trace bit is set.
+    pub fn note_region_mint_site(&mut self, id: u32, site: std::rc::Rc<str>) {
+        self.region_store.note_mint_site(id, site);
+    }
+
     /// How many times this heap has freed the region filed under `id` — the
     /// counter that tells one incarnation of a recycled id from the next
     /// (docs/impl/region/generations.md § "Region generations").

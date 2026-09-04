@@ -106,6 +106,7 @@ impl VM {
             pending_error_park: false,
             trampoline_parent_override: None,
             error_loc: None,
+            arena_site: None,
             gated_exit_reason: None,
             active_tier: "bytecode",
             exit_trapped: false,

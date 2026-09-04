@@ -308,6 +308,37 @@ fn a_frame_replacing_exit_in_the_body_refuses_the_window() {
 }
 
 #[test]
+fn a_return_mint_in_the_body_does_not_refuse_the_window() {
+    // The frame-exit boundary above reads a *frame-replacing* exit. A `Return`
+    // node is not one: it is what `wrap_tail_returns` puts around a tail value,
+    // and `lower_return` emits the return mint and no control flow, so control
+    // falls through it to the exit label. Here the block is the function's tail,
+    // which `Return`-wraps both its own tail value and the break's value — and
+    // the window still applies to `x`, whose release the break jumps over.
+    //
+    // The counter-factual: reading `Return` as a frame exit refuses this window,
+    // and `x` strands once per call that breaks. That is every lookup helper
+    // written as a block of guarded breaks.
+    let (hir, _arena, info) = pipeline(
+        "(defn h [n] (block (let [x \"s\"] (if (%int? n) (break 1) nil) \
+                              (%string? x))))",
+    );
+    let block = first_block(&hir).expect("a Block node");
+    let dp = first_string_decref_point(&hir, &info);
+    let order = compute_order(&hir);
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    assert!(
+        ord(dp) >= ord(block),
+        "skipped region in a TAIL block dies at @{} (order {}), before the \
+         block @{} (order {}) — the break jumps over that release",
+        dp.0,
+        ord(dp),
+        block.0,
+        ord(block),
+    );
+}
+
+#[test]
 fn break_through_a_branch_anchors_both_arms_at_the_block() {
     // The floor travels with the value through the tail-transparent forms: an
     // `if` in break position hands EITHER arm to the block, so neither arm may

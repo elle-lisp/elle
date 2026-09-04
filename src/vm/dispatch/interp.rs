@@ -98,6 +98,20 @@ impl VM {
         let consts: &[Value] = code.constants();
         let locations = code.locations();
 
+        // `--trace=arena` attribution (docs/impl/region/diagnostics.md): the bit
+        // is read ONCE per frame, so an untraced run pays a predictable branch
+        // on a local per instruction and resolves no location. A toggle through
+        // `(vm/config-set :trace …)` therefore takes effect at the next frame,
+        // which is what a diagnostic needs and what keeps this off the hot path.
+        let trace_arena = self
+            .runtime_config
+            .has_trace_bit(crate::config::trace_bits::ARENA);
+        let arena_fn_name = if trace_arena {
+            code.template().name()
+        } else {
+            None
+        };
+
         // The executing-closure register is a possibly-dead borrow here: an
         // activation can outlive its closure's heap value (the region solver
         // frees the value at its last use; `code`/`env` live on as `Rc`s), and a
@@ -142,6 +156,10 @@ impl VM {
             }
 
             instr_ip = ip; // save instruction start before reading opcode
+
+            if trace_arena {
+                self.arena_site = locations.get(instr_ip).map(|l| (l, arena_fn_name));
+            }
 
             // Locals live beneath the operands on this same stack, so nothing
             // may pop through the reserved region (see `Code::reserved_locals`).

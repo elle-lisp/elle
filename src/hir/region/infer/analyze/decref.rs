@@ -1083,6 +1083,20 @@ fn pin_break_skipped_releases(
     let low = compute_subtree_low(hir, order);
     let mut scopes = BreakWindowScopes::default();
     collect_window_scopes(hir, order, &low, &mut scopes);
+    // Where each region is allocated, as post-order indices — what the loop
+    // barrier below is read off. A region absent here is allocated by a caller
+    // (a parameter), so no loop in this unit re-allocates it. Capture cells
+    // count as allocated at their `Begin`, which is where `populate_env` mints
+    // them.
+    let mut alloc_sites: HashMap<Region, Vec<u32>> = HashMap::new();
+    for (alloc_id, &region) in &info.alloc_region {
+        alloc_sites.entry(region).or_default().push(ord(*alloc_id));
+    }
+    for (begin_id, cells) in &info.begin_cell_regions {
+        for &(_b, region) in cells {
+            alloc_sites.entry(region).or_default().push(ord(*begin_id));
+        }
+    }
 
     for (block_id, sites) in break_skip_blocks {
         // The window opens at the EARLIEST targeting break: a release after it is
@@ -1097,33 +1111,68 @@ fn pin_break_skipped_releases(
         let anchor_ord = ord(anchor);
         // Only the barriers nested INSIDE this block matter: one enclosing the
         // block encloses the anchor too, so it constrains nothing here.
-        let inner: Vec<(u32, u32)> = scopes
-            .barriers
+        let inner_loops: Vec<(u32, u32)> = scopes
+            .loops
             .iter()
             .copied()
             .filter(|&(lo, hi)| block_lo <= lo && hi < block_hi)
             .collect();
-        // Does anything in the window leave the frame before the exit label? A
-        // nested lambda's own exits belong to that lambda, not to this block.
-        let lambdas: Vec<(u32, u32)> = scopes
+        // A nested lambda is two things at once: a barrier for the releases
+        // inside it, and the frame boundary that says whose exits a
+        // `frame_exits` entry belongs to.
+        let inner_lambdas: Vec<(u32, u32)> = scopes
             .lambdas
             .iter()
             .copied()
             .filter(|&(lo, hi)| block_lo <= lo && hi < block_hi)
             .collect();
+        // A frame exit inside a targeting break's own VALUE does not refuse the
+        // window: that break already jumps over every release in it, so on that
+        // path there is nothing left for the exit to strand
+        // (docs/impl/region/mechanism.md § "A release the break jumps over is not
+        // a release", third boundary). Only an exit on a path that would
+        // otherwise ARRIVE at the release — the block's fall-through — does.
+        let break_values: Vec<(u32, u32)> = sites
+            .iter()
+            .map(|s| (low.get(s).copied().unwrap_or(0), ord(*s)))
+            .collect();
         if scopes.frame_exits.iter().any(|&e| {
-            e >= first_break && e <= block_hi && !lambdas.iter().any(|&(lo, hi)| lo <= e && e <= hi)
+            e >= first_break
+                && e <= block_hi
+                && !inner_lambdas.iter().any(|&(lo, hi)| lo <= e && e <= hi)
+                && !break_values.iter().any(|&(lo, hi)| lo <= e && e <= hi)
         }) {
             continue;
         }
-        for d in info.region_data.values_mut() {
+        for (region, d) in info.region_data.iter_mut() {
             let dord = ord(d.decref_point);
             // In the body (the block node's own decrefs are already at the
             // anchor), at or after the break, and not already later than it.
             if dord < first_break || dord < block_lo || dord >= block_hi || dord >= anchor_ord {
                 continue;
             }
-            if inner.iter().any(|&(lo, hi)| lo <= dord && dord <= hi) {
+            // A lambda's body releases against its own frame's slots, so the
+            // enclosing block's exit label is not a point that activation
+            // reaches — a release there never hoists, whatever it names.
+            if inner_lambdas
+                .iter()
+                .any(|&(lo, hi)| lo <= dord && dord <= hi)
+            {
+                continue;
+            }
+            // A loop barrier is about the COUNT: it holds back a region the loop
+            // body allocates, which is re-allocated per iteration and so needs
+            // its release per iteration. A region allocated outside — a
+            // parameter above all, which has no allocation site here at all — is
+            // one per activation, and one release at the anchor covers it
+            // exactly once.
+            if inner_loops.iter().any(|&(lo, hi)| {
+                lo <= dord
+                    && dord <= hi
+                    && alloc_sites
+                        .get(region)
+                        .is_some_and(|sites| sites.iter().any(|&a| lo <= a && a <= hi))
+            }) {
                 continue;
             }
             d.decref_point = anchor;
@@ -1135,18 +1184,24 @@ fn pin_break_skipped_releases(
 /// unit, all as post-order indices so containment is an interval test.
 #[derive(Default)]
 struct BreakWindowScopes {
-    /// Subtree intervals of the scopes a release may not be hoisted OUT of: an
-    /// iterative scope (`While`/`Loop`, whose body re-allocates per iteration)
-    /// and a `Lambda` (whose body runs in its own activation, against its own
-    /// frame's slots).
-    barriers: Vec<(u32, u32)>,
-    /// Subtree intervals of the `Lambda`s alone — the frame boundary, which says
-    /// whose exits a `frame_exits` entry belongs to.
+    /// Subtree intervals of the iterative scopes (`While`/`Loop`). A release
+    /// inside one is held back only for a region that scope ALLOCATES, which is
+    /// re-allocated per iteration and so needs its release per iteration; a
+    /// region the loop merely reads is one per activation and hoists.
+    loops: Vec<(u32, u32)>,
+    /// Subtree intervals of the `Lambda`s: both an unconditional barrier (the
+    /// body runs in its own activation, against its own frame's slots) and the
+    /// frame boundary that says whose exits a `frame_exits` entry belongs to.
     lambdas: Vec<(u32, u32)>,
     /// Nodes that leave the enclosing frame instead of falling through to it: a
-    /// `Return`, and a `Call` in tail position (lowered as a frame-replacing
-    /// `TailCall`). One in a block's window means the block's exit label is not
-    /// a point every path reaches.
+    /// `Call` in tail position, lowered as a frame-replacing `TailCall`. One in a
+    /// block's window means the block's exit label is not a point every path
+    /// reaches.
+    ///
+    /// A `Return` node is deliberately NOT one (docs/impl/region/mechanism.md
+    /// § "A release the break jumps over is not a release", third boundary):
+    /// `lower_return` emits the return mint and no control flow, so control falls
+    /// through it to the exit label like any other value.
     frame_exits: Vec<u32>,
 }
 
@@ -1160,12 +1215,8 @@ fn collect_window_scopes(
     let lo = low.get(&hir.id).copied().unwrap_or(0);
     let hi = order.get(&hir.id).copied().unwrap_or(0);
     match &hir.kind {
-        HirKind::While { .. } | HirKind::Loop { .. } => out.barriers.push((lo, hi)),
-        HirKind::Lambda { .. } => {
-            out.barriers.push((lo, hi));
-            out.lambdas.push((lo, hi));
-        }
-        HirKind::Return { .. } => out.frame_exits.push(hi),
+        HirKind::While { .. } | HirKind::Loop { .. } => out.loops.push((lo, hi)),
+        HirKind::Lambda { .. } => out.lambdas.push((lo, hi)),
         HirKind::Call { is_tail: true, .. } => out.frame_exits.push(hi),
         _ => {}
     }

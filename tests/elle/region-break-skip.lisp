@@ -13,12 +13,15 @@
 #
 # The close re-anchors those regions to the same point the broken value takes,
 # `last_use[block]`, which the break path and the fall-through path both reach.
-# Three boundaries stop the hoist: an iterative scope nested in the block (a
-# loop-body value is re-allocated per iteration, so one release cannot cover N),
-# a lambda nested in the block (its releases run in another activation, against
-# another frame's slots), and a frame-replacing tail call in the body (the
-# fall-through path leaves through the callee, so the exit label is not a point
-# every path reaches).
+# Three boundaries stop the hoist, and each is narrower than the scope it sits
+# in: an iterative scope nested in the block, for a region that scope ALLOCATES
+# (re-allocated per iteration, so one release cannot cover N — a region the loop
+# only reads is one per activation and hoists); a lambda nested in the block,
+# unconditionally (its releases run in another activation, against another
+# frame's slots); and a frame-replacing tail call on the block's FALL-THROUGH
+# (that path leaves through the callee, so the exit label is not a point every
+# path reaches — one inside a break's own value is on a path that already jumps
+# over these releases and refuses nothing).
 #
 # This file is the LEAK gauge — an `arena/region-count` delta over a fixed
 # window, which must be BOUNDED for every placement of a skipped release, and
@@ -42,6 +45,11 @@
 
 (defn mk ()
   {:a 1})
+
+# A fresh heap value the CALLER allocates, so the callee's parameter names a
+# region the caller owns and the callee releases.
+(defn mk-string ()
+  (concat "ab" "cd"))
 
 # subjects ─────────────────────────────────────────────────────────────────────
 
@@ -95,6 +103,41 @@
                  (when (%gt n 0) (break 1))
                  (%add 2 (length (keys x)))))))
 
+# (g) the block is the function's TAIL. Every subject above ends its body with a
+# trailing `nil`, which keeps the block out of tail position and so keeps a
+# `Return` out of the window; a lookup helper is not written that way. The tail
+# value and the break's value are both `Return`-wrapped here, and a `Return` is
+# the return MINT — control falls through it to the exit label — so neither is a
+# frame-replacing exit and the window still applies.
+(defn skip-tail-block (n)
+  (block (let [x (mk)]
+           (when (%gt n 0) (break 1))
+           (%struct? x))))
+
+# (h) the same, with the break carrying a FRESH value rather than an immediate.
+# The carried value takes the return mint; the skipped `x` has no mint and must
+# still be released at the anchor.
+(defn skip-tail-heap-break (n)
+  (block (let [x (mk)]
+           (when (%gt n 0) (break {:b 2}))
+           x)))
+
+# (i) a tail block with SEVERAL breaks, each carrying a heap literal — the shape
+# a lookup helper is written in, and the one where the frame-exit boundary has
+# to read which path an exit is on. A break's value is walked as a tail value in
+# a tail block, so each `{…}` here is a tail-marked call sitting in the window.
+# An exit inside a break's own value is on a path that already jumps over these
+# releases, so it does not refuse the window; only one on the fall-through does
+# (`bound-tailcall`).
+# Each guard names one value of `n`, so every break is reachable on its own and
+# the value asserts below exercise all three exits rather than only the first.
+(defn skip-tail-many-breaks (n)
+  (block (let [x (mk)]
+           (when (= n 1) (break {:b 1}))
+           (when (= n 2) (break {:b 2}))
+           (when (= n 3) (break {:b 3}))
+           (%struct? x))))
+
 # boundaries ───────────────────────────────────────────────────────────────────
 # Each drives a break that never fires, so the guarded code RUNS and its releases
 # must fire where they were placed. A hoist that crossed a boundary would leave
@@ -108,6 +151,19 @@
     (while (%lt i 8)
       (let [x (mk)]
         (%struct? x))
+      (assign i (%add i 1)))
+    nil))
+
+# The loop barrier is read off the ALLOCATION site, not off where the release
+# sits. `s` is a parameter — allocated once by the caller — whose last use is
+# inside the loop, so its release sits there while the value is still one per
+# activation. One release at the anchor covers it exactly once. The break here
+# DOES fire, so a refusal strands `s` on every call.
+(defn skip-loop-read-param (n s)
+  (block (when (%gt n 0) (break 1))
+    (def @i 0)
+    (while (%lt i 4)
+      (when (%eq (length s) 999) (break 2))
       (assign i (%add i 1)))
     nil))
 
@@ -155,6 +211,13 @@
 (def skip-deep-break-d (measure (fn () (skip-deep-break 1)) 200 window))
 (def skip-nested-block-d (measure (fn () (skip-nested-block 1)) 200 window))
 (def skip-used-d (measure (fn () (skip-used 1)) 200 window))
+(def skip-tail-block-d (measure (fn () (skip-tail-block 1)) 200 window))
+(def skip-tail-heap-break-d
+  (measure (fn () (skip-tail-heap-break 1)) 200 window))
+(def skip-tail-many-breaks-d
+  (measure (fn () (skip-tail-many-breaks 1)) 200 window))
+(def skip-loop-read-param-d
+  (measure (fn () (skip-loop-read-param 1 (mk-string))) 200 window))
 (def bound-loop-d (measure (fn () (bound-loop 1)) 200 window))
 (def bound-lambda-d (measure (fn () (bound-lambda 1)) 200 window))
 (def bound-tailcall-d (measure (fn () (bound-tailcall 1)) 200 window))
@@ -165,6 +228,9 @@
 (println "  call " skip-call-d "  literal " skip-literal-d "  two " skip-two-d
          "  deep " skip-deep-break-d)
 (println "  nested-block " skip-nested-block-d "  used " skip-used-d)
+(println "  tail-block " skip-tail-block-d "  tail-heap-break "
+         skip-tail-heap-break-d "  tail-many-breaks " skip-tail-many-breaks-d)
+(println "  loop-read-param " skip-loop-read-param-d)
 (println "  boundaries: loop " bound-loop-d "  lambda " bound-lambda-d
          "  tailcall " bound-tailcall-d)
 (println "  controls: nobreak " ctl-nobreak-d "  before-break "
@@ -184,6 +250,13 @@
 (bounded? skip-deep-break-d "skipped release under a nested break")
 (bounded? skip-nested-block-d "skipped release inside a nested block")
 (bounded? skip-used-d "skipped release under a consumed block result")
+(bounded? skip-tail-block-d "skipped release in a block in TAIL position")
+(bounded? skip-tail-heap-break-d
+          "skipped release beside a break carrying a fresh value")
+(bounded? skip-tail-many-breaks-d
+          "skipped release in a tail block with several breaks")
+(bounded? skip-loop-read-param-d
+          "skipped release of a param the loop only reads")
 
 (bounded? bound-loop-d "loop nested in the window: per-iteration release")
 (bounded? bound-lambda-d "lambda nested in the window: per-activation release")
@@ -196,5 +269,16 @@
 (assert (= (bound-loop 1) nil) "boundary loop body diverged")
 (assert (= (bound-lambda 1) nil) "boundary lambda body diverged")
 (assert (= (bound-tailcall 1) 2) "boundary tail call body diverged")
+(assert (= (skip-tail-block 1) 1) "tail block: breaking result lost")
+(assert (= (skip-tail-block 0) true) "tail block: fall-through result lost")
+(assert (= (skip-tail-heap-break 1) {:b 2})
+        "tail block: the value the break carried did not survive")
+(assert (= (skip-tail-heap-break 0) {:a 1})
+        "tail block: the fall-through value did not survive")
+(assert (= (skip-tail-many-breaks 1) {:b 1}) "tail block: first break lost")
+(assert (= (skip-tail-many-breaks 2) {:b 2}) "tail block: second break lost")
+(assert (= (skip-tail-many-breaks 3) {:b 3}) "tail block: third break lost")
+(assert (= (skip-tail-many-breaks 0) true)
+        "tail block: many-break fall-through lost")
 
 (println "region-break-skip: ok")
