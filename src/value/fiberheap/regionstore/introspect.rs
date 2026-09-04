@@ -159,15 +159,35 @@ impl RegionStore {
             .unwrap_or_default()
     }
 
+    /// Record where physical id `id` was just minted, for the `--trace=arena`
+    /// attribution `debug_dump` prints. Callers gate on the trace bit, so an
+    /// untraced run never reaches this.
+    pub fn note_mint_site(&mut self, id: u32, site: std::rc::Rc<str>) {
+        self.mint_sites.insert(id, site);
+    }
+
+    /// The recorded mint site of `id`, or `None` when the run is untraced or
+    /// the id was minted before the bit was set.
+    pub fn mint_site(&self, id: u32) -> Option<&str> {
+        self.mint_sites.get(&id).map(|s| &**s)
+    }
+
     pub fn debug_dump(&self) {
         for (idx, slot) in self.regions.iter().enumerate() {
             if let Some(e) = slot.as_ref() {
+                // The mint site is present only under `--trace=arena`; an
+                // untraced dump keeps its historical one-line-per-region shape.
+                let site = match self.mint_site(idx as u32) {
+                    Some(s) => format!(" from {s}"),
+                    None => String::new(),
+                };
                 eprintln!(
-                    "  region {} rc={} objs={} tags={:?}",
+                    "  region {} rc={} objs={} tags={:?}{}",
                     idx,
                     e.count(),
                     e.pool.obj_count(),
-                    e.pool.debug_tags()
+                    e.pool.debug_tags(),
+                    site
                 );
             }
         }

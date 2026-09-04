@@ -53,6 +53,17 @@ the region rules ([rules.md](rules.md)) honest.
   per-region tags name *what* leaked (a stray `Fiber` / `Closure` region pinning
   an unfreed value). The companion `(arena/region-info)` returns the same id / RC
   / count as data (no tags) for assertions.
+- `--trace=arena`: **name the code that minted a region.** Each mint records the
+  running function, the place it was called from, and the mint's kind — `alloc`
+  for an allocation slot, `call result` for a call's own result region — and
+  `arena/dump` prints it after the tags: `region 1673 rc=1 objs=1 tags=[LString]
+  from send-request-frames [alloc] called at lib/http2.lisp:186:20`. The tags say
+  a retained region holds a string; this says which code made it, which is the
+  step from "the window retained 60 regions" to a shape small enough to
+  reproduce. Off by default and free then: the site string is built only while
+  the bit is set, so an untraced dump prints the same line it always did. The
+  mints the **VM** owns are covered; a region minted by a native, by the io
+  backend, or by the env builder prints no site.
 - `(arena/page-claims)`: the live count of pages this heap's `RegionStore` has
   claimed from its page pool, monotonic and never decremented on release. A
   delta across a fixed window is the *page* cost of a shape, the dimension

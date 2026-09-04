@@ -172,6 +172,18 @@ pub struct VM {
     /// call sites. This also protects against fiber error propagation
     /// overwriting the child fiber's error origin.
     pub(crate) error_loc: Option<SourceLoc>,
+    /// The instruction the interpreter is executing, as `--trace=arena` reports
+    /// it: the running function's name and the source location of the
+    /// instruction itself (docs/impl/region/diagnostics.md § `--trace=arena`).
+    ///
+    /// Written only while that trace bit is set — the dispatch loop reads the
+    /// bit once per frame into a local, so an ordinary run pays one predictable
+    /// branch per instruction and never resolves a location. It names the
+    /// ALLOCATION rather than the enclosing call, which is the difference
+    /// between "a string was made somewhere in this function" and the line that
+    /// made it, and it is the only reading available inside a fiber's entry
+    /// closure, where the call stack is still empty.
+    pub(crate) arena_site: Option<(SourceLoc, Option<&'static str>)>,
     /// Reason carried by the most recent uncaught `:gated` error to propagate
     /// out of `execute_proto`. A loud `(gate! …)` whose condition is unmet
     /// raises `{:error :gated :reason …}`; when that escapes to the top level

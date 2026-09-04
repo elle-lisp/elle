@@ -166,6 +166,17 @@ pub(crate) struct RegionStore {
     /// from its earlier incarnation by generation. `None` outside such a scope
     /// (the common case: one branch on the mint path).
     mint_log: Option<Vec<(u32, u32)>>,
+    /// Where each id was last minted, keyed by physical region id — the
+    /// `--trace=arena` attribution `arena/dump` prints beside a region's tags
+    /// (docs/impl/region/diagnostics.md § "Naming the code that minted a
+    /// region"). A tag census says a retained region holds a string; this says
+    /// which function made it.
+    ///
+    /// Empty unless that trace bit is set: `note_mint_site` is the only writer
+    /// and its callers gate on the bit, so an untraced run pays one `is_empty`
+    /// read at dump time and nothing at mint time. Bounded by the id
+    /// high-water mark, since a recycled id overwrites its entry.
+    mint_sites: std::collections::HashMap<u32, std::rc::Rc<str>>,
     /// This instance's trace cell (a clone of the heap's), handed to each
     /// `RegionPool` at creation so the `PAGES` page-claim gate reads its own
     /// instance's trace state rather than a process-global.
@@ -224,6 +235,7 @@ impl RegionStore {
             generations: Vec::new(),
             store_id: NEXT_STORE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             mint_log: None,
+            mint_sites: std::collections::HashMap::new(),
             trace,
         }
     }

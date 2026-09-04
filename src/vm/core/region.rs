@@ -32,6 +32,65 @@ impl FrameLocals<'_> {
 }
 
 impl VM {
+    /// Record where a just-minted region came from, for `--trace=arena`
+    /// (docs/impl/region/diagnostics.md § "Naming the code that minted a
+    /// region"). `arena/dump` prints it beside the region's tags, so a region a
+    /// residue window reports as retained names the Elle code that made it.
+    ///
+    /// The site is the running function and the place it was called from — the
+    /// same two facts a stack-trace line carries, read from the innermost
+    /// `CallFrame`. `what` names the mint kind and, for a mint the compiler
+    /// assigned a slot, that slot: `--dump=regions` on the running function maps
+    /// `rN` back to the allocation node, which the call site alone cannot do
+    /// when a function allocates in several places.
+    ///
+    /// Off by default and one relaxed atomic load then: the string is built only
+    /// while the bit is set.
+    /// `kind` names the mint; `slot` is the compiler's region slot where the mint
+    /// has one. Nothing is formatted unless the bit is set, so the allocation path
+    /// pays one relaxed atomic load in an ordinary run.
+    #[inline]
+    pub(crate) fn note_region_mint(
+        &mut self,
+        id: RuntimeRegion,
+        kind: &str,
+        slot: Option<StaticRegion>,
+    ) {
+        if !self
+            .runtime_config
+            .has_trace_bit(crate::config::trace_bits::ARENA)
+        {
+            return;
+        }
+        let slot = match slot {
+            Some(s) => format!(" r{}", s.get()),
+            None => String::new(),
+        };
+        // The allocating instruction names itself. The call stack is the
+        // fallback for a mint the interpreter loop did not set a site for — a
+        // compiled frame, or one made off an instruction entirely.
+        let site = match &self.arena_site {
+            Some((loc, name)) => format!(
+                "{} [{}{}] at {}",
+                name.unwrap_or("<anonymous>"),
+                kind,
+                slot,
+                loc
+            ),
+            None => match self.fiber.call_stack.last() {
+                Some(f) => {
+                    let loc = match f.location() {
+                        Some(l) => format!("{l}"),
+                        None => "?".to_string(),
+                    };
+                    format!("{} [{}{}] called at {}", f.name(), kind, slot, loc)
+                }
+                None => format!("<no frame> [{kind}{slot}]"),
+            },
+        };
+        self.heap().note_region_mint_site(id.get(), site.into());
+    }
+
     /// Resolve a static region slot to a **fresh** physical region for an
     /// allocation that has a matching compiler-emitted `DecrefRegion` at its
     /// decref_point (Pair, arrays, structs, closures, capture cells).
@@ -65,6 +124,7 @@ impl VM {
         // slot-0 case: the operand is a `StaticRegion`, always ≥ 1.)
         let phys = self.heap().new_runtime_region();
         let gen = self.heap().generation_raw(phys.get());
+        self.note_region_mint(phys, "alloc", Some(static_id));
         self.fiber
             .activation_region_maps
             .last_mut()
@@ -153,7 +213,9 @@ impl VM {
         &mut self,
         _static_id: StaticRegion,
     ) -> RegionMint {
-        self.heap().new_runtime_region_tracked()
+        let mint = self.heap().new_runtime_region_tracked();
+        self.note_region_mint(mint.region(), "call result", Some(_static_id));
+        mint
     }
     /// Close out a call-result mint: return its id to the free list unless the
     /// call materialized the region (docs/impl/region/model.md § "Physical id
