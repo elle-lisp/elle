@@ -206,28 +206,7 @@ impl VM {
                     &[]
                 };
                 let collected = match closure.template.vararg_tag() {
-                    crate::value::VarargTag::List => {
-                        let list = Self::args_to_list(rest_args, heap);
-                        // On a MOVE (`own_params = false`: a tail call / FFI callback),
-                        // the caller's owning reference to each arg transferred to us. A
-                        // fixed param lands that reference in its env slot; a rest arg
-                        // instead lives in the collected list, which `args_to_list`'s
-                        // `alloc_obj` gave its OWN incref. So a rest arg's moved-in
-                        // reference is surplus — release it, or it leaks one region per
-                        // rest arg per call (the variadic tail-forward leak: `(defn g [&
-                        // rest] …) (defn f [x] (g x))`; `store-wrapper` in the oracle).
-                        // An OWNED call keeps the caller's reference (freed at the arg's
-                        // last use), so it must NOT be released. Only release when the
-                        // value appears EXACTLY ONCE across all arg positions: an aliased
-                        // arg (same value in a fixed slot and/or another rest position)
-                        // shares one transferred reference that a fixed slot / earlier
-                        // cons already consumes, so a second release would over-free
-                        // (a UAF — leak-safe conservatism, never mis-free).
-                        if !own_params {
-                            Self::release_moved_rest_args(rest_args, args, heap);
-                        }
-                        list
-                    }
+                    crate::value::VarargTag::List => Self::args_to_list(rest_args, heap),
                     crate::value::VarargTag::Struct => {
                         match Self::collect_struct_in_own_region(fiber, heap, rest_args, None) {
                             Some(v) => v,
@@ -243,6 +222,18 @@ impl VM {
                         }
                     }
                 };
+                // On a MOVE (`own_params = false`: a tail call / FFI callback) the
+                // caller's owning reference to each arg transferred to us, and a
+                // collected arg lands in `collected` — which took its own reference
+                // when it stored the value — rather than in an env slot. So the
+                // moved reference is surplus and is released here, whichever
+                // collector took the value over (docs/impl/region/mechanism.md
+                // § "A collector parameter takes the moved reference over itself").
+                // Released after `collected` is built, so the collection's own
+                // reference already stands.
+                if !own_params {
+                    Self::release_moved_rest_args(rest_args, args, heap);
+                }
                 // The rest-param's collected list/struct is built into the env
                 // region here, not moved in by the caller — it is a borrow, not
                 // an owned param, so no caller incref balances it: `false`.
@@ -384,13 +375,18 @@ impl VM {
         list
     }
 
-    /// Release the moved-in reference of each rest arg on a MOVE call
-    /// (`own_params = false`). See the caller (`populate_env`, the `List` vararg
-    /// arm) for why: the rest arg lives in the collected list (its own incref), so
-    /// the caller's transferred reference is surplus. Released ONLY for a value that
+    /// Release the moved-in reference of each collected arg on a MOVE call
+    /// (`own_params = false`), for every collector kind — `&`, `&keys`, `&named`
+    /// alike (docs/impl/region/mechanism.md § "A collector parameter takes the
+    /// moved reference over itself"; rate pinned by
+    /// `tests/elle/region-collector-arg-move.lisp`). Released ONLY for a value that
     /// appears exactly once across ALL arg positions (`all_args`) — an aliased value
-    /// shares one transferred reference a fixed slot / earlier cons already consumes,
-    /// so a second release would over-free (leak-safe: never mis-free).
+    /// shares one transferred reference a fixed slot / earlier member already
+    /// consumes, so a second release would over-free (leak-safe: never mis-free).
+    ///
+    /// A keyword key in `rest_args` is an immediate, so `region_of` reports no
+    /// region for it and the `&keys`/`&named` keys are skipped without a special
+    /// case — only the values they name are released.
     ///
     /// The occurrence counts come from ONE pass over `all_args`, so the whole
     /// step is linear in the argument count. Counting per rest arg instead —

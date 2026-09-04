@@ -1326,6 +1326,38 @@ any other holder and its cascade drops the `cell ⊇ closure` edge ahead of the 
 What the deferral drops afterwards is the frame's own slot reference, the last one
 standing.
 
+### A collector parameter takes the moved reference over itself
+
+The exemption above is a claim about the **callee's owned-param release**: the
+caller drops its release of a moved argument because the callee's release of
+that parameter consumes the reference. A `&`, `&keys`, or `&named` parameter is
+where that claim runs out. Its binding names the collected list or struct, not
+the argument, and the collected value is built in a region of its own with its
+own reference on each member (`alloc_obj`'s cross-region incref). So the
+callee's one release frees the collection and drops the collection's reference —
+never the caller's moved one. The move arrives and nothing consumes it: one
+region per collected argument per call, plus its cascade.
+
+The runtime closes it where the collection is built (`populate_env`,
+src/vm/env.rs). On a **move** — a tail call or an FFI callback, the calls that
+pass `own_params = false` — the surplus reference is released once the collected
+value holds its own. Which collector took the value over does not enter the
+argument: what makes the reference surplus is that the argument went into a
+collection rather than into an env slot, which is true of all three.
+
+Aliasing is what the release must not read past. One value in two argument
+positions arrives with a single moved reference, and a fixed slot or an earlier
+member may already consume it; a second release would free a value still in use.
+So a value is released only where it occurs exactly once across the whole
+argument list — leak-safe in the other direction, never mis-freeing.
+
+An **owned** call (`own_params = true`, the ordinary non-tail call) is not this
+case at all: the caller keeps its reference and releases it at the argument's own
+last use, so releasing here would over-free.
+
+`tests/elle/region-collector-arg-move.lisp` pins the rate for each collector kind
+against a positional-parameter control.
+
 ### The relocation point outlives the block, and a branch merge inherits it
 
 Inside the tail call's own block the relocation is a **move**: the instruction is
