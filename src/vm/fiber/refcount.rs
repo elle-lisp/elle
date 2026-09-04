@@ -159,13 +159,11 @@ pub(crate) fn release_displaced_terminal_signal(
 /// park no longer names what is in the slot, and an `(emit :fs v)` under the same
 /// withheld bits is a body-allocated payload this must never touch.
 ///
-/// No resume-value skip, unlike [`release_resumed_io_request`]: that skip answers
-/// for a `Fresh` io op building its completion buffer IN the request's region,
-/// and a denial payload is complete before the park. A resume value read back OUT
-/// of the payload shares its region and still owes this release — the child's
-/// continuation releases the denied call's RESULT, which the delivery's own
-/// `ResumeDelivery` mint funds. A no-op for a fiber with no record, a record that
-/// no longer names the parked signal, or an immediate payload.
+/// A resume value read back OUT of the payload shares its region and still owes
+/// this release — the child's continuation releases the denied call's RESULT,
+/// which the delivery's own `ResumeDelivery` mint funds. A no-op for a fiber with
+/// no record, a record that no longer names the parked signal, or an immediate
+/// payload.
 ///
 /// Runs beside [`release_displaced_io_request`], never in place of it: the two
 /// name disjoint payloads, this one whatever the record names and that one an
@@ -210,6 +208,18 @@ pub(crate) fn release_displaced_denial_payload(
 /// built is released by the install that displaces it"): the resume that
 /// delivers a completion, and the injected error `fiber/abort` / `fiber/refuse`
 /// raise at the fiber's own suspension point.
+///
+/// **Every install owes it, the resume included.** A `Fresh` io op
+/// (`port/read`, `accept`) mints ONE region for the call and builds both the
+/// request and the completion buffer in it, then hands that buffer back as the
+/// resume value — so the resume is the one install that finds the region still
+/// live. It owes the release all the same, because the two references answer to
+/// different consumers: the `Fresh` mint is consumed by the release of the value
+/// the suspend hands back, and the `SuspendEscape` is consumed here. Standing
+/// down on a resume value sharing the region leaves the second reference with no
+/// consumer at all, and the region survives with its buffer and its request —
+/// one per read. `tests/elle/region-io-read-strand.lisp` bounds the rate and
+/// pins that the buffer still outlives this release.
 ///
 /// **In flight is no reason to wait.** An abort reaches a fiber whose request
 /// the scheduler already submitted, and a `Fresh` op's completion buffer lives in
@@ -271,37 +281,6 @@ fn io_request_region(
         .as_external::<crate::io::request::IoRequest>()
         .is_some()
         .then_some(region)
-}
-
-/// [`release_displaced_io_request`] as the RESUME path takes it: the one install
-/// that hands a value back in place of the request, and so the one that can find
-/// the request's region still live.
-///
-/// The `Fresh` io ops (`port/read`/`accept`) build their completion buffer *in*
-/// the IoRequest's region and hand it back as `resume_value`. There the caller's
-/// `DecrefValueRegion` on the buffer balances the `SuspendEscape`, and a decref
-/// here would free the buffer out from under the caller. So a resume value
-/// sharing the request's region is the signature that the region is still live,
-/// and the release stands down.
-///
-/// The skip is a fact about a DELIVERY, which is why it lives here rather than in
-/// the release: an injected error is not one — the abort's own `AbortDelivery`
-/// mint funds the consumer it has — so an error value that happens to live in the
-/// request's region owes the release all the same. The gauges are `oracle.lisp`'s
-/// `io-yield ev/sleep` probe for this path and `tests/elle/region-io-park.lisp`
-/// per install.
-pub(crate) fn release_resumed_io_request(
-    heap: &mut crate::value::fiberheap::FiberHeap,
-    parked: Option<(SignalBits, Value)>,
-    resume_value: Value,
-) {
-    let Some(region) = io_request_region(heap, parked) else {
-        return;
-    };
-    if crate::value::arena::region_of(heap, resume_value) == Some(region) {
-        return;
-    }
-    crate::value::arena::decref_region(heap, Some(region));
 }
 
 #[cfg(test)]

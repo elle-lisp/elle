@@ -1957,6 +1957,19 @@ fn region_io_completion_leak_guardfree() {
     );
 }
 
+// Guard — a `Fresh` io op builds its completion buffer in the request's own
+// region, and the install that ends the park releases the suspend retain there
+// like any other. The buffer the resume hands back must survive that release:
+// under the UAF oracle a release that took one reference too many faults at the
+// read of a held chunk instead of returning it.
+#[test]
+fn region_io_read_strand_guardfree() {
+    run_elle_script_with_args(
+        "region-io-read-strand",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // =============================================================================
 // I/O backend selection (`--no-uring`)
 // =============================================================================

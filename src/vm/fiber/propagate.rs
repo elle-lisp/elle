@@ -23,7 +23,7 @@ impl VM {
     ///
     /// - A NON-TERMINAL signal (a yield, an io request). The fiber runs again,
     ///   so the resume path proper governs the payload —
-    ///   `release_resumed_io_request` for an io request, the resumed body's own
+    ///   `release_displaced_io_request` for an io request, the resumed body's own
     ///   pending release otherwise.
     ///   `with_child_fiber` step 6a excludes exactly this set from its park
     ///   retain for the same reason ("retaining here would leak"), and the
