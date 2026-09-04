@@ -978,13 +978,25 @@ the body.
 Three boundaries bound the window. Two are about *how many times* a release runs
 rather than where:
 
-- **An iterative scope nested in the block** (`While`/`Loop`). A value allocated
-  in a loop body is re-allocated per iteration, so its release must stay
-  per-iteration: hoisting it to the block's exit would leave one release for N
-  allocations — a worse leak than the one being closed, and the same
-  re-allocation argument the `capture_loop_ext` "bound outside" guard makes. A
-  break out of a loop therefore still strands the *breaking iteration's* regions,
-  an over-keep bounded by one iteration.
+- **An iterative scope nested in the block** (`While`/`Loop`), for a region the
+  loop body ALLOCATES. Such a value is re-allocated per iteration, so its release
+  must stay per-iteration: hoisting it to the block's exit would leave one
+  release for N allocations — a worse leak than the one being closed, and the
+  same re-allocation argument the `capture_loop_ext` "bound outside" guard makes.
+  A break out of a loop therefore still strands the *breaking iteration's* own
+  regions, an over-keep bounded by one iteration.
+
+  A region the loop merely READS is a different case, and the barrier is read off
+  the allocation site rather than the release's position for exactly that reason.
+  A parameter, or anything bound before the loop, is allocated once per
+  activation; its release only *sits* in the loop because that is where its last
+  use is. One release at the anchor covers it exactly once, which is the count
+  the re-allocation argument asks for. Refusing there strands a parameter on
+  every call that breaks — `dt-lookup`'s `name` and `value`, compared against
+  each dynamic-table entry in a `while` and then broken past.
+
+  A region with no allocation site in the unit at all is a parameter by
+  construction: the caller allocated it, so no loop here re-allocates it.
 - **A `Lambda` nested in the block.** Its body's releases run in a different
   activation, against a different frame's slots; the enclosing block's exit label
   is not a point that activation ever reaches.
@@ -992,14 +1004,36 @@ rather than where:
 The third guards the anchor itself — the hoist's premise is that the exit label
 is a point every path **reaches**:
 
-- **A frame-replacing exit in the body** (a `Return`, or a `Call` in tail
-  position, lowered as `TailCall`). That path leaves through the callee instead
-  of arriving at the exit label, so a release moved to the anchor would be dead
-  on exactly the path that used to run it — one leak traded for another. Such a
-  block declines the window whole. This is the `(fn … (forever … (break v)))`
-  tail-block idiom, where the broken value's own pin still applies (it is the
-  *returned* value, and its release is the one the return mint funds) but the
-  window's does not.
+- **A frame-replacing exit on the block's fall-through** — a `Call` in tail
+  position, lowered as `TailCall`. That path leaves through the callee instead of
+  arriving at the exit label, so a release moved to the anchor would be dead on
+  exactly the path that used to run it — one leak traded for another. Such a
+  block declines the window whole.
+
+  An exit inside a targeting break's own **value** is not that case, and reading
+  it as one costs a region per call on any block with more than one break. On the
+  break path the release is already jumped over, so there is nothing left for the
+  exit to strand and the trade is one-sided: every other path gains its release
+  and that path stays exactly as it was. The shape is ordinary because a break's
+  value is walked as a tail value in a tail block, so a `{…}` or `[…]` literal
+  carried by any break past the first is a tail-marked `Call` sitting in the
+  window. `dt-lookup` in `lib/http2/hpack.lisp` is four of them.
+
+  A `Return` node is **not** one of these, and reading it as one costs a region
+  per call on the most ordinary shape there is. `Return` is what
+  `wrap_tail_returns` puts around a *tail value*, and it is its only producer;
+  `lower_return` emits the return **mint** and nothing else, so control falls
+  through it. Both places one can appear inside a block's window — the block's
+  own tail value, and the value of a `break` targeting a tail block — therefore
+  reach the exit label like any other path. Declining there refuses the window of
+  every function whose body is a `block` with a `break` in it, which is how a
+  lookup helper is written: `(defn f [k] (block (let [x (mk k)] (when (hit x)
+  (break …)) …)))` strands `x` on every call that breaks.
+
+  The tail-block idiom `(fn … (forever … (break v)))` is unaffected either way:
+  the broken value's own pin applies (it is the *returned* value, and its release
+  is the one the return mint funds), and the `forever` is an iterative-scope
+  barrier that keeps the window off the loop body regardless.
 
 All three leave the conservative baseline (the release stays where it is,
 skipped on the break path), never a mis-free.
@@ -1341,9 +1375,9 @@ region per collected argument per call, plus its cascade.
 The runtime closes it where the collection is built (`populate_env`,
 src/vm/env.rs). On a **move** — a tail call or an FFI callback, the calls that
 pass `own_params = false` — the surplus reference is released once the collected
-value holds its own. Which collector took the value over does not enter the
-argument: what makes the reference surplus is that the argument went into a
-collection rather than into an env slot, which is true of all three.
+value holds its own. The release is per collector *kind*-independent: what makes
+the reference surplus is that the argument went into a collection rather than
+into an env slot, which is true of all three.
 
 Aliasing is what the release must not read past. One value in two argument
 positions arrives with a single moved reference, and a fixed slot or an earlier
