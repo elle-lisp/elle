@@ -64,14 +64,68 @@ A memo learns a name where names already travel, and nowhere else:
 | the reader | every identifier and keyword token in the source text |
 | primitives | every keyword a native mints through its `NativeCtx` |
 | the plugin ABI | every keyword a plugin mints through `make_keyword`'s call ctx |
+| the signal registry | every signal name read back out of the process-global registry — by `(signals)`, `fiber/caps`, a compile query's `:bits` set, or a capability denial |
+| `--trace` | every trace key the command line named, reported by `(vm/config)` |
 | `send` | the bundle's name table (symbols, named from the sender's memo) and the inline names keywords already carry, replayed into the receiver's memo |
 | hydration | the image's name table, replayed into the hydrating instance |
 | `ConstTemplate` decode | symbols and keywords encoded by name in the constant pool |
+
+The signal registry and `--trace` are read sites, not mint sites, and they are
+on the list for the same reason: both hold spellings a program coined at run
+time — `(signal :my-sig)` allocates a bit, `--trace=my-pass` names a dump — in
+a process-global table that outlives no single memo. An instance that reads
+one back never met the spelling, and a worker thread never met it at all.
 
 Because a name is recorded only at those sites, a memo answers for the names
 its instance has actually met. That is the whole contract: a value whose name
 was never recorded is still a perfectly good value, and still compares
 correctly. It just has no name to print.
+
+## A spelling the runtime itself mints
+
+The memo answers for names that arrive at run time. The Rust runtime also
+coins keywords of its own — every struct key a primitive returns, every type
+name, every status, every error kind — and each of those spellings is fixed
+when the binary is built. `VOCABULARY` in `src/value/keyword.rs` is that list,
+and `resolve_keyword_name` reads it after the memo. A vocabulary spelling
+needs no instance, so it survives a display path that threads no memo at all.
+
+The two halves divide by where the spelling comes from:
+
+| Origin of the spelling | Where it lives |
+|------------------------|----------------|
+| a Rust string literal, or a `&'static str` an accessor returns | `VOCABULARY` |
+| source text, a string conversion, a plugin, a peer instance, an image, a run-time registry | the memo |
+
+A build-fixed spelling in neither is a defect with no compile error behind it.
+The keyword is a perfectly good value and still compares correctly; it just
+prints as `#<keyword:hash>`. Where that reads as cosmetic it is not: JSON has
+no such spelling to write, so `json/serialize` and `json/pretty` raise
+`serde-error` on any struct carrying such a key, and the whole value fails to
+encode. Every key of `(file/stat …)` was in that state, as was every key a
+compile query returns.
+
+Two standing checks keep the list complete, because the constructor cannot —
+`Value::keyword` takes a `&str` and records nothing, by design:
+
+- `vocabulary_covers_literal_mint_sites` scans `src/` for every form that
+  hands a literal to a keyword constructor: `Value::keyword("…")`,
+  `TableKey::keyword("…")`, the `kw("…")` helper each primitive module
+  defines for its struct keys, `ctx.error("…")` and `io_error("…")` (the kind
+  becomes the `:error` field's keyword), and `ctx.external("…")` (the type
+  name becomes the keyword `type-of` returns). It fails on a spelling the
+  vocabulary lacks.
+- `vocabulary_covers_accessor_mint_sites` enumerates the closed tables whose
+  `&'static str` accessors feed those same constructors — the signal
+  registry's built-ins, `sigmap`'s POSIX signals, the JIT/WASM/MLIR policy
+  keywords, the VM's tier names, `FiberStatus`, `WatchEventKind` — and
+  asserts each spelling resolves. A scan cannot see these: the literal sits
+  in a `match` arm, not in the call.
+
+Adding a spelling to one of those tables therefore fails the build until it is
+added to `VOCABULARY` too. Spellings that only exist once a real value does —
+the type name of each heap variant, reached through `(type-of …)` — are pinned
+by the corpus instead, in `tests/elle/keyword-spelling.lisp`.
 
 ## Reading a name, and not reading one
 

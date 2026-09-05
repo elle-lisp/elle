@@ -115,6 +115,11 @@ JSON primitives signal a `:serde-error` for:
   other types with no JSON counterpart.
 - **Non-finite floats** — `json/serialize` rejects NaN and infinity,
   which JSON cannot represent.
+- **A keyword with no spelling** — a keyword is a name hash, and the name
+  is looked up in the running instance. A keyword whose name that instance
+  never met has nothing to write as a JSON string or object key, so the
+  serializers refuse it rather than write the hash, which would read back
+  as a different name. The message names the hash.
 
 Catch one with `try` or `protect`. Parsing and serializing report the same
 kind, so one `catch` covers both directions.
