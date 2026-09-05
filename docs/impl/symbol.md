@@ -63,7 +63,7 @@ A memo learns a name where names already travel, and nowhere else:
 |------|--------------|
 | the reader | every identifier and keyword token in the source text |
 | primitives | every keyword a native mints through its `NativeCtx` |
-| the plugin ABI | every keyword a plugin mints through `make_keyword`'s call ctx |
+| the plugin ABI | every keyword a plugin mints through `make_keyword`'s call ctx, and the type name it wraps an external in — the string lives in the plugin's `.so`, so no vocabulary entry can carry it and `(type-of …)` has nowhere else to read it from |
 | the signal registry | every signal name read back out of the process-global registry — by `(signals)`, `fiber/caps`, a compile query's `:bits` set, or a capability denial |
 | `--trace` | every trace key the command line named, reported by `(vm/config)` |
 | `send` | the bundle's name table (symbols, named from the sender's memo) and the inline names keywords already carry, replayed into the receiver's memo |
@@ -198,6 +198,13 @@ call belongs to, and `keyword_name`/`as_keyword_name` read back through the
 same ctx. `intern_keyword` is a pure hash: it records nothing and needs no
 ctx. `Value::keyword(&str)` in the host is equally pure — construction is
 identity only, and naming happens at the learning sites above.
+
+`make_external` is a learning site for the same reason, one step removed. The
+type name a plugin wraps its handle in is not a keyword when it is handed
+over, but `(type-of …)` mints one from it, and the string lives in the
+plugin's `.so` — a host external's name is a literal the vocabulary scan
+finds, and a plugin's is not. So the ctx records it where the external is
+built, and `type-of` needs no memo of its own.
 
 ## Where the id appears
 
