@@ -24,9 +24,13 @@
 //!
 //! What the path cannot separate is a socket that is bound and never listened
 //! on. It refuses exactly as a full backlog does and leaves its file in place,
-//! so such a connect is refused at once on Linux and paces to the caller's
-//! `:timeout` elsewhere. That is the price of pacing the common case, and
-//! `:timeout` is what bounds it.
+//! so such a connect is refused at once on Linux and paces elsewhere. That is
+//! the price of pacing the common case.
+//!
+//! A connect that named a `:timeout` is bounded by it. One that named none
+//! waits until `io/cancel` or the sweep for a fiber that is gone ends the
+//! operation — the same ending an untimed connect to a listener that never
+//! accepts already has on every platform.
 
 use super::*;
 use std::time::Instant;
