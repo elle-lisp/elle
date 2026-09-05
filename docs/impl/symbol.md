@@ -105,9 +105,16 @@ no such spelling to write, so `json/serialize` and `json/pretty` raise
 encode. Every key of `(file/stat …)` was in that state, as was every key a
 compile query returns.
 
-Two standing checks keep the list complete, because the constructor cannot —
+Three standing checks keep the list complete, because the constructor cannot —
 `Value::keyword` takes a `&str` and records nothing, by design:
 
+- `keyword::vocab(name)` is a `const fn` that returns its argument and asserts
+  the vocabulary carries it. Called from a `const` block, the assertion runs
+  when the crate is compiled, so a spelling it cannot find is a build error at
+  the line that wrote it. `rich_error!` puts every field name through it —
+  `rich_error!(ctx, "parse-error", msg, input = …)` writes the keyword `:input`
+  through `stringify!`, where the spelling reaches the constructor as a token
+  rather than as a string and no scan of the source can find it.
 - `vocabulary_covers_literal_mint_sites` scans `src/` for every form that
   hands a literal to a keyword constructor: `Value::keyword("…")`,
   `TableKey::keyword("…")`, the `kw("…")` helper each primitive module
@@ -123,9 +130,11 @@ Two standing checks keep the list complete, because the constructor cannot —
   in a `match` arm, not in the call.
 
 Adding a spelling to one of those tables therefore fails the build until it is
-added to `VOCABULARY` too. Spellings that only exist once a real value does —
-the type name of each heap variant, reached through `(type-of …)` — are pinned
-by the corpus instead, in `tests/elle/keyword-spelling.lisp`.
+added to `VOCABULARY` too. What the three miss is a spelling that reaches the
+constructor through a local — `let kind = match … ; Value::keyword(kind)` — and
+those are pinned by the corpus instead, in
+`tests/elle/keyword-spelling.lisp`, along with the type name of each heap
+variant, which only exists once a real value does.
 
 ## Reading a name, and not reading one
 
