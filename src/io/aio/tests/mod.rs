@@ -1,6 +1,6 @@
 // audited: 2026-09-05
 // src/io/AGENTS.md
-//! The fixtures the async-backend tests share: sockets a peer never answers,
+//! Fixtures the async-backend tests share: sockets a peer never answers,
 //! scratch paths, and the assertion that a cancelled operation retires.
 
 use super::*;

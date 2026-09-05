@@ -1,6 +1,7 @@
 // audited: 2026-09-05
 // src/io/AGENTS.md
-// Unit tests for the threadpool backend, split by concern:
+// Unit tests for the thread-pool backend, one module per concern.
+//
 //   - `hub`:      CompletionHub in_flight accounting (the one-channel invariant)
 //   - `net`:      what a connect makes of a refusal, and the platform
 //                 behavior the paced retry rests on
