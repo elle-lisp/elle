@@ -1,10 +1,11 @@
-//! The heap's code-payload cache.
+// audited: 2026-09-05
+//! The heap's code-payload cache: one payload per blueprint, shared by every
+//! header built from it.
+//! docs/impl/region/template.md
 //!
-//! One payload per blueprint, materialized on first use and shared by every
-//! header built from it afterwards (docs/impl/region/template.md § "Who owns
-//! the payload region"). Instance-owned rider state on `FiberHeap`, beside the
-//! root region and the process-root registry — two coexisting instances each
-//! materialize their own payloads.
+//! A payload is materialized on first use. The cache is instance-owned rider
+//! state on `FiberHeap`, beside the root region and the process-root registry,
+//! so two coexisting instances each materialize their own payloads.
 
 use std::rc::{Rc, Weak};
 
@@ -50,6 +51,9 @@ struct Entry {
     proto: Weak<TemplateProto>,
     region_ix: usize,
     payload: RegionSlice<CodePayload>,
+    /// The region's generation when the payload was built. Reading it back at
+    /// a hit is how a live region is told from a recycled id.
+    generation: u32,
 }
 
 /// Every payload this instance has materialized.
@@ -65,13 +69,23 @@ pub(crate) struct TemplatePayloads {
 }
 
 impl TemplatePayloads {
-    /// The payload cached for `proto`, if the entry still names it.
-    fn get(&self, proto: &Rc<TemplateProto>) -> Option<RegionSlice<CodePayload>> {
+    /// The payload cached for `proto` with the region it lives in and that
+    /// region's generation at materialization, if the entry still names `proto`.
+    fn get(
+        &self,
+        proto: &Rc<TemplateProto>,
+    ) -> Option<(RegionSlice<CodePayload>, RuntimeRegion, u32)> {
         let entry = self.entries.get(&(Rc::as_ptr(proto) as usize))?;
         // The weak keeps the old allocation readable, so a dead blueprint whose
         // address was reused reports a strong count of zero here rather than
         // aliasing the new one.
-        (entry.proto.strong_count() > 0).then_some(entry.payload)
+        (entry.proto.strong_count() > 0).then(|| {
+            (
+                entry.payload,
+                self.regions[entry.region_ix].region,
+                entry.generation,
+            )
+        })
     }
 }
 
@@ -85,7 +99,14 @@ impl FiberHeap {
         &mut self,
         proto: &Rc<TemplateProto>,
     ) -> RegionSlice<CodePayload> {
-        if let Some(payload) = self.template_payloads.get(proto) {
+        if let Some((payload, region, generation)) = self.template_payloads.get(proto) {
+            debug_assert_eq!(
+                self.region_generation(region.get()),
+                generation,
+                "a cached payload names a live region; this one's region was \
+                 freed, so the header built from it would read whatever the \
+                 pages hold now"
+            );
             return payload;
         }
         self.sweep_template_payloads_if_due();
@@ -94,6 +115,7 @@ impl FiberHeap {
         let before = self.region_bytes(region);
         let payload = materialize_payload(self, proto, region);
         let grew = self.region_bytes(region).saturating_sub(before);
+        let generation = self.region_generation(region.get());
 
         let cache = &mut self.template_payloads;
         cache.regions[region_ix].bytes += grew;
@@ -104,9 +126,24 @@ impl FiberHeap {
                 proto: Rc::downgrade(proto),
                 region_ix,
                 payload,
+                generation,
             },
         );
         payload
+    }
+
+    /// Every payload region this instance still holds open.
+    ///
+    /// The cache's reference to each one is held in Rust, so a pass that finds
+    /// a region's holders by scanning heap contents finds none of them. Such a
+    /// pass takes this list as its exclusion set.
+    pub(crate) fn template_payload_regions(&self) -> Vec<RuntimeRegion> {
+        self.template_payloads
+            .regions
+            .iter()
+            .filter(|r| !r.released)
+            .map(|r| r.region)
+            .collect()
     }
 
     /// This instance's placeholder code object: a nullary body of a single

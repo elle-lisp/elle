@@ -1,3 +1,8 @@
+// audited: 2026-09-05
+//! Process roots, the pinned root region, and the macro-expansion scope.
+//! docs/impl/region/rules.md
+//! docs/impl/region/template.md
+
 use super::*;
 
 /// Record `region` as a process root of `heap` — a region the teardown sweep
@@ -67,19 +72,28 @@ pub fn begin_macro_scope(heap: &mut FiberHeap) {
 }
 
 /// Close the scope opened by [`begin_macro_scope`] and reclaim the transformer's
-/// dead scratch — EXCLUDING process-lifetime roots. Trait method tables (and the
-/// root region) are allocated through [`alloc_root`]/`root_region`, which mint
-/// a real region whose sole owner is held Rust-side by the registry — invisible
-/// to the heap-content in-degree scan the reclaim uses. A transformer that
-/// dispatches a trait method (e.g. `append`'s `empty?`) can trigger that first
-/// allocation mid-scope, so the root region must be protected from reclamation
-/// or the trait tables would be freed under the running program. The instance's
-/// process roots plus its root region are exactly that exclusion set.
+/// dead scratch, excluding every region whose sole owner is held Rust-side.
+///
+/// The reclaim finds a region's holders through the heap-content in-degree
+/// scan, so an owner living in a Rust structure is invisible to it and its
+/// region reads as unreferenced scratch. Three owners are that, and a
+/// transformer reaches each of them mid-scope:
+///
+/// - the process-root registry, which owns the trait method tables a
+///   transformer's first trait dispatch (`append`'s `empty?`) allocates;
+/// - the pinned root region those tables live in;
+/// - the code-payload cache, which a `MakeClosure` inside the transformer
+///   extends with a fresh region whenever the open one is full.
+///
+/// Excluding them delays no reclamation, because each answers to its own
+/// owner: teardown for a process root, the death of the last blueprint packed
+/// into it for a payload region.
 pub fn reclaim_macro_scope(heap: &mut FiberHeap) {
     let mut protected = heap.process_roots_snapshot();
     if let Some(root) = heap.root_region_slot() {
         protected.push(root);
     }
+    protected.extend(heap.template_payload_regions());
     heap.reclaim_region_mint_scope(&protected);
 }
 
