@@ -1,9 +1,32 @@
+// audited: 2026-09-05
+// src/io/AGENTS.md
 //! The socket operations a worker runs.
 //!
 //! `Accept`, `RecvFrom` and both connects each wait on a peer that may never
 //! appear, so each takes the descriptor non-blocking and waits under its bound
 //! rather than in the kernel. `SendTo` and `Shutdown` hand what they were given
 //! to the kernel and return.
+//!
+//! # A full AF_UNIX backlog arrives under two errnos
+//!
+//! Linux reports a connect to an AF_UNIX listener whose backlog is full as
+//! `EAGAIN`. macOS and the BSDs report it as `ECONNREFUSED`, which is also the
+//! errno they return when nobody is listening. So one peer state arrives under
+//! two names, and on the BSDs that name carries two readings.
+//!
+//! A connect paces `EAGAIN` on every platform. It paces `ECONNREFUSED` only
+//! for an AF_UNIX peer, only where the errno is spent both ways, and only
+//! while the path still names a socket. That last condition is what keeps a
+//! dead peer fast: a listener that has gone takes its socket with it, so the
+//! path stops naming one and the connect reports the refusal it was pacing. A
+//! TCP connect never paces a refusal, because a reset from a host with no
+//! listener is the peer's whole answer.
+//!
+//! What the path cannot separate is a socket that is bound and never listened
+//! on. It refuses exactly as a full backlog does and leaves its file in place,
+//! so such a connect is refused at once on Linux and paces to the caller's
+//! `:timeout` elsewhere. That is the price of pacing the common case, and
+//! `:timeout` is what bounds it.
 
 use super::*;
 use std::time::Instant;
@@ -171,9 +194,9 @@ pub(super) fn connect_unix(path: &str, options: &SocketOptions, bounds: Bounds) 
     }
 }
 
-/// How long a connect that reported `EAGAIN` waits before trying again.
-/// AF_UNIX reports a listener whose backlog is full that way, and offers no
-/// readiness to wait on, so that retry is paced rather than driven by an event.
+/// How long a connect that met a full AF_UNIX backlog waits before trying
+/// again. The kernel offers no readiness for that state, whichever errno it
+/// reports it under, so the retry is paced rather than driven by an event.
 const CONNECT_RETRY_PACE: Duration = Duration::from_millis(10);
 
 /// Open a socket, connect it to `sa`, and report the connected descriptor —

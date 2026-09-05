@@ -1,3 +1,5 @@
+// audited: 2026-09-05
+// src/io/AGENTS.md
 //! The per-operation bound a thread-pool worker runs its syscalls under.
 //!
 //! Two types, one for each side of the handover. [`Bounds`] is what a
@@ -275,8 +277,9 @@ impl OpBound {
     /// first. Only the stop pipe is polled, so `Ready` is impossible.
     ///
     /// This is for a syscall the kernel offers no readiness for: an AF_UNIX
-    /// `connect` to a listener whose backlog is full reports `EAGAIN` and gives
-    /// nothing to wait on, so its retry has to be paced. The stop stays visible
+    /// `connect` to a listener whose backlog is full reports `EAGAIN` on Linux
+    /// and `ECONNREFUSED` on macOS and the BSDs, and gives nothing to wait on
+    /// either way, so its retry has to be paced. The stop stays visible
     /// throughout, which a plain sleep would not allow.
     pub(super) fn pause(&self, slice: Duration) -> Wake {
         let mut pfd = libc::pollfd {
