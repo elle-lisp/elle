@@ -2,7 +2,7 @@
        smoke-elle smoke-vm smoke-noffi smoke-jit smoke-nouring smoke-wasm smoke-mlir \
        doctest myplugin elle-wasm check-wasm elle-mlir elle-noffi plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding \
-       fmt fmt-check
+       fmt fmt-check audit agents agents-check
 
 .DEFAULT_GOAL := all
 
@@ -217,6 +217,15 @@ docs/pipeline.svg: docs/pipeline.dot
 docgen: elle  ## Generate documentation site (Rust docs + Elle site)
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 	$(ELLE) demos/docgen/generate.lisp
+
+audit:  ## What to audit next against DOCUMENTATION.md
+	@./scripts/audit
+
+agents:  ## Write each directory's AGENTS.md from its documents' call-outs
+	@./scripts/agents
+
+agents-check:  ## Fail when a committed AGENTS.md is stale
+	@./scripts/agents --check
 
 # ── Format ─────────────────────────────────────────────────────────
 

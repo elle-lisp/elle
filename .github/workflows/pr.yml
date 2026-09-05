@@ -72,6 +72,11 @@ jobs:
           sudo apt-get install -y llvm-22-dev libpolly-22-dev mlir-22-tools libmlir-22-dev libclang-22-dev clang-22
       - name: Check formatting
         run: cargo fmt -- --check
+      # The generated AGENTS.md indexes are committed, so a worktree starts
+      # with one. The pre-commit hook rebuilds and re-stages them; this is the
+      # hard gate, because CI cannot rewrite the tree.
+      - name: Check generated indexes
+        run: make agents-check
       - name: Run clippy on workspace
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       # The clippy step above only ever sees the Linux arm of every

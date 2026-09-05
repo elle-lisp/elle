@@ -1,5 +1,7 @@
 # tests/integration
 
+<!-- audited: 2026-09-05 -->
+
 Full-pipeline integration tests: end-to-end behavior verification.
 
 ## Responsibility
@@ -105,6 +107,9 @@ Tests are organized by feature area in separate files:
 | `glob.rs` | Glob patterns |
 | `elle_scripts.rs` | Process-global runtime-mode pins (guardfree/no-uring/mlir-off); the corpus itself runs via `elle test` |
 | `paths.rs` | The paths and URLs the Makefile and the doc generator name in text, checked against the tree |
+| `agents.rs` | Call-out extraction and the generated `AGENTS.md` index ([docs/impl/agents.md](../../docs/impl/agents.md)) |
+| `audit.rs` | The audit stamp's commit gate, and the queue's cost ordering ([docs/impl/audit.md](../../docs/impl/audit.md)) |
+| `prose.rs` | The checkable half of [DOCUMENTATION.md](../../DOCUMENTATION.md), swept over every file that carries a stamp |
 | `bytecode_doc.rs` | The instruction names and source paths the bytecode documents spell, checked against the `Instruction` enum |
 | `workflows.rs` | The PR workflow's merge gate: every job needed and enforced by `all-checks`, a job that builds every plugin in the `plugins/` submodule, no job serializing the corpus and the Rust suite, no shared cache key |
 | `plugins.rs` | Every plugin directory checked against the submodule workspace's `members`, the plugin artifacts the Makefile demands checked against the submodule's crates, and the assertion that fails when one is missing |

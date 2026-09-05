@@ -1,14 +1,37 @@
 #!/bin/sh
 # Pre-commit hook:
-#   1. Auto-format staged .lisp files with `elle fmt` and re-stage.
-#   2. Auto-format staged .rs files with `cargo fmt` and re-stage.
-#   3. If staged .rs files exist, gate on clippy / rustdoc — the `make test`
+#   1. Gate on the audit stamp: every staged file carries today's date.
+#   2. Auto-format staged .lisp files with `elle fmt` and re-stage.
+#   3. Auto-format staged .rs files with `cargo fmt` and re-stage.
+#   4. If staged .rs files exist, gate on clippy / rustdoc — the `make test`
 #      checks that CAN'T be auto-fixed, scoped to Rust-touching commits so
 #      Lisp-only commits don't pay the Cargo cost.
 #
 # Formatting is fixed, never gated: an unformatted file is reformatted and
 # re-staged, not rejected. CI's `make fmt-check` is the hard format gate (CI
 # can't rewrite your tree); the local hook just keeps every commit clean.
+
+# ── Audit stamp ─────────────────────────────────────────────────────
+# Touch a file, audit it (DOCUMENTATION.md). Read it whole, hold it to the
+# policy, then stamp today's date. This runs first so a missing stamp costs
+# nothing to discover.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+if ! ./scripts/audit --staged; then
+  exit 1
+fi
+
+# ── Generated indexes ───────────────────────────────────────────────
+# Rebuild every AGENTS.md the generator owns and re-stage what changed. Fixed,
+# never gated, exactly like the formatters below: an index is derived, so a
+# stale one is a thing to rewrite rather than a thing to reject. CI's
+# `make agents-check` is the hard gate, because CI cannot rewrite your tree.
+#
+# scripts/agents refuses any directory still holding a hand-written AGENTS.md,
+# so this cannot eat module knowledge that has not been converted yet.
+./scripts/agents >/dev/null 2>&1
+for f in $(git diff --name-only --diff-filter=ACM -- '*AGENTS.md'); do
+  git add "$f"
+done
 
 # ── Lisp ────────────────────────────────────────────────────────────
 if [ -n "$ELLE" ]; then

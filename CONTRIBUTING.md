@@ -1,5 +1,10 @@
 # Contributing to Elle
 
+<!-- audited: 2026-09-05 -->
+
+How to work on Elle: the test policy that keeps main green, the order of work,
+and what a change has to carry before we can take it.
+
 ## The not rocket science rule
 
 `origin/main` is green. Always. Every commit on main has passed every
@@ -146,13 +151,8 @@ git config core.hooksPath .githooks
 
 ## Conventions
 
-- Files and directories: lowercase, single-word when possible.
-- Target file size: ~500 lines / 15KB.
-- Prefer formal types over hashes/maps for structured data.
-- Validation at boundaries, not recovery at use sites.
-- Do not add backward compatibility machinery.
-- Do not silently swallow errors. Propagate or log with context.
-- Breaking changes are fine. Use epochs for mechanical migration.
+[AGENTS.md](AGENTS.md#conventions) holds the code conventions, and
+[DOCUMENTATION.md](DOCUMENTATION.md) holds the ones for prose.
 
 ## Pull requests: the body describes the change, and nothing else
 
@@ -175,54 +175,30 @@ caveats about code the change does not touch. If a reviewer needs one of them
 to judge THIS change, state it in one sentence where it bears on the change and
 link the issue. Otherwise leave it out.
 
-## Comments: write for the cold reader
+## Comments and documents
 
-Every line of code and text here is written by an agent, and read by another
-agent that arrives **cold** — no memory of this session, this mission, the plan
-that drove it, or who wrote what. That single fact decides what a comment may say.
-The reader can see the *what*; a comment exists to explain the *why*. It can
-resolve a reference to code, a spec, or a test — those are in front of it. It
-**cannot** resolve a reference to anything that lived only in the writing
-session's head. So a comment must be self-contained and timeless: describe the
-code as it is now, never the journey that produced it (git holds history).
-
-Three references in particular are unresolvable to the cold reader and so are
-forbidden — in comments and in shipped docs alike:
-
-- **Defects and leaks.** Never write "this avoids the UAF in `foo.lisp`", "the
-  dominant leak is X", or "RED until Y is fixed". **The canonical reference for a
-  defect or leak is a test.** A test explains the source and state of the code
-  extensively, demonstrates the problem, and proves whether it is present — and,
-  because it goes green when the defect is fixed, it cannot lie. A comment can:
-  the moment the defect is fixed (or never existed), a defect-narrating comment
-  misleads the cold reader into distrusting correct code, and demands a follow-up
-  edit to remove. State the invariant the code upholds *positively*; if a behavior
-  guards against a hazard, let the pinning test carry the detail.
-
-- **Dev-scratch files.** Never cite a working roadmap, hand-off note, or mission
-  plan — the ephemeral documents that drive a session and get deleted when their
-  work lands. The reference dangles the instant the file is gone, and until then
-  it imports a transient framing the reader has no way to evaluate. Cite the
-  permanent spec (`docs/impl/*.md`) or the test instead. When a working plan
-  graduates into a spec, its citations graduate with it.
-
-- **Session and mission scaffolding.** Never reference the numbered steps of the
-  effort that produced the code — "Stage 3", "A3.2", "addendum 2", "the commit-4
-  variant" — nor which session or attempt did something. The reader has no access
-  to that sequence and cannot reconstruct it; it is pure noise that implies an
-  ordering no longer present in the code. Provenance is equally irrelevant: the
-  codebase is the artifact, not the history of who touched which line when.
-  Describe the *mechanism*, not the step or session that produced it.
-
-Graduating a working plan into a permanent spec means stripping all three: the
-defect ledger, the scratch-file citations, and the stage numbers. What remains is
-the mechanism as it stands, with tests as the reference for every claim about
-correctness.
+[DOCUMENTATION.md](DOCUMENTATION.md) holds the rules for both: what a comment
+may say, where a claim lives, how references are written, and the audit stamp
+every file you touch carries.
 
 ## Making changes
 
+Documentation, then tests, then code.
+
 1. Read the relevant AGENTS.md files for the modules you're changing.
-2. Write or update tests for every behavioral change.
-3. Run `make test` before committing.
-4. Update AGENTS.md and docs when you change interfaces.
-5. All tests pass. No exceptions.
+2. Write the documentation first. It is the specification you are about to
+   build against, and it is what a reviewer reads to judge whether the change
+   is the right one.
+3. Write the tests next. Run each new test before you implement, and watch it
+   fail. A test written after the code is shaped to whatever the code does, so
+   it proves only that the code agrees with itself.
+4. Write the code, until the tests pass.
+5. Run `make test` before you open the pull request. All tests pass.
+
+How you sequence your own commits is your business. A change that arrives with
+no documentation and no tests is not one we can take.
+
+A note that costs people time more often than it should: a test that will not
+compile has not failed. When a Rust test names an API that does not exist yet,
+stub the smallest signature that compiles and return a wrong answer from it.
+Then watch the assertion fail, and write the body.
