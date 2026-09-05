@@ -109,6 +109,20 @@
           true (break nil))))
     (length outer:k)))
 
+# (h) the block a break leaves sits INSIDE a branch arm, so its exit label is
+# reached before the branch's merge. The point must be dead by then: a replica
+# into the break's block would release `outer` a second time on the path that
+# already released it at the merge.
+(defn w-inner-block (i)
+  (let [outer {:k (string "n" i "-long")}]
+    (if (%gt i -1)
+      (begin
+        (block (let [x {:k (string "x" i)}]
+                 (if (%gt i -1) (break 1) nil)
+                 (length x:k)))
+        (length outer:k))
+      0)))
+
 # ── control: the same read with no break — correct now (harness sanity) ───────
 (defn c-plain (i)
   (let [x {:k (string "p" i)}]
@@ -123,6 +137,7 @@
 (var e 0)
 (var f 0)
 (var g 0)
+(var h 0)
 (var k 0)
 (while (%lt i 3000)
   (assign a (w-carried i))
@@ -132,6 +147,7 @@
   (assign e (w-many i))
   (assign f (w-return i))
   (assign g (w-outer i))
+  (assign h (w-inner-block i))
   (assign k (c-plain i))
   # The sink is a module-level container by design (witness c stores into it);
   # drain it so the driver's own retention stays flat.
@@ -147,5 +163,7 @@
 (assert (%gt e 0) "an earlier iteration's release and the replica double-freed")
 (assert (%gt f 0) "the returned value was freed under the caller's read")
 (assert (%gt g 0) "a value bound outside the loop was freed by the replica")
+(assert (%gt h 0)
+        "a point that outlived its block replicated onto the branch merge path")
 
 (println "region-break-loop-replica-uaf: ok")

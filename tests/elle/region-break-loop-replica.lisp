@@ -123,6 +123,30 @@
         (= msg:type :data) (break msg)
         true (break nil)))))
 
+# the point's lifetime ─────────────────────────────────────────────────────────
+# The point lives exactly as long as its block is being lowered, and both
+# directions of that matter. Here the block sits INSIDE a branch arm, so its exit
+# label is reached before the branch's merge: the point must be dead by the time
+# the merge emits, or the merge's release is replicated onto a path that already
+# ran it. `outer` is live across the whole shape, so an extra release faults.
+(defn scope-inner-block (c)
+  (let [outer (mk)]
+    (if c
+      (begin
+        (block (let [x (mk)]
+                 (when true (break 1))
+                 (%struct? x)))
+        (length (keys outer)))
+      0)))
+
+# The other direction: the break's block ENCLOSES a later branch, whose merge the
+# jump skipped, so the point must still be live there.
+(defn scope-outer-block (c)
+  (block (let [x (mk)]
+           (when c (break 1))
+           (if (%gt 1 0) 1 2)
+           (%struct? x))))
+
 # boundaries ───────────────────────────────────────────────────────────────────
 # A lambda nested in the body releases against its own frame's slots, which no
 # point of this frame can name. Its releases must stay where they were placed.
@@ -173,6 +197,8 @@
 (def many-iterations-d (measure (fn () (many-iterations 8)) 200 window))
 (def used-result-d (measure used-result 200 window))
 (def carries-value-d (measure carries-value 200 window))
+(def scope-inner-block-d (measure (fn () (scope-inner-block true)) 200 window))
+(def scope-outer-block-d (measure (fn () (scope-outer-block true)) 200 window))
 (def bound-lambda-d (measure (fn () (bound-lambda 1)) 200 window))
 (def ctl-if-break-d (measure ctl-if-break 200 window))
 (def ctl-bare-break-d (measure ctl-bare-break 200 window))
@@ -184,6 +210,8 @@
          "  two-values " two-values-d "  deep " deep-break-d)
 (println "  many-iterations " many-iterations-d "  used-result " used-result-d
          "  carries-value " carries-value-d)
+(println "  scope: inner-block " scope-inner-block-d "  outer-block "
+         scope-outer-block-d)
 (println "  boundary: lambda " bound-lambda-d)
 (println "  controls: if " ctl-if-break-d "  bare " ctl-bare-break-d "  flag "
          ctl-flag-d "  noloop " ctl-noloop-d)
@@ -206,6 +234,10 @@
 (bounded? used-result-d "the block's value is consumed")
 (bounded? carries-value-d "the break carries the loop's own value")
 
+(bounded? scope-inner-block-d
+          "the point outlived the block, inside a branch arm")
+(bounded? scope-outer-block-d
+          "the point died at a nested branch's merge inside its own block")
 (bounded? bound-lambda-d "lambda nested in the body: per-activation release")
 
 # Value preservation: adding a release must not change what runs.
