@@ -1,6 +1,10 @@
+// audited: 2026-09-05
 //! Suspension and call-frame types: `BytecodeFrame` (a parked bytecode
 //! execution point), `SuspendedFrame` (one step in a fiber's replay chain),
 //! and the execution/stack-trace frames `Frame` / `CallFrame`.
+//!
+//! docs/impl/region/generations.md
+//! docs/impl/region/owner.md
 
 use super::FiberHandle;
 use crate::value::closure::Closure;
@@ -158,6 +162,39 @@ pub(crate) fn record_region_borrows(
         .filter(|(_, m)| heap.generation_raw(m.region.get()) == m.gen)
         .map(|(&slot, m)| (slot, m.region, m.gen))
         .collect()
+}
+
+/// Where a suspended frame parked, for the resume-boundary panic a stale
+/// uncounted borrow raises (docs/impl/region/generations.md).
+pub struct ParkSite<'a> {
+    /// The parked activation's function, `None` for an anonymous body.
+    pub function: Option<&'a str>,
+    /// The location recorded for the resume ip, where the table has one.
+    pub at: Option<crate::reader::SourceLoc>,
+    /// The function's first recorded location, which names the file where the
+    /// resume ip has no entry of its own.
+    pub start: Option<crate::reader::SourceLoc>,
+    pub ip: usize,
+    /// This frame's index in the replay chain, and the chain's length.
+    pub frame: usize,
+    pub frames: usize,
+}
+
+impl ParkSite<'_> {
+    /// The resume-boundary panic text for a stale suspended-frame region borrow.
+    pub fn stale_borrow_message(
+        &self,
+        slot: u32,
+        region: crate::hir::region::RuntimeRegion,
+    ) -> String {
+        format!(
+            "stale suspended-frame region borrow on resume: activation region \
+             slot {slot} maps to region {}, which was freed while this fiber was \
+             parked — an uncounted suspended-frame borrow outlived its region \
+             (docs/impl/region/generations.md § 'Uncounted-borrow check')",
+            region.get(),
+        )
+    }
 }
 
 /// A suspended execution step — either a bytecode frame or a sub-fiber resume.

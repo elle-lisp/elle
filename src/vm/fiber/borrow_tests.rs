@@ -1,17 +1,16 @@
-//! Counterfactual tests for the uncounted cross-fiber borrow check
-//! (docs/impl/region/generations.md § "Uncounted-borrow check").
+// audited: 2026-09-05
+//! Counter-factual tests for the two uncounted region borrows that carry a
+//! recorded generation, and for the panic the resume boundary raises on a stale one.
 //!
-//! A child fiber snapshots heap values from its parent's dynamic-parameter
-//! baseline without a reference count (the scheduler-via-parameter borrow). The
-//! recorded `(region, generation)` lets the resume and `resolve_parameter`
-//! checks confirm the borrowed region is still live — catching a dangling
-//! borrow that a page-stamp check (`region_of`) misses once the freed page is
-//! re-claimed and re-stamped. Region resolution and the generation read both go
-//! through the one explicit heap passed in, so the recorded pair and the check
-//! are within a single store.
+//! docs/impl/region/generations.md
+//!
+//! Region resolution and the generation read both go through the one explicit
+//! heap passed in, so the recorded pair and the check are within a single store.
 
 use super::{first_stale_borrow, record_param_borrows};
 use crate::hir::region::MappedRegion;
+use crate::reader::SourceLoc;
+use crate::value::fiber::ParkSite;
 use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::{HeapObject, Pair};
 use crate::value::Value;
@@ -168,5 +167,82 @@ fn stale_leftover_map_entry_is_not_snapshotted_as_a_borrow() {
     assert!(
         first_stale_borrow(&borrows, &heap).is_none(),
         "freeing the unrelated recycled incarnation must not trip the check",
+    );
+}
+
+/// The resume-boundary panic names the activation that parked, not just the
+/// slot and the physical region (docs/impl/region/generations.md).
+///
+/// The trap: a slot number and a physical region id are per-run values. Both
+/// change with the batch, the build profile and the I/O backend, so a panic
+/// carrying only those cannot be traced back to any line of any program — which
+/// is the whole difficulty of a failure that reproduces only on a machine the
+/// reader cannot run.
+///
+/// Counter-factual: assert only that the message holds the slot and the region,
+/// and the pre-existing message passes unchanged. The function name and the
+/// source location are what the assertions below add.
+#[test]
+fn stale_borrow_message_names_the_parked_site() {
+    let mut heap = FiberHeap::new();
+    let r = heap.new_runtime_region();
+
+    let site = ParkSite {
+        function: Some("drain-body"),
+        at: Some(SourceLoc::new("tests/elle/http.lisp", 214, 7)),
+        start: Some(SourceLoc::new("tests/elle/http.lisp", 200, 1)),
+        ip: 61,
+        frame: 1,
+        frames: 3,
+    };
+    let msg = site.stale_borrow_message(136968, r);
+
+    assert!(
+        msg.contains("136968") && msg.contains(&format!("{}", r.get())),
+        "the slot and the physical region must survive the rewrite: {msg}",
+    );
+    assert!(
+        msg.contains("drain-body"),
+        "the parked activation's function must be named: {msg}",
+    );
+    assert!(
+        msg.contains("tests/elle/http.lisp:214:7"),
+        "the resume point's own source location must be named: {msg}",
+    );
+    assert!(
+        msg.contains("frame 1 of 3"),
+        "the frame's position in the replay chain must be named: {msg}",
+    );
+}
+
+/// Where the resume ip has no location entry of its own, the message falls back
+/// to the function's first recorded line. Naming the file is most of the answer,
+/// and an exact-match table lookup misses whenever the resume point is not
+/// itself a recorded offset.
+///
+/// Counter-factual: report `at` alone and this case prints no location at all —
+/// the reader learns the region id and nothing about which program parked.
+#[test]
+fn stale_borrow_message_falls_back_to_the_function_start() {
+    let mut heap = FiberHeap::new();
+    let r = heap.new_runtime_region();
+
+    let site = ParkSite {
+        function: None,
+        at: None,
+        start: Some(SourceLoc::new("lib/http2.lisp", 88, 3)),
+        ip: 61,
+        frame: 0,
+        frames: 1,
+    };
+    let msg = site.stale_borrow_message(7, r);
+
+    assert!(
+        msg.contains("lib/http2.lisp:88:3"),
+        "the function's first recorded line must stand in for a missing entry: {msg}",
+    );
+    assert!(
+        msg.contains("<anonymous>"),
+        "an unnamed activation must still be reported as one: {msg}",
     );
 }
