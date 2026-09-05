@@ -102,3 +102,59 @@ fn distinct_ctxs_route_to_distinct_regions() {
         "the second ctx's region must be honored, not overridden by an ambient slot",
     );
 }
+
+// A ctx that carries a real memo, for the naming asserts below.
+fn ctx_with_memo(
+    heap: &mut FiberHeap,
+    region: crate::hir::region::RuntimeRegion,
+    memo: &mut crate::symbol::SymbolTable,
+) -> CallCtx {
+    CallCtx {
+        region,
+        heap: heap as *mut FiberHeap,
+        symbols: memo as *mut crate::symbol::SymbolTable,
+    }
+}
+
+// Spec: a name that arrives from a plugin is learned by the instance the call
+// belongs to, because nothing else can spell it — the string lives in the
+// plugin's `.so`, so the static vocabulary cannot carry it
+// (docs/impl/symbol.md § "Keywords in the plugin ABI").
+//
+// The external's type name is the one step removed: it is not a keyword when
+// the plugin hands it over, but `(type-of …)` mints one from it, so an
+// unlearned name makes every `type-of` on that handle print
+// `#<keyword:hash>` and refuses to encode as JSON.
+#[test]
+fn a_plugin_name_is_learned_by_the_calling_instance() {
+    let mut heap = FiberHeap::new();
+    let mut memo = crate::symbol::SymbolTable::new();
+    let region = heap.new_runtime_region();
+
+    let kw = "plugin-keyword-xt";
+    let ext = "plugin-external-xt";
+    {
+        let mut ctx = ctx_with_memo(&mut heap, region, &mut memo);
+        unsafe { make_keyword(&mut ctx, kw.as_ptr(), kw.len()) };
+        unsafe {
+            make_external(
+                &mut ctx,
+                ext.as_ptr(),
+                ext.len(),
+                std::ptr::null_mut(),
+                None,
+            )
+        };
+    }
+
+    assert_eq!(
+        memo.keyword_name(crate::value::keyword::keyword_hash(kw)),
+        Some(kw),
+        "a plugin-minted keyword is learned by the instance the call belongs to",
+    );
+    assert_eq!(
+        memo.keyword_name(crate::value::keyword::keyword_hash(ext)),
+        Some(ext),
+        "an external's type name is learned too — `type-of` mints a keyword from it",
+    );
+}
