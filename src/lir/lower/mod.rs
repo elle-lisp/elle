@@ -1,64 +1,40 @@
-//! HIR to LIR lowering
+// audited: 2026-09-05
+//! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
+//! carries. The passes themselves live in the sibling modules named below.
+//!
+//! docs/impl/lir.md
 
 mod access;
+mod aliases;
 mod binding;
 mod control;
 mod emitops;
 mod expr;
 mod lambda;
+mod naming;
+mod order;
 mod pattern;
 pub mod rcstats;
-
-use std::sync::atomic::{AtomicU32, Ordering};
+mod regiondecref;
+mod regionemit;
+mod relocate;
+mod splice;
+mod tailcall;
 
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
 use crate::hir::arena::BindingArena;
 use crate::hir::region::{RegionInfo, StaticRegion};
 use crate::hir::{analyze_escape, Binding, BlockId, EscapeInfo, Hir, HirId, HirKind, HirPattern};
-
-/// Global region ID counter. IDs 0 (invalid) and 1 are reserved; minting starts at 2.
-/// Used by the lowerer for solver-assigned regions and by the compilation
-/// pipeline for transient compile-time regions.
-static NEXT_STATIC_REGION: AtomicU32 = AtomicU32::new(2);
-
-/// Short, stable name for an allocating `LirInstr` variant — used only
-/// in the `--trace=rc:emit` lines to disambiguate which kind of alloc
-/// was stamped on a phantom region's HirId.
-fn instr_kind_name(instr: &LirInstr) -> &'static str {
-    match instr {
-        LirInstr::MakeClosure { .. } => "MakeClosure",
-        LirInstr::MakeCaptureCell { .. } => "MakeCaptureCell",
-        LirInstr::MakeArrayMut { .. } => "MakeArrayMut",
-        LirInstr::List { .. } => "List",
-        LirInstr::Call { .. } => "Call",
-        LirInstr::SuspendingCall { .. } => "SuspendingCall",
-        LirInstr::TailCall { .. } => "TailCall",
-        LirInstr::CallArrayMut { .. } => "CallArrayMut",
-        LirInstr::TailCallArrayMut { .. } => "TailCallArrayMut",
-        LirInstr::Freeze { .. } => "Freeze",
-        LirInstr::Thaw { .. } => "Thaw",
-        _ => "other",
-    }
-}
-
-/// Mint a fresh **static** region id — a compile-time, globally-unique slot
-/// number baked into bytecode. A static id is a per-function slot, NOT a live
-/// region: each activation remaps it to a freshly-minted `new_runtime_region`
-/// via its `activation_region_map`. Never index a static id into the
-/// `RegionStore` (see docs/impl/region/model.md § id-spaces).
-pub fn new_static_region() -> StaticRegion {
-    let id = NEXT_STATIC_REGION.fetch_add(1, Ordering::Relaxed);
-    assert!(
-        id >= 2,
-        "static region id counter wrapped or hit reserved range"
-    );
-    StaticRegion::new(id).expect("static region id counter is >= 2, hence nonzero")
-}
 use crate::syntax::Span;
 use crate::value::{Arity, SymbolId, Value};
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
+
+pub use naming::new_static_region;
+pub(crate) use naming::ValueSlot;
+use order::assert_cells_outlive_their_readers;
+pub(crate) use relocate::{BranchHoists, HoistBlock, TailExitHoist};
 
 /// Tracks an active Loop during lowering so `Recur` can find its
 /// entry label and binding slots.
@@ -73,131 +49,13 @@ struct LoopLowerContext {
 /// result register and exit label. A `break` emits no region instruction of its
 /// own: both the value it carries and every release its jump passes over are
 /// anchored on the BLOCK by the solver, which the lowerer emits after the exit
-/// label (docs/impl/region/mechanism.md § "`break` transfers its value" and
-/// § "A release the break jumps over is not a release").
+/// label (docs/impl/region/anchors.md).
 struct BlockLowerContext {
     block_id: BlockId,
     #[allow(dead_code)]
     result_reg: Reg,
     result_slot: u16,
     exit_label: Label,
-}
-
-/// The relocation point a frame-replacing tail call opens in its own block
-/// (docs/impl/region/mechanism.md § "A release past a frame-replacing tail call
-/// is not a release").
-///
-/// Everything the lowerer emits after a `TailCall` runs only on the NATIVE
-/// fall-through — a native pushes no bytecode frame, so the dispatch loop
-/// continues into that block, while a closure callee replaces the frame and
-/// never arrives. A release landing there is therefore emitted where control may
-/// never reach, and the frame's own reference is stranded once per call. Moving
-/// that one release to just before the `TailCall` costs no count argument (it is
-/// the same single release, relocated), and is legal for every region the call
-/// itself cannot reach.
-///
-/// A branch merge inherits the points of the arms that reach it AND the points
-/// that already covered the branch's entry, so a point outlives its own block
-/// (§ "The relocation point outlives the block"). There the release is emitted at
-/// the merge *and* replicated at each point, which is sound only for a
-/// self-cancelling run — one that nil-stamps the slot it read, so the copy a path
-/// reaches second no-ops.
-#[derive(Clone)]
-struct TailExitHoist {
-    /// Index of the `TailCall` in its block's instruction list. A hoisted
-    /// release is spliced in here, ahead of the frame replacement, and the index
-    /// advances so successive hoists keep their emission order.
-    at: usize,
-    /// The block the `TailCall` sits in.
-    block: HoistBlock,
-    /// The local slots and capture indices the call's operands were loaded from.
-    /// A release that reloads one of these reloads the very value now sitting on
-    /// the operand stack, so it IS the ownership move however ANF spelled the
-    /// argument — the reading `exempt` cannot give, since ANF is free to rewrite
-    /// an operand into a synthetic binding whose region the syntax walk does not
-    /// connect back to the call.
-    operand_locals: rustc_hash::FxHashSet<u16>,
-    operand_captures: rustc_hash::FxHashSet<u16>,
-    /// Regions the callee or an argument subtree names, canonicalized through
-    /// the merge forest. These releases must STAY in the dead block: an
-    /// argument's is the ownership move the calling convention rests on, and the
-    /// callee's belongs to the activation that takes it over.
-    exempt: rustc_hash::FxHashSet<crate::hir::region::Region>,
-}
-
-/// What a branch lowering holds across its arms, so `open_branch_merge` can hand
-/// the merge block everything that covers it.
-///
-/// Two sources, collected at different moments because they are sealed
-/// differently: an arm's own points name a block the arm just closed and are
-/// sealed at that close (`seal_arm_hoists`), while the points covering the
-/// branch's ENTRY are already sealed when the branch begins and are read there
-/// (docs/impl/region/mechanism.md § "A merge inherits what covered the branch's
-/// ENTRY as well").
-struct BranchHoists {
-    /// The enclosing branch's `arm_exit_hoists`, restored at the merge so a
-    /// nested branch's arms never leak into it.
-    saved: Vec<TailExitHoist>,
-    /// The points that already covered the position the branch was entered at.
-    inherited: Vec<TailExitHoist>,
-}
-
-/// Where a relocation point lives, and with it which of the two placements
-/// applies: a MOVE within the block still being filled, or a REPLICA spliced
-/// into an arm that has already closed.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum HoistBlock {
-    /// The block the lowerer is filling. Its label validates the point — a
-    /// stale one names an instruction list this block no longer is.
-    Current(Label),
-    /// A branch arm already pushed onto `LirFunction::blocks`, by index. Blocks
-    /// are only ever appended, so the index stays valid for the function's life.
-    Finished(usize),
-}
-
-/// Where a value-route release reads the value whose region it means.
-///
-/// `allocate_slot_routed` mints binding slots from two disjoint address spaces,
-/// both indexed by `u16`: an in-lambda captured binding gets an ENV index (the
-/// index `LoadCapture`/`StoreCapture` address, backed by the `populate_env`
-/// cell), and every other binding gets a STACK index (`LoadLocal`/`StoreLocal`).
-/// Nothing about the number says which, so a bare `u16` in `region_to_slot` lets
-/// an env index be read back as a stack slot — naming whichever local happens to
-/// sit at that index and releasing it under its holder
-/// (`tests/elle/region-def-in-lambda-capture.lisp`). Carrying the space with the
-/// index makes that unrepresentable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum ValueSlot {
-    /// A stack-frame local. `LoadLocal { slot }` yields the value itself.
-    Local(u16),
-    /// An env-cell index. `LoadCapture { index }` UNWRAPS the cell and yields
-    /// its content — the value whose region a release means. (The cell's own
-    /// region is a separate concern, released through `LoadCaptureRaw` +
-    /// `DecrefCellRegion` for a `cell_release_regions` member.)
-    Env(u16),
-}
-
-impl ValueSlot {
-    /// The raw index, for the sites that only need to dedupe or report it.
-    pub(super) fn index(self) -> u16 {
-        match self {
-            ValueSlot::Local(i) | ValueSlot::Env(i) => i,
-        }
-    }
-
-    /// The stack slot, or `None` for an env index. Use at sites whose emission
-    /// is stack-only (`AdoptRegion`, `FreeRegionGroup`, the branch-arm
-    /// compensations' value route): skipping an env-celled region there leaves it
-    /// independently reference-counted, which is each of those cuts' documented
-    /// always-legal fallback. A `cell_release_regions` member is the one env-indexed
-    /// release those compensations do emit, and it reads [`Self::index`] instead —
-    /// it names the cell BOX, which `LoadCaptureRaw` reaches by index alone.
-    pub(super) fn local(self) -> Option<u16> {
-        match self {
-            ValueSlot::Local(i) => Some(i),
-            ValueSlot::Env(_) => None,
-        }
-    }
 }
 
 /// Lowers HIR to LIR
@@ -328,8 +186,7 @@ pub struct Lowerer<'a> {
     /// region the solver releases at that letrec's scope end — the release the
     /// frame-replacing `TailCall` strands, and the one the relocation must leave
     /// where it is because the callee is about to enter that closure
-    /// (docs/impl/region/mechanism.md § "What the exemption keeps, a channel must
-    /// still run"). A member captured by a sibling has uses spanning the whole
+    /// (docs/impl/region/relocate.md). A member captured by a sibling has uses spanning the whole
     /// letrec, so its demise lands at the scope end rather than at the call node
     /// and `tail_callee_defers_release`'s dies-here reading never sees it. Marked
     /// by `lower_letrec` after the inits are lowered, and honoured only through a
@@ -433,7 +290,7 @@ pub struct Lowerer<'a> {
     /// Tail-call HirIds whose result a `Return` mint already covers, so
     /// `lower_call`'s post-`TailCall` fall-through retain must stand down: the
     /// return mint is emitted exactly once per returned value
-    /// (docs/impl/region/mechanism.md § "The return mint is emitted exactly once").
+    /// (docs/impl/region/mechanism.md � "The return mint is emitted exactly once").
     ///
     /// The shape is ANF's canonical wrap of a tail call in a non-propagating tail
     /// position — `(let [t (f …)] (return t))`, built for a tail call nested in a
@@ -469,9 +326,6 @@ pub struct Lowerer<'a> {
     /// instruction does.
     replicating_release: bool,
 }
-
-mod regiondecref;
-mod regionemit;
 
 impl<'a> Lowerer<'a> {
     pub fn new(arena: &'a BindingArena) -> Self {
@@ -551,236 +405,6 @@ impl<'a> Lowerer<'a> {
         self
     }
 
-    /// Set Tofte-Talpin region inference results.
-    pub fn with_region_info(mut self, info: RegionInfo) -> Self {
-        // Pre-index the two collections that `emit_increfs_for` /
-        // `emit_decrefs_for` consult per HIR node, so each lookup is O(1)
-        // instead of a linear scan (which made lowering O(n²) over a
-        // large compilation unit like the stdlib).
-        let mut increfs_by_site: HashMap<
-            HirId,
-            Vec<(crate::hir::region::Region, crate::hir::region::Region)>,
-        > = HashMap::new();
-        for &(site, src, dst) in &info.cross_region_refs {
-            increfs_by_site.entry(site).or_default().push((src, dst));
-        }
-        let mut decrefs_by_decref_point: HashMap<HirId, Vec<crate::hir::region::Region>> =
-            HashMap::new();
-        for (&r, d) in &info.region_data {
-            decrefs_by_decref_point
-                .entry(d.decref_point)
-                .or_default()
-                .push(r);
-        }
-        // The **release order** at each shared `decref_point` (docs/impl/region/rules.md
-        // Rule 4): the `(earlier, later)` edges of every region that HOLDS another's pages
-        // live, so the holder's release is emitted first. Two sources:
-        //
-        // - **Adoption.** An adopted member keeps its OWN `DecrefRegion`, a structural
-        //   no-op only while the member is still `Owned` — once its owner's subtree drop
-        //   reclaims it, that decref faults. So a member releases before its owner. The
-        //   adopt maps hold exactly those edges: `owned_adopt_edges` (store-adopted, each
-        //   store site → `(member, owner)`) and `capture_adopt_edges` (capture-adopted,
-        //   each closure site → `(captured, closure)`), disjoint per member — a member is
-        //   adopted by its single owner through exactly one map (region/info.rs).
-        // - **Value aliasing.** A region that may be — or live inside — another is
-        //   released `DecrefValueRegion`-style, resolving its runtime region by READING
-        //   the value's own page, which the other's release can tear. Where the two land
-        //   on one point (a discarded read, whose alias dies exactly where its container
-        //   does), the alias must be ordered ahead. The same three relations the ownership
-        //   cut's alias obligation closes over supply these edges, oriented
-        //   `alias → source` throughout (region/adopt.md § "The lifetime obligation the
-        //   root carries"): a native read's result and the container it read from
-        //   (`counted_read_aliases`), an opaque call's result and its arguments
-        //   (`opaque_result_aliases`), and a `Funnel`'s result and its container
-        //   (`funnel_result_containers`). They compose transitively through the sort, so a
-        //   read out of a CALL's result — whose recorded container is the call's
-        //   placeholder, not the container the call handed back — is still ordered ahead
-        //   of the container that frees the page. An opcode read mints no region of its
-        //   own and contributes no edge; its borrow is covered by the container's extended
-        //   lifetime instead (region/rules.md Rule 4).
-        //
-        // `order_releases` topologically sorts the result (holder before holdee, nested
-        // subtrees innermost-first); a single flat priority class cannot express a
-        // transitive member ⊂ mid ⊂ root chain, nor a region that both is adopted and
-        // reads out of another. The two sets stay SEPARATE because only the first is a
-        // forest: a binding whose `binding_regions` name several alternatives (a
-        // re-`def`ined or branch-union binding) makes two reads each other's container, so
-        // the read edges can carry a may-alias cycle no order satisfies — which the sort
-        // resolves by tie-break rather than treating as the impossible state an adopt-edge
-        // cycle would be.
-        // Both sets are indexed by their `earlier` endpoint once here, so the per-bucket
-        // sort below costs the bucket's own size rather than a scan of every edge in the
-        // unit (the O(n²)-over-the-stdlib trap the two indices above exist to avoid).
-        let mut adopt_owner: HashMap<crate::hir::region::Region, Vec<crate::hir::region::Region>> =
-            HashMap::new();
-        for &(member, owner) in info
-            .owned_adopt_edges
-            .values()
-            .flatten()
-            .chain(info.capture_adopt_edges.values().flatten())
-        {
-            adopt_owner.entry(member).or_default().push(owner);
-        }
-        let mut value_alias: HashMap<crate::hir::region::Region, Vec<crate::hir::region::Region>> =
-            HashMap::new();
-        for &(_site, alias, source) in info
-            .counted_read_aliases
-            .iter()
-            .chain(info.opaque_result_aliases.iter())
-            .chain(info.funnel_result_containers.iter())
-        {
-            value_alias.entry(alias).or_default().push(source);
-        }
-        for regions in decrefs_by_decref_point.values_mut() {
-            Self::order_releases(regions, &adopt_owner, &value_alias, &info);
-        }
-        // The fn-local 1-slot containers whose content drop lands at each scope
-        // node, indexed the same way and for the same reason as the two above.
-        let mut cell_drops_by_demise: HashMap<HirId, Vec<Binding>> = HashMap::new();
-        for (&b, c) in &info.cell_containers {
-            // A cell that forwards its final content into the next link of a
-            // loop chain has no content drop of its own: that link took the one
-            // reference over and releases it (`CellContainer::forwards_content`).
-            if c.forwards_content {
-                continue;
-            }
-            cell_drops_by_demise.entry(c.demise).or_default().push(b);
-        }
-        // Deterministic emission order across runs (the map's iteration is not).
-        for bindings in cell_drops_by_demise.values_mut() {
-            bindings.sort_unstable_by_key(|b| b.0);
-        }
-        self.increfs_by_site = increfs_by_site;
-        self.decrefs_by_decref_point = decrefs_by_decref_point;
-        self.cell_drops_by_demise = cell_drops_by_demise;
-        self.region_info = info;
-        self
-    }
-
-    /// Order the releases sharing one `decref_point` (docs/impl/region/rules.md Rule 4).
-    ///
-    /// A topological sort of the **holder-before-holdee** edges — `adopt_owner`
-    /// (`member → owner`, the single-owner Owned-subtree forest) and `value_alias`
-    /// (`alias → source`, every region that may be or live inside another: a borrowing
-    /// read's result, an opaque call's result, a funnel's pass-through result) — so every
-    /// store/capture-adopted member's own `DecrefRegion` — a no-op only while the member
-    /// is still `Owned` — and every alias's page-reading `DecrefValueRegion` are emitted
-    /// before the release that frees (or subtree-drops) what they name (region/adopt.md
-    /// § "The lifetime obligation the root carries"). Both nested subtrees and chained
-    /// aliases resolve innermost-first by construction — a single flat priority class
-    /// cannot express a transitive member-before-owner chain, nor a read whose container
-    /// is a call's placeholder for the region that actually frees the page.
-    ///
-    /// Regions no such edge relates are tie-broken by page-read depth: a value-gated
-    /// `DecrefValueRegion` that unwraps a cell to the inner value reads deepest and sorts
-    /// first (class 0), then a `DecrefCellRegion` that reads the cell header and frees the
-    /// cell (class 1), then a plain `DecrefRegion` that frees and reads nothing (class 2);
-    /// region id breaks the final tie, so the order never depends on `HashMap` iteration
-    /// (the flaky capture-cell UAF, region-capture-cell-noreassign-uaf.lisp).
-    ///
-    /// **The two edge sets differ in what a cycle means.** Adoption is a forest — each
-    /// member has exactly one owner (the two adopt maps are disjoint per member;
-    /// region/info.rs) — so a cycle there is an impossible state a debug assert flags. A
-    /// read edge is only a MAY-alias: a binding whose `binding_regions` name several
-    /// alternatives (a re-`def`ined or branch-union binding) makes each alternative the
-    /// other's container, so two reads through it can point at each other though no
-    /// single runtime container does. Such a cycle is broken by re-sorting the stalled
-    /// residue on the adopt edges alone, then by tie-break — deterministic, never a
-    /// release-build panic on a legal program.
-    fn order_releases(
-        regions: &mut Vec<crate::hir::region::Region>,
-        adopt_owner: &HashMap<crate::hir::region::Region, Vec<crate::hir::region::Region>>,
-        value_alias: &HashMap<crate::hir::region::Region, Vec<crate::hir::region::Region>>,
-        info: &RegionInfo,
-    ) {
-        use crate::hir::region::Region;
-        use std::cmp::Reverse;
-        use std::collections::BinaryHeap;
-
-        // Page-read depth: lower sorts earlier. `cell_release_regions ⊆
-        // call_result_regions`, so test the cell membership first.
-        let class = |r: Region| -> u8 {
-            if info.cell_release_regions.contains(&r) {
-                1 // DecrefCellRegion: reads the cell page header, frees the cell
-            } else if info.call_result_regions.contains(&r) {
-                0 // DecrefValueRegion: unwraps the cell to the inner value (deepest read)
-            } else {
-                2 // plain DecrefRegion: frees, reads nothing
-            }
-        };
-        // Kahn's algorithm over the edges restricted to `bucket`. A `later` region waits
-        // on every in-bucket `earlier` region that holds it; `waiters` lists the waiters of
-        // each earlier region (a member has one owner, but a region can be an adopted
-        // member AND a read alias, so the successor set is a list). The edge sets arrive
-        // PRE-INDEXED by their `earlier` endpoint, so a bucket costs its own size, not a
-        // scan of every edge in the unit — the same O(n²)-over-the-stdlib trap the
-        // decref/incref indices above exist to avoid. Returns the ordered prefix and the
-        // residue the edges never unblocked (a cycle).
-        let kahn = |bucket: &[Region],
-                    edges: &[&HashMap<Region, Vec<Region>>]|
-         -> (Vec<Region>, Vec<Region>) {
-            let present: rustc_hash::FxHashSet<Region> = bucket.iter().copied().collect();
-            let mut indeg: HashMap<Region, u32> = bucket.iter().map(|&r| (r, 0)).collect();
-            let mut succ: HashMap<Region, Vec<Region>> = HashMap::new();
-            for &earlier in bucket {
-                for &later in edges
-                    .iter()
-                    .filter_map(|e| e.get(&earlier))
-                    .flatten()
-                    .filter(|l| present.contains(l))
-                {
-                    *indeg.get_mut(&later).expect("later is in this bucket") += 1;
-                    succ.entry(earlier).or_default().push(later);
-                }
-            }
-            // Min-heap by (class, region id): the deterministic tie-break among the
-            // currently-unblocked regions. `Region` has no `Ord`, so key on the id and
-            // reconstruct — the id is unique within a bucket (`region_data` keys regions).
-            let mut ready: BinaryHeap<Reverse<(u8, u32)>> = BinaryHeap::new();
-            for &r in bucket {
-                if indeg[&r] == 0 {
-                    ready.push(Reverse((class(r), r.0)));
-                }
-            }
-            let mut out: Vec<Region> = Vec::with_capacity(bucket.len());
-            while let Some(Reverse((_, id))) = ready.pop() {
-                let r = Region(id);
-                out.push(r);
-                for &waiter in succ.get(&r).into_iter().flatten() {
-                    let d = indeg.get_mut(&waiter).expect("waiter tracked in indeg");
-                    *d -= 1;
-                    if *d == 0 {
-                        ready.push(Reverse((class(waiter), waiter.0)));
-                    }
-                }
-            }
-            let residue: Vec<Region> = bucket
-                .iter()
-                .copied()
-                .filter(|r| !out.contains(r))
-                .collect();
-            (out, residue)
-        };
-
-        let (mut out, residue) = kahn(regions, &[adopt_owner, value_alias]);
-        if !residue.is_empty() {
-            // A may-alias read cycle: drop the read edges over the stalled residue and
-            // order it on the adopt forest alone.
-            let (rest, cyclic) = kahn(&residue, &[adopt_owner]);
-            out.extend(rest);
-            debug_assert!(
-                cyclic.is_empty(),
-                "release-order ADOPT edges cycled at a shared decref_point: {cyclic:?}"
-            );
-            let mut cyclic = cyclic;
-            cyclic.sort_by_key(|r| (class(*r), r.0));
-            out.extend(cyclic);
-        }
-        *regions = out;
-    }
-
-    /// Check if a scope has local allocations (reclaimable).
     fn region_scope_check(&self, hir_id: HirId) -> bool {
         self.region_info.scope_has_local_allocs(hir_id)
     }
@@ -788,32 +412,6 @@ impl<'a> Lowerer<'a> {
     /// Check if a loop has local allocations (rotation-eligible).
     fn region_loop_check(&self, hir_id: HirId) -> bool {
         self.region_info.scope_has_local_allocs(hir_id)
-    }
-
-    /// Collect, over the whole HIR, the bindings each `match`/`destructure`
-    /// pattern binds to a BORROWED subview of its scrutinee — the structural
-    /// element positions (`First`/`Rest`/`Index`/`Key`), excluding fresh-owned
-    /// collectors (`Slice`/`StructRest`, the `& rest` of array/struct patterns).
-    ///
-    /// Runs once at `lower()` entry, before any body lowering, so a `match`
-    /// compound in tail-argument position has its aliases registered before the
-    /// call site classifies that argument. `Hir::for_each_child` deliberately
-    /// does NOT enumerate pattern bindings (patterns are not HIR children), so
-    /// this walk enumerates `Match` arms / `Destructure` patterns itself and
-    /// recurses through `for_each_child` for the ordinary expression tree.
-    fn precompute_destructure_aliases(&mut self, hir: &Hir) {
-        match &hir.kind {
-            HirKind::Match { arms, .. } => {
-                for (pat, _, _) in arms {
-                    collect_pattern_aliases(pat, &mut self.destructure_alias_bindings, false);
-                }
-            }
-            HirKind::Destructure { pattern, .. } => {
-                collect_pattern_aliases(pattern, &mut self.destructure_alias_bindings, false);
-            }
-            _ => {}
-        }
-        hir.for_each_child(|c| self.precompute_destructure_aliases(c));
     }
 
     /// Lower a HIR expression to an LIR module.
@@ -867,178 +465,6 @@ impl<'a> Lowerer<'a> {
         #[cfg(debug_assertions)]
         assert_cells_outlive_their_readers(&module);
         Ok(module)
-    }
-
-    /// Check if a HIR body is a tail call (or control flow where all result
-    /// positions are tail calls). Used to relax the suspension check: a
-    /// tail call replaces the frame, so its signal doesn't affect the
-    /// enclosing scope's lifetime.
-    ///
-    /// After the ANF lift, a tail call previously of the form `(f x)`
-    /// becomes `(let [t (f x)] t)`. Recognise this single-binding shape
-    /// where the body is `Var(b)` and check the init for tail-callness
-    /// — `mark_tail_calls` runs before ANF, so `is_tail` is preserved
-    /// on the wrapped Call.
-    fn body_is_tail_call(hir: &Hir) -> bool {
-        match &hir.kind {
-            HirKind::Call { is_tail: true, .. } => true,
-            HirKind::If {
-                then_branch,
-                else_branch,
-                ..
-            } => Self::body_is_tail_call(then_branch) && Self::body_is_tail_call(else_branch),
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                clauses
-                    .iter()
-                    .all(|(_, body)| Self::body_is_tail_call(body))
-                    && else_branch
-                        .as_ref()
-                        .is_some_and(|b| Self::body_is_tail_call(b))
-            }
-            HirKind::Begin(exprs) => exprs.last().is_some_and(Self::body_is_tail_call),
-            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                // ANF wrap shape: `(let [b e] (var b))` is tail-equivalent
-                // to `e`.
-                if bindings.len() == 1 {
-                    let (b, init) = (&bindings[0].0, &bindings[0].1);
-                    if matches!(&body.kind, HirKind::Var(v) if v == b)
-                        && Self::body_is_tail_call(init)
-                    {
-                        return true;
-                    }
-                }
-                Self::body_is_tail_call(body)
-            }
-            HirKind::Match { arms, .. } => arms
-                .iter()
-                .all(|(_, _, body)| Self::body_is_tail_call(body)),
-            _ => false,
-        }
-    }
-}
-
-/// Debug-only: no block frees an env cell before an instruction that reads through
-/// that same cell.
-///
-/// A captured binding's value and its box are addressed by one env index, and the
-/// value's release loads the box RAW and unwraps it to the content — so it READS
-/// the page the box's `DecrefCellRegion` frees. Two mechanisms hold that order and
-/// neither can see the other: the `decref_point` clamp places the box release at or
-/// after every release routed through the cell (docs/impl/region/bindings.md § "A
-/// cell's release lands at or after every release routed through that cell"), and
-/// the frame-exit relocation declines a move that would carry the box release back
-/// across such a read (docs/impl/region/mechanism.md § "A move that crosses a read
-/// through the cell it frees is declined"). This states the property both exist to
-/// hold, over the finished emission where the two meet.
-#[cfg(debug_assertions)]
-fn assert_cells_outlive_their_readers(module: &LirModule) {
-    for f in std::iter::once(&module.entry).chain(module.closures.iter()) {
-        for b in &f.blocks {
-            let mut from_index: HashMap<Reg, u16> = HashMap::new();
-            let mut freed: HashMap<u16, usize> = HashMap::new();
-            for (idx, i) in b.instructions.iter().enumerate() {
-                match &i.instr {
-                    LirInstr::LoadCapture { dst, index }
-                    | LirInstr::LoadCaptureRaw { dst, index } => {
-                        from_index.insert(*dst, *index);
-                        if let Some(&at) = freed.get(index) {
-                            panic!(
-                                "env cell {index} is read at instruction {idx} of block \
-                                 {:?}, after the DecrefCellRegion at {at} freed the box \
-                                 — the read lands on a reclaimed page",
-                                b.label
-                            );
-                        }
-                    }
-                    LirInstr::DecrefCellRegion { src } => {
-                        if let Some(&index) = from_index.get(src) {
-                            freed.insert(index, idx);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-}
-
-/// Collect the bindings one pattern binds to a BORROWED subview of its
-/// scrutinee into `out` — the structural ELEMENT positions, mirroring
-/// `access_is_borrowed_element`'s access-path gate over the source pattern
-/// shape. `in_element` is true when this pattern is itself reached through an
-/// element load (so a bare `Var` at that position is an element binding, while
-/// a `Var` pattern at the top bound to the whole scrutinee is not).
-///
-/// Fresh-owned collectors are excluded: the `& rest` of a `Tuple`/`Array`
-/// compiles to `Slice` (a new owned array), and of a `Struct`/`Table` to
-/// `StructRest` (a new owned struct) — a binding reached under one owns its
-/// new container. The cons `rest` of a `List`/`Pair` is NOT excluded: it is
-/// `AccessPath::Rest`, a borrowed view into the scrutinee's cells.
-fn collect_pattern_aliases(
-    pat: &HirPattern,
-    out: &mut std::collections::HashSet<Binding>,
-    in_element: bool,
-) {
-    match pat {
-        HirPattern::Var(b) => {
-            if in_element {
-                out.insert(*b);
-            }
-        }
-        HirPattern::Pair { head, tail } => {
-            // head = First, tail = Rest — both borrowed cell views.
-            collect_pattern_aliases(head, out, true);
-            collect_pattern_aliases(tail, out, true);
-        }
-        HirPattern::List { elements, rest } => {
-            // list element N = First of N rests — borrowed; the cons rest
-            // itself is AccessPath::Rest — borrowed.
-            for e in elements {
-                collect_pattern_aliases(e, out, true);
-            }
-            if let Some(r) = rest {
-                collect_pattern_aliases(r, out, true);
-            }
-        }
-        HirPattern::Tuple { elements, rest } | HirPattern::Array { elements, rest } => {
-            // array element = Index — borrowed. The & rest (Slice) mints a
-            // fresh owned array; a binding under it owns the slice.
-            for e in elements {
-                collect_pattern_aliases(e, out, true);
-            }
-            let _ = rest; // slice rest: fresh-owned, not a borrower
-        }
-        HirPattern::Struct { entries, rest } | HirPattern::Table { entries, rest } => {
-            // entry value = Key — borrowed. The & rest (StructRest) mints a
-            // fresh owned struct; a binding under it owns the rest-struct.
-            for (_, v) in entries {
-                collect_pattern_aliases(v, out, true);
-            }
-            let _ = rest; // struct rest: fresh-owned, not a borrower
-        }
-        HirPattern::NamedStruct { entries } => {
-            for (_, v) in entries {
-                collect_pattern_aliases(v, out, true);
-            }
-        }
-        HirPattern::Set { binding } | HirPattern::SetMut { binding } => {
-            // A set pattern binds the WHOLE value (type-guard only) — Root, not
-            // an element — but if it sits inside an element load (e.g. an array
-            // of sets), the set value itself is that element: pass in_element
-            // through so a Var at that depth is marked when reached sideways.
-            collect_pattern_aliases(binding, out, in_element);
-        }
-        HirPattern::Or(alternatives) => {
-            // An or-pattern binds the same names in every arm, each reached
-            // through the same access path — collect each arm identically.
-            for alt in alternatives {
-                collect_pattern_aliases(alt, out, in_element);
-            }
-        }
-        HirPattern::Wildcard | HirPattern::Nil | HirPattern::Literal(_) => {}
     }
 }
 
