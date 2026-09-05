@@ -124,23 +124,30 @@ impl<'a> Lowerer<'a> {
                 continue;
             }
             let at = self.tail_exit_hoist[i].at;
-            // A point's `at` names its `TailCall`, and each replica spliced ahead
-            // of that call advances it past what it inserted — so the invariant is
-            // that ONE record of each point exists (`begin_branch_arms` moves them
-            // rather than copying). A second record keeps a stale index, which
-            // splices into the middle of the run the live one already put there and
-            // leaves the operand stack of a block that still passes every other
-            // check misshapen. Asserting the index still names the call turns that
-            // into a panic here rather than an out-of-bounds stack read at runtime.
+            // A point's `at` names the position it splices at — its `TailCall`,
+            // or the end of the list for a break, whose jump is the terminator —
+            // and each replica advances it past what it inserted. So the
+            // invariant is that ONE record of each point exists
+            // (`begin_branch_arms` moves them rather than copying). A second
+            // record keeps a stale index, which splices into the middle of the
+            // run the live one already put there and leaves the operand stack of
+            // a block that still passes every other check misshapen. Asserting
+            // the index still names that position turns it into a panic here
+            // rather than an out-of-bounds stack read at runtime.
             debug_assert!(
-                matches!(
-                    self.current_func.blocks[block].instructions.get(at),
-                    Some(SpannedInstr {
-                        instr: LirInstr::TailCall { .. } | LirInstr::TailCallArrayMut { .. },
-                        ..
-                    })
-                ),
-                "a relocation point's index must still name its tail call: block={block} at={at}"
+                if self.tail_exit_hoist[i].left_block.is_some() {
+                    at == self.current_func.blocks[block].instructions.len()
+                } else {
+                    matches!(
+                        self.current_func.blocks[block].instructions.get(at),
+                        Some(SpannedInstr {
+                            instr: LirInstr::TailCall { .. } | LirInstr::TailCallArrayMut { .. },
+                            ..
+                        })
+                    )
+                },
+                "a relocation point's index must still name its exit position: \
+                 block={block} at={at}"
             );
             self.tail_exit_hoist[i].at += copy.len();
             self.current_func.blocks[block]

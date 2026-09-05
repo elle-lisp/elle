@@ -1,3 +1,10 @@
+// audited: 2026-09-05
+//! The forms that jump: `while`, `loop`/`recur`, `break`, and the `cond` chain
+//! each level of which lowers to a two-armed branch.
+//!
+//! docs/impl/lir.md
+//! docs/impl/region/replicate.md
+
 use super::*;
 
 impl<'a> Lowerer<'a> {
@@ -173,16 +180,22 @@ impl<'a> Lowerer<'a> {
             src: value_reg,
         });
 
-        // Break emits no region instruction of its own, on either face. The
-        // value it carries is TRANSFERRED to the block, so its release is
-        // anchored where the block's value is consumed — reached by this jump —
-        // rather than inside the body (docs/impl/region/mechanism.md § "`break`
-        // transfers its value; it does not consume it"); a compensating release
-        // here would free the value the block is about to hand to its consumer.
-        // Every OTHER release this jump passes over is anchored on the block by
-        // the same solver pin (§ "A release the break jumps over is not a
-        // release"), so there is nothing to walk here either. Pinned by
-        // tests/elle/region-break-transfer.lisp and region-break-skip.lisp.
+        // Break emits no region instruction of its own here. The value it
+        // carries is TRANSFERRED to the block, so its release is anchored where
+        // the block's value is consumed — reached by this jump — rather than
+        // inside the body (docs/impl/region/anchors.md); a release here would
+        // free the value the block is about to hand to its consumer, which is
+        // why that value's regions are the point's `exempt` set.
+        //
+        // Every OTHER release this jump passes over is the block's to anchor,
+        // and what the loop barrier refuses there — a region the loop body
+        // allocates, whose release is one per iteration — is replicated at this
+        // point instead. The point names the end of THIS block, so it is opened
+        // before the jump and while the block's context is still on the stack
+        // (docs/impl/region/replicate.md). Pinned by
+        // tests/elle/region-break-transfer.lisp, region-break-skip.lisp and
+        // region-break-loop-replica.lisp.
+        self.open_break_exit_hoist(*block_id, value, value_reg);
         self.terminate(Terminator::Jump(target_exit_label));
 
         let dead_label = self.fresh_label();
@@ -219,9 +232,8 @@ impl<'a> Lowerer<'a> {
 
         // Every path into the done block leaves through a clause body or the
         // else block, so each seals its relocation points for the merge to
-        // inherit (docs/impl/region/mechanism.md § "The relocation point outlives
-        // the block"). A `cond` with no `else` contributes an empty-handed nil
-        // path, which simply carries no point.
+        // inherit (docs/impl/region/replicate.md). A `cond` with no `else`
+        // contributes an empty-handed nil path, which carries no point.
         let branch_hoists = self.begin_branch_arms();
 
         // Process each clause

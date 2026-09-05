@@ -319,7 +319,15 @@ impl<'a> Lowerer<'a> {
         // never reaches is a release added where none was owed. Only a branch
         // merge knows otherwise, and it re-installs them itself
         // (`open_branch_merge`, docs/impl/region/replicate.md).
-        self.tail_exit_hoist.clear();
+        //
+        // A break's point carries its own answer instead, and it is a stronger
+        // one: the jump goes to a block's EXIT LABEL, so every position the
+        // lowerer fills while that block is still being lowered is a position
+        // the jump passed over, whatever block boundaries fall in between. The
+        // point therefore survives every boundary until its block's context is
+        // popped, and no further (`retain_open_break_points`).
+        self.tail_exit_hoist.retain(|h| h.left_block.is_some());
+        self.retain_open_break_points();
         let block = std::mem::replace(&mut self.current_block, BasicBlock::new(Label(0)));
         self.current_func.blocks.push(block);
     }
