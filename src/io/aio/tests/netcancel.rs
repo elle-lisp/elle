@@ -291,11 +291,10 @@ fn a_cancelled_pool_tcp_connect_ends_rather_than_being_abandoned() {
 /// between them. A blocking one waits inside the kernel until the listener
 /// accepts, which a listener that has stopped accepting never does.
 ///
-/// Linux-only: macOS and the BSDs report a full backlog as `ECONNREFUSED`,
-/// which the connect does not pace, so a parked Unix connect cannot be
-/// arranged there.
+/// The two platforms name the full backlog differently — Linux `EAGAIN`, macOS
+/// and the BSDs `ECONNREFUSED` — and the connect paces both, so this runs
+/// everywhere rather than on Linux alone.
 #[test]
-#[cfg(target_os = "linux")]
 fn a_cancelled_pool_unix_connect_ends_rather_than_being_abandoned() {
     crate::value::arena::with_test_region(|| {
         let h = crate::primitives::ctx::TestHeap::new();
@@ -316,8 +315,8 @@ fn a_cancelled_pool_unix_connect_ends_rather_than_being_abandoned() {
         };
 
         // Fill the backlog. AF_UNIX says so directly — a non-blocking connect
-        // to a full queue reports EAGAIN — so the setup can prove the connect
-        // under test really has nothing to complete against.
+        // to a full queue reports it rather than waiting — so the setup can
+        // prove the connect under test really has nothing to complete against.
         let mut queued: Vec<libc::c_int> = Vec::new();
         let mut full = false;
         for _ in 0..8 {
@@ -332,11 +331,20 @@ fn a_cancelled_pool_unix_connect_ends_rather_than_being_abandoned() {
             }
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
             unsafe { libc::close(c) };
-            assert!(
+            // Each platform is held to its own errno rather than to the union
+            // of both. A union would still pass if one platform started
+            // answering the other's way, which is the change worth catching.
+            #[cfg(target_os = "linux")]
+            let (queue_is_full, expected) = (
                 errno == libc::EAGAIN || errno == libc::EWOULDBLOCK,
-                "connect({}) failed with errno {}, expected EAGAIN/EWOULDBLOCK",
-                path,
-                errno
+                "EAGAIN/EWOULDBLOCK",
+            );
+            #[cfg(not(target_os = "linux"))]
+            let (queue_is_full, expected) = (errno == libc::ECONNREFUSED, "ECONNREFUSED");
+            assert!(
+                queue_is_full,
+                "connect({}) failed with errno {}, expected {}",
+                path, errno, expected
             );
             full = true;
             break;

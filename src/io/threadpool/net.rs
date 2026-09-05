@@ -199,6 +199,36 @@ pub(super) fn connect_unix(path: &str, options: &SocketOptions, bounds: Bounds) 
 /// reports it under, so the retry is paced rather than driven by an event.
 const CONNECT_RETRY_PACE: Duration = Duration::from_millis(10);
 
+/// What a connect makes of `ECONNREFUSED`. See this module's header.
+// A stub, so the tests that name it compile and fail on their assertions
+// rather than on the build. `connect_bounded` consults it in the next commit,
+// which is what makes the allow unnecessary.
+#[allow(dead_code)]
+pub(super) enum Refusal {
+    /// The peer's own answer, reported as it stands.
+    Final,
+    /// A refusal that may be a full backlog, paced while `.0` names a socket.
+    WhileBound(String),
+}
+
+#[allow(dead_code)]
+impl Refusal {
+    /// How a TCP connect reads a refusal.
+    pub(super) fn for_tcp() -> Refusal {
+        Refusal::Final
+    }
+
+    /// How an AF_UNIX connect to `path` reads a refusal on this platform.
+    pub(super) fn for_unix(_path: &str) -> Refusal {
+        Refusal::Final
+    }
+
+    /// True when this refusal may clear on its own, so the connect asks again.
+    pub(super) fn may_clear(&self) -> bool {
+        false
+    }
+}
+
 /// Open a socket, connect it to `sa`, and report the connected descriptor —
 /// or `-errno`. `label` describes the peer for the completion's data.
 ///
