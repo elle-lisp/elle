@@ -16,9 +16,9 @@ an HTML comment under the title.
 
 The date is ISO 8601. A file with no stamp has never been audited.
 
-A file that cannot meet a rule yet stamps `audited: <date> (#N)`, naming the
-issue that will fix it. A deviation with no issue behind it is a broken rule,
-and the file carries no stamp at all.
+A file that breaks a rule carries no stamp until the rule is met. Nothing
+records a deviation and keeps the stamp: the stamp is what removes a file from
+the queue, and a file with a standing violation is what the queue is for.
 
 ## Enforcement
 

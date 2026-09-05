@@ -138,21 +138,6 @@ fn a_large_file_outranks_a_small_file_at_the_same_depth() {
 }
 
 #[test]
-fn a_stamp_naming_an_issue_counts_as_stamped() {
-    let t = Tree::new("deviation");
-    t.write("tracked.md", &doc(Some("2026-09-04 (#123)"), 400))
-        .write("bare.md", &doc(None, 400));
-
-    // `audited: <date> (#N)` reads as audited with a known deviation, tracked
-    // where the work is scheduled. Treating it as unstamped would push every
-    // deliberately-deferred file to the front of the queue forever.
-    assert!(
-        t.rank_of("bare.md") < t.rank_of("tracked.md"),
-        "a deviation with an issue behind it is not the same as never audited"
-    );
-}
-
-#[test]
 fn a_generated_index_carries_no_stamp_and_is_not_queued() {
     let t = Tree::new("generated");
     t.write(

@@ -25,8 +25,8 @@ comment under its title:
   // audited: 2026-09-04
   <!-- audited: 2026-09-04 -->
 
-Apply DOCUMENTATION.md to a file, then stamp today's date. Break a rule with no
-issue behind it, and remove the stamp.
+Apply DOCUMENTATION.md to a file, then stamp today's date. A file that breaks a
+rule carries no stamp until the rule is met.
 EOF
 }
 
@@ -90,8 +90,7 @@ vendored() {
     return 1
 }
 
-# The stamp date on one file, or empty. It lives in the first few lines, and
-# `(#N)` after the date marks a tracked deviation that still counts as stamped.
+# The stamp date on one file, or empty. It lives in the first few lines.
 #
 # The `|| true` is required, not defensive: under `pipefail` an unstamped file
 # makes grep exit 1, which `set -e` turns into a silent early exit of the whole
