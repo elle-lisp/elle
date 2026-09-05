@@ -1,5 +1,7 @@
 # Code objects — a blueprint, a payload, and a header
 
+<!-- audited: 2026-09-05 -->
+
 A closure template is the code object of one lambda: its bytecode, constant
 pool, source locations, and the region tables its body needs. This doc owns the
 argument for how that object is represented and who owns each part. The
@@ -126,17 +128,32 @@ A header holds a strong `Rc` to its blueprint, so a blueprint cannot die while
 a header made from it is alive, and the sweep cannot pull a payload out from
 under a live header.
 
+## The cache's reference is the one nothing on the heap points at
+
+A macro expansion is a closed allocation scope: it reclaims the transformer's
+scratch by balancing the references a scan of heap contents cannot explain
+([rules.md](rules.md) § "Macro expansion — a closed allocation scope"). The
+cache holds its reference in Rust, so that scan reaches nothing naming a
+payload region — the same shape as the process roots, whose owner is the root
+registry.
+
+A payload region minted while such a scope is open is therefore excluded from
+the reclaim, and a transformer that builds a closure mints one: `MakeClosure`
+materializes the payload of a blueprint used for the first time. The exclusion
+delays no reclamation. The region is still released when the last blueprint
+packed into it dies, and by teardown otherwise.
+
 ## What the header still carries, and what removes it
 
 The header's `Rc<TemplateProto>` is the one Rust-heap owner left on a code
-object. It answers four questions the payload cannot yet answer, and each one
-leaves as its own milestone lands:
+object. It answers four questions the payload does not hold, and two of them
+leave as their milestones land:
 
 | Question | Answered by | Leaves with |
 |----------|-------------|-------------|
 | Which blueprints do my `MakeClosure` instructions index? | `child_protos` | the image milestone, when child templates become body data |
 | What LIR does the JIT promote me from? | `lir_function` | the encoded-LIR side-stream ([image.md](../image.md) § JIT) |
-| What syntax defined me? | `syntax` | the region-native syntax foundation |
+| Where was I written? | `origin` | nothing — a `Span` is plain bytes, so the payload could hold it |
 | What SPIR-V did `(git f)` compile for me? | `spirv` | nothing — the GPU path recompiles (image.md § Sealing) |
 
 Until then the census classifies `ClosureTemplate` as sealed on the strength of
