@@ -487,8 +487,13 @@ impl VM {
             );
         };
         let dumps = crate::dump::render_all(&source, &name, symbols, cctx);
+        let symbols = unsafe { &mut *symbols_ptr };
         let mut map = BTreeMap::new();
         for (kind, text) in dumps {
+            // The stage names are build-fixed and in the vocabulary, but the
+            // memo is right here and a stage added later would otherwise print
+            // as a hash until somebody noticed.
+            symbols.keyword(&kind);
             map.insert(
                 TableKey::from_value(&Value::keyword(&kind)).unwrap(),
                 ctx.string(text),

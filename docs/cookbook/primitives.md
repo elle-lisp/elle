@@ -106,6 +106,13 @@ dispatches native functions via `handle_primitive_signal()` in `src/vm/signal.rs
 - Return `(SIG_OK, value)` for success.
 - Return `(SIG_ERROR, error_val("kind", "message"))` for errors.
 - Validate arity and types at the top of the function.
+- Every keyword the primitive returns needs a spelling, or it prints as
+  `#<keyword:hash>` and `json/serialize` refuses the struct that carries it.
+  A spelling fixed at build time — a struct key, an error kind, a status —
+  goes in `VOCABULARY` in `src/value/keyword.rs`, and a test fails the build
+  until it does. A spelling that exists only at run time is minted with
+  `ctx.keyword(name)`, which records it in the instance memo. See
+  [impl/symbol.md](../impl/symbol.md) § "A spelling the runtime itself mints".
 - No primitive has VM access. If you need VM interaction, return
   `(SIG_RESUME, fiber_value)` or `(SIG_QUERY, cons(keyword, arg))`.
 

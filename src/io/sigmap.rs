@@ -65,8 +65,14 @@ pub fn supported_list_str() -> String {
 ///   `signum_to_keyword`).
 ///
 /// Unknown keywords and unnamed integers return an error string.
-/// `context` is the primitive name used in error messages.
-pub fn resolve(val: &crate::value::Value, context: &str) -> Result<libc::c_int, ResolveError> {
+/// `context` is the primitive name used in error messages. `memo` is the
+/// calling instance's display memo, which is what turns the rejected
+/// keyword's hash back into the spelling the caller wrote.
+pub fn resolve(
+    val: &crate::value::Value,
+    context: &str,
+    memo: Option<&crate::symbol::SymbolTable>,
+) -> Result<libc::c_int, ResolveError> {
     if let Some(n) = val.as_int() {
         let n_i32 = n as libc::c_int;
         return match signum_to_keyword(n_i32) {
@@ -76,15 +82,17 @@ pub fn resolve(val: &crate::value::Value, context: &str) -> Result<libc::c_int, 
     }
     if let Some(hash) = val.keyword_hash() {
         // Match by hash — the recognised set is fixed, so no spelling is
-        // needed to resolve. A miss recovers a spelling for the error
-        // message through the static vocabulary, or shows the raw hash.
+        // needed to resolve. A miss recovers a spelling for the error message
+        // through the memo, then the static vocabulary. The rejected keyword
+        // is the caller's own, so it is the memo that holds it; without one
+        // the message names a hash the caller has to decode.
         for (k, v) in SIGNALS {
             if crate::value::keyword::keyword_hash(k) == hash {
                 return Ok(*v);
             }
         }
-        let spelling = crate::value::keyword::resolve_keyword_name(None, hash)
-            .map(str::to_string)
+        let spelling = crate::value::keyword::resolve_keyword_name(memo, hash)
+            .map(|n| format!(":{}", n))
             .unwrap_or_else(|| format!("#<keyword:{:#x}>", hash));
         return Err(ResolveError::UnknownKeyword(spelling));
     }
@@ -98,7 +106,9 @@ pub fn resolve(val: &crate::value::Value, context: &str) -> Result<libc::c_int, 
 pub enum ResolveError {
     /// Integer did not round-trip to a named signal.
     UnknownSignum(i64),
-    /// Keyword name is not in the recognised set.
+    /// Keyword is not in the recognised set, already rendered as the caller
+    /// would read it — `:name` when a spelling was found, the unreadable
+    /// `#<keyword:hash>` when none was.
     UnknownKeyword(String),
     /// Argument is neither integer nor keyword.
     WrongType(&'static str),
@@ -117,12 +127,12 @@ impl ResolveError {
                     supported_list_str(),
                 ),
             ),
-            ResolveError::UnknownKeyword(name) => (
+            ResolveError::UnknownKeyword(shown) => (
                 "argument-error",
                 format!(
-                    "{}: unknown signal keyword :{}; expected one of {}",
+                    "{}: unknown signal keyword {}; expected one of {}",
                     context,
-                    name,
+                    shown,
                     supported_list_str(),
                 ),
             ),

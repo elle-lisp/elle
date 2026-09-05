@@ -39,8 +39,17 @@ fn rejected(vm: &mut VM, tier: &str, msg: impl Into<String>) -> Value {
         "tier-rejected",
         msg,
         &[
-            ("tier", Value::keyword(tier)),
-            ("reason", Value::keyword("ineligible")),
+            // The two field names are keyword spellings; `vocab` fails the
+            // build if the vocabulary stops carrying one, the same guard
+            // `rich_error!` applies to the names it stringifies.
+            (
+                const { crate::value::keyword::vocab("tier") },
+                Value::keyword(tier),
+            ),
+            (
+                const { crate::value::keyword::vocab("reason") },
+                Value::keyword("ineligible"),
+            ),
         ],
     )
 }

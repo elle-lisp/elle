@@ -354,6 +354,7 @@ impl VM {
             // came out of an args array the calling convention owns, whose
             // counted edge the caller reclaims once this returns. So the callee
             // mints one of its own per parameter, as in call position.
+            let symbols = unsafe { self.symbols_ptr.as_ref() };
             if !Self::populate_env(
                 &mut self.tail_call_env_cache,
                 unsafe { &mut *self.heap_ptr },
@@ -361,6 +362,7 @@ impl VM {
                 closure,
                 &args,
                 spliced_args,
+                symbols,
             ) {
                 return Some(SIG_ERROR);
             }

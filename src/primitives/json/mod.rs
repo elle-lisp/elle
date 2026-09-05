@@ -6,6 +6,9 @@
 mod parser;
 mod serializer;
 
+#[cfg(test)]
+mod tests;
+
 pub use parser::JsonParser;
 pub use serializer::{escape_json_string, serialize_value, serialize_value_pretty};
 

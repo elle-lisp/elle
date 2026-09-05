@@ -196,7 +196,7 @@ fn prim_sig_send(
             )
         }
     };
-    let signum = match sigmap::resolve(&args[1], "os/sig-send") {
+    let signum = match sigmap::resolve(&args[1], "os/sig-send", ctx.symbols()) {
         Ok(s) => s,
         Err(e) => {
             let (kind, msg) = e.parts("os/sig-send");
@@ -229,7 +229,7 @@ fn prim_sig_raise(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let signum = match sigmap::resolve(&args[0], "os/sig-raise") {
+    let signum = match sigmap::resolve(&args[0], "os/sig-raise", ctx.symbols()) {
         Ok(s) => s,
         Err(e) => {
             let (kind, msg) = e.parts("os/sig-raise");

@@ -31,9 +31,15 @@ pub const fn keyword_hash(name: &str) -> u64 {
 /// keyword dynamically (read from source, converted from a string, minted by
 /// a plugin, parsed from JSON) are learned by the instance memo instead.
 ///
-/// `vocabulary_is_collision_free` proves the list injective under the hash;
-/// a missing entry is not an error — the keyword prints as `#<keyword:hash>`
-/// until the spelling is added here or learned at run time.
+/// `vocabulary_is_collision_free` proves the list injective under the hash.
+/// A missing entry is a defect with no compile error behind it: the keyword
+/// prints as `#<keyword:hash>`, and `json/serialize` refuses any struct that
+/// carries it as a key, because JSON has no rendering for a hash. Two tests
+/// keep the list complete, since the constructor cannot —
+/// `vocabulary_covers_literal_mint_sites` scans every form that hands a
+/// literal to a keyword constructor, and `vocabulary_covers_accessor_mint_sites`
+/// enumerates the tables whose `&'static str` accessors feed the same
+/// constructors from behind a `match` arm no scan can see.
 static VOCABULARY: &[&str] = &[
     // Result-struct keys and general fields
     "a",
@@ -62,6 +68,7 @@ static VOCABULARY: &[&str] = &[
     "first",
     "func",
     "id",
+    "input",
     "instrs",
     "k",
     "kind",
@@ -90,13 +97,61 @@ static VOCABULARY: &[&str] = &[
     "sender-uid",
     "signal",
     "spans",
+    "spec",
     "stats",
     "term",
     "term-display",
     "term-kind",
     "term-span",
+    "tier",
     "value",
     "x",
+    // File metadata keys (`file/stat`, `file/lstat`)
+    "accessed",
+    "blksize",
+    "created",
+    "dev",
+    "file-type",
+    "gid",
+    "inode",
+    "is-dir",
+    "is-file",
+    "is-symlink",
+    "modified",
+    "nlinks",
+    "permissions",
+    "rdev",
+    "readonly",
+    "uid",
+    // Compile-query and rewrite keys (`compile/signal`, `compile/bindings`,
+    // `compile/call-graph`, `compile/diagnostics`, `compile/rename`)
+    "bits",
+    "callees",
+    "callers",
+    "captures",
+    "edits",
+    "immutable",
+    "jit-eligible",
+    "leaves",
+    "lines",
+    "mutated",
+    "needs-lbox",
+    "new-function",
+    "nodes",
+    "propagates",
+    "roots",
+    "rule",
+    "safe",
+    "scope",
+    "severity",
+    "shared-captures",
+    "silent",
+    "source",
+    "suggestions",
+    "tail",
+    "usages",
+    "wraps",
+    "yields",
     // Status and outcome keywords
     "denied",
     "disconnected",
@@ -116,11 +171,24 @@ static VOCABULARY: &[&str] = &[
     "capability-denied",
     "feature-disabled",
     "fiber/caps",
+    // Signal names the registry pre-registers. A signal a program declares at
+    // run time cannot be listed here; it is learned where the registry is read
+    // (docs/impl/symbol.md § "The display memo").
+    "debug",
+    "exec",
+    "fs",
+    "fuel",
+    "io",
+    "os-signal",
+    "wait",
+    "yield",
     // Error kinds (`ctx.error(kind, …)` becomes the `:error` field's keyword)
     "argument-error",
+    "assertion-failed",
     "arity-error",
     "compile-error",
     "division-by-zero",
+    "dns-error",
     "double-free",
     "encoding-error",
     "exec-error",
@@ -139,7 +207,9 @@ static VOCABULARY: &[&str] = &[
     "runtime-error",
     "serde-error",
     "state-error",
+    "task-error",
     "thread-error",
+    "tier-rejected",
     "trait-error",
     "type-error",
     "unknown-tier",
@@ -193,6 +263,16 @@ static VOCABULARY: &[&str] = &[
     "@struct",
     "syntax",
     "thread-handle",
+    // External type names: the `ctx.external(type_name, …)` a primitive wraps
+    // its handle in, which is what `type-of` hands back for that handle.
+    // "port" and "process" appear above.
+    "analysis",
+    "chan/receiver",
+    "chan/sender",
+    "fs-watcher",
+    "io-backend",
+    "io-request",
+    "signal-receiver",
     // Trait protocol keys
     "Collection",
     "Sequence",
@@ -222,7 +302,8 @@ static VOCABULARY: &[&str] = &[
     "lazy",
     "off",
     "on",
-    // Execution tiers
+    // Execution tiers (`VM::active_tier`, reported by `(vm/tier)`)
+    "bytecode",
     "git",
     "gpu",
     "jit",
@@ -323,6 +404,7 @@ static VOCABULARY: &[&str] = &[
     "variable",
     "builtin",
     "macro",
+    "module",
     "branch",
     "emit",
     "jump",
@@ -338,6 +420,41 @@ static VOCABULARY: &[&str] = &[
     "lir",
     "regions",
 ];
+
+/// Whether `VOCABULARY` carries `name`. `const fn`, so a caller can ask in a
+/// `const` context and turn the answer into a build error; the linear scan is
+/// what makes it one (the `static_keyword_name` index is not const-buildable).
+pub const fn is_vocabulary(name: &str) -> bool {
+    let hash = keyword_hash(name);
+    let mut i = 0;
+    while i < VOCABULARY.len() {
+        if keyword_hash(VOCABULARY[i]) == hash {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+/// `name`, having asserted the vocabulary carries it.
+///
+/// The spelling of a keyword the runtime coins from a fixed string has to be
+/// in `VOCABULARY` or the keyword has no name to print, and `json/serialize`
+/// refuses any struct that carries it as a key. Called from a `const` block,
+/// this moves that requirement to compile time: `const { vocab("input") }` is
+/// a build error at the line that wrote it until "input" is listed.
+///
+/// `rich_error!` is the caller that needs it. A field name written
+/// `input = …` reaches the keyword constructor through `stringify!`, as a
+/// token rather than as a string, so no scan of the source can find it
+/// (docs/impl/symbol.md § "A spelling the runtime itself mints").
+pub const fn vocab(name: &'static str) -> &'static str {
+    assert!(
+        is_vocabulary(name),
+        "keyword spelling missing from VOCABULARY in src/value/keyword.rs"
+    );
+    name
+}
 
 /// The spelling of a vocabulary keyword, or `None` if `hash` names nothing
 /// the runtime spells itself.

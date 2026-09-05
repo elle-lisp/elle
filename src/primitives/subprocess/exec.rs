@@ -417,7 +417,7 @@ pub(super) fn prim_subprocess_kill(
         }
     };
     let signal = if args.len() > 1 {
-        match crate::io::sigmap::resolve(&args[1], "subprocess/kill") {
+        match crate::io::sigmap::resolve(&args[1], "subprocess/kill", ctx.symbols()) {
             Ok(s) => s,
             Err(e) => {
                 let (kind, msg) = e.parts("subprocess/kill");

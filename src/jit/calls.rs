@@ -144,7 +144,7 @@ pub(crate) fn jit_capability_denial(
 ) -> JitValue {
     let payload = {
         let mut ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm.heap_ptr });
-        crate::vm::VM::build_denial_payload(&mut ctx, def, blocked, args)
+        crate::vm::VM::build_denial_payload(&mut ctx, def, blocked, args, vm.symbols())
     };
     let heap = unsafe { &mut *vm.heap_ptr };
     let r = crate::value::arena::region_of(heap, payload);

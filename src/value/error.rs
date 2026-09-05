@@ -20,12 +20,27 @@ use crate::value::fiberheap::FiberHeap;
 /// region by `alloc`'s content scan. The macro only sugars the `(SIG_ERROR, …)`
 /// tuple, the `:error <kind>` field, and the slice — it never builds a field
 /// value for you, so it cannot misplace a region.
+///
+/// A field *name* becomes a keyword, so its spelling must be in `VOCABULARY`
+/// or the error prints a hash where the name belongs and `json/serialize`
+/// refuses the whole struct. `stringify!` puts the spelling out of reach of
+/// any scan of the source — it is a token here, not a string — so each name
+/// goes through `keyword::vocab` in a `const` block instead, which fails the
+/// build at this call site if the list does not carry it
+/// (docs/impl/symbol.md § "A spelling the runtime itself mints").
 #[macro_export]
 macro_rules! rich_error {
     ($scope:expr, $kind:expr, $msg:expr $(, $field:ident = $val:expr)* $(,)?) => {
         (
             $crate::value::SIG_ERROR,
-            $scope.error_extra($kind, $msg, &[$((stringify!($field), $val)),*]),
+            $scope.error_extra(
+                $kind,
+                $msg,
+                &[$((
+                    const { $crate::value::keyword::vocab(stringify!($field)) },
+                    $val,
+                )),*],
+            ),
         )
     };
 }
