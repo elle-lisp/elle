@@ -360,6 +360,11 @@ fn the_scripts_use_no_construct_that_fails_on_macos() {
     //   sed -i       BSD sed requires an argument to -i
     //   readlink -f  GNU only
     const GNUISMS: &[&str] = &["date -d", "mapfile", "grep -P", "sed -i ", "readlink -f"];
+    // GNU extensions to basic regular expressions. BSD sed reads each as the
+    // literal character, so the pattern quietly stops matching rather than
+    // erroring — `s|^$root/\?||` leaves every path absolute on macOS and the
+    // caller builds nonsense from it.
+    const BRE: &[&str] = &["\\?", "\\+", "\\|"];
     let mut found = Vec::new();
     for name in ["scripts/audit", "scripts/agents"] {
         let text = fs::read_to_string(repo_root().join(name)).expect("read the script");
@@ -370,6 +375,13 @@ fn the_scripts_use_no_construct_that_fails_on_macos() {
             for g in GNUISMS {
                 if line.contains(g) {
                     found.push(format!("{name}:{}: {g}", n + 1));
+                }
+            }
+            if line.contains("sed ") {
+                for b in BRE {
+                    if line.contains(b) {
+                        found.push(format!("{name}:{}: GNU BRE `{b}` in sed", n + 1));
+                    }
                 }
             }
         }

@@ -146,7 +146,7 @@ tree_of() {
     local d="$1"
     find "$root/${d#./}" -type d \
         -not -path '*/.git*' -not -path '*/target*' -not -path '*/node_modules*' \
-        2>/dev/null | sed "s|^$root/\?||" | sed 's|^$|.|' | LC_ALL=C sort
+        2>/dev/null | sed -e "s|^$root$|.|" -e "s|^$root/||" | LC_ALL=C sort
 }
 
 case "$mode" in
