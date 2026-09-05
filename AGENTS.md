@@ -1,5 +1,7 @@
 # Elle
 
+<!-- audited: 2026-09-05 -->
+
 Elle is a Lisp. Source text becomes bytecode; bytecode runs on a VM.
 
 This is not a toy. The implementation targets correctness, performance, and
@@ -18,6 +20,10 @@ and a merge queue. If a test fails on your branch, your branch caused it.
 every failure before merging — no skip lists, no expected failures, no
 excuses. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full policy.
 
+[DOCUMENTATION.md](DOCUMENTATION.md) governs every document and comment here.
+A document you find wrong is yours: repair it inside the change you are already
+making, and stamp the file you touched.
+
 ## Contents
 
 - [Architecture](#architecture)
@@ -26,10 +32,13 @@ excuses. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full policy.
 - [Directories](#directories)
 - [Testing](#testing)
 - [Invariants](#invariants)
+- [Writing Elle code](#writing-elle-code)
 - [Intentional oddities](#intentional-oddities)
 - [Conventions](#conventions)
 - [Maintaining documentation](#maintaining-documentation)
 - [Where to start](#where-to-start)
+- [MCP Server](#mcp-server)
+- [Standard Library](#standard-library)
 
 ## Architecture
 
@@ -202,7 +211,8 @@ Redirect to a file, or use `elle test --summary`.
 
 For test organization, helpers, and how to add tests:
 [`docs/testing.md`](docs/testing.md).
-For CI structure and failure triage: [`docs/debugging.md`](docs/debugging.md).
+For CI structure and failure triage:
+[`docs/analysis/debugging.md`](docs/analysis/debugging.md).
 
 ## Invariants
 
@@ -237,31 +247,39 @@ These must remain true. Violating them breaks the system:
 
 ## Writing Elle code
 
-**Read [`QUICKSTART.md`](QUICKSTART.md) before writing any Elle code.**
-It is the complete language reference: syntax, special forms, data types,
-control flow, macros, fibers, signals, and the standard library. Elle
-looks like a Lisp but has significant differences from Scheme/Clojure/CL
-that will trip you up if you guess. Do not guess; read the reference.
+**Read [`QUICKSTART.md`](QUICKSTART.md) before writing any Elle code.** It
+carries the gotchas that cost the most, and it indexes the document that owns
+each language topic. Elle looks like a Lisp and differs from Scheme, Clojure
+and Common Lisp in ways that will trip you up if you guess. Read the topic
+document before you guess.
 
 ## Intentional oddities
 
-The 4 most critical (agents get these wrong):
+These three shape whole programs, so they belong here. A fact about one
+primitive belongs in that primitive's docstring, where `(doc name)` finds it.
 
-- **`nil` vs `()` are distinct.** `nil` is falsy; `()` is truthy (empty
-  list). Use `empty?` not `nil?` for end-of-list. **Getting this wrong
-  causes infinite recursion.** See [docs/empty-list.md](docs/empty-list.md)
-  for the rationale.
-- **`#` is comment, `;` is splice.** Not the other way around.
-- **`assign` not `set` for mutation.** `(set x val)` creates a set.
-- **`squelch` takes exactly 2 arguments.** `(squelch closure :keyword)` or
-  `(squelch closure |:kw1 :kw2|)` with a set.
+- **`nil` and `()` are distinct.** `nil` is falsy; `()` is the empty list and
+  is truthy. Use `empty?` for end-of-list, and `nil?` for nil. **Getting this
+  wrong causes infinite recursion.** See
+  [docs/empty-list.md](docs/empty-list.md) for the rationale.
+- **`#` is comment, `;` is splice.** `;[1 2 3]` spreads into the surrounding
+  form.
+- **`assign` mutates; `set` builds a set.** `(set x val)` evaluates to `|x
+  val|`.
 
 Full list: [`docs/warts.md`](docs/warts.md).
 
 ## Conventions
 
-- Files and directories: lowercase, single-word when possible.
-- Target file size: 500 lines / 15KB. Dispatch tables up to 800 lines.
+- [DOCUMENTATION.md](DOCUMENTATION.md) holds the naming and size rules. The
+  exception it defers to: dispatch tables run to 800 lines.
+- `make doctest` runs every `.md` under `docs/` as a program, so a claim inside
+  a ` ```lisp ` fence is executed on every build.
+- Write a Rust file's call-out as a `//!` module doc, under the `// audited:`
+  stamp. `make qa` builds rustdoc, so `//!` is the one header form a reader
+  meets both in the source and in the rendered documentation.
+- A fact about one primitive belongs in that primitive's docstring, where
+  `(doc name)` finds it.
 - Prefer formal types over hashes/maps for structured data.
 - Validation at boundaries, not recovery at use sites.
 - Tests reflect architecture: unit tests for modules, integration tests for
@@ -271,38 +289,26 @@ Full list: [`docs/warts.md`](docs/warts.md).
 
 ## Maintaining documentation
 
-AGENTS.md and README.md files exist throughout the codebase. Keep them
-current:
+[DOCUMENTATION.md](DOCUMENTATION.md) is the policy. Read it before you write
+prose or a comment. The rule it turns on: **a document you find wrong is
+yours**, and you repair it inside the change you are already making.
 
-- **When you change a module's interface**, update its AGENTS.md. Changed
-  exports, new invariants, altered data flow — these matter to the next agent.
-
-- **When you add a new module**, create AGENTS.md (for agents) and README.md
-  (for humans). Copy structure from a sibling module.
-
-- **When you violate a documented invariant**, either fix your code or update
-  the invariant. Stale invariants are worse than none.
-
-- **When you discover undocumented behavior**, document it. If it's
-  intentional, add to `docs/warts.md`. If it's a bug, file an issue.
-
-Documentation debt compounds. A few minutes now saves hours of confusion
-later.
+When you change a module's interface, update its AGENTS.md in the same change.
 
 ## Where to start
 
-1. Read [`QUICKSTART.md`](QUICKSTART.md) — complete language reference for writing Elle code.
+1. Read [`QUICKSTART.md`](QUICKSTART.md) — the gotchas, and the index of the
+   document that owns each language topic.
 2. Read `pipeline.rs` — it shows the full compilation flow in 50 lines.
 3. Read an example in `examples/` to understand the surface syntax.
 4. Read `value.rs` to understand runtime representation.
 5. Read a failing test to understand what's expected.
+6. Read [`docs/cookbook/index.md`](docs/cookbook/index.md) for step-by-step
+   recipes for common cross-cutting changes.
+7. Read [`tests/AGENTS.md`](tests/AGENTS.md) for test organization and how
+   to add new tests.
 
 When in doubt, run the tests.
-
-5. Read [`docs/cookbook.md`](docs/cookbook.md) for step-by-step recipes for
-   common cross-cutting changes.
-6. Read [`tests/AGENTS.md`](tests/AGENTS.md) for test organization and how
-   to add new tests.
 
 ## MCP Server
 
