@@ -33,6 +33,9 @@ use std::collections::HashMap;
 
 pub use naming::new_static_region;
 pub(crate) use naming::ValueSlot;
+// The walk it names is a debug-only net, so the import is gated with it — an
+// unconditional `use` of a `cfg`-gated item fails the release build alone.
+#[cfg(debug_assertions)]
 use order::assert_cells_outlive_their_readers;
 pub(crate) use relocate::{BranchHoists, HoistBlock, TailExitHoist};
 
