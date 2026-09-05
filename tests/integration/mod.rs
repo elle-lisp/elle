@@ -1,3 +1,4 @@
+// audited: 2026-09-05
 // Integration tests harness
 mod core {
     include!("core.rs");
@@ -179,6 +180,15 @@ mod unicode_generation {
 }
 mod paths {
     include!("paths.rs");
+}
+mod agents {
+    include!("agents.rs");
+}
+mod audit {
+    include!("audit.rs");
+}
+mod prose {
+    include!("prose.rs");
 }
 mod bytecode_doc {
     include!("bytecode_doc.rs");
