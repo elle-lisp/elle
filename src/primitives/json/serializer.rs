@@ -1,5 +1,48 @@
 use crate::value::{TableKey, Value};
 
+/// The refusal for a keyword whose spelling neither the calling instance's
+/// memo nor the static vocabulary carries.
+///
+/// JSON has no rendering for a name hash: `"0xcbf2…"` would read back as a
+/// different name, so there is no fallback to take. The message names the
+/// hash because that is the author's only handle on which keyword it was —
+/// and, upstream, on the mint site that never recorded the spelling
+/// (docs/impl/symbol.md § "A spelling the runtime itself mints").
+fn unspellable(what: &str, hash: u64) -> String {
+    format!("{} has no learned spelling: #<keyword:{:#x}>", what, hash)
+}
+
+/// A struct key as a quoted JSON object key. `container` names the struct
+/// kind, for the message a key of neither JSON-writable type earns.
+fn json_object_key(
+    key: &TableKey,
+    symbols: Option<&crate::symbol::SymbolTable>,
+    container: &str,
+) -> Result<String, String> {
+    match key {
+        TableKey::String(v) => Ok(escape_json_string(
+            v.as_str().expect("a string key holds a string"),
+        )),
+        TableKey::Keyword(hash) => {
+            match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
+                Some(name) => Ok(escape_json_string(name)),
+                None => Err(unspellable("keyword struct key", *hash)),
+            }
+        }
+        _ => Err(format!(
+            "{} keys must be strings or keywords for JSON serialization",
+            container
+        )),
+    }
+}
+
+/// A keyword as a quoted JSON string.
+fn json_keyword(hash: u64, symbols: Option<&crate::symbol::SymbolTable>) -> Result<String, String> {
+    crate::value::keyword::resolve_keyword_name(symbols, hash)
+        .map(escape_json_string)
+        .ok_or_else(|| unspellable("keyword", hash))
+}
+
 /// Escape a string for JSON output
 pub fn escape_json_string(s: &str) -> String {
     let mut result = String::from("\"");
@@ -66,25 +109,7 @@ pub fn serialize_value(
         let mstruct = t.borrow();
         let mut pairs = Vec::new();
         for (k, v) in mstruct.iter() {
-            let key_str = match k {
-                TableKey::String(v) => {
-                    escape_json_string(v.as_str().expect("a string key holds a string"))
-                }
-                TableKey::Keyword(hash) => {
-                    match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
-                        Some(name) => escape_json_string(name),
-                        None => {
-                            return Err("keyword struct key has no learned spelling".to_string())
-                        }
-                    }
-                }
-                _ => {
-                    return Err(
-                        "@struct keys must be strings or keywords for JSON serialization"
-                            .to_string(),
-                    )
-                }
-            };
+            let key_str = json_object_key(k, symbols, "@struct")?;
             let val_str = serialize_value(v, symbols)?;
             pairs.push(format!("{}:{}", key_str, val_str));
         }
@@ -92,33 +117,13 @@ pub fn serialize_value(
     } else if let Some(s) = value.as_struct() {
         let mut pairs = Vec::new();
         for (k, v) in s.iter() {
-            let key_str = match k {
-                TableKey::String(v) => {
-                    escape_json_string(v.as_str().expect("a string key holds a string"))
-                }
-                TableKey::Keyword(hash) => {
-                    match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
-                        Some(name) => escape_json_string(name),
-                        None => {
-                            return Err("keyword struct key has no learned spelling".to_string())
-                        }
-                    }
-                }
-                _ => {
-                    return Err(
-                        "Struct keys must be strings or keywords for JSON serialization"
-                            .to_string(),
-                    )
-                }
-            };
+            let key_str = json_object_key(k, symbols, "Struct")?;
             let val_str = serialize_value(v, symbols)?;
             pairs.push(format!("{}:{}", key_str, val_str));
         }
         Ok(format!("{{{}}}", pairs.join(",")))
     } else if let Some(hash) = value.keyword_hash() {
-        let name = crate::value::keyword::resolve_keyword_name(symbols, hash)
-            .ok_or_else(|| "keyword has no learned spelling".to_string())?;
-        Ok(escape_json_string(name))
+        json_keyword(hash, symbols)
     } else if value.is_closure() {
         Err("Cannot serialize closures to JSON".to_string())
     } else if value.is_symbol() {
@@ -259,25 +264,7 @@ pub fn serialize_value_pretty(
         }
         let mut pairs = Vec::new();
         for (k, v) in mstruct.iter() {
-            let key_str = match k {
-                TableKey::String(v) => {
-                    escape_json_string(v.as_str().expect("a string key holds a string"))
-                }
-                TableKey::Keyword(hash) => {
-                    match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
-                        Some(name) => escape_json_string(name),
-                        None => {
-                            return Err("keyword struct key has no learned spelling".to_string())
-                        }
-                    }
-                }
-                _ => {
-                    return Err(
-                        "@struct keys must be strings or keywords for JSON serialization"
-                            .to_string(),
-                    )
-                }
-            };
+            let key_str = json_object_key(k, symbols, "@struct")?;
             let val_str = serialize_value_pretty(v, symbols, indent_level + 1)?;
             pairs.push(format!("{}: {}", key_str, val_str));
         }
@@ -293,25 +280,7 @@ pub fn serialize_value_pretty(
         }
         let mut pairs = Vec::new();
         for (k, v) in s.iter() {
-            let key_str = match k {
-                TableKey::String(v) => {
-                    escape_json_string(v.as_str().expect("a string key holds a string"))
-                }
-                TableKey::Keyword(hash) => {
-                    match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
-                        Some(name) => escape_json_string(name),
-                        None => {
-                            return Err("keyword struct key has no learned spelling".to_string())
-                        }
-                    }
-                }
-                _ => {
-                    return Err(
-                        "Struct keys must be strings or keywords for JSON serialization"
-                            .to_string(),
-                    )
-                }
-            };
+            let key_str = json_object_key(k, symbols, "Struct")?;
             let val_str = serialize_value_pretty(v, symbols, indent_level + 1)?;
             pairs.push(format!("{}: {}", key_str, val_str));
         }
@@ -322,9 +291,7 @@ pub fn serialize_value_pretty(
             indent
         ))
     } else if let Some(hash) = value.keyword_hash() {
-        let name = crate::value::keyword::resolve_keyword_name(symbols, hash)
-            .ok_or_else(|| "keyword has no learned spelling".to_string())?;
-        Ok(escape_json_string(name))
+        json_keyword(hash, symbols)
     } else if value.is_closure() {
         Err("Cannot serialize closures to JSON".to_string())
     } else if value.is_symbol() {

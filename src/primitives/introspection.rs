@@ -193,10 +193,21 @@ pub(crate) fn prim_signals(
     _args: &[Value],
 ) -> (SignalBits, Value) {
     let reg = crate::signals::registry::global_registry().lock().unwrap();
+    let names: Vec<(String, u32)> = reg
+        .entries()
+        .iter()
+        .map(|e| (e.name.clone(), e.bit_position))
+        .collect();
+    drop(reg);
     let mut map = std::collections::BTreeMap::new();
-    for entry in reg.entries() {
-        let key = crate::value::TableKey::from_value(&Value::keyword(&entry.name)).unwrap();
-        map.insert(key, Value::int(entry.bit_position as i64));
+    for (name, bit) in names {
+        // A learning site: the registry is process-global and carries names a
+        // program declared at run time, so the spelling may be new to this
+        // instance (docs/impl/symbol.md § "The display memo"). Without this the
+        // struct's own keys have no name to print, and `json/serialize` refuses
+        // the whole value.
+        let key = crate::value::TableKey::from_value(&ctx.keyword(&name)).unwrap();
+        map.insert(key, Value::int(bit as i64));
     }
     (SIG_OK, ctx.struct_from(map))
 }

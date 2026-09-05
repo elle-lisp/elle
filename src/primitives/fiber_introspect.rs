@@ -354,7 +354,7 @@ pub(crate) fn prim_fiber_caps(
 
     let caps = handle.with(|fiber| crate::signals::CAP_MASK.subtract(fiber.withheld));
     let registry = crate::signals::registry::global_registry().lock().unwrap();
-    let keywords = registry.bits_to_keywords(caps);
+    let keywords = registry.bits_to_keywords(caps, ctx.vm().symbols());
     (SIG_OK, ctx.set(keywords.into_iter().collect()))
 }
 

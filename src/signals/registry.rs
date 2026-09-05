@@ -155,15 +155,33 @@ impl SignalRegistry {
         self.lookup(name).map(SignalBits::from_bit)
     }
 
-    /// Convert signal bits to a Vec of keyword Values.
+    /// Convert signal bits to a Vec of keyword Values, recording each name in
+    /// `memo`.
     ///
     /// Used by `fiber/caps` and capability denial payloads to produce
     /// keyword sets from signal bitmasks.
-    pub fn bits_to_keywords(&self, bits: SignalBits) -> Vec<crate::value::Value> {
+    ///
+    /// This is a learning site. The registry is process-global and holds names
+    /// a program coined at run time — `(signal :my-sig)` allocates a bit — so
+    /// an instance reading a name back here may never have met the spelling,
+    /// and no static vocabulary can cover it. A worker thread has met none of
+    /// them. `memo` is `None` only where no instance is in reach, in which
+    /// case the built-in names still resolve through the vocabulary
+    /// (docs/impl/symbol.md § "The display memo").
+    pub fn bits_to_keywords(
+        &self,
+        bits: SignalBits,
+        mut memo: Option<&mut crate::symbol::SymbolTable>,
+    ) -> Vec<crate::value::Value> {
         self.entries
             .iter()
             .filter(|e| bits.has_bit(e.bit_position))
-            .map(|e| crate::value::Value::keyword(&e.name))
+            .map(|e| {
+                if let Some(m) = memo.as_deref_mut() {
+                    m.keyword(&e.name);
+                }
+                crate::value::Value::keyword(&e.name)
+            })
             .collect()
     }
 

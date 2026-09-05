@@ -102,7 +102,7 @@ impl VM {
             "fiber/caps" => {
                 let caps = crate::signals::CAP_MASK.subtract(self.fiber.withheld);
                 let registry = crate::signals::registry::global_registry().lock().unwrap();
-                let keywords = registry.bits_to_keywords(caps);
+                let keywords = registry.bits_to_keywords(caps, self.symbols());
                 (SIG_OK, ctx.set(keywords.into_iter().collect()))
             }
             "list-primitives" => {

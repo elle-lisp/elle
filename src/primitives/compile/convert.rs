@@ -4,16 +4,18 @@ use crate::primitives::ctx::NativeCtx;
 pub(crate) fn signal_to_value(sig: &Signal, ctx: &mut NativeCtx) -> Value {
     let mut fields = BTreeMap::new();
 
-    // :bits as keyword set
-    let bit_set = with_registry(|reg| {
-        let mut bit_set = BTreeSet::new();
-        for entry in reg.entries() {
-            if sig.bits.has_bit(entry.bit_position) {
-                bit_set.insert(Value::keyword(&entry.name));
-            }
-        }
-        bit_set
+    // :bits as keyword set. A learning site for the same reason `(signals)` is
+    // one: the registry carries names a program declared at run time, and this
+    // instance may never have met the spelling (docs/impl/symbol.md § "The
+    // display memo").
+    let names = with_registry(|reg| {
+        reg.entries()
+            .iter()
+            .filter(|e| sig.bits.has_bit(e.bit_position))
+            .map(|e| e.name.clone())
+            .collect::<Vec<_>>()
     });
+    let bit_set: BTreeSet<Value> = names.iter().map(|n| ctx.keyword(n)).collect();
     let bits_val = ctx.set(bit_set);
     fields.insert(kw("bits"), bits_val);
 

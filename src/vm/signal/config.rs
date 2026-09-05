@@ -1,6 +1,27 @@
 use super::*;
 
 impl VM {
+    /// The `--trace` keys as a keyword set.
+    ///
+    /// A learning site: a trace key is whatever the command line named, so its
+    /// spelling is not build-fixed and no vocabulary entry can cover it
+    /// (docs/impl/symbol.md § "The display memo").
+    fn trace_keywords(&self, ctx: &mut crate::primitives::ctx::Alloc) -> Value {
+        let mut memo = self.symbols();
+        let set: std::collections::BTreeSet<Value> = self
+            .runtime_config
+            .trace
+            .iter()
+            .map(|k| {
+                if let Some(m) = memo.as_deref_mut() {
+                    m.keyword(k);
+                }
+                Value::keyword(k)
+            })
+            .collect();
+        ctx.set(set)
+    }
+
     /// Handle `(vm/config)` read — returns config struct or specific field.
     pub(super) fn dispatch_vm_config_read(
         &self,
@@ -27,11 +48,9 @@ impl VM {
                 TableKey::from_value(&Value::keyword("mlir")).unwrap(),
                 Value::keyword(rc.mlir.keyword()),
             );
-            // trace as a set of keywords
-            let trace_set: Vec<Value> = rc.trace.iter().map(|k| Value::keyword(k)).collect();
             map.insert(
                 TableKey::from_value(&Value::keyword("trace")).unwrap(),
-                ctx.set(trace_set.into_iter().collect()),
+                self.trace_keywords(ctx),
             );
             map.insert(
                 TableKey::from_value(&Value::keyword("stats")).unwrap(),
@@ -55,11 +74,7 @@ impl VM {
                 "jit" => (SIG_OK, Value::keyword(rc.jit.keyword())),
                 "wasm" => (SIG_OK, Value::keyword(rc.wasm.keyword())),
                 "mlir" => (SIG_OK, Value::keyword(rc.mlir.keyword())),
-                "trace" => {
-                    let trace_set: Vec<Value> =
-                        rc.trace.iter().map(|k| Value::keyword(k)).collect();
-                    (SIG_OK, ctx.set(trace_set.into_iter().collect()))
-                }
+                "trace" => (SIG_OK, self.trace_keywords(ctx)),
                 "stats" => (SIG_OK, Value::bool(rc.stats)),
                 "flip" => (SIG_OK, Value::bool(crate::config::flip_enabled())),
                 "unicode" => (SIG_OK, self.unicode_version_value(ctx)),

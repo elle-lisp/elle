@@ -260,7 +260,7 @@ impl VM {
     ) -> Option<SignalBits> {
         let payload = {
             let mut ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *self.heap_ptr });
-            Self::build_denial_payload(&mut ctx, def, blocked, args)
+            Self::build_denial_payload(&mut ctx, def, blocked, args, self.symbols())
         };
 
         // The denial payload escapes into `fiber.signal`, read later via
@@ -330,7 +330,7 @@ impl VM {
     ) -> SignalBits {
         let payload = {
             let mut ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *self.heap_ptr });
-            Self::build_denial_payload(&mut ctx, def, blocked, args)
+            Self::build_denial_payload(&mut ctx, def, blocked, args, self.symbols())
         };
         // Retain the escaping payload region, mirroring the tail-position
         // `SignalAction::Suspend` path (see `handle_primitive_signal_tail`):
@@ -365,12 +365,13 @@ impl VM {
         def: &'static crate::primitives::def::PrimitiveDef,
         blocked: SignalBits,
         args: &[Value],
+        memo: Option<&mut crate::symbol::SymbolTable>,
     ) -> Value {
         use crate::value::heap::TableKey;
         use std::collections::BTreeMap;
 
         let registry = crate::signals::registry::global_registry().lock().unwrap();
-        let denied_keywords = registry.bits_to_keywords(blocked);
+        let denied_keywords = registry.bits_to_keywords(blocked, memo);
 
         let denied = ctx.set(denied_keywords.into_iter().collect());
         let primitive = ctx.string(def.name);
