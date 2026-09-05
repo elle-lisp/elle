@@ -24,6 +24,18 @@ impl<'a> Lowerer<'a> {
         let else_label = self.fresh_label();
         let merge_label = self.fresh_label();
 
+        // Each arm seals whatever relocation point it ends on, so a release
+        // emitted past the merge can be replicated back into the arms that leave
+        // through a frame-replacing tail call (docs/impl/region/mechanism.md
+        // § "The relocation point outlives the block"). Read BEFORE the condition
+        // block closes, because the merge's other source is the set of points
+        // already covering this position, and `finish_block` clears them
+        // (§ "A merge inherits what covered the branch's ENTRY as well"). `cond`
+        // is lowered above, so nothing of this branch's own is lost by reading
+        // here; `lower_cond` and `lower_match` reach the same moment with their
+        // entry block still open.
+        let branch_hoists = self.begin_branch_arms();
+
         // Terminate current block with branch
         self.terminate(Terminator::Branch {
             cond: cond_reg,
@@ -31,12 +43,6 @@ impl<'a> Lowerer<'a> {
             else_label,
         });
         self.finish_block();
-
-        // Each arm seals whatever relocation point it ends on, so a release
-        // emitted past the merge can be replicated back into the arms that leave
-        // through a frame-replacing tail call (docs/impl/region/mechanism.md
-        // § "The relocation point outlives the block").
-        let saved_arm_hoists = self.begin_branch_arms();
 
         // Then block: store result to slot, jump to merge
         self.current_block = BasicBlock::new(then_label);
@@ -62,7 +68,7 @@ impl<'a> Lowerer<'a> {
 
         // Merge block: load result from slot
         self.current_block = BasicBlock::new(merge_label);
-        self.open_branch_merge(saved_arm_hoists);
+        self.open_branch_merge(branch_hoists);
         self.emit(LirInstr::LoadLocal {
             dst: result_reg,
             slot: result_slot,

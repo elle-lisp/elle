@@ -302,14 +302,52 @@ impl<'a> Lowerer<'a> {
         self.current_func.blocks.push(block);
     }
 
-    /// Start collecting the relocation points of a branch's arms, returning the
-    /// enclosing branch's collection for `open_branch_merge` to restore.
+    /// Start collecting the relocation points of a branch's arms, returning what
+    /// [`Self::open_branch_merge`] needs to hand the merge block: the enclosing
+    /// branch's collection to restore, and the points already covering the
+    /// position this branch is entered at.
     ///
     /// The three branch lowerings bracket their arms with this pair; a branch
     /// nested inside an arm therefore collects into its own list and hands its
     /// union up as that arm's contribution.
-    pub(super) fn begin_branch_arms(&mut self) -> Vec<super::TailExitHoist> {
-        std::mem::take(&mut self.arm_exit_hoists)
+    ///
+    /// The **inherited** half is the merge's second source. A merge is reached
+    /// only through the branch, so the paths that arrive at it are the paths that
+    /// arrived at the entry, minus the ones an arm's own tail call took away — and
+    /// a point that covered the entry covers the merge for the same reason it
+    /// covered the entry (docs/impl/region/mechanism.md § "A merge inherits what
+    /// covered the branch's ENTRY as well"). Without it a branch that follows an
+    /// earlier branch starts life covering nothing: the condition block closes like
+    /// any other and clears what it was carrying.
+    ///
+    /// Read here rather than sealed later, because this runs while the branch's own
+    /// entry block is the one still open — the position the points describe. Only
+    /// the [`super::HoistBlock::Finished`] ones are taken: a point still naming the
+    /// open block dies with that block exactly as before, having no closed
+    /// instruction list to be spliced into.
+    ///
+    /// The points are MOVED out rather than copied, so the branch holds the only
+    /// record of each. A point is mutable state — every replica spliced into its
+    /// block advances its `at` past what it inserted — so two records of one point
+    /// diverge, and the stale one then splices into the middle of the run the
+    /// current one already put there. What that costs is the position between here
+    /// and the branch's own first block boundary: a `cond`'s first clause test and a
+    /// `match`'s first pattern test are lowered into the entry block and emit their
+    /// releases plainly. That is the conservative baseline this whole mechanism
+    /// improves on, never a mis-free.
+    pub(super) fn begin_branch_arms(&mut self) -> super::BranchHoists {
+        let mut inherited = Vec::new();
+        self.tail_exit_hoist.retain(|h| match h.block {
+            super::HoistBlock::Finished(_) => {
+                inherited.push(h.clone());
+                false
+            }
+            super::HoistBlock::Current(_) => true,
+        });
+        super::BranchHoists {
+            saved: std::mem::take(&mut self.arm_exit_hoists),
+            inherited,
+        }
     }
 
     /// Seal the relocation points of the arm-final block into the branch's
@@ -337,14 +375,20 @@ impl<'a> Lowerer<'a> {
         self.arm_exit_hoists.extend(sealed);
     }
 
-    /// Hand the merge block just opened the points its arms sealed, and restore
-    /// the enclosing branch's collection.
+    /// Hand the merge block just opened the points its arms sealed and the points
+    /// that covered the branch's entry, and restore the enclosing branch's
+    /// collection.
     ///
-    /// Every path into a merge arrives through one of the arms, so these points
-    /// together cover the merge — which is what licenses replicating a release
-    /// emitted here back into each of them.
-    pub(super) fn open_branch_merge(&mut self, saved: Vec<super::TailExitHoist>) {
+    /// Every path into a merge arrives through one of the arms, and every path
+    /// into the branch arrived at its entry, so the two sets together cover the
+    /// merge — which is what licenses replicating a release emitted here back into
+    /// each of them. Neither can double-count the other: a point handed over from
+    /// the entry was never in an arm's `tail_exit_hoist` to be sealed, the block
+    /// boundary between the two having cleared it.
+    pub(super) fn open_branch_merge(&mut self, hoists: super::BranchHoists) {
+        let super::BranchHoists { saved, inherited } = hoists;
         self.tail_exit_hoist = std::mem::replace(&mut self.arm_exit_hoists, saved);
+        self.tail_exit_hoist.extend(inherited);
     }
 
     /// Open the relocation point a frame-replacing tail call leaves behind: the
@@ -612,6 +656,24 @@ impl<'a> Lowerer<'a> {
                 continue;
             }
             let at = self.tail_exit_hoist[i].at;
+            // A point's `at` names its `TailCall`, and each replica spliced ahead
+            // of that call advances it past what it inserted — so the invariant is
+            // that ONE record of each point exists (`begin_branch_arms` moves them
+            // rather than copying). A second record keeps a stale index, which
+            // splices into the middle of the run the live one already put there and
+            // leaves the operand stack of a block that still passes every other
+            // check misshapen. Asserting the index still names the call turns that
+            // into a panic here rather than an out-of-bounds stack read at runtime.
+            debug_assert!(
+                matches!(
+                    self.current_func.blocks[block].instructions.get(at),
+                    Some(SpannedInstr {
+                        instr: LirInstr::TailCall { .. } | LirInstr::TailCallArrayMut { .. },
+                        ..
+                    })
+                ),
+                "a relocation point's index must still name its tail call: block={block} at={at}"
+            );
             self.tail_exit_hoist[i].at += copy.len();
             self.current_func.blocks[block]
                 .instructions

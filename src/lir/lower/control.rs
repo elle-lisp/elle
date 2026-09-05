@@ -494,11 +494,11 @@ impl<'a> Lowerer<'a> {
         // the block"). The no-match block makes no tail call, so it contributes
         // none — which costs nothing, since a point is only ever a licence to
         // replicate, never an obligation to.
-        let saved_arm_hoists = self.begin_branch_arms();
+        let branch_hoists = self.begin_branch_arms();
 
         if any_guard_yields {
             self.lower_match_sequential(arms, scrutinee_slot, result_slot, result_reg, done_label)?;
-            self.open_branch_merge(saved_arm_hoists);
+            self.open_branch_merge(branch_hoists);
             return Ok(result_reg);
         }
 
@@ -520,7 +520,7 @@ impl<'a> Lowerer<'a> {
 
         // Done block: reload result
         self.current_block = BasicBlock::new(done_label);
-        self.open_branch_merge(saved_arm_hoists);
+        self.open_branch_merge(branch_hoists);
         self.emit(LirInstr::LoadLocal {
             dst: result_reg,
             slot: result_slot,

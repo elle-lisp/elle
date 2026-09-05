@@ -102,6 +102,7 @@ struct BlockLowerContext {
 /// the merge *and* replicated at each point, which is sound only for a
 /// self-cancelling run — one that nil-stamps the slot it read, so the copy a path
 /// reaches second no-ops.
+#[derive(Clone)]
 struct TailExitHoist {
     /// Index of the `TailCall` in its block's instruction list. A hoisted
     /// release is spliced in here, ahead of the frame replacement, and the index
@@ -122,6 +123,23 @@ struct TailExitHoist {
     /// argument's is the ownership move the calling convention rests on, and the
     /// callee's belongs to the activation that takes it over.
     exempt: rustc_hash::FxHashSet<crate::hir::region::Region>,
+}
+
+/// What a branch lowering holds across its arms, so `open_branch_merge` can hand
+/// the merge block everything that covers it.
+///
+/// Two sources, collected at different moments because they are sealed
+/// differently: an arm's own points name a block the arm just closed and are
+/// sealed at that close (`seal_arm_hoists`), while the points covering the
+/// branch's ENTRY are already sealed when the branch begins and are read there
+/// (docs/impl/region/mechanism.md § "A merge inherits what covered the branch's
+/// ENTRY as well").
+struct BranchHoists {
+    /// The enclosing branch's `arm_exit_hoists`, restored at the merge so a
+    /// nested branch's arms never leak into it.
+    saved: Vec<TailExitHoist>,
+    /// The points that already covered the position the branch was entered at.
+    inherited: Vec<TailExitHoist>,
 }
 
 /// Where a relocation point lives, and with it which of the two placements
