@@ -29,8 +29,11 @@ already making.
   next reader holding two claims and no way to choose.
 - Delete what no longer describes the code. A deleted paragraph costs nothing
   to read.
-- When the repair is larger than your change, file an issue and cite it where
-  the claim sits.
+- Do the repair, however much larger it is than the change that found it. A
+  file past the reading budget is split; a section describing code that is gone
+  is deleted. Neither waits for somebody else.
+- File an issue for a defect in the code. Prose you have open is repaired here,
+  where the cost of reading it is already paid.
 - Audit against this file as it stands today, never against the version you
   remember.
 
