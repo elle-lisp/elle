@@ -119,9 +119,10 @@ Three standing checks keep the list complete, because the constructor cannot —
   hands a literal to a keyword constructor: `Value::keyword("…")`,
   `TableKey::keyword("…")`, the `kw("…")` helper each primitive module
   defines for its struct keys, `ctx.error("…")` and `io_error("…")` (the kind
-  becomes the `:error` field's keyword), and `ctx.external("…")` (the type
-  name becomes the keyword `type-of` returns). It fails on a spelling the
-  vocabulary lacks.
+  becomes the `:error` field's keyword), `ctx.external("…")` (the type name
+  becomes the keyword `type-of` returns), and `Syntax::keyword(arena, "…")`
+  (a keyword a desugaring writes into the tree, which no source token backs
+  and so no reader learns). It fails on a spelling the vocabulary lacks.
 - `vocabulary_covers_accessor_mint_sites` enumerates the closed tables whose
   `&'static str` accessors feed those same constructors — the signal
   registry's built-ins, `sigmap`'s POSIX signals, the JIT/WASM/MLIR policy
