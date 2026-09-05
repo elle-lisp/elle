@@ -1,5 +1,7 @@
 # Region generations: stale derefs detonate in debug builds
 
+<!-- audited: 2026-09-05 -->
+
 Implementation-facing: the per-region generation counter and page stamping that
 turn a stale region deref into a deterministic debug-build panic at the exact
 deref site. Pairs with the `--trace=guardfree` oracle described in
@@ -157,9 +159,16 @@ own **live** allocations, kept alive by its still-pending `DecrefRegion`s;
 frame's `region_borrows` (`record_region_borrows`), and `resume_suspended` re-checks
 them with the shared `first_stale_borrow` just before `restore_activation_region_map`
 re-enters the body — so a region freed while the fiber was parked panics at the resume
-boundary, naming the slot, instead of corrupting the resumed activation's allocs/
-decrefs. Pinned by `suspended_frame_region_borrow_detects_freed_region`
-(`src/vm/fiber/borrow_tests.rs`).
+boundary instead of corrupting the resumed activation's allocs/decrefs. Pinned by
+`suspended_frame_region_borrow_detects_freed_region` (`src/vm/fiber/borrow_tests.rs`).
+
+The panic names the parked activation beside the slot and the physical region: the
+function, its position in the replay chain, and the source location of the resume
+point. A slot number and a physical region id are per-run values that name no code, so
+a panic carrying only those says nothing about which program parked. The location
+falls back to the function's first recorded line where the resume point has no entry of
+its own, because naming the file is most of the answer. `ParkSite` builds the text
+(`src/value/fiber/frame.rs`), pinned by `stale_borrow_message_names_the_parked_site`.
 
 The map is not automatically dangling-free, which is what forces the snapshot to record
 the **establish-generation** (`MappedRegion::gen`, the region's generation when the slot
