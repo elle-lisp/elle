@@ -1480,14 +1480,47 @@ followed by one the tail call's path may not be a predecessor of at all, and a
 release replicated into an unreachable point is a release added on a path that
 never owed it.
 
+**A merge inherits what covered the branch's ENTRY as well.** The arms are one of
+the two sources, not the whole of it. A branch is entered from one position, and
+whatever points covered that position cover the merge too — the merge is reached
+only through the branch, so the paths that arrive at it are exactly the paths that
+arrived at the entry, minus the ones an arm's own tail call took away. Reading the
+arms alone loses a point at the boundary the arms never touch: the condition
+block, which closes like any other and clears what it was carrying, so a branch
+that follows an earlier branch starts life covering nothing. Every release after
+the second branch is then emitted at a merge the first branch's tail-calling arm
+does not reach, with no replica to run it there — one region per call, plus its
+cascade.
+
+That is not a corner shape. **Functionalization inserts a branch of its own** for
+every mutable a branch arm reassigns: the two versions of the name have to meet,
+and they meet in an `If` on the same condition, emitted after the arm that already
+carries the tail call. So a body whose tail is `(if p (begin … (assign i …) …
+(f x)) …)` compiles to two branches, and the enclosing scope's releases land past
+the second one. A loop is the everyday spelling of it, `while` and `each` alike
+carrying an `assign` over their induction variable — which is why an `each` over an
+empty sequence, whose body never runs, still strands what the scope around it
+holds.
+
+The two sources are collected separately because they are sealed differently. An
+arm's own points name a block the arm just closed and are sealed AT that close; the
+inherited ones are already sealed when the branch begins, and are read there —
+`Finished` points only, a point still naming the open block dying with it exactly as
+before. Neither source can double-count the other: a point handed to the merge from
+the entry was never in an arm's `tail_exit_hoist` to be sealed, the block boundary
+between the two having cleared it.
+
 The residual is unchanged in kind: a holder escape marks by a facet no edge at
 the point replaces.
 
 Pinned by `tests/elle/region-tail-frame-exit.lisp` (the reclamation, with the
 argument-move and callee exemptions, the per-arm faces, the captured-holder faces,
 the non-self-cancelling boundary, the env-cell faces, the
-handed-back-through-the-callee faces, the forward-cell faces, and the
-id-routed letrec closure whose body's tail is a branch, driven as rows),
+handed-back-through-the-callee faces, the forward-cell faces, the
+id-routed letrec closure whose body's tail is a branch, and the merge that
+inherits its points from the branch's entry — the `if`, `when`, `cond` and loop
+faces of the branch functionalization inserts for a reassigned local — driven as
+rows),
 the `tail-frame-exit-unused` /
 `tail-frame-exit-moved` / `tail-frame-exit-arms` / `tail-frame-exit-captured` /
 `tail-frame-exit-handback` / `tail-frame-exit-fold-driver` /

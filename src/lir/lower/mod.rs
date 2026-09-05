@@ -96,11 +96,12 @@ struct BlockLowerContext {
 /// the same single release, relocated), and is legal for every region the call
 /// itself cannot reach.
 ///
-/// A branch merge inherits the points of the arms that reach it, so a point also
-/// outlives its own block (§ "The relocation point outlives the block"). There
-/// the release is emitted at the merge *and* replicated at each point, which is
-/// sound only for a self-cancelling run — one that nil-stamps the slot it read,
-/// so the copy a path reaches second no-ops.
+/// A branch merge inherits the points of the arms that reach it AND the points
+/// that already covered the branch's entry, so a point outlives its own block
+/// (§ "The relocation point outlives the block"). There the release is emitted at
+/// the merge *and* replicated at each point, which is sound only for a
+/// self-cancelling run — one that nil-stamps the slot it read, so the copy a path
+/// reaches second no-ops.
 struct TailExitHoist {
     /// Index of the `TailCall` in its block's instruction list. A hoisted
     /// release is spliced in here, ahead of the frame replacement, and the index
@@ -429,10 +430,11 @@ pub struct Lowerer<'a> {
     /// emission position (see [`TailExitHoist`]). Either a single
     /// [`HoistBlock::Current`] entry — a frame-replacing tail call emitted into
     /// this very block, which dominates everything after it — or the
-    /// [`HoistBlock::Finished`] points a branch merge inherited from its arms.
-    /// Set by `lower_call`'s tail arm and by the branch lowerings, cleared at
-    /// every other block boundary, and saved/restored across lambda boundaries
-    /// like every other per-function slot map.
+    /// [`HoistBlock::Finished`] points a branch merge inherited, from its arms
+    /// and from the position the branch was entered at. Set by `lower_call`'s
+    /// tail arm and by the branch lowerings, cleared at every other block
+    /// boundary, and saved/restored across lambda boundaries like every other
+    /// per-function slot map.
     tail_exit_hoist: Vec<TailExitHoist>,
     /// Points sealed from the arms of the branch currently being lowered, which
     /// `open_branch_merge` hands to its merge block. Saved and restored around
