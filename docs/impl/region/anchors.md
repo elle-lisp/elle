@@ -202,8 +202,11 @@ rather than where:
   must stay per-iteration: hoisting it to the block's exit would leave one
   release for N allocations — a worse leak than the one being closed, and the
   same re-allocation argument the `capture_loop_ext` "bound outside" guard makes.
-  A break out of a loop therefore still strands the *breaking iteration's* own
-  regions, an over-keep bounded by one iteration.
+  What the refusal leaves unserved is the iteration that BREAKS, whose value no
+  successor displaces and no later release reaches. That one is answered at the
+  break site rather than at the anchor: the break opens a relocation point of its
+  own and the release is replicated there ([the relocation
+  point](replicate.md)).
 
   A region the loop merely READS is a different case, and the barrier is read off
   the allocation site rather than the release's position for exactly that reason.

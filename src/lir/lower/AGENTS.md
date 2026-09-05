@@ -244,9 +244,16 @@ emits after the exit label, so it fires on the break path and the fall-through
 path alike. That covers both faces: the value the break carries out
 ([mechanism.md](../../../docs/impl/region/mechanism.md) § "`break` transfers its
 value; it does not consume it") and every *other* release the jump passes over
-(§ "A release the break jumps over is not a release"). Do not add a compensating
-release at the break site — for the broken value it would free what the block is
-about to hand its consumer, and for the rest there is nothing left to free.
+(docs/impl/region/anchors.md).
+
+The one release the anchor cannot carry is the **breaking iteration's own**: a
+region the loop body allocates is minted per iteration, so the block's exit label
+would cover whichever value the slot held last. `lower_break` therefore opens a
+relocation point at the end of the block it leaves, exactly as a frame-replacing
+tail call opens one ahead of its `TailCall`, and a release emitted while that
+block is still open is replicated there (`relocate.rs::open_break_exit_hoist`,
+docs/impl/region/replicate.md). Do NOT free the value the break CARRIES at that
+point — it is exempt, because the block is about to hand it to its consumer.
 
 ## Key instructions
 
@@ -311,4 +318,4 @@ about to hand its consumer, and for the rest there is nothing left to free.
 - **Not emitting lbox operations**: If a binding needs an lbox, emit `MakeCaptureCell` before storing
 - **Not propagating spans**: Every emitted instruction should carry the source span from the HIR node
 - **Missing a region demise**: After lowering each HIR node, iterate `regions_demising_at(hir_id)` and emit one `DecrefRegion(rid)` per region. Forgetting to do so leaks regions.
-- **Anchoring a release on a path `break` skips**: a release placed at a `decref_point` between a break site and its target block's exit label never runs on the break path. Both the broken value and every other region in that window are anchored on the `Block` node by the analysis (see Block/Break lowering above) — never patched at the break site
+- **Anchoring a release on a path `break` skips**: a release placed at a `decref_point` between a break site and its target block's exit label never runs on the break path. The analysis anchors what it can on the `Block` node; what the loop barrier refuses there, the break's own relocation point replicates (see Block/Break lowering above). Never hand-write a release at the break site — the two mechanisms already cover every path, and a third would double-free
