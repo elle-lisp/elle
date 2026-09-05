@@ -36,6 +36,14 @@
 # value-routed release nil-stamps the slot it read, so the copy a path reaches
 # second loads `nil` and no-ops.
 #
+# The arms are one of two sources. A merge also inherits what covered the
+# position the branch was ENTERED at, because the merge is reached only through
+# the branch (§ "A merge inherits what covered the branch's ENTRY as well"). That
+# is what a branch following an earlier branch needs, and functionalization
+# writes one for every mutable a branch arm reassigns — so a loop or an `assign`
+# inside an arm puts the enclosing scope's releases past a merge the first
+# branch's tail-calling arm never arrives at.
+#
 # An ENV CELL's release leaves no such stamp, so it takes the other route to the
 # same place: the relocation keeps it in the arm whose tail call it was placed in,
 # and the sibling arm takes branch compensation's per-arm release — the HEAD one
@@ -378,6 +386,82 @@
     (go n)
     (if t (tail-sink) 5)))
 
+# (d22) the release lands past a SECOND branch. A merge inherits the relocation
+# points of the arms that reach it AND the points that already covered the
+# position the branch was entered at — the merge is reached only through the
+# branch, so the paths arriving at it are the paths that arrived at the entry
+# (docs/impl/region/mechanism.md § "A merge inherits what covered the branch's
+# ENTRY as well"). Read from the arms alone, a branch following an earlier branch
+# starts life covering nothing, and every release after it is emitted where the
+# earlier branch's tail-calling arm never arrives.
+#
+# The second branch is not written here: functionalization inserts one for every
+# mutable a branch arm reassigns, an `If` on the same condition merging the two
+# versions of the name after the arm that already carries the tail call. The
+# scrutinee's own region is what these rows measure — the branch tests a value
+# read out of it, so its release lands at the branch and, with the second one
+# inserted, past that instead.
+(defn mk-ok ()
+  [true 7])
+(defn mk-not ()
+  [false 7])
+(defn phi-when (p)
+  (let [[ok? n] (p)]
+    (when ok?
+      (let [_ (begin
+                (def @i 0)
+                (assign i (%add i 1))
+                i)]
+        (tail-sink)))))
+
+# (d22b) both arms, the sibling FALLING THROUGH to the merge, where the release
+# is still emitted. Exactly one release runs per path, the arm's replica or the
+# merge's copy.
+(defn phi-if (p)
+  (let [[ok? n] (p)]
+    (if ok?
+      (let [_ (begin
+                (def @i 0)
+                (assign i (%add i 1))
+                i)]
+        (tail-sink))
+      5)))
+
+# (d22c) the reassignment inside a LOOP, which is how ordinary code writes it:
+# `while` and `each` both carry an `assign` over an induction variable, so a walk
+# in a branch arm inserts the merge whether or not its body ever runs. This one's
+# never does.
+(defn phi-loop (p)
+  (let [[ok? n] (p)]
+    (when ok?
+      (let [_ (begin
+                (def @i 0)
+                (while (%lt i 0) (assign i (%add i 1))))]
+        (tail-sink)))))
+
+# (d22d) a `cond` clause body carrying the reassignment, with the else body
+# leaving through its own callee. Both bodies are driven.
+(defn phi-cond (p)
+  (let [[ok? n] (p)]
+    (cond
+      ok?
+        (let [_ (begin
+                  (def @i 0)
+                  (assign i (%add i 1))
+                  i)]
+          (tail-sink))
+      (tail-sink2))))
+
+# (d22e) control: the same arm with no reassignment, so functionalization inserts
+# no second branch and the arm's own point is the one the release reads.
+(defn phi-none (p)
+  (let [[ok? n] (p)]
+    (when ok?
+      (let [_ (begin
+                (def i 0)
+                (%add i 1))]
+        (tail-sink)))))
+
 # (d18) the `def` face of the same three bodies. A `def` has no scope NODE, so the
 # analysis leaves its closure region's demise where the binding chain put it — the
 # binding's last use — and a use as a CALLEE resolves through `last_use` to the node
@@ -595,6 +679,13 @@
   (measure (fn () (arm-selfrec-partial 3 true)) 200 window))
 (def arm-selfrec-partial-f-d
   (measure (fn () (arm-selfrec-partial 3 false)) 200 window))
+(def phi-when-d (measure (fn () (phi-when mk-ok)) 200 window))
+(def phi-if-t-d (measure (fn () (phi-if mk-ok)) 200 window))
+(def phi-if-f-d (measure (fn () (phi-if mk-not)) 200 window))
+(def phi-loop-d (measure (fn () (phi-loop mk-ok)) 200 window))
+(def phi-cond-t-d (measure (fn () (phi-cond mk-ok)) 200 window))
+(def phi-cond-f-d (measure (fn () (phi-cond mk-not)) 200 window))
+(def phi-none-d (measure (fn () (phi-none mk-ok)) 200 window))
 (def callee-letrec-member-d
   (measure (fn () (callee-letrec-member 3)) 200 window))
 (def callee-member-plain-d (measure (fn () (callee-member-plain 3)) 200 window))
@@ -661,6 +752,9 @@
          arm-selfrec-f-d "  cond " arm-selfrec-cond-0-d "/" arm-selfrec-cond-2-d
          "  inner " arm-selfrec-inner-t-d "/" arm-selfrec-inner-f-d "  partial "
          arm-selfrec-partial-t-d "/" arm-selfrec-partial-f-d)
+(println "  merge inheriting the branch's entry: when " phi-when-d "  if "
+         phi-if-t-d "/" phi-if-f-d "  loop " phi-loop-d "  cond " phi-cond-t-d
+         "/" phi-cond-f-d "  control " phi-none-d)
 (println "  def binder: arg-call " def-arg-call-d "  nontail " def-nontail-d
          "  stmt " def-stmt-d "  tail " def-tail-d)
 (println "  letrec member callee: arg-call " callee-letrec-member-d "  plain "
@@ -766,6 +860,15 @@
 (bounded? def-stmt-d "the same `def` called for effect")
 (bounded? def-tail-d "control: the `def` whose body tail-calls the binding")
 
+(bounded? phi-when-d
+          "a release past the merge functionalization inserts for a reassigned local")
+(bounded? phi-if-t-d "the tail-calling arm of the same shape's two-armed face")
+(bounded? phi-if-f-d "the sibling arm, which falls through to the merge")
+(bounded? phi-loop-d "the same where a loop carries the reassignment")
+(bounded? phi-cond-t-d "the same under a cond clause body")
+(bounded? phi-cond-f-d "the cond else body, which leaves through its own callee")
+(bounded? phi-none-d "control: the same arm with no reassignment to merge")
+
 (bounded? callee-letrec-member-d
           "the letrec member the body tail-calls, released at the letrec scope end")
 (bounded? callee-member-plain-d
@@ -814,6 +917,14 @@
 (assert (= (arm-selfrec-inner 3 false) 1) "inner-recursion sibling arm lost")
 (assert (= (arm-selfrec-partial 3 false) 5)
         "partial branch-tail fall-through result lost")
+(assert (= (phi-when mk-ok) 0) "phi merge when result lost")
+(assert (nil? (phi-when mk-not)) "phi merge when sibling arm lost")
+(assert (= (phi-if mk-ok) 0) "phi merge if result lost")
+(assert (= (phi-if mk-not) 5) "phi merge if fall-through result lost")
+(assert (= (phi-loop mk-ok) 0) "phi merge loop result lost")
+(assert (= (phi-cond mk-ok) 0) "phi merge cond clause result lost")
+(assert (= (phi-cond mk-not) 1) "phi merge cond else result lost")
+(assert (= (phi-none mk-ok) 0) "control: no-reassignment arm result lost")
 (assert (= (callee-letrec-member 3) 1) "callee-letrec-member result lost")
 (assert (= (callee-member-plain 3) 2) "callee-member-plain result lost")
 (assert (= (callee-member-capture member-src) 4)

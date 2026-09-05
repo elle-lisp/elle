@@ -318,6 +318,33 @@
         m (e17-arm v false)]
     (%add n (%add m (length (first v))))))
 
+# (e18) the merge a branch inherits from its ENTRY rather than from its arms
+# (docs/impl/region/mechanism.md § "A merge inherits what covered the branch's
+# ENTRY as well"). Functionalization inserts a second branch to merge the two
+# versions of the mutable this arm reassigns, so the scrutinee's release is
+# emitted past it and replicated ahead of the arm's `TailCall`. The scrutinee is a
+# pair built around a list the CALLER owns, so freeing it cascades one decref
+# along the funnel's counted edge — which must drop that edge and no more. The
+# caller drives both arms with one list and reads it afterwards, so an
+# over-cascade faults on the second call or on the final read.
+(defn e18-pair (v)
+  [v 1])
+(defn e18-arm (v t)
+  (let [[a b] (e18-pair v)
+        g (fn () (length (first a)))]
+    (if t
+      (let [_ (begin
+                (def @i 0)
+                (assign i (%add i 1))
+                i)]
+        (g))
+      5)))
+(defn e18-read (i)
+  (let [v (list (string "ag" i) i)
+        n (e18-arm v true)
+        m (e18-arm v false)]
+    (%add n (%add m (length (first v))))))
+
 # (e4) the capturing closure is RETURNED, so it outlives the frame and carries `x`
 # with it — on the funnel's counted edge, which is what the frame's release must
 # leave standing. The caller invokes the closure afterwards and reads through it.
@@ -566,6 +593,7 @@
 (var e16 0)
 (var e16b 0)
 (var e17 0)
+(var e18 0)
 (var e4 0)
 (var f 0)
 (var g 0)
@@ -605,6 +633,7 @@
   (assign e16 (e16-read i))
   (assign e16b (e16b-read i))
   (assign e17 (e17-read i))
+  (assign e18 (e18-read i))
   (assign e4 (e4-read i))
   (assign f (f-read i))
   (assign g (g-return i))
@@ -658,6 +687,9 @@
 (assert (%gt e17 0)
         "a letrec closure's replicated release freed more than the frame's own \
          reference under a branch body tail")
+(assert (%gt e18 0)
+        "a scrutinee's replicated release freed more than the frame's own \
+         reference at a merge inherited from the branch's entry")
 (assert (> e4 0) "value freed under a closure that escaped holding it")
 (assert (%gt f 0) "stranded value freed after being stored into a container")
 (assert (%gt g 0) "returned value freed under the caller's read")
