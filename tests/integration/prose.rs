@@ -266,7 +266,12 @@ fn header_doc_paths(line: &str) -> Vec<String> {
     }
     let mut out = Vec::new();
     for word in t.split_whitespace() {
-        let w = word.trim_matches(|c: char| !c.is_ascii_graphic() || c == '`' || c == ',');
+        // Brackets are trimmed with the rest of the punctuation: a header cites a
+        // document mid-sentence as often as on a line of its own, and
+        // `(docs/impl/x.md § …)` names the same file `docs/impl/x.md` does.
+        let w = word.trim_matches(|c: char| {
+            !c.is_ascii_graphic() || matches!(c, '`' | ',' | '(' | ')' | '[' | ']')
+        });
         if w.ends_with(".md") && w.contains('/') && !w.starts_with('.') {
             out.push(w.to_string());
         }
