@@ -135,16 +135,14 @@ fn a_plugin_name_is_learned_by_the_calling_instance() {
     let ext = "plugin-external-xt";
     {
         let mut ctx = ctx_with_memo(&mut heap, region, &mut memo);
-        unsafe { make_keyword(&mut ctx, kw.as_ptr(), kw.len()) };
-        unsafe {
-            make_external(
-                &mut ctx,
-                ext.as_ptr(),
-                ext.len(),
-                std::ptr::null_mut(),
-                None,
-            )
-        };
+        make_keyword(&mut ctx, kw.as_ptr(), kw.len());
+        make_external(
+            &mut ctx,
+            ext.as_ptr(),
+            ext.len(),
+            std::ptr::null_mut(),
+            None,
+        );
     }
 
     assert_eq!(

@@ -150,6 +150,13 @@ fn vocabulary_membership_answers_in_a_const_context() {
 // most of the runtime's struct keys are written in. `ctx.error("…")` and
 // `io_error("…")` name a kind that becomes the `:error` field's keyword.
 // `ctx.external("…")` names a type that becomes the keyword `type-of` returns.
+// `Syntax::keyword(arena, "…")` is a keyword a desugaring writes into the
+// tree: no source token backs it, so no reader learns it and only the
+// vocabulary can spell it.
+//
+// Each pattern ends at the quote that opens the spelling, because the
+// extraction reads from there to the next quote. A form whose literal is not
+// in that position needs its own entry, spelled out to the argument before it.
 const LITERAL_MINT_FORMS: &[&str] = &[
     "Value::keyword(\"",
     "TableKey::keyword(\"",
@@ -157,6 +164,7 @@ const LITERAL_MINT_FORMS: &[&str] = &[
     "ctx.error(\"",
     "io_error(\"",
     "ctx.external(\"",
+    "Syntax::keyword(arena, \"",
 ];
 
 // Every fixed spelling the runtime mints must be in VOCABULARY, or the value
