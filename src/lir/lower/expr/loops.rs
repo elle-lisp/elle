@@ -222,7 +222,7 @@ impl<'a> Lowerer<'a> {
         // inherit (docs/impl/region/mechanism.md § "The relocation point outlives
         // the block"). A `cond` with no `else` contributes an empty-handed nil
         // path, which simply carries no point.
-        let saved_arm_hoists = self.begin_branch_arms();
+        let branch_hoists = self.begin_branch_arms();
 
         // Process each clause
         for (i, (test, body)) in clauses.iter().enumerate() {
@@ -284,7 +284,7 @@ impl<'a> Lowerer<'a> {
 
         // Done block (continue here)
         self.current_block = BasicBlock::new(done_label);
-        self.open_branch_merge(saved_arm_hoists);
+        self.open_branch_merge(branch_hoists);
         self.emit(LirInstr::LoadLocal {
             dst: result_reg,
             slot: cond_result_slot,

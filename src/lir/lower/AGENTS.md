@@ -172,7 +172,14 @@ other is structural ownership-location, NOT escape:
   and the callee takes over the leaf rather than the source, so such an argument
   keeps the exemption only where the call passes the slot the region's own
   release route loads (`drop_named_only_arg_exemptions`, mechanism.md § "A leaf
-  is a part, not the whole").
+  is a part, not the whole"). A point survives the block it was opened in through
+  a branch: `begin_branch_arms` reads both the points the branch's arms will seal
+  and the ones already covering the position the branch is entered at, and
+  `open_branch_merge` hands the merge the union. The entry half is what a branch
+  following an earlier branch needs — the condition block clears what it carries
+  like any other, and functionalization puts a second branch after the first for
+  every mutable an arm reassigns (mechanism.md § "A merge inherits what covered
+  the branch's ENTRY as well").
   And the region must be frame-held
   (`RegionInfo::frame_held_regions`), because a tail callee also reaches
   its CAPTURED environment, which no argument names. A region escaping by the
