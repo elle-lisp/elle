@@ -195,6 +195,13 @@ pub(in crate::plugin_api) extern "C" fn make_external(
     // The type_name comes from the plugin's .so rodata — valid for process lifetime.
     let type_name: &'static str =
         unsafe { std::mem::transmute::<&str, &'static str>(type_name_str) };
+    // A learning site, one step removed from the keyword it feeds: `(type-of
+    // …)` mints a keyword from this name, and the name lives in the plugin's
+    // `.so`, so no static vocabulary entry can carry it
+    // (docs/impl/symbol.md § "Keywords in the plugin ABI").
+    if let Some(symbols) = unsafe { ctx.as_ref().and_then(|c| c.symbols.as_mut()) } {
+        symbols.keyword(type_name);
+    }
     let wrapper = ExternalWrapper { data, drop_fn };
     from_value(unsafe {
         with_ctx(ctx, |heap, region| {
