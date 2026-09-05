@@ -75,9 +75,14 @@ an HTML comment under the title.
 The date is ISO 8601. A file with no stamp is not audited yet, and it sorts to
 the front of the queue.
 
-Break a rule with no issue behind it, and remove the stamp. A file that cannot
-meet a rule yet stamps `audited: <date> (#N)`, which reads as audited with a
-known deviation, tracked where the work is scheduled.
+**A file that breaks a rule carries no stamp.** There is no form that records
+the break and keeps the stamp, and no way to hand the repair to somebody else
+and stamp the file anyway.
+
+The stamp is what takes a file out of the queue. So a stamp over a standing
+violation is exactly how that violation stops being anybody's work, and the
+file that most needs a reader is the one nothing will send a reader back to.
+Repair the file, or leave it unstamped where the queue can still reach it.
 
 ### The tree comes into policy one file at a time
 
