@@ -129,3 +129,31 @@
 
 (assert (not (unspelled? tier-failure)) "a tier rejection names its context")
 (assert (encodes? tier-failure) "a tier rejection encodes as JSON")
+
+# ── A message that shows the keyword it rejected ──────────────────────
+#
+# Here the keyword is the caller's own, so a memo does hold its spelling
+# — what the message has to do is consult the one that does. Each name
+# is coined at run time and asserted through the spelling the runtime
+# hands back, so no literal in this file can stand in for it.
+
+(defn takes-named [&named allowed]
+  allowed)
+
+(def unknown-param (keyword (append "sigil-param-" "name")))
+
+(def named-failure (failure (fn [] (apply takes-named [unknown-param 1]))))
+
+(assert (string/contains? (get named-failure :message) (string unknown-param))
+        "the unknown-parameter message spells the parameter it rejected")
+(assert (not (string/contains? (get named-failure :message) "#<keyword"))
+        "the unknown-parameter message shows no hash")
+
+(def unknown-signal (keyword (append "sigil-signal-" "name")))
+
+(def signal-failure (failure (fn [] (os/sig-raise unknown-signal))))
+
+(assert (string/contains? (get signal-failure :message) (string unknown-signal))
+        "the unknown-signal message spells the signal it rejected")
+(assert (not (string/contains? (get signal-failure :message) "#<keyword"))
+        "the unknown-signal message shows no hash")
