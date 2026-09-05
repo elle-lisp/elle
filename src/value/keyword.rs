@@ -68,6 +68,7 @@ static VOCABULARY: &[&str] = &[
     "first",
     "func",
     "id",
+    "input",
     "instrs",
     "k",
     "kind",
@@ -96,11 +97,13 @@ static VOCABULARY: &[&str] = &[
     "sender-uid",
     "signal",
     "spans",
+    "spec",
     "stats",
     "term",
     "term-display",
     "term-kind",
     "term-span",
+    "tier",
     "value",
     "x",
     // File metadata keys (`file/stat`, `file/lstat`)
@@ -206,6 +209,7 @@ static VOCABULARY: &[&str] = &[
     "state-error",
     "task-error",
     "thread-error",
+    "tier-rejected",
     "trait-error",
     "type-error",
     "unknown-tier",
@@ -400,6 +404,7 @@ static VOCABULARY: &[&str] = &[
     "variable",
     "builtin",
     "macro",
+    "module",
     "branch",
     "emit",
     "jump",
@@ -415,6 +420,41 @@ static VOCABULARY: &[&str] = &[
     "lir",
     "regions",
 ];
+
+/// Whether `VOCABULARY` carries `name`. `const fn`, so a caller can ask in a
+/// `const` context and turn the answer into a build error; the linear scan is
+/// what makes it one (the `static_keyword_name` index is not const-buildable).
+pub const fn is_vocabulary(name: &str) -> bool {
+    let hash = keyword_hash(name);
+    let mut i = 0;
+    while i < VOCABULARY.len() {
+        if keyword_hash(VOCABULARY[i]) == hash {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+/// `name`, having asserted the vocabulary carries it.
+///
+/// The spelling of a keyword the runtime coins from a fixed string has to be
+/// in `VOCABULARY` or the keyword has no name to print, and `json/serialize`
+/// refuses any struct that carries it as a key. Called from a `const` block,
+/// this moves that requirement to compile time: `const { vocab("input") }` is
+/// a build error at the line that wrote it until "input" is listed.
+///
+/// `rich_error!` is the caller that needs it. A field name written
+/// `input = …` reaches the keyword constructor through `stringify!`, as a
+/// token rather than as a string, so no scan of the source can find it
+/// (docs/impl/symbol.md § "A spelling the runtime itself mints").
+pub const fn vocab(name: &'static str) -> &'static str {
+    assert!(
+        is_vocabulary(name),
+        "keyword spelling missing from VOCABULARY in src/value/keyword.rs"
+    );
+    name
+}
 
 /// The spelling of a vocabulary keyword, or `None` if `hash` names nothing
 /// the runtime spells itself.
