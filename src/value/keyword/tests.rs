@@ -120,6 +120,28 @@ fn resolution_reads_memo_then_vocabulary() {
     );
 }
 
+// `vocab` is the compile-time half of the guard, and the only half that
+// reaches a spelling written as a *token* rather than a string — a
+// `rich_error!` field name, which becomes a keyword through `stringify!`. A
+// `const` block calling it with a spelling the vocabulary lacks is a build
+// error at the line that wrote it.
+//
+// A crate cannot assert that it fails to compile, so what is pinned here is
+// the predicate the assertion rests on, and that it answers in a const
+// context at all — a `vocab` that stopped being `const fn` would still pass
+// every other test in this file while the guard silently moved to run time.
+#[test]
+fn vocabulary_membership_answers_in_a_const_context() {
+    const CHECKED: &str = vocab("message");
+    assert_eq!(CHECKED, "message");
+
+    assert!(is_vocabulary("error"), "a listed spelling is carried");
+    assert!(
+        !is_vocabulary("kw-not-in-the-vocabulary-xt"),
+        "an unlisted spelling is not"
+    );
+}
+
 // Every form in `src/` that hands a *literal* spelling to a keyword
 // constructor. `kw("…")` is the per-module helper each primitive module
 // defines for its struct keys (`primitives/compile/mod.rs`,

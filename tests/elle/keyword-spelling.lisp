@@ -102,3 +102,30 @@
         "a channel sender's type name has a spelling")
 (assert (not (unspelled? (type-of rx)))
         "a channel receiver's type name has a spelling")
+
+# ── The context fields a rich error carries ───────────────────────────
+#
+# An error is a struct, so an unspellable context key costs the whole
+# value: the error prints with a hash where a field name belongs, and
+# `json/serialize` refuses it. These three name their field through
+# `stringify!`, which puts the spelling further out of reach than a
+# string literal does.
+
+(defn failure [thunk]
+  (second (protect (thunk))))
+
+(def parse-failure (failure (fn [] (parse-int "not-a-number"))))
+
+(assert (not (unspelled? parse-failure)) "a parse failure names its context")
+(assert (encodes? parse-failure) "a parse failure encodes as JSON")
+
+(def import-failure (failure (fn [] ((import "std/nothing-of-this-name")))))
+
+(assert (not (unspelled? import-failure)) "an import failure names its context")
+(assert (encodes? import-failure) "an import failure encodes as JSON")
+
+(def tier-failure
+  (failure (fn [] (compile/run-on :nothing-of-this-name (fn [] 1)))))
+
+(assert (not (unspelled? tier-failure)) "a tier rejection names its context")
+(assert (encodes? tier-failure) "a tier rejection encodes as JSON")
