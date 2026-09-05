@@ -327,3 +327,21 @@ fn region_match_dead_arm_uaf() {
 fn region_mutable_reassign_param_uaf() {
     run_elle_script_with_args("region-mutable-reassign-param", &["--trace=guardfree"]);
 }
+
+// Guard — a `break` opens a relocation point at the end of the block it leaves,
+// and a release emitted while that block is still open is REPLICATED there
+// (docs/impl/region/replicate.md). Each replica fires on a path that ran no
+// release before, so it owes the same count argument the frame-exit relocation's
+// replicas owe, and the value the break CARRIES is exempt — freeing it there
+// would free what the block is about to hand its consumer. Under the UAF oracle
+// each of those faults at the read; the harness runs the file under its vm/jit
+// policies WITHOUT the oracle, where the freed page is stale but intact and the
+// functional asserts pass. The leak face is
+// tests/elle/region-break-loop-replica.lisp.
+#[test]
+fn region_break_loop_replica_uaf() {
+    run_elle_script_with_args(
+        "region-break-loop-replica-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
