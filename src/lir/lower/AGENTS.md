@@ -1,5 +1,7 @@
 # lir/lower
 
+<!-- audited: 2026-09-05 -->
+
 HIR to LIR lowering: explicit control flow, binding slot allocation, lbox operations, and region RC instruction emission.
 
 ## Responsibility
@@ -96,20 +98,20 @@ Region allocation uses `IncrefRegion` and `DecrefRegion` instructions
 to manage per-region reference counts. The lowerer emits these based
 on output from the region solver (`src/hir/region/infer.rs`); there is no
 local escape-analysis pass that gates region instructions. See
-`docs/regions.md` for the full memory model.
+[the region model](../../../docs/regions.md) for the full memory model.
 
 **Lowerer outputs from `RegionInfo`:**
 - `alloc_region[hir_id]` — the region each allocation site is born
   into.
-- `region_data[rid].free_at` — the HirId at which the lowerer emits
+- `region_data[rid].decref_point` — the HirId at which the lowerer emits
   the region's compiler-owned `DecrefRegion`.
 - `cross_region_refs` — cross-region edges that drive `IncrefRegion`
   emission at the storage site.
 
-**`regions_demising_at(hir_id)`** is the reverse index over
-`region_data.free_at`. After lowering each HIR node, the lowerer
-iterates `regions_demising_at(hir_id)` and emits one
-`DecrefRegion(rid)` per region in that iterator.
+**`decrefs_by_decref_point`** is the reverse index over
+`region_data.decref_point`, built once in `with_region_info`. After lowering
+each HIR node, `emit_decrefs_for` looks that node up and emits one release per
+region it finds, in the order `order.rs` sorted them into.
 
 There is no escape-vs-local classification. Every allocation gets its
 own region; the runtime tracks references via RC. The compiler's only
@@ -149,9 +151,8 @@ other is structural ownership-location, NOT escape:
   `stranded_member_bindings`: a sibling captures it, so its demise lands at
   the letrec's scope end and region-locality never sees it, while the
   relocation must leave that release alone — the call is about to enter the
-  closure it would free (docs/impl/region/mechanism.md § "What the exemption
-  keeps, a channel must still run").
-- `emitops.rs::open_tail_exit_hoist` / `with_tail_exit_hoist` — the callee's
+  closure it would free (docs/impl/region/relocate.md).
+- `relocate.rs::open_tail_exit_hoist` / `splice.rs::with_tail_exit_hoist` — the callee's
   region is not the only one stranded past a `TailCall`: everything the
   lowerer emits after it runs only on the native fall-through, so a
   parameter used only inside a closure the body builds, a parameter used
@@ -187,9 +188,8 @@ other is structural ownership-location, NOT escape:
   by the callee's own `Return`, after the relocated release, and that callee
   reaches a value this frame owns as an operand or through its captured
   environment and by no other route — so it either counts the region across the
-  gap or cannot mint against it at all (docs/impl/region/mechanism.md § "The
-  callee's return mint, and why the point owes it nothing").
-- `emitops.rs::seal_arm_hoists` / `open_branch_merge` — an `if`/`cond`/`match`
+  gap or cannot mint against it at all (docs/impl/region/relocate.md).
+- `relocate.rs::seal_arm_hoists` / `open_branch_merge` — an `if`/`cond`/`match`
   merge is reached only through arms the lowerer closes one at a time, so it
   INHERITS their relocation points and a release emitted past the merge is
   emitted there AND replicated ahead of each arm's `TailCall`. What makes
@@ -203,8 +203,7 @@ other is structural ownership-location, NOT escape:
   `DecrefCellRegion` and the transfer adopt have no such alternative and keep
   the baseline, and every other block boundary clears the points — a replica
   in a point the emission position is unreachable from is a release added
-  where none was owed (docs/impl/region/mechanism.md § "A release past a
-  frame-replacing tail call is not a release", § "Self-cancelling is a
+  where none was owed (docs/impl/region/relocate.md, § "Self-cancelling is a
   property of the ROUTE, not of the region's class").
 
 ## Yield as terminator
