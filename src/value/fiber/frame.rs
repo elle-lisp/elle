@@ -180,19 +180,52 @@ pub struct ParkSite<'a> {
     pub frames: usize,
 }
 
-impl ParkSite<'_> {
+impl<'a> ParkSite<'a> {
+    /// Read the site off the frame's own code object and resume ip. `frame` is
+    /// the index `resume_suspended` is replaying and `frames` the chain's
+    /// length, which together say how far into the replay the park sits.
+    pub fn of(code: &'a crate::value::Code, ip: usize, frame: usize, frames: usize) -> Self {
+        let locations = code.locations();
+        ParkSite {
+            function: code.template().name(),
+            at: locations.get(ip),
+            start: locations.first(),
+            ip,
+            frame,
+            frames,
+        }
+    }
+
     /// The resume-boundary panic text for a stale suspended-frame region borrow.
+    ///
+    /// The slot and the physical region say which borrow died; the site says
+    /// which program held it. Both halves are needed, and the second is the one
+    /// a reader who cannot run the failing machine has to work from
+    /// (docs/impl/region/generations.md).
     pub fn stale_borrow_message(
         &self,
         slot: u32,
         region: crate::hir::region::RuntimeRegion,
     ) -> String {
+        // An exact-offset table lookup misses whenever the resume point is not
+        // itself a recorded offset, so fall back to the line the function starts
+        // on: naming the file is most of what the reader needs.
+        let where_ = match (&self.at, &self.start) {
+            (Some(at), _) => format!(" at {at}"),
+            (None, Some(start)) => format!(" somewhere below {start}"),
+            (None, None) => String::new(),
+        };
         format!(
             "stale suspended-frame region borrow on resume: activation region \
              slot {slot} maps to region {}, which was freed while this fiber was \
              parked — an uncounted suspended-frame borrow outlived its region \
-             (docs/impl/region/generations.md § 'Uncounted-borrow check')",
+             (docs/impl/region/generations.md § 'Uncounted-borrow check')\
+             \n  parked in {}{where_}, frame {} of {}, ip {}",
             region.get(),
+            self.function.unwrap_or("<anonymous>"),
+            self.frame,
+            self.frames,
+            self.ip,
         )
     }
 }
