@@ -228,13 +228,23 @@ impl<'h> NativeCtx<'h> {
         unsafe { &mut *self.vm }
     }
 
+    /// This instance's display memo, for a message that has to show a name.
+    /// `None` for an instance with no symbol table.
+    ///
+    /// The borrow is a reborrow of the VM's raw pointer, sound by the same
+    /// contract as `vm()`. Hand it to a routine that renders a name and takes
+    /// no other borrow of the ctx — the returned reference does not outlive
+    /// that call, so the ctx stays free for the `ctx.error(…)` that follows.
+    pub fn symbols(&self) -> Option<&crate::symbol::SymbolTable> {
+        unsafe { self.vm().symbols_ptr.as_ref() }
+    }
+
     /// The spelling of a keyword value, through this instance's memo and the
     /// static vocabulary. `None` if `v` is not a keyword or the spelling was
     /// never learned (docs/impl/symbol.md § "The display memo").
     pub fn keyword_spelling(&self, v: crate::value::Value) -> Option<String> {
         let hash = v.keyword_hash()?;
-        let symbols = unsafe { self.vm().symbols_ptr.as_ref() };
-        crate::value::keyword::resolve_keyword_name(symbols, hash).map(str::to_string)
+        crate::value::keyword::resolve_keyword_name(self.symbols(), hash).map(str::to_string)
     }
 
     /// Learn `name` into this instance's memo and build the keyword value —

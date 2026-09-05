@@ -47,6 +47,10 @@ impl VM {
         // callee one owning reference per such arg here (`own_params = true`),
         // balanced by that release. A tail call (`tail_call_inner`) is a pure
         // move and passes `false`.
+        //
+        // The memo is read before the mutable borrows below, so the message a
+        // rejected `&named` key earns can spell it.
+        let symbols = unsafe { self.symbols_ptr.as_ref() };
         if !Self::populate_env(
             &mut self.env_cache,
             unsafe { &mut *self.heap_ptr },
@@ -54,6 +58,7 @@ impl VM {
             closure,
             args,
             true,
+            symbols,
         ) {
             return None;
         }
@@ -79,6 +84,7 @@ impl VM {
         args: &[Value],
         own_params: bool,
     ) -> Option<Rc<Vec<Value>>> {
+        let symbols = unsafe { self.symbols_ptr.as_ref() };
         if !Self::populate_env(
             &mut self.tail_call_env_cache,
             unsafe { &mut *self.heap_ptr },
@@ -86,6 +92,7 @@ impl VM {
             closure,
             args,
             own_params,
+            symbols,
         ) {
             return None;
         }
@@ -122,6 +129,7 @@ impl VM {
         args: &[Value],
     ) -> Option<Rc<Vec<Value>>> {
         let mut buf = Vec::new();
+        let symbols = unsafe { self.symbols_ptr.as_ref() };
         let ok = Self::populate_env(
             &mut buf,
             unsafe { &mut *self.heap_ptr },
@@ -129,6 +137,7 @@ impl VM {
             closure,
             args,
             false,
+            symbols,
         );
         if !ok {
             return None;
@@ -147,6 +156,10 @@ impl VM {
     /// `heap.alloc_in_region()`, each into its own region (`env_value_region`).
     ///
     /// Returns `false` if keyword argument collection fails (error set on fiber).
+    ///
+    /// `symbols` is the calling instance's display memo, carried only so that
+    /// a rejected `&named` key is named rather than hashed in the error
+    /// message (docs/impl/symbol.md § "The display memo").
     pub(super) fn populate_env(
         buf: &mut Vec<Value>,
         heap: &mut crate::value::fiberheap::FiberHeap,
@@ -154,6 +167,7 @@ impl VM {
         closure: &crate::value::Closure,
         args: &[Value],
         own_params: bool,
+        symbols: Option<&crate::symbol::SymbolTable>,
     ) -> bool {
         buf.clear();
         let needed = closure.env_capacity();
@@ -208,15 +222,22 @@ impl VM {
                 let collected = match closure.template.vararg_tag() {
                     crate::value::VarargTag::List => Self::args_to_list(rest_args, heap),
                     crate::value::VarargTag::Struct => {
-                        match Self::collect_struct_in_own_region(fiber, heap, rest_args, None) {
+                        match Self::collect_struct_in_own_region(
+                            fiber, heap, rest_args, None, symbols,
+                        ) {
                             Some(v) => v,
                             None => return false,
                         }
                     }
                     crate::value::VarargTag::StrictStruct => {
                         let keys = closure.template.strict_keys();
-                        match Self::collect_struct_in_own_region(fiber, heap, rest_args, Some(keys))
-                        {
+                        match Self::collect_struct_in_own_region(
+                            fiber,
+                            heap,
+                            rest_args,
+                            Some(keys),
+                            symbols,
+                        ) {
                             Some(v) => v,
                             None => return false,
                         }
@@ -437,6 +458,7 @@ impl VM {
         heap: &mut crate::value::fiberheap::FiberHeap,
         args: &[Value],
         valid_keys: Option<crate::value::closure::StrKeys<'_>>,
+        symbols: Option<&crate::symbol::SymbolTable>,
     ) -> Option<Value> {
         let sr = env_value_region(heap);
         // Build the struct INSIDE `sr` (the per-value region the result lives
@@ -450,7 +472,7 @@ impl VM {
         // alloc-region bracket closes, so it is born in its own durable region
         // (`heap.new_runtime_region()`) — like every other param-binding error
         // (e.g. `check_arity`) — which survives until the fiber dies.
-        let built = Self::args_to_struct_static(heap, args, valid_keys, sr);
+        let built = Self::args_to_struct_static(heap, args, valid_keys, symbols, sr);
         match built {
             Ok(v) => Some(v),
             Err((kind, msg)) => {
@@ -480,6 +502,7 @@ impl VM {
         heap: &mut crate::value::fiberheap::FiberHeap,
         args: &[Value],
         valid_keys: Option<crate::value::closure::StrKeys<'_>>,
+        symbols: Option<&crate::symbol::SymbolTable>,
         region: crate::hir::region::RuntimeRegion,
     ) -> Result<Value, (&'static str, String)> {
         use crate::value::types::TableKey;
@@ -514,10 +537,13 @@ impl VM {
                     ));
                 }
             };
-            // Error-message spelling: this static path has no memo, so an
-            // off-vocabulary key falls back to the unreadable form.
+            // Error-message spelling. The rejected key is one the caller
+            // wrote, so it is the instance memo that holds its name — a
+            // message built without one names a hash the author has to
+            // decode (docs/impl/symbol.md § "Reading a name, and not reading
+            // one").
             let spell = || {
-                crate::value::keyword::resolve_keyword_name(None, key)
+                crate::value::keyword::resolve_keyword_name(symbols, key)
                     .map(|n| format!(":{}", n))
                     .unwrap_or_else(|| format!("#<keyword:{:#x}>", key))
             };
