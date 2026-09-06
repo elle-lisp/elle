@@ -114,7 +114,8 @@ impl BytecodeFrame {
         heap: &crate::value::fiberheap::FiberHeap,
     ) -> Self {
         #[cfg(debug_assertions)]
-        let region_borrows = record_region_borrows(&activation_region_map, heap);
+        let region_borrows =
+            record_region_borrows(&activation_region_map, heap, code.frame_release_regions());
         #[cfg(not(debug_assertions))]
         let _ = heap;
         BytecodeFrame {
@@ -157,7 +158,9 @@ impl BytecodeFrame {
 pub(crate) fn record_region_borrows(
     map: &rustc_hash::FxHashMap<u32, crate::hir::region::MappedRegion>,
     heap: &crate::value::fiberheap::FiberHeap,
+    slot_routed: &[u32],
 ) -> Vec<(u32, crate::hir::region::RuntimeRegion, u32)> {
+    let _ = slot_routed;
     map.iter()
         .filter(|(_, m)| heap.generation_raw(m.region.get()) == m.gen)
         .map(|(&slot, m)| (slot, m.region, m.gen))

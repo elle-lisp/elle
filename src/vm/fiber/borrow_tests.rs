@@ -91,7 +91,7 @@ fn suspended_frame_region_borrow_detects_freed_region() {
     // region r, tagged with r's generation at the moment the slot was established.
     let mut map: rustc_hash::FxHashMap<u32, MappedRegion> = rustc_hash::FxHashMap::default();
     map.insert(7u32, MappedRegion::new(r, heap.generation_raw(r.get())));
-    let borrows = crate::value::fiber::record_region_borrows(&map, &heap);
+    let borrows = crate::value::fiber::record_region_borrows(&map, &heap, &[7]);
 
     assert!(
         first_stale_borrow(&borrows, &heap).is_none(),
@@ -154,7 +154,7 @@ fn stale_leftover_map_entry_is_not_snapshotted_as_a_borrow() {
     );
 
     // The dead leftover is skipped entirely — not recorded as a borrow.
-    let borrows = crate::value::fiber::record_region_borrows(&map, &heap);
+    let borrows = crate::value::fiber::record_region_borrows(&map, &heap, &[7]);
     assert!(
         borrows.is_empty(),
         "a leftover entry whose region's generation has moved is a dead mapping, \
@@ -167,6 +167,71 @@ fn stale_leftover_map_entry_is_not_snapshotted_as_a_borrow() {
     assert!(
         first_stale_borrow(&borrows, &heap).is_none(),
         "freeing the unrelated recycled incarnation must not trip the check",
+    );
+}
+
+/// A map slot the function never releases by id is not a borrow, however live
+/// its region still is (docs/impl/region/generations.md).
+///
+/// The trap: the establish-generation separates a dead leftover from a live
+/// borrow only once the region has been freed. At park a leftover whose region
+/// is still live reads exactly like a borrow — the free that would move the
+/// generation has not happened yet — and it is the free AFTER the park that the
+/// resume check then reports. The heap alone cannot tell the two apart, so the
+/// snapshot asks the function which slots its slot-routed releases name.
+///
+/// Counter-factual: drop the `slot_routed` argument and record on generation
+/// alone, and the first assertion below records slot 7 — a slot whose region is
+/// released by value, so no `DecrefRegion` ever reads the entry. Freeing that
+/// region while the fiber is parked then trips the resume check on a mapping the
+/// activation reads through nothing.
+#[test]
+fn a_slot_with_no_slot_routed_release_is_not_a_borrow() {
+    let mut heap = FiberHeap::new();
+
+    // Two live slots, both mapped at their establish generation. The function
+    // releases slot 9 by id; slot 7's region is value-routed, so slot 7 appears
+    // in no `DecrefRegion` this function emits.
+    let by_value = heap.new_runtime_region();
+    let by_slot = heap.new_runtime_region();
+    for r in [by_value, by_slot] {
+        heap.alloc_in_region(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)), r);
+    }
+    let mut map: rustc_hash::FxHashMap<u32, MappedRegion> = rustc_hash::FxHashMap::default();
+    map.insert(
+        7u32,
+        MappedRegion::new(by_value, heap.generation_raw(by_value.get())),
+    );
+    map.insert(
+        9u32,
+        MappedRegion::new(by_slot, heap.generation_raw(by_slot.get())),
+    );
+
+    let borrows = crate::value::fiber::record_region_borrows(&map, &heap, &[9]);
+
+    assert_eq!(
+        borrows.len(),
+        1,
+        "only the slot-routed mapping is a borrow; a value-routed slot holds no \
+         pending DecrefRegion (got {borrows:?})",
+    );
+    assert_eq!((borrows[0].0, borrows[0].1), (9, by_slot));
+
+    // Freeing the value-routed region while "parked" must not read stale: the
+    // activation reaches that entry through no release.
+    heap.decref_region(by_value);
+    assert!(
+        first_stale_borrow(&borrows, &heap).is_none(),
+        "freeing a region whose slot the function never releases by id must not \
+         trip the check",
+    );
+
+    // The slot-routed one still does, so the filter has not blinded the check.
+    heap.decref_region(by_slot);
+    assert_eq!(
+        first_stale_borrow(&borrows, &heap),
+        Some((9, by_slot)),
+        "a slot-routed borrow freed while parked must still read stale",
     );
 }
 
