@@ -28,6 +28,30 @@ A closure instance references a header; a header references a payload; a
 blueprint owns the right to materialize more headers. `MakeClosure` builds a
 header, not a payload — that is the whole point of the split.
 
+## One constructor builds a nested lambda's blueprint
+
+Two backends build a blueprint at a `MakeClosure`: the bytecode emitter and the
+JIT. Both hold the same two inputs — the lambda's `LirFunction`, and the
+bytecode its own emission produced. So `TemplateProto::nested_lambda` takes
+those two and fills every field.
+
+The alternative is a hand-written literal at each site. Twenty fields is more
+than a backend keeps track of, a field one of them leaves out gets the empty
+value `TemplateProto::new` supplies, and the code object it builds still runs.
+
+The two release tables are the fields that cost the most when one is left out.
+A closure materialized from such a blueprint carries real bytecode, so it runs
+correctly until one of its frames is abandoned. The error exit then walks an
+empty table, and every region that frame owed is stranded
+([mechanism.md](mechanism.md) § "An abandoned frame runs the releases it still
+owes"). Nothing reads wrong at the closure itself, and the loss arrives as a
+rate.
+
+Pinned by
+`lir::emit::tests::a_nested_lambdas_blueprint_carries_the_frame_release_tables`
+and
+`jit::compiler::tests::blueprint::a_nested_lambdas_jit_blueprint_carries_the_frame_release_tables`.
+
 ## Why the payload is shared and the header is not
 
 `MakeClosure` runs once per closure *creation*, which for a closure built in a

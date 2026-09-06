@@ -1,4 +1,7 @@
-//! Tests for LIR to bytecode emission
+// audited: 2026-09-05
+// docs/impl/bytecode.md
+//! What the bytecode emitter writes: control flow, merge-block depth, yield
+//! points, the coalescing oracle, and a nested lambda's blueprint.
 
 use super::*;
 use crate::lir::testkit::LirFixture;
@@ -276,7 +279,7 @@ fn assert_region_matches_panics_on_wrong_slot() {
     // mis-coalescing — the oracle must detonate deterministically here, not let
     // the later cascade free a live region (a UAF). Counterfactual: with the
     // handler's check absent (release / no-op), this returns normally and the
-    // test fails — proving the net is load-bearing.
+    // test fails, so the assertion is what catches the mis-coalesce.
     let func = oracle_probe_func(1, 2);
     let mut emitter = Emitter::new();
     let (bytecode, _, _) = emitter.emit(&func);
@@ -403,4 +406,70 @@ fn arithmetic_binops_emit_the_polymorphic_bytecodes() {
             "{integer}: BinOp must not emit the integer-only opcode; got {opcodes:?}"
         );
     }
+}
+
+/// A nested lambda's blueprint carries both halves of the abandoned-frame
+/// release table, so a closure the emitted `MakeClosure` materializes reaches
+/// an error exit with the releases it still owes (docs/impl/region/template.md
+/// § "One constructor builds a nested lambda's blueprint").
+#[test]
+fn a_nested_lambdas_blueprint_carries_the_frame_release_tables() {
+    // Counter-factual: leaving both tables to the empty value
+    // `TemplateProto::new` supplies fails nothing that runs. The closure built
+    // from such a blueprint carries real bytecode and returns the right
+    // answers; what it loses is one error exit's walk, which strands every
+    // region the abandoned frame still owed.
+    use crate::hir::region::StaticRegion;
+    use crate::lir::ClosureId;
+
+    let mut nested = LirFixture::new(Arity::Exact(0))
+        .name("nested")
+        .block(
+            0,
+            vec![LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Nil,
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build();
+    nested.frame_release_slots = vec![3, 7];
+    nested.frame_release_regions = vec![
+        StaticRegion::new(11).unwrap(),
+        StaticRegion::new(13).unwrap(),
+    ];
+
+    let outer = LirFixture::new(Arity::Exact(0))
+        .block(
+            0,
+            vec![LirInstr::MakeClosure {
+                dst: Reg(0),
+                closure_id: ClosureId(0),
+                captures: vec![],
+                region: StaticRegion::new(2).unwrap(),
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build();
+
+    let module = LirModule {
+        entry: outer,
+        closures: vec![nested],
+    };
+    let (bytecode, _, _) = Emitter::new().emit_module(&module);
+    assert_eq!(
+        bytecode.child_protos.len(),
+        1,
+        "one MakeClosure registers one blueprint"
+    );
+    assert_eq!(
+        bytecode.child_protos[0].frame_release_slots,
+        vec![3u16, 7],
+        "the value route's slots reach the blueprint",
+    );
+    assert_eq!(
+        bytecode.child_protos[0].frame_release_regions,
+        vec![11u32, 13],
+        "the slot route's regions reach the blueprint",
+    );
 }

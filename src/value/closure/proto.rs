@@ -1,8 +1,9 @@
+// audited: 2026-09-05
+// docs/impl/region/template.md
 //! `TemplateProto` — a code object's compile-time blueprint.
 //!
 //! Plain Rust data the emitter builds, owned by whatever holds the compiled
-//! program. It never enters a region; what it materializes does
-//! (docs/impl/region/template.md § "Three things, not one").
+//! program. It never enters a region; what it materializes does.
 
 use std::cell::OnceCell;
 use std::rc::Rc;
@@ -111,6 +112,52 @@ impl TemplateProto {
             frame_release_slots: Vec::new(),
             frame_release_regions: Vec::new(),
             child_protos: Vec::new(),
+        }
+    }
+
+    /// The blueprint of a nested lambda: everything `func` knows about itself,
+    /// plus the bytecode its own emission produced.
+    ///
+    /// Every backend that meets a `MakeClosure` builds its blueprint here, so
+    /// no field is a backend's to remember — the two release tables least of
+    /// all (docs/impl/region/template.md § "One constructor builds a nested
+    /// lambda's blueprint").
+    ///
+    /// `num_captures` comes from the instruction rather than from `func`: what
+    /// a lambda closes over is decided at the site that builds it.
+    pub fn nested_lambda(
+        func: &crate::lir::LirFunction,
+        num_captures: usize,
+        compiled: crate::lir::ClosureCompiled,
+    ) -> Self {
+        let (bytecode, yield_points, call_sites) = compiled;
+        // The LIR the JIT promotes this lambda from is `func` plus the metadata
+        // only emission can supply.
+        let mut lir = func.clone();
+        lir.yield_points = yield_points;
+        lir.call_sites = call_sites;
+
+        TemplateProto {
+            num_locals: func.num_locals as usize,
+            num_captures,
+            num_params: func.num_params,
+            signal: func.signal,
+            capture_params_mask: func.capture_params_mask,
+            capture_locals_mask: func.capture_locals_mask.clone(),
+            location_map: bytecode.location_map,
+            lir_function: Some(Rc::new(lir)),
+            doc: func.doc.as_deref().map(str::to_string),
+            origin: func.origin,
+            vararg_kind: func.vararg_kind.clone(),
+            name: func.name.clone(),
+            region_table: func.region_table.clone(),
+            merged_slots: func.merged_slots.iter().map(|s| s.get()).collect(),
+            frame_release_slots: func.frame_release_slots.clone(),
+            frame_release_regions: func.frame_release_regions.iter().map(|r| r.get()).collect(),
+            // The nested bytecode's own children, so a deeper `MakeClosure`
+            // resolves recursively.
+            child_protos: bytecode.child_protos,
+            ..TemplateProto::new(bytecode.instructions, func.arity, bytecode.constants)
         }
     }
 
