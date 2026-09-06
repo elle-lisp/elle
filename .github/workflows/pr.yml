@@ -134,6 +134,13 @@ jobs:
     needs: changes
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
+    env:
+      # The io_uring half of the region-check coverage. Every Makefile job builds
+      # --release, and the region checks are #[cfg(debug_assertions)], so without
+      # this the corpus runs with them compiled out. This job is the backend
+      # `create_platform_backend` picks on Linux; `nouring` below is the pool.
+      # See docs/analysis/ci.md § "What each job builds".
+      CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -164,6 +171,13 @@ jobs:
     needs: changes
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
+    env:
+      # The thread-pool half of the region-check coverage, for the same reason
+      # `tests` above carries the io_uring half: the checks are compiled out of
+      # a release build without it. This job is the only Linux one that drives
+      # the pool, so a pool-only region defect has no other Linux detector.
+      # See docs/analysis/ci.md § "What each job builds".
+      CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
