@@ -1,13 +1,16 @@
-//! Wasmtime host state and primitive dispatch.
+// audited: 2026-09-06
+// docs/impl/wasm.md
+//! Wasmtime host state and primitive dispatch: everything the compiled module
+//! reaches across the boundary for.
 //!
-//! The host state (`ElleHost`) lives in the Wasmtime `Store` and holds:
-//! - Handle table for heap objects
-//! - Flattened primitive dispatch table
-//! - Parameter frames for dynamic bindings
+//! The host state (`ElleHost`) lives in the Wasmtime `Store` and holds the
+//! handle table heap objects are named by, the flattened primitive dispatch
+//! table, the parameter frames of dynamic bindings, each fiber's suspension
+//! frames, and the dual-compiled blueprint of every closure in the module.
 //!
 //! Host functions are registered as Wasmtime imports under the "elle"
-//! namespace. The main one is `call_primitive(prim_id, args_ptr, nargs, ctx)`
-//! which dispatches to Elle's 331+ primitive functions.
+//! namespace. `rt_call` is the one a compiled call reaches: it resolves the
+//! callee and dispatches on its runtime type, primitives included.
 
 use crate::io::request::IoRequest;
 use crate::io::AnyBackend;
@@ -20,12 +23,11 @@ use crate::value::Value;
 use super::handle::HandleTable;
 
 /// A closure's dual-compiled blueprint, used by spawn for cross-thread
-/// execution. `rt_make_closure` builds a code object from it plus the metadata
-/// the WASM call supplies, and the OS-thread VM worker runs that code object's
-/// bytecode. The blueprint carries its own `child_protos` — the nested-lambda
-/// blueprints the bytecode's `MakeClosure` instructions index — and omitting
-/// them makes the worker panic on its first `MakeClosure` (src/wasm/tests.rs
-/// `wasm_full_spawn_runs_nested_closure`).
+/// execution. `rt_make_closure` builds a code object from it plus the shape the
+/// WASM call supplies, and the OS-thread VM worker runs that code object's
+/// bytecode. Everything the worker reads off the code object rides on this
+/// blueprint — the nested-lambda blueprints a `MakeClosure` indexes, and the
+/// tables an abandoned frame walks (src/wasm/tests/closure.rs).
 pub type ClosureBytecode = std::rc::Rc<crate::value::TemplateProto>;
 
 /// A pre-compiled standalone closure Module with its constant pool.
@@ -128,9 +130,9 @@ pub struct ElleHost {
     /// Mapping from const pool index → handle table index for heap values.
     /// Immediate values (tag < TAG_HEAP_START) have 0 here (unused).
     pub pool_to_handle: Vec<u64>,
-    /// Bytecode for each closure, indexed by table index.
-    /// Populated from EmitResult so rt_make_closure can give WASM closures
-    /// valid bytecode for cross-thread execution via spawn.
+    /// The dual-compiled blueprint of each closure, indexed by table index.
+    /// Populated from `EmitResult` so `rt_make_closure` can give a WASM closure
+    /// a code object the bytecode VM can run after a spawn.
     pub closure_bytecodes: Vec<ClosureBytecode>,
     /// Debug logging enabled (set once from `config.debug_wasm` at construction).
     pub debug: bool,

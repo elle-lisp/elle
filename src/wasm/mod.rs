@@ -1,3 +1,5 @@
+// audited: 2026-09-06
+// docs/impl/wasm.md
 //! WASM backend: LIR → WASM emission and Wasmtime execution.
 //!
 //! Two modes:
@@ -11,6 +13,8 @@
 //! - `instruction` — LIR instruction → WASM instruction translation
 //! - `controlflow` — CFG emission, loop+br_table dispatch, terminators
 //! - `suspend` — CPS suspension/resume, spill/restore, block splitting
+//! - `liveness` — which register slots are live at a suspend point
+//! - `outcome` — what a call reports back to emitted code: value, signal, park
 //! - `handle` — Handle table mapping u64 handles to `Value`
 //! - `host` — Host state (`ElleHost`), primitive dispatch, I/O
 //! - `linker` — Wasmtime host function registration
@@ -255,7 +259,7 @@ fn build_full_source(source: &str, source_name: &str) -> Result<(String, usize),
     // Nesting the whole body in a single `(fn [] …)` instead (the naive wrap)
     // makes those defs a fn-body letrec* where a duplicate binding is rejected —
     // the divergence that failed def-shadow/numeric/… under `--wasm=full`
-    // (src/wasm/tests.rs `wasm_full_allows_toplevel_def_redefinition`).
+    // (src/wasm/tests/toplevel.rs).
     //
     // But the restructure has a cost: a top-level def's RHS then runs in the
     // ENTRY function, and some operations (`eval`'s dynamic compilation) trap
@@ -302,7 +306,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     // `pair?` (src/stdlib.lisp) to detect a comparison form — and expansion runs
     // on the macro VM, not in the spliced source. Without stdlib loaded here that
     // call is unbound and expansion fails with "undefined variable: pair?" before
-    // any WASM is emitted (src/wasm/tests.rs `wasm_full_expands_assert_macro`).
+    // any WASM is emitted (src/wasm/tests/stdlib.rs).
     // This is independent of the source-splice in `build_full_source`: the splice
     // makes stdlib callable from WASM at RUNTIME; this load makes it callable
     // during macro expansion at COMPILE time. User references still bind to the
