@@ -1,3 +1,13 @@
+// audited: 2026-09-06
+// src/lir/AGENTS.md
+//! Emitting the operator, predicate, region-refcount and collection-op
+//! instructions to bytecode.
+//!
+//! One exhaustive match over the instruction set, which is why this file takes
+//! the dispatch-table allowance in `src/lir/AGENTS.md`. Each arm brings its
+//! operands to the top of the simulated stack, emits an opcode, and records the
+//! stack effect.
+
 use super::*;
 
 impl Emitter {
@@ -5,12 +15,27 @@ impl Emitter {
     /// emission (chain tail from `emit_instr`).
     pub(super) fn emit_instr_ops(&mut self, instr: &LirInstr) {
         match instr {
-            LirInstr::BinOp { dst, op, lhs, rhs } => {
+            LirInstr::BinOp {
+                dst,
+                op,
+                lhs,
+                rhs,
+                proof,
+            } => {
                 // Check if lhs and rhs are already the top two stack elements
                 // (lhs at top-1, rhs at top). This is the common case from the
                 // lowerer and avoids DupN which would leave orphaned values.
                 self.ensure_binary_on_top(*lhs, *rhs);
+                // Four operations have an integer-only opcode, which reads both
+                // operands without testing a tag. The rest have one opcode each:
+                // `Rem` was never specialized, and the bitwise handlers already
+                // read integers (docs/impl/lir.md).
+                let int_proven = proof.is_int();
                 let instr = match op {
+                    BinOp::Add if int_proven => Instruction::AddInt,
+                    BinOp::Sub if int_proven => Instruction::SubInt,
+                    BinOp::Mul if int_proven => Instruction::MulInt,
+                    BinOp::Div if int_proven => Instruction::DivInt,
                     BinOp::Add => Instruction::Add,
                     BinOp::Sub => Instruction::Sub,
                     BinOp::Mul => Instruction::Mul,
@@ -28,7 +53,13 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::Compare { dst, op, lhs, rhs } => {
+            LirInstr::Compare {
+                dst,
+                op,
+                lhs,
+                rhs,
+                proof: _,
+            } => {
                 // Check if lhs and rhs are already the top two stack elements
                 self.ensure_binary_on_top(*lhs, *rhs);
                 let instr = match op {
@@ -48,7 +79,12 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::UnaryOp { dst, op, src } => {
+            LirInstr::UnaryOp {
+                dst,
+                op,
+                src,
+                proof: _,
+            } => {
                 self.ensure_on_top(*src);
                 match op {
                     UnaryOp::Not => self.bytecode.emit(Instruction::Not),

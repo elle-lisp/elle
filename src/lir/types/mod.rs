@@ -1,3 +1,5 @@
+// audited: 2026-09-06
+// src/lir/AGENTS.md
 //! LIR type definitions
 
 use crate::hir::region::StaticRegion;
@@ -148,6 +150,28 @@ pub enum UnaryOp {
 pub enum ConvOp {
     IntToFloat,
     FloatToInt,
+}
+
+/// What the front end proved about an operation's operands.
+///
+/// The proof is discharged by the intrinsic operand contract
+/// (`src/hir/typeinfer/contract.rs`) and carried here by the lowerer. A backend
+/// spends it by dropping the tag test its generic path would run; see
+/// docs/impl/lir.md for what each one does with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum OperandProof {
+    /// Nothing was proved. The operands can hold any value.
+    #[default]
+    Unproven,
+    /// Every operand is an integer on every path that reaches the operation.
+    Int,
+}
+
+impl OperandProof {
+    /// Are the operands proven integers?
+    pub fn is_int(self) -> bool {
+        matches!(self, OperandProof::Int)
+    }
 }
 
 /// Comparison operations

@@ -194,9 +194,15 @@ pub enum LirInstr {
         op: BinOp,
         lhs: Reg,
         rhs: Reg,
+        proof: OperandProof,
     },
     /// Unary operations
-    UnaryOp { dst: Reg, op: UnaryOp, src: Reg },
+    UnaryOp {
+        dst: Reg,
+        op: UnaryOp,
+        src: Reg,
+        proof: OperandProof,
+    },
     /// Type conversion (float↔int intrinsics)
     Convert { dst: Reg, op: ConvOp, src: Reg },
     /// Comparison
@@ -205,6 +211,7 @@ pub enum LirInstr {
         op: CmpOp,
         lhs: Reg,
         rhs: Reg,
+        proof: OperandProof,
     },
 
     // === Type Checks ===
@@ -600,33 +607,100 @@ pub enum LirInstr {
 }
 
 impl LirInstr {
-    /// A binary arithmetic or bitwise operation.
+    /// A binary arithmetic or bitwise operation, claiming nothing about its
+    /// operands.
     pub fn binop(dst: Reg, op: BinOp, lhs: Reg, rhs: Reg) -> Self {
-        LirInstr::BinOp { dst, op, lhs, rhs }
+        LirInstr::BinOp {
+            dst,
+            op,
+            lhs,
+            rhs,
+            proof: OperandProof::Unproven,
+        }
     }
 
-    /// A comparison.
+    /// A comparison, claiming nothing about its operands.
     pub fn compare(dst: Reg, op: CmpOp, lhs: Reg, rhs: Reg) -> Self {
-        LirInstr::Compare { dst, op, lhs, rhs }
+        LirInstr::Compare {
+            dst,
+            op,
+            lhs,
+            rhs,
+            proof: OperandProof::Unproven,
+        }
     }
 
-    /// A unary operation.
+    /// A unary operation, claiming nothing about its operand.
     pub fn unary(dst: Reg, op: UnaryOp, src: Reg) -> Self {
-        LirInstr::UnaryOp { dst, op, src }
+        LirInstr::UnaryOp {
+            dst,
+            op,
+            src,
+            proof: OperandProof::Unproven,
+        }
     }
 
     /// A binary operation over operands proven to be integers.
     pub fn int_binop(dst: Reg, op: BinOp, lhs: Reg, rhs: Reg) -> Self {
-        LirInstr::BinOp { dst, op, lhs, rhs }
+        LirInstr::BinOp {
+            dst,
+            op,
+            lhs,
+            rhs,
+            proof: OperandProof::Int,
+        }
     }
 
     /// A comparison of operands proven to be integers.
     pub fn int_compare(dst: Reg, op: CmpOp, lhs: Reg, rhs: Reg) -> Self {
-        LirInstr::Compare { dst, op, lhs, rhs }
+        LirInstr::Compare {
+            dst,
+            op,
+            lhs,
+            rhs,
+            proof: OperandProof::Int,
+        }
     }
 
     /// A unary operation over an operand proven to be an integer.
     pub fn int_unary(dst: Reg, op: UnaryOp, src: Reg) -> Self {
-        LirInstr::UnaryOp { dst, op, src }
+        LirInstr::UnaryOp {
+            dst,
+            op,
+            src,
+            proof: OperandProof::Int,
+        }
+    }
+
+    /// Build a binary operation carrying `proof`.
+    pub fn binop_proved(dst: Reg, op: BinOp, lhs: Reg, rhs: Reg, proof: OperandProof) -> Self {
+        LirInstr::BinOp {
+            dst,
+            op,
+            lhs,
+            rhs,
+            proof,
+        }
+    }
+
+    /// Build a comparison carrying `proof`.
+    pub fn compare_proved(dst: Reg, op: CmpOp, lhs: Reg, rhs: Reg, proof: OperandProof) -> Self {
+        LirInstr::Compare {
+            dst,
+            op,
+            lhs,
+            rhs,
+            proof,
+        }
+    }
+
+    /// Build a unary operation carrying `proof`.
+    pub fn unary_proved(dst: Reg, op: UnaryOp, src: Reg, proof: OperandProof) -> Self {
+        LirInstr::UnaryOp {
+            dst,
+            op,
+            src,
+            proof,
+        }
     }
 }

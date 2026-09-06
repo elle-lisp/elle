@@ -1,3 +1,5 @@
+// audited: 2026-09-06
+// src/pipeline/AGENTS.md
 //! Compilation pipeline: source -> bytecode.
 
 use super::CompileCtx;
@@ -99,7 +101,7 @@ fn compile_inner(
     // Phase 3.5: regularize the analyzed HIR — prune dead `(type-of x)` arms,
     // mark tail calls, functionalize, ANF-lift, type inference (crate::hir::regularize).
     let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
-    crate::hir::regularize(
+    let types = crate::hir::regularize(
         &mut analysis.hir,
         &mut arena,
         symbols,
@@ -121,7 +123,8 @@ fn compile_inner(
         .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_region_info(region_info);
+        .with_region_info(region_info)
+        .with_type_info(types);
     let lir_module = lowerer.lower(&analysis.hir)?;
 
     // Phase 5: Emit bytecode with symbol names for cross-thread portability
@@ -240,7 +243,8 @@ fn compile_file_to_lir_inner(
     }
 
     let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
-    crate::hir::regularize(&mut hir, &mut arena, symbols, dispatch_wrappers, fn_inline)?;
+    let types =
+        crate::hir::regularize(&mut hir, &mut arena, symbols, dispatch_wrappers, fn_inline)?;
 
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(cctx.primitive_meta());
     let region_info =
@@ -255,7 +259,8 @@ fn compile_file_to_lir_inner(
         .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_region_info(region_info);
+        .with_region_info(region_info)
+        .with_type_info(types);
     lowerer.lower(&hir)
 }
 
@@ -269,9 +274,8 @@ pub fn compile_file_to_fhir(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<(crate::hir::Hir, BindingArena), String> {
-    let (hir, arena, _expander, _prim_values, _signal_projection) =
-        compile_file_frontend(source, symbols, cctx, source_name)?;
-    Ok((hir, arena))
+    let f = compile_file_frontend(source, symbols, cctx, source_name)?;
+    Ok((f.hir, f.arena))
 }
 
 /// All top-level forms are analyzed together, enabling mutual recursion.
@@ -304,8 +308,14 @@ fn compile_file_inner(
     source_name: &str,
 ) -> Result<(CompileResult, crate::syntax::Expander), String> {
     let ct = crate::trace::compile();
-    let (hir, arena, expander, prim_values, signal_projection) =
-        compile_file_frontend(source, symbols, cctx, source_name)?;
+    let Frontend {
+        hir,
+        arena,
+        expander,
+        prim_values,
+        signal_projection,
+        types,
+    } = compile_file_frontend(source, symbols, cctx, source_name)?;
 
     // Lower to LIR
     let t = std::time::Instant::now();
@@ -324,7 +334,8 @@ fn compile_file_inner(
         .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_region_info(region_info);
+        .with_region_info(region_info)
+        .with_type_info(types);
 
     let lir_module = lowerer.lower(&hir)?;
     crate::phase!(ct, "compile", t, "{} lower", source_name);
@@ -400,7 +411,14 @@ fn lower_test_frontend(
     symbols: &SymbolTable,
     cctx: &mut CompileCtx,
 ) -> Result<CompileResult, String> {
-    let (hir, arena, _expander, prim_values, signal_projection) = frontend;
+    let Frontend {
+        hir,
+        arena,
+        prim_values,
+        signal_projection,
+        types,
+        ..
+    } = frontend;
 
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(cctx.primitive_meta());
     let region_info =
@@ -409,7 +427,8 @@ fn lower_test_frontend(
         .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_region_info(region_info);
+        .with_region_info(region_info)
+        .with_type_info(types);
     let lir_module = lowerer.lower(&hir)?;
 
     let signal = lir_module.entry.signal;

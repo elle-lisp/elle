@@ -1,3 +1,5 @@
+// audited: 2026-09-06
+// src/pipeline/AGENTS.md
 //! `CompileCtx`: the per-instance compile-time state — a macro-expansion VM, the
 //! prelude/core `Expander`, the `PrimitiveMeta` (primitives + core.lisp + stdlib
 //! exports + REPL value bindings), and the file→signal projection map.
@@ -392,7 +394,7 @@ fn compile_core(
     // not single monomorphic-op arms), and its cross-unit-inlineable fns are not
     // recorded for later units. The load-bearing cross-unit templates (`inc`/`dec`)
     // live in `stdlib.lisp`, which compiles through the instance registries.
-    crate::hir::regularize(
+    let types = crate::hir::regularize(
         &mut hir,
         &mut arena,
         symbols,
@@ -414,7 +416,8 @@ fn compile_core(
         .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_region_info(region_info);
+        .with_region_info(region_info)
+        .with_type_info(types);
     let lir_module = lowerer
         .lower(&hir)
         .expect("core.lisp lowering must succeed");

@@ -1,3 +1,11 @@
+// audited: 2026-09-06
+// src/wasm/AGENTS.md
+//! Emitting one LIR instruction as WASM.
+//!
+//! One exhaustive match over the instruction set, which is why this file takes
+//! the dispatch-table allowance in `src/wasm/AGENTS.md`. Each arm either emits
+//! the instructions inline or calls one of the concrete emitters beside it.
+
 use super::*;
 
 impl WasmEmitter {
@@ -52,8 +60,19 @@ impl WasmEmitter {
                 }
                 self.known_int.remove(dst);
             }
-            LirInstr::BinOp { dst, op, lhs, rhs } => {
-                let both_int = self.known_int.contains(lhs) && self.known_int.contains(rhs);
+            LirInstr::BinOp {
+                dst,
+                op,
+                lhs,
+                rhs,
+                proof,
+            } => {
+                // Two sources say the operands are integers, and either is
+                // enough. `known_int` follows integers this emitter produced
+                // itself; the proof carries what the front end decided, which
+                // reaches a parameter the walk cannot type (docs/impl/lir.md).
+                let both_int = proof.is_int()
+                    || (self.known_int.contains(lhs) && self.known_int.contains(rhs));
                 self.emit_binop(f, *dst, *op, *lhs, *rhs, both_int);
                 let is_bitwise = matches!(
                     op,
@@ -65,10 +84,21 @@ impl WasmEmitter {
                     self.known_int.remove(dst);
                 }
             }
-            LirInstr::Compare { dst, op, lhs, rhs } => {
+            LirInstr::Compare {
+                dst,
+                op,
+                lhs,
+                rhs,
+                proof: _,
+            } => {
                 self.emit_compare(f, *dst, *op, *lhs, *rhs);
             }
-            LirInstr::UnaryOp { dst, op, src } => {
+            LirInstr::UnaryOp {
+                dst,
+                op,
+                src,
+                proof: _,
+            } => {
                 self.emit_unary(f, *dst, *op, *src);
             }
             LirInstr::IsNil { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_NIL),
