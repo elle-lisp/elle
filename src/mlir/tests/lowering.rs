@@ -1,7 +1,7 @@
 // audited: 2026-09-06
 // docs/impl/mlir.md
-//! The straight-line base case: a two-operand add and a constant, lowered to
-//! MLIR text, run on the CPU tier, and lowered again to a SPIR-V module.
+//! The straight-line base case: an add and a constant, through MLIR text, the
+//! CPU tier, and a SPIR-V module.
 
 use super::*;
 

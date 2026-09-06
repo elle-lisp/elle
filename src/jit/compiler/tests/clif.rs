@@ -1,7 +1,7 @@
 // audited: 2026-09-06
 // docs/impl/jit.md
-//! What only the rendered Cranelift IR settles: the flags a load carries, which
-//! arithmetic still tests a tag, and the pop that precedes every exit.
+//! What only the rendered Cranelift IR settles: a load's flags, an operation's
+//! tag test, and the pop before every exit.
 
 use super::*;
 

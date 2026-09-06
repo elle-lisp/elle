@@ -1,11 +1,9 @@
-// audited: 2026-09-06
 // src/lir/AGENTS.md
 //! The LIR instruction set, and the constructors that build an instruction.
 //!
 //! One enum names every operation the lowerer can emit and every backend must
-//! answer for. Rust cannot split an enum, so this file runs past the ordinary
-//! reading budget under the instruction-set allowance in `src/lir/AGENTS.md`;
-//! the walks over it live in `consts` and `region`.
+//! answer for; the walks over it live in `consts` and `region`. Rust cannot
+//! split an enum, so this file is past the reading budget and carries no stamp.
 
 use super::*;
 

@@ -38,7 +38,7 @@ The lowerer (`src/lir/lower/`) transforms HIR trees into LIR:
 3. **Block construction** — control flow (if, loops, match) creates
    basic blocks connected by terminators
 4. **Region assignment** — every allocation is routed to a region
-   (see `docs/regions.md`); the lowerer emits `DecrefRegion` at each
+   (see [regions](../regions.md)); the lowerer emits `DecrefRegion` at each
    region's `free_at` HirId and `IncrefRegion` at cross-region edges
 
 ## The operand proof

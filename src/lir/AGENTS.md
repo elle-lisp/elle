@@ -7,11 +7,15 @@ and basic blocks. Architecture-independent but close to target.
 
 ## Size
 
-`types/instr.rs` and `emit/instr/ops.rs` take the dispatch-table allowance the
-root [AGENTS.md](../../AGENTS.md) grants: 800 lines rather than 500. Both are one
-exhaustive enumeration of the instruction set, and Rust gives no way to split an
-enum or to make a match over it partial. Everything else in this directory takes
-the ordinary budget.
+`types/instr.rs` is past the 500-line reading budget and carries no audit stamp,
+so it sits in the queue. The file is one enum, and Rust gives no way to split
+one; bringing it inside the budget means nesting a group of variants into a
+sub-enum, which rewrites every exhaustive match in the crate. That is its own
+change, not a rider on whatever touches the file next.
+
+A match over the instruction set splits where an enum cannot: `emit/instr/ops.rs`
+hands its tail to `ops/intrinsics.rs`, and every other file here takes the
+ordinary budget.
 
 ## Responsibility
 

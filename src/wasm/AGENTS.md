@@ -4,13 +4,6 @@
 
 LIR → WASM emission via `wasm-encoder`, execution via Wasmtime.
 
-## Size
-
-`instruction/dispatch.rs` takes the dispatch-table allowance the root
-[AGENTS.md](../../AGENTS.md) grants: 800 lines rather than 500. It is one
-exhaustive match over the instruction set, which Rust gives no way to make
-partial. Everything else here takes the ordinary budget.
-
 ## Architecture
 
 ```

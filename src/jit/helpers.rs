@@ -1,7 +1,7 @@
 // audited: 2026-09-06
 // src/jit/AGENTS.md
-//! What a `FunctionTranslator` reaches for: constants, the arithmetic fast
-//! paths, the runtime-helper call shapes, and the register variable pairs.
+//! What a `FunctionTranslator` reaches for: constants, fast paths, call shapes
+//! and register pairs.
 //!
 //! `checks` holds the two checks a call site runs on the way back.
 

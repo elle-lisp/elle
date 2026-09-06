@@ -96,7 +96,7 @@ IncrefRegion rid   increment region rid's reference count
 DecrefRegion rid   decrement region rid; free pages when RC hits 0
 ```
 `DecrefRegion` is the only region-demise bytecode; there is no
-separate `FreeRegion`. See `docs/regions.md` for the full model.
+separate `FreeRegion`. See [regions](../regions.md) for the full model.
 
 ## Encoding
 
@@ -110,7 +110,7 @@ reporting.
 `SignalBits` is a 64-bit mask, and every bit of it is meaningful in
 bytecode: built-in signals sit at bits 0–17, the runtime reserves bits
 18–31, and `(signal :keyword)` allocates user signals from bit 32 upward
-(`docs/signals/protocol.md`). An operand that holds fewer than 64 bits
+([the signal protocol](../signals/protocol.md)). An operand of fewer than 64 bits
 therefore cannot name a user signal at all.
 
 Two instructions carry such an operand — `Emit` and `CheckSignalBound` —

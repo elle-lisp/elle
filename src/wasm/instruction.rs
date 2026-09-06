@@ -22,6 +22,7 @@ mod arith;
 mod calls;
 mod data;
 mod dispatch;
+mod intrinsics;
 mod mem;
 
 #[cfg(test)]

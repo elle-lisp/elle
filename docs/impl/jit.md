@@ -77,7 +77,7 @@ function's bytecode pointer (see "Cache identity" for why that key is sound),
 so a re-submission could only ever reproduce the identical rejection — it is
 pure wasted work.
 
-This invariant is load-bearing under eager JIT. With `--jit=eager` the hotness
+Eager JIT is where this invariant pays. With `--jit=eager` the hotness
 threshold is 0, so *every* call is "hot"; absent the negative cache, each call
 to an un-jit'able function re-submits it to the background worker. A single
 un-jit'able function called in a hot loop (e.g. stdlib `-`/`/`, which build a

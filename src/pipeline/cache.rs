@@ -1,8 +1,10 @@
 // audited: 2026-09-06
 // src/pipeline/AGENTS.md
-//! `CompileCtx`: the per-instance compile-time state — a macro-expansion VM, the
-//! prelude/core `Expander`, the `PrimitiveMeta` (primitives + core.lisp + stdlib
-//! exports + REPL value bindings), and the file→signal projection map.
+//! `CompileCtx`: one instance's compile-time state.
+//!
+//! A macro-expansion VM, the prelude/core `Expander`, the `PrimitiveMeta`
+//! (primitives + core.lisp + stdlib exports + REPL value bindings), and the
+//! file→signal projection map.
 //!
 //! This is owned by the instance's `RuntimeCore` (a sibling of the `VM` and
 //! `SymbolTable`) and threaded explicitly through the pipeline: two embedded Elle
@@ -392,8 +394,9 @@ fn compile_core(
     // during `on_vm` construction, so throwaway registries are correct here: it
     // defines no container-dispatch wrappers (its `concat`/`reverse` fan to helpers,
     // not single monomorphic-op arms), and its cross-unit-inlineable fns are not
-    // recorded for later units. The load-bearing cross-unit templates (`inc`/`dec`)
-    // live in `stdlib.lisp`, which compiles through the instance registries.
+    // recorded for later units. The cross-unit templates every later unit reads
+    // (`inc`/`dec`) live in `stdlib.lisp`, which compiles through the instance
+    // registries.
     let types = crate::hir::regularize(
         &mut hir,
         &mut arena,
