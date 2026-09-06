@@ -1,3 +1,4 @@
+// audited: 2026-09-05
 // ── Region-lifecycle: decref/release emission ────────────────────
 //
 // Where the lowerer puts each region's release, split by the question each
@@ -7,6 +8,8 @@
 // - `order` — the order releases take when several share one decref_point
 //   (docs/impl/region/rules.md Rule 4).
 // - `frameexit` — the release a frame owes on the way out.
+// - `breakexit` — the replica a `break` leaves at the end of the block it
+//   leaves, for the release its jump passes over.
 // - `arms` — releases across branch arms: a tail-calling arm must not hold back
 //   its falling-through siblings, and a re-storable capture cell's slot is not
 //   a release route.
@@ -15,6 +18,7 @@
 use super::*;
 
 mod arms;
+mod breakexit;
 mod emission;
 mod frameexit;
 mod order;

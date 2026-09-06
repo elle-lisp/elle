@@ -1,3 +1,10 @@
+// audited: 2026-09-05
+//! Replaying a fiber's suspended frame chain: each frame's stack, region map and
+//! dues are restored before its body is re-entered.
+//!
+//! docs/impl/region/owner.md
+//! docs/impl/region/generations.md
+
 use super::*;
 use crate::value::fiber::ActivationDues;
 
@@ -200,13 +207,16 @@ impl VM {
                     if let Some((slot, r)) =
                         crate::vm::fiber::first_stale_borrow(&frame.region_borrows, self.heap())
                     {
-                        panic!(
-                            "stale suspended-frame region borrow on resume: activation \
-                             region slot {slot} maps to region {r}, which was freed while \
-                             this fiber was parked — an uncounted suspended-frame borrow \
-                             outlived its region (docs/impl/region/generations.md \
-                             § 'Uncounted-borrow check')"
+                        // The site is what makes the panic readable off a machine
+                        // the reader cannot run: a slot and a physical region id
+                        // are per-run values that name no code.
+                        let site = crate::value::fiber::ParkSite::of(
+                            &frame.code,
+                            frame.ip,
+                            i,
+                            frames.len(),
                         );
+                        panic!("{}", site.stale_borrow_message(slot, r));
                     }
 
                     // Restore this activation's static→physical region remap

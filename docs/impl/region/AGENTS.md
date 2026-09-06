@@ -7,17 +7,24 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [adopt.md](adopt.md) — **Ownership adopts and the root's lifetime obligation (more...)**
+- [anchors.md](anchors.md) — **Where a release is anchored** Where the solver anchors a release: what each binding form pins, and what a `break` does to the releases its jump passes over.
 - [bindings.md](bindings.md) — **Reassigned mutable bindings are 1-slot containers** Implementation-facing: how the solver and lowerer handle a binding that is reassigned over its lifetime.
+- [compensate.md](compensate.md) — **Per-arm compensation** The releases a branch adds one per arm, each funded by a retain on its own node.
 - [ctx.md](ctx.md) — **NativeCtx — explicit allocation: every value names its region and heap** Implementation-facing.
 - [diagnostics.md](diagnostics.md) — **Region diagnostics and validation (more...)**
 - [effects.md](effects.md) — **Native region effects: declared, not guessed (more...)**
 - [errors.md](errors.md) — **Rich errors — one region-coherent struct routine + `rich_error!`** Implementation-facing.
-- [generations.md](generations.md) — **Region generations: stale derefs detonate in debug builds (more...)**
+- [generations.md](generations.md) — **Region generations: stale derefs detonate in debug builds** The per-region generation counter and page stamps that turn a stale region deref into a debug-build panic at the deref site.
 - [letrec.md](letrec.md) — **The letrec closure-cycle merge** The builder-idiom seed merges one tight `child → parent` store edge.
-- [mechanism.md](mechanism.md) — **The mechanism (more...)**
+- [mechanism.md](mechanism.md) — **The mechanism** The RC-instruction machinery the [rules](rules.md) constrain: how each instruction names its region, and when a static slot may stand in.
 - [merging.md](merging.md) — **Merging (more...)**
 - [model.md](model.md) — **Region representation — id-spaces, per-execution model, layout** Implementation-facing.
 - [owner.md](owner.md) — **Owner nodes — an activation as a forest root (more...)**
 - [ownership.md](ownership.md) — **Adoption and subtree drop (the ownership forest) (more...)**
+- [relocate.md](relocate.md) — **A release past a frame-replacing tail call** Every release the lowerer emits after a `TailCall` is dead on the closure path, and what it costs to move one ahead of that call.
+- [replicate.md](replicate.md) — **The relocation point and its replicas** How a relocation point outlives its own block, so one release covers a merge and every path that leaves the frame before it.
 - [rules.md](rules.md) — **Region rules — the implementor's correctness obligations** This is implementation-facing: the exhaustive correctness contract the compiler and runtime must uphold.
+- [signalexit.md](signalexit.md) — **What a signal exit owes** A native tail call runs its fall-through block on normal completion alone, so a signal exit answers for the releases left in it.
 - [template.md](template.md) — **Code objects — a blueprint, a payload, and a header** A closure template is the code object of one lambda: its bytecode, constant pool, source locations, and the region tables its body needs.
+- [unwind.md](unwind.md) — **An abandoned frame runs the releases it still owes** The two tables naming what an abandoned frame still owed, and the exits that walk them.
+- [window.md](window.md) — **The branch-arm release window** Where a branch puts the ONE release of a region several arms use.

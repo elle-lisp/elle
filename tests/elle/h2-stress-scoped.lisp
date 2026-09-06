@@ -1,4 +1,5 @@
 (elle/epoch 12)
+# audited: 2026-09-05
 # h2 request loops written so escape analysis can scope them, and the heap
 # residue those loops leave behind.
 #
@@ -63,8 +64,8 @@
 # delta must fit under. Shrink-only — see "The pins" above.
 (def residue-small 10)
 (def residue-large 30)
-(def max-objects-per-request 2)
-(def max-regions-per-request 2)
+(def max-objects-per-request 0)
+(def max-regions-per-request 0)
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

@@ -1,8 +1,9 @@
 # Region generations: stale derefs detonate in debug builds
 
-Implementation-facing: the per-region generation counter and page stamping that
-turn a stale region deref into a deterministic debug-build panic at the exact
-deref site. Pairs with the `--trace=guardfree` oracle described in
+<!-- audited: 2026-09-05 -->
+
+The per-region generation counter and page stamps that turn a stale region deref
+into a debug-build panic at the deref site. Pairs with the `--trace=guardfree` oracle described in
 [diagnostics.md](diagnostics.md).
 
 Physical region ids are recycled (a freed id returns to the mint pool) and
@@ -49,7 +50,7 @@ which must first find the pointer's **page base** — pages are variable-sized
 (geometric growth to 4 MiB), so it masks the pointer to each candidate power-of-2
 alignment and reads the header there. The header's `size_tag` carries a 24-bit
 `PAGE_MAGIC` plus `log2(page_size)`; the true base is the alignment whose tag
-validates. The magic is load-bearing: a *smaller* sub-alignment of a large page
+validates. Without the magic the search is unsound: a *smaller* sub-alignment of a large page
 masks to a base **mid-page**, on object/inline data, and a bare `log2` byte there
 can coincidentally equal the smaller size's log2 — read as a false header
 yielding a garbage `(region_id, stamp)`. The magic makes that ~`1/2^32` instead
@@ -157,9 +158,16 @@ own **live** allocations, kept alive by its still-pending `DecrefRegion`s;
 frame's `region_borrows` (`record_region_borrows`), and `resume_suspended` re-checks
 them with the shared `first_stale_borrow` just before `restore_activation_region_map`
 re-enters the body — so a region freed while the fiber was parked panics at the resume
-boundary, naming the slot, instead of corrupting the resumed activation's allocs/
-decrefs. Pinned by `suspended_frame_region_borrow_detects_freed_region`
-(`src/vm/fiber/borrow_tests.rs`).
+boundary instead of corrupting the resumed activation's allocs/decrefs. Pinned by
+`suspended_frame_region_borrow_detects_freed_region` (`src/vm/fiber/borrow_tests.rs`).
+
+The panic names the parked activation beside the slot and the physical region: the
+function, its position in the replay chain, and the source location of the resume
+point. A slot number and a physical region id are per-run values that name no code, so
+a panic carrying only those says nothing about which program parked. The location
+falls back to the function's first recorded line where the resume point has no entry of
+its own, because naming the file is most of the answer. `ParkSite` builds the text
+(`src/value/fiber/frame.rs`), pinned by `stale_borrow_message_names_the_parked_site`.
 
 The map is not automatically dangling-free, which is what forces the snapshot to record
 the **establish-generation** (`MappedRegion::gen`, the region's generation when the slot
@@ -179,6 +187,20 @@ while an entry that still matches is a genuine live borrow whose free *while par
 trips the check. Pinned by `stale_leftover_map_entry_is_not_snapshotted_as_a_borrow`
 (`src/vm/fiber/borrow_tests.rs`) and, at corpus scale, by
 `signals_no_stale_suspended_frame_region_borrow` (`tests/integration/elle_scripts.rs`).
+
+The generation separates the two cases only once the region has been freed. A leftover
+whose region is still live reads exactly like a borrow, because the free that would move
+the generation has not happened yet — and it is the free *after* the park that the check
+then reports. So the snapshot asks the function as well as the heap: a slot the function
+never releases by id holds no pending `DecrefRegion`, whatever its generation says.
+`Code::frame_release_regions` is that list — the static slots this function's slot-routed
+releases name — and `record_region_borrows` records an entry only when the slot appears in
+it. The entries this excludes belong to a region whose release is VALUE-routed, which
+frees the region without clearing the slot; the activation reads that map entry through no
+release at all, so a free while parked corrupts nothing through it. What the activation
+still holds in its stack or its environment is covered where it is read, by `region_of`'s
+page stamp. Pinned by `a_slot_with_no_slot_routed_release_is_not_a_borrow`
+(`src/vm/fiber/borrow_tests.rs`).
 
 A **pass-through borrow** is the other shape and needs
 no handle. The `%first`/`%rest`/`%get` intrinsics (`LirInstr::First`/`Rest`/`Get`)
