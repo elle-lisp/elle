@@ -614,4 +614,19 @@ impl LirInstr {
     pub fn unary(dst: Reg, op: UnaryOp, src: Reg) -> Self {
         LirInstr::UnaryOp { dst, op, src }
     }
+
+    /// A binary operation over operands proven to be integers.
+    pub fn int_binop(dst: Reg, op: BinOp, lhs: Reg, rhs: Reg) -> Self {
+        LirInstr::BinOp { dst, op, lhs, rhs }
+    }
+
+    /// A comparison of operands proven to be integers.
+    pub fn int_compare(dst: Reg, op: CmpOp, lhs: Reg, rhs: Reg) -> Self {
+        LirInstr::Compare { dst, op, lhs, rhs }
+    }
+
+    /// A unary operation over an operand proven to be an integer.
+    pub fn int_unary(dst: Reg, op: UnaryOp, src: Reg) -> Self {
+        LirInstr::UnaryOp { dst, op, src }
+    }
 }

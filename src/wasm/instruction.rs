@@ -1,3 +1,5 @@
+// audited: 2026-09-06
+// src/wasm/AGENTS.md
 //! LIR instruction → WASM instruction emission.
 //!
 //! Translates individual LIR instructions into WASM bytecode via
@@ -21,3 +23,6 @@ mod calls;
 mod data;
 mod dispatch;
 mod mem;
+
+#[cfg(test)]
+mod tests;
