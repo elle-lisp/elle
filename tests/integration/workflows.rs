@@ -1,4 +1,9 @@
-// What `.github/workflows/pr.yml` claims to gate must be what it gates.
+// audited: 2026-09-05
+// What `.github/workflows/pr.yml` claims to gate must be what it gates, and
+// what each job builds must let its own checks run.
+//
+// docs/analysis/ci.md
+// .github/BRANCH_PROTECTION.md
 //
 // The workflow is not compiled and not linted. GitHub checks that a `needs`
 // entry names a real job and stops there, so both halves of the merge gate can
@@ -241,6 +246,60 @@ fn a_job_builds_every_plugin_in_the_submodule() {
             body.contains("submodule"),
             "job `{name}` builds the plugins but never checks the submodule \
              out, so it runs over an empty directory"
+        );
+    }
+}
+
+// The region checks are `#[cfg(debug_assertions)]`, and every Makefile-driven
+// job builds `--release`. So a corpus job without
+// `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` drives the whole corpus with those
+// checks compiled out, and reports green over what they would have caught. The
+// argument is in docs/analysis/ci.md § "What each job builds".
+//
+// The trap: a green corpus job is not evidence the checks ran. `macOS Smoke`
+// was the only job setting the flag, so both Linux backends ran blind and the
+// slowest runner in the workflow was the sole detector — on a box whose
+// failures read as flaky timeouts.
+//
+// The counter-factual: assert only that SOME job sets the flag, and the
+// macOS-only state passes unchanged. The backend split below is the assertion.
+#[test]
+fn each_io_backend_has_a_linux_corpus_job_with_debug_assertions() {
+    const FLAG: &str = "CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS";
+    let text = workflow_text();
+
+    // A corpus job drives the Makefile's smoke targets. Restricted to Linux
+    // runners: the point is that neither backend depends on the macOS box.
+    let corpus: Vec<(String, String)> = jobs(&text)
+        .into_iter()
+        .filter(|(_, body)| body.contains("runs-on: ubuntu"))
+        .filter(|(_, body)| body.contains("make smoke"))
+        .collect();
+    assert!(
+        corpus.len() > 1,
+        "found {} Linux corpus jobs in {}; the parse is broken, not the workflow",
+        corpus.len(),
+        workflow_path().display()
+    );
+
+    // `smoke-nouring` is the thread-pool target; every other smoke target takes
+    // the backend `create_platform_backend` picks, which on Linux is io_uring.
+    let (pool, uring): (Vec<_>, Vec<_>) = corpus
+        .iter()
+        .partition(|(_, body)| body.contains("make smoke-nouring"));
+
+    for (backend, group) in [("thread-pool", &pool), ("io_uring", &uring)] {
+        let covered: Vec<&String> = group
+            .iter()
+            .filter(|(_, body)| body.contains(FLAG))
+            .map(|(name, _)| name)
+            .collect();
+        assert!(
+            !covered.is_empty(),
+            "no Linux corpus job sets `{FLAG}` on the {backend} backend, so the \
+             region checks are compiled out of every {backend} run and only the \
+             macOS job can catch what they find. Candidates: {:?}",
+            group.iter().map(|(n, _)| n).collect::<Vec<_>>(),
         );
     }
 }
