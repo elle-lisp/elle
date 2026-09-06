@@ -2,13 +2,15 @@
 
 <!-- audited: 2026-09-06 -->
 
+The WASM backend compiles Elle programs to WebAssembly and runs them under
+Wasmtime, over the same front end the bytecode VM uses.
+
 > **Feature-gated:** The WASM backend requires `--features wasm` at build
 > time. It is disabled by default to reduce binary size. Build with
 > `cargo build --features wasm` to enable it.
 
-The WASM backend compiles Elle programs to WebAssembly and executes them
-via Wasmtime. It is an alternative to the bytecode VM, sharing the same
-front end (reader → expander → analyzer → HIR → LIR).
+It is an alternative to the bytecode VM, sharing that front end
+(reader → expander → analyzer → HIR → LIR) and replacing everything below it.
 
 ## Quick start
 

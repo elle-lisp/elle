@@ -5,8 +5,8 @@
 //! A standalone single-closure module is served by hosts whose suspension and
 //! tail-call imports are panic stubs (src/wasm/lazy/env.rs) and whose funcref
 //! table has one entry, so `emit_single_closure` must refuse every shape whose
-//! execution would reach one of them (src/wasm/AGENTS.md § "Constraints on
-//! per-closure compilation"). Refusal means `None`: the tiered caller falls
+//! execution would reach one of them — see src/wasm/AGENTS.md § "Constraints
+//! on per-closure compilation". Refusal means `None`: the tiered caller falls
 //! back to the bytecode VM, the precache caller to full-module dispatch.
 
 use super::*;

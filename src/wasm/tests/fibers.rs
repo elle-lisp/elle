@@ -5,8 +5,8 @@
 //!
 //! A fiber whose body suspends is driven by the host resume chain, and the
 //! nested fiber `protect` and `defer` build must be re-driven when its own
-//! suspension propagates through the resumer (src/wasm/AGENTS.md §
-//! "Uncaught-suspend propagation + re-drive"). Each test below is a shape that
+//! suspension propagates through the resumer — see src/wasm/AGENTS.md §
+//! "Uncaught-suspend propagation + re-drive". Each test below is a shape that
 //! returned a wrong value — not an error — when one of those handoffs was
 //! missing.
 
