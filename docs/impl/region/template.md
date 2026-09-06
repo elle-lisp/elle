@@ -128,6 +128,23 @@ A header holds a strong `Rc` to its blueprint, so a blueprint cannot die while
 a header made from it is alive, and the sweep cannot pull a payload out from
 under a live header.
 
+## One blueprint's death decrements one count
+
+The `Weak` makes a *lookup* correct. The count that decides when a payload
+region is released has to be kept correct separately, because the reused
+address reaches it by another route: materializing a payload for a blueprint
+that landed on a dead one's key inserts *over* the dead entry.
+
+The entry that insert displaces takes its region's claim with it. So the insert
+retires the displaced entry down the same path the sweep uses — decrement the
+count, release the region when the count reaches zero. The invariant that
+states it is that the counts sum to the number of entries, and a debug build
+checks that at every insert.
+
+Leaving the displaced entry for the next sweep does not cover this. A sweep
+runs when the entry map has doubled, so every address reused between two sweeps
+would hold a region's pages until teardown.
+
 ## The cache's reference is the one nothing on the heap points at
 
 A macro expansion is a closed allocation scope: it reclaims the transformer's
