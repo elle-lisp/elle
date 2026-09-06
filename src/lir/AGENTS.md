@@ -1,7 +1,17 @@
 # lir
 
+<!-- audited: 2026-09-06 -->
+
 Low-level Intermediate Representation. SSA form with virtual registers
 and basic blocks. Architecture-independent but close to target.
+
+## Size
+
+`types/instr.rs` and `emit/instr/ops.rs` take the dispatch-table allowance the
+root [AGENTS.md](../../AGENTS.md) grants: 800 lines rather than 500. Both are one
+exhaustive enumeration of the instruction set, and Rust gives no way to split an
+enum or to make a match over it partial. Everything else in this directory takes
+the ordinary budget.
 
 ## Responsibility
 

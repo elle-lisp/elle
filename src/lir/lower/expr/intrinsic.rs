@@ -1,3 +1,13 @@
+// audited: 2026-09-06
+// src/lir/lower/AGENTS.md
+// docs/intrinsics.md
+//! Lowering a `%`-intrinsic: arithmetic, comparison, conversion, pairs, bitwise,
+//! and the type predicates.
+//!
+//! The match is a chain. This file lowers the operand registers once, then takes
+//! the ops above; `rest` takes the collection, freeze/thaw and remaining
+//! predicate ops from the same registers.
+
 use super::*;
 
 impl<'a> Lowerer<'a> {
@@ -18,52 +28,23 @@ impl<'a> Lowerer<'a> {
         match op {
             // Binary arithmetic
             IntrinsicOp::Add => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::Add,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
+                self.emit(LirInstr::binop(dst, BinOp::Add, arg_regs[0], arg_regs[1]));
             }
             IntrinsicOp::Sub => {
                 if arg_regs.len() == 1 {
-                    self.emit(LirInstr::UnaryOp {
-                        dst,
-                        op: UnaryOp::Neg,
-                        src: arg_regs[0],
-                    });
+                    self.emit(LirInstr::unary(dst, UnaryOp::Neg, arg_regs[0]));
                 } else {
-                    self.emit(LirInstr::BinOp {
-                        dst,
-                        op: BinOp::Sub,
-                        lhs: arg_regs[0],
-                        rhs: arg_regs[1],
-                    });
+                    self.emit(LirInstr::binop(dst, BinOp::Sub, arg_regs[0], arg_regs[1]));
                 }
             }
             IntrinsicOp::Mul => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::Mul,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
+                self.emit(LirInstr::binop(dst, BinOp::Mul, arg_regs[0], arg_regs[1]));
             }
             IntrinsicOp::Div => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::Div,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
+                self.emit(LirInstr::binop(dst, BinOp::Div, arg_regs[0], arg_regs[1]));
             }
             IntrinsicOp::Rem => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::Rem,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
+                self.emit(LirInstr::binop(dst, BinOp::Rem, arg_regs[0], arg_regs[1]));
             }
             IntrinsicOp::Mod => {
                 // Floored modulus: ((a % b) + b) % b
@@ -82,12 +63,7 @@ impl<'a> Lowerer<'a> {
                     slot: b_slot,
                 });
                 let t = self.fresh_reg();
-                self.emit(LirInstr::BinOp {
-                    dst: t,
-                    op: BinOp::Rem,
-                    lhs: arg_regs[0],
-                    rhs: b1,
-                });
+                self.emit(LirInstr::binop(t, BinOp::Rem, arg_regs[0], b1));
                 // Step 2: t2 = t + b
                 let b2 = self.fresh_reg();
                 self.emit(LirInstr::LoadLocal {
@@ -95,73 +71,34 @@ impl<'a> Lowerer<'a> {
                     slot: b_slot,
                 });
                 let t2 = self.fresh_reg();
-                self.emit(LirInstr::BinOp {
-                    dst: t2,
-                    op: BinOp::Add,
-                    lhs: t,
-                    rhs: b2,
-                });
+                self.emit(LirInstr::binop(t2, BinOp::Add, t, b2));
                 // Step 3: result = t2 % b
                 let b3 = self.fresh_reg();
                 self.emit(LirInstr::LoadLocal {
                     dst: b3,
                     slot: b_slot,
                 });
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::Rem,
-                    lhs: t2,
-                    rhs: b3,
-                });
+                self.emit(LirInstr::binop(dst, BinOp::Rem, t2, b3));
             }
             // Comparisons
             IntrinsicOp::Eq => {
-                self.emit(LirInstr::Compare {
-                    dst,
-                    op: CmpOp::Eq,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
+                self.emit(LirInstr::compare(dst, CmpOp::Eq, arg_regs[0], arg_regs[1]));
             }
             IntrinsicOp::Lt => {
-                self.emit(LirInstr::Compare {
-                    dst,
-                    op: CmpOp::Lt,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
+                self.emit(LirInstr::compare(dst, CmpOp::Lt, arg_regs[0], arg_regs[1]));
             }
             IntrinsicOp::Gt => {
-                self.emit(LirInstr::Compare {
-                    dst,
-                    op: CmpOp::Gt,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
+                self.emit(LirInstr::compare(dst, CmpOp::Gt, arg_regs[0], arg_regs[1]));
             }
             IntrinsicOp::Le => {
-                self.emit(LirInstr::Compare {
-                    dst,
-                    op: CmpOp::Le,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
+                self.emit(LirInstr::compare(dst, CmpOp::Le, arg_regs[0], arg_regs[1]));
             }
             IntrinsicOp::Ge => {
-                self.emit(LirInstr::Compare {
-                    dst,
-                    op: CmpOp::Ge,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
+                self.emit(LirInstr::compare(dst, CmpOp::Ge, arg_regs[0], arg_regs[1]));
             }
             // Logical
             IntrinsicOp::Not => {
-                self.emit(LirInstr::UnaryOp {
-                    dst,
-                    op: UnaryOp::Not,
-                    src: arg_regs[0],
-                });
+                self.emit(LirInstr::unary(dst, UnaryOp::Not, arg_regs[0]));
             }
             // Conversion
             IntrinsicOp::Int => {
@@ -201,61 +138,37 @@ impl<'a> Lowerer<'a> {
             }
             // Bitwise
             IntrinsicOp::BitAnd => {
-                self.emit(LirInstr::BinOp {
+                self.emit(LirInstr::binop(
                     dst,
-                    op: BinOp::BitAnd,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
+                    BinOp::BitAnd,
+                    arg_regs[0],
+                    arg_regs[1],
+                ));
             }
             IntrinsicOp::BitOr => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::BitOr,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
+                self.emit(LirInstr::binop(dst, BinOp::BitOr, arg_regs[0], arg_regs[1]));
             }
             IntrinsicOp::BitXor => {
-                self.emit(LirInstr::BinOp {
+                self.emit(LirInstr::binop(
                     dst,
-                    op: BinOp::BitXor,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
+                    BinOp::BitXor,
+                    arg_regs[0],
+                    arg_regs[1],
+                ));
             }
             IntrinsicOp::Shl => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::Shl,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
+                self.emit(LirInstr::binop(dst, BinOp::Shl, arg_regs[0], arg_regs[1]));
             }
             IntrinsicOp::Shr => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::Shr,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
+                self.emit(LirInstr::binop(dst, BinOp::Shr, arg_regs[0], arg_regs[1]));
             }
             // Bitwise NOT
             IntrinsicOp::BitNot => {
-                self.emit(LirInstr::UnaryOp {
-                    dst,
-                    op: UnaryOp::BitNot,
-                    src: arg_regs[0],
-                });
+                self.emit(LirInstr::unary(dst, UnaryOp::BitNot, arg_regs[0]));
             }
             // Not-equal comparison
             IntrinsicOp::Ne => {
-                self.emit(LirInstr::Compare {
-                    dst,
-                    op: CmpOp::Ne,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
+                self.emit(LirInstr::compare(dst, CmpOp::Ne, arg_regs[0], arg_regs[1]));
             }
             // Type predicates
             IntrinsicOp::IsNil => {

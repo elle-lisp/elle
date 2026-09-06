@@ -1,4 +1,7 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-09-06
+// src/wasm/AGENTS.md
+//! What the WASM register allocator gives a register: a shared slot inside one
+//! block, a dedicated slot across two.
 
 use super::*;
 use crate::lir::testkit::LirFixture;
@@ -22,12 +25,7 @@ fn within_block_reuse() {
                     dst: Reg(1),
                     value: LirConst::Int(2),
                 },
-                LirInstr::BinOp {
-                    dst: Reg(2),
-                    op: LirBinOp::Add,
-                    lhs: Reg(0),
-                    rhs: Reg(1),
-                },
+                LirInstr::binop(Reg(2), LirBinOp::Add, Reg(0), Reg(1)),
             ],
             Terminator::Return(Reg(2)),
         )

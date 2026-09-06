@@ -1,3 +1,8 @@
+// audited: 2026-09-06
+// docs/impl/mlir.md
+//! A comparison lowers to `arith.cmpi`, returns `Bool`, and computes the same
+//! answer the interpreter does on either side of the boundary.
+
 use super::*;
 
 // ── Bool return tests ──────────────────────────────────────────
@@ -18,12 +23,7 @@ fn make_compare() -> LirFunction {
                     dst: Reg(1),
                     value: LirConst::Int(0),
                 },
-                LirInstr::Compare {
-                    dst: Reg(2),
-                    op: CmpOp::Gt,
-                    lhs: Reg(0),
-                    rhs: Reg(1),
-                },
+                LirInstr::compare(Reg(2), CmpOp::Gt, Reg(0), Reg(1)),
             ],
             Terminator::Return(Reg(2)),
         )

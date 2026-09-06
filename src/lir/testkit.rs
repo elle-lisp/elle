@@ -1,15 +1,12 @@
+// audited: 2026-09-06
+// src/lir/AGENTS.md
 //! Assembling a `LirFunction` by hand, for the unit tests of the backends that
 //! consume it.
 //!
-//! Every consumer of LIR — the bytecode emitter, the JIT, the WASM backend, the
-//! MLIR and SPIR-V tiers, the cross-thread send path — tests against a function
-//! written out instruction by instruction, because the shape under test is
-//! usually one the front end cannot be coaxed into producing on demand. The
-//! assembly is the same every time: name the function, open a block, push
-//! spanned instructions, close it with a terminator.
-//!
-//! [`LirFixture`] is that assembly, once. It mirrors [`crate::hir::testkit`],
-//! which does the same job for the front-end passes.
+//! Every consumer of LIR tests against a function written out instruction by
+//! instruction, because the shape under test is usually one the front end cannot
+//! be coaxed into producing on demand. [`LirFixture`] is that assembly, once. It
+//! mirrors [`crate::hir::testkit`], which does the same job for the front end.
 //!
 //! The register count is inferred rather than declared: `num_regs` is one past
 //! the highest register id the blocks mention, so it cannot drift away from the
@@ -26,8 +23,8 @@ use crate::value::Arity;
 
 /// Builds a [`LirFunction`].
 ///
-/// See `src/lir/AGENTS.md` § "Building LIR in tests" for the rules; the pins
-/// for each of them are at the bottom of this file.
+/// The rules are in `src/lir/AGENTS.md`; the test for each is at the bottom of
+/// this file.
 pub(crate) struct LirFixture {
     func: LirFunction,
     /// The count [`LirFixture::num_regs`] asked for, if it was called. `None`
@@ -187,12 +184,7 @@ mod tests {
                         dst: Reg(3),
                         value: LirConst::Int(2),
                     },
-                    LirInstr::BinOp {
-                        dst: Reg(1),
-                        op: BinOp::Add,
-                        lhs: Reg(0),
-                        rhs: Reg(3),
-                    },
+                    LirInstr::binop(Reg(1), BinOp::Add, Reg(0), Reg(3)),
                 ],
                 Terminator::Return(Reg(1)),
             )

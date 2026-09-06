@@ -1,3 +1,8 @@
+// audited: 2026-09-06
+// docs/impl/mlir.md
+//! The straight-line base case: a two-operand add and a constant, lowered to
+//! MLIR text, run on the CPU tier, and lowered again to a SPIR-V module.
+
 use super::*;
 
 /// Build LIR: fn(a, b) { return a + b }
@@ -16,12 +21,7 @@ fn make_add() -> LirFunction {
                     dst: Reg(1),
                     index: 1,
                 },
-                LirInstr::BinOp {
-                    dst: Reg(2),
-                    op: BinOp::Add,
-                    lhs: Reg(0),
-                    rhs: Reg(1),
-                },
+                LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
             ],
             Terminator::Return(Reg(2)),
         )

@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-06
 // docs/impl/bytecode.md
 //! What the bytecode emitter writes: control flow, merge-block depth, yield
 //! points, the coalescing oracle, and a nested lambda's blueprint.
@@ -379,12 +379,7 @@ fn arithmetic_binops_emit_the_polymorphic_bytecodes() {
                         dst: Reg(1),
                         value: LirConst::Int(7),
                     },
-                    LirInstr::BinOp {
-                        dst: Reg(2),
-                        op,
-                        lhs: Reg(0),
-                        rhs: Reg(1),
-                    },
+                    LirInstr::binop(Reg(2), op, Reg(0), Reg(1)),
                 ],
                 Terminator::Return(Reg(2)),
             )

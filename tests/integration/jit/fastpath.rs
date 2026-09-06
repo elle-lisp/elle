@@ -1,3 +1,8 @@
+// audited: 2026-09-06
+// src/jit/AGENTS.md
+// The unary fast paths over each operand shape, and which signals the JIT
+// accepts a function under.
+
 use super::*;
 
 // =============================================================================
@@ -15,11 +20,7 @@ fn test_jit_neg_negative() {
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::UnaryOp {
-            dst: Reg(1),
-            op: UnaryOp::Neg,
-            src: Reg(0),
-        },
+        LirInstr::unary(Reg(1), UnaryOp::Neg, Reg(0)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());
@@ -41,11 +42,7 @@ fn test_jit_bit_not_zero() {
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::UnaryOp {
-            dst: Reg(1),
-            op: UnaryOp::BitNot,
-            src: Reg(0),
-        },
+        LirInstr::unary(Reg(1), UnaryOp::BitNot, Reg(0)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());
@@ -67,11 +64,7 @@ fn test_jit_not_integer_zero() {
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::UnaryOp {
-            dst: Reg(1),
-            op: UnaryOp::Not,
-            src: Reg(0),
-        },
+        LirInstr::unary(Reg(1), UnaryOp::Not, Reg(0)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());
@@ -93,11 +86,7 @@ fn test_jit_not_empty_list() {
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::UnaryOp {
-            dst: Reg(1),
-            op: UnaryOp::Not,
-            src: Reg(0),
-        },
+        LirInstr::unary(Reg(1), UnaryOp::Not, Reg(0)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());

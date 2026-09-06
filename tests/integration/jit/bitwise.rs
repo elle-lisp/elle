@@ -1,3 +1,8 @@
+// audited: 2026-09-06
+// src/jit/AGENTS.md
+// What JIT-compiled bitwise and logical operations return, and what an
+// expression spanning several blocks returns.
+
 use super::*;
 
 // =============================================================================
@@ -23,12 +28,7 @@ fn test_jit_conditional_arithmetic() {
         span(),
     ));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::Compare {
-            dst: Reg(2),
-            op: CmpOp::Eq,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
+        LirInstr::compare(Reg(2), CmpOp::Eq, Reg(0), Reg(1)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(
@@ -61,12 +61,7 @@ fn test_jit_conditional_arithmetic() {
         span(),
     ));
     else_block.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(3),
-            op: BinOp::Mul,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
+        LirInstr::binop(Reg(3), BinOp::Mul, Reg(0), Reg(1)),
         span(),
     ));
     else_block.terminator = SpannedTerminator::new(Terminator::Return(Reg(3)), span());
@@ -98,21 +93,11 @@ fn test_jit_chained_arithmetic() {
     entry.instructions.push(load_arg(Reg(1), 1));
     entry.instructions.push(load_arg(Reg(2), 2));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(3),
-            op: BinOp::Add,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
+        LirInstr::binop(Reg(3), BinOp::Add, Reg(0), Reg(1)),
         span(),
     ));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(4),
-            op: BinOp::Mul,
-            lhs: Reg(3),
-            rhs: Reg(2),
-        },
+        LirInstr::binop(Reg(4), BinOp::Mul, Reg(3), Reg(2)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(4)), span());
@@ -139,12 +124,7 @@ fn test_jit_bit_and() {
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(load_arg(Reg(1), 1));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(2),
-            op: BinOp::BitAnd,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
+        LirInstr::binop(Reg(2), BinOp::BitAnd, Reg(0), Reg(1)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), span());
@@ -167,12 +147,7 @@ fn test_jit_bit_or() {
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(load_arg(Reg(1), 1));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(2),
-            op: BinOp::BitOr,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
+        LirInstr::binop(Reg(2), BinOp::BitOr, Reg(0), Reg(1)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), span());
@@ -195,12 +170,7 @@ fn test_jit_shl() {
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(load_arg(Reg(1), 1));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(2),
-            op: BinOp::Shl,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
+        LirInstr::binop(Reg(2), BinOp::Shl, Reg(0), Reg(1)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), span());
@@ -226,11 +196,7 @@ fn test_jit_not_true() {
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::UnaryOp {
-            dst: Reg(1),
-            op: UnaryOp::Not,
-            src: Reg(0),
-        },
+        LirInstr::unary(Reg(1), UnaryOp::Not, Reg(0)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());
@@ -251,11 +217,7 @@ fn test_jit_not_false() {
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::UnaryOp {
-            dst: Reg(1),
-            op: UnaryOp::Not,
-            src: Reg(0),
-        },
+        LirInstr::unary(Reg(1), UnaryOp::Not, Reg(0)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());
@@ -276,11 +238,7 @@ fn test_jit_not_nil() {
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::UnaryOp {
-            dst: Reg(1),
-            op: UnaryOp::Not,
-            src: Reg(0),
-        },
+        LirInstr::unary(Reg(1), UnaryOp::Not, Reg(0)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());

@@ -1,3 +1,8 @@
+// audited: 2026-09-06
+// docs/impl/mlir.md
+//! One branching function, `abs`, run through both MLIR tiers: the CPU JIT
+//! computes it, and the SPIR-V path lowers its two blocks to a module.
+
 use super::*;
 
 /// Build LIR: fn(x) { if x > 0 then x else -x }  (absolute value)
@@ -17,12 +22,7 @@ fn make_abs() -> LirFunction {
                     dst: Reg(1),
                     value: LirConst::Int(0),
                 },
-                LirInstr::Compare {
-                    dst: Reg(2),
-                    op: CmpOp::Gt,
-                    lhs: Reg(0),
-                    rhs: Reg(1),
-                },
+                LirInstr::compare(Reg(2), CmpOp::Gt, Reg(0), Reg(1)),
             ],
             Terminator::Branch {
                 cond: Reg(2),
@@ -35,12 +35,7 @@ fn make_abs() -> LirFunction {
         // Block 2: else — return 0 - x
         .block(
             2,
-            vec![LirInstr::BinOp {
-                dst: Reg(3),
-                op: BinOp::Sub,
-                lhs: Reg(1),
-                rhs: Reg(0),
-            }],
+            vec![LirInstr::binop(Reg(3), BinOp::Sub, Reg(1), Reg(0))],
             Terminator::Return(Reg(3)),
         )
         .build()

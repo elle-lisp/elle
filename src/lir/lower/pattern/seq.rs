@@ -1,4 +1,11 @@
-//! Sequence pattern lowering: Pair / List / Tuple / Array.
+// audited: 2026-09-06
+// src/lir/lower/AGENTS.md
+// docs/destructuring.md
+//! Lowering the sequence patterns: pair, list, tuple, array.
+//!
+//! Each one parks the scrutinee in a temp slot and reloads it. A nested pattern
+//! may end the block, so a register read across that boundary is a register the
+//! emitter has already consumed; only the slot survives.
 
 use super::*;
 
@@ -182,12 +189,12 @@ impl<'a> Lowerer<'a> {
                         value: Value::EMPTY_LIST,
                     });
                     let is_empty_reg = self.fresh_reg();
-                    self.emit(LirInstr::Compare {
-                        dst: is_empty_reg,
-                        op: CmpOp::Eq,
-                        lhs: current_reg,
-                        rhs: empty_list_reg,
-                    });
+                    self.emit(LirInstr::compare(
+                        is_empty_reg,
+                        CmpOp::Eq,
+                        current_reg,
+                        empty_list_reg,
+                    ));
 
                     let continue_label = self.fresh_label();
                     self.terminate(Terminator::Branch {
@@ -254,20 +261,20 @@ impl<'a> Lowerer<'a> {
 
                 if rest.is_some() {
                     // With & rest: length must be >= number of fixed elements
-                    self.emit(LirInstr::Compare {
-                        dst: len_ok_reg,
-                        op: CmpOp::Ge,
-                        lhs: len_reg,
-                        rhs: expected_len,
-                    });
+                    self.emit(LirInstr::compare(
+                        len_ok_reg,
+                        CmpOp::Ge,
+                        len_reg,
+                        expected_len,
+                    ));
                 } else {
                     // Without rest: length must be exactly equal
-                    self.emit(LirInstr::Compare {
-                        dst: len_ok_reg,
-                        op: CmpOp::Eq,
-                        lhs: len_reg,
-                        rhs: expected_len,
-                    });
+                    self.emit(LirInstr::compare(
+                        len_ok_reg,
+                        CmpOp::Eq,
+                        len_reg,
+                        expected_len,
+                    ));
                 }
 
                 let len_ok_label = self.fresh_label();
@@ -371,20 +378,20 @@ impl<'a> Lowerer<'a> {
 
                 if rest.is_some() {
                     // With & rest: length must be >= number of fixed elements
-                    self.emit(LirInstr::Compare {
-                        dst: len_ok_reg,
-                        op: CmpOp::Ge,
-                        lhs: len_reg,
-                        rhs: expected_len,
-                    });
+                    self.emit(LirInstr::compare(
+                        len_ok_reg,
+                        CmpOp::Ge,
+                        len_reg,
+                        expected_len,
+                    ));
                 } else {
                     // Without rest: length must be exactly equal
-                    self.emit(LirInstr::Compare {
-                        dst: len_ok_reg,
-                        op: CmpOp::Eq,
-                        lhs: len_reg,
-                        rhs: expected_len,
-                    });
+                    self.emit(LirInstr::compare(
+                        len_ok_reg,
+                        CmpOp::Eq,
+                        len_reg,
+                        expected_len,
+                    ));
                 }
 
                 let len_ok_label = self.fresh_label();
