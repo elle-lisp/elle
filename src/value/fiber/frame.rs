@@ -154,14 +154,26 @@ impl BytecodeFrame {
 /// its generation are read from the SAME `heap`, so the recorded pair and the
 /// later check compare within one store. Debug builds only
 /// (docs/impl/region/generations.md § "Two borrow shapes").
+///
+/// The generation answers only once the region has been freed, which is why
+/// `slot_routed` — the function's `Code::frame_release_regions`, the static slots
+/// its slot-routed releases name — is the second half of the question. A leftover
+/// whose region is still live at park carries a matching generation and is
+/// otherwise indistinguishable from a borrow, so the free that comes *after* the
+/// park reads as a borrow dying under a parked fiber. A slot absent from
+/// `slot_routed` holds no pending `DecrefRegion`: its region's release is
+/// value-routed and frees without clearing the slot, so the activation reaches
+/// that entry through no release and a free while parked corrupts nothing through
+/// it. What the activation still holds in its stack or environment is checked
+/// where it is read, by `region_of`'s page stamp.
 #[cfg(debug_assertions)]
 pub(crate) fn record_region_borrows(
     map: &rustc_hash::FxHashMap<u32, crate::hir::region::MappedRegion>,
     heap: &crate::value::fiberheap::FiberHeap,
     slot_routed: &[u32],
 ) -> Vec<(u32, crate::hir::region::RuntimeRegion, u32)> {
-    let _ = slot_routed;
     map.iter()
+        .filter(|(slot, _)| slot_routed.contains(slot))
         .filter(|(_, m)| heap.generation_raw(m.region.get()) == m.gen)
         .map(|(&slot, m)| (slot, m.region, m.gen))
         .collect()
