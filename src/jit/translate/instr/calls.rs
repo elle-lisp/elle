@@ -1,3 +1,8 @@
+// audited: 2026-09-05
+// docs/impl/jit.md
+//! How a call leaves compiled code: a direct call to an SCC peer, the
+//! self-tail-call loop, the generic dispatch helper, and a `MakeClosure`.
+
 use super::*;
 
 impl<'a> FunctionTranslator<'a> {
@@ -150,21 +155,8 @@ impl<'a> FunctionTranslator<'a> {
                             .map(|arg_reg| self.use_var_pair(builder, arg_reg.0))
                             .collect();
 
-                        // Rotate slab pools: free iteration N-2, preserve N-1
-                        // (argument SSA values are in registers, safe from
-                        // rotation).
-                        //
-                        // Only safe when THIS function is rotation-safe: if
-                        // its body stores a heap value into external mutable
-                        // state (e.g. `(push acc {:index i})` inside the
-                        // loop), rotation would dangle the external pointer
-                        // exactly like the VM-side trampoline bug fixed via
-                        // `body_escapes_heap_values`. When not rotation-safe,
-                        // skip the rotation entirely — leak-style correctness
-                        // matches the VM interpreter's behavior, which also
-                        // declines to rotate non-rotation-safe callers.
-                        // rotation_safe removed; skip pool rotation.
-
+                        // Every new argument is read above, before any is
+                        // written, so `(f b a)` swaps rather than clobbers.
                         for (i, (at, ap)) in new_arg_vals.into_iter().enumerate() {
                             let base = self.arg_var_base + i as u32;
                             self.def_var_pair(builder, base, at, ap);
@@ -246,63 +238,26 @@ impl<'a> FunctionTranslator<'a> {
                     })?
                     .clone();
 
-                let mut emitter = crate::lir::Emitter::new();
-
+                // Emit every closure of the module, then take this one's:
+                // a nested `MakeClosure` resolves its own child through the
+                // same pass, so the whole tree is compiled together.
                 let lir_module = crate::lir::LirModule {
                     entry: func.clone(),
                     closures: self.module_closures.clone(),
                 };
-                let (nested_bytecode, nested_yield_points, nested_call_sites) =
-                    emitter.emit_module(&lir_module);
-                // emit_module returns the entry result; we want the closure's bytecode.
-                // Actually, we need to emit just this closure with module context.
-                // Use emit_module_closures to get per-closure bytecodes, then index.
-                drop(nested_bytecode);
-                drop(nested_yield_points);
-                drop(nested_call_sites);
-                let mut emitter2 = crate::lir::Emitter::new();
-                let all_compiled = emitter2.emit_module_closures(&lir_module);
-                let (nested_bytecode, nested_yield_points, nested_call_sites) =
-                    all_compiled.into_iter().nth(closure_id.0 as usize).unwrap();
-
-                let mut nested_lir = func.clone();
-                nested_lir.yield_points = nested_yield_points;
-                nested_lir.call_sites = nested_call_sites;
+                let compiled = crate::lir::Emitter::new()
+                    .emit_module_closures(&lir_module)
+                    .into_iter()
+                    .nth(closure_id.0 as usize)
+                    .expect("emit_module_closures is parallel to the module's closures");
 
                 // The nested lambda's template BLUEPRINT — plain data, owned by
                 // the JIT code object (`closure_protos`), NOT a heap `Value`.
                 // `elle_jit_make_closure` materializes a FRESH region-allocated
                 // `HeapObject::ClosureTemplate` from it per execution (a heap
-                // literal is an ordinary, reclaimable allocation). Its own
-                // `child_protos` are the nested bytecode's.
-                let template = crate::value::TemplateProto {
-                    num_locals: func.num_locals as usize,
-                    num_captures: captures.len(),
-                    num_params: func.num_params,
-                    signal: func.signal,
-                    capture_params_mask: func.capture_params_mask,
-                    capture_locals_mask: func.capture_locals_mask.clone(),
-                    location_map: nested_bytecode.location_map,
-                    lir_function: Some(std::rc::Rc::new(nested_lir)),
-                    doc: func.doc.as_deref().map(str::to_string),
-                    origin: func.origin,
-                    vararg_kind: func.vararg_kind.clone(),
-                    name: func.name.clone(),
-                    region_table: func.region_table.clone(),
-                    merged_slots: func.merged_slots.iter().map(|s| s.get()).collect(),
-                    frame_release_slots: func.frame_release_slots.clone(),
-                    frame_release_regions: func
-                        .frame_release_regions
-                        .iter()
-                        .map(|r| r.get())
-                        .collect(),
-                    child_protos: nested_bytecode.child_protos,
-                    ..crate::value::TemplateProto::new(
-                        nested_bytecode.instructions,
-                        func.arity,
-                        nested_bytecode.constants,
-                    )
-                };
+                // literal is an ordinary, reclaimable allocation).
+                let template =
+                    crate::value::TemplateProto::nested_lambda(&func, captures.len(), compiled);
 
                 // Bake a stable raw pointer to the blueprint. The `Rc`'s target
                 // address does not move with the vector, and the JIT code object

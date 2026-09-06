@@ -1,7 +1,7 @@
-//! LIR to Bytecode emission
-//!
-//! Converts register-based LIR to stack-based bytecode.
-//! Uses a simple stack simulation to track register values.
+// audited: 2026-09-05
+// docs/impl/bytecode.md
+//! Converts register-based LIR to stack-based bytecode, simulating the operand
+//! stack to find where each register's value sits.
 
 mod stack;
 
@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Per-closure compilation result: bytecode, yield points, call sites.
-type ClosureCompiled = (Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>);
+pub type ClosureCompiled = (Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>);
 
 /// Emits bytecode from LIR
 pub struct Emitter {
@@ -217,7 +217,7 @@ impl Emitter {
         )
     }
 
-    /// Emit bytecode from a nested LIR function (for closures)
+    /// Emit one basic block: its instructions in order, then its terminator.
     fn emit_block(&mut self, block: &BasicBlock, func: &LirFunction) {
         // Check if this block has saved stack state from a yield
         if let Some((saved_stack, saved_reg_map)) = self.yield_stack_state.remove(&block.label) {

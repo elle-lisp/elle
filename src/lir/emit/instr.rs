@@ -1,3 +1,8 @@
+// audited: 2026-09-05
+// docs/impl/bytecode.md
+//! The emitter's instruction dispatch: what each `LirInstr` writes into the
+//! bytecode, and what it does to the simulated operand stack.
+
 use super::*;
 
 impl Emitter {
@@ -143,8 +148,8 @@ impl Emitter {
                     .as_ref()
                     .expect("MakeClosure without compiled_closures context")
                     .get(closure_id.0 as usize)
-                    .expect("MakeClosure: invalid ClosureId");
-                let (nested_bytecode, nested_yield_points, nested_call_sites) = compiled.clone();
+                    .expect("MakeClosure: invalid ClosureId")
+                    .clone();
 
                 // Look up the LirFunction from the module for metadata.
                 // We need the LirFunction for the ClosureTemplate (arity,
@@ -156,43 +161,11 @@ impl Emitter {
                     .expect("MakeClosure without closure_lir_funcs context")
                     [closure_id.0 as usize];
 
-                let mut nested_lir = func.clone();
-                nested_lir.yield_points = nested_yield_points;
-                nested_lir.call_sites = nested_call_sites;
-
-                // Build the nested lambda's TEMPLATE BLUEPRINT — plain
-                // compile-time data, NOT a heap `Value` (a heap literal is an
-                // ordinary, reclaimable allocation; closure templates are no
-                // exception). The blueprint's own `child_protos` are the nested
-                // bytecode's, so deeper `MakeClosure`s resolve recursively.
-                let template = crate::value::TemplateProto {
-                    num_locals: func.num_locals as usize,
-                    num_captures: captures.len(),
-                    num_params: func.num_params,
-                    signal: func.signal,
-                    capture_params_mask: func.capture_params_mask,
-                    capture_locals_mask: func.capture_locals_mask.clone(),
-                    location_map: nested_bytecode.location_map,
-                    lir_function: Some(Rc::new(nested_lir)),
-                    doc: func.doc.as_deref().map(str::to_string),
-                    origin: func.origin,
-                    vararg_kind: func.vararg_kind.clone(),
-                    name: func.name.clone(),
-                    region_table: func.region_table.clone(),
-                    merged_slots: func.merged_slots.iter().map(|s| s.get()).collect(),
-                    frame_release_slots: func.frame_release_slots.clone(),
-                    frame_release_regions: func
-                        .frame_release_regions
-                        .iter()
-                        .map(|r| r.get())
-                        .collect(),
-                    child_protos: nested_bytecode.child_protos,
-                    ..crate::value::TemplateProto::new(
-                        nested_bytecode.instructions,
-                        func.arity,
-                        nested_bytecode.constants,
-                    )
-                };
+                // The nested lambda's TEMPLATE BLUEPRINT — plain compile-time
+                // data, NOT a heap `Value` (a heap literal is an ordinary,
+                // reclaimable allocation; closure templates are no exception).
+                let template =
+                    crate::value::TemplateProto::nested_lambda(func, captures.len(), compiled);
 
                 // Register the blueprint in THIS code object's child_protos and
                 // emit its index; the VM/JIT materialize a fresh region-allocated
@@ -392,150 +365,10 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::First { dst, pair } => {
-                self.ensure_on_top(*pair);
-                self.bytecode.emit(Instruction::First);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::Rest { dst, pair } => {
-                self.ensure_on_top(*pair);
-                self.bytecode.emit(Instruction::Rest);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::MatchFail { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::MatchFail);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::FirstDestructure { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::FirstDestructure);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::RestDestructure { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::RestDestructure);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::ArrayMutRefDestructure { dst, src, index } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayMutRefDestructure);
-                self.bytecode.emit_u16(*index);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::ArrayMutSliceFrom { dst, src, index } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayMutSliceFrom);
-                self.bytecode.emit_u16(*index);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::StructGetOrNil { dst, src, key } => {
-                self.ensure_on_top(*src);
-                let key_value = match key {
-                    LirConst::Keyword(hash) => Value::keyword_from_hash(*hash),
-                    // Struct/table keys are only keyword or symbol (the pattern
-                    // and access-path lowerers never build a string key), so a
-                    // string key never reaches the emitter.
-                    LirConst::String(_) => {
-                        unreachable!("struct keys are keyword or symbol, never string")
-                    }
-                    LirConst::Int(n) => Value::int(*n),
-                    LirConst::Symbol(sym) => Value::symbol(*sym),
-                    LirConst::Bool(b) => Value::bool(*b),
-                    LirConst::Nil => Value::NIL,
-                    _ => panic!("StructGetOrNil: unsupported key type"),
-                };
-                let const_idx = self.bytecode.add_constant(key_value);
-                self.bytecode.emit(Instruction::StructGetOrNil);
-                self.bytecode.emit_u16(const_idx);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::StructGetDestructure { dst, src, key } => {
-                self.ensure_on_top(*src);
-                let key_value = match key {
-                    LirConst::Keyword(hash) => Value::keyword_from_hash(*hash),
-                    // Struct/table keys are only keyword or symbol (the pattern
-                    // and access-path lowerers never build a string key), so a
-                    // string key never reaches the emitter.
-                    LirConst::String(_) => {
-                        unreachable!("struct keys are keyword or symbol, never string")
-                    }
-                    LirConst::Int(n) => Value::int(*n),
-                    LirConst::Symbol(sym) => Value::symbol(*sym),
-                    LirConst::Bool(b) => Value::bool(*b),
-                    LirConst::Nil => Value::NIL,
-                    _ => panic!("StructGetDestructure: unsupported key type"),
-                };
-                let const_idx = self.bytecode.add_constant(key_value);
-                self.bytecode.emit(Instruction::StructGetDestructure);
-                self.bytecode.emit_u16(const_idx);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::StructRest {
-                dst,
-                src,
-                exclude_keys,
-            } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::StructRest);
-                self.bytecode.emit_u16(exclude_keys.len() as u16);
-                for key in exclude_keys {
-                    let key_value = match key {
-                        LirConst::Keyword(hash) => Value::keyword_from_hash(*hash),
-                        LirConst::Symbol(sid) => Value::symbol(*sid),
-                        _ => panic!("StructRest: unsupported key type {:?}", key),
-                    };
-                    let const_idx = self.bytecode.add_constant(key_value);
-                    self.bytecode.emit_u16(const_idx);
-                }
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            // Silent destructuring (parameter context: absent optional params → nil)
-            LirInstr::FirstOrNil { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::FirstOrNil);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::RestOrNil { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::RestOrNil);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::ArrayMutRefOrNil { dst, src, index } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayMutRefOrNil);
-                self.bytecode.emit_u16(*index);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            _ => self.emit_instr_ops(instr),
+            _ => self.emit_instr_destructure(instr),
         }
     }
 }
 
+mod destructure;
 mod ops;
