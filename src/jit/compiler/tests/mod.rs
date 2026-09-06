@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-06
 // docs/impl/jit.md
 //! What the solo-compilation gate accepts and rejects, and what the compiled
 //! entry it produces records about itself.
@@ -49,12 +49,7 @@ fn make_add_lir() -> LirFunction {
                     dst: Reg(1),
                     index: 1,
                 },
-                LirInstr::BinOp {
-                    dst: Reg(2),
-                    op: BinOp::Add,
-                    lhs: Reg(0),
-                    rhs: Reg(1),
-                },
+                LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
             ],
             Terminator::Return(Reg(2)),
         )

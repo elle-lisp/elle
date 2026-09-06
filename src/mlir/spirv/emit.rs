@@ -1,3 +1,10 @@
+// audited: 2026-09-06
+// docs/impl/spirv.md
+//! Emitting the GPU-eligible LIR subset as MLIR text for the SPIR-V pipeline.
+//!
+//! Registers are named strings rather than SSA values, because the output is
+//! text `mlir-translate` reads rather than a module built in memory.
+
 use super::*;
 
 /// Helper: emit a sitofp promotion for a register from i64 to f64.
@@ -47,7 +54,13 @@ pub(super) fn emit_block_instructions(
                     }
                 }
             }
-            LirInstr::BinOp { dst, op, lhs, rhs } => {
+            LirInstr::BinOp {
+                dst,
+                op,
+                lhs,
+                rhs,
+                proof,
+            } => {
                 let lv = env
                     .reg_names
                     .get(lhs)
@@ -58,8 +71,16 @@ pub(super) fn emit_block_instructions(
                     .get(rhs)
                     .ok_or_else(|| format!("undef r{}", rhs.0))?
                     .clone();
-                let lt = env.reg_types.get(lhs).copied().unwrap_or(ScalarType::Int);
-                let rt = env.reg_types.get(rhs).copied().unwrap_or(ScalarType::Int);
+                // A proof settles both operand types; the local walk reads an
+                // untyped register as an integer by default (docs/impl/lir.md).
+                let (lt, rt) = if proof.is_int() {
+                    (ScalarType::Int, ScalarType::Int)
+                } else {
+                    (
+                        env.reg_types.get(lhs).copied().unwrap_or(ScalarType::Int),
+                        env.reg_types.get(rhs).copied().unwrap_or(ScalarType::Int),
+                    )
+                };
 
                 let is_bitwise = matches!(
                     op,
@@ -121,7 +142,13 @@ pub(super) fn emit_block_instructions(
                 env.reg_names.insert(*dst, name);
                 env.reg_types.insert(*dst, result_type);
             }
-            LirInstr::Compare { dst, op, lhs, rhs } => {
+            LirInstr::Compare {
+                dst,
+                op,
+                lhs,
+                rhs,
+                proof,
+            } => {
                 let lv = env
                     .reg_names
                     .get(lhs)
@@ -132,8 +159,14 @@ pub(super) fn emit_block_instructions(
                     .get(rhs)
                     .ok_or_else(|| format!("undef r{}", rhs.0))?
                     .clone();
-                let lt = env.reg_types.get(lhs).copied().unwrap_or(ScalarType::Int);
-                let rt = env.reg_types.get(rhs).copied().unwrap_or(ScalarType::Int);
+                let (lt, rt) = if proof.is_int() {
+                    (ScalarType::Int, ScalarType::Int)
+                } else {
+                    (
+                        env.reg_types.get(lhs).copied().unwrap_or(ScalarType::Int),
+                        env.reg_types.get(rhs).copied().unwrap_or(ScalarType::Int),
+                    )
+                };
                 let use_float = lt == ScalarType::Float || rt == ScalarType::Float;
 
                 let cmp_i1 = format!("%cmpi1_{}_{}", block_idx, dst.0);
@@ -185,13 +218,22 @@ pub(super) fn emit_block_instructions(
                 env.reg_names.insert(*dst, ext_i64);
                 env.reg_types.insert(*dst, ScalarType::Int);
             }
-            LirInstr::UnaryOp { dst, op, src } => {
+            LirInstr::UnaryOp {
+                dst,
+                op,
+                src,
+                proof,
+            } => {
                 let sv = env
                     .reg_names
                     .get(src)
                     .ok_or_else(|| format!("undef r{}", src.0))?
                     .clone();
-                let st = env.reg_types.get(src).copied().unwrap_or(ScalarType::Int);
+                let st = if proof.is_int() {
+                    ScalarType::Int
+                } else {
+                    env.reg_types.get(src).copied().unwrap_or(ScalarType::Int)
+                };
                 let name = format!("%u{}_{}", block_idx, dst.0);
 
                 match op {

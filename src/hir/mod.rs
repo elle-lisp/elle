@@ -1,3 +1,5 @@
+// audited: 2026-09-06
+// src/hir/AGENTS.md
 //! High-level Intermediate Representation (HIR)
 //!
 //! HIR is the fully-analyzed form produced from expanded Syntax. All bindings
@@ -54,3 +56,4 @@ pub use region::infer::{analyze_regions, analyze_regions_with, format_regions};
 pub use region::{CallClassification, Region, RegionInfo};
 pub(crate) use regularize::regularize;
 pub use symbols::extract_symbols_from_hir;
+pub use typeinfer::TypeInfo;

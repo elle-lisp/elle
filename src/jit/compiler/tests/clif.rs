@@ -1,7 +1,7 @@
-// audited: 2026-09-05
+// audited: 2026-09-06
 // docs/impl/jit.md
-//! What only the rendered Cranelift IR settles: the flags a load carries, and
-//! the pop that precedes every exit.
+//! What only the rendered Cranelift IR settles: a load's flags, an operation's
+//! tag test, and the pop before every exit.
 
 use super::*;
 
@@ -28,6 +28,161 @@ fn load_lines(clif: &[String]) -> Vec<&str> {
         .map(|line| line.trim())
         .filter(|line| line.contains("= load."))
         .collect()
+}
+
+/// fn(a, b) -> a `op` b, with the two arguments loaded from the argument array
+/// and the operation built by `make_op`.
+fn make_arith_lir(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> LirFunction {
+    LirFixture::new(Arity::Exact(2))
+        .signal(Signal::silent())
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCapture {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::LoadCapture {
+                    dst: Reg(1),
+                    index: 1,
+                },
+                make_op(Reg(2), op, Reg(0), Reg(1)),
+            ],
+            Terminator::Return(Reg(2)),
+        )
+        .build()
+}
+
+/// The `brif` lines of a rendered Cranelift function.
+fn branch_lines(clif: &[String]) -> Vec<&str> {
+    clif.iter()
+        .map(|line| line.trim())
+        .filter(|line| line.starts_with("brif "))
+        .collect()
+}
+
+fn arith_clif(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> Vec<String> {
+    JitCompiler::new()
+        .expect("Failed to create compiler")
+        .clif_text(&make_arith_lir(op, make_op), None)
+        .expect("Failed to translate")
+}
+
+/// Without a proof the JIT cannot know the operands are integers, so it emits
+/// the tag-check diamond: test both tags, then the inline integer instruction
+/// or a call to the runtime helper (docs/impl/jit.md).
+#[test]
+fn an_unproven_arithmetic_op_compiles_to_a_tag_check_diamond() {
+    // The counter-factual for the test below: a translator that never emitted
+    // the diamond would pass "a proven op has no branch" trivially, while
+    // computing garbage for every float operand that reaches an unproven site.
+    for op in [BinOp::Add, BinOp::Sub, BinOp::Mul] {
+        let clif = arith_clif(op, LirInstr::binop);
+        assert!(
+            !branch_lines(&clif).is_empty(),
+            "{op:?}: an unproven op must test its operands' tags; got:\n{}",
+            clif.join("\n")
+        );
+    }
+}
+
+/// A proven op skips the tag check: the operands are integers, so the branch
+/// only ever takes one arm and the other arm is unreachable code
+/// (docs/impl/lir.md).
+#[test]
+fn a_proven_arithmetic_op_compiles_without_a_tag_check() {
+    for op in [BinOp::Add, BinOp::Sub, BinOp::Mul] {
+        let clif = arith_clif(op, LirInstr::int_binop);
+        let branches = branch_lines(&clif);
+        assert!(
+            branches.is_empty(),
+            "{op:?}: a proven op must carry no type-check branch; got {branches:?} in:\n{}",
+            clif.join("\n")
+        );
+    }
+}
+
+/// A proven comparison skips its tag check too — the same diamond, over the
+/// comparison helpers (docs/impl/lir.md).
+#[test]
+fn a_proven_comparison_compiles_without_a_tag_check() {
+    use crate::lir::CmpOp;
+
+    for op in [CmpOp::Lt, CmpOp::Le, CmpOp::Eq] {
+        let unproven = JitCompiler::new()
+            .expect("Failed to create compiler")
+            .clif_text(
+                &LirFixture::new(Arity::Exact(2))
+                    .signal(Signal::silent())
+                    .block(
+                        0,
+                        vec![
+                            LirInstr::LoadCapture {
+                                dst: Reg(0),
+                                index: 0,
+                            },
+                            LirInstr::LoadCapture {
+                                dst: Reg(1),
+                                index: 1,
+                            },
+                            LirInstr::compare(Reg(2), op, Reg(0), Reg(1)),
+                        ],
+                        Terminator::Return(Reg(2)),
+                    )
+                    .build(),
+                None,
+            )
+            .expect("Failed to translate");
+        assert!(
+            !branch_lines(&unproven).is_empty(),
+            "{op:?}: an unproven comparison must test its operands' tags"
+        );
+
+        let proven = JitCompiler::new()
+            .expect("Failed to create compiler")
+            .clif_text(
+                &LirFixture::new(Arity::Exact(2))
+                    .signal(Signal::silent())
+                    .block(
+                        0,
+                        vec![
+                            LirInstr::LoadCapture {
+                                dst: Reg(0),
+                                index: 0,
+                            },
+                            LirInstr::LoadCapture {
+                                dst: Reg(1),
+                                index: 1,
+                            },
+                            LirInstr::int_compare(Reg(2), op, Reg(0), Reg(1)),
+                        ],
+                        Terminator::Return(Reg(2)),
+                    )
+                    .build(),
+                None,
+            )
+            .expect("Failed to translate");
+        let branches = branch_lines(&proven);
+        assert!(
+            branches.is_empty(),
+            "{op:?}: a proven comparison must carry no type-check branch; got {branches:?} in:\n{}",
+            proven.join("\n")
+        );
+    }
+}
+
+/// A proven division keeps one branch — the zero test. Cranelift's `sdiv` traps
+/// rather than returning a value, and the proof names the operands' type only
+/// (docs/impl/jit.md).
+#[test]
+fn a_proven_division_keeps_its_zero_test() {
+    let clif = arith_clif(BinOp::Div, LirInstr::int_binop);
+    assert_eq!(
+        branch_lines(&clif).len(),
+        1,
+        "a proven division keeps exactly the zero test; got:\n{}",
+        clif.join("\n")
+    );
 }
 
 #[test]

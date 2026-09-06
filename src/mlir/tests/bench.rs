@@ -1,3 +1,12 @@
+// audited: 2026-09-06
+// docs/impl/mlir.md
+//! A two-operation kernel, `a * b + a`, and the timings that say what each MLIR
+//! phase costs beside Cranelift's.
+//!
+//! `bench_mlir` asserts nothing about the timings — it prints them. What it does
+//! assert is that a million invocations through the LLVM engine all return the
+//! answer the arithmetic says.
+
 use super::*;
 
 /// Build LIR: fn(a, b) { return a * b + a }
@@ -16,18 +25,8 @@ fn make_mul_add() -> LirFunction {
                     dst: Reg(1),
                     index: 1,
                 },
-                LirInstr::BinOp {
-                    dst: Reg(2),
-                    op: BinOp::Mul,
-                    lhs: Reg(0),
-                    rhs: Reg(1),
-                },
-                LirInstr::BinOp {
-                    dst: Reg(3),
-                    op: BinOp::Add,
-                    lhs: Reg(2),
-                    rhs: Reg(0),
-                },
+                LirInstr::binop(Reg(2), BinOp::Mul, Reg(0), Reg(1)),
+                LirInstr::binop(Reg(3), BinOp::Add, Reg(2), Reg(0)),
             ],
             Terminator::Return(Reg(3)),
         )

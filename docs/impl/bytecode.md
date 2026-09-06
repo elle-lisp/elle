@@ -1,5 +1,7 @@
 # Bytecode
 
+<!-- audited: 2026-09-06 -->
+
 The bytecode instruction set is a `repr(u8)` enum. Operands follow
 instructions inline in the bytecode stream.
 
@@ -29,12 +31,14 @@ Add, Sub, Mul, Div              generic arithmetic (any numeric type)
 Rem                             remainder
 AddInt, SubInt, MulInt, DivInt  integer-specialized arithmetic
 ```
-The integer-only forms are implemented but unemitted. The interpreter runs
-them (`src/vm/arithmetic.rs`), and nothing produces them: the emitter maps
-every LIR `BinOp` to the polymorphic bytecode
-(`src/lir/emit/instr/ops.rs`), so a program never reaches an `AddInt`.
-Wiring them up is tracked as issue #957, which carries the compiler's
-operand-type proofs across the HIR→LIR boundary and spends them here.
+The integer-only forms read both operands as integers and never test a tag.
+The emitter picks one when the LIR instruction carries a proof that its
+operands are integers, and the polymorphic form otherwise
+(`src/lir/emit/instr/ops.rs`). The proof comes from the front end's
+intrinsic operand contract; [impl/lir.md](lir.md) has the mechanism.
+
+Only these four specialize. A proven `Rem` still emits the polymorphic
+`Rem`, and the bitwise opcodes have no polymorphic form to choose between.
 
 There is no negation instruction, and no modulo instruction. The emitter
 lowers unary minus to a `Mul` by the constant `-1`.
@@ -92,7 +96,7 @@ IncrefRegion rid   increment region rid's reference count
 DecrefRegion rid   decrement region rid; free pages when RC hits 0
 ```
 `DecrefRegion` is the only region-demise bytecode; there is no
-separate `FreeRegion`. See `docs/regions.md` for the full model.
+separate `FreeRegion`. See [regions](../regions.md) for the full model.
 
 ## Encoding
 
@@ -106,7 +110,7 @@ reporting.
 `SignalBits` is a 64-bit mask, and every bit of it is meaningful in
 bytecode: built-in signals sit at bits 0–17, the runtime reserves bits
 18–31, and `(signal :keyword)` allocates user signals from bit 32 upward
-(`docs/signals/protocol.md`). An operand that holds fewer than 64 bits
+([the signal protocol](../signals/protocol.md)). An operand of fewer than 64 bits
 therefore cannot name a user signal at all.
 
 Two instructions carry such an operand — `Emit` and `CheckSignalBound` —

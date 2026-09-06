@@ -1,3 +1,5 @@
+// audited: 2026-09-06
+// src/lir/AGENTS.md
 //! Compact human-readable display for LIR instructions and terminators.
 //!
 //! The Debug format is verbose Rust struct syntax. This module provides
@@ -7,6 +9,15 @@
 
 use super::types::*;
 use std::fmt;
+
+/// The suffix an operation carrying a proof about its operands is printed with.
+/// An unproven operation gets none, so the common case reads unchanged.
+fn proof_mark(proof: OperandProof) -> &'static str {
+    match proof {
+        OperandProof::Unproven => "",
+        OperandProof::Int => " :int",
+    }
+}
 
 // ── Reg and Label ───────────────────────────────────────────────────
 
@@ -184,10 +195,21 @@ impl fmt::Display for LirInstr {
             LirInstr::Rest { dst, pair } => write!(f, "{} ← rest({})", dst, pair),
 
             // === Primitive Operations ===
-            LirInstr::BinOp { dst, op, lhs, rhs } => {
-                write!(f, "{} ← {} {} {}", dst, lhs, op, rhs)
+            LirInstr::BinOp {
+                dst,
+                op,
+                lhs,
+                rhs,
+                proof,
+            } => {
+                write!(f, "{} ← {} {} {}{}", dst, lhs, op, rhs, proof_mark(*proof))
             }
-            LirInstr::UnaryOp { dst, op, src } => write!(f, "{} ← {}{}", dst, op, src),
+            LirInstr::UnaryOp {
+                dst,
+                op,
+                src,
+                proof,
+            } => write!(f, "{} ← {}{}{}", dst, op, src, proof_mark(*proof)),
             LirInstr::Convert { dst, op, src } => {
                 let name = match op {
                     ConvOp::IntToFloat => "float",
@@ -195,8 +217,14 @@ impl fmt::Display for LirInstr {
                 };
                 write!(f, "{} ← {}({})", dst, name, src)
             }
-            LirInstr::Compare { dst, op, lhs, rhs } => {
-                write!(f, "{} ← {} {} {}", dst, lhs, op, rhs)
+            LirInstr::Compare {
+                dst,
+                op,
+                lhs,
+                rhs,
+                proof,
+            } => {
+                write!(f, "{} ← {} {} {}{}", dst, lhs, op, rhs, proof_mark(*proof))
             }
 
             // === Type Checks ===

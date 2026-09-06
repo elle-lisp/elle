@@ -1,9 +1,11 @@
-// audited: 2026-09-05
+// audited: 2026-09-06
 // docs/impl/bytecode.md
-//! What the bytecode emitter writes: control flow, merge-block depth, yield
-//! points, the coalescing oracle, and a nested lambda's blueprint.
+//! What the bytecode emitter writes: control flow, merge depth, yield points,
+//! the coalescing oracle, and a nested lambda's blueprint.
 
 use super::*;
+
+mod opcodes;
 use crate::lir::testkit::LirFixture;
 use crate::value::Arity;
 
@@ -343,69 +345,6 @@ fn emit_terminator_carries_a_user_signal_bit_whole() {
         emit_line.contains(&format!("signal_bits=0x{:016x}", signal.raw())),
         "got: {emit_line}"
     );
-}
-
-/// LIR `BinOp` names an operation, never an operand type, so it can only mean
-/// the polymorphic bytecode. The integer-only family stays unemitted until a
-/// typed LIR variant carries a proof of integer operands
-/// (docs/impl/bytecode.md § Arithmetic).
-#[test]
-fn arithmetic_binops_emit_the_polymorphic_bytecodes() {
-    // The trap: every integer opcode name contains its polymorphic one, so a
-    // substring search for "Add" also matches an emitted `AddInt` and passes
-    // under the very mapping it exists to reject. Compare the opcode token
-    // whole.
-    //
-    // The counter-factual: without the negative half, mapping `BinOp::Add` to
-    // `AddInt` still satisfies "some arithmetic opcode was emitted", and float
-    // operands would silently take integer wrapping arithmetic.
-    use crate::compiler::bytecode::disassemble_lines;
-
-    for (op, polymorphic, integer) in [
-        (BinOp::Add, "Add", "AddInt"),
-        (BinOp::Sub, "Sub", "SubInt"),
-        (BinOp::Mul, "Mul", "MulInt"),
-        (BinOp::Div, "Div", "DivInt"),
-    ] {
-        let func = LirFixture::new(Arity::Exact(0))
-            .block(
-                0,
-                vec![
-                    LirInstr::Const {
-                        dst: Reg(0),
-                        value: LirConst::Int(6),
-                    },
-                    LirInstr::Const {
-                        dst: Reg(1),
-                        value: LirConst::Int(7),
-                    },
-                    LirInstr::BinOp {
-                        dst: Reg(2),
-                        op,
-                        lhs: Reg(0),
-                        rhs: Reg(1),
-                    },
-                ],
-                Terminator::Return(Reg(2)),
-            )
-            .build();
-
-        let (bytecode, _, _) = Emitter::new().emit(&func);
-        let opcodes: Vec<String> = disassemble_lines(&bytecode.instructions)
-            .iter()
-            .filter_map(|line| line.split_once("] "))
-            .map(|(_, rest)| rest.split(' ').next().unwrap_or_default().to_string())
-            .collect();
-
-        assert!(
-            opcodes.iter().any(|name| name == polymorphic),
-            "{polymorphic}: BinOp must emit the polymorphic opcode; got {opcodes:?}"
-        );
-        assert!(
-            !opcodes.iter().any(|name| name == integer),
-            "{integer}: BinOp must not emit the integer-only opcode; got {opcodes:?}"
-        );
-    }
 }
 
 /// A nested lambda's blueprint carries both halves of the abandoned-frame

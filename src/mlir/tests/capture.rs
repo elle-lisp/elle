@@ -1,3 +1,8 @@
+// audited: 2026-09-06
+// docs/impl/mlir.md
+//! A closure body that reads its captured environment: lowered, executed, and
+//! refused by the SPIR-V tier.
+
 use super::*;
 
 // ── Capture tests ──────────────────────────────────────────────
@@ -23,12 +28,7 @@ fn make_capture_add() -> LirFunction {
                     index: 1,
                 },
                 // cap + param
-                LirInstr::BinOp {
-                    dst: Reg(2),
-                    op: BinOp::Add,
-                    lhs: Reg(0),
-                    rhs: Reg(1),
-                },
+                LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
             ],
             Terminator::Return(Reg(2)),
         )
@@ -93,20 +93,14 @@ fn test_spirv_rejects_captures() {
     );
 }
 
-// ── Capture index collision regression ──────────────────────────
+// ── Env indices and destination registers are separate spaces ───
 
-/// Build LIR that reproduces the env-index vs dst-reg collision bug.
+/// Build the LIR the lowerer produces for `(fn (y) (+ x y))`, `x` captured.
 ///
-/// The LIR mimics what the lowerer produces for:
-///   (fn (y) (+ x y))   where x is a capture
-///
-/// Env layout: [cap0=x, param0=y] — indices 0 and 1.
-/// The lowerer copies param from env to a local slot, then loads
-/// the capture and the local into registers. If the MLIR lowerer
-/// uses a single `regs` map for both block-argument lookups and
-/// destination-register writes, the first LoadCaptureRaw (dst=r0,
-/// index=1) clobbers regs[0], causing the second LoadCaptureRaw
-/// (dst=r1, index=0) to read the wrong value.
+/// The trap: env index and destination register are both small integers, and
+/// here they cross — `LoadCaptureRaw` reads env index 1 into r0, then env index
+/// 0 into r1. One map for both spaces makes the first load overwrite what the
+/// second reads, and the function returns `y + y`.
 fn make_capture_param_collision() -> LirFunction {
     LirFixture::new(Arity::Exact(1))
         .name("cap_param_collision")
@@ -136,12 +130,7 @@ fn make_capture_param_collision() -> LirFunction {
                     slot: 0,
                 },
                 // x + y
-                LirInstr::BinOp {
-                    dst: Reg(3),
-                    op: BinOp::Add,
-                    lhs: Reg(1),
-                    rhs: Reg(2),
-                },
+                LirInstr::binop(Reg(3), BinOp::Add, Reg(1), Reg(2)),
             ],
             Terminator::Return(Reg(3)),
         )

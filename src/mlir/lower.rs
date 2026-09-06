@@ -1,3 +1,5 @@
+// audited: 2026-09-06
+// docs/impl/mlir.md
 //! Lower GPU-eligible LirFunction to MLIR.
 //!
 //! Produces an MLIR module using the arith, func, cf, and memref dialects.
@@ -148,14 +150,23 @@ pub fn check_slot_types(
                     };
                     reg_types.insert(*dst, t);
                 }
-                LirInstr::BinOp { dst, lhs, rhs, op } => {
+                LirInstr::BinOp {
+                    dst,
+                    lhs,
+                    rhs,
+                    op,
+                    proof,
+                } => {
                     let lt = reg_types.get(lhs).copied().unwrap_or(ScalarType::Int);
                     let rt = reg_types.get(rhs).copied().unwrap_or(ScalarType::Int);
                     let is_bitwise = matches!(
                         op,
                         BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr
                     );
-                    let t = if is_bitwise {
+                    // A proof settles the result type without consulting the
+                    // local walk, which reads an untyped operand as an integer
+                    // by default (docs/impl/lir.md).
+                    let t = if is_bitwise || proof.is_int() {
                         ScalarType::Int
                     } else if lt.is_float() || rt.is_float() {
                         ScalarType::Float
@@ -167,9 +178,15 @@ pub fn check_slot_types(
                 LirInstr::Compare { dst, .. } => {
                     reg_types.insert(*dst, ScalarType::Bool);
                 }
-                LirInstr::UnaryOp { dst, op, src } => {
+                LirInstr::UnaryOp {
+                    dst,
+                    op,
+                    src,
+                    proof,
+                } => {
                     let st = reg_types.get(src).copied().unwrap_or(ScalarType::Int);
                     let t = match op {
+                        UnaryOp::Neg if proof.is_int() => ScalarType::Int,
                         UnaryOp::Neg => st,
                         UnaryOp::Not | UnaryOp::BitNot => ScalarType::Int,
                     };

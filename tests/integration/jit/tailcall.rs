@@ -1,3 +1,8 @@
+// audited: 2026-09-06
+// src/jit/AGENTS.md
+// Tail calls the JIT turns into a loop, and the integer fast paths at the
+// edges: wrapping overflow, a zero divisor, a mixed int/float pair.
+
 use super::*;
 
 // =============================================================================
@@ -169,12 +174,7 @@ fn test_jit_int_add_wrapping() {
         span(),
     ));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(2),
-            op: BinOp::Add,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
+        LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), span());
@@ -206,12 +206,7 @@ fn test_jit_int_sub_wrapping() {
         span(),
     ));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(2),
-            op: BinOp::Sub,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
+        LirInstr::binop(Reg(2), BinOp::Sub, Reg(0), Reg(1)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), span());
@@ -236,12 +231,7 @@ fn test_jit_div_by_zero_integer() {
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(load_arg(Reg(1), 1));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(2),
-            op: BinOp::Div,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
+        LirInstr::binop(Reg(2), BinOp::Div, Reg(0), Reg(1)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), span());
@@ -266,12 +256,7 @@ fn test_jit_mixed_int_float_add() {
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(load_arg(Reg(1), 1));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(2),
-            op: BinOp::Add,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
+        LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), span());
@@ -295,12 +280,7 @@ fn test_jit_int_lt_negative() {
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(load_arg(Reg(1), 1));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::Compare {
-            dst: Reg(2),
-            op: CmpOp::Lt,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
+        LirInstr::compare(Reg(2), CmpOp::Lt, Reg(0), Reg(1)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), span());
@@ -329,12 +309,7 @@ fn test_jit_int_eq_negative() {
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(load_arg(Reg(1), 1));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::Compare {
-            dst: Reg(2),
-            op: CmpOp::Eq,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
+        LirInstr::compare(Reg(2), CmpOp::Eq, Reg(0), Reg(1)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), span());

@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-06
 // docs/impl/jit.md
 //! What batch compilation of an SCC accepts and rejects, and that a member
 //! reaches its peers through the shared module.
@@ -68,12 +68,7 @@ fn test_compile_batch_mutual_calls() {
                     dst: Reg(1),
                     value: LirConst::Int(0),
                 },
-                LirInstr::Compare {
-                    dst: Reg(2),
-                    op: CmpOp::Le,
-                    lhs: Reg(0),
-                    rhs: Reg(1),
-                },
+                LirInstr::compare(Reg(2), CmpOp::Le, Reg(0), Reg(1)),
             ],
             Terminator::Branch {
                 cond: Reg(2),
@@ -91,12 +86,7 @@ fn test_compile_batch_mutual_calls() {
                     dst: Reg(3),
                     value: LirConst::Int(1),
                 },
-                LirInstr::BinOp {
-                    dst: Reg(4),
-                    op: BinOp::Sub,
-                    lhs: Reg(0),
-                    rhs: Reg(3),
-                },
+                LirInstr::binop(Reg(4), BinOp::Sub, Reg(0), Reg(3)),
                 LirInstr::ValueConst {
                     dst: Reg(5),
                     value: crate::value::Value::NIL,

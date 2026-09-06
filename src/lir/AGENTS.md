@@ -1,7 +1,21 @@
 # lir
 
+<!-- audited: 2026-09-06 -->
+
 Low-level Intermediate Representation. SSA form with virtual registers
 and basic blocks. Architecture-independent but close to target.
+
+## Size
+
+`types/instr.rs` is past the 500-line reading budget and carries no audit stamp,
+so it sits in the queue. The file is one enum, and Rust gives no way to split
+one; bringing it inside the budget means nesting a group of variants into a
+sub-enum, which rewrites every exhaustive match in the crate. That is its own
+change, not a rider on whatever touches the file next.
+
+A match over the instruction set splits where an enum cannot: `emit/instr/ops.rs`
+hands its tail to `ops/intrinsics.rs`, and every other file here takes the
+ordinary budget.
 
 ## Responsibility
 
@@ -22,6 +36,7 @@ Does NOT:
 | `LirFunction` | Compilation unit: blocks, constants, metadata, docstring, syntax, yield/call-site info |
 | `BasicBlock` | Instructions + terminator |
 | `LirInstr` | Individual operation |
+| `OperandProof` | What the front end proved about an operation's operands: nothing, or that every one is an integer. See [lir.md](../../docs/impl/lir.md) |
 | `SpannedInstr` | `LirInstr` + `Span` for source tracking |
 | `SpannedTerminator` | `Terminator` + `Span` for source tracking |
 | `Terminator` | How block exits: `Return`, `Jump`, `Branch`, `Emit` |

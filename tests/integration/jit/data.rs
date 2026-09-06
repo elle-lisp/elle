@@ -1,3 +1,8 @@
+// audited: 2026-09-06
+// src/jit/AGENTS.md
+// What JIT-compiled code makes of values that are not integers: floats, pairs,
+// arrays, and capture cells.
+
 use super::*;
 
 // =============================================================================
@@ -38,12 +43,7 @@ fn test_jit_float_add() {
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(load_arg(Reg(1), 1));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(2),
-            op: BinOp::Add,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
+        LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), span());
@@ -116,12 +116,7 @@ fn test_jit_car_cdr() {
         span(),
     ));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(3),
-            op: BinOp::Add,
-            lhs: Reg(1),
-            rhs: Reg(2),
-        },
+        LirInstr::binop(Reg(3), BinOp::Add, Reg(1), Reg(2)),
         span(),
     ));
     entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(3)), span());

@@ -1,5 +1,13 @@
+// src/lir/AGENTS.md
+//! The LIR instruction set, and the constructors that build an instruction.
+//!
+//! One enum names every operation the lowerer can emit and every backend must
+//! answer for; the walks over it live in `consts` and `region`. Rust cannot
+//! split an enum, so this file is past the reading budget and carries no stamp.
+
 use super::*;
 
+mod consts;
 mod region;
 
 /// LIR instruction (SSA form - each register assigned exactly once)
@@ -184,9 +192,15 @@ pub enum LirInstr {
         op: BinOp,
         lhs: Reg,
         rhs: Reg,
+        proof: OperandProof,
     },
     /// Unary operations
-    UnaryOp { dst: Reg, op: UnaryOp, src: Reg },
+    UnaryOp {
+        dst: Reg,
+        op: UnaryOp,
+        src: Reg,
+        proof: OperandProof,
+    },
     /// Type conversion (float↔int intrinsics)
     Convert { dst: Reg, op: ConvOp, src: Reg },
     /// Comparison
@@ -195,6 +209,7 @@ pub enum LirInstr {
         op: CmpOp,
         lhs: Reg,
         rhs: Reg,
+        proof: OperandProof,
     },
 
     // === Type Checks ===
@@ -590,105 +605,100 @@ pub enum LirInstr {
 }
 
 impl LirInstr {
-    /// Visit every `LirConst` this instruction carries.
-    ///
-    /// Exhaustive on purpose. The `send` path rewrites `LirConst::Symbol` ids
-    /// into the loading process's table, and an instruction it fails to visit
-    /// keeps the storing process's id — a silently wrong symbol, not an error.
-    /// A new variant that carries a constant cannot be added without choosing
-    /// its arm here.
-    pub fn for_each_const_mut(&mut self, mut f: impl FnMut(&mut LirConst)) {
-        use LirInstr::*;
-        match self {
-            Const { value, .. } => f(value),
-            StructGetOrNil { key, .. } => f(key),
-            StructGetDestructure { key, .. } => f(key),
-            StructRest { exclude_keys, .. } => exclude_keys.iter_mut().for_each(f),
-            // Carries no `LirConst`.
-            ValueConst { .. }
-            | MaterializeConst { .. }
-            | LoadLocal { .. }
-            | StoreLocal { .. }
-            | StoreLocalRefcounted { .. }
-            | LoadCapture { .. }
-            | LoadCaptureRaw { .. }
-            | StoreCapture { .. }
-            | MakeClosure { .. }
-            | LoadSelf { .. }
-            | Call { .. }
-            | SuspendingCall { .. }
-            | TailCall { .. }
-            | List { .. }
-            | MakeArrayMut { .. }
-            | First { .. }
-            | Rest { .. }
-            | BinOp { .. }
-            | UnaryOp { .. }
-            | Convert { .. }
-            | Compare { .. }
-            | IsNil { .. }
-            | IsPair { .. }
-            | IsArray { .. }
-            | IsArrayMut { .. }
-            | IsStruct { .. }
-            | IsStructMut { .. }
-            | IsSet { .. }
-            | IsSetMut { .. }
-            | ArrayMutLen { .. }
-            | MakeCaptureCell { .. }
-            | LoadCaptureCell { .. }
-            | StoreCaptureCell { .. }
-            | MatchFail { .. }
-            | FirstDestructure { .. }
-            | RestDestructure { .. }
-            | ArrayMutRefDestructure { .. }
-            | ArrayMutSliceFrom { .. }
-            | FirstOrNil { .. }
-            | RestOrNil { .. }
-            | ArrayMutRefOrNil { .. }
-            | LoadResumeValue { .. }
-            | Eval { .. }
-            | ArrayMutExtend { .. }
-            | ArrayMutPush { .. }
-            | CallArrayMut { .. }
-            | TailCallArrayMut { .. }
-            | IncrefRegion { .. }
-            | DecrefRegion { .. }
-            | DecrefValueRegion { .. }
-            | DecrefCellRegion { .. }
-            | IncrefValueRegion { .. }
-            | AdoptRegion { .. }
-            | AdoptCellRegion { .. }
-            | FreeRegionGroup { .. }
-            | AdoptIntoActivation { .. }
-            | AssertRegionMatches { .. }
-            | PushParamFrame { .. }
-            | PopParamFrame
-            | CheckSignalBound { .. }
-            | IsEmpty { .. }
-            | IsBool { .. }
-            | IsInt { .. }
-            | IsFloat { .. }
-            | IsString { .. }
-            | IsKeyword { .. }
-            | IsSymbolCheck { .. }
-            | IsBytes { .. }
-            | IsBox { .. }
-            | IsClosure { .. }
-            | IsFiber { .. }
-            | TypeOf { .. }
-            | Length { .. }
-            | Get { .. }
-            | Put { .. }
-            | Del { .. }
-            | Has { .. }
-            | IntrPush { .. }
-            | IntrStringPush { .. }
-            | IntrBytesPush { .. }
-            | Pop { .. }
-            | Freeze { .. }
-            | Thaw { .. }
-            | Identical { .. } => {}
+    /// A binary arithmetic or bitwise operation, claiming nothing about its
+    /// operands.
+    pub fn binop(dst: Reg, op: BinOp, lhs: Reg, rhs: Reg) -> Self {
+        LirInstr::BinOp {
+            dst,
+            op,
+            lhs,
+            rhs,
+            proof: OperandProof::Unproven,
+        }
+    }
+
+    /// A comparison, claiming nothing about its operands.
+    pub fn compare(dst: Reg, op: CmpOp, lhs: Reg, rhs: Reg) -> Self {
+        LirInstr::Compare {
+            dst,
+            op,
+            lhs,
+            rhs,
+            proof: OperandProof::Unproven,
+        }
+    }
+
+    /// A unary operation, claiming nothing about its operand.
+    pub fn unary(dst: Reg, op: UnaryOp, src: Reg) -> Self {
+        LirInstr::UnaryOp {
+            dst,
+            op,
+            src,
+            proof: OperandProof::Unproven,
+        }
+    }
+
+    /// A binary operation over operands proven to be integers.
+    pub fn int_binop(dst: Reg, op: BinOp, lhs: Reg, rhs: Reg) -> Self {
+        LirInstr::BinOp {
+            dst,
+            op,
+            lhs,
+            rhs,
+            proof: OperandProof::Int,
+        }
+    }
+
+    /// A comparison of operands proven to be integers.
+    pub fn int_compare(dst: Reg, op: CmpOp, lhs: Reg, rhs: Reg) -> Self {
+        LirInstr::Compare {
+            dst,
+            op,
+            lhs,
+            rhs,
+            proof: OperandProof::Int,
+        }
+    }
+
+    /// A unary operation over an operand proven to be an integer.
+    pub fn int_unary(dst: Reg, op: UnaryOp, src: Reg) -> Self {
+        LirInstr::UnaryOp {
+            dst,
+            op,
+            src,
+            proof: OperandProof::Int,
+        }
+    }
+
+    /// Build a binary operation carrying `proof`.
+    pub fn binop_proved(dst: Reg, op: BinOp, lhs: Reg, rhs: Reg, proof: OperandProof) -> Self {
+        LirInstr::BinOp {
+            dst,
+            op,
+            lhs,
+            rhs,
+            proof,
+        }
+    }
+
+    /// Build a comparison carrying `proof`.
+    pub fn compare_proved(dst: Reg, op: CmpOp, lhs: Reg, rhs: Reg, proof: OperandProof) -> Self {
+        LirInstr::Compare {
+            dst,
+            op,
+            lhs,
+            rhs,
+            proof,
+        }
+    }
+
+    /// Build a unary operation carrying `proof`.
+    pub fn unary_proved(dst: Reg, op: UnaryOp, src: Reg, proof: OperandProof) -> Self {
+        LirInstr::UnaryOp {
+            dst,
+            op,
+            src,
+            proof,
         }
     }
 }

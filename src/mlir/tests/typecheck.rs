@@ -1,3 +1,8 @@
+// audited: 2026-09-06
+// docs/impl/mlir.md
+//! What `check_slot_types` accepts: a local slot rewritten within one block, but
+//! never one holding a float on one path and an int on another.
+
 use super::*;
 
 // ── Mixed-type slot rejection ─────────────────────────────────
@@ -25,12 +30,7 @@ fn make_mixed_type_slot() -> LirFunction {
                     slot: 0,
                     src: Reg(1),
                 },
-                LirInstr::Compare {
-                    dst: Reg(2),
-                    op: CmpOp::Gt,
-                    lhs: Reg(0),
-                    rhs: Reg(1),
-                },
+                LirInstr::compare(Reg(2), CmpOp::Gt, Reg(0), Reg(1)),
             ],
             Terminator::Branch {
                 cond: Reg(2),
@@ -95,14 +95,12 @@ fn test_reject_mixed_type_slot() {
 
 /// Build LIR: fn() { var s; r0 = 5; r1 = 2.5; s = r1; <block 1> s = r0; return s }
 ///
-/// Slot 0 (the only local) numerically collides with register r0. The
-/// slot is genuinely mixed-type: Float (from r1) in block 0, Int (from
-/// r0) in block 1 — `check_slot_types` must reject it. The type checker
-/// infers the store source's type from its `reg_types` map; if that map
-/// is keyed by raw `u32`, block 0's `StoreLocal slot=0` overwrites the
-/// entry for register r0 with the slot's Float type, so block 1's
-/// `StoreLocal slot=0 src=r0` mis-reads r0 as Float and the Float/Int
-/// conflict slips through undetected (a false negative).
+/// Slot 0 is float in block 0 and int in block 1 — the same conflict the test
+/// above rejects, but arranged so that slot id 0 and register r0 share a number.
+///
+/// The trap: one `u32`-keyed map for slots and registers alike lets the float
+/// store to slot 0 overwrite what r0 holds, after which block 1 reads r0 as a
+/// float and the checker reports no conflict at all.
 fn make_slot_reg_collision_hides_mixed_type() -> LirFunction {
     LirFixture::new(Arity::Exact(0))
         .name("collision_hides_mixed")

@@ -1,10 +1,15 @@
+// audited: 2026-09-06
+// src/lir/lower/AGENTS.md
+// docs/match.md
+//! The pattern-match entry point: the scalar patterns lower here, and the
+//! sequence and keyed families are handed to `seq` and `keyed`.
+
 use super::*;
 
 impl<'a> Lowerer<'a> {
-    /// Lower pattern matching code
-    /// Emits code that checks if value_reg matches the pattern
-    /// If it doesn't match, branches to fail_label
-    /// If it matches, binds any variables and continues in the current block
+    /// Lower `pattern` against `value_reg`, branching to `fail_label` on a
+    /// mismatch. A match binds the pattern's variables and continues in the
+    /// current block.
     pub(in crate::lir::lower) fn lower_pattern_match(
         &mut self,
         pattern: &HirPattern,
@@ -49,12 +54,7 @@ impl<'a> Lowerer<'a> {
                 };
 
                 let eq_reg = self.fresh_reg();
-                self.emit(LirInstr::Compare {
-                    dst: eq_reg,
-                    op: CmpOp::Eq,
-                    lhs: value_reg,
-                    rhs: lit_reg,
-                });
+                self.emit(LirInstr::compare(eq_reg, CmpOp::Eq, value_reg, lit_reg));
 
                 let continue_label = self.fresh_label();
                 self.terminate(Terminator::Branch {

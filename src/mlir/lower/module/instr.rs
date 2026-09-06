@@ -1,3 +1,5 @@
+// audited: 2026-09-06
+// docs/impl/mlir.md
 //! Per-instruction MLIR emission for the GPU-eligible LIR subset.
 //!
 //! One arm per supported `LirInstr`, appending arith/memref ops to the current
@@ -66,7 +68,13 @@ pub(super) fn lower_instr<'c, 'a>(
                 ctx.types.insert(*dst, scalar_type);
             }
         },
-        LirInstr::BinOp { dst, op, lhs, rhs } => {
+        LirInstr::BinOp {
+            dst,
+            op,
+            lhs,
+            rhs,
+            proof,
+        } => {
             let lv = *ctx
                 .regs
                 .get(lhs)
@@ -75,8 +83,16 @@ pub(super) fn lower_instr<'c, 'a>(
                 .regs
                 .get(rhs)
                 .ok_or_else(|| format!("undefined reg r{}", rhs.0))?;
-            let lt = ctx.types.get(lhs).copied().unwrap_or(ScalarType::Int);
-            let rt = ctx.types.get(rhs).copied().unwrap_or(ScalarType::Int);
+            // A proof settles both operand types; the local walk reads an
+            // untyped register as an integer by default (docs/impl/lir.md).
+            let (lt, rt) = if proof.is_int() {
+                (ScalarType::Int, ScalarType::Int)
+            } else {
+                (
+                    ctx.types.get(lhs).copied().unwrap_or(ScalarType::Int),
+                    ctx.types.get(rhs).copied().unwrap_or(ScalarType::Int),
+                )
+            };
 
             let is_bitwise = matches!(
                 op,
@@ -133,7 +149,13 @@ pub(super) fn lower_instr<'c, 'a>(
             ctx.regs.insert(*dst, op_ref.result(0).unwrap().into());
             ctx.types.insert(*dst, result_type);
         }
-        LirInstr::Compare { dst, op, lhs, rhs } => {
+        LirInstr::Compare {
+            dst,
+            op,
+            lhs,
+            rhs,
+            proof,
+        } => {
             let lv = *ctx
                 .regs
                 .get(lhs)
@@ -142,8 +164,14 @@ pub(super) fn lower_instr<'c, 'a>(
                 .regs
                 .get(rhs)
                 .ok_or_else(|| format!("undefined reg r{}", rhs.0))?;
-            let lt = ctx.types.get(lhs).copied().unwrap_or(ScalarType::Int);
-            let rt = ctx.types.get(rhs).copied().unwrap_or(ScalarType::Int);
+            let (lt, rt) = if proof.is_int() {
+                (ScalarType::Int, ScalarType::Int)
+            } else {
+                (
+                    ctx.types.get(lhs).copied().unwrap_or(ScalarType::Int),
+                    ctx.types.get(rhs).copied().unwrap_or(ScalarType::Int),
+                )
+            };
             let use_float = lt == ScalarType::Float || rt == ScalarType::Float;
 
             let op_ref = if use_float {
@@ -186,12 +214,21 @@ pub(super) fn lower_instr<'c, 'a>(
             ctx.regs.insert(*dst, ext_ref.result(0).unwrap().into());
             ctx.types.insert(*dst, ScalarType::Bool);
         }
-        LirInstr::UnaryOp { dst, op, src } => {
+        LirInstr::UnaryOp {
+            dst,
+            op,
+            src,
+            proof,
+        } => {
             let sv = *ctx
                 .regs
                 .get(src)
                 .ok_or_else(|| format!("undefined reg r{}", src.0))?;
-            let src_type = ctx.types.get(src).copied().unwrap_or(ScalarType::Int);
+            let src_type = if proof.is_int() {
+                ScalarType::Int
+            } else {
+                ctx.types.get(src).copied().unwrap_or(ScalarType::Int)
+            };
             let (result, result_type) = match op {
                 UnaryOp::Neg => {
                     if src_type == ScalarType::Float {

@@ -1,4 +1,7 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-09-06
+// src/lir/AGENTS.md
+//! The spelling `--dump=lir` gives each register, label, operator, constant,
+//! instruction and terminator.
 
 use super::*;
 
@@ -51,12 +54,7 @@ fn test_instr_const() {
 
 #[test]
 fn test_instr_binop() {
-    let instr = LirInstr::BinOp {
-        dst: Reg(2),
-        op: BinOp::Add,
-        lhs: Reg(0),
-        rhs: Reg(1),
-    };
+    let instr = LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(1));
     assert_eq!(format!("{}", instr), "r2 ← r0 + r1");
 }
 
@@ -101,12 +99,7 @@ fn test_instr_tailcall() {
 
 #[test]
 fn test_instr_compare() {
-    let instr = LirInstr::Compare {
-        dst: Reg(3),
-        op: CmpOp::Lt,
-        lhs: Reg(1),
-        rhs: Reg(2),
-    };
+    let instr = LirInstr::compare(Reg(3), CmpOp::Lt, Reg(1), Reg(2));
     assert_eq!(format!("{}", instr), "r3 ← r1 < r2");
 }
 

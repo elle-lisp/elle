@@ -1,3 +1,5 @@
+// audited: 2026-09-06
+// src/pipeline/AGENTS.md
 //! Shared file/syntax compilation front end: parse → epoch-migrate → macro
 //! expand (with include splicing) → classify → analyze → regularize. Every
 //! backend (bytecode, LIR, FHIR, the test-mode transforms) feeds off the HIR
@@ -5,19 +7,21 @@
 
 use super::*;
 
-/// The tuple produced by the file/syntax front end, shared by the source and
-/// syntax test-compile entry points (see `lower_test_frontend`).
+/// What the file/syntax front end produces, shared by the source and syntax
+/// test-compile entry points (see `lower_test_frontend`).
 ///
-/// Returns `(hir, arena, expander, prim_values, signal_projection)`.
-/// Callers that don't need all fields can ignore the extras.
-#[allow(clippy::type_complexity)]
-pub(super) type Frontend = (
-    crate::hir::Hir,
-    BindingArena,
-    crate::syntax::Expander,
-    std::collections::HashMap<crate::hir::Binding, crate::value::Value>,
-    Option<std::collections::HashMap<String, crate::signals::Signal>>,
-);
+/// A caller that does not need a field ignores it.
+pub(super) struct Frontend {
+    pub hir: crate::hir::Hir,
+    pub arena: BindingArena,
+    pub expander: crate::syntax::Expander,
+    pub prim_values: std::collections::HashMap<crate::hir::Binding, crate::value::Value>,
+    pub signal_projection: Option<std::collections::HashMap<String, crate::signals::Signal>>,
+    /// The inferred types, which the lowerer reads to mark an operation whose
+    /// operands the intrinsic operand contract proved are integers
+    /// (docs/impl/lir.md).
+    pub types: crate::hir::TypeInfo,
+}
 
 pub(super) type FrontendResult = Result<Frontend, String>;
 
@@ -197,8 +201,16 @@ fn compile_syntaxes_frontend_xform_inner(
     }
 
     let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
-    crate::hir::regularize(&mut hir, &mut arena, symbols, dispatch_wrappers, fn_inline)?;
+    let types =
+        crate::hir::regularize(&mut hir, &mut arena, symbols, dispatch_wrappers, fn_inline)?;
     crate::phase!(ct, "compile", t, "{} analyze", source_name);
 
-    Ok((hir, arena, expander, prim_values, signal_projection))
+    Ok(Frontend {
+        hir,
+        arena,
+        expander,
+        prim_values,
+        signal_projection,
+        types,
+    })
 }

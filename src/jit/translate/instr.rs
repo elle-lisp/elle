@@ -1,3 +1,10 @@
+// audited: 2026-09-06
+// src/jit/AGENTS.md
+//! Translating one LIR instruction to Cranelift IR.
+//!
+//! One exhaustive match over the instruction set. Each arm reads its operands as
+//! (tag, payload) variable pairs and defines the destination the same way.
+
 use super::*;
 
 impl<'a> FunctionTranslator<'a> {
@@ -167,23 +174,40 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, self_tag, self_payload);
             }
 
-            LirInstr::BinOp { dst, op, lhs, rhs } => {
+            LirInstr::BinOp {
+                dst,
+                op,
+                lhs,
+                rhs,
+                proof,
+            } => {
                 let (lt, lp) = self.use_var_pair(builder, lhs.0);
                 let (rt, rp) = self.use_var_pair(builder, rhs.0);
-                let (rt2, rp2) = self.call_binary_helper(builder, *op, lt, lp, rt, rp)?;
+                let (rt2, rp2) = self.call_binary_helper(builder, *op, lt, lp, rt, rp, *proof)?;
                 self.def_var_pair(builder, dst.0, rt2, rp2);
             }
 
-            LirInstr::UnaryOp { dst, op, src } => {
+            LirInstr::UnaryOp {
+                dst,
+                op,
+                src,
+                proof,
+            } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
-                let (rt, rp) = self.call_unary_helper(builder, *op, st, sp)?;
+                let (rt, rp) = self.call_unary_helper(builder, *op, st, sp, *proof)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::Compare { dst, op, lhs, rhs } => {
+            LirInstr::Compare {
+                dst,
+                op,
+                lhs,
+                rhs,
+                proof,
+            } => {
                 let (lt, lp) = self.use_var_pair(builder, lhs.0);
                 let (rt, rp) = self.use_var_pair(builder, rhs.0);
-                let (crt, crp) = self.call_compare_helper(builder, *op, lt, lp, rt, rp)?;
+                let (crt, crp) = self.call_compare_helper(builder, *op, lt, lp, rt, rp, *proof)?;
                 self.def_var_pair(builder, dst.0, crt, crp);
             }
 

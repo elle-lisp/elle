@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-06
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -328,6 +328,12 @@ pub struct Lowerer<'a> {
     /// False everywhere else, where one point covers every path and one
     /// instruction does.
     replicating_release: bool,
+    /// The inferred type of each HIR node, from the pass that discharged the
+    /// intrinsic operand contracts (`src/hir/typeinfer/`). The lowerer reads it
+    /// for one decision: whether an operation's operands are proven integers,
+    /// which every backend spends (docs/impl/lir.md). Empty until
+    /// `with_type_info`, which reads as proving nothing.
+    hir_types: HashMap<HirId, crate::hir::types::TyId>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -377,7 +383,15 @@ impl<'a> Lowerer<'a> {
             tail_exit_hoist: Vec::new(),
             arm_exit_hoists: Vec::new(),
             replicating_release: false,
+            hir_types: HashMap::new(),
         }
+    }
+
+    /// Give lowering the front end's inferred types, so a proven operation can
+    /// carry its operand proof into LIR (docs/impl/lir.md).
+    pub fn with_type_info(mut self, info: crate::hir::TypeInfo) -> Self {
+        self.hir_types = info.hir_types;
+        self
     }
 
     /// Set all primitive property sets from a PrimitiveClassification.

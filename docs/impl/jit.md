@@ -1,5 +1,7 @@
 # JIT
 
+<!-- audited: 2026-09-06 -->
+
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
 ## Architecture
@@ -39,6 +41,22 @@ It emits both halves of a `Value` — tag at `+0`, payload at `+8` — so the
 16-byte stride is written once, from `size_of`/`offset_of` rather than as a
 literal.
 
+## Arithmetic: the tag-check diamond, and skipping it
+
+A binary operation, a comparison and a negation each compile to a diamond
+(`src/jit/fastpath.rs`): test both tags for `TAG_INT`, then either the native
+integer instruction or a call to the runtime helper, merging on a two-parameter
+block. Division and remainder add a second test for a zero divisor.
+
+An instruction carrying `OperandProof::Int` skips the tag test and the helper
+call, leaving the integer instruction inline with no branch and no merge
+([lir.md](lir.md) has where the proof comes from). Division keeps its zero test:
+Cranelift's `sdiv` traps rather than returning a value, and the proof speaks only
+about the operands' type.
+
+Nothing else changes. The elided path is the one the tag test would have chosen,
+because the operands are integers.
+
 ## Function selection
 
 Functions become JIT candidates based on a hotness threshold
@@ -59,7 +77,7 @@ function's bytecode pointer (see "Cache identity" for why that key is sound),
 so a re-submission could only ever reproduce the identical rejection — it is
 pure wasted work.
 
-This invariant is load-bearing under eager JIT. With `--jit=eager` the hotness
+Eager JIT is where this invariant pays. With `--jit=eager` the hotness
 threshold is 0, so *every* call is "hot"; absent the negative cache, each call
 to an un-jit'able function re-submits it to the background worker. A single
 un-jit'able function called in a hot loop (e.g. stdlib `-`/`/`, which build a

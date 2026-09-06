@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-06
 // docs/impl/lir.md
 //! Low-level Intermediate Representation: SSA form with basic blocks and
 //! virtual registers, close to the target but architecture-independent.
@@ -22,6 +22,6 @@ pub use lower::Lowerer;
 pub use types::{
     closure_value_const_count, for_each_def, for_each_terminator_use, for_each_use,
     value_to_lir_const, BasicBlock, BinOp, CallSiteInfo, ClosureId, CmpOp, ConvOp, Label, LirConst,
-    LirFunction, LirInstr, LirModule, Reg, SpannedInstr, SpannedTerminator, Terminator, UnaryOp,
-    YieldPointInfo,
+    LirFunction, LirInstr, LirModule, OperandProof, Reg, SpannedInstr, SpannedTerminator,
+    Terminator, UnaryOp, YieldPointInfo,
 };

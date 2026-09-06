@@ -1,3 +1,8 @@
+// audited: 2026-09-06
+// docs/impl/spirv.md
+//! What the SPIR-V emitter makes of float arithmetic, and of a local slot whose
+//! id equals a register's.
+
 use super::*;
 
 /// Build LIR: fn(x) { return x + 1.5 }  (float constant + mixed promotion)
@@ -16,12 +21,7 @@ fn make_float_add() -> LirFunction {
                     dst: Reg(1),
                     value: LirConst::Float(1.5),
                 },
-                LirInstr::BinOp {
-                    dst: Reg(2),
-                    op: BinOp::Add,
-                    lhs: Reg(0),
-                    rhs: Reg(1),
-                },
+                LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
             ],
             Terminator::Return(Reg(2)),
         )
@@ -56,12 +56,7 @@ fn make_float_mul() -> LirFunction {
                     dst: Reg(2),
                     value: LirConst::Float(3.0),
                 },
-                LirInstr::BinOp {
-                    dst: Reg(3),
-                    op: BinOp::Mul,
-                    lhs: Reg(1),
-                    rhs: Reg(2),
-                },
+                LirInstr::binop(Reg(3), BinOp::Mul, Reg(1), Reg(2)),
             ],
             Terminator::Return(Reg(3)),
         )
@@ -77,26 +72,20 @@ fn test_spirv_float_mul() {
     assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
 }
 
-// ── SPIR-V reg/slot namespace collision regression ──────────────
+// ── Registers and local slots are separate namespaces ───────────
 //
-// The SPIR-V emitter keyed its `regs`/`reg_types` maps by raw `u32`,
-// inserting both register ids (`dst.0`) and local-slot ids
-// (`*slot as u32`) into the *same* map. LIR allocates registers and
-// local slots from two independent counters that both start at 0
-// (`next_reg` and `num_locals` in src/lir/lower/mod.rs), so a slot id
-// and a register id routinely collide numerically. When they do, a
-// `StoreLocal` to a slot overwrites the entry for the register with the
-// same number, corrupting every later use of that register.
+// The trap: LIR draws register ids and local-slot ids from two counters that
+// both start at 0 (`next_reg` and `num_locals`), so the two collide routinely.
+// A `u32`-keyed map holding both lets a store to a slot overwrite the register
+// wearing the same number.
 //
-// These tests build LIR that exercises such a collision and assert on
-// the generated MLIR text, so they need neither a GPU nor mlir-translate.
+// Both tests assert on the generated MLIR text, so neither needs a GPU or
+// mlir-translate.
 
 /// Build LIR: fn() { var s; r0 = 10; r1 = 20; s = r1; return r0 + r0 }
 ///
-/// Single block. Slot 0 (the only local) numerically collides with
-/// register r0. `StoreLocal slot=0 src=r1` must not disturb r0, which is
-/// read by the trailing `r0 + r0`. Correct lowering adds the const-10
-/// value to itself; the conflated map adds the const-20 value instead.
+/// Slot 0 shares its number with r0. Correct lowering adds the const-10 value
+/// to itself; a conflated map adds the const-20 value instead.
 fn make_storelocal_clobbers_reg() -> LirFunction {
     LirFixture::new(Arity::Exact(0))
         .name("store_clobber")
@@ -121,12 +110,7 @@ fn make_storelocal_clobbers_reg() -> LirFunction {
                     src: Reg(1),
                 },
                 // r2 = r0 + r0
-                LirInstr::BinOp {
-                    dst: Reg(2),
-                    op: BinOp::Add,
-                    lhs: Reg(0),
-                    rhs: Reg(0),
-                },
+                LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(0)),
             ],
             Terminator::Return(Reg(2)),
         )
@@ -154,11 +138,9 @@ fn test_spirv_storelocal_does_not_clobber_reg() {
 
 /// Build LIR: fn(x) { var s; s=0; if x>0 then s=100 else s=200; return s + x }
 ///
-/// Multi-block, if-converted. The param x lives in r0 (`%arg0`); the
-/// single local `s` is slot 0 — numerically colliding with r0. The
-/// if-conversion merge writes its result under the slot key, which in a
-/// conflated map clobbers r0. The trailing `s + x` must still read the
-/// param (`%arg0`) for its right operand, not the merged if-result.
+/// The same collision across an if-conversion: param `x` is r0, local `s` is
+/// slot 0, and the merge writes its result under the slot key. The trailing
+/// `s + x` must still read `%arg0`.
 fn make_if_merge_clobbers_param() -> LirFunction {
     LirFixture::new(Arity::Exact(1))
         .name("merge_clobber")
@@ -180,12 +162,7 @@ fn make_if_merge_clobbers_param() -> LirFunction {
                     slot: 0,
                     src: Reg(1),
                 },
-                LirInstr::Compare {
-                    dst: Reg(2),
-                    op: CmpOp::Gt,
-                    lhs: Reg(0),
-                    rhs: Reg(1),
-                },
+                LirInstr::compare(Reg(2), CmpOp::Gt, Reg(0), Reg(1)),
             ],
             Terminator::Branch {
                 cond: Reg(2),
@@ -231,12 +208,7 @@ fn make_if_merge_clobbers_param() -> LirFunction {
                     dst: Reg(5),
                     slot: 0,
                 },
-                LirInstr::BinOp {
-                    dst: Reg(6),
-                    op: BinOp::Add,
-                    lhs: Reg(5),
-                    rhs: Reg(0),
-                },
+                LirInstr::binop(Reg(6), BinOp::Add, Reg(5), Reg(0)),
             ],
             Terminator::Return(Reg(6)),
         )
@@ -248,10 +220,6 @@ fn test_spirv_if_merge_does_not_clobber_param() {
     let func = make_if_merge_clobbers_param();
     let text =
         super::spirv::generate_gpu_module(&func, 256).expect("multi-block lowering should succeed");
-    // The final `s + x` must use %arg0 (the param) as its second operand.
-    // Only the correct, un-conflated lowering keeps %arg0 live across the
-    // if-conversion merge, where the merged result is written under the
-    // slot-0 key (which collides with r0 = %arg0).
     assert!(
         text.contains(", %arg0 : i64"),
         "return s + x must read the param %arg0; the if-merge slot store \
