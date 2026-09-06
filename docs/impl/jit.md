@@ -1,5 +1,7 @@
 # JIT
 
+<!-- audited: 2026-09-06 -->
+
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
 ## Architecture
@@ -38,6 +40,22 @@ the same slot holds different flags, or nothing at all.
 It emits both halves of a `Value` — tag at `+0`, payload at `+8` — so the
 16-byte stride is written once, from `size_of`/`offset_of` rather than as a
 literal.
+
+## Arithmetic: the tag-check diamond, and skipping it
+
+A binary operation, a comparison and a negation each compile to a diamond
+(`src/jit/fastpath.rs`): test both tags for `TAG_INT`, then either the native
+integer instruction or a call to the runtime helper, merging on a two-parameter
+block. Division and remainder add a second test for a zero divisor.
+
+An instruction carrying `OperandProof::Int` skips the tag test and the helper
+call, leaving the integer instruction inline with no branch and no merge
+([lir.md](lir.md) has where the proof comes from). Division keeps its zero test:
+Cranelift's `sdiv` traps rather than returning a value, and the proof speaks only
+about the operands' type.
+
+Nothing else changes. The elided path is the one the tag test would have chosen,
+because the operands are integers.
 
 ## Function selection
 

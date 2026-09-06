@@ -32,6 +32,7 @@ Does NOT:
 | `LirFunction` | Compilation unit: blocks, constants, metadata, docstring, syntax, yield/call-site info |
 | `BasicBlock` | Instructions + terminator |
 | `LirInstr` | Individual operation |
+| `OperandProof` | What the front end proved about an operation's operands: nothing, or that every one is an integer. See [lir.md](../../docs/impl/lir.md) |
 | `SpannedInstr` | `LirInstr` + `Span` for source tracking |
 | `SpannedTerminator` | `Terminator` + `Span` for source tracking |
 | `Terminator` | How block exits: `Return`, `Jump`, `Branch`, `Emit` |

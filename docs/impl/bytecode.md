@@ -1,5 +1,7 @@
 # Bytecode
 
+<!-- audited: 2026-09-06 -->
+
 The bytecode instruction set is a `repr(u8)` enum. Operands follow
 instructions inline in the bytecode stream.
 
@@ -29,12 +31,14 @@ Add, Sub, Mul, Div              generic arithmetic (any numeric type)
 Rem                             remainder
 AddInt, SubInt, MulInt, DivInt  integer-specialized arithmetic
 ```
-The integer-only forms are implemented but unemitted. The interpreter runs
-them (`src/vm/arithmetic.rs`), and nothing produces them: the emitter maps
-every LIR `BinOp` to the polymorphic bytecode
-(`src/lir/emit/instr/ops.rs`), so a program never reaches an `AddInt`.
-Wiring them up is tracked as issue #957, which carries the compiler's
-operand-type proofs across the HIR→LIR boundary and spends them here.
+The integer-only forms read both operands as integers and never test a tag.
+The emitter picks one when the LIR instruction carries a proof that its
+operands are integers, and the polymorphic form otherwise
+(`src/lir/emit/instr/ops.rs`). The proof comes from the front end's
+intrinsic operand contract; [impl/lir.md](lir.md) has the mechanism.
+
+Only these four specialize. A proven `Rem` still emits the polymorphic
+`Rem`, and the bitwise opcodes have no polymorphic form to choose between.
 
 There is no negation instruction, and no modulo instruction. The emitter
 lowers unary minus to a `Mul` by the constant `-1`.

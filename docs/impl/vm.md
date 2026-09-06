@@ -1,5 +1,7 @@
 # VM
 
+<!-- audited: 2026-09-06 -->
+
 The VM is a stack-machine interpreter that executes bytecode.
 
 ## Architecture
@@ -42,8 +44,9 @@ Specialization lives inside the handlers instead. The polymorphic
 arithmetic ops test their two operands for integers and take a wrapping
 integer path before falling back to the general one
 (`src/vm/arithmetic.rs`). The integer-only `AddInt`/`SubInt`/`MulInt`/
-`DivInt` handlers skip even that test, but no emitter produces those
-bytecodes — see [impl/bytecode.md](bytecode.md) § Arithmetic.
+`DivInt` handlers skip even that test, and the emitter produces them where
+the compiler proved both operands are integers — see
+[impl/bytecode.md](bytecode.md).
 
 ## Fiber integration
 

@@ -1,5 +1,7 @@
 # LIR — Low-level IR
 
+<!-- audited: 2026-09-06 -->
+
 LIR is an SSA-form intermediate representation with virtual registers,
 basic blocks, and explicit control flow.
 
@@ -38,6 +40,45 @@ The lowerer (`src/lir/lower/`) transforms HIR trees into LIR:
 4. **Region assignment** — every allocation is routed to a region
    (see `docs/regions.md`); the lowerer emits `DecrefRegion` at each
    region's `free_at` HirId and `IncrefRegion` at cross-region edges
+
+## The operand proof
+
+A `%`-intrinsic in call position compiles only when the front end discharges its
+operand contract ([intrinsics.md](../intrinsics.md)). That proof used to stop at
+this boundary, and every backend then re-derived at run time what the compiler
+had already decided.
+
+`BinOp`, `Compare` and `UnaryOp` carry it across instead. `OperandProof::Int`
+says every operand of that instruction is an integer on every path reaching it.
+`OperandProof::Unproven` claims nothing. The lowerer reads each operand node's
+inferred type out of `TypeInfo` — the same map the contract check discharged
+against — and marks the instruction `Int` when every one of them is exactly
+`int`. Nothing downstream may set the proof: a backend that guessed would be
+asserting what only the front end can know.
+
+Build an instruction with `LirInstr::binop`, `compare` or `unary` to claim
+nothing, and with `int_binop`, `int_compare` or `int_unary` to carry the proof.
+
+What each backend spends it on:
+
+| Backend | Unproven | Int |
+|---------|----------|-----|
+| bytecode | `Add` `Sub` `Mul` `Div` | `AddInt` `SubInt` `MulInt` `DivInt` |
+| JIT | tag check, then the integer path or a helper call | the integer instruction alone |
+| WASM | tag check, then the `i64` path or the `f64` path | the `i64` instruction alone |
+| MLIR, SPIR-V | operand types from local inference | the integer operation |
+
+The bytecode set specializes four operations, so a proven `%rem`, `%bit-and` or
+comparison still emits the polymorphic opcode. Those handlers already read their
+operands as integers and do no better with the proof.
+
+A division keeps its zero test on every tier. The contract does prove the divisor
+nonzero wherever both operands are proven integers, but `OperandProof` names the
+operand type and says nothing about a value, and a trapping `sdiv` is the wrong
+place to spend a reading it does not carry.
+
+An unproven instruction is correct everywhere and only slower, so a lowering that
+cannot decide says `Unproven` and each backend does what it did before.
 
 ## Heap literals are allocations
 
