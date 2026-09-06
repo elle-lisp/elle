@@ -115,35 +115,42 @@ passes a size threshold, which bounds how long a short-lived blueprint's
 payload can pin a long-lived one's.
 
 The cache maps a blueprint's address to its payload and holds a `Weak` to the
-blueprint beside it. The `Weak` is not an optimization: a dead blueprint's
-address can be reused by a new one, and a stale entry would hand the new
-blueprint the old one's code. A lookup therefore matches the address *and*
-confirms the weak still names it. Entries whose blueprint has died are swept,
-and a payload region is released when the last blueprint packed into it is
-gone. Teardown releases whatever is left, so a payload region is an ordinary
-counted region on every path — no second reclamation mechanism, no carve-out in
-the leak suite.
+blueprint beside it. Entries whose blueprint has died are swept, and a payload
+region is released when the last blueprint packed into it is gone. Teardown
+releases whatever is left, so a payload region is an ordinary counted region on
+every path — no second reclamation mechanism, no carve-out in the leak suite.
 
 A header holds a strong `Rc` to its blueprint, so a blueprint cannot die while
 a header made from it is alive, and the sweep cannot pull a payload out from
 under a live header.
 
-## One blueprint's death decrements one count
+## An address is a sound key because the `Weak` holds it
 
-The `Weak` makes a *lookup* correct. The count that decides when a payload
-region is released has to be kept correct separately, because the reused
-address reaches it by another route: materializing a payload for a blueprint
-that landed on a dead one's key inserts *over* the dead entry.
+An address on its own is not an identity. The allocator hands a freed block
+back to the next allocation of the same layout, so a new blueprint could land
+on a dead one's key and be given the dead one's code.
 
-The entry that insert displaces takes its region's claim with it. So the insert
-retires the displaced entry down the same path the sweep uses — decrement the
-count, release the region when the count reaches zero. The invariant that
-states it is that the counts sum to the number of entries, and a debug build
-checks that at every insert.
+The `Weak` beside the entry is what stops that, and it stops it by **holding**
+rather than by checking. A `Weak` keeps the `Rc`'s allocation alive after the
+last strong reference goes: the value is dropped, the block is not freed. A
+cached blueprint's address is therefore reserved for as long as its entry
+lives, and no live blueprint can be at that address.
 
-Leaving the displaced entry for the next sweep does not cover this. A sweep
-runs when the entry map has doubled, so every address reused between two sweeps
-would hold a region's pages until teardown.
+So an insert never lands on a key an entry already holds. The lookup still
+confirms the strong count before trusting a payload, which costs one load and
+is what a key that does not pin its blueprint would need — but with this one,
+the confirmation never has anything to report.
+
+## Every entry holds one claim on its region
+
+A payload region counts the entries naming it, and that count decides when the
+region is released. Nothing else reads the count, so a wrong one is invisible
+where it happens and shows up far away, as pages held until teardown.
+
+The count moves by one per entry and in one direction each way: an insert adds
+an entry and a claim, the sweep removes both. Because an insert never displaces
+a live entry, no other motion exists. The invariant is that the claims sum to
+the number of entries, and a debug build checks it at every insert.
 
 ## The cache's reference is the one nothing on the heap points at
 
