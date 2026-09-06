@@ -189,6 +189,20 @@ trips the check. Pinned by `stale_leftover_map_entry_is_not_snapshotted_as_a_bor
 (`src/vm/fiber/borrow_tests.rs`) and, at corpus scale, by
 `signals_no_stale_suspended_frame_region_borrow` (`tests/integration/elle_scripts.rs`).
 
+The generation separates the two cases only once the region has been freed. A leftover
+whose region is still live reads exactly like a borrow, because the free that would move
+the generation has not happened yet — and it is the free *after* the park that the check
+then reports. So the snapshot asks the function as well as the heap: a slot the function
+never releases by id holds no pending `DecrefRegion`, whatever its generation says.
+`Code::frame_release_regions` is that list — the static slots this function's slot-routed
+releases name — and `record_region_borrows` records an entry only when the slot appears in
+it. The entries this excludes belong to a region whose release is VALUE-routed, which
+frees the region without clearing the slot; the activation reads that map entry through no
+release at all, so a free while parked corrupts nothing through it. What the activation
+still holds in its stack or its environment is covered where it is read, by `region_of`'s
+page stamp. Pinned by `a_slot_with_no_slot_routed_release_is_not_a_borrow`
+(`src/vm/fiber/borrow_tests.rs`).
+
 A **pass-through borrow** is the other shape and needs
 no handle. The `%first`/`%rest`/`%get` intrinsics (`LirInstr::First`/`Rest`/`Get`)
 hand back a value that aliases into the source collection's region with no incref —
