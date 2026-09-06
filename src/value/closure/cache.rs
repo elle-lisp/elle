@@ -38,16 +38,17 @@ struct PayloadRegion {
     /// Payload bytes materialized into it so far.
     bytes: usize,
     /// How many cache entries name it. The region is released when the last
-    /// one goes.
-    live: usize,
+    /// claim goes, so this is the count every path has to move by exactly one.
+    claims: usize,
     released: bool,
 }
 
 /// One blueprint's materialized payload.
 struct Entry {
-    /// The blueprint this payload was built for. Not an optimization: Rust
-    /// reuses the address of a freed allocation, so a key match alone would
-    /// hand a new blueprint the dead one's code.
+    /// The blueprint this payload was built for. Not an optimization, and not
+    /// a check: a `Weak` holds the `Rc`'s allocation after the last strong
+    /// reference goes, and that is what pins this entry's key against a later
+    /// blueprint (docs/impl/region/template.md).
     proto: Weak<TemplateProto>,
     region_ix: usize,
     payload: RegionSlice<CodePayload>,
@@ -76,9 +77,9 @@ impl TemplatePayloads {
         proto: &Rc<TemplateProto>,
     ) -> Option<(RegionSlice<CodePayload>, RuntimeRegion, u32)> {
         let entry = self.entries.get(&(Rc::as_ptr(proto) as usize))?;
-        // The weak keeps the old allocation readable, so a dead blueprint whose
-        // address was reused reports a strong count of zero here rather than
-        // aliasing the new one.
+        // A cached blueprint's allocation is held by the weak above, so a live
+        // `proto` can never be at a dead entry's address and this test has
+        // nothing to report. It is what a key that does not pin would need.
         (entry.proto.strong_count() > 0).then(|| {
             (
                 entry.payload,
@@ -119,8 +120,8 @@ impl FiberHeap {
 
         let cache = &mut self.template_payloads;
         cache.regions[region_ix].bytes += grew;
-        cache.regions[region_ix].live += 1;
-        cache.entries.insert(
+        cache.regions[region_ix].claims += 1;
+        let displaced = cache.entries.insert(
             Rc::as_ptr(proto) as usize,
             Entry {
                 proto: Rc::downgrade(proto),
@@ -129,22 +130,41 @@ impl FiberHeap {
                 generation,
             },
         );
+        debug_assert!(
+            displaced.is_none(),
+            "a live blueprint landed on a cached one's key, so the entry it \
+             displaced took its region's claim with it and that region can no \
+             longer reach zero"
+        );
+        self.debug_assert_payload_claims();
         payload
     }
 
     /// How many cache entries there are, and how many claims the payload
-    /// regions between them count.
+    /// regions count between them.
     ///
     /// A payload region is released when its claims reach zero, so the two are
     /// the same number exactly when every entry holds one claim
     /// (docs/impl/region/template.md).
-    #[cfg(test)]
     pub(crate) fn template_payload_census(&self) -> (usize, usize) {
         let cache = &self.template_payloads;
         (
             cache.entries.len(),
-            cache.regions.iter().map(|r| r.live).sum(),
+            cache.regions.iter().map(|r| r.claims).sum(),
         )
+    }
+
+    /// Check the claims against the entries wherever either moves.
+    ///
+    /// Nothing but the release decision reads a claim, so a wrong count costs
+    /// nothing where it is made and comes due arbitrarily far away, as a
+    /// payload region's pages held to teardown.
+    fn debug_assert_payload_claims(&self) {
+        let (entries, claims) = self.template_payload_census();
+        debug_assert_eq!(
+            claims, entries,
+            "every cache entry holds one claim on its payload region"
+        );
     }
 
     /// Every payload region this instance still holds open.
@@ -204,7 +224,7 @@ impl FiberHeap {
         self.template_payloads.regions.push(PayloadRegion {
             region,
             bytes: 0,
-            live: 0,
+            claims: 0,
             released: false,
         });
         (self.template_payloads.regions.len() - 1, region)
@@ -225,10 +245,10 @@ impl FiberHeap {
         for key in dead {
             let entry = cache.entries.remove(&key).expect("just enumerated");
             let region = &mut cache.regions[entry.region_ix];
-            region.live -= 1;
+            region.claims -= 1;
             // A region whose last blueprint is gone is released, but its slot
             // stays: entries name their region by index.
-            if region.live == 0 && !region.released {
+            if region.claims == 0 && !region.released {
                 region.released = true;
                 emptied.push(region.region);
             }
@@ -237,6 +257,7 @@ impl FiberHeap {
         for region in emptied {
             self.decref_region_if_present(region);
         }
+        self.debug_assert_payload_claims();
     }
 
     /// Release every payload region, live entries included. The teardown sweep
