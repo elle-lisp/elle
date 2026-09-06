@@ -144,17 +144,19 @@ never has anything to report.
 
 ## Every entry holds one claim on its region
 
-A payload region counts the entries naming it, and that count decides when the
-region is released. Nothing else reads the count, so a wrong one is invisible
-where it happens and shows up far away, as pages held until teardown.
+A payload region counts the entries naming it — one **claim** per entry — and
+that count is what decides when the region is released. Nothing else reads it,
+so a wrong count is invisible where it is made and comes due far away, as pages
+held until teardown.
 
-The count moves by one per entry and in one direction each way: an insert adds
+The claims move by one per entry and in one direction each way: an insert adds
 an entry and a claim, the sweep removes both. The pin is what leaves no third
 motion, because an insert that displaced an entry would take that entry's claim
 with it. The invariant is that the claims sum to the number of entries, and a
 debug build checks it wherever either moves.
 
-Pinning and claim tests: `src/value/closure/tests/mod.rs`.
+Pinning and claim tests:
+[closure/tests/mod.rs](../../../src/value/closure/tests/mod.rs).
 
 ## The cache's reference is the one nothing on the heap points at
 

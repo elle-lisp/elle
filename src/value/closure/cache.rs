@@ -77,9 +77,9 @@ impl TemplatePayloads {
         proto: &Rc<TemplateProto>,
     ) -> Option<(RegionSlice<CodePayload>, RuntimeRegion, u32)> {
         let entry = self.entries.get(&(Rc::as_ptr(proto) as usize))?;
-        // A cached blueprint's allocation is held by the weak above, so a live
-        // `proto` can never be at a dead entry's address and this test has
-        // nothing to report. It is what a key that does not pin would need.
+        // An entry pins its blueprint's allocation, so a live `proto` is never
+        // at a dead entry's address and this test has nothing to report. It is
+        // what a key without a pin would need.
         (entry.proto.strong_count() > 0).then(|| {
             (
                 entry.payload,
