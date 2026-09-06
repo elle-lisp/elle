@@ -1,6 +1,6 @@
 # Code objects — a blueprint, a payload, and a header
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-06 -->
 
 A closure template is the code object of one lambda: its bytecode, constant
 pool, source locations, and the region tables its body needs. This doc owns the
@@ -30,9 +30,9 @@ header, not a payload — that is the whole point of the split.
 
 ## One constructor builds a nested lambda's blueprint
 
-Two backends build a blueprint at a `MakeClosure`: the bytecode emitter and the
-JIT. Both hold the same two inputs — the lambda's `LirFunction`, and the
-bytecode its own emission produced. So `TemplateProto::nested_lambda` takes
+Three backends build a blueprint at a `MakeClosure`. Two of them — the bytecode
+emitter and the JIT — hold the same two inputs: the lambda's `LirFunction`, and
+the bytecode its own emission produced. So `TemplateProto::nested_lambda` takes
 those two and fills every field.
 
 The alternative is a hand-written literal at each site. Twenty fields is more
@@ -51,6 +51,29 @@ Pinned by
 `lir::emit::tests::a_nested_lambdas_blueprint_carries_the_frame_release_tables`
 and
 `jit::compiler::tests::blueprint::a_nested_lambdas_jit_blueprint_carries_the_frame_release_tables`.
+
+## The WASM backend is handed a blueprint instead
+
+The third site is `rt_make_closure`, the host function an emitted module calls
+at every closure creation. It has no `LirFunction` to read. What it holds is a
+blueprint the module carries for that closure, dual-compiled for the spawn path
+([wasm.md](../wasm.md) § "Cross-thread spawn"), and the shape of the frame the
+lambda runs in — arity, the three counts, the two capture masks, the signal —
+which the compiled code passes through linear memory.
+
+`TemplateProto::wasm_closure` takes those two. The **code half** comes off the
+blueprint whole; the **shape half** comes off the call. Splitting it there is
+what keeps the release tables: the blueprint carries them, and the location map,
+the merge set and the nested-lambda blueprints beside them, because
+`Bytecode::into_proto` built it from that closure's own emission. A site that
+copies the fields it happens to name copies three of the seven.
+
+The dual-compiled bytecode is what a spawned OS-thread worker runs, so a frame
+of it abandoned on an error exit walks whichever table this constructor carried.
+
+Pinned by
+`wasm::tests::closure::a_wasm_built_closure_carries_the_frame_release_tables`
+and `..._carries_the_locations_and_the_merge_set_its_body_names`.
 
 ## Why the payload is shared and the header is not
 

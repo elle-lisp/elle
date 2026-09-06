@@ -1,5 +1,7 @@
 # WASM Backend
 
+<!-- audited: 2026-09-06 -->
+
 > **Feature-gated:** The WASM backend requires `--features wasm` at build
 > time. It is disabled by default to reduce binary size. Build with
 > `cargo build --features wasm` to enable it.
@@ -159,7 +161,7 @@ drops the code after the suspend; the fiber then returns its resume value.
 And a host that answers "suspended" by OR-ing a bit back onto the signal
 puts that bit where programs can see it: `fiber/bits` reports
 `|:io :yield|` where the VM reports `|:io|`. Pinned by
-`tests/elle/wasm-suspend-not-by-bit.lisp`.
+[wasm-suspend-not-by-bit.lisp](../../tests/elle/wasm-suspend-not-by-bit.lisp).
 
 A non-zero `status` likewise does not mean "parked". `(yield v)` and
 `(error …)` both compile to an `Emit` terminator and both route through
@@ -188,8 +190,8 @@ on its runtime type, mirroring the interpreter's `call_inner` /
 The last two are the host-VM fallbacks: without them a call reaching a
 bytecode closure or a collection-as-function raises a `cannot call …` type
 error that terminates the compiled entry. Pinned by
-`tests/elle/wasm-bytecode-closure-call.lisp` and
-`tests/elle/wasm-collection-call.lisp`.
+[wasm-bytecode-closure-call.lisp](../../tests/elle/wasm-bytecode-closure-call.lisp)
+and [wasm-collection-call.lisp](../../tests/elle/wasm-collection-call.lisp).
 
 ### Suspension and resume
 
@@ -204,67 +206,47 @@ Yielding closures use a CPS-like scheme:
    and jumps to the continuation block.
 4. For yield-through-call (callee yields through a non-yielding
    caller), the caller's frame is saved too, forming a chain.
-   `drive_resume_chain` in `resume.rs` walks the chain.
+   `drive_resume_chain` ([resume.rs](../../src/wasm/resume.rs)) walks the chain.
 
 ### Cross-thread spawn (dual-compiled bytecode)
 
 `sys/spawn`/`sys/spawn-vm` deep-copy a closure to a fresh OS-thread **bytecode**
 VM and run it there — WASM functions are not callable off the main store. So the
 full-module emitter *dual-compiles*: alongside the WASM body it emits ordinary
-bytecode for every closure (`emit_module_closures`), stored on the host as
-`closure_bytecodes` (instructions + constants + **child prototypes**). When
-`rt_make_closure` builds a WASM closure value it stitches this bytecode into the
-`ClosureTemplate`, so a spawned worker can run `template.code()` on the VM.
+bytecode for every closure (`emit_module_closures`) and turns each into a
+blueprint, stored on the host as `closure_bytecodes`. When `rt_make_closure`
+builds a WASM closure value it builds the code object from that blueprint, so a
+spawned worker can run `template.code()` on the VM.
 
-The child prototypes are essential: a closure's bytecode `MakeClosure`
-instructions index the template's `child_protos` (the nested-lambda blueprints).
-Reconstructing the template without them leaves that list empty and the worker
-panics on its first `MakeClosure` (`src/vm/closure.rs`). Pinned by
-`wasm::tests::wasm_full_spawn_*`.
+The blueprint travels whole, through `TemplateProto::wasm_closure`
+([region/template.md](region/template.md) § "The WASM backend is handed a
+blueprint instead"). Every field of it earns the trip. The nested-lambda
+blueprints are the loudest: a closure's bytecode `MakeClosure` instructions
+index `child_protos`, so a code object built without them leaves that list empty
+and the worker panics on its first `MakeClosure`
+([closure.rs](../../src/vm/closure.rs)). The two
+release tables are the quietest, and are what an abandoned frame on that worker
+walks. Pinned by `wasm::tests::closure`.
 
 ### Register allocation
 
 LIR uses SSA-style virtual registers (unlimited). The register
-allocator (`regalloc.rs`) compacts them:
+allocator ([regalloc.rs](../../src/wasm/regalloc.rs)) compacts them:
 
 - Cross-block registers get dedicated WASM locals.
 - Within-block registers share locals from a pool (greedy linear scan).
 
-This reduces WASM local counts from ~1700 to ~200 for a typical
-stdlib compilation.
-
-## Source layout
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| `emit.rs` | 680 | Module structure, orchestration |
-| `instruction.rs` | 867 | LIR → WASM instruction translation |
-| `controlflow.rs` | 280 | CFG dispatch (loop + br_table) |
-| `suspend.rs` | 341 | CPS spill/restore, block splitting |
-| `linker.rs` | 784 | Host function registration, data op dispatch |
-| `store.rs` | 520 | Engine/Store, env preparation, module execution |
-| `host.rs` | 382 | ElleHost state, handle wrappers, I/O |
-| `lazy.rs` | 637 | Tiered compilation (per-closure) |
-| `regalloc.rs` | 463 | Register allocation |
-| `resume.rs` | 204 | Fiber resume chain |
-| `mod.rs` | 189 | Entry points |
-| `handle.rs` | 106 | Handle table + shared arg reading |
+A WASM function declares every local up front, so the compacted count is what
+the module pays. `--debug-wasm` prints each closure's `virtual regs → slots`;
+over a stdlib module the widest functions come out around a third of their
+virtual-register count.
 
 ## Performance
 
-Current state (fib(30), release build, cached):
-
-```text
-Bytecode VM:     54ms
-WASM backend:  1092ms  (execute only, wasmtime compile cached)
-```
-
-The gap is the WASM→host→WASM boundary crossing on every closure call
-(~400ns per call via `rt_call` + wasmtime trampolines, vs ~20ns for
-the bytecode VM's direct dispatch).
-
-Wasmtime compilation: ~830ms cold, ~3ms with `--cache`.
-Arithmetic and comparisons are already inline WASM (no host calls).
+Every `--wasm=full` run prints its own `[wasm]` line — the LIR, emission,
+wasmtime-compile and execute times of that program, and the size of the module.
+Read the run rather than a number written down here: the tier is not on any
+production workload, so a figure in this document ages with nothing to fail.
 
 ### What's fast
 
@@ -272,14 +254,15 @@ Arithmetic and comparisons are already inline WASM (no host calls).
 - Comparisons and boolean logic (inline tag checks)
 - Local variable access (WASM locals, no memory traffic)
 - Tail calls (WASM `return_call_indirect`, no stack growth)
-- Repeated runs with disk cache (3ms compile)
+- Repeated runs with `--cache`, which skips the wasmtime compile
 
 ### What's slow
 
-- Every closure call crosses the host boundary twice
+- Every closure call crosses the host boundary twice, through `rt_call` and a
+  wasmtime trampoline, where the bytecode VM dispatches directly
 - Every heap data operation (cons, car, cdr, array-ref, lbox) is a
   host call via `rt_data_op`
-- Module compilation is 830ms cold (2.2MB of WASM for stdlib + hello)
+- A cold wasmtime compile of the stdlib module, which is megabytes of WASM
 
 ### Improvement path
 
@@ -297,7 +280,7 @@ Arithmetic and comparisons are already inline WASM (no host calls).
 
 ### Debug builds optimize dependencies
 
-The `830ms cold` figure is a release build. A **debug** build applies
+A **debug** build applies
 
 ```toml
 [profile.dev.package."*"]
@@ -308,22 +291,23 @@ so every dependency — `cranelift-codegen`/`cranelift-frontend`/`regalloc2`
 included — compiles optimized while `elle` itself stays at `opt-level = 0` with
 full debug assertions. Without the override those crates build at `opt-level =
 0`, where Cranelift's hot SSA-construction and bitset ops are un-inlined
-call-per-op and a single stdlib module takes **~10s** to Wasmtime-compile
-(profiled: `cranelift_bitset` / `SSABuilder` self-time dominates); with it the
-cold compile drops to **~0.016s**. (`--cache=<dir>` amortizes either way.)
+call-per-op (profiled: `cranelift_bitset` / `SSABuilder` self-time dominates)
+and one stdlib module costs seconds of wasmtime compile where the override
+costs a fraction of one. (`--cache=<dir>` amortizes either way.)
 
 `cranelift-codegen` is shared between the WASM path (via `wasmtime`) and the
 **Cranelift JIT** (`cranelift-jit`), so optimizing it also speeds up JIT
 compilation. The generated JIT *code* is unchanged: the JIT pins its own output
-at `opt_level = "speed"` (`src/jit/compiler.rs`) independent of how
-`cranelift-codegen` was itself built, so the tier is behaviour-identical across
-the override — only compile *latency* moves. A faster background compile does
-shift *when* a hot function crosses from the interpreter to JIT mid-execution,
-so two crossover invariants are each pinned by a test that fails if the shift
-mishandles the boundary: a fuel-suspended callee's frame survives the JIT tier
-(`tests/elle/fuel-jit-preempt.lisp`), and a value emitted from JIT-compiled code
-is retained as it escapes into `fiber.signal`, where the resumer reads it
-(`tests/elle/region-jit-emit-escape-uaf.lisp`).
+at `opt_level = "speed"` ([compiler.rs](../../src/jit/compiler.rs)) independent
+of how `cranelift-codegen` was itself built, so the tier is behaviour-identical
+across the override — only compile *latency* moves. A faster background compile
+does shift *when* a hot function crosses from the interpreter to JIT
+mid-execution, so two crossover invariants are each pinned by a test that fails
+if the shift mishandles the boundary: a fuel-suspended callee's frame survives
+the JIT tier ([fuel-jit-preempt.lisp](../../tests/elle/fuel-jit-preempt.lisp)),
+and a value emitted from JIT-compiled code is retained as it escapes into
+`fiber.signal`, where the resumer reads it
+([region-jit-emit-escape-uaf.lisp](../../tests/elle/region-jit-emit-escape-uaf.lisp)).
 
 ### One Cranelift in the dependency graph
 
@@ -342,8 +326,9 @@ and `Cargo.toml` pins `cranelift-codegen`, `-frontend`, `-module`, `-jit`, and
 Cranelift in the same change, which is a code change and not only a manifest
 one — 0.133 interns memory-operation flags per function (see
 [impl/jit.md](jit.md) § "Memory flags on emitted loads").
-`integration::deps` (`tests/integration/deps.rs`) reads `Cargo.lock` and fails
-if the graph ever holds two versions of `cranelift-codegen` or `regalloc2`.
+`integration::deps` ([deps.rs](../../tests/integration/deps.rs)) reads
+`Cargo.lock` and fails if the graph ever holds two versions of
+`cranelift-codegen` or `regalloc2`.
 
 ## Full-module coverage and its two teardown/lowering invariants
 
@@ -355,18 +340,20 @@ and each is pinned by a specific corpus file run under `--wasm=full`.
 
 - **every io-backend strands to the heap's teardown.** Every region instruction
   is a structural no-op on this tier (its emitter lowers each to nothing —
-  `src/wasm/instruction/dispatch.rs`), so a scheduler I/O backend — a heap
-  `ExternalObject` (`Value::external("io-backend", …)`) whose `pending` map holds
-  `Port`/`ProcessHandle` values for ops submitted-but-unreaped at exit (a POSIX
-  signal waiter, a spawned-process waiter) — is never reclaimed during execution.
-  Where the VM strands one backend, this tier strands every one.
+  [dispatch.rs](../../src/wasm/instruction/dispatch.rs)), so a scheduler I/O
+  backend — a heap `ExternalObject` (`Value::external("io-backend", …)`) whose
+  `pending` map holds `Port`/`ProcessHandle` values for ops
+  submitted-but-unreaped at exit (a POSIX signal waiter, a spawned-process
+  waiter) — is never reclaimed during execution. Where the VM strands one
+  backend, this tier strands every one.
 
   What handles them is not this tier's: `FiberHeap::quiesce_io_backends` drains
   each before the region sweep, on every tier, because the VM reaches the same
-  state whenever a program ends without dropping its backend (src/io/AGENTS.md §
-  "A hold is let go while its store is still there"). This tier is where it
-  shows up on the widest range of programs, so it is the coverage that pins it.
-  Canonical reference: `tests/elle/posix.lisp`.
+  state whenever a program ends without dropping its backend
+  ([src/io/AGENTS.md](../../src/io/AGENTS.md) § "A hold is let go while its
+  store is still there"). This tier is where it shows up on the widest range of
+  programs, so it is the coverage that pins it. Canonical reference:
+  [posix.lisp](../../tests/elle/posix.lisp).
 
 - **a fn-local reassigned mutable binding's slot is never value-route decref'd +
   nil-stamped.** `allocate_slot` gives such a binding its own never-reused stack
@@ -381,8 +368,9 @@ and each is pinned by a specific corpus file run under `--wasm=full`.
   nil-stamp. This is a lowering the VM/JIT (bytecode-derived LIR) never take. The
   branch-result-loop nil-stamp guard is untouched — the suppression keys on the
   slot's binding, not the branch-union region
-  (`tests/elle/region-branch-result-loop-uaf.lisp` stays green). Canonical
-  reference: `tests/elle/region-capture-cell-loop-uaf.lisp`.
+  ([region-branch-result-loop-uaf.lisp](../../tests/elle/region-branch-result-loop-uaf.lisp)
+  stays green). Canonical reference:
+  [region-capture-cell-loop-uaf.lisp](../../tests/elle/region-capture-cell-loop-uaf.lisp).
 
 ## Testing
 
@@ -404,8 +392,8 @@ elle --wasm=full tests/elle/arithmetic.lisp
 # Tiered mode test
 elle --wasm=11 tests/elle/wasm-tier.lisp
 
-# Rust-side WASM tests
-cargo test wasm
+# Rust-side WASM tests — the feature is off by default, so name it
+cargo test -p elle --lib --features wasm wasm::
 ```
 
 ## The module cache is a cache
@@ -427,8 +415,9 @@ program deletes the entry, so every later run reads the same unusable bytes
 and stops the same way. An upgrade would strand every user holding a warm
 cache until they cleared it by hand, and the error naming a wasmtime version
 gives no hint that a directory is what needs deleting. A cache that cannot
-miss is not a cache. `wasm::tests::cache_entry_that_cannot_be_deserialized_recompiles`
-pins the fallback on both cached paths.
+miss is not a cache.
+`wasm::tests::cache::cache_entry_that_cannot_be_deserialized_recompiles` pins
+the fallback on both cached paths.
 
 ## CLI flags
 
@@ -441,12 +430,15 @@ pins the fallback on both cached paths.
 | `--wasm-dump` | Write WASM bytes to `/dev/shm/elle-wasm-dump.wasm` |
 | `--wasm-lir` | Print LIR before WASM emission |
 | `--wasm-no-stdlib` | Skip stdlib (for emitter testing) |
+| `--wasm-no-sparse-spill` | Spill every register at a suspend point, not the live ones |
 | `--jit=0` | Disable cranelift optimization in Wasmtime |
 
 ---
 
 ## See also
 
+- [src/wasm/AGENTS.md](../../src/wasm/AGENTS.md) — which file each part of the
+  backend lives in
 - [impl/lir.md](lir.md) — LIR that the WASM emitter consumes
 - [impl/vm.md](vm.md) — bytecode VM (full-module WASM replaces it; tiered complements it)
 - [impl/jit.md](jit.md) — Cranelift JIT alternative
