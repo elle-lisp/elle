@@ -1,5 +1,7 @@
 # CI and Triage
 
+<!-- audited: 2026-09-05 -->
+
 CI structure, local workflow, and failure diagnosis.
 
 ## CI structure
@@ -46,9 +48,11 @@ slower of the pair instead of the sum. The split doubles the runner minutes the
 platform spends and roughly halves the wall clock, which is the trade the merge
 gate cares about.
 
-Each job keeps its own `Swatinem/rust-cache` `shared-key`. The pair builds
-different profiles, so one shared key would make the two jobs overwrite each
-other's cache on alternating runs.
+Each job caches under its own key — set explicitly with
+`Swatinem/rust-cache`'s `shared-key` where a job wants a stable one, and taken
+from the per-job default otherwise. The pair builds different profiles, so one
+shared key would make the two jobs overwrite each other's cache on alternating
+runs.
 
 ### What each job builds
 
@@ -59,12 +63,24 @@ AArch64 Smoke jobs are release runs exactly as the x86_64 ones are. The Rust
 Tests jobs build the dev profile, also on every platform, because `cargo test`
 does. No platform is quietly gated at a weaker optimization level.
 
-One job changes the release profile it builds. `macOS Smoke` sets
-`CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS`, because the panic that reads a
-scrubbed page is `#[cfg(debug_assertions)]` and `--trace=scrub` is worthless
-without it (docs/impl/region/diagnostics.md). Its binary is therefore a release
-build that also runs the debug-only checks, on the smallest runner in the
-workflow. Read a macOS corpus timing against that, not against a Linux one.
+Three jobs change the release profile they build. `VM+JIT Tests`, `Thread-Pool
+I/O Tests` and `macOS Smoke` set `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS`,
+which is what compiles the region checks in. Those checks are
+`#[cfg(debug_assertions)]`, so a corpus job without the flag drives the whole
+corpus blind to every one of them.
+
+The rule is one such job per I/O backend. `Thread-Pool I/O Tests` covers the
+pool and `VM+JIT Tests` covers io_uring, so finding a region defect never
+depends on the macOS runner — the slowest box in the workflow, and the one
+whose failures read as flaky timeouts (§ "Runner capacity").
+`tests/integration/workflows.rs` is the standing check that both backends keep
+a job.
+
+`macOS Smoke` sets `--trace=scrub` beside the flag, because the panic that
+reads a scrubbed page needs both (docs/impl/region/diagnostics.md). Its binary
+is a release build that also runs the debug-only checks, on the smallest runner
+in the workflow. Read a macOS corpus timing against that, not against a Linux
+one.
 
 ### Runner capacity
 
