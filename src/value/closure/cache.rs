@@ -132,6 +132,21 @@ impl FiberHeap {
         payload
     }
 
+    /// How many cache entries there are, and how many claims the payload
+    /// regions between them count.
+    ///
+    /// A payload region is released when its claims reach zero, so the two are
+    /// the same number exactly when every entry holds one claim
+    /// (docs/impl/region/template.md).
+    #[cfg(test)]
+    pub(crate) fn template_payload_census(&self) -> (usize, usize) {
+        let cache = &self.template_payloads;
+        (
+            cache.entries.len(),
+            cache.regions.iter().map(|r| r.live).sum(),
+        )
+    }
+
     /// Every payload region this instance still holds open.
     ///
     /// The cache's reference to each one is held in Rust, so a pass that finds

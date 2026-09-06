@@ -312,3 +312,76 @@ fn a_blueprint_at_a_dead_ones_address_gets_its_own_payload() {
          (address was reused here: {reused})"
     );
 }
+
+/// Materialize payloads into `into` until a blueprint lands on a dead one's
+/// address, and answer how many it took.
+///
+/// The trap: nothing obliges the allocator to reuse an address, so a test that
+/// mints one blueprint, drops it, mints a second and hopes is only sometimes
+/// testing what it is named for. Each blueprint here dies before the next is
+/// minted, which leaves a free block of exactly the right layout for the next
+/// one to land in — and the loop keeps asking until one does, then panics
+/// rather than pass without having reached the case.
+///
+/// Sixty-four is under the sweep's floor, so no sweep runs inside the loop.
+/// That is the window the count has to survive on its own.
+fn until_an_address_is_reused(heap: &mut FiberHeap, into: RuntimeRegion) -> usize {
+    let mut seen: Vec<usize> = Vec::new();
+    for byte in 0..64u8 {
+        let p = proto(vec![byte; 16]);
+        let addr = Rc::as_ptr(&p) as usize;
+        let reused = seen.contains(&addr);
+        let _ = materialize(heap, &p, into);
+        seen.push(addr);
+        if reused {
+            return seen.len();
+        }
+    }
+    panic!("no blueprint landed on a dead one's address in 64 tries");
+}
+
+/// A payload region counts the entries naming it and is released when that
+/// count reaches zero. A blueprint at a dead one's address inserts over the
+/// dead entry, so the entry that insert displaces has to give its claim back.
+///
+/// The counter-factual is the entry map on its own. A lookup is already correct
+/// without any of this — the `Weak` beside a stale entry catches it — so no
+/// header ever reads the wrong code, and the count is the only thing that says
+/// anything went wrong.
+#[test]
+fn a_displaced_entry_gives_its_regions_claim_back() {
+    let mut heap = FiberHeap::new();
+    let headers = region(&mut heap);
+
+    let minted = until_an_address_is_reused(&mut heap, headers);
+
+    let (entries, claims) = heap.template_payload_census();
+    assert_eq!(
+        claims, entries,
+        "each of the {minted} blueprints holds one claim while its entry \
+         lives; {claims} claims against {entries} entries means an insert \
+         displaced an entry that kept its claim"
+    );
+}
+
+/// What the claim decides. With one left over, the sweep that removes the last
+/// entry cannot bring the region to zero, so the region and its pages outlive
+/// every blueprint packed into them and are freed only at teardown.
+#[test]
+fn a_reused_address_still_releases_the_payload_region() {
+    let mut heap = FiberHeap::new();
+    let baseline = heap.active_region_count();
+    let headers = region(&mut heap);
+
+    until_an_address_is_reused(&mut heap, headers);
+
+    heap.decref_region(headers);
+    heap.release_dead_template_payloads();
+
+    assert_eq!(
+        heap.active_region_count(),
+        baseline,
+        "every blueprint is dead, so the payload region they shared must be \
+         released by the sweep rather than held to teardown"
+    );
+}
