@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-06
 // docs/impl/region/template.md
 //! `TemplateProto` — a code object's compile-time blueprint.
 //!
@@ -86,6 +86,26 @@ pub struct TemplateProto {
     pub child_protos: Vec<Rc<TemplateProto>>,
 }
 
+/// The shape of the frame a WASM closure runs in, as the `MakeClosure` site
+/// supplies it: what a lambda's own `LirFunction` would answer, read out of
+/// linear memory instead because the host has no LIR to ask.
+///
+/// A struct rather than eight arguments: the three counts and the two masks are
+/// each a bare integer, and at a call site of eight positions a pair of them
+/// swapped type-checks and runs.
+pub struct WasmClosureMeta {
+    pub arity: Arity,
+    pub num_locals: usize,
+    pub num_captures: usize,
+    pub num_params: usize,
+    pub signal: Signal,
+    pub capture_params_mask: u64,
+    pub capture_locals_mask: CaptureMask,
+    /// The module function-table index of this closure's compiled body, which
+    /// is how `rt_call` dispatches to it.
+    pub wasm_func_idx: u32,
+}
+
 impl TemplateProto {
     /// A blueprint with the three required fields; everything else empty.
     pub fn new(bytecode: Vec<u8>, arity: Arity, constants: Vec<Value>) -> Self {
@@ -158,6 +178,42 @@ impl TemplateProto {
             // resolves recursively.
             child_protos: bytecode.child_protos,
             ..TemplateProto::new(bytecode.instructions, func.arity, bytecode.constants)
+        }
+    }
+
+    /// The blueprint of a closure a compiled WASM module builds: everything
+    /// `code` knows about the lambda's code, plus the shape `meta` carries.
+    ///
+    /// The third site that meets a `MakeClosure`, and the one holding no
+    /// `LirFunction` to read (docs/impl/region/template.md § "The WASM backend
+    /// is handed a blueprint instead"). `code` is the dual-compiled blueprint
+    /// the module carries for this closure, and it travels whole, because a
+    /// spawned OS-thread worker running its bytecode reads every field of it.
+    /// `None` is a module carrying none, whose code object has no bytecode to
+    /// run and takes its shape from `meta` alone.
+    pub fn wasm_closure(code: Option<&TemplateProto>, meta: WasmClosureMeta) -> Self {
+        let empty;
+        let code = match code {
+            Some(code) => code,
+            None => {
+                empty = TemplateProto::new(Vec::new(), meta.arity, Vec::new());
+                &empty
+            }
+        };
+        TemplateProto {
+            num_locals: meta.num_locals,
+            num_captures: meta.num_captures,
+            num_params: meta.num_params,
+            signal: meta.signal,
+            capture_params_mask: meta.capture_params_mask,
+            capture_locals_mask: meta.capture_locals_mask,
+            wasm_func_idx: Some(meta.wasm_func_idx),
+            location_map: code.location_map.clone(),
+            merged_slots: code.merged_slots.clone(),
+            frame_release_slots: code.frame_release_slots.clone(),
+            frame_release_regions: code.frame_release_regions.clone(),
+            child_protos: code.child_protos.clone(),
+            ..TemplateProto::new(code.bytecode.clone(), meta.arity, code.constants.clone())
         }
     }
 

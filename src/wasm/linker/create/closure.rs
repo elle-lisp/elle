@@ -1,3 +1,6 @@
+// audited: 2026-09-06
+// docs/impl/wasm.md
+// docs/impl/region/template.md
 //! Constant-pool and closure-construction host functions:
 //! `rt_load_const` and `rt_make_closure`.
 
@@ -52,7 +55,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
             let capture_params_mask = read_i64(mp + 40) as u64;
             // Slot 6 is the word count of the unbounded locals mask; the words
             // follow the 8 fixed slots (written in `emit_make_closure`,
-            // src/wasm/instruction.rs).
+            // src/wasm/instruction/calls.rs).
             let locals_mask_nwords = read_i64(mp + 48) as usize;
             let signal_bits = read_i64(mp + 56) as u64;
             let capture_locals_mask = crate::value::CaptureMask::from_words(
@@ -75,23 +78,27 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 captures.push(value);
             }
 
+            // One count is the whole wire format, because a lambda's arity is
+            // Exact or AtLeast: a Range arity belongs to a primitive or a
+            // special form, and no `MakeClosure` names one.
             let arity = match arity_kind {
-                0 => crate::value::types::Arity::Exact(arity_count),
                 1 => crate::value::types::Arity::AtLeast(arity_count),
                 _ => crate::value::types::Arity::Exact(arity_count),
             };
 
-            // The blueprint: the dual-compiled bytecode, constants and
-            // nested-lambda blueprints for this table index, plus the metadata
-            // this call supplies. An OS-thread VM worker running this code
-            // object needs the child blueprints, so they ride along.
+            // The blueprint: the dual-compiled one this module carries for this
+            // table index, plus the shape this call supplies. The constructor
+            // takes the first whole, so nothing it holds is this site's to
+            // remember.
             let dual = caller
                 .data()
                 .closure_bytecodes
                 .get(table_idx as usize)
                 .cloned();
-            let proto = std::rc::Rc::new(match dual.as_deref() {
-                Some(d) => crate::value::TemplateProto {
+            let proto = std::rc::Rc::new(crate::value::TemplateProto::wasm_closure(
+                dual.as_deref(),
+                crate::value::WasmClosureMeta {
+                    arity,
                     num_locals,
                     num_captures: num_captures as usize,
                     num_params,
@@ -101,28 +108,9 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                     },
                     capture_params_mask,
                     capture_locals_mask,
-                    wasm_func_idx: Some(table_idx as u32),
-                    child_protos: d.child_protos.clone(),
-                    ..crate::value::TemplateProto::new(
-                        d.bytecode.clone(),
-                        arity,
-                        d.constants.clone(),
-                    )
+                    wasm_func_idx: table_idx as u32,
                 },
-                None => crate::value::TemplateProto {
-                    num_locals,
-                    num_captures: num_captures as usize,
-                    num_params,
-                    signal: crate::signals::Signal {
-                        bits: crate::value::fiber::SignalBits::new(signal_bits),
-                        propagates: 0,
-                    },
-                    capture_params_mask,
-                    capture_locals_mask,
-                    wasm_func_idx: Some(table_idx as u32),
-                    ..crate::value::TemplateProto::new(Vec::new(), arity, Vec::new())
-                },
-            });
+            ));
 
             // Build the code object, the closure, and its captured-env slice
             // through a boundary ctx over its own fresh result region.
