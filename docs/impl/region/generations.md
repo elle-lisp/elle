@@ -2,9 +2,8 @@
 
 <!-- audited: 2026-09-05 -->
 
-Implementation-facing: the per-region generation counter and page stamping that
-turn a stale region deref into a deterministic debug-build panic at the exact
-deref site. Pairs with the `--trace=guardfree` oracle described in
+The per-region generation counter and page stamps that turn a stale region deref
+into a debug-build panic at the deref site. Pairs with the `--trace=guardfree` oracle described in
 [diagnostics.md](diagnostics.md).
 
 Physical region ids are recycled (a freed id returns to the mint pool) and
@@ -51,7 +50,7 @@ which must first find the pointer's **page base** — pages are variable-sized
 (geometric growth to 4 MiB), so it masks the pointer to each candidate power-of-2
 alignment and reads the header there. The header's `size_tag` carries a 24-bit
 `PAGE_MAGIC` plus `log2(page_size)`; the true base is the alignment whose tag
-validates. The magic is load-bearing: a *smaller* sub-alignment of a large page
+validates. Without the magic the search is unsound: a *smaller* sub-alignment of a large page
 masks to a base **mid-page**, on object/inline data, and a bare `log2` byte there
 can coincidentally equal the smaller size's log2 — read as a false header
 yielding a garbage `(region_id, stamp)`. The magic makes that ~`1/2^32` instead

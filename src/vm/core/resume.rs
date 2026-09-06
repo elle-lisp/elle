@@ -1,6 +1,6 @@
 // audited: 2026-09-05
-//! Replaying a fiber's suspended frame chain: each frame's stack, region map,
-//! dues and closure register are restored before its body is re-entered.
+//! Replaying a fiber's suspended frame chain: each frame's stack, region map and
+//! dues are restored before its body is re-entered.
 //!
 //! docs/impl/region/owner.md
 //! docs/impl/region/generations.md

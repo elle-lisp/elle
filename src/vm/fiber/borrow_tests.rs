@@ -1,6 +1,6 @@
 // audited: 2026-09-05
 //! Counter-factual tests for the two uncounted region borrows that carry a
-//! recorded generation, and for the panic the resume boundary raises on a stale one.
+//! recorded generation, and for the panic a stale one raises.
 //!
 //! docs/impl/region/generations.md
 //!

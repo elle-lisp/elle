@@ -1,7 +1,6 @@
 // audited: 2026-09-05
-//! Suspension and call-frame types: `BytecodeFrame` (a parked bytecode
-//! execution point), `SuspendedFrame` (one step in a fiber's replay chain),
-//! and the execution/stack-trace frames `Frame` / `CallFrame`.
+//! Suspension and call-frame types: a parked bytecode execution point, a step in
+//! a fiber's replay chain, and the frames a stack trace uses.
 //!
 //! docs/impl/region/generations.md
 //! docs/impl/region/owner.md
