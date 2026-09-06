@@ -1,3 +1,8 @@
+// audited: 2026-09-05
+// src/io/AGENTS.md
+//! Fixtures the async-backend tests share: sockets a peer never answers,
+//! scratch paths, and the assertion that a cancelled operation retires.
+
 use super::*;
 use crate::io::request::{IoOp, IoRequest};
 use crate::port::{Direction, Encoding, Port, PortKind};
@@ -159,10 +164,81 @@ fn assert_cancel_retires(backend: &AsyncBackend, id: SubmissionId, what: &str) {
     );
 }
 
+/// Take a descriptor non-blocking, whatever the platform spells the flag.
+/// `SOCK_NONBLOCK` is a Linux extension to `socket(2)`; `fcntl` is everywhere.
+fn set_nonblocking(fd: libc::c_int) {
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        assert!(flags >= 0, "F_GETFL failed");
+        assert_eq!(libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK), 0);
+    }
+}
+
+/// A loopback TCP listener with a backlog of one, and the port it took.
+///
+/// The small backlog is the point: paired with `fill_tcp_backlog`, it gives a
+/// listener the kernel refuses further connections to, which is a peer that
+/// never answers without needing a network to reach one.
+fn full_backlog_listener() -> (libc::c_int, u16) {
+    unsafe {
+        let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
+        assert!(fd >= 0, "socket() failed");
+        let mut addr: libc::sockaddr_in = std::mem::zeroed();
+        addr.sin_family = libc::AF_INET as libc::sa_family_t;
+        addr.sin_port = 0;
+        addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
+        assert_eq!(
+            libc::bind(
+                fd,
+                &addr as *const _ as *const libc::sockaddr,
+                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t
+            ),
+            0,
+            "bind() failed"
+        );
+        assert_eq!(libc::listen(fd, 1), 0, "listen() failed");
+        let mut bound: libc::sockaddr_in = std::mem::zeroed();
+        let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+        libc::getsockname(fd, &mut bound as *mut _ as *mut libc::sockaddr, &mut len);
+        (fd, u16::from_be(bound.sin_port))
+    }
+}
+
+/// Fill the accept queue of the listener on `port`, and return the descriptors
+/// that hold it full. Nobody accepts these, so the kernel has nowhere to put a
+/// further connection and drops its SYNs.
+///
+/// The caller holds the descriptors for the length of its test: closing one
+/// frees a queue slot, and the connect under test would then complete.
+fn fill_tcp_backlog(port: u16) -> Vec<libc::c_int> {
+    let mut queued = Vec::new();
+    for _ in 0..8 {
+        let c = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+        assert!(c >= 0, "socket() failed");
+        set_nonblocking(c);
+        unsafe {
+            let mut addr: libc::sockaddr_in = std::mem::zeroed();
+            addr.sin_family = libc::AF_INET as libc::sa_family_t;
+            addr.sin_port = port.to_be();
+            addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
+            libc::connect(
+                c,
+                &addr as *const _ as *const libc::sockaddr,
+                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            );
+        }
+        queued.push(c);
+    }
+    queued
+}
+
 mod backend;
 mod bridge;
 mod fileops;
 mod net;
+mod netcancel;
+mod netend;
+mod netread;
 mod park;
 mod process;
 mod submit;

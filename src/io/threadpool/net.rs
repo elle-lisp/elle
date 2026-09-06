@@ -1,9 +1,36 @@
+// audited: 2026-09-05
+// src/io/AGENTS.md
 //! The socket operations a worker runs.
 //!
 //! `Accept`, `RecvFrom` and both connects each wait on a peer that may never
 //! appear, so each takes the descriptor non-blocking and waits under its bound
 //! rather than in the kernel. `SendTo` and `Shutdown` hand what they were given
 //! to the kernel and return.
+//!
+//! # A full AF_UNIX backlog arrives under two errnos
+//!
+//! Linux reports a connect to an AF_UNIX listener whose backlog is full as
+//! `EAGAIN`. macOS and the BSDs report it as `ECONNREFUSED`, which is also the
+//! errno they return when nobody is listening. So one peer state arrives under
+//! two names, and on the BSDs that name carries two readings.
+//!
+//! A connect paces `EAGAIN` on every platform. It paces `ECONNREFUSED` only
+//! for an AF_UNIX peer, only where the errno is spent both ways, and only
+//! while the path still names a socket. That last condition is what keeps a
+//! dead peer fast: a listener that has gone takes its socket with it, so the
+//! path stops naming one and the connect reports the refusal it was pacing. A
+//! TCP connect never paces a refusal, because a reset from a host with no
+//! listener is the peer's whole answer.
+//!
+//! What the path cannot separate is a socket that is bound and never listened
+//! on. It refuses exactly as a full backlog does and leaves its file in place,
+//! so such a connect is refused at once on Linux and paces elsewhere. That is
+//! the price of pacing the common case.
+//!
+//! A connect that named a `:timeout` is bounded by it. One that named none
+//! waits until `io/cancel` or the sweep for a fiber that is gone ends the
+//! operation — the same ending an untimed connect to a listener that never
+//! accepts already has on every platform.
 
 use super::*;
 use std::time::Instant;
@@ -151,6 +178,7 @@ pub(super) fn connect_tcp(
         options,
         bounds,
         addr.to_string(),
+        Refusal::for_tcp(),
     )
 }
 
@@ -167,14 +195,66 @@ pub(super) fn connect_unix(path: &str, options: &SocketOptions, bounds: Bounds) 
             options,
             bounds,
             path.to_string(),
+            Refusal::for_unix(path),
         ),
     }
 }
 
-/// How long a connect that reported `EAGAIN` waits before trying again.
-/// AF_UNIX reports a listener whose backlog is full that way, and offers no
-/// readiness to wait on, so that retry is paced rather than driven by an event.
+/// How long a connect that met a full AF_UNIX backlog waits before trying
+/// again. The kernel offers no readiness for that state, whichever errno it
+/// reports it under, so the retry is paced rather than driven by an event.
 const CONNECT_RETRY_PACE: Duration = Duration::from_millis(10);
+
+/// True where a full AF_UNIX backlog arrives as `ECONNREFUSED` rather than as
+/// `EAGAIN`, so that errno carries two readings and needs telling apart.
+///
+/// A constant rather than a `cfg` around each arm: both arms then compile on
+/// both platforms, which is what `make crosscheck` exists to check.
+const BACKLOG_REFUSES: bool = !cfg!(target_os = "linux");
+
+/// What a connect makes of `ECONNREFUSED`. See this module's header.
+pub(super) enum Refusal {
+    /// The peer's own answer, reported as it stands.
+    Final,
+    /// A refusal that may be a full backlog, paced while `.0` names a socket.
+    WhileBound(String),
+}
+
+impl Refusal {
+    /// How a TCP connect reads a refusal.
+    pub(super) fn for_tcp() -> Refusal {
+        Refusal::Final
+    }
+
+    /// How an AF_UNIX connect to `path` reads a refusal on this platform.
+    ///
+    /// An abstract name has no filesystem entry, so the check below finds
+    /// nothing and the refusal is final. That is the right answer and needs no
+    /// arm of its own: abstract sockets are a Linux extension, and Linux takes
+    /// `Final` here anyway.
+    pub(super) fn for_unix(path: &str) -> Refusal {
+        if BACKLOG_REFUSES {
+            Refusal::WhileBound(path.to_string())
+        } else {
+            Refusal::Final
+        }
+    }
+
+    /// True when this refusal may clear on its own, so the connect asks again.
+    ///
+    /// The path is read on every retry rather than once at the start. A
+    /// listener that unlinks its socket while the connect is pacing has ended
+    /// the wait, and asking each time is what notices.
+    pub(super) fn may_clear(&self) -> bool {
+        match self {
+            Refusal::Final => false,
+            Refusal::WhileBound(path) => {
+                use std::os::unix::fs::FileTypeExt;
+                std::fs::metadata(path).is_ok_and(|m| m.file_type().is_socket())
+            }
+        }
+    }
+}
 
 /// Open a socket, connect it to `sa`, and report the connected descriptor —
 /// or `-errno`. `label` describes the peer for the completion's data.
@@ -191,6 +271,7 @@ fn connect_socket(
     options: &SocketOptions,
     bounds: Bounds,
     label: String,
+    refusal: Refusal,
 ) -> (i32, Vec<u8>) {
     let fd = unsafe { libc::socket(family, libc::SOCK_STREAM, 0) };
     if fd < 0 {
@@ -210,7 +291,7 @@ fn connect_socket(
     // descriptor could have handed to another thread's socket by then.
     let outcome = {
         let bound = OpBound::new(fd, bounds);
-        connect_bounded(fd, sa, sa_len, &bound)
+        connect_bounded(fd, sa, sa_len, &bound, &refusal)
     };
     if outcome < 0 {
         unsafe { libc::close(fd) };
@@ -230,6 +311,7 @@ fn connect_bounded(
     sa: *const libc::sockaddr,
     sa_len: libc::socklen_t,
     bound: &OpBound,
+    refusal: &Refusal,
 ) -> i32 {
     let deadline = bound.timeout().map(|t| Instant::now() + t);
     loop {
@@ -249,13 +331,16 @@ fn connect_bounded(
             }
             // A second call after the connection is up says so this way.
             libc::EISCONN => return 0,
-            // The peer's backlog is full (AF_UNIX). There is no readiness to
-            // wait for, so pace the retry — the pause still watches the stop.
-            libc::EAGAIN => match pace_retry(bound, deadline, CONNECT_RETRY_PACE) {
-                Wake::Ready => {}
-                Wake::Stopped => return -libc::ECANCELED,
-                Wake::TimedOut => return -libc::ETIMEDOUT,
-            },
+            // The peer's AF_UNIX backlog is full, under whichever errno this
+            // platform reports it. There is no readiness to wait for, so pace
+            // the retry — the pause still watches the stop.
+            e if e == libc::EAGAIN || (e == libc::ECONNREFUSED && refusal.may_clear()) => {
+                match pace_retry(bound, deadline, CONNECT_RETRY_PACE) {
+                    Wake::Ready => {}
+                    Wake::Stopped => return -libc::ECANCELED,
+                    Wake::TimedOut => return -libc::ETIMEDOUT,
+                }
+            }
             e => return -e,
         }
     }

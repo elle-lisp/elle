@@ -1,5 +1,10 @@
-// Unit tests for the threadpool backend, split by concern:
+// audited: 2026-09-05
+// src/io/AGENTS.md
+// Unit tests for the thread-pool backend, one module per concern.
+//
 //   - `hub`:      CompletionHub in_flight accounting (the one-channel invariant)
+//   - `net`:      what a connect makes of a refusal, and the platform
+//                 behavior the paced retry rests on
 //   - `opbound`:  the per-operation timeout bound, on a pipe
 //   - `pool`:     worker reuse: the crew's handover, growth, and retirement
 //   - `process`:  ProcessWait completion encoding
@@ -7,6 +12,7 @@
 //   - `signals`:  forked signalfd/kqueue read + close-time drain regressions
 //   - `stdin`:    stdin worker shutdown (idle and mid-read)
 mod hub;
+mod net;
 mod opbound;
 mod openfile;
 mod pool;
