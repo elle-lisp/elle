@@ -281,34 +281,111 @@ fn a_payload_region_opened_inside_a_macro_scope_survives_the_reclaim() {
     );
 }
 
-/// The cache is keyed by blueprint address, and Rust reuses the address of a
-/// freed allocation. An entry therefore holds a `Weak` to the blueprint it was
-/// built for, and a lookup confirms it before trusting the payload.
+/// Mint `rounds` blueprints, each one dead before the next is minted, and
+/// answer the addresses they occupied.
 ///
-/// The counter-factual is an address-only key: the second blueprint below would
-/// be handed the first one's bytecode, which is silent, wrong, and would only
-/// surface as the wrong function running.
+/// The trap: dropping the `Rc` is not enough to kill a blueprint. The header
+/// materialized from it holds its own strong reference, so the blueprint dies
+/// only when the header's region is freed — which is why each round mints a
+/// region of its own and frees it before the round ends.
+///
+/// Every blueprint is materialized, so every one leaves an entry behind, and
+/// `rounds` stays under the sweep floor so no sweep runs inside the loop. That
+/// is the window in which the cache holds nothing but dead blueprints' entries.
+fn mint_and_drop_blueprints(heap: &mut FiberHeap, rounds: u8) -> Vec<usize> {
+    (0..rounds)
+        .map(|byte| {
+            let holder = region(heap);
+            let p = proto(vec![byte; 16]);
+            let _ = materialize(heap, &p, holder);
+            heap.decref_region(holder);
+            assert_eq!(
+                Rc::strong_count(&p),
+                1,
+                "the header's reference must be gone, so dropping this one \
+                 leaves the block free for the next round to land in"
+            );
+            Rc::as_ptr(&p) as usize
+        })
+        .collect()
+}
+
+/// The cache is keyed by blueprint address, and the allocator hands a freed
+/// block back to the next allocation of the same layout. The entry's `Weak` is
+/// what makes the key sound: it holds the blueprint's allocation after the last
+/// strong reference goes, so a cached address stays reserved and no live
+/// blueprint is ever at it. The JIT caches pin their keys the same way
+/// (src/vm/jit_entry/tests.rs).
+///
+/// The trap this replaces: a test that minted a blueprint at a dead one's
+/// address, drew a `reused` flag from the comparison, and reported it. The flag
+/// was always false, because the pin makes it false, and the prose beside it
+/// said the case was usually reached.
+///
+/// The counter-factual is a key that does not pin. Replacing the entry's `Weak`
+/// with an empty one puts all 64 blueprints below at one address, where each
+/// would be handed the last one's bytecode — silent, and surfacing only as the
+/// wrong function running.
 #[test]
-fn a_blueprint_at_a_dead_ones_address_gets_its_own_payload() {
+fn a_cache_entry_pins_its_keyed_blueprint() {
     let mut heap = FiberHeap::new();
 
-    let first_addr = {
-        let a = proto(vec![0xAA; 16]);
-        let _ = header_in(&mut heap, &a);
-        Rc::as_ptr(&a) as usize
-    };
+    let mut addresses = mint_and_drop_blueprints(&mut heap, 64);
+    let minted = addresses.len();
+    addresses.sort_unstable();
+    addresses.dedup();
 
-    // The allocator usually hands the same block back for an identical layout.
-    // The assertion below holds either way; address reuse is what makes it a
-    // real test rather than a tautology.
-    let b = proto(vec![0xBB; 16]);
-    let reused = Rc::as_ptr(&b) as usize == first_addr;
-
-    let hb = header(header_in(&mut heap, &b));
     assert_eq!(
-        hb.bytecode(),
-        &[0xBB; 16],
-        "a blueprint must get its own code, even at a dead blueprint's address \
-         (address was reused here: {reused})"
+        addresses.len(),
+        minted,
+        "each dead blueprint's entry pins its allocation, so none of the \
+         {minted} addresses can be handed to a later blueprint"
+    );
+}
+
+/// A payload region counts the entries naming it, and that count decides when
+/// the region is released. Nothing else reads it, so the invariant is the only
+/// place it can be seen: one claim per entry, however many blueprints have
+/// lived and died.
+///
+/// The counter-factual is any motion of the count that is not an entry
+/// arriving or leaving. It costs nothing a header reads — the code stays
+/// correct — and shows up only as a region whose count can no longer reach
+/// zero.
+#[test]
+fn every_entry_holds_one_claim_on_its_payload_region() {
+    let mut heap = FiberHeap::new();
+
+    mint_and_drop_blueprints(&mut heap, 64);
+
+    let (entries, claims) = heap.template_payload_census();
+    assert_eq!(
+        claims, entries,
+        "{claims} claims against {entries} entries; the two move together or \
+         a payload region is held past its last blueprint"
+    );
+
+    heap.release_dead_template_payloads();
+    let (entries, claims) = heap.template_payload_census();
+    assert_eq!(entries, 0, "every blueprint above is dead");
+    assert_eq!(claims, 0, "the sweep takes each entry's claim with it");
+}
+
+/// What the claim decides, at the scale the region is packed for: many
+/// blueprints share one payload region, so the region is released only when
+/// the sweep has removed the last of them.
+#[test]
+fn a_sweep_releases_the_region_every_blueprint_has_left() {
+    let mut heap = FiberHeap::new();
+    let baseline = heap.active_region_count();
+
+    mint_and_drop_blueprints(&mut heap, 64);
+    heap.release_dead_template_payloads();
+
+    assert_eq!(
+        heap.active_region_count(),
+        baseline,
+        "every blueprint is dead, so the payload region they shared must be \
+         released by the sweep rather than held to teardown"
     );
 }

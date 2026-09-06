@@ -115,18 +115,48 @@ passes a size threshold, which bounds how long a short-lived blueprint's
 payload can pin a long-lived one's.
 
 The cache maps a blueprint's address to its payload and holds a `Weak` to the
-blueprint beside it. The `Weak` is not an optimization: a dead blueprint's
-address can be reused by a new one, and a stale entry would hand the new
-blueprint the old one's code. A lookup therefore matches the address *and*
-confirms the weak still names it. Entries whose blueprint has died are swept,
-and a payload region is released when the last blueprint packed into it is
-gone. Teardown releases whatever is left, so a payload region is an ordinary
-counted region on every path — no second reclamation mechanism, no carve-out in
-the leak suite.
+blueprint beside it. Entries whose blueprint has died are swept, and a payload
+region is released when the last blueprint packed into it is gone. Teardown
+releases whatever is left, so a payload region is an ordinary counted region on
+every path — no second reclamation mechanism, no carve-out in the leak suite.
 
 A header holds a strong `Rc` to its blueprint, so a blueprint cannot die while
 a header made from it is alive, and the sweep cannot pull a payload out from
 under a live header.
+
+## An entry pins the blueprint it is keyed by
+
+An address identifies an allocation only while that allocation is alive. The
+allocator hands a freed block to the next allocation of the same layout, so a
+new blueprint could land on a dead one's key and be given the dead one's code.
+The JIT caches key entries the same way and answer the same question
+([jit.md](../jit.md)).
+
+The `Weak` beside the entry is the pin, and it pins by **holding** rather than
+by checking. A `Weak` keeps the `Rc`'s allocation alive after the last strong
+reference goes: the value is dropped, the block is not freed. A cached
+blueprint's address is reserved for as long as its entry lives, so no live
+blueprint is ever at it and a key collision cannot occur.
+
+The lookup still confirms the strong count before trusting a payload. That
+costs one load and is what a key without a pin would need; behind this one it
+never has anything to report.
+
+## Every entry holds one claim on its region
+
+A payload region counts the entries naming it — one **claim** per entry — and
+that count is what decides when the region is released. Nothing else reads it,
+so a wrong count is invisible where it is made and comes due far away, as pages
+held until teardown.
+
+The claims move by one per entry and in one direction each way: an insert adds
+an entry and a claim, the sweep removes both. The pin is what leaves no third
+motion, because an insert that displaced an entry would take that entry's claim
+with it. The invariant is that the claims sum to the number of entries, and a
+debug build checks it wherever either moves.
+
+Pinning and claim tests:
+[closure/tests/mod.rs](../../../src/value/closure/tests/mod.rs).
 
 ## The cache's reference is the one nothing on the heap points at
 
