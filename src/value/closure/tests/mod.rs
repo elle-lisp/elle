@@ -311,21 +311,23 @@ fn mint_and_drop_blueprints(heap: &mut FiberHeap, rounds: u8) -> Vec<usize> {
 }
 
 /// The cache is keyed by blueprint address, and the allocator hands a freed
-/// block back to the next allocation of the same layout. What keeps the key
-/// sound is the entry's `Weak`: it holds the blueprint's allocation after the
-/// last strong reference goes, so a cached address stays reserved and no live
-/// blueprint can be at it.
+/// block back to the next allocation of the same layout. The entry's `Weak` is
+/// what makes the key sound: it holds the blueprint's allocation after the last
+/// strong reference goes, so a cached address stays reserved and no live
+/// blueprint is ever at it. The JIT caches pin their keys the same way
+/// (src/vm/jit_entry/tests.rs).
 ///
-/// The trap this replaces: a test that mints one blueprint, drops it, mints a
-/// second and calls the case covered. It never reached the case, because the
-/// case cannot happen — and it read as if it usually did.
+/// The trap this replaces: a test that minted a blueprint at a dead one's
+/// address, drew a `reused` flag from the comparison, and reported it. The flag
+/// was always false, because the pin makes it false, and the prose beside it
+/// said the case was usually reached.
 ///
-/// The counter-factual is a key that does not pin, a raw address or an id
-/// drawn from a counter that wraps. The blueprints below would then collide,
-/// and one would be handed the other's bytecode — silent, and surfacing only
-/// as the wrong function running.
+/// The counter-factual is a key that does not pin. Replacing the entry's `Weak`
+/// with an empty one puts all 64 blueprints below at one address, where each
+/// would be handed the last one's bytecode — silent, and surfacing only as the
+/// wrong function running.
 #[test]
-fn a_cached_blueprints_address_is_never_handed_to_another() {
+fn a_cache_entry_pins_its_keyed_blueprint() {
     let mut heap = FiberHeap::new();
 
     let mut addresses = mint_and_drop_blueprints(&mut heap, 64);
@@ -336,8 +338,8 @@ fn a_cached_blueprints_address_is_never_handed_to_another() {
     assert_eq!(
         addresses.len(),
         minted,
-        "each dead blueprint's entry holds its allocation, so none of the {minted} \
-         addresses can be handed to a later blueprint"
+        "each dead blueprint's entry pins its allocation, so none of the \
+         {minted} addresses can be handed to a later blueprint"
     );
 }
 

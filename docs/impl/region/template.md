@@ -124,22 +124,23 @@ A header holds a strong `Rc` to its blueprint, so a blueprint cannot die while
 a header made from it is alive, and the sweep cannot pull a payload out from
 under a live header.
 
-## An address is a sound key because the `Weak` holds it
+## An entry pins the blueprint it is keyed by
 
-An address on its own is not an identity. The allocator hands a freed block
-back to the next allocation of the same layout, so a new blueprint could land
-on a dead one's key and be given the dead one's code.
+An address identifies an allocation only while that allocation is alive. The
+allocator hands a freed block to the next allocation of the same layout, so a
+new blueprint could land on a dead one's key and be given the dead one's code.
+The JIT caches key entries the same way and answer the same question
+([jit.md](../jit.md)).
 
-The `Weak` beside the entry is what stops that, and it stops it by **holding**
-rather than by checking. A `Weak` keeps the `Rc`'s allocation alive after the
-last strong reference goes: the value is dropped, the block is not freed. A
-cached blueprint's address is therefore reserved for as long as its entry
-lives, and no live blueprint can be at that address.
+The `Weak` beside the entry is the pin, and it pins by **holding** rather than
+by checking. A `Weak` keeps the `Rc`'s allocation alive after the last strong
+reference goes: the value is dropped, the block is not freed. A cached
+blueprint's address is reserved for as long as its entry lives, so no live
+blueprint is ever at it and a key collision cannot occur.
 
-So an insert never lands on a key an entry already holds. The lookup still
-confirms the strong count before trusting a payload, which costs one load and
-is what a key that does not pin its blueprint would need — but with this one,
-the confirmation never has anything to report.
+The lookup still confirms the strong count before trusting a payload. That
+costs one load and is what a key without a pin would need; behind this one it
+never has anything to report.
 
 ## Every entry holds one claim on its region
 
@@ -148,9 +149,12 @@ region is released. Nothing else reads the count, so a wrong one is invisible
 where it happens and shows up far away, as pages held until teardown.
 
 The count moves by one per entry and in one direction each way: an insert adds
-an entry and a claim, the sweep removes both. Because an insert never displaces
-a live entry, no other motion exists. The invariant is that the claims sum to
-the number of entries, and a debug build checks it at every insert.
+an entry and a claim, the sweep removes both. The pin is what leaves no third
+motion, because an insert that displaced an entry would take that entry's claim
+with it. The invariant is that the claims sum to the number of entries, and a
+debug build checks it wherever either moves.
+
+Pinning and claim tests: `src/value/closure/tests/mod.rs`.
 
 ## The cache's reference is the one nothing on the heap points at
 
