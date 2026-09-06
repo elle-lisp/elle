@@ -1,5 +1,7 @@
 # WASM Backend
 
+<!-- audited: 2026-09-06 -->
+
 LIR → WASM emission via `wasm-encoder`, execution via Wasmtime.
 
 ## Architecture
@@ -76,14 +78,22 @@ WASM closure host-side via `handle_fiber_resume` (in resume.rs).
 | File | Purpose |
 |------|---------|
 | `emit.rs` | LIR → WASM emission. `emit_module()` is the entry point. |
+| `emit/abi.rs` | The numbers the module and the host agree on: imports, memory slots, data-op codes. |
+| `emit/functions.rs` | Module sections, and the entry / closure function bodies. |
+| `instruction.rs` | LIR instruction → WASM instruction translation. |
+| `controlflow.rs` | CFG emission: loop + br_table dispatch, terminators. |
+| `suspend.rs` | CPS spill/restore and block splitting at suspending calls. |
+| `liveness.rs` | Which register slots are live at each suspend point. |
+| `outcome.rs` | `CallOutcome`: what a call reports back to emitted code. |
 | `handle.rs` | `HandleTable`: maps u64 handles to `Rc<HeapObject>`. |
 | `host.rs` | `ElleHost` state (handle table + primitives + suspension frames). |
-| `linker.rs` | Host function registration (`create_linker`), data op dispatch. |
+| `linker.rs` | Host function registration (`create_linker`); `linker/` holds the registrations and the data-op dispatch. |
 | `resume.rs` | Fiber resume chain (`drive_resume_chain`, `handle_fiber_resume`). |
 | `store.rs` | Engine/Store creation, `call_wasm_closure`, `resume_wasm_closure`, `run_module`. |
 | `lazy.rs` | `WasmTier`: per-closure WASM compilation and tiered dispatch. |
 | `regalloc.rs` | Register allocation for WASM locals. |
 | `mod.rs` | `eval_wasm()` entry point. |
+| `tests/` | The unit tests, one file per subject. |
 
 ## Host functions (WASM imports)
 
@@ -193,7 +203,7 @@ and hot closures are compiled to per-closure WASM modules on demand.
 `standalone_emittable` gate in `emit.rs` (`emit_single_closure` returns `None`;
 the tiered/precache callers fall back to the VM / full-module dispatch). A
 standalone module serves one closure through hosts whose suspension and
-tail-call imports are panic stubs (`lazy/env.rs`) and whose funcref table has a
+tail-call imports are panic stubs (`lazy/env.rs`, this directory) and whose funcref table has a
 single entry, so the gate refuses every shape whose execution would reach one:
 - No `TailCall`/`TailCallArrayMut` (`return_call_indirect` needs callee table
   indices + `rt_prepare_tail_call`)
@@ -203,7 +213,7 @@ single entry, so the gate refuses every shape whose execution would reach one:
 - No `MakeClosure` without module context (`ClosureId` resolution; nested
   closures stay on the bytecode VM)
 
-Pinned by `wasm::tests::standalone_emission_refuses_*`.
+Pinned by `wasm::tests::gate::standalone_emission_refuses_*`.
 
 **Self-recursive call optimization:** When `rt_call` detects a call to the
 same closure currently executing in WASM (same bytecode pointer), it dispatches
@@ -211,9 +221,11 @@ directly through the instance's funcref table (`call_indirect` on index 0)
 instead of creating a new Store. This makes recursive functions like fib
 efficient within a single WASM instance.
 
-## Known issues
+## What this tier does not do
 
-- `Eval` — needs dynamic module compilation (post-merge)
-- Port-edge-cases example slow under WASM — needs investigation
-- Tiered mode: per-call Store creation for cross-closure WASM calls is slow
-- `call_primitive` host function registered but unused (import required by module declaration)
+- `eval` — dynamic module compilation, which no WASM path has. The Makefile's
+  `WASM_SKIP` keeps `eval.lisp`/`eval-env.lisp` out of `make smoke-wasm`.
+- Tiered mode creates a `Store` per cross-closure call
+  (`call_precached_closure`), so such a call costs a store setup.
+- `call_primitive` is imported and never called: the module declaration lists
+  it, and every compiled call reaches a primitive through `rt_call`.

@@ -1,3 +1,5 @@
+// audited: 2026-09-06
+// docs/impl/values.md
 //! Value representation and tagged-union architecture
 //!
 //! This module implements the core value type for the Elle VM using a 16-byte
@@ -54,7 +56,9 @@ pub use fiberheap::FiberHeap;
 pub use capturemask::CaptureMask;
 
 // Export closure and fiber types
-pub use closure::{Closure, ClosureTemplate, TemplateProto, TemplateRef, VarargTag};
+pub use closure::{
+    Closure, ClosureTemplate, TemplateProto, TemplateRef, VarargTag, WasmClosureMeta,
+};
 pub use code::Code;
 pub use fiber::{
     BytecodeFrame, CallFrame, Fiber, FiberHandle, FiberStatus, Frame, SignalBits, SuspendedFrame,

@@ -28,7 +28,7 @@ Up: [..](../AGENTS.md)
 - [syntax.md](syntax.md) — **Syntax — a region-native immutable tree** The pre-analysis tree the reader produces, the expander rewrites, and the analyzer consumes.
 - [values.md](values.md) — **Values** Every Elle value is a 16-byte tagged union: an 8-byte tag and an 8-byte payload.
 - [vm.md](vm.md) — **VM** The VM is a stack-machine interpreter that executes bytecode.
-- [wasm.md](wasm.md) — **WASM Backend (more...)**
+- [wasm.md](wasm.md) — **WASM Backend** The WASM backend compiles Elle programs to WebAssembly and runs them under Wasmtime, over the same front end the bytecode VM uses.
 
 ## Directories
 

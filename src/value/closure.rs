@@ -1,3 +1,5 @@
+// audited: 2026-09-06
+// docs/impl/region/template.md
 //! Closure type for the Elle runtime
 //!
 //! `Closure` pairs a template with a captured environment and an optional
@@ -22,7 +24,7 @@ mod proto;
 
 pub use header::ClosureTemplate;
 pub use payload::{CodePayload, LocEntry, LocationTable, MaskRef, MergedSlots, StrKeys, VarargTag};
-pub use proto::{materialize, TemplateProto};
+pub use proto::{materialize, TemplateProto, WasmClosureMeta};
 
 /// A reference to a closure's per-definition code object.
 ///
@@ -192,8 +194,6 @@ impl PartialEq for Closure {
             && self.squelch_mask == other.squelch_mask
     }
 }
-
-// Tests migrated to tests/elle/value-closure.lisp
 
 #[cfg(test)]
 mod tests;
