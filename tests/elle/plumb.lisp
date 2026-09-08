@@ -115,12 +115,14 @@
 (pin-io-2 "io-abort" probe-io-abort 0 0)
 (pin-io-2 "io-refuse" probe-io-refuse 0 0)
 
-# The over-free gate closes here, over every probe above.
+# The over-free gate closes here, over every probe above and the load before it.
 (def over-frees-after (arena/over-frees))
-(check (assert (= over-frees-after over-frees-before)
-               (string "over-free: " (- over-frees-after over-frees-before)
-                       " direct double-release(s) across this run — a release "
-                       "that ran twice, which no leak rate can see "
+(check (assert (= over-frees-after 0)
+               (string "over-free: " over-frees-after
+                       " direct double-release(s) this process, "
+                       (- over-frees-after over-frees-before)
+                       " of them across the probes — a release that ran twice, "
+                       "which no leak rate can see "
                        "(docs/impl/region/diagnostics.md)")))
 
 # ── The split headline ────────────────────────────────────────────────

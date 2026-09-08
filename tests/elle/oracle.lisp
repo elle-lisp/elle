@@ -75,10 +75,16 @@
 # ── The over-free gate, opened here and closed after the last probe ───
 # `arena/over-frees` counts a direct release that ran twice — the bookkeeping
 # half of an over-free, and the half no rate can see, since a reference dropped
-# twice leaves the heap SMALLER (docs/impl/region/diagnostics.md). Two reads
-# cover every probe in every file below with no change to any of them. A debug
-# build aborts at the site on its own `debug_assert!`; this is what a RELEASE
-# pass reads, which is the pass a dashboard rate is ratcheted on.
+# twice leaves the heap SMALLER (docs/impl/region/diagnostics.md). A debug build
+# aborts at the site on its own `debug_assert!`; this is what a RELEASE pass
+# reads, which is the pass a dashboard rate is ratcheted on.
+#
+# The counter is monotonic and starts at 0, so the assertion is 0 outright
+# rather than a delta: that covers the stdlib load ahead of this line as well as
+# every probe in every file below, with no change to any of them. A regression
+# bad enough to over-free tends to do so while the stdlib is being compiled,
+# which a delta between two reads taken after that point cannot see. This read
+# is kept anyway, to say how many of the violations the probes themselves caused.
 #
 # It needs no discriminator. The gauge-live discipline exists because a dead
 # gauge and a reclaimed shape both read ~0, and here 0 is the assertion rather
@@ -104,12 +110,14 @@
 (include-file "probe/branch.lisp")
 (include-file "probe/native.lisp")
 
-# The over-free gate closes here, over every probe above.
+# The over-free gate closes here, over every probe above and the load before it.
 (def over-frees-after (arena/over-frees))
-(check (assert (= over-frees-after over-frees-before)
-               (string "over-free: " (- over-frees-after over-frees-before)
-                       " direct double-release(s) across this run — a release "
-                       "that ran twice, which no leak rate can see "
+(check (assert (= over-frees-after 0)
+               (string "over-free: " over-frees-after
+                       " direct double-release(s) this process, "
+                       (- over-frees-after over-frees-before)
+                       " of them across the probes — a release that ran twice, "
+                       "which no leak rate can see "
                        "(docs/impl/region/diagnostics.md)")))
 
 # ── The split headline — the number §1's protocol reads, printed by the tool ──
