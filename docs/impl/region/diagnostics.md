@@ -1,6 +1,6 @@
 # Region diagnostics and validation
 
-<!-- audited: 2026-09-07 -->
+<!-- audited: 2026-09-08 -->
 
 Implementation-facing: the instruments that tell correct from broken, and the
 test scaffolding that keeps the region rules honest.
@@ -26,6 +26,30 @@ test scaffolding that keeps the region rules honest.
   reclamation path walks the table (O(edges), no heap scan); the content scan survives
   only as this oracle, so a missed store-funnel edge (a silent leak) or a double-record
   (a UAF) detonates at the free site, naming the region and both edge sets, instead.
+- `(arena/over-frees)`: **the double-release counter.** A direct `DecrefRegion`
+  naming a region that is absent, or a counted one already at zero, is a release
+  that ran twice — precisely what an over-eager relocation replica produces.
+  `RegionStore::decref_reaches_zero` counts one there. A delta of 0 across a
+  window is the claim; any growth is a release that ran twice. The dashboards
+  read it once before their first probe and once after their last, so the gate
+  covers every probe in both files with no change to any of them.
+
+  The counter and the `debug_assert!` beside it are for different builds. A
+  debug run aborts at the violation, which is the louder report and names the
+  id; the counter is what a **release** build can see, where that assert is
+  compiled out. Keep both.
+
+  It sees the **bookkeeping** class and no other. A release that frees a region
+  a live value still points into leaves this flat — the ledger balanced, and
+  nothing wrong until something reads the page, which is what `--trace=guardfree`
+  is for. So a rate sees a reference that was never dropped, this sees one
+  dropped twice, and neither sees one dropped too early.
+
+  A cascade decref is exempt on both faces: one region may be referenced several
+  times by another's contents, so a later visit legitimately finds what an
+  earlier one freed or zeroed. `decref_if_present` is exempt for its absent slots
+  too — the macro transient and the embedding API reserve an id without
+  necessarily allocating into it. Immediate, so sampling allocates nothing.
 - `--trace=free` / `--trace=freebt`: a free-log recording each `free_runtime_region_pages`'s pages
   and a reason; `freebt` adds a Rust backtrace at a `DecrefRegion` about to drop
   a region to 0.
@@ -118,7 +142,7 @@ test scaffolding that keeps the region rules honest.
   reachable. A *cascade* free of a still-referenced region is a missing incref on
   the referrer: an escape site from Rule 5 was not covered.
 - `arena.rs` tag/object mismatch = a UAF surfacing as a wrong-tag deref;
-  `regionstore/refcount.rs` phantom/double-free assert (`decref_with_cascade`) =
+  `regionstore/refcount.rs` phantom/double-free assert (`decref_reaches_zero`) =
   a `DecrefRegion` for a region never allocated or already freed.
 - `--stats`: prints exit-time statistics, including a **page-claim size
   histogram** — one `[stats] page-claim size=<bytes> claims=<n> bytes=<n>` line
@@ -188,6 +212,9 @@ measured, but its *shape* — slope-based, shrink-only — is the rule.
 
 UAF is a separate axis, gated by `--trace=guardfree` under the full stdlib (the only
 trustworthy UAF oracle — plain-VM green is not evidence), not by the slope verdict.
+One class of it does reach the dashboards: both pin `arena/over-frees` at a delta of
+0 across their whole run (above), so a release that ran twice fails them. A page
+freed under a live reader still needs the oracle.
 
 ## The backend-tier gauge
 
