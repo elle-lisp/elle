@@ -36,6 +36,82 @@
     (k-arm-native x (string "w" i) true)
     (length (first x))))
 
+# ── the short-circuit face: an arm the source spells as one expression ────────
+# `and` and `or` carry no branch in the source and the lowerer gives them one:
+# each operand stores its value into the result slot, and every operand but the
+# last branches on that value — to the done block where the answer is settled, to
+# the next operand otherwise. So the done block is a merge reached through every
+# operand's block, and the operands are its arms
+# (docs/impl/region/replicate.md § "A short-circuit operand is an arm"). Only the
+# LAST operand inherits tail position, so it is the only arm that can carry a
+# frame-replacing tail call, and the replica the merge sends into it owes exactly
+# what the rows above owe — re-asked here because the arms are found by a
+# different route.
+
+(defn sc-read-len (a)
+  (length a:k))
+
+# (sc1) the arm MOVES `x` into its callee, whose owned-param release is what frees
+# it. A replica ahead of the call drops that reference first, and the callee's
+# read of `a:k` finds a freed page.
+(defn sc-moved-inner (x t)
+  (or t (sc-read-len x)))
+(defn sc-moved (i)
+  (let [r (sc-moved-inner {:k (string "m" i "-long")} false)]
+    (if r 1 0)))
+
+# (sc2) the arm's callee reaches `x` through its CAPTURED environment, which no
+# argument names. The funnel counted that hold when the env was built, so the
+# replica must leave the callee's read standing.
+(defn sc-captured-inner (x t)
+  (let [g (fn () (length x:k))]
+    (or t (g))))
+(defn sc-captured (i)
+  (let [r (sc-captured-inner {:k (string "c" i "-long")} false)]
+    (if r 1 0)))
+
+# (sc3) the arm's callee hands `x` BACK, so the caller's reference is minted by the
+# callee's own `Return` — after the relocated release has run. The counted env
+# edge is what holds the region across that gap.
+(defn sc-handback-inner (x t)
+  (let [g (fn () x)]
+    (or t (g))))
+(defn sc-handback (i)
+  (let [r (sc-handback-inner {:k (string "h" i "-long")} false)]
+    (length r:k)))
+
+# (sc4) `x` escapes into a container that outlives the frame before the branch, and
+# is read back out afterwards. The store's incref is what the replica must not
+# take below zero.
+(defn sc-store-inner (x t)
+  (push sink x)
+  (or t (tail-sink)))
+(defn sc-store (i)
+  (sc-store-inner {:k (string "s" i "-long")} false)
+  (length (get (get sink (%sub (length sink) 1)) :k)))
+
+# (sc5) a closure that ESCAPES captured `x`; calling it after the frame is gone must
+# still reach the captured region.
+(defn sc-escape-inner (x t)
+  (let [g (fn () (length x:k))]
+    (push sink g)
+    (or t (tail-sink))))
+(defn sc-escape (i)
+  (sc-escape-inner {:k (string "e" i "-long")} false)
+  (let [g (get sink (%sub (length sink) 1))]
+    (if (g) 1 0)))
+
+# (sc6) the arm's callee is a NATIVE, which pushes no frame — so the fall-through
+# runs the replica AND reaches the merge, where the same release stands. Two
+# copies on one path count once only because the value route nil-stamps the slot
+# it read; without the stamp the second decref names a freed and recycled region.
+(defn sc-native-inner (x t)
+  (or t (length "abcdef")))
+(defn sc-native (i)
+  (let [x {:k (string "n" i "-long")}]
+    (sc-native-inner x false)
+    (length x:k)))
+
 # ── the forward-cell face: a region no binding names ──────────────────────────
 # A prebound FORWARD CELL is reached through its binding's verdict rather than its
 # own, because a binding names the closure region its cell points AT (see

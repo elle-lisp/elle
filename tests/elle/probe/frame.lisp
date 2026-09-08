@@ -27,6 +27,19 @@
   1)
 (defn t23-arms [x t]
   (if t (t23-sink) (t23-sink2)))
+# `t23-or-arm` and `t23-and-arm` put the same strand past a SHORT-CIRCUIT merge.
+# `and` and `or` carry no branch in the source and the lowerer gives them one:
+# each operand stores its value into the result slot and every operand but the
+# last branches on it, so the done block is a merge every operand's block reaches
+# (docs/impl/region/replicate.md § "A short-circuit operand is an arm"). Only the
+# LAST operand inherits tail position, so it is the only arm that can carry a
+# frame-replacing tail call, and that one arm strands the whole release set the
+# enclosing scope emits past the merge. Each is driven through its own arm: `or`
+# reaches the last operand on a FALSE first operand, `and` on a true one.
+(defn t23-or-arm [x t]
+  (or t (t23-sink)))
+(defn t23-and-arm [x t]
+  (and t (t23-sink)))
 # `t23-captured`'s parameter is reached by the tail callee through its CAPTURED
 # environment — the path no argument names and no callee region describes. It is
 # admitted all the same: the funnel counted the closure's hold when the env was

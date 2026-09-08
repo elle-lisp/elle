@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-08
 // Guardfree pins for the frame-exit relocation and the deferred channels a tail call rides.
 //
 // docs/analysis/testing.md
@@ -29,8 +29,13 @@ fn region_native_tail_return_uaf() {
 // captured environment, a mutable accumulator the callee fills, a value already
 // stored into a longer-lived container, a value returned through the callee, and
 // an argument a parked frame resolves after the resume. Releasing any of them
-// early faults on the read below — SIGSEGV under guardfree. The leak face is
-// `region-tail-frame-exit.lisp`.
+// early faults on the read below — SIGSEGV under guardfree. It drives the same
+// set once more at a merge the lowerer builds out of an `and`/`or`'s operands,
+// where the arms are found by a different route and only the last operand can
+// carry the call (docs/impl/region/replicate.md § "A short-circuit operand is an
+// arm") — the `sc-*` rows. The leak face is `region-tail-frame-exit.lisp` and,
+// for the short-circuit rows, the `tail-frame-exit-or-arm` /
+// `tail-frame-exit-and-arm` probes of `tests/elle/oracle.lisp`.
 #[test]
 fn region_tail_frame_exit_uaf() {
     run_elle_script_with_args(

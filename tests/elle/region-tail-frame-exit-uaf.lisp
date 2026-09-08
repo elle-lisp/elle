@@ -99,7 +99,13 @@
 (var p1 0)
 (var q1 0)
 (var r1 0)
-(while (%lt i 1350)
+(var sc1 0)
+(var sc2 0)
+(var sc3 0)
+(var sc4 0)
+(var sc5 0)
+(var sc6 0)
+(while (%lt i 1170)
   (assign a (a-moved i))
   (assign b (b-moved-beside i))
   (assign c (c-callee-local i))
@@ -138,9 +144,15 @@
   (assign p1 (p-read i))
   (assign q1 (q-read i))
   (assign r1 (r-lambda-arg i))
+  (assign sc1 (sc-moved i))
+  (assign sc2 (sc-captured i))
+  (assign sc3 (sc-handback i))
+  (assign sc4 (sc-store i))
+  (assign sc5 (sc-escape i))
+  (assign sc6 (sc-native i))
   (assign k (c-plain i))
-  # The sink is a module-level container by design (witness f stores into it);
-  # drain it so the driver's own retention stays flat.
+  # The sink is a module-level container by design (witnesses f, sc4 and sc5
+  # store into it); drain it so the driver's own retention stays flat.
   (assign sink @[])
   (assign i (%add i 1)))
 
@@ -201,5 +213,22 @@
 (assert (%gt p1 0) "container freed under the element read out of it")
 (assert (%gt q1 0) "container freed under an opcode read's borrow")
 (assert (%gt r1 0) "capture freed under the lambda argument that holds it")
+
+(assert (%gt sc1 0)
+        "the region the short-circuit arm moved into its callee was freed first")
+(assert (%gt sc2 0)
+        "the region the short-circuit arm's callee captured was freed before the \
+         call")
+(assert (%gt sc3 0)
+        "the region the short-circuit arm's callee handed back was freed under \
+         the caller")
+(assert (%gt sc4 0)
+        "a value the short-circuit arm stored into a longer-lived container was \
+         freed")
+(assert (%gt sc5 0)
+        "a value the short-circuit arm's escaping closure captured was freed")
+(assert (%gt sc6 0)
+        "the short-circuit replica and the merge's own release both ran on one \
+         path")
 
 (println "region-tail-frame-exit-uaf: ok")

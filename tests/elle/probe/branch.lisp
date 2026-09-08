@@ -187,7 +187,7 @@
                          {:type :a :v v} v
                          _ 0)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-# The frame-exit release, eleven CLOSED controls. A frame-replacing tail call means
+# The frame-exit release, thirteen CLOSED controls. A frame-replacing tail call means
 # everything the lowerer emits after it runs only on the NATIVE fall-through, so a
 # release landing there is emitted where control may never arrive; the close moves
 # that one release ahead of the `TailCall` — admitted where escape proves the frame
@@ -218,6 +218,17 @@
 # `tail-frame-exit-fold-driver` is the other end of the hand-back's enumeration: a
 # returned accumulator the tail callee reaches through NEITHER route, so its
 # `Return` mints nothing against the region and the relocated release is the last.
+# `tail-frame-exit-or-arm` and `tail-frame-exit-and-arm` are the SHORT-CIRCUIT face
+# of the merge, and a strand of their own rather than a second reading of
+# `tail-frame-exit-arms`: an `and`/`or` done block is a merge the lowerer builds
+# out of operands the source spells as one expression, so the arms are found by a
+# different route and only the last operand can carry the tail call
+# (docs/impl/region/replicate.md § "A short-circuit operand is an arm").
+# `tail-frame-exit-arms` drives an `if`, so it read 0 throughout this defect and
+# would read 0 through its regression. The pair must stay together: `and`'s branch
+# is `or`'s mirror — the first operand settles on FALSE rather than on true — so
+# the two reach the same arm through opposite conditions and a reading that
+# recovered one polarity alone would close one of them.
 # Undeclared, like `param-used-arm`, so a regression trips the
 # completeness gate loudly rather than being absorbed as F1a scratch. The
 # counterfactual and the boundary rows live in
@@ -299,6 +310,20 @@
                      (def @j 0)
                      (while (%lt j b)
                        (t23-fold-drive 3)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "tail-frame-exit-or-arm"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t23-or-arm (list 1 2 3) false)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "tail-frame-exit-and-arm"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t23-and-arm (list 1 2 3) true)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # The three `break-value*` probes are CLOSED controls for the break TRANSFER
 # (docs/impl/region/mechanism.md § "`break` transfers its value"): the value a

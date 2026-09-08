@@ -345,24 +345,3 @@ fn region_break_loop_replica_uaf() {
         &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
     );
 }
-
-// Guard — an `and`/`or` done block is a merge its operands' blocks reach, so it
-// inherits the relocation point of the last operand's frame-replacing tail call
-// and a release emitted past it is REPLICATED into that arm
-// (docs/impl/region/replicate.md § "A short-circuit operand is an arm"). Each
-// replica fires on a path that ran no release before, so it owes the same count
-// argument every other replica owes: the region the arm MOVES into its callee is
-// exempt, the ones the callee reaches through its captured environment or hands
-// back are held by counted edges, and a native callee's fall-through runs the
-// replica and the merge's own copy on one path. Under the UAF oracle each of
-// those faults at the read; the harness runs the file under its vm/jit policies
-// WITHOUT the oracle, where the freed page is stale but intact and the
-// functional asserts pass. The leak face is
-// tests/elle/region-shortcircuit-tail-arm.lisp.
-#[test]
-fn region_shortcircuit_tail_arm_uaf() {
-    run_elle_script_with_args(
-        "region-shortcircuit-tail-arm-uaf",
-        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
-    );
-}
