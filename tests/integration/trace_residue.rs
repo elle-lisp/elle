@@ -1,8 +1,7 @@
-// audited: 2026-09-07
-// `--trace=residue` prints the teardown leak dump (docs/impl/region/
-// diagnostics.md § Diagnostics): after the sweep, one `arena/dump` line per
-// surviving region and one `[trace:residue] edge a -> b` line per cross-region
-// reference among them.
+// audited: 2026-09-08
+// The `--trace=residue` teardown leak dump: one region line per survivor,
+// one edge line per cross-region reference among them.
+// docs/impl/region/diagnostics.md
 
 use std::process::Command;
 
