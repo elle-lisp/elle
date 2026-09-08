@@ -29,10 +29,18 @@ test scaffolding that keeps the region rules honest.
 - `(arena/over-frees)`: **the double-release counter.** A direct `DecrefRegion`
   naming a region that is absent, or a counted one already at zero, is a release
   that ran twice — precisely what an over-eager relocation replica produces.
-  `RegionStore::decref_reaches_zero` counts one there. A delta of 0 across a
-  window is the claim; any growth is a release that ran twice. The dashboards
-  read it once before their first probe and once after their last, so the gate
-  covers every probe in both files with no change to any of them.
+  `RegionStore::decref_reaches_zero` counts one there. The counter is monotonic
+  and starts at 0, so **0 is the claim** — not a delta. The dashboards read it
+  before their first probe and after their last, and assert the second read is
+  0: that covers every probe in both files with no change to any of them, and
+  the stdlib load ahead of them as well. The delta between the two reads says
+  how many of the violations the probes themselves caused, which is what the
+  failure message reports.
+
+  Asserting the delta instead would miss the everyday shape. A relocation
+  regression bad enough to over-free tends to over-free while the stdlib is
+  being compiled, which is before either read — so the delta is 0 and the run
+  passes while the process is already corrupt.
 
   The counter and the `debug_assert!` beside it are for different builds. A
   debug run aborts at the violation, which is the louder report and names the
@@ -212,9 +220,9 @@ measured, but its *shape* — slope-based, shrink-only — is the rule.
 
 UAF is a separate axis, gated by `--trace=guardfree` under the full stdlib (the only
 trustworthy UAF oracle — plain-VM green is not evidence), not by the slope verdict.
-One class of it does reach the dashboards: both pin `arena/over-frees` at a delta of
-0 across their whole run (above), so a release that ran twice fails them. A page
-freed under a live reader still needs the oracle.
+One class of it does reach the dashboards: both pin `arena/over-frees` at 0 over the
+whole process (above), so a release that ran twice fails them. A page freed under a
+live reader still needs the oracle.
 
 ## The backend-tier gauge
 
