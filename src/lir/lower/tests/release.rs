@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-08
 // ── Region-lifecycle: decref/release emission ────────────────────
 //
 // Where the lowerer puts each region's release, split by the question each
@@ -13,6 +13,8 @@
 // - `arms` — releases across branch arms: a tail-calling arm must not hold back
 //   its falling-through siblings, and a re-storable capture cell's slot is not
 //   a release route.
+// - `shortcircuit` — the same placement across the branch `and`/`or` lower to,
+//   whose arms are their operands.
 
 // Re-glob the parent's test imports so each submodule can `use super::*;`.
 use super::*;
@@ -22,6 +24,8 @@ mod breakexit;
 mod emission;
 mod frameexit;
 mod order;
+mod shortcircuit;
+
 /// The local slots each block of `func` releases by value, tagged with whether
 /// that block ends in a frame-replacing `TailCall`.
 ///
