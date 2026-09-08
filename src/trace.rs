@@ -1,3 +1,4 @@
+// audited: 2026-09-07
 //! Trace macro for runtime-gated debug output.
 //!
 //! Gates on the VM's `runtime_config.has_trace_bit` — one relaxed atomic load
@@ -33,6 +34,12 @@ pub(crate) fn boot() -> bool {
 /// same static-CLI gating as `boot` (no VM trace cell exists yet).
 pub(crate) fn census() -> bool {
     crate::config::get().has_trace("census")
+}
+
+/// True when `--trace=residue` is active. Read once, at teardown — same
+/// static-CLI gating as `boot`/`census` (the VM is being torn down).
+pub(crate) fn residue() -> bool {
+    crate::config::get().has_trace("residue")
 }
 
 /// True when `--trace=compile` is active. Compile phases run on the

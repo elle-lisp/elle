@@ -1,3 +1,4 @@
+// audited: 2026-09-07
 //! The process runtime: one lifecycle for compile/evaluate, shared by every
 //! entry path (`elle foo.lisp`, the REPL, and the embedding API).
 //!
@@ -323,6 +324,22 @@ impl Runtime {
         // (3) Observe the result. Every region is mortal, so every surviving
         //     region is leaked residue.
         let regions: Vec<(u32, u32, usize)> = unsafe { &*heap_ptr }.region_info_vec();
+
+        // The teardown leak dump (docs/impl/region/diagnostics.md §
+        // Diagnostics): each survivor's `arena/dump` line, then the
+        // cross-region edges among them — enough to compute externally-pinned
+        // roots (rc > in-edges) and reference cycles offline.
+        if crate::trace::residue() {
+            let heap = unsafe { &*heap_ptr };
+            eprintln!(
+                "[trace:residue] live regions after teardown: {}",
+                regions.len()
+            );
+            heap.debug_dump();
+            for (referrer, referent) in heap.cross_ref_edges() {
+                eprintln!("[trace:residue] edge {} -> {}", referrer, referent);
+            }
+        }
 
         TeardownReport {
             live_regions: regions.len(),

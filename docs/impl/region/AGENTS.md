@@ -11,7 +11,7 @@ Up: [..](../AGENTS.md)
 - [bindings.md](bindings.md) — **Reassigned mutable bindings are 1-slot containers** Implementation-facing: how the solver and lowerer handle a binding that is reassigned over its lifetime.
 - [compensate.md](compensate.md) — **Per-arm compensation** The releases a branch adds one per arm, each funded by a retain on its own node.
 - [ctx.md](ctx.md) — **NativeCtx — explicit allocation: every value names its region and heap** Implementation-facing.
-- [diagnostics.md](diagnostics.md) — **Region diagnostics and validation (more...)**
+- [diagnostics.md](diagnostics.md) — **Region diagnostics and validation** Implementation-facing: the instruments that tell correct from broken, and the test scaffolding that keeps the region rules honest.
 - [effects.md](effects.md) — **Native region effects: declared, not guessed (more...)**
 - [errors.md](errors.md) — **Rich errors — one region-coherent struct routine + `rich_error!`** Implementation-facing.
 - [generations.md](generations.md) — **Region generations: stale derefs detonate in debug builds** The per-region generation counter and page stamps that turn a stale region deref into a debug-build panic at the deref site.
