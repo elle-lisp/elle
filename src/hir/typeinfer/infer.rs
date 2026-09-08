@@ -2,7 +2,7 @@
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
 //! The inference pass and the environment it carries: one context owns every
-//! map a pass reads and rewrites, so each per-node rule names only what it uses.
+//! map a pass reads and rewrites. Each per-node rule names only what it uses.
 //!
 //! - `fixpoint` — the ascent: passes over the whole tree until the environment
 //!   stops moving (docs/impl/typeinfer.md).

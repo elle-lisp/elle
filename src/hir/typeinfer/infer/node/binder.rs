@@ -1,8 +1,9 @@
 // audited: 2026-09-08
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
-//! What a binder records: the type a `let`, a `def`, a loop binding or a cell
-//! write leaves in the environment for every later read of that binding.
+//! What a binder records: the type a `let`, a `def` or a cell write leaves for
+//! every later read of that binding. A lambda init also records its body type,
+//! which is what the binding's callers read.
 
 use super::*;
 

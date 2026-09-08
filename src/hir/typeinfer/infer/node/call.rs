@@ -2,7 +2,7 @@
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
 //! What a call proves: the arguments it forwards to the callee's parameters,
-//! and the type its own result carries away (docs/impl/typeinfer.md).
+//! and the type its own result carries away.
 
 use super::*;
 use crate::hir::expr::CallArg;
