@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-08
 //! The relocation points that say which paths a release still has to cover.
 //! A frame-replacing tail call opens one and a `break` opens one; a branch merge
 //! inherits them.
@@ -107,9 +107,10 @@ impl<'a> Lowerer<'a> {
     /// branch's collection to restore, and the points already covering the
     /// position this branch is entered at.
     ///
-    /// The three branch lowerings bracket their arms with this pair; a branch
-    /// nested inside an arm therefore collects into its own list and hands its
-    /// union up as that arm's contribution.
+    /// Each branch lowering brackets its arms with this pair — `if`, `cond`,
+    /// `match`, and the branch `and`/`or` compile to, whose arms are their
+    /// operands. A branch nested inside an arm therefore collects into its own
+    /// list and hands its union up as that arm's contribution.
     ///
     /// The **inherited** half is the merge's second source. A merge is reached
     /// only through the branch, so the paths that arrive at it are the paths that

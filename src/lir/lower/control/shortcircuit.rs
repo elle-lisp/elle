@@ -19,6 +19,13 @@ impl<'a> Lowerer<'a> {
         self.current_func.num_locals += 1;
         let done_label = self.fresh_label();
 
+        // Every operand's block branches or jumps to the done block, so each is an
+        // ARM of the branch this lowering writes and the done block is their merge
+        // (docs/impl/region/replicate.md § "A short-circuit operand is an arm").
+        // Read while this branch's own entry block is still open, exactly as
+        // `lower_if` and `lower_cond` read it.
+        let branch_hoists = self.begin_branch_arms();
+
         for (i, expr) in exprs.iter().enumerate() {
             let val_reg = self.lower_expr(expr)?;
 
@@ -44,18 +51,21 @@ impl<'a> Lowerer<'a> {
                     then_label: next_label,
                     else_label: done_label,
                 });
+                self.seal_arm_hoists();
                 self.finish_block();
 
                 self.current_block = BasicBlock::new(next_label);
             } else {
                 // Last expression: jump to done (value already in slot)
                 self.terminate(Terminator::Jump(done_label));
+                self.seal_arm_hoists();
                 self.finish_block();
             }
         }
 
         // Done block: load result from slot
         self.current_block = BasicBlock::new(done_label);
+        self.open_branch_merge(branch_hoists);
         let result_reg = self.fresh_reg();
         self.emit(LirInstr::LoadLocal {
             dst: result_reg,
@@ -76,6 +86,9 @@ impl<'a> Lowerer<'a> {
         let result_slot = self.current_func.num_locals;
         self.current_func.num_locals += 1;
         let done_label = self.fresh_label();
+
+        // The arms and the merge are `lower_and`'s, with the branch inverted.
+        let branch_hoists = self.begin_branch_arms();
 
         for (i, expr) in exprs.iter().enumerate() {
             let val_reg = self.lower_expr(expr)?;
@@ -100,16 +113,19 @@ impl<'a> Lowerer<'a> {
                     then_label: done_label, // ← inverted from lower_and
                     else_label: next_label, // ← inverted from lower_and
                 });
+                self.seal_arm_hoists();
                 self.finish_block();
 
                 self.current_block = BasicBlock::new(next_label);
             } else {
                 self.terminate(Terminator::Jump(done_label));
+                self.seal_arm_hoists();
                 self.finish_block();
             }
         }
 
         self.current_block = BasicBlock::new(done_label);
+        self.open_branch_merge(branch_hoists);
         let result_reg = self.fresh_reg();
         self.emit(LirInstr::LoadLocal {
             dst: result_reg,
