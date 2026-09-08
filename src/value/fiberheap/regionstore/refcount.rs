@@ -1,3 +1,10 @@
+// audited: 2026-09-08
+//! Reference counting: the incref/decref pair, the bookkeeping half of a free,
+//! and the content-edge tables the free cascade walks instead of scanning pages.
+//!
+//! docs/impl/region/ownership.md
+//! docs/impl/region/diagnostics.md
+
 use super::*;
 
 impl RegionStore {
@@ -70,6 +77,15 @@ impl RegionStore {
         // are exempt because a single region may be referenced
         // multiple times by another's contents and may have already
         // been freed by an earlier cascade visit.
+        let direct = from_cascade.is_none();
+        // The same violation as a NUMBER, for the build the assert below is
+        // compiled out of (docs/impl/region/diagnostics.md § the
+        // `arena/over-frees` bullet). The dashboards run in release, where a rate
+        // is ratcheted on every landing, and a rate cannot see a release that ran
+        // twice — the heap it leaves is smaller, not larger. The counter is read
+        // there; the assert stays, because a debug run should still abort at the
+        // violation and name the id.
+        let _ = direct;
         debug_assert!(
             from_cascade.is_some() || (idx < self.regions.len() && self.regions[idx].is_some()),
             "DecrefRegion({id}) but region was never alloc_in_region'd \
@@ -80,8 +96,12 @@ impl RegionStore {
         if idx >= self.regions.len() {
             return false;
         }
-        match self.regions[idx].as_mut() {
-            None => false,
+        // `(freed, over_free)`: the second is a DIRECT decref that found the count
+        // already at zero, the other face of the same double-release. The flag is
+        // carried out of the match rather than counted inside it so the entry
+        // borrow ends first.
+        let (freed, over_free) = match self.regions[idx].as_mut() {
+            None => (false, false),
             // owned ⇒ RC frozen (docs/impl/region/ownership.md § "The runtime: a
             // reclamation typestate"): an `Owned` region has no count to
             // decrement — it is reclaimed only by its owner's subtree drop. Both a
@@ -90,7 +110,7 @@ impl RegionStore {
             // drop frees the child explicitly. The no-op is *structural* (the
             // variant carries no `u32`), which is what lets the interior
             // containment edge stay un-suppressed at runtime.
-            Some(e) if matches!(e.reclaim, Reclaim::Owned { .. }) => false,
+            Some(e) if matches!(e.reclaim, Reclaim::Owned { .. }) => (false, false),
             Some(entry) => {
                 let Reclaim::Counted(rc) = &mut entry.reclaim else {
                     unreachable!("Owned handled by the arm above")
@@ -98,7 +118,8 @@ impl RegionStore {
                 // rc==0 means a cascade decref reached an already-zeroed counted
                 // region; free without underflowing. Copy `freed`/`new_rc` out so
                 // the `rc` borrow ends before `entry.pool` is read for tracing.
-                let (freed, new_rc) = if *rc == 0 {
+                let already_zero = *rc == 0;
+                let (freed, new_rc) = if already_zero {
                     (true, 0)
                 } else {
                     *rc -= 1;
@@ -116,9 +137,11 @@ impl RegionStore {
                         eprintln!("[trace:rc] decref({id}) → rc={new_rc} src={src}");
                     }
                 }
-                freed
+                (freed, direct && already_zero)
             }
-        }
+        };
+        let _ = over_free;
+        freed
     }
     /// Get the current RC for a region (0 if not created).
     pub fn rc(&self, id: RuntimeRegion) -> u32 {

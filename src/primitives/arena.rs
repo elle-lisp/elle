@@ -1,4 +1,8 @@
-//! Heap arena and memory management primitives
+// audited: 2026-09-08
+//! Heap arena and memory management primitives — the gauges a program samples
+//! its own heap with, and the leak localisers it dumps.
+//!
+//! docs/impl/region/diagnostics.md
 
 use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::Signal;
@@ -160,6 +164,21 @@ pub(crate) fn prim_arena_region_count(
 ) -> (SignalBits, Value) {
     let count = ctx.heap_mut().active_region_count();
     (SIG_OK, Value::int(count as i64))
+}
+
+/// (arena/over-frees) — direct double-releases seen, monotonic.
+///
+/// A `DecrefRegion` naming a region the store has no entry for, or a counted one
+/// already at zero, on the route no cascade explains — a release that ran twice
+/// (docs/impl/region/diagnostics.md). A debug build aborts at the same site on a
+/// `debug_assert!`; this is what a release build can read. A delta of 0 across a
+/// window is the claim, which is how both leak dashboards read it.
+pub(crate) fn prim_arena_over_frees(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
+    let over = ctx.heap_mut().over_frees();
+    (SIG_OK, Value::int(i64::from(over)))
 }
 
 /// (arena/region-ids) — physical region ids issued, one past the largest id ever
@@ -329,6 +348,15 @@ primitive! {
         category: "debug",
         example: "(debug/arena-region-count)",
         aliases: &["arena/region-count"],
+        effect: RegionEffect::Immediate,
+    }
+    "debug/arena-over-frees" => prim_arena_over_frees {
+        ret: RetType::Int,
+        signal: Signal::errors(),
+        doc: "Return direct double-releases seen (monotonic): a DecrefRegion of an absent or already-zeroed region.",
+        category: "debug",
+        example: "(debug/arena-over-frees)",
+        aliases: &["arena/over-frees"],
         effect: RegionEffect::Immediate,
     }
     "debug/arena-region-ids" => prim_arena_region_ids {

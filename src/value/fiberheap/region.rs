@@ -1,9 +1,13 @@
+// audited: 2026-09-08
 //! `FiberHeap` region-allocator surface.
 //!
 //! Everything that allocates into, reference-counts, adopts, or inspects the
 //! per-heap `RegionStore` lives here, separate from the instance-rider state
 //! and the custom-allocator/teardown paths. These are inherent methods, so
 //! method-call syntax resolves them without any re-export.
+//!
+//! docs/impl/region/ownership.md
+//! docs/impl/region/diagnostics.md
 
 use crate::hir::region::RuntimeRegion;
 use crate::value::heap::HeapObject;
@@ -264,6 +268,13 @@ impl FiberHeap {
     /// Number of active regions.
     pub fn active_region_count(&self) -> usize {
         self.region_store.active_region_count()
+    }
+
+    /// Direct double-releases this heap has seen — the backend of the
+    /// `arena/over-frees` gauge (docs/impl/region/diagnostics.md). Monotonic; a
+    /// delta of 0 across a window is the claim.
+    pub fn over_frees(&self) -> u32 {
+        self.region_store.over_frees()
     }
 
     /// Physical region ids this heap has issued — the backend of the

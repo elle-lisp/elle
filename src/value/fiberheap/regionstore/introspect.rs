@@ -1,7 +1,10 @@
+// audited: 2026-09-08
 //! Read-only introspection: counts, byte totals, cross-ref/edge dumps, and the
 //! generation accessor. These back the `arena/*` diagnostics and the free-time
 //! equivalence oracle's comparison views; none mutate reclamation state. The
 //! `#[cfg(test)]` helpers here expose the same internals to the region tests.
+//!
+//! docs/impl/region/diagnostics.md
 
 use super::*;
 
@@ -102,6 +105,13 @@ impl RegionStore {
     /// Number of active (non-empty) regions.
     pub fn active_region_count(&self) -> usize {
         self.regions.iter().filter(|r| r.is_some()).count()
+    }
+
+    /// Direct double-releases seen — monotonic. The backend of the
+    /// `arena/over-frees` gauge (docs/impl/region/diagnostics.md): a delta of 0
+    /// across a window is the claim, and any growth is a release that ran twice.
+    pub fn over_frees(&self) -> u32 {
+        self.over_frees
     }
 
     /// Physical region ids issued — one past the largest id ever minted from

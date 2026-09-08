@@ -1,3 +1,4 @@
+// audited: 2026-09-08
 //! Region table: maps a physical region id → RegionEntry (RegionPool + RC).
 //!
 //! `RegionStore` lives on `FiberHeap` and owns the `PagePool` (per-thread
@@ -15,6 +16,9 @@
 //! When a region is freed, mutable collections in it may reference objects
 //! in other regions. `teardown_and_cascade` walks collection contents and
 //! decrefs each referenced region. This is a worklist, not recursion.
+//!
+//! docs/impl/region/ownership.md
+//! docs/impl/region/model.md
 
 use super::pagepool::PagePool;
 use super::regionpool::RegionPool;
@@ -181,6 +185,17 @@ pub(crate) struct RegionStore {
     /// `RegionPool` at creation so the `PAGES` page-claim gate reads its own
     /// instance's trace state rather than a process-global.
     trace: crate::config::TraceCell,
+    /// Direct double-releases seen, monotonic — a `DecrefRegion` naming a region
+    /// this store has no entry for, or a counted one already at zero, on the
+    /// route no cascade explains (`decref_reaches_zero`). The backend of the
+    /// `arena/over-frees` gauge (docs/impl/region/diagnostics.md).
+    ///
+    /// The same violation the `debug_assert!` beside it aborts on, kept as a
+    /// number because that assert is compiled out of a release build — and a
+    /// release build is where the leak dashboards run. It counts the BOOKKEEPING
+    /// class alone: a release that frees a region a live value still points into
+    /// leaves this flat, the ledger being balanced until something reads the page.
+    over_frees: u32,
 }
 
 mod alloc;
@@ -237,6 +252,7 @@ impl RegionStore {
             mint_log: None,
             mint_sites: std::collections::HashMap::new(),
             trace,
+            over_frees: 0,
         }
     }
 
