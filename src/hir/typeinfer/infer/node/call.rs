@@ -52,22 +52,20 @@ impl Infer<'_> {
                     }
                 }
             }
-            // A call to a lambda whose own body is being inferred (a
-            // recursive call) contributes BOTTOM — the recursive
-            // contribution to a return-type join is exactly the base
-            // cases (Kleene iteration from below). It must NOT read the
-            // running estimate: on the first pass that is Top (the body
-            // was walked before any call site forwarded its parameters),
-            // and Top can never come back down through a join. Argument
-            // forwarding above still runs — a self-call is usually the
-            // sole source of its own parameters' step types.
-            if self.selfrec.contains(&callee_binding) {
-                return TypeInterner::BOTTOM;
-            }
-            // Return type = whatever the callee's body returns.
-            // Only use BOTTOM for known lambdas (in lambda_params) where the
-            // body type hasn't been computed yet. For unknown callees (primitives,
-            // imports), return TOP to avoid unsound rewrites.
+            // Return type = whatever the callee's body returns, as the
+            // previous pass left it.
+            //
+            // A SELF-recursive call takes no exception here: it reads the map
+            // every other call reads. On the first pass the callee's own body
+            // has not been walked yet, so the map holds no entry for it, and
+            // BOTTOM is exactly what the recursive contribution to a
+            // return-type join is worth — the base cases. Every later pass
+            // reads the estimate the pass before it computed, which is Kleene
+            // iteration from below and converges on the least fixpoint
+            // (docs/impl/typeinfer.md § "What a call contributes").
+            //
+            // For unknown callees (primitives, imports) TOP, to avoid unsound
+            // rewrites.
             if self.lambda_params.contains_key(&callee_binding) {
                 return self
                     .lambda_body_type

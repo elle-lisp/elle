@@ -10,23 +10,15 @@ impl Infer<'_> {
     /// Let/Letrec — seed binding types from init values.
     pub(super) fn infer_let(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> TyId {
         for (binding, init) in bindings {
-            let is_lambda_init = matches!(&unwrap_make_cell(init).kind, HirKind::Lambda { .. });
-            if is_lambda_init {
-                self.selfrec.push(*binding);
-            }
             let ty = self.infer(init);
-            if is_lambda_init {
-                self.selfrec.pop();
-            }
             self.hir_types.insert(init.id, ty);
             // For lambda bindings (possibly cell-wrapped when
-            // self-recursive/captured), track their body's return type.
-            // REPLACE, don't join: on the first pass a self-recursive
-            // body reads its own parameters before any call site has
-            // forwarded them, so it computes Top — and a join can never
-            // come back down from Top on the later passes that know
-            // better. Each pass re-derives the body type from strictly
-            // more information; the last pass's value is the answer.
+            // self-recursive/captured), record their body's return type:
+            // this is what every call to the binding reads, a self-call
+            // included (docs/impl/typeinfer.md).
+            // REPLACE, don't join: each pass re-derives the body type from
+            // strictly more information, and a join could never come back
+            // down from the estimate an earlier pass computed with less.
             if let HirKind::Lambda { body: lam_body, .. } = &unwrap_make_cell(init).kind {
                 let body_ty = self
                     .hir_types
@@ -62,25 +54,17 @@ impl Infer<'_> {
 
     /// Assign/Define — update binding type. A Define whose value is a
     /// lambda (the in-function `defn` idiom — a letrec*-semantics local)
-    /// records its return type exactly like a Let/Letrec lambda binding,
-    /// with the same selfrec discipline; `collect_lambda_info` records its
-    /// params.
+    /// records its return type exactly like a Let/Letrec lambda binding;
+    /// `collect_lambda_info` records its params.
     pub(super) fn infer_define(&mut self, target: Binding, value: &Hir) -> TyId {
-        let is_lambda_init = matches!(&unwrap_make_cell(value).kind, HirKind::Lambda { .. });
-        if is_lambda_init {
-            self.selfrec.push(target);
-        }
         let ty = self.infer(value);
-        if is_lambda_init {
-            self.selfrec.pop();
-            if let HirKind::Lambda { body: lam_body, .. } = &unwrap_make_cell(value).kind {
-                let body_ty = self
-                    .hir_types
-                    .get(&lam_body.id)
-                    .copied()
-                    .unwrap_or(TypeInterner::TOP);
-                self.lambda_body_type.insert(target, body_ty);
-            }
+        if let HirKind::Lambda { body: lam_body, .. } = &unwrap_make_cell(value).kind {
+            let body_ty = self
+                .hir_types
+                .get(&lam_body.id)
+                .copied()
+                .unwrap_or(TypeInterner::TOP);
+            self.lambda_body_type.insert(target, body_ty);
         }
         self.hir_types.insert(value.id, ty);
         let old = self

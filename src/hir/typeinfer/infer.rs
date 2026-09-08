@@ -73,10 +73,10 @@ pub(super) struct Infer<'a> {
     /// skipped unknown is exactly the unsound "typed callers alone prove the
     /// parameter" hole. Here Top contributes honestly.
     param_joins: HashMap<Binding, TyId>,
-    /// The letrec lambdas whose own bodies are currently being walked, so a
-    /// binder knows which body it is inside. A traversal stack, not
-    /// environment: it is empty at the start and end of every pass.
-    selfrec: Vec<Binding>,
+    /// The entries the ascent gave up on: an estimate still moving when the
+    /// pass budget ran out is held at Top for the rest of the run, so nothing
+    /// reads a proof out of it (`fixpoint.rs`).
+    widened: HashSet<Binding>,
 }
 
 impl<'a> Infer<'a> {
@@ -123,7 +123,7 @@ impl<'a> Infer<'a> {
             lambda_body_type: HashMap::new(),
             binding_min_length: HashMap::new(),
             param_joins: HashMap::new(),
-            selfrec: Vec::new(),
+            widened: HashSet::new(),
         }
     }
 }
