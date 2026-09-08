@@ -26,6 +26,7 @@ Up: [..](../AGENTS.md)
 - [stdlib-cache.md](stdlib-cache.md) — **Standard Library Disk Cache** `stdlib.lisp` (~2850 lines) is recompiled on every process start.
 - [symbol.md](symbol.md) — **Symbols and keywords — identity is the name hash** A `SymbolId` is the 64-bit FNV-1a hash of the symbol's name.
 - [syntax.md](syntax.md) — **Syntax — a region-native immutable tree** The pre-analysis tree the reader produces, the expander rewrites, and the analyzer consumes.
+- [typeinfer.md](typeinfer.md) — **Type inference: the ascent, and what a call proves** Where the types come from: an ascent from below whose limit is the least fixpoint, and what each kind of call contributes to it.
 - [values.md](values.md) — **Values** Every Elle value is a 16-byte tagged union: an 8-byte tag and an 8-byte payload.
 - [vm.md](vm.md) — **VM** The VM is a stack-machine interpreter that executes bytecode.
 - [wasm.md](wasm.md) — **WASM Backend** The WASM backend compiles Elle programs to WebAssembly and runs them under Wasmtime, over the same front end the bytecode VM uses.

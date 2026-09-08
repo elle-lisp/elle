@@ -1,11 +1,12 @@
-// audited: 2026-09-07
-// docs/impl/hir.md
+// audited: 2026-09-08
+// docs/impl/typeinfer.md
 // docs/intrinsics.md
 //! Bidirectional type inference and the intrinsic operand proofs.
 //!
 //! Post-functionalize pass that:
 //! 1. Infers types from literals, known return types, and type guards
-//! 2. Propagates types through call sites (forward flow)
+//! 2. Propagates types through call sites (forward flow — the ascent in
+//!    `infer/fixpoint.rs`)
 //! 3. Checks every call-position %-intrinsic against its operand contract
 //!    (prove-or-reject; `contract.rs`)
 //! 4. Narrows signals on primitive calls with provably typed args
@@ -45,8 +46,6 @@ pub struct TypeInfo {
     pub hir_types: HashMap<HirId, TyId>,
 }
 
-const MAX_ITERS: usize = 10;
-
 /// Run type inference and stdlib-to-intrinsic rewriting on functionalized HIR.
 ///
 /// `Err` is the intrinsic operand proof obligation firing (see
@@ -60,80 +59,11 @@ pub fn infer_and_rewrite(
 ) -> Result<TypeInfo, String> {
     let interner = TypeInterner::new();
 
-    let mut binding_types: HashMap<Binding, TyId> = HashMap::new();
-    let mut hir_types: HashMap<HirId, TyId> = HashMap::new();
-    let mut binding_min_length: HashMap<Binding, usize> = HashMap::new();
-
-    // Collect parameter info for lambdas: which bindings are params of which lambda
-    let mut lambda_params: HashMap<Binding, Vec<Binding>> = HashMap::new();
-    let mut lambda_body_type: HashMap<Binding, TyId> = HashMap::new();
-    collect_lambda_info(hir, arena, &mut lambda_params);
-    // A parameter mutated in its body has flow the per-pass recomputation
-    // cannot see; it never receives call-site proofs (guards only).
-    let mutated_params = collect_mutated_bindings(hir);
-    // Bindings read anywhere but callee position — their param joins are
-    // not proofs (see `collect_value_position_uses`).
-    let mut value_used = std::collections::HashSet::new();
-    collect_value_position_uses(hir, &mut value_used);
-    // Immutable let-bound aliases of `(type-of a)` → subject `a`, so the
-    // `(let [ta (type-of a)] (match ta …))` idiom narrows `a` like the inline
-    // dispatch (`collect_typeof_aliases`).
-    let mut typeof_aliases: HashMap<Binding, Binding> = HashMap::new();
-    collect_typeof_aliases(hir, arena, &mut typeof_aliases);
-    // Kleene start: every parameter that CAN be proven by complete call-site
-    // enumeration (callee-only binding, unmutated param) begins at BOTTOM, so
-    // an identity-passed argument in a self/mutual recursion contributes
-    // nothing on the way up instead of reading the Top default and pinning
-    // itself there. Parameters of value-used bindings stay ABSENT (read as
-    // Top): their callers are not enumerable, so optimism there would let the
-    // checker pass on ⊥. A never-called callee-only function's params stay ⊥
-    // — its %-sites can never execute, so nothing unsound compiles.
-    for (b, params) in &lambda_params {
-        if value_used.contains(b) {
-            continue;
-        }
-        for p in params {
-            if !mutated_params.contains(p) {
-                binding_types.insert(*p, TypeInterner::BOTTOM);
-            }
-        }
-    }
-
-    // Inference to a fixpoint. Convergence is judged on the whole type
-    // environment, not the root node's type: a call site visited late in a
-    // pass joins into a callee parameter whose occurrences were recorded
-    // earlier, so the refinement only reaches them on the next pass.
-    for _ in 0..MAX_ITERS {
-        let before_hir = hir_types.clone();
-        let before_bindings = binding_types.clone();
-        let mut param_joins: HashMap<Binding, TyId> = HashMap::new();
-        infer_types(
-            hir,
-            &interner,
-            arena,
-            &mut binding_types,
-            &mut hir_types,
-            &lambda_params,
-            &mut lambda_body_type,
-            &mut binding_min_length,
-            &value_used,
-            &typeof_aliases,
-            &mut param_joins,
-        );
-        // REPLACE each contributed parameter's type with this pass's complete
-        // join (Top included). A `(numeric!)` declaration floors the result at
-        // Number (meet: callers can refine to Int/Float, never widen past the
-        // declared contract); a mutated parameter never receives proofs.
-        for (param, joined) in param_joins {
-            if mutated_params.contains(&param) {
-                continue;
-            }
-            binding_types.insert(param, declared_floor(param, joined, arena, &interner));
-        }
-        if before_hir == hir_types && before_bindings == binding_types {
-            break;
-        }
-    }
+    // The ascent (docs/impl/typeinfer.md): one context collects the unit's
+    // program facts, then iterates the transfer function until the type
+    // environment stops moving.
+    let mut infer = Infer::new(hir, arena);
+    infer.solve(hir);
 
     // Collapse container-dispatch wrapper calls (`(put s :x j)` with `s` a proven
     // concrete container → `(%put-struct-mut s :x j)`) so the multi-arm dispatch and
@@ -143,23 +73,31 @@ pub fn infer_and_rewrite(
     // selected it.
     monomorphize::monomorphize_dispatch_wrappers(
         hir,
-        &hir_types,
+        &infer.hir_types,
         arena,
-        &typeof_aliases,
+        &infer.typeof_aliases,
         dispatch_wrappers,
     );
 
     // The prove-or-reject gate: every call-position %-intrinsic must discharge
     // its operand contract from the (narrowed, per-occurrence) inferred types.
-    contract::check_intrinsic_operand_proofs(hir, &hir_types, arena)?;
+    contract::check_intrinsic_operand_proofs(hir, &infer.hir_types, arena)?;
 
     // Signal narrowing: strip SIG_ERROR from calls with provably typed args
-    super::narrow::narrow_signals(hir, &interner, arena, &hir_types, &binding_min_length);
+    super::narrow::narrow_signals(
+        hir,
+        &interner,
+        arena,
+        &infer.hir_types,
+        &infer.binding_min_length,
+    );
 
     // Signal re-propagation: recompute parent signals bottom-up
     super::narrow::repropagate_signals(hir);
 
-    Ok(TypeInfo { hir_types })
+    Ok(TypeInfo {
+        hir_types: infer.hir_types,
+    })
 }
 
 /// Extract the binding from a callee expression.

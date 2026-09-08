@@ -1,4 +1,9 @@
-use super::super::*;
+// audited: 2026-09-08
+// src/hir/AGENTS.md
+// docs/impl/typeinfer.md
+//! The pre-passes: the program facts one walk of the tree yields, which every
+//! later pass reads without recomputing them.
+
 use super::*;
 
 /// A binding initializer with any capture-cell wrapper peeled off: a
