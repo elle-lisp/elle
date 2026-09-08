@@ -306,7 +306,8 @@ point — it is exempt, because the block is about to hand it to its consumer.
 
 - **Adding a new special form**: Add a case in `expr.rs::lower_expr`, implement `lower_your_form` method
 - **Changing binding lowering**: Update `binding.rs`
-- **Changing control flow**: Update `control.rs`
+- **Changing control flow**: Update `control.rs` and
+  `control/{shortcircuit,matcharms,call}.rs`
 - **Changing pattern matching**: Update `pattern.rs` and `pattern/{keyed,matching,seq}.rs`
 - **Changing region RC emission**: Update `regionemit.rs` (it reads the solver's `RegionInfo`); to change *what* is escaping or *where* a region is dropped, edit the region solver in `src/hir/region/infer.rs`, not the lowerer
 - **Changing tail-call ownership**: Update `control.rs::tail_arg_is_borrowed` and `control/call.rs::tail_callee_defers_release`
