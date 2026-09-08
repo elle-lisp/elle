@@ -1,3 +1,4 @@
+// audited: 2026-09-07
 //! Unit tests (`super` is the parent impl module).
 
 use super::*;
@@ -94,17 +95,18 @@ fn trace_all_covers_every_defined_bit() {
 fn trace_keywords_are_known() {
     // Future GPU backends — accepted without error, no bit yet.
     const FORWARD_COMPAT: &[&str] = &["spirv", "mlir", "gpu"];
-    // Region/free diagnostics, boot-phase timing, the post-boot census, the
-    // park trace, and the syncjit compile mode: functional today but checked
-    // via the string `has_trace` (cold free paths in fiberheap/freelog.rs;
-    // the phase marks and census in trace.rs; the park/resume seam; the
-    // submit path in vm/jit_entry.rs), so they deliberately carry no
-    // `trace_bits` entry.
+    // Region/free diagnostics, the teardown residue dump, boot-phase timing,
+    // the post-boot census, the park trace, and the syncjit compile mode:
+    // functional today but checked via the string `has_trace` (cold free
+    // paths in fiberheap/freelog.rs; the teardown in runtime.rs; the phase
+    // marks and census in trace.rs; the park/resume seam; the submit path in
+    // vm/jit_entry.rs), so they deliberately carry no `trace_bits` entry.
     const STRING_TRACED: &[&str] = &[
         "free",
         "guardfree",
         "freebt",
         "scrub",
+        "residue",
         "boot",
         "census",
         "park",

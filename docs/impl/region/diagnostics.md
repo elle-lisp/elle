@@ -1,8 +1,9 @@
 # Region diagnostics and validation
 
+<!-- audited: 2026-09-07 -->
+
 Implementation-facing: the instruments that tell correct from broken, and the
-test scaffolding (the exhaustive free-cascade pin and the leak suite) that keeps
-the region rules ([rules.md](rules.md)) honest.
+test scaffolding that keeps the region rules honest.
 
 ## Diagnostics — telling correct from broken
 
@@ -64,6 +65,17 @@ the region rules ([rules.md](rules.md)) honest.
   the bit is set, so an untraced dump prints the same line it always did. The
   mints the **VM** owns are covered; a region minted by a native, by the io
   backend, or by the env builder prints no site.
+- `--trace=residue`: **the teardown leak dump.** Where `--stats` counts the
+  regions the teardown sweep left alive, this prints them — the `arena/dump`
+  line for each surviving region, then every cross-region reference edge among
+  them as `[trace:residue] edge <referrer> -> <referent>`. The edges make the
+  residue a graph you can analyze offline: a region whose rc exceeds its
+  in-edge count is pinned from outside the region graph (an unbalanced
+  Rust-side claim — a true leak root), and an SCC among the edges is a
+  reference cycle per-region RC can never reclaim. It runs inside
+  `Runtime::teardown` (src/runtime.rs), after the root release and cascade, so
+  the file, REPL, and embedding paths all report through it. Composes with
+  `--trace=arena`: with both set each residue line carries its mint site.
 - `(arena/page-claims)`: the live count of pages this heap's `RegionStore` has
   claimed from its page pool, monotonic and never decremented on release. A
   delta across a fixed window is the *page* cost of a shape, the dimension

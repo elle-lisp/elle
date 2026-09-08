@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-07
 // Integration tests harness
 mod core {
     include!("core.rs");
@@ -161,6 +161,9 @@ mod trace_boot {
 }
 mod trace_isolation {
     include!("trace_isolation.rs");
+}
+mod trace_residue {
+    include!("trace_residue.rs");
 }
 mod spawn_stack {
     include!("spawn_stack.rs");

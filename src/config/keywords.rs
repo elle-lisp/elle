@@ -1,3 +1,4 @@
+// audited: 2026-09-07
 //! Trace and dump keyword tables and their bit encodings.
 
 // ── Trace keywords ────────────────────────────────────────────────
@@ -40,6 +41,9 @@ pub const TRACE_KEYWORDS: &[&str] = &[
     "guardfree",
     "freebt",
     "scrub",
+    // Teardown leak dump: the surviving regions and their cross-region edges
+    // (string-traced, no bit; src/runtime.rs `Runtime::teardown`).
+    "residue",
     // Park/resume diagnostics: log every suspended-frame park (JIT side-exit
     // helpers) and every frame replay (resume_suspended) with the frame's
     // shape and value types. See src/jit/suspend.rs and src/vm/core/resume.rs.
