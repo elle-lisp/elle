@@ -1,11 +1,15 @@
 (elle/epoch 12)
-# audited: 2026-09-06
+# audited: 2026-09-07
 # The operand proof, end to end.
 #
 # A %-intrinsic whose operands the front end proved are integers emits the
 # integer-only bytecode; one it could not prove emits the polymorphic bytecode.
 # Both compute the same answer, on every tier this file runs on.
+#
+# A proven op's result carries a type of its own, so the proof reaches the next
+# op in the chain — and a float operand denies it there.
 # docs/impl/lir.md
+# docs/intrinsics.md
 
 (defn disasm-text [f]
   "The disassembly of f's bytecode, as one string."
@@ -80,7 +84,58 @@
 (defn and-ints []
   (%bit-and 12 10))
 
-# The instruction set has no RemInt, and the bitwise opcodes already read their
-# operands as integers, so a proof buys nothing and changes nothing.
+# The bytecode set has no RemInt, and the bitwise opcodes already read their
+# operands as integers, so the proof selects no different opcode here. It is
+# not idle: the JIT spends it on Rem (dropping the tag check, keeping the zero
+# test), and the next section spends it downstream on every tier.
 (assert (= (rem-ints) 1) "%rem over proven ints is unchanged")
 (assert (= (and-ints) 8) "%bit-and over proven ints is unchanged")
+
+# ── The result of a proven operation proves the next one ─────────
+
+(defn rem-then-add [x]
+  "The %rem result is the %add's proof: one guard carries the whole chain."
+  (when (%not (int? x))
+    (error {:error :type-error :message "rem-then-add: int required"}))
+  (%add (%rem x 16) 1))
+
+# The counter-factual, and the reason this section exists: while a remainder
+# typed as Number, the %add read an unproven operand and kept the polymorphic
+# Add — the int chain died at the remainder even though both its operands were
+# proven ints.
+(assert (string/contains? (disasm-text rem-then-add) "AddInt")
+        "the remainder of two proven ints proves the %add")
+(assert (= (rem-then-add 33) 2) "AddInt computes over the remainder")
+
+(defn mask [x]
+  "The masking kernel the bitwise contract used to refuse."
+  (when (%not (int? x))
+    (error {:error :type-error :message "mask: int required"}))
+  (%bit-and (%rem x 16) 15))
+
+(assert (= (mask 33) 1) "a guard-proven remainder discharges %bit-and")
+(assert (= (mask 255) 15) "and holds at the mask's top value")
+
+# ── A float operand proves nothing to a bitwise op ───────────────
+
+# The trap: a bitwise opcode reads a float's payload as an integer, so a wrong
+# result type here is silent garbage rather than a fault.
+#
+# The counter-factual: while %mod was declared the constant Int this compiled,
+# and `(%bit-and (%mod 5.5 2.0) 1)` returned 0 — where the `mod` wrapper's own
+# integer? guards raise :type-error on the same operands.
+(let [r (protect (compile/barrier-module "(%bit-and (%mod 5.5 2.0) 1)"
+                 "<typed-int-ops>"))]
+  (assert (not (get r 0)) "a float %mod under a bitwise op must not compile")
+  (assert (= (get (get r 1) :error) :compile-error)
+          (string "expected :compile-error, got " (get r 1)))
+  (assert (string/contains? (get (get r 1) :message) "%bit-and")
+          (string "the diagnostic must name the refusing op, got "
+                  (get (get r 1) :message)))
+  (assert (string/contains? (get (get r 1) :message) "not a proven int")
+          (string "the diagnostic must say what was unproven, got "
+                  (get (get r 1) :message))))
+
+# The refusal is the bitwise op's, not %mod's: the float domain still computes.
+(assert (= (%mod 5.5 2.0) 1.5) "%mod over floats is a float")
+(assert (= (%mod -5 3) 1) "%mod over ints floors toward the divisor's sign")
