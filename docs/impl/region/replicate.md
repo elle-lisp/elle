@@ -176,14 +176,17 @@ other reference, held in an env cell the callee rewrites, held in a sibling's
 forward cell the callee reads on every recursion, captured by a closure
 that escapes, or read after the call must survive the moved release).
 
-The short-circuit face has gauges of its own:
-`tests/elle/region-shortcircuit-tail-arm.lisp` (the reclamation — the `or` and
-`and` subjects, the argument-move exemption, and the native-callee and
-no-short-circuit controls), the placement pins in
-`lir::lower::tests::release::shortcircuit`, and
-`tests/elle/region-shortcircuit-tail-arm-uaf.lisp` (the soundness complement — a
-value the short-circuit arm's callee moves, captures, or hands back must survive
-the replica).
+The short-circuit face rides the same three instruments. Its per-op rates are the
+`tail-frame-exit-or-arm` and `tail-frame-exit-and-arm` rows of
+`tests/elle/oracle.lisp`, one per operator, each driven through the arm its own
+polarity reaches. Its placement pins are
+`lir::lower::tests::release::shortcircuit`, which read WHICH release lands ahead
+of the arm's `TailCall` and which stays behind as the ownership move — a position
+no rate can see. Its soundness rows are the `sc-*` witnesses of
+`tests/elle/region-tail-frame-exit-uaf.lisp`: a value the arm's callee moves,
+captures, hands back, stores into a longer-lived container, or lets escape must
+survive the replica, and a native callee's fall-through must run the replica and
+the merge's own copy exactly once between them.
 
 ## A `break` opens a relocation point too
 
