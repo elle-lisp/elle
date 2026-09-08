@@ -54,6 +54,7 @@ same map.
 ```lisp
 (defn fib [n]
   (if (%lt n 2) n (%add (fib (%sub n 1)) (fib (%sub n 2)))))
+(assert (= (fib 10) 55) "the recursive results prove the addition")
 ```
 
 Pass 1 reads Bottom for both self-calls, so the `%add` is Bottom and the body
@@ -115,3 +116,6 @@ fewer, so no program in it pays.
 - `…::a_chain_deeper_than_the_budget_proves_nothing` — the widening: eleven
   functions in reverse walk order outrun the ten passes, and the site that
   reads the unsettled entry is rejected rather than compiled.
+- `tests/elle/typed-int-ops.lisp` — the corpus peer, on every tier: a
+  self-recursive integer `fib` emits `AddInt` and computes with it, and a float
+  base case is refused at compile time.
