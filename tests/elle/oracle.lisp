@@ -71,6 +71,22 @@
 # Include ORDER is run order, and it is also definition order: a family's
 # shapes are defined in the file that drives them, and the ledger comes first
 # because `pin` classifies against it.
+
+# ── The over-free gate, opened here and closed after the last probe ───
+# `arena/over-frees` counts a direct release that ran twice — the bookkeeping
+# half of an over-free, and the half no rate can see, since a reference dropped
+# twice leaves the heap SMALLER (docs/impl/region/diagnostics.md). Two reads
+# cover every probe in every file below with no change to any of them. A debug
+# build aborts at the site on its own `debug_assert!`; this is what a RELEASE
+# pass reads, which is the pass a dashboard rate is ratcheted on.
+#
+# It needs no discriminator. The gauge-live discipline exists because a dead
+# gauge and a reclaimed shape both read ~0, and here 0 is the assertion rather
+# than the measurement — a counter frozen at 0 fails to report a violation
+# instead of painting one green, which is what the `--trace=guardfree` axis and
+# the debug assert are for.
+(def over-frees-before (arena/over-frees))
+
 (include-file "probe/ledger.lisp")
 (include-file "probe/gauge.lisp")
 (include-file "probe/shape.lisp")
@@ -87,6 +103,14 @@
 (include-file "probe/container.lisp")
 (include-file "probe/branch.lisp")
 (include-file "probe/native.lisp")
+
+# The over-free gate closes here, over every probe above.
+(def over-frees-after (arena/over-frees))
+(check (assert (= over-frees-after over-frees-before)
+               (string "over-free: " (- over-frees-after over-frees-before)
+                       " direct double-release(s) across this run — a release "
+                       "that ran twice, which no leak rate can see "
+                       "(docs/impl/region/diagnostics.md)")))
 
 # ── The split headline — the number §1's protocol reads, printed by the tool ──
 # `open defects` is the burndown count; `by-design` is the fixed growth set; `roots` is
