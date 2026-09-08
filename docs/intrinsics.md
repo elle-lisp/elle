@@ -1,5 +1,7 @@
 # Intrinsics
 
+<!-- audited: 2026-09-07 -->
+
 Intrinsics are silent bytecode operations prefixed with `%`. A `%`-intrinsic
 in **call position** is a compile-time type-checked request for the fast
 instruction: the compiler either **proves** the call satisfies the op's
@@ -72,6 +74,9 @@ Inference discharges contracts from:
 - **nonzero facts** for the div family — a nonzero literal divisor, or a
   diverging zero guard: after `(when (= d 0) (error …))`, `d` is provably
   nonzero;
+- **the result of a proven `%`-intrinsic** — each op's result type is a
+  function of its operand types (see below), so one guard proves a whole
+  chain of them;
 - **a `(numeric!)` declaration** — it floors *every parameter of the
   enclosing function* at Number, so a whole numeric kernel proves at once
   without a per-parameter guard.
@@ -102,7 +107,40 @@ The declaration is recorded on the parameter **bindings** it constrains, not
 on the function node, so it survives a rewrite that dissolves the function:
 `(map sq xs)` over a proven array splices `sq`'s body into an index-walk
 loop, and the spliced `%mul` proves against the same floor it proved against
-inside `sq` (`docs/impl/dissolution.md` § "Raw `%`-intrinsic bodies").
+inside `sq` (see [dissolution](impl/dissolution.md)).
+
+### What an op's result proves
+
+A proven op's result carries a type of its own, so the next op reads that
+type as its proof and the chain needs no second guard:
+
+```lisp
+(defn mask [x]
+  "One guard proves the whole chain: the %rem result proves the %bit-and."
+  (when (%not (%int? x)) (error {:error :type-error :message "mask: int required"}))
+  (%bit-and (%rem x 16) 15))
+(assert (= (mask 33) 1) "the remainder of two proven ints is a proven int")
+```
+
+| Ops | Result type |
+|-----|-------------|
+| `%add` `%sub` `%mul` `%div` `%rem` `%mod` | the join of the operand types, clamped to Number: two ints give Int, two floats give Float, a mixed pair gives Number |
+| `%bit-and` `%bit-or` `%bit-xor` `%bit-not` `%shl` `%shr` · `%length` · `%int` | Int |
+| `%float` | Float |
+| `%eq` `%ne` `%lt` `%gt` `%le` `%ge` · `%not` `%identical?` and the type predicates | Bool |
+| `%type-of` | Keyword |
+| `%pair` | a pair |
+| `%push-array[-mut]` `%put-struct[-mut]` `%put-array[-mut]` | the variant's own container type, whatever the operand's mutability |
+| `%freeze` `%thaw` | the operand's immutable / mutable twin |
+| `%put` `%del` `%array-push` `%string-push` `%bytes-push` | their first operand's type — the container they store into |
+| `%first` `%rest` `%get` `%has?` `%pop` | nothing: element types are untracked |
+
+The join is what makes the div family usable in an integer kernel. A
+remainder over two proven ints is an Int, so it feeds a bitwise op; a
+remainder over anything else is not an Int, so the same bitwise op rejects
+it. That second case is the one the run time computes as a float, and the
+bitwise opcodes read a float's payload as an integer, so admitting it would
+return garbage.
 
 ### Silent by construction
 
@@ -125,8 +163,9 @@ One lowering per op; which one is a fixed property of the op, not a mode:
 - **Storing and copying ops** — `%put`, `%put-struct[-mut]`,
   `%put-array[-mut]`, `%array-push`, `%push-array[-mut]`, `%string-push`,
   `%bytes-push`, `%del`, `%pop`, `%freeze`, `%thaw` — lower to the
-  **escape-correct native funnel call** (`docs/impl/region/adopt.md`,
-  § The funnel adopt): the same prove-or-reject gate for type legality, but
+  **escape-correct native funnel call** (see
+  [the funnel adopt](impl/region/adopt.md)): the same prove-or-reject gate
+  for type legality, but
   the store/remove runs through the native whose region accounting records
   cross-region edges and gives the result its call-result region. `%pop`
   rides here so its moved-out element carries that call-result accounting.
