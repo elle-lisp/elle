@@ -1,6 +1,6 @@
 # The relocation point and its replicas
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-08 -->
 
 How a relocation point outlives its own block, so one release covers a merge and
 every path that leaves the frame before it.
@@ -85,13 +85,38 @@ callee arrives at that drop on no path at all, and the replica is what runs the
 release on each arm instead. That is the shape a polymorphic entry point takes
 when a `letrec` walker serves a dispatch whose arms tail-call out.
 
-**Which merges inherit the points.** `if`, `cond` and `match` merges are reached
-only through arms the lowerer closes one at a time, so each arm's points are
-sealed onto its finished block and the merge starts life owning the union. Every
-other block boundary clears them: a block that closes for any other reason is
-followed by one the tail call's path may not be a predecessor of at all, and a
-release replicated into an unreachable point is a release added on a path that
-never owed it.
+**Which merges inherit the points.** An `if`, a `cond`, a `match` and the
+short-circuit pair `and`/`or` reach their merge only through arms the lowerer
+closes one at a time, so each arm's points are sealed onto its finished block and
+the merge starts life owning the union. Every other block boundary clears them: a
+block that closes for any other reason is followed by one the tail call's path may
+not be a predecessor of at all, and a release replicated into an unreachable point
+is a release added on a path that never owed it.
+
+**A short-circuit operand is an arm.** `and` and `or` carry no branch in the
+source and the lowerer gives them one. Each operand stores its value into the
+result slot, and every operand but the last branches on that value — to the done
+block where the answer is settled, to the next operand otherwise. So the done
+block is a merge reached through every operand's block, and the operands are its
+arms.
+
+Only the LAST operand inherits tail position, so it is the only arm that can carry
+a frame-replacing tail call. That one arm is enough to strand the whole release
+set the enclosing scope emits past the merge: a closure callee replaces the frame,
+so the path through it reaches the merge no more than any other arm's does. The
+everyday shape is a two-test predicate whose second test calls out:
+
+```lisp
+(defn fiber-failed? [f]
+  (let [s (fiber/status f)]
+    (or (= s :error) (not (= 0 (bit/and (fiber/bits f) 1))))))
+```
+
+`not` is a closure, so the `or`'s last operand replaces the frame and `f`'s
+owned-parameter release, emitted at the merge, is skipped on every call the first
+test does not settle. The caller's `CallArgument` reference is stranded once per
+such call, and everything the argument's region holds strands behind it — which
+is what pins a scheduler's fiber for the life of the process.
 
 **A merge inherits what covered the branch's ENTRY as well.** The arms are one of
 the two sources, not the whole of it. A branch is entered from one position, and
@@ -150,6 +175,15 @@ place by it, handed back out through it, handed back when the frame holds the on
 other reference, held in an env cell the callee rewrites, held in a sibling's
 forward cell the callee reads on every recursion, captured by a closure
 that escapes, or read after the call must survive the moved release).
+
+The short-circuit face has gauges of its own:
+`tests/elle/region-shortcircuit-tail-arm.lisp` (the reclamation — the `or` and
+`and` subjects, the argument-move exemption, and the native-callee and
+no-short-circuit controls), the placement pins in
+`lir::lower::tests::release::shortcircuit`, and
+`tests/elle/region-shortcircuit-tail-arm-uaf.lisp` (the soundness complement — a
+value the short-circuit arm's callee moves, captures, or hands back must survive
+the replica).
 
 ## A `break` opens a relocation point too
 

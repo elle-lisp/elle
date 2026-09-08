@@ -1,6 +1,6 @@
 # lir/lower
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-08 -->
 
 HIR to LIR lowering: explicit control flow, binding slot allocation, lbox operations, and region RC instruction emission.
 
@@ -190,7 +190,8 @@ other is structural ownership-location, NOT escape:
   environment and by no other route — so it either counts the region across the
   gap or cannot mint against it at all (docs/impl/region/relocate.md).
 - `relocate.rs::seal_arm_hoists` / `open_branch_merge` — an `if`/`cond`/`match`
-  merge is reached only through arms the lowerer closes one at a time, so it
+  merge, and the done block of an `and`/`or` whose operands are its arms, is
+  reached only through arms the lowerer closes one at a time, so it
   INHERITS their relocation points and a release emitted past the merge is
   emitted there AND replicated ahead of each arm's `TailCall`. What makes
   that count once per path is `self_cancelling_run`: a value-routed release
