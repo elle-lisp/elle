@@ -1,39 +1,11 @@
-// audited: 2026-09-07
+// audited: 2026-09-08
 // src/hir/AGENTS.md
 // docs/intrinsics.md
 //! What an op's result proves: every `%`-intrinsic and every constructor has a
 //! result type, and that type is the next op's proof.
 
-use super::{compile_fhir, compile_result, infer_and_rewrite, inferred_types};
-use crate::hir::types::{TyId, TypeInterner};
-use crate::hir::{Hir, HirId, HirKind};
-use crate::symbol::SymbolTable;
-
-/// The inferred type of the `%`-intrinsic node named `op` in `src`.
-///
-/// Sharper than `inferred_types`, which reports every node's type at once: over
-/// int literals the operands put `Int` into that set themselves, so a family
-/// member's own result rule can only be read off the op's own node.
-fn intrinsic_result_type(src: &str, op: &str) -> TyId {
-    fn find(h: &Hir, op: &str, found: &mut Option<HirId>) {
-        if let HirKind::Intrinsic { op: this, .. } = &h.kind {
-            if this.name() == op {
-                *found = Some(h.id);
-            }
-        }
-        h.for_each_child(|c| find(c, op, found));
-    }
-    let mut symbols = SymbolTable::new();
-    let (mut hir, arena) = compile_fhir(src, &mut symbols);
-    let info = infer_and_rewrite(&mut hir, &arena, &mut Default::default()).expect("infer");
-    let mut found = None;
-    find(&hir, op, &mut found);
-    let id = found.unwrap_or_else(|| panic!("{src} compiled to no {op} node"));
-    info.hir_types
-        .get(&id)
-        .copied()
-        .unwrap_or_else(|| panic!("the {op} node in {src} carries no inferred type"))
-}
+use super::{compile_result, inferred_types, intrinsic_result_type};
+use crate::hir::types::TypeInterner;
 
 /// Every member of the div family: `%add` and `%sub` and `%mul` share their
 /// result rule with `%div`, `%rem` and `%mod`, so each row below runs over all

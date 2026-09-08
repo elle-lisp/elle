@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-07
+# audited: 2026-09-08
 # The operand proof, end to end.
 #
 # A %-intrinsic whose operands the front end proved are integers emits the
@@ -7,7 +7,8 @@
 # Both compute the same answer, on every tier this file runs on.
 #
 # A proven op's result carries a type of its own, so the proof reaches the next
-# op in the chain — and a float operand denies it there.
+# op in the chain — and a float operand denies it there. A call's result carries
+# one too, a recursive call included.
 # docs/impl/lir.md
 # docs/intrinsics.md
 
@@ -115,6 +116,36 @@
 
 (assert (= (mask 33) 1) "a guard-proven remainder discharges %bit-and")
 (assert (= (mask 255) 15) "and holds at the mask's top value")
+
+# ── A recursive call's result proves the next operation ──────────
+
+(defn fib-int [n]
+  "The recursion's own result is the addition's proof: a self-call reads the
+   body type the previous pass of the ascent computed."
+  (when (%not (int? n))
+    (error {:error :type-error :message "fib-int: int required"}))
+  (if (%lt n 2)
+    n
+    (%add (fib-int (%sub n 1)) (fib-int (%sub n 2)))))
+
+# The counter-factual: while a self-recursive call returned Bottom, this %add
+# read two unproven operands and kept the polymorphic Add. No spelling of an
+# integer recursion emitted the integer opcode, and the JIT kept a tag-check
+# diamond in the hot path of a body that is two subtractions and a compare.
+(assert (string/contains? (disasm-text fib-int) "AddInt")
+        "%add over two self-recursive int results emits AddInt")
+(assert (= (fib-int 10) 55) "AddInt computes the recursion")
+(assert (= (fib-int 0) 0) "and the base case returns its argument")
+
+# The proof follows the body, not the shape: a base case that returns a float
+# makes the recursive result a Number, which the bitwise contract refuses.
+(let [r (protect (compile/barrier-module (string "(defn f [n] "
+                 "  (if (%lt n 2) 1.5 (%bit-and (%add (f (%sub n 1)) 1) 3))) "
+                 "(f 4)") "<typed-int-ops>"))]
+  (assert (not (get r 0)) "a float base case must not prove an int result")
+  (assert (string/contains? (get (get r 1) :message) "%bit-and")
+          (string "the diagnostic must name the refusing op, got "
+                  (get (get r 1) :message))))
 
 # ── A float operand proves nothing to a bitwise op ───────────────
 

@@ -9,7 +9,7 @@ use super::*;
 /// How many passes one ascent may take. Information travels one call at a time
 /// in walk order, so the count a program needs is the depth of its call chains
 /// rather than their size; the whole corpus settles in five or fewer.
-const MAX_ITERS: usize = 10;
+pub(in crate::hir::typeinfer) const MAX_ITERS: usize = 10;
 
 impl Infer<'_> {
     /// Run the transfer function over `hir` until the environment stops moving.

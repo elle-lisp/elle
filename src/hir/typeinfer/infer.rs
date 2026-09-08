@@ -26,7 +26,7 @@ use std::collections::HashSet;
 
 mod collect;
 mod facts;
-mod fixpoint;
+pub(in crate::hir::typeinfer) mod fixpoint;
 mod node;
 mod subject;
 
