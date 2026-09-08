@@ -13,7 +13,7 @@ Up: [..](../AGENTS.md)
 - [dissolution.md](dissolution.md) — **Dissolution — HOF loop fusion (more...)**
 - [escape.md](escape.md) — **Escape analysis — the authoritative true-escape pass (more...)**
 - [fleet.md](fleet.md) — **Fleet — adhoc distributed execution over images (more...)**
-- [gpu.md](gpu.md) — **GPU Compute (more...)**
+- [gpu.md](gpu.md) — **GPU Compute** How a plain Elle closure becomes a dispatched compute kernel, across the MLIR backend and the Vulkan plugin.
 - [hir.md](hir.md) — **HIR — High-level IR** The HIR pass converts expanded syntax trees into a typed intermediate representation.
 - [image.md](image.md) — **Images — regions hydrated at load** Design for image-style persistence.
 - [jit.md](jit.md) — **JIT** The JIT compiles hot functions from LIR to native code using Cranelift.

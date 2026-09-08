@@ -1,5 +1,7 @@
 # Capability enforcement
 
+<!-- audited: 2026-09-07 -->
+
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
 parent can catch.
@@ -63,7 +65,7 @@ can deny nor what it can catch.
 `:yield` is not in this table. It is the cooperative suspension `(yield v)`
 raises, not a capability: an I/O request raises `|:io|` alone, so a
 generator masked `|:yield|` catches its own yields while its reads travel
-out to the scheduler. See `docs/signals/protocol.md`.
+out to the scheduler. See [protocol.md](protocol.md).
 
 | Keyword | Bit | Effect when denied | Dispatch |
 |---------|-----|--------------------|----------|
@@ -74,7 +76,7 @@ out to the scheduler. See `docs/signals/protocol.md`.
 | `:halt` | 8 | Blocks VM termination | yes |
 | `:io` | 9 | Blocks operations that reach the I/O scheduler | yes |
 | `:exec` | 11 | Blocks subprocess execution | no |
-| `:gpu` | 15 | Blocks GPU dispatch | no |
+| `:gpu` | 15 | Blocks compiling a closure to SPIR-V (`git`) | no |
 | `:os-signal` | 16 | Blocks POSIX signal send/raise | no |
 | `:fs` | 17 | Blocks filesystem access | no |
 
@@ -117,7 +119,7 @@ When a fiber calls a primitive whose declared signal bits overlap
 with the fiber's withheld capabilities, the primitive does not run.
 Instead, the fiber emits a signal with:
 
-- **Bits**: the blocked capability bits (e.g., `:io`)
+- **Bits**: the blocked capability bits, for example `:io`
 - **Payload**: a struct describing the denial
 
 ```text
@@ -129,6 +131,27 @@ Instead, the fiber emits a signal with:
 ```
 
 The parent catches this signal through the normal mask routing.
+
+## What a denial does not confine
+
+A denial gates the primitive that **mints** authority. It does not gate a
+capability-bearing value the fiber already holds.
+
+An `io-request`, a port, and the module value a native `import` returns are
+ordinary values. Each reaches a fiber through a closure capture, a resume
+value, a channel, or a struct field. A fiber that holds one uses it whatever
+its withheld set says, because `io/submit` and its siblings declare `:error`
+alone.
+
+So a sandbox built from `:deny` holds while every capability-bearing value
+stays outside it. Hand one in and no denial applies to it.
+[authority.md](authority.md) states the model this follows from, and the
+question the runtime would have to ask instead.
+
+`emit` is the same shape one level down. It is a bytecode instruction rather
+than a primitive call, so a fiber raises any bit it names — including one it
+does not hold. A mask therefore audits a cooperative child, not a hostile one.
+See [emit.md](emit.md).
 
 ## Introspection
 
@@ -253,6 +276,9 @@ blocks `length` but not `+`.
 
 ## Examples
 
+Each sandbox below holds while the fiber receives no capability-bearing value
+from outside it, for the reason the confinement section gives.
+
 ```text
 # Pure computation sandbox — no IO, no filesystem, no FFI, no subprocess
 (let [f (fiber/new compute |:io :fs :ffi :exec :error|
@@ -263,13 +289,19 @@ blocks `length` but not `+`.
 (let [f (fiber/new worker |:fs :error| :deny |:fs|)]
   (fiber/resume f))
 
-# Capability-check a plugin before running it
+# Watch what a plugin's init tries to do
 (let [f (fiber/new plugin-init |:error| :deny |:exec :ffi|)]
   (let [result (fiber/resume f)]
     (if (= (fiber/status f) :dead)
       result
       (do (println "plugin tried:" ((fiber/value f) :primitive))
           (fiber/cancel f)))))
+```
+
+Denying `:ffi` does not stop the fiber loading a native module. `import`
+declares `:fs`, so `:fs` is the bit that closes that route.
+
+```text
 
 # Nested sandbox: outer denies IO, inner denies errors
 (let [outer (fiber/new
