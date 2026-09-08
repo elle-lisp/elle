@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-07
 // src/lir/lower/AGENTS.md
 // docs/intrinsics.md
 //! Lowering a `%`-intrinsic: arithmetic, comparison, conversion, pairs, bitwise,
@@ -120,8 +120,10 @@ impl<'a> Lowerer<'a> {
                     dst: b1,
                     slot: b_slot,
                 });
-                // Every step operates on the two original operands or on an
-                // integer derived from them, so each carries the same proof.
+                // The proof is Int only where both operands are, and then every
+                // intermediate is an integer too: the remainder of two ints,
+                // its sum with the divisor, and that sum's remainder. Over
+                // anything else the proof is Unproven and no step claims one.
                 let t = self.fresh_reg();
                 self.emit(LirInstr::binop_proved(
                     t,

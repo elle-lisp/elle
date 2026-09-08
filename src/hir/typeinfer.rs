@@ -1,3 +1,6 @@
+// audited: 2026-09-07
+// docs/impl/hir.md
+// docs/intrinsics.md
 //! Bidirectional type inference and the intrinsic operand proofs.
 //!
 //! Post-functionalize pass that:
@@ -292,8 +295,17 @@ fn intrinsic_return_type(
     hir_types: &HashMap<HirId, TyId>,
 ) -> TyId {
     match op {
-        // Arithmetic: returns the join of arg types within Number
-        IntrinsicOp::Add | IntrinsicOp::Sub | IntrinsicOp::Mul | IntrinsicOp::Div => {
+        // Arithmetic, the whole div family included: the join of the arg types
+        // within Number. Every member promotes the same way at run time on every
+        // tier — an integer result only where both operands are integers — so
+        // one rule serves all six, and a remainder in the middle of an int chain
+        // keeps the chain proven.
+        IntrinsicOp::Add
+        | IntrinsicOp::Sub
+        | IntrinsicOp::Mul
+        | IntrinsicOp::Div
+        | IntrinsicOp::Rem
+        | IntrinsicOp::Mod => {
             let mut ty = TypeInterner::BOTTOM;
             for arg in args {
                 let arg_ty = hir_types.get(&arg.id).copied().unwrap_or(TypeInterner::TOP);
@@ -306,8 +318,6 @@ fn intrinsic_return_type(
                 TypeInterner::NUMBER
             }
         }
-        IntrinsicOp::Rem => TypeInterner::NUMBER,
-        IntrinsicOp::Mod => TypeInterner::INT,
 
         // Comparison: returns Bool
         IntrinsicOp::Eq
