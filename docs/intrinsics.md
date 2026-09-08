@@ -1,6 +1,6 @@
 # Intrinsics
 
-<!-- audited: 2026-09-07 -->
+<!-- audited: 2026-09-08 -->
 
 Intrinsics are silent bytecode operations prefixed with `%`. A `%`-intrinsic
 in **call position** is a compile-time type-checked request for the fast
@@ -65,6 +65,9 @@ Inference discharges contracts from:
 
 - **literals** and expressions with known types (`(%add 1 2)` compiles);
 - **primitive return types** flowing forward (`(%length (->array c))`);
+- **a called function's return type** — a call to a function this unit
+  defines carries what that function's body was proven to return, a
+  recursive call included (see [impl/typeinfer.md](impl/typeinfer.md));
 - **`match (type-of x)` keyword arms** — inside a `:@array` arm, `x` *is* a
   mutable array, authoritatively;
 - **diverging type guards** — after
