@@ -85,7 +85,9 @@ impl RegionStore {
         // twice — the heap it leaves is smaller, not larger. The counter is read
         // there; the assert stays, because a debug run should still abort at the
         // violation and name the id.
-        let _ = direct;
+        if direct && (idx >= self.regions.len() || self.regions[idx].is_none()) {
+            self.over_frees = self.over_frees.saturating_add(1);
+        }
         debug_assert!(
             from_cascade.is_some() || (idx < self.regions.len() && self.regions[idx].is_some()),
             "DecrefRegion({id}) but region was never alloc_in_region'd \
@@ -140,7 +142,9 @@ impl RegionStore {
                 (freed, direct && already_zero)
             }
         };
-        let _ = over_free;
+        if over_free {
+            self.over_frees = self.over_frees.saturating_add(1);
+        }
         freed
     }
     /// Get the current RC for a region (0 if not created).
