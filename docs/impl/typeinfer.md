@@ -16,14 +16,14 @@ and leaves that environment behind. The next pass walks the same tree over the
 environment the last one left. The passes stop when one of them changes
 nothing.
 
-The start is Bottom, not Top. Every parameter a complete enumeration of call
-sites can prove — the binding is used only as a callee, the parameter is not
-mutated — is seeded at Bottom, so a recursion that passes its own argument
-through contributes nothing on the way up instead of pinning the parameter at
-Top. A parameter whose callers are not all visible is left absent, and an
-absent entry reads as Top.
+The start is Bottom, not Top. A parameter is seeded at Bottom when a complete
+enumeration of call sites can prove it: the binding is used only as a callee,
+and the parameter is not mutated. A recursion that passes its own argument
+through then contributes nothing on the way up, rather than pinning the
+parameter at Top. A parameter whose callers are not all visible is left absent,
+and an absent entry reads as Top.
 
-A pass re-derives, it never accumulates. Each parameter's type is **replaced**
+A pass re-derives; it never accumulates. Each parameter's type is **replaced**
 at pass end by that pass's complete join over the call sites, and each lambda's
 body type is replaced by what its body computed on that pass. A join that only
 grows can never come back down, so one early reading of an unfinished estimate
@@ -43,11 +43,11 @@ estimate rises, and the limit of the ascent is the least fixpoint.
 
 **A self-recursive call is a call.** It reads the body-type map that every
 other call reads, and takes no exception of its own. On the first pass the
-callee's body has not been walked yet, so the map holds no entry for it and an
-absent entry is Bottom — which is what the recursive contribution to a
-return-type join is worth, the base cases. Every later pass reads the estimate
-the pass before it computed, exactly as a mutual recursion does through the
-same map.
+callee's body has not been walked yet, so the map holds no entry for it, and an
+absent entry is Bottom. Bottom is what the recursive contribution to a
+return-type join is worth: the base cases. Every later pass reads the estimate
+the pass before it computed, exactly as a mutual recursion does through the same
+map.
 
 `fib` settles on the second pass:
 
@@ -85,8 +85,8 @@ entry and the widening terminates.
 
 Widening costs precision, and only for a program that outran the budget: a
 `%`-intrinsic whose operand a widened entry feeds no longer proves, and
-prove-or-reject rejects that site. The whole corpus converges in five passes or
-fewer, so no program in it pays.
+prove-or-reject rejects that site. The whole corpus converges in six passes or
+fewer — the deepest is `demos/nqueens` at six — so no program in it widens.
 
 ## What still does not prove
 
