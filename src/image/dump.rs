@@ -5,11 +5,12 @@
 //! docs/impl/image.md
 //! docs/impl/image/format.md
 //!
-//! The pages carry relocations, a page table, and an object index. The store
-//! milestone's scope is data-only: pairs, strings, bytes, arrays, floats, and
-//! the portable immediates (ints, inline floats, bools, nil, the empty list,
-//! keywords — keyword payloads are stable name hashes). Anything else fails
-//! the dump with an error naming the variant.
+//! Beside the pages the file carries relocations, a page table, an object
+//! index, and the spellings of the symbols and keywords in the body. The
+//! store milestone's scope is data-only: pairs, strings, bytes, arrays,
+//! floats, and the portable immediates (ints, inline floats, bools, nil, the
+//! empty list, symbols and keywords — both payloads are stable name hashes).
+//! Anything else fails the dump with an error naming the variant.
 //!
 //! Determinism is engineered: the copy visits children in order, the visited
 //! map is only ever probed (never iterated), and the file's page bytes are
@@ -19,17 +20,18 @@
 //! construction temporary's uninitialized padding can reach the artifact,
 //! and two dumps of the same graph are byte-identical whole files.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io::Write;
 use std::mem::size_of;
 use std::path::Path;
 
 use crate::hir::region::RuntimeRegion;
+use crate::symbol::SymbolTable;
 use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::{deref, HeapObject, Pair};
 use crate::value::region_slice::RegionSlice;
 use crate::value::repr::{
-    TAG_EMPTY_LIST, TAG_FALSE, TAG_FLOAT, TAG_INT, TAG_KEYWORD, TAG_NIL, TAG_TRUE,
+    TAG_EMPTY_LIST, TAG_FALSE, TAG_FLOAT, TAG_INT, TAG_KEYWORD, TAG_NIL, TAG_SYMBOL, TAG_TRUE,
 };
 use crate::value::Value;
 
@@ -40,14 +42,18 @@ use super::ImageError;
 /// Dump `root`'s value graph to `path`, atomically (temp file + rename).
 /// The graph must be sealed data; a refused value fails the dump before any
 /// byte is written, and the scratch region is dropped either way.
+///
+/// `symbols` is the dumping instance's display memo. Every symbol and keyword
+/// the walk meets takes its spelling from it into the image's name table; a
+/// spelling this instance never learned is simply absent.
 pub fn dump(
     heap: &mut FiberHeap,
-    _symbols: &crate::symbol::SymbolTable,
+    symbols: &SymbolTable,
     root: Value,
     path: &Path,
 ) -> Result<(), ImageError> {
     let scratch = heap.new_runtime_region();
-    let result = dump_into(heap, scratch, root, path);
+    let result = dump_into(heap, scratch, symbols, root, path);
     heap.decref_region_if_present(scratch);
     result
 }
@@ -55,11 +61,13 @@ pub fn dump(
 fn dump_into(
     heap: &mut FiberHeap,
     scratch: RuntimeRegion,
+    symbols: &SymbolTable,
     root: Value,
     path: &Path,
 ) -> Result<(), ImageError> {
-    let mut visited: HashMap<usize, Value> = HashMap::new();
-    let copied = copy_value(heap, scratch, root, &mut visited)?;
+    let mut walk = Walk::new(symbols);
+    let copied = copy_value(heap, scratch, root, &mut walk)?;
+    let names = walk.into_name_table();
 
     // Page layout, largest page first: packing in descending size order keeps
     // every page's offset a multiple of its own size (§ File format).
@@ -166,6 +174,11 @@ fn dump_into(
         Some(p) => (true, in_image(off_of(p as usize))?),
         None => (false, copied.payload),
     };
+    let mut name_table = Vec::new();
+    for name in &names {
+        format::write_name(&mut name_table, name);
+    }
+
     let header = Header {
         pages_len,
         n_pages: entries.len() as u64,
@@ -174,6 +187,7 @@ fn dump_into(
         root_tag: copied.tag,
         root_payload,
         root_is_heap,
+        names_len: name_table.len() as u64,
         fingerprint: format::fingerprint(),
     };
 
@@ -188,6 +202,7 @@ fn dump_into(
     for &(o, t) in &index {
         format::write_u64_pair(&mut file_bytes, o, t);
     }
+    file_bytes.extend_from_slice(&name_table);
     debug_assert_eq!(file_bytes.len() % 8, 0);
     debug_assert!(format::pages_offset() as u64 + pages_len <= file_bytes.len() as u64);
 
@@ -231,18 +246,67 @@ fn slice_slots<T: 'static>(
     Ok(())
 }
 
+/// What the copying walk carries: the sharing map, and the spellings met so
+/// far. Both are per-dump state the recursion threads through every value.
+struct Walk<'a> {
+    /// Source payload address → its copy in the scratch region.
+    visited: HashMap<usize, Value>,
+    /// The dumping instance's display memo, read for spellings.
+    memo: &'a SymbolTable,
+    /// The spellings met, deduplicated and ordered by name — the order the
+    /// name table is written in, so one graph writes one table whatever order
+    /// the memo learned them in.
+    names: BTreeSet<Box<str>>,
+}
+
+impl<'a> Walk<'a> {
+    fn new(memo: &'a SymbolTable) -> Self {
+        Walk {
+            visited: HashMap::new(),
+            memo,
+            names: BTreeSet::new(),
+        }
+    }
+
+    /// Record the spelling of a symbol or keyword the walk just met. A value
+    /// whose spelling this instance never learned contributes none: it still
+    /// dumps, and it still prints as `#<symbol:hash>` on the other side
+    /// (docs/impl/symbol.md).
+    fn note_name(&mut self, v: Value) {
+        let memo = self.memo;
+        let name = match v.as_symbol() {
+            Some(id) => memo.name(id),
+            None => crate::value::keyword::resolve_keyword_name(Some(memo), v.payload),
+        };
+        if let Some(name) = name {
+            if !self.names.contains(name) {
+                self.names.insert(name.into());
+            }
+        }
+    }
+
+    fn into_name_table(self) -> Vec<Box<str>> {
+        self.names.into_iter().collect()
+    }
+}
+
 /// Deep-copy one sealed data value into the scratch region, preserving
-/// sharing through the visited map (keyed on source payload address). A
-/// value outside the spike's sealed set fails the copy, naming the variant.
+/// sharing through the walk's visited map (keyed on source payload address).
+/// A value outside the spike's sealed set fails the copy, naming the variant.
 fn copy_value(
     heap: &mut FiberHeap,
     region: RuntimeRegion,
     v: Value,
-    visited: &mut HashMap<usize, Value>,
+    walk: &mut Walk,
 ) -> Result<Value, ImageError> {
     if !v.is_heap() {
         return match v.tag {
-            TAG_INT | TAG_FLOAT | TAG_NIL | TAG_TRUE | TAG_FALSE | TAG_EMPTY_LIST | TAG_KEYWORD => {
+            TAG_INT | TAG_FLOAT | TAG_NIL | TAG_TRUE | TAG_FALSE | TAG_EMPTY_LIST => Ok(v),
+            // A symbol and a keyword payload are name hashes, so the value
+            // means the same thing in every process; only the spelling has to
+            // travel beside it.
+            TAG_SYMBOL | TAG_KEYWORD => {
+                walk.note_name(v);
                 Ok(v)
             }
             _ => Err(ImageError::Unsupported(format!(
@@ -252,7 +316,7 @@ fn copy_value(
         };
     }
     let key = v.payload as usize;
-    if let Some(&copy) = visited.get(&key) {
+    if let Some(&copy) = walk.visited.get(&key) {
         return Ok(copy);
     }
     let obj = unsafe { deref(v) };
@@ -264,8 +328,8 @@ fn copy_value(
     }
     let copy = match obj {
         HeapObject::Pair(pair) => {
-            let first = copy_value(heap, region, pair.first, visited)?;
-            let rest = copy_value(heap, region, pair.rest, visited)?;
+            let first = copy_value(heap, region, pair.first, walk)?;
+            let rest = copy_value(heap, region, pair.rest, walk)?;
             heap.alloc_in_region(HeapObject::Pair(Pair::new(first, rest)), region)
         }
         HeapObject::LString { s, .. } => {
@@ -291,7 +355,7 @@ fn copy_value(
         HeapObject::LArray { elements, .. } => {
             let mut copies = Vec::with_capacity(elements.len());
             for &el in elements.iter() {
-                copies.push(copy_value(heap, region, el, visited)?);
+                copies.push(copy_value(heap, region, el, walk)?);
             }
             let slice = heap.alloc_region_slice_in_region(&copies, region);
             heap.alloc_in_region(
@@ -310,6 +374,6 @@ fn copy_value(
             )))
         }
     };
-    visited.insert(key, copy);
+    walk.visited.insert(key, copy);
     Ok(copy)
 }

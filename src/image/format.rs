@@ -5,8 +5,8 @@
 //!
 //! One header block of `HEADER_BLOCK` bytes zero-padded to `pages_offset()`,
 //! then the pages section, then the metadata sections (page table,
-//! relocations, object index). Pages are stored largest first, so packing
-//! them contiguously keeps every page's offset a multiple of its own size —
+//! relocations, object index, name table). Pages are stored largest first, so
+//! packing them contiguously keeps every page's offset a multiple of its size —
 //! the self-alignment the masked-header walk requires — and, since the
 //! section starts on a base-page boundary, every file offset stays legal for
 //! `mmap`. All integers are little-endian u64 unless noted.
@@ -110,8 +110,10 @@ pub fn sections(bytes: &[u8]) -> Result<Sections, ImageError> {
         .checked_add(usize::try_from(header.pages_len).unwrap_or(usize::MAX))
         .ok_or_else(|| ImageError::Corrupt("pages section length out of range".into()))?;
     let pages = pages_offset()..at;
-    let mut ranges = Vec::with_capacity(counts.len());
-    for (n, stride) in counts {
+    let mut ranges = Vec::with_capacity(counts.len() + 1);
+    // The name table is measured in bytes rather than entries, because its
+    // entries are the spellings themselves and vary in length.
+    for (n, stride) in counts.into_iter().chain([(header.names_len, 1)]) {
         let len = usize::try_from(n)
             .ok()
             .and_then(|n| n.checked_mul(stride))
@@ -132,7 +134,7 @@ pub fn sections(bytes: &[u8]) -> Result<Sections, ImageError> {
         page_table: ranges[0].clone(),
         relocations: ranges[1].clone(),
         index: ranges[2].clone(),
-        names: at..at,
+        names: ranges[3].clone(),
     })
 }
 
@@ -149,6 +151,9 @@ pub(crate) struct Header {
     pub root_tag: u64,
     pub root_payload: u64,
     pub root_is_heap: bool,
+    /// Bytes of the name table. Counted rather than tallied, because an entry
+    /// is a spelling and spellings differ in length.
+    pub names_len: u64,
     pub fingerprint: String,
 }
 
@@ -194,6 +199,7 @@ impl Header {
         put(&mut block, 48, self.root_tag);
         put(&mut block, 56, self.root_payload);
         put(&mut block, 64, self.root_is_heap as u64);
+        put(&mut block, 72, self.names_len);
         put(&mut block, FINGERPRINT_AT, fp.len() as u64);
         block[FINGERPRINT_AT + 8..FINGERPRINT_AT + 8 + fp.len()].copy_from_slice(fp);
         Ok(block)
@@ -231,6 +237,7 @@ impl Header {
             root_tag: get(block, 48),
             root_payload: get(block, 56),
             root_is_heap: get(block, 64) != 0,
+            names_len: get(block, 72),
             fingerprint,
         })
     }
@@ -259,6 +266,43 @@ pub(crate) fn write_u64_pair(out: &mut Vec<u8>, a: u64, b: u64) {
 pub(crate) fn read_u64_pair(buf: &[u8], i: usize, stride: usize) -> (u64, u64) {
     let at = i * stride;
     (get(buf, at), get(buf, at + 8))
+}
+
+/// Append one name-table entry: the spelling's byte length, its bytes, and
+/// zero padding out to the next multiple of eight. `out` is the name section
+/// alone, so the padding it computes is the padding the reader expects.
+pub(crate) fn write_name(out: &mut Vec<u8>, name: &str) {
+    out.extend_from_slice(&(name.len() as u64).to_le_bytes());
+    out.extend_from_slice(name.as_bytes());
+    out.resize(out.len().next_multiple_of(8), 0);
+}
+
+/// Decode the name table into borrowed spellings.
+///
+/// No hash is stored, so nothing here can disagree with the payloads in the
+/// body: the caller hashes each spelling as it records it
+/// (docs/impl/image/format.md). Bounds and UTF-8 are the whole check, because
+/// no address is derived from this section.
+pub(crate) fn read_names(buf: &[u8]) -> Result<Vec<&str>, ImageError> {
+    let corrupt = || ImageError::Corrupt("a name table entry runs past its section".into());
+    let mut out = Vec::new();
+    let mut at = 0usize;
+    while at < buf.len() {
+        let body = at
+            .checked_add(8)
+            .filter(|&b| b <= buf.len())
+            .ok_or_else(corrupt)?;
+        let end = body
+            .checked_add(get(buf, at) as usize)
+            .filter(|&e| e <= buf.len())
+            .ok_or_else(corrupt)?;
+        out.push(
+            std::str::from_utf8(&buf[body..end])
+                .map_err(|_| ImageError::Corrupt("a name in the image is not UTF-8".into()))?,
+        );
+        at = end.next_multiple_of(8);
+    }
+    Ok(out)
 }
 
 /// Page sizes a host may report. 4 KiB is Linux on x86-64, 16 KiB is macOS
@@ -373,6 +417,7 @@ mod tests {
             root_tag: 0,
             root_payload: 0,
             root_is_heap: false,
+            names_len: 0,
             fingerprint: fingerprint(),
         };
         let block = header.to_block().expect("fingerprint fits");

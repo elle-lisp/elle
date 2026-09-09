@@ -5,11 +5,13 @@
 //! docs/impl/image.md
 //! docs/impl/image/format.md
 //!
-//! Hydration rewrites the pointer slots and installs the result as an
-//! ordinary counted region. Current scope is the store milestone's data-only
-//! set: pairs, strings, bytes, arrays, floats, and the portable immediates,
-//! dumped and hydrated end to end. Closures, structs, sets, symbols, and the
-//! boot and environment configurations arrive with the later milestones
+//! Hydration rewrites the pointer slots, replays the name table into the
+//! hydrating instance's display memo, and installs the result as an ordinary
+//! counted region. Current scope is the store milestone's data-only set:
+//! pairs, strings, bytes, arrays, floats, and the portable immediates —
+//! symbols and keywords among them — dumped and hydrated end to end.
+//! Closures, structs, sets, syntax, and the boot and environment
+//! configurations arrive with the later milestones
 //! (docs/impl/image/plan.md).
 
 mod dump;

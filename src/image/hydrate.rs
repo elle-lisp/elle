@@ -50,9 +50,14 @@ pub fn hydrate_path(
 
 /// Hydrate the image `source` names into `heap`. On any failure the heap is
 /// untouched: no region minted, no mapping left behind.
+///
+/// `symbols` is the hydrating instance's display memo. The image's name table
+/// replays into it before anything is mapped, which is both what lets the
+/// instance print the image's symbols and where a cross-build name collision
+/// is caught (docs/impl/symbol.md).
 pub fn hydrate(
     heap: &mut FiberHeap,
-    _symbols: &mut crate::symbol::SymbolTable,
+    symbols: &mut crate::symbol::SymbolTable,
     source: &ImageSource,
 ) -> Result<Hydrated, ImageError> {
     let corrupt = |what: &str| ImageError::Corrupt(what.into());
@@ -85,12 +90,17 @@ pub fn hydrate(
 
     // Section geometry, checked against the real file before any mapping.
     let pages_len = header.pages_len;
-    if header.n_pages > 1 << 20 || header.n_relocs > 1 << 32 || header.n_objects > 1 << 32 {
+    if header.n_pages > 1 << 20
+        || header.n_relocs > 1 << 32
+        || header.n_objects > 1 << 32
+        || header.names_len > 1 << 32
+    {
         return Err(corrupt("section counts out of range"));
     }
     let meta_len = header.n_pages * PAGE_ENTRY_BYTES as u64
         + header.n_relocs * RELOC_BYTES as u64
-        + header.n_objects * INDEX_BYTES as u64;
+        + header.n_objects * INDEX_BYTES as u64
+        + header.names_len;
     let meta_off = image_at + pages_at + pages_len;
     if file_len < meta_off + meta_len {
         return Err(corrupt("file shorter than its sections claim"));
@@ -100,8 +110,10 @@ pub fn hydrate(
 
     let page_table_bytes = header.n_pages as usize * PAGE_ENTRY_BYTES;
     let reloc_bytes = header.n_relocs as usize * RELOC_BYTES;
+    let index_bytes = header.n_objects as usize * INDEX_BYTES;
     let (page_table, rest) = meta.split_at(page_table_bytes);
-    let (reloc_table, index_table) = rest.split_at(reloc_bytes);
+    let (reloc_table, rest) = rest.split_at(reloc_bytes);
+    let (index_table, name_table) = rest.split_at(index_bytes);
 
     // Page table: sizes are powers of two ≥ the base page, descending, with
     // ordered cursors; the packed offsets must sum to the section length.
@@ -171,6 +183,14 @@ pub fn hydrate(
         }
     } else if header.root_tag >= TAG_HEAP_START {
         return Err(corrupt("immediate root with a heap tag"));
+    }
+
+    // Replay the name table (step 2), before the region is minted: the
+    // spellings are what let this instance print the image's symbols and
+    // keywords, and recording one whose hash the instance maps to a different
+    // spelling panics here rather than making two names one name.
+    for name in format::read_names(name_table)? {
+        symbols.record_spelling(crate::namehash::name_hash(name), name);
     }
 
     // An immediate-rooted image maps nothing; the region is empty.
