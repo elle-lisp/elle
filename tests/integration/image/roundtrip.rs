@@ -167,20 +167,6 @@ fn double_hydration_is_correct_and_independent() {
 
 // ── Determinism ─────────────────────────────────────────────────────
 
-/// Fill `depth + 1` stack frames with `pattern` so that any construction
-/// temporary a later call materializes inherits pattern bytes in its
-/// padding. The xor keeps the recursion and the buffer observable.
-#[inline(never)]
-fn paint_stack(pattern: u8, depth: usize) -> u64 {
-    let buf = [pattern; 4096];
-    let sum: u64 = buf.iter().map(|&b| b as u64).sum();
-    if depth == 0 {
-        sum
-    } else {
-        sum ^ paint_stack(pattern, depth - 1)
-    }
-}
-
 // § Test plan, "Determinism" / § Dumping: two dumps of the same graph are
 // byte-identical whole files. The counter-factual is the stack painting:
 // the dumper's scratch objects are `repr(Rust)` enum copies whose padding

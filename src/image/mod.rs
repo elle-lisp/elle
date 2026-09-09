@@ -36,6 +36,11 @@ use crate::value::Value;
 pub struct Hydrated {
     pub root: Value,
     pub region: RuntimeRegion,
+    /// One past the highest hygiene scope counter the body carries. An
+    /// expander that will meet this image's syntax mints above it, or two
+    /// unrelated scopes compare equal (docs/impl/image/format.md). Zero when
+    /// the body holds no syntax.
+    pub scope_watermark: u32,
 }
 
 /// Why a dump or hydration refused.

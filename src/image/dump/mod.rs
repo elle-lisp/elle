@@ -20,6 +20,9 @@
 
 mod copy;
 
+#[cfg(test)]
+mod tests;
+
 use std::io::Write;
 use std::mem::size_of;
 use std::path::Path;

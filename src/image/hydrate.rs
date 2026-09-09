@@ -202,6 +202,7 @@ pub fn hydrate(
                 payload: header.root_payload,
             },
             region,
+            scope_watermark: 0,
         });
     }
 
@@ -303,5 +304,6 @@ pub fn hydrate(
             header.root_tag,
         ),
         region,
+        scope_watermark: 0,
     })
 }

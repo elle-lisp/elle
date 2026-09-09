@@ -5,6 +5,7 @@
 
 use super::*;
 use elle::image::{self, ImageError, Sections};
+use elle::syntax::{Span, Syntax, SyntaxArena, SyntaxKind};
 use elle::value::HeapTag;
 
 /// Dump the standard graph and answer its bytes, with the section ranges the
@@ -178,6 +179,54 @@ fn a_struct_entry_slice_that_leaves_the_image_is_refused() {
         break;
     }
     assert!(patched, "no LStruct in the index to damage");
+
+    match refusal(&bytes) {
+        ImageError::Corrupt(_) => {}
+        other => panic!("expected a corrupt-image refusal, got {other:?}"),
+    }
+}
+
+// A syntax object's root node rides in its shell, so its child slice is an
+// extent the walk reads there (docs/impl/image.md § Verifier). The trap: a
+// verifier that checked only the one extent a string, array, or struct has
+// would skip a syntax object entirely, and the first walk of that tree would
+// read past the image.
+//
+// The tree is the image's only object and carries no scopes, so the one
+// relocation in the file is the root node's child pointer — which is what
+// lets this test find the length beside it without a layout probe.
+#[test]
+fn a_syntax_child_extent_that_leaves_the_image_is_refused() {
+    let dir = crate::common::ScratchDir::new("image-syntax-extent");
+    let (mut bytes, s) = dumped_value(&dir, |heap, region| {
+        let arena = SyntaxArena::new(heap, region);
+        let kids = [
+            Syntax::new(SyntaxKind::Int(1), Span::synthetic()),
+            Syntax::new(SyntaxKind::Int(2), Span::synthetic()),
+            Syntax::new(SyntaxKind::Int(3), Span::synthetic()),
+        ];
+        let tree = Syntax::list(&arena, &kids, Span::synthetic());
+        let owned = tree.copy_into(&arena);
+        heap.alloc_in_region(
+            HeapObject::Syntax {
+                syntax: owned,
+                traits: Value::NIL,
+            },
+            region,
+        )
+    });
+    assert_eq!(
+        s.relocations.len(),
+        Sections::RELOC_BYTES,
+        "the lone tree has one relocation, the root node's child pointer"
+    );
+
+    // A `RegionSlice`'s len sits 8 bytes past its ptr, and the ptr is the
+    // relocated slot.
+    let len_at = s.pages.start + get_u64(&bytes, s.relocations.start) as usize + 8;
+    let len = u32::from_le_bytes(bytes[len_at..len_at + 4].try_into().expect("4 bytes"));
+    assert_eq!(len, 3, "the child count is not beside the relocated pointer");
+    bytes[len_at..len_at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
 
     match refusal(&bytes) {
         ImageError::Corrupt(_) => {}

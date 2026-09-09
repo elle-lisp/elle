@@ -85,6 +85,8 @@ pub struct Sections {
     pub index: std::ops::Range<usize>,
     /// Length-prefixed spellings, sorted by name.
     pub names: std::ops::Range<usize>,
+    /// Length-prefixed source-file names, sorted, indexed by the file stream.
+    pub files: std::ops::Range<usize>,
 }
 
 impl Sections {
@@ -135,6 +137,7 @@ pub fn sections(bytes: &[u8]) -> Result<Sections, ImageError> {
         relocations: ranges[1].clone(),
         index: ranges[2].clone(),
         names: ranges[3].clone(),
+        files: at..at,
     })
 }
 
