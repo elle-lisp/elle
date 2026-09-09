@@ -36,7 +36,8 @@ estimate rises, and the limit of the ascent is the least fixpoint.
 
 | Callee | The call's type |
 |---|---|
-| a lambda binding this unit defines | that lambda's body type, as the previous pass left it |
+| a lambda binding this unit writes | Top (§ "A written binding's result is Top") |
+| a lambda binding this unit defines and never writes | that lambda's body type, as the previous pass left it |
 | a registered primitive | its declared `RetType`, read from the primitive tables |
 | a stdlib arithmetic wrapper (`+`, `abs`, `min`, …) | Number — the wrapper raises on everything else |
 | anything else | Top |
@@ -184,13 +185,14 @@ the first branch it meets — `(if c (f 0) 1)` joins it with Int and hands the
 site an Int proof. `settle` never sees it, because the join has already
 replaced it (§ "Bottom is not a proof").
 
-```lisp
+```text
 (var f (fn [x] 1))
+(%bit-and (f 0) 1)
 (assign f (fn [x] "s"))
 (%bit-and (f 0) 1)
 ```
 
-That is a compile error at both call sites, the one before the write included.
+That is a compile error at both call sites, the one above the write included.
 The pass has no flow, so it cannot order the write against a call.
 
 ## What still does not prove
