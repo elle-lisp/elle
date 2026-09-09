@@ -39,10 +39,11 @@ Then the image milestones:
    memory file for an image that arrives as bytes, the verifier's two
    passes, the name table that teaches a hydrating instance the spellings its
    symbols and keywords carry, and the scrub and guardfree pins over a
-   hydrated region. The format, mapping, relocation, and teardown are proven
-   end to end. What it does not carry is the rest of the sealed set the
-   foundations opened up: structs, sets, and syntax are body data now, and
-   the dumper still refuses them.
+   hydrated region, and the sorted containers, whose entries the dumper
+   assembles from probed extents exactly as it does an object's. The format,
+   mapping, relocation, and teardown are proven end to end. What it does not
+   carry is the last of the sealed set the foundations opened up: syntax is
+   body data now, and the dumper still refuses it.
 6. **boot** — cell snapping, dump-boot, warm cache, embedded blob,
    per-worker hydration for `sys/spawn`, the encoded-LIR side-stream with
    lazy decode, compiler-state persistence, and the parity gate (bytecode
@@ -58,6 +59,12 @@ Then the image milestones:
 - Round-trip: dump a data graph, hydrate in a fresh runtime, assert
   structural equality — and a counter-factual load with a corrupted
   fingerprint falls back cleanly.
+- Sorted containers: a hydrated set and a hydrated struct answer the
+  membership and lookup questions their sources did, over keys that rank by
+  hash (a symbol, a keyword) and keys that rank by content (a string, an
+  array). The counter-factual for the entry canonicalization is the
+  determinism pin: a struct whose key padding differs between two dumps must
+  still write one file.
 - Source: an image parked at a non-zero, base-page-aligned offset inside a
   larger file hydrates from that descriptor and offset. A misaligned offset
   is refused by name, before anything is mapped.

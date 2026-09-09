@@ -155,6 +155,14 @@ Sealed and portable after the foundations: `Pair`, `LString`, `LArray`,
 stable name hashes), native-fns (dense `prim_id`, remapped by name), ints
 and floats, `Parameter`.
 
+A sorted container copies in order and is never re-sorted. Every key an image
+may carry ranks by its own content — a name hash for a symbol or a keyword, the
+bytes for a string, its elements for an array, its structure for anything else
+— so the order the dump wrote is the order the hydrating instance's comparator
+agrees with, and a binary search over the mapped entries finds what it found
+before. The keys that rank by address instead belong to values the dumper
+refuses anyway.
+
 **Capture cells are snapped, not persisted.** The stdlib file-letrec
 allocates one `CaptureCell` (`Rc<RefCell<Value>>`) per captured top-level
 binding. After the letrec fixpoint completes, a cell whose binding is never
@@ -353,12 +361,13 @@ children in sorted order and never iterates a hash map, so the same graph
 always yields the same layout — offsets, page table, relocation table, and
 object index are byte-identical across dumps. The page bytes are assembled
 canonically from a zeroed buffer: headers, cursor gaps, alignment slack,
-and relocation slots stay zero, and each object slot receives only its
+and relocation slots stay zero. Each object slot receives only its
 discriminant byte and the leaf-field extents the layout probes record
-([format.md](image/format.md) § Fingerprint). A `repr(Rust)` enum copy
-carries uninitialized padding from its construction temporary — the store
-spike measured this residue — so the dumper never copies a slot wholesale;
-the extent copy leaves padding out, and two dumps of the same graph are
+([format.md](image/format.md) § Fingerprint), and so does each struct entry,
+whose key is an enum with padding of its own. A `repr(Rust)` enum copy carries
+uninitialized padding from its construction temporary — the store spike
+measured this residue — so the dumper never copies a record wholesale; the
+extent copy leaves padding out, and two dumps of the same graph are
 byte-identical whole files. The warm cache still keys on the fingerprint,
 not a content hash; whole-file determinism buys reproducible embedded blobs,
 and concurrent dumpers racing through the atomic rename produce identical

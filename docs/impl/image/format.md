@@ -115,7 +115,8 @@ falls back to sources, instead of a page table the reader rejects as corrupt
 or an offset `mmap` refuses.
 
 Size and align alone do not pin field offsets. The fingerprint therefore also
-records the probed layout of every variant the dumper can emit: the
+records the probed layout of every variant the dumper can emit — the heap
+objects, and the `TableKey` variants a struct entry carries: the
 discriminant byte and each leaf field's offset and length
 ([measurements.md](measurements.md) item 6 records the probe mechanism and the
 measured layout). A build whose layout reorders a field or moves the
