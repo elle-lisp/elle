@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-09
 //! The compacting copy: what the dumper accepts into an image's body, and
 //! the spellings it records on the way through.
 //!
@@ -14,6 +14,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::hir::region::RuntimeRegion;
 use crate::symbol::SymbolTable;
+use crate::syntax::SyntaxArena;
 use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::{deref, HeapObject, Pair};
 use crate::value::repr::{
@@ -171,6 +172,21 @@ pub(super) fn copy_value(
             heap.alloc_in_region(
                 HeapObject::LStruct {
                     data: slice,
+                    traits: Value::NIL,
+                },
+                region,
+            )
+        }
+        // A tree is region-resident POD with no Rust-heap ownership, so the
+        // copy the syntax module already performs between arenas is the copy
+        // an image needs — every node, child slice, string payload, and scope
+        // set rebuilt in the destination.
+        HeapObject::Syntax { syntax, .. } => {
+            let arena = unsafe { SyntaxArena::from_raw(heap as *mut FiberHeap, region) };
+            let owned = syntax.copy_into(&arena);
+            heap.alloc_in_region(
+                HeapObject::Syntax {
+                    syntax: owned,
                     traits: Value::NIL,
                 },
                 region,

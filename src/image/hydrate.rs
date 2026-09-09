@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-09
 //! The hydrator: map an image's pages privately, relocate them, and install
 //! them as a freshly minted counted region.
 //!
@@ -19,7 +19,7 @@ use crate::value::heap::{HeapObject, HeapTag};
 use crate::value::repr::TAG_HEAP_START;
 use crate::value::Value;
 
-use super::format::{self, Header, INDEX_BYTES, PAGE_ENTRY_BYTES, RELOC_BYTES};
+use super::format::{self, Header, FILE_SLOT_BYTES, INDEX_BYTES, PAGE_ENTRY_BYTES, RELOC_BYTES};
 use super::verify::{self, MappedPage};
 use super::{Hydrated, ImageError, ImageSource};
 
@@ -93,14 +93,19 @@ pub fn hydrate(
     if header.n_pages > 1 << 20
         || header.n_relocs > 1 << 32
         || header.n_objects > 1 << 32
+        || header.n_file_slots > 1 << 32
         || header.names_len > 1 << 32
+        || header.files_len > 1 << 32
+        || header.scope_watermark > u32::MAX as u64
     {
         return Err(corrupt("section counts out of range"));
     }
     let meta_len = header.n_pages * PAGE_ENTRY_BYTES as u64
         + header.n_relocs * RELOC_BYTES as u64
         + header.n_objects * INDEX_BYTES as u64
-        + header.names_len;
+        + header.n_file_slots * FILE_SLOT_BYTES as u64
+        + header.names_len
+        + header.files_len;
     let meta_off = image_at + pages_at + pages_len;
     if file_len < meta_off + meta_len {
         return Err(corrupt("file shorter than its sections claim"));
@@ -111,9 +116,12 @@ pub fn hydrate(
     let page_table_bytes = header.n_pages as usize * PAGE_ENTRY_BYTES;
     let reloc_bytes = header.n_relocs as usize * RELOC_BYTES;
     let index_bytes = header.n_objects as usize * INDEX_BYTES;
+    let file_slot_bytes = header.n_file_slots as usize * FILE_SLOT_BYTES;
     let (page_table, rest) = meta.split_at(page_table_bytes);
     let (reloc_table, rest) = rest.split_at(reloc_bytes);
-    let (index_table, name_table) = rest.split_at(index_bytes);
+    let (index_table, rest) = rest.split_at(index_bytes);
+    let (file_slot_table, rest) = rest.split_at(file_slot_bytes);
+    let (name_table, file_table) = rest.split_at(header.names_len as usize);
 
     // Page table: sizes are powers of two ≥ the base page, descending, with
     // ordered cursors; the packed offsets must sum to the section length.
@@ -173,6 +181,25 @@ pub fn hydrate(
         relocs.push((slot, target));
     }
 
+    // File slots, decoded and bounds-checked before mapping. A slot is a
+    // span's `FileId`, so it is four bytes and four-byte aligned rather than
+    // eight (docs/impl/image/format.md).
+    let files = format::read_names(file_table)?;
+    let mut file_slots = Vec::with_capacity(header.n_file_slots as usize);
+    for i in 0..header.n_file_slots as usize {
+        let (slot, which) = format::read_u64_pair(file_slot_table, i, FILE_SLOT_BYTES);
+        if slot + 4 > pages_len {
+            return Err(corrupt("file slot out of range"));
+        }
+        if !slot.is_multiple_of(4) {
+            return Err(corrupt("file slot is not 4-byte aligned"));
+        }
+        let name = files
+            .get(which as usize)
+            .ok_or_else(|| corrupt("file slot names no entry in the file table"))?;
+        file_slots.push((slot, *name));
+    }
+
     // Root, checked before mapping.
     if header.root_is_heap {
         if header.root_tag < TAG_HEAP_START || header.root_payload + obj_size > pages_len {
@@ -202,7 +229,7 @@ pub fn hydrate(
                 payload: header.root_payload,
             },
             region,
-            scope_watermark: 0,
+            scope_watermark: header.scope_watermark as u32,
         });
     }
 
@@ -273,6 +300,16 @@ pub fn hydrate(
         }
     }
 
+    // The same sweep for file ids: a dump-time id is an index into another
+    // process's interner, so each listed span takes the id this process
+    // interns its file's name under.
+    for &(slot, name) in &file_slots {
+        let id = crate::syntax::files::intern(name);
+        unsafe {
+            *((base + slot as usize) as *mut crate::syntax::files::FileId) = id;
+        }
+    }
+
     // The verifier's object walk (§ Verifier), over the shells relocation
     // has already made resident.
     let mapped: Vec<MappedPage> = entries
@@ -304,6 +341,6 @@ pub fn hydrate(
             header.root_tag,
         ),
         region,
-        scope_watermark: 0,
+        scope_watermark: header.scope_watermark as u32,
     })
 }

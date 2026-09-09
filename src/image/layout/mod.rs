@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-09
 //! Layout probes for the records the dumper writes into page bytes: each
 //! variant's discriminant byte and the byte extents of its leaf fields.
 //!
@@ -12,9 +12,10 @@
 //! a discriminant or reorders fields fails loudly before any image is written
 //! or trusted.
 //!
-//! Two records carry a discriminant into the body, so two are probed: the
-//! `HeapObject` an object slot holds, and the `TableKey` a struct entry
-//! begins with. Two callers consume the extents. The fingerprint records
+//! Three records carry a discriminant into the body, so three are probed: the
+//! `HeapObject` an object slot holds, the `TableKey` a struct entry begins
+//! with, and the `SyntaxKind` inside a node (syntax.rs, which also writes the
+//! node around it). Two callers consume the extents. The fingerprint records
 //! them, so a binary whose layout shifted rejects foreign images. The dumper
 //! copies only the discriminant byte and these extents into zeroed slots, so
 //! a construction temporary's uninitialized padding never reaches the file
@@ -22,6 +23,9 @@
 
 mod heap;
 mod key;
+mod syntax;
+
+pub(crate) use syntax::{file_slot_in_node, write_canonical_node};
 
 use std::mem::{offset_of, size_of};
 
@@ -188,8 +192,11 @@ pub(crate) fn fingerprint_component() -> String {
         key_at,
         value_at,
     );
+    out.push(';');
+    out.push_str(&syntax::fingerprint_component());
     describe::<crate::value::heap::HeapObject>(&mut out);
     describe::<TableKey>(&mut out);
+    describe::<crate::syntax::SyntaxKind>(&mut out);
     out
 }
 
@@ -242,6 +249,14 @@ fn assert_nested_layout() {
     for (what, other) in [
         ("Value", RegionSlice::<Value>::header_layout()),
         ("entry", RegionSlice::<(TableKey, Value)>::header_layout()),
+        (
+            "Syntax",
+            RegionSlice::<crate::syntax::Syntax>::header_layout(),
+        ),
+        (
+            "ScopeId",
+            RegionSlice::<crate::syntax::ScopeId>::header_layout(),
+        ),
     ] {
         assert_eq!(
             u8_layout, other,

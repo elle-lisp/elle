@@ -1,4 +1,7 @@
+// audited: 2026-09-09
 //! Syntax tree representation for Elle source code
+//!
+//! docs/impl/syntax.md
 //!
 //! This module provides the pre-analysis AST representation. Unlike `Value`,
 //! which is the runtime representation, `Syntax` is specifically designed for:
@@ -13,7 +16,7 @@
 //!
 //! The tree is region data: nodes, child slices, and string payloads live in
 //! region pages, and a node is `Copy` POD with no `Drop`. Every constructor
-//! therefore names a [`SyntaxArena`]. See docs/impl/syntax.md.
+//! therefore names a [`SyntaxArena`].
 
 mod arena;
 pub(crate) mod convert;
@@ -49,6 +52,14 @@ impl ScopeId {
     /// Is this a macro-expansion intro scope?
     pub(crate) fn is_intro(self) -> bool {
         self.0 & Self::INTRO_BIT != 0
+    }
+
+    /// The expander counter value behind this id, with the intro bit masked
+    /// off. Intro scopes and ordinary ones come off the same counter, so this
+    /// is what an image's scope watermark is measured in
+    /// (docs/impl/image/format.md).
+    pub(crate) fn counter(self) -> u32 {
+        self.0 & !Self::INTRO_BIT
     }
 }
 

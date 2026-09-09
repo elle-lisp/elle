@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-09
 //! The heap-object half of the layout probe: exemplars and field extents for
 //! every `HeapObject` variant the dumper can emit.
 //!
@@ -7,6 +7,7 @@
 use std::mem::{offset_of, size_of};
 use std::sync::OnceLock;
 
+use crate::syntax::{Span, Syntax, SyntaxKind};
 use crate::value::heap::{HeapObject, HeapTag, Pair};
 use crate::value::region_slice::RegionSlice;
 use crate::value::Value;
@@ -14,7 +15,7 @@ use crate::value::Value;
 use super::{field_offset, probe, FieldExtent, Probed, VariantLayout};
 
 /// The variants the dumper emits, and so the ones the verifier accepts.
-const PROBED: [HeapTag; 7] = [
+const PROBED: [HeapTag; 8] = [
     HeapTag::LString,
     HeapTag::Pair,
     HeapTag::LArray,
@@ -22,6 +23,7 @@ const PROBED: [HeapTag; 7] = [
     HeapTag::Float,
     HeapTag::LSet,
     HeapTag::LStruct,
+    HeapTag::Syntax,
 ];
 
 impl Probed for HeapObject {
@@ -64,6 +66,10 @@ impl Probed for HeapObject {
                 data: RegionSlice::empty(),
                 traits: Value::NIL,
             },
+            HeapTag::Syntax => HeapObject::Syntax {
+                syntax: Syntax::new(SyntaxKind::Nil, Span::synthetic()),
+                traits: Value::NIL,
+            },
             HeapTag::Pair => HeapObject::Pair(Pair::new(Value::int(1), Value::int(2))),
             HeapTag::Float => HeapObject::Float(1.5),
             other => panic!("no exemplar for {other:?} (src/image/layout/heap.rs)"),
@@ -100,6 +106,16 @@ impl Probed for HeapObject {
                 data as *const _ as _,
                 traits,
             ),
+            // A syntax object's extents cover `traits` and stop: the node
+            // inside it is a record of its own, written by
+            // `write_canonical_node` at its own offset. Reaching it through
+            // an extent would copy the padding the node probe exists to
+            // leave out.
+            HeapObject::Syntax { traits, .. } => vec![FieldExtent::new(
+                "traits",
+                field_offset(self, traits as *const _ as _),
+                value,
+            )],
             HeapObject::Pair(p) => {
                 let base = field_offset(self, p as *const _ as _);
                 vec![
@@ -143,6 +159,9 @@ impl Probed for HeapObject {
                 (a.as_ptr() as *const u8, a.len()),
                 (b.as_ptr() as *const u8, b.len()),
             ),
+            // Only `traits`, because that is all this variant's extents
+            // carry; the node's own read-back is the kind probe's.
+            (HeapObject::Syntax { traits: a, .. }, HeapObject::Syntax { traits: b, .. }) => a == b,
             (HeapObject::Pair(a), HeapObject::Pair(b)) => {
                 a.first == b.first && a.rest == b.rest && a.traits == b.traits
             }

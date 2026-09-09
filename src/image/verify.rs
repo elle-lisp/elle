@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-09
 //! The verifier's object walk: every mapped object decodes as the tag the
 //! index claims, and stays inside the image.
 //!
@@ -12,16 +12,17 @@
 
 use std::mem::size_of;
 
+use crate::syntax::{ScopeId, Syntax, SyntaxKind};
 use crate::value::fiberheap::regionpool::HEADER_SIZE;
 use crate::value::heap::{HeapObject, HeapTag};
 use crate::value::{TableKey, Value};
 
 use super::format::PageEntry;
 use super::layout::{self, Probed};
+use super::ImageError;
 
 /// The discriminant span of an object slot, which is what the index names.
 const DISC_BYTES: usize = <HeapObject as Probed>::DISC_BYTES;
-use super::ImageError;
 
 /// One page as the walk sees it: where it starts in the image, and the two
 /// cursors that bound what the dying region wrote into it.
@@ -58,21 +59,21 @@ pub(crate) fn objects(
         // probed variant tolerates arbitrary bit patterns in its fields
         // (raw pointers, integers, floats, `Value` words).
         let obj = unsafe { &*((base + off) as *const HeapObject) };
-        let Some((ptr, bytes)) = slice_extent(obj) else {
-            continue;
-        };
-        let start = ptr
-            .checked_sub(base)
-            .filter(|_| ptr >= base)
-            .ok_or_else(|| extent_error(off))?;
-        let end = start.checked_add(bytes).ok_or_else(|| extent_error(off))?;
-        let backing = page_of(pages, start)?;
-        // Inline data bumps down from the end of the page, so a backing runs
-        // from the data cursor to the page's end and no further.
-        if start < backing.start + backing.entry.data_cursor as usize
-            || end > backing.start + backing.entry.size as usize
-        {
-            return Err(extent_error(off));
+        for extent in slice_extents(obj).into_iter().flatten() {
+            let (ptr, bytes) = extent;
+            let start = ptr
+                .checked_sub(base)
+                .filter(|_| ptr >= base)
+                .ok_or_else(|| extent_error(off))?;
+            let end = start.checked_add(bytes).ok_or_else(|| extent_error(off))?;
+            let backing = page_of(pages, start)?;
+            // Inline data bumps down from the end of the page, so a backing
+            // runs from the data cursor to the page's end and no further.
+            if start < backing.start + backing.entry.data_cursor as usize
+                || end > backing.start + backing.entry.size as usize
+            {
+                return Err(extent_error(off));
+            }
         }
     }
     Ok(())
@@ -111,30 +112,64 @@ fn discriminant(base: usize, off: usize, tag: HeapTag) -> Result<(), ImageError>
     Ok(())
 }
 
-/// The region-backed extent an object names, in bytes, or `None` for one
-/// that names none. An empty slice has a dangling constant pointer and no
-/// backing, so it names nothing.
-fn slice_extent(obj: &HeapObject) -> Option<(usize, usize)> {
+/// The region-backed extents an object names, in bytes. Most name one; a
+/// syntax object names two, because its root node rides in the shell and
+/// carries both a scope set and its kind's payload. An empty slice has a
+/// dangling constant pointer and no backing, so it names nothing.
+fn slice_extents(obj: &HeapObject) -> [Option<(usize, usize)>; 2] {
     // The unit is the element's size, not a `Value`'s: a struct's entries are
     // (key, value) pairs, so the same length names a much longer extent.
-    let (ptr, len, unit) = match obj {
-        HeapObject::LString { s, .. } => (s.as_ptr() as usize, s.len(), 1),
-        HeapObject::LBytes { data, .. } => (data.as_ptr() as usize, data.len(), 1),
-        HeapObject::LArray { elements, .. } => (
-            elements.as_ptr() as usize,
-            elements.len(),
-            size_of::<Value>(),
-        ),
-        HeapObject::LSet { data, .. } => (data.as_ptr() as usize, data.len(), size_of::<Value>()),
-        HeapObject::LStruct { data, .. } => (
-            data.as_ptr() as usize,
-            data.len(),
-            size_of::<(TableKey, Value)>(),
-        ),
-        _ => return None,
+    let one = |ptr: *const u8, len: usize, unit: usize| {
+        (len != 0).then(|| (ptr as usize, len.saturating_mul(unit)))
     };
-    if len == 0 {
-        return None;
+    match obj {
+        HeapObject::LString { s, .. } => [one(s.as_ptr(), s.len(), 1), None],
+        HeapObject::LBytes { data, .. } => [one(data.as_ptr(), data.len(), 1), None],
+        HeapObject::LArray { elements, .. } => [
+            one(
+                elements.as_ptr() as *const u8,
+                elements.len(),
+                size_of::<Value>(),
+            ),
+            None,
+        ],
+        HeapObject::LSet { data, .. } => [
+            one(data.as_ptr() as *const u8, data.len(), size_of::<Value>()),
+            None,
+        ],
+        HeapObject::LStruct { data, .. } => [
+            one(
+                data.as_ptr() as *const u8,
+                data.len(),
+                size_of::<(TableKey, Value)>(),
+            ),
+            None,
+        ],
+        HeapObject::Syntax { syntax, .. } => [
+            one(
+                syntax.scopes.as_ptr() as *const u8,
+                syntax.scopes.len(),
+                size_of::<ScopeId>(),
+            ),
+            kind_extent(&syntax.kind, &one),
+        ],
+        _ => [None, None],
     }
-    Some((ptr, len.saturating_mul(unit)))
+}
+
+/// The extent a node's kind names: a region string's bytes, or its child
+/// nodes. A wrapping kind names one node, and an atom names nothing.
+fn kind_extent(
+    kind: &SyntaxKind,
+    one: &impl Fn(*const u8, usize, usize) -> Option<(usize, usize)>,
+) -> Option<(usize, usize)> {
+    use SyntaxKind::*;
+    match kind {
+        Symbol(s) | Keyword(s) | String(s) | StringMut(s) => one(s.as_ptr(), s.len(), 1),
+        List(n) | Array(n) | ArrayMut(n) | Struct(n) | StructMut(n) | Set(n) | SetMut(n)
+        | Bytes(n) | BytesMut(n) => one(n.as_ptr() as *const u8, n.len(), size_of::<Syntax>()),
+        Quote(r) | Quasiquote(r) | Unquote(r) | UnquoteSplicing(r) | Splice(r)
+        | SyntaxLiteral(r) => one(r.as_ptr() as *const u8, 1, size_of::<Syntax>()),
+        Nil | Bool(_) | Int(_) | Float(_) => None,
+    }
 }

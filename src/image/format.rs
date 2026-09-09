@@ -1,11 +1,12 @@
-// audited: 2026-09-08
+// audited: 2026-09-09
 //! The image file's byte layout, and the fingerprint that gates hydration.
 //!
 //! docs/impl/image/format.md
 //!
 //! One header block of `HEADER_BLOCK` bytes zero-padded to `pages_offset()`,
 //! then the pages section, then the metadata sections (page table,
-//! relocations, object index, name table). Pages are stored largest first, so
+//! relocations, object index, file slots, and the name and file tables).
+//! Pages are stored largest first, so
 //! packing them contiguously keeps every page's offset a multiple of its size —
 //! the self-alignment the masked-header walk requires — and, since the
 //! section starts on a base-page boundary, every file offset stays legal for
@@ -20,7 +21,7 @@ use crate::value::Value;
 use super::ImageError;
 
 pub(crate) const MAGIC: [u8; 8] = *b"ELLEIMG\0";
-pub(crate) const VERSION: u32 = 0;
+pub(crate) const VERSION: u32 = 1;
 
 /// Fixed size of the serialized header block: the magic, the section
 /// geometry, the root, and the fingerprint string. The pages section starts
@@ -44,8 +45,9 @@ pub(crate) fn pages_offset_for(base_page: usize) -> usize {
     HEADER_BLOCK.next_multiple_of(base_page)
 }
 
-/// Byte offset of the fingerprint length field; the string follows it.
-const FINGERPRINT_AT: usize = 80;
+/// Byte offset of the fingerprint length field; the string follows it. Every
+/// fixed field sits below it, so adding one moves this and bumps [`VERSION`].
+const FINGERPRINT_AT: usize = 104;
 
 /// The live process's image fingerprint. An image whose stored fingerprint
 /// differs is rejected at hydration — images are regenerated, never
@@ -83,6 +85,8 @@ pub struct Sections {
     pub relocations: std::ops::Range<usize>,
     /// `(offset, tag)` pairs, one per heap object.
     pub index: std::ops::Range<usize>,
+    /// `(slot, file index)` pairs, one per span that names a file.
+    pub file_slots: std::ops::Range<usize>,
     /// Length-prefixed spellings, sorted by name.
     pub names: std::ops::Range<usize>,
     /// Length-prefixed source-file names, sorted, indexed by the file stream.
@@ -96,6 +100,8 @@ impl Sections {
     pub const RELOC_BYTES: usize = RELOC_BYTES;
     /// Bytes per object-index entry.
     pub const INDEX_BYTES: usize = INDEX_BYTES;
+    /// Bytes per file-slot entry.
+    pub const FILE_SLOT_BYTES: usize = FILE_SLOT_BYTES;
 }
 
 /// The section ranges of an image held in memory. Reads the header only, so
@@ -107,15 +113,17 @@ pub fn sections(bytes: &[u8]) -> Result<Sections, ImageError> {
         (header.n_pages, PAGE_ENTRY_BYTES),
         (header.n_relocs, RELOC_BYTES),
         (header.n_objects, INDEX_BYTES),
+        (header.n_file_slots, FILE_SLOT_BYTES),
     ];
     let mut at = pages_offset()
         .checked_add(usize::try_from(header.pages_len).unwrap_or(usize::MAX))
         .ok_or_else(|| ImageError::Corrupt("pages section length out of range".into()))?;
     let pages = pages_offset()..at;
-    let mut ranges = Vec::with_capacity(counts.len() + 1);
-    // The name table is measured in bytes rather than entries, because its
-    // entries are the spellings themselves and vary in length.
-    for (n, stride) in counts.into_iter().chain([(header.names_len, 1)]) {
+    let mut ranges = Vec::with_capacity(counts.len() + 2);
+    // The two string tables are measured in bytes rather than entries,
+    // because their entries are spellings and spellings vary in length.
+    let tables = [(header.names_len, 1), (header.files_len, 1)];
+    for (n, stride) in counts.into_iter().chain(tables) {
         let len = usize::try_from(n)
             .ok()
             .and_then(|n| n.checked_mul(stride))
@@ -136,8 +144,9 @@ pub fn sections(bytes: &[u8]) -> Result<Sections, ImageError> {
         page_table: ranges[0].clone(),
         relocations: ranges[1].clone(),
         index: ranges[2].clone(),
-        names: ranges[3].clone(),
-        files: at..at,
+        file_slots: ranges[3].clone(),
+        names: ranges[4].clone(),
+        files: ranges[5].clone(),
     })
 }
 
@@ -154,9 +163,16 @@ pub(crate) struct Header {
     pub root_tag: u64,
     pub root_payload: u64,
     pub root_is_heap: bool,
+    /// `(slot, file index)` pairs, one per span that names a file.
+    pub n_file_slots: u64,
     /// Bytes of the name table. Counted rather than tallied, because an entry
     /// is a spelling and spellings differ in length.
     pub names_len: u64,
+    /// Bytes of the file table, counted for the same reason.
+    pub files_len: u64,
+    /// One past the highest hygiene scope counter the body carries; zero when
+    /// the body holds no syntax (docs/impl/image/format.md).
+    pub scope_watermark: u64,
     pub fingerprint: String,
 }
 
@@ -171,6 +187,7 @@ pub(crate) struct PageEntry {
 pub(crate) const PAGE_ENTRY_BYTES: usize = 24;
 pub(crate) const RELOC_BYTES: usize = 16;
 pub(crate) const INDEX_BYTES: usize = 16;
+pub(crate) const FILE_SLOT_BYTES: usize = 16;
 
 fn put(buf: &mut [u8], at: usize, v: u64) {
     buf[at..at + 8].copy_from_slice(&v.to_le_bytes());
@@ -203,6 +220,9 @@ impl Header {
         put(&mut block, 56, self.root_payload);
         put(&mut block, 64, self.root_is_heap as u64);
         put(&mut block, 72, self.names_len);
+        put(&mut block, 80, self.n_file_slots);
+        put(&mut block, 88, self.files_len);
+        put(&mut block, 96, self.scope_watermark);
         put(&mut block, FINGERPRINT_AT, fp.len() as u64);
         block[FINGERPRINT_AT + 8..FINGERPRINT_AT + 8 + fp.len()].copy_from_slice(fp);
         Ok(block)
@@ -241,6 +261,9 @@ impl Header {
             root_payload: get(block, 56),
             root_is_heap: get(block, 64) != 0,
             names_len: get(block, 72),
+            n_file_slots: get(block, 80),
+            files_len: get(block, 88),
+            scope_watermark: get(block, 96),
             fingerprint,
         })
     }
@@ -420,7 +443,10 @@ mod tests {
             root_tag: 0,
             root_payload: 0,
             root_is_heap: false,
+            n_file_slots: 0,
             names_len: 0,
+            files_len: 0,
+            scope_watermark: 0,
             fingerprint: fingerprint(),
         };
         let block = header.to_block().expect("fingerprint fits");
