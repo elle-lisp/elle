@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-09
 // Guardfree pins for capture cells, letrec members and self-recursive closures.
 //
 // docs/analysis/testing.md
@@ -182,7 +182,7 @@ fn region_capture_cell_noreassign_uaf() {
 // iteration's re-store of the cell derefs the freed page (`capture_store_with_rebind`
 // reads the stale prior content). `capture_containment_edges` excludes cell-indirected
 // captures for exactly this reason (the cell owns its contents, the closure only reads
-// through it). The corpus runner exercises the (now unconditional) forest but never
+// through it). The corpus runner exercises the forest but never
 // under `--trace=guardfree`, so this subprocess is the deterministic-fault guard for
 // the env-cell-vs-capture-adopt interaction. Canonical shape:
 // tests/elle/region-capture-cell-loop-uaf.lisp (single loop, nested loops, and
@@ -192,9 +192,9 @@ fn region_capture_cell_loop_uaf_ownership() {
     run_elle_script_with_args("region-capture-cell-loop-uaf", &["--trace=guardfree"]);
 }
 
-// GREEN (live guard) — distinct from `region_traits_table_uaf` above, which was a
-// RUNTIME RC gap (fixed). This is the COMPILE-TIME OWNERSHIP invariant the unconditional
-// forest upholds: a closure captures a top-level struct and attaches it as a trait table
+// GREEN (live guard) — the COMPILE-TIME OWNERSHIP invariant the forest upholds, distinct
+// from the runtime RC accounting `elle_scripts::containers::region_traits_table_uaf`
+// covers: a closure captures a top-level struct and attaches it as a trait table
 // with `with-traits`. `with-traits` declares `RegionEffect::Fresh` AND `embeds: &[1]`, so
 // the walk records the `result ⊇ table` embed containment (`call_embeds` →
 // `containment_edges`) — the compile-time analog of the runtime alloc-scan that counts the
@@ -278,7 +278,7 @@ fn region_cell_aliased_init_uaf() {
 // same dispatch reads the request's id). Green pins that the drop rescues the
 // externally-referenced region to the RC baseline: the cell's read after the
 // fiber completes sees the live member, and the region frees at the cell's
-// release. The rescue unit family is `regionstore::tests::forest`. Subprocess
+// release. The rescue unit family is `regionstore::tests::rescue`. Subprocess
 // guardfree run, same rationale as the twin above.
 #[test]
 fn region_capture_cell_member_cascade_uaf() {
@@ -342,8 +342,8 @@ fn region_compose_closure_acc_uaf() {
 // cell in recv_region would drive recv_region's RC to 0 mid-body and the worker's
 // cleanup `decref_region(recv_region)` then double-frees a phantom region. This
 // subprocess runs the JIT tier under the guardfree oracle, where a regression
-// faults deterministically on the worker thread. (`src/primitives/
-// concurrency.rs`, the captured-local cell loop.)
+// faults deterministically on the worker thread. The cell loop is in
+// src/primitives/concurrency.rs.
 #[test]
 fn region_spawn_capture_mutate_guardfree() {
     run_elle_script_with_args(

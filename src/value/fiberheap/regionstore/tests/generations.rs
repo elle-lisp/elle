@@ -1,10 +1,15 @@
-use super::*;
-
-// ── Region generations (docs/impl/region/generations.md § "Region generations") ─────
+// audited: 2026-09-09
+// One generation counter per physical region id, so a stale deref is named at
+// the deref instead of resolving to a dead region.
 //
-// Written from the spec: a per-physical-id generation counter, bumped on
-// every free, stamped in each claimed page's header, checked by the
-// region-of funnel in debug builds — a stale deref panics at the deref.
+// docs/impl/region/generations.md
+//
+// The counter is bumped on every free and stamped into each claimed page's
+// header. The region-of funnel compares the two in a debug build, which is what
+// turns a stale-but-intact read into a panic at the site that made it — and
+// what makes the three tests below debug-only.
+
+use super::*;
 
 #[test]
 fn generation_bumps_on_free_and_recycled_id_mints_at_bumped_generation() {
@@ -29,6 +34,7 @@ fn generation_bumps_on_free_and_recycled_id_mints_at_bumped_generation() {
     assert_eq!(store.region_of_ptr(v2.as_heap_ptr().unwrap()), r2.get());
 }
 
+#[cfg(debug_assertions)]
 #[test]
 #[should_panic(expected = "stale region")]
 fn stale_value_deref_panics_after_region_free() {
@@ -44,6 +50,7 @@ fn stale_value_deref_panics_after_region_free() {
     let _ = store.region_of_ptr(ptr);
 }
 
+#[cfg(debug_assertions)]
 #[test]
 #[should_panic(expected = "stale region")]
 fn stale_value_deref_panics_after_id_recycle() {
@@ -60,6 +67,7 @@ fn stale_value_deref_panics_after_id_recycle() {
     let _ = store.region_of_ptr(ptr); // page gen 0 vs current gen 1
 }
 
+#[cfg(debug_assertions)]
 #[test]
 #[should_panic(expected = "stale region")]
 fn stale_value_deref_panics_after_teardown_all() {
@@ -122,20 +130,4 @@ fn reclaimed_page_resolves_to_new_region_undetected() {
         "first slot of the re-claimed page is the old pointer (LIFO cache)"
     );
     assert_eq!(store.region_of_ptr(ptr), r2.get());
-}
-
-#[test]
-fn cascade_pair_cross_region() {
-    let mut store = RegionStore::default();
-    let val_in_r2 = store.alloc_obj(rr(2), cons_obj()); // rc(2)=1
-
-    let pair = HeapObject::Pair(Pair::new(val_in_r2, Value::NIL));
-    store.alloc_obj(rr(3), pair); // auto-incref r2 → rc(2)=2
-
-    store.decref(rr(3)); // cascade: rc(2)=1
-    assert_eq!(
-        store.rc(rr(2)),
-        1,
-        "cascade should decref pair's cross-region ref"
-    );
 }

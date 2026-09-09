@@ -1,3 +1,9 @@
+// audited: 2026-09-09
+// What a compiled call does with the signal a primitive raised, and with a
+// closure whose environment outlived its region.
+//
+// docs/impl/jit.md
+
 use super::*;
 use crate::value::fiber::{SIG_DEBUG, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::vm::VM;
@@ -98,8 +104,6 @@ fn user_defined_signal_treated_as_suspension() {
     assert_eq!(sig, user_bit);
 }
 
-// -- Restored tests (wrongly deleted in 94cd2050) --
-
 #[test]
 fn bare_sig_error_stores_signal_returns_nil() {
     crate::value::arena::with_test_region(|| {
@@ -149,8 +153,11 @@ fn sig_error_terminal_stored_as_error_not_panic() {
 // silently and detonates later at an unattributed load (or, on macOS,
 // wedges the thread on the faulting instruction). The guard classifies
 // the env backing at the boundary, where the generation check names the
-// call site instead.
+// call site instead. That check is debug-only, so the test that drives it to
+// panic is too — the two below run in both profiles because they assert that
+// the guard stays quiet, which a release build's no-op also does.
 
+#[cfg(debug_assertions)]
 #[test]
 #[should_panic(expected = "stale region")]
 fn env_backing_guard_panics_on_a_freed_env_region() {
