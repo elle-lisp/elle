@@ -115,7 +115,7 @@ read a proof out of Bottom. The first two ask with `subtype`, and did.
 
 A definition is therefore checked where it is written:
 
-```lisp
+```text
 (defn f [x] (%mul x x))
 ```
 
@@ -139,6 +139,7 @@ binding, so the guard or the declaration is the whole of what is known:
 (defn g [b]
   (when (%not (%int? b)) (error :not-int))
   (%mul 2 b))
+(assert (= (g 5) 10) "the guard proves b, and this unit calls g nowhere else")
 ```
 
 `b` is an int in everything after the guard, whether or not this unit calls
