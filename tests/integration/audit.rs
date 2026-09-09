@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-09
 // The audit queue and its commit gate, specified in docs/impl/audit.md.
 //
 // scripts/audit answers two questions: did the files this commit stages carry
@@ -244,6 +244,44 @@ fn the_gate_and_the_queue_agree_on_what_is_exempt() {
     assert!(
         out.status.success() && !queued,
         "AGENTS.md must be exempt from the gate and absent from the queue, or neither"
+    );
+}
+
+#[test]
+fn the_makefile_is_exempt_from_the_queue_and_from_the_gate() {
+    // The trap: the Makefile is past the 500-line reading budget and there is
+    // nothing to split out of it, so a stamp on it fails prose.rs while no
+    // stamp on it fails the gate. Queued, it is a file no commit can touch.
+    //
+    // The counter-factual: exempt it from the gate alone and the queue reports
+    // it as unaudited forever, which is the disagreement the shared
+    // eligibility test exists to prevent.
+    let t = Tree::new("makefile");
+    t.write("Makefile", "all:  ## build\n\techo hi\n")
+        .write("ours.md", &doc(None, 400));
+
+    let out = Command::new(script())
+        .args([
+            "--root",
+            t.0.to_str().expect("utf-8 path"),
+            "--staged",
+            "Makefile",
+        ])
+        .output()
+        .expect("run scripts/audit");
+    let q = t.queue();
+    assert!(
+        out.status.success(),
+        "the Makefile must pass the gate unstamped: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !q.iter().any(|p| p.ends_with("Makefile")),
+        "`make help` is how the Makefile is read, so it is not queued: {q:?}"
+    );
+    assert!(
+        q.iter().any(|p| p.ends_with("ours.md")),
+        "the exemption is the Makefile alone; the tree stays queued: {q:?}"
     );
 }
 
