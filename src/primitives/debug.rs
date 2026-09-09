@@ -1,4 +1,7 @@
-//! Debug print, trace, and memory usage primitives
+// audited: 2026-09-09
+//! The debug primitives an author reaches for to see a running program. Two
+//! stderr prints, a process memory reading, and the count of spellings this
+//! instance's memo holds.
 
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
@@ -8,27 +11,33 @@ use crate::value::Value;
 
 /// Prints a value with debug information
 /// (debug-print value)
+///
+/// The value goes through `VM::show_value`, so it renders against this
+/// instance's memo. A bare `{:?}` threads no memo and spells every name outside
+/// the static vocabulary `#<symbol:hash>` (docs/impl/symbol.md).
 pub(crate) fn prim_debug_print(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    eprintln!("[DEBUG] {:?}", args[0]);
+    eprintln!("[DEBUG] {}", ctx.vm().show_value(args[0]));
     (SIG_OK, args[0])
 }
 
 /// Traces execution with a label
 /// `(trace label value)` — prints `[TRACE] label: value` to stderr, returns value
 ///
-/// Label can be a string or symbol. Symbols are resolved to their
-/// name via the VM's symbol table (via `ctx.vm().symbols()`, same access
-/// pattern as string).
+/// The label can be a string or a symbol. Both halves of the line resolve
+/// against this instance's memo: the label through `SymbolTable::name`, the
+/// value through `VM::show_value` (docs/impl/symbol.md). Rendering only the
+/// label leaves a spelled label beside a hashed value on one line.
 pub(crate) fn prim_trace(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
+    let traced = ctx.vm().show_value(args[1]);
     if args[0]
         .with_string(|s| {
-            eprintln!("[TRACE] {}: {:?}", s, args[1]);
+            eprintln!("[TRACE] {}: {}", s, traced);
         })
         .is_some()
     {
@@ -40,7 +49,7 @@ pub(crate) fn prim_trace(
             .and_then(|s| s.name(sym_id))
             .map(|n| n.to_string())
             .unwrap_or_else(|| format!("#<symbol:{:#x}>", sym_id.0));
-        eprintln!("[TRACE] {}: {:?}", name, args[1]);
+        eprintln!("[TRACE] {}: {}", name, traced);
         (SIG_OK, args[1])
     } else {
         (
