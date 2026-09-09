@@ -6,9 +6,9 @@
 //!
 //! One module per subject: `narrow` for what a guard or a dispatch arm proves,
 //! `rettype` for what an op's result proves, `recursion` for what a recursive
-//! call's result proves, `bottom` for what the lattice's start proves,
-//! `prune` for dead-arm removal, `contract` for prove-or-reject,
-//! `monomorphize` for wrapper collapse.
+//! call's result proves, `mutation` for what a written binding proves,
+//! `bottom` for what the lattice's start proves, `prune` for dead-arm removal,
+//! `contract` for prove-or-reject, `monomorphize` for wrapper collapse.
 
 use super::infer_and_rewrite;
 use crate::hir::types::TyId;
@@ -18,6 +18,7 @@ use crate::symbol::SymbolTable;
 mod bottom;
 mod contract;
 mod monomorphize;
+mod mutation;
 mod narrow;
 mod prune;
 mod recursion;

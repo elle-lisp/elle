@@ -36,7 +36,8 @@ estimate rises, and the limit of the ascent is the least fixpoint.
 
 | Callee | The call's type |
 |---|---|
-| a lambda binding this unit defines | that lambda's body type, as the previous pass left it |
+| a lambda binding this unit writes | Top (§ "A written binding's result is Top") |
+| a lambda binding this unit defines and never writes | that lambda's body type, as the previous pass left it |
 | a registered primitive | its declared `RetType`, read from the primitive tables |
 | a stdlib arithmetic wrapper (`+`, `abs`, `min`, …) | Number — the wrapper raises on everything else |
 | anything else | Top |
@@ -154,13 +155,54 @@ parameter, and `meet(String, Int)` is ⊥ inside the `(%int? x)` branch of a
 function only ever called with a string. Both are left alone, so those sites
 reject rather than compute.
 
+## A written binding's result is Top
+
+A binding whose initializer is a lambda records that lambda's body type, and
+every call to the binding reads it as a proof. An `assign` puts a different
+lambda in the binding, and no pass can say which one a given call reaches: the
+write can sit inside a function an earlier call runs.
+
+So the binder records **Top** for a binding this unit writes anywhere, whatever
+its initializer computes. The rule is asked once, where the body type is
+recorded, so no route to the write defeats it. Functionalization rewrites a
+write to a mutated binding into `MakeCell`/`SetCell`, whose arm records no body
+type at all; the `Assign` arm records one for a binding that rewrite left alone.
+
+Which binding a call names is functionalization's answer rather than the
+source's. A straight-line write to a function-local binding is SSA-renamed:
+each version has one initializer, and the call names the version the write
+made. No version is written there, so that spelling keeps its proof and answers
+from the lambda the program last put in the name.
+
+What renaming cannot reach is a binding a **cell** holds — file scope, a loop,
+a capture, a write from inside another function — and that is the shape this
+rule covers. A version a branch merges is neither: its initializer is the
+merge, so nothing records a body type for it and a call already reads Top.
+
+Recording Top is what the join needs, and recording nothing is not enough. An
+absent entry reads as Bottom, and a Bottom no later pass raises joins away at
+the first branch it meets — `(if c (f 0) 1)` joins it with Int and hands the
+site an Int proof. `settle` never sees it, because the join has already
+replaced it (§ "Bottom is not a proof").
+
+```text
+(var f (fn [x] 1))
+(%bit-and (f 0) 1)
+(assign f (fn [x] "s"))
+(%bit-and (f 0) 1)
+```
+
+That is a compile error at both call sites, the one above the write included.
+The pass has no flow, so it cannot order the write against a call.
+
 ## What still does not prove
 
 - **A mutated binding.** An `assign` gives a binding flow that a per-pass
   recomputation cannot see, so a mutated parameter never receives call-site
   proofs and keeps whatever a guard proves of it. The loop-accumulator spelling
   of a numeric kernel is unproven for this reason, where the recursive spelling
-  of the same kernel proves.
+  of the same kernel proves. A mutated lambda binding's result answers the same
+  way, and for the same reason (§ "A written binding's result is Top").
 - **A binding used as a value.** One use outside callee position — stored,
   passed to a higher-order function, returned, exported — means callers this
   unit cannot enumerate, so the call-site join over the visible ones proves
@@ -187,6 +229,13 @@ reject rather than compute.
   declaration each refining the Kleene start and each meeting a fact that
   contradicts it, and the postcondition that the map the pass hands out carries
   no Bottom.
+- `hir::typeinfer::tests::mutation::*` — a written lambda binding proves nothing
+  about its result: the write after the call and the write before it, the write
+  reached from inside another function, a write that stores the same type, the
+  loop that rewrites its own callee between two turns, the branch a Bottom would
+  have joined away, and two controls — the unwritten binding, and the
+  SSA-renamed function-local write that still proves.
 - `tests/elle/typed-int-ops.lisp` — the corpus peer, on every tier: a
-  self-recursive integer `fib` emits `AddInt` and computes with it, and a float
-  base case is refused at compile time.
+  self-recursive integer `fib` emits `AddInt` and computes with it, a float
+  base case is refused at compile time, and a reassigned local lambda binding
+  is refused where its unreassigned twin emits `AddInt`.

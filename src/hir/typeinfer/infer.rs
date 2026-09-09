@@ -47,10 +47,13 @@ pub(super) struct Infer<'a> {
     // ── the program's facts: collected once, never rewritten ──
     /// Which bindings are lambdas, and what their parameters are.
     lambda_params: HashMap<Binding, Vec<Binding>>,
-    /// Bindings written by `Assign`/`SetCell`. A parameter in this set has flow
-    /// the per-pass recomputation cannot see, so it never receives call-site
-    /// proofs (guards only).
-    mutated_params: HashSet<Binding>,
+    /// Bindings written by `Assign`/`SetCell` anywhere in the unit. A write
+    /// gives a binding flow the per-pass recomputation cannot see, and that
+    /// costs the binding two proofs: a parameter in this set never receives
+    /// call-site proofs (guards only), and a lambda binding in it records Top
+    /// for its result rather than its initializer's body type
+    /// (docs/impl/typeinfer.md).
+    mutated: HashSet<Binding>,
     /// Bindings with at least one value-position use
     /// (`collect_value_position_uses`): their callers are not all visible, so
     /// call-site joins must not prove their parameters.
@@ -84,7 +87,7 @@ impl<'a> Infer<'a> {
     pub(super) fn new(hir: &Hir, arena: &'a BindingArena) -> Self {
         let mut lambda_params: HashMap<Binding, Vec<Binding>> = HashMap::new();
         collect_lambda_info(hir, arena, &mut lambda_params);
-        let mutated_params = collect_mutated_bindings(hir);
+        let mutated = collect_mutated_bindings(hir);
         let mut value_used = HashSet::new();
         collect_value_position_uses(hir, &mut value_used);
         let mut typeof_aliases: HashMap<Binding, Binding> = HashMap::new();
@@ -108,7 +111,7 @@ impl<'a> Infer<'a> {
                 continue;
             }
             for p in params {
-                if !mutated_params.contains(p) {
+                if !mutated.contains(p) {
                     binding_types.insert(*p, TypeInterner::BOTTOM);
                 }
             }
@@ -118,7 +121,7 @@ impl<'a> Infer<'a> {
             interner: TypeInterner::new(),
             arena,
             lambda_params,
-            mutated_params,
+            mutated,
             value_used,
             typeof_aliases,
             binding_types,
