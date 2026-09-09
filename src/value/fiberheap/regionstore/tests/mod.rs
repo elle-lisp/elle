@@ -1,6 +1,9 @@
-// Re-export everything the parent `regionstore` module's `use super::*;` brought
-// into scope, so each themed submodule's `use super::*;` resolves the same names
-// (RuntimeRegion, RegionStore, HeapObject, Value, …) it relied on before the split.
+// audited: 2026-09-09
+// Re-exports what the region store's own scope holds, plus the two fixtures
+// every themed file below builds a region from.
+//
+// docs/impl/region/ownership.md
+
 pub(crate) use super::*;
 use crate::value::heap::Pair;
 
@@ -13,8 +16,11 @@ pub(super) fn cons_obj() -> HeapObject {
     HeapObject::Pair(Pair::new(Value::NIL, Value::NIL))
 }
 
+mod adopt;
 mod edges;
-mod forest;
 mod generations;
 mod recycle;
 mod refcount;
+mod reparent;
+mod rescue;
+mod subtree;
