@@ -1,10 +1,11 @@
 // audited: 2026-09-09
-// Freeing a root frees every region its subtree owns, however deep.
+// Freeing a root frees every region its subtree owns, however deep, and
+// whether or not the root holds pages of its own.
 //
-// docs/impl/region/ownership.md
+// docs/impl/region/owner.md
 //
-// This is the structural reclamation a per-region count cannot do on its own:
-// an interior cycle holds every count above zero, and only a walk from the root
+// This is the structural reclamation a per-region count cannot do alone: an
+// interior cycle holds every count above zero, and only a walk from the root
 // reaches it. Each test here is a counter-factual against a link that records
 // the edge and frees nothing through it.
 

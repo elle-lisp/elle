@@ -20,7 +20,7 @@ Up: [..](../AGENTS.md)
 - [merging.md](merging.md) — **Merging (more...)**
 - [model.md](model.md) — **Region representation — id-spaces, per-execution model, layout** Implementation-facing.
 - [owner.md](owner.md) — **Owner nodes — an activation as a forest root (more...)**
-- [ownership.md](ownership.md) — **Adoption and subtree drop (the ownership forest) (more...)**
+- [ownership.md](ownership.md) — **Adoption and subtree drop (the ownership forest)** Adoption links regions into a parent→child tree, so a whole subtree frees as a unit when its root frees.
 - [relocate.md](relocate.md) — **A release past a frame-replacing tail call** Every release the lowerer emits after a `TailCall` is dead on the closure path, and what it costs to move one ahead of that call.
 - [replicate.md](replicate.md) — **The relocation point and its replicas** How a relocation point outlives its own block, so one release covers a merge and every path that leaves the frame before it.
 - [rules.md](rules.md) — **Region rules — the implementor's correctness obligations** This is implementation-facing: the exhaustive correctness contract the compiler and runtime must uphold.
