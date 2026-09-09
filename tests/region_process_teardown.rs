@@ -72,6 +72,33 @@ fn unexplained_references(
         .collect()
 }
 
+/// Run `src` on `rt`, tear the runtime down, and describe every region left
+/// pinned from outside the region graph. Empty is the contract
+/// (docs/impl/region/rules.md § "Teardown — every region frees"); each entry is
+/// a claim no release the region system reaches can balance.
+fn pinned_after_teardown(mut rt: Runtime, src: &str) -> Vec<String> {
+    let value = {
+        let (vm, symbols, cctx) = rt.parts();
+        let result = compile_file(src, symbols, cctx, "<unexplained>").expect("compiles");
+        vm.execute_scheduled(&result.bytecode, cctx).expect("runs")
+    };
+    // The program value reaches the caller with one owning reference; route it
+    // through the process-root registry so the sweep consumes it, or it reports
+    // as an unexplained reference of the caller's own making.
+    elle::value::arena::register_process_root(rt.heap(), value);
+    let report = rt.teardown();
+    let heap = rt.heap();
+    unexplained_references(heap, &report)
+        .iter()
+        .map(|&(id, rc, ind)| {
+            format!(
+                "region {id} rc={rc} in-edges={ind} tags={:?}",
+                heap.region_tags(id)
+            )
+        })
+        .collect()
+}
+
 /// One line per surviving region, plus the leak roots grouped by tag signature.
 fn report_census(heap: &elle::value::fiberheap::FiberHeap, report: &elle::runtime::TeardownReport) {
     eprintln!("census: {} regions survive teardown", report.live_regions);

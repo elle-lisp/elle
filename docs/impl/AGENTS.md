@@ -23,7 +23,7 @@ Up: [..](../AGENTS.md)
 - [reader.md](reader.md) — **Reader** The reader transforms source text into syntax trees.
 - [selfrec.md](selfrec.md) — **Self-recursion: the executing-closure mechanism (no cell) (more...)**
 - [spirv.md](spirv.md) — **SPIR-V Backend (more...)**
-- [stdlib-cache.md](stdlib-cache.md) — **Standard Library Disk Cache** `stdlib.lisp` (~2850 lines) is recompiled on every process start.
+- [stdlib-cache.md](stdlib-cache.md) — **Standard Library Disk Cache** `stdlib.lisp` (~2900 lines) is recompiled on every process start.
 - [symbol.md](symbol.md) — **Symbols and keywords — identity is the name hash** A `SymbolId` is the 64-bit FNV-1a hash of the symbol's name.
 - [syntax.md](syntax.md) — **Syntax — a region-native immutable tree** The pre-analysis tree the reader produces, the expander rewrites, and the analyzer consumes.
 - [typeinfer.md](typeinfer.md) — **Type inference: the ascent, and what a call proves** Where the types come from: an ascent from below whose limit is the least fixpoint, and what each kind of call contributes to it.
