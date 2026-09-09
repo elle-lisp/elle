@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-08
+# audited: 2026-09-09
 # The operand proof, end to end.
 #
 # A %-intrinsic whose operands the front end proved are integers emits the
@@ -143,6 +143,29 @@
                  "  (if (%lt n 2) 1.5 (%bit-and (%add (f (%sub n 1)) 1) 3))) "
                  "(f 4)") "<typed-int-ops>"))]
   (assert (not (get r 0)) "a float base case must not prove an int result")
+  (assert (string/contains? (get (get r 1) :message) "%bit-and")
+          (string "the diagnostic must name the refusing op, got "
+                  (get (get r 1) :message))))
+
+# ── A reassigned lambda binding proves nothing ───────────────────
+
+(defn call-local-lambda []
+  "One initializer and no write, so the call reads the lambda's body type."
+  (var g (fn [x] (%add x 1)))
+  (%add (g 1) 1))
+
+(assert (string/contains? (disasm-text call-local-lambda) "AddInt")
+        "a call to an unwritten local lambda binding proves the %add")
+(assert (= (call-local-lambda) 3) "AddInt computes over the call's result")
+
+# The counter-factual: the binder kept the first initializer's body type
+# through every later write, so this compiled and `%bit-and` ran the integer
+# opcode over the string "s", printing 0.
+(let [r (protect (compile/barrier-module (string "(var f (fn [x] 1)) "
+                 "(assign f (fn [x] \"s\")) " "(%bit-and (f 0) 1)")
+                 "<typed-int-ops>"))]
+  (assert (not (get r 0))
+          "a reassigned lambda binding must not prove its result")
   (assert (string/contains? (get (get r 1) :message) "%bit-and")
           (string "the diagnostic must name the refusing op, got "
                   (get (get r 1) :message))))
