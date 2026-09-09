@@ -71,6 +71,37 @@ pub fn fingerprint() -> String {
     )
 }
 
+/// Where each section sits in an image's bytes, for a caller that reads or
+/// damages one without mapping the image.
+#[derive(Debug, Clone)]
+pub struct Sections {
+    /// The mappable page bytes.
+    pub pages: std::ops::Range<usize>,
+    /// `(size, object cursor, data cursor)` per page, in placement order.
+    pub page_table: std::ops::Range<usize>,
+    /// `(slot, target)` pairs, both region-relative.
+    pub relocations: std::ops::Range<usize>,
+    /// `(offset, tag)` pairs, one per heap object.
+    pub index: std::ops::Range<usize>,
+}
+
+impl Sections {
+    /// Bytes per page-table entry.
+    pub const PAGE_ENTRY_BYTES: usize = PAGE_ENTRY_BYTES;
+    /// Bytes per relocation entry.
+    pub const RELOC_BYTES: usize = RELOC_BYTES;
+    /// Bytes per object-index entry.
+    pub const INDEX_BYTES: usize = INDEX_BYTES;
+}
+
+/// The section ranges of an image held in memory. Reads the header only, so
+/// it answers for a file this binary could not hydrate.
+pub fn sections(_bytes: &[u8]) -> Result<Sections, ImageError> {
+    Err(ImageError::Corrupt(
+        "section decoding is not built yet".into(),
+    ))
+}
+
 /// Everything the header block records besides the fingerprint.
 #[derive(Debug, Clone)]
 pub(crate) struct Header {

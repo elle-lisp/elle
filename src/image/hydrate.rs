@@ -38,9 +38,17 @@ impl Drop for Reservation {
     }
 }
 
-/// Hydrate the image at `path` into `heap`. On any failure the heap is
+/// Hydrate the image `source` names into `heap`. On any failure the heap is
 /// untouched: no region minted, no mapping left behind.
-pub fn hydrate(heap: &mut FiberHeap, path: &Path) -> Result<Hydrated, ImageError> {
+pub fn hydrate(heap: &mut FiberHeap, source: &super::ImageSource) -> Result<Hydrated, ImageError> {
+    let _ = (heap, source);
+    Err(ImageError::Corrupt(
+        "hydrating from a descriptor is not built yet".into(),
+    ))
+}
+
+/// Hydrate the image occupying the whole file at `path`.
+pub fn hydrate_path(heap: &mut FiberHeap, path: &Path) -> Result<Hydrated, ImageError> {
     let file = std::fs::File::open(path)?;
     let file_len = file.metadata()?.len();
 

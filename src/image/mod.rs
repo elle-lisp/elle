@@ -16,10 +16,12 @@ mod dump;
 mod format;
 mod hydrate;
 mod layout;
+mod source;
 
 pub use dump::dump;
-pub use format::fingerprint;
-pub use hydrate::hydrate;
+pub use format::{fingerprint, sections, Sections};
+pub use hydrate::{hydrate, hydrate_path};
+pub use source::ImageSource;
 
 use crate::hir::region::RuntimeRegion;
 use crate::value::Value;
@@ -43,6 +45,13 @@ pub enum ImageError {
         expected: String,
         found: String,
     },
+    /// The image does not start on a base-page boundary of its descriptor, so
+    /// no page of it can be mapped. Whoever placed the image chose the
+    /// offset; the same descriptor is legal once the image moves.
+    Unaligned {
+        offset: u64,
+        page: usize,
+    },
     /// The graph holds a value the dump policy refuses, named.
     Unsupported(String),
     /// The file is not a well-formed image for this format version.
@@ -59,6 +68,10 @@ impl std::fmt::Display for ImageError {
                     "image fingerprint mismatch: built for {found:?}, this binary is {expected:?}"
                 )
             }
+            ImageError::Unaligned { offset, page } => write!(
+                f,
+                "image offset {offset} is not a multiple of the {page}-byte page size"
+            ),
             ImageError::Unsupported(what) => write!(f, "image refuses: {what}"),
             ImageError::Corrupt(what) => write!(f, "corrupt image: {what}"),
         }
