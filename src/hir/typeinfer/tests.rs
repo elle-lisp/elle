@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-09
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
 //! The inference pass's unit tests, and the four helpers every one of them
@@ -6,14 +6,16 @@
 //!
 //! One module per subject: `narrow` for what a guard or a dispatch arm proves,
 //! `rettype` for what an op's result proves, `recursion` for what a recursive
-//! call's result proves, `prune` for dead-arm removal, `contract` for
-//! prove-or-reject, `monomorphize` for wrapper collapse.
+//! call's result proves, `bottom` for what the lattice's start proves,
+//! `prune` for dead-arm removal, `contract` for prove-or-reject,
+//! `monomorphize` for wrapper collapse.
 
 use super::infer_and_rewrite;
 use crate::hir::types::TyId;
 use crate::hir::{BindingArena, Hir, HirId, HirKind};
 use crate::symbol::SymbolTable;
 
+mod bottom;
 mod contract;
 mod monomorphize;
 mod narrow;
