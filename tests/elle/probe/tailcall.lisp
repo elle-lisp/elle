@@ -243,18 +243,22 @@
 (pin (measure "recur-local-defn-mutual" (fn [j] (lcl-defn-mutual 3)) 100 6 60
               0.4 0.5) 0)
 
-# The closure-as-module factory: a constructor that defines mutually recursive
-# helpers over its own mutable state and returns a struct of them. Two things
-# separate it from the bare run above, and neither may refuse the merge. The
-# members CAPTURE the table, a counted reference OUT of the arena rather than a
-# member of it. And the factory HANDS THE MEMBERS OUT: the struct's hold is a
-# foreign capture, RC-counted, so it outlives the arena's single decref and the
-# arena dies with the struct.
+# The closure-as-module factory built from such a run: a constructor that defines
+# mutually recursive helpers over its own mutable state and hands back a struct of
+# them. Two things separate it from the bare run above, and neither may refuse the
+# merge. The members CAPTURE the table, a counted reference OUT of the arena rather
+# than a member of it. And the factory HANDS THE MEMBERS OUT: the struct's hold is a
+# foreign capture, RC-counted, so it outlives the arena's single decref and the arena
+# dies with the struct. This is the async scheduler's own shape, and its cycle held
+# 100% of every program's teardown residue (elle-lisp/elle#1081). It is the `defn`
+# twin of `recur-local-mutual-factory` above, so the two together read the
+# binder-form claim on the shape the merge was extended for.
 #
-# This is the async scheduler's own shape, and its cycle held 100% of every
-# program's teardown residue (elle-lisp/elle#1081). The probe drives the factory
-# per op and calls a member, so a refusal reads as the whole module per
-# construction rather than as a teardown-only number no per-op gauge can see.
+# The op CONSTRUCTS the module and stops there. Calling a member back through the
+# returned struct grows ~7 objects and ~2 regions per op under `--jit=eager` — on
+# BOTH binder spellings, and flat on the VM, so the growth is the tier's rather than
+# this mechanism's (elle-lisp/elle#1103). Put the call back into the op when that
+# closes.
 (defn defn-module-factory []
   (let [t @{}]
     (defn fa [m]
@@ -266,8 +270,8 @@
       (fa (%sub m 1)))
     (let [s {:a fa :b fb}]
       s)))
-(pin (measure "defn-module-factory" (fn [j] ((get (defn-module-factory) :a) 2))
-              100 6 60 0.4 0.5) 0)
+(pin (measure "defn-module-factory" (fn [j] (defn-module-factory)) 100 6 60 0.4
+              0.5) 0)
 
 # ── Retained-closure reclamation (a RETURNED self-recursive closure's region) ──
 # `recur-local-self` above pins the LEAK rate of a self-recursive closure used as a

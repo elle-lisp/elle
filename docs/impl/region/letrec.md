@@ -426,12 +426,16 @@ teardown — the case that must NOT pick up a later drop site). The oracle reads
 `recur-local-mutual-ret`, `recur-local-mutual-ret-foreign`,
 `recur-local-mutual-ret-value` and `recur-local-mutual-ret-bound` — the four body
 shapes, all closed at 0 — `recur-local-mutual-factory` for the struct-literal
-tail that carries both members into a native by-move, and
-`recur-local-defn-mutual` and `defn-module-factory` for the `defn` run and the
-closure-as-module factory built from one. The `defn` run's own guardfree fixture
-is `region_defn_cycle_uaf`, which re-enters a member of a returned factory after
-the arena's drop site has passed and drives the factory across churn that
-recycles a freed page.
+tail that carries both members into a native by-move, and `recur-local-defn-mutual`
+and `defn-module-factory` for the `defn` run and the closure-as-module factory
+built from one. Both factory probes CONSTRUCT the module per op and stop there;
+calling a member back through the returned struct grows on both spellings under
+`--jit=eager` and on neither on the VM, which is the tier's
+(elle-lisp/elle#1103). `region_ownership_reclaims_defn_module_factory_per_call`
+gauges both drivers on the VM. The `defn` run's own guardfree fixture is
+`region_defn_cycle_uaf`, which re-enters a member of a returned factory after the
+arena's drop site has passed and drives the factory across churn that recycles a
+freed page.
 `region_ownership_reclaims_self_recursion_closure_cycle` pins the same bounded growth for a
 pure self-recursive closure, which is reclaimed cell-free (ordinary RC / the tail-call
 deferred release — [selfrec.md](../selfrec.md)), not by this merge.
