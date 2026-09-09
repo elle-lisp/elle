@@ -1,9 +1,13 @@
-// audited: 2026-09-07
-// Integration tests harness
+// audited: 2026-09-09
+// Registers every integration test file, which is what makes one run.
+//
+// tests/AGENTS.md
+//
+// A file here is not compiled until it is named below, so an unregistered file
+// is a test suite that reports success having run nothing.
 mod core {
     include!("core.rs");
 }
-// concurrency tests migrated to tests/elle/concurrency.lisp
 mod error_reporting {
     include!("error_reporting.rs");
 }
@@ -22,7 +26,6 @@ mod pipeline {
 mod pipeline_property {
     include!("pipeline_property.rs");
 }
-// pipeline_point tests migrated to tests/elle/pipeline.lisp
 mod thread_transfer {
     include!("thread_transfer.rs");
 }
@@ -36,18 +39,12 @@ mod signal_unsoundness {
 mod jit {
     include!("jit.rs");
 }
-// fibers tests migrated to tests/elle/fibers.lisp
 mod time_property {
     include!("time_property.rs");
 }
 mod time_elapsed {
     include!("time_elapsed.rs");
 }
-// destructuring tests migrated to tests/elle/destructuring.lisp
-// blocks tests migrated to tests/elle/blocks.lisp
-// primitives tests migrated to tests/elle/primitives.lisp
-// ffi tests migrated to tests/elle/ffi.lisp
-// bracket_errors tests migrated to tests/elle/brackets.lisp
 mod deps {
     include!("deps.rs");
 }
@@ -63,53 +60,21 @@ mod compliance {
 mod string {
     include!("string.rs");
 }
-// splice tests migrated to tests/elle/splice.lisp
-// bytes/crypto tests migrated to tests/elle/bytes.lisp and tests/elle/plugins/crypto.lisp
-// regex tests migrated to tests/elle/plugins/regex.lisp
-// glob tests migrated to tests/elle/plugins/glob.lisp
-// fn_flow tests migrated to tests/elle/fn-flow.lisp
-// fn_graph tests migrated to tests/elle/fn-graph.lisp
-// table_keys tests migrated to tests/elle/table-keys.lisp
-// arena tests removed (arena semantics tested in Elle)
 mod escape {
     include!("escape.rs");
 }
-
-// FIXME(family-e): `allocator.rs` uses retired FiberHeap APIs
-// (alloc, mark, release, push_scope_mark,
-// pop_scope_mark_and_release, alloc_region_slice). The new API
-// surface is alloc_in_region / alloc_region_slice_in_region with
-// per-region refcount lifecycle. The whole file needs rewriting
-// against that interface — or retired with a replacement Elle-level
-// test (the allocator-interception property is exercised by
-// push_custom_allocator). Re-enable when rewritten.
-// See notes.md § "Current failing tests — Family E".
-// mod allocator {
-//     include!("allocator.rs");
-// }
-
-// anf_counterfactual tests migrated to tests/elle/ (the three scripts
-// jit-lbox-param-repro, jit-lbox-param-noyield, letstar-yield-repro are
-// already run by smoke-vm). The ANF-causality framing is obsolete: the
-// liveness extension in src/hir/liveness.rs (iter_scope_stack) closes
-// the bug independently of the ANF lift.
-// parameters tests migrated to tests/elle/parameters.lisp
-// ports tests migrated to tests/elle/ports.lisp
 mod io {
     include!("io.rs");
 }
-// jit_yield tests migrated to tests/elle/jit-yield.lisp
 mod net {
     include!("net.rs");
 }
 mod file_scope {
     include!("file_scope.rs");
 }
-// traits tests migrated to tests/elle/traits.lisp
 mod sys_args {
     include!("sys_args.rs");
 }
-// cond_match_args tests migrated to tests/elle/cond-match-args.lisp
 mod meta {
     include!("meta.rs");
 }
@@ -125,7 +90,6 @@ mod trace_compile {
 mod flip_cli {
     include!("flip_cli.rs");
 }
-// mutability tests migrated to tests/elle/mutability.lisp
 mod embedding {
     include!("embedding.rs");
 }
@@ -193,6 +157,12 @@ mod audit {
 mod prose {
     include!("prose.rs");
 }
+mod rustsource {
+    include!("rustsource.rs");
+}
+mod profiles {
+    include!("profiles.rs");
+}
 mod bytecode_doc {
     include!("bytecode_doc.rs");
 }
@@ -212,10 +182,9 @@ mod doctest {
     include!("doctest.rs");
 }
 
-// Temporarily disabled while sorting out compilation caching.
-// mod fn_flow {
-//     include!("fn_flow.rs");
-// }
-// mod fn_graph {
-//     include!("fn_graph.rs");
-// }
+// `allocator.rs` is absent from the list above and does not compile. It calls
+// FiberHeap methods the region-ownership model retired — `alloc`, `mark`,
+// `release`, `push_scope_mark`, `pop_scope_mark_and_release`,
+// `alloc_region_slice` — against a heap that now allocates and refcounts per
+// region. The allocator interception it covered is reached by
+// `push_custom_allocator`.
