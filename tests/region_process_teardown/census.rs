@@ -5,6 +5,7 @@
 // docs/impl/region/diagnostics.md
 
 use super::*;
+use elle::compiler::stdlib_cache::StdlibCache;
 
 /// The sweep must be *observable* and *idempotent*. The residual live-region
 /// count is the standing oracle: it is the set of regions whose RC never reached
@@ -54,14 +55,17 @@ fn process_teardown_is_observable_and_idempotent() {
 /// claim sits inside that number indistinguishable from the cycle's shadow.
 ///
 /// The run goes through `execute_scheduled`, the path every entry point takes,
-/// so the scheduler wrapper's own allocations are inside the measurement.
+/// so the scheduler wrapper's own allocations are inside the measurement. The
+/// stdlib is compiled rather than read from the disk cache, so every region in
+/// the residue was minted by this run and the verdict does not move with the
+/// state of a cache file.
 #[test]
 fn teardown_leaves_no_unexplained_references() {
     for src in [
         "(+ 1 2)",
         "(def squares (map (fn [x] (* x x)) (list 1 2 3)))",
     ] {
-        let mut rt = Runtime::new();
+        let mut rt = Runtime::with_stdlib_cache(StdlibCache::Off);
         let value = {
             let (vm, symbols, cctx) = rt.parts();
             let result = compile_file(src, symbols, cctx, "<unexplained>").expect("compiles");
