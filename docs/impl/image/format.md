@@ -20,7 +20,7 @@ One image is one file, or one blob embedded in a larger one:
 | relocations | pointer stream: (slot offset, target segment, target offset); primitive stream: (slot offset); reconstruction stream: (slot offset, constructor tag). Offsets are region-relative bytes: the hydrated region is one contiguous interval, so `base + offset` names any slot or target in O(1) and the (page, offset) pair collapses |
 | object index | (offset, tag) per heap object, sorted — rebuilds `dtors`/`ref_objs` and drives the verifier |
 | primitive table | primitive names in dump-time `prim_id` order |
-| name table | symbol and keyword names in the body — hashes are stable, but the hydrating instance's display memo must learn them |
+| name table | the spellings of the symbols and keywords in the body, one length-prefixed string each, sorted by name |
 | signal table | user-defined signal names in dump-time bit order |
 | watermarks | dump-time counters: parameter id, static-region mint, hygiene scope id, next signal bit |
 | manifest | bindings: name, kind (function / macro / core), value location, signal, arity, doc location; macro entries add parameter lists, template-syntax and transformer-cache locations; inline-fn syntax locations; plus root locations and dependency fingerprints |
@@ -70,6 +70,30 @@ keys; they collide harmlessly across functions. The loader bumps the global
 mint counter past the image watermark anyway, so uniqueness diagnostics stay
 truthful. Parameter ids, hygiene scopes, and signal bits get the same
 watermark treatment.
+
+## The name table carries spellings, not hashes
+
+A symbol's payload is the hash of its name, so identity travels in the body and
+needs no table at all. Display does not travel: a hydrating instance holds none
+of the dump's spellings, and a value whose spelling it never met prints as
+`#<symbol:hash>`. The name table is what closes that gap, for both vocabularies
+at once ([symbol.md](../symbol.md) owns the memo it replays into).
+
+An entry is a spelling: a byte length, the bytes, and zero padding out to the
+next multiple of eight. No hash appears. The hydrator hashes each spelling with
+the function the payloads already carry, so a name and the id it names cannot
+disagree. Nothing derives a pointer from this section either, so its own bounds
+are the whole check it needs. The entries are sorted by name, so one graph and
+one set of spellings always produce one table.
+
+The replay is a learning site, and the collision guard runs there: a spelling
+whose hash the instance already maps to a different spelling panics. Checking
+at the point a name lands is what extends the guard across builds, since the
+two spellings meet in the receiving memo and nowhere else.
+
+A spelling the dumping instance never learned is simply absent. The value still
+hydrates, still compares equal, and still has no name to print — the memo's
+standing contract, not an image rule.
 
 ## Fingerprint: regenerate, never migrate
 

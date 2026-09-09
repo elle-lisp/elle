@@ -37,11 +37,12 @@ Then the image milestones:
    hydrator for data-only graphs (no closures), the object-index rebuild,
    the fingerprint fallback, the `(fd, offset)` input form with an anonymous
    memory file for an image that arrives as bytes, the verifier's two
-   passes, and the scrub and guardfree pins over a hydrated region. The
-   format, mapping, relocation, and teardown are proven end to end. What it
-   does not carry is the sealed set the foundations opened up: symbols,
-   structs, sets, and syntax are body data now, and the dumper still refuses
-   them.
+   passes, the name table that teaches a hydrating instance the spellings its
+   symbols and keywords carry, and the scrub and guardfree pins over a
+   hydrated region. The format, mapping, relocation, and teardown are proven
+   end to end. What it does not carry is the rest of the sealed set the
+   foundations opened up: structs, sets, and syntax are body data now, and
+   the dumper still refuses them.
 6. **boot** — cell snapping, dump-boot, warm cache, embedded blob,
    per-worker hydration for `sys/spawn`, the encoded-LIR side-stream with
    lazy decode, compiler-state persistence, and the parity gate (bytecode
@@ -90,9 +91,12 @@ Then the image milestones:
 - Tier parity: a hot stdlib function reaches the JIT under image boot
   exactly as under source boot — the lazy LIR decode feeds `submit_jit_task`
   and the compiled result executes.
-- Names: print an image keyword and an image symbol (the instance's display
-  memos learned them) and raise an image-defined signal (the replayed bit
-  matches the baked profile).
+- Names: a fresh instance prints an image's symbol and its keyword by name,
+  having met neither spelling before, and two dumps of one graph write one
+  name table whatever order the dumping memo learned the spellings in. A
+  spelling the dumping instance never learned hydrates as an equal value that
+  still prints as `#<keyword:hash>`. Under boot, an image-defined signal
+  raises with the replayed bit matching the baked profile.
 - Macros: a macro whose transformer cache was empty at dump expands
   correctly after hydration (the lazy fill still works).
 - Parameters: after image boot, `println` writes to the process's real
