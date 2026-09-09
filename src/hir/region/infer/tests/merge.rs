@@ -1,7 +1,7 @@
 // audited: 2026-09-09
-// ── Region merging ────────────────────────────────────────────────────
-//
+// The merge test suite's shared helpers, and the split of its submodules by what forces a collapse.
 // docs/impl/region/merging.md
+// docs/impl/region/letrec.md
 //
 // When two regions collapse into one, split by what forces the collapse:
 //
@@ -89,6 +89,28 @@ fn analyze_cycle_with_effects(
     let (hir, arena) = compile_fhir(source, symbols);
     let info = analyze_regions_with(&hir, &arena, cc);
     (hir, arena, info)
+}
+
+/// The binding scope that prebound a named binding's forward cell, and every cell
+/// that scope minted. Where [`letrec_binding_node`] finds a `letrec`'s node from
+/// the syntax, this finds a `defn` run's `Begin` from the cells themselves — the
+/// run has no node of its own to name, and one scope holding every member's cell
+/// is what the merge requires (docs/impl/region/letrec.md § "One binding, one
+/// cell"). `None` when no scope minted a cell for `name`.
+fn cell_scope_of(
+    arena: &BindingArena,
+    symbols: &SymbolTable,
+    info: &RegionInfo,
+    name: &str,
+) -> Option<(HirId, Vec<Region>)> {
+    info.begin_cell_regions
+        .iter()
+        .find(|(_, cells)| {
+            cells
+                .iter()
+                .any(|(b, _)| symbols.name(arena.get(*b).name) == Some(name))
+        })
+        .map(|(&scope, cells)| (scope, cells.iter().map(|&(_, r)| r).collect()))
 }
 
 /// The forward-cell regions of the in-lambda `ev`/`od` letrec, and the merged root

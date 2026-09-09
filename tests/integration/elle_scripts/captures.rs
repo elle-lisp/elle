@@ -94,6 +94,26 @@ fn region_letrec_return_cycle_uaf() {
     );
 }
 
+// Guard — the same cell↔closure cycle written as a run of local `defn`s. A sibling
+// reads each name before its initializer has run, so each keeps a forward cell and the
+// merge collapses the SCC ∪ cells onto one arena, dropped at the `Begin` that prebound
+// them. What must not go wrong is that drop: where the run's members leave the scope —
+// in the struct a factory returns, or through an outer closure that captures one — the
+// hold is a FOREIGN capture, RC-counted, and it has to keep the arena off zero past the
+// single decref. Otherwise the caller holds a closure whose env sits in a freed arena:
+// a generation panic on the plain VM, a SIGSEGV under `--trace=guardfree`. Every member
+// is re-entered after the drop site across churn that recycles a freed page, modules
+// are held live across many later mint/free cycles, and the run whose members never
+// leave is driven beside them — the case that must NOT pick up a later release point.
+// docs/impl/region/letrec.md § "The binder form does not decide the shape".
+#[test]
+fn region_defn_cycle_uaf() {
+    run_elle_script_with_args(
+        "region-defn-cycle-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // A top-level mutable that is BOTH captured by a closure (boxed in a
 // MakeCaptureCell) AND reassigned. The hazard: routing the init value's release
 // through the binding slot — which holds the CELL — makes `DecrefValueRegion`

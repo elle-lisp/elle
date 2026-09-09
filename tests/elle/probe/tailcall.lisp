@@ -226,6 +226,49 @@
 (pin (measure "recur-local-mutual-factory" (fn [j] (lcl-mutual-factory 3)) 100 6
               60 0.4 0.5) 0)
 
+# The same cycle written the way a body writes it: two local `defn`s rather than a
+# `letrec`. A sibling reads each name before its initializer has run, so each is
+# prebound with a forward cell exactly as a letrec binding is — one shape, one
+# merge, whichever binder spells it (docs/impl/region/letrec.md § "The binder form
+# does not decide the shape"). Reading the run as a different shape refused it and
+# leaked the whole cycle — two closures and two forward cells — per call.
+(defn lcl-defn-mutual [n]
+  (defn dv [m]
+    (when (%not (%int? m)) (error :m))
+    (if (%lt m 1) :even (dd (%sub m 1))))
+  (defn dd [m]
+    (when (%not (%int? m)) (error :m))
+    (if (%lt m 1) :odd (dv (%sub m 1))))
+  (dv n))
+(pin (measure "recur-local-defn-mutual" (fn [j] (lcl-defn-mutual 3)) 100 6 60
+              0.4 0.5) 0)
+
+# The closure-as-module factory: a constructor that defines mutually recursive
+# helpers over its own mutable state and returns a struct of them. Two things
+# separate it from the bare run above, and neither may refuse the merge. The
+# members CAPTURE the table, a counted reference OUT of the arena rather than a
+# member of it. And the factory HANDS THE MEMBERS OUT: the struct's hold is a
+# foreign capture, RC-counted, so it outlives the arena's single decref and the
+# arena dies with the struct.
+#
+# This is the async scheduler's own shape, and its cycle held 100% of every
+# program's teardown residue (elle-lisp/elle#1081). The probe drives the factory
+# per op and calls a member, so a refusal reads as the whole module per
+# construction rather than as a teardown-only number no per-op gauge can see.
+(defn defn-module-factory []
+  (let [t @{}]
+    (defn fa [m]
+      (when (%not (%int? m)) (error :m))
+      (if (%lt m 1) t (fb (%sub m 1))))
+    (defn fb [m]
+      (when (%not (%int? m)) (error :m))
+      (put t m true)
+      (fa (%sub m 1)))
+    (let [s {:a fa :b fb}]
+      s)))
+(pin (measure "defn-module-factory" (fn [j] ((get (defn-module-factory) :a) 2))
+              100 6 60 0.4 0.5) 0)
+
 # ── Retained-closure reclamation (a RETURNED self-recursive closure's region) ──
 # `recur-local-self` above pins the LEAK rate of a self-recursive closure used as a
 # LOOP (0 — cell-free, reclaimed per call). These two RETAIN each returned closure in

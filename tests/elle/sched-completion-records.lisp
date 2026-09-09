@@ -1,4 +1,5 @@
 (elle/epoch 12)
+# audited: 2026-09-09
 # What the scheduler remembers about the fibers it has finished with.
 #
 # Two records outlive a fiber's run: its status (`:ok` / `:error`) and a
@@ -167,5 +168,79 @@
   (ev/sleep 0)
   (assert (= (fiber/status f) :dead) "the fiber ran without being joined")
   (assert (= (ev/join f) 42) "and a later join reads its value from itself"))
+
+# ── 6. The pump's last act is to forget every fiber ──────────────────
+# The two exceptions above — a failure's mark, and the program's own
+# fibers — have exactly one reader between them, and it is the loop
+# itself. So when `:pump` returns there is nothing left to read: every
+# fiber it knows about is terminal and nothing will resume one.
+#
+# Held past that point the records are not merely dead weight. Each
+# holds its fiber; a fiber holds the scheduler struct through the
+# parameter baseline it was created with; and the struct's closures
+# capture the very tables the records live in. That is a reference cycle
+# through mutable edges, which per-region RC cannot break — so the whole
+# loop and every closure in it survives to process teardown, on every
+# run of every program.
+#
+# Read from a scheduler of our own, because the enclosing program's pump
+# has not returned yet — the report of a running loop cannot answer this
+# question about itself. The fiber is MARKED, which is what `ev/run` does
+# to the program's own thunks: a marked fiber is exempt from retirement
+# at completion, so its records are exactly the ones only the pump's own
+# ending can drop.
+
+(println "the pump forgets every fiber it finished with...")
+
+(defn run-marked [thunk]
+  "Run one thunk the way `ev/run` runs a program's own: spawned, marked,
+   pumped. Returns the scheduler, so the caller can read what the pump
+   left behind."
+  (let [sched (make-async-scheduler)]
+    (parameterize ((*scheduler* sched)
+                   (*spawn* (get sched :spawn))
+                   (*shutdown* (get sched :shutdown))
+                   (*io-backend* (get sched :backend)))
+      (let [f (ev/spawn thunk)]
+        ((get sched :mark-joined) f)
+        ((get sched :pump) f)
+        [sched f]))))
+
+(let [[sched _] (run-marked (fn [] (ev/join (ev/spawn (fn [] 7)))))]
+  (let [r ((get sched :report))]
+    (assert (= (get r :records) 0)
+            (string "the pump returned holding " (get r :records)
+                    " completion records — each holds its fiber, and the fiber "
+                    "holds this scheduler back"))
+    (assert (= (get r :marks) 0)
+            (string "the pump returned holding " (get r :marks) " join marks"))
+    (assert (= (get r :runnable) 0)
+            (string "the pump returned holding " (get r :runnable)
+                    " runnable fibers"))
+    (assert (= (get r :joins) 0)
+            (string "the pump returned holding " (get r :joins) " join waiters"))
+    (assert (= (get r :selects) 0)
+            (string "the pump returned holding " (get r :selects) " select sets"))
+    (assert (= (get r :io) 0)
+            (string "the pump returned holding " (get r :io) " io submissions"))
+    (assert (= (get r :forwarded) 0)
+            (string "the pump returned holding " (get r :forwarded)
+                    " forwarded submissions"))
+    (assert (= (length (get r :parks)) 0)
+            (string "the pump returned holding " (length (get r :parks))
+                    " park queues"))))
+
+# Forgetting loses nothing a later caller needs: a join that arrives
+# after the records are gone re-derives the answer from the fiber, which
+# is the same route every fiber retired at completion already takes.
+
+(println "a forgotten fiber still answers a later join...")
+
+(let [[sched f] (run-marked (fn [] 99))]
+  (assert (= (get ((get sched :report)) :records) 0)
+          "the pump forgot the fiber it ran")
+  (assert (= (fiber/status f) :dead) "the fiber itself still reads terminal")
+  (assert (= (fiber/value f) 99)
+          "and its value is still readable from the fiber"))
 
 (println "sched-completion-records: ok")

@@ -300,3 +300,137 @@ fn merge_collapses_self_and_sibling_captured_member_cell() {
         info.merged_parent,
     );
 }
+
+// ── The `defn` run ────────────────────────────────────────────────────
+//
+// A run of local `defn`s in one body prebinds the same forward cells a `letrec`
+// does, so it is the same cell↔closure cycle and takes the same merge
+// (docs/impl/region/letrec.md § "The binder form does not decide the shape").
+// These two drive the reading from the spec: the bare mutual pair, and the
+// closure-as-module factory ordinary code writes it as.
+
+#[test]
+fn merge_collapses_defn_run_closure_cycle_in_lambda() {
+    // Two local `defn`s inside a lambda, mutually recursive: `a` calls `b`, `b`
+    // calls `a`. Each is prebound with a forward cell because its sibling reads
+    // the name before its initializer has run — the same structure the `ev`/`od`
+    // letrec has, written the way a body writes it. The merge must collapse both
+    // closures and both cells onto ONE region, and drop it at the `Begin` that
+    // prebound the cells.
+    //
+    // The counter-factual is the scope count, not the collapse: `lower_begin`'s
+    // pre-pass descends nested `Begin`s, so a walk that minted a second region for
+    // a binding an inner `Begin` reaches again would key the two cells of this one
+    // cycle at two scopes — and a cycle whose cells name two binding scopes has no
+    // drop site the merge can place, so it refuses whole.
+    let mut symbols = SymbolTable::new();
+    let (hir, arena) = compile_fhir(
+        "(def f (fn [k] \
+           (defn a [m] (when (%not (%int? m)) (error :m)) (if (%lt m 1) :even (b (%sub m 1)))) \
+           (defn b [m] (when (%not (%int? m)) (error :m)) (if (%lt m 1) :odd (a (%sub m 1)))) \
+           (let [s (%pair a b)] s))) \
+         (f 3)",
+        &mut symbols,
+    );
+    let info = analyze_regions(&hir, &arena);
+    let (closures, _) = letrec_cycle_members(&hir, &info);
+    let (scope, cells) =
+        cell_scope_of(&arena, &symbols, &info, "a").expect("a scope prebinds `a`'s forward cell");
+    assert_eq!(
+        cells.len(),
+        2,
+        "ONE scope prebinds both forward cells of the run; got {cells:?} across \
+         begin_cell_regions={:?}",
+        info.begin_cell_regions,
+    );
+    let cell_roots: rustc_hash::FxHashSet<Region> =
+        cells.iter().map(|&c| info.merged_root(c)).collect();
+    assert_eq!(
+        cell_roots.len(),
+        1,
+        "both cells must share one merged root; got {cell_roots:?} merged_parent={:?}",
+        info.merged_parent,
+    );
+    let root = cell_roots.into_iter().next().unwrap();
+    assert!(
+        !cells.contains(&root) && closures.contains(&root),
+        "the merged root r{} must be an SCC closure region, not a cell; \
+         closures={closures:?} cells={cells:?}",
+        root.0,
+    );
+    let merged_closures = closures
+        .iter()
+        .filter(|&&c| info.merged_root(c) == root)
+        .count();
+    assert_eq!(
+        merged_closures, 2,
+        "exactly the a/b closures collapse onto the root (f stays unmerged); \
+         closures={closures:?} merged_parent={:?}",
+        info.merged_parent,
+    );
+    let dp = info.region_data.get(&root).map(|d| d.decref_point);
+    assert_eq!(
+        dp,
+        Some(scope),
+        "the run's cycle (root r{}) must drop at the binding scope @{} that prebound \
+         its cells; decref_point was {:?}",
+        root.0,
+        scope.0,
+        dp,
+    );
+}
+
+#[test]
+fn merge_collapses_defn_module_factory_cycle() {
+    // The closure-as-module factory: a constructor that defines a set of mutually
+    // recursive helpers over its own mutable state and hands back a struct of
+    // them. This is the async scheduler's shape, and the cycle it forms is what
+    // held every program's whole teardown residue (elle-lisp/elle#1081).
+    //
+    // Two things distinguish it from the bare pair above and must not refuse it.
+    // The members CAPTURE a mutable table, which is a cross-region reference out
+    // of the arena rather than a member of it. And the factory HANDS THE MEMBERS
+    // OUT, in a value bound out of tail position — a foreign hold on the arena,
+    // which is RC-counted and outlives the single decref.
+    let mut symbols = SymbolTable::new();
+    let (hir, arena) = compile_fhir(
+        "(def mk (fn [] \
+           (let [t (%pair 1 2)] \
+             (defn a [m] (when (%not (%int? m)) (error :m)) (if (%lt m 1) t (b (%sub m 1)))) \
+             (defn b [m] (when (%not (%int? m)) (error :m)) (if (%lt m 1) t (a (%sub m 1)))) \
+             (let [s (%pair a b)] s)))) \
+         (mk)",
+        &mut symbols,
+    );
+    let info = analyze_regions(&hir, &arena);
+    let (closures, _) = letrec_cycle_members(&hir, &info);
+    let (_, cells) =
+        cell_scope_of(&arena, &symbols, &info, "a").expect("a scope prebinds `a`'s forward cell");
+    assert_eq!(
+        cells.len(),
+        2,
+        "one scope prebinds both cells; got {cells:?}"
+    );
+    let members: Vec<Region> = cells.iter().copied().collect();
+    let roots: rustc_hash::FxHashSet<Region> =
+        members.iter().map(|&m| info.merged_root(m)).collect();
+    assert_eq!(
+        roots.len(),
+        1,
+        "the factory's members and their cells collapse onto ONE merged root; \
+         cells={cells:?} closures={closures:?} merged_parent={:?}",
+        info.merged_parent,
+    );
+    let root = roots.into_iter().next().unwrap();
+    let merged_closures = closures
+        .iter()
+        .filter(|&&c| info.merged_root(c) == root)
+        .count();
+    assert_eq!(
+        merged_closures, 2,
+        "capturing a mutable table refuses nothing — the capture is a counted edge \
+         OUT of the arena, not a member of it; closures={closures:?} \
+         merged_parent={:?}",
+        info.merged_parent,
+    );
+}

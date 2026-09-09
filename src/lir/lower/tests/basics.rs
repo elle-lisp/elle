@@ -275,3 +275,41 @@ fn call_position_self_reference_lowers_to_load_self() {
          its callee to exactly one LoadSelf",
     );
 }
+
+// ── Compiled forward cells: one mint, one address space ──────────
+//
+// A binding whose forward cell is COMPILED holds the cell in its OWN stack slot
+// (`BindingInner::compiled_forward_cell`), so `populate_env` must not mint a
+// shadow env cell over it and every later recording of the binding's address
+// space must say `Local`. Both halves read `compiled_cell_bindings`, which
+// `allocate_compiled_cell_slot` writes as it mints the cell — the pairing the
+// solver keeps in `record_compiled_cell`.
+//
+// The counter-factual: a binder form that minted the cell itself and registered
+// nothing. The cell then sits in a stack slot while `value_slot_for` still reads
+// the binding as an in-lambda upvalue, so the init's release loads an env index
+// (`LoadCaptureRaw`) for a value that is on the stack.
+
+#[test]
+fn a_letrec_registers_every_compiled_forward_cell_it_mints() {
+    let (mut lowerer, hir) = make_lowerer(
+        "(letrec [ev (fn [n] (if (%lt n 1) :even (od (%sub n 1)))) \
+                  od (fn [n] (if (%lt n 1) :odd (ev (%sub n 1))))] \
+           (ev 4))",
+    );
+    let module = lowerer.lower(&hir).expect("lower");
+    let cells = func_count(&module.entry, |i| {
+        matches!(i, LirInstr::MakeCaptureCell { .. })
+    });
+    assert_eq!(
+        cells, 2,
+        "precondition: ev and od capture each other, so the letrec prebinds a \
+         compiled forward cell for each",
+    );
+    assert_eq!(
+        lowerer.compiled_cell_bindings.len(),
+        cells,
+        "every compiled cell a binder form mints registers its binding, so \
+         `value_slot_for` names the stack slot the cell lives in",
+    );
+}

@@ -1110,3 +1110,62 @@ fn region_ownership_reclaims_sibling_captured_forward_cell_per_call() {
          calls is {returned} (the discriminator grows {live_chain}, so the gauge is live)",
     );
 }
+
+/// Per-CALL reclamation of the closure-as-module factory — a constructor that
+/// defines mutually recursive helpers over its own mutable state and hands back a
+/// struct of them (docs/impl/region/letrec.md § "The binder form does not decide
+/// the shape"; oracle.lisp `defn-module-factory`). The helpers are local `defn`s,
+/// so their forward cells are prebound by the `Begin` they sit in rather than by a
+/// `Letrec` node, and the merge must collapse the same SCC ∪ cells onto one arena.
+///
+/// The factory's value is what makes this the interesting half: the struct holds
+/// the members, a FOREIGN capture of the arena that is RC-counted, so the arena
+/// outlives the single binding-scope decref and dies with the struct. Each call
+/// therefore builds and drops one whole module, which is the shape the async
+/// scheduler is built as — and the shape whose cycle held every program's entire
+/// teardown residue (elle-lisp/elle#1081).
+///
+/// Oracle: per-iteration live-region growth via `arena/region-count`, sampled
+/// mid-run BY THE PROGRAM, beside the self-referential accumulator discriminator
+/// whose growth proves the gauge is live.
+#[test]
+fn region_ownership_reclaims_defn_module_factory_per_call() {
+    let prelude = "(def mk (fn [] \
+        (let [t @{}] \
+          (defn fa [m] (when (%not (%int? m)) (error :m)) \
+                       (if (%lt m 1) t (fb (%sub m 1)))) \
+          (defn fb [m] (when (%not (%int? m)) (error :m)) \
+                       (put t m true) (fa (%sub m 1))) \
+          (let [s {:a fa :b fb}] s))))";
+
+    // Discriminator: the self-referential accumulator legitimately retains every
+    // prior, proving the gauge detects per-iteration region growth.
+    let live_chain_growth = mid_run_discriminator(Runtime::new(), "arena/region-count");
+    assert!(
+        live_chain_growth > 150,
+        "precondition: the live accumulator retains every prior, so region growth \
+         over 200 iterations must be large (~200) — got {live_chain_growth}; if \
+         small, the gauge is dead and the assertions below are vacuous",
+    );
+
+    let built = mid_run_growth(Runtime::new(), prelude, "(mk)", "arena/region-count");
+    assert!(
+        built < 50,
+        "a factory whose local `defn`s form a mutual-recursion cycle must reclaim \
+         that cycle per call — region growth over 200 constructions must be near \
+         zero, got {built} (a run read as a shape other than a letrec's refuses the \
+         merge and strands every closure and forward cell it built)",
+    );
+    let used = mid_run_growth(
+        Runtime::new(),
+        prelude,
+        "((get (mk) :a) 2)",
+        "arena/region-count",
+    );
+    assert!(
+        used < 50,
+        "the same holds when a member is CALLED through the struct the factory \
+         returned — the struct's hold is a counted reference out of the arena, and \
+         it dies with the struct — got {used}",
+    );
+}

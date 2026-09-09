@@ -113,6 +113,49 @@ fn a_cache_hit_leaves_no_unexplained_references() {
     }
 }
 
+/// A completed run leaves NOTHING (docs/impl/region/rules.md § "Teardown — every
+/// region frees", property 2). Zero is the claim, not a target the count may
+/// approach: the sweep is RC-driven, so a survivor is a reference that never
+/// reached zero, and the number IS the remaining work.
+///
+/// The counter-factual is `teardown_leaves_no_unexplained_references` beside it,
+/// which this does not subsume in either direction. That one sees a claim held
+/// outside the region graph and is blind to a cycle — every reference in a cycle
+/// is explained by another survivor's contents, so it reads clean while the cycle
+/// stands. This one sees the cycle and cannot say what pins it. The residue of
+/// every program ever run was one 42-region cycle holding 100% of the rest, and
+/// nothing failed on it (elle-lisp/elle#1081).
+///
+/// The run goes through `execute_scheduled`, the path every entry point takes, so
+/// the scheduler wrapper is inside the measurement — which is where that cycle
+/// lived. The stdlib is compiled rather than read from the disk cache, so every
+/// region in the residue was minted by this run.
+#[test]
+fn teardown_leaves_no_residue() {
+    for src in PROGRAMS {
+        let mut rt = Runtime::with_stdlib_cache(StdlibCache::Off);
+        let value = {
+            let (vm, symbols, cctx) = rt.parts();
+            let result = compile_file(src, symbols, cctx, "<residue>").expect("compiles");
+            vm.execute_scheduled(&result.bytecode, cctx).expect("runs")
+        };
+        // The program value reaches the caller with one owning reference; route it
+        // through the process-root registry so the sweep consumes it, or it counts
+        // as residue of the caller's own making.
+        elle::value::arena::register_process_root(rt.heap(), value);
+        let report = rt.teardown();
+        if report.live_regions != 0 {
+            report_census(rt.heap(), &report);
+        }
+        assert_eq!(
+            report.live_regions, 0,
+            "{src}: {} regions survived teardown — every one is a reference the run \
+             never dropped",
+            report.live_regions,
+        );
+    }
+}
+
 /// Diagnostic, not a gate: dump the post-teardown residue (id, rc, objs, tags)
 /// for offline aggregation. The residue census names the dominant leak classes
 /// of the standing live-region count — run with
