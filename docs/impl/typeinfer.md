@@ -232,8 +232,9 @@ The pass has no flow, so it cannot order the write against a call.
 - `hir::typeinfer::tests::mutation::*` — a written lambda binding proves nothing
   about its result: the write after the call and the write before it, the write
   reached from inside another function, a write that stores the same type, the
-  branch a Bottom would have joined away, and two controls — the unwritten
-  binding, and the SSA-renamed function-local write that still proves.
+  loop that rewrites its own callee between two turns, the branch a Bottom would
+  have joined away, and two controls — the unwritten binding, and the
+  SSA-renamed function-local write that still proves.
 - `tests/elle/typed-int-ops.lisp` — the corpus peer, on every tier: a
   self-recursive integer `fib` emits `AddInt` and computes with it, a float
   base case is refused at compile time, and a reassigned local lambda binding

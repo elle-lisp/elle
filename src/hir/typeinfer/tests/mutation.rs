@@ -101,6 +101,29 @@ fn a_branch_does_not_join_a_written_binding_result_away() {
     );
 }
 
+/// The loop, which is what makes the write-before-the-call row above a
+/// soundness rule rather than a precision cost. The call stands above every
+/// write in the file and still reaches the string, because the second turn runs
+/// over what the first turn assigned. A loop is one of the shapes the document
+/// names as beyond SSA renaming, and this is the row that checks it.
+///
+/// The counter-factual: this compiled and printed `1` then `0`. The second turn
+/// ran the integer opcode over the string the first turn assigned.
+#[test]
+fn a_loop_that_rewrites_its_own_callee_proves_nothing() {
+    let src = "(let [@g (fn [x] 1)] \
+                 (var i 0) \
+                 (while (%lt i 2) \
+                   (%bit-and (g 0) 1) \
+                   (assign g (fn [x] \"s\")) \
+                   (assign i (%add i 1))))";
+    let err = compile_result(src).expect_err("a callee the loop rewrites proves no int");
+    assert!(
+        err.contains("%bit-and"),
+        "the error must name the op that could not prove; got: {err}"
+    );
+}
+
 /// The over-rejection guard. A binding nothing writes still records its one
 /// initializer's body type, so the everyday spelling keeps the proof the whole
 /// ascent exists to hand out — at file scope and inside a function alike.
