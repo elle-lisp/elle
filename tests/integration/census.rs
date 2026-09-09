@@ -1,10 +1,13 @@
-// The post-boot heap census (docs/impl/image.md § "Open risks and dispatch
-// experiments", item 2): after `Runtime::new()` completes, every live object
-// in the instance's region store is boot state, and the census enumerates the
-// graph a boot image must dump. These tests are the permanent regression net
-// for the sealing claims: they fail the moment an unsealed variant enters the
-// boot graph, which is exactly the condition that would make the boot image
-// undumpable.
+// audited: 2026-09-08
+// The post-boot heap census: the regression net for the image design's
+// sealing claims.
+// docs/impl/image/measurements.md
+//
+// After `Runtime::new()` completes, every live object in the instance's
+// region store is boot state, and the census (item 2 there) enumerates the
+// graph a boot image must dump. These tests fail the moment an unsealed
+// variant enters the boot graph, which is exactly the condition that would
+// make the boot image undumpable.
 
 use elle::runtime::Runtime;
 use elle::value::fiberheap::census::Sealing;

@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-08
 //! What a payload carries: the tables and masks a header reads out of it.
 //! docs/impl/region/template.md
 
@@ -192,9 +192,9 @@ fn the_region_table_holds_static_region_slots() {
 
 /// `HeapObject`'s size is the size of its largest variant, and the by-value
 /// closure template used to set it at 288 bytes — so a `Float` slot was ~95%
-/// padding (docs/impl/image.md risk item 6). A header is a payload slice and a
-/// blueprint pointer; nothing about a code object should size the union any
-/// more.
+/// padding (docs/impl/image/measurements.md item 6). A header is a payload
+/// slice and a blueprint pointer; nothing about a code object should size the
+/// union any more.
 #[test]
 fn a_code_object_no_longer_sizes_the_heap_object_union() {
     assert!(

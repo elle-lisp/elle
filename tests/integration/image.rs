@@ -1,8 +1,11 @@
-// The store spike (docs/impl/image.md § "Landing order" item 5, dispatched as
-// risk-item 3): dump a data-only value graph as page bytes plus relocations,
-// hydrate it by private file mapping into an ordinary counted region, and
-// prove the format, the mapping, the relocation pass, and teardown end to
-// end. These are the § "Test plan" pins the store milestone must keep.
+// audited: 2026-09-08
+// The image store milestone: dump a data-only value graph, hydrate it by
+// private file mapping, and prove the mechanism end to end.
+// docs/impl/image/plan.md
+//
+// An image is page bytes plus relocations, hydrated into an ordinary counted
+// region. These tests are the test plan's pins for the format, the mapping,
+// the relocation pass, and teardown.
 
 use std::rc::Rc;
 
@@ -232,7 +235,7 @@ fn paint_stack(pattern: u8, depth: usize) -> u64 {
 // bytes wholesale writes whatever the stack held into the file — painting
 // the stack differently before each dump forced ~700 differing bytes.
 // Only a dumper that assembles slots from the probed field extents
-// (docs/impl/image.md risk item 6) keeps the files identical.
+// (docs/impl/image/measurements.md item 6) keeps the files identical.
 #[test]
 fn dump_is_byte_deterministic_whole_file() {
     let dir = crate::common::ScratchDir::new("image-determinism");

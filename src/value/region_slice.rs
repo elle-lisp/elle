@@ -1,4 +1,7 @@
+// audited: 2026-09-08
 //! `RegionSlice`: a `(ptr, len)` view into data owned by a region.
+//!
+//! docs/impl/region/model.md
 //!
 //! Used by immutable collection types (LString, LArray, LStruct, LBytes,
 //! LSet) and closure environments to store variable-length data contiguously
@@ -103,7 +106,7 @@ impl<T: 'static> RegionSlice<T> {
     }
 
     /// Byte layout of the slice header itself, for the image layout probes
-    /// (docs/impl/image.md § Fingerprint): the `ptr` and `len` field offsets
+    /// (docs/impl/image/format.md): the `ptr` and `len` field offsets
     /// and the `len` field's size. Lives here because the fields are private.
     pub(crate) fn header_layout() -> (usize, usize, usize) {
         let probe = Self::empty();

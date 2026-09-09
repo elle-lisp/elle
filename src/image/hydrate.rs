@@ -1,8 +1,13 @@
-//! The hydrator (docs/impl/image.md § Hydration): validate the fingerprint,
-//! reserve one aligned contiguous interval, `MAP_FIXED` + `MAP_PRIVATE` each
-//! page from the file into its slot, run the relocation pass, and install
-//! the pages as a freshly minted `Counted` region. No value is deserialized;
-//! cost is O(relocations) + O(objects).
+// audited: 2026-09-08
+//! The hydrator: map an image's pages privately, relocate them, and install
+//! them as a freshly minted counted region.
+//!
+//! docs/impl/image.md
+//!
+//! Validate the fingerprint, reserve one aligned contiguous interval,
+//! `MAP_FIXED` + `MAP_PRIVATE` each page from the file into its slot, run the
+//! relocation pass, then install. No value is deserialized; cost is
+//! O(relocations) + O(objects).
 
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::FileExt;

@@ -1,12 +1,23 @@
 # Images — regions hydrated at load
 
-Design for image-style persistence. One mechanism with two shipped
-configurations: the **boot** image (core, prelude, and stdlib pre-compiled
-into the binary) and **environment** images (user `save`/`load`) — the same
-format, dumper, and hydrator throughout, differing only in dependency list
-and dump policy (see *One mechanism, two configurations*). This doc owns the
-design argument. *Landing order* below says what has landed and what has not;
-the test plan at the end names the pins each milestone must land with.
+<!-- audited: 2026-09-08 -->
+
+Design for image-style persistence: one mechanism, two shipped configurations.
+
+The two are the **boot** image (core, prelude, and stdlib pre-compiled into the
+binary) and **environment** images (user `save`/`load`) — the same format,
+dumper, and hydrator throughout, differing only in dependency list and dump
+policy (see *One mechanism, two configurations*). This document owns the design
+argument. Three companions carry the rest:
+
+- [foundations.md](image/foundations.md) — the four representation fixes the
+  image needed first, all landed.
+- [format.md](image/format.md) — the file's sections, and the fingerprint that
+  gates a load.
+- [plan.md](image/plan.md) — the landing order, and the pins each milestone
+  must land with.
+- [measurements.md](image/measurements.md) — the six experiments that
+  dispatched the design's open risks, with their numbers.
 
 ## The problem
 
@@ -53,15 +64,16 @@ accounting, the generation checks, `--trace=scrub`, `--trace=guardfree`, and
 
 Compaction is where the runtime win comes from. Stdlib boot today produces
 hundreds of regions — one per letrec capture cell plus everything they pin
-(405 measured; risk item 2 records the census). The image is **one**
-region: every internal reference is a self-edge, so its edge tables are
-empty, and all RC traffic against stdlib values lands on a single counter.
+(405 measured; [measurements.md](image/measurements.md) item 2 records the
+census). The image is **one** region: every internal reference is a self-edge,
+so its edge tables are empty, and all RC traffic against stdlib values lands
+on a single counter.
 
 ## One mechanism, two configurations
 
 "Boot image" and "environment image" are not two kinds of image. There is
 one format, one dumper, one hydrator, one verifier. Every use of either
-name in this doc means a *configuration* of that one mechanism; an image
+name in this document means a *configuration* of that one mechanism; an image
 differs from another only in its **dependency list** and its **dump
 policy**:
 
@@ -128,105 +140,6 @@ environment-over-boot are simply the two depths this design ships.
   values per execution — image templates carry the same encoded
   `ConstTemplate` bytes, which are already name-stable.
 
-## Foundations
-
-The image effort does not start with images. Four representation fixes come
-first. Each is independently valuable at runtime today, lands green against
-the existing corpus with no image machinery, and **deletes** image machinery
-that would otherwise have to be built and then thrown away. Building the
-image first would mean shipping remap passes, re-sort passes, and a syntax
-codec whose only purpose is to compensate for representations we intend to
-fix anyway.
-
-### Stable symbol identity — landed
-
-A `SymbolId` used to be a dense per-table index minted in first-intern order —
-a process-local accident. Everything downstream compensated: every code object
-carried a `symbol_names` map for cross-table remap, `send` re-interned by name,
-`CompileCtx` leaned on a fragile "registration order is deterministic"
-invariant, and — the sharpest edge — immutable structs and sets are *sorted
-arrays* whose order (`TableKey`/`Value` compare symbols by raw id) was
-process-local, so a persisted sorted container was correct only where it was
-built.
-
-A `SymbolId` is now the 64-bit FNV-1a hash of the name, and a name lives in a
-per-instance display memo rather than a process-wide table
-([symbol.md](symbol.md) owns the model). Symbol values are as portable as
-keyword values, and sort orders are stable by construction, so the image needs
-no symbol remap pass, no re-sort pass, and no symbol watermark.
-
-Identity comes free; display does not. A hydrating instance holds none of the
-dump's names, which is what the name table below is for, and replaying it is
-also where a cross-build collision is caught.
-
-### Region-native immutable structs — landed
-
-`LStruct` used to hold `Vec<(TableKey, Value)>`, and two `TableKey` arms owned
-Rust heap memory: `String` owned a `String` and `Array` owned a
-`Vec<TableKey>`. The payload is now `RegionSlice<(TableKey, Value)>` and both
-key arms hold a `Value` pointing at a region-resident string or array, as
-arrays and strings already did. `TableKey` is `Copy` and sealed;
-[values.md](values.md) § "Struct keys" owns the key model — a borrowed probe
-key, an interned stored key, and an owning `SendKey` for `send` and the disk
-cache. Payoff now: immutable structs allocate nothing on the Rust heap, and a
-`get` probe builds its key without allocating. Payoff for images: structs are
-body data, and a struct's key bytes are self-edges of its own region.
-
-### Region-native closure templates
-
-`ClosureTemplate` was ~20 `Rc`/`Vec` fields, and `MakeClosure` cloned the whole
-blueprint into the instance region on every closure creation — 13 refcount
-bumps and two Rust-heap allocations apiece, in a `HeapObject` variant whose 288
-bytes set the size of every other variant.
-
-A code object is now three things ([region/template.md](region/template.md)
-owns the argument): a compile-time blueprint, a `CodePayload` holding every
-variable-length field inline in region pages, and a two-word region-resident
-header naming that payload. The payload is materialized once per blueprint and
-shared, so `MakeClosure` copies two words and takes one cross-region reference
-rather than copying a function's bytecode per iteration of a loop that builds a
-closure. Payoff for images: the payload is body data — bytecode, constants,
-name and doc as region strings, masks and release tables as inline slices, and
-source locations as a sorted `RegionSlice<LocEntry>` over an interned file
-table, replacing a `HashMap<usize, SourceLoc>` whose `String` file names could
-not be sealed at any price.
-
-The header keeps one `Rc` to its blueprint, for the four questions the payload
-cannot yet answer: the nested-lambda blueprints a `MakeClosure` indexes, the
-LIR the JIT promotes from, the defining syntax, and the SPIR-V cache. The
-syntax foundation and the LIR side-stream remove two; the image milestone's own
-dump removes the third by making child templates body data; the fourth is the
-GPU cache this design already drops.
-
-### Region-native syntax — landed
-
-Syntax is load-bearing for images, not a reconstruction nicety: a macro *is*
-its template (`MacroDef.template: Syntax` plus parameter lists; the compiled
-transformer is a lazily filled cache), so the expander cannot be rebuilt
-without syntax. A Rust-heap `Box` tree would force a side-stream codec and a
-lazy-decode seam — a serializer whose entire job is to work around the
-representation.
-
-Syntax is a region-native immutable tree instead: nodes and child slices
-inline in region pages, `Copy` POD with no `Drop`, spans and hygiene scopes as
-plain fields ([syntax.md](syntax.md) owns the model). Macro templates, the
-syntax a `Value` wraps, and inline-fn syntax are body data, demand-paged like
-everything else, and `HeapObject::Syntax` owns its tree inline rather than
-through a `Box` no image could seal around.
-
-The tree is region-native everywhere, not only at the value boundary — the
-expander's working tree included. A mutable Rust tree in the compiler beside a
-region-native form at the boundary would be two representations of one datum:
-conversion seams, double maintenance, and a standing invitation for the two to
-drift. The bar is **parity**, since expansion is compile-path-hot and the
-fallback compile pays it too; risk item 5 measured the prototype at 2–5×
-faster than a Rust-heap tree on every expansion-hot operation, so the
-boundary-only split never had a case.
-
-Hygiene scope ids minted by the expander remain process-local counters; the
-image records a scope watermark so a fresh expander mints above every scope
-baked into persisted syntax.
-
 ## Sealing
 
 After the foundations, the body may contain only *sealed* heap objects:
@@ -278,14 +191,15 @@ never see. Anything the dumper meets that is neither sealed nor
 reconstructible nor side-streamable fails the dump with a named binding.
 
 The **default trait tables** are the second reconstructible class, found by
-the census (risk item 2): every collection's `traits` field points at one of
-the instance's two default traitsets — `@struct`s built by
-`init_default_traits` at VM init, before any stdlib load or hydration. They
-are instance infrastructure, not program state, so the dumper never copies
-them: a `traits` slot aimed at a default traitset becomes a reconstruction
-entry whose constructor resolves the hydrating instance's own table for that
-tag. The tables exist before hydration by construction (VM-init order), so
-the constructor is a lookup, not an allocation.
+the census ([measurements.md](image/measurements.md) item 2): every
+collection's `traits` field points at one of the instance's two default
+traitsets — `@struct`s built by `init_default_traits` at VM init, before any
+stdlib load or hydration. They are instance infrastructure, not program
+state, so the dumper never copies them: a `traits` slot aimed at a default
+traitset becomes a reconstruction entry whose constructor resolves the
+hydrating instance's own table for that tag. The tables exist before
+hydration by construction (VM-init order), so the constructor is a lookup,
+not an allocation.
 
 **Macros persist whole.** A manifest macro entry carries its parameter
 lists, its template syntax (a body value), and its transformer cache's body
@@ -314,90 +228,12 @@ binding tables ([impl/hir.md](hir.md) § "A fragment is closed over its
 bindings") — so the registry is plain data that crosses a process boundary as
 it stands. The image records it the way the stdlib disk cache already does,
 with no re-derivation from syntax and no dependency on the syntax foundation.
-The parity test below is the acceptance gate, and it belongs to the **boot**
-milestone, not a follow-up.
-
-## File format
-
-One image is one file (or one embedded blob):
-
-| Section | Content |
-|---------|---------|
-| header | magic, format version, fingerprint, section offsets, page count |
-| pages | the dumped region's pages, largest first: body bytes per page at base-page-aligned file offsets, so the section is mappable. Descending size order makes the packed layout self-aligning: every earlier page's size is a multiple of every later page's, so each page's offset — in the file and in the mapped interval — is a multiple of its own size, satisfying the masked-header walk with no padding |
-| page table | (size, object cursor, data cursor) per page, in placement order — rebuilds each page's cursors |
-| relocations | pointer stream: (slot offset, target segment, target offset); primitive stream: (slot offset); reconstruction stream: (slot offset, constructor tag). Offsets are region-relative bytes: the hydrated region is one contiguous interval (Hydration step 3), so `base + offset` names any slot or target in O(1) and the (page, offset) pair collapses |
-| object index | (offset, tag) per heap object, sorted — rebuilds `dtors`/`ref_objs` and drives the verifier |
-| primitive table | primitive names in dump-time `prim_id` order |
-| name table | symbol and keyword names in the body — hashes are stable, but the hydrating instance's display memo must learn them |
-| signal table | user-defined signal names in dump-time bit order |
-| watermarks | dump-time counters: parameter id, static-region mint, hygiene scope id, next signal bit |
-| manifest | bindings: name, kind (function / macro / core), value location, signal, arity, doc location; macro entries add parameter lists, template-syntax and transformer-cache locations; inline-fn syntax locations; plus root locations and dependency fingerprints |
-| side-stream | typed streams, present in any image: encoded `LirFunction`s keyed by template location (the boot configuration requires this stream — see *JIT*); `SendValue`-encoded mutable bindings (present only where the dump policy permits mutables) |
-
-**The pages section starts at a base-page boundary.** `mmap` accepts only a
-file offset that is a multiple of the OS page size, and that size is a
-property of the running machine rather than of the format: Linux on x86-64
-reports 4 KiB, macOS on arm64 reports 16 KiB. The header block is therefore
-padded with zeros up to the first base-page boundary at or after it, and the
-pages section begins there. Pinning the section to a fixed 4 KiB start
-instead would map on a 4 KiB machine and fail every page with `EINVAL` on a
-16 KiB one — the header block is the only part of the file read with `read`
-rather than mapped, so it is the only part whose offset is free.
-
-**Relocation slots.** A pointer slot is any 8-byte field holding an absolute
-address: a heap-tagged `Value`'s payload, a `RegionSlice`'s ptr. A primitive
-slot is a `Value` with `TAG_NATIVE_FN`, remapped by name — and a name
-missing from the live registry is minted on the spot from its static def
-(trait-method handlers are appended to the registry on first use, so a dump
-can hold ids the fresh process has not minted yet). Symbol and keyword
-payloads are stable hashes and need no relocation. The dumper emits each
-entry as it copies the object — it knows every variant's layout, so there is
-no post-hoc discovery, and targets are region-relative offsets so hydration
-rewrites each slot in O(1) with no address search.
-
-**Static region slots** baked into bytecode operands are opaque per-function
-keys; they collide harmlessly across functions. The loader bumps the global
-mint counter past the image watermark anyway, so uniqueness diagnostics stay
-truthful. Parameter ids, hygiene scopes, and signal bits get the same
-watermark treatment.
-
-## Fingerprint: regenerate, never migrate
-
-`HeapObject` is `repr(Rust)`; opcode discriminants and `prim_id`s are
-source-order-dependent. An image is therefore valid only for a binary whose
-layout agrees with the dumper's. The fingerprint records: format version,
-rustc version and target triple, `size_of`/`align_of` for `Value`,
-`HeapObject`, `RegionSlice`, `Closure`, `ClosureTemplate`, and `TableKey`, the
-instruction-set high-water mark, `CURRENT_EPOCH`, the feature set, a hash of
-the primitive name list in registration order, the OS base page size, and
-(for the boot configuration) the hashes of the three sources.
-
-The base page size earns its place because the file's geometry is built from
-it: the pages section starts at a base-page boundary (§ File format) and
-every page size in the page table is a multiple of it. Two machines can
-agree on the target triple and still disagree here — arm64 Linux ships both
-4 KiB and 64 KiB kernels. Recording the size turns that case into a
-fingerprint mismatch, which falls back to sources, instead of a page table
-the reader rejects as corrupt or an offset `mmap` refuses.
-
-Size and align alone do not pin field offsets. The fingerprint therefore
-also records the probed layout of every variant the dumper can emit: the
-discriminant byte and each leaf field's offset and length (risk item 6
-records the probe mechanism and the measured layout). A build whose layout
-reorders a field or moves the discriminant fails the fingerprint instead of
-hydrating garbage, so the two-stage embed build cannot pass with a shifted
-layout. The same extents drive slot canonicalization (§ Dumping).
-
-On mismatch the loader falls back — the `include_str!` sources never go away,
-so the image is an optimization, not a correctness dependency. Images are
-regenerated, not migrated; epochs stay a source-level concept. An environment
-image is binary-locked: durable cross-version data belongs in files or RDF,
-and the manifest is designed so a tool running the *old* binary can export
-bindings as source. State that limit to users rather than promising
-migration.
+The parity test in [plan.md](image/plan.md) is the acceptance gate, and it
+belongs to the **boot** milestone, not a follow-up.
 
 ## Hydration
+
+[format.md](image/format.md) owns the sections this reads.
 
 1. Validate the fingerprint; on failure, fall back (boot: compile sources;
    environment: report the mismatch).
@@ -407,7 +243,7 @@ migration.
    them. Check the primitive table against the live registry.
 3. Mint a region and map the page section: reserve an aligned `PROT_NONE`
    range, then `MAP_FIXED` + `MAP_PRIVATE` each dumped page from the file
-   into its slot. The section's 4 KiB file alignment makes the offsets
+   into its slot. The section's base-page file alignment makes the offsets
    legal; the reservation gives each page the self-alignment the
    masked-header walk requires. The pages enter the region flagged
    **file-backed**: the pool neither caches nor recycles such a page, and
@@ -449,7 +285,10 @@ image that arrives as bytes — over the network, from Redis, from a channel —
 is written into an anonymous memory file (`memfd_create`; `shm_open` on
 macOS) and hydrated from that descriptor without touching a filesystem. On
 Linux the memfd is write-sealed (`F_SEAL_WRITE | F_SEAL_SHRINK`) before
-mapping, so the immutability the mapping relies on is kernel-enforced.
+mapping, so the immutability the mapping relies on is kernel-enforced. The
+offset must sit on a base-page boundary of the descriptor, and a misaligned
+one is refused before anything is mapped ([format.md](image/format.md) owns
+that rule).
 
 **Never rewrite an image file in place.** The atomic temp-file-and-rename
 discipline is what keeps a mapped old inode stable while a new image
@@ -516,13 +355,14 @@ object index are byte-identical across dumps. The page bytes are assembled
 canonically from a zeroed buffer: headers, cursor gaps, alignment slack,
 and relocation slots stay zero, and each object slot receives only its
 discriminant byte and the leaf-field extents the layout probes record
-(§ Fingerprint). A `repr(Rust)` enum copy carries uninitialized padding
-from its construction temporary — the store spike measured this residue —
-so the dumper never copies a slot wholesale; the extent copy leaves padding
-out, and two dumps of the same graph are byte-identical whole files. The
-warm cache still keys on the fingerprint, not a content hash; whole-file
-determinism buys reproducible embedded blobs, and concurrent dumpers racing
-through the atomic rename produce identical files.
+([format.md](image/format.md) § Fingerprint). A `repr(Rust)` enum copy
+carries uninitialized padding from its construction temporary — the store
+spike measured this residue — so the dumper never copies a slot wholesale;
+the extent copy leaves padding out, and two dumps of the same graph are
+byte-identical whole files. The warm cache still keys on the fingerprint,
+not a content hash; whole-file determinism buys reproducible embedded blobs,
+and concurrent dumpers racing through the atomic rename produce identical
+files.
 
 Mutable bindings are the dump-policy fork. The strict policy (boot) fails
 the dump, naming the binding. The environment policy defaults to the same
@@ -557,283 +397,40 @@ its acceptance gate.
 - **Embedded (release):** a Makefile stage builds `elle`, runs
   `elle image dump-boot`, and rebuilds with the blob embedded (path passed
   by env var; `build.rs` declares the rerun-if). The blob is embedded
-  4 KiB-aligned — an `include_bytes!` behind a `#[repr(align(4096))]`
+  64 KiB-aligned — an `include_bytes!` behind a `#[repr(align(65536))]`
   wrapper keeps its virtual address aligned, and load-segment congruence
   makes its file offset aligned too — so hydration maps it straight from
   the executable's own file, with the offset recovered from the static's
   address and the segment table (`dl_iterate_phdr`; the Mach-O load
-  commands on macOS). Embedding changes the binary but not the fingerprint
-  — every fingerprint input is computed from layout probes and sources, not
-  from the binary hash — so the two-stage build converges in one iteration.
+  commands on macOS). The constant is the largest base page any supported
+  host reports, because the alignment a blob needs is the *host's* page
+  size and no smaller constant covers a 64 KiB arm64 kernel. Embedding
+  changes the binary but not the fingerprint — every fingerprint input is
+  computed from layout probes and sources, not from the binary hash — so
+  the two-stage build converges in one iteration.
 
 ## Verifier
 
-A debug verifier walks the object index after hydration and asserts sealing:
-every tag is in the sealed set, every pointer slot targets this image or a
-declared dependency, every `RegionSlice` is in bounds, and the rebuilt
-cursors agree with the index. Format drift then fails loudly at load, not as
-a torn read later.
+The tables are checked before anything is mapped; the mapped objects are
+checked in a debug build.
 
-## Open risks and dispatch experiments
+Every entry the hydrator decodes is bounds-checked as it is read: each page
+size is a power of two at or above the base page, and the sizes sum to the
+section; each relocation slot and target lies inside the image and is
+8-byte aligned; each object offset admits a whole `HeapObject` and carries a
+tag in the sealed set; the root names an object inside the pages or carries
+an immediate tag. A file that fails any of these is refused by name, with no
+mapping made and no region minted. These checks are always on: they read the
+file's tables rather than its page bytes, so they cost no faults, and they
+are what stops a corrupt table from writing outside the image during
+relocation.
 
-The design rests on assumptions that are cheap to test and expensive to be
-wrong about. Run these before the foundations land, in this order:
-
-1. **Boot-time attribution — dispatched, value proposition confirmed.**
-   `--trace=boot,compile` (landed with this design; pinned by
-   `tests/integration/trace_boot.rs`) attributes a warm release-build boot
-   of a trivial script (~545 ms total): stdlib frontend compile ~494 ms
-   (91%), of which region inference ~216 ms, expand ~95 ms, analyze
-   ~75 ms, emit ~74 ms, lower ~18 ms; core ~8 ms; prelude, registration,
-   and meta build ~2 ms combined; stdlib *execute* ~1.4 ms; ~38 ms of
-   process/VM setup and teardown remain. The image removes everything but
-   that ~38 ms floor and the 1.4 ms execute — roughly a 10× boot. Region
-   inference alone is 44% of the stdlib compile, an independent
-   optimization target for the fallback path.
-2. **Post-boot heap census — dispatched, sealing confirmed.**
-   `--trace=census` (landed with this experiment; pinned by
-   `tests/integration/census.rs`, whose sealing net fails the moment an
-   unsealed variant enters the boot graph) walks every live object in the
-   instance's region store after boot. A warm release boot leaves **402
-   regions**, **640 objects**, 3.81 MiB of committed region pages, and
-   1.25 MiB of body payload:
-
-   | Tag | Count | Bytes | Heap-ptr slots | Slices |
-   |-----|-------|-------|----------------|--------|
-   | ClosureTemplate | 202 | 1,227,041 | 13 | 202 |
-   | Closure | 201 | 36,064 | 826 | 148 |
-   | CaptureCell | 220 | 31,680 | 215 | 0 |
-   | LStruct | 4 | 10,400 | 198 | 0 |
-   | Parameter | 8 | 1,024 | 3 | 0 |
-   | External | 3 | 384 | 0 | 0 |
-   | LStructMut | 2 | 400 | 3 | 0 |
-
-   The boot residue is code, not data: no pair, string, or array survives
-   to the post-boot heap. The 220 capture cells are the snapping set — the
-   static scan found zero top-level `assign`s in stdlib.lisp, so every
-   cell snaps. The unsealed leaves are exactly the reconstruction stream's
-   two classes: the three stdio-port `External`s and the two default
-   traitsets (§ "Process-owned resources reconstruct in place"); nothing
-   else in the graph is refused, so the boot image is dumpable. Relocation
-   load: 1,258 heap-pointer slots + 350 `RegionSlice` ptrs + 684
-   primitive slots ≈ 2,300 relocation entries.
-
-   Most of the payload is source locations. The template foundation moved a
-   code object's data into region pages, so what the census now measures
-   includes the location tables — 16 bytes an entry over an interned file
-   table, where the `HashMap<usize, SourceLoc>` they replaced held a `String`
-   per entry on the Rust heap, invisible here and several times larger. Every
-   boot closure already referenced a region-resident template object, so that
-   foundation rewrote the representation rather than the sharing structure:
-   the census's `shared-templates` counter, which measured how many closures
-   still held an `Rc` blueprint, retired with that variant.
-3. **The store spike — dispatched, mechanism proven.** `src/image` dumps
-   and hydrates data-only graphs (pairs, strings, bytes, arrays, floats,
-   portable immediates) end to end, pinned by `tests/integration/image.rs`
-   against the § Test plan: round-trip equality in a fresh heap, sharing
-   preservation, corrupted-fingerprint fallback with no leaked region or
-   mapping, double hydration with independent address sets, rename-over-a-
-   live-mapping, teardown to baseline, and file-backed release as `munmap`
-   (never cached — also pinned at the pool in `pagepool/tests.rs`). The
-   pool interplay reduced to one field: `MmapPage` carries a `file_backed`
-   flag the release path checks. Two findings: relocation slots and targets
-   collapse to region-relative offsets (recorded in § File format), and
-   raw object-slot bytes are not byte-deterministic under `repr(Rust)`
-   padding (recorded in § Dumping; resolved by risk item 6's extent
-   copy). Still
-   open for the full **store** milestone: scrub/guardfree exercised over a
-   hydrated region, the `(fd, offset)` input form (memfd for byte
-   sources), and the always-on verifier's pointer-bounds walk beyond the
-   tag check.
-4. **Symbol-identity scout — dispatched, migration confirmed cheap.** The
-   audit classified all 221 `SymbolId` sites, and a throwaway prototype —
-   `SymbolId(u64)` minted as the FNV-1a name hash, `SymbolTable` reduced
-   to a hash→name registry with the keyword collision panic — ran the full
-   suites. Site classes and the cost of each:
-
-   | Site class | Sites | Migration cost |
-   |------------|-------|----------------|
-   | Opaque keys and pass-throughs (`PrimitiveMeta`, classification maps, inline/dispatch registries, JIT `scc_peers`, binding arenas) | ~170 | none — already hash-keyed |
-   | Width seams: `SymbolId(u32)`; `Value::symbol(u32)`; the truncating `as_symbol() → u32`; `Bytecode::add_symbol(u32)`; `SendValue::Symbol.id` (dead on receive); `errors.rs` parses `SymbolId(N)` as `u32`; 66 `HashMap<u32, String>` name maps | ~75 | mechanical widening — the whole prototype is 39 files, ±110 lines, and compiles clean beyond these seams |
-   | Dense indexing beyond `SymbolTable` | 1 | `jit/group.rs` `globals[sym.0 as usize]` — dead code with test-only callers; there is no VM globals table (the letrec model has no `LoadGlobal`), so no live density assumption exists |
-   | Bytecode operands carrying a symbol id | 0 | none to audit: symbols reach bytecode only as constant-pool `Value`s (u16 pool index) and `ConstTemplate`s, which already encode symbols by name |
-   | Raw-id comparators (`Value::Ord` rank-3 arm, `TableKey::Ord` symbol arm) | 2 | sort order flips to hash order coherently; sorted structs, sets, and their binary searches stay correct because build and probe share the comparator |
-   | Sentinel `SYNTHETIC = u32::MAX` | 1 production read | becomes a reserved `u64::MAX`; the binding's existing `is_synthetic` flag could replace it outright |
-
-   Measured fallout: Rust suites green except two tests that pin the
-   property being removed (the sequential-mint assertion, and a
-   different-ids-across-two-tables setup assert). The full smoke corpus —
-   2,264 files, VM and JIT — passes with **zero expectation churn**: no
-   Elle test observes symbol sort or print order. `(environment)` is the
-   one producer of symbol-keyed structs, and nothing pins its key order.
-   Keyword-keyed containers sort by name string and are unaffected. Boot
-   is unharmed: quiet-machine stdlib-compile is not slower under hash
-   interning. Deleted by the migration: the five `symbol_names` maps and
-   their threading, `all_names()`, `send`'s by-name symbol re-intern,
-   `intern_primitive_names` and its five call sites, and the `CompileCtx`
-   registration-order invariant (including the docs/pipeline.md bullet).
-   The audit also found two live cross-table id holes that stable ids
-   close: `send` ships `LirConst::Symbol` inside the live `LirFunction`
-   verbatim, so worker-side JIT re-emission pools sender-space ids; and
-   `TableKey::Symbol` keys inside sent structs cross untranslated. The
-   symbol milestone must land regression tests for both.
-5. **Expander mutation parity — dispatched, parity exceeded.** A throwaway
-   prototype node ran the expander's hot operations head to head against
-   the Rust-heap tree, allocating through the real region store
-   (`FiberHeap::alloc_region_slice_in_region`). The node is 56 bytes to
-   `Syntax`'s 112: kind tag, packed span over an interned file id, scope
-   set inline (capacity 4 plus an overflow slice), string payloads and
-   child slices as `RegionSlice`, symbols as stable hashes (the symbol
-   foundation lands first). Corpus: the parsed prelude + stdlib trees
-   (230 forms, 13,332 nodes), 20 rounds per op, in-place walks mutating
-   uniquely owned trees through the child slices:
-
-   | Per node | Rust-heap tree | Region tree |
-   |----------|----------------|-------------|
-   | stamp-copy (macro-arg clone + add-scope walk) | 176 ns | 37 ns |
-   | hygiene flip walk, in place | 40 ns | 17 ns |
-   | file-scope add walk, in place | 31 ns | 13 ns |
-   | build + drop (the `from_value` shape) | 73 ns | 17 ns |
-   | teardown | 31 ns | 7 ns |
-
-   Region mint + free measures ~6 ns, so per-expansion transient regions
-   are noise. The no-inline-capacity fallback — regrow the scope slice on
-   every add — costs 8 ns per visit, so scope storage is not a parity risk
-   in either form. The op mix is measured, not assumed: counters on
-   `Syntax::clone`, the constructors, `map_scope_recursive`, and the
-   converters (dumped at the `--trace=compile` expand/analyze marks)
-   showed the stdlib expand phase (84.5 ms warm release) deep-clones
-   **464,089** nodes against 46,746 built and 24,718 from `from_value`,
-   across 1,532 expansions; analysis clones another 143,298. A 300-defn
-   macro-heavy user file amplified the same shape: 992,170 clones in a
-   206 ms expand, ~254 clones per expansion — a large share being the
-   per-call `MacroDef` template deep clone, which pointer-shared immutable
-   region trees delete outright. perf agrees: `Syntax::clone` +
-   `drop_in_place<Syntax>` is ~10% of the whole boot. Scope sets are tiny
-   everywhere: every one of the ~430k measured scope ops ended with ≤3
-   scopes. Counts × per-op deltas put tree ops near half of an
-   expansion-heavy expand phase and ~4× cheaper in regions, so the
-   migration is projected to make expansion-heavy compiles roughly a
-   third *faster* — and even a fully immutable working tree meets the
-   bar, since a full stamp-copy (37 ns) undercuts the Rust tree's
-   in-place walk (40 ns). The boundary-only split is dead; no measured
-   deal-breaker exists. One condition binds the migration: keep in-place
-   mutation legal on uniquely owned working trees (stamped copies and
-   conversion results — the ownership discipline the hygiene flip already
-   relies on). To redo: counter patch at the sites above, plus a
-   `#[cfg(test)]` bench under `src/syntax/expand/` building the prototype
-   node from `read_syntax_all` output and running stamp/flip/add/build/
-   teardown against `stamp_scope`/`flip_scope_recursive`. The shipped node
-   differs from the prototype in two ways [syntax.md](syntax.md) argues for:
-   it carries a symbol's spelling as a region string rather than a hash, and
-   its scope set has no inline capacity (the prototype measured the
-   difference at 8 ns per visit). It is 64 bytes, not 56.
-6. **Fingerprint strength — dispatched, probes landed.** Size/align probes
-   do not pin field offsets; the fingerprint now records, per dumpable
-   variant, the discriminant byte and every leaf field's offset and length
-   (`src/image/layout.rs`), so the two-stage embed build cannot pass the
-   fingerprint with a shifted layout. Mechanism finding: `offset_of!`
-   cannot name an enum variant's field on stable Rust (E0658,
-   rust-lang/rust#120141), so the probes construct one exemplar per variant
-   and measure each field's address against the object's base, with
-   `offset_of!` covering the nested structs (`Pair`, `Value`,
-   `RegionSlice`). Measured layout (rustc 1.95, x86-64): `HeapObject` is
-   128 bytes, align 8. The by-value `ClosureTemplate` variant used to set
-   that size at 288 bytes, making a `Float` slot ~95% padding; the template
-   foundation reduced the variant to a payload slice plus a blueprint
-   pointer. The discriminant is one byte at offset 0 (declaration index
-   plus 3) with bytes 1–7 zero; every probed variant places its payload
-   field at 8 and `traits` at 24 (`Pair` nests its whole struct at 8).
-   `RegionSlice`'s `u32` len leaves interior padding at bytes 12–16 of the
-   field, which is why extents are recorded per leaf field, never per
-   variant field. The probes verify themselves on first use — distinct
-   discriminant bytes, zero upper discriminant bytes, disjoint in-bounds
-   extents, and a canonicalize-then-read-back check per variant — and
-   panic on violation, so a rustc that moves the tag or reorders fields
-   fails loudly before any image is written or trusted. The unlock
-   (§ Dumping): the dumper assembles object slots from the extents, dumps
-   are byte-identical whole files, and the determinism pin asserts
-   whole-file equality with a poisoned-padding counter-factual.
-
-## Landing order
-
-Foundations first — each lands green on the existing corpus with no image
-code, and each deletes image machinery:
-
-1. **symbol** — landed. Stable content-addressed symbol identity
-   ([symbol.md](symbol.md)); deleted the symbol remap pass, the
-   sorted-container re-sort hazard, the `symbol_names` maps, and `send`'s
-   re-interning.
-2. **struct** — landed. Region-native immutable struct payloads and keys
-   ([values.md](values.md) § "Struct keys"); deleted the per-probe key
-   allocation and the owned-key arms the dumper would have had to encode.
-3. **template** — landed. The blueprint / payload / header split
-   ([region/template.md](region/template.md)); deleted the per-creation
-   blueprint clone, the `HashMap` location map, and the `Rc`-shared template
-   variant that no image could dump.
-4. **syntax** — landed. The region-native syntax tree ([syntax.md](syntax.md));
-   deleted the side-stream syntax codec this design would otherwise have
-   needed, the `Box<Syntax>` inside `HeapObject::Syntax`, and the retained
-   lambda tree on every closure template.
-
-Then the image milestones:
-
-5. **store** — the file-backed page flag in the pool, then dumper/hydrator
-   for data-only graphs (no closures), the object-index rebuild, and the
-   fingerprint fallback. Proves the format, mapping, relocation, and
-   teardown end to end. The mechanism here is independent of the
-   foundations — pairs, strings, and arrays are already sealed — so a
-   deliberately small spike of this milestone may run in parallel with them
-   to retire the mapping and pool-interplay risk early; it must not grow
-   compensating machinery (remap passes, codecs) that the foundations
-   delete.
-6. **boot** — cell snapping, dump-boot, warm cache, embedded blob,
-   per-worker hydration for `sys/spawn`, the encoded-LIR side-stream with
-   lazy decode, compiler-state persistence, and the parity gate (bytecode
-   *and* tier).
-7. **environment** — `image/save` and `image/load`, manifest deltas over
-   boot, mutable side-stream.
-
-## Test plan
-
-- Foundations: existing corpus plus targeted unit tests pinning the new
-  layouts, the no-clone `MakeClosure`, stable symbol ordering across two
-  tables, and syntax round-trips through `send`.
-- Round-trip: dump a data graph, hydrate in a fresh runtime, assert
-  structural equality — and a counter-factual load with a corrupted
-  fingerprint falls back cleanly.
-- Hygiene: hydrate, run, exit — the live region count returns to baseline
-  and the leak suite stays green with no image-specific carve-out. Free the
-  hydrated region explicitly under `--trace=guardfree` and assert the
-  cascade releases its cross-image edges exactly once.
-- Relocation: hydrate the same image twice in one process (two regions, two
-  address sets) and assert both hydrations are correct and independent.
-- Mapping: replace the image file by rename while a hydration is live, then
-  read the hydrated values — the old inode's mapping is intact. Release a
-  file-backed page and assert the pool unmapped it rather than caching it.
-  Run scrub and guardfree over a hydrated region.
-- Snapping: boot from image, run the full smoke corpus — behavior identical
-  to source boot. A stdlib top-level that is `assign`ed must fail the dump
-  with a named error.
-- Compile parity: compile the same user file under image boot and source
-  boot and assert byte-identical bytecode — the acceptance gate for the
-  persisted compiler state (inline fragments, dispatch wrappers).
-- Tier parity: a hot stdlib function reaches the JIT under image boot
-  exactly as under source boot — the lazy LIR decode feeds `submit_jit_task`
-  and the compiled result executes.
-- Names: print an image keyword and an image symbol (the instance's display
-  memos learned them) and raise an image-defined signal (the replayed bit
-  matches the baked profile).
-- Macros: a macro whose transformer cache was empty at dump expands
-  correctly after hydration (the lazy fill still works).
-- Parameters: after image boot, `println` writes to the process's real
-  stdout (the reconstructed default, not a stale dump-time resource), and
-  `parameterize` of `*stdout*` redirects it — the captured `Parameter`
-  identity and the fiber's frame lookup both survived hydration.
-- Determinism: dump the same graph twice and assert byte-identical whole
-  files. The counter-factual: scribble a pattern into a live object's
-  padding bytes before the dump and assert the file does not change — a
-  wholesale slot copy would carry the pattern into the artifact.
-- Resolution: a unit test pins that an image pointer resolves through the
-  interval table without touching the header ladder, and that `owns` on a
-  hydrated region is a range check.
+The sealing walk reads the mapped objects, so it runs under
+`debug_assertions`: every object's tag matches the index's, every
+`RegionSlice` extent stays inside the image, and each page's cursors bound
+the objects the index places on it. Reading every object faults in every
+object page, which is the cost the design otherwise refuses to pay — a boot
+image's untouched pages are never read (§ "The clean set is the currency"),
+and an always-on sealing walk would read all of them. Format drift then
+fails loudly at load in the builds that develop the format, rather than as a
+torn read later.

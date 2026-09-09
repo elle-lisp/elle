@@ -1,6 +1,7 @@
-//! The image file's byte layout (docs/impl/image.md § "File format") and the
-//! fingerprint that gates hydration (§ "Fingerprint: regenerate, never
-//! migrate").
+// audited: 2026-09-08
+//! The image file's byte layout, and the fingerprint that gates hydration.
+//!
+//! docs/impl/image/format.md
 //!
 //! One header block of `HEADER_BLOCK` bytes zero-padded to `pages_offset()`,
 //! then the pages section, then the metadata sections (page table,
@@ -27,8 +28,7 @@ pub(crate) const VERSION: u32 = 0;
 pub(crate) const HEADER_BLOCK: usize = 4096;
 
 /// File offset where the pages section starts, for this machine's OS page
-/// size (docs/impl/image.md § "The pages section starts at a base-page
-/// boundary").
+/// size (docs/impl/image/format.md).
 pub(crate) fn pages_offset() -> usize {
     pages_offset_for(crate::value::fiberheap::pagepool::base_page())
 }
@@ -50,7 +50,7 @@ const FINGERPRINT_AT: usize = 80;
 /// The live process's image fingerprint. An image whose stored fingerprint
 /// differs is rejected at hydration — images are regenerated, never
 /// migrated. Beyond sizes and aligns, the fingerprint carries the probed
-/// per-variant layout (docs/impl/image.md § Fingerprint): size checks alone
+/// per-variant layout (docs/impl/image/format.md): size checks alone
 /// cannot see a reordered field or a moved discriminant.
 pub fn fingerprint() -> String {
     format!(

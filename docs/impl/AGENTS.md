@@ -15,7 +15,7 @@ Up: [..](../AGENTS.md)
 - [fleet.md](fleet.md) — **Fleet — adhoc distributed execution over images (more...)**
 - [gpu.md](gpu.md) — **GPU Compute (more...)**
 - [hir.md](hir.md) — **HIR — High-level IR** The HIR pass converts expanded syntax trees into a typed intermediate representation.
-- [image.md](image.md) — **Images — regions hydrated at load** Design for image-style persistence.
+- [image.md](image.md) — **Images — regions hydrated at load** Design for image-style persistence: one mechanism, two shipped configurations.
 - [jit.md](jit.md) — **JIT** The JIT compiles hot functions from LIR to native code using Cranelift.
 - [lexicon.md](lexicon.md) — **Lexicon: epoch-aware lexing** Status: implemented.
 - [lir.md](lir.md) — **LIR — Low-level IR** LIR is an SSA-form intermediate representation with virtual registers, basic blocks, and explicit control flow.
@@ -33,4 +33,5 @@ Up: [..](../AGENTS.md)
 
 ## Directories
 
+- [image/](image/AGENTS.md) — The image file, Foundations, What the experiments measured, Landing order and test plan
 - [region/](region/AGENTS.md) — Ownership adopts and the root's lifetime obligation, Where a release is anchored, Reassigned mutable bindings are 1-slot containers, Per-arm compensation, NativeCtx — explicit allocation: every value names its region and heap, Region diagnostics and validation, Native region effects: declared, not guessed, Rich errors — one region-coherent struct routine + `rich_error!`, Region generations: stale derefs detonate in debug builds, The letrec closure-cycle merge, The mechanism, Merging, Region representation — id-spaces, per-execution model, layout, Owner nodes — an activation as a forest root, Adoption and subtree drop (the ownership forest), A release past a frame-replacing tail call, The relocation point and its replicas, Region rules — the implementor's correctness obligations, What a signal exit owes, Code objects — a blueprint, a payload, and a header, An abandoned frame runs the releases it still owes, The branch-arm release window

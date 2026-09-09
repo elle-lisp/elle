@@ -1,3 +1,8 @@
+// audited: 2026-09-08
+// Unit tests for heap-object allocation, tags, and the region residence an
+// image dump depends on.
+// docs/impl/values.md
+
 use super::*;
 
 #[test]
@@ -29,7 +34,7 @@ fn test_alloc_cons() {
 
 // An immutable struct's entries are page bytes of the struct's own region, the
 // way an array's and a set's already are. That is what lets an image dump a
-// struct as body data (docs/impl/image.md § Foundations) and what keeps a
+// struct as body data (docs/impl/image/foundations.md) and what keeps a
 // struct off the Rust heap. Counter-factual: a `Vec` payload lives outside
 // every region, so its address resolves to no region at all.
 #[test]

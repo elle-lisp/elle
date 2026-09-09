@@ -1,13 +1,16 @@
-//! Image persistence, store milestone (docs/impl/image.md — the design
-//! home). An image is the page bytes of one compacted region plus a
-//! relocation table; hydration maps the pages privately, rewrites the
-//! pointer slots, and installs the result as an ordinary counted region.
+// audited: 2026-09-08
+//! Image persistence: an image is the page bytes of one compacted region plus
+//! a relocation table, and hydration maps those pages privately.
 //!
-//! Current scope is the data-only spike (§ "Landing order" item 5): sealed
-//! data graphs — pairs, strings, bytes, arrays, floats, portable immediates
-//! — dumped and hydrated end to end. Closures, structs, sets, symbols, and
-//! the boot/environment configurations arrive with the foundations and the
-//! later milestones.
+//! docs/impl/image.md
+//! docs/impl/image/format.md
+//!
+//! Hydration rewrites the pointer slots and installs the result as an
+//! ordinary counted region. Current scope is the store milestone's data-only
+//! set: pairs, strings, bytes, arrays, floats, and the portable immediates,
+//! dumped and hydrated end to end. Closures, structs, sets, symbols, and the
+//! boot and environment configurations arrive with the later milestones
+//! (docs/impl/image/plan.md).
 
 mod dump;
 mod format;

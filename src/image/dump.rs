@@ -1,8 +1,13 @@
-//! The dumper (docs/impl/image.md § Dumping): a compacting copy of a sealed
-//! data graph into a fresh scratch region, then the scratch pages written as
-//! an image file with relocations, page table, and object index. The spike
-//! scope is data-only: pairs, strings, bytes, arrays, floats, and the
-//! portable immediates (ints, inline floats, bools, nil, the empty list,
+// audited: 2026-09-08
+//! The dumper: a compacting copy of a sealed data graph into a scratch
+//! region, written out as an image file.
+//!
+//! docs/impl/image.md
+//! docs/impl/image/format.md
+//!
+//! The pages carry relocations, a page table, and an object index. The store
+//! milestone's scope is data-only: pairs, strings, bytes, arrays, floats, and
+//! the portable immediates (ints, inline floats, bools, nil, the empty list,
 //! keywords — keyword payloads are stable name hashes). Anything else fails
 //! the dump with an error naming the variant.
 //!

@@ -35,8 +35,8 @@ Build and probe share the comparator, so the containers stay correct; the
 order is deterministic but carries no lexicographic meaning, and no part of the
 language promises one.
 
-[image.md](image.md) § "Stable symbol identity" owns the argument for why the
-image work needs this property.
+[foundations.md](image/foundations.md) owns the argument for why the image work
+needs this property.
 
 ## The display memo
 

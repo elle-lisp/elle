@@ -1,7 +1,11 @@
+// audited: 2026-09-08
+// Bakes the compiling rustc's version in for the image fingerprint, and links
+// libgcc where libffi needs it.
+// docs/impl/image/format.md
+
 fn main() {
     // The compiling rustc's version string, baked in for the image
-    // fingerprint (docs/impl/image.md § "Fingerprint: regenerate, never
-    // migrate"): `HeapObject` is `repr(Rust)`, so an image is valid only for
+    // fingerprint: `HeapObject` is `repr(Rust)`, so an image is valid only for
     // a binary whose compiler agrees with the dumper's layout decisions.
     let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
     let version = std::process::Command::new(&rustc)

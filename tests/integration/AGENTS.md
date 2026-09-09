@@ -1,6 +1,10 @@
 # tests/integration
 
+<<<<<<< HEAD
 <!-- audited: 2026-09-09 -->
+=======
+<!-- audited: 2026-09-08 -->
+>>>>>>> d043f269d (docs: the image design splits into the argument and its three companions)
 
 Full-pipeline integration tests: end-to-end behavior verification.
 
@@ -120,8 +124,8 @@ Tests are organized by feature area in separate files:
 | `escape.rs` | Escape analysis |
 | `arena.rs` | Arena allocation |
 | `trace_boot.rs` | `--trace=boot`/`--trace=compile` phase-timing marks |
-| `census.rs` | Post-boot heap census: the sealing regression net and the `--trace=census` report (docs/impl/image.md) |
-| `image.rs` | Image store spike: dump/hydrate round-trip, fingerprint fallback, relocation independence, mapping and pool-interplay pins (docs/impl/image.md § Test plan) |
+| `census.rs` | Post-boot heap census: the sealing regression net and the `--trace=census` report ([image.md](../../docs/impl/image.md)) |
+| `image.rs` | Image store spike: dump/hydrate round-trip, fingerprint fallback, relocation independence, mapping and pool-interplay pins ([plan.md](../../docs/impl/image/plan.md)) |
 | `allocator.rs` | Memory allocation |
 | ~~`parameters.rs`~~ | Migrated to `tests/elle/parameters.lisp` |
 | `ports.rs` | I/O ports |

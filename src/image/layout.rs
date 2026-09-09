@@ -1,6 +1,9 @@
-//! Layout probes for the variants the dumper emits (docs/impl/image.md
-//! § Fingerprint, risk item 6): each variant's discriminant byte and the
-//! byte extents of its leaf fields.
+// audited: 2026-09-08
+//! Layout probes for the variants the dumper emits: each variant's
+//! discriminant byte and the byte extents of its leaf fields.
+//!
+//! docs/impl/image/format.md
+//! docs/impl/image/measurements.md
 //!
 //! `offset_of!` cannot name an enum variant's field on stable Rust
 //! (E0658), so each variant is probed through a constructed exemplar:
