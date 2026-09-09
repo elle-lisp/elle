@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-08
 // Guardfree pins for where a release lands: the branch-arm window, the break window, and the binder pins.
 //
 // docs/analysis/testing.md

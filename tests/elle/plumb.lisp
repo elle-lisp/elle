@@ -1,4 +1,5 @@
 (elle/epoch 12)
+# audited: 2026-09-08
 # plumb.lisp — the io leak dashboard: every probe whose drive reaches the io
 # backend. oracle.lisp is the pure region dashboard and owns the discipline
 # this file follows — the estimator, the gauge-live discriminator rule, the
@@ -32,6 +33,12 @@
   (push region-disc-sink {:k j}))
 
 (println "── plumb: io leak dashboard ──")
+# The over-free gate, opened here and closed after the last probe — the same two
+# reads oracle.lisp makes, and the same argument for them (oracle.lisp § "The
+# over-free gate"). The io backend moves whole region entries between fibers,
+# the scheduler, and requests, so a release that runs twice is as reachable here
+# as anywhere and this file's probes are not covered by the oracle's gate.
+(def over-frees-before (arena/over-frees))
 (def disc (measure "discriminator (live-growth)" probe-disc 200 6 60 0.4 0.5))
 (show disc)
 (check (assert (= (get disc :verdict) :open)
@@ -107,6 +114,16 @@
 (pin-io-2 "io-drop" probe-io-drop 0 0)
 (pin-io-2 "io-abort" probe-io-abort 0 0)
 (pin-io-2 "io-refuse" probe-io-refuse 0 0)
+
+# The over-free gate closes here, over every probe above and the load before it.
+(def over-frees-after (arena/over-frees))
+(check (assert (= over-frees-after 0)
+               (string "over-free: " over-frees-after
+                       " direct double-release(s) this process, "
+                       (- over-frees-after over-frees-before)
+                       " of them across the probes — a release that ran twice, "
+                       "which no leak rate can see "
+                       "(docs/impl/region/diagnostics.md)")))
 
 # ── The split headline ────────────────────────────────────────────────
 (println "── split ──")

@@ -1,3 +1,10 @@
+// audited: 2026-09-08
+//! Reference-count tests: what a decref frees, how far a cascade reaches, and
+//! what a release that ran twice reports.
+//!
+//! docs/impl/region/rules.md
+//! docs/impl/region/diagnostics.md
+
 use super::*;
 
 #[test]
@@ -55,6 +62,98 @@ fn double_decref_panics_in_debug() {
     store.alloc_obj(rr(4), cons_obj());
     store.decref(rr(4)); // rc=1 → 0, region freed, slot becomes None
     store.decref(rr(4)); // debug build panics on the second decref
+}
+
+// ── the over-free counter (docs/impl/region/diagnostics.md) ──────────────────
+// The same violation the two `should_panic` tests above name, kept as a NUMBER
+// for the build that compiles their `debug_assert!` out. The leak dashboards run
+// in release, and no rate they carry can see a release that ran twice — the heap
+// it leaves is smaller, not larger.
+//
+// These drive `decref_reaches_zero` directly rather than `decref`, because that
+// is the only way to leave a counted region present at rc 0: `decref` frees such
+// a region and clears its slot, so the second release would take the absent face
+// and abort on the assert before the count could be read.
+
+#[test]
+fn a_direct_decref_of_a_zeroed_region_counts_an_over_free() {
+    let mut store = RegionStore::default();
+    store.alloc_obj(rr(4), cons_obj()); // rc=1
+    assert!(store.decref_reaches_zero(rr(4), None), "rc 1 → 0");
+    assert_eq!(
+        store.over_frees(),
+        0,
+        "the release that took the count to zero is the first one, not a second"
+    );
+    assert!(store.decref_reaches_zero(rr(4), None), "already at zero");
+    assert_eq!(
+        store.over_frees(),
+        1,
+        "a direct decref of an already-zeroed region is a release that ran twice"
+    );
+}
+
+#[test]
+fn a_cascade_decref_of_a_zeroed_region_is_not_an_over_free() {
+    // One container's contents may name one region several times, so the free
+    // cascade legitimately revisits a region an earlier visit already zeroed.
+    // Counting that would make the gauge fire on correct programs.
+    let mut store = RegionStore::default();
+    store.alloc_obj(rr(4), cons_obj());
+    assert!(store.decref_reaches_zero(rr(4), None), "rc 1 → 0");
+    assert!(
+        store.decref_reaches_zero(rr(4), Some(rr(3))),
+        "cascade revisit"
+    );
+    assert_eq!(
+        store.over_frees(),
+        0,
+        "a cascade revisit is not a violation"
+    );
+}
+
+#[test]
+fn a_cascade_decref_of_an_absent_region_is_not_an_over_free() {
+    // The other cascade face: an earlier visit freed the region outright, so the
+    // slot is gone by the time this one arrives.
+    let mut store = RegionStore::default();
+    assert!(!store.decref_reaches_zero(rr(99), Some(rr(3))));
+    assert_eq!(store.over_frees(), 0);
+}
+
+#[test]
+fn decref_if_present_skips_an_absent_slot_without_counting() {
+    // The macro transient, the per-compilation transient and the embedding API
+    // reserve a region id without necessarily allocating into it, so an absent
+    // slot here is the documented pattern rather than a double-release.
+    let mut store = RegionStore::default();
+    assert_eq!(store.decref_if_present(rr(99)), 0);
+    assert_eq!(store.over_frees(), 0);
+}
+
+#[test]
+fn a_direct_decref_of_an_absent_region_counts_before_it_asserts() {
+    // The face a release build reaches: with the `debug_assert!` compiled out the
+    // decref returns false and the run carries on, so the count is the only
+    // report left. The increment precedes the assert, so the two reports name the
+    // same event and the counter is already right at the moment of the abort.
+    //
+    // Caught rather than `should_panic` because the count is what is under test
+    // and a `should_panic` test cannot read anything afterwards. The panic
+    // message reaching stderr is the cost.
+    let mut store = RegionStore::default();
+    {
+        let caught = std::panic::AssertUnwindSafe(&mut store);
+        let _ = std::panic::catch_unwind(move || {
+            let caught = caught;
+            caught.0.decref_reaches_zero(rr(99), None)
+        });
+    }
+    assert_eq!(
+        store.over_frees(),
+        1,
+        "a direct decref of a region with no entry is a release that ran twice"
+    );
 }
 
 #[test]

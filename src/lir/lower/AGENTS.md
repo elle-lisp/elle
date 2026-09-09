@@ -1,6 +1,6 @@
 # lir/lower
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-08 -->
 
 HIR to LIR lowering: explicit control flow, binding slot allocation, lbox operations, and region RC instruction emission.
 
@@ -190,7 +190,8 @@ other is structural ownership-location, NOT escape:
   environment and by no other route — so it either counts the region across the
   gap or cannot mint against it at all (docs/impl/region/relocate.md).
 - `relocate.rs::seal_arm_hoists` / `open_branch_merge` — an `if`/`cond`/`match`
-  merge is reached only through arms the lowerer closes one at a time, so it
+  merge, and the done block of an `and`/`or` whose operands are its arms, is
+  reached only through arms the lowerer closes one at a time, so it
   INHERITS their relocation points and a release emitted past the merge is
   emitted there AND replicated ahead of each arm's `TailCall`. What makes
   that count once per path is `self_cancelling_run`: a value-routed release
@@ -305,7 +306,8 @@ point — it is exempt, because the block is about to hand it to its consumer.
 
 - **Adding a new special form**: Add a case in `expr.rs::lower_expr`, implement `lower_your_form` method
 - **Changing binding lowering**: Update `binding.rs`
-- **Changing control flow**: Update `control.rs`
+- **Changing control flow**: Update `control.rs` and
+  `control/{shortcircuit,matcharms,call}.rs`
 - **Changing pattern matching**: Update `pattern.rs` and `pattern/{keyed,matching,seq}.rs`
 - **Changing region RC emission**: Update `regionemit.rs` (it reads the solver's `RegionInfo`); to change *what* is escaping or *where* a region is dropped, edit the region solver in `src/hir/region/infer.rs`, not the lowerer
 - **Changing tail-call ownership**: Update `control.rs::tail_arg_is_borrowed` and `control/call.rs::tail_callee_defers_release`
