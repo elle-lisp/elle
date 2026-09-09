@@ -1,6 +1,6 @@
 // audited: 2026-09-09
-//! Serialize the compiled standard library to a content-addressed file, so a
-//! later process deserializes it instead of running the front end again.
+//! Cache the compiled standard library on disk, so a later process
+//! deserializes it instead of running the front end again.
 //! docs/impl/stdlib-cache.md
 
 use crate::compiler::Bytecode;

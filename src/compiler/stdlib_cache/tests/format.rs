@@ -1,7 +1,6 @@
 // audited: 2026-09-09
-// What the serialized form carries across: the bytecode graph, the two
-// cross-unit registries the skipped compile would have filled, and the one
-// thing a restored template loses.
+// What the serialized form carries across, and the one thing a restored
+// template loses.
 // docs/impl/stdlib-cache.md
 
 use super::super::*;
