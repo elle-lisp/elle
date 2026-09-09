@@ -36,7 +36,8 @@ estimate rises, and the limit of the ascent is the least fixpoint.
 
 | Callee | The call's type |
 |---|---|
-| a lambda binding this unit defines | that lambda's body type, as the previous pass left it |
+| a lambda binding this unit writes with `assign` | Top |
+| a lambda binding this unit defines and never writes | that lambda's body type, as the previous pass left it |
 | a registered primitive | its declared `RetType`, read from the primitive tables |
 | a stdlib arithmetic wrapper (`+`, `abs`, `min`, …) | Number — the wrapper raises on everything else |
 | anything else | Top |
@@ -166,6 +167,29 @@ reject rather than compute.
   unit cannot enumerate, so the call-site join over the visible ones proves
   nothing about the parameters.
 
+### A written binding's result is Top
+
+The same argument covers what a call to a mutated binding returns. An
+initializer records the body type of the lambda it holds, and a later `assign`
+puts a different lambda in the same binding. The pass walks both and cannot say
+which one a call reaches, so the recorded type is not a fact about the call.
+
+```text
+(var f (fn [x] 1))
+(assign f (fn [x] "s"))
+(%bit-and (f 0) 1)
+```
+
+That is a compile error at the `%bit-and`. Both calls in the two-call spelling
+answer the same way: the rule is about the binding, and the pass reads no order
+between a call and the write.
+
+The rule sits where a body type is recorded, not where the write happens: a
+binding in `mutated_params` records Top. `functionalize` rewrites this `assign`
+into a `SetCell` that records no body type at all, and a route reaching the
+write some other way would do the same. Keying on the binding covers all of
+them.
+
 ## Pinning tests
 
 - `hir::typeinfer::tests::recursion::self_recursive_call_result_is_the_body_type`
@@ -182,11 +206,16 @@ reject rather than compute.
 - `…::a_chain_deeper_than_the_budget_proves_nothing` — the widening: eleven
   functions in reverse walk order outrun the ten passes, and the site that
   reads the unsettled entry is rejected rather than compiled.
+- `hir::typeinfer::tests::mutation::*` — a written binding's result: the
+  reassigned lambda, the call that stands above the write, the `let`-bound
+  spelling, and the over-rejection guard that a binding nothing writes still
+  proves.
 - `hir::typeinfer::tests::bottom::*` — Bottom is not a proof: one rejection per
   contract row that asks a subtype question, a guard and a `(numeric!)`
   declaration each refining the Kleene start and each meeting a fact that
   contradicts it, and the postcondition that the map the pass hands out carries
   no Bottom.
 - `tests/elle/typed-int-ops.lisp` — the corpus peer, on every tier: a
-  self-recursive integer `fib` emits `AddInt` and computes with it, and a float
-  base case is refused at compile time.
+  self-recursive integer `fib` emits `AddInt` and computes with it, a float
+  base case is refused at compile time, and a reassigned lambda binding is
+  refused while the reassignment itself still runs.
