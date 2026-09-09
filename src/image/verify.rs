@@ -14,10 +14,13 @@ use std::mem::size_of;
 
 use crate::value::fiberheap::regionpool::HEADER_SIZE;
 use crate::value::heap::{HeapObject, HeapTag};
-use crate::value::Value;
+use crate::value::{TableKey, Value};
 
 use super::format::PageEntry;
-use super::layout::{self, DISC_BYTES};
+use super::layout::{self, Probed};
+
+/// The discriminant span of an object slot, which is what the index names.
+const DISC_BYTES: usize = <HeapObject as Probed>::DISC_BYTES;
 use super::ImageError;
 
 /// One page as the walk sees it: where it starts in the image, and the two
@@ -112,6 +115,8 @@ fn discriminant(base: usize, off: usize, tag: HeapTag) -> Result<(), ImageError>
 /// that names none. An empty slice has a dangling constant pointer and no
 /// backing, so it names nothing.
 fn slice_extent(obj: &HeapObject) -> Option<(usize, usize)> {
+    // The unit is the element's size, not a `Value`'s: a struct's entries are
+    // (key, value) pairs, so the same length names a much longer extent.
     let (ptr, len, unit) = match obj {
         HeapObject::LString { s, .. } => (s.as_ptr() as usize, s.len(), 1),
         HeapObject::LBytes { data, .. } => (data.as_ptr() as usize, data.len(), 1),
@@ -119,6 +124,12 @@ fn slice_extent(obj: &HeapObject) -> Option<(usize, usize)> {
             elements.as_ptr() as usize,
             elements.len(),
             size_of::<Value>(),
+        ),
+        HeapObject::LSet { data, .. } => (data.as_ptr() as usize, data.len(), size_of::<Value>()),
+        HeapObject::LStruct { data, .. } => (
+            data.as_ptr() as usize,
+            data.len(),
+            size_of::<(TableKey, Value)>(),
         ),
         _ => return None,
     };
