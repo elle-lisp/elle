@@ -1,3 +1,9 @@
+// audited: 2026-09-09
+// The VM's execution entries: a blueprint, a code object at the root, and a
+// program under the async scheduler. The module list sits above them.
+// docs/impl/vm.md
+// docs/impl/region/rules.md
+
 pub mod arithmetic;
 pub mod call;
 pub mod capture;
@@ -380,12 +386,14 @@ impl VM {
             Instruction::Return as u8,
         ];
 
-        // `call_region` is the static slot baked into the synthetic Call above;
-        // it doubles as the physical region the entry thunk is born in (the
-        // static/runtime conflation flagged elsewhere — preserved here). The slot
-        // counter starts at 2, so nonzero.
-        let entry_region = crate::hir::region::RuntimeRegion::new(call_region_slot)
-            .expect("call_region slot nonzero");
+        // The entry thunk gets a runtime region of its own, minted from the heap.
+        // The static slot baked into the synthetic `Call` above is a compile-time
+        // name from a different id-space (docs/impl/region/model.md § id-spaces):
+        // read as a physical id it names whichever live region already answers to
+        // that number, so the thunk would land among another value's objects and
+        // the mint's creation claim would never be taken. A mint takes that claim
+        // here, and the release after the run balances it.
+        let entry_region = self.heap().new_runtime_region();
         // Build the entry thunk as an ordinary allocation into `entry_region`
         // (mortal) — reclaimed by the termination sweep. The synthetic
         // `(ev/run thunk)` bytecode has no MakeClosure of its own; the real
@@ -415,7 +423,16 @@ impl VM {
             crate::value::Arity::Exact(0),
             synthetic_constants,
         );
-        self.execute_proto(&Rc::new(wrapper), None)
+        let result = self.execute_proto(&Rc::new(wrapper), None);
+        // The run is over, so this is the entry thunk's point of demise (Rule 4,
+        // docs/impl/region/rules.md): the wrapper's hand-encoded bytecode carries
+        // no `DecrefRegion` to fire, so the balance for the mint above is here.
+        // The result of `(ev/run thunk)` lives in the fresh region that call
+        // minted, never in this one, so the release cannot reach the value being
+        // returned. It runs on the error exit too — a failed run owes the same
+        // balance as a completed one.
+        self.heap().decref_region(entry_region);
+        result
     }
 }
 
