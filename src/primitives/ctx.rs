@@ -75,6 +75,17 @@ impl<'h> Alloc<'h> {
         Self::new(heap)
     }
 
+    /// A ctx whose values a Rust holder keeps for the life of the instance —
+    /// the stdlib cache's reload (docs/impl/region/ctx.md). It mints a fresh
+    /// region like [`new`](Self::new) and records it as a process root, so the
+    /// teardown sweep decrefs it and the cascade takes the values with it.
+    /// Rooting at the mint is why no constructor hands the region back.
+    pub(crate) fn process_root(heap: &'h mut FiberHeap) -> Self {
+        let region = heap.new_runtime_region();
+        crate::value::arena::register_process_root_region(heap, region);
+        Self::with_region(region, heap)
+    }
+
     /// Test-only view of the ctx's own region. Exists ONLY under `cfg(test)` so
     /// the spec-pin tests can assert "born in the ctx's region". It is invisible
     /// to production code, which has no region getter at all

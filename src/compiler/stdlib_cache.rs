@@ -299,7 +299,10 @@ pub fn load_bytecode(
         ));
     }
     let t0 = std::time::Instant::now();
-    let mut alloc = crate::primitives::ctx::Alloc::new(vm.heap());
+    // The templates this rebuilds are held Rust-side until the instance is
+    // gone, so nothing releases their region by value; it is a process root
+    // (docs/impl/region/ctx.md).
+    let mut alloc = crate::primitives::ctx::Alloc::process_root(vm.heap());
     let mut templates = crate::value::send::deserialize_templates(
         crate::value::send::SendTemplates {
             templates: vec![stored.entry],
