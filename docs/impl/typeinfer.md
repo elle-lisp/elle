@@ -167,6 +167,17 @@ recorded, so no route to the write defeats it. Functionalization rewrites a
 write to a mutated binding into `MakeCell`/`SetCell`, whose arm records no body
 type at all; the `Assign` arm records one for a binding that rewrite left alone.
 
+Which binding a call names is functionalization's answer rather than the
+source's. A straight-line write to a function-local binding is SSA-renamed:
+each version has one initializer, and the call names the version the write
+made. No version is written there, so that spelling keeps its proof and answers
+from the lambda the program last put in the name.
+
+What renaming cannot reach is a binding a **cell** holds — file scope, a loop,
+a capture, a write from inside another function — and that is the shape this
+rule covers. A version a branch merges is neither: its initializer is the
+merge, so nothing records a body type for it and a call already reads Top.
+
 Recording Top is what the join needs, and recording nothing is not enough. An
 absent entry reads as Bottom, and a Bottom no later pass raises joins away at
 the first branch it meets — `(if c (f 0) 1)` joins it with Int and hands the
@@ -218,8 +229,9 @@ The pass has no flow, so it cannot order the write against a call.
   no Bottom.
 - `hir::typeinfer::tests::mutation::*` — a written lambda binding proves nothing
   about its result: the write after the call and the write before it, the write
-  reached from inside another function, the branch a Bottom would have joined
-  away, and the unwritten control that still proves.
+  reached from inside another function, a write that stores the same type, the
+  branch a Bottom would have joined away, and two controls — the unwritten
+  binding, and the SSA-renamed function-local write that still proves.
 - `tests/elle/typed-int-ops.lisp` — the corpus peer, on every tier: a
   self-recursive integer `fib` emits `AddInt` and computes with it, a float
   base case is refused at compile time, and a reassigned local lambda binding
