@@ -1,6 +1,6 @@
 # Landing order and test plan
 
-<!-- audited: 2026-09-08 -->
+<!-- audited: 2026-09-09 -->
 
 What lands in which order, and the pins each milestone must land with.
 
@@ -33,21 +33,28 @@ code, and each deletes image machinery
 
 Then the image milestones:
 
-5. **store** — landed. The file-backed page flag in the pool, dumper and
-   hydrator for data-only graphs (no closures), the object-index rebuild,
-   the fingerprint fallback, the `(fd, offset)` input form with an anonymous
-   memory file for an image that arrives as bytes, the verifier's two
-   passes, the name table that teaches a hydrating instance the spellings its
-   symbols and keywords carry, and the scrub and guardfree pins over a
-   hydrated region, the sorted containers, whose entries the dumper assembles
-   from probed extents exactly as it does an object's, and syntax, with the
-   file table its spans need and the scope watermark a fresh expander must
-   mint above. The format, mapping, relocation, and teardown are proven end
-   to end, over every value the foundations sealed.
-6. **boot** — cell snapping, dump-boot, warm cache, embedded blob,
-   per-worker hydration for `sys/spawn`, the encoded-LIR side-stream with
-   lazy decode, compiler-state persistence, and the parity gate (bytecode
-   *and* tier).
+5. **store** — landed. The file-backed page flag in the pool, the dumper and
+   hydrator, the object-index rebuild, the fingerprint fallback, the
+   `(fd, offset)` input form with an anonymous memory file for an image that
+   arrives as bytes, the verifier's two passes, the name table that teaches a
+   hydrating instance the spellings its symbols and keywords carry, the
+   sorted containers, whose entries the dumper assembles from probed extents
+   exactly as it does an object's, syntax, with the file table its spans need
+   and the scope watermark a fresh expander must mint above, and the scrub
+   and guardfree pins over a hydrated region. The format, mapping,
+   relocation, and teardown are proven end to end over every value the
+   foundations sealed as data. What the dumper still refuses is the rest of
+   the sealed set, which only a boot graph holds: closures, closure
+   templates, native-fns, and `Parameter`.
+6. **boot** — cell snapping, closures and closure templates in the body, the
+   primitive table that remaps a native-fn by name, `Parameter` and the
+   reconstruction stream its default needs, dump-boot, warm cache, embedded
+   blob, per-worker hydration for `sys/spawn`, the encoded-LIR side-stream
+   with lazy decode, compiler-state persistence, the hydrated-region interval
+   table that keeps `region_of_ptr` off the probe ladder
+   ([image.md](../image.md) § "Pointer resolution must not regress" — the
+   regression it prevents needs a region the size of stdlib to show), and the
+   parity gate (bytecode *and* tier).
 7. **environment** — `image/save` and `image/load`, manifest deltas over
    boot, mutable side-stream.
 
@@ -66,11 +73,10 @@ Then the image milestones:
   determinism pin: a struct whose key padding differs between two dumps must
   still write one file.
 - Syntax: a tree round-trips with its structure, its spans, its scope sets,
-  and its scope-exempt flags intact. A span's file survives by name: poison
-  the dumped file id in the page bytes, and the hydrated span still names its
-  file, because the file stream wrote the live id over it. The scope
-  watermark exceeds every counter value the body carries, intro scopes
-  included.
+  and its scope-exempt flags intact. The file table is what decides a
+  hydrated span's file: rename the spelling in the table, and every span
+  follows it. A synthetic span still names no file. The scope watermark
+  exceeds every counter value the body carries, intro scopes included.
 - Source: an image parked at a non-zero, base-page-aligned offset inside a
   larger file hydrates from that descriptor and offset. A misaligned offset
   is refused by name, before anything is mapped.
