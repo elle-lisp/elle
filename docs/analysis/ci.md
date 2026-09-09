@@ -82,6 +82,22 @@ is a release build that also runs the debug-only checks, on the smallest runner
 in the workflow. Read a macOS corpus timing against that, not against a Linux
 one.
 
+### The cross-checks mirror a local target
+
+Two jobs compile for a platform no runner in the workflow executes. `QA` runs
+clippy over `x86_64-apple-darwin`, and `Android Cross-Check` runs `cargo check`
+over `aarch64-linux-android`. Neither step codegens or links, so neither needs
+an SDK or an NDK — only the target's std.
+
+`make crosscheck` runs both, and that is what the target is for. A `cfg` arm no
+local command compiles has a runner for its first reader, and the report
+arrives after the push rather than before it. The Android job has run since
+#752, and the local target arrived later covering macOS alone — so an
+Android-only break compiled everywhere a developer could look.
+
+`tests/integration/workflows.rs` is the standing check that every target a job
+cross-compiles is a target `make crosscheck` compiles too.
+
 ### Runner capacity
 
 The corpus passes run one process per file, `parallel -j $(JOBS)`. On CI the
