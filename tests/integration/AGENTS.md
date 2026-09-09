@@ -1,10 +1,6 @@
 # tests/integration
 
-<<<<<<< HEAD
 <!-- audited: 2026-09-09 -->
-=======
-<!-- audited: 2026-09-08 -->
->>>>>>> d043f269d (docs: the image design splits into the argument and its three companions)
 
 Full-pipeline integration tests: end-to-end behavior verification.
 

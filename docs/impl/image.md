@@ -411,26 +411,29 @@ its acceptance gate.
 
 ## Verifier
 
-The tables are checked before anything is mapped; the mapped objects are
-checked in a debug build.
+The whole verifier is always on, in two passes: the tables before anything is
+mapped, then the objects before the region is installed.
 
 Every entry the hydrator decodes is bounds-checked as it is read: each page
 size is a power of two at or above the base page, and the sizes sum to the
-section; each relocation slot and target lies inside the image and is
-8-byte aligned; each object offset admits a whole `HeapObject` and carries a
-tag in the sealed set; the root names an object inside the pages or carries
-an immediate tag. A file that fails any of these is refused by name, with no
-mapping made and no region minted. These checks are always on: they read the
-file's tables rather than its page bytes, so they cost no faults, and they
-are what stops a corrupt table from writing outside the image during
-relocation.
+section; each relocation slot lies inside the image and is 8-byte aligned;
+each target lies inside it; each object offset admits a whole `HeapObject`
+and carries a tag in the sealed set; the root names an object inside the
+pages or carries an immediate tag. This pass reads the file's tables rather
+than its page bytes, so it costs no faults, and it is what stops a corrupt
+table from writing outside the image during relocation.
 
-The sealing walk reads the mapped objects, so it runs under
-`debug_assertions`: every object's tag matches the index's, every
-`RegionSlice` extent stays inside the image, and each page's cursors bound
-the objects the index places on it. Reading every object faults in every
-object page, which is the cost the design otherwise refuses to pay — a boot
-image's untouched pages are never read (§ "The clean set is the currency"),
-and an always-on sealing walk would read all of them. Format drift then
-fails loudly at load in the builds that develop the format, rather than as a
-torn read later.
+The sealing walk then reads each indexed object: its tag matches the index's,
+every `RegionSlice` extent stays inside the image, and each page's cursors
+bound the objects the index places on it. It reads object shells only, never
+a slice's backing bytes — an extent is checked from the `ptr` and `len` in
+the shell — so the clean set is untouched. The shells themselves are already
+resident: relocation writes a pointer slot in every object that has one, so
+the frames this walk reads are the frames it just dirtied
+(§ "The clean set is the currency"). An image whose objects hold no pointers
+at all is the one case that pays a fault per page, and it is not a case the
+boot or environment configurations produce.
+
+The verifier is a drift detector, not a sandbox (§ Hydration). Format drift
+fails loudly at load rather than as a torn read later, and a truncated or
+scrambled file is refused by name instead of mapped.
