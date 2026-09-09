@@ -1,33 +1,53 @@
-// audited: 2026-09-08
+// audited: 2026-09-09
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
 //! What a binder records: the type a `let`, a `def` or a cell write leaves for
 //! every later read of that binding. A lambda init also records its body type,
-//! which is what the binding's callers read.
+//! which is what the binding's callers read — unless something writes the
+//! binding, and then they read Top.
 
 use super::*;
 
 impl Infer<'_> {
+    /// Record a lambda binding's body type, which is what every call to the
+    /// binding reads, a self-call included. Reports whether `init` held a
+    /// lambda at all; a cell wrapper around a self-recursive or captured one is
+    /// peeled off first.
+    ///
+    /// REPLACE, don't join: each pass re-derives the body type from strictly
+    /// more information, and a join could never come back down from the
+    /// estimate an earlier pass computed with less.
+    ///
+    /// A binding something writes records Top. The initializer's body type
+    /// describes one lambda, an `assign` puts a different lambda in the same
+    /// binding, and the pass cannot tell which one a call reaches — the same
+    /// argument that denies a mutated parameter its call-site proofs. The rule
+    /// sits here rather than on the write, so a route that reaches the write
+    /// differently cannot defeat it: `functionalize` rewrites a top-level
+    /// `assign` into a `SetCell`, which records no body type at all
+    /// (docs/impl/typeinfer.md § "What still does not prove").
+    fn record_lambda_body_type(&mut self, binding: Binding, init: &Hir) -> bool {
+        let HirKind::Lambda { body, .. } = &unwrap_make_cell(init).kind else {
+            return false;
+        };
+        let body_ty = if self.mutated_params.contains(&binding) {
+            TypeInterner::TOP
+        } else {
+            self.hir_types
+                .get(&body.id)
+                .copied()
+                .unwrap_or(TypeInterner::TOP)
+        };
+        self.lambda_body_type.insert(binding, body_ty);
+        true
+    }
+
     /// Let/Letrec — seed binding types from init values.
     pub(super) fn infer_let(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> TyId {
         for (binding, init) in bindings {
             let ty = self.infer(init);
             self.hir_types.insert(init.id, ty);
-            // For lambda bindings (possibly cell-wrapped when
-            // self-recursive/captured), record their body's return type:
-            // this is what every call to the binding reads, a self-call
-            // included (docs/impl/typeinfer.md).
-            // REPLACE, don't join: each pass re-derives the body type from
-            // strictly more information, and a join could never come back
-            // down from the estimate an earlier pass computed with less.
-            if let HirKind::Lambda { body: lam_body, .. } = &unwrap_make_cell(init).kind {
-                let body_ty = self
-                    .hir_types
-                    .get(&lam_body.id)
-                    .copied()
-                    .unwrap_or(TypeInterner::TOP);
-                self.lambda_body_type.insert(*binding, body_ty);
-            } else {
+            if !self.record_lambda_body_type(*binding, init) {
                 let old = self
                     .binding_types
                     .get(binding)
@@ -59,14 +79,7 @@ impl Infer<'_> {
     /// `collect_lambda_info` records its params.
     pub(super) fn infer_define(&mut self, target: Binding, value: &Hir) -> TyId {
         let ty = self.infer(value);
-        if let HirKind::Lambda { body: lam_body, .. } = &unwrap_make_cell(value).kind {
-            let body_ty = self
-                .hir_types
-                .get(&lam_body.id)
-                .copied()
-                .unwrap_or(TypeInterner::TOP);
-            self.lambda_body_type.insert(target, body_ty);
-        }
+        self.record_lambda_body_type(target, value);
         self.hir_types.insert(value.id, ty);
         let old = self
             .binding_types
