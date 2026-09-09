@@ -124,17 +124,34 @@ exempt it, and only in the spelling with a form after it: the same definition
 alone in a file is the file's result, so `f` reads in value position, its
 parameters read as Top, and the site was rejected already.
 
-### The declaration still floors
+### A fact refines the start
 
-`(numeric!)` proves Number for a parameter no call site has reached, so the
-floor lands **on** the Kleene start rather than meeting with it. `meet(⊥,
-Number)` is ⊥, which sits below the contract the author wrote, and a floor that
-returns something below itself is not a floor.
+A guard and a `(numeric!)` declaration are both proofs about a binding that owe
+nothing to a call site. Both reach the environment by meeting with the type the
+ascent has accumulated, and `meet(⊥, fact)` is ⊥, so the start erases them.
+While Bottom discharged every row that erasure cost nothing, and nothing found
+it.
 
-A Bottom the meet **produces** is the opposite fact: a caller passing a string
-to a declared-numeric parameter, where `meet(String, Number)` is ⊥. That one
-stays unproven, so the declaring body's `%`-sites reject rather than compute
-over the string.
+A fact meeting the start **is** the fact. Nothing has contributed to the
+binding, so the guard or the declaration is the whole of what is known:
+
+```lisp
+(defn g [b]
+  (when (%not (%int? b)) (error :not-int))
+  (%mul 2 b))
+```
+
+`b` is an int in everything after the guard, whether or not this unit calls
+`g`. `(numeric!)` reads the same way: it floors **on** the start rather than
+meeting with it, and a floor that returns something below itself is not a
+floor.
+
+A Bottom the meet **produces** is the opposite fact — the accumulated type and
+the fact are disjoint, so no value reaches the site the fact governs.
+`meet(String, Number)` is ⊥ for a caller passing a string to a declared-numeric
+parameter, and `meet(String, Int)` is ⊥ inside the `(%int? x)` branch of a
+function only ever called with a string. Both are left alone, so those sites
+reject rather than compute.
 
 ## What still does not prove
 
@@ -165,9 +182,10 @@ over the string.
   functions in reverse walk order outrun the ten passes, and the site that
   reads the unsettled entry is rejected rather than compiled.
 - `hir::typeinfer::tests::bottom::*` — Bottom is not a proof: one rejection per
-  contract row that asks a subtype question, the `(numeric!)` floor over the
-  Kleene start and over a caller that contradicts it, and the postcondition
-  that the map the pass hands out carries no Bottom.
+  contract row that asks a subtype question, a guard and a `(numeric!)`
+  declaration each refining the Kleene start and each meeting a fact that
+  contradicts it, and the postcondition that the map the pass hands out carries
+  no Bottom.
 - `tests/elle/typed-int-ops.lisp` — the corpus peer, on every tier: a
   self-recursive integer `fib` emits `AddInt` and computes with it, and a float
   base case is refused at compile time.
