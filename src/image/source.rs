@@ -6,7 +6,6 @@
 
 use std::fs::File;
 use std::os::fd::{AsFd, BorrowedFd, FromRawFd};
-use std::os::unix::fs::FileExt;
 use std::path::Path;
 
 use crate::value::fiberheap::pagepool::base_page;
@@ -83,6 +82,10 @@ fn last_error() -> ImageError {
 /// kernel mints a memfd exactly as any other Linux one does.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn anonymous_file(bytes: &[u8]) -> Result<File, ImageError> {
+    // Scoped to this arm: the other one holds a descriptor no `FileExt` method
+    // can reach, so a module-level import would read as dead on that platform.
+    use std::os::unix::fs::FileExt;
+
     // `MFD_ALLOW_SEALING` is what makes the seal below possible; a memfd
     // created without it can never be sealed.
     let name = b"elle-image\0";
@@ -97,6 +100,8 @@ fn anonymous_file(bytes: &[u8]) -> Result<File, ImageError> {
     }
     // SAFETY: `memfd_create` answered with a descriptor this call owns.
     let file = unsafe { File::from_raw_fd(fd) };
+    // A memfd is a file, so it takes its bytes the way a file does. The other
+    // arm cannot: see `fill_through_a_mapping`.
     file.write_all_at(bytes, 0)?;
 
     // Seal writes and both size changes. A shrink would leave the mapping
@@ -148,6 +153,42 @@ fn anonymous_file(bytes: &[u8]) -> Result<File, ImageError> {
     if unsafe { libc::ftruncate(fd, bytes.len() as libc::off_t) } != 0 {
         return Err(last_error());
     }
-    file.write_all_at(bytes, 0)?;
+    fill_through_a_mapping(&file, bytes)?;
     Ok(file)
+}
+
+/// Copy `bytes` into a descriptor that only `mmap` reaches.
+///
+/// A Darwin shared-memory object answers `mmap`, `ftruncate` and `fstat` and
+/// refuses the rest, so the `pwrite` that fills a memfd fails on one with
+/// `ESPIPE`. The bytes go in through a writable shared mapping, which is
+/// dropped before the descriptor is handed on.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn fill_through_a_mapping(file: &File, bytes: &[u8]) -> Result<(), ImageError> {
+    use std::os::fd::AsRawFd;
+
+    // `mmap` refuses a zero length, and an empty image has nothing to copy.
+    if bytes.is_empty() {
+        return Ok(());
+    }
+    let addr = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            bytes.len(),
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_SHARED,
+            file.as_raw_fd(),
+            0,
+        )
+    };
+    if addr == libc::MAP_FAILED {
+        return Err(last_error());
+    }
+    // SAFETY: `mmap` answered with `bytes.len()` writable bytes at `addr`, and
+    // a mapping this call just made cannot overlap the caller's slice.
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), addr as *mut u8, bytes.len()) };
+    if unsafe { libc::munmap(addr, bytes.len()) } != 0 {
+        return Err(last_error());
+    }
+    Ok(())
 }
