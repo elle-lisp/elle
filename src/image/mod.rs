@@ -17,6 +17,7 @@ mod format;
 mod hydrate;
 mod layout;
 mod source;
+mod verify;
 
 pub use dump::dump;
 pub use format::{fingerprint, sections, Sections};

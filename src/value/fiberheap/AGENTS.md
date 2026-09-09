@@ -1,5 +1,7 @@
 # fiberheap
 
+<!-- audited: 2026-09-08 -->
+
 The per-VM heap: the physical region allocator (docs/impl/region/model.md). One
 `FiberHeap` per VM, shared by all of that VM's fibers; every allocation names its
 heap and region explicitly through `arena`.
@@ -27,7 +29,8 @@ heap and region explicitly through `arena`.
 | `regionstore/refcount.rs` | `incref`/`decref` + cascade, `outgoing` edge recording, phantom/double-free debug asserts |
 | `regionstore/free.rs` | `free_runtime_region_pages` / `free_region_group` → the four-phase `free_region_set`: subtree / set drop over `owned_children`, frontier from the recorded `outgoing` table, and the `#[cfg(debug_assertions)]` edge-table equivalence oracle |
 | `regionstore/mintscope.rs` | closed allocation-scope mint log (macro expansion): `begin_mint_log` / `reclaim_mint_scope` RC-balance the scratch DAG by `rc − in_degree` (an `Owned` survivor is left to its owner's drop) |
-| `regionpool.rs` | `RegionPool`: dual-ended pages, page-header stamp, `header_of_page_ptr` |
+| `regionpool.rs` | `RegionPool`: dual-ended pages, object and data cursors, page claim and release |
+| `regionpool/header.rs` | The 16-byte page header: region id, `(generation, store)` stamp, self-validating size tag, and the masked walk that finds a base from any pointer inside the page |
 | `regionpool/introspect.rs` | `find_object_cross_refs` content scan (cascade + diagnostics) |
 | `pagepool.rs` | `PagePool`: per-thread mmap page cache by size class; the `PageDirty` release-time body reset; live traffic counters (`arena/page-claims`); guardfree leak hook; file-backed (hydrated image) pages bypass the cache — their release is `munmap` |
 | `regionstore/hydrate.rs` | Install a hydrated image region: adopt mapped pages, rebuild object bookkeeping from the image's index (docs/impl/image.md § Hydration) |

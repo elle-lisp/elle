@@ -71,10 +71,12 @@ cleared, and [plan.md](plan.md) the order everything lands in.
    collapse to region-relative offsets (recorded in [format.md](format.md)),
    and raw object-slot bytes are not byte-deterministic under `repr(Rust)`
    padding (recorded in [image.md](../image.md) § Dumping; resolved by item
-   6's extent copy). Still open for the full **store** milestone:
-   scrub/guardfree exercised over a hydrated region, the `(fd, offset)` input
-   form (memfd for byte sources), and the always-on verifier's pointer-bounds
-   walk beyond the tag check.
+   6's extent copy). The three the spike left open have since landed with the
+   **store** milestone: the `(fd, offset)` input form with an anonymous
+   memory file for byte sources, the verifier's object walk, and the
+   scrub/guardfree pins over a hydrated region. A fourth finding came from
+   the guardfree pin: `mprotect` is not a way to ask whether a page is
+   mapped, because asking makes it inaccessible — `msync` is.
 4. **Symbol-identity scout — dispatched, migration confirmed cheap.** The
    audit classified all 221 `SymbolId` sites, and a throwaway prototype —
    `SymbolId(u64)` minted as the FNV-1a name hash, `SymbolTable` reduced

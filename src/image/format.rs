@@ -95,11 +95,42 @@ impl Sections {
 }
 
 /// The section ranges of an image held in memory. Reads the header only, so
-/// it answers for a file this binary could not hydrate.
-pub fn sections(_bytes: &[u8]) -> Result<Sections, ImageError> {
-    Err(ImageError::Corrupt(
-        "section decoding is not built yet".into(),
-    ))
+/// it answers for a file this binary could not hydrate — a fingerprint
+/// mismatch is not this function's business.
+pub fn sections(bytes: &[u8]) -> Result<Sections, ImageError> {
+    let header = Header::parse(bytes)?;
+    let counts = [
+        (header.n_pages, PAGE_ENTRY_BYTES),
+        (header.n_relocs, RELOC_BYTES),
+        (header.n_objects, INDEX_BYTES),
+    ];
+    let mut at = pages_offset()
+        .checked_add(usize::try_from(header.pages_len).unwrap_or(usize::MAX))
+        .ok_or_else(|| ImageError::Corrupt("pages section length out of range".into()))?;
+    let pages = pages_offset()..at;
+    let mut ranges = Vec::with_capacity(counts.len());
+    for (n, stride) in counts {
+        let len = usize::try_from(n)
+            .ok()
+            .and_then(|n| n.checked_mul(stride))
+            .ok_or_else(|| ImageError::Corrupt("section counts out of range".into()))?;
+        let end = at
+            .checked_add(len)
+            .ok_or_else(|| ImageError::Corrupt("section counts out of range".into()))?;
+        ranges.push(at..end);
+        at = end;
+    }
+    if bytes.len() < at {
+        return Err(ImageError::Corrupt(
+            "file shorter than its sections claim".into(),
+        ));
+    }
+    Ok(Sections {
+        pages,
+        page_table: ranges[0].clone(),
+        relocations: ranges[1].clone(),
+        index: ranges[2].clone(),
+    })
 }
 
 /// Everything the header block records besides the fingerprint.

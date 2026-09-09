@@ -33,18 +33,15 @@ code, and each deletes image machinery
 
 Then the image milestones:
 
-5. **store** — the file-backed page flag in the pool, then dumper/hydrator
-   for data-only graphs (no closures), the object-index rebuild, and the
-   fingerprint fallback. Proves the format, mapping, relocation, and
-   teardown end to end. The milestone also owes three things the spike left
-   out: the descriptor input form (`(fd, offset)`, with an anonymous memory
-   file for an image that arrives as bytes), the verifier's bounds walk over
-   the tables, and the diagnostics pins that run scrub and guardfree over a
-   hydrated region. The mechanism here is independent of the foundations —
-   pairs, strings, and arrays are already sealed — so a deliberately small
-   spike of this milestone may run in parallel with them to retire the
-   mapping and pool-interplay risk early; it must not grow compensating
-   machinery (remap passes, codecs) that the foundations delete.
+5. **store** — landed. The file-backed page flag in the pool, dumper and
+   hydrator for data-only graphs (no closures), the object-index rebuild,
+   the fingerprint fallback, the `(fd, offset)` input form with an anonymous
+   memory file for an image that arrives as bytes, the verifier's two
+   passes, and the scrub and guardfree pins over a hydrated region. The
+   format, mapping, relocation, and teardown are proven end to end. What it
+   does not carry is the sealed set the foundations opened up: symbols,
+   structs, sets, and syntax are body data now, and the dumper still refuses
+   them.
 6. **boot** — cell snapping, dump-boot, warm cache, embedded blob,
    per-worker hydration for `sys/spawn`, the encoded-LIR side-stream with
    lazy decode, compiler-state persistence, and the parity gate (bytecode
