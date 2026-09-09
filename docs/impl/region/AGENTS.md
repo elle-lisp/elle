@@ -23,7 +23,7 @@ Up: [..](../AGENTS.md)
 - [ownership.md](ownership.md) — **Adoption and subtree drop (the ownership forest)** Adoption links regions into a parent→child tree, so a whole subtree frees as a unit when its root frees.
 - [relocate.md](relocate.md) — **A release past a frame-replacing tail call** Every release the lowerer emits after a `TailCall` is dead on the closure path, and what it costs to move one ahead of that call.
 - [replicate.md](replicate.md) — **The relocation point and its replicas** How a relocation point outlives its own block, so one release covers a merge and every path that leaves the frame before it.
-- [rules.md](rules.md) — **Region rules — the implementor's correctness obligations** This is implementation-facing: the exhaustive correctness contract the compiler and runtime must uphold.
+- [rules.md](rules.md) — **Region rules — the implementor's correctness obligations** The exhaustive correctness contract the compiler and runtime must uphold for regions.
 - [signalexit.md](signalexit.md) — **What a signal exit owes** A native tail call runs its fall-through block on normal completion alone, so a signal exit answers for the releases left in it.
 - [template.md](template.md) — **Code objects — a blueprint, a payload, and a header** A closure template is the code object of one lambda: its bytecode, constant pool, source locations, and the region tables its body needs.
 - [unwind.md](unwind.md) — **An abandoned frame runs the releases it still owes** The two tables naming what an abandoned frame still owed, and the exits that walk them.

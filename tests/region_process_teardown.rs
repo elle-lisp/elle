@@ -1,3 +1,4 @@
+// audited: 2026-09-09
 //! Process-teardown contract (docs/impl/region/rules.md § "Teardown — every
 //! region frees").
 //!
@@ -47,37 +48,48 @@ fn census_with(mut rt: Runtime, src: Option<&str>) {
     report_census(rt.heap(), &report);
 }
 
-fn report_census(heap: &elle::value::fiberheap::FiberHeap, report: &elle::runtime::TeardownReport) {
-    eprintln!("census: {} regions survive teardown", report.live_regions);
-    // For every surviving region, count how many of its rc references are
-    // explained by another live region's contents (in-degree). The remainder
-    // (`rc - in_degree`) is an owner/escape reference that was never released —
-    // those regions are the *roots* of the leak graph; everything else is
-    // their cascade shadow. Group the roots by tag signature. Reads this
-    // instance's own heap (passed explicitly).
+/// The references a surviving region carries that no other survivor's contents
+/// explain: `(id, rc, in_degree)` for every region whose rc exceeds its
+/// in-degree. Each remainder is a claim held outside the region graph, so no
+/// release the region system reaches can ever balance it — the leak roots of
+/// docs/impl/region/rules.md § "Teardown — every region frees". Everything else
+/// in the residue is their cascade shadow.
+fn unexplained_references(
+    heap: &elle::value::fiberheap::FiberHeap,
+    report: &elle::runtime::TeardownReport,
+) -> Vec<(u32, u32, u32)> {
     let mut indegree: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
     for (_, to) in heap.cross_ref_edges() {
         *indegree.entry(to).or_insert(0) += 1;
     }
+    report
+        .regions
+        .iter()
+        .filter_map(|&(id, rc, _objs)| {
+            let ind = indegree.get(&id).copied().unwrap_or(0);
+            (rc > ind).then_some((id, rc, ind))
+        })
+        .collect()
+}
+
+/// One line per surviving region, plus the leak roots grouped by tag signature.
+fn report_census(heap: &elle::value::fiberheap::FiberHeap, report: &elle::runtime::TeardownReport) {
+    eprintln!("census: {} regions survive teardown", report.live_regions);
+    let roots = unexplained_references(heap, report);
+    let shadow = report.regions.len() - roots.len();
     let mut root_classes: std::collections::HashMap<String, (usize, u32)> =
         std::collections::HashMap::new();
-    let mut shadow = 0usize;
-    for &(id, rc, _objs) in &report.regions {
-        let ind = indegree.get(&id).copied().unwrap_or(0);
-        if rc > ind {
-            let mut tags: Vec<String> = heap
-                .region_tags(id)
-                .iter()
-                .map(|t| format!("{t:?}"))
-                .collect();
-            tags.sort();
-            tags.dedup();
-            let e = root_classes.entry(tags.join("+")).or_insert((0, 0));
-            e.0 += 1;
-            e.1 += rc - ind;
-        } else {
-            shadow += 1;
-        }
+    for &(id, rc, ind) in &roots {
+        let mut tags: Vec<String> = heap
+            .region_tags(id)
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect();
+        tags.sort();
+        tags.dedup();
+        let e = root_classes.entry(tags.join("+")).or_insert((0, 0));
+        e.0 += 1;
+        e.1 += rc - ind;
     }
     let mut classes: Vec<_> = root_classes.into_iter().collect();
     classes.sort_by_key(|(_, (n, _))| std::cmp::Reverse(*n));
