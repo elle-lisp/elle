@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-09
 // Where an image's bytes come from: a descriptor and an offset, never a path.
 // docs/impl/image/format.md
 
@@ -105,11 +105,15 @@ fn bytes_hydrate_through_an_anonymous_file() {
     assert!(!plain.exists(), "the test's own precondition went stale");
 }
 
-// § Hydration: on Linux the anonymous file is write-sealed before it is
-// mapped, so the immutability `MAP_PRIVATE` relies on is enforced by the
-// kernel rather than by our own discipline. A write to that descriptor must
-// fail.
-#[cfg(target_os = "linux")]
+// § Hydration: where the kernel mints memory files the anonymous file is
+// write-sealed before it is mapped, so the immutability `MAP_PRIVATE` relies
+// on is enforced by the kernel rather than by our own discipline. A write to
+// that descriptor must fail.
+//
+// The cfg follows the call, not the name: Android's `target_os` is `"android"`
+// and its kernel seals a memfd like any other Linux one, so a `linux`-only gate
+// would skip the platform on the strength of its spelling.
+#[cfg(any(target_os = "linux", target_os = "android"))]
 #[test]
 fn an_anonymous_image_file_refuses_writes() {
     use std::os::fd::AsRawFd;

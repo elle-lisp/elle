@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-09
 //! Where an image's bytes live: a descriptor, and the offset of the image's
 //! first byte inside it.
 //!
@@ -46,9 +46,9 @@ impl ImageSource {
     /// An image that arrived as bytes — over the network, from Redis, from a
     /// channel — in an anonymous memory file that no filesystem names.
     ///
-    /// On Linux the file is write-sealed before it is returned, so the
-    /// immutability `MAP_PRIVATE` relies on is enforced by the kernel rather
-    /// than by the caller's discipline.
+    /// Where the kernel mints memory files, the file is write-sealed before it
+    /// is returned, so the immutability `MAP_PRIVATE` relies on is enforced by
+    /// the kernel rather than by the caller's discipline.
     pub fn from_bytes(bytes: &[u8]) -> Result<ImageSource, ImageError> {
         Ok(ImageSource {
             file: anonymous_file(bytes)?,
@@ -77,7 +77,11 @@ fn last_error() -> ImageError {
 }
 
 /// A file holding `bytes` that no directory entry names.
-#[cfg(target_os = "linux")]
+///
+/// The arm is chosen by the call the platform has, never by the name it goes
+/// under: Rust spells Android's `target_os` as `"android"`, and Android's
+/// kernel mints a memfd exactly as any other Linux one does.
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn anonymous_file(bytes: &[u8]) -> Result<File, ImageError> {
     // `MFD_ALLOW_SEALING` is what makes the seal below possible; a memfd
     // created without it can never be sealed.
@@ -111,7 +115,11 @@ fn anonymous_file(bytes: &[u8]) -> Result<File, ImageError> {
 /// shared-memory object and unlinks it immediately: the name is gone before
 /// the bytes are written, and the descriptor is the only way back to them.
 /// Immutability is this process's discipline there rather than the kernel's.
-#[cfg(not(target_os = "linux"))]
+///
+/// Android takes the memfd arm above and never reaches this one: bionic
+/// declares neither `shm_open` nor `shm_unlink`, so there is no POSIX shared
+/// memory there to fall back to.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn anonymous_file(bytes: &[u8]) -> Result<File, ImageError> {
     use std::sync::atomic::{AtomicU64, Ordering};
 
