@@ -5,9 +5,10 @@
 //! element it starts from, and what it still discharges.
 //!
 //! `subtype(⊥, b)` holds for every `b`, so a Bottom operand would discharge
-//! every contract row that asks a subtype question. One reject per such row,
-//! the `(numeric!)` floor on both sides, and the postcondition that closes the
-//! whole class: the map the pass hands out carries no Bottom.
+//! every contract row that asks a subtype question. One reject per such row, a
+//! guard and a declaration each refining the start and each meeting a fact that
+//! contradicts it, and the postcondition that closes the whole class: the map
+//! the pass hands out carries no Bottom.
 
 use super::{compile_result, inferred_types};
 use crate::hir::types::TypeInterner;
@@ -81,30 +82,51 @@ fn a_call_that_never_returns_proves_nothing_about_its_result() {
     );
 }
 
-/// The declaration floors the Kleene start rather than meeting with it:
-/// `meet(⊥, Number)` is ⊥, and a floor that returns something below itself is
-/// not a floor. The over-rejection guard for the row above — refusing Bottom
-/// must not cost the declaration its proof.
+/// A fact meeting the Kleene start IS the fact. A guard and a `(numeric!)`
+/// declaration are both proofs about a binding that owe nothing to a call site,
+/// and both reach the environment by meeting with what the ascent accumulated —
+/// where `meet(⊥, fact)` is ⊥, which erases them.
+///
+/// The over-rejection guard for the rejections above. While Bottom discharged
+/// every row the erasure cost nothing and nothing found it; refusing Bottom is
+/// what makes these three sites depend on the fact.
 #[test]
-fn a_numeric_declaration_proves_a_parameter_no_call_site_has_reached() {
+fn a_fact_proves_a_parameter_no_call_site_has_reached() {
     compile_result("(defn sq [x] (numeric!) (%mul x x)) 1")
         .expect("the declaration proves the parameter of a function nobody calls");
+    compile_result("(defn g [b] (when (%not (%int? b)) (error :not-int)) (%mul 2 b)) 1")
+        .expect("the diverging guard proves b whether or not this unit calls g");
+    compile_result("(defn g [b] (if (%int? b) (%mul 2 b) 0)) 1")
+        .expect("the if-guard proves b in its then-branch on the same terms");
 }
 
-/// The soundness half of the same rule. `meet(String, Number)` is ⊥ too, and
-/// that Bottom is a caller contradicting the declaration — the opposite fact,
-/// and the one that must not discharge anything.
+/// The soundness half of the same rule, and what keeps the two Bottoms apart. A
+/// Bottom the meet PRODUCES says the accumulated type and the fact are
+/// disjoint, so no value reaches the site the fact governs — the opposite of a
+/// start nothing has contributed to, and not a proof either.
 ///
-/// The counter-factual: this compiled, `%bit-and` ran the integer opcode over
-/// the string "str", and the program printed 0.
+/// The counter-factual: the declared case compiled, `%bit-and` ran the integer
+/// opcode over the string "str", and the program printed 0.
 #[test]
-fn a_caller_that_contradicts_a_numeric_declaration_proves_nothing() {
-    let err = compile_result("(defn sq [x] (numeric!) (%bit-and x 1)) (sq \"str\")")
-        .expect_err("a string argument does not discharge a declared-numeric parameter");
-    assert!(
-        err.contains("%bit-and"),
-        "the error must name the op that could not prove; got: {err}"
-    );
+fn a_fact_that_contradicts_the_accumulated_type_proves_nothing() {
+    for (src, op) in [
+        // meet(String, Number): a caller contradicts the declaration.
+        (
+            "(defn sq [x] (numeric!) (%bit-and x 1)) (sq \"str\")",
+            "%bit-and",
+        ),
+        // meet(String, Int): the guarded branch of a function only ever called
+        // with a string.
+        (
+            "(defn g [b] (if (%int? b) (%bit-and b 1) 0)) (g \"str\")",
+            "%bit-and",
+        ),
+    ] {
+        let Err(err) = compile_result(src) else {
+            panic!("a fact disjoint from the accumulated type proves nothing: {src}");
+        };
+        assert!(err.contains(op), "the error must name {op}; got: {err}");
+    }
     compile_result("(defn sq [x] (numeric!) (%bit-and x 1)) (sq 7)")
         .expect("an int argument refines the declaration and still proves");
 }
