@@ -2,16 +2,33 @@
 
 <!-- audited: 2026-09-09 -->
 
+Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
+
 The builder-idiom seed merges one tight `child → parent` store edge. The same
 collapse-to-one-region mechanism reclaims a shape per-region RC cannot: the
 **immutable reference cycle mutual recursion forms** (`ping`/`pong`). Each member is a
 capture-cell↔closure structure: the forward-reference **cell** holds the closure
-(`StoreCaptureCell`) and a *sibling* closure **captures** the cell, both at the `letrec`,
-never mutated. The cells and closures reference each other around the SCC, so per-region
-RC never reaches zero (rules.md Rule 8) — the cycle leaks. Unlike a *mutable*
+(`StoreCaptureCell`) and a *sibling* closure **captures** the cell, both at the binding
+scope, never mutated. The cells and closures reference each other around the SCC, so
+per-region RC never reaches zero (rules.md Rule 8) — the cycle leaks. Unlike a *mutable*
 `@array` cycle (the deliberate boundary, adopt.md § "Why this is hybrid"), an immutable one
 is reclaimable, and a fiber that builds one per loop iteration would otherwise leak
 unboundedly.
+
+**The binder form does not decide the shape.** A run of local `defn`s in one body
+prebinds the same forward cells a `letrec` does, for the same reason — a sibling
+reads a name before its initializer has run — so the two express one shape and the
+merge reads one predicate for both (`BindingInner::compiled_forward_cell`). This
+document says **binding scope** for the node that prebinds the cells: the `Letrec`,
+or the `Begin` the `defn` run sits in. Its **body** is the `Letrec`'s body, or the
+`Begin`'s last expression — the position whose value the scope yields, and the only
+one of a `Begin`'s expressions a tail call can sit in. Where a claim is about the
+letrec form alone, it says `letrec`.
+
+Reading the `defn` run as a different shape is what left the closure-as-module
+idiom — a constructor that defines a set of mutually recursive helpers over its own
+mutable state and returns a struct of them — leaking its whole cycle on every
+construction, which is the async scheduler's own shape (elle-lisp/elle#1081).
 
 **Self-recursion is not this shape.** A purely self-recursive local fn (`loop` references
 only itself) is **cell-free**: its self-edge does not mark it captured
@@ -138,22 +155,33 @@ its binding is"). Both faces apply: the one where nothing leaves the frame, and 
 one where the capturing member is handed to the caller.
 
 The static-slot cell requirement is met in **every position**, top level and inside a
-lambda body alike: a `letrec` binding that is immutable, never mutated, and
-lambda-initialized — the recursive-closure shape — lowers its forward cell as a
-compiled `MakeCaptureCell` held in the binding's own (stack) slot
-(`BindingInner::letrec_compiled_cell`, the one predicate `lower_letrec` and the
-region walk's Letrec arm both read), so its cell region is a `begin_cell_regions`
-member wherever the letrec sits. A `letrec` binding **outside** that shape — mutated/
+lambda body alike, and by a `defn` run exactly as by a `letrec`: a binding that is
+immutable, never mutated, and lambda-initialized — the recursive-closure shape —
+lowers its forward cell as a compiled `MakeCaptureCell` held in the binding's own
+(stack) slot. `BindingInner::compiled_forward_cell` is the one predicate every site
+reads — `lower_letrec`, `lower_begin`'s slot pre-pass, and the region walk's matching
+arms — so a cell region is never a phantom (a region with no allocation) and never
+missing (an allocation with no region). A binding **outside** that shape — mutated/
 reassigned, or not lambda-initialized — keeps, inside a lambda, the runtime
 `populate_env` env-cell route (no static slot), so it has no `begin_cell_regions`
 cell and refuses the merge; a purely self-recursive binding is cell-free by
 construction and never a member.
 
+**One binding, one cell.** `lower_begin`'s pre-pass descends nested `Begin`s, so an
+inner one reaches a binding the outer one already claimed; it emits nothing the second
+time, because the binding's slot exists. The region walk owes the same reading. A
+second cell region for one cell is a phantom — but the cost lands before that: the
+cells of a cycle are keyed by the scope that minted them, so a split mints the two
+cells of one cycle at two scopes, and a cycle whose cells name two binding scopes is
+one the merge cannot place a drop site for and refuses. The walk therefore skips a
+binding some scope already minted a cell for.
+
 **Drop site — the binding scope.** A cycle whose members stay inside their scope has no
 member whose natural last-use post-dominates the rest (no containing parent pins it,
 unlike the builder idiom), so the merge sets the canonical root region's `decref_point`
-to the cycle's **binding scope**: the single non-lambda `Let`/`Letrec` that prebinds
-every member's capture cell (the `begin_cell_regions` key). This is decided by
+to the cycle's **binding scope**: the single node that prebinds every member's capture
+cell — a `Letrec`, or the `Begin` a `defn` run sits in (the `begin_cell_regions` key).
+This is decided by
 structural ancestry, never a numeric `compute_order` compare (adopt.md § "The lifetime
 obligation the root carries"). The root is the SCC closure of least program order
 (region ids order nothing); any member mints the shared physical region at runtime
@@ -350,6 +378,16 @@ callee's compile-time VALUE rather than its spelling;
 and is never a member; `merge_collapses_self_and_sibling_captured_member_cell` — the mixed
 self+sibling-captured member's retained cell still merges).
 
+The **`defn` run** is pinned as its own family, because the binder form is what the
+reading turns on: `merge_collapses_defn_run_closure_cycle_in_lambda` (the same SCC and
+cells, written as two local `defn`s, collapse onto one `merged_root` and drop at the
+`Begin`) and `merge_collapses_defn_module_factory_cycle` (the closure-as-module shape
+— a struct of the members, bound out of tail position, over a mutable table the members
+capture). Their counterfactual is that both read the drop site at ONE scope: a walk that
+minted a second cell for a binding a nested `Begin` reaches again splits them and the
+merge refuses, which is what
+`region_ownership_reclaims_defn_module_factory_per_call` measures from the other side.
+
 The **frontier gate**'s faces are pinned as one family, so the two halves cannot
 drift into each other. The return half's admission is pinned across all three ways a
 body leaves the frame — `merge_admits_returned_member_cycle_on_member_tail` (a member
@@ -387,8 +425,13 @@ drop's promptness (a discarded top-level cycle freed at its letrec, not held to
 teardown — the case that must NOT pick up a later drop site). The oracle reads
 `recur-local-mutual-ret`, `recur-local-mutual-ret-foreign`,
 `recur-local-mutual-ret-value` and `recur-local-mutual-ret-bound` — the four body
-shapes, all closed at 0 — and `recur-local-mutual-factory` for the struct-literal
-tail that carries both members into a native by-move.
+shapes, all closed at 0 — `recur-local-mutual-factory` for the struct-literal
+tail that carries both members into a native by-move, and
+`recur-local-defn-mutual` and `defn-module-factory` for the `defn` run and the
+closure-as-module factory built from one. The `defn` run's own guardfree fixture
+is `region_defn_cycle_uaf`, which re-enters a member of a returned factory after
+the arena's drop site has passed and drives the factory across churn that
+recycles a freed page.
 `region_ownership_reclaims_self_recursion_closure_cycle` pins the same bounded growth for a
 pure self-recursive closure, which is reclaimed cell-free (ordinary RC / the tail-call
 deferred release — [selfrec.md](../selfrec.md)), not by this merge.

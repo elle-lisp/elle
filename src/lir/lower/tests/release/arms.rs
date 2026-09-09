@@ -93,7 +93,7 @@ fn tail_call_argument_release_stays_the_ownership_move() {
 // cell — `result_region_of` sees through a capture cell — and frees the region of
 // whatever content the cell holds when the release FIRES. For a cell an `assign`
 // repoints, that is a different, live value: the capture-cell reassign UAF
-// (docs/impl/region/bindings.md § "Captured reassigned cells"). The init's
+// (docs/impl/region/cells.md § "Captured reassigned cells"). The init's
 // producer reference is dropped at the define instead
 // (`store_captured_cell_init`), so no such route may be emitted at all.
 //

@@ -166,7 +166,7 @@ struct IterScope {
 /// `post_loop_placement` (`analyze/decref.rs`), and it exists for the same
 /// reason: `populate_env` mints the box once per activation, so a release
 /// anchored at an in-loop use frees it on the first iteration and the next
-/// iteration reads a recycled cell (docs/impl/region/bindings.md § "Env cells in
+/// iteration reads a recycled cell (docs/impl/region/cells.md § "Env cells in
 /// loops: release once per activation, not per iteration").
 ///
 /// The loop must lie INSIDE the arm — a loop enclosing the whole branch is not a

@@ -7,7 +7,7 @@
 //! count on it — so the cell's own lifetime is what keeps the borrow alive, and
 //! the cell owns the content outright (`AdoptCellRegion`), so releasing the cell
 //! reclaims exactly what was borrowed out of it
-//! (docs/impl/region/bindings.md § "A read through an env cell is an uncounted
+//! (docs/impl/region/cells.md § "A read through an env cell is an uncounted
 //! borrow").
 //!
 //! Every shape below reads such a binding and hands the result to a further

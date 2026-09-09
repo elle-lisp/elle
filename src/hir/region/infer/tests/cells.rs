@@ -549,7 +549,7 @@ fn a_cell_release_lands_at_or_after_the_release_routed_through_it() {
     // loads the box raw and `result_region_of` unwraps it to the content. The
     // cell's own `DecrefCellRegion` FREES that page. So the cell's release must
     // be placed at or after every such value release
-    // (docs/impl/region/bindings.md § "A cell's release lands at or after every
+    // (docs/impl/region/cells.md § "A cell's release lands at or after every
     // release routed through that cell").
     //
     // The counter-factual this pins: both regions ride the binding's uses, so

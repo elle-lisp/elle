@@ -126,7 +126,7 @@ fn region_capture_cell_reassign_uaf() {
 // question is unchanged — but classifying the reassign by the ASSIGN SITE's scope
 // calls it fn-local, keeps the cell-slot routing, and frees the value the frame
 // hands back. The classification is a fact about the binding, not the write site
-// (docs/impl/region/bindings.md § "Captured reassigned cells"). Compile-level
+// (docs/impl/region/cells.md § "Captured reassigned cells"). Compile-level
 // twins over more shapes: `lir::lower::tests::release`'s
 // `*_closure_reassign_leaves_no_cell_slot_release`.
 #[test]

@@ -299,7 +299,7 @@ pub struct RegionInfo {
     /// container. The cell's overwrite (`capture_store_with_rebind`) decrefs the
     /// displaced prior unconditionally, so a reader that merely aliases the
     /// cell's value is freed under it by the next overwrite (the captured-alias
-    /// use-after-free; docs/impl/region/bindings.md § "Captured reassigned
+    /// use-after-free; docs/impl/region/cells.md § "Captured reassigned
     /// cells"). The read is treated as Rule 5's "new reference" pass-through: the
     /// lowerer emits an `IncrefValueRegion` here so the reader holds a counted
     /// reference of its own, and the read's placeholder region (minted at this

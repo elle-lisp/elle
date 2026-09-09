@@ -1,7 +1,10 @@
 # Scheduler
 
-The async scheduler is the only supported execution backend. User code
-runs inside it automatically — no setup required.
+<!-- audited: 2026-09-09 -->
+
+The async scheduler is the only supported execution backend, and user code runs inside it automatically.
+
+No setup is required.
 
 ## Architecture
 
@@ -100,11 +103,11 @@ Two invariants govern delivery:
   no chance to recover, so the regions holding the operation's operands —
   the port, the buffer the read reserved — go with it. The backend then
   retires the entry unread and answers with an error built from nothing it
-  held (`src/io/AGENTS.md` § "An operation whose operands are gone has no
-  reader either"). The scheduler drops that error exactly as it would a
-  result. An abort retains those regions instead, because the unwinding it
-  starts can suspend and be resumed (`docs/signals/primitives.md`
-  § "Unwinding that suspends").
+  held — an operation whose operands are gone has no reader either
+  ([the io backend rules](../src/io/AGENTS.md)). The scheduler drops that
+  error exactly as it would a result. An abort retains those regions instead,
+  because the unwinding it starts can suspend and be resumed
+  ([the fiber primitives](signals/primitives.md)).
 - **A finished fiber holds no operation.** Completing a fiber cancels the
   submission it still waits on. Otherwise that submission keeps a worker
   and a descriptor for a fiber that can never read the result, and the
@@ -141,15 +144,31 @@ And the program's own fibers — the thunks `ev/run` hands the loop —
 because their records are what tells the loop the program finished, so
 they last until the loop ends.
 
-`tests/elle/sched-completion-records.lisp` pins the bound through
-`ev/report`'s `:records` / `:marks`; `tests/elle/ev-unjoined-error.lisp` pins
-that retiring the records still leaves an unjoined failure to crash the
-program.
+- **The loop's last act is to forget every fiber.** When `:pump` returns,
+  every fiber the loop knows about is terminal and nothing will resume one,
+  so no record can be read again — including the two kinds above, whose
+  readers are the loop itself. Every record goes: the status records and
+  marks, the join and select waiter lists, the submission pairing, the park
+  queues, and the runnable queue.
 
-The records are not the only per-fiber cost. A spawned fiber still strands a
-few regions of its own after everyone has let go of it — the residue
-`oracle.lisp`'s `spawn-join` probe measures and bounds. That is a region-model
-defect, tracked there; these records are the scheduler's own half of it.
+  Held past that point they are not merely dead weight. Each record holds
+  its fiber, a fiber holds the scheduler struct through the parameter
+  baseline it was created with, and the struct's closures capture the very
+  tables the records live in. That is a reference cycle through mutable
+  edges, and per-region RC cannot break one — so the whole loop, every
+  closure in it, and everything any of them reaches survives to process
+  teardown, on every run of every program (elle-lisp/elle#1081).
+
+  A join that arrives afterward loses nothing: an absent record is
+  re-derived from the fiber's own status, which is the same route every
+  fiber retired at completion already takes.
+
+`tests/elle/sched-completion-records.lisp` pins the bound through
+`ev/report`'s `:records` / `:marks`, and that the pump leaves none of them
+behind; `tests/elle/ev-unjoined-error.lisp` pins that retiring the records
+still leaves an unjoined failure to crash the program.
+`tests/region_process_teardown.rs` pins what the two together are worth: a
+completed run leaves no live region at all.
 
 ---
 

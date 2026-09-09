@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-09-06 -->
+<!-- audited: 2026-09-09 -->
 
 Low-level Intermediate Representation. SSA form with virtual registers
 and basic blocks. Architecture-independent but close to target.
@@ -45,7 +45,6 @@ Does NOT:
 | `YieldPointInfo` | Metadata for a yield point: resume IP and live registers |
 | `CallSiteInfo` | Metadata for a call site: resume IP and live registers (for yield-through-call) |
 | `Lowerer` | HIR → LIR |
-| `ScopeStats` | Compile-time scope allocation statistics |
 | `Emitter` | LIR → (Bytecode, yield_points, call_sites) |
 | `for_each_def` / `for_each_use` / `for_each_terminator_use` | The registers an instruction or terminator writes and reads |
 | `testkit::LirFixture` | Builds a `LirFunction` by hand, for tests (`#[cfg(test)]`) |
@@ -106,7 +105,7 @@ Lowerer (&BindingArena)
     ├─► seed immutable_values for constant bindings (emit ValueConst instead of LoadLocal)
     ├─► allocate slots for bindings (HashMap<Binding, u16>)
     ├─► emit MakeCaptureCell for captured locals (arena.get(b).needs_capture();
-    │   top level, plus compiled-cell letrec bindings in-lambda — invariant 6)
+    │   top level, plus compiled-cell bindings in-lambda — invariant 6)
     ├─► lower control flow to jumps
     ├─► emit LoadCapture/StoreCapture for upvalues
     └─► propagate HIR spans to SpannedInstr
@@ -169,6 +168,8 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 
 4. **`upvalue_bindings` tracks what uses LoadCapture.** Inside fn bodies,
     captures and parameters are upvalues; they use LoadCapture, not LoadLocal.
+    A binding whose forward cell is COMPILED (invariant 6) is not an upvalue:
+    its slot holds the cell, so it reads LoadLocal and unwraps.
 
 5. **`capture_params_mask` is set for mutable parameters.** Bit i set means
      parameter i needs lbox wrapping at call time. With immutable-by-default
@@ -185,8 +186,8 @@ stored in `Closure.location_map` and used by the VM for error reporting.
      is named precisely, so an uncaptured local beyond slot 63 gets a bare-NIL
      env slot, never a dead, leaked cell. (`capture_params_mask` stays a `u64`;
      its path has no `>=64` fallback and functions never approach 64 params.)
-     One captured shape is deliberately NOT mask-set: a `letrec` binding whose
-     forward cell is COMPILED (`BindingInner::letrec_compiled_cell` — immutable,
+     One captured shape is deliberately NOT mask-set: a binding whose
+     forward cell is COMPILED (`BindingInner::compiled_forward_cell` — immutable,
      never mutated, lambda-initialized, in every position including inside a
      lambda). Its `MakeCaptureCell` value lives in a plain stack slot
      (`allocate_slot_routed`), giving the cell a static region slot the
@@ -308,28 +309,20 @@ solver (`src/hir/region/infer.rs`), not a local escape analysis pass.
 
 The solver produces `RegionInfo` containing `alloc_region` (which
 region each allocation site is born into) and, per region,
-`RegionData { free_at: HirId, ... }` — the program point at which the
-compiler emits the region's `DecrefRegion`. Plus `cross_region_refs`
+`RegionData { decref_point: HirId, ... }` — the program point at which
+the compiler emits the region's `DecrefRegion`. Plus `cross_region_refs`
 for the cross-region edges that drive `IncrefRegion` emission.
 
 At lowering time the lowerer reverse-indexes `region_data` to ask
 "which regions demise at this HirId?" and emits one `DecrefRegion(rid)`
 per region in that set after lowering the HIR node. Region demise is
-keyed per-`HirId` by the solver's `free_at` point, not by lexical
-scope.
+keyed per-`HirId` by the solver's `decref_point`, not by lexical scope.
 
-`break` emits compensating `DecrefRegion` instructions for each
-region whose `free_at` lies between the break site and the target
-block. The `BlockLowerContext` records the relevant `free_at` set at
-entry so the break path can fire the same decrefs that a fall-through
-exit would have.
-
-**Compile-time scope stats** (`ScopeStats`): The lowerer counts how many
-scopes were analyzed, how many qualified for scope allocation, and the
-first-failing condition for each rejected scope (captured, suspends,
-unsafe-result, outward-set, break). Access via `lowerer.scope_stats()`
-after `lower()` completes. Pass `--stats` to the elle CLI to print the
-aggregated stats to stderr on program exit (alongside JIT stats).
+`break` emits no region instruction of its own, and neither does
+`Block`. The solver anchors every release the jump passes over on the
+`Block`, which the lowerer emits after the exit label, so it fires on
+the break path and the fall-through path alike
+([anchors.md](../../docs/impl/region/anchors.md)).
 
 ## Emit as terminator
 
