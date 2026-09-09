@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-08
+# audited: 2026-09-09
 # The operand proof, end to end.
 #
 # A %-intrinsic whose operands the front end proved are integers emits the
@@ -8,7 +8,8 @@
 #
 # A proven op's result carries a type of its own, so the proof reaches the next
 # op in the chain — and a float operand denies it there. A call's result carries
-# one too, a recursive call included.
+# one too, a recursive call included. A call to a reassigned binding carries
+# none.
 # docs/impl/lir.md
 # docs/intrinsics.md
 
@@ -146,6 +147,29 @@
   (assert (string/contains? (get (get r 1) :message) "%bit-and")
           (string "the diagnostic must name the refusing op, got "
                   (get (get r 1) :message))))
+
+# ── A reassigned lambda binding proves nothing ───────────────────
+
+# The trap: a binding's initializer and its replacement are two different
+# lambdas, and the pass walks both. A body type recorded from either one
+# describes a lambda the call may not reach, so it is not a proof.
+#
+# The counter-factual: this compiled, %bit-and ran the integer opcode over the
+# string the assign left in f, and the program printed 0 instead of raising.
+(let [r (protect (compile/barrier-module (string "(var f (fn [x] 1)) "
+                 "(assign f (fn [x] \"s\")) " "(%bit-and (f 0) 1)")
+                 "<typed-int-ops>"))]
+  (assert (not (get r 0)) "a written binding's result must not prove an int")
+  (assert (string/contains? (get (get r 1) :message) "%bit-and")
+          (string "the diagnostic must name the refusing op, got "
+                  (get (get r 1) :message))))
+
+# The refusal belongs to the operand proof, not to the assignment: the write
+# itself still runs, and a call reaches whichever lambda the binding holds.
+(var swap-me (fn [x] 1))
+(assert (= (swap-me 0) 1) "the initializer's lambda answers before the write")
+(assign swap-me (fn [x] "s"))
+(assert (= (swap-me 0) "s") "and the assigned lambda answers after it")
 
 # ── A float operand proves nothing to a bitwise op ───────────────
 
