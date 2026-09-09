@@ -6,6 +6,7 @@
 
 use super::*;
 use elle::compiler::stdlib_cache::StdlibCache;
+use elle::primitives::module_init::StdlibSource;
 
 /// The sweep must be *observable* and *idempotent*. The residual live-region
 /// count is the standing oracle: it is the set of regions whose RC never reached
@@ -61,31 +62,50 @@ fn process_teardown_is_observable_and_idempotent() {
 /// state of a cache file.
 #[test]
 fn teardown_leaves_no_unexplained_references() {
-    for src in [
-        "(+ 1 2)",
-        "(def squares (map (fn [x] (* x x)) (list 1 2 3)))",
-    ] {
-        let mut rt = Runtime::with_stdlib_cache(StdlibCache::Off);
-        let value = {
-            let (vm, symbols, cctx) = rt.parts();
-            let result = compile_file(src, symbols, cctx, "<unexplained>").expect("compiles");
-            vm.execute_scheduled(&result.bytecode, cctx).expect("runs")
-        };
-        // The program value reaches the caller with one owning reference; route
-        // it through the process-root registry so the sweep consumes it, or it
-        // reports as an unexplained reference of the caller's own making.
-        elle::value::arena::register_process_root(rt.heap(), value);
-        let report = rt.teardown();
-        let heap = rt.heap();
-        let pinned: Vec<String> = unexplained_references(heap, &report)
-            .iter()
-            .map(|&(id, rc, ind)| {
-                format!(
-                    "region {id} rc={rc} in-edges={ind} tags={:?}",
-                    heap.region_tags(id)
-                )
-            })
-            .collect();
+    for src in PROGRAMS {
+        let pinned = pinned_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), src);
+        assert!(
+            pinned.is_empty(),
+            "{src}: regions pinned from outside the region graph: {pinned:#?}"
+        );
+    }
+}
+
+/// The programs both unexplained-reference gates run. Two, because the second
+/// allocates through the stdlib and the first does not, and the claim is about
+/// the runtime's own residue either way.
+const PROGRAMS: [&str; 2] = [
+    "(+ 1 2)",
+    "(def squares (map (fn [x] (* x x)) (list 1 2 3)))",
+];
+
+/// The same property on the cache-hit boot path.
+/// `teardown_leaves_no_unexplained_references` compiles the stdlib so its
+/// verdict does not move with the state of a cache file, and that is exactly
+/// what stops it seeing this: a hit rebuilds the stdlib's closures, templates
+/// and capture cells through an allocation context of its own, and the Rust
+/// code that keeps them releases nothing.
+///
+/// The counter-factual: the residue count cannot see it either. The reload adds
+/// one region to a residue of over a hundred, indistinguishable from the
+/// reference cycle that explains the rest — while the in-degree reading names it
+/// outright, rc=1 against no in-edge at all.
+#[test]
+fn a_cache_hit_leaves_no_unexplained_references() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cache = StdlibCache::Dir(dir.path().to_path_buf());
+    // The first runtime meets an empty directory, so it compiles and stores.
+    drop(Runtime::with_stdlib_cache(cache.clone()));
+    for src in PROGRAMS {
+        let rt = Runtime::with_stdlib_cache(cache.clone());
+        assert_eq!(
+            rt.stdlib_source(),
+            StdlibSource::Cache,
+            "this runtime must load the stdlib the seeding one stored; a miss \
+             yields a working runtime too, so it would pass the assertion below \
+             without ever exercising the reload"
+        );
+        let pinned = pinned_after_teardown(rt, src);
         assert!(
             pinned.is_empty(),
             "{src}: regions pinned from outside the region graph: {pinned:#?}"
