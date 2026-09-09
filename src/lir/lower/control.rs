@@ -1,6 +1,6 @@
 // audited: 2026-09-08
 //! Control flow lowering: the tail-argument ownership predicates, intrinsic
-//! specialization, `eval`, `emit`, and the call path; `and`/`or` and `match`
+//! specialization, `eval`, `emit`, and the call path. `and`/`or` and `match`
 //! lower in the submodules beside it.
 //!
 //! docs/impl/lir.md

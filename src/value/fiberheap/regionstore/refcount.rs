@@ -1,6 +1,7 @@
 // audited: 2026-09-08
-//! Reference counting: the incref/decref pair, the bookkeeping half of a free,
-//! and the content-edge tables the free cascade walks instead of scanning pages.
+//! Reference counting: the incref/decref pair and the bookkeeping half of a
+//! free. The free cascade walks the content-edge tables kept here, rather than
+//! scanning pages.
 //!
 //! docs/impl/region/ownership.md
 //! docs/impl/region/diagnostics.md
