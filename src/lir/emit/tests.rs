@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-09
 // docs/impl/bytecode.md
 //! What the bytecode emitter writes: control flow, merge depth, yield points,
 //! the coalescing oracle, and a nested lambda's blueprint.
@@ -272,6 +272,9 @@ fn assert_region_matches_passes_on_correct_slot() {
     );
 }
 
+// The interpreter's handler wraps the check in `#[cfg(debug_assertions)]`, so
+// this is the profile the oracle exists in.
+#[cfg(debug_assertions)]
 #[test]
 #[should_panic(expected = "AssertRegionMatches")]
 fn assert_region_matches_panics_on_wrong_slot() {
@@ -279,9 +282,9 @@ fn assert_region_matches_panics_on_wrong_slot() {
     // activation never allocated: it resolves to `None`, contradicting the
     // pair's real region. A coalescer that mapped this return to slot 2 would be
     // mis-coalescing — the oracle must detonate deterministically here, not let
-    // the later cascade free a live region (a UAF). Counterfactual: with the
-    // handler's check absent (release / no-op), this returns normally and the
-    // test fails, so the assertion is what catches the mis-coalesce.
+    // the later cascade free a live region (a UAF). Counter-factual: with the
+    // handler's check reduced to a no-op, this returns normally, so the
+    // assertion is what catches the mis-coalesce.
     let func = oracle_probe_func(1, 2);
     let mut emitter = Emitter::new();
     let (bytecode, _, _) = emitter.emit(&func);

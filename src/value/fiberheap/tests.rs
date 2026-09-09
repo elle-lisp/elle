@@ -1,4 +1,8 @@
-//! Tests for FiberHeap.
+// audited: 2026-09-09
+//! What a `FiberHeap` promises about the physical region ids it hands out, and
+//! what it does with a value whose region is gone.
+//!
+//! docs/impl/region/rules.md
 
 use super::*;
 use crate::hir::region::RuntimeRegion;
@@ -9,10 +13,10 @@ fn rr(n: u32) -> RuntimeRegion {
     RuntimeRegion::new(n).unwrap()
 }
 
-/// Each `FiberHeap` owns an independent trace cell — two coexisting instances in
-/// one process never share a diagnostic toggle (the multi-instance correctness the
-/// trace relocation restores). Setting one heap's cell leaves the other's at zero,
-/// and a heap hands out a *clone* of its one cell, not a fresh one each call.
+/// Each `FiberHeap` owns an independent trace cell, so two coexisting instances
+/// in one process never share a diagnostic toggle. Setting one heap's cell
+/// leaves the other's at zero, and a heap hands out a *clone* of its one cell,
+/// not a fresh one on each call.
 #[test]
 fn heaps_have_independent_trace_cells() {
     use std::sync::atomic::Ordering;
@@ -103,6 +107,10 @@ fn free_region_physical_frees_matching_slots() {
     heap.decref_region_if_present(rr(2));
 }
 
+// The generation check inside `region_of` is debug-only, so a release build
+// hands back the dead region's id instead of panicking. Both tests below go
+// where the check goes.
+#[cfg(debug_assertions)]
 #[test]
 #[should_panic(expected = "stale region")]
 fn region_of_panics_on_stale_value_in_debug() {
@@ -117,6 +125,7 @@ fn region_of_panics_on_stale_value_in_debug() {
     let _ = crate::value::arena::region_of(&heap, v);
 }
 
+#[cfg(debug_assertions)]
 #[test]
 #[should_panic(expected = "stale region")]
 fn pass_through_borrow_detonates_at_region_of() {
@@ -159,14 +168,12 @@ fn pass_through_borrow_detonates_at_region_of() {
 // resize. A corrupt page-header read (the diagnosed cause was a misidentified
 // page base — closed by the `region_of_ptr` ownership-validated walk and the
 // page-header magic — but a stale/foreign read could also reach here) can hand
-// back an id near `u32::MAX`. Without the backstop `ensure_raw` resizes the
-// table to that id (~584 GB) and OOM-aborts far from the bug. With it, the
-// implausible id detonates at the incref, naming the hazard, in every build (the
-// failure observed as `elle test tests/elle/oracle.lisp` aborting with `memory
-// allocation of 584115526960 bytes failed`).
+// back an id near `u32::MAX`. The backstop detonates at the incref, naming the
+// hazard, in every build.
 //
-// Counterfactual: pre-backstop this call resizes `regions` to ~u32::MAX entries
-// (an OOM); post-backstop it panics before any resize.
+// Counter-factual: without it, `ensure_raw` resizes `regions` to ~u32::MAX
+// entries and the process aborts on a 584 GB allocation, far from the read that
+// produced the id. That is what `elle test tests/elle/oracle.lisp` reported.
 #[test]
 #[should_panic(expected = "physically implausible")]
 fn incref_on_implausible_region_id_detonates_not_resizes() {
@@ -188,10 +195,6 @@ fn region_zero_and_one_are_unrepresentable() {
     assert_eq!(RuntimeRegion::new(7).map(|r| r.get()), Some(7));
 }
 
-// Regression: the macro-transformer-cache use-after-free demonstrated by
-// `demos/fib/fib.lisp` — intermittent startup panic
-// `Macro 'error': transformer is not a closure`.
-//
 // A transient region (the per-compilation/per-expansion scratch region built
 // by `pipeline::compile::with_transient` and `expand_macro_call`) must mint its
 // physical region id from the per-heap `new_runtime_region` pool — the single
@@ -201,25 +204,25 @@ fn region_zero_and_one_are_unrepresentable() {
 // index the same `RegionStore`, so a transient's `new_static_region()`
 // value can equal a LIVE runtime region's `new_runtime_region()` id. The
 // transient's `decref_region_if_present` then frees that live region — a
-// use-after-free that violates docs/impl/region/rules.md invariant #1 ("no freeing
-// while RC > 0"). A cached macro transformer closure lives in such a
-// runtime region; when a later macro expansion's transient collides with
-// it, the cached closure's region is freed and recycled, and the next
-// lookup derefs a non-closure.
+// use-after-free that violates docs/impl/region/rules.md invariant #1 ("no
+// freeing while RC > 0"). A cached macro transformer closure lives in such a
+// runtime region; when a later macro expansion's transient collides with it,
+// the cached closure's region is freed and recycled, and the next lookup
+// derefs a non-closure. `demos/fib/fib.lisp` shows it as an intermittent
+// startup panic, `Macro 'error': transformer is not a closure`.
 //
-// Counterfactual: force the EXACT collision. Make a live region whose id
-// equals the value the next `new_static_region()` will return — i.e. the id
-// a pre-fix transient mints. Pre-fix the transient frees this live region
-// (its RC drops to 0); post-fix the transient draws from the per-heap
-// `new_runtime_region` pool and cannot pick this id, so the live region
-// survives. This is the fib UAF in miniature.
+// Counter-factual: the test forces the EXACT collision, by making a live
+// region whose id equals the value the next `new_static_region()` returns. A
+// transient drawing from that global counter mints the same id and takes the
+// live region's count to zero. One drawing from the per-heap pool cannot pick
+// the id at all, so the live region survives.
 #[test]
 fn transient_does_not_free_a_live_region_sharing_its_id() {
     let mut heap = FiberHeap::new();
 
     // `new_static_region()` returns the current global counter then advances,
     // so the *next* call returns `g + 1`. Nothing between here and the
-    // transient calls it, so a pre-fix transient mints exactly `g + 1`.
+    // transient calls it, so a transient drawing from it mints exactly `g + 1`.
     let g = crate::lir::lower::new_static_region();
     let colliding = rr(g.get() + 1);
     heap.alloc_in_region(
@@ -229,7 +232,7 @@ fn transient_does_not_free_a_live_region_sharing_its_id() {
     assert_eq!(heap.region_rc(colliding), 1);
 
     // The transient minted from the per-heap pool, allocated into, then freed —
-    // exactly what `with_transient` / `expand_macro_call` do now (no macro).
+    // exactly what `with_transient` and `expand_macro_call` do, minus the macro.
     {
         let rid = heap.new_runtime_region();
         heap.alloc_in_region(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)), rid);
@@ -277,11 +280,11 @@ fn new_runtime_region_never_reissues_a_live_region() {
     assert_eq!(heap.region_rc(raw), 1);
 }
 
-// Proof of the single-allocator property that makes the collision
-// impossible: a transient must mint its physical id from the per-heap
-// `new_runtime_region` pool, so a freed id is recycled and the next transient
-// reuses it. Advancing the global counter first decouples it from the
-// small per-heap id, making the counterfactual order-independent.
+// The single-allocator property that makes the collision above impossible: a
+// transient mints its physical id from the per-heap `new_runtime_region` pool,
+// so a freed id is recycled and the next transient reuses it. Advancing the
+// global counter first decouples it from the small per-heap id, which makes the
+// counter-factual independent of the order the two happen to run in.
 #[test]
 fn transient_region_id_comes_from_heap_pool_not_global_counter() {
     let mut heap = FiberHeap::new();
@@ -301,8 +304,8 @@ fn transient_region_id_comes_from_heap_pool_not_global_counter() {
         let _ = crate::lir::lower::new_static_region();
     }
 
-    // The transient must reuse the recycled id, proving it draws from the
-    // per-heap physical pool. A pre-fix transient drawing a global
+    // The transient must reuse the recycled id, which is what says it draws
+    // from the per-heap physical pool. A transient drawing a global
     // `new_static_region()` value would never equal the recycled id.
     let tid = heap.new_runtime_region();
     assert_eq!(
@@ -323,15 +326,15 @@ fn transient_region_id_comes_from_heap_pool_not_global_counter() {
 // reference into region A (the source's env backing). The alloc-time scan
 // (`find_object_cross_refs`, Closure arm) MUST incref A — otherwise A is freed
 // at its owning-scope decref while the new closure still reads its env. The
-// observed symptom is the protect+squelch+nested-yield hang: `populate_env`
-// reads a freed page on first fiber resume (b.lisp / signals.lisp), because
+// symptom is the protect+squelch+nested-yield hang: `populate_env` reads a
+// freed page on the first fiber resume (tests/elle/signals.lisp), because
 // `safe = (squelch outer …)` shares `outer`'s env and `outer`'s region is
 // released at rc=1 right after the `def`.
 //
-// Counterfactual: pre-fix the Closure arm only scans the env *Values*, never
-// the env backing, so `region_rc(A)` stays 1 after the closure alloc and the
-// owning decref frees A out from under the live closure. The Fiber arm already
-// does this (Fix 1's "EXPERIMENT"); closures need the same edge.
+// Counter-factual: a Closure arm that scans only the env *Values* and never the
+// env backing leaves `region_rc(A)` at 1 after the closure allocation, so the
+// owning decref frees A out from under the live closure. The Fiber arm records
+// the same edge, for the same reason.
 #[test]
 fn closure_sharing_env_increfs_the_env_backing_region() {
     use crate::value::fiber::SignalBits;
@@ -382,8 +385,9 @@ fn closure_sharing_env_increfs_the_env_backing_region() {
          live closure — the squelch/protect env UAF"
     );
 
-    // The owning-scope decref of A must then leave it alive (the closure in B
-    // still references the env backing). Pre-fix this frees A (rc 1 → 0).
+    // The owning-scope decref of A must then leave it alive, because the
+    // closure in B still reads the env backing. Without the incref above, this
+    // decref takes A from rc 1 to 0 and frees it.
     heap.decref_region(region_a);
     assert!(
         heap.region_rc(region_a) >= 1,

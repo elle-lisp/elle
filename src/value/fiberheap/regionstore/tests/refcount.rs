@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-09
 //! Reference-count tests: what a decref frees, how far a cascade reaches, and
 //! what a release that ran twice reports.
 //!
@@ -34,30 +34,26 @@ fn free_region_tears_down() {
     assert_eq!(store.region_obj_count(rr(4)), 0);
 }
 
+// The guard is a `debug_assert!`, so a release build takes the decref and
+// returns false. Both tests go where the guard goes.
+
+/// A decref of an id nothing ever allocated in is the phantom-region bug: the
+/// solver named a region for a node whose lowering emits no allocation.
+#[cfg(debug_assertions)]
 #[test]
 #[should_panic(expected = "DecrefRegion(99) but region was never alloc_in_region'd")]
 fn decref_of_unallocated_region_panics_in_debug() {
-    // Decref of a region id that was never alloc_in_region'd
-    // is the "phantom region" class of bug — solver assigned a
-    // region id to a node whose lowerer emits no alloc
-    // instruction (DerefCell, MakeCell pre-fix; Eval without
-    // call_result_regions registration). docs/impl/region/rules.md
-    // § "Every region must correspond to a real allocation"
-    // documents the rule; this debug_assert! catches violators
-    // at the runtime boundary.
     let mut store = RegionStore::default();
     store.decref(rr(99)); // never allocated — debug build panics
 }
 
+/// A region freed once must not be decref'd again: the emitter must not produce
+/// two `DecrefRegion(N)` for one N along one path. Saturating arithmetic would
+/// absorb the second silently, which is the shape that hides the emitter bug.
+#[cfg(debug_assertions)]
 #[test]
 #[should_panic(expected = "DecrefRegion(4) but region was never alloc_in_region'd")]
 fn double_decref_panics_in_debug() {
-    // A region freed once must not be decref'd again. The
-    // bytecode emitter must not produce two DecrefRegion(N)
-    // instructions for the same N along the same path. The
-    // saturating-arithmetic tolerance the data structure used
-    // to provide hid bugs that the regions audit was exactly
-    // chasing — replace tolerance with loud failure in debug.
     let mut store = RegionStore::default();
     store.alloc_obj(rr(4), cons_obj());
     store.decref(rr(4)); // rc=1 → 0, region freed, slot becomes None
@@ -326,6 +322,22 @@ fn free_region_decrefs_escaped() {
         store.region_obj_count(rr(2)),
         0,
         "region 2 freed after cascade from r3"
+    );
+}
+
+#[test]
+fn cascade_pair_cross_region() {
+    let mut store = RegionStore::default();
+    let val_in_r2 = store.alloc_obj(rr(2), cons_obj()); // rc(2)=1
+
+    let pair = HeapObject::Pair(Pair::new(val_in_r2, Value::NIL));
+    store.alloc_obj(rr(3), pair); // auto-incref r2 → rc(2)=2
+
+    store.decref(rr(3)); // cascade: rc(2)=1
+    assert_eq!(
+        store.rc(rr(2)),
+        1,
+        "cascade should decref pair's cross-region ref"
     );
 }
 

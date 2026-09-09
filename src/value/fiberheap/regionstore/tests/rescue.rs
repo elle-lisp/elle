@@ -300,6 +300,10 @@ fn extract_owned_region_admits_external_references() {
     );
 }
 
+// `region_of_ptr` runs the generation check under `cfg!(debug_assertions)`, so
+// a release build returns the stale id instead of naming it. The test has to
+// go where the check goes.
+#[cfg(debug_assertions)]
 #[test]
 #[should_panic(expected = "stale region")]
 fn stale_owned_child_deref_panics_after_subtree_drop() {

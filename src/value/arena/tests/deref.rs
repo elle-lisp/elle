@@ -21,6 +21,9 @@ fn deref_accepts_consistent_tag_and_object() {
     assert!(matches!(obj, HeapObject::Pair(_)));
 }
 
+// The check is `#[cfg(debug_assertions)]`, so a release build reads the
+// mismatched value and returns it. The test has to go where the check goes.
+#[cfg(debug_assertions)]
 #[test]
 #[should_panic(expected = "tag/object mismatch")]
 fn deref_panics_on_tag_object_mismatch() {
