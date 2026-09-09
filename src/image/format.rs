@@ -5,7 +5,7 @@
 //!
 //! One header block of `HEADER_BLOCK` bytes zero-padded to `pages_offset()`,
 //! then the pages section, then the metadata sections (page table,
-//! relocations, object index, file slots, and the name and file tables).
+//! relocations and file slots, object index, and the name and file tables).
 //! Pages are stored largest first, so
 //! packing them contiguously keeps every page's offset a multiple of its size —
 //! the self-alignment the masked-header walk requires — and, since the
@@ -83,10 +83,10 @@ pub struct Sections {
     pub page_table: std::ops::Range<usize>,
     /// `(slot, target)` pairs, both region-relative.
     pub relocations: std::ops::Range<usize>,
-    /// `(offset, tag)` pairs, one per heap object.
-    pub index: std::ops::Range<usize>,
     /// `(slot, file index)` pairs, one per span that names a file.
     pub file_slots: std::ops::Range<usize>,
+    /// `(offset, tag)` pairs, one per heap object.
+    pub index: std::ops::Range<usize>,
     /// Length-prefixed spellings, sorted by name.
     pub names: std::ops::Range<usize>,
     /// Length-prefixed source-file names, sorted, indexed by the file stream.
@@ -112,8 +112,8 @@ pub fn sections(bytes: &[u8]) -> Result<Sections, ImageError> {
     let counts = [
         (header.n_pages, PAGE_ENTRY_BYTES),
         (header.n_relocs, RELOC_BYTES),
-        (header.n_objects, INDEX_BYTES),
         (header.n_file_slots, FILE_SLOT_BYTES),
+        (header.n_objects, INDEX_BYTES),
     ];
     let mut at = pages_offset()
         .checked_add(usize::try_from(header.pages_len).unwrap_or(usize::MAX))
@@ -143,8 +143,8 @@ pub fn sections(bytes: &[u8]) -> Result<Sections, ImageError> {
         pages,
         page_table: ranges[0].clone(),
         relocations: ranges[1].clone(),
-        index: ranges[2].clone(),
-        file_slots: ranges[3].clone(),
+        file_slots: ranges[2].clone(),
+        index: ranges[3].clone(),
         names: ranges[4].clone(),
         files: ranges[5].clone(),
     })

@@ -1,5 +1,5 @@
-// audited: 2026-09-08
-// The image store milestone: dump a data-only value graph, hydrate it by
+// audited: 2026-09-09
+// The image store milestone: dump a sealed value graph, hydrate it by
 // private file mapping, and prove the mechanism end to end.
 // docs/impl/image/plan.md
 //

@@ -119,8 +119,8 @@ pub fn hydrate(
     let file_slot_bytes = header.n_file_slots as usize * FILE_SLOT_BYTES;
     let (page_table, rest) = meta.split_at(page_table_bytes);
     let (reloc_table, rest) = rest.split_at(reloc_bytes);
-    let (index_table, rest) = rest.split_at(index_bytes);
     let (file_slot_table, rest) = rest.split_at(file_slot_bytes);
+    let (index_table, rest) = rest.split_at(index_bytes);
     let (name_table, file_table) = rest.split_at(header.names_len as usize);
 
     // Page table: sizes are powers of two ≥ the base page, descending, with
@@ -156,7 +156,7 @@ pub fn hydrate(
         // The accept set is the dumper's emit set, spelled once (layout.rs).
         if !super::layout::dumpable(tag) {
             return Err(ImageError::Corrupt(format!(
-                "{tag:?} in a data-only image (docs/impl/image.md)"
+                "{tag:?} is not sealed data (docs/impl/image.md § Sealing)"
             )));
         }
         if off + obj_size > pages_len {

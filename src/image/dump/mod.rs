@@ -128,14 +128,16 @@ fn dump_into(
     for e in &entries {
         format::write_page_entry(&mut file_bytes, *e);
     }
+    // The file stream sits with the pointer stream, because both are
+    // relocations: one rewrites an address, the other an interned id.
     for &(s, t) in &emitted.relocs {
         format::write_u64_pair(&mut file_bytes, s, t);
     }
-    for &(o, t) in &emitted.index {
-        format::write_u64_pair(&mut file_bytes, o, t);
-    }
     for &(s, i) in &file_slots {
         format::write_u64_pair(&mut file_bytes, s, i);
+    }
+    for &(o, t) in &emitted.index {
+        format::write_u64_pair(&mut file_bytes, o, t);
     }
     file_bytes.extend_from_slice(&name_table);
     file_bytes.extend_from_slice(&file_table);
