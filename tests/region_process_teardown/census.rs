@@ -1,3 +1,9 @@
+// audited: 2026-09-09
+// What one run leaves behind: the gates on the post-teardown residue, and the
+// per-shape censuses that name the classes it is made of.
+// docs/impl/region/rules.md
+// docs/impl/region/diagnostics.md
+
 use super::*;
 
 /// The sweep must be *observable* and *idempotent*. The residual live-region
@@ -34,6 +40,53 @@ fn process_teardown_is_observable_and_idempotent() {
         report.live_regions,
         again.live_regions
     );
+}
+
+/// Teardown leaves no reference the region graph cannot explain
+/// (docs/impl/region/rules.md § "Teardown — every region frees"). Every
+/// reference a surviving region carries comes from another survivor's contents;
+/// a remainder is a claim held outside the graph, and no release the region
+/// system reaches can ever balance it.
+///
+/// The counter-factual: the residue count alone cannot see this. A reference
+/// cycle keeps its members alive with every reference explained, so the count
+/// stays positive for a reason the graph shows, and an unbalanced Rust-side
+/// claim sits inside that number indistinguishable from the cycle's shadow.
+///
+/// The run goes through `execute_scheduled`, the path every entry point takes,
+/// so the scheduler wrapper's own allocations are inside the measurement.
+#[test]
+fn teardown_leaves_no_unexplained_references() {
+    for src in [
+        "(+ 1 2)",
+        "(def squares (map (fn [x] (* x x)) (list 1 2 3)))",
+    ] {
+        let mut rt = Runtime::new();
+        let value = {
+            let (vm, symbols, cctx) = rt.parts();
+            let result = compile_file(src, symbols, cctx, "<unexplained>").expect("compiles");
+            vm.execute_scheduled(&result.bytecode, cctx).expect("runs")
+        };
+        // The program value reaches the caller with one owning reference; route
+        // it through the process-root registry so the sweep consumes it, or it
+        // reports as an unexplained reference of the caller's own making.
+        elle::value::arena::register_process_root(rt.heap(), value);
+        let report = rt.teardown();
+        let heap = rt.heap();
+        let pinned: Vec<String> = unexplained_references(heap, &report)
+            .iter()
+            .map(|&(id, rc, ind)| {
+                format!(
+                    "region {id} rc={rc} in-edges={ind} tags={:?}",
+                    heap.region_tags(id)
+                )
+            })
+            .collect();
+        assert!(
+            pinned.is_empty(),
+            "{src}: regions pinned from outside the region graph: {pinned:#?}"
+        );
+    }
 }
 
 /// Diagnostic, not a gate: dump the post-teardown residue (id, rc, objs, tags)
