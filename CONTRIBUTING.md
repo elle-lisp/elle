@@ -1,6 +1,6 @@
 # Contributing to Elle
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-09 -->
 
 How to work on Elle: the test policy that keeps main green, the order of work,
 and what a change has to carry before we can take it.
@@ -95,10 +95,10 @@ tests and zero assertions, the session was wasted.
 | Command | Runtime | What it does |
 |---------|---------|-------------|
 | `cargo test -p elle --lib` | ~1.5min | Rust unit tests — the fast inner loop |
-| `make qa` | ~2min | The PR gate's QA job, locally: rustfmt, workspace clippy, macOS cross-check, rustdoc. Run before every push |
+| `make qa` | ~2min | The PR gate's QA job, locally: rustfmt, workspace clippy, the cross-checks, rustdoc. Run before every push |
 | `make smoke` | ~30min release | Elle corpus (VM, JIT) + doctests + embedding |
 | `make test` | smoke + ~5min | smoke + qa + unit + integration tests |
-| `make crosscheck` | ~1min | Clippy over the macOS `cfg(target_os)` arms a Linux build never compiles |
+| `make crosscheck` | ~2min | Clippy over the macOS and Android `cfg(target_os)` arms a Linux build never compiles |
 
 Pass the release binary to anything that runs the corpus — the debug default
 takes hours rather than ~30 minutes:

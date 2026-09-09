@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-09 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -251,6 +251,7 @@ cargo test --workspace
 | **Formatting** | `fmt` job fails | Unformatted Rust code. | Run `cargo fmt`. |
 | **Rustdoc** | `docs` job fails on `cargo doc` step | Broken intra-doc links or malformed doc comments. CI documents private items, so a link into a `pub(crate)` item counts. A `#[cfg(test)]` item is absent from a doc build — gate it `#[cfg(any(test, doc))]` if the docs link to it. | Run `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items` locally. |
 | **macOS cross-check** | `qa` job fails on `Cross-check macOS`, or `macOS Smoke` fails on `Run clippy` | A binding or method used only by the io_uring backend reads as dead code on the thread-pool platform. The Linux clippy gate compiles only the `cfg(target_os = "linux")` arms and cannot see it. | Run `make crosscheck` locally. Gate the binding with `#[cfg(target_os = "linux")]`, or narrow the allow with `#[cfg_attr(not(target_os = "linux"), allow(dead_code))]`. |
+| **Android cross-check** | `android` job fails on `Cross-check Android` | A `not(target_os = "linux")` arm that assumed the other side was a desktop unix. Android is neither: `target_os` is `"android"`, so it takes the else-arm, and its libc is missing what a BSD or macOS arm reaches for. | Run `make crosscheck` locally — it covers both cross-targets. Split the arm by the call the platform has (`any(target_os = "linux", target_os = "android")`), not by the name. |
 
 
 ---
