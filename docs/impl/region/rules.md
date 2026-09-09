@@ -1,7 +1,11 @@
 # Region rules — the implementor's correctness obligations
 
-This is implementation-facing: the exhaustive correctness contract the
-compiler and runtime must uphold. Read it before touching the region code. The RC-instruction mechanism these
+<!-- audited: 2026-09-09 -->
+
+The exhaustive correctness contract the compiler and runtime must uphold for
+regions.
+
+Read this file before you touch the region code. The RC-instruction mechanism these
 rules constrain — value/slot resolution, coalescing, self-edge elimination, and
 the equivalence oracle — is in [mechanism.md](mechanism.md).
 For the consumer-facing model — how to write Elle that is sympathetic to the
@@ -91,7 +95,7 @@ is a correctness defect, not a tuning knob.
    When the target block is the function's **tail**, that anchor is the last
    point before the frame is handed back, so the broken value is also the
    *returned* value and takes the return mint — including through an enclosing
-   `Loop`/`While`, which a `break` jumps past (mechanism.md § "A break out of a
+   `Loop`/`While`, which a `break` jumps past ([mechanism.md](mechanism.md) § "A break out of a
    TAIL block carries the return mint"). The jump moves the anchor of every
    *other* region in the same window too: a release the break passes over is
    emitted into unreachable code, so a `decref_point` at or after a break site
@@ -99,7 +103,7 @@ is a correctness defect, not a tuning knob.
    nested loop or lambda, where the release must keep running once per iteration
    / once per activation, and except where a frame-replacing exit in the body
    means the block's own exit label is not a point every path reaches
-   (mechanism.md § "A release the break jumps over is not a release").
+   ([mechanism.md](mechanism.md) § "A release the break jumps over is not a release").
    A third class is a *borrowing node*: an **uncounted** container element read —
    the `%get`/`%first`/`%rest` opcodes — hands back a value that still lives
    **inside the container** (its own region for a pair's car, an interior member's
@@ -112,12 +116,12 @@ is a correctness defect, not a tuning knob.
    not this class: its dispatch takes the Rule 5 pass-through retain, so the reader
    holds its own reference and the container is free to die — what that retain
    cannot survive is adoption freezing the element's RC, which the ownership cut
-   handles at admission (adopt.md § "The lifetime obligation the root carries"). A
+   handles at admission ([adopt.md](adopt.md) § "The lifetime obligation the root carries"). A
    *remove* is neither: `%pop` extracts the element out of the container (and out of
    its Owned subtree, `extract_owned_region`), so the container keeps its own last
    use. A `Match` arm's pattern binding is a borrowing read of the **scrutinee**, so
    where its release lands is decided by the loop-containment test every binder's
-   scope node feeds (mechanism.md § "Every binder records its scope").
+   scope node feeds ([mechanism.md](mechanism.md) § "Every binder records its scope").
    It is *per
    activation*: each activation remaps its static region slots to fresh physical
    regions, so the same static `DecrefRegion` frees a different physical region
@@ -137,7 +141,7 @@ is a correctness defect, not a tuning knob.
    before the release
    that subtree-drops its **owner**. A member's own `DecrefRegion` is a no-op only
    while the member is still `Owned`; once the owner's drop has reclaimed it that
-   decref faults, so the member must come first (adopt.md § "The lifetime
+   decref faults, so the member must come first ([adopt.md](adopt.md) § "The lifetime
    obligation the root carries"). The same holds for a value that may BE, or live
    inside, another — a borrowing read's result, an opaque call's result, a funnel's
    pass-through result: each is released `DecrefValueRegion`-style, which resolves
@@ -196,7 +200,8 @@ is a correctness defect, not a tuning knob.
      owned-param callee (the caller's dead post-`TailCall` release *is* the
      transfer), so an arg the frame does NOT own is handed one fresh owning
      reference, consumed by the callee's owned-param release. The transfer is
-     what makes that block's deadness load-bearing for **arguments only**: a
+     what lets that block's deadness carry weight, and it does so for
+     **arguments only**: a
      release landing there for anything the call does not name has no such
      story and is carried back ahead of the `TailCall`
      ([mechanism.md](mechanism.md) § "A release past a frame-replacing tail
@@ -324,7 +329,7 @@ process-resident roots in the process-root registry; `Runtime`'s `Drop` (or an
 explicit `Runtime::teardown`) runs the sweep. One teardown routine, so the paths
 cannot drift.
 
-Two non-negotiable properties:
+Three non-negotiable properties:
 
 1. **RC-driven, never iterate-and-free.** The sweep releases the *roots* —
    decrefs each registered process-root region exactly once — and lets the
@@ -340,6 +345,19 @@ Two non-negotiable properties:
    number *is* the remaining work, not a tuning knob. `tests/elle/oracle.lisp`
    measures the same property as a per-op leak rate while a program runs;
    `tests/region_process_teardown` counts what survives the process.
+
+3. **No unexplained references.** A surviving region's RC is explained by the
+   in-edges other survivors point at it, and by nothing else. The remainder —
+   RC minus that in-degree, the quantity the macro scope balances below — is a
+   claim held outside the region graph, so no release the region system can
+   reach ever frees it. Zero regions carrying one is the claim, and
+   `tests/region_process_teardown` gates it.
+
+   The residue count and this one measure different defects. A reference cycle
+   keeps its members alive with every reference explained, so the residue stays
+   positive while this count is zero. An unexplained reference pins its region
+   and everything that region reaches, whatever the rest of the graph does, and
+   it survives every fix to the graph.
 
 Because the sweep is RC-driven, the residue equals the set of regions whose RC
 never reached zero — the true leaks — rather than being hidden by a blanket free.
