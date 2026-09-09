@@ -297,7 +297,13 @@ it. The split is by the call the platform has, not by the name it goes under:
 Android is Linux to `memfd_create` and has no POSIX shared memory at all, so a
 `target_os = "linux"` test decides the wrong way there. Where a memfd is what
 was minted, it is write-sealed (`F_SEAL_WRITE | F_SEAL_SHRINK`) before
-mapping, so the immutability the mapping relies on is kernel-enforced. The
+mapping, so the immutability the mapping relies on is kernel-enforced.
+
+The two are filled differently, because only one of them is a file. A memfd
+takes the bytes through `pwrite`. A Darwin shared-memory object answers `mmap`,
+`ftruncate` and `fstat` and refuses the rest — a `pwrite` to one fails with
+`ESPIPE` — so its bytes go in through a writable shared mapping that is dropped
+before the descriptor is handed on. The
 offset must sit on a base-page boundary of the descriptor, and a misaligned
 one is refused before anything is mapped ([format.md](image/format.md) owns
 that rule).
