@@ -49,12 +49,37 @@ fn a_written_lambda_binding_proves_nothing_about_its_result() {
 /// string row above.
 #[test]
 fn a_write_that_keeps_the_type_still_stops_the_proof() {
-    let src = "(defn top [] (var g (fn [x] 1)) (assign g (fn [x] 2)) \
-               (%bit-and (g 1) 1)) (top)";
+    let src = "(var f (fn [x] 1)) (assign f (fn [x] 2)) (%bit-and (f 0) 1)";
     let err = compile_result(src).expect_err("a written binding proves no result, int or not");
     assert!(
         err.contains("%bit-and"),
         "the error must name the op that could not prove; got: {err}"
+    );
+}
+
+/// The other over-rejection guard, and the reason the rule is stated over the
+/// binding a call NAMES. Functionalization SSA-renames a straight-line write to
+/// a function-local binding, so each version carries one initializer and the
+/// call reads the version the write made — a proof about one lambda, not a
+/// guess between two.
+///
+/// The trap: both spellings read `(assign g …)` in the source, and only the
+/// cell-held one is a binding this rule can say anything about.
+#[test]
+fn a_renamed_function_local_write_keeps_its_proof() {
+    compile_result(
+        "(defn top [] (var g (fn [x] 1)) (assign g (fn [x] 2)) \
+                    (%bit-and (g 1) 1)) (top)",
+    )
+    .expect("the call names the version the write made, whose one body is an int");
+    let err = compile_result(
+        "(defn top [] (var g (fn [x] 1)) (assign g (fn [x] \"s\")) \
+         (%bit-and (g 1) 1)) (top)",
+    )
+    .expect_err("and that version's body decides the answer when it is a string");
+    assert!(
+        err.contains("string"),
+        "the error must report the body the call reaches; got: {err}"
     );
 }
 
