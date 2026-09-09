@@ -154,13 +154,42 @@ parameter, and `meet(String, Int)` is ⊥ inside the `(%int? x)` branch of a
 function only ever called with a string. Both are left alone, so those sites
 reject rather than compute.
 
+## A written binding's result is Top
+
+A binding whose initializer is a lambda records that lambda's body type, and
+every call to the binding reads it as a proof. An `assign` puts a different
+lambda in the binding, and no pass can say which one a given call reaches: the
+write can sit inside a function an earlier call runs.
+
+So the binder records **Top** for a binding this unit writes anywhere, whatever
+its initializer computes. The rule is asked once, where the body type is
+recorded, so no route to the write defeats it. Functionalization rewrites a
+write to a mutated binding into `MakeCell`/`SetCell`, whose arm records no body
+type at all; the `Assign` arm records one for a binding that rewrite left alone.
+
+Recording Top is what the join needs, and recording nothing is not enough. An
+absent entry reads as Bottom, and a Bottom no later pass raises joins away at
+the first branch it meets — `(if c (f 0) 1)` joins it with Int and hands the
+site an Int proof. `settle` never sees it, because the join has already
+replaced it (§ "Bottom is not a proof").
+
+```lisp
+(var f (fn [x] 1))
+(assign f (fn [x] "s"))
+(%bit-and (f 0) 1)
+```
+
+That is a compile error at both call sites, the one before the write included.
+The pass has no flow, so it cannot order the write against a call.
+
 ## What still does not prove
 
 - **A mutated binding.** An `assign` gives a binding flow that a per-pass
   recomputation cannot see, so a mutated parameter never receives call-site
   proofs and keeps whatever a guard proves of it. The loop-accumulator spelling
   of a numeric kernel is unproven for this reason, where the recursive spelling
-  of the same kernel proves.
+  of the same kernel proves. A mutated lambda binding's result answers the same
+  way, and for the same reason (§ "A written binding's result is Top").
 - **A binding used as a value.** One use outside callee position — stored,
   passed to a higher-order function, returned, exported — means callers this
   unit cannot enumerate, so the call-site join over the visible ones proves
@@ -187,6 +216,11 @@ reject rather than compute.
   declaration each refining the Kleene start and each meeting a fact that
   contradicts it, and the postcondition that the map the pass hands out carries
   no Bottom.
+- `hir::typeinfer::tests::mutation::*` — a written lambda binding proves nothing
+  about its result: the write after the call and the write before it, the write
+  reached from inside another function, the branch a Bottom would have joined
+  away, and the unwritten control that still proves.
 - `tests/elle/typed-int-ops.lisp` — the corpus peer, on every tier: a
-  self-recursive integer `fib` emits `AddInt` and computes with it, and a float
-  base case is refused at compile time.
+  self-recursive integer `fib` emits `AddInt` and computes with it, a float
+  base case is refused at compile time, and a reassigned local lambda binding
+  is refused where its unreassigned twin emits `AddInt`.
