@@ -85,7 +85,7 @@ impl<'a> Lowerer<'a> {
                 else_branch,
             } => self.lower_if(cond, then_branch, else_branch),
 
-            HirKind::Begin(exprs) => self.lower_begin(exprs),
+            HirKind::Begin(exprs) => self.lower_begin(hir.id, exprs),
             HirKind::Block { block_id, body, .. } => self.lower_block(block_id, body),
             HirKind::Break { block_id, value } => self.lower_break(block_id, value),
 

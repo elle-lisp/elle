@@ -16,10 +16,14 @@ impl<'a> Lowerer<'a> {
     /// Only scans through Let/Begin/Loop/Block — these are structural
     /// wrappers. Does NOT scan into If/Match/Cond because different
     /// branches may define bindings with overlapping slot allocation.
-    fn collect_preallocate_bindings(hir: &Hir, out: &mut Vec<Binding>) {
+    fn collect_preallocate_bindings(hir: &Hir, out: &mut Vec<(Binding, bool)>) {
         match &hir.kind {
-            HirKind::Define { binding, .. } => out.push(*binding),
-            HirKind::Destructure { pattern, .. } => out.extend(pattern.bindings().bindings),
+            HirKind::Define { binding, value } => {
+                out.push((*binding, matches!(value.kind, HirKind::Lambda { .. })))
+            }
+            HirKind::Destructure { pattern, .. } => {
+                out.extend(pattern.bindings().bindings.iter().map(|&b| (b, false)))
+            }
             HirKind::Lambda { .. } => {}
             HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
                 for (_, init) in bindings {
@@ -47,7 +51,7 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    pub(super) fn lower_begin(&mut self, exprs: &[Hir]) -> Result<Reg, String> {
+    pub(super) fn lower_begin(&mut self, hir_id: HirId, exprs: &[Hir]) -> Result<Reg, String> {
         // Pre-allocate slots for all local Define and Destructure bindings
         // reachable from this Begin (including inside Let/Loop/If bodies
         // but NOT inside Lambdas). This enables mutual recursion where
@@ -56,11 +60,28 @@ impl<'a> Lowerer<'a> {
         for expr in exprs {
             Self::collect_preallocate_bindings(expr, &mut bindings_to_preallocate);
         }
-        for &binding in &bindings_to_preallocate {
+        for &(binding, init_is_lambda) in &bindings_to_preallocate {
             // Allocate slot now so captures can find it
             if !self.binding_to_slot.contains_key(&binding) {
+                // A COMPILED forward cell lives in the binding's own stack slot:
+                // every captured binding at top level, and inside a lambda the
+                // recursive-closure shape — immutable, never mutated,
+                // lambda-initialized. That is the shape a run of local `defn`s
+                // takes, and it is what gives the closure-cycle merge a
+                // static-slot cell to collapse with its SCC
+                // (docs/impl/region/letrec.md). Every other captured binding
+                // keeps the `populate_env` env-cell route, where the VM builds
+                // the cell as it builds the closure environment.
+                if self
+                    .arena
+                    .get(binding)
+                    .compiled_forward_cell(init_is_lambda, self.in_lambda)
+                {
+                    self.allocate_compiled_cell_slot(binding)?;
+                    continue;
+                }
                 let needs_capture = self.arena.get(binding).needs_capture();
-                let slot = self.allocate_slot(binding);
+                self.allocate_slot(binding);
 
                 // Inside lambdas, only LBox locals live in the closure
                 // environment (LoadCapture/StoreCapture). Non-LBox locals
@@ -68,38 +89,27 @@ impl<'a> Lowerer<'a> {
                 if self.in_lambda && needs_capture {
                     self.upvalue_bindings.insert(binding);
                 }
-
-                // Only create cells for top-level locals (outside lambdas)
-                // Inside lambdas, the VM creates cells for locally-defined variables
-                // when building the closure environment
-                if needs_capture && !self.in_lambda {
-                    // Create a cell containing nil
-                    // This cell will be captured by nested lambdas
-                    // and updated when the Define is lowered.
-                    // One region PER cell (`begin_cell_regions`): emitting all
-                    // cells against this Begin's single slot orphans all but
-                    // the last minted physical region — the shared-slot
-                    // capture-cell leak (docs/impl/region/model.md, "one allocation
-                    // execution per slot between drops").
-                    let region = self.cell_region_for(binding);
-                    let nil_reg = self.emit_const(LirConst::Nil)?;
-                    let cell_reg = self.fresh_reg();
-                    self.emit_alloc_in(region, |region| LirInstr::MakeCaptureCell {
-                        region,
-                        dst: cell_reg,
-                        value: nil_reg,
-                    });
-                    self.emit(LirInstr::StoreLocal {
-                        slot,
-                        src: cell_reg,
-                    });
-                }
             }
         }
         // Now lower all expressions (slots are available for capture lookup)
         // Pop intermediate results to keep the stack clean
         if exprs.is_empty() {
             return self.emit_const(LirConst::Nil);
+        }
+
+        // A `Begin` that prebound forward cells is a mutual-recursion cycle's
+        // BINDING SCOPE, so the releases it emits after its last expression are
+        // stranded by a frame-replacing tail call there exactly as a `Letrec`'s
+        // are — `(dv n)` closing a run of local `defn`s is the everyday case, and
+        // the merged arena's drop is what it takes out. Marked here, before the
+        // body is lowered, so the tail call itself sees it. A `Begin` that
+        // prebound nothing is no scope: it emits no scope-end release for a tail
+        // call to strand, and marking one there would defer a release that also
+        // fires live.
+        if self.region_info.begin_cell_regions.contains_key(&hir_id) {
+            if let Some(last) = exprs.last() {
+                self.mark_body_tail_strands(hir_id, last);
+            }
         }
 
         let mut last_reg = self.lower_expr(&exprs[0])?;

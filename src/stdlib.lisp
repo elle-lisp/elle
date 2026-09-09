@@ -2138,6 +2138,50 @@
         (process-completions timeout-ms)
         :pending))
 
+    (defn forget-fibers []
+      "Drop every record the loop keeps of a fiber.
+
+       A record answers a question only a running loop asks: who waits on
+       whom, which submission belongs to which fiber, which fiber has
+       finished. `:pump` returning is the point past which no such question
+       can be asked, because every fiber the loop knows about is terminal
+       and nothing will resume one.
+
+       Held past it, each record keeps its fiber alive, and a fiber keeps
+       this scheduler alive in turn — the parameter baseline it was created
+       with holds the scheduler struct, whose closures capture these very
+       tables. That is a reference cycle through mutable edges, which
+       per-region RC cannot break, so the whole loop and every closure in it
+       survives to process teardown. See docs/scheduler.md § Completion
+       records.
+
+       A join that arrives later loses nothing: `get-completion` re-derives
+       the status from the fiber's own, which is what `retire-fiber` already
+       relies on for every fiber it drops at completion."
+      (each [id _] in (pairs pending)
+        (del pending id))
+      (each [f _] in (pairs fiber-io)
+        (del fiber-io f))
+      (each [f _] in (pairs fiber-park)
+        (del fiber-park f))
+      (each [f _] in (pairs waiters)
+        (del waiters f))
+      (each [f _] in (pairs select-sets)
+        (del select-sets f))
+      (each [f _] in (pairs completed)
+        (del completed f))
+      (each [k _] in (pairs park-queues)
+        (del park-queues k))
+      (each [id _] in (pairs forwarded-pending)
+        (del forwarded-pending id))
+      (each f in (->array joined)
+        (del joined f))
+      (each f in (->array entry-fibers)
+        (del entry-fibers f))
+      (each f in (->array scheduler-killed)
+        (del scheduler-killed f))
+      (while (> (length runnable) 0) (pop runnable)))
+
     (defn report []
       "What the loop is waiting for right now, and what it still
        remembers. The loop blocks when `runnable` is empty and the rest
@@ -2204,10 +2248,19 @@
        # fiber/propagate, not (error (fiber/value fiber)): re-raising the
        # fiber's own signal carries the location of the form that raised it,
        # which a fresh raise of the payload would replace with this line.
-       (each [fiber status] in (pairs completed)
-         (when (and (= status :error) (not (contains? joined fiber))
-                    (not (contains? scheduler-killed fiber)))
-           (fiber/propagate fiber))))
+       #
+       # The fiber to raise is chosen BEFORE the records are dropped, and
+       # raised after: `fiber/propagate` leaves through the signal machinery,
+       # so a `forget-fibers` sitting behind it would be skipped on exactly
+       # the runs a caller catches the error and keeps going.
+       (let [@unjoined nil]
+         (each [fiber status] in (pairs completed)
+           (when (and (nil? unjoined) (= status :error)
+                      (not (contains? joined fiber))
+                      (not (contains? scheduler-killed fiber)))
+             (assign unjoined fiber)))
+         (forget-fibers)
+         (when (not (nil? unjoined)) (fiber/propagate unjoined))))
      :shutdown  # shutdown-fn: signal shutdown
       (fn (timeout-ms) (put shutdown-req 0 timeout-ms))
      :mark-joined  # mark one of the program's own fibers: observed (suppress the

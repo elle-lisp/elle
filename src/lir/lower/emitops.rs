@@ -43,10 +43,10 @@ impl<'a> Lowerer<'a> {
     /// `allocate_slot` with the env-vs-stack routing decided by the caller.
     /// `env_celled` routes an in-lambda binding to the env address space (a
     /// `capture_locals_mask` bit + an env-relative slot, backed by the
-    /// `populate_env` cell); `false` gives a plain stack slot. `lower_letrec`
-    /// passes `false` for a compiled-cell letrec binding
-    /// (`BindingInner::letrec_compiled_cell`): its slot holds the
-    /// `MakeCaptureCell` VALUE, so the env must not mint a shadow cell for it.
+    /// `populate_env` cell); `false` gives a plain stack slot.
+    /// [`allocate_compiled_cell_slot`](Self::allocate_compiled_cell_slot) passes
+    /// `false`: such a slot holds the `MakeCaptureCell` VALUE, so the env must
+    /// not mint a shadow cell for it.
     pub(super) fn allocate_slot_routed(&mut self, binding: Binding, env_celled: bool) -> u16 {
         // Inside a lambda, two address spaces coexist:
         //   - Env (captures + params + LBox locals): LoadCapture/StoreCapture
@@ -100,6 +100,39 @@ impl<'a> Lowerer<'a> {
             }
         }
         slot
+    }
+
+    /// Allocate `binding`'s slot and fill it with a nil-valued COMPILED
+    /// `MakeCaptureCell` — the forward cell a sibling closure captures before
+    /// the binding's initializer has run.
+    ///
+    /// The slot is a plain stack local in every position, because it holds the
+    /// cell itself: an env-routed slot would have `populate_env` mint a second,
+    /// shadow cell over it. Recording the binding is what lets `value_slot_for`
+    /// name the same address space the allocation used.
+    ///
+    /// The one site that mints such a cell, so the mint and the recording cannot
+    /// come apart. Both binder forms of a mutual-recursion cycle call it —
+    /// `lower_letrec`'s pre-pass and `lower_begin`'s — which is the lowering half
+    /// of one predicate answering for both (`BindingInner::compiled_forward_cell`).
+    /// The solver pairs the same two writes in `record_compiled_cell`.
+    pub(super) fn allocate_compiled_cell_slot(&mut self, binding: Binding) -> Result<u16, String> {
+        let slot = self.allocate_slot_routed(binding, false);
+        self.compiled_cell_bindings.insert(binding);
+        // One region PER cell (`begin_cell_regions`): emitting every cell of a
+        // scope against one region slot orphans all but the last minted physical
+        // region — the shared-slot capture-cell leak (docs/impl/region/model.md,
+        // "one allocation execution per slot between drops").
+        let region = self.cell_region_for(binding);
+        let nil_reg = self.emit_const(LirConst::Nil)?;
+        let cell_reg = self.fresh_reg();
+        self.emit_alloc_in(region, |region| LirInstr::MakeCaptureCell {
+            region,
+            dst: cell_reg,
+            value: nil_reg,
+        });
+        self.emit_binding_store(slot, cell_reg);
+        Ok(slot)
     }
 
     /// Extract a compile-time constant value from an HIR node.
@@ -156,11 +189,11 @@ impl<'a> Lowerer<'a> {
     }
 
     /// `emit_alloc` with an explicitly named solver region instead of the
-    /// current HIR node's `alloc_region` entry — for the one site that emits
-    /// SEVERAL allocations at one HirId (`lower_begin`'s capture-cell
-    /// pre-pass; one region per cell via `begin_cell_regions`, since N
-    /// allocations against one slot orphan all but the last minted physical
-    /// region — docs/impl/region/model.md, "one allocation execution per slot between
+    /// current HIR node's `alloc_region` entry — for the sites that emit SEVERAL
+    /// allocations at one HirId: one capture cell per binding of a scope, keyed
+    /// by binding in `begin_cell_regions`, since N allocations against one slot
+    /// orphan all but the last minted physical region
+    /// (docs/impl/region/model.md, "one allocation execution per slot between
     /// drops").
     pub(super) fn emit_alloc_in(
         &mut self,

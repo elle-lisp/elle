@@ -146,7 +146,7 @@ fn merge_collapses_in_lambda_mutual_recursion_letrec_closure_cycle() {
     // The IN-LAMBDA mutual cycle — the letrec is a lambda body (the universal
     // recursive-local-helper shape, oracle.lisp `recur-local-mutual`). An immutable,
     // lambda-initialized letrec binding's forward cell is a compiled static-slot cell
-    // in every position (`BindingInner::letrec_compiled_cell`), so the merge collapses
+    // in every position (`BindingInner::compiled_forward_cell`), so the merge collapses
     // the ev/od SCC ∪ cells onto ONE region exactly as at top level, and the root drops
     // at the in-lambda letrec (the binding scope). The body `(ev k)` is a tail call to
     // an SCC member — the shape whose stranded binding-scope drop rides the tail-call
@@ -411,9 +411,7 @@ fn merge_collapses_defn_module_factory_cycle() {
         2,
         "one scope prebinds both cells; got {cells:?}"
     );
-    let members: Vec<Region> = cells.iter().copied().collect();
-    let roots: rustc_hash::FxHashSet<Region> =
-        members.iter().map(|&m| info.merged_root(m)).collect();
+    let roots: rustc_hash::FxHashSet<Region> = cells.iter().map(|&m| info.merged_root(m)).collect();
     assert_eq!(
         roots.len(),
         1,

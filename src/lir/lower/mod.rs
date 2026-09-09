@@ -90,6 +90,13 @@ pub struct Lowerer<'a> {
     /// Set of bindings that are upvalues (captures/parameters in lambda)
     /// These use LoadCapture/StoreCapture, not LoadLocal/StoreLocal
     upvalue_bindings: std::collections::HashSet<Binding>,
+    /// Bindings whose forward cell is a COMPILED `MakeCaptureCell` held in the
+    /// binding's own stack slot (`BindingInner::compiled_forward_cell`), rather
+    /// than the `populate_env` env cell an in-lambda captured binding otherwise
+    /// takes. Written where the slot is allocated, read wherever the address
+    /// space of a captured binding's slot is asked for, so the allocation and
+    /// every later recording cannot disagree.
+    compiled_cell_bindings: std::collections::HashSet<Binding>,
     /// Bindings bound to a BORROWED SUBVIEW of a scrutinee by destructuring:
     /// a `(a & rest)` list pattern, a `(entry & rest)` head, an array element,
     /// a struct value — every binding a structural ELEMENT load (`First`/`Rest`/
@@ -350,6 +357,7 @@ impl<'a> Lowerer<'a> {
             num_captures: 0,
             num_local_params: 0,
             upvalue_bindings: std::collections::HashSet::new(),
+            compiled_cell_bindings: std::collections::HashSet::new(),
             destructure_alias_bindings: std::collections::HashSet::new(),
             current_span: Span::synthetic(),
             intrinsics: FxHashMap::default(),

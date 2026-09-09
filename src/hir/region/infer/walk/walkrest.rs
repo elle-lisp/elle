@@ -61,20 +61,17 @@ impl RegionInference {
 
             HirKind::Begin(exprs) => {
                 // Register Begin for pre-allocated capture cells
-                // (MakeCaptureCell in lower_begin for Define bindings
-                // with needs_capture).
+                // (MakeCaptureCell in lower_begin).
                 //
-                // Predicate mirrors lower_begin: emit MakeCaptureCell iff
-                // (a) we are NOT inside a lambda body (the VM materializes
-                // cells via the closure-construction path inside lambdas),
-                // AND (b) at least one reachable Define/Destructure binding
-                // has `needs_capture()` true (reachable via Let/Begin/Loop/
-                // Block, NOT via If/Match/Cond/Lambda — see
+                // Predicate mirrors lower_begin: emit MakeCaptureCell for each
+                // reachable Define/Destructure binding that takes a COMPILED
+                // forward cell (`BindingInner::compiled_forward_cell`, reachable
+                // via Let/Begin/Loop/Block, NOT via If/Match/Cond/Lambda — see
                 // `collect_preallocate_bindings`). Unconditional alloc_here
                 // here would create phantom regions whose DecrefRegion is
                 // emitted at the Begin's decref_point but never paired with a
                 // runtime alloc_in_region.
-                if !self.in_lambda() && self.begin_has_capturable_binding(exprs) {
+                if self.begin_has_capturable_binding(exprs) {
                     // ONE region PER pre-allocated capture cell, never one
                     // region for all of them: the runtime mints a fresh
                     // physical region per allocation *execution* and
@@ -97,13 +94,25 @@ impl RegionInference {
                     // TAG_CAPTURE_CELL UAF at `as_capture_cell` in
                     // handle_update_capture).
                     let mut capturable = Vec::new();
-                    Self::collect_begin_capturable_bindings(self.arena(), exprs, &mut capturable);
+                    Self::collect_begin_capturable_bindings(
+                        self.arena(),
+                        self.in_lambda(),
+                        exprs,
+                        &mut capturable,
+                    );
                     for b in capturable {
+                        // `collect_preallocate_bindings` descends nested
+                        // `Begin`s, so an inner one reaches the same binding the
+                        // outer one already claimed. The lowerer emits its cell
+                        // once — its pre-pass skips a binding whose slot exists —
+                        // so a second region here is a phantom, and it splits the
+                        // cycle's cells across two scopes, which the merge reads
+                        // as two binding scopes and refuses.
+                        if self.compiled_cell_bindings.contains(&b) {
+                            continue;
+                        }
                         let cell_region = self.fresh_region(self.current_region);
-                        self.begin_cell_regions
-                            .entry(hir.id)
-                            .or_default()
-                            .push((b, cell_region));
+                        self.record_compiled_cell(hir.id, b, cell_region);
                         let entry = self.binding_regions.entry(b).or_default();
                         if !entry.contains(&cell_region) {
                             entry.push(cell_region);
