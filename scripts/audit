@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# audited: 2026-09-05
+# audited: 2026-09-09
 # Names the files whose stale documentation costs the most, and gates a commit
 # on the files it stages carrying today's stamp.
 # docs/impl/audit.md
@@ -67,8 +67,11 @@ eligible() {
             ;;
     esac
     if vendored "$(dirname "$1")"; then return 1; fi
+    # A makefile is absent from this list on purpose. Every file here is read
+    # whole by somebody; a makefile is read through `make help`, one `##` line
+    # at a time. See docs/impl/audit.md § "What carries a stamp".
     case "$1" in
-        scripts/* | Makefile | *.rs | *.lisp | *.md) return 0 ;;
+        scripts/* | *.rs | *.lisp | *.md) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -128,7 +131,7 @@ days_since() {
 candidates() {
     cd "$root"
     find . -type f \
-        \( -name '*.rs' -o -name '*.lisp' -o -name '*.md' -o -name 'Makefile' \) \
+        \( -name '*.rs' -o -name '*.lisp' -o -name '*.md' \) \
         -not -path './.git/*' -not -path './target/*' \
         -not -path './node_modules/*' -not -path './plugins/*' \
         | sed 's|^\./||'
