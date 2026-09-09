@@ -1,6 +1,6 @@
 # Intrinsics
 
-<!-- audited: 2026-09-08 -->
+<!-- audited: 2026-09-09 -->
 
 Intrinsics are silent bytecode operations prefixed with `%`. A `%`-intrinsic
 in **call position** is a compile-time type-checked request for the fast
@@ -82,7 +82,9 @@ Inference discharges contracts from:
   chain of them;
 - **a `(numeric!)` declaration** — it floors *every parameter of the
   enclosing function* at Number, so a whole numeric kernel proves at once
-  without a per-parameter guard.
+  without a per-parameter guard. A caller that contradicts the declaration
+  does not discharge it: pass a string to a declared-numeric parameter and
+  the declaring body's `%`-sites are rejected.
 
 ```lisp
 (def half
@@ -105,6 +107,12 @@ stays unknown, so `(fn [x] (%mul x x))` does not compile — write
 `(fn [x] (* x x))` (the wrapper), guard the parameter, or declare
 `(numeric!)`. This is the point of the design: the programmer states the
 fact once, visibly, and the compiler holds it.
+
+**A definition is checked where it is written.** A function nobody calls has
+no proven call sites, so `(defn f [x] (%mul x x))` is the same compile error
+whether or not the rest of the file calls `f`. "Nothing reaches this
+parameter" is a claim about reachability, and no contract row asks that
+question (see [impl/typeinfer.md](impl/typeinfer.md)).
 
 The declaration is recorded on the parameter **bindings** it constrains, not
 on the function node, so it survives a rewrite that dissolves the function:

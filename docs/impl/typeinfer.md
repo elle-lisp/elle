@@ -1,6 +1,6 @@
 # Type inference: the ascent, and what a call proves
 
-<!-- audited: 2026-09-08 -->
+<!-- audited: 2026-09-09 -->
 
 Where the types come from: an ascent from below whose limit is the least
 fixpoint, and what each kind of call contributes to it.
@@ -88,6 +88,54 @@ Widening costs precision, and only for a program that outran the budget: a
 prove-or-reject rejects that site. The whole corpus converges in six passes or
 fewer — the deepest is `demos/nqueens` at six — so no program in it widens.
 
+## Bottom is not a proof
+
+Widening treats an unsettled entry, and a settled Bottom needs the same answer
+for the same reason. `subtype(⊥, b)` holds for every `b`, so a Bottom operand
+discharges every contract row that asks a subtype question — Numbers,
+DivFamily, Ints, Ordered, and the `%get` index — and the silent opcode lowers
+over a value of any type.
+
+Two different facts wear that one lattice element:
+
+- **No value reaches here.** A function this unit defines and never calls has
+  parameters no call site contributes to, so they keep the Kleene start.
+- **Nothing has contributed yet.** A `(numeric!)` parameter carries the start
+  until a pass walks a call site that refines it.
+
+Neither says what type a value arriving at the site has. So the pass hands out
+no Bottom: at the ascent's limit, every Bottom left in the node map settles to
+Top, which is above the fixpoint and proves nothing.
+
+That one rule covers every consumer, because they all read that one map — the
+operand contracts (`contract.rs`), the signal narrowing (`narrow.rs`), the
+wrapper monomorphization (`monomorphize.rs`), and the LIR operand proof
+(`src/lir/lower/expr/intrinsic.rs`). The last two ask with equality and never
+read a proof out of Bottom. The first two ask with `subtype`, and did.
+
+A definition is therefore checked where it is written:
+
+```lisp
+(defn f [x] (%mul x x))
+```
+
+That is a compile error whether or not a later form calls `f`. Bottom used to
+exempt it, and only in the spelling with a form after it: the same definition
+alone in a file is the file's result, so `f` reads in value position, its
+parameters read as Top, and the site was rejected already.
+
+### The declaration still floors
+
+`(numeric!)` proves Number for a parameter no call site has reached, so the
+floor lands **on** the Kleene start rather than meeting with it. `meet(⊥,
+Number)` is ⊥, which sits below the contract the author wrote, and a floor that
+returns something below itself is not a floor.
+
+A Bottom the meet **produces** is the opposite fact: a caller passing a string
+to a declared-numeric parameter, where `meet(String, Number)` is ⊥. That one
+stays unproven, so the declaring body's `%`-sites reject rather than compute
+over the string.
+
 ## What still does not prove
 
 - **A mutated binding.** An `assign` gives a binding flow that a per-pass
@@ -116,6 +164,10 @@ fewer — the deepest is `demos/nqueens` at six — so no program in it widens.
 - `…::a_chain_deeper_than_the_budget_proves_nothing` — the widening: eleven
   functions in reverse walk order outrun the ten passes, and the site that
   reads the unsettled entry is rejected rather than compiled.
+- `hir::typeinfer::tests::bottom::*` — Bottom is not a proof: one rejection per
+  contract row that asks a subtype question, the `(numeric!)` floor over the
+  Kleene start and over a caller that contradicts it, and the postcondition
+  that the map the pass hands out carries no Bottom.
 - `tests/elle/typed-int-ops.lisp` — the corpus peer, on every tier: a
   self-recursive integer `fib` emits `AddInt` and computes with it, and a float
   base case is refused at compile time.
