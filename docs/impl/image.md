@@ -361,10 +361,11 @@ children in sorted order and never iterates a hash map, so the same graph
 always yields the same layout — offsets, page table, relocation table, and
 object index are byte-identical across dumps. The page bytes are assembled
 canonically from a zeroed buffer: headers, cursor gaps, alignment slack,
-and relocation slots stay zero. Each object slot receives only its
-discriminant byte and the leaf-field extents the layout probes record
-([format.md](image/format.md) § Fingerprint), and so does each struct entry,
-whose key is an enum with padding of its own. A `repr(Rust)` enum copy carries
+and relocation slots stay zero. Every record the dumper writes receives only
+its discriminant byte and the leaf-field extents the layout probes record
+([format.md](image/format.md) § Fingerprint) — an object slot, a struct entry
+whose key is an enum with padding of its own, and a syntax node, which is a
+struct with a `bool` in it around an enum. A `repr(Rust)` enum copy carries
 uninitialized padding from its construction temporary — the store spike
 measured this residue — so the dumper never copies a record wholesale; the
 extent copy leaves padding out, and two dumps of the same graph are
@@ -436,7 +437,10 @@ The sealing walk then reads each indexed object: its tag matches the index's,
 every `RegionSlice` extent stays inside the image, and each page's cursors
 bound the objects the index places on it. It reads object shells only, never
 a slice's backing bytes — an extent is checked from the `ptr` and `len` in
-the shell — so the clean set is untouched. The shells themselves are already
+the shell — so the clean set is untouched. A syntax object's root node rides
+in its shell, so that node's two extents are shell reads like any other; the
+nodes behind them are covered by the relocation bounds check, exactly as an
+array's elements are. The shells themselves are already
 resident: relocation writes a pointer slot in every object that has one, so
 the frames this walk reads are the frames it just dirtied
 (§ "The clean set is the currency"). An image whose objects hold no pointers

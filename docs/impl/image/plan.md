@@ -39,11 +39,11 @@ Then the image milestones:
    memory file for an image that arrives as bytes, the verifier's two
    passes, the name table that teaches a hydrating instance the spellings its
    symbols and keywords carry, and the scrub and guardfree pins over a
-   hydrated region, and the sorted containers, whose entries the dumper
-   assembles from probed extents exactly as it does an object's. The format,
-   mapping, relocation, and teardown are proven end to end. What it does not
-   carry is the last of the sealed set the foundations opened up: syntax is
-   body data now, and the dumper still refuses it.
+   hydrated region, the sorted containers, whose entries the dumper assembles
+   from probed extents exactly as it does an object's, and syntax, with the
+   file table its spans need and the scope watermark a fresh expander must
+   mint above. The format, mapping, relocation, and teardown are proven end
+   to end, over every value the foundations sealed.
 6. **boot** — cell snapping, dump-boot, warm cache, embedded blob,
    per-worker hydration for `sys/spawn`, the encoded-LIR side-stream with
    lazy decode, compiler-state persistence, and the parity gate (bytecode
@@ -65,6 +65,12 @@ Then the image milestones:
   array). The counter-factual for the entry canonicalization is the
   determinism pin: a struct whose key padding differs between two dumps must
   still write one file.
+- Syntax: a tree round-trips with its structure, its spans, its scope sets,
+  and its scope-exempt flags intact. A span's file survives by name: poison
+  the dumped file id in the page bytes, and the hydrated span still names its
+  file, because the file stream wrote the live id over it. The scope
+  watermark exceeds every counter value the body carries, intro scopes
+  included.
 - Source: an image parked at a non-zero, base-page-aligned offset inside a
   larger file hydrates from that descriptor and offset. A misaligned offset
   is refused by name, before anything is mapped.

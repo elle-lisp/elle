@@ -17,10 +17,11 @@ One image is one file, or one blob embedded in a larger one:
 | header | magic, format version, fingerprint, section offsets, page count |
 | pages | the dumped region's pages, largest first: body bytes per page at base-page-aligned file offsets, so the section is mappable. Descending size order makes the packed layout self-aligning: every earlier page's size is a multiple of every later page's, so each page's offset — in the file and in the mapped interval — is a multiple of its own size, satisfying the masked-header walk with no padding |
 | page table | (size, object cursor, data cursor) per page, in placement order — rebuilds each page's cursors |
-| relocations | pointer stream: (slot offset, target segment, target offset); primitive stream: (slot offset); reconstruction stream: (slot offset, constructor tag). Offsets are region-relative bytes: the hydrated region is one contiguous interval, so `base + offset` names any slot or target in O(1) and the (page, offset) pair collapses |
+| relocations | pointer stream: (slot offset, target segment, target offset); primitive stream: (slot offset); file stream: (slot offset, file index); reconstruction stream: (slot offset, constructor tag). Offsets are region-relative bytes: the hydrated region is one contiguous interval, so `base + offset` names any slot or target in O(1) and the (page, offset) pair collapses |
 | object index | (offset, tag) per heap object, sorted — rebuilds `dtors`/`ref_objs` and drives the verifier |
 | primitive table | primitive names in dump-time `prim_id` order |
 | name table | the spellings of the symbols and keywords in the body, one length-prefixed string each, sorted by name |
+| file table | the source-file names the body's spans point at, one length-prefixed string each, sorted by name — the file stream indexes it |
 | signal table | user-defined signal names in dump-time bit order |
 | watermarks | dump-time counters: parameter id, static-region mint, hygiene scope id, next signal bit |
 | manifest | bindings: name, kind (function / macro / core), value location, signal, arity, doc location; macro entries add parameter lists, template-syntax and transformer-cache locations; inline-fn syntax locations; plus root locations and dependency fingerprints |
@@ -94,6 +95,41 @@ two spellings meet in the receiving memo and nowhere else.
 A spelling the dumping instance never learned is simply absent. The value still
 hydrates, still compares equal, and still has no name to print — the memo's
 standing contract, not an image rule.
+
+## A span names its file by name, not by id
+
+A syntax node carries a `Span`, and a span carries a `FileId` — a dense index
+into a process-wide interner ([syntax.md](../syntax.md) owns the model). The
+index is an accident of which files this process read and in what order, so it
+means nothing in another process. It is the one process-local id the
+foundations left in the body.
+
+So a file travels the way a primitive does: by name. The file table holds the
+spellings the body's spans point at, sorted, and the file stream names each
+span's `file` field with the index of its spelling. Hydration interns each
+name in its own process and writes the live id into every listed slot. A slot
+is four bytes, not eight, because a `FileId` is a `u32`; the verifier bounds
+it and checks its alignment like any other slot.
+
+The cost is frames. Every node of a tree read from a real file carries a file
+id, so the file stream dirties every frame those nodes sit in — where an atom
+node with no pointers would otherwise have stayed clean. Leaving the ids alone
+is not the cheaper alternative but the wrong one: the span would name whatever
+file the hydrating process happens to have interned at that index, and print
+it in an error message.
+
+## The scope watermark bounds what a fresh expander may mint
+
+Hygiene scope ids are a per-expander counter, and an expander starts at one.
+Syntax in the body carries the scopes it was stamped with, so a fresh expander
+minting from one would hand out ids the body already uses, and two unrelated
+scopes would compare equal.
+
+The header therefore records a scope watermark: one past the highest counter
+value any node in the body carries, with the intro bit masked off, since intro
+scopes and ordinary ones come from the same counter. Hydration answers with
+it, and the loader that owns an expander mints above it. A body with no syntax
+records zero.
 
 ## Fingerprint: regenerate, never migrate
 
