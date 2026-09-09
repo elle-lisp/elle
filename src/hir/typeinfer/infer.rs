@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-09
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
 //! The inference pass and the environment it carries: one context owns every
@@ -96,9 +96,12 @@ impl<'a> Infer<'a> {
         // contributes nothing on the way up instead of reading the Top default
         // and pinning itself there. Parameters of value-used bindings stay
         // ABSENT (read as Top): their callers are not enumerable, so optimism
-        // there would let the checker pass on ⊥. A never-called callee-only
-        // function's params stay ⊥ — its %-sites can never execute, so nothing
-        // unsound compiles.
+        // there would let the checker pass on ⊥.
+        //
+        // The start is not a proof, and a never-called function's parameters
+        // never leave it. Reaching the limit still at ⊥ says only that nothing
+        // contributed, so `Infer::settle` raises those to Top before the map
+        // leaves the pass (docs/impl/typeinfer.md § "Bottom is not a proof").
         let mut binding_types: HashMap<Binding, TyId> = HashMap::new();
         for (b, params) in &lambda_params {
             if value_used.contains(b) {

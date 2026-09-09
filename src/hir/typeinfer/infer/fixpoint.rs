@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-09
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
 //! The ascent: passes over the whole tree until the type environment stops
@@ -13,14 +13,38 @@ pub(in crate::hir::typeinfer) const MAX_ITERS: usize = 10;
 
 impl Infer<'_> {
     /// Run the transfer function over `hir` until the environment stops moving,
-    /// widening whatever is still moving when the budget runs out.
+    /// widening whatever is still moving when the budget runs out, then settle
+    /// what the ascent hands out.
     pub(in crate::hir::typeinfer) fn solve(&mut self, hir: &Hir) {
         while let Some(moving) = self.ascend(hir) {
             // A round that pins nothing new has pinned everything there is, so
             // the environment is already Top throughout and proves nothing.
             // Stopping there is what bounds the widening.
             if !self.widen(moving) {
-                return;
+                break;
+            }
+        }
+        self.settle();
+    }
+
+    /// Raise every Bottom the ascent settled on to Top, so the node map this
+    /// pass hands out carries none.
+    ///
+    /// Bottom is the start, and `subtype(⊥, b)` holds for every `b` — so a
+    /// Bottom operand discharges every contract row that asks a subtype
+    /// question. What a settled Bottom records is that nothing contributed to
+    /// the entry: the parameters of a function this unit never calls, or the
+    /// body type of a cycle with no base case. Neither says what type a value
+    /// arriving at the site has, and Top is the answer that proves nothing
+    /// (docs/impl/typeinfer.md § "Bottom is not a proof").
+    ///
+    /// One raise serves every consumer, because they all read this one map: the
+    /// operand contracts, the signal narrowing, the wrapper monomorphization,
+    /// and the LIR operand proof.
+    fn settle(&mut self) {
+        for ty in self.hir_types.values_mut() {
+            if *ty == TypeInterner::BOTTOM {
+                *ty = TypeInterner::TOP;
             }
         }
     }
@@ -82,9 +106,9 @@ impl Infer<'_> {
 
     /// One pass: infer every node from the environment the last pass left, then
     /// REPLACE each contributed parameter's type with this pass's complete join
-    /// (Top included). A `(numeric!)` declaration floors the result at Number
-    /// (meet: callers can refine to Int/Float, never widen past the declared
-    /// contract); a mutated parameter never receives proofs.
+    /// (Top included). A `(numeric!)` declaration floors the result at Number —
+    /// callers can refine to Int/Float, never widen past the declared contract
+    /// (`declared_floor`); a mutated parameter never receives proofs.
     fn pass(&mut self, hir: &Hir) {
         self.param_joins.clear();
         let ty = self.infer(hir);
