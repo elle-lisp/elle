@@ -1,4 +1,34 @@
+// audited: 2026-09-09
+// src/hir/AGENTS.md
+// docs/impl/typeinfer.md
+//! The declared floor, and the guard-derived narrowing facts a branching form
+//! applies to the binding environment and then restores.
+
 use super::super::*;
+
+/// Refine a binding's accumulated type with a fact proven about the binding —
+/// a type guard's narrowing, or a `(numeric!)` declaration's floor.
+///
+/// A fact meeting the ascent's start IS the fact. `meet(⊥, fact)` is ⊥, so
+/// meeting there would erase a proof that owes nothing to a call site: a guard
+/// holds in the branch it governs, and a declaration holds through the body,
+/// whether or not this unit calls the enclosing function
+/// (docs/impl/typeinfer.md § "Bottom is not a proof").
+///
+/// A Bottom the meet PRODUCES is the opposite reading — the accumulated type
+/// and the fact are disjoint, so no value reaches the site the fact governs —
+/// and it is left alone, because it proves nothing either.
+///
+/// The two are one `TyId`, so a Bottom an enclosing disjoint fact produced
+/// reads here as the start and the fact re-proves the binding. That costs
+/// precision and nothing else: reaching it takes two mutually exclusive guards
+/// around the site, so the code the fact proves is code no value reaches.
+fn refine(interner: &TypeInterner, accumulated: TyId, fact: TyId) -> TyId {
+    if accumulated == TypeInterner::BOTTOM {
+        return fact;
+    }
+    interner.meet(accumulated, fact)
+}
 
 /// Apply a binding's `(numeric!)` declaration to a type it is being bound with.
 /// The declaration floors the binding at Number — callers may refine it to
@@ -19,15 +49,15 @@ pub(crate) fn declared_floor(
     interner: &TypeInterner,
 ) -> TyId {
     if arena.get(binding).declared_numeric {
-        interner.meet(ty, TypeInterner::NUMBER)
+        refine(interner, ty, TypeInterner::NUMBER)
     } else {
         ty
     }
 }
 
-/// Apply the `TypeIs` facts to the binding environment (meet with the
-/// accumulated type), returning the saved prior entries for `restore_type_facts`.
-/// `Nonzero` facts are the contract checker's flow, not a type — skipped here.
+/// Apply the `TypeIs` facts to the binding environment, returning the saved
+/// prior entries for `restore_type_facts`. `Nonzero` facts are the contract
+/// checker's flow, not a type — skipped here.
 pub(crate) fn apply_type_facts(
     facts: &[super::super::guard::Fact],
     binding_types: &mut HashMap<Binding, TyId>,
@@ -43,7 +73,7 @@ pub(crate) fn apply_type_facts(
             .get(binding)
             .copied()
             .unwrap_or(TypeInterner::TOP);
-        binding_types.insert(*binding, interner.meet(old, *narrow_ty));
+        binding_types.insert(*binding, refine(interner, old, *narrow_ty));
     }
     saved
 }

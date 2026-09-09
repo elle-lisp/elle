@@ -1,12 +1,31 @@
-//! Discharging a single call-position site: match its op's contract row
-//! against the inferred operand types (and the nonzero-divisor facts), and
-//! either lower silently or reject with a diagnostic.
+// audited: 2026-09-09
+// src/hir/AGENTS.md
+// docs/intrinsics.md
+//! Discharging one call-position site: its op's contract row, against the
+//! operand types the inference proved.
+//!
+//! A row that holds lets the site lower silently. A row that does not is a
+//! compile error naming the op, the operand, and what was inferred there. The
+//! div family carries the nonzero-divisor facts on top of its types.
 
 use super::*;
 
 /// The inferred type of an operand occurrence (post-narrowing, per occurrence).
+///
+/// Never Bottom: `subtype(⊥, b)` holds for every `b`, so a Bottom operand would
+/// discharge Numbers, DivFamily, Ints, Ordered and the `%get` index alike, and
+/// the silent opcode would lower over a value of any type. The ascent raises
+/// every settled Bottom to Top before it hands this map over
+/// (`Infer::settle`), and the assertion is what keeps that true of a later
+/// producer of one.
 fn ty_of(h: &Hir, hir_types: &HashMap<HirId, TyId>) -> TyId {
-    hir_types.get(&h.id).copied().unwrap_or(TypeInterner::TOP)
+    let ty = hir_types.get(&h.id).copied().unwrap_or(TypeInterner::TOP);
+    debug_assert_ne!(
+        ty,
+        TypeInterner::BOTTOM,
+        "an operand type reaching the contract gate is Bottom, which proves nothing"
+    );
+    ty
 }
 
 /// Is this operand provably ≠ 0 on the current path?
