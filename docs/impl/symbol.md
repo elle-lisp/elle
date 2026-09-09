@@ -1,5 +1,7 @@
 # Symbols and keywords — identity is the name hash
 
+<!-- audited: 2026-09-09 -->
+
 A `SymbolId` is the 64-bit FNV-1a hash of the symbol's name. Nothing mints it
 and no table owns it: the same name yields the same id in every symbol table,
 every thread, every process, and every build.
@@ -159,6 +161,19 @@ value — the wrong one. `#<…>` is the codebase's marker for an object the
 printer cannot render faithfully, and here it doubles as a canary: every mint
 site is a learning site, so an unresolved form in user-facing output points at
 a missed one, or at a formatter that failed to thread the memo.
+
+`VM::show_value` is the one render of a value for a message a person reads. It
+threads the owning instance's memo, and every such message goes through it: the
+uncaught-error report, the "Cannot call" type error on each of the four call
+paths, the WASM tier's report, and the `debug/print` and `trace` prints. A site
+that formats a `Value` with a bare `{}` or `{:?}` instead threads no memo, so
+the author reads a hash where their own name should be.
+
+Because the unresolved form is a canary, one test answers for the whole class
+rather than for each render. `unresolved_names_reach_no_user_facing_surface`
+runs a program across every output surface and fails if either stream carries
+`#<symbol:` or `#<keyword:` at all. A render added later that forgets the memo
+fails there without anybody naming it.
 
 ## Collisions are fatal
 

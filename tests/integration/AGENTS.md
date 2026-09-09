@@ -1,6 +1,6 @@
 # tests/integration
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-09 -->
 
 Full-pipeline integration tests: end-to-end behavior verification.
 
@@ -73,7 +73,8 @@ Tests are organized by feature area in separate files:
 | `core.rs` | Basic arithmetic, conditionals, lists, functions |
 | `advanced.rs` | Closures, recursion, higher-order functions |
 | `concurrency.rs` | Fibers, thread transfer |
-| `error_reporting.rs` | Error messages with source locations |
+| `error_reporting.rs` | Error messages with source locations, and the names an uncaught error's report spells |
+| `diagnostics.rs` | What `debug/print` and `trace` write to stderr, and the unresolved-name canary over every output surface |
 | `repl_exit_codes.rs` | REPL exit code behavior |
 | ~~`coroutines.rs`~~ | Migrated to `tests/elle/coroutines.lisp` |
 | `lexical_scope.rs` | Lexical scoping and closures |
