@@ -105,6 +105,39 @@ fn bytes_hydrate_through_an_anonymous_file() {
     assert!(!plain.exists(), "the test's own precondition went stale");
 }
 
+// § "Only one of the two anonymous files is a file": a read from the
+// descriptor goes through ImageSource, because a Darwin shared-memory object
+// refuses `pread` and only `mmap` reaches its bytes.
+//
+// The trap: a mapping starts at a base-page boundary and a read does not, so
+// the non-`pread` arm maps from the page below the offset and copies out of
+// the middle of it. An arm that mapped from the offset itself fails with
+// EINVAL, and one that dropped the slack returns the wrong bytes silently.
+// This is the only test that reaches that arithmetic — every other read in the
+// suite starts at an offset a page already begins on.
+#[test]
+fn a_read_from_a_source_starts_where_it_was_asked_to() {
+    let dir = crate::common::ScratchDir::new("image-read-at");
+    let container = dir.join("container.bin");
+
+    let bytes: Vec<u8> = (0..4u32 * base_page() as u32)
+        .map(|i| (i % 251) as u8)
+        .collect();
+    std::fs::write(&container, &bytes).expect("write container");
+    let file = std::fs::File::open(&container).expect("open container");
+    let source = ImageSource::at(file, base_page() as u64).expect("aligned offset");
+
+    // Deliberately misaligned, and long enough to leave the page it starts in.
+    let at = base_page() as u64 + 37;
+    let mut got = vec![0u8; base_page() + 11];
+    source.read_exact_at(&mut got, at).expect("read at an offset");
+    assert_eq!(
+        got.as_slice(),
+        &bytes[at as usize..at as usize + got.len()],
+        "the read returned bytes from the wrong place in the descriptor"
+    );
+}
+
 // § Hydration: where the kernel mints memory files the anonymous file is
 // write-sealed before it is mapped, so the immutability `MAP_PRIVATE` relies
 // on is enforced by the kernel rather than by our own discipline. A write to
