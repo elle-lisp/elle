@@ -65,9 +65,58 @@ impl ImageSource {
         self.offset
     }
 
-    /// The open file, for the hydrator's header read and its mappings.
+    /// The open file, for the hydrator's size check and its page mappings.
+    ///
+    /// `mmap` and `fstat` are the two calls every kind of descriptor here
+    /// answers. Anything that moves bytes goes through `read_exact_at` below,
+    /// which knows which kind this is.
     pub(crate) fn file(&self) -> &File {
         &self.file
+    }
+
+    /// Fill `buf` from the descriptor, starting at `at`.
+    ///
+    /// The caller has already established that the descriptor holds
+    /// `buf.len()` bytes from `at`; a short one is a truncated image and is
+    /// reported as an I/O error rather than as a partial read.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub fn read_exact_at(&self, buf: &mut [u8], at: u64) -> Result<(), ImageError> {
+        use std::os::unix::fs::FileExt;
+
+        self.file.read_exact_at(buf, at)?;
+        Ok(())
+    }
+
+    /// Fill `buf` from the descriptor, starting at `at`.
+    ///
+    /// A Darwin shared-memory object refuses `pread`, so the bytes come out of
+    /// a read-only mapping. `mmap` takes a base-page offset and `at` is any
+    /// offset at all, so the mapping starts at the page below it and the copy
+    /// starts that far into the mapping.
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    pub fn read_exact_at(&self, buf: &mut [u8], at: u64) -> Result<(), ImageError> {
+        if buf.is_empty() {
+            return Ok(());
+        }
+        let slack = (at % base_page() as u64) as usize;
+        let map = Mapping::new(
+            &self.file,
+            at - slack as u64,
+            slack + buf.len(),
+            libc::PROT_READ,
+            libc::MAP_PRIVATE,
+        )?;
+        // SAFETY: the mapping covers `slack + buf.len()` readable bytes, and
+        // the caller has established that the descriptor is at least that
+        // long from the page the mapping starts at.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                (map.addr as *const u8).add(slack),
+                buf.as_mut_ptr(),
+                buf.len(),
+            )
+        };
+        Ok(())
     }
 }
 
@@ -165,30 +214,66 @@ fn anonymous_file(bytes: &[u8]) -> Result<File, ImageError> {
 /// dropped before the descriptor is handed on.
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn fill_through_a_mapping(file: &File, bytes: &[u8]) -> Result<(), ImageError> {
-    use std::os::fd::AsRawFd;
-
     // `mmap` refuses a zero length, and an empty image has nothing to copy.
     if bytes.is_empty() {
         return Ok(());
     }
-    let addr = unsafe {
-        libc::mmap(
-            std::ptr::null_mut(),
-            bytes.len(),
-            libc::PROT_READ | libc::PROT_WRITE,
-            libc::MAP_SHARED,
-            file.as_raw_fd(),
-            0,
-        )
-    };
-    if addr == libc::MAP_FAILED {
-        return Err(last_error());
-    }
-    // SAFETY: `mmap` answered with `bytes.len()` writable bytes at `addr`, and
-    // a mapping this call just made cannot overlap the caller's slice.
-    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), addr as *mut u8, bytes.len()) };
-    if unsafe { libc::munmap(addr, bytes.len()) } != 0 {
-        return Err(last_error());
-    }
+    let map = Mapping::new(
+        file,
+        0,
+        bytes.len(),
+        libc::PROT_READ | libc::PROT_WRITE,
+        libc::MAP_SHARED,
+    )?;
+    // SAFETY: the mapping covers `bytes.len()` writable bytes, and a mapping
+    // this call just made cannot overlap the caller's slice.
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), map.addr as *mut u8, bytes.len()) };
     Ok(())
+}
+
+/// One temporary mapping of a descriptor's range, unmapped when it drops.
+///
+/// Both directions on this platform go through one of these, so the unmap
+/// rides on the scope rather than on every path out of the copy.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+struct Mapping {
+    addr: *mut libc::c_void,
+    len: usize,
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+impl Mapping {
+    /// Map `len` bytes of `file` from `at`, which `mmap` requires to be a
+    /// multiple of the base page.
+    fn new(
+        file: &File,
+        at: u64,
+        len: usize,
+        prot: libc::c_int,
+        flags: libc::c_int,
+    ) -> Result<Mapping, ImageError> {
+        use std::os::fd::AsRawFd;
+
+        let addr = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                len,
+                prot,
+                flags,
+                file.as_raw_fd(),
+                at as libc::off_t,
+            )
+        };
+        if addr == libc::MAP_FAILED {
+            return Err(last_error());
+        }
+        Ok(Mapping { addr, len })
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+impl Drop for Mapping {
+    fn drop(&mut self) {
+        unsafe { libc::munmap(self.addr, self.len) };
+    }
 }

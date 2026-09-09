@@ -10,7 +10,6 @@
 //! deserialized; cost is O(relocations) + O(objects).
 
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::FileExt;
 use std::path::Path;
 
 use crate::value::fiberheap::pagepool::MmapPage;
@@ -77,7 +76,7 @@ pub fn hydrate(
     if file_len < image_at + format::HEADER_BLOCK as u64 {
         return Err(corrupt("file shorter than the header"));
     }
-    file.read_exact_at(&mut block, image_at)?;
+    source.read_exact_at(&mut block, image_at)?;
     let header = Header::parse(&block)?;
 
     let expected = format::fingerprint();
@@ -111,7 +110,7 @@ pub fn hydrate(
         return Err(corrupt("file shorter than its sections claim"));
     }
     let mut meta = vec![0u8; meta_len as usize];
-    file.read_exact_at(&mut meta, meta_off)?;
+    source.read_exact_at(&mut meta, meta_off)?;
 
     let page_table_bytes = header.n_pages as usize * PAGE_ENTRY_BYTES;
     let reloc_bytes = header.n_relocs as usize * RELOC_BYTES;
