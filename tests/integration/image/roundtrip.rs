@@ -117,13 +117,20 @@ fn garbage_file_is_rejected() {
 
 // § Fingerprint: the layout probes participate in the fingerprint, so a
 // binary whose `HeapObject` layout shifted rejects the image instead of
-// hydrating garbage. Pin that every dumpable variant appears with extents.
+// hydrating garbage. The keys are on the list for the same reason: a struct
+// entry is body bytes, and `TableKey` is a `repr(Rust)` enum whose payload
+// offset a build is free to move.
 #[test]
 fn fingerprint_records_variant_layouts() {
     let fp = image::fingerprint();
     assert!(fp.contains("layout="), "no layout section: {fp}");
-    for variant in ["LString", "Pair", "LArray", "LBytes", "Float"] {
+    for variant in [
+        "LString", "Pair", "LArray", "LBytes", "Float", "LSet", "LStruct",
+    ] {
         assert!(fp.contains(variant), "layout section lacks {variant}: {fp}");
+    }
+    for key in ["key:Symbol", "key:String", "key:Keyword", "key:Array"] {
+        assert!(fp.contains(key), "layout section lacks {key}: {fp}");
     }
 }
 

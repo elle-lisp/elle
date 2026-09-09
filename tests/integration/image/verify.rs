@@ -18,6 +18,23 @@ fn dumped_bytes(dir: &crate::common::ScratchDir) -> (Vec<u8>, Sections) {
     (bytes, sections)
 }
 
+/// Dump one lone value and answer its bytes and section ranges. The graph is
+/// the caller's, so a test can put a single object in the image and know
+/// exactly where its inline data sits.
+fn dumped_value(
+    dir: &crate::common::ScratchDir,
+    build: impl FnOnce(&mut FiberHeap, RuntimeRegion) -> Value,
+) -> (Vec<u8>, Sections) {
+    let path = dir.join("lone.image");
+    let mut src = FiberHeap::new();
+    let region = src.new_runtime_region();
+    let root = build(&mut src, region);
+    image::dump(&mut src, &graph_names(), root, &path).expect("dump");
+    let bytes = std::fs::read(&path).expect("read image");
+    let sections = image::sections(&bytes).expect("a freshly dumped image parses");
+    (bytes, sections)
+}
+
 /// Hydrate `bytes` in a fresh heap and answer the refusal, asserting the
 /// failed load left neither a region nor page bytes behind.
 fn refusal(bytes: &[u8]) -> ImageError {
@@ -113,6 +130,54 @@ fn a_slice_extent_that_leaves_the_image_is_refused() {
         break;
     }
     assert!(patched, "no LString in the index to damage");
+
+    match refusal(&bytes) {
+        ImageError::Corrupt(_) => {}
+        other => panic!("expected a corrupt-image refusal, got {other:?}"),
+    }
+}
+
+// A struct's entries are a slice like any other, but its element is a
+// `(TableKey, Value)` — 40 bytes, not the 16 a `Value` slice uses. The
+// counter-factual is the length this test writes: one element past the end,
+// which overruns the page at the true stride and stays comfortably inside it
+// at a `Value`'s. A verifier that measured the extent in `Value`s would pass
+// the image and let the first probe of that struct read past its page.
+//
+// The struct is the image's only object, so its entries are the only inline
+// data and they end exactly at the page's end — which is what makes one extra
+// element an overrun rather than a read of the neighbour's bytes.
+#[test]
+fn a_struct_entry_slice_that_leaves_the_image_is_refused() {
+    let dir = crate::common::ScratchDir::new("image-entry-extent");
+    let (mut bytes, s) = dumped_value(&dir, |heap, region| {
+        alloc_struct(
+            heap,
+            region,
+            &[
+                (TableKey::Int(1), Value::int(2)),
+                (TableKey::Int(3), Value::int(4)),
+            ],
+        )
+    });
+
+    let mut patched = false;
+    for entry in s.index.clone().step_by(Sections::INDEX_BYTES) {
+        if get_u64(&bytes, entry + 8) != HeapTag::LStruct as u64 {
+            continue;
+        }
+        let len_at = s.pages.start + get_u64(&bytes, entry) as usize + 16;
+        let len = u32::from_le_bytes(bytes[len_at..len_at + 4].try_into().expect("4 bytes"));
+        assert_eq!(
+            len, 2,
+            "the entry count is not where the layout probes say it is, \
+             so this test would damage some other field"
+        );
+        bytes[len_at..len_at + 4].copy_from_slice(&3u32.to_le_bytes());
+        patched = true;
+        break;
+    }
+    assert!(patched, "no LStruct in the index to damage");
 
     match refusal(&bytes) {
         ImageError::Corrupt(_) => {}
