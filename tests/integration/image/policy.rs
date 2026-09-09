@@ -24,7 +24,7 @@ fn mutable_value_refuses_dump() {
         region,
     );
     let root = alloc_pair(&mut src, region, Value::int(1), arr);
-    match image::dump(&mut src, root, &path) {
+    match image::dump(&mut src, &SymbolTable::new(), root, &path) {
         Err(ImageError::Unsupported(what)) => {
             assert!(
                 what.contains("LArrayMut"),
@@ -56,7 +56,7 @@ fn traited_value_refuses_dump() {
         },
         region,
     );
-    match image::dump(&mut src, traited, &path) {
+    match image::dump(&mut src, &SymbolTable::new(), traited, &path) {
         Err(ImageError::Unsupported(what)) => {
             assert!(what.contains("traits"), "refusal does not say traits: {what}");
         }

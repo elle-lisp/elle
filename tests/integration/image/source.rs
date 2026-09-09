@@ -40,7 +40,7 @@ fn an_image_parked_at_an_offset_hydrates_from_its_descriptor() {
     let file = std::fs::File::open(&container).expect("open container");
     let source = ImageSource::at(file, offset as u64).expect("aligned offset");
     let mut dst = FiberHeap::new();
-    let hydrated = image::hydrate(&mut dst, &source).expect("hydrate at offset");
+    let hydrated = image::hydrate(&mut dst, &mut SymbolTable::new(), &source).expect("hydrate at offset");
     assert_eq!(
         root, hydrated.root,
         "the graph read back from a parked image differs from the source"
@@ -48,7 +48,7 @@ fn an_image_parked_at_an_offset_hydrates_from_its_descriptor() {
 
     let head = std::fs::File::open(&container).expect("reopen container");
     let at_zero = ImageSource::at(head, 0).expect("zero is aligned");
-    match image::hydrate(&mut dst, &at_zero) {
+    match image::hydrate(&mut dst, &mut SymbolTable::new(), &at_zero) {
         Err(ImageError::Corrupt(_)) => {}
         other => panic!("offset 0 of the container is not an image, got {other:?}"),
     }
@@ -100,7 +100,7 @@ fn bytes_hydrate_through_an_anonymous_file() {
 
     let source = ImageSource::from_bytes(&bytes).expect("anonymous file");
     let mut dst = FiberHeap::new();
-    let hydrated = image::hydrate(&mut dst, &source).expect("hydrate from bytes");
+    let hydrated = image::hydrate(&mut dst, &mut SymbolTable::new(), &source).expect("hydrate from bytes");
     assert_eq!(root, hydrated.root, "the graph read back from bytes differs");
     assert!(!plain.exists(), "the test's own precondition went stale");
 }
@@ -137,5 +137,5 @@ fn an_anonymous_image_file_refuses_writes() {
 
     // The mapping still reads the bytes the source was built from.
     let mut dst = FiberHeap::new();
-    image::hydrate(&mut dst, &source).expect("hydrate after the refused write");
+    image::hydrate(&mut dst, &mut SymbolTable::new(), &source).expect("hydrate after the refused write");
 }

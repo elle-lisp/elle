@@ -40,7 +40,12 @@ use super::ImageError;
 /// Dump `root`'s value graph to `path`, atomically (temp file + rename).
 /// The graph must be sealed data; a refused value fails the dump before any
 /// byte is written, and the scratch region is dropped either way.
-pub fn dump(heap: &mut FiberHeap, root: Value, path: &Path) -> Result<(), ImageError> {
+pub fn dump(
+    heap: &mut FiberHeap,
+    _symbols: &crate::symbol::SymbolTable,
+    root: Value,
+    path: &Path,
+) -> Result<(), ImageError> {
     let scratch = heap.new_runtime_region();
     let result = dump_into(heap, scratch, root, path);
     heap.decref_region_if_present(scratch);

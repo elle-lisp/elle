@@ -20,7 +20,7 @@ fn data_graph_round_trips_through_dump_and_hydrate() {
     let root = dump_graph(&mut src, &path);
 
     let mut dst = FiberHeap::new();
-    let hydrated = image::hydrate_path(&mut dst, &path).expect("hydrate");
+    let hydrated = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("hydrate");
     assert_eq!(root, hydrated.root, "hydrated graph differs from source");
 }
 
@@ -37,10 +37,10 @@ fn hydration_preserves_sharing() {
     let region = src.new_runtime_region();
     let shared = alloc_str(&mut src, region, "shared once");
     let root = alloc_array(&mut src, region, &[shared, shared]);
-    image::dump(&mut src, root, &path).expect("dump");
+    image::dump(&mut src, &SymbolTable::new(), root, &path).expect("dump");
 
     let mut dst = FiberHeap::new();
-    let hydrated = image::hydrate_path(&mut dst, &path).expect("hydrate");
+    let hydrated = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("hydrate");
     let obj = unsafe { deref(hydrated.root) };
     let HeapObject::LArray { elements, .. } = obj else {
         panic!("hydrated root is not an array");
@@ -61,9 +61,9 @@ fn immediate_root_round_trips() {
     let path = dir.join("imm.image");
 
     let mut src = FiberHeap::new();
-    image::dump(&mut src, Value::keyword("just-me"), &path).expect("dump");
+    image::dump(&mut src, &SymbolTable::new(), Value::keyword("just-me"), &path).expect("dump");
     let mut dst = FiberHeap::new();
-    let hydrated = image::hydrate_path(&mut dst, &path).expect("hydrate");
+    let hydrated = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("hydrate");
     assert_eq!(hydrated.root, Value::keyword("just-me"));
 }
 
@@ -91,7 +91,7 @@ fn corrupted_fingerprint_falls_back_cleanly() {
 
     let mut dst = FiberHeap::new();
     let before = dst.active_region_count();
-    match image::hydrate_path(&mut dst, &path) {
+    match image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path) {
         Err(ImageError::Fingerprint { .. }) => {}
         other => panic!("expected fingerprint mismatch, got {other:?}"),
     }
@@ -109,7 +109,7 @@ fn garbage_file_is_rejected() {
     let path = dir.join("garbage.image");
     std::fs::write(&path, b"not an image at all").expect("write");
     let mut dst = FiberHeap::new();
-    match image::hydrate_path(&mut dst, &path) {
+    match image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path) {
         Err(ImageError::Corrupt(_)) => {}
         other => panic!("expected corrupt-image error, got {other:?}"),
     }
@@ -141,8 +141,8 @@ fn double_hydration_is_correct_and_independent() {
     let root = dump_graph(&mut src, &path);
 
     let mut dst = FiberHeap::new();
-    let first = image::hydrate_path(&mut dst, &path).expect("first hydrate");
-    let second = image::hydrate_path(&mut dst, &path).expect("second hydrate");
+    let first = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("first hydrate");
+    let second = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("second hydrate");
     assert_ne!(
         first.root.as_heap_ptr(),
         second.root.as_heap_ptr(),
@@ -192,9 +192,9 @@ fn dump_is_byte_deterministic_whole_file() {
     let region = src.new_runtime_region();
     let root = build_graph(&mut src, region);
     paint_stack(0xAA, 16);
-    image::dump(&mut src, root, &a).expect("dump a");
+    image::dump(&mut src, &graph_names(), root, &a).expect("dump a");
     paint_stack(0x55, 16);
-    image::dump(&mut src, root, &b).expect("dump b");
+    image::dump(&mut src, &graph_names(), root, &b).expect("dump b");
 
     let ba = std::fs::read(&a).expect("read a");
     let bb = std::fs::read(&b).expect("read b");

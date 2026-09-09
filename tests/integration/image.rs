@@ -9,7 +9,14 @@
 
 use elle::hir::region::RuntimeRegion;
 use elle::value::fiberheap::FiberHeap;
-use elle::value::{HeapObject, Pair, Value};
+use elle::value::{HeapObject, Pair, SymbolId, Value};
+use elle::SymbolTable;
+
+/// The keyword and the symbol [`build_graph`] carries. Neither spelling is in
+/// the static vocabulary, so only the image's name table can carry them to a
+/// fresh instance.
+const GRAPH_KEYWORD: &str = "spike";
+const GRAPH_SYMBOL: &str = "image-graph-symbol";
 
 // ── Graph builders (trait-less data values, one region) ─────────────
 
@@ -51,19 +58,34 @@ fn alloc_array(heap: &mut FiberHeap, region: RuntimeRegion, items: &[Value]) -> 
 }
 
 /// A representative data graph: nesting, every supported heap variant, and
-/// supported immediates (ints, inline floats, bools, nil, keywords).
+/// supported immediates (ints, inline floats, bools, nil, keywords, symbols).
 fn build_graph(heap: &mut FiberHeap, region: RuntimeRegion) -> Value {
     let s = alloc_str(heap, region, "hello image");
     let b = alloc_bytes(heap, region, &[0xE1, 0x1E, 0x5C]);
     let inner = alloc_array(
         heap,
         region,
-        &[Value::int(7), s, Value::keyword("spike"), Value::float(2.5)],
+        &[
+            Value::int(7),
+            s,
+            Value::keyword(GRAPH_KEYWORD),
+            Value::float(2.5),
+        ],
     );
     let tail = alloc_pair(heap, region, Value::bool(true), Value::EMPTY_LIST);
-    let mid = alloc_pair(heap, region, inner, tail);
+    let named = alloc_pair(heap, region, Value::symbol(SymbolId::of(GRAPH_SYMBOL)), tail);
+    let mid = alloc_pair(heap, region, inner, named);
     let mid2 = alloc_pair(heap, region, b, mid);
     alloc_pair(heap, region, Value::int(1), mid2)
+}
+
+/// The memo a dumping instance of [`build_graph`]'s graph would hold: the two
+/// spellings its values carry, and nothing else.
+fn graph_names() -> SymbolTable {
+    let mut names = SymbolTable::new();
+    names.keyword(GRAPH_KEYWORD);
+    names.intern(GRAPH_SYMBOL);
+    names
 }
 
 /// Build [`build_graph`]'s graph in `src` and dump it to `path`, answering the
@@ -72,7 +94,7 @@ fn build_graph(heap: &mut FiberHeap, region: RuntimeRegion) -> Value {
 fn dump_graph(src: &mut FiberHeap, path: &std::path::Path) -> Value {
     let region = src.new_runtime_region();
     let root = build_graph(src, region);
-    elle::image::dump(src, root, path).expect("dump");
+    elle::image::dump(src, &graph_names(), root, path).expect("dump");
     root
 }
 
@@ -84,6 +106,9 @@ mod mapping {
 }
 mod policy {
     include!("image/policy.rs");
+}
+mod names {
+    include!("image/names.rs");
 }
 mod source {
     include!("image/source.rs");

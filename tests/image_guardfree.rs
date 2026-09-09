@@ -18,6 +18,7 @@
 use elle::image;
 use elle::runtime::Runtime;
 use elle::value::{HeapObject, Pair, Value};
+use elle::SymbolTable;
 
 fn base_page() -> usize {
     unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize }
@@ -82,9 +83,9 @@ fn a_freed_hydrated_page_stays_reserved_and_unreadable() {
         region,
     );
     let root = heap.alloc_in_region(HeapObject::Pair(Pair::new(Value::int(1), inner)), region);
-    image::dump(heap, root, &path).expect("dump");
+    image::dump(heap, &SymbolTable::new(), root, &path).expect("dump");
 
-    let hydrated = image::hydrate_path(heap, &path).expect("hydrate");
+    let hydrated = image::hydrate_path(heap, &mut SymbolTable::new(), &path).expect("hydrate");
     let addr = hydrated
         .root
         .as_heap_ptr()

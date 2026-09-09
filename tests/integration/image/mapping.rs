@@ -21,7 +21,7 @@ fn hydrated_pages_release_by_munmap_not_cache() {
 
     let mut dst = FiberHeap::new();
     let before = dst.allocated_bytes();
-    let hydrated = image::hydrate_path(&mut dst, &path).expect("hydrate");
+    let hydrated = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("hydrate");
     assert!(
         dst.allocated_bytes() > before,
         "hydration added no page bytes"
@@ -50,7 +50,7 @@ fn hydration_teardown_returns_to_baseline() {
     let mut dst = FiberHeap::new();
     let regions_before = dst.region_info_vec();
     let objs_before = dst.visible_len();
-    let hydrated = image::hydrate_path(&mut dst, &path).expect("hydrate");
+    let hydrated = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("hydrate");
     assert!(dst.visible_len() > objs_before);
     dst.decref_region_if_present(hydrated.region);
     assert_eq!(dst.region_info_vec(), regions_before);
@@ -70,7 +70,7 @@ fn replaced_file_keeps_live_mapping_intact() {
     let root = dump_graph(&mut src, &path);
 
     let mut dst = FiberHeap::new();
-    let hydrated = image::hydrate_path(&mut dst, &path).expect("hydrate");
+    let hydrated = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("hydrate");
 
     // Replace the path with a different (garbage) file via rename.
     let replacement = dir.join("replacement");

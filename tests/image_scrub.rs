@@ -18,6 +18,7 @@
 use elle::image;
 use elle::value::fiberheap::FiberHeap;
 use elle::value::{HeapObject, Pair, Value};
+use elle::SymbolTable;
 
 /// The graph the store milestone's tests dump: nesting, a string, bytes, an
 /// array, and the portable immediates.
@@ -67,11 +68,11 @@ fn a_hydrated_region_survives_scrub_and_unmaps_on_release() {
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
     let root = build_graph(&mut src, region);
-    image::dump(&mut src, root, &path).expect("dump");
+    image::dump(&mut src, &SymbolTable::new(), root, &path).expect("dump");
 
     let mut dst = FiberHeap::new();
     let baseline = dst.allocated_bytes();
-    let hydrated = image::hydrate_path(&mut dst, &path).expect("hydrate");
+    let hydrated = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("hydrate");
     assert_eq!(
         root, hydrated.root,
         "the hydrated graph differs from its source under --trace=scrub"

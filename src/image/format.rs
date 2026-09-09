@@ -83,6 +83,8 @@ pub struct Sections {
     pub relocations: std::ops::Range<usize>,
     /// `(offset, tag)` pairs, one per heap object.
     pub index: std::ops::Range<usize>,
+    /// Length-prefixed spellings, sorted by name.
+    pub names: std::ops::Range<usize>,
 }
 
 impl Sections {
@@ -130,6 +132,7 @@ pub fn sections(bytes: &[u8]) -> Result<Sections, ImageError> {
         page_table: ranges[0].clone(),
         relocations: ranges[1].clone(),
         index: ranges[2].clone(),
+        names: at..at,
     })
 }
 

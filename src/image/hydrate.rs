@@ -40,13 +40,21 @@ impl Drop for Reservation {
 }
 
 /// Hydrate the image occupying the whole file at `path`.
-pub fn hydrate_path(heap: &mut FiberHeap, path: &Path) -> Result<Hydrated, ImageError> {
-    hydrate(heap, &ImageSource::open(path)?)
+pub fn hydrate_path(
+    heap: &mut FiberHeap,
+    symbols: &mut crate::symbol::SymbolTable,
+    path: &Path,
+) -> Result<Hydrated, ImageError> {
+    hydrate(heap, symbols, &ImageSource::open(path)?)
 }
 
 /// Hydrate the image `source` names into `heap`. On any failure the heap is
 /// untouched: no region minted, no mapping left behind.
-pub fn hydrate(heap: &mut FiberHeap, source: &ImageSource) -> Result<Hydrated, ImageError> {
+pub fn hydrate(
+    heap: &mut FiberHeap,
+    _symbols: &mut crate::symbol::SymbolTable,
+    source: &ImageSource,
+) -> Result<Hydrated, ImageError> {
     let corrupt = |what: &str| ImageError::Corrupt(what.into());
     let file = source.file();
     let file_len = file.metadata()?.len();

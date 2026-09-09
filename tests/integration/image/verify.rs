@@ -25,7 +25,7 @@ fn refusal(bytes: &[u8]) -> ImageError {
     let mut dst = FiberHeap::new();
     let regions_before = dst.active_region_count();
     let bytes_before = dst.allocated_bytes();
-    let err = match image::hydrate(&mut dst, &source) {
+    let err = match image::hydrate(&mut dst, &mut SymbolTable::new(), &source) {
         Err(e) => e,
         Ok(_) => panic!("the damaged image hydrated instead of being refused"),
     };
@@ -114,6 +114,37 @@ fn a_slice_extent_that_leaves_the_image_is_refused() {
     }
     assert!(patched, "no LString in the index to damage");
 
+    match refusal(&bytes) {
+        ImageError::Corrupt(_) => {}
+        other => panic!("expected a corrupt-image refusal, got {other:?}"),
+    }
+}
+
+// A name entry is a length and its bytes. A length past the section's end
+// reads spellings out of whatever follows the image, and the names section is
+// the last one — so the read runs off the buffer entirely.
+#[test]
+fn a_name_longer_than_its_section_is_refused() {
+    let dir = crate::common::ScratchDir::new("image-name-length");
+    let (mut bytes, s) = dumped_bytes(&dir);
+    assert!(!s.names.is_empty(), "the graph has spellings to damage");
+    put_u64(&mut bytes, s.names.start, s.names.len() as u64);
+    match refusal(&bytes) {
+        ImageError::Corrupt(_) => {}
+        other => panic!("expected a corrupt-image refusal, got {other:?}"),
+    }
+}
+
+// A spelling is a Rust `&str` the moment the memo records it. Bytes that are
+// not UTF-8 have no such reading, so the table is refused rather than
+// lossily repaired into a name that denotes some other symbol.
+#[test]
+fn a_name_that_is_not_utf8_is_refused() {
+    let dir = crate::common::ScratchDir::new("image-name-utf8");
+    let (mut bytes, s) = dumped_bytes(&dir);
+    let len = get_u64(&bytes, s.names.start) as usize;
+    assert!(len > 0, "the first name entry is empty");
+    bytes[s.names.start + 8] = 0xFF;
     match refusal(&bytes) {
         ImageError::Corrupt(_) => {}
         other => panic!("expected a corrupt-image refusal, got {other:?}"),
