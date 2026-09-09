@@ -114,7 +114,7 @@ impl Infer<'_> {
         let ty = self.infer(hir);
         self.hir_types.insert(hir.id, ty);
         for (param, joined) in std::mem::take(&mut self.param_joins) {
-            if self.mutated_params.contains(&param) {
+            if self.mutated.contains(&param) {
                 continue;
             }
             let floored = declared_floor(param, joined, self.arena, &self.interner);
