@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-09
 // Guardfree pins for the frame-exit relocation and the deferred channels a tail call rides.
 //
 // docs/analysis/testing.md
@@ -83,8 +83,9 @@ fn region_tail_deferred_exits_uaf() {
 
 // Guard — a local mutual-recursion clique (`ev`/`od`) whose `letrec` body ends in a
 // tail call to a NON-member (a native `%add`, the redefined-closure operator `+`, a
-// foreign fn `g`, and a MIXED member+non-member `if`) must reclaim its merged arena
-// soundly. The frame-replacing `TailCall` strands the arena's binding-scope drop, so
+// foreign fn `g`, a MIXED member+non-member `if`, and both BY-MOVE shapes — a member
+// carried into a `struct` literal, which merges, and one carried into a closure,
+// which keeps the refusal) must reclaim its merged arena soundly. The frame-replacing `TailCall` strands the arena's binding-scope drop, so
 // a closure callee rides the explicit arena adopt (`TailCall::deferred_release_slot`) at
 // recursion completion while a native callee falls through to the live scope-exit
 // drop — mutually exclusive per call, exactly one release. A premature free leaves

@@ -1,5 +1,7 @@
 # The letrec closure-cycle merge
 
+<!-- audited: 2026-09-09 -->
+
 The builder-idiom seed merges one tight `child → parent` store edge. The same
 collapse-to-one-region mechanism reclaims a shape per-region RC cannot: the
 **immutable reference cycle mutual recursion forms** (`ping`/`pong`). Each member is a
@@ -41,7 +43,7 @@ the cell↔closure structure is not one SCC in the graphs the other passes build
   binding is its *closure* region), and — unlike `capture_containment_edges`, which
   drops the `r == closure_r` self-edge — the **self-edge is admitted**. An SCC of
   size ≥ 2 is a mutual cycle. The single-closure self-edge is redundant for a genuine
-  mutual cycle (the sibling edges already close the SCC); it is load-bearing only for
+  mutual cycle (the sibling edges already close the SCC); it matters only for
   the one mixed shape that still has a cell — a self-recursive member a *sibling* also
   captures (so it keeps a cell for that sibling) but that is not itself in a mutual
   cycle, a size-1 SCC the self-edge admits so its retained cell can merge into the
@@ -100,7 +102,7 @@ something else still reads the arena.
 
   So *which* channel carries the release does not enter the ordering argument, and
   neither does whether the compiler can classify the callee: the merge wires both
-  channels precisely because it cannot, and both are late enough. This is the same
+  channels rather than choose between them, and both are late enough. This is the same
   ordering argument as the cell-free self-recursive deferral's return admission
   ([selfrec.md](../selfrec.md) § "The deferral's escape gate is the fiber frontier
   alone") — the release runs *after* the mint, so unlike the frame-exit relocation
@@ -220,13 +222,17 @@ point keeps the Shared baseline.
 **A tail-call letrec body hands the drop to a tail-call deferred release — for a member *or* a
 non-member callee.** When the letrec body ends in a frame-replacing tail call, the
 binding-scope `DecrefRegion` is emitted past the `TailCall` — dead code — so the
-release must ride the activation's completion instead. **The compiler cannot know at
-compile time whether a tail call replaces the frame**: that is decided at runtime by
-the callee *value* (a `func.as_closure()` replaces the frame and trampolines; a
-`func.as_native_def()` keeps the frame and falls through to the live scope-exit drop),
-and any binding — a redefined operator `+`, a `%`-intrinsic — may be rebound to
-either. So the merge never classifies the callee; it wires **both** arena release
-channels and lets exactly one fire.
+release must ride the activation's completion instead. **For nearly every callee the
+compiler cannot know at compile time whether a tail call replaces the frame**: that is
+decided at runtime by the callee *value* (a `func.as_closure()` replaces the frame and
+trampolines; a `func.as_native_def()` keeps the frame and falls through to the live
+scope-exit drop), and a name that looks native reaches a closure often enough — the
+stdlib binds a bytecode `+` over the native one. The single callee the compiler does
+read is a binding whose compile-time constant IS a native function: immutable, never
+mutated, lowered as a `LoadConst` of that native, so no value but that native is ever
+called (`BindingInner::may_replace_frame`). The release channel does not use the
+reading. The merge wires **both** channels and lets exactly one fire, which costs
+nothing and gives every callee one shape.
 
 - **A tail call to an SCC member** rides the existing stranded-cycle channel:
   `lower_letrec` marks the member bindings the letrec body tail-calls
@@ -307,6 +313,21 @@ fresh aggregate then passed (`(g (%pair od 1))`) is RC-counted, and a member *ca
 in an argument (`(g (ev k))`) contributes its result, not itself — both admitted. An
 unresolvable non-member callee (no site to key the deferred release at) likewise refuses.
 
+**The refusal answers a callee that REPLACES the frame.** What collides is the new
+activation's owned-parameter release and the deferred release that frame replacement
+made necessary, so a callee the compiler reads as a native (above) never reaches the
+collision: it borrows its arguments and releases none of them, and it keeps the frame,
+which leaves the binding-scope `DecrefRegion` live as the arena's single release. The
+gate therefore asks whether the tail callee can replace the frame before it refuses,
+and a **struct literal in tail position** — `{:a fa :b fb}`, a `struct` native call
+taking both members as direct arguments — merges. That is the everyday factory: a
+`letrec` of mutually-recursive closures over some shared state, handed back in one
+struct. Where the native's fresh result keeps the members, it holds them by a
+cross-region reference into the arena, RC-counted exactly as a foreign capture is
+(§ "Drop site — the binding scope"), so the arena survives the binding-scope drop. A
+callee the compiler cannot read that way — a foreign closure `g`, a redefined
+operator, an expression — keeps the refusal.
+
 **All-tier, unconditional.** The merge extends the same `merged_parent` forest the
 builder seed populates and rides the same `merged_root` canonicalization and
 `merged_slots` mint-or-reuse every tier already resolves — so it adds no opcode and no
@@ -319,7 +340,11 @@ onto one `merged_root`; `merge_collapses_in_lambda_mutual_recursion_letrec_closu
 `merge_admits_native_tail` — a non-member (foreign closure / native) body
 tail now MERGES and records `cycle_tail_release`;
 `merge_refuses_member_passed_by_move_to_foreign_tail` — the by-move boundary (`(g od)`
-double-free) still refuses;
+double-free) still refuses, while `merge_admits_member_passed_by_move_to_native_tail`
+takes the factory whose tail is a struct literal over its own members, and
+`merge_refuses_member_passed_by_move_to_shadowed_native_tail` — a user `def` of
+`struct` over the native, which the literal then calls — holds the reading to the
+callee's compile-time VALUE rather than its spelling;
 `merge_mutual_recursion_cycle_drops_at_binding_scope_not_enclosing`;
 `self_recursive_letrec_is_cell_free_not_merged` — a pure self-recursive letrec has no cell
 and is never a member; `merge_collapses_self_and_sibling_captured_member_cell` — the mixed
@@ -362,7 +387,8 @@ drop's promptness (a discarded top-level cycle freed at its letrec, not held to
 teardown — the case that must NOT pick up a later drop site). The oracle reads
 `recur-local-mutual-ret`, `recur-local-mutual-ret-foreign`,
 `recur-local-mutual-ret-value` and `recur-local-mutual-ret-bound` — the four body
-shapes, all closed at 0.
+shapes, all closed at 0 — and `recur-local-mutual-factory` for the struct-literal
+tail that carries both members into a native by-move.
 `region_ownership_reclaims_self_recursion_closure_cycle` pins the same bounded growth for a
 pure self-recursive closure, which is reclaimed cell-free (ordinary RC / the tail-call
 deferred release — [selfrec.md](../selfrec.md)), not by this merge.

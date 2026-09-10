@@ -1,11 +1,16 @@
+// audited: 2026-09-09
 // ── Region merging ────────────────────────────────────────────────────
+//
+// docs/impl/region/merging.md
 //
 // When two regions collapse into one, split by what forces the collapse:
 //
 // - `seed` — the builder-idiom child→parent merge, where the merge starts.
 // - `selfedge` — the self-edge elimination predicate (transform 2).
 // - `recursion` — the letrec closure-cycle merge: which recursion shapes
-//   collapse, and which tail callees the merge still admits.
+//   collapse, and where the single release fires.
+// - `tailgate` — which letrec body tails carry the merged arena's release, and
+//   which the by-move boundary still refuses.
 // - `escape` — where the merge stops: a returned cycle, a handed-out member,
 //   and a fiber crossing.
 
@@ -16,6 +21,7 @@ mod escape;
 mod recursion;
 mod seed;
 mod selfedge;
+mod tailgate;
 
 /// The `Letrec` node binding a name (`loop`/`ping`) — the cycle's binding scope,
 /// whose scope-exit is the tight, RC-safe drop site for the merged arena.

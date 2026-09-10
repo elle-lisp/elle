@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-08
+# audited: 2026-09-09
 # Tail-call rotation, letrec-local recursive closures, a returned self-recursive closure's region, and the scheduler round trip.
 #
 # docs/impl/region/diagnostics.md
@@ -134,8 +134,8 @@
 
 # The same returned ev/od cycle, one body-tail apart: it tail-calls a NON-member
 # (`lcl-ident`) rather than the member `ev`. Which channel carries the arena's release
-# does not enter the ordering argument, and neither does the fact that the compiler
-# cannot classify the callee: a CLOSURE callee replaces the frame and takes the
+# does not enter the ordering argument, and neither does whether the compiler can
+# classify the callee: a CLOSURE callee replaces the frame and takes the
 # `deferred_release_slot` deferral at the recursion's completion, while a NATIVE callee
 # keeps the frame and falls through to the binding-scope drop the lowerer emits at the
 # `Letrec` node — after the mint the tail call itself emits at the call site. Both are
@@ -197,6 +197,34 @@
     c))
 (pin (measure "recur-local-mutual-ret-bound" (fn [j] (lcl-mutual-ret-bound 3))
               100 6 60 0.4 0.5) 0)
+
+# The FACTORY — the everyday shape the whole family serves: mutually recursive local
+# helpers over shared state, handed back in one struct. The letrec body's tail is a
+# struct literal over BOTH members, so it is a tail call on the `struct` native
+# carrying `ev` and `od` in BY-MOVE. That by-move refusal answers a callee which
+# REPLACES the frame, whose new activation's owned-parameter release would decref the
+# merged arena a second time against the deferred release. A native does neither — it
+# borrows its arguments and keeps the frame — so the binding-scope drop stays live and
+# single, and the members the returned struct keeps are a cross-region reference into
+# the arena, RC-counted exactly as a foreign capture is (docs/impl/region/letrec.md
+# § "What the non-member tail still refuses"). Refusing it held five regions per call:
+# the cycle's two closures and two forward cells, plus the `t` the leaked cycle pinned.
+# A CLOSED control, undeclared like `rest-array-copy`, so a regression to open trips
+# the completeness gate as an F4 defect rather than being absorbed under the root.
+(defn lcl-mutual-factory [n]
+  # Both members leave in the struct (a value use), which disables call-site param
+  # joins, so a local diverging guard proves the %lt/%sub operands.
+  (let [t @{}]
+    (letrec [ev (fn [m]
+                  (when (%not (%int? m)) (error :m))
+                  (if (%lt m 1) t (od (%sub m 1))))
+             od (fn [m]
+                  (when (%not (%int? m)) (error :m))
+                  (put t m true)
+                  (ev (%sub m 1)))]
+      {:a ev :b od})))
+(pin (measure "recur-local-mutual-factory" (fn [j] (lcl-mutual-factory 3)) 100 6
+              60 0.4 0.5) 0)
 
 # ── Retained-closure reclamation (a RETURNED self-recursive closure's region) ──
 # `recur-local-self` above pins the LEAK rate of a self-recursive closure used as a

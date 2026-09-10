@@ -1,3 +1,5 @@
+// audited: 2026-09-09
+// docs/impl/hir.md
 //! Arena-backed binding storage for the compilation pipeline.
 //!
 //! `BindingArena` owns all `BindingInner` values for a compilation unit.
@@ -84,6 +86,14 @@ pub struct BindingInner {
     /// bodies"). Carried on the binding, the declared floor survives that splice,
     /// so the spliced intrinsic proves exactly as it did inside the function.
     pub declared_numeric: bool,
+    /// Whether this binding's compile-time constant value is a NATIVE function —
+    /// the lowerer reads such a binding as a `LoadConst` of that native, never as a
+    /// global lookup. Written from the VALUE at the two sites that bind one
+    /// (`bind_primitives`, `bind_compile_time_env`), so a primitive-scope name whose
+    /// constant is a CLOSURE — core.lisp binds a bytecode `+` over the native — is
+    /// false here while `is_primitive` is true of both. Read through
+    /// [`may_replace_frame`](Self::may_replace_frame).
+    pub is_native_fn: bool,
     /// Whether this binding is a MODULE-SCOPE (file-letrec) name — a direct
     /// binding of `analyze_file_letrec` (top-level `def`/`var`/expr statement).
     /// Such a binding's lifetime is the whole module/program: its demise is the
@@ -112,8 +122,23 @@ impl BindingInner {
             is_primitive: false,
             is_synthetic: false,
             declared_numeric: false,
+            is_native_fn: false,
             is_file_scope: false,
         }
+    }
+
+    /// Can a call to this binding REPLACE the frame? A closure callee does — the
+    /// `TailCall` trampolines into a new activation, which owns the arguments and
+    /// releases each one. A native callee does not: the dispatch loop stays in this
+    /// frame, borrows the arguments, and falls through.
+    ///
+    /// Which of the two a name reaches is a runtime fact about the callee VALUE, so
+    /// the answer is yes for every binding but one — an immutable, unmutated binding
+    /// whose compile-time constant is a native function, where no other value can be
+    /// called. The closure-cycle merge's by-move tail gate asks this before it
+    /// refuses (docs/impl/region/letrec.md).
+    pub fn may_replace_frame(&self) -> bool {
+        !(self.is_native_fn && self.is_immutable && !self.is_mutated)
     }
 
     /// A binding needs a cell if captured (for locals) or mutated (for params).
