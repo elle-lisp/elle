@@ -1,4 +1,7 @@
+// audited: 2026-09-09
 //! Syntax to HIR analysis
+//!
+//! docs/impl/hir.md
 //!
 //! This module converts expanded Syntax trees into HIR by:
 //! 1. Resolving all variable references to Bindings
@@ -17,6 +20,7 @@
 mod binding;
 mod call;
 mod destructure;
+mod env;
 mod fileletrec;
 mod letrec;
 pub use fileletrec::classify_form;
@@ -446,122 +450,6 @@ impl<'a> Analyzer<'a> {
     pub fn set_unicode_generation(&mut self, gen: crate::segment::Generation) {
         self.unicode_generation = gen;
     }
-
-    /// Levenshtein edit distance between two strings.
-    fn levenshtein(a: &str, b: &str) -> usize {
-        let m = a.len();
-        let n = b.len();
-        if m == 0 {
-            return n;
-        }
-        if n == 0 {
-            return m;
-        }
-
-        let mut prev: Vec<usize> = (0..=n).collect();
-        let mut curr = vec![0; n + 1];
-
-        for (i, ca) in a.chars().enumerate() {
-            curr[0] = i + 1;
-            for (j, cb) in b.chars().enumerate() {
-                let cost = if ca == cb { 0 } else { 1 };
-                curr[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(curr[j] + 1);
-            }
-            std::mem::swap(&mut prev, &mut curr);
-        }
-        prev[n]
-    }
-
-    /// Find bindings in scope with names similar to `name` (edit distance <= 2).
-    ///
-    /// Spelling-based, so unlike resolution this does need the memo. A binding
-    /// whose name this instance never learned simply cannot be suggested — the
-    /// message degrades, nothing resolves differently.
-    fn suggest_similar(&self, name: &str) -> Vec<String> {
-        let mut candidates: Vec<(usize, String)> = Vec::new();
-        for scope in self.scopes.iter().rev() {
-            for scope_sym in scope.bindings.keys() {
-                let Some(scope_name) = self.symbols.name(*scope_sym) else {
-                    continue;
-                };
-                let dist = Self::levenshtein(name, scope_name);
-                if dist > 0 && dist <= 2 && !candidates.iter().any(|(_, n)| n == scope_name) {
-                    candidates.push((dist, scope_name.to_string()));
-                }
-            }
-        }
-        candidates.sort_by_key(|(d, _)| *d);
-        candidates.into_iter().map(|(_, n)| n).take(3).collect()
-    }
-
-    /// Bind all registered primitives as immutable Local bindings in the
-    /// analyzer's initial scope.
-    ///
-    /// Called before `analyze_file_letrec` so that primitives are in scope
-    /// during file analysis. Primitives are `BindingScope::Local` with
-    /// `mark_immutable()` set. File-level `def` bindings shadow primitives
-    /// because `analyze_file_letrec` pushes a new scope.
-    ///
-    /// The lowerer uses `immutable_values` to emit `LoadConst` for these
-    /// bindings — the `NativeFn` values are baked into the constant pool.
-    /// No slot allocation is needed.
-    pub fn bind_primitives(&mut self, meta: &PrimitiveMeta) {
-        for (&sym_id, &signal) in &meta.signals {
-            let binding = self.bind_by_sym(sym_id, BindingScope::Local);
-            self.arena.get_mut(binding).is_immutable = true;
-            self.arena.get_mut(binding).is_primitive = true;
-            self.signal_env.insert(binding, signal);
-            if let Some(&arity) = meta.arities.get(&sym_id) {
-                self.arity_env.insert(binding, arity);
-            }
-            if let Some(&func_value) = meta.functions.get(&sym_id) {
-                self.primitive_values.insert(binding, func_value);
-            }
-        }
-    }
-
-    /// Return the primitive binding→value map for the lowerer.
-    ///
-    /// The lowerer seeds its `immutable_values` from this so that
-    /// primitive references compile to `LoadConst`.
-    pub fn primitive_values(&self) -> &HashMap<Binding, Value> {
-        &self.primitive_values
-    }
-
-    /// Bind compile-time values (from `begin-for-syntax`) into the Analyzer's
-    /// current scope as immutable local bindings backed by constant values.
-    ///
-    /// Called from `eval_syntax` after `bind_primitives` so that compile-time
-    /// names are visible in macro body analysis. The Lowerer emits `LoadConst`
-    /// for these bindings (same mechanism as primitive functions).
-    ///
-    /// `env`: map from name string to Value, from `Expander.compile_time_env`.
-    ///
-    /// `is_primitive`: mark each binding as a primitive. This is for the
-    /// **core.lisp export env** (`fold`/`reduce`/`concat`/`append`/`reverse`/…),
-    /// whose bindings here are the *canonical* definitions user code calls — they
-    /// deliberately override any earlier `meta` entry (e.g. `reverse` was once a
-    /// native, now core.lisp), so this binding must win *and* be recognizable to
-    /// passes that key on `is_primitive` (loop fusion, dispatch monomorphization),
-    /// exactly as stdlib exports are. Without the flag a core HOF is invisible to
-    /// those passes even though it is as canonical as `map`/`filter`. Passed false
-    /// for genuine compile-time / REPL envs, where a binding is a user value that
-    /// must *not* be treated as a canonical primitive.
-    pub fn bind_compile_time_env(
-        &mut self,
-        env: &std::collections::HashMap<String, crate::value::Value>,
-        is_primitive: bool,
-    ) {
-        for (name, value) in env {
-            let sym = self.symbols.intern(name);
-            let binding = self.bind_by_sym(sym, BindingScope::Local);
-            self.arena.get_mut(binding).is_immutable = true;
-            self.arena.get_mut(binding).is_primitive = is_primitive;
-            self.primitive_values.insert(binding, *value);
-        }
-    }
-
-    // === Scope Management ===
 }
 
 #[cfg(test)]

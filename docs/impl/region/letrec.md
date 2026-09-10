@@ -43,7 +43,7 @@ the cell↔closure structure is not one SCC in the graphs the other passes build
   binding is its *closure* region), and — unlike `capture_containment_edges`, which
   drops the `r == closure_r` self-edge — the **self-edge is admitted**. An SCC of
   size ≥ 2 is a mutual cycle. The single-closure self-edge is redundant for a genuine
-  mutual cycle (the sibling edges already close the SCC); it is load-bearing only for
+  mutual cycle (the sibling edges already close the SCC); it matters only for
   the one mixed shape that still has a cell — a self-recursive member a *sibling* also
   captures (so it keeps a cell for that sibling) but that is not itself in a mutual
   cycle, a size-1 SCC the self-edge admits so its retained cell can merge into the
@@ -102,7 +102,7 @@ something else still reads the arena.
 
   So *which* channel carries the release does not enter the ordering argument, and
   neither does whether the compiler can classify the callee: the merge wires both
-  channels precisely because it cannot, and both are late enough. This is the same
+  channels rather than choose between them, and both are late enough. This is the same
   ordering argument as the cell-free self-recursive deferral's return admission
   ([selfrec.md](../selfrec.md) § "The deferral's escape gate is the fiber frontier
   alone") — the release runs *after* the mint, so unlike the frame-exit relocation
