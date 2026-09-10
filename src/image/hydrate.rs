@@ -255,6 +255,11 @@ pub fn hydrate(
         }
     } else if header.root_tag >= TAG_HEAP_START {
         return Err(corrupt("immediate root with a heap tag"));
+    } else if header.n_pages != 0 {
+        // Only a graph that allocated nothing has an immediate root, so pages
+        // beside one are drift — and they would leave the payload word read
+        // as an offset by one branch and as a value by another.
+        return Err(corrupt("immediate root beside a pages section"));
     }
     // A native-fn root's payload is a primitive-table index, since the header
     // is not a slot any stream can name.
