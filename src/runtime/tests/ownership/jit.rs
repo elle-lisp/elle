@@ -291,7 +291,7 @@ fn region_ownership_reclaims_bare_cycle_group_under_jit() {
 /// as `reassign_toplevel_prior_release_is_bounded` samples its gauge. The returned
 /// closure escapes via return, so it is the caller that holds it.
 ///
-/// The retain route is load-bearing and must stay a chain rather than a push into a
+/// The retain route decides the reading, and must stay a chain rather than a push into a
 /// container. A `%pair` records a COUNTED cross-region edge to the closure, so the
 /// closure's region stays in the active accounting `arena/count` sums. A container
 /// store instead lets the ownership forest ADOPT the stored region as a member of the

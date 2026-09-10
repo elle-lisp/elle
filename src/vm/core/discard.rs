@@ -1,9 +1,8 @@
 // audited: 2026-09-10
 // docs/impl/region/owner.md
 // docs/impl/region/mechanism.md
-//! Abandoning suspended work: the squelch boundary that raises a
-//! signal-violation, and the one chokepoint that runs what the discarded frames
-//! still owed.
+//! Abandoning suspended work: the squelch boundary, and the chokepoint that runs
+//! what the discarded frames still owed.
 
 use super::VM;
 use crate::value::{SignalBits, Value};

@@ -1,7 +1,7 @@
 // audited: 2026-09-10
 // docs/impl/vm.md
-//! The `VM` struct — every piece of per-instance state a running program reaches
-//! — and the accessors that reborrow the allocations it points at.
+//! The `VM` struct — the per-instance state a running program reaches — and the
+//! accessors that reborrow the allocations it points at.
 
 use crate::error::StackFrame;
 use crate::ffi::FFISubsystem;
