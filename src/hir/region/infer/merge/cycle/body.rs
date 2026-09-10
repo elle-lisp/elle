@@ -1,5 +1,5 @@
 // audited: 2026-09-09
-//! What one `letrec` BODY looks like at its tail, as the closure-cycle merge's two
+//! What one binding scope's BODY looks like at its tail, as the closure-cycle merge's
 //! tail gates read it.
 //!
 //! docs/impl/region/letrec.md
@@ -37,9 +37,10 @@ pub(super) struct TailCallSite {
     pub(super) arg_bindings: Vec<crate::hir::Binding>,
 }
 
-/// What one `Letrec`'s BODY looks like at its tail, as the merge's two tail gates
-/// read it.
-pub(super) struct LetrecTail {
+/// What one binding scope's BODY looks like at its tail, as the merge's two tail
+/// gates read it. A binding scope is the node that prebinds the cycle's forward
+/// cells: a `Letrec`, or the `Begin` a run of local `defn`s sits in.
+pub(super) struct ScopeTail {
     /// One [`TailCallSite`] per tail call in the body — the release-channel gate's
     /// input. A body tail call replaces the frame, stranding the binding-scope drop,
     /// so each must supply a release channel (a member callee's stranded-cycle
@@ -61,23 +62,33 @@ pub(super) struct LetrecTail {
     pub(super) value_bindings: Vec<crate::hir::Binding>,
 }
 
-/// For every `Letrec` node, how its BODY exits at the tail ([`LetrecTail`]).
-pub(super) fn collect_letrec_tail_callees(hir: &Hir, out: &mut FxHashMap<HirId, LetrecTail>) {
-    if let HirKind::Letrec { body, .. } = &hir.kind {
+/// For every binding-scope node, how its BODY exits at the tail ([`ScopeTail`]).
+///
+/// A `Letrec`'s body is its `body`; a `Begin`'s is its LAST expression, the one
+/// whose value the `Begin` yields. An earlier statement of a `Begin` is not a
+/// tail position at all, so reading only the last one asks the same question of
+/// both forms.
+pub(super) fn collect_scope_tails(hir: &Hir, out: &mut FxHashMap<HirId, ScopeTail>) {
+    let body = match &hir.kind {
+        HirKind::Letrec { body, .. } => Some(&**body),
+        HirKind::Begin(exprs) => exprs.last(),
+        _ => None,
+    };
+    if let Some(body) = body {
         let mut sites = Vec::new();
         body_tail_callees(body, &mut sites);
         let mut value_bindings = Vec::new();
         value_flow_bindings(body, &mut value_bindings);
         out.insert(
             hir.id,
-            LetrecTail {
+            ScopeTail {
                 sites,
                 exits_frame: body_tail_exits_frame(body),
                 value_bindings,
             },
         );
     }
-    hir.for_each_child(|c| collect_letrec_tail_callees(c, out));
+    hir.for_each_child(|c| collect_scope_tails(c, out));
 }
 
 /// Does every tail EXIT of a letrec body leave the frame — is the value the frame

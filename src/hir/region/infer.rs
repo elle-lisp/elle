@@ -74,6 +74,12 @@ struct RegionInference {
     /// (mirrors `lower_begin`'s MakeCaptureCell pre-pass; one region PER CELL —
     /// see `RegionInfo::begin_cell_regions`).
     begin_cell_regions: HashMap<HirId, Vec<(Binding, Region)>>,
+    /// Every binding a scope arm above minted a COMPILED cell for. Its forward
+    /// cell lives in the binding's own slot, so it takes no `populate_env` env
+    /// cell — the mirror of the lowerer's own `compiled_cell_bindings`. The
+    /// scope arms mint before they walk their inits, so a binding is recorded
+    /// here before any use of it is walked.
+    compiled_cell_bindings: rustc_hash::FxHashSet<Binding>,
     /// Cross-region edges recorded directly at storage / capture sites:
     /// (storage_site_hir_id, source_region, target_region).
     cross_region_refs: Vec<(HirId, Region, Region)>,
@@ -297,6 +303,7 @@ impl RegionInference {
             local_reassigns: HashMap::new(),
             loop_forwarded_params: HashMap::new(),
             begin_cell_regions: HashMap::new(),
+            compiled_cell_bindings: rustc_hash::FxHashSet::default(),
             cross_region_refs: Vec::new(),
             hard_edge_sites: rustc_hash::FxHashSet::default(),
             call_result_regions: rustc_hash::FxHashSet::default(),
@@ -344,51 +351,52 @@ impl RegionInference {
     /// Mirror of `lower_begin`'s collect_preallocate_bindings: a Begin
     /// emits MakeCaptureCell at its HirId iff some reachable Define or
     /// Destructure binding (reachable via Let/Begin/Loop/Block, NOT via
-    /// If/Match/Cond/Lambda) has `needs_capture()` true.
+    /// If/Match/Cond/Lambda) takes a COMPILED forward cell
+    /// (`BindingInner::compiled_forward_cell`).
     fn begin_has_capturable_binding(&self, exprs: &[Hir]) -> bool {
-        fn walk(arena: &BindingArena, h: &Hir) -> bool {
-            match &h.kind {
-                HirKind::Define { binding, .. } => arena.get(*binding).needs_capture(),
-                HirKind::Destructure { pattern, .. } => pattern
-                    .bindings()
-                    .bindings
-                    .iter()
-                    .any(|b| arena.get(*b).needs_capture()),
-                HirKind::Lambda { .. } => false,
-                HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                    bindings.iter().any(|(_, init)| walk(arena, init)) || walk(arena, body)
-                }
-                HirKind::Loop { bindings, body } => {
-                    bindings.iter().any(|(_, init)| walk(arena, init)) || walk(arena, body)
-                }
-                HirKind::Begin(es) => es.iter().any(|e| walk(arena, e)),
-                HirKind::Block { body, .. } => body.iter().any(|e| walk(arena, e)),
-                _ => false,
-            }
-        }
-        exprs.iter().any(|e| walk(self.arena(), e))
+        let mut capturable = Vec::new();
+        Self::collect_begin_capturable_bindings(
+            self.arena(),
+            self.in_lambda(),
+            exprs,
+            &mut capturable,
+        );
+        !capturable.is_empty()
     }
 
     /// Mirror of `lower_begin`'s collect_preallocate_bindings: collect
     /// every Define/Destructure binding reachable via Let/Begin/Loop/Block
-    /// (NOT via If/Match/Cond/Lambda) whose `needs_capture()` is true.
+    /// (NOT via If/Match/Cond/Lambda) that takes a COMPILED forward cell.
     /// Each of these gets a MakeCaptureCell at the Begin's HirId during
     /// lowering, so the Begin's alloc region must outlive each binding's
     /// last use. This populates `binding_regions[b]` with the Begin's
     /// alloc region so the post-pass `decref_point` extension covers them.
     fn collect_begin_capturable_bindings(
         arena: &BindingArena,
+        in_lambda: bool,
         exprs: &[Hir],
         out: &mut Vec<Binding>,
     ) {
-        fn walk(arena: &BindingArena, h: &Hir, out: &mut Vec<Binding>) {
+        fn celled(arena: &BindingArena, b: Binding, init_is_lambda: bool, in_lambda: bool) -> bool {
+            arena
+                .get(b)
+                .compiled_forward_cell(init_is_lambda, in_lambda)
+        }
+        fn walk(arena: &BindingArena, in_lambda: bool, h: &Hir, out: &mut Vec<Binding>) {
             match &h.kind {
-                HirKind::Define { binding, .. } if arena.get(*binding).needs_capture() => {
+                HirKind::Define { binding, value }
+                    if celled(
+                        arena,
+                        *binding,
+                        matches!(value.kind, HirKind::Lambda { .. }),
+                        in_lambda,
+                    ) =>
+                {
                     out.push(*binding);
                 }
                 HirKind::Destructure { pattern, .. } => {
                     for b in &pattern.bindings().bindings {
-                        if arena.get(*b).needs_capture() {
+                        if celled(arena, *b, false, in_lambda) {
                             out.push(*b);
                         }
                     }
@@ -396,31 +404,31 @@ impl RegionInference {
                 HirKind::Lambda { .. } => {}
                 HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
                     for (_, init) in bindings {
-                        walk(arena, init, out);
+                        walk(arena, in_lambda, init, out);
                     }
-                    walk(arena, body, out);
+                    walk(arena, in_lambda, body, out);
                 }
                 HirKind::Loop { bindings, body } => {
                     for (_, init) in bindings {
-                        walk(arena, init, out);
+                        walk(arena, in_lambda, init, out);
                     }
-                    walk(arena, body, out);
+                    walk(arena, in_lambda, body, out);
                 }
                 HirKind::Begin(es) => {
                     for e in es {
-                        walk(arena, e, out);
+                        walk(arena, in_lambda, e, out);
                     }
                 }
                 HirKind::Block { body, .. } => {
                     for e in body {
-                        walk(arena, e, out);
+                        walk(arena, in_lambda, e, out);
                     }
                 }
                 _ => {}
             }
         }
         for e in exprs {
-            walk(arena, e, out);
+            walk(arena, in_lambda, e, out);
         }
     }
 
@@ -722,7 +730,25 @@ impl RegionInference {
     /// placeholder region iff the binding is such an env cell; `None` for
     /// top-level captured defs (compiled `MakeCaptureCell`, already released)
     /// and non-captured locals.
+    /// Record the region of one COMPILED capture cell a scope arm minted, and
+    /// the binding it belongs to. The two writes travel together so no arm can
+    /// mint a cell region without also taking the binding off the env-cell
+    /// route (`env_cell_placeholder`).
+    fn record_compiled_cell(&mut self, scope_id: HirId, binding: Binding, cell_region: Region) {
+        self.begin_cell_regions
+            .entry(scope_id)
+            .or_default()
+            .push((binding, cell_region));
+        self.compiled_cell_bindings.insert(binding);
+    }
+
     fn env_cell_placeholder(&mut self, binding: Binding) -> Option<Region> {
+        // A binding whose forward cell is COMPILED holds that cell in its own
+        // slot, so `populate_env` mints none for it and a placeholder here would
+        // be a phantom — a `DecrefCellRegion` against a cell no allocation made.
+        if self.compiled_cell_bindings.contains(&binding) {
+            return None;
+        }
         if self.in_lambda() && self.arena().get(binding).needs_capture() {
             // Idempotent per binding: a captured local is materialized as
             // EXACTLY ONE per-value CaptureCell (`populate_env`), released by a

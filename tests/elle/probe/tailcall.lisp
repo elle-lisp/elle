@@ -226,6 +226,53 @@
 (pin (measure "recur-local-mutual-factory" (fn [j] (lcl-mutual-factory 3)) 100 6
               60 0.4 0.5) 0)
 
+# The same cycle written the way a body writes it: two local `defn`s rather than a
+# `letrec`. A sibling reads each name before its initializer has run, so each is
+# prebound with a forward cell exactly as a letrec binding is — one shape, one
+# merge, whichever binder spells it (docs/impl/region/letrec.md § "The binder form
+# does not decide the shape"). Reading the run as a different shape refused it and
+# leaked the whole cycle — two closures and two forward cells — per call.
+(defn lcl-defn-mutual [n]
+  (defn dv [m]
+    (when (%not (%int? m)) (error :m))
+    (if (%lt m 1) :even (dd (%sub m 1))))
+  (defn dd [m]
+    (when (%not (%int? m)) (error :m))
+    (if (%lt m 1) :odd (dv (%sub m 1))))
+  (dv n))
+(pin (measure "recur-local-defn-mutual" (fn [j] (lcl-defn-mutual 3)) 100 6 60
+              0.4 0.5) 0)
+
+# The closure-as-module factory built from such a run: a constructor that defines
+# mutually recursive helpers over its own mutable state and hands back a struct of
+# them. Two things separate it from the bare run above, and neither may refuse the
+# merge. The members CAPTURE the table, a counted reference OUT of the arena rather
+# than a member of it. And the factory HANDS THE MEMBERS OUT: the struct's hold is a
+# foreign capture, RC-counted, so it outlives the arena's single decref and the arena
+# dies with the struct. This is the async scheduler's own shape, and its cycle held
+# 100% of every program's teardown residue (elle-lisp/elle#1081). It is the `defn`
+# twin of `recur-local-mutual-factory` above, so the two together read the
+# binder-form claim on the shape the merge was extended for.
+#
+# The op CONSTRUCTS the module and stops there. Calling a member back through the
+# returned struct grows ~7 objects and ~2 regions per op under `--jit=eager` — on
+# BOTH binder spellings, and flat on the VM, so the growth is the tier's rather than
+# this mechanism's (elle-lisp/elle#1103). Put the call back into the op when that
+# closes.
+(defn defn-module-factory []
+  (let [t @{}]
+    (defn fa [m]
+      (when (%not (%int? m)) (error :m))
+      (if (%lt m 1) t (fb (%sub m 1))))
+    (defn fb [m]
+      (when (%not (%int? m)) (error :m))
+      (put t m true)
+      (fa (%sub m 1)))
+    (let [s {:a fa :b fb}]
+      s)))
+(pin (measure "defn-module-factory" (fn [j] (defn-module-factory)) 100 6 60 0.4
+              0.5) 0)
+
 # ── Retained-closure reclamation (a RETURNED self-recursive closure's region) ──
 # `recur-local-self` above pins the LEAK rate of a self-recursive closure used as a
 # LOOP (0 — cell-free, reclaimed per call). These two RETAIN each returned closure in

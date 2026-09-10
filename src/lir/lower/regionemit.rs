@@ -8,18 +8,28 @@ impl<'a> Lowerer<'a> {
     /// allocating-intrinsic in a consumer position is bound to a
     /// synthetic Let — so this map covers the result via its binding
     /// slot directly, without a separate stash-and-reload slot.
-    pub(super) fn record_region_slot(&mut self, hir_id: HirId, slot: super::ValueSlot) {
+    ///
+    /// Takes the BINDING whose slot this is, never a ready-made
+    /// [`ValueSlot`]: the address space comes from `value_slot_for`, so a binder
+    /// form cannot record a space its own allocation did not use.
+    pub(super) fn record_region_slot(&mut self, hir_id: HirId, binding: Binding, slot: u16) {
         if let Some(&r) = self.region_info.alloc_region.get(&hir_id) {
-            self.region_to_slot.insert(r, slot);
+            let space = self.value_slot_for(binding, slot);
+            self.region_to_slot.insert(r, space);
         }
     }
 
     /// The address space `allocate_slot_routed` minted this binding's slot from:
     /// an in-lambda captured binding lives in the env, everything else on the
-    /// stack. The one place that decision is re-derived, so a recording site
-    /// cannot disagree with the allocation.
+    /// stack — including an in-lambda binding whose forward cell is COMPILED,
+    /// whose slot holds the `MakeCaptureCell` itself. The one place that
+    /// decision is re-derived, so a recording site cannot disagree with the
+    /// allocation.
     pub(super) fn value_slot_for(&self, binding: Binding, slot: u16) -> super::ValueSlot {
-        if self.in_lambda && self.arena.get(binding).needs_capture() {
+        if self.in_lambda
+            && self.arena.get(binding).needs_capture()
+            && !self.compiled_cell_bindings.contains(&binding)
+        {
             super::ValueSlot::Env(slot)
         } else {
             super::ValueSlot::Local(slot)

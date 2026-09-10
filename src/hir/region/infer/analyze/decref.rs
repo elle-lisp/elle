@@ -264,7 +264,7 @@ pub(super) fn populate_decref_points(
     // the value-binding rule the `capture_loop_ext` "bound outside" guard
     // enforces: a value bound INSIDE a loop is re-allocated per iteration and its
     // release must stay per-iteration, but an env cell's allocation is
-    // loop-independent. See docs/impl/region/bindings.md "Env cells in loops:
+    // loop-independent. See docs/impl/region/cells.md "Env cells in loops:
     // release once per activation, not per iteration".
     if !info.cell_release_regions.is_empty() && !iter_scopes.is_empty() {
         // Snapshot the cell regions first — the loop mutates `region_data`.
@@ -444,7 +444,7 @@ pub(super) fn populate_decref_points(
 }
 
 /// Clamp each env cell's box release to at-or-after every release routed THROUGH
-/// that cell (docs/impl/region/bindings.md § "A cell's release lands at or after
+/// that cell (docs/impl/region/cells.md § "A cell's release lands at or after
 /// every release routed through that cell").
 ///
 /// A captured binding's init value and the box that holds it are addressed by one

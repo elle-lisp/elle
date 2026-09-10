@@ -1,6 +1,6 @@
 # lir/lower
 
-<!-- audited: 2026-09-08 -->
+<!-- audited: 2026-09-09 -->
 
 HIR to LIR lowering: explicit control flow, binding slot allocation, lbox operations, and region RC instruction emission.
 
@@ -292,7 +292,7 @@ point — it is exempt, because the block is about to hand it to its consumer.
 
 3. **`binding_to_slot` maps all accessed bindings.** If lowering fails with "unknown binding," the HIR→LIR mapping is incomplete. The key is `Binding` (hashed by `Value::to_bits()`), the value is `u16` slot index.
 
-4. **`upvalue_bindings` tracks what uses LoadCapture.** Inside fn bodies, captures, parameters, and LBox locals are upvalues; they use LoadCapture/StoreCapture. Non-LBox locals use LoadLocal/StoreLocal.
+4. **`upvalue_bindings` tracks what uses LoadCapture.** Inside fn bodies, captures, parameters, and LBox locals are upvalues; they use LoadCapture/StoreCapture. Non-LBox locals use LoadLocal/StoreLocal. A binding whose forward cell is COMPILED (`compiled_cell_bindings`, invariant 7) is not an upvalue: its slot holds the cell, so it reads LoadLocal + LoadCaptureCell. `value_slot_for` is the one place that address-space choice is re-derived, so a recording site cannot disagree with the allocation. `allocate_compiled_cell_slot` is the one place a forward cell is minted, and it registers the binding as it mints — so no binder form can do one without the other. The solver pairs the same two writes in `record_compiled_cell`.
 
 5. **Dual address space inside lambdas.** `allocate_slot` returns env-relative indices for LBox locals (`num_captures + num_locals`) and stack-relative indices for non-LBox locals (`num_locals`). Both increment `num_locals` to keep env placeholder slots aligned. The bytecode emitter's `non_cell_local_slot` converts LoadCapture → LoadLocal for non-cell locals. The JIT's `local_slot_to_var` maps stack-relative slots to the JIT variable space. The WASM emitter uses dedicated WASM locals for stack-relative slots.
 

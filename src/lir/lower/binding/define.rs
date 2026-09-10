@@ -22,9 +22,13 @@ impl<'a> Lowerer<'a> {
 
         // Check if this binding needs to be wrapped in a cell
         let needs_capture = self.arena.get(binding).needs_capture();
+        // A COMPILED forward cell already sits in the slot, put there by the
+        // `Begin` pre-pass; the init stores THROUGH it. Every other captured
+        // binding inside a lambda takes the `populate_env` env cell.
+        let compiled_cell = self.compiled_cell_bindings.contains(&binding);
 
         // Only LBox-wrapped locals need upvalue treatment inside lambdas
-        if self.in_lambda && needs_capture {
+        if self.in_lambda && needs_capture && !compiled_cell {
             self.upvalue_bindings.insert(binding);
         }
 
@@ -54,7 +58,7 @@ impl<'a> Lowerer<'a> {
             .captured_reassigned_bindings
             .contains(&binding);
         if !captured_reassigned {
-            self.record_region_slot(value.id, self.value_slot_for(binding, slot));
+            self.record_region_slot(value.id, binding, slot);
         }
 
         // Now lower the value (which can reference the binding)
@@ -85,7 +89,25 @@ impl<'a> Lowerer<'a> {
         // Seed immutable_values for constant definitions
         self.try_seed_immutable(binding, value);
 
-        if self.in_lambda && needs_capture {
+        if compiled_cell || (!self.in_lambda && needs_capture) {
+            // The cell was already created in the Begin pre-pass. Store the init
+            // into it; if the binding is reassigned, drop the init's alloc
+            // reference off its own register (NOT via the binding slot, which
+            // holds the cell — see the suppressed `record_region_slot` above).
+            self.store_captured_cell_init(binding, slot, value_reg, value, captured_reassigned);
+            // Reload from cell
+            let cell_reg2 = self.fresh_reg();
+            self.emit(LirInstr::LoadLocal {
+                dst: cell_reg2,
+                slot,
+            });
+            let result = self.fresh_reg();
+            self.emit(LirInstr::LoadCaptureCell {
+                dst: result,
+                cell: cell_reg2,
+            });
+            Ok(result)
+        } else if self.in_lambda && needs_capture {
             // Captured local → a `populate_env` env cell (StoreCapture into a
             // pre-allocated cell, no compiled MakeCaptureCell). Record its
             // env-cell placeholder so `emit_decrefs_for` releases the cell at
@@ -102,29 +124,6 @@ impl<'a> Lowerer<'a> {
             self.emit(LirInstr::LoadCapture {
                 dst: result,
                 index: slot,
-            });
-            Ok(result)
-        } else if self.in_lambda {
-            self.emit_binding_store(slot, value_reg);
-            let result = self.fresh_reg();
-            self.emit(LirInstr::LoadLocal { dst: result, slot });
-            Ok(result)
-        } else if needs_capture {
-            // The cell was already created in the Begin pre-pass. Store the init
-            // into it; if the binding is reassigned, drop the init's alloc
-            // reference off its own register (NOT via the binding slot, which
-            // holds the cell — see the suppressed `record_region_slot` above).
-            self.store_captured_cell_init(binding, slot, value_reg, value, captured_reassigned);
-            // Reload from cell
-            let cell_reg2 = self.fresh_reg();
-            self.emit(LirInstr::LoadLocal {
-                dst: cell_reg2,
-                slot,
-            });
-            let result = self.fresh_reg();
-            self.emit(LirInstr::LoadCaptureCell {
-                dst: result,
-                cell: cell_reg2,
             });
             Ok(result)
         } else {

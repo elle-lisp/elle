@@ -5,14 +5,14 @@
 //! docs/impl/region/letrec.md
 //!
 //! The single `DecrefRegion` fires at the cycle's binding scope — or, where the
-//! letrec hands a member out, where that member's own release already sits. How the
-//! letrec BODY reads at its tail, which two of the gates below ask about, is
+//! scope hands a member out, where that member's own release already sits. How that
+//! scope's BODY reads at its tail, which two of the gates below ask about, is
 //! [`body`].
 
 mod body;
 
 use super::super::*;
-use body::{collect_letrec_tail_callees, LetrecTail};
+use body::{collect_scope_tails, ScopeTail};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// One admitted `letrec` closure-cycle merge: an SCC of mutually-recursive closures
@@ -60,15 +60,20 @@ pub(crate) struct ClosureCycleMerge {
 /// a member with no static-slot cell (a mutated in-lambda letrec binding, a purely
 /// self-recursive closure) never reaches the gates at all.
 ///
+/// The binding scope is whichever node prebinds the cells, which is the `letrec`
+/// for one spelling and the `begin` a run of local `defn`s sits in for the other:
+/// a sibling reads each name before its initializer has run either way, so one
+/// predicate answers for both (`BindingInner::compiled_forward_cell`).
+///
 /// The gates, in the order the loop asks them:
 ///
-///  1. ONE binding scope for the whole SCC — the `letrec` prebinding every cell;
+///  1. ONE binding scope for the whole SCC — the node prebinding every cell;
 ///  2. per member: off the FIBER frontier, sole-held (waived for a handed-out
 ///     member), with a sole-held static-slot cell;
 ///  3. the DROP SITE — that binding scope, or the release point a handed-out
 ///     member's own region already carries;
-///  4. LETREC-SUBTREE CONTAINMENT of every member's allocation site;
-///  5. a RELEASE CHANNEL for every tail call in the letrec body;
+///  4. BINDING-SCOPE-SUBTREE CONTAINMENT of every member's allocation site;
+///  5. a RELEASE CHANNEL for every tail call in that scope's body;
 ///  6. for a member on the RETURN frontier, that the body hands the value over
 ///     itself.
 ///
@@ -148,8 +153,8 @@ pub(crate) fn compute_closure_cycle_merges(
     // adopted release point (which must post-dominate that scope from outside it). Plus
     // each letrec's body tail reading, for the tail gates. Both built once.
     let pd = super::super::postdom::PostDom::new(hir, order);
-    let mut letrec_tail: FxHashMap<HirId, LetrecTail> = FxHashMap::default();
-    collect_letrec_tail_callees(hir, &mut letrec_tail);
+    let mut scope_tail: FxHashMap<HirId, ScopeTail> = FxHashMap::default();
+    collect_scope_tails(hir, &mut scope_tail);
 
     // Transitive reach over the capture graph (a set closure, so a cycle terminates).
     let reach = |start: Region| -> FxHashSet<Region> {
@@ -222,7 +227,7 @@ pub(crate) fn compute_closure_cycle_merges(
             continue;
         }
         let binding_scope = cell_scopes.into_iter().next().unwrap();
-        let tail = letrec_tail.get(&binding_scope);
+        let tail = scope_tail.get(&binding_scope);
         let exits_frame = tail.is_some_and(|t| t.exits_frame);
 
         // The members the letrec HANDS OUT (docs/impl/region/letrec.md § "Drop site —

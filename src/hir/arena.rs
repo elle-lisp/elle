@@ -203,20 +203,25 @@ impl BindingInner {
         self.is_captured = true;
     }
 
-    /// Does a `letrec` binding's forward cell lower as a COMPILED
+    /// Does a prebound binding's forward cell lower as a COMPILED
     /// `MakeCaptureCell` held in the binding's own (stack) slot? True at top
     /// level for every captured binding (the pre-pass cell every sibling
     /// captures), and inside a lambda body for the recursive-closure shape —
     /// immutable, never mutated, lambda-initialized — so the cell is a
     /// static-slot allocation the closure-cycle merge can collapse with its SCC
     /// (docs/impl/region/letrec.md § The letrec closure-cycle merge). Any other
-    /// in-lambda captured letrec binding keeps the runtime `populate_env`
-    /// env-cell route (`StoreCapture`; docs/impl/region/bindings.md "Env cells
-    /// in loops"). The region walk's Letrec arm and `lower_letrec` both read
-    /// this one predicate — the walk must mirror the lowerer's `MakeCaptureCell`
-    /// sites exactly, or a cell region is a phantom (no allocation) or missing
-    /// (an allocation with no region).
-    pub fn letrec_compiled_cell(&self, init_is_lambda: bool, in_lambda: bool) -> bool {
+    /// in-lambda captured binding keeps the runtime `populate_env`
+    /// env-cell route (`StoreCapture`; docs/impl/region/cells.md "Env cells
+    /// in loops").
+    ///
+    /// The question is the binding's, not the binder form's: a `letrec` and a
+    /// run of local `defn`s in a `begin` express the same mutual recursion and
+    /// prebind the same forward cells, so `lower_letrec`, `lower_begin`'s
+    /// pre-pass, and the region walk's matching arms all read this one
+    /// predicate. The walk must mirror the lowerer's `MakeCaptureCell` sites
+    /// exactly, or a cell region is a phantom (no allocation) or missing (an
+    /// allocation with no region).
+    pub fn compiled_forward_cell(&self, init_is_lambda: bool, in_lambda: bool) -> bool {
         self.needs_capture()
             && (!in_lambda || (init_is_lambda && self.is_immutable && !self.is_mutated))
     }

@@ -7,7 +7,7 @@
 # is a `LoadLocal slot` + `DecrefValueRegion`, and `result_region_of` unwraps a
 # capture cell to whatever content it holds AT THE RELEASE. A reassignment
 # repoints the cell, so the release then frees a different, live value — the
-# capture-cell reassign UAF (docs/impl/region/bindings.md § "Captured reassigned
+# capture-cell reassign UAF (docs/impl/region/cells.md § "Captured reassigned
 # cells").
 #
 # The sibling fixture region-capture-cell-reassign-uaf.lisp writes its

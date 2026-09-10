@@ -48,7 +48,7 @@ impl<'a> Lowerer<'a> {
             } else {
                 // A plain stack slot: every non-upvalue binding — outside
                 // lambdas, and in-lambda for a compiled-cell letrec binding
-                // (letrec_compiled_cell) whose slot holds the MakeCaptureCell.
+                // (compiled_forward_cell) whose slot holds the MakeCaptureCell.
                 self.emit(LirInstr::LoadLocal { dst, slot });
 
                 if needs_capture {

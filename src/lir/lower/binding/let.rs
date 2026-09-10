@@ -71,7 +71,7 @@ impl<'a> Lowerer<'a> {
             // would leak. Defer the init node's decrefs, store the value,
             // then emit them against the now-populated slot.
             let slot = self.allocate_slot(*binding);
-            self.record_region_slot(init.id, self.value_slot_for(*binding, slot));
+            self.record_region_slot(init.id, *binding, slot);
             self.deferred_decref_points.insert(init.id);
             let init_reg = self.lower_expr(init)?;
             self.emit_counted_cell_read_retain(init.id, init_reg);
@@ -155,34 +155,24 @@ impl<'a> Lowerer<'a> {
 
         // First allocate all slots with nil (or cells containing nil)
         for (binding, init) in bindings.iter() {
-            let nil_reg = self.emit_const(LirConst::Nil)?;
             let bi = self.arena.get(*binding);
             let needs_capture = bi.needs_capture();
             // A COMPILED forward cell (every captured binding at top level; the
             // immutable lambda-initialized shape inside a lambda — the
             // closure-cycle merge's static-slot cells) lives in the binding's
             // own stack slot; every other in-lambda captured binding keeps the
-            // env-cell route (StoreCapture into the `populate_env` cell).
+            // env-cell route (StoreCapture into the `populate_env` cell). Both
+            // binder forms mint that cell through the one constructor, which is
+            // also what registers the binding (`allocate_compiled_cell_slot`).
             let compiled_cell = bi
-                .letrec_compiled_cell(matches!(init.kind, HirKind::Lambda { .. }), self.in_lambda);
-            let slot = self
-                .allocate_slot_routed(*binding, self.in_lambda && needs_capture && !compiled_cell);
-
+                .compiled_forward_cell(matches!(init.kind, HirKind::Lambda { .. }), self.in_lambda);
             if compiled_cell {
-                // One region PER cell — a letrec pre-allocates one cell per
-                // captured binding, and emitting them all against the letrec's
-                // single slot leaks every cell but the last (the shared-slot
-                // capture-cell leak; docs/impl/region/model.md, "one allocation
-                // execution per slot between drops").
-                let region = self.cell_region_for(*binding);
-                let cell_reg = self.fresh_reg();
-                self.emit_alloc_in(region, |region| LirInstr::MakeCaptureCell {
-                    region,
-                    dst: cell_reg,
-                    value: nil_reg,
-                });
-                self.emit_binding_store(slot, cell_reg);
-            } else if self.in_lambda && needs_capture {
+                self.allocate_compiled_cell_slot(*binding)?;
+                continue;
+            }
+            let nil_reg = self.emit_const(LirConst::Nil)?;
+            let slot = self.allocate_slot_routed(*binding, self.in_lambda && needs_capture);
+            if self.in_lambda && needs_capture {
                 self.upvalue_bindings.insert(*binding);
                 self.emit(LirInstr::StoreCapture {
                     index: slot,
@@ -219,21 +209,7 @@ impl<'a> Lowerer<'a> {
                 .captured_reassigned_bindings
                 .contains(binding);
             if !captured_reassigned {
-                // A COMPILED forward cell took a stack slot even when captured
-                // in a lambda (`allocate_slot_routed(.., !compiled_cell)` in the
-                // pre-pass above), so the space follows that same condition
-                // rather than `value_slot_for`'s capture test.
-                let celled = self.arena.get(*binding).letrec_compiled_cell(
-                    matches!(init.kind, HirKind::Lambda { .. }),
-                    self.in_lambda,
-                );
-                let space = if self.in_lambda && self.arena.get(*binding).needs_capture() && !celled
-                {
-                    super::super::ValueSlot::Env(slot)
-                } else {
-                    super::super::ValueSlot::Local(slot)
-                };
-                self.record_region_slot(init.id, space);
+                self.record_region_slot(init.id, *binding, slot);
             }
             // Defer the init node's region releases until after the value is
             // stored (mirrors `lower_let`). Without this, an init region whose
@@ -270,11 +246,9 @@ impl<'a> Lowerer<'a> {
             // A compiled-cell binding stores its init into the pre-allocated
             // MakeCaptureCell (its slot holds the CELL); an env-celled upvalue
             // stores through the populate_env cell; everything else is a plain
-            // slot store.
-            let compiled_cell = self
-                .arena
-                .get(*binding)
-                .letrec_compiled_cell(matches!(init.kind, HirKind::Lambda { .. }), self.in_lambda);
+            // slot store. The pre-pass above registered which is which, exactly
+            // as `lower_define` reads it of a `Begin`'s pre-pass.
+            let compiled_cell = self.compiled_cell_bindings.contains(binding);
             let is_upvalue = self.upvalue_bindings.contains(binding);
 
             if compiled_cell {
@@ -298,10 +272,29 @@ impl<'a> Lowerer<'a> {
                 self.pending_free_regions.push(rid);
             }
         }
-        // Every tail call the letrec BODY makes, by callee binding. A frame-replacing
-        // tail call leaves everything this node emits after the body — the scope-end
-        // releases — in dead code, so each marking below asks which release that
-        // stranding takes out and which channel supplies it.
+        self.mark_body_tail_strands(hir_id, body);
+        let result = self.lower_expr(body)?;
+        if tail_scoped {
+            self.pending_free_regions.pop();
+        }
+        // Region-demise DecrefRegion emission is in `lower_expr`.
+        let _ = region_id;
+        Ok(result)
+    }
+
+    /// Mark what a binding scope's BODY strands when it leaves by a tail call.
+    ///
+    /// A frame-replacing tail call leaves everything the scope node emits after
+    /// the body — the scope-end releases — in dead code, so each marking below
+    /// asks which release that stranding takes out and which channel supplies it.
+    ///
+    /// Read by both binder forms of a mutual-recursion cycle, because both leave
+    /// the same releases stranded: a `Letrec`'s body, and the last expression of
+    /// the `Begin` a run of local `defn`s sits in (docs/impl/region/letrec.md
+    /// § "The binder form does not decide the shape"). `scope_id` is the node
+    /// whose scope-end releases the tail call passes over.
+    pub(in crate::lir::lower) fn mark_body_tail_strands(&mut self, scope_id: HirId, body: &Hir) {
+        // Every tail call the body makes, by callee binding.
         let mut tail_callees: Vec<Binding> = Vec::new();
         Self::collect_body_tail_callees(body, &mut tail_callees);
         // A self-recursive binding of THIS letrec is cell-free, but its closure region
@@ -338,7 +331,7 @@ impl<'a> Lowerer<'a> {
                 self.stranded_self_bindings.insert(b);
             }
         }
-        // A letrec body that TAIL-CALLS a closure-cycle merge MEMBER strands the
+        // A body that TAIL-CALLS a closure-cycle merge MEMBER strands the
         // merged arena's binding-scope DecrefRegion as dead code past the
         // frame-replacing TailCall; mark those callees so the body's tail call
         // defers the merged region's release (`tail_callee_defers_release`) — the runtime then
@@ -371,7 +364,7 @@ impl<'a> Lowerer<'a> {
         {
             let scope_end_releases: Vec<crate::hir::region::Region> = self
                 .decrefs_by_decref_point
-                .get(&hir_id)
+                .get(&scope_id)
                 .cloned()
                 .unwrap_or_default();
             for b in tail_callees {
@@ -393,13 +386,6 @@ impl<'a> Lowerer<'a> {
                 }
             }
         }
-        let result = self.lower_expr(body)?;
-        if tail_scoped {
-            self.pending_free_regions.pop();
-        }
-        // Region-demise DecrefRegion emission is in `lower_expr`.
-        let _ = region_id;
-        Ok(result)
     }
 
     /// Collect the target bindings of every tail call in a letrec BODY: each

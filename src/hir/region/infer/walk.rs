@@ -196,10 +196,7 @@ impl RegionInference {
                     for (b, _) in bindings {
                         if self.arena().get(*b).needs_capture() {
                             let cell_region = self.fresh_region(self.current_region);
-                            self.begin_cell_regions
-                                .entry(hir.id)
-                                .or_default()
-                                .push((*b, cell_region));
+                            self.record_compiled_cell(hir.id, *b, cell_region);
                         }
                     }
                 }
@@ -252,7 +249,7 @@ impl RegionInference {
                 // One region PER capture cell `lower_letrec` will emit — a
                 // COMPILED MakeCaptureCell: every captured binding at top
                 // level, plus the immutable lambda-initialized shape inside a
-                // lambda (`letrec_compiled_cell`, the closure-cycle merge's
+                // lambda (`compiled_forward_cell`, the closure-cycle merge's
                 // static-slot cells). Any other in-lambda captured binding
                 // keeps the env-cell route (StoreCapture), so a region here
                 // would be a phantom. One region per cell, never one shared
@@ -269,13 +266,10 @@ impl RegionInference {
                         if self
                             .arena()
                             .get(*b)
-                            .letrec_compiled_cell(init_is_lambda, self.in_lambda())
+                            .compiled_forward_cell(init_is_lambda, self.in_lambda())
                         {
                             let cell_region = self.fresh_region(self.current_region);
-                            self.begin_cell_regions
-                                .entry(hir.id)
-                                .or_default()
-                                .push((*b, cell_region));
+                            self.record_compiled_cell(hir.id, *b, cell_region);
                         }
                     }
                 }

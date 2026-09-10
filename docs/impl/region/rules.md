@@ -339,12 +339,19 @@ Three non-negotiable properties:
    freeing-by-iteration always "succeeds" and proves nothing; freeing-by-RC
    succeeds only when the accounting is correct.
 
-2. **Observable.** The sweep reports the live region census afterward
-   (`Runtime::teardown` returns it; `--stats` prints it). The target is **zero**
-   regions remaining. A non-zero residue is the standing list of open leaks: the
-   number *is* the remaining work, not a tuning knob. `tests/elle/oracle.lisp`
-   measures the same property as a per-op leak rate while a program runs;
-   `tests/region_process_teardown` counts what survives the process.
+2. **Observable, and zero.** The sweep reports the live region census afterward
+   (`Runtime::teardown` returns it; `--stats` prints it), and **zero** is the
+   claim `tests/region_process_teardown` gates — not a target the number is
+   allowed to approach. A residue is the standing list of open leaks: the number
+   *is* the remaining work, not a tuning knob. `tests/elle/oracle.lisp` measures
+   the same property as a per-op leak rate while a program runs; this counts what
+   survives the process, which is the axis that sees a leak whose rate is one per
+   PROGRAM rather than one per op.
+
+   Reading the count as a target is what let the last one stand: a single
+   reference cycle — the async scheduler's closures, their forward cells, and the
+   fiber its tables held — held 100% of the residue of every program ever run,
+   and nothing failed on it (elle-lisp/elle#1081).
 
 3. **No unexplained references.** A surviving region's RC is explained by the
    in-edges other survivors point at it, and by nothing else. The remainder —

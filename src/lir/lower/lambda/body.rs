@@ -39,6 +39,10 @@ impl<'a> Lowerer<'a> {
         let saved_num_captures = self.num_captures;
         let saved_num_local_params = self.num_local_params;
         let saved_upvalue_bindings = std::mem::take(&mut self.upvalue_bindings);
+        // Slot address spaces are per-function, so the compiled-cell set is too:
+        // a binding of the enclosing body must not decide how a same-named slot
+        // in this one is read.
+        let saved_compiled_cell_bindings = std::mem::take(&mut self.compiled_cell_bindings);
         let saved_discard_slot = self.discard_slot;
         let saved_region_to_table = std::mem::take(&mut self.region_to_table);
         // `region_to_slot` is the post-ANF replacement for the
@@ -291,6 +295,7 @@ impl<'a> Lowerer<'a> {
         self.num_captures = saved_num_captures;
         self.num_local_params = saved_num_local_params;
         self.upvalue_bindings = saved_upvalue_bindings;
+        self.compiled_cell_bindings = saved_compiled_cell_bindings;
         self.discard_slot = saved_discard_slot;
         self.region_to_table = saved_region_to_table;
         self.region_to_slot = saved_region_to_slot;
