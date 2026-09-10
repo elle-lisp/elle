@@ -1,7 +1,6 @@
 (elle/epoch 12)
+# audited: 2026-09-10
 # Integration tests for the eval special form
-#
-# Migrated from tests/integration/eval.rs (46 tests)
 
 
 # Helper: assert that an expression errors (uses protect to capture VM-level signals)
@@ -45,11 +44,16 @@
 (assert (= (eval (list '+ 1 2)) 3) "eval list construction")
 
 # ============================================================
-# Env argument handling (REMOVED)
+# Env argument handling
 # ============================================================
-# Environment argument support was intentionally removed from eval.
-# Tests that relied on (eval expr env) have been removed.
-# Lexical scoping via closures is the recommended pattern.
+# The optional second argument is a struct; its symbol-keyed entries
+# become immutable bindings visible to the evaluated expression.
+
+# test_eval_with_env_struct
+(assert (= (eval '(+ x y) {'x 10 'y 20}) 30) "eval with explicit env struct")
+
+# test_eval_env_nil_is_no_env
+(assert (= (eval '(+ 1 2) nil) 3) "eval with nil env")
 
 # ============================================================
 # Prelude macros in eval'd code
@@ -130,8 +134,10 @@
   (assert (not ok?) "eval runtime error (division by zero)"))
 
 # test_eval_undefined_variable
-(let [[ok? _] (protect ((fn () (eval 'undefined_var))))]
-  (assert (not ok?) "eval undefined variable"))
+# The failure is a named resolution error, never an internal one (#1094).
+(assert-err-contains (fn () (eval 'undefined_var))
+                     "undefined variable: undefined_var"
+                     "eval undefined variable")
 
 # ============================================================
 # Sequential evals (expander caching)
@@ -156,12 +162,10 @@
 # Eval with match
 # ============================================================
 
-# test_eval_with_match — bind match result to var first (known bug workaround)
-(def @match-result
-  (eval '(match 42
-           42 "found"
-           _ "not found")))
-(assert (= match-result "found") "eval with match")
+# test_eval_with_match
+(assert (= (eval '(match 42
+                    42 "found"
+                    _ "not found")) "found") "eval with match")
 
 # ============================================================
 # Eval with list operations
@@ -230,14 +234,26 @@
 (assert (= (eval '(length "hello")) 5) "eval with string length")
 
 # ============================================================
-# Eval with multiple env bindings (REMOVED)
+# Same-unit definitions and eval
 # ============================================================
-# This test relied on environment argument support, which was removed.
+# A top-level defn is a letrec binding of the enclosing file, not a
+# global: a bare eval cannot see it, and the failure names the symbol
+# (#1094). Passing (environment) hands the lexical scope over.
 
-# ============================================================
-# Eval with env binding shadowing primitives (REMOVED)
-# ============================================================
-# This test relied on environment argument support, which was removed.
+(defn same-unit-fn [x]
+  (+ x 1))
+
+# The defn is live in this unit...
+(assert (= (same-unit-fn 1) 2) "same-unit defn callable directly")
+
+# ...but invisible to a bare eval, with a resolution error naming it.
+(assert-err-contains (fn () (eval '(same-unit-fn 5)))
+                     "undefined variable: same-unit-fn"
+                     "bare eval does not see same-unit definitions")
+
+# (environment) makes it visible.
+(assert (= (eval '(same-unit-fn 5) (environment)) 6)
+        "eval with (environment) sees same-unit definitions")
 
 # ============================================================
 # Eval returns keyword

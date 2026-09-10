@@ -1,3 +1,4 @@
+// audited: 2026-09-10
 //! The special-form registry: the single source of truth for the names the
 //! analyzer treats as special forms.
 //!
@@ -324,7 +325,7 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
     SpecialForm {
         name: "eval",
         handler: Some(sf_eval),
-        doc: "Compile and execute an expression at runtime. The expression is a quoted datum that goes through the full compilation pipeline (expand, analyze, lower, emit, execute). An optional second argument provides an environment struct — its symbol-keyed entries become immutable bindings visible to the expression.",
+        doc: "Compile and execute an expression at runtime. The expression is a quoted datum that goes through the full compilation pipeline (expand, analyze, lower, emit, execute). It compiles against the primitives and the prelude only: the enclosing program's own bindings are not visible. An optional second argument provides an environment struct — its symbol-keyed entries become immutable bindings visible to the expression; pass (environment) to hand over the caller's lexical scope. A name that resolves against none of these is an undefined-variable error, surfaced as an :eval-error.",
         params: &["expr", "env?"],
         arity: Arity::Range(1, 2),
         signal: Signal::yields(),

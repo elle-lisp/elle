@@ -1,3 +1,4 @@
+// audited: 2026-09-10
 //! Runtime eval instruction handler.
 //!
 //! Compiles and executes a datum (quoted value) at runtime.
@@ -182,6 +183,15 @@ fn eval_in_arena(
     let mut analysis = analyzer
         .analyze(&expanded)
         .map_err(|e| LError::generic(format!("eval: analysis failed: {}", e)))?;
+    // Recoverable analysis errors (undefined variables, signal mismatches)
+    // accumulate as poison nodes; unreported they reach the lowerer and die
+    // as "internal: error poison node in lowerer".
+    if !analysis.errors.is_empty() {
+        return Err(LError::generic(format!(
+            "eval: analysis failed: {}",
+            analysis.errors[0].description()
+        )));
+    }
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
 
