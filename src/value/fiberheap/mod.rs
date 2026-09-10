@@ -1,4 +1,7 @@
+// audited: 2026-09-10
 //! Per-instance heap ownership.
+//!
+//! docs/impl/region/model.md
 //!
 //! `FiberHeap` uses `RegionStore` — a physical region allocator where
 //! each region owns its pages exclusively. `FreeRegion(ρ)` tears down
@@ -154,6 +157,15 @@ impl FiberHeap {
     /// Whether this instance's default trait tables have been built.
     pub fn default_traits_built(&self) -> bool {
         !self.default_traits.is_empty()
+    }
+
+    /// This instance's whole default trait table, indexed by `HeapTag as
+    /// usize`. The image dumper reads it to ask which tag a `traits` pointer
+    /// names, which the per-tag accessor cannot answer: one traitset serves
+    /// several tags, and a value may carry a table other than its own tag's
+    /// (docs/impl/image.md).
+    pub fn default_traits_table(&self) -> &[Value] {
+        &self.default_traits
     }
 
     /// Install this instance's default trait table (indexed by `HeapTag as usize`).

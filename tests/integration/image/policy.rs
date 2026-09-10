@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-10
 // What the dumper refuses, and how it says so.
 // docs/impl/image.md
 
@@ -36,18 +36,24 @@ fn mutable_value_refuses_dump() {
     assert!(!path.exists(), "refused dump left a partial file");
 }
 
-// A carried traitset is a reference out of the data graph (the default
-// traitsets are instance infrastructure — § "Process-owned resources
-// reconstruct in place"); the dumper refuses it rather than persisting a
-// dangling instance pointer.
+// A mutable value inside a traitset is refused like any other: a table is
+// program data, so it is walked, not waved through. What a traits field is
+// allowed to name lives in image/traits.rs.
 #[test]
-fn traited_value_refuses_dump() {
+fn a_mutable_value_inside_a_traitset_refuses_dump() {
     let dir = crate::common::ScratchDir::new("image-traits");
     let path = dir.join("traits.image");
 
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let table = alloc_str(&mut src, region, "pretend traitset");
+    let store = src.alloc_in_region(
+        HeapObject::LArrayMut {
+            data: Rc::new(std::cell::RefCell::new(vec![Value::int(1)])),
+            traits: Value::NIL,
+        },
+        region,
+    );
+    let table = alloc_struct(&mut src, region, &[(TableKey::keyword("method"), store)]);
     let slice = src.alloc_region_slice_in_region("x".as_bytes(), region);
     let traited = src.alloc_in_region(
         HeapObject::LString {
@@ -58,8 +64,11 @@ fn traited_value_refuses_dump() {
     );
     match image::dump(&mut src, &SymbolTable::new(), traited, &path) {
         Err(ImageError::Unsupported(what)) => {
-            assert!(what.contains("traits"), "refusal does not say traits: {what}");
+            assert!(
+                what.contains("LArrayMut"),
+                "refusal does not name the variant: {what}"
+            );
         }
-        other => panic!("expected traits refusal, got {other:?}"),
+        other => panic!("expected unsupported-value refusal, got {other:?}"),
     }
 }

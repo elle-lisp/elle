@@ -1,6 +1,6 @@
 # Landing order and test plan
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-10 -->
 
 What lands in which order, and the pins each milestone must land with.
 
@@ -47,8 +47,9 @@ Then the image milestones:
    the sealed set, which only a boot graph holds: closures, closure
    templates, native-fns, and `Parameter`.
 6. **boot** — cell snapping, closures and closure templates in the body, the
-   primitive table that remaps a native-fn by name, `Parameter` and the
-   reconstruction stream its default needs, dump-boot, warm cache, embedded
+   primitive table that remaps a native-fn by name and the user traitsets it
+   makes dumpable, the reconstruction stream — which the default trait tables
+   need before `Parameter`'s stdio default does — dump-boot, warm cache, embedded
    blob, per-worker hydration for `sys/spawn`, the encoded-LIR side-stream
    with lazy decode, compiler-state persistence, the hydrated-region interval
    table that keeps `region_of_ptr` off the probe ladder
@@ -101,6 +102,18 @@ Then the image milestones:
 - Mapping: replace the image file by rename while a hydration is live, then
   read the hydrated values — the old inode's mapping is intact. Release a
   file-backed page and assert the pool unmapped it rather than caching it.
+- Traits: a value carrying its instance's default traitset hydrates carrying
+  the *hydrating* instance's table for that tag, and a user traitset hydrates
+  out of the body with its methods intact. The counter-factual is the identity
+  check: a default traitset copied into the body would hydrate as a table equal
+  to the instance's own and distinct from it, which only a pointer comparison
+  against `default_traits_for` can see. Freeing the hydrated region releases the
+  trait table's region exactly once, and the free-time edge oracle agrees with
+  the recorded table.
+- Primitives: a native-fn in the body answers to the live registry's id for its
+  name, in an instance that minted its ids differently. A def the canonical
+  tables do not name fails the dump by name, and two dumps write one file
+  whatever ids the dumping process handed out.
 - Snapping: boot from image, run the full smoke corpus — behavior identical
   to source boot. A stdlib top-level that is `assign`ed must fail the dump
   with a named error.

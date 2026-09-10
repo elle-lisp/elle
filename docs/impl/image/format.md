@@ -1,6 +1,6 @@
 # The image file
 
-<!-- audited: 2026-09-08 -->
+<!-- audited: 2026-09-10 -->
 
 The byte layout of an image, and the fingerprint that decides whether this
 binary may map it.
@@ -17,9 +17,9 @@ One image is one file, or one blob embedded in a larger one:
 | header | magic, format version, fingerprint, section offsets, page count |
 | pages | the dumped region's pages, largest first: body bytes per page at base-page-aligned file offsets, so the section is mappable. Descending size order makes the packed layout self-aligning: every earlier page's size is a multiple of every later page's, so each page's offset — in the file and in the mapped interval — is a multiple of its own size, satisfying the masked-header walk with no padding |
 | page table | (size, object cursor, data cursor) per page, in placement order — rebuilds each page's cursors |
-| relocations | pointer stream: (slot offset, target segment, target offset); primitive stream: (slot offset); file stream: (slot offset, file index); reconstruction stream: (slot offset, constructor tag). Offsets are region-relative bytes: the hydrated region is one contiguous interval, so `base + offset` names any slot or target in O(1) and the (page, offset) pair collapses |
+| relocations | pointer stream: (slot offset, target offset); primitive stream: (slot offset, name index); file stream: (slot offset, file index); reconstruction stream: (slot offset, constructor tag). Offsets are region-relative bytes: the hydrated region is one contiguous interval, so `base + offset` names any slot or target in O(1) and the (page, offset) pair collapses |
 | object index | (offset, tag) per heap object, sorted — rebuilds `dtors`/`ref_objs` and drives the verifier |
-| primitive table | primitive names in dump-time `prim_id` order |
+| primitive table | the names the body's native-fn slots hold, one length-prefixed string each, sorted by name — the primitive stream indexes it |
 | name table | the spellings of the symbols and keywords in the body, one length-prefixed string each, sorted by name |
 | file table | the source-file names the body's spans point at, one length-prefixed string each, sorted by name — the file stream indexes it |
 | signal table | user-defined signal names in dump-time bit order |
@@ -56,11 +56,9 @@ its alignment to the largest base page any supported host reports.
 ## Relocation slots
 
 A pointer slot is any 8-byte field holding an absolute address: a heap-tagged
-`Value`'s payload, a `RegionSlice`'s ptr. A primitive slot is a `Value` with
-`TAG_NATIVE_FN`, remapped by name — and a name missing from the live registry
-is minted on the spot from its static def (trait-method handlers are appended
-to the registry on first use, so a dump can hold ids the fresh process has not
-minted yet). Symbol and keyword payloads are stable hashes and need no
+`Value`'s payload, a `RegionSlice`'s ptr. A primitive slot is the payload word
+of a `Value` with `TAG_NATIVE_FN`, which the primitive stream names.
+Symbol and keyword payloads are stable hashes and need no
 relocation. The dumper emits each entry as it copies the object — it knows
 every variant's layout, so there is no post-hoc discovery, and targets are
 region-relative offsets so hydration rewrites each slot in O(1) with no
@@ -117,6 +115,37 @@ node with no pointers would otherwise have stayed clean. Leaving the ids alone
 is not the cheaper alternative but the wrong one: the span would name whatever
 file the hydrating process happens to have interned at that index, and print
 it in an error message.
+
+## A primitive travels by name, for the same reason
+
+A native-fn is the immediate `Value{TAG_NATIVE_FN, prim_id}`, and that id is a
+dense index into the process's primitive registry. The canonical tables seed it
+in source order, and every other def — a trait-method handler, an FFI callback
+— is appended in the order the process first asks for it. So the id is worth
+even less across processes than a file id is, and it travels the same way.
+
+The primitive table holds the spellings the body's native-fn slots name,
+sorted; the primitive stream names each slot with the index of its spelling.
+Hydration resolves each name against its own registry and writes the live id
+into the payload word. The dumper zeroes that word first, so the artifact never
+records which ids the dumping process happened to hand out, and two builds that
+number their primitives differently write one file.
+
+A name the canonical tables do not carry fails the dump, naming the primitive
+([image.md](../image.md) § Sealing argues why nothing is lost).
+
+## A reconstruction entry rewrites a whole `Value`
+
+An entry is a slot offset and a constructor tag. A pointer relocation's target
+lies inside the image, so it rewrites one payload word and leaves the tag the
+canonical bytes already carry. A reconstructed value comes from the hydrating
+instance instead, and neither of its words is known at dump time — so the entry
+rewrites both, and the dumper leaves the slot zero.
+
+The one constructor this format carries is the default traitset, tagged with
+the heap tag whose table to look up. An instance whose trait tables are not
+built refuses the load by name, rather than writing nil into a traits slot and
+leaving a value that answers no protocol.
 
 ## The scope watermark bounds what a fresh expander may mint
 

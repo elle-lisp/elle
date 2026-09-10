@@ -1,4 +1,7 @@
+// audited: 2026-09-10
 //! Heap-allocated value types for the tagged-union value system.
+//!
+//! docs/impl/values.md
 //!
 //! All non-immediate values (strings, cons cells, vectors, closures, etc.)
 //! are stored on the heap and accessed through `HeapObject`.
@@ -37,10 +40,17 @@ pub struct Pair {
 
 impl Pair {
     pub fn new(first: Value, rest: Value) -> Self {
+        Pair::with_traits(first, rest, Value::NIL)
+    }
+
+    /// A pair carrying a trait table. Every other traitable variant takes its
+    /// table as a field of the `HeapObject` arm, so a caller that rebuilds one
+    /// — the image dumper's compacting copy — needs the same reach here.
+    pub fn with_traits(first: Value, rest: Value, traits: Value) -> Self {
         Pair {
             first,
             rest,
-            traits: Value::NIL,
+            traits,
         }
     }
 }

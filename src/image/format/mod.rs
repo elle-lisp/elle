@@ -1,16 +1,23 @@
-// audited: 2026-09-09
-//! The image file's byte layout, and the fingerprint that gates hydration.
+// audited: 2026-09-10
+//! The image file's geometry and the fingerprint that gates hydration, with
+//! the codecs its tables are written and read through.
 //!
 //! docs/impl/image/format.md
 //!
 //! One header block of `HEADER_BLOCK` bytes zero-padded to `pages_offset()`,
-//! then the pages section, then the metadata sections (page table,
-//! relocations and file slots, object index, and the name and file tables).
+//! then the pages section, then the metadata sections (page table, the four
+//! relocation streams, object index, and the three string tables).
 //! Pages are stored largest first, so
 //! packing them contiguously keeps every page's offset a multiple of its size —
 //! the self-alignment the masked-header walk requires — and, since the
 //! section starts on a base-page boundary, every file offset stays legal for
 //! `mmap`. All integers are little-endian u64 unless noted.
+
+mod header;
+mod sections;
+
+pub(crate) use header::Header;
+pub use sections::{sections, Sections};
 
 use std::mem::{align_of, size_of};
 
@@ -20,8 +27,7 @@ use crate::value::Value;
 
 use super::ImageError;
 
-pub(crate) const MAGIC: [u8; 8] = *b"ELLEIMG\0";
-pub(crate) const VERSION: u32 = 1;
+pub(crate) const VERSION: u32 = 2;
 
 /// Fixed size of the serialized header block: the magic, the section
 /// geometry, the root, and the fingerprint string. The pages section starts
@@ -44,10 +50,6 @@ pub(crate) fn pages_offset() -> usize {
 pub(crate) fn pages_offset_for(base_page: usize) -> usize {
     HEADER_BLOCK.next_multiple_of(base_page)
 }
-
-/// Byte offset of the fingerprint length field; the string follows it. Every
-/// fixed field sits below it, so adding one moves this and bumps [`VERSION`].
-const FINGERPRINT_AT: usize = 104;
 
 /// The live process's image fingerprint. An image whose stored fingerprint
 /// differs is rejected at hydration — images are regenerated, never
@@ -73,109 +75,6 @@ pub fn fingerprint() -> String {
     )
 }
 
-/// Where each section sits in an image's bytes, for a caller that reads or
-/// damages one without mapping the image.
-#[derive(Debug, Clone)]
-pub struct Sections {
-    /// The mappable page bytes.
-    pub pages: std::ops::Range<usize>,
-    /// `(size, object cursor, data cursor)` per page, in placement order.
-    pub page_table: std::ops::Range<usize>,
-    /// `(slot, target)` pairs, both region-relative.
-    pub relocations: std::ops::Range<usize>,
-    /// `(slot, file index)` pairs, one per span that names a file.
-    pub file_slots: std::ops::Range<usize>,
-    /// `(offset, tag)` pairs, one per heap object.
-    pub index: std::ops::Range<usize>,
-    /// Length-prefixed spellings, sorted by name.
-    pub names: std::ops::Range<usize>,
-    /// Length-prefixed source-file names, sorted, indexed by the file stream.
-    pub files: std::ops::Range<usize>,
-}
-
-impl Sections {
-    /// Bytes per page-table entry.
-    pub const PAGE_ENTRY_BYTES: usize = PAGE_ENTRY_BYTES;
-    /// Bytes per relocation entry.
-    pub const RELOC_BYTES: usize = RELOC_BYTES;
-    /// Bytes per object-index entry.
-    pub const INDEX_BYTES: usize = INDEX_BYTES;
-    /// Bytes per file-slot entry.
-    pub const FILE_SLOT_BYTES: usize = FILE_SLOT_BYTES;
-}
-
-/// The section ranges of an image held in memory. Reads the header only, so
-/// it answers for a file this binary could not hydrate — a fingerprint
-/// mismatch is not this function's business.
-pub fn sections(bytes: &[u8]) -> Result<Sections, ImageError> {
-    let header = Header::parse(bytes)?;
-    let counts = [
-        (header.n_pages, PAGE_ENTRY_BYTES),
-        (header.n_relocs, RELOC_BYTES),
-        (header.n_file_slots, FILE_SLOT_BYTES),
-        (header.n_objects, INDEX_BYTES),
-    ];
-    let mut at = pages_offset()
-        .checked_add(usize::try_from(header.pages_len).unwrap_or(usize::MAX))
-        .ok_or_else(|| ImageError::Corrupt("pages section length out of range".into()))?;
-    let pages = pages_offset()..at;
-    let mut ranges = Vec::with_capacity(counts.len() + 2);
-    // The two string tables are measured in bytes rather than entries,
-    // because their entries are spellings and spellings vary in length.
-    let tables = [(header.names_len, 1), (header.files_len, 1)];
-    for (n, stride) in counts.into_iter().chain(tables) {
-        let len = usize::try_from(n)
-            .ok()
-            .and_then(|n| n.checked_mul(stride))
-            .ok_or_else(|| ImageError::Corrupt("section counts out of range".into()))?;
-        let end = at
-            .checked_add(len)
-            .ok_or_else(|| ImageError::Corrupt("section counts out of range".into()))?;
-        ranges.push(at..end);
-        at = end;
-    }
-    if bytes.len() < at {
-        return Err(ImageError::Corrupt(
-            "file shorter than its sections claim".into(),
-        ));
-    }
-    Ok(Sections {
-        pages,
-        page_table: ranges[0].clone(),
-        relocations: ranges[1].clone(),
-        file_slots: ranges[2].clone(),
-        index: ranges[3].clone(),
-        names: ranges[4].clone(),
-        files: ranges[5].clone(),
-    })
-}
-
-/// Everything the header block records besides the fingerprint.
-#[derive(Debug, Clone)]
-pub(crate) struct Header {
-    /// Total bytes of the pages section (sum of page sizes).
-    pub pages_len: u64,
-    pub n_pages: u64,
-    pub n_relocs: u64,
-    pub n_objects: u64,
-    /// The root value: its tag word, and — when `root_is_heap` — the
-    /// region-relative offset of its object; otherwise the raw payload.
-    pub root_tag: u64,
-    pub root_payload: u64,
-    pub root_is_heap: bool,
-    /// `(slot, file index)` pairs, one per span that names a file.
-    pub n_file_slots: u64,
-    /// Bytes of the name table. Counted rather than tallied, because an entry
-    /// is a spelling and spellings differ in length.
-    pub names_len: u64,
-    /// Bytes of the file table, counted for the same reason.
-    pub files_len: u64,
-    /// One past the highest hygiene scope counter the body carries; zero when
-    /// the body holds no syntax (docs/impl/image/format.md).
-    pub scope_watermark: u64,
-    pub fingerprint: String,
-}
-
 /// One entry of the page table: a page's size and its two bump cursors.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PageEntry {
@@ -188,6 +87,8 @@ pub(crate) const PAGE_ENTRY_BYTES: usize = 24;
 pub(crate) const RELOC_BYTES: usize = 16;
 pub(crate) const INDEX_BYTES: usize = 16;
 pub(crate) const FILE_SLOT_BYTES: usize = 16;
+pub(crate) const PRIM_SLOT_BYTES: usize = 16;
+pub(crate) const RECON_BYTES: usize = 16;
 
 fn put(buf: &mut [u8], at: usize, v: u64) {
     buf[at..at + 8].copy_from_slice(&v.to_le_bytes());
@@ -195,78 +96,6 @@ fn put(buf: &mut [u8], at: usize, v: u64) {
 
 fn get(buf: &[u8], at: usize) -> u64 {
     u64::from_le_bytes(buf[at..at + 8].try_into().expect("8-byte read"))
-}
-
-impl Header {
-    /// Serialize into the file's whole header prefix: the `HEADER_BLOCK`
-    /// bytes of fields, then zero padding out to [`pages_offset`]. Emitting
-    /// the padding here keeps the pages section's start in one place — the
-    /// dumper appends pages to whatever this returns.
-    pub fn to_block(&self) -> Result<Vec<u8>, ImageError> {
-        let fp = self.fingerprint.as_bytes();
-        if FINGERPRINT_AT + 8 + fp.len() > HEADER_BLOCK {
-            return Err(ImageError::Corrupt(
-                "fingerprint does not fit the header block".into(),
-            ));
-        }
-        let mut block = vec![0u8; pages_offset()];
-        block[0..8].copy_from_slice(&MAGIC);
-        block[8..12].copy_from_slice(&VERSION.to_le_bytes());
-        put(&mut block, 16, self.pages_len);
-        put(&mut block, 24, self.n_pages);
-        put(&mut block, 32, self.n_relocs);
-        put(&mut block, 40, self.n_objects);
-        put(&mut block, 48, self.root_tag);
-        put(&mut block, 56, self.root_payload);
-        put(&mut block, 64, self.root_is_heap as u64);
-        put(&mut block, 72, self.names_len);
-        put(&mut block, 80, self.n_file_slots);
-        put(&mut block, 88, self.files_len);
-        put(&mut block, 96, self.scope_watermark);
-        put(&mut block, FINGERPRINT_AT, fp.len() as u64);
-        block[FINGERPRINT_AT + 8..FINGERPRINT_AT + 8 + fp.len()].copy_from_slice(fp);
-        Ok(block)
-    }
-
-    /// Parse a header block. Rejects a wrong magic or version as corrupt;
-    /// the fingerprint is parsed here and compared by the caller.
-    pub fn parse(block: &[u8]) -> Result<Header, ImageError> {
-        if block.len() < HEADER_BLOCK {
-            return Err(ImageError::Corrupt("file shorter than the header".into()));
-        }
-        if block[0..8] != MAGIC {
-            return Err(ImageError::Corrupt("bad magic".into()));
-        }
-        let version = u32::from_le_bytes(block[8..12].try_into().expect("4-byte read"));
-        if version != VERSION {
-            return Err(ImageError::Corrupt(format!(
-                "format version {version}, this binary reads {VERSION}"
-            )));
-        }
-        let fp_len = get(block, FINGERPRINT_AT) as usize;
-        if FINGERPRINT_AT + 8 + fp_len > HEADER_BLOCK {
-            return Err(ImageError::Corrupt(
-                "fingerprint length out of range".into(),
-            ));
-        }
-        let fingerprint =
-            String::from_utf8(block[FINGERPRINT_AT + 8..FINGERPRINT_AT + 8 + fp_len].to_vec())
-                .map_err(|_| ImageError::Corrupt("fingerprint is not UTF-8".into()))?;
-        Ok(Header {
-            pages_len: get(block, 16),
-            n_pages: get(block, 24),
-            n_relocs: get(block, 32),
-            n_objects: get(block, 40),
-            root_tag: get(block, 48),
-            root_payload: get(block, 56),
-            root_is_heap: get(block, 64) != 0,
-            names_len: get(block, 72),
-            n_file_slots: get(block, 80),
-            files_len: get(block, 88),
-            scope_watermark: get(block, 96),
-            fingerprint,
-        })
-    }
 }
 
 pub(crate) fn write_page_entry(out: &mut Vec<u8>, e: PageEntry) {
@@ -303,7 +132,8 @@ pub(crate) fn write_name(out: &mut Vec<u8>, name: &str) {
     out.resize(out.len().next_multiple_of(8), 0);
 }
 
-/// Decode the name table into borrowed spellings.
+/// Decode a string table into borrowed spellings. The name, file and
+/// primitive tables share this encoding.
 ///
 /// No hash is stored, so nothing here can disagree with the payloads in the
 /// body: the caller hashes each spelling as it records it
@@ -331,11 +161,33 @@ pub(crate) fn read_names(buf: &[u8]) -> Result<Vec<&str>, ImageError> {
     Ok(out)
 }
 
-/// Page sizes a host may report. 4 KiB is Linux on x86-64, 16 KiB is macOS
-/// on arm64, 64 KiB is an arm64 Linux kernel build — the alignment rule has
-/// to hold at every one of them, not just this machine's.
-#[cfg(test)]
-const HOST_PAGE_SIZES: [usize; 3] = [4096, 16384, 65536];
+/// What a reconstruction entry asks the hydrating instance to build. The tag
+/// is a kind in the high word and its argument in the low one, so a
+/// constructor added later needs no re-encoding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ctor {
+    /// This instance's default traitset for a heap tag.
+    DefaultTraits(HeapTag),
+}
+
+const CTOR_DEFAULT_TRAITS: u64 = 1;
+
+impl Ctor {
+    pub(crate) fn encode(self) -> u64 {
+        match self {
+            Ctor::DefaultTraits(tag) => (CTOR_DEFAULT_TRAITS << 32) | tag as u64,
+        }
+    }
+
+    pub(crate) fn decode(raw: u64) -> Result<Ctor, ImageError> {
+        match raw >> 32 {
+            CTOR_DEFAULT_TRAITS => Ok(Ctor::DefaultTraits(tag_from_u64(raw & 0xFFFF_FFFF)?)),
+            _ => Err(ImageError::Corrupt(format!(
+                "unknown constructor tag {raw} in the reconstruction stream"
+            ))),
+        }
+    }
+}
 
 /// Decode a stored tag word. Exhaustive over `HeapTag`: an unknown value is
 /// image corruption, not a variant to guess at.
@@ -375,6 +227,12 @@ pub(crate) fn tag_from_u64(raw: u64) -> Result<HeapTag, ImageError> {
     };
     Ok(tag)
 }
+
+/// Page sizes a host may report. 4 KiB is Linux on x86-64, 16 KiB is macOS
+/// on arm64, 64 KiB is an arm64 Linux kernel build — the alignment rule has
+/// to hold at every one of them, not just this machine's.
+#[cfg(test)]
+const HOST_PAGE_SIZES: [usize; 3] = [4096, 16384, 65536];
 
 #[cfg(test)]
 mod tests {
@@ -426,35 +284,6 @@ mod tests {
     fn this_hosts_pages_offset_is_mmap_legal() {
         assert_eq!(pages_offset() % base_page(), 0);
         assert_eq!(pages_offset(), pages_offset_for(base_page()));
-    }
-
-    // The dumper appends pages directly to `to_block`'s output, and the
-    // hydrator maps them from `pages_offset` — so the block's length is the
-    // agreement between the two halves. The counter-factual: a block padded
-    // to HEADER_BLOCK while the hydrator maps from a 16 KiB boundary reads
-    // 12 KiB of header as page bytes, and every object decodes as garbage.
-    #[test]
-    fn the_header_block_runs_exactly_up_to_the_pages_section() {
-        let header = Header {
-            pages_len: 0,
-            n_pages: 0,
-            n_relocs: 0,
-            n_objects: 0,
-            root_tag: 0,
-            root_payload: 0,
-            root_is_heap: false,
-            n_file_slots: 0,
-            names_len: 0,
-            files_len: 0,
-            scope_watermark: 0,
-            fingerprint: fingerprint(),
-        };
-        let block = header.to_block().expect("fingerprint fits");
-        assert_eq!(block.len(), pages_offset());
-        assert!(
-            block[HEADER_BLOCK..].iter().all(|&b| b == 0),
-            "padding between the header fields and the pages section is not zero"
-        );
     }
 
     // The page size shapes the file geometry, so an image built under a
