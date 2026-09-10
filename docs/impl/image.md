@@ -463,7 +463,10 @@ size is a power of two at or above the base page, and the sizes sum to the
 section; each relocation slot lies inside the image and is 8-byte aligned;
 each target lies inside it; each object offset admits a whole `HeapObject`
 and carries a tag in the sealed set; the root names an object inside the
-pages or carries an immediate tag. This pass reads the file's tables rather
+pages, or carries an immediate tag and no pages at all — an immediate root is
+what a graph that allocated nothing produces, so pages beside one are drift,
+and the root's payload word means one thing rather than either. This pass
+reads the file's tables rather
 than its page bytes, so it costs no faults, and it is what stops a corrupt
 table from writing outside the image during relocation.
 
