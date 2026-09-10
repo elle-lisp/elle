@@ -1,14 +1,18 @@
-//! JIT compilation for Elle
-//!
-//! This module provides JIT compilation of LIR functions to native code
-//! using Cranelift. Functions with `Signal::silent()` or `Signal::yields()` are
-//! JIT candidates. Polymorphic functions remain excluded.
+// audited: 2026-09-10
+// docs/impl/jit.md
+//! Cranelift JIT compilation of LIR functions, and the types every stage of it
+//! shares.
 //!
 //! ## Architecture
 //!
 //! ```text
 //! LirFunction -> JitCompiler -> Cranelift IR -> Native code -> JitCode
 //! ```
+//!
+//! A polymorphic or yielding function compiles like any other — the runtime
+//! dispatch helper handles an arbitrary callable, and a callee that suspends
+//! leaves through the yield side-exit. What `JitCompiler::compile` refuses is
+//! listed there.
 //!
 //! ## Calling Convention
 //!
@@ -20,15 +24,16 @@
 //!     args: *const Value,     // arguments array
 //!     nargs: u32,             // number of arguments
 //!     vm: *mut VM,            // pointer to VM (for globals, function calls)
-//!     self_bits: u64,         // closure identity bits (for self-tail-call detection)
+//!     self_tag: u64,          // the executing closure's own Value, tag half
+//!     self_payload: u64,      // and its payload half
 //! ) -> Value;
 //! ```
 //!
-//! The 5th parameter `self_bits` enables self-tail-call optimization: when a
-//! function tail-calls itself, the JIT compares the callee against `self_bits`.
-//! If equal, it updates the arg variables and jumps to the loop header instead
-//! of calling `elle_jit_tail_call`. This turns self-recursive tail calls into
-//! native loops.
+//! The last two parameters carry the executing closure as a `Value`, which is
+//! what makes the self-tail-call optimization possible: a tail call compares its
+//! callee against that pair, and on a match updates the argument variables and
+//! jumps to the loop header instead of calling `elle_jit_tail_call`. So a
+//! self-recursive tail call is a native loop.
 
 mod calls;
 mod code;
@@ -98,6 +103,45 @@ impl JitCtx {
     #[inline]
     pub(crate) fn vm(&self) -> *mut crate::vm::VM {
         self.vm
+    }
+}
+
+/// The two deferral channels one `TailCall` carries to `elle_jit_tail_call`: the
+/// callee closure's own region, and the merged closure-cycle arena's static slot
+/// (see `LirInstr::TailCall`). A frame-replacing tail call strands both releases,
+/// and the activation that runs the callee takes them over
+/// (docs/impl/region/relocate.md § "A channel built in compiled code hands its
+/// release forward").
+///
+/// Both are `u32` at the C ABI and neither is the other, so they cross as one
+/// named pair rather than as two bare arguments a call site could swap.
+#[derive(Clone, Copy)]
+pub(crate) struct TailDeferrals {
+    /// 1 when the new activation takes over the callee closure's own release.
+    pub(crate) callee: u32,
+    /// The merged arena's static slot, or 0 for none (`StaticRegion` is nonzero,
+    /// so 0 is never a real slot).
+    pub(crate) arena_slot: u32,
+}
+
+impl TailDeferrals {
+    /// The pair a call site carries no deferral on: the spliced tail call, which
+    /// carries neither channel on either tier, and the self-tail-call loop, which
+    /// replaces no frame.
+    pub(crate) const NONE: TailDeferrals = TailDeferrals {
+        callee: 0,
+        arena_slot: 0,
+    };
+
+    /// Read the pair off a `LirInstr::TailCall`'s own fields.
+    pub(crate) fn of(
+        defer_callee_release: bool,
+        deferred_release_slot: Option<crate::hir::region::StaticRegion>,
+    ) -> Self {
+        TailDeferrals {
+            callee: u32::from(defer_callee_release),
+            arena_slot: deferred_release_slot.map_or(0, |s| s.get()),
+        }
     }
 }
 

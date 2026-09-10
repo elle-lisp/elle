@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-10
 // src/jit/AGENTS.md
 //! What a `FunctionTranslator` reaches for: constants, fast paths, call shapes
 //! and register pairs.
@@ -7,7 +7,7 @@
 
 mod checks;
 
-use cranelift_codegen::ir::types::I64;
+use cranelift_codegen::ir::types::{I32, I64};
 use cranelift_codegen::ir::InstBuilder;
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::{FuncId, Module};
@@ -20,6 +20,7 @@ use crate::value::SymbolId;
 
 use super::translate::FunctionTranslator;
 use super::JitError;
+use super::TailDeferrals;
 
 /// Helper to create a Variable from a register/slot index
 #[inline]
@@ -270,7 +271,8 @@ impl<'a> FunctionTranslator<'a> {
     }
 
     /// Call the elle_jit_call helper.
-    /// Signature: (func_tag, func_payload, args_ptr, nargs, vm) -> (tag, payload)
+    /// Signature: (func_tag, func_payload, args_ptr, nargs, vm, region_id)
+    /// -> (tag, payload)
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn call_helper_call(
         &mut self,
@@ -293,7 +295,9 @@ impl<'a> FunctionTranslator<'a> {
     }
 
     /// Call the elle_jit_tail_call helper.
-    /// Signature: (func_tag, func_payload, args_ptr, nargs, vm) -> (tag, payload)
+    /// Signature: (func_tag, func_payload, args_ptr, nargs, vm, region_id,
+    /// defer_callee, arena_slot) -> (tag, payload). The last two are the deferral
+    /// channels this `TailCall` carries; see `LirInstr::TailCall`.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn call_helper_tail_call(
         &mut self,
@@ -304,13 +308,25 @@ impl<'a> FunctionTranslator<'a> {
         nargs: cranelift_codegen::ir::Value,
         vm: cranelift_codegen::ir::Value,
         region_id: cranelift_codegen::ir::Value,
+        defer: TailDeferrals,
     ) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
+        let defer_callee = builder.ins().iconst(I32, defer.callee as i64);
+        let arena_slot = builder.ins().iconst(I32, defer.arena_slot as i64);
         let func_ref = self
             .module
             .declare_func_in_func(self.helpers.tail_call, builder.func);
         let call = builder.ins().call(
             func_ref,
-            &[func_tag, func_payload, args_ptr, nargs, vm, region_id],
+            &[
+                func_tag,
+                func_payload,
+                args_ptr,
+                nargs,
+                vm,
+                region_id,
+                defer_callee,
+                arena_slot,
+            ],
         );
         Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))
     }

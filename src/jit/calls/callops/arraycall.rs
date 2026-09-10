@@ -1,3 +1,6 @@
+// audited: 2026-09-10
+// docs/impl/jit.md
+// docs/impl/region/relocate.md
 //! Array-call, closure-construction, tail-call, and env-building JIT entry points.
 
 use super::*;
@@ -107,6 +110,9 @@ pub extern "C" fn elle_jit_tail_call_array(
     };
 
     let nargs = args.len() as u32;
+    // A spliced tail call carries neither deferral channel on either tier —
+    // `handle_tail_call_array` passes `false`/`None` for the same reason.
+    let defer = TailDeferrals::NONE;
     let result = if args.is_empty() {
         jit_tail_call_inner(
             func_tag,
@@ -116,6 +122,7 @@ pub extern "C" fn elle_jit_tail_call_array(
             vm,
             region_id,
             true,
+            defer,
         )
     } else {
         jit_tail_call_inner(
@@ -126,6 +133,7 @@ pub extern "C" fn elle_jit_tail_call_array(
             vm,
             region_id,
             true,
+            defer,
         )
     };
     unsafe { &mut *(vm as *mut crate::vm::VM) }.release_splice_args(args_array);
@@ -248,9 +256,12 @@ pub(super) fn exec_result_to_jit_value(vm: &mut crate::vm::VM, bits: SignalBits)
 
 /// Handle a non-self tail call from JIT code.
 ///
-/// If the target closure has JIT code in the cache, calls it directly.
-/// Falls back to TAIL_CALL_SENTINEL (interpreter trampoline) only when
-/// the target has no JIT code.
+/// A native, parameter or collection callee answers here. A CLOSURE callee always
+/// leaves through `TAIL_CALL_SENTINEL`, so the interpreter trampoline runs it and
+/// mutual tail recursion costs no native stack.
+///
+/// `defer_callee` and `arena_slot` are the `TailCall`'s own deferral channels,
+/// flattened to `u32` for the C ABI (`TailDeferrals`).
 #[no_mangle]
 pub extern "C" fn elle_jit_tail_call(
     func_tag: u64,
@@ -259,6 +270,8 @@ pub extern "C" fn elle_jit_tail_call(
     nargs: u32,
     vm: *mut (),
     region_id: u32,
+    defer_callee: u32,
+    arena_slot: u32,
 ) -> JitValue {
     jit_tail_call_inner(
         func_tag,
@@ -268,6 +281,10 @@ pub extern "C" fn elle_jit_tail_call(
         vm,
         region_id,
         false,
+        TailDeferrals {
+            callee: defer_callee,
+            arena_slot,
+        },
     )
 }
 
@@ -287,6 +304,7 @@ fn jit_tail_call_inner(
     vm: *mut (),
     region_id: u32,
     spliced_args: bool,
+    defer: TailDeferrals,
 ) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     let func = Value {
@@ -300,8 +318,8 @@ fn jit_tail_call_inner(
         let args_slice = args_ptr_to_value_slice(args_ptr, nargs);
         // Capability gate — identical to the interpreter's tail path
         // (`tail_call_inner`, src/vm/call/inner/tail.rs): a native whose signal
-        // overlaps the fiber's withheld capabilities is denied, not run. Same gap
-        // and fix as `elle_jit_call`'s Call-position path.
+        // overlaps the fiber's withheld capabilities is denied, not run. The
+        // Call-position path (`elle_jit_call`) asks the same question.
         let blocked = def
             .signal
             .bits
@@ -330,14 +348,10 @@ fn jit_tail_call_inner(
             return JitValue::nil();
         }
         let result = vm.resolve_parameter(id, default);
-        // Pass-through retain, mirror of `tail_call_inner`'s parameter branch.
-        // FIXME(leak): preserves the historical cross-id-space comparison; see
-        // `VM::dispatch_native_call`. Revisited in the leak phase.
-        // A parameter resolve never allocates a fresh region — always hand the
-        // caller one owning reference for its `DecrefValueRegion` to consume.
-        // `incref_for_escape(None, …)` no-ops an immediate. (Was gated on a
-        // static-vs-runtime `r.get() == region_id` compare — see the leak note
-        // in `VM::dispatch_native_call`.)
+        // Pass-through retain, mirror of `tail_call_inner`'s parameter branch. A
+        // parameter resolve never allocates a fresh region, so it always hands the
+        // caller one owning reference for its `DecrefValueRegion` to consume, with
+        // no gate of its own; `incref_for_escape(None, …)` no-ops an immediate.
         let heap = unsafe { &mut *vm.heap_ptr };
         let result_region = crate::value::arena::region_of(heap, result);
         crate::value::arena::incref_for_escape(
@@ -360,6 +374,17 @@ fn jit_tail_call_inner(
             .map(|i| unsafe { *args_ptr.add(i) })
             .collect();
 
+        // The two releases this frame replacement strands, resolved while THIS
+        // activation's region map is still the current one — the compiled caller's,
+        // which its `Return` path has not popped yet. Read exactly as the
+        // interpreter's `tail_call_inner` reads them, and before `build_tail_call_env`
+        // copies the closure's env uncounted.
+        let arena = crate::hir::region::StaticRegion::new(defer.arena_slot)
+            .and_then(|slot| vm.runtime_region_for_release_slot(slot));
+        let callee = (defer.callee != 0)
+            .then(|| vm.tail_callee_release_region(func))
+            .flatten();
+
         // Tail call: pure MOVE (own_params=false) — the caller's arg references
         // transfer to the callee, which releases them. A SPLICED tail call has
         // no such reference of the frame's: its arguments came out of the args
@@ -375,12 +400,14 @@ fn jit_tail_call_inner(
             closure: func,
             squelch_mask: closure.squelch_mask,
         });
-        // A deferral this spliced JIT tail call strands is not recorded on the
-        // activation's dues: the callee-release and merged-arena channels are not
-        // wired on this path, so the region stays held to the activation's own
-        // teardown — a bounded over-keep, never an over-free — until they are
-        // (docs/impl/region/owner.md § "A deferred tail-call release has the
-        // node's life").
+        // Hand both stranded releases to the activation that runs the callee. This
+        // activation is the compiled caller's, and it pops its own dues slot on the
+        // way out with the sentinel, so recording there would drop them
+        // (docs/impl/region/relocate.md § "A channel built in compiled code hands
+        // its release forward"). Written after the pending call is set, so a path
+        // that fails earlier leaves nothing for another activation's push to take.
+        vm.pending_tail_deferrals
+            .extend(arena.into_iter().chain(callee));
 
         return TAIL_CALL_SENTINEL;
     }
@@ -391,10 +418,10 @@ fn jit_tail_call_inner(
     // like the native-tail Ok path above (`jit_handle_primitive_signal` →
     // `JitValue::from_value`): the value is handed back in the return register
     // with its one owning reference, and the JIT-compiled caller's
-    // post-`TailCall` block runs the owned-arg releases + result handling. The
-    // old code set `fiber.signal = (SIG_OK, value)` AND skipped the retain, so a
-    // tail-position call-index freed the returned co-located element under the
-    // caller's borrow (JIT crash; the interpreter sibling leaked).
+    // post-`TailCall` block runs the owned-arg releases + result handling.
+    // Handing the value over through `fiber.signal` instead reaches neither, and
+    // a returned element co-located in its collection's region is then freed
+    // under the caller's borrow.
     if let Some(result) = {
         let region = crate::hir::region::StaticRegion::new(region_id)
             .expect("JIT region slot is nonzero — emitter invariant");
@@ -419,9 +446,10 @@ fn jit_tail_call_inner(
 // Environment Building
 // =============================================================================
 //
-// JIT closure-env construction is now unified on the interpreter's
-// `VM::populate_env` (via `build_closure_env` / `build_tail_call_env` in
-// `src/vm/env.rs`): the interpreter-fallback and tail paths call those directly
-// so the owned-params `CallArgument` incref and per-value env-region minting are
-// shared, not duplicated. The old `build_closure_env_for_jit` (which did neither,
-// causing the owned-param over-release UAF and env-region commingling) is gone.
+// JIT closure-env construction is the interpreter's `VM::populate_env`, reached
+// through `build_closure_env` / `build_tail_call_env` (`src/vm/env.rs`). The
+// interpreter-fallback and tail paths call those directly, so the owned-params
+// `CallArgument` incref and the per-value env-region minting are one
+// implementation. A second construction here would owe both, and an env built
+// without them over-releases every owned param and commingles the env cells of
+// two calls through one slot.

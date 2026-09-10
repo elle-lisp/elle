@@ -1,3 +1,8 @@
+// audited: 2026-09-10
+// docs/impl/jit.md
+//! One Cranelift signature per `elle_jit_*` runtime helper, declared into the
+//! module before any function is translated.
+
 use super::*;
 
 /// Declare all runtime helper functions in the JITModule, returning their FuncIds.
@@ -50,6 +55,17 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     // region_id (I32) routes native-result allocation and gates the
     // pass-through retain, mirroring the interpreter's `call_inner`.
     let call_sig = make_sig(module, &[I64, I64, I64, I64, I64, I32], &[I64, I64]);
+    // tail_call: the call signature plus the two deferral channels a
+    // frame-replacing tail call strands — `defer_callee` (0/1, the callee closure's
+    // own region) and `arena_slot` (0 for none, else the merged closure-cycle
+    // arena's static slot). Both reach the helper because a compiled caller cannot
+    // record them on its own dues (docs/impl/region/relocate.md § "A channel built
+    // in compiled code hands its release forward").
+    let tail_call_sig = make_sig(
+        module,
+        &[I64, I64, I64, I64, I64, I32, I32, I32],
+        &[I64, I64],
+    );
     // resolve_tail_call: (result_tag, result_payload, vm) -> (tag, payload)
     let resolve_tc_sig = make_sig(module, &[I64, I64, I64], &[I64, I64]);
     // store_capture: (env_ptr, index, val_tag, val_payload, vm) -> (tag, payload)
@@ -180,7 +196,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         )?,
         store_capture: declare(module, "elle_jit_store_capture", &store_capture_sig)?,
         call: declare(module, "elle_jit_call", &call_sig)?,
-        tail_call: declare(module, "elle_jit_tail_call", &call_sig)?,
+        tail_call: declare(module, "elle_jit_tail_call", &tail_call_sig)?,
         has_exception: declare(module, "elle_jit_has_exception", &vm_only)?,
         resolve_tail_call: declare(module, "elle_jit_resolve_tail_call", &resolve_tc_sig)?,
         call_depth_enter: declare(module, "elle_jit_call_depth_enter", &vm_only)?,

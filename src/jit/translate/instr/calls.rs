@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-10
 // docs/impl/jit.md
 //! How a call leaves compiled code: a direct call to an SCC peer, the
 //! self-tail-call loop, the generic dispatch helper, and a `MakeClosure`.
@@ -120,12 +120,23 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             LirInstr::TailCall {
-                dst, func, args, ..
+                dst,
+                func,
+                args,
+                defer_callee_release,
+                deferred_release_slot,
+                ..
             } => {
                 let (ft, fp) = self.use_var_pair(builder, func.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("TailCall without vm pointer".to_string())
                 })?;
+                // The releases this call strands past the frame replacement. The
+                // helper hands them to the activation that runs the callee, this
+                // one having popped its own dues slot by then
+                // (docs/impl/region/relocate.md § "A channel built in compiled
+                // code hands its release forward").
+                let defer = TailDeferrals::of(*defer_callee_release, *deferred_release_slot);
 
                 // Self-tail-call optimization
                 if let (Some((self_tag, self_payload)), Some(loop_header)) =
@@ -156,7 +167,10 @@ impl<'a> FunctionTranslator<'a> {
                             .collect();
 
                         // Every new argument is read above, before any is
-                        // written, so `(f b a)` swaps rather than clobbers.
+                        // written, so `(f b a)` swaps rather than clobbers. The
+                        // loop replaces no frame and stays in this activation, so
+                        // it hands `defer` nowhere: the callee IS this function,
+                        // and the release the deferral would supply is its own.
                         for (i, (at, ap)) in new_arg_vals.into_iter().enumerate() {
                             let base = self.arg_var_base + i as u32;
                             self.def_var_pair(builder, base, at, ap);
@@ -187,11 +201,12 @@ impl<'a> FunctionTranslator<'a> {
                             args,
                             vm,
                             region_id_const,
+                            defer,
                         )?;
                         // Generic dispatch: a native that completes normally
-                        // falls through so the post-`TailCall` releases run
-                        // (Inc4 native-tail). Builder is left on the continue
-                        // block; keep translating the rest of this LIR block.
+                        // falls through so the post-`TailCall` releases run.
+                        // Builder is left on the continue block; keep
+                        // translating the rest of this LIR block.
                         self.emit_tail_call_result_branch(builder, *dst, rt, rp)?;
                         return Ok(false);
                     }
@@ -210,8 +225,15 @@ impl<'a> FunctionTranslator<'a> {
                     return Ok(true);
                 }
 
-                let (rt, rp) =
-                    self.emit_tail_call_with_args(builder, ft, fp, args, vm, region_id_const)?;
+                let (rt, rp) = self.emit_tail_call_with_args(
+                    builder,
+                    ft,
+                    fp,
+                    args,
+                    vm,
+                    region_id_const,
+                    defer,
+                )?;
                 // A native that completes normally falls through to run the
                 // post-`TailCall` owned-arg releases; a closure (sentinel),
                 // yield, or error returns. Builder is left on the continue
