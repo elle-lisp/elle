@@ -356,6 +356,29 @@ fn an_unknown_constructor_tag_is_refused() {
     }
 }
 
+// § Verifier: an immediate root and a pages section disagree. The trap is
+// what the root's payload word means — a page offset for a heap root, the
+// value's own payload for an immediate one, and a primitive-table index for a
+// native-fn. A file claiming both leaves that reading to whichever branch runs
+// last, which is how a payload becomes a pointer nobody minted.
+#[test]
+fn an_immediate_root_beside_pages_is_refused() {
+    let dir = crate::common::ScratchDir::new("image-root-kind");
+    let (mut bytes, s) = dumped_bytes(&dir);
+    assert!(!s.pages.is_empty(), "the graph has pages to disagree with");
+
+    // The header's root fields: the tag word at 48, the heap flag at 64. The
+    // flag is read back first, so a header whose layout moved fails here
+    // rather than damaging some other field.
+    assert_eq!(get_u64(&bytes, 64), 1, "the dumped graph has a heap root");
+    put_u64(&mut bytes, 48, 0); // an int's tag
+    put_u64(&mut bytes, 64, 0);
+    match refusal(&bytes) {
+        ImageError::Corrupt(_) => {}
+        other => panic!("expected a corrupt-image refusal, got {other:?}"),
+    }
+}
+
 // The page table's cursors are what the rebuilt region allocates from. A
 // cursor below the objects the index places on that page hands the next
 // allocation an address an image object already occupies, so the region
