@@ -120,8 +120,8 @@ Tests are organized by feature area in separate files:
 | `escape.rs` | Escape analysis |
 | `arena.rs` | Arena allocation |
 | `trace_boot.rs` | `--trace=boot`/`--trace=compile` phase-timing marks |
-| `census.rs` | Post-boot heap census: the sealing regression net and the `--trace=census` report (docs/impl/image.md) |
-| `image.rs` | Image store spike: dump/hydrate round-trip, fingerprint fallback, relocation independence, mapping and pool-interplay pins (docs/impl/image.md § Test plan) |
+| `census.rs` | Post-boot heap census: the sealing regression net and the `--trace=census` report ([image.md](../../docs/impl/image.md)) |
+| `image.rs` | Image store milestone, in submodules: the round trip and its determinism, the descriptor input form, the verifier's refusals, mapping and pool interplay, and the dump policy ([plan.md](../../docs/impl/image/plan.md)) |
 | `allocator.rs` | Memory allocation |
 | ~~`parameters.rs`~~ | Migrated to `tests/elle/parameters.lisp` |
 | `ports.rs` | I/O ports |

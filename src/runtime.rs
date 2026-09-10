@@ -1,4 +1,4 @@
-// audited: 2026-09-07
+// audited: 2026-09-08
 //! The process runtime: one lifecycle for compile/evaluate, shared by every
 //! entry path (`elle foo.lisp`, the REPL, and the embedding API).
 //!
@@ -234,9 +234,9 @@ impl Runtime {
             crate::primitives::module_init::StdlibSource::Compiled
         };
 
-        // The post-boot heap census (docs/impl/image.md § "Open risks and
-        // dispatch experiments", item 2): at this point every live object is
-        // boot state, the graph a boot image must dump.
+        // The post-boot heap census (docs/impl/image/measurements.md, item 2):
+        // at this point every live object is boot state, the graph a boot
+        // image must dump.
         if crate::trace::census() {
             for line in core.heap().census().lines() {
                 eprintln!("[trace:census] {}", line);

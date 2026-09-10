@@ -1,4 +1,13 @@
-//! Source location tracking
+// audited: 2026-09-09
+//! Source location tracking: where a form came from, in bytes a region can
+//! hold.
+//!
+//! docs/impl/syntax.md
+//!
+//! A span is plain bytes, so the file it names travels as a `FileId` — an
+//! index into a process-wide table. Every path that carries a span out of
+//! this process therefore carries the spelling instead and re-interns it:
+//! serde does it below, and an image does it through its file table.
 
 use std::fmt;
 
@@ -57,6 +66,14 @@ impl Span {
     /// Point this span at an already-interned file.
     pub fn set_file_id(&mut self, file: FileId) {
         self.file = file;
+    }
+
+    /// Byte offset of the file id inside a span. An image rewrites this field
+    /// in place — a dump-time id means nothing in another process — so it
+    /// needs the offset rather than the value
+    /// (docs/impl/image/format.md).
+    pub(crate) const fn file_offset() -> usize {
+        std::mem::offset_of!(Span, file)
     }
 
     /// Merge two spans into one covering both

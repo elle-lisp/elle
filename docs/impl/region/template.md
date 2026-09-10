@@ -1,12 +1,12 @@
 # Code objects — a blueprint, a payload, and a header
 
-<!-- audited: 2026-09-06 -->
+<!-- audited: 2026-09-08 -->
 
 A closure template is the code object of one lambda: its bytecode, constant
 pool, source locations, and the region tables its body needs. This doc owns the
 argument for how that object is represented and who owns each part. The
-foundation it serves is named in [image.md](../image.md) § "Region-native
-closure templates"; the rule it obeys is
+foundation it serves is named in
+[image/foundations.md](../image/foundations.md); the rule it obeys is
 [model.md](model.md) § "Constants lower as ordinary allocations".
 
 ## Three things, not one
@@ -231,7 +231,7 @@ leave as their milestones land:
 | Which blueprints do my `MakeClosure` instructions index? | `child_protos` | the image milestone, when child templates become body data |
 | What LIR does the JIT promote me from? | `lir_function` | the encoded-LIR side-stream ([image.md](../image.md) § JIT) |
 | Where was I written? | `origin` | nothing — a `Span` is plain bytes, so the payload could hold it |
-| What SPIR-V did `(git f)` compile for me? | `spirv` | nothing — the GPU path recompiles (image.md § Sealing) |
+| What SPIR-V did `(git f)` compile for me? | `spirv` | nothing — the GPU path recompiles ([image.md](../image.md) § Sealing) |
 
 Until then the census classifies `ClosureTemplate` as sealed on the strength of
 its payload, which is the part an image would carry.

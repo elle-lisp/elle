@@ -1,22 +1,29 @@
-//! Image persistence, store milestone (docs/impl/image.md — the design
-//! home). An image is the page bytes of one compacted region plus a
-//! relocation table; hydration maps the pages privately, rewrites the
-//! pointer slots, and installs the result as an ordinary counted region.
+// audited: 2026-09-09
+//! Image persistence: an image is the page bytes of one compacted region plus
+//! a relocation table, and hydration maps those pages privately.
 //!
-//! Current scope is the data-only spike (§ "Landing order" item 5): sealed
-//! data graphs — pairs, strings, bytes, arrays, floats, portable immediates
-//! — dumped and hydrated end to end. Closures, structs, sets, symbols, and
-//! the boot/environment configurations arrive with the foundations and the
-//! later milestones.
+//! docs/impl/image.md
+//! docs/impl/image/format.md
+//!
+//! Hydration rewrites the pointer slots, replays the name and file tables
+//! into the hydrating instance, and installs the result as an ordinary
+//! counted region. The body carries the whole sealed data set: pairs,
+//! strings, bytes, arrays, sets, structs, syntax, floats, and the portable
+//! immediates, symbols and keywords among them. Closures and the boot and
+//! environment configurations arrive with the later milestones
+//! (docs/impl/image/plan.md).
 
 mod dump;
 mod format;
 mod hydrate;
 mod layout;
+mod source;
+mod verify;
 
 pub use dump::dump;
-pub use format::fingerprint;
-pub use hydrate::hydrate;
+pub use format::{fingerprint, sections, Sections};
+pub use hydrate::{hydrate, hydrate_path};
+pub use source::ImageSource;
 
 use crate::hir::region::RuntimeRegion;
 use crate::value::Value;
@@ -28,6 +35,11 @@ use crate::value::Value;
 pub struct Hydrated {
     pub root: Value,
     pub region: RuntimeRegion,
+    /// One past the highest hygiene scope counter the body carries. An
+    /// expander that will meet this image's syntax mints above it, or two
+    /// unrelated scopes compare equal (docs/impl/image/format.md). Zero when
+    /// the body holds no syntax.
+    pub scope_watermark: u32,
 }
 
 /// Why a dump or hydration refused.
@@ -39,6 +51,13 @@ pub enum ImageError {
     Fingerprint {
         expected: String,
         found: String,
+    },
+    /// The image does not start on a base-page boundary of its descriptor, so
+    /// no page of it can be mapped. Whoever placed the image chose the
+    /// offset; the same descriptor is legal once the image moves.
+    Unaligned {
+        offset: u64,
+        page: usize,
     },
     /// The graph holds a value the dump policy refuses, named.
     Unsupported(String),
@@ -56,6 +75,10 @@ impl std::fmt::Display for ImageError {
                     "image fingerprint mismatch: built for {found:?}, this binary is {expected:?}"
                 )
             }
+            ImageError::Unaligned { offset, page } => write!(
+                f,
+                "image offset {offset} is not a multiple of the {page}-byte page size"
+            ),
             ImageError::Unsupported(what) => write!(f, "image refuses: {what}"),
             ImageError::Corrupt(what) => write!(f, "corrupt image: {what}"),
         }

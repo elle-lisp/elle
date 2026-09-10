@@ -569,21 +569,34 @@ test: smoke smoke-nouring qa  ## Rust unit + integration tests + QA (fmt/clippy/
 	$(MLIR_ENV) cargo test --workspace --lib --all-features
 	cargo test --test '*' -- --skip property
 
-# Clippy over the macOS arm of every `cfg(target_os)`. A Linux-only gate sees
-# only the io_uring side, so a binding the thread-pool backend never reads
-# stays invisible until the Mac runner reports it. Clippy does not codegen or
-# link, so this needs no macOS SDK — only the target's std. `ffi` and `zstd`
-# build C for the host and cannot cross, hence `--no-default-features`; that
-# also drops the variant balancing `HeapObject`, so allow that one lint (the
-# default-features gates above still enforce it). CI's QA job runs the same
-# command, so a missing target here only costs local feedback.
+# Compile the arms a Linux gate never reaches. There are two of them, and the
+# workflow checks both — so this target checks both, or a branch discovers the
+# second one in CI (see the note above `test`).
+#
+# macOS is the io_uring blind spot: a binding the thread-pool backend never
+# reads stays invisible until the Mac runner reports it, so this arm runs
+# clippy. Android is the `not(target_os = "linux")` blind spot: Rust spells it
+# `"android"`, so it takes every else-arm written for a desktop unix, and its
+# libc answers for a different set of calls. It runs `cargo check`, which is
+# what the workflow's Android job runs — this target predicts the gate rather
+# than raising it.
+#
+# Neither step codegens or links, so neither needs an SDK or an NDK — only the
+# target's std. `ffi` and `zstd` build C for the host and cannot cross, hence
+# `--no-default-features`; that also drops the variant balancing `HeapObject`,
+# so allow that one lint (the default-features gates above still enforce it).
+# A missing target costs local feedback and nothing else.
 CROSS_TARGET := x86_64-apple-darwin
+ANDROID_TARGET := aarch64-linux-android
 
-crosscheck:  ## Clippy the macOS cfg arms (cross-target, no SDK needed)
-	@rustup target list --installed | grep -qx '$(CROSS_TARGET)' || { \
-		echo "SKIPPED crosscheck: rustup target add $(CROSS_TARGET)"; exit 0; }; \
-	cargo clippy --target $(CROSS_TARGET) --no-default-features -p elle \
-		-- -D warnings -A clippy::large_enum_variant
+crosscheck:  ## Compile the macOS and Android cfg arms (no SDK or NDK needed)
+	@if rustup target list --installed | grep -qx '$(CROSS_TARGET)'; then \
+		cargo clippy --target $(CROSS_TARGET) --no-default-features -p elle \
+			-- -D warnings -A clippy::large_enum_variant || exit 1; \
+	else echo "SKIPPED macOS: rustup target add $(CROSS_TARGET)"; fi
+	@if rustup target list --installed | grep -qx '$(ANDROID_TARGET)'; then \
+		cargo check --target $(ANDROID_TARGET) --no-default-features -p elle || exit 1; \
+	else echo "SKIPPED Android: rustup target add $(ANDROID_TARGET)"; fi
 
 # ── Clean ───────────────────────────────────────────────────────────
 

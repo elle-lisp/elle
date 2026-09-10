@@ -1,5 +1,7 @@
 # Values
 
+<!-- audited: 2026-09-08 -->
+
 Every Elle value is a 16-byte tagged union: an 8-byte tag and an 8-byte
 payload.
 
@@ -66,7 +68,7 @@ TAG_SET (20)          LSet { data: RegionSlice<Value>, traits }
 TAG_SET_MUT (21)      LSetMut { data: Rc<RefCell<BTreeSet<Value>>>, traits }
 TAG_LBOX (22)         LBox { cell: Rc<RefCell<Value>>, traits }
 TAG_FIBER (23)        Fiber { handle: FiberHandle, traits }
-TAG_SYNTAX (24)       Syntax { syntax: Box<Syntax>, traits }
+TAG_SYNTAX (24)       Syntax { syntax: Syntax, traits }
 TAG_STRING (26)       LString { s: RegionSlice<u8>, traits }
 TAG_FFI_SIG (27)      FFISignature(Signature, CifCache)
 TAG_FFI_TYPE (28)     FFIType(TypeDesc)
@@ -110,7 +112,8 @@ This structure means:
 - **Region reclamation** — a region is a set of pages with a reference count
   minted per allocation; `DecrefRegion` decrements that RC, and when it hits 0
   the region's pages are freed and the contained destructors run (see
-  `docs/regions.md`). This is RC-driven, not tied to any lexical scope.
+  [regions.md](../regions.md)). This is RC-driven, not tied to any lexical
+  scope.
 
 ### Immutable types use RegionSlice
 
@@ -134,7 +137,7 @@ A struct key is a `TableKey` (`src/value/types.rs`). Every variant is `Copy`,
 and no variant owns a Rust-heap allocation: a key's payload is either an
 immediate or a `Value` that points into a region. The entries of an immutable
 struct are therefore page bytes, which is what lets an image dump a struct as
-body data (see [impl/image.md](image.md) § Foundations).
+body data (see [image/foundations.md](image/foundations.md)).
 
 ### A key is borrowed to probe and interned to store
 
@@ -204,14 +207,15 @@ identity key is refused at the boundary.
 
 ## Closures
 
-A `Closure` stores:
-- Pointer to compiled function (bytecode or JIT code)
-- Captured values array
-- Arity descriptor
-- Optional docstring
-- Signal profile
-- Location map (bytecode offset → source location)
-- Optional syntax object (for `eval` reconstruction)
+A `Closure` stores three `Copy` fields:
+- A `TemplateRef` naming its code object
+- Captured values (`RegionSlice<Value>`)
+- A per-instance squelch mask
+
+Everything a definition shares between its instances — bytecode, constants,
+arity, docstring, signal profile, source locations — lives in the code
+object's payload, allocated once per blueprint
+([region/template.md](region/template.md) owns that split).
 
 ## Arity
 

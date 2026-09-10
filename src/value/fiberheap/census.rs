@@ -1,8 +1,13 @@
-//! The post-boot heap census (docs/impl/image.md § "Open risks and dispatch
-//! experiments", item 2): enumerate every live object in this instance's
-//! region store and report the graph a boot image must dump. Reached from
-//! `Runtime::build_with` under `--trace=census` and from the sealing
-//! regression net in `tests/integration/census.rs`.
+// audited: 2026-09-08
+//! The post-boot heap census: every live object in this instance's region
+//! store, and the graph a boot image must dump.
+//!
+//! docs/impl/image.md
+//! docs/impl/image/measurements.md
+//!
+//! Reached from `Runtime::build_with` under `--trace=census` and from the
+//! sealing regression net in `tests/integration/census.rs`. The census is
+//! item 2 of the measurements above.
 //!
 //! Byte accounting is a dump-size estimate, not an allocator audit. Each
 //! object contributes its `HeapObject` shell plus its payload wherever the
@@ -14,7 +19,7 @@
 //! masks, and fiber-internal state (fibers are refused from the body).
 //!
 //! Pointer-slot counting follows the image format's relocation definition
-//! (docs/impl/image.md § "Relocation slots"): a heap-tagged `Value` slot or
+//! (docs/impl/image/format.md): a heap-tagged `Value` slot or
 //! a non-empty `RegionSlice`'s `ptr`; native-fn slots (the primitive
 //! stream, remapped by name) are counted separately. `Rc` pointers are not
 //! counted — the foundations delete them from persistable objects.

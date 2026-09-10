@@ -1,12 +1,14 @@
 # Syntax — a region-native immutable tree
 
+<!-- audited: 2026-09-09 -->
+
 The pre-analysis tree the reader produces, the expander rewrites, and the
 analyzer consumes. Every node, every child slice, and every string payload
 lives in region pages. A node is plain old data: `Copy`, 64 bytes, with no
 `Box`, no `Vec`, no `Rc`, and no `Drop`.
 
-[image.md](image.md) § "Region-native syntax" owns the argument for why the
-image work needs this property. This document owns the model.
+[foundations.md](image/foundations.md) owns the argument for why the image work
+needs this property. This document owns the model.
 
 ## The node
 
@@ -109,8 +111,8 @@ new one:
   hygiene operation applied to a transformer's result.
 
 Both copy: a shared subtree must not see a scope its other holders did not ask
-for. [image.md](image.md) risk item 5 measures the copy at 37 ns per node,
-which is the budget the whole design was checked against.
+for. [measurements.md](image/measurements.md) item 5 measures the copy at
+37 ns per node, which is the budget the whole design was checked against.
 
 In-place mutation stays legal on a **uniquely owned** working tree, through
 `Syntax::children_mut`. The expander uses it where it has just built the
@@ -137,9 +139,12 @@ on every merge. `FileId::NONE` is the absent file, so the `Option` is out of
 the representation but not out of the API — `Span::file()` answers
 `Option<&'static str>`.
 
-`Span` crosses process boundaries inside serialized LIR (the stdlib cache and
-`send`), where a `FileId` means nothing. Its `Serialize` writes the *name* and
-its `Deserialize` re-interns, so an id is never the thing that travels.
+`Span` crosses process boundaries — inside serialized LIR for the stdlib cache
+and `send`, and inside an image's page bytes — and a `FileId` means nothing on
+the other side of any of them. So an id is never the thing that travels: serde
+writes the *name* and re-interns it, and an image carries its file table and
+rewrites each span's id as it hydrates
+([image/format.md](image/format.md) owns that path).
 
 ## Crossing a thread
 
