@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-10
 // What the verifier refuses: a table entry that would send a write, a read,
 // or a rebuild outside the image.
 // docs/impl/image.md
@@ -27,7 +27,7 @@ fn dumped_value(
     build: impl FnOnce(&mut FiberHeap, RuntimeRegion) -> Value,
 ) -> (Vec<u8>, Sections) {
     let path = dir.join("lone.image");
-    let mut src = FiberHeap::new();
+    let mut src = traited_heap();
     let region = src.new_runtime_region();
     let root = build(&mut src, region);
     image::dump(&mut src, &graph_names(), root, &path).expect("dump");
@@ -36,11 +36,19 @@ fn dumped_value(
     (bytes, sections)
 }
 
+/// A heap with its default trait tables built, as VM init leaves one — the
+/// instance an image is dumped from and hydrated into.
+fn traited_heap() -> FiberHeap {
+    let mut heap = FiberHeap::new();
+    elle::primitives::traitregistry::init_default_traits(&mut heap);
+    heap
+}
+
 /// Hydrate `bytes` in a fresh heap and answer the refusal, asserting the
 /// failed load left neither a region nor page bytes behind.
 fn refusal(bytes: &[u8]) -> ImageError {
     let source = image::ImageSource::from_bytes(bytes).expect("anonymous file");
-    let mut dst = FiberHeap::new();
+    let mut dst = traited_heap();
     let regions_before = dst.active_region_count();
     let bytes_before = dst.allocated_bytes();
     let err = match image::hydrate(&mut dst, &mut SymbolTable::new(), &source) {
@@ -259,6 +267,89 @@ fn a_name_that_is_not_utf8_is_refused() {
     let len = get_u64(&bytes, s.names.start) as usize;
     assert!(len > 0, "the first name entry is empty");
     bytes[s.names.start + 8] = 0xFF;
+    match refusal(&bytes) {
+        ImageError::Corrupt(_) => {}
+        other => panic!("expected a corrupt-image refusal, got {other:?}"),
+    }
+}
+
+/// An array carrying its instance's default traitset, holding one native-fn:
+/// the smallest image with a reconstruction entry and a primitive slot.
+fn dumped_traited_array(dir: &crate::common::ScratchDir) -> (Vec<u8>, Sections) {
+    dumped_value(dir, |heap, region| {
+        let prim = Value::native_fn(
+            elle::primitives::prim_table_snapshot()
+                .into_iter()
+                .find(|d| d.name == "insert")
+                .expect("insert is a canonical primitive"),
+        );
+        let slice = heap.alloc_region_slice_in_region(&[prim], region);
+        let traits = heap.default_traits_for(HeapTag::LArray);
+        heap.alloc_in_region(
+            HeapObject::LArray {
+                elements: slice,
+                traits,
+            },
+            region,
+        )
+    })
+}
+
+// A primitive slot names where hydration writes a resolved id. Out of range,
+// it writes outside the image, exactly as a pointer relocation would.
+#[test]
+fn a_primitive_slot_outside_the_image_is_refused() {
+    let dir = crate::common::ScratchDir::new("image-prim-range");
+    let (mut bytes, s) = dumped_traited_array(&dir);
+    assert!(!s.prim_slots.is_empty(), "the image names a primitive slot");
+    put_u64(&mut bytes, s.prim_slots.start, s.pages.len() as u64);
+    match refusal(&bytes) {
+        ImageError::Corrupt(_) => {}
+        other => panic!("expected a corrupt-image refusal, got {other:?}"),
+    }
+}
+
+// The second half of a primitive entry is an index into the primitive table.
+// An index past the table names no spelling, so there is no primitive to
+// resolve and nothing to write.
+#[test]
+fn a_primitive_slot_naming_no_spelling_is_refused() {
+    let dir = crate::common::ScratchDir::new("image-prim-index");
+    let (mut bytes, s) = dumped_traited_array(&dir);
+    put_u64(&mut bytes, s.prim_slots.start + 8, 99);
+    match refusal(&bytes) {
+        ImageError::Corrupt(_) => {}
+        other => panic!("expected a corrupt-image refusal, got {other:?}"),
+    }
+}
+
+// A reconstruction slot takes a whole `Value` — sixteen bytes, not eight — so
+// its bound is the wider one. The counter-factual is a slot eight bytes below
+// the end of the pages: a verifier that bounded it like a pointer relocation
+// would admit it, and hydration would write the payload word past the image.
+#[test]
+fn a_reconstruction_slot_outside_the_image_is_refused() {
+    let dir = crate::common::ScratchDir::new("image-recon-range");
+    let (mut bytes, s) = dumped_traited_array(&dir);
+    assert!(
+        !s.reconstruction.is_empty(),
+        "the traited array has a reconstruction entry"
+    );
+    put_u64(&mut bytes, s.reconstruction.start, s.pages.len() as u64 - 8);
+    match refusal(&bytes) {
+        ImageError::Corrupt(_) => {}
+        other => panic!("expected a corrupt-image refusal, got {other:?}"),
+    }
+}
+
+// The constructor tag says which value to build. A tag this binary has no
+// constructor for is format drift, refused at the table rather than left to
+// write whatever a mis-read tag resolves to.
+#[test]
+fn an_unknown_constructor_tag_is_refused() {
+    let dir = crate::common::ScratchDir::new("image-recon-ctor");
+    let (mut bytes, s) = dumped_traited_array(&dir);
+    put_u64(&mut bytes, s.reconstruction.start + 8, u64::MAX);
     match refusal(&bytes) {
         ImageError::Corrupt(_) => {}
         other => panic!("expected a corrupt-image refusal, got {other:?}"),

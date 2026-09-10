@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-10
 //! The image file's byte layout, and the fingerprint that gates hydration.
 //!
 //! docs/impl/image/format.md
@@ -85,12 +85,20 @@ pub struct Sections {
     pub relocations: std::ops::Range<usize>,
     /// `(slot, file index)` pairs, one per span that names a file.
     pub file_slots: std::ops::Range<usize>,
+    /// `(slot, primitive index)` pairs, one per native-fn payload word.
+    pub prim_slots: std::ops::Range<usize>,
+    /// `(slot, constructor tag)` pairs, one per value the hydrating instance
+    /// builds for itself.
+    pub reconstruction: std::ops::Range<usize>,
     /// `(offset, tag)` pairs, one per heap object.
     pub index: std::ops::Range<usize>,
     /// Length-prefixed spellings, sorted by name.
     pub names: std::ops::Range<usize>,
     /// Length-prefixed source-file names, sorted, indexed by the file stream.
     pub files: std::ops::Range<usize>,
+    /// Length-prefixed primitive names, sorted, indexed by the primitive
+    /// stream.
+    pub prims: std::ops::Range<usize>,
 }
 
 impl Sections {
@@ -102,6 +110,10 @@ impl Sections {
     pub const INDEX_BYTES: usize = INDEX_BYTES;
     /// Bytes per file-slot entry.
     pub const FILE_SLOT_BYTES: usize = FILE_SLOT_BYTES;
+    /// Bytes per primitive-slot entry.
+    pub const PRIM_SLOT_BYTES: usize = PRIM_SLOT_BYTES;
+    /// Bytes per reconstruction entry.
+    pub const RECON_BYTES: usize = RECON_BYTES;
 }
 
 /// The section ranges of an image held in memory. Reads the header only, so
@@ -144,9 +156,12 @@ pub fn sections(bytes: &[u8]) -> Result<Sections, ImageError> {
         page_table: ranges[0].clone(),
         relocations: ranges[1].clone(),
         file_slots: ranges[2].clone(),
+        prim_slots: 0..0,
+        reconstruction: 0..0,
         index: ranges[3].clone(),
         names: ranges[4].clone(),
         files: ranges[5].clone(),
+        prims: 0..0,
     })
 }
 
@@ -188,6 +203,8 @@ pub(crate) const PAGE_ENTRY_BYTES: usize = 24;
 pub(crate) const RELOC_BYTES: usize = 16;
 pub(crate) const INDEX_BYTES: usize = 16;
 pub(crate) const FILE_SLOT_BYTES: usize = 16;
+pub(crate) const PRIM_SLOT_BYTES: usize = 16;
+pub(crate) const RECON_BYTES: usize = 16;
 
 fn put(buf: &mut [u8], at: usize, v: u64) {
     buf[at..at + 8].copy_from_slice(&v.to_le_bytes());
