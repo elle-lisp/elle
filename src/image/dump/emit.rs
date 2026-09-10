@@ -1,6 +1,6 @@
-// audited: 2026-09-09
-//! What the file gets from the copied graph: page bytes, relocation slots,
-//! the object index, the file-id slots, and the scope watermark.
+// audited: 2026-09-10
+//! What the file gets from the copied graph: page bytes, the four relocation
+//! streams, the object index, and the scope watermark.
 //!
 //! docs/impl/image.md
 //! docs/impl/image/format.md
@@ -10,6 +10,7 @@
 //! extents into a zeroed buffer rather than copied, so no construction
 //! temporary's padding reaches the artifact.
 
+use std::collections::HashMap;
 use std::mem::size_of;
 
 use crate::syntax::{ScopeId, Syntax, SyntaxKind};
@@ -18,8 +19,10 @@ use crate::value::heap::HeapObject;
 use crate::value::region_slice::RegionSlice;
 use crate::value::{TableKey, Value};
 
+use super::super::format::Ctor;
 use super::super::layout;
 use super::super::ImageError;
+use super::primitive_name;
 
 /// Where the scratch region's addresses land in the image: its pages in
 /// placement order, each with the image offset it starts at.
@@ -73,6 +76,11 @@ pub(super) struct Emitted {
     /// index into the file table once the whole walk is done and the table's
     /// order is known.
     pub files: Vec<(u64, Box<str>)>,
+    /// `(slot, primitive name)` per native-fn payload word, indexed into the
+    /// primitive table the same way.
+    pub prims: Vec<(u64, &'static str)>,
+    /// `(slot, encoded constructor)` per value the hydrating instance builds.
+    pub recons: Vec<(u64, u64)>,
     /// One past the highest hygiene scope counter any node carries.
     pub scope_watermark: u32,
 }
@@ -81,12 +89,18 @@ pub(super) struct Emitted {
 ///
 /// `pool` is `None` for a graph that allocated nothing — an image rooted at an
 /// immediate — and the answer is then an empty pages section.
-pub(super) fn emit(pool: Option<&RegionPool>, at: &Placement) -> Result<Emitted, ImageError> {
+pub(super) fn emit(
+    pool: Option<&RegionPool>,
+    at: &Placement,
+    reconstructions: &HashMap<usize, Ctor>,
+) -> Result<Emitted, ImageError> {
     let mut out = Emitted {
         pages: vec![0u8; at.len() as usize],
         relocs: Vec::new(),
         index: Vec::new(),
         files: Vec::new(),
+        prims: Vec::new(),
+        recons: Vec::new(),
         scope_watermark: 0,
     };
     let mut backings: Vec<Backing> = Vec::new();
@@ -97,10 +111,11 @@ pub(super) fn emit(pool: Option<&RegionPool>, at: &Placement) -> Result<Emitted,
         out.index.push((obj_off, obj.tag() as u64));
         let dst = obj_off as usize;
         layout::write_canonical(obj, &mut out.pages[dst..dst + size_of::<HeapObject>()]);
+        out.traits_slot(obj, addr, reconstructions, at)?;
         match obj {
             HeapObject::Pair(pair) => {
-                out.payload_slot(&pair.first, at)?;
-                out.payload_slot(&pair.rest, at)?;
+                out.value_slot(&pair.first, at)?;
+                out.value_slot(&pair.rest, at)?;
             }
             HeapObject::LString { s, .. } => {
                 if let Some((rel, src)) = out.slice_backing(s, at)? {
@@ -115,13 +130,13 @@ pub(super) fn emit(pool: Option<&RegionPool>, at: &Placement) -> Result<Emitted,
             HeapObject::LArray { elements, .. } => {
                 out.values_backing(elements, at, &mut backings)?;
                 for v in elements.iter() {
-                    out.payload_slot(v, at)?;
+                    out.value_slot(v, at)?;
                 }
             }
             HeapObject::LSet { data, .. } => {
                 out.values_backing(data, at, &mut backings)?;
                 for v in data.iter() {
-                    out.payload_slot(v, at)?;
+                    out.value_slot(v, at)?;
                 }
             }
             HeapObject::LStruct { data, .. } => {
@@ -132,9 +147,9 @@ pub(super) fn emit(pool: Option<&RegionPool>, at: &Placement) -> Result<Emitted,
                 // slots per entry rather than one.
                 for (key, value) in data.iter() {
                     if let Some(v) = key.heap_value() {
-                        out.payload_slot(v, at)?;
+                        out.value_slot(v, at)?;
                     }
-                    out.payload_slot(value, at)?;
+                    out.value_slot(value, at)?;
                 }
             }
             // A syntax object's root node rides in its shell, so the shell's
@@ -150,17 +165,30 @@ pub(super) fn emit(pool: Option<&RegionPool>, at: &Placement) -> Result<Emitted,
     }
     out.relocs.sort_unstable();
     out.index.sort_unstable();
+    out.prims.sort_unstable();
+    out.recons.sort_unstable();
 
     // Object slots and syntax nodes are already canonical in `pages`; add the
     // backings that are not nodes.
     for backing in &backings {
         backing.write(&mut out.pages);
     }
-    // Canonicalize every relocation slot to zero: its dump-time content is a
-    // scratch-region absolute address — meaningless to the file and rewritten
-    // wholesale by hydration's relocation pass.
-    for &(slot, _) in &out.relocs {
+    // Canonicalize every rewritten slot to zero. A relocation slot holds a
+    // scratch-region address and a primitive slot a `prim_id` — both are
+    // dump-time facts the file must not record, and hydration writes both
+    // wholesale. A reconstruction slot takes a whole `Value`, so both its
+    // words go.
+    let words: Vec<u64> = out
+        .relocs
+        .iter()
+        .map(|&(slot, _)| slot)
+        .chain(out.prims.iter().map(|&(slot, _)| slot))
+        .collect();
+    for slot in words {
         out.pages[slot as usize..slot as usize + 8].fill(0);
+    }
+    for &(slot, _) in &out.recons {
+        out.pages[slot as usize..slot as usize + size_of::<Value>()].fill(0);
     }
     Ok(out)
 }
@@ -173,13 +201,51 @@ impl Emitted {
         Ok(())
     }
 
-    /// Record the relocation slot of `v`'s payload, when `v` names a heap
-    /// object. The slot is named by its own address, so the walk takes it
-    /// from the live field rather than computing an offset from a probe.
-    fn payload_slot(&mut self, v: &Value, at: &Placement) -> Result<(), ImageError> {
-        match v.as_heap_ptr() {
-            Some(p) => self.slot(&v.payload as *const u64 as usize, p as usize, at),
-            None => Ok(()),
+    /// Record what a `Value` slot needs at hydration: a relocation when it
+    /// names a heap object, a primitive entry when it names a native-fn, and
+    /// nothing at all for a portable immediate. The slot is named by its own
+    /// address, so the walk takes it from the live field rather than computing
+    /// an offset from a probe.
+    fn value_slot(&mut self, v: &Value, at: &Placement) -> Result<(), ImageError> {
+        let slot = &v.payload as *const u64 as usize;
+        if let Some(p) = v.as_heap_ptr() {
+            return self.slot(slot, p as usize, at);
+        }
+        if v.is_native_fn() {
+            self.prims.push((at.offset(slot)?, primitive_name(*v)?));
+        }
+        Ok(())
+    }
+
+    /// Record what `obj`'s `traits` field needs: a constructor the hydrating
+    /// instance runs, a relocation into the body, or nothing
+    /// (docs/impl/image.md § Sealing). The field's own address comes from the
+    /// probe, because the variants keep it in different places and the copy
+    /// this walks is read through a shared `HeapObject` reference.
+    fn traits_slot(
+        &mut self,
+        obj: &HeapObject,
+        addr: usize,
+        reconstructions: &HashMap<usize, Ctor>,
+        at: &Placement,
+    ) -> Result<(), ImageError> {
+        let traits = obj.traits();
+        let ctor = reconstructions.get(&addr);
+        if traits.as_heap_ptr().is_none() && ctor.is_none() {
+            return Ok(());
+        }
+        let field = addr
+            + layout::traits_slot_in(obj.tag())
+                .expect("a traited object's variant carries a probed traits field");
+        match ctor {
+            Some(&ctor) => {
+                self.recons.push((at.offset(field)?, ctor.encode()));
+                Ok(())
+            }
+            None => {
+                let target = traits.as_heap_ptr().expect("checked above") as usize;
+                self.slot(field + layout::payload_in_value(), target, at)
+            }
         }
     }
 

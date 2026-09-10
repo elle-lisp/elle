@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-10
 //! The compacting copy: what the dumper accepts into an image's body, and
 //! the spellings it records on the way through.
 //!
@@ -8,7 +8,9 @@
 //! preserved through a map keyed on source payload address. A value outside
 //! the sealed set fails the copy, naming the variant, before any byte is
 //! written. Every symbol and keyword the walk meets — in a value position or
-//! as a struct key — leaves its spelling in the name table.
+//! as a struct key — leaves its spelling in the name table. A `traits` field
+//! either copies as program data or becomes a reconstruction the hydrating
+//! instance answers for itself.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -18,11 +20,13 @@ use crate::syntax::SyntaxArena;
 use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::{deref, HeapObject, Pair};
 use crate::value::repr::{
-    TAG_EMPTY_LIST, TAG_FALSE, TAG_FLOAT, TAG_INT, TAG_KEYWORD, TAG_NIL, TAG_SYMBOL, TAG_TRUE,
+    TAG_EMPTY_LIST, TAG_FALSE, TAG_FLOAT, TAG_INT, TAG_KEYWORD, TAG_NATIVE_FN, TAG_NIL, TAG_SYMBOL,
+    TAG_TRUE,
 };
 use crate::value::{TableKey, Value};
 
-use super::ImageError;
+use super::super::format::Ctor;
+use super::{primitive_name, ImageError};
 
 /// What the copying walk carries: the sharing map, and the spellings met so
 /// far. Both are per-dump state the recursion threads through every value.
@@ -35,6 +39,10 @@ pub(super) struct Walk<'a> {
     /// name table is written in, so one graph writes one table whatever order
     /// the memo learned them in.
     names: BTreeSet<Box<str>>,
+    /// Copied objects whose `traits` field the hydrating instance fills in for
+    /// itself, by the address of the copy. Emit turns each into a
+    /// reconstruction entry once it knows where that copy lands in the image.
+    reconstructions: HashMap<usize, Ctor>,
 }
 
 impl<'a> Walk<'a> {
@@ -43,6 +51,7 @@ impl<'a> Walk<'a> {
             visited: HashMap::new(),
             memo,
             names: BTreeSet::new(),
+            reconstructions: HashMap::new(),
         }
     }
 
@@ -63,9 +72,58 @@ impl<'a> Walk<'a> {
         }
     }
 
-    pub(super) fn into_name_table(self) -> Vec<Box<str>> {
-        self.names.into_iter().collect()
+    pub(super) fn into_tables(self) -> (Vec<Box<str>>, HashMap<usize, Ctor>) {
+        (self.names.into_iter().collect(), self.reconstructions)
     }
+}
+
+/// What the copy of an object carries in its `traits` field
+/// (docs/impl/image.md § Sealing).
+enum Traits {
+    /// Nothing: the source object carried no table.
+    None,
+    /// The hydrating instance's own table, named by a constructor. The copy
+    /// carries nil until hydration fills the slot in.
+    Reconstruct(Ctor),
+    /// A user table, copied into the image like any other struct.
+    Carried(Value),
+}
+
+impl Traits {
+    /// What the copy is built with. A reconstructed slot is written at
+    /// hydration, so the dump leaves it nil and the emitter zeroes it.
+    fn value(&self) -> Value {
+        match self {
+            Traits::Carried(v) => *v,
+            _ => Value::NIL,
+        }
+    }
+}
+
+/// Decide what a source object's `traits` field crosses as, copying a user
+/// table into `region` on the way.
+///
+/// The identity test runs over the whole default table rather than the
+/// object's own tag: one traitset serves several tags, and `with-traits` can
+/// attach any of them to any value.
+fn copy_traits(
+    heap: &mut FiberHeap,
+    region: RuntimeRegion,
+    traits: Value,
+    walk: &mut Walk,
+) -> Result<Traits, ImageError> {
+    let Some(ptr) = traits.as_heap_ptr() else {
+        return Ok(Traits::None);
+    };
+    let default = heap
+        .default_traits_table()
+        .iter()
+        .position(|t| t.as_heap_ptr() == Some(ptr));
+    if let Some(i) = default {
+        let tag = super::super::format::tag_from_u64(i as u64)?;
+        return Ok(Traits::Reconstruct(Ctor::DefaultTraits(tag)));
+    }
+    Ok(Traits::Carried(copy_value(heap, region, traits, walk)?))
 }
 
 /// Deep-copy one sealed data value into the scratch region, preserving
@@ -87,6 +145,14 @@ pub(super) fn copy_value(
                 walk.note_name(v);
                 Ok(v)
             }
+            // A native-fn is its `prim_id`, which means nothing in another
+            // process — so the value only crosses if a canonical name carries
+            // it. The emitter records the slot; this is where an unnameable
+            // def fails, at the value rather than at the byte.
+            TAG_NATIVE_FN => {
+                primitive_name(v)?;
+                Ok(v)
+            }
             _ => Err(ImageError::Unsupported(format!(
                 "immediate {} is not portable data",
                 v.type_name()
@@ -98,24 +164,23 @@ pub(super) fn copy_value(
         return Ok(copy);
     }
     let obj = unsafe { deref(v) };
-    if obj.traits() != Value::NIL {
-        return Err(ImageError::Unsupported(format!(
-            "{:?} carries traits — instance state the image cannot own",
-            obj.tag()
-        )));
-    }
+    let traits = copy_traits(heap, region, obj.traits(), walk)?;
+    let carried = traits.value();
     let copy = match obj {
         HeapObject::Pair(pair) => {
             let first = copy_value(heap, region, pair.first, walk)?;
             let rest = copy_value(heap, region, pair.rest, walk)?;
-            heap.alloc_in_region(HeapObject::Pair(Pair::new(first, rest)), region)
+            heap.alloc_in_region(
+                HeapObject::Pair(Pair::with_traits(first, rest, carried)),
+                region,
+            )
         }
         HeapObject::LString { s, .. } => {
             let slice = heap.alloc_region_slice_in_region(s.as_slice(), region);
             heap.alloc_in_region(
                 HeapObject::LString {
                     s: slice,
-                    traits: Value::NIL,
+                    traits: carried,
                 },
                 region,
             )
@@ -125,7 +190,7 @@ pub(super) fn copy_value(
             heap.alloc_in_region(
                 HeapObject::LBytes {
                     data: slice,
-                    traits: Value::NIL,
+                    traits: carried,
                 },
                 region,
             )
@@ -139,7 +204,7 @@ pub(super) fn copy_value(
             heap.alloc_in_region(
                 HeapObject::LArray {
                     elements: slice,
-                    traits: Value::NIL,
+                    traits: carried,
                 },
                 region,
             )
@@ -157,7 +222,7 @@ pub(super) fn copy_value(
             heap.alloc_in_region(
                 HeapObject::LSet {
                     data: slice,
-                    traits: Value::NIL,
+                    traits: carried,
                 },
                 region,
             )
@@ -172,7 +237,7 @@ pub(super) fn copy_value(
             heap.alloc_in_region(
                 HeapObject::LStruct {
                     data: slice,
-                    traits: Value::NIL,
+                    traits: carried,
                 },
                 region,
             )
@@ -187,7 +252,7 @@ pub(super) fn copy_value(
             heap.alloc_in_region(
                 HeapObject::Syntax {
                     syntax: owned,
-                    traits: Value::NIL,
+                    traits: carried,
                 },
                 region,
             )
@@ -200,6 +265,10 @@ pub(super) fn copy_value(
             )))
         }
     };
+    if let Traits::Reconstruct(ctor) = traits {
+        let at = copy.as_heap_ptr().expect("a copied object is heap") as usize;
+        walk.reconstructions.insert(at, ctor);
+    }
     walk.visited.insert(key, copy);
     Ok(copy)
 }

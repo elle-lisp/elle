@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-10
 //! Layout probes for the records the dumper writes into page bytes: each
 //! variant's discriminant byte and the byte extents of its leaf fields.
 //!
@@ -125,6 +125,18 @@ pub(crate) fn dumpable(tag: HeapTag) -> bool {
     variant_layout(tag).is_some()
 }
 
+/// Where `tag`'s `traits` field sits inside a `HeapObject`, or `None` for a
+/// variant that has none. The probe measured it with every other leaf extent,
+/// so the dumper names the slot from the same measurement the fingerprint
+/// records rather than from a second one of its own.
+pub(crate) fn traits_slot_in(tag: HeapTag) -> Option<usize> {
+    variant_layout(tag)?
+        .fields
+        .iter()
+        .find(|f| f.name == "traits")
+        .map(|f| f.offset)
+}
+
 /// Copy `v`'s canonical bytes into the zeroed slot `dst`: the discriminant
 /// byte plus every leaf-field extent. Padding stays zero, so the result is
 /// independent of the construction that produced `v`.
@@ -145,6 +157,13 @@ pub(crate) fn write_canonical<T: Probed>(v: &T, dst: &mut [u8]) {
             std::ptr::copy_nonoverlapping(src.add(f.offset), dst[f.offset..].as_mut_ptr(), f.len);
         }
     }
+}
+
+/// Where a `Value` keeps its payload word — the word a pointer or a primitive
+/// relocation rewrites, inside a slot the walk reaches by offset rather than
+/// by its own address.
+pub(crate) fn payload_in_value() -> usize {
+    offset_of!(Value, payload)
 }
 
 /// Where a struct entry keeps its key and its value. A tuple's field order is

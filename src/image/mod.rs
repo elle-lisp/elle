@@ -1,17 +1,17 @@
-// audited: 2026-09-09
+// audited: 2026-09-10
 //! Image persistence: an image is the page bytes of one compacted region plus
 //! a relocation table, and hydration maps those pages privately.
 //!
 //! docs/impl/image.md
 //! docs/impl/image/format.md
 //!
-//! Hydration rewrites the pointer slots, replays the name and file tables
-//! into the hydrating instance, and installs the result as an ordinary
-//! counted region. The body carries the whole sealed data set: pairs,
-//! strings, bytes, arrays, sets, structs, syntax, floats, and the portable
-//! immediates, symbols and keywords among them. Closures and the boot and
-//! environment configurations arrive with the later milestones
-//! (docs/impl/image/plan.md).
+//! Hydration rewrites the pointer slots, replays the name, file and primitive
+//! tables into the hydrating instance, runs the reconstruction stream, and
+//! installs the result as an ordinary counted region. The body carries the
+//! whole sealed data set: pairs, strings, bytes, arrays, sets, structs,
+//! syntax, floats, user trait tables, and the portable immediates — symbols,
+//! keywords and native-fns among them. Closures and the boot and environment
+//! configurations arrive with the later milestones (docs/impl/image/plan.md).
 
 mod dump;
 mod format;

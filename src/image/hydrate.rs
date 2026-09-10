@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-10
 //! The hydrator: map an image's pages privately, relocate them, and install
 //! them as a freshly minted counted region.
 //!
@@ -12,13 +12,17 @@
 use std::os::fd::AsRawFd;
 use std::path::Path;
 
+use crate::hir::region::RuntimeRegion;
 use crate::value::fiberheap::pagepool::MmapPage;
 use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::{HeapObject, HeapTag};
-use crate::value::repr::TAG_HEAP_START;
+use crate::value::repr::{TAG_HEAP_START, TAG_NATIVE_FN};
 use crate::value::Value;
 
-use super::format::{self, Header, FILE_SLOT_BYTES, INDEX_BYTES, PAGE_ENTRY_BYTES, RELOC_BYTES};
+use super::format::{
+    self, Ctor, Header, FILE_SLOT_BYTES, INDEX_BYTES, PAGE_ENTRY_BYTES, PRIM_SLOT_BYTES,
+    RECON_BYTES, RELOC_BYTES,
+};
 use super::verify::{self, MappedPage};
 use super::{Hydrated, ImageError, ImageSource};
 
@@ -93,8 +97,11 @@ pub fn hydrate(
         || header.n_relocs > 1 << 32
         || header.n_objects > 1 << 32
         || header.n_file_slots > 1 << 32
+        || header.n_prim_slots > 1 << 32
+        || header.n_recons > 1 << 32
         || header.names_len > 1 << 32
         || header.files_len > 1 << 32
+        || header.prims_len > 1 << 32
         || header.scope_watermark > u32::MAX as u64
     {
         return Err(corrupt("section counts out of range"));
@@ -103,8 +110,11 @@ pub fn hydrate(
         + header.n_relocs * RELOC_BYTES as u64
         + header.n_objects * INDEX_BYTES as u64
         + header.n_file_slots * FILE_SLOT_BYTES as u64
+        + header.n_prim_slots * PRIM_SLOT_BYTES as u64
+        + header.n_recons * RECON_BYTES as u64
         + header.names_len
-        + header.files_len;
+        + header.files_len
+        + header.prims_len;
     let meta_off = image_at + pages_at + pages_len;
     if file_len < meta_off + meta_len {
         return Err(corrupt("file shorter than its sections claim"));
@@ -116,11 +126,16 @@ pub fn hydrate(
     let reloc_bytes = header.n_relocs as usize * RELOC_BYTES;
     let index_bytes = header.n_objects as usize * INDEX_BYTES;
     let file_slot_bytes = header.n_file_slots as usize * FILE_SLOT_BYTES;
+    let prim_slot_bytes = header.n_prim_slots as usize * PRIM_SLOT_BYTES;
+    let recon_bytes = header.n_recons as usize * RECON_BYTES;
     let (page_table, rest) = meta.split_at(page_table_bytes);
     let (reloc_table, rest) = rest.split_at(reloc_bytes);
     let (file_slot_table, rest) = rest.split_at(file_slot_bytes);
+    let (prim_slot_table, rest) = rest.split_at(prim_slot_bytes);
+    let (recon_table, rest) = rest.split_at(recon_bytes);
     let (index_table, rest) = rest.split_at(index_bytes);
-    let (name_table, file_table) = rest.split_at(header.names_len as usize);
+    let (name_table, rest) = rest.split_at(header.names_len as usize);
+    let (file_table, prim_table) = rest.split_at(header.files_len as usize);
 
     // Page table: sizes are powers of two ≥ the base page, descending, with
     // ordered cursors; the packed offsets must sum to the section length.
@@ -199,6 +214,37 @@ pub fn hydrate(
         file_slots.push((slot, *name));
     }
 
+    // Primitive slots, decoded and bounds-checked before mapping. A slot is a
+    // `Value`'s payload word, so it is bounded and aligned like a pointer
+    // relocation; what it takes is this process's id for the name the entry
+    // indexes (docs/impl/image/format.md).
+    let prim_names = format::read_names(prim_table)?;
+    let mut prim_slots = Vec::with_capacity(header.n_prim_slots as usize);
+    for i in 0..header.n_prim_slots as usize {
+        let (slot, which) = format::read_u64_pair(prim_slot_table, i, PRIM_SLOT_BYTES);
+        if slot + 8 > pages_len {
+            return Err(corrupt("primitive slot out of range"));
+        }
+        if !slot.is_multiple_of(8) {
+            return Err(corrupt("primitive slot is not 8-byte aligned"));
+        }
+        prim_slots.push((slot, primitive_at(&prim_names, which)?));
+    }
+
+    // Reconstruction entries, decoded and bounds-checked before mapping. An
+    // entry rewrites a whole `Value`, so its bound is the wider one.
+    let mut recons = Vec::with_capacity(header.n_recons as usize);
+    for i in 0..header.n_recons as usize {
+        let (slot, raw) = format::read_u64_pair(recon_table, i, RECON_BYTES);
+        if slot + std::mem::size_of::<Value>() as u64 > pages_len {
+            return Err(corrupt("reconstruction slot out of range"));
+        }
+        if !slot.is_multiple_of(8) {
+            return Err(corrupt("reconstruction slot is not 8-byte aligned"));
+        }
+        recons.push((slot, Ctor::decode(raw)?));
+    }
+
     // Root, checked before mapping.
     if header.root_is_heap {
         if header.root_tag < TAG_HEAP_START || header.root_payload + obj_size > pages_len {
@@ -210,6 +256,16 @@ pub fn hydrate(
     } else if header.root_tag >= TAG_HEAP_START {
         return Err(corrupt("immediate root with a heap tag"));
     }
+    // A native-fn root's payload is a primitive-table index, since the header
+    // is not a slot any stream can name.
+    let root = if !header.root_is_heap && header.root_tag == TAG_NATIVE_FN {
+        Value::native_fn(primitive_at(&prim_names, header.root_payload)?)
+    } else {
+        Value {
+            tag: header.root_tag,
+            payload: header.root_payload,
+        }
+    };
 
     // Replay the name table (step 2), before the region is minted: the
     // spellings are what let this instance print the image's symbols and
@@ -223,10 +279,7 @@ pub fn hydrate(
     if header.n_pages == 0 {
         let region = heap.install_hydrated_region(Vec::new(), &[], 0);
         return Ok(Hydrated {
-            root: Value {
-                tag: header.root_tag,
-                payload: header.root_payload,
-            },
+            root,
             region,
             scope_watermark: header.scope_watermark as u32,
         });
@@ -309,6 +362,14 @@ pub fn hydrate(
         }
     }
 
+    // And for primitives: the slot takes this process's id for the name the
+    // entry named, whatever id the dumping process held.
+    for &(slot, def) in &prim_slots {
+        unsafe {
+            *((base + slot as usize) as *mut u64) = Value::native_fn(def).payload;
+        }
+    }
+
     // The verifier's object walk (§ Verifier), over the shells relocation
     // has already made resident.
     let mapped: Vec<MappedPage> = entries
@@ -319,6 +380,14 @@ pub fn hydrate(
         })
         .collect();
     verify::objects(base, &mapped, &objects)?;
+
+    // Resolve every reconstruction before the region is installed: an
+    // instance that cannot answer refuses the load, and a refusal must leave
+    // no region behind (docs/impl/image.md § Sealing).
+    let mut rebuilt = Vec::with_capacity(recons.len());
+    for &(slot, ctor) in &recons {
+        rebuilt.push((slot, reconstruct(heap, ctor)?));
+    }
 
     // Install (steps 5–6): the mapped pages become a freshly minted Counted
     // region; the header stamps and cursor rebuild happen inside.
@@ -334,6 +403,24 @@ pub fn hydrate(
     guard.armed = false; // ownership of every byte moved into the MmapPages
     let region = heap.install_hydrated_region(pages, &objects, base);
 
+    // Write each reconstructed value into its slot and count the reference it
+    // creates. The target lives in a region of this instance's own, so the
+    // hydrated region's free cascade must release it exactly once — and the
+    // free-time edge oracle compares the recorded table against the same
+    // pointers it just wrote (docs/impl/region/ownership.md).
+    for (slot, v) in rebuilt {
+        unsafe {
+            *((base + slot as usize) as *mut Value) = v;
+        }
+        if let Some(target) = v
+            .as_heap_ptr()
+            .and_then(|p| RuntimeRegion::new(heap.region_of_ptr(p)))
+        {
+            heap.incref_region(target);
+            heap.record_outgoing_edge(Some(region), Some(target));
+        }
+    }
+
     Ok(Hydrated {
         root: Value::from_heap_ptr(
             (base + header.root_payload as usize) as *const (),
@@ -342,4 +429,34 @@ pub fn hydrate(
         region,
         scope_watermark: header.scope_watermark as u32,
     })
+}
+
+/// The def a primitive-table index names, for this process.
+fn primitive_at(
+    names: &[&str],
+    which: u64,
+) -> Result<&'static crate::primitives::def::PrimitiveDef, ImageError> {
+    let name = names.get(which as usize).ok_or_else(|| {
+        ImageError::Corrupt("a primitive slot names no entry in the primitive table".into())
+    })?;
+    crate::primitives::registration::def_by_name(name).ok_or_else(|| {
+        ImageError::Unsupported(format!("this binary has no primitive named {name}"))
+    })
+}
+
+/// Build the value a reconstruction entry asks the hydrating instance for, or
+/// refuse by name. The default trait tables exist before any hydration by
+/// VM-init order, so this is a lookup rather than an allocation.
+fn reconstruct(heap: &FiberHeap, ctor: Ctor) -> Result<Value, ImageError> {
+    match ctor {
+        Ctor::DefaultTraits(tag) => {
+            let table = heap.default_traits_for(tag);
+            if table.is_nil() {
+                return Err(ImageError::Unsupported(format!(
+                    "this instance has no default trait table for {tag:?}"
+                )));
+            }
+            Ok(table)
+        }
+    }
 }

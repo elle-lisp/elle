@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-10
 //! The dumper: a compacting copy of a sealed data graph into a scratch
 //! region, written out as an image file.
 //!
@@ -53,6 +53,24 @@ pub fn dump(
     result
 }
 
+/// The canonical name a native-fn crosses as, or a refusal naming the def.
+///
+/// A `prim_id` is an index into this process's registry, so only a name the
+/// canonical tables carry can be resolved again elsewhere
+/// (docs/impl/image/format.md).
+pub(super) fn primitive_name(v: Value) -> Result<&'static str, ImageError> {
+    let def = v
+        .as_native_def()
+        .ok_or_else(|| ImageError::Unsupported("a native-fn payload names no primitive".into()))?;
+    match crate::primitives::registration::def_by_name(def.name) {
+        Some(canonical) if std::ptr::eq(canonical, def) => Ok(def.name),
+        _ => Err(ImageError::Unsupported(format!(
+            "native-fn {} is outside the canonical primitive tables, so no name carries it",
+            def.name
+        ))),
+    }
+}
+
 fn dump_into(
     heap: &mut FiberHeap,
     scratch: RuntimeRegion,
@@ -62,14 +80,14 @@ fn dump_into(
 ) -> Result<(), ImageError> {
     let mut walk = Walk::new(symbols);
     let copied = copy_value(heap, scratch, root, &mut walk)?;
-    let names = walk.into_name_table();
+    let (names, reconstructions) = walk.into_tables();
 
     let mut layouts = heap
         .region_pool(scratch)
         .map(|p| p.page_layouts())
         .unwrap_or_default();
     let at = Placement::new(&mut layouts);
-    let emitted = emit::emit(heap.region_pool(scratch), &at)?;
+    let emitted = emit::emit(heap.region_pool(scratch), &at, &reconstructions)?;
 
     let entries: Vec<PageEntry> = layouts
         .iter()
@@ -80,9 +98,38 @@ fn dump_into(
         })
         .collect();
 
+    // A primitive travels by name (docs/impl/image/format.md). The table holds
+    // the spellings the body's slots name, plus the root's when the whole
+    // image is one native-fn — that root rides in the header, where no stream
+    // can reach it, so its payload is a table index and its tag says so.
+    let root_prim = if copied.is_native_fn() {
+        Some(primitive_name(copied)?)
+    } else {
+        None
+    };
+    let prims: Vec<Box<str>> = emitted
+        .prims
+        .iter()
+        .map(|&(_, name)| Box::<str>::from(name))
+        .chain(root_prim.map(Box::<str>::from))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let prim_index = |name: &str| -> u64 {
+        prims
+            .binary_search(&Box::<str>::from(name))
+            .expect("every name the walk met is in the table") as u64
+    };
+    let mut prim_slots: Vec<(u64, u64)> = emitted
+        .prims
+        .iter()
+        .map(|&(slot, name)| (slot, prim_index(name)))
+        .collect();
+    prim_slots.sort_unstable();
+
     let (root_is_heap, root_payload) = match copied.as_heap_ptr() {
         Some(p) => (true, at.offset(p as usize)?),
-        None => (false, copied.payload),
+        None => (false, root_prim.map_or(copied.payload, prim_index)),
     };
 
     // A file travels by name, and the table's sorted order is what gives each
@@ -108,17 +155,21 @@ fn dump_into(
 
     let name_table = string_table(&names);
     let file_table = string_table(&files);
+    let prim_table = string_table(&prims);
     let header = Header {
         pages_len: at.len(),
         n_pages: entries.len() as u64,
         n_relocs: emitted.relocs.len() as u64,
         n_objects: emitted.index.len() as u64,
         n_file_slots: file_slots.len() as u64,
+        n_prim_slots: prim_slots.len() as u64,
+        n_recons: emitted.recons.len() as u64,
         root_tag: copied.tag,
         root_payload,
         root_is_heap,
         names_len: name_table.len() as u64,
         files_len: file_table.len() as u64,
+        prims_len: prim_table.len() as u64,
         scope_watermark: emitted.scope_watermark as u64,
         fingerprint: format::fingerprint(),
     };
@@ -136,11 +187,18 @@ fn dump_into(
     for &(s, i) in &file_slots {
         format::write_u64_pair(&mut file_bytes, s, i);
     }
+    for &(s, i) in &prim_slots {
+        format::write_u64_pair(&mut file_bytes, s, i);
+    }
+    for &(s, c) in &emitted.recons {
+        format::write_u64_pair(&mut file_bytes, s, c);
+    }
     for &(o, t) in &emitted.index {
         format::write_u64_pair(&mut file_bytes, o, t);
     }
     file_bytes.extend_from_slice(&name_table);
     file_bytes.extend_from_slice(&file_table);
+    file_bytes.extend_from_slice(&prim_table);
     debug_assert_eq!(file_bytes.len() % 8, 0);
     debug_assert!(format::pages_offset() as u64 + at.len() <= file_bytes.len() as u64);
 
