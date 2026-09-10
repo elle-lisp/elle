@@ -1,7 +1,8 @@
 // audited: 2026-09-09
-//! Lexical scopes and the name resolution over them: binding, looking up, the
-//! capture a lookup across a function boundary records, and the near-miss
-//! suggestion an unresolved name gets.
+//! Lexical scopes and name resolution over them.
+//!
+//! Binding, looking up, the capture a lookup across a function boundary records,
+//! and the near-miss suggestion an unresolved name gets.
 //!
 //! docs/bindings.md
 //! docs/macros.md

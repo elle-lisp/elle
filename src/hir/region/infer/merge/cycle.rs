@@ -1,7 +1,6 @@
 // audited: 2026-09-09
-//! The `letrec` closure-cycle merge: one SCC of mutually-recursive closures ∪ their
-//! prebound capture cells, collapsed onto one arena and freed by a single
-//! `DecrefRegion`.
+//! The `letrec` closure-cycle merge: one SCC of mutually-recursive closures and their
+//! prebound capture cells, collapsed onto one arena.
 //!
 //! docs/impl/region/letrec.md
 //!

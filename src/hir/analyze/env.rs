@@ -1,6 +1,6 @@
 // audited: 2026-09-09
-//! The ambient environment every compilation starts from: the primitives, and the
-//! compile-time values a `begin-for-syntax` or the core library exports.
+//! The ambient environment a compilation starts from: the primitives, and what
+//! `begin-for-syntax` or the core library exports.
 //!
 //! docs/impl/hir.md
 //!

@@ -6,7 +6,7 @@
 // A `letrec` self/mutual recursive closure is a capture-cell↔closure cycle: the
 // prebound forward-reference cell holds the closure (`StoreCaptureCell`) and the
 // closure captures the cell. Per-region RC cannot collect the immutable cycle
-// (region/rules.md Rule 8), but every member is static-slot (the closure's
+// (docs/impl/region/rules.md Rule 8), but every member is static-slot (the closure's
 // `alloc_region`, the cell's `begin_cell_regions`), sole-held, and non-escaping —
 // so the merge collapses the whole SCC ∪ its cells onto ONE region. The interior
 // cell↔closure references become intra-region (the alloc-scan and free-cascade both
