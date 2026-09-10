@@ -1,6 +1,6 @@
 # Images — regions hydrated at load
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-10 -->
 
 Design for image-style persistence: one mechanism, two shipped configurations.
 
@@ -155,6 +155,12 @@ Sealed and portable after the foundations: `Pair`, `LString`, `LArray`,
 stable name hashes), native-fns (dense `prim_id`, remapped by name), ints
 and floats, `Parameter`.
 
+A native-fn's `prim_id` is dense and process-local, so it travels as a name
+([format.md](image/format.md) owns the stream). A def the canonical primitive
+tables do not name — a trait-method handler the registry appended at run time —
+fails the dump instead. Nothing loses by that refusal: those handlers are
+reachable only through the default trait tables, which hydration reconstructs.
+
 A sorted container copies in order and is never re-sorted. Every key an image
 may carry ranks by its own content — a name hash for a symbol or a keyword, the
 bytes for a string, its elements for an array, its structure for anything else
@@ -200,14 +206,23 @@ reconstructible nor side-streamable fails the dump with a named binding.
 
 The **default trait tables** are the second reconstructible class, found by
 the census ([measurements.md](image/measurements.md) item 2): every
-collection's `traits` field points at one of the instance's two default
-traitsets — `@struct`s built by `init_default_traits` at VM init, before any
-stdlib load or hydration. They are instance infrastructure, not program
-state, so the dumper never copies them: a `traits` slot aimed at a default
-traitset becomes a reconstruction entry whose constructor resolves the
-hydrating instance's own table for that tag. The tables exist before
-hydration by construction (VM-init order), so the constructor is a lookup,
-not an allocation.
+collection the runtime allocates carries a `traits` field pointing at one of
+the instance's two default traitsets — `@struct`s built by
+`init_default_traits` at VM init, before any stdlib load or hydration. They
+are instance infrastructure, not program state, so the dumper never copies
+them: a `traits` slot aimed at a default traitset becomes a reconstruction
+entry whose constructor resolves the hydrating instance's own table for that
+tag. The tables exist before hydration by construction (VM-init order), so
+the constructor is a lookup, not an allocation. The dumper tests the slot
+against the whole default table rather than against the object's own tag,
+because one traitset serves seven tags and a program may attach the array's
+table to a string.
+
+A `traits` slot naming anything else is program data and copies into the body
+like any other struct. `with-traits` attaches an ordinary immutable struct
+whose methods are native-fns or closures the body already carries, so a user
+traitset needs no mechanism of its own. A traits slot therefore has three
+answers: nil, a reconstruction entry, and an ordinary pointer relocation.
 
 **Macros persist whole.** A manifest macro entry carries its parameter
 lists, its template syntax (a body value), and its transformer cache's body
@@ -258,10 +273,11 @@ belongs to the **boot** milestone, not a follow-up.
    its release is `munmap`. Generations, scrub's `memset`, and guardfree's
    `mprotect` operate on mappings unchanged.
 4. Run the relocation passes: rewrite pointer slots to
-   `new_page_base + offset`; remap primitive payloads when the registry
-   differs; run the reconstruction stream's constructors and write the
-   fresh values' addresses into their slots. One linear pass; each write
-   copy-on-write faults its 4 KiB frame private.
+   `new_page_base + offset`; resolve each primitive slot's name against this
+   process's registry; run the reconstruction stream's constructors and write
+   their values into their slots, recording the cross-region edge each one
+   creates so the free cascade releases the target exactly once. One linear
+   pass; each write copy-on-write faults its 4 KiB frame private.
 5. Stamp each page header; rebuild `dtors`, `ref_objs`, cursors, and
    `obj_count` from the object index.
 6. Register the region as a process root; bump the watermark counters.
