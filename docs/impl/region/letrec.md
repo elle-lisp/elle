@@ -1,6 +1,6 @@
 # The letrec closure-cycle merge
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-10 -->
 
 Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
 
@@ -428,11 +428,15 @@ teardown — the case that must NOT pick up a later drop site). The oracle reads
 shapes, all closed at 0 — `recur-local-mutual-factory` for the struct-literal
 tail that carries both members into a native by-move, and `recur-local-defn-mutual`
 and `defn-module-factory` for the `defn` run and the closure-as-module factory
-built from one. Both factory probes CONSTRUCT the module per op and stop there;
-calling a member back through the returned struct grows on both spellings under
-`--jit=eager` and on neither on the VM, which is the tier's
-(elle-lisp/elle#1103). `region_ownership_reclaims_defn_module_factory_per_call`
-gauges both drivers on the VM. The `defn` run's own guardfree fixture is
+built from one. The `defn-module-factory` op constructs the module and calls a
+member back through the returned struct, which is the driver the interpreter and
+the JIT must agree on. `region_ownership_reclaims_defn_module_factory_per_call`
+gauges both drivers on the VM, and
+`region_ownership_defn_module_member_call_under_jit` gauges the member call with
+the CALLER compiled — the tier where the tail call into the member hands its
+deferral forward to the callee's activation ([relocate.md](relocate.md) § "A
+channel built in compiled code hands its release forward"). The `defn` run's own
+guardfree fixture is
 `region_defn_cycle_uaf`, which re-enters a member of a returned factory after the
 arena's drop site has passed and drives the factory across churn that recycles a
 freed page.
