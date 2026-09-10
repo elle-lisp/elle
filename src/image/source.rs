@@ -5,7 +5,7 @@
 //! docs/impl/image/format.md
 
 use std::fs::File;
-use std::os::fd::{AsFd, BorrowedFd, FromRawFd};
+use std::os::fd::{AsFd, BorrowedFd};
 use std::path::Path;
 
 use crate::value::fiberheap::pagepool::base_page;
@@ -16,7 +16,7 @@ use super::ImageError;
 ///
 /// The hydrator takes one of these rather than a path, because not every
 /// image has a path — the release build's blob lives inside the executable,
-/// and an image that arrives as bytes is mapped from an anonymous memory file.
+/// and an image that arrives as bytes is mapped from an anonymous file.
 #[derive(Debug)]
 pub struct ImageSource {
     file: File,
@@ -66,60 +66,31 @@ impl ImageSource {
     }
 
     /// The open file, for the hydrator's size check and its page mappings.
-    ///
-    /// `mmap` and `fstat` are the two calls every kind of descriptor here
-    /// answers. Anything that moves bytes goes through `read_exact_at` below,
-    /// which knows which kind this is.
     pub(crate) fn file(&self) -> &File {
         &self.file
     }
 
     /// Fill `buf` from the descriptor, starting at `at`.
     ///
+    /// One implementation for every source, because every descriptor here is a
+    /// file: a path, the executable, a memfd, or an unlinked file. The offset
+    /// is any offset at all — the base-page rule binds where an image starts,
+    /// not where the hydrator reads.
+    ///
     /// The caller has already established that the descriptor holds
     /// `buf.len()` bytes from `at`; a short one is a truncated image and is
     /// reported as an I/O error rather than as a partial read.
-    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub fn read_exact_at(&self, buf: &mut [u8], at: u64) -> Result<(), ImageError> {
         use std::os::unix::fs::FileExt;
 
         self.file.read_exact_at(buf, at)?;
         Ok(())
     }
-
-    /// Fill `buf` from the descriptor, starting at `at`.
-    ///
-    /// A Darwin shared-memory object refuses `pread`, so the bytes come out of
-    /// a read-only mapping. `mmap` takes a base-page offset and `at` is any
-    /// offset at all, so the mapping starts at the page below it and the copy
-    /// starts that far into the mapping.
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    pub fn read_exact_at(&self, buf: &mut [u8], at: u64) -> Result<(), ImageError> {
-        if buf.is_empty() {
-            return Ok(());
-        }
-        let slack = (at % base_page() as u64) as usize;
-        let map = Mapping::new(
-            &self.file,
-            at - slack as u64,
-            slack + buf.len(),
-            libc::PROT_READ,
-            libc::MAP_PRIVATE,
-        )?;
-        // SAFETY: the mapping covers `slack + buf.len()` readable bytes, and
-        // the caller has established that the descriptor is at least that
-        // long from the page the mapping starts at.
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                (map.addr as *const u8).add(slack),
-                buf.as_mut_ptr(),
-                buf.len(),
-            )
-        };
-        Ok(())
-    }
 }
 
+/// The failure a bare libc call leaves behind. Only the memfd arm makes one:
+/// the other reaches the kernel through `std`, which reports for itself.
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn last_error() -> ImageError {
     ImageError::Io(std::io::Error::last_os_error())
 }
@@ -131,8 +102,7 @@ fn last_error() -> ImageError {
 /// kernel mints a memfd exactly as any other Linux one does.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn anonymous_file(bytes: &[u8]) -> Result<File, ImageError> {
-    // Scoped to this arm: the other one holds a descriptor no `FileExt` method
-    // can reach, so a module-level import would read as dead on that platform.
+    use std::os::fd::FromRawFd;
     use std::os::unix::fs::FileExt;
 
     // `MFD_ALLOW_SEALING` is what makes the seal below possible; a memfd
@@ -165,115 +135,38 @@ fn anonymous_file(bytes: &[u8]) -> Result<File, ImageError> {
 
 /// A file holding `bytes` that no directory entry names.
 ///
-/// macOS has neither `memfd_create` nor file seals, so this opens a POSIX
-/// shared-memory object and unlinks it immediately: the name is gone before
-/// the bytes are written, and the descriptor is the only way back to them.
-/// Immutability is this process's discipline there rather than the kernel's.
+/// A host without `memfd_create` gets a file under `TMPDIR`, unlinked before
+/// its first byte is written: the name is gone before there is anything to
+/// read, so the descriptor is the only way back to the bytes and no failure
+/// below can leave a file behind. It gets no seal, so immutability here is
+/// this process's discipline rather than the kernel's.
 ///
-/// Android takes the memfd arm above and never reaches this one: bionic
-/// declares neither `shm_open` nor `shm_unlink`, so there is no POSIX shared
-/// memory there to fall back to.
+/// POSIX shared memory is the obvious candidate and cannot serve. A Darwin
+/// object of that kind takes `mmap` only with `MAP_SHARED`, and the hydrator
+/// maps every page `MAP_FIXED | MAP_PRIVATE` (docs/impl/image.md).
+///
+/// Android takes the memfd arm above and never reaches this one.
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn anonymous_file(bytes: &[u8]) -> Result<File, ImageError> {
+    use std::os::unix::fs::FileExt;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    // A shared-memory name is process-global, so two hydrations racing on one
-    // name would share bytes. The counter is what keeps them apart.
+    // The pid separates two processes and the counter separates two hydrations
+    // inside one, so no two calls race on a name. `create_new` refuses an
+    // existing entry rather than opening it, which is the check that holds if
+    // both ever coincide anyway.
     static NEXT: AtomicU64 = AtomicU64::new(0);
-    let name = format!(
-        "/elle-image-{}-{}\0",
+    let path = std::env::temp_dir().join(format!(
+        "elle-anon-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
-    );
-    let cname = name.as_ptr() as *const libc::c_char;
-    let fd = unsafe {
-        libc::shm_open(
-            cname,
-            libc::O_RDWR | libc::O_CREAT | libc::O_EXCL,
-            0o600 as libc::c_uint,
-        )
-    };
-    if fd < 0 {
-        return Err(last_error());
-    }
-    unsafe { libc::shm_unlink(cname) };
-    // SAFETY: `shm_open` answered with a descriptor this call owns.
-    let file = unsafe { File::from_raw_fd(fd) };
-    if unsafe { libc::ftruncate(fd, bytes.len() as libc::off_t) } != 0 {
-        return Err(last_error());
-    }
-    fill_through_a_mapping(&file, bytes)?;
+    ));
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
+    std::fs::remove_file(&path)?;
+    file.write_all_at(bytes, 0)?;
     Ok(file)
-}
-
-/// Copy `bytes` into a descriptor that only `mmap` reaches.
-///
-/// A Darwin shared-memory object answers `mmap`, `ftruncate` and `fstat` and
-/// refuses the rest, so the `pwrite` that fills a memfd fails on one with
-/// `ESPIPE`. The bytes go in through a writable shared mapping, which is
-/// dropped before the descriptor is handed on.
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
-fn fill_through_a_mapping(file: &File, bytes: &[u8]) -> Result<(), ImageError> {
-    // `mmap` refuses a zero length, and an empty image has nothing to copy.
-    if bytes.is_empty() {
-        return Ok(());
-    }
-    let map = Mapping::new(
-        file,
-        0,
-        bytes.len(),
-        libc::PROT_READ | libc::PROT_WRITE,
-        libc::MAP_SHARED,
-    )?;
-    // SAFETY: the mapping covers `bytes.len()` writable bytes, and a mapping
-    // this call just made cannot overlap the caller's slice.
-    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), map.addr as *mut u8, bytes.len()) };
-    Ok(())
-}
-
-/// One temporary mapping of a descriptor's range, unmapped when it drops.
-///
-/// Both directions on this platform go through one of these, so the unmap
-/// rides on the scope rather than on every path out of the copy.
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
-struct Mapping {
-    addr: *mut libc::c_void,
-    len: usize,
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
-impl Mapping {
-    /// Map `len` bytes of `file` from `at`, which `mmap` requires to be a
-    /// multiple of the base page.
-    fn new(
-        file: &File,
-        at: u64,
-        len: usize,
-        prot: libc::c_int,
-        flags: libc::c_int,
-    ) -> Result<Mapping, ImageError> {
-        use std::os::fd::AsRawFd;
-
-        let addr = unsafe {
-            libc::mmap(
-                std::ptr::null_mut(),
-                len,
-                prot,
-                flags,
-                file.as_raw_fd(),
-                at as libc::off_t,
-            )
-        };
-        if addr == libc::MAP_FAILED {
-            return Err(last_error());
-        }
-        Ok(Mapping { addr, len })
-    }
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
-impl Drop for Mapping {
-    fn drop(&mut self) {
-        unsafe { libc::munmap(self.addr, self.len) };
-    }
 }
