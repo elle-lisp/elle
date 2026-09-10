@@ -1,4 +1,5 @@
 (elle/epoch 12)
+# audited: 2026-09-10
 # tests/elle/bytes-linear.lisp — binary concat/append must be BULK, not per-byte.
 #
 # The binary sibling of concat-linear.lisp (which pins string concat).
@@ -14,46 +15,83 @@
 # The fix gives %bytes-push a whole-bytes bulk form (mirroring %string-push);
 # push-all then bulk-appends bytes sources too. Pinned in Rust by
 # `bytes_push_bulk_appends_bytes_value` (primitives::intrinsics::tests).
+#
+# The text append of the same size is the control, because it is the branch of
+# push-all that never regressed. A wall-clock bound cannot tell a per-byte
+# binary path from a runner that lost its CPU inside the measured window; the
+# ratio between the two appends can. docs/testing.md § "A performance gate
+# measures against a control" holds the argument.
 
-# A 20 KiB immutable bytes chunk (the shape read-exact appends per socket read).
+# Time both thunks over `rounds` alternating rounds and return [control subject]
+# — the smallest elapsed each one reached. Alternating samples the same stretch
+# of machine, and the minimum discards a round the scheduler stalled, so one
+# starved run cannot decide the comparison.
+(defn best-of [rounds control subject]
+  (let [@a nil
+        @b nil
+        @i 0]
+    (while (< i rounds)
+      (let [ca (second (time/elapsed control))
+            cb (second (time/elapsed subject))]
+        (when (or (nil? a) (< ca a)) (assign a ca))
+        (when (or (nil? b) (< cb b)) (assign b cb)))
+      (assign i (+ i 1)))
+    [a b]))
+
+# A 20 KiB immutable bytes chunk (the shape read-exact appends per socket read),
+# and the 20 KiB text chunk that is its control.
 (def chunk
-  (let [@b (@bytes)]
-    (def @i 0)
+  (let [@b (@bytes)
+        @i 0]
     (while (< i 20000)
       (%bytes-push b (bit/and i 0xff))
       (assign i (+ i 1)))
     (freeze b)))
+(def text
+  (let [@s (@string)
+        @i 0]
+    (while (< i 20000)
+      (%string-push s "x")
+      (assign i (+ i 1)))
+    (freeze s)))
+(assert (= (length text) (length chunk))
+        "the control chunk and the measured chunk are the same size")
 
 # Accumulate ~2 MiB by appending the chunk 100 times, exactly as read-exact
 # accumulates a large body from many socket reads. Pre-fix (per-byte push) this
 # is ~2M interpreted %bytes-push calls and runs into whole seconds; post-fix it
-# is ~100 bulk memcpies and completes in milliseconds.
-(def t0 (clock/monotonic))
-(def buf
-  (let [@acc (@bytes)]
-    (def @i 0)
+# is ~100 bulk memcpies and completes in milliseconds. `make` hands back a fresh
+# accumulator per run, so every timed round does the same work from scratch.
+(defn accumulate [make chunk]
+  (let [@acc (make)
+        @i 0]
     (while (< i 100)
       (append acc chunk)
       (assign i (+ i 1)))
-    (freeze acc)))
-(def elapsed (- (clock/monotonic) t0))
+    acc))
+(def binary (fn () (accumulate (fn () (@bytes)) chunk)))
+(def textual (fn () (accumulate (fn () (@string)) text)))
 
+(def buf (freeze (binary)))
 (assert (= (length buf) 2000000) "accumulated the full 2 MiB")
 (assert (= (slice buf 0 4) (bytes 0 1 2 3)) "content preserved at head")
 (assert (= (slice buf 20000 20004) (bytes 0 1 2 3))
         "content preserved across chunks")
 
-# A generous bound: the per-byte path takes seconds and blows it; the bulk
-# path takes milliseconds and clears it with wide margin.
-(assert (< elapsed 0.5)
+# Both appends walk the same push-all branch over the same byte count, so they
+# cost about the same and the multiple is slack, not a budget: the per-byte path
+# is ~100 chunk-copies where the bulk path is one.
+(def [control measured] (best-of 5 textual binary))
+(assert (< measured (* 8 control))
         (concat "binary append must be bulk; 100×20KiB append took "
-                (string elapsed) "s (per-byte regression)"))
+                (string measured) "s against " (string control)
+                "s for the same-size text append (per-byte regression)"))
 
 # concat over many binary chunks (the `(apply concat ...)` body-assembly path)
 # must be bulk too.
 (def parts
-  (let [@ps @[]]
-    (def @i 0)
+  (let [@ps @[]
+        @i 0]
     (while (< i 100)
       (push ps chunk)
       (assign i (+ i 1)))
@@ -61,4 +99,5 @@
 (def joined (apply concat parts))
 (assert (= (length joined) 2000000) "apply concat over 100 binary chunks")
 
-(println "bytes-linear ok: |buf|=" (length buf) " append took " elapsed "s")
+(println "bytes-linear ok: |buf|=" (length buf) " append took " measured
+         "s against " control "s for text")

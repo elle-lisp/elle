@@ -1,17 +1,19 @@
 # Testing
 
+<!-- audited: 2026-09-10 -->
+
 Elle has two test systems:
 
 1. **The Elle corpus** — `.lisp` files under `tests/elle/`, run through the
    **agent-first runner** (`elle test`). This is what `make smoke` gates on.
 2. **The Rust suite** — unit, integration, and property tests under `tests/` and
    inline `#[cfg(test)]` modules, run through `cargo test`. See
-   [`tests/AGENTS.md`](../tests/AGENTS.md) for categories, helpers, and how to add
-   one, and [`docs/analysis/testing.md`](analysis/testing.md) for the
+   [tests/AGENTS.md](../tests/AGENTS.md) for categories, helpers, and how to add
+   one, and [docs/analysis/testing.md](analysis/testing.md) for the
    decision tree (which kind of Rust test to write).
 
 This document covers the Elle corpus and the runner; the runner's full
-specification is [`docs/test-runner.md`](test-runner.md).
+specification is [docs/test-runner.md](test-runner.md).
 
 ## Quick start
 
@@ -39,12 +41,13 @@ You read results from the run itself — never by hand-writing SQLite.
 
 The runner compiles and runs the **whole corpus in one process**, recording every
 `(form × tier)` result into a **SQLite DB** plus a filesystem CAS for
-artifacts. The thesis (see [`docs/test-runner.md`](test-runner.md)): *capture
+artifacts. The thesis (see [docs/test-runner.md](test-runner.md)): *capture
 everything once; query forever* — so an agent issues SQL against the stored run
 instead of re-running with `--dump`/`--trace`.
 
 - **The corpus is the source of truth, in git.** The DB is a derived, rebuildable
-  index living outside the repo (default `$ELLE_CACHE/elle-tests.db`).
+  index living outside the repo (`$ELLE_CACHE/elle-tests.db`, or
+  `target/elle-tests.db` when that variable is unset).
 - **The DB tracks all runs.** Each invocation appends a `run` row; `--summary`
   shows the *latest* run (`run N of M` makes the history visible).
 
@@ -58,7 +61,8 @@ form-by-form. Two shapes:
   forced onto **every backend tier** via `compile/run-on` (`vm`, `jit`, and
   `wasm`/`mlir-cpu` when the build carries them). If two tiers return *different*
   values, the runner records a synthetic `diverge` row — this *is* the
-  differential (cross-tier) testing path (docs/impl/differential.md).
+  differential (cross-tier) testing path
+  ([docs/impl/differential.md](impl/differential.md)).
 - **A legacy multi-form file** (most of `tests/elle/`) is an imperative script, so
   it is wrapped as one whole-file thunk and run under each **JIT policy**: once
   with `jit=off` (recorded tier `vm`) and once with `jit=eager` (recorded tier
@@ -114,7 +118,7 @@ records a reasoned `skip` (and a direct `elle FILE` run exits 0 cleanly):
 
 Name a plugin through `import`, not through an `import-file` path. `import`
 resolves `plugin/X` against the running binary's own build profile
-([`modules.md`](modules.md) § "Module search path"); a written-out
+([modules.md](modules.md) § "Module search path"); a written-out
 `target/release/…` names a file only a release build has, so under a debug
 binary that test gates itself out and reports nothing.
 
@@ -143,6 +147,37 @@ same prefix:
 
 A per-file namespace does not cover this. It separates different files, not two
 runs of one file.
+
+### A performance gate measures against a control
+
+A test that pins a *cost* — a bulk copy against a per-byte copy, a linear pass
+against a quadratic one — cannot assert a wall-clock number. The runner shares
+its machine, so a bound wide enough to survive a stall is wider than the
+regression it exists to catch. `tests/elle/bytes-linear.lisp` failed at 0.5055s
+against a 0.5 bound, on a commit that costs 0.003s on a quiet box.
+
+Measure a **control** instead. Pick an operation of the same size, in the same
+process, that runs the path the regression cannot reach, and require the
+subject to stay within a small multiple of it. A starved machine slows both
+measurements, so the ratio survives what an absolute bound does not, and a
+per-byte path costs about a hundred times the bulk one.
+
+Two rules keep the ratio steady:
+
+- **Alternate the two measurements, and keep the smallest of several rounds.**
+  Both thunks then sample the same stretch of machine, and one stalled round
+  decides nothing.
+- **Build the operands outside the timed thunk.** `length` on a string counts
+  graphemes, so a loop that re-reads it times the walk instead of the work.
+
+The two worked examples are `tests/elle/bytes-linear.lisp`, which gates a
+binary append against the same-size text append, and
+`tests/elle/concat-linear.lisp`, which gates a string concat against the
+same-size bytes concat.
+
+A **timeout** test is the other case, and it keeps its absolute bound. There
+the deadline is the specification: a 50 ms `chan/select` has to return in about
+50 ms, and no ratio can say what that means.
 
 ### Per-thread native teardown
 
@@ -173,11 +208,12 @@ elle test --query \
 ```
 
 The schema (`run`, `form`, `result`, `asset`, `changed_file`) is documented in
-[`docs/test-runner.md`](test-runner.md) § Schema (with the v1 implemented-subset
+[docs/test-runner.md](test-runner.md) § Schema (with the v1 implemented-subset
 note — the `run` code-state/resource columns are deferred). Captured stdout/stderr
 live in the CAS at `<db-dir>/cas/<hash>`, referenced by `asset` rows. `--dump`
 artifact capture (the LIR-as-a-hash-lookup path) is currently **omitted** — it
-OOMs the corpus run and does not dedup (test-runner.md § CAS asset capture) — so
+OOMs the corpus run and does not dedup
+([docs/test-runner.md](test-runner.md) § CAS asset capture) — so
 today only stdout/stderr assets exist; the LIR of a failing form still needs a
 re-run until that capture is re-enabled.
 
@@ -200,7 +236,7 @@ A run killed mid-flight (OOM, signal) is recorded honestly: its `run` row's
 partial tally (computed from `result` rows — the stored counters are written
 only at completion), and the next `elle test` warns about it. An all-pass
 result set from a truncated run is partial coverage, not green
-(see [`docs/test-runner.md`](test-runner.md) § Run honesty).
+(see [docs/test-runner.md](test-runner.md) § Run honesty).
 
 ## Correctness the leak and UAF oracles cannot see
 
@@ -236,7 +272,7 @@ The **order of two correctly-counted releases** is the other hazard of this kind
 it needs a third detector rather than a behavioral pin. A captured binding's value and
 its env cell are two regions addressed by one env index; the value's release loads the
 box raw and unwraps it, so it reads the page the box's release frees
-([`docs/impl/region/bindings.md`](impl/region/bindings.md) § "A cell's release lands at
+([docs/impl/region/bindings.md](impl/region/bindings.md) § "A cell's release lands at
 or after every release routed through that cell"). Emit the two in the wrong order and
 both counts are still right: nothing leaks, so the leak oracle reads flat, and no count
 reaches zero early, so guardfree unmaps nothing to fault on. What catches it is a
@@ -250,12 +286,13 @@ see the other, which is why the claim is stated once more over the finished emis
 
 `make test` runs the Rust gate after the corpus: `cargo fmt --check`, clippy,
 `make crosscheck`, rustdoc, `cargo test --lib`, and the integration tests. For
-what kind of Rust test to write and where, see [`tests/AGENTS.md`](../tests/AGENTS.md) and
-[`docs/analysis/testing.md`](analysis/testing.md). (`elle test --rust`, which folds
+what kind of Rust test to write and where, see [tests/AGENTS.md](../tests/AGENTS.md) and
+[docs/analysis/testing.md](analysis/testing.md). (`elle test --rust`, which folds
 the cargo suite into the same DB, is specced but not yet implemented.)
 
 **Symbol names in assertions.** A name lives in the owning instance's display
-memo, not in a global table (docs/impl/symbol.md), and `fmt` cannot reach it. So
+memo, not in a global table ([docs/impl/symbol.md](impl/symbol.md)), and `fmt`
+cannot reach it. So
 a bare `{:?}`/`{}` on a symbol-bearing `Value` renders `#<symbol:hash>`. To read
 names in assertion output, thread the table:
 `format!("{}", v.display_with(Some(&symbols)))`, which renders the bare `name`
@@ -265,10 +302,6 @@ name needs no table and no formatting at all — use
 
 ## Known gaps
 
-- **`subprocess.lisp` hangs in a worker** — `subprocess/wait` relies on SIGCHLD,
-  which is masked on worker threads, so the reaper never wakes; the runner records
-  a `timeout`. It is quarantined from `make smoke` (`ELLE_TEST_SKIP` in the
-  Makefile) until reaping moves to the main thread or such files route in-process.
 - **No cross-file parallelism yet** — the runner maps over files sequentially
   (parallelism is per-form within a file), so a full corpus run is minutes, not
   seconds. Fanning out across files (single SQLite writer) is the next perf step.
@@ -280,7 +313,7 @@ name needs no table and no formatting at all — use
 
 ## See also
 
-- [`docs/test-runner.md`](test-runner.md) — the runner's full specification and schema.
-- [`tests/AGENTS.md`](../tests/AGENTS.md) — Rust test categories, helpers, fixtures.
-- [`docs/analysis/testing.md`](analysis/testing.md) — Rust test decision tree.
-- [`docs/threads.md`](threads.md) — worker threads, `os/spawn`, the scheduler the runner ships into workers.
+- [docs/test-runner.md](test-runner.md) — the runner's full specification and schema.
+- [tests/AGENTS.md](../tests/AGENTS.md) — Rust test categories, helpers, fixtures.
+- [docs/analysis/testing.md](analysis/testing.md) — Rust test decision tree.
+- [docs/threads.md](threads.md) — worker threads, `os/spawn`, the scheduler the runner ships into workers.
