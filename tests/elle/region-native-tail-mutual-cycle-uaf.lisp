@@ -1,6 +1,8 @@
 (elle/epoch 12)
-# A local mutual-recursion clique (`ev`/`od`) whose `letrec` BODY ends in a tail
-# call to a NON-member must reclaim its merged arena soundly — no premature free.
+# audited: 2026-09-09
+# A local mutual-recursion clique whose letrec body ends in a non-member tail call must reclaim its merged arena with no premature free.
+#
+# docs/impl/region/letrec.md
 #
 # The closure-cycle merge collapses the `ev`/`od` SCC and their forward cells onto
 # one arena, freed once by the arena's binding-scope `DecrefRegion`. When the body
@@ -19,7 +21,9 @@
 #
 # Covers each non-member body-tail shape (inline intrinsic, redefined-operator
 # closure, foreign closure), a MIXED body (member + non-member
-# arm — exactly one release per path), and the same clique rebuilt PER LOOP ITERATION
+# arm — exactly one release per path), both BY-MOVE shapes (a member carried into a
+# native `struct` literal, which merges, and one carried into a closure, which keeps
+# the refusal), and the same clique rebuilt PER LOOP ITERATION
 # (per-call reclamation at recursion-completion granularity, not activation
 # granularity — the case an activation-owner-node cut would leak/double-free). Pinned
 # under the UAF oracle by `region_native_tail_mutual_cycle_uaf`
@@ -58,6 +62,38 @@
              od (fn [m] (if (%lt m 1) 1 (ev (%sub m 1))))]
       (g (ev n)))))
 
+# Factory body tail: the letrec body is a struct literal over BOTH members, so each is
+# carried into the `struct` native BY-MOVE. A native borrows its arguments and keeps
+# the frame, so the arena's binding-scope drop is live and single, and what the
+# returned struct keeps is a cross-region reference into that arena. The drive below
+# calls a member OUT of the struct after the factory's frame is gone, which reads the
+# whole cycle through that reference — a premature free faults there.
+## Each member leaves the frame in the struct (a value use), so no visible call site
+## proves its `m` — a diverging guard proves the %lt/%sub operands instead.
+(defn f-factory [n0]
+  (let [n (if (%int? n0) n0 0)]
+    (letrec [ev (fn [m]
+                  (when (%not (%int? m)) (error :m))
+                  (if (%lt m 1) 0 (od (%sub m 1))))
+             od (fn [m]
+                  (when (%not (%int? m)) (error :m))
+                  (if (%lt m 1) 1 (ev (%sub m 1))))]
+      {:ev ev :n n})))
+
+# The counterweight: a member handed by-move to a callee that CAN replace the frame
+# keeps the refusal, so this cycle stays Shared — the always-legal baseline. Driven so
+# that a future widening of the reading past a native callee faults here instead of
+# passing on the strength of the factory row alone.
+(defn f-move-closure [n0]
+  (let [n (if (%int? n0) n0 0)]
+    (letrec [ev (fn [m]
+                  (when (%not (%int? m)) (error :m))
+                  (if (%lt m 1) 0 (od (%sub m 1))))
+             od (fn [m]
+                  (when (%not (%int? m)) (error :m))
+                  (if (%lt m 1) 1 (ev (%sub m 1))))]
+      (g ev))))
+
 # Mixed body tail: one arm tail-calls a MEMBER (`ev`, released by the
 # stranded-cycle adopt, its binding-scope drop dead there); the other ends in the
 # inline `%add` opcode (no frame replacement — the live scope-exit drop releases).
@@ -86,6 +122,22 @@
   (assert (= (f-mixed i (= (mod i 2) 0)) (mod i 2))
           (string "mixed: wrong result at i=" i " (arena freed early?)"))
   (assign i (%add i 1)))
+
+# The two by-move rows: build the cycle, let the builder's frame go, then re-enter a
+# member through the handle it handed out. Each read happens after the arena's release
+# ran, so an over-release faults here.
+(def @j 0)
+(while (%lt j 60)
+  (let [fac (f-factory j)
+        mem (get fac :ev)]
+    (assert (= (mem j) (mod j 2))
+            (string "factory: wrong result at j=" j " (arena freed early?)"))
+    (assert (= (get fac :n) j)
+            (string "factory: struct lost its own field at j=" j)))
+  (let [mem (f-move-closure j)]
+    (assert (= (mem j) (mod j 2))
+            (string "move-closure: wrong result at j=" j " (arena freed early?)")))
+  (assign j (%add j 1)))
 
 # Accumulate across a longer loop so the arena is minted-and-freed hundreds of times
 # (a leak would grow RSS, a double-free would fault) — the per-iteration granularity

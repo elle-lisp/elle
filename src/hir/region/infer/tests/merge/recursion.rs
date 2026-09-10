@@ -1,19 +1,22 @@
-use super::*;
-
-// ── The letrec closure-cycle merge ────────────────────────────────────
+// audited: 2026-09-09
+// ── Which recursion shapes the closure-cycle merge collapses ─────────
 //
-// docs/impl/region/letrec.md § The letrec closure-cycle merge. A `letrec`
-// self/mutual recursive closure is a
-// capture-cell↔closure cycle: the prebound forward-reference cell holds the closure
-// (`StoreCaptureCell`) and the closure captures the cell. Per-region RC cannot
-// collect the immutable cycle (region/rules.md Rule 8), but every member is
-// static-slot (the closure's `alloc_region`, the cell's `begin_cell_regions`),
-// sole-held, and non-escaping — so the merge collapses the whole SCC ∪ its cells
-// onto ONE region. The interior cell↔closure references become intra-region (the
-// alloc-scan and free-cascade both self-skip same-region refs,
-// regionpool/introspect.rs `rid != own_id`), so the cycle frees as one arena with
-// one `DecrefRegion`. These pins drive that from the spec: the positive cases
-// collapse the SCC onto one `merged_root`; the negative refuses an escaping closure.
+// docs/impl/region/letrec.md
+//
+// A `letrec` self/mutual recursive closure is a capture-cell↔closure cycle: the
+// prebound forward-reference cell holds the closure (`StoreCaptureCell`) and the
+// closure captures the cell. Per-region RC cannot collect the immutable cycle
+// (region/rules.md Rule 8), but every member is static-slot (the closure's
+// `alloc_region`, the cell's `begin_cell_regions`), sole-held, and non-escaping —
+// so the merge collapses the whole SCC ∪ its cells onto ONE region. The interior
+// cell↔closure references become intra-region (the alloc-scan and free-cascade both
+// self-skip same-region refs, regionpool/introspect.rs `rid != own_id`), so the
+// cycle frees as one arena with one `DecrefRegion`. These pins drive that from the
+// spec: which shapes collapse onto one `merged_root`, and where the single release
+// fires. Which body TAILS the merge admits is `tailgate`; where it stops for an
+// escaping member is `escape`.
+
+use super::*;
 
 #[test]
 fn self_recursive_letrec_is_cell_free_not_merged() {
@@ -147,8 +150,8 @@ fn merge_collapses_in_lambda_mutual_recursion_letrec_closure_cycle() {
     // the ev/od SCC ∪ cells onto ONE region exactly as at top level, and the root drops
     // at the in-lambda letrec (the binding scope). The body `(ev k)` is a tail call to
     // an SCC member — the shape whose stranded binding-scope drop rides the tail-call
-    // deferred release — and must be ADMITTED (the tail-strand refusal bites only a non-member
-    // callee, `merge_refuses_in_lambda_cycle_with_foreign_tail_callee`).
+    // deferred release — and must be ADMITTED (which body tails carry the arena's
+    // release, and which the gate refuses, is `tailgate`).
     let mut symbols = SymbolTable::new();
     let (hir, arena) = compile_fhir(
         "(def f (fn [k] (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
@@ -213,149 +216,6 @@ fn merge_collapses_in_lambda_mutual_recursion_letrec_closure_cycle() {
         root.0,
         letrec_id.0,
         dp,
-    );
-}
-
-#[test]
-fn merge_admits_in_lambda_cycle_with_foreign_tail_callee() {
-    // INVERTED from the old tail-strand refusal: a letrec body tail-calling a
-    // NON-member closure `g` (a foreign fn) now MERGES. The frame-replacing
-    // TailCall strands the binding-scope drop, but the non-member release channel —
-    // `RegionInfo::cycle_tail_release` → `TailCall::deferred_release_slot` — is wired, so a
-    // closure callee's new activation takes over the arena's release, freeing it at recursion
-    // completion. The tail argument is `(ev k)`'s RESULT (a value), not a member, so
-    // no member flows in by-move (contrast
-    // `merge_refuses_member_passed_by_move_to_foreign_tail`). `g` is a user closure,
-    // so its `(g r)` tail is an ordinary `Call`.
-    let mut symbols = SymbolTable::new();
-    let (hir, arena) = compile_fhir(
-        "(def g (fn [x] x)) \
-         (def f (fn [k] (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
-                                 od (fn [m] (if (%lt m 1) :odd (ev (%sub m 1))))] \
-                          (g (ev k))))) \
-         (f 3)",
-        &mut symbols,
-    );
-    let info = analyze_regions(&hir, &arena);
-    let cells = ev_od_cells(&hir, &arena, &symbols, &info);
-    assert_eq!(
-        cells.len(),
-        2,
-        "precondition: two compiled forward cells; got {cells:?}"
-    );
-    let roots: rustc_hash::FxHashSet<Region> = cells.iter().map(|&c| info.merged_root(c)).collect();
-    assert_eq!(
-        roots.len(),
-        1,
-        "a foreign-closure body tail ((g (ev k))) must now MERGE the cycle — the \
-         non-member tail release slot supplies the stranded release; cells={cells:?} \
-         merged_parent={:?}",
-        info.merged_parent,
-    );
-    let root = roots.into_iter().next().unwrap();
-    assert!(
-        !cells.contains(&root),
-        "the merged root must be a closure region, not a cell; root=r{} cells={cells:?}",
-        root.0,
-    );
-    // The non-member tail site is recorded, keyed to the merged root — the datum the
-    // lowerer reads to set `deferred_release_slot`.
-    assert!(
-        info.cycle_tail_release.values().any(|&r| r == root),
-        "the (g r) tail site must record cycle_tail_release → merged root r{}; got {:?}",
-        root.0,
-        info.cycle_tail_release,
-    );
-}
-
-#[test]
-fn merge_admits_native_tail() {
-    // The native body tail `(%freeze (ev k))`: a copying `%`-op compiles as a native
-    // funnel `Call`, so in tail position it is a frame-replacing `TailCall` (an inline
-    // arith `%`-op would be an `Intrinsic` node and not a Call tail at all). The cycle
-    // must MERGE and record the `%freeze` site in `cycle_tail_release`: at runtime the
-    // native keeps the frame and the live scope-exit drop frees the arena, but the
-    // release slot is carried anyway (the compiler never classifies the callee), so a
-    // rebound `%freeze` closure is also covered. This is the native-tail shape the
-    // whole class regressed on.
-    let mut symbols = SymbolTable::new();
-    let (hir, arena, info) = analyze_cycle_with_effects(
-        "(def f (fn [k] (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
-                                 od (fn [m] (if (%lt m 1) :odd (ev (%sub m 1))))] \
-                          (%freeze (ev k))))) \
-         (f 3)",
-        &mut symbols,
-    );
-    let cells = ev_od_cells(&hir, &arena, &symbols, &info);
-    assert_eq!(
-        cells.len(),
-        2,
-        "precondition: two compiled forward cells; got {cells:?}"
-    );
-    let roots: rustc_hash::FxHashSet<Region> = cells.iter().map(|&c| info.merged_root(c)).collect();
-    assert_eq!(
-        roots.len(),
-        1,
-        "a native body tail ((%freeze (ev k))) must MERGE the cycle; \
-         cells={cells:?} merged_parent={:?}",
-        info.merged_parent,
-    );
-    let root = roots.into_iter().next().unwrap();
-    assert!(
-        info.cycle_tail_release.values().any(|&r| r == root),
-        "the (%freeze …) tail site must record cycle_tail_release → merged root r{}; got {:?}",
-        root.0,
-        info.cycle_tail_release,
-    );
-}
-
-#[test]
-fn merge_refuses_member_passed_by_move_to_foreign_tail() {
-    // THE SAFETY BOUNDARY. A member closure `od` passed BY-MOVE as an argument to a
-    // non-member tail call `(g od)` must REFUSE the merge. Freeing the arena at the
-    // recursion's completion (the deferred release) collides with `od`'s own move/return
-    // machinery — which also decrefs the merged arena — a double-free. The escape
-    // gate does NOT catch this (an opaque callee's argument is not a return/fiber
-    // Shared-seed), and the ANF hoist temp aliasing `od` is a synthetic holder
-    // excluded from the sole-held count, so this by-move refusal is the tail gate's
-    // own: `arg_bindings` sees a binding whose source region is in the SCC. Contrast
-    // `merge_admits_in_lambda_cycle_with_foreign_tail_callee`, where the argument is a
-    // value (`(ev k)`'s result), not the member itself.
-    // `od` is used in value position (`(g od)`), so call-site forwarding cannot
-    // prove its `m` — the diverging guard does (ev stays callee-only and is
-    // proven by forwarding from od's `(ev (%sub m 1))`).
-    let mut symbols = SymbolTable::new();
-    let (hir, arena) = compile_fhir(
-        "(def g (fn [x] x)) \
-         (def f (fn [k] (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
-                                 od (fn [m] (when (%not (%int? m)) (error :m)) \
-                                      (if (%lt m 1) :odd (ev (%sub m 1))))] \
-                          (g od)))) \
-         (f 3)",
-        &mut symbols,
-    );
-    let info = analyze_regions(&hir, &arena);
-    let cells = ev_od_cells(&hir, &arena, &symbols, &info);
-    assert_eq!(
-        cells.len(),
-        2,
-        "precondition: two compiled forward cells; got {cells:?}"
-    );
-    for &c in &cells {
-        assert_eq!(
-            info.merged_root(c),
-            c,
-            "a cycle passing a member (od) BY-MOVE into a non-member tail (g od) must \
-             NOT merge — the deferred release would double-free the arena against od's own \
-             move/return release; cell r{} merged; merged_parent={:?}",
-            c.0,
-            info.merged_parent,
-        );
-    }
-    assert!(
-        info.cycle_tail_release.is_empty(),
-        "a refused cycle records no non-member tail release site; got {:?}",
-        info.cycle_tail_release,
     );
 }
 

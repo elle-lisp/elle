@@ -1,3 +1,8 @@
+// audited: 2026-09-09
+// docs/impl/hir.md
+//! The analyzer's ground floor: each form it recognises, the binding metadata it
+//! records, scope-aware name resolution, and collection literals.
+
 use super::*;
 
 #[test]
@@ -98,6 +103,44 @@ fn test_binding_info() {
     // of the (module-private) capture flag, observed through `needs_capture()`.
     arena.get_mut(binding).mark_captured();
     assert!(arena.get(binding).needs_capture());
+}
+
+#[test]
+fn test_native_constant_binding_never_replaces_the_frame() {
+    // A tail call replaces the frame when its callee turns out to be a closure, which
+    // the compiler cannot read off a name it resolves at run time. The one callee it
+    // can read is a binding whose compile-time constant IS a native function — the
+    // lowerer emits `LoadConst` of that native, so no other value is ever called. The
+    // closure-cycle merge's by-move tail gate asks this before it refuses
+    // (docs/impl/region/letrec.md).
+    //
+    // The counter-factual each mutation below covers: a name that merely LOOKS native
+    // is not one. `is_native_fn` alone would take a primitive-scope name the stdlib
+    // rebinds to a bytecode closure, and a mutable binding's value is whatever the
+    // last `assign` left there.
+    use crate::hir::arena::{BindingArena, BindingScope};
+    let mut arena = BindingArena::new();
+    let ordinary = arena.alloc(SymbolId(3), BindingScope::Local);
+    assert!(
+        arena.get(ordinary).may_replace_frame(),
+        "an ordinary binding is resolved at run time — it may name a closure"
+    );
+
+    let native = arena.alloc(SymbolId(4), BindingScope::Local);
+    arena.get_mut(native).is_native_fn = true;
+    arena.get_mut(native).is_immutable = true;
+    assert!(
+        !arena.get(native).may_replace_frame(),
+        "an immutable, unmutated binding whose constant is a native function keeps \
+         the frame"
+    );
+
+    arena.get_mut(native).is_mutated = true;
+    assert!(
+        arena.get(native).may_replace_frame(),
+        "a mutated binding holds whatever the last assign left there, native \
+         constant or not"
+    );
 }
 
 #[test]

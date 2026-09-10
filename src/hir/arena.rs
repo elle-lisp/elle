@@ -1,3 +1,5 @@
+// audited: 2026-09-09
+// docs/impl/hir.md
 //! Arena-backed binding storage for the compilation pipeline.
 //!
 //! `BindingArena` owns all `BindingInner` values for a compilation unit.
@@ -84,6 +86,8 @@ pub struct BindingInner {
     /// bodies"). Carried on the binding, the declared floor survives that splice,
     /// so the spliced intrinsic proves exactly as it did inside the function.
     pub declared_numeric: bool,
+    /// Whether this binding's compile-time constant value is a NATIVE function.
+    pub is_native_fn: bool,
     /// Whether this binding is a MODULE-SCOPE (file-letrec) name — a direct
     /// binding of `analyze_file_letrec` (top-level `def`/`var`/expr statement).
     /// Such a binding's lifetime is the whole module/program: its demise is the
@@ -112,8 +116,14 @@ impl BindingInner {
             is_primitive: false,
             is_synthetic: false,
             declared_numeric: false,
+            is_native_fn: false,
             is_file_scope: false,
         }
+    }
+
+    /// Can a call to this binding REPLACE the frame?
+    pub fn may_replace_frame(&self) -> bool {
+        true
     }
 
     /// A binding needs a cell if captured (for locals) or mutated (for params).
