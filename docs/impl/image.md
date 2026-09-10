@@ -290,26 +290,27 @@ this design.
 **The hydrator's input is `(fd, offset)`,** never a path. A path source is
 opened first; the embedded blob maps from the executable's descriptor; an
 image that arrives as bytes — over the network, from Redis, from a channel —
-is written into an anonymous memory file and hydrated from that descriptor
-without touching a filesystem. A kernel with `memfd_create` gives one
-directly, and every other host opens a POSIX shared-memory object and unlinks
-it. The split is by the call the platform has, not by the name it goes under:
-Android is Linux to `memfd_create` and has no POSIX shared memory at all, so a
-`target_os = "linux"` test decides the wrong way there. Where a memfd is what
-was minted, it is write-sealed (`F_SEAL_WRITE | F_SEAL_SHRINK`) before
-mapping, so the immutability the mapping relies on is kernel-enforced.
+is written into an anonymous file and hydrated from that descriptor, with no
+path any other process can open. A kernel with `memfd_create` mints one
+directly. Every other host creates a file under `TMPDIR` and unlinks it before
+writing a byte, so the descriptor is the only way back to the bytes and no
+failure downstream can leave a file behind.
 
-**Only one of the two anonymous files is a file.** A memfd is one, and it
-carries bytes both ways through `pread` and `pwrite`. A Darwin shared-memory
-object answers `mmap`, `ftruncate` and `fstat` and refuses the rest, so both of
-those calls fail on it with `ESPIPE`.
+The split is by the call the platform has, not by the name it goes under:
+Android is Linux to `memfd_create`, so a `target_os = "linux"` test decides the
+wrong way there. Where a memfd is what was minted, it is write-sealed
+(`F_SEAL_WRITE | F_SEAL_SHRINK`) before mapping, so the immutability the
+mapping relies on is kernel-enforced. An unlinked file gets no seal, and
+immutability is this process's discipline instead.
 
-So every transfer to or from the descriptor goes through `ImageSource`, which
-is the one type that knows which kind it holds. It fills a new object through a
-writable shared mapping, and it serves the hydrator's header and section reads
-from a read-only one, mapped from the base page below the offset asked for.
-The hydrator's own page mappings need none of this — `mmap` is the call both
-kinds of descriptor answer, and it is the only one the mapping path makes.
+**The fallback is an unlinked file rather than POSIX shared memory,** which is
+the obvious candidate and does not work. A Darwin shared-memory object answers
+`mmap` only with `MAP_SHARED`: `pread` and `pwrite` to one fail with `ESPIPE`,
+and a `MAP_PRIVATE` mapping of one fails with `EINVAL`. Private mapping is the
+whole hydrator — every page arrives through `MAP_FIXED | MAP_PRIVATE` — so a
+descriptor that refuses it cannot carry an image at all. It costs a write to
+the filesystem where a memfd costs none, and that is the price of the one
+descriptor every platform treats alike.
 
 The offset must sit on a base-page boundary of the descriptor, and a misaligned
 one is refused before anything is mapped ([format.md](image/format.md) owns
