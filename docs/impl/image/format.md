@@ -23,7 +23,7 @@ One image is one file, or one blob embedded in a larger one:
 | name table | the spellings of the symbols and keywords in the body, one length-prefixed string each, sorted by name |
 | file table | the source-file names the body's spans point at, one length-prefixed string each, sorted by name — the file stream indexes it |
 | signal table | user-defined signal names in dump-time bit order |
-| watermarks | dump-time counters: parameter id, static-region mint, hygiene scope id, next signal bit |
+| watermarks | dump-time counters, carried in the header block: parameter id and hygiene scope id today, static-region mint and next signal bit with the milestones that need them |
 | manifest | bindings: name, kind (function / macro / core), value location, signal, arity, doc location; macro entries add parameter lists, template-syntax and transformer-cache locations; inline-fn syntax locations; plus root locations and dependency fingerprints |
 | side-stream | typed streams, present in any image: encoded `LirFunction`s keyed by template location (the boot configuration requires this stream); `SendValue`-encoded mutable bindings (present only where the dump policy permits mutables) |
 
@@ -132,7 +132,7 @@ records which ids the dumping process happened to hand out, and two builds that
 number their primitives differently write one file.
 
 A name the canonical tables do not carry fails the dump, naming the primitive
-([image.md](../image.md) § Sealing argues why nothing is lost).
+([sealing.md](sealing.md) argues why nothing is lost).
 
 ## A reconstruction entry rewrites a whole `Value`
 
@@ -142,23 +142,29 @@ canonical bytes already carry. A reconstructed value comes from the hydrating
 instance instead, and neither of its words is known at dump time — so the entry
 rewrites both, and the dumper leaves the slot zero.
 
-The one constructor this format carries is the default traitset, tagged with
-the heap tag whose table to look up. An instance whose trait tables are not
-built refuses the load by name, rather than writing nil into a traits slot and
-leaving a value that answers no protocol.
+A tag is a kind in its high word and that kind's argument in the low one, so a
+constructor added later needs no re-encoding. Two kinds ship. The default
+traitset names the heap tag whose table to look up, and an instance whose trait
+tables are not built refuses the load by name — rather than writing nil into a
+traits slot and leaving a value that answers no protocol. The standard-stream
+port names which stream, and the hydrating instance opens a fresh one. That
+second constructor allocates, so its value lands in a companion region and the
+edge into that region is counted like any other.
 
-## The scope watermark bounds what a fresh expander may mint
+## The watermarks bound what a fresh instance may mint
 
-Hygiene scope ids are a per-expander counter, and an expander starts at one.
-Syntax in the body carries the scopes it was stamped with, so a fresh expander
-minting from one would hand out ids the body already uses, and two unrelated
-scopes would compare equal.
+Two counters reach the body, and both are process-local. An expander mints
+hygiene scope ids from one; a process-wide counter mints parameter ids from
+zero. Each is compared for equality and nothing else, so an instance minting
+from its own start hands out ids the body already uses. Two unrelated scopes
+would then compare equal, and a new parameter would share `*stdin*`'s id.
 
-The header therefore records a scope watermark: one past the highest counter
-value any node in the body carries, with the intro bit masked off, since intro
-scopes and ordinary ones come from the same counter. Hydration answers with
-it, and the loader that owns an expander mints above it. A body with no syntax
-records zero.
+The header therefore records one watermark per counter: one past the highest
+value the body carries. The scope watermark masks the intro bit off first,
+since intro scopes and ordinary ones come from the same counter. Hydration
+raises the process's parameter counter past its own watermark, and answers with
+the scope watermark for the loader that owns an expander. A body carrying
+neither records zero for both.
 
 ## Fingerprint: regenerate, never migrate
 

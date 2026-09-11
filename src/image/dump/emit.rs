@@ -219,7 +219,7 @@ impl Emitted {
 
     /// Record what `obj`'s `traits` field needs: a constructor the hydrating
     /// instance runs, a relocation into the body, or nothing
-    /// (docs/impl/image.md § Sealing). The field's own address comes from the
+    /// (docs/impl/image/sealing.md). The field's own address comes from the
     /// probe, because the variants keep it in different places and the copy
     /// this walks is read through a shared `HeapObject` reference.
     fn traits_slot(

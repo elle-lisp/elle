@@ -170,7 +170,7 @@ pub fn hydrate(
         // The accept set is the dumper's emit set, spelled once (layout.rs).
         if !super::layout::dumpable(tag) {
             return Err(ImageError::Corrupt(format!(
-                "{tag:?} is not sealed data (docs/impl/image.md § Sealing)"
+                "{tag:?} is not sealed data (docs/impl/image/sealing.md)"
             )));
         }
         if off + obj_size > pages_len {
@@ -388,7 +388,7 @@ pub fn hydrate(
 
     // Resolve every reconstruction before the region is installed: an
     // instance that cannot answer refuses the load, and a refusal must leave
-    // no region behind (docs/impl/image.md § Sealing).
+    // no region behind (docs/impl/image/sealing.md).
     let mut rebuilt = Vec::with_capacity(recons.len());
     for &(slot, ctor) in &recons {
         rebuilt.push((slot, reconstruct(heap, ctor)?));

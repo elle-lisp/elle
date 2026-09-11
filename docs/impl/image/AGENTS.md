@@ -10,3 +10,4 @@ Up: [..](../AGENTS.md)
 - [foundations.md](foundations.md) — **Foundations** Four representation fixes the image needed first: each pays at runtime today, and each deletes image machinery.
 - [measurements.md](measurements.md) — **What the experiments measured** Six assumptions the image design rests on, each dispatched by an experiment, with the numbers it produced.
 - [plan.md](plan.md) — **Landing order and test plan** What lands in which order, and the pins each milestone must land with.
+- [sealing.md](sealing.md) — **Sealing** What an image's body may hold, what the hydrating instance rebuilds for itself, and what fails the dump.

@@ -1,11 +1,12 @@
+// audited: 2026-09-10
+// docs/impl/region/template.md
+// docs/impl/image/sealing.md
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
 //!
 //! One payload per compile-time blueprint, materialized once per heap and
-//! shared by every header built from that blueprint
-//! (docs/impl/region/template.md § "Why the payload is shared and the header is
-//! not"). Nothing here owns Rust heap memory: the payload's bytes *are* the
-//! payload, which is what an image needs of body data (docs/impl/image.md
-//! § Sealing).
+//! shared by every header built from that blueprint. Nothing here owns Rust
+//! heap memory: the payload's bytes *are* the payload, which is what an image
+//! needs of body data.
 
 use crate::hir::region::StaticRegion;
 use crate::reader::SourceLoc;

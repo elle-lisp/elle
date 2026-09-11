@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-10
 // What survives a syntax tree's round trip: its shape, its spans, and the
 // file each span names.
 // docs/impl/image/format.md
@@ -104,7 +104,8 @@ fn same_kind(a: &SyntaxKind, b: &SyntaxKind) -> bool {
     }
 }
 
-// § Sealing: syntax is body data, so a tree crosses as page bytes. The trap a
+// Syntax is body data, so a tree crosses as page bytes
+// (docs/impl/image/sealing.md). The trap a
 // structural comparison catches: a `Value` holding syntax compares by
 // identity, so the round-trip pin every other value gets — assert the
 // hydrated value equals its source — says nothing here and would pass over a

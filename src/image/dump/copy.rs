@@ -2,7 +2,7 @@
 //! The compacting copy: what the dumper accepts into an image's body, and
 //! the spellings it records on the way through.
 //!
-//! docs/impl/image.md
+//! docs/impl/image/sealing.md
 //!
 //! One walk builds a sealed twin of the graph in a scratch region, sharing
 //! preserved through a map keyed on source payload address. A value outside
@@ -78,7 +78,7 @@ impl<'a> Walk<'a> {
 }
 
 /// What the copy of an object carries in its `traits` field
-/// (docs/impl/image.md § Sealing).
+/// (docs/impl/image/sealing.md).
 enum Traits {
     /// Nothing: the source object carried no table.
     None,
@@ -212,7 +212,7 @@ pub(super) fn copy_value(
         // A sorted container copies in order and is never re-sorted: every
         // key and element an image may carry ranks by its own content, so the
         // order the copy preserves is the order the hydrating instance's
-        // comparator agrees with (docs/impl/image.md § Sealing).
+        // comparator agrees with (docs/impl/image/sealing.md).
         HeapObject::LSet { data, .. } => {
             let mut copies = Vec::with_capacity(data.len());
             for &el in data.iter() {
@@ -260,7 +260,7 @@ pub(super) fn copy_value(
         HeapObject::Float(f) => heap.alloc_in_region(HeapObject::Float(*f), region),
         other => {
             return Err(ImageError::Unsupported(format!(
-                "{:?} is not sealed data (docs/impl/image.md § Sealing)",
+                "{:?} is not sealed data (docs/impl/image/sealing.md)",
                 other.tag()
             )))
         }

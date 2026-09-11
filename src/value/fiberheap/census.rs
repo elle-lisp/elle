@@ -1,8 +1,8 @@
-// audited: 2026-09-08
+// audited: 2026-09-10
 //! The post-boot heap census: every live object in this instance's region
 //! store, and the graph a boot image must dump.
 //!
-//! docs/impl/image.md
+//! docs/impl/image/sealing.md
 //! docs/impl/image/measurements.md
 //!
 //! Reached from `Runtime::build_with` under `--trace=census` and from the
@@ -37,7 +37,7 @@ use crate::value::Value;
 use super::regionstore::RegionStore;
 use super::FiberHeap;
 
-/// How the image dumper treats a `HeapTag` (docs/impl/image.md § Sealing).
+/// How the image dumper treats a `HeapTag` (docs/impl/image/sealing.md).
 /// The design doc owns the argument; this is its executable form, pinned by
 /// `tests/integration/census.rs`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
