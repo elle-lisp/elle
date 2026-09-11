@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-10
 //! The ergonomic `ctx.*` allocation surface: one constructor per heap type,
 //! each born on the ctx's heap in the ctx's own region.
 //! docs/impl/region/ctx.md
@@ -127,8 +127,8 @@ impl<'h> Alloc<'h> {
     //
     // These wrap one `HeapObject` (no `RegionSlice` payload), so they allocate
     // directly into the call's region via `alloc`. Hand-written because their
-    // arg shapes / construction logic are specific (a global id counter, a
-    // handle wrapper, an FFI descriptor). They replace the bare `Value::*`
+    // arg shapes / construction logic are specific (a minted id, a handle
+    // wrapper, an FFI descriptor). They replace the bare `Value::*`
     // single-object ctors at native-call sites (RegionEffect::Fresh requires the
     // result in the call's own region, which the region-free bare ctor — minting
     // its own fresh region — would violate).
@@ -137,11 +137,8 @@ impl<'h> Alloc<'h> {
     #[inline]
     pub fn parameter(&self, default: Value) -> Value {
         use crate::value::heap::HeapObject;
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static NEXT_ID: AtomicU32 = AtomicU32::new(0);
-        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         self.alloc(HeapObject::Parameter {
-            id,
+            id: crate::value::parameter::mint(),
             default,
             traits: Value::NIL,
         })

@@ -40,6 +40,10 @@ pub struct Hydrated {
     /// unrelated scopes compare equal (docs/impl/image/format.md). Zero when
     /// the body holds no syntax.
     pub scope_watermark: u32,
+    /// One past the highest parameter id the body carries; zero when the body
+    /// holds no parameter. Hydration has already raised this process's counter
+    /// past it — the field is what a caller reads to see that it did.
+    pub param_watermark: u32,
 }
 
 /// Why a dump or hydration refused.

@@ -287,6 +287,7 @@ pub fn hydrate(
             root,
             region,
             scope_watermark: header.scope_watermark as u32,
+            param_watermark: 0,
         });
     }
 
@@ -433,6 +434,7 @@ pub fn hydrate(
         ),
         region,
         scope_watermark: header.scope_watermark as u32,
+        param_watermark: 0,
     })
 }
 
