@@ -1,141 +1,70 @@
 # tests/elle
 
-Elle script tests: behavioral tests in Elle that verify language semantics.
+<!-- audited: 2026-09-11 -->
 
-## Responsibility
+The Elle corpus: one self-contained `.lisp` program per subject, each asserting
+what the language does and exiting non-zero when an assertion fails.
 
-Test language behavior by running Elle code directly. Each `.lisp` file in this directory is a self-contained test that:
-1. Uses the built-in `(assert)` primitive for all assertions
-2. Exits with code 0 on success, 1 on failure
+## What a file here is
 
-Read [`QUICKSTART.md`](../../QUICKSTART.md) for the complete language reference.
+A file is a whole program. It asserts with the built-in `(assert expr msg)`,
+which signals `:failed-assertion` and exits 1, so a file that runs to the end
+has passed. It carries no harness, no setup, and no dependency on another file.
 
-Does NOT:
-- Test Rust APIs (that's unit tests)
-- Test invariants across random inputs (that's property tests)
-- Test individual modules in isolation (that's integration tests)
+Name the file for its subject, and keep one subject per file. The directory is
+its own index: `ls tests/elle` names every subject the corpus covers.
 
-## Test structure
+Does NOT belong here:
 
-Each Elle script follows this pattern:
+- A test that inspects Rust types or a Rust API.
+- Source that must fail to compile.
+- An error-message substring match.
+- A property over generated inputs.
 
-```janet
-(elle/epoch 1)
-## Test description
+[docs/analysis/testing.md](../../docs/analysis/testing.md) is the decision tree
+that says which kind of test a thing wants.
+
+## Shape
+
+```lisp
+(elle/epoch 12)
+# What this file pins, and the trap or counter-factual behind it.
 
 (assert (= (+ 1 2) 3) "addition")
-(assert (> 5 3) "greater than")
 (assert (not (< 5 3)) "not less than")
 ```
 
-Start every file with `(elle N)` where N is the current epoch (check
-`CURRENT_EPOCH` in `src/epoch/rules.rs`). Use `(assert expr msg)` for all
-assertions. It signals a `:failed-assertion` error on failure, which causes
-the script to exit with code 1.
+Open every file with `(elle/epoch N)` for the current epoch — `CURRENT_EPOCH`
+in [src/epoch/rules.rs](../../src/epoch/rules.rs).
 
-## Test organization
+## Running
 
-Tests are organized by feature area:
+The agent-first runner owns this directory. `elle test`, which
+`make smoke-elle` drives, compiles and runs every file once per JIT policy
+(`:off` → `vm`, `:eager` → `jit`), plus per-tier divergence for a single-form
+file. A new file is picked up by being here; there is nothing to register.
 
-| File | Coverage |
-|------|----------|
-| `eval.lisp` | Evaluation and basic forms |
-| `prelude.lisp` | Prelude macros (defn, let*, when, unless, etc.) |
-| `destructuring.lisp` | Destructuring patterns |
-| `core.lisp` | Core language features |
-| `splice.lisp` | Splice syntax |
-| `blocks.lisp` | Block and break control flow |
-| `functional.lisp` | Functional programming (map, filter, fold, etc.) |
-| `arithmetic.lisp` | Arithmetic operations |
-| `determinism.lisp` | Deterministic behavior |
-| `property-eval.lisp` | Property-based evaluation |
-| `convert.lisp` | Type conversions |
-| `sequences.lisp` | List and array operations |
-| `macros.lisp` | Macro behavior |
-| `strings.lisp` | String operations |
-| `tables.lisp` | Table operations |
-| `fibers.lisp` | Fiber operations |
-| `coroutines.lisp` | Fiber behavior |
-| `signals.lisp` | Signal system |
-| `closures.lisp` | Closure behavior |
-| `recursion.lisp` | Recursive functions |
-| `higher-order.lisp` | Higher-order functions |
-| `match.lisp` | Pattern matching |
-| `parameters.lisp` | Dynamic parameters |
-| `ports.lisp` | I/O ports |
-| `json.lisp` | JSON serialization |
-| `regex.lisp` | Regular expressions |
-| `bytes.lisp` | Bytes operations |
-| `string.lisp` | String and @string operations |
-| `symbol-identity.lisp` | Symbol identity across worker symbol tables |
+[docs/testing.md](../../docs/testing.md) covers the runner and the commands,
+and [docs/test-runner.md](../../docs/test-runner.md) is its specification.
 
-## Running Elle scripts
+One file at a time, `elle tests/elle/NAME.lisp` runs it as a plain program.
 
-Elle scripts are run via the `integration::elle_scripts` harness in `tests/integration/elle_scripts.rs`:
+[tests/integration/elle_scripts.rs](../integration/elle_scripts.rs) pins the
+few files that need a process-global mode the runner cannot vary per file — the
+page-guard oracle, the I/O backend, a backend toggle paired with the adaptive
+JIT. A file that needs no such mode does not go there, because the runner
+already runs it under more policies than one subprocess call would.
 
-```bash
-cargo test elle_scripts::eval    # Run tests/elle/eval.lisp
-cargo test elle_scripts          # Run all Elle scripts
-```
-
-Each script is executed with the `elle` binary:
-
-```bash
-./target/debug/elle tests/elle/eval.lisp
-```
-
-If the script exits with code 0, the test passes. If it exits with code 1, the test fails.
-
-## Writing a new Elle script
-
-1. Create `tests/elle/myfeature.lisp`
-2. Add a test function to `tests/integration/elle_scripts.rs`:
-   ```rust
-   #[test]
-   fn myfeature() {
-       run_elle_script("myfeature");
-   }
-   ```
-3. Write the script:
-   ```janet
-   (elle/epoch 1)
-   ## My feature test
-
-   (assert (= (my-feature 42) 42) "my-feature identity")
-   ```
 ## Invariants
 
-1. **Scripts are self-contained.** Each script uses `(assert)` directly and runs independently.
-
-2. **Scripts exit with code 0 on success, 1 on failure.** The test harness checks the exit code.
-
-3. **Scripts use assertions, not print statements.** Assertions provide clear failure messages and exit codes.
-
-4. **Scripts are deterministic.** Same script always produces same result. No randomness or timing dependencies.
-
-5. **Scripts test language semantics, not implementation details.** They verify what the language does, not how it does it.
-
-## When to add a test
-
-- **New language feature**: Add a script that exercises the feature
-- **Bug regression**: Add a script that reproduces the bug
-- **Behavioral change**: Add a script that verifies the new behavior
-- **Documentation example**: Add a script that demonstrates the feature
-
-## Common pitfalls
-
-- **Using print instead of assertions**: Use `(assert expr msg)` instead of `(print ...)` for clear failure messages.
-- **Forgetting to register the test**: New scripts must be added to `tests/integration/elle_scripts.rs` with a test function.
-- **Testing implementation details**: Test language semantics, not internal behavior (e.g., don't test bytecode structure).
-- **Non-deterministic tests**: Don't use `time::now()` or other non-deterministic functions (except in dedicated time tests).
-
-## Decision tree for test placement
-
-Use this decision tree to decide where to place a new test:
-
-1. **Does it test Elle language semantics?** → Elle script (`tests/elle/`)
-2. **Does it test an invariant across all inputs?** → Property test (`tests/property/`)
-3. **Does it test end-to-end pipeline behavior?** → Integration test (`tests/integration/`)
-4. **Does it test a Rust API in isolation?** → Unit test (`tests/unittests/` or inline in `src/`)
-
-See `docs/testing.md` for the full decision tree.
+1. **A file is self-contained.** It asserts directly and runs on its own.
+2. **Exit 0 is pass, 1 is fail.** Every runner reads the exit code.
+3. **A file is deterministic.** No clock, no randomness, no dependence on how
+   fast a background thread happens to be. Where a result depends on work that
+   is in flight, drain it first — `(jit/rejections)` drains pending JIT
+   compilations, and
+   [jit-compiled-caller-promotes-callee.lisp](jit-compiled-caller-promotes-callee.lisp)
+   shows the shape.
+4. **A file tests what the language does**, not how the implementation does it.
+   An exception a file must earn in its own comment: a tier probe such as
+   `(jit? f)`, where the behavior under test IS which tier ran the code.
