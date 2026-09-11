@@ -1,6 +1,6 @@
-// audited: 2026-09-10
+// audited: 2026-09-11
 //! What a dump records that no caller outside this crate can build: a syntax
-//! tree's scope sets, and the stdio port behind a parameter's default.
+//! tree's scope sets, and the port behind a parameter's default.
 //!
 //! docs/impl/image/sealing.md
 //! docs/impl/image/format.md

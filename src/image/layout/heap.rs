@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-11
 //! The heap-object half of the layout probe: exemplars and field extents for
 //! every `HeapObject` variant the dumper can emit.
 //!
@@ -15,7 +15,7 @@ use crate::value::Value;
 use super::{field_offset, probe, FieldExtent, Probed, VariantLayout};
 
 /// The variants the dumper emits, and so the ones the verifier accepts.
-const PROBED: [HeapTag; 8] = [
+const PROBED: [HeapTag; 9] = [
     HeapTag::LString,
     HeapTag::Pair,
     HeapTag::LArray,
@@ -24,6 +24,7 @@ const PROBED: [HeapTag; 8] = [
     HeapTag::LSet,
     HeapTag::LStruct,
     HeapTag::Syntax,
+    HeapTag::Parameter,
 ];
 
 impl Probed for HeapObject {
@@ -71,6 +72,11 @@ impl Probed for HeapObject {
                 traits: Value::NIL,
             },
             HeapTag::Pair => HeapObject::Pair(Pair::new(Value::int(1), Value::int(2))),
+            HeapTag::Parameter => HeapObject::Parameter {
+                id: 1,
+                default: Value::int(3),
+                traits: Value::NIL,
+            },
             HeapTag::Float => HeapObject::Float(1.5),
             other => panic!("no exemplar for {other:?} (src/image/layout/heap.rs)"),
         }
@@ -124,6 +130,26 @@ impl Probed for HeapObject {
                     FieldExtent::new("traits", base + offset_of!(Pair, traits), value),
                 ]
             }
+            // A parameter is three leaf fields and nothing behind them. `id`
+            // is four bytes in a word-aligned slot, so the extent stops at the
+            // four that mean something and the padding beside it stays zero.
+            HeapObject::Parameter {
+                id,
+                default,
+                traits,
+            } => vec![
+                FieldExtent::new(
+                    "id",
+                    field_offset(self, id as *const _ as _),
+                    size_of::<u32>(),
+                ),
+                FieldExtent::new(
+                    "default",
+                    field_offset(self, default as *const _ as _),
+                    value,
+                ),
+                FieldExtent::new("traits", field_offset(self, traits as *const _ as _), value),
+            ],
             HeapObject::Float(f) => vec![FieldExtent::new(
                 "0",
                 field_offset(self, f as *const _ as _),
@@ -165,6 +191,18 @@ impl Probed for HeapObject {
             (HeapObject::Pair(a), HeapObject::Pair(b)) => {
                 a.first == b.first && a.rest == b.rest && a.traits == b.traits
             }
+            (
+                HeapObject::Parameter {
+                    id: ia,
+                    default: da,
+                    traits: ta,
+                },
+                HeapObject::Parameter {
+                    id: ib,
+                    default: db,
+                    traits: tb,
+                },
+            ) => ia == ib && da == db && ta == tb,
             (HeapObject::Float(a), HeapObject::Float(b)) => a.to_bits() == b.to_bits(),
             _ => false,
         }

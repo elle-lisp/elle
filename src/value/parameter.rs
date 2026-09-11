@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-11
 // docs/impl/image/sealing.md
 //! The dynamic-parameter id counter: the one mint in the process, and the
 //! watermark a hydrated image raises it past.
@@ -22,4 +22,20 @@ pub(crate) fn mint() -> u32 {
 #[cfg(test)]
 pub(crate) fn peek() -> u32 {
     NEXT_ID.load(Ordering::Relaxed)
+}
+
+/// Raise the counter so that no later mint answers below `watermark`.
+///
+/// A hydrated image's body carries the ids the dumping process handed out, and
+/// this instance's counter knows nothing about them. The compare-exchange loop
+/// is what keeps the raise from lowering a counter another thread just pushed
+/// higher.
+pub(crate) fn raise_to(watermark: u32) {
+    let mut seen = NEXT_ID.load(Ordering::Relaxed);
+    while seen < watermark {
+        match NEXT_ID.compare_exchange_weak(seen, watermark, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return,
+            Err(actual) => seen = actual,
+        }
+    }
 }

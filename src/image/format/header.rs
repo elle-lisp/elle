@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-11
 //! The header block: what an image records about itself before its first
 //! mapped byte, and how it is read back.
 //!
@@ -15,7 +15,7 @@ pub(crate) const MAGIC: [u8; 8] = *b"ELLEIMG\0";
 
 /// Byte offset of the fingerprint length field; the string follows it. Every
 /// fixed field sits below it, so adding one moves this and bumps [`VERSION`].
-const FINGERPRINT_AT: usize = 128;
+const FINGERPRINT_AT: usize = 136;
 
 /// Everything the header block records besides the fingerprint.
 #[derive(Debug, Clone)]
@@ -48,6 +48,10 @@ pub(crate) struct Header {
     /// One past the highest hygiene scope counter the body carries; zero when
     /// the body holds no syntax (docs/impl/image/format.md).
     pub scope_watermark: u64,
+    /// One past the highest parameter id the body carries; zero when the body
+    /// holds no parameter. Hydration raises the process counter past it, so
+    /// the ids a fresh instance mints cannot repeat the image's.
+    pub param_watermark: u64,
     pub fingerprint: String,
 }
 
@@ -80,6 +84,7 @@ impl Header {
         put(&mut block, 104, self.n_prim_slots);
         put(&mut block, 112, self.n_recons);
         put(&mut block, 120, self.prims_len);
+        put(&mut block, 128, self.param_watermark);
         put(&mut block, FINGERPRINT_AT, fp.len() as u64);
         block[FINGERPRINT_AT + 8..FINGERPRINT_AT + 8 + fp.len()].copy_from_slice(fp);
         Ok(block)
@@ -124,6 +129,7 @@ impl Header {
             n_prim_slots: get(block, 104),
             n_recons: get(block, 112),
             prims_len: get(block, 120),
+            param_watermark: get(block, 128),
             fingerprint,
         })
     }
@@ -156,6 +162,7 @@ mod tests {
             files_len: 0,
             prims_len: 0,
             scope_watermark: 0,
+            param_watermark: 0,
             fingerprint: fingerprint(),
         };
         let block = header.to_block().expect("fingerprint fits");

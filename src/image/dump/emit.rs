@@ -1,6 +1,6 @@
-// audited: 2026-09-10
+// audited: 2026-09-11
 //! What the file gets from the copied graph: page bytes, the four relocation
-//! streams, the object index, and the scope watermark.
+//! streams, the object index, and the two watermarks.
 //!
 //! docs/impl/image.md
 //! docs/impl/image/format.md
@@ -83,6 +83,8 @@ pub(super) struct Emitted {
     pub recons: Vec<(u64, u64)>,
     /// One past the highest hygiene scope counter any node carries.
     pub scope_watermark: u32,
+    /// One past the highest id any parameter carries.
+    pub param_watermark: u32,
 }
 
 /// Walk every live object of the copied graph and answer what the file needs.
@@ -102,6 +104,7 @@ pub(super) fn emit(
         prims: Vec::new(),
         recons: Vec::new(),
         scope_watermark: 0,
+        param_watermark: 0,
     };
     let mut backings: Vec<Backing> = Vec::new();
 
@@ -111,7 +114,7 @@ pub(super) fn emit(
         out.index.push((obj_off, obj.tag() as u64));
         let dst = obj_off as usize;
         layout::write_canonical(obj, &mut out.pages[dst..dst + size_of::<HeapObject>()]);
-        out.traits_slot(obj, addr, reconstructions, at)?;
+        out.traits_slot(obj, addr, at)?;
         match obj {
             HeapObject::Pair(pair) => {
                 out.value_slot(&pair.first, at)?;
@@ -156,6 +159,13 @@ pub(super) fn emit(
             // canonical bytes cover `traits` and the walk below writes the
             // node itself, along with every node it reaches.
             HeapObject::Syntax { syntax, .. } => out.node(syntax, at, &mut backings)?,
+            // A default the hydrating instance rebuilds is nil in the copy, so
+            // the slot call records nothing for it and the entry loop does the
+            // work instead.
+            HeapObject::Parameter { id, default, .. } => {
+                out.param_watermark = out.param_watermark.max(id.saturating_add(1));
+                out.value_slot(default, at)?;
+            }
             HeapObject::Float(_) => {}
             other => {
                 // copy_value only allocates the variants above.
@@ -163,6 +173,13 @@ pub(super) fn emit(
             }
         }
     }
+    // The copy walk named every reconstructed field by its address in the
+    // scratch region, so all that is left is where each address lands.
+    for (&field, &ctor) in reconstructions {
+        let entry = (at.offset(field)?, ctor.encode());
+        out.recons.push(entry);
+    }
+
     out.relocs.sort_unstable();
     out.index.sort_unstable();
     out.prims.sort_unstable();
@@ -217,36 +234,26 @@ impl Emitted {
         Ok(())
     }
 
-    /// Record what `obj`'s `traits` field needs: a constructor the hydrating
-    /// instance runs, a relocation into the body, or nothing
-    /// (docs/impl/image/sealing.md). The field's own address comes from the
-    /// probe, because the variants keep it in different places and the copy
-    /// this walks is read through a shared `HeapObject` reference.
+    /// Record the relocation `obj`'s `traits` field needs. A reconstructed
+    /// table is nil in the copy, so it leaves through the entry loop instead
+    /// and this sees nothing (docs/impl/image/sealing.md).
+    ///
+    /// The field's own address comes from the probe, because the variants keep
+    /// it in different places and the copy this walks is read through a shared
+    /// `HeapObject` reference.
     fn traits_slot(
         &mut self,
         obj: &HeapObject,
         addr: usize,
-        reconstructions: &HashMap<usize, Ctor>,
         at: &Placement,
     ) -> Result<(), ImageError> {
-        let traits = obj.traits();
-        let ctor = reconstructions.get(&addr);
-        if traits.as_heap_ptr().is_none() && ctor.is_none() {
+        let Some(target) = obj.traits().as_heap_ptr() else {
             return Ok(());
-        }
+        };
         let field = addr
             + layout::traits_slot_in(obj.tag())
                 .expect("a traited object's variant carries a probed traits field");
-        match ctor {
-            Some(&ctor) => {
-                self.recons.push((at.offset(field)?, ctor.encode()));
-                Ok(())
-            }
-            None => {
-                let target = traits.as_heap_ptr().expect("checked above") as usize;
-                self.slot(field + layout::payload_in_value(), target, at)
-            }
-        }
+        self.slot(field + layout::payload_in_value(), target as usize, at)
     }
 
     /// Record a slice field's relocation slot (its `ptr`, at offset 0 of the
