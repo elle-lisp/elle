@@ -1,3 +1,6 @@
+// audited: 2026-09-10
+// docs/impl/vm.md
+// docs/impl/region/relocate.md
 //! Bytecode execution entry points.
 //!
 //! ## Re-entrancy
@@ -350,6 +353,17 @@ impl VM {
         #[cfg(debug_assertions)]
         let entry_depth = self.fiber.activation_region_maps.len();
         self.push_activation_region_map();
+        // A tail call BUILT in compiled code strands its releases on an activation
+        // that pops its own dues slot at the tail-call sentinel, so it leaves them
+        // on `pending_tail_deferrals` for the activation that runs the callee
+        // (docs/impl/region/relocate.md § "A channel built in compiled code hands
+        // its release forward"). Every sentinel consumer enters that callee here,
+        // so this is where the hand-off is collected.
+        if !self.pending_tail_deferrals.is_empty() {
+            for region in std::mem::take(&mut self.pending_tail_deferrals) {
+                self.activation_dues().defer(region);
+            }
+        }
         let mut result = self.trampoline_loop(code, closure_env, 0, !parks_error_frame);
         #[cfg(debug_assertions)]
         debug_assert_eq!(
@@ -395,9 +409,9 @@ impl VM {
     /// thunk's continuation and returns `SIG_SWITCH` for a driving trampoline
     /// rather than executing inline (`handle_fiber_resume_signal`). Without
     /// driving it here the switch unwinds out of the re-entrant boundary and the
-    /// continuation resumes OUTSIDE the caller's scope — the `arena/allocs`
-    /// measurement returned the resumed child's value instead of `(result .
-    /// net)` and never finished the thunk (`tests/elle/arena.lisp`,
+    /// continuation resumes OUTSIDE the caller's scope, so the `arena/allocs`
+    /// measurement answers with the resumed child's value instead of `(result .
+    /// net)` and never finishes the thunk (`tests/elle/arena.lisp`,
     /// `tests/elle/resource.lisp` `fiber-spawn-10`).
     ///
     /// Returns the final signal bits; the result value is left in

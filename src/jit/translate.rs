@@ -1,7 +1,7 @@
-//! LIR to Cranelift IR translation
-//!
-//! This module contains `FunctionTranslator`, which translates individual
-//! LIR instructions and terminators to Cranelift IR.
+// audited: 2026-09-10
+// docs/impl/jit.md
+//! `FunctionTranslator`: the register-to-variable mapping every LIR instruction
+//! and terminator is lowered to Cranelift IR through.
 //!
 //! ## Variable layout
 //!
@@ -33,6 +33,7 @@ use crate::value::SymbolId;
 
 use super::vtable::RuntimeHelpers;
 use super::JitError;
+use super::TailDeferrals;
 
 mod instr;
 mod region;
@@ -105,13 +106,12 @@ pub(crate) struct FunctionTranslator<'a> {
     /// (`elle_jit_release_activation_dues`) only for a function that can
     /// have minted a node; the common path pays no extra helper call.
     ///
-    /// The node is the whole of what a COMPILED activation can owe: the deferred
-    /// tail-call releases are recorded by the interpreter's `tail_call_inner`
-    /// alone, and the JIT's own tail-call path leaves both channels unwired
-    /// (`jit_tail_call_inner`). Wiring them means gating this on the deferral
-    /// too, or the release the compiled `Return` skips is the one nothing else
-    /// runs (docs/impl/region/owner.md § "A deferred tail-call release has the
-    /// node's life").
+    /// The node is the whole of what a COMPILED activation can owe. A tail call
+    /// this function makes strands releases too, but they belong to the activation
+    /// that runs the callee rather than to this one, and `jit_tail_call_inner`
+    /// hands them straight there (docs/impl/region/relocate.md § "A channel built
+    /// in compiled code hands its release forward"). So a function with no
+    /// `AdoptIntoActivation` reaches its `Return` owing nothing.
     pub(crate) uses_activation_owner_node: bool,
 }
 

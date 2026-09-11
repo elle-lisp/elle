@@ -1,3 +1,6 @@
+// audited: 2026-09-10
+// docs/impl/jit.md
+// docs/impl/region/owner.md
 //! Function call dispatch helpers for JIT-compiled code.
 //!
 //! These `extern "C"` functions handle calling Elle closures, native functions,
@@ -6,6 +9,7 @@
 //! by the interpreter fallback paths.
 
 use crate::jit::value::{JitValue, TAIL_CALL_SENTINEL_JV, YIELD_SENTINEL_JV};
+use crate::jit::TailDeferrals;
 use crate::signals::dispatch::{classify, SignalAction};
 use crate::value::fiber::{SignalBits, MAX_CALL_DEPTH, SIG_ERROR, SIG_HALT};
 use crate::value::Value;
@@ -96,8 +100,8 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
             // becomes the resume result, co-located in one region). Without this
             // incref the region's only reference is dropped when the resume
             // consumer's `DecrefValueRegion` fires, and the scheduler's release
-            // of the same region double-frees it (the redis eager/adaptive-JIT
-            // crash; tests/elle/region-jit-io-suspend-uaf.lisp). `region_of`, NOT
+            // of the same region frees it a second time
+            // (tests/elle/region-jit-io-suspend-uaf.lisp). `region_of`, NOT
             // `result_region_of`: the escaping value's own region is the one held
             // live across the suspend.
             let heap = unsafe { &mut *vm.heap_ptr };

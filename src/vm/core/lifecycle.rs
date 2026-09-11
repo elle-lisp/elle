@@ -1,3 +1,7 @@
+// audited: 2026-09-10
+// docs/impl/vm.md
+//! Building a VM over a heap it owns or shares, and resetting one for reuse.
+
 use super::*;
 
 /// A dummy root closure for the root fiber.
@@ -101,6 +105,7 @@ impl VM {
             tail_call_env_cache: Vec::with_capacity(256),
             env_cache: Vec::with_capacity(256),
             pending_tail_call: None,
+            pending_tail_deferrals: Vec::new(),
             pending_fiber_resume: None,
             pending_entry_closure: crate::value::Value::NIL,
             pending_error_park: false,
@@ -153,6 +158,7 @@ impl VM {
         self.current_fiber_handle = None;
         self.current_fiber_value = None;
         self.pending_tail_call = None;
+        self.pending_tail_deferrals.clear();
         self.pending_entry_closure = crate::value::Value::NIL;
         self.pending_error_park = false;
         self.pending_fiber_resume = None;

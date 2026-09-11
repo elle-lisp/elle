@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-09
+# audited: 2026-09-10
 # Tail-call rotation, letrec-local recursive closures, a returned self-recursive closure's region, and the scheduler round trip.
 #
 # docs/impl/region/diagnostics.md
@@ -254,11 +254,14 @@
 # twin of `recur-local-mutual-factory` above, so the two together read the
 # binder-form claim on the shape the merge was extended for.
 #
-# The op CONSTRUCTS the module and stops there. Calling a member back through the
-# returned struct grows ~7 objects and ~2 regions per op under `--jit=eager` — on
-# BOTH binder spellings, and flat on the VM, so the growth is the tier's rather than
-# this mechanism's (elle-lisp/elle#1103). Put the call back into the op when that
-# closes.
+# The op CONSTRUCTS the module and then CALLS a member back through the returned
+# struct, which is the half the two tiers can disagree on. The construction is the
+# merge's; the call is a tail call into a member out of a caller the JIT compiles,
+# whose stranded arena release the compiled tier must hand to the activation that
+# runs the member (docs/impl/region/relocate.md § "A channel built in compiled code
+# hands its release forward"). Dropping the call left the whole cycle — two closures,
+# two forward cells, and the table they capture — growing ~7 objects and ~2 regions
+# per op under `--jit=eager`, and flat on the VM.
 (defn defn-module-factory []
   (let [t @{}]
     (defn fa [m]
@@ -270,8 +273,8 @@
       (fa (%sub m 1)))
     (let [s {:a fa :b fb}]
       s)))
-(pin (measure "defn-module-factory" (fn [j] (defn-module-factory)) 100 6 60 0.4
-              0.5) 0)
+(pin (measure "defn-module-factory" (fn [j] ((get (defn-module-factory) :a) 2))
+              100 6 60 0.4 0.5) 0)
 
 # ── Retained-closure reclamation (a RETURNED self-recursive closure's region) ──
 # `recur-local-self` above pins the LEAK rate of a self-recursive closure used as a

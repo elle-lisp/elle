@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-10 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -317,6 +317,36 @@ The sibling's forward **cell** is not the callee's own region, so it relocates l
 any other holder and its cascade drops the `cell ⊇ closure` edge ahead of the call.
 What the deferral drops afterwards is the frame's own slot reference, the last one
 standing.
+
+### A channel built in compiled code hands its release forward
+
+The exemption reads the same on every tier, so the channel must run on every tier.
+The interpreter records a deferral on the activation slot the tail call is built in,
+and the callee reuses that activation ([owner.md](owner.md) § "A deferred tail-call
+release has the node's life"). A compiled caller reuses nothing.
+`jit_tail_call_inner` sets the pending call, and the compiled body then pops its own
+region-remap frame and returns the tail-call sentinel. The slot the helper would have
+recorded on is gone before the callee starts, so a release recorded there is a release
+nothing runs.
+
+The compiled tier writes both channels instead — the callee closure's region, and the
+merged arena the `deferred_release_slot` resolves to — into a one-shot
+(`VM::pending_tail_deferrals`) that `push_activation_region_map` drains into the fresh
+dues. The next push is always the callee's: every sentinel consumer takes the pending
+call and enters the callee through `execute_bytecode_saving_stack`, whose push is the
+first one after the helper returns. The helper writes the one-shot only once the
+pending call is set, so a path that fails earlier writes nothing. A hand-off no push
+collects holds the region to the caller's own teardown, which is an over-keep and
+never an over-free.
+
+The everyday shape is the closure-as-module factory whose member is called back
+through the struct it handed out: the caller's tail call into the member strands the
+merged cycle arena, and the whole cycle plus the state it captures grows once per
+call. Pinned by
+`runtime::tests::ownership::region_ownership_defn_module_member_call_under_jit`, whose
+compiled-caller reading sits beside the interpreter's in
+`…::region_ownership_reclaims_defn_module_factory_per_call`, and gauged per op by the
+oracle's `defn-module-factory` probe.
 
 ### A collector parameter takes the moved reference over itself
 

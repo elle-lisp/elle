@@ -1,8 +1,11 @@
+// audited: 2026-09-10
+// docs/impl/jit.md
+// docs/impl/region/relocate.md
 //! Terminator translation and the generic tail-call result branch.
 //!
-//! `translate_terminator` lowers each LIR `Terminator`; the two tail-call
-//! helpers implement the interpreter's native-vs-closure tail dispatch (the
-//! Inc4 native-tail trick) that a generic `TailCall` in `instr::calls` relies on.
+//! `translate_terminator` lowers each LIR `Terminator`; the two tail-call helpers
+//! carry the interpreter's native-vs-closure tail dispatch, which a generic
+//! `TailCall` in `instr::calls` relies on.
 
 use super::*;
 
@@ -20,16 +23,13 @@ impl<'a> FunctionTranslator<'a> {
     ///   that completed normally. Bind `dst` and fall through so the caller
     ///   keeps translating the post-`TailCall` block — the compiler's own
     ///   per-arg `DecrefValueRegion`/`DecrefRegion`s that release each moved
-    ///   native arg. This is the Inc4 native-tail trick the interpreter
-    ///   performs by NOT replacing the frame for a normally-completing native;
-    ///   without it the moved arg leaks (region-native-tail-move.lisp;
+    ///   native arg. The interpreter reaches the same block by NOT replacing the
+    ///   frame for a normally-completing native; a tier that returns at the call
+    ///   instead strands every moved arg (tests/elle/region-native-tail-move.lisp;
     ///   docs/impl/region/rules.md Rule 8).
     ///
     /// On return the builder is positioned on the continue (fall-through)
     /// block, with `dst` defined.
-    // `pub(super)` (was private in the translate root): the sibling
-    // `instr::calls` submodule calls this; widen to the minimal
-    // `translate`-scoped visibility so it stays reachable after the move.
     pub(super) fn emit_tail_call_result_branch(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -205,9 +205,9 @@ impl<'a> FunctionTranslator<'a> {
 
             Terminator::Unreachable => {
                 // User trap code 1 — `unwrap_user(0)` panics (Cranelift user
-                // trap codes are `NonZeroU8`). Reachable now that a generic
-                // tail call can fall through to its block's terminator instead
-                // of self-terminating (the native-tail continue path); a
+                // trap codes are `NonZeroU8`). This arm is reached, because a
+                // generic tail call falls through to its block's terminator on
+                // the native-tail continue path rather than self-terminating; a
                 // genuinely-unreachable block must still compile to a valid
                 // trap.
                 builder
@@ -219,9 +219,7 @@ impl<'a> FunctionTranslator<'a> {
     }
 
     /// Helper: emit a tail call with args spilled to stack.
-    // `pub(super)` (was private in the translate root): the sibling
-    // `instr::calls` submodule calls this; widen to the minimal
-    // `translate`-scoped visibility so it stays reachable after the move.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn emit_tail_call_with_args(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -230,11 +228,12 @@ impl<'a> FunctionTranslator<'a> {
         args: &[Reg],
         vm: cranelift_codegen::ir::Value,
         region_id_const: cranelift_codegen::ir::Value,
+        defer: TailDeferrals,
     ) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
         if args.is_empty() {
             let null_ptr = builder.ins().iconst(I64, 0);
             let nargs = builder.ins().iconst(I64, 0);
-            self.call_helper_tail_call(builder, ft, fp, null_ptr, nargs, vm, region_id_const)
+            self.call_helper_tail_call(builder, ft, fp, null_ptr, nargs, vm, region_id_const, defer)
         } else {
             let slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
                 cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
@@ -250,7 +249,16 @@ impl<'a> FunctionTranslator<'a> {
             }
             let args_addr = builder.ins().stack_addr(I64, slot, 0);
             let nargs = builder.ins().iconst(I64, args.len() as i64);
-            self.call_helper_tail_call(builder, ft, fp, args_addr, nargs, vm, region_id_const)
+            self.call_helper_tail_call(
+                builder,
+                ft,
+                fp,
+                args_addr,
+                nargs,
+                vm,
+                region_id_const,
+                defer,
+            )
         }
     }
 }
