@@ -1,10 +1,11 @@
-//! JIT compilation entry points and interpreter trampolines.
+// audited: 2026-09-12
+// docs/impl/jit.md
+//! Where a closure call meets the JIT: the hotness counter, the code cache, and
+//! the trampolines back into the interpreter.
 //!
-//! Handles:
-//! - JIT compilation profiling and caching
-//! - JIT code execution and result dispatch
-//! - Batch JIT compilation for call peers
-//! - Fallback to interpreter on compilation failure
+//! Both tiers promote through here. The interpreter arrives at `try_jit_call`,
+//! compiled code at `profile_jit_candidate` from `elle_jit_call`, and a
+//! compiled callee's result comes back through `run_jit`.
 
 use crate::jit::{JitCode, JitRejectionInfo, JitValue, TAIL_CALL_SENTINEL, YIELD_SENTINEL};
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_YIELD};
@@ -44,23 +45,25 @@ impl VM {
             .insert(template.bytecode().as_ptr() as usize, template);
     }
 
-    /// Try JIT compilation/dispatch for a closure call.
+    /// Count one call of `closure`, and hand back the compiled code to run it
+    /// with when the cache holds some.
     ///
-    /// Returns `Some(Option<SignalBits>)` if JIT handled the call (the inner
-    /// Option follows handle_call's convention), or `None` to fall through
-    /// to the interpreter path. Caller is responsible for decrementing
-    /// call_depth on the `Some` path.
+    /// The promotion step of a non-tail call, and the only one: the interpreter
+    /// reaches it through `try_jit_call`, compiled code through `elle_jit_call`
+    /// (docs/impl/jit.md § "Function selection"). A tier that counted only its
+    /// own calls would stop promotion one level below whatever has already
+    /// compiled, because a compiled caller stops reaching its callees through
+    /// the other tier.
     ///
-    /// Compilation is asynchronous: when a function becomes hot, its LIR
-    /// is sent to a background thread for Cranelift compilation. The
-    /// interpreter continues running the function until compiled code
-    /// is ready. Zero stall on the event loop.
-    pub(super) fn try_jit_call(
+    /// A compile submitted here never runs this call. A hot function's LIR goes
+    /// to the background worker and the caller falls back meanwhile, so nothing
+    /// stalls the event loop and the next call picks the code up.
+    /// `--trace=syncjit` compiles on this thread instead, and is held to that
+    /// same schedule rather than given a second one.
+    pub(crate) fn profile_jit_candidate(
         &mut self,
         closure: &crate::value::Closure,
-        args: &[Value],
-        func: Value,
-    ) -> Option<Option<SignalBits>> {
+    ) -> Option<Arc<JitCode>> {
         if !self.runtime_config.jit.enabled() {
             return None;
         }
@@ -72,7 +75,7 @@ impl VM {
 
         // Check cache (may have been populated by poll above)
         if let Some(jit_code) = self.jit_code_for(bytecode_ptr) {
-            return Some(self.run_jit(&jit_code, closure, args, func));
+            return Some(jit_code);
         }
 
         // If hot, not already pending, and not already rejected, submit
@@ -92,6 +95,22 @@ impl VM {
         }
 
         None // Interpreter fallback while compilation proceeds in background
+    }
+
+    /// Try JIT compilation/dispatch for a closure call.
+    ///
+    /// Returns `Some(Option<SignalBits>)` if JIT handled the call (the inner
+    /// Option follows handle_call's convention), or `None` to fall through
+    /// to the interpreter path. Caller is responsible for decrementing
+    /// call_depth on the `Some` path.
+    pub(super) fn try_jit_call(
+        &mut self,
+        closure: &crate::value::Closure,
+        args: &[Value],
+        func: Value,
+    ) -> Option<Option<SignalBits>> {
+        let jit_code = self.profile_jit_candidate(closure)?;
+        Some(self.run_jit(&jit_code, closure, args, func))
     }
 
     /// Poll the background JIT worker for completed compilations.
@@ -122,22 +141,42 @@ impl VM {
                     }
                     self.install_jit_code(pin, Arc::new(jit_code));
                 }
-                Err(e) => match &e {
-                    crate::jit::JitError::UnsupportedInstruction(_)
-                    | crate::jit::JitError::Polymorphic
-                    | crate::jit::JitError::Yielding => {
-                        // Expected rejection — record for diagnostics.
-                        let bytecode_ptr = result.bytecode_key as *const u8;
-                        self.jit_rejections
-                            .entry(bytecode_ptr)
-                            .or_insert_with(|| JitRejectionInfo::new(e, pin));
-                    }
-                    _ => {
-                        eprintln!("[jit] background compilation failed: {}", e);
-                    }
-                },
+                Err(e) => {
+                    self.record_jit_failure(result.bytecode_key as *const u8, e, pin);
+                }
             }
         }
+    }
+
+    /// Record a compile that failed, and name the failures nobody planned for.
+    ///
+    /// Every failure enters the negative cache, so the function is never
+    /// re-submitted whichever kind it was. A refusal the translator plans for
+    /// says nothing further; a Cranelift failure or an invalid-LIR result is a
+    /// defect in the compiler and prints one line on stderr
+    /// (docs/impl/jit.md § "Rejection tracking"). Both the worker's results and
+    /// the synchronous compile come through here, so a flag meant to show a
+    /// codegen failure cannot be the one place that swallows it.
+    ///
+    /// `pin` is the code object the key was derived from, and is `None` only
+    /// where the submission's pin was already lost.
+    fn record_jit_failure(
+        &mut self,
+        bytecode_ptr: *const u8,
+        error: crate::jit::JitError,
+        pin: Option<crate::value::ClosureTemplate>,
+    ) {
+        if !matches!(
+            error,
+            crate::jit::JitError::UnsupportedInstruction(_)
+                | crate::jit::JitError::Polymorphic
+                | crate::jit::JitError::Yielding
+        ) {
+            eprintln!("[jit] compilation failed: {}", error);
+        }
+        self.jit_rejections
+            .entry(bytecode_ptr)
+            .or_insert_with(|| JitRejectionInfo::new(error, pin));
     }
 
     /// Submit a background JIT compilation task for a hot function.
@@ -176,11 +215,7 @@ impl VM {
                     }
                     self.install_jit_code(template, Arc::new(jit_code));
                 }
-                Err(e) => {
-                    self.jit_rejections
-                        .entry(bytecode_ptr)
-                        .or_insert_with(|| JitRejectionInfo::new(e, Some(template)));
-                }
+                Err(e) => self.record_jit_failure(bytecode_ptr, e, Some(template)),
             }
             *self.jit_compile_attempts.entry(bytecode_ptr).or_insert(0) += 1;
             return;
@@ -227,12 +262,7 @@ impl VM {
                             let Some(pin) = pin else { continue };
                             self.install_jit_code(pin, Arc::new(jit_code));
                         }
-                        Err(e) => {
-                            let bytecode_ptr = result.bytecode_key as *const u8;
-                            self.jit_rejections
-                                .entry(bytecode_ptr)
-                                .or_insert_with(|| JitRejectionInfo::new(e, pin));
-                        }
+                        Err(e) => self.record_jit_failure(result.bytecode_key as *const u8, e, pin),
                     }
                 }
                 None => break, // Worker exited
