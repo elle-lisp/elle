@@ -392,7 +392,7 @@ impl VM {
                     None => return type_error!(ctx, closure_val, "git", "closure"),
                 };
                 // Already cached? Return early.
-                if closure.template.spirv().get().is_some() {
+                if closure.template.spirv_bytes().is_some() {
                     return (SIG_OK, closure_val);
                 }
                 let lir = match closure.template.lir_function() {
@@ -416,8 +416,8 @@ impl VM {
                     .get_or_insert_with(crate::mlir::MlirCache::new);
                 match cache.compile_spirv(key, lir, wg_size) {
                     Ok(bytes) => {
-                        // Cache on the template (OnceCell — idempotent).
-                        let _ = closure.template.spirv().set(bytes.to_vec());
+                        // Cache on the template (idempotent).
+                        closure.template.cache_spirv(bytes.to_vec());
                         (SIG_OK, closure_val)
                     }
                     Err(e) => (SIG_ERROR, ctx.error("mlir-error", format!("git: {}", e))),

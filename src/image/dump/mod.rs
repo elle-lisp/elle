@@ -1,4 +1,4 @@
-// audited: 2026-09-11
+// audited: 2026-09-13
 //! The dumper: a compacting copy of a sealed data graph into a scratch
 //! region, written out as an image file.
 //!
@@ -8,12 +8,14 @@
 //! This file assembles the file: it copies the graph, asks emit.rs what the
 //! sections hold, and writes the result out under a temporary name. copy.rs
 //! owns the walk and the set of values it accepts; emit.rs owns the page
-//! bytes and the streams that point into them.
+//! bytes and the streams that point into them; backing.rs owns the writers
+//! that put a slice's bytes into their place.
 //!
 //! Determinism is engineered: the copy visits children in order, no map is
 //! ever iterated, and every table is sorted before it is written. Two dumps
 //! of one graph are byte-identical whole files.
 
+mod backing;
 mod copy;
 mod emit;
 

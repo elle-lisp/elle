@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-13
 //! The process runtime: one lifecycle for compile/evaluate, shared by every
 //! entry path (`elle foo.lisp`, the REPL, and the embedding API).
 //!

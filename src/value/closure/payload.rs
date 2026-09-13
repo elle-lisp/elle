@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-13
 // docs/impl/region/template.md
 // docs/impl/image/sealing.md
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
@@ -50,40 +50,48 @@ pub struct LocEntry {
 /// A code object's payload: every variable-length field of one lambda, inline
 /// in region pages. `Copy`, so a header names it with a `RegionSlice` of length
 /// one and copies nothing.
+/// The fields are `pub(crate)` rather than `pub(super)` for one consumer: the
+/// image dumper reads them to copy a payload and to name its relocation slots
+/// (docs/impl/image/sealing.md). Everything else goes through the accessors.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct CodePayload {
-    pub(super) bytecode: RegionSlice<u8>,
-    pub(super) constants: RegionSlice<Value>,
+    pub(crate) bytecode: RegionSlice<u8>,
+    pub(crate) constants: RegionSlice<Value>,
     /// Ascending by `offset`, so a lookup is a binary search and the
     /// smallest-offset location is the first entry.
-    pub(super) locations: RegionSlice<LocEntry>,
+    pub(crate) locations: RegionSlice<LocEntry>,
     /// File names interned once per payload; `LocEntry::file` indexes this.
-    pub(super) files: RegionSlice<RegionSlice<u8>>,
-    pub(super) name: RegionSlice<u8>,
-    pub(super) doc: RegionSlice<u8>,
-    pub(super) region_table: RegionSlice<StaticRegion>,
+    pub(crate) files: RegionSlice<RegionSlice<u8>>,
+    pub(crate) name: RegionSlice<u8>,
+    pub(crate) doc: RegionSlice<u8>,
+    pub(crate) region_table: RegionSlice<StaticRegion>,
     /// Ascending, so membership is a binary search.
-    pub(super) merged_slots: RegionSlice<u32>,
-    pub(super) frame_release_slots: RegionSlice<u16>,
-    pub(super) frame_release_regions: RegionSlice<u32>,
+    pub(crate) merged_slots: RegionSlice<u32>,
+    pub(crate) frame_release_slots: RegionSlice<u16>,
+    pub(crate) frame_release_regions: RegionSlice<u32>,
     /// The capture-locals mask's words. Unbounded in width, so an uncaptured
     /// local at any index gets a bare-NIL env slot rather than a dead cell.
-    pub(super) capture_locals: RegionSlice<u64>,
+    pub(crate) capture_locals: RegionSlice<u64>,
     /// The `&named` key set, empty unless `vararg` is `StrictStruct`.
-    pub(super) strict_keys: RegionSlice<RegionSlice<u8>>,
-    pub(super) arity: Arity,
-    pub(super) signal: Signal,
-    pub(super) capture_params_mask: u64,
-    pub(super) num_locals: u32,
-    pub(super) num_captures: u32,
-    pub(super) num_params: u32,
-    pub(super) wasm_func_idx: Option<u32>,
-    pub(super) vararg: VarargTag,
+    pub(crate) strict_keys: RegionSlice<RegionSlice<u8>>,
+    pub(crate) arity: Arity,
+    pub(crate) signal: Signal,
+    pub(crate) capture_params_mask: u64,
+    pub(crate) num_locals: u32,
+    pub(crate) num_captures: u32,
+    pub(crate) num_params: u32,
+    /// The WASM function-table index, meaningful only when `has_wasm_idx`.
+    /// Split from an `Option<u32>` so every byte of the field is written: an
+    /// enum's niche-less `None` carries uninitialized payload bytes, which the
+    /// image's canonical writer could not reproduce.
+    pub(crate) wasm_func_idx: u32,
+    pub(crate) has_wasm_idx: bool,
+    pub(crate) vararg: VarargTag,
     /// Whether `name`/`doc` are present at all: an absent docstring and an
     /// empty one are different answers to `(doc f)`, and both are empty slices.
-    pub(super) has_name: bool,
-    pub(super) has_doc: bool,
+    pub(crate) has_name: bool,
+    pub(crate) has_doc: bool,
 }
 
 /// A payload's source-location table.
@@ -260,7 +268,8 @@ impl CodePayload {
             num_locals: 0,
             num_captures: 0,
             num_params: 0,
-            wasm_func_idx: None,
+            wasm_func_idx: 0,
+            has_wasm_idx: false,
             vararg: VarargTag::List,
             has_name: false,
             has_doc: false,
@@ -336,7 +345,7 @@ impl CodePayload {
     }
 
     pub fn wasm_func_idx(&self) -> Option<u32> {
-        self.wasm_func_idx
+        self.has_wasm_idx.then_some(self.wasm_func_idx)
     }
 
     pub fn vararg_tag(&self) -> VarargTag {

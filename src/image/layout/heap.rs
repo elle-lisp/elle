@@ -1,4 +1,4 @@
-// audited: 2026-09-11
+// audited: 2026-09-13
 //! The heap-object half of the layout probe: exemplars and field extents for
 //! every `HeapObject` variant the dumper can emit.
 //!
@@ -8,6 +8,8 @@ use std::mem::{offset_of, size_of};
 use std::sync::OnceLock;
 
 use crate::syntax::{Span, Syntax, SyntaxKind};
+use crate::value::closure::{Closure, ClosureTemplate, TemplateRef};
+use crate::value::fiber::SignalBits;
 use crate::value::heap::{HeapObject, HeapTag, Pair};
 use crate::value::region_slice::RegionSlice;
 use crate::value::Value;
@@ -15,7 +17,7 @@ use crate::value::Value;
 use super::{field_offset, probe, FieldExtent, Probed, VariantLayout};
 
 /// The variants the dumper emits, and so the ones the verifier accepts.
-const PROBED: [HeapTag; 9] = [
+const PROBED: [HeapTag; 11] = [
     HeapTag::LString,
     HeapTag::Pair,
     HeapTag::LArray,
@@ -25,6 +27,8 @@ const PROBED: [HeapTag; 9] = [
     HeapTag::LStruct,
     HeapTag::Syntax,
     HeapTag::Parameter,
+    HeapTag::Closure,
+    HeapTag::ClosureTemplate,
 ];
 
 impl Probed for HeapObject {
@@ -78,6 +82,19 @@ impl Probed for HeapObject {
                 traits: Value::NIL,
             },
             HeapTag::Float => HeapObject::Float(1.5),
+            // The template `Value` names no object: the probe measures where
+            // the field sits and never dereferences it.
+            HeapTag::Closure => HeapObject::Closure {
+                closure: Closure::new(
+                    TemplateRef::region(Value::int(3)),
+                    RegionSlice::empty(),
+                    SignalBits::EMPTY,
+                ),
+                traits: Value::NIL,
+            },
+            HeapTag::ClosureTemplate => {
+                HeapObject::ClosureTemplate(ClosureTemplate::new(RegionSlice::empty(), None))
+            }
             other => panic!("no exemplar for {other:?} (src/image/layout/heap.rs)"),
         }
     }
@@ -155,6 +172,40 @@ impl Probed for HeapObject {
                 field_offset(self, f as *const _ as _),
                 size_of::<f64>(),
             )],
+            // A closure is a template `Value`, an env slice, and one squelch
+            // word. `assert_nested_layout` pins that the first is a bare
+            // `Value` and the last a bare word, so each is one extent.
+            HeapObject::Closure { closure, traits } => {
+                let (slice_ptr, slice_len, slice_len_size) = RegionSlice::<u8>::header_layout();
+                let env = field_offset(self, &closure.env as *const _ as _);
+                vec![
+                    FieldExtent::new(
+                        "template",
+                        field_offset(self, &closure.template as *const _ as _),
+                        size_of::<Value>(),
+                    ),
+                    FieldExtent::new("env.ptr", env + slice_ptr, size_of::<*const u8>()),
+                    FieldExtent::new("env.len", env + slice_len, slice_len_size),
+                    FieldExtent::new(
+                        "squelch",
+                        field_offset(self, &closure.squelch_mask as *const _ as _),
+                        size_of::<SignalBits>(),
+                    ),
+                    FieldExtent::new("traits", field_offset(self, traits as *const _ as _), value),
+                ]
+            }
+            // A header's extents cover the payload slice and stop: the
+            // blueprint is a Rust-heap owner no image carries, so its bytes
+            // stay zero and hydrate as absent (docs/impl/image/sealing.md).
+            HeapObject::ClosureTemplate(t) => {
+                let (slice_ptr, slice_len, slice_len_size) = RegionSlice::<u8>::header_layout();
+                let base = field_offset(self, t as *const _ as _)
+                    + ClosureTemplate::payload_slice_offset();
+                vec![
+                    FieldExtent::new("payload.ptr", base + slice_ptr, size_of::<*const u8>()),
+                    FieldExtent::new("payload.len", base + slice_len, slice_len_size),
+                ]
+            }
             other => panic!(
                 "no exemplar for {:?} (src/image/layout/heap.rs)",
                 other.tag()
@@ -204,6 +255,32 @@ impl Probed for HeapObject {
                 },
             ) => ia == ib && da == db && ta == tb,
             (HeapObject::Float(a), HeapObject::Float(b)) => a.to_bits() == b.to_bits(),
+            // Compared as raw words and header fields: a probe exemplar's
+            // template names no object, so nothing behind it can be compared,
+            // and a rebuilt header's blueprint is absent by design.
+            (
+                HeapObject::Closure {
+                    closure: a,
+                    traits: ta,
+                },
+                HeapObject::Closure {
+                    closure: b,
+                    traits: tb,
+                },
+            ) => {
+                let (av, bv) = (a.template.value(), b.template.value());
+                av.tag == bv.tag
+                    && av.payload == bv.payload
+                    && a.env.as_ptr() == b.env.as_ptr()
+                    && a.env.len() == b.env.len()
+                    && a.squelch_mask == b.squelch_mask
+                    && ta == tb
+            }
+            (HeapObject::ClosureTemplate(a), HeapObject::ClosureTemplate(b)) => {
+                a.payload_slice().as_ptr() == b.payload_slice().as_ptr()
+                    && a.payload_slice().len() == b.payload_slice().len()
+                    && b.proto().is_none()
+            }
             _ => false,
         }
     }

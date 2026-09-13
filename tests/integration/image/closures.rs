@@ -1,3 +1,4 @@
+// audited: 2026-09-13
 // A closure and its code object cross the body; the header hydrates without
 // its blueprint.
 // docs/impl/image/sealing.md
@@ -372,6 +373,11 @@ fn freeing_a_hydrated_closure_region_returns_to_baseline() {
 // in a fresh one, through a REPL binding and the ordinary dispatch path. The
 // source closure carries LIR (every compiled lambda does); the hydrated one
 // carries none, so the call below is also the interpreter-tier pin.
+//
+// The trap is the body's spelling. A stdlib wrapper like `+` is itself a
+// closure the lambda captures, and stdlib closures build nested lambdas —
+// which the dump refuses. `%eq` and `if` compile to bare instructions, so
+// this closure's graph is its own.
 #[test]
 fn a_compiled_closure_answers_a_call_after_hydration() {
     let dir = crate::common::ScratchDir::new("image-closure-call");
@@ -380,7 +386,14 @@ fn a_compiled_closure_answers_a_call_after_hydration() {
     let mut rt = Runtime::new();
     let f = {
         let (vm, symbols, cctx) = rt.parts();
-        eval_all("(fn [x] (+ x 40))", symbols, vm, cctx, "<image-closures>").expect("eval")
+        eval_all(
+            "(fn [x] (if (%eq x 2) 42 7))",
+            symbols,
+            vm,
+            cctx,
+            "<image-closures>",
+        )
+        .expect("eval")
     };
     assert!(
         f.as_closure()

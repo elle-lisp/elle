@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-13
 //! What the layout probe answers for: the probed set, and what canonical
 //! bytes keep and drop.
 //!

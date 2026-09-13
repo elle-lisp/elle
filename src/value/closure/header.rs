@@ -1,11 +1,13 @@
+// audited: 2026-09-13
 //! `ClosureTemplate` — the region-resident header of a code object.
 //!
-//! Two words: a `RegionSlice` naming the shared payload, and an `Rc` to the
-//! blueprint it was materialized from. `MakeClosure` allocates one of these per
+//! Two words: a `RegionSlice` naming the shared payload, and an optional `Rc`
+//! to the blueprint it was materialized from — present on every header
+//! `MakeClosure` builds, absent on a header hydrated from an image
+//! (docs/impl/image/sealing.md). `MakeClosure` allocates one of these per
 //! closure creation, which is what makes a closure built in a loop cheap
 //! (docs/impl/region/template.md).
 
-use std::cell::OnceCell;
 use std::rc::Rc;
 
 use crate::hir::region::StaticRegion;
@@ -26,15 +28,18 @@ use super::proto::TemplateProto;
 pub struct ClosureTemplate {
     /// The shared payload, length one. Its backing lives in a payload region of
     /// the heap's own, so allocating a header takes a counted cross-region
-    /// reference to it (docs/impl/region/rules.md Rule 5).
+    /// reference to it (docs/impl/region/rules.md Rule 5). A hydrated header's
+    /// backing lands in its own region instead — a self-edge.
     payload: RegionSlice<CodePayload>,
     /// The blueprint this header came from — the one Rust-heap owner left on a
     /// code object. It answers what the payload cannot yet hold: the
     /// nested-lambda blueprints a `MakeClosure` indexes, the LIR the JIT
     /// promotes from, the defining span, and the SPIR-V cache. Holding it
     /// strongly is also what stops the heap's payload cache from sweeping a
-    /// payload this header still reads.
-    proto: Rc<TemplateProto>,
+    /// payload this header still reads. A header hydrated from an image has
+    /// none — its payload backing is image pages no cache sweeps — and answers
+    /// the four questions with absence (docs/impl/image/sealing.md).
+    proto: Option<Rc<TemplateProto>>,
 }
 
 impl std::fmt::Debug for ClosureTemplate {
@@ -53,7 +58,10 @@ impl std::fmt::Debug for ClosureTemplate {
 }
 
 impl ClosureTemplate {
-    pub(super) fn new(payload: RegionSlice<CodePayload>, proto: Rc<TemplateProto>) -> Self {
+    /// A header over `payload`. `MakeClosure` and the entry paths pass the
+    /// blueprint; the image hydrator's bytes decode with none
+    /// (docs/impl/image/sealing.md).
+    pub(crate) fn new(payload: RegionSlice<CodePayload>, proto: Option<Rc<TemplateProto>>) -> Self {
         ClosureTemplate { payload, proto }
     }
 
@@ -61,7 +69,10 @@ impl ClosureTemplate {
     /// that have no `FiberHeap` to materialize a blueprint through.
     #[cfg(test)]
     pub(crate) fn test_header(payload: RegionSlice<CodePayload>, proto: Rc<TemplateProto>) -> Self {
-        ClosureTemplate { payload, proto }
+        ClosureTemplate {
+            payload,
+            proto: Some(proto),
+        }
     }
 
     /// The code object for `proto` on `heap`, with no header allocated in any
@@ -77,13 +88,26 @@ impl ClosureTemplate {
         heap: &mut crate::value::fiberheap::FiberHeap,
         proto: &Rc<TemplateProto>,
     ) -> Self {
-        ClosureTemplate::new(heap.template_payload(proto), Rc::clone(proto))
+        ClosureTemplate::new(heap.template_payload(proto), Some(Rc::clone(proto)))
     }
 
     /// The shared payload.
     #[inline]
     pub fn payload(&self) -> &CodePayload {
         &self.payload.as_slice()[0]
+    }
+
+    /// The payload slice itself, for the image dumper: the header's one
+    /// relocation slot is this slice's `ptr` (docs/impl/image/format.md).
+    #[inline]
+    pub(crate) fn payload_slice(&self) -> &RegionSlice<CodePayload> {
+        &self.payload
+    }
+
+    /// Where the header keeps that slice, for the image layout probe. Lives
+    /// here because the field is private.
+    pub(crate) fn payload_slice_offset() -> usize {
+        std::mem::offset_of!(ClosureTemplate, payload)
     }
 
     /// The pointer the payload's region owns — what the alloc scan turns into
@@ -93,10 +117,11 @@ impl ClosureTemplate {
         self.payload.as_ptr() as *const ()
     }
 
-    /// The blueprint this header was materialized from.
+    /// The blueprint this header was materialized from, absent on a header
+    /// hydrated from an image.
     #[inline]
-    pub fn proto(&self) -> &Rc<TemplateProto> {
-        &self.proto
+    pub fn proto(&self) -> Option<&Rc<TemplateProto>> {
+        self.proto.as_ref()
     }
 
     // ── payload ────────────────────────────────────────────────────────
@@ -197,25 +222,44 @@ impl ClosureTemplate {
     }
 
     // ── blueprint ──────────────────────────────────────────────────────
+    //
+    // Each of these answers with absence for a blueprint-less header. The
+    // dump refuses a template with child blueprints, so the empty-children
+    // answer is never a lie a `MakeClosure` could act on
+    // (docs/impl/image/sealing.md).
 
     #[inline]
     pub fn child_protos(&self) -> &[Rc<TemplateProto>] {
-        &self.proto.child_protos
+        self.proto
+            .as_ref()
+            .map(|p| p.child_protos.as_slice())
+            .unwrap_or(&[])
     }
 
     #[inline]
     pub fn lir_function(&self) -> Option<&Rc<crate::lir::LirFunction>> {
-        self.proto.lir_function.as_ref()
+        self.proto.as_ref()?.lir_function.as_ref()
     }
 
     #[inline]
     pub fn origin(&self) -> Option<crate::syntax::Span> {
-        self.proto.origin
+        self.proto.as_ref()?.origin
     }
 
+    /// The SPIR-V bytes `(git f)` compiled for this code object, if any.
     #[inline]
-    pub fn spirv(&self) -> &OnceCell<Vec<u8>> {
-        &self.proto.spirv
+    pub fn spirv_bytes(&self) -> Option<&Vec<u8>> {
+        self.proto.as_ref()?.spirv.get()
+    }
+
+    /// Cache freshly compiled SPIR-V on the blueprint. Idempotent (the cell
+    /// keeps its first value); a blueprint-less header caches nothing, and
+    /// its caller recompiles.
+    #[inline]
+    pub fn cache_spirv(&self, bytes: Vec<u8>) {
+        if let Some(p) = self.proto.as_ref() {
+            let _ = p.spirv.set(bytes);
+        }
     }
 
     // ── owned re-forms ─────────────────────────────────────────────────

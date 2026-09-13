@@ -1,4 +1,4 @@
-// audited: 2026-09-11
+// audited: 2026-09-13
 //! The verifier's two passes: the tables before anything is mapped, then every
 //! mapped object against the tag its index claims.
 //!
@@ -12,12 +12,14 @@
 //! pages a hydration never faults in stay clean. The shells are already
 //! resident: relocation wrote a pointer slot in every object that has one.
 
-use std::mem::size_of;
+use std::mem::{align_of, size_of};
 
 use crate::primitives::def::PrimitiveDef;
 use crate::syntax::{ScopeId, Syntax, SyntaxKind};
+use crate::value::closure::{CodePayload, LocEntry};
 use crate::value::fiberheap::regionpool::HEADER_SIZE;
 use crate::value::heap::{HeapObject, HeapTag};
+use crate::value::region_slice::RegionSlice;
 use crate::value::{TableKey, Value};
 
 use super::format::{
@@ -231,24 +233,66 @@ pub(crate) fn objects(
 
         // SAFETY: the discriminant byte matches a probed variant, and every
         // probed variant tolerates arbitrary bit patterns in its fields
-        // (raw pointers, integers, floats, `Value` words).
+        // (raw pointers, integers, floats, `Value` words). A header's
+        // blueprint word is the one exception a bit pattern could hurt —
+        // dropping a fabricated `Rc` — and the check below refuses it while
+        // it is still only a word being read.
         let obj = unsafe { &*((base + off) as *const HeapObject) };
         for extent in slice_extents(obj).into_iter().flatten() {
-            let (ptr, bytes) = extent;
-            let start = ptr
-                .checked_sub(base)
-                .filter(|_| ptr >= base)
-                .ok_or_else(|| extent_error(off))?;
-            let end = start.checked_add(bytes).ok_or_else(|| extent_error(off))?;
-            let backing = page_of(pages, start)?;
-            // Inline data bumps down from the end of the page, so a backing
-            // runs from the data cursor to the page's end and no further.
-            if start < backing.start + backing.entry.data_cursor as usize
-                || end > backing.start + backing.entry.size as usize
-            {
-                return Err(extent_error(off));
+            check_extent(base, pages, off, extent)?;
+        }
+
+        // A header names exactly one payload, its blueprint hydrates as
+        // absent, and the payload's own slices are bounded through the shell
+        // the extent above just admitted (docs/impl/image/sealing.md).
+        if let HeapObject::ClosureTemplate(t) = obj {
+            let slice = t.payload_slice();
+            if slice.len() != 1 {
+                return Err(ImageError::Corrupt(format!(
+                    "the header at {off} names {} payloads rather than one",
+                    slice.len()
+                )));
+            }
+            if !(slice.as_ptr() as usize).is_multiple_of(align_of::<CodePayload>()) {
+                return Err(ImageError::Corrupt(format!(
+                    "the header at {off} names a misaligned payload"
+                )));
+            }
+            if t.proto().is_some() {
+                return Err(ImageError::Corrupt(format!(
+                    "the header at {off} carries a blueprint pointer, which no image writes"
+                )));
+            }
+            for extent in payload_extents(t.payload()).into_iter().flatten() {
+                check_extent(base, pages, off, extent)?;
+            }
+            for extent in payload_name_extents(t.payload()).into_iter().flatten() {
+                check_extent(base, pages, off, extent)?;
             }
         }
+    }
+    Ok(())
+}
+
+/// One region-backed extent stays inside the mapped pages' inline-data span.
+fn check_extent(
+    base: usize,
+    pages: &[MappedPage],
+    off: usize,
+    (ptr, bytes): (usize, usize),
+) -> Result<(), ImageError> {
+    let start = ptr
+        .checked_sub(base)
+        .filter(|_| ptr >= base)
+        .ok_or_else(|| extent_error(off))?;
+    let end = start.checked_add(bytes).ok_or_else(|| extent_error(off))?;
+    let backing = page_of(pages, start)?;
+    // Inline data bumps down from the end of the page, so a backing
+    // runs from the data cursor to the page's end and no further.
+    if start < backing.start + backing.entry.data_cursor as usize
+        || end > backing.start + backing.entry.size as usize
+    {
+        return Err(extent_error(off));
     }
     Ok(())
 }
@@ -327,8 +371,100 @@ fn slice_extents(obj: &HeapObject) -> [Option<(usize, usize)>; 2] {
             ),
             kind_extent(&syntax.kind, &one),
         ],
+        HeapObject::Closure { closure, .. } => [
+            one(
+                closure.env.as_ptr() as *const u8,
+                closure.env.len(),
+                size_of::<Value>(),
+            ),
+            None,
+        ],
+        HeapObject::ClosureTemplate(t) => {
+            let slice = t.payload_slice();
+            [
+                one(
+                    slice.as_ptr() as *const u8,
+                    slice.len(),
+                    size_of::<CodePayload>(),
+                ),
+                None,
+            ]
+        }
         _ => [None, None],
     }
+}
+
+/// The extents a code payload names: one per non-empty slice field, plus one
+/// per file name and `&named` key behind the two nested slices. The caller
+/// has already bounded the payload struct itself, so reading it here is a
+/// read of admitted bytes.
+fn payload_extents(p: &CodePayload) -> Vec<Option<(usize, usize)>> {
+    let one = |ptr: *const u8, len: usize, unit: usize| {
+        (len != 0).then(|| (ptr as usize, len.saturating_mul(unit)))
+    };
+    vec![
+        one(p.bytecode.as_ptr(), p.bytecode.len(), 1),
+        one(
+            p.constants.as_ptr() as *const u8,
+            p.constants.len(),
+            size_of::<Value>(),
+        ),
+        one(
+            p.locations.as_ptr() as *const u8,
+            p.locations.len(),
+            size_of::<LocEntry>(),
+        ),
+        one(
+            p.files.as_ptr() as *const u8,
+            p.files.len(),
+            size_of::<RegionSlice<u8>>(),
+        ),
+        one(p.name.as_ptr(), p.name.len(), 1),
+        one(p.doc.as_ptr(), p.doc.len(), 1),
+        one(
+            p.region_table.as_ptr() as *const u8,
+            p.region_table.len(),
+            size_of::<crate::hir::region::StaticRegion>(),
+        ),
+        one(
+            p.merged_slots.as_ptr() as *const u8,
+            p.merged_slots.len(),
+            size_of::<u32>(),
+        ),
+        one(
+            p.frame_release_slots.as_ptr() as *const u8,
+            p.frame_release_slots.len(),
+            size_of::<u16>(),
+        ),
+        one(
+            p.frame_release_regions.as_ptr() as *const u8,
+            p.frame_release_regions.len(),
+            size_of::<u32>(),
+        ),
+        one(
+            p.capture_locals.as_ptr() as *const u8,
+            p.capture_locals.len(),
+            size_of::<u64>(),
+        ),
+        one(
+            p.strict_keys.as_ptr() as *const u8,
+            p.strict_keys.len(),
+            size_of::<RegionSlice<u8>>(),
+        ),
+    ]
+}
+
+/// The byte extents behind a payload's two name slices. Read only after
+/// [`payload_extents`] passed: the headers these iterate live inside the
+/// `files` and `strict_keys` extents, and reading them earlier would chase a
+/// length nothing has bounded yet.
+fn payload_name_extents(p: &CodePayload) -> Vec<Option<(usize, usize)>> {
+    let one = |ptr: *const u8, len: usize| (len != 0).then_some((ptr as usize, len));
+    [&p.files, &p.strict_keys]
+        .into_iter()
+        .flat_map(|names| names.iter())
+        .map(|inner| one(inner.as_ptr(), inner.len()))
+        .collect()
 }
 
 /// The extent a node's kind names: a region string's bytes, or its child

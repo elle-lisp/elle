@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-13
 // docs/impl/region/template.md
 //! `TemplateProto` — a code object's compile-time blueprint.
 //!
@@ -328,7 +328,8 @@ pub(super) fn materialize_payload(
         num_locals: proto.num_locals as u32,
         num_captures: proto.num_captures as u32,
         num_params: proto.num_params as u32,
-        wasm_func_idx: proto.wasm_func_idx,
+        wasm_func_idx: proto.wasm_func_idx.unwrap_or(0),
+        has_wasm_idx: proto.wasm_func_idx.is_some(),
         vararg: proto.vararg_tag(),
         has_name: name.1,
         has_doc: doc.1,
@@ -367,7 +368,7 @@ pub fn materialize(
     let payload = heap.template_payload(proto);
     alloc_in_region(
         heap,
-        HeapObject::ClosureTemplate(ClosureTemplate::new(payload, Rc::clone(proto))),
+        HeapObject::ClosureTemplate(ClosureTemplate::new(payload, Some(Rc::clone(proto)))),
         region,
     )
 }
