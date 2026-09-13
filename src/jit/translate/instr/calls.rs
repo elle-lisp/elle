@@ -1,7 +1,7 @@
-// audited: 2026-09-10
+// audited: 2026-09-13
 // docs/impl/jit.md
-//! How a call leaves compiled code: a direct call to an SCC peer, the
-//! self-tail-call loop, the generic dispatch helper, and a `MakeClosure`.
+//! How a call leaves compiled code: the self-tail-call loop, the dispatch
+//! helper that carries every other call, and a `MakeClosure`.
 
 use super::*;
 
@@ -22,49 +22,7 @@ impl<'a> FunctionTranslator<'a> {
                     .vm_ptr
                     .ok_or_else(|| JitError::InvalidLir("Call without vm pointer".to_string()))?;
 
-                let maybe_scc = self
-                    .global_load_map
-                    .get(func)
-                    .and_then(|&sym| self.scc_peers.get(&sym).map(|&fid| (sym, fid)));
-                if let Some((sym, peer_func_id)) = maybe_scc {
-                    // Call depth check
-                    let (overflow_tag, _) =
-                        self.call_helper_vm_only(builder, self.helpers.call_depth_enter, vm)?;
-                    let tag_true = builder.ins().iconst(I64, TAG_TRUE as i64);
-                    let is_overflow = builder.ins().icmp(IntCC::Equal, overflow_tag, tag_true);
-                    let overflow_block = builder.create_block();
-                    let call_block = builder.create_block();
-                    builder
-                        .ins()
-                        .brif(is_overflow, overflow_block, &[], call_block, &[]);
-
-                    builder.switch_to_block(overflow_block);
-                    builder.seal_block(overflow_block);
-                    let nil_t = builder.ins().iconst(I64, TAG_NIL as i64);
-                    let zero = builder.ins().iconst(I64, 0);
-                    self.emit_pop_then_return(builder, nil_t, zero)?;
-
-                    builder.switch_to_block(call_block);
-                    builder.seal_block(call_block);
-
-                    let (rt, rp) =
-                        self.emit_direct_scc_call(builder, peer_func_id, sym, args, vm)?;
-                    self.call_helper_vm_only(builder, self.helpers.call_depth_exit, vm)?;
-                    // Resolve pending tail call
-                    let func_ref = self
-                        .module
-                        .declare_func_in_func(self.helpers.resolve_tail_call, builder.func);
-                    let call = builder.ins().call(func_ref, &[rt, rp, vm]);
-                    let resolved_t = builder.inst_results(call)[0];
-                    let resolved_p = builder.inst_results(call)[1];
-                    self.def_var_pair(builder, dst.0, resolved_t, resolved_p);
-                    self.emit_exception_check_after_call(builder)?;
-                    if self.lir.signal.may_suspend() {
-                        let idx = self.call_site_index;
-                        self.call_site_index += 1;
-                        self.emit_yield_check_after_call(builder, idx)?;
-                    }
-                } else if args.is_empty() {
+                if args.is_empty() {
                     let null_ptr = builder.ins().iconst(I64, 0);
                     let nargs = builder.ins().iconst(I64, 0);
                     let (rt, rp) = self.call_helper_call(
@@ -181,19 +139,6 @@ impl<'a> FunctionTranslator<'a> {
                         builder.switch_to_block(other_call_block);
                         builder.seal_block(other_call_block);
 
-                        let maybe_scc2 = self
-                            .global_load_map
-                            .get(func)
-                            .and_then(|&sym| self.scc_peers.get(&sym).map(|&fid| (sym, fid)));
-                        if let Some((sym2, peer_func_id)) = maybe_scc2 {
-                            // An SCC peer is always a user closure (never a
-                            // native), so it always trampolines/returns — no
-                            // post-`TailCall` native release to run.
-                            let (rt, rp) =
-                                self.emit_direct_scc_call(builder, peer_func_id, sym2, args, vm)?;
-                            self.emit_pop_then_return(builder, rt, rp)?;
-                            return Ok(true);
-                        }
                         let (rt, rp) = self.emit_tail_call_with_args(
                             builder,
                             ft,
@@ -213,18 +158,6 @@ impl<'a> FunctionTranslator<'a> {
                 }
 
                 // Fallback: no self-tail-call optimization
-                let maybe_scc3 = self
-                    .global_load_map
-                    .get(func)
-                    .and_then(|&sym| self.scc_peers.get(&sym).map(|&fid| (sym, fid)));
-                if let Some((sym3, peer_func_id)) = maybe_scc3 {
-                    // SCC peer → user closure → always trampolines/returns.
-                    let (rt, rp) =
-                        self.emit_direct_scc_call(builder, peer_func_id, sym3, args, vm)?;
-                    self.emit_pop_then_return(builder, rt, rp)?;
-                    return Ok(true);
-                }
-
                 let (rt, rp) = self.emit_tail_call_with_args(
                     builder,
                     ft,

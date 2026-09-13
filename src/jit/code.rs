@@ -1,7 +1,10 @@
-//! JIT-compiled code wrapper
+// audited: 2026-09-13
+// docs/impl/jit.md
+//! `JitCode`: a compiled function's entry pointer, plus everything the native
+//! code holds a raw pointer into and therefore must outlive it.
 //!
-//! This module provides the `JitCode` type that wraps a native function pointer
-//! and keeps the JIT module alive to prevent the code from being freed.
+//! The Cranelift module comes first — freeing it frees the code — and the
+//! side-exit metadata, closure blueprints and constant templates follow.
 
 use std::sync::Arc;
 
@@ -63,9 +66,9 @@ pub struct JitCode {
     /// template *data* (the code object's constant pool), not a region value —
     /// re-materialized per execution.
     //
-    // clippy::vec_box: the `Box` is load-bearing, not redundant indirection —
-    // native code bakes a raw pointer to each `ConstTemplate`, so an element must
-    // not move when the Vec grows; `Box` gives each a stable address.
+    // clippy::vec_box: the `Box` is what gives each element a stable address.
+    // Native code bakes a raw pointer to each `ConstTemplate`, so an element
+    // must not move when the Vec grows.
     #[allow(dead_code, clippy::vec_box)]
     pub(crate) templates: Vec<Box<crate::value::ConstTemplate>>,
 }
@@ -86,29 +89,6 @@ impl JitCode {
             call_sites: Vec::new(),
             closure_protos: Vec::new(),
             templates: Vec::new(),
-        }
-    }
-
-    /// Create a new JitCode from a function pointer and a shared module
-    ///
-    /// This constructor is used for batch compilation where multiple JitCode
-    /// instances share one module. Closure template blueprints and
-    /// string-literal templates must be passed in to keep them alive for the
-    /// JitCode's lifetime.
-    #[allow(clippy::vec_box)] // stable per-element address for baked JIT pointers
-    pub(crate) fn new_shared(
-        fn_ptr: *const u8,
-        module: Arc<ModuleHolder>,
-        closure_protos: Vec<std::rc::Rc<crate::value::TemplateProto>>,
-        templates: Vec<Box<crate::value::ConstTemplate>>,
-    ) -> Self {
-        JitCode {
-            fn_ptr,
-            _module: module,
-            yield_points: Vec::new(),
-            call_sites: Vec::new(),
-            closure_protos,
-            templates,
         }
     }
 

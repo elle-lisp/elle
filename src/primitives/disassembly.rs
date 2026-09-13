@@ -1,4 +1,7 @@
-//! Bytecode and JIT disassembly primitives
+// audited: 2026-09-13
+// docs/impl/jit.md
+//! The primitives that render a closure's compiled forms: bytecode, Cranelift
+//! IR, and the LIR control flow graph.
 
 use crate::lir::{terminator_kind, Terminator};
 use crate::primitives::def::RegionEffect;
@@ -63,7 +66,12 @@ pub(crate) fn prim_disbit(
     }
 }
 
-/// (fn/disasm-jit closure) — return Cranelift IR as array of strings, or nil
+/// (fn/disasm-jit closure) — render the Cranelift IR the JIT emits for a
+/// closure, as an array of strings.
+///
+/// Translates fresh rather than reading the cache, so the answer does not
+/// depend on whether the closure is compiled. Answers nil where there is
+/// nothing to render: no LIR on the closure, or a translation the JIT refuses.
 pub(crate) fn prim_disjit(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -78,7 +86,7 @@ pub(crate) fn prim_disjit(
             Ok(c) => c,
             Err(_) => return (SIG_OK, Value::NIL),
         };
-        match compiler.clif_text(&lir, None) {
+        match compiler.clif_text(&lir) {
             Ok(lines) => {
                 return (
                     SIG_OK,
@@ -329,7 +337,7 @@ primitive! {
     "fn/disasm-jit" => prim_disjit {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Disassemble a closure's JIT-compiled Cranelift IR, or nil if not JIT'd.",
+        doc: "Render the Cranelift IR the JIT emits for a closure, or nil if it has none.",
         params: &["closure"],
         category: "fn",
         example: "(fn/disasm-jit (fn (x) x))",

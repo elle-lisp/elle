@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-13
 // docs/impl/jit.md
 //! `FunctionTranslator`: the register-to-variable mapping every LIR instruction
 //! and terminator is lowered to Cranelift IR through.
@@ -24,12 +24,11 @@ use cranelift_codegen::ir::types::{I32, I64};
 use cranelift_codegen::ir::{InstBuilder, MemFlagsData};
 use cranelift_frontend::{FunctionBuilder, Variable};
 use cranelift_jit::JITModule;
-use cranelift_module::{FuncId, Module};
+use cranelift_module::Module;
 
 use crate::hir::region::StaticRegion;
 use crate::lir::{Label, LirInstr, Reg, Terminator};
-use crate::value::repr::{TAG_FALSE, TAG_NIL, TAG_TRUE};
-use crate::value::SymbolId;
+use crate::value::repr::{TAG_FALSE, TAG_NIL};
 
 use super::vtable::RuntimeHelpers;
 use super::JitError;
@@ -62,12 +61,6 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) local_var_base: u32,
     /// Loop header block for self-tail-call jumps
     pub(crate) loop_header: Option<cranelift_codegen::ir::Block>,
-    /// SCC peer functions
-    pub(crate) scc_peers: HashMap<SymbolId, FuncId>,
-    /// Map from register to the SymbolId it was loaded from.
-    pub(crate) global_load_map: HashMap<Reg, SymbolId>,
-    /// SymbolId of the function being compiled (for self-call detection)
-    pub(crate) self_sym: Option<SymbolId>,
     /// Counter for yield point indices
     pub(crate) yield_point_index: u32,
     /// Counter for call site indices
@@ -158,9 +151,6 @@ impl<'a> FunctionTranslator<'a> {
             arg_var_base: 0,
             local_var_base: 0,
             loop_header: None,
-            scc_peers: HashMap::new(),
-            global_load_map: HashMap::new(),
-            self_sym: None,
             yield_point_index: 0,
             call_site_index: 0,
             shared_spill_slot: None,

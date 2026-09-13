@@ -1,15 +1,16 @@
-//! Background JIT compilation worker thread.
+// audited: 2026-09-13
+// docs/impl/jit.md
+//! The background JIT worker: the thread Cranelift runs on, and the task and
+//! result that cross to it.
 //!
-//! Moves Cranelift compilation off the event loop so the interpreter
-//! continues running hot functions while native code is generated in
-//! the background. When compilation finishes, the next call to the
-//! function picks up the compiled code from cache.
+//! Compilation moves off the event loop so the interpreter keeps running a hot
+//! function while its native code is generated. When compilation finishes, the
+//! next call picks the code up from the cache.
 //!
 //! Modeled on `StdinThread` in `src/io/threadpool.rs`.
 
 use crate::jit::{JitCode, JitCompiler, JitError};
 use crate::lir::LirFunction;
-use crate::value::SymbolId;
 /// Cumulative Cranelift compilation time (ns) and task count across the
 /// process, readable by embedders for profiling.
 pub static JIT_COMPILE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -21,7 +22,6 @@ pub(crate) struct JitTask {
     /// the JIT reads their tag/payload as i64 immediates, never
     /// dereferencing heap pointers during compilation.
     pub lir: LirFunction,
-    pub self_sym: Option<SymbolId>,
     /// Cache key — the bytecode pointer address, cast to usize.
     pub bytecode_key: usize,
 }
@@ -70,7 +70,7 @@ impl JitWorker {
                     let key = task.bytecode_key;
                     let t0 = std::time::Instant::now();
                     let result = match JitCompiler::new() {
-                        Ok(compiler) => compiler.compile(&task.lir, task.self_sym, Vec::new()),
+                        Ok(compiler) => compiler.compile(&task.lir, Vec::new()),
                         Err(e) => Err(e),
                     };
                     JIT_COMPILE_NS.fetch_add(
@@ -123,7 +123,6 @@ impl JitWorker {
 /// (docs/impl/jit.md § "The code-address registry").
 pub(crate) fn prepare_task(
     lir: &LirFunction,
-    self_sym: Option<SymbolId>,
     bytecode_key: usize,
     display_name: Option<&str>,
 ) -> JitTask {
@@ -132,11 +131,7 @@ pub(crate) fn prepare_task(
     if lir.name.is_none() {
         lir.name = display_name.map(String::from);
     }
-    JitTask {
-        lir,
-        self_sym,
-        bytecode_key,
-    }
+    JitTask { lir, bytecode_key }
 }
 
 // A string literal lowers to `MaterializeConst` in every position (value:

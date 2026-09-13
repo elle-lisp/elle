@@ -7,7 +7,7 @@ JIT compilation for Elle using Cranelift.
 ## Responsibility
 
 Compile `LirFunction` to native x86_64 code. A function's signal decides
-nothing about admission (see `signals/AGENTS.md` for signal definitions);
+nothing about admission (see [signals/AGENTS.md](../signals/AGENTS.md) for signal definitions);
 what it decides is the code around a call. Yielding functions use side-exit:
 JIT code calls a runtime helper that builds a `SuspendedFrame` and returns
 `YIELD_SENTINEL` to the interpreter.
@@ -81,7 +81,7 @@ type JitFn = unsafe extern "C" fn(
 ) -> Value;
 ```
 
-Values are 16-byte tagged unions (see `value/repr/AGENTS.md`).
+Values are 16-byte tagged unions (see [value/repr/AGENTS.md](../value/repr/AGENTS.md)).
 
 The last two parameters carry the executing closure, which is what makes
 self-tail-call optimization possible: when a function tail-calls itself, the
@@ -133,7 +133,8 @@ These handle type checking and tagged-union encoding.
 ### dispatch.rs (thin re-export layer + non-call helpers)
 
 `dispatch.rs` re-exports everything from `calls.rs`, `data.rs`, and `suspend.rs` so that
-`vtable.rs` can reference all helpers as `dispatch::elle_jit_*`. It also houses:
+`vtable/symbols.rs` can register all helpers as `dispatch::elle_jit_*`. It also
+houses:
 
 - **Array mutation**: `elle_jit_array_push`, `elle_jit_array_extend`
 - **Parameter frames**: `elle_jit_push_param_frame`
@@ -146,9 +147,7 @@ These handle type checking and tagged-union encoding.
 - **Metadata types**: `YieldPointMeta`, `CallSiteMeta`
 - **Exception check**: `elle_jit_has_exception`
 - **Function calls**: `elle_jit_call`, `elle_jit_tail_call`, `elle_jit_call_array`, `elle_jit_tail_call_array`
-- **Call depth**: `elle_jit_call_depth_enter`, `elle_jit_call_depth_exit`
-- **Misc call helpers**: `elle_jit_resolve_tail_call`, `elle_jit_pop_param_frame`, `elle_jit_make_closure`
-- **Env building**: `build_closure_env_for_jit` (interpreter fallback env construction)
+- **Misc call helpers**: `elle_jit_pop_param_frame`, `elle_jit_make_closure`
 
 ### data.rs (heap/VM interaction)
 
@@ -343,7 +342,7 @@ No errors are silently swallowed.
 
 11. **Value layout is assumed stable.** JIT-to-JIT calling and native function
     dispatch pass `*const Value` pointers directly. If Value's representation
-    changes (see `value/repr/AGENTS.md`), these casts break.
+    changes (see [value/repr/AGENTS.md](../value/repr/AGENTS.md)), these casts break.
 
 12. **Yield helpers set fiber.signal and fiber.suspended.** `elle_jit_yield`
      and `elle_jit_yield_through_call` are responsible for building the

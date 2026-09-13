@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-13
 // docs/impl/region/template.md
 //! The blueprint the JIT builds for a nested lambda at a `MakeClosure`.
 
@@ -69,7 +69,7 @@ fn closure_protos(
     ctx.func.signature = sig;
     ctx.func.name = UserFuncName::user(0, func_id.as_u32());
     let (protos, _) = compiler
-        .translate_function(outer, &mut ctx.func, None, None, vec![nested])
+        .translate_function(outer, &mut ctx.func, vec![nested])
         .expect("Failed to translate");
     protos
 }

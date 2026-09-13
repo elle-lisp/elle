@@ -64,7 +64,7 @@ fn branch_lines(clif: &[String]) -> Vec<&str> {
 fn arith_clif(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> Vec<String> {
     JitCompiler::new()
         .expect("Failed to create compiler")
-        .clif_text(&make_arith_lir(op, make_op), None)
+        .clif_text(&make_arith_lir(op, make_op))
         .expect("Failed to translate")
 }
 
@@ -130,7 +130,6 @@ fn a_proven_comparison_compiles_without_a_tag_check() {
                         Terminator::Return(Reg(2)),
                     )
                     .build(),
-                None,
             )
             .expect("Failed to translate");
         assert!(
@@ -159,7 +158,6 @@ fn a_proven_comparison_compiles_without_a_tag_check() {
                         Terminator::Return(Reg(2)),
                     )
                     .build(),
-                None,
             )
             .expect("Failed to translate");
         let branches = branch_lines(&proven);
@@ -197,7 +195,7 @@ fn an_argument_load_carries_trusted_flags() {
     // unaligned-tolerant access on every parameter of every hot function.
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let clif = compiler
-        .clif_text(&make_simple_lir(), None)
+        .clif_text(&make_simple_lir())
         .expect("Failed to translate");
     let loads = load_lines(&clif);
     assert!(
@@ -219,7 +217,7 @@ fn a_capture_load_carries_trusted_flags() {
     // different translator path than the argument array.
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let clif = compiler
-        .clif_text(&make_capture_read_lir(), None)
+        .clif_text(&make_capture_read_lir())
         .expect("Failed to translate");
     let loads = load_lines(&clif);
     assert!(
@@ -368,23 +366,18 @@ fn called_refs(clif: &[String]) -> Vec<String> {
 /// every other call (docs/impl/jit.md § "How a call leaves compiled code").
 #[test]
 fn a_self_recursive_call_goes_through_the_dispatch_helper() {
-    // Counter-factual: the translator carries the machinery for a direct call
-    // to a compiled peer — a `scc_peers` map keyed by `SymbolId`, and
-    // `emit_direct_scc_call` — and resolves a callee register through
-    // `global_load_map`. Nothing ever writes that map, so the direct arm is
-    // dead: this test passes with `self_sym` supplied, which is what builds
-    // the one-entry self map the direct arm would take.
+    // Trap: a direct Cranelift call to the function itself reads as free here,
+    // the callee being a function this module already names. It is not code
+    // motion. The callee needs its environment passed, its arity checked and
+    // its call depth counted, and the dispatch helper is what does all three.
     //
-    // Trap: the direct arm passes a null environment and skips the arity
-    // check, so wiring it up is a behavior change and not a map insert. A
-    // reader who believes the peer call exists is reading a call that is not
-    // emitted.
+    // Counter-factual: a translator that emitted the direct call computes the
+    // same answers for a capture-free function, and reads garbage captures for
+    // every other one, because a direct call has no environment to hand over.
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let dispatch_id = compiler.helpers.call.as_u32();
     let lir = make_self_call_lir();
-    let clif = compiler
-        .clif_text(&lir, Some(SymbolId(1)))
-        .expect("Failed to translate");
+    let clif = compiler.clif_text(&lir).expect("Failed to translate");
 
     let refs = func_refs(&clif);
     let called: Vec<u32> = called_refs(&clif)
@@ -426,7 +419,7 @@ fn every_compiled_exit_pops_the_region_map() {
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let pop_id = compiler.helpers.pop_region_map.as_u32();
     let clif = compiler
-        .clif_text(&make_suspending_call_lir(), None)
+        .clif_text(&make_suspending_call_lir())
         .expect("Failed to translate");
     let refs = func_refs(&clif);
 

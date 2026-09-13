@@ -36,5 +36,5 @@ interpreter a resumable frame.
 ## See Also
 
 - [AGENTS.md](AGENTS.md) — technical reference for LLM agents
-- [`docs/impl/jit.md`](../../docs/impl/jit.md) — the design document
-- [`benches/`](../../benches/) — performance benchmarks
+- [docs/impl/jit.md](../../docs/impl/jit.md) — the design document
+- [benches/](../../benches/) — performance benchmarks

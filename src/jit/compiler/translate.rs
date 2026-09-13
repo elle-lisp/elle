@@ -1,3 +1,8 @@
+// audited: 2026-09-13
+// docs/impl/jit.md
+//! The prologue: what a compiled function does with its six parameters before
+//! the first LIR block runs.
+
 use super::*;
 
 impl JitCompiler {
@@ -11,8 +16,6 @@ impl JitCompiler {
         &mut self,
         lir: &LirFunction,
         func: &mut Function,
-        scc_peers: Option<&HashMap<SymbolId, FuncId>>,
-        self_sym: Option<SymbolId>,
         module_closures: Vec<LirFunction>,
     ) -> Result<TranslatedConsts, JitError> {
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -21,12 +24,6 @@ impl JitCompiler {
         // Create translator context
         let mut translator = FunctionTranslator::new(&mut self.module, &self.helpers, lir);
         translator.module_closures = module_closures;
-
-        translator.self_sym = self_sym;
-
-        if let Some(peers) = scc_peers {
-            translator.scc_peers = peers.clone();
-        }
 
         // Variable layout: each LIR register index `r` maps to TWO Cranelift variables:
         //   tag     at Cranelift var index 2*r

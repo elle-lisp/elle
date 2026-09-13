@@ -1,6 +1,6 @@
 # What the experiments measured
 
-<!-- audited: 2026-09-08 -->
+<!-- audited: 2026-09-13 -->
 
 Six assumptions the image design rests on, each dispatched by an experiment,
 with the numbers it produced.
@@ -85,9 +85,9 @@ cleared, and [plan.md](plan.md) the order everything lands in.
 
    | Site class | Sites | Migration cost |
    |------------|-------|----------------|
-   | Opaque keys and pass-throughs (`PrimitiveMeta`, classification maps, inline/dispatch registries, JIT `scc_peers`, binding arenas) | ~170 | none — already hash-keyed |
+   | Opaque keys and pass-throughs (`PrimitiveMeta`, classification maps, inline/dispatch registries, binding arenas) | ~170 | none — already hash-keyed |
    | Width seams: `SymbolId(u32)`; `Value::symbol(u32)`; the truncating `as_symbol() → u32`; `Bytecode::add_symbol(u32)`; `SendValue::Symbol.id` (dead on receive); `errors.rs` parses `SymbolId(N)` as `u32`; 66 `HashMap<u32, String>` name maps | ~75 | mechanical widening — the whole prototype is 39 files, ±110 lines, and compiles clean beyond these seams |
-   | Dense indexing beyond `SymbolTable` | 1 | `jit/group.rs` `globals[sym.0 as usize]` — dead code with test-only callers; there is no VM globals table (the letrec model has no `LoadGlobal`), so no live density assumption exists |
+   | Dense indexing beyond `SymbolTable` | 0 | the one site the audit found was dead code in a JIT module since removed; there is no VM globals table, and the letrec model has no global-load instruction, so no live density assumption exists |
    | Bytecode operands carrying a symbol id | 0 | none to audit: symbols reach bytecode only as constant-pool `Value`s (u16 pool index) and `ConstTemplate`s, which already encode symbols by name |
    | Raw-id comparators (`Value::Ord` rank-3 arm, `TableKey::Ord` symbol arm) | 2 | sort order flips to hash order coherently; sorted structs, sets, and their binary searches stay correct because build and probe share the comparator |
    | Sentinel `SYNTHETIC = u32::MAX` | 1 production read | becomes a reserved `u64::MAX`; the binding's existing `is_synthetic` flag could replace it outright |
