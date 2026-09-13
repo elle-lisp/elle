@@ -1,7 +1,7 @@
-// audited: 2026-09-06
+// audited: 2026-09-13
 // docs/impl/jit.md
 //! What only the rendered Cranelift IR settles: a load's flags, an operation's
-//! tag test, and the pop before every exit.
+//! tag test, a call's target, and the pop before every exit.
 
 use super::*;
 
@@ -309,6 +309,100 @@ fn call_target_before(clif: &[String], at: usize) -> Option<String> {
         return Some(name.to_string());
     }
     None
+}
+
+/// fn(x) -> f(x), where `f` is the function being compiled. `LoadSelf` is the
+/// one callee register whose target the translator knows while it translates,
+/// so this is the shape a direct call between compiled functions would reach
+/// first.
+fn make_self_call_lir() -> LirFunction {
+    use crate::hir::region::StaticRegion;
+    LirFixture::new(Arity::Exact(1))
+        .name("self-recursive")
+        .signal(Signal::silent())
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCapture {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::LoadSelf { dst: Reg(1) },
+                LirInstr::Call {
+                    dst: Reg(2),
+                    func: Reg(1),
+                    args: vec![Reg(0)],
+                    arity_checked: false,
+                    region: StaticRegion::new(1).unwrap(),
+                },
+            ],
+            Terminator::Return(Reg(2)),
+        )
+        .build()
+}
+
+/// The `u0:N` id a rendered function names itself by, read off its signature
+/// line (`function u0:3(i64, …) -> i64, i64 system_v {`).
+fn own_func_id(clif: &[String]) -> u32 {
+    clif.iter()
+        .find_map(|line| {
+            let rest = line.trim().strip_prefix("function ")?;
+            let id = rest.split('(').next()?.trim().strip_prefix("u0:")?;
+            id.parse::<u32>().ok()
+        })
+        .expect("a rendered function names itself")
+}
+
+/// Every `fnN` a rendered function calls, in emission order.
+fn called_refs(clif: &[String]) -> Vec<String> {
+    clif.iter()
+        .filter_map(|line| {
+            let pos = line.find("call ")?;
+            let name = line[pos + "call ".len()..].split('(').next()?.trim();
+            name.starts_with("fn").then(|| name.to_string())
+        })
+        .collect()
+}
+
+/// A self-recursive call leaves compiled code through `elle_jit_call`, like
+/// every other call (docs/impl/jit.md § "How a call leaves compiled code").
+#[test]
+fn a_self_recursive_call_goes_through_the_dispatch_helper() {
+    // Counter-factual: the translator carries the machinery for a direct call
+    // to a compiled peer — a `scc_peers` map keyed by `SymbolId`, and
+    // `emit_direct_scc_call` — and resolves a callee register through
+    // `global_load_map`. Nothing ever writes that map, so the direct arm is
+    // dead: this test passes with `self_sym` supplied, which is what builds
+    // the one-entry self map the direct arm would take.
+    //
+    // Trap: the direct arm passes a null environment and skips the arity
+    // check, so wiring it up is a behavior change and not a map insert. A
+    // reader who believes the peer call exists is reading a call that is not
+    // emitted.
+    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let dispatch_id = compiler.helpers.call.as_u32();
+    let lir = make_self_call_lir();
+    let clif = compiler
+        .clif_text(&lir, Some(SymbolId(1)))
+        .expect("Failed to translate");
+
+    let refs = func_refs(&clif);
+    let called: Vec<u32> = called_refs(&clif)
+        .iter()
+        .filter_map(|name| refs.get(name).copied())
+        .collect();
+    assert!(
+        called.contains(&dispatch_id),
+        "a self-recursive call must reach `elle_jit_call` (u0:{dispatch_id}); got {called:?} in:\n{}",
+        clif.join("\n")
+    );
+    let own = own_func_id(&clif);
+    assert!(
+        !called.contains(&own),
+        "the function calls itself directly (u0:{own}), which the documents say \
+         no compiled function does; got {called:?} in:\n{}",
+        clif.join("\n")
+    );
 }
 
 /// Every `return` a compiled function emits is preceded by the call that pops
