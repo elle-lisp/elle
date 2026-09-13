@@ -1,6 +1,6 @@
 # Code objects — a blueprint, a payload, and a header
 
-<!-- audited: 2026-09-10 -->
+<!-- audited: 2026-09-13 -->
 
 A closure template is the code object of one lambda: its bytecode, constant
 pool, source locations, and the region tables its body needs. This doc owns the
@@ -22,7 +22,9 @@ and different lifetimes:
   once per heap and shared by every header built from that blueprint.
 - **`ClosureTemplate`** — the region-resident *header*, the thing
   `HeapObject::ClosureTemplate` holds. It is two words: a `RegionSlice` naming
-  its payload, and an `Rc` to the blueprint it came from.
+  its payload, and an optional `Rc` to the blueprint it came from — present on
+  every header `MakeClosure` materializes, absent on a hydrated one
+  (§ "What the header still carries, and what removes it").
 
 A closure instance references a header; a header references a payload; a
 blueprint owns the right to materialize more headers. `MakeClosure` builds a
@@ -223,18 +225,21 @@ packed into it dies, and by teardown otherwise.
 ## What the header still carries, and what removes it
 
 The header's `Rc<TemplateProto>` is the one Rust-heap owner left on a code
-object. It answers four questions the payload does not hold, and two of them
-leave as their milestones land:
+object, and it is optional: `MakeClosure` materializes every header with one,
+and a header hydrated from an image has none
+([sealing.md](../image/sealing.md) § "A closure crosses without its
+blueprint"). It answers four questions the payload does not hold, and a
+blueprint-less header answers each with absence:
 
-| Question | Answered by | Leaves with |
-|----------|-------------|-------------|
-| Which blueprints do my `MakeClosure` instructions index? | `child_protos` | the image milestone, when child templates become body data |
-| What LIR does the JIT promote me from? | `lir_function` | the encoded-LIR side-stream ([image.md](../image.md) § JIT) |
-| Where was I written? | `origin` | nothing — a `Span` is plain bytes, so the payload could hold it |
-| What SPIR-V did `(git f)` compile for me? | `spirv` | nothing — the GPU path recompiles ([sealing.md](../image/sealing.md)) |
+| Question | Answered by | Without a blueprint |
+|----------|-------------|---------------------|
+| Which blueprints do my `MakeClosure` instructions index? | `child_protos` | none — the dump refuses a template that has any, until child templates become body data |
+| What LIR does the JIT promote me from? | `lir_function` | none — interpreter tier, until the encoded-LIR side-stream ([image.md](../image.md) § JIT) |
+| Where was I written? | `origin` | none — `meta/origin` answers nil |
+| What SPIR-V did `(git f)` compile for me? | `spirv` | none, and nothing caches — the GPU path recompiles ([sealing.md](../image/sealing.md)) |
 
-Until then the census classifies `ClosureTemplate` as sealed on the strength of
-its payload, which is the part an image would carry.
+The census classifies `ClosureTemplate` as sealed on the strength of its
+payload, which is the part an image carries.
 
 ## The executing context is the header
 

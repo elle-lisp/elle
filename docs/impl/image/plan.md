@@ -1,6 +1,6 @@
 # Landing order and test plan
 
-<!-- audited: 2026-09-10 -->
+<!-- audited: 2026-09-13 -->
 
 What lands in which order, and the pins each milestone must land with.
 
@@ -43,19 +43,21 @@ Then the image milestones:
    and the scope watermark a fresh expander must mint above, and the scrub
    and guardfree pins over a hydrated region. The format, mapping,
    relocation, and teardown are proven end to end over every value the
-   foundations sealed as data. What the dumper still refuses is the rest of
-   the sealed set, which only a boot graph holds: closures and closure
-   templates.
-6. **boot** — cell snapping, closures and closure templates in the body, the
-   primitive table that remaps a native-fn by name and the user traitsets it
-   makes dumpable, the reconstruction stream — which the default trait tables
-   need before `Parameter`'s stdio default does — dump-boot, warm cache, embedded
-   blob, per-worker hydration for `sys/spawn`, the encoded-LIR side-stream
-   with lazy decode, compiler-state persistence, the hydrated-region interval
-   table that keeps `region_of_ptr` off the probe ladder
-   ([image.md](../image.md) § "Pointer resolution must not regress" — the
-   regression it prevents needs a region the size of stdlib to show), and the
-   parity gate (bytecode *and* tier).
+   foundations sealed as data.
+6. **boot** — in progress. Landed so far: the primitive table that remaps a
+   native-fn by name and the user traitsets it makes dumpable, the
+   reconstruction stream — which the default trait tables need before
+   `Parameter`'s stdio default does — and closures and closure templates in
+   the body: the payload crosses whole and shared, the header hydrates
+   without its blueprint, and a template naming child blueprints refuses the
+   dump ([sealing.md](sealing.md) § "A closure crosses without its
+   blueprint"). Still to land: child templates as body data, cell snapping,
+   dump-boot, warm cache, embedded blob, per-worker hydration for
+   `sys/spawn`, the encoded-LIR side-stream with lazy decode, compiler-state
+   persistence, the hydrated-region interval table that keeps
+   `region_of_ptr` off the probe ladder ([image.md](../image.md) § "Pointer
+   resolution must not regress" — the regression it prevents needs a region
+   the size of stdlib to show), and the parity gate (bytecode *and* tier).
 7. **environment** — `image/save` and `image/load`, manifest deltas over
    boot, mutable side-stream.
 
@@ -102,6 +104,18 @@ Then the image milestones:
 - Mapping: replace the image file by rename while a hydration is live, then
   read the hydrated values — the old inode's mapping is intact. Release a
   file-backed page and assert the pool unmapped it rather than caching it.
+- Closures: a closure compiled in one runtime hydrates in a fresh one and
+  answers a call with the same result — through a REPL binding, so the call
+  goes through the ordinary dispatch path. The payload survives field by
+  field: bytecode, constants (a heap constant included), arity, signal,
+  name, doc, and the capture masks. Two headers materialized from one
+  blueprint hydrate naming one payload copy — the counter-factual is a
+  per-header deep copy, which round-trips equal and silently doubles every
+  payload. A hydrated header has no blueprint: `meta/origin` answers nil
+  and the JIT is never entered. A template carrying child blueprints, a
+  WASM-dispatch closure, and an env holding a capture cell each refuse the
+  dump with a named error. A dumped closure writes one file across two
+  dumps, whatever its construction temporaries held.
 - Traits: a value carrying its instance's default traitset hydrates carrying
   the *hydrating* instance's table for that tag, and a user traitset hydrates
   out of the body with its methods intact. The counter-factual is the identity

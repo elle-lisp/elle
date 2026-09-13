@@ -1,6 +1,6 @@
 # Sealing
 
-<!-- audited: 2026-09-10 -->
+<!-- audited: 2026-09-13 -->
 
 What an image's body may hold, what the hydrating instance rebuilds for itself,
 and what fails the dump.
@@ -36,6 +36,40 @@ bytes for a string, its elements for an array, its structure for anything else
 agrees with, and a binary search over the mapped entries finds what it found
 before. The keys that rank by address instead belong to values the dumper
 refuses anyway.
+
+## A closure crosses without its blueprint
+
+A closure instance is three sealed fields: the template it references, its env
+slice, and its squelch mask. All three cross whole, traits beside them, and
+every env value goes through the ordinary walk — so a capture cell in an env
+still refuses the dump until snapping lands ([plan.md](plan.md)).
+
+A closure template is a header naming a shared payload, plus an `Rc` to the
+compile-time blueprint it came from
+([region/template.md](../region/template.md)). The payload is sealed data and
+copies into the body: every slice lands in the image, constants go through the
+value walk, and two headers from one blueprint keep one payload copy. The
+blueprint is Rust-heap data and does not cross — a hydrated header carries
+none, and its slot hydrates as absent.
+
+Everything the payload answers is therefore identical after hydration:
+bytecode, constants, arity, signal, masks, locations, the region tables. The
+four blueprint-only answers degrade, each within the design:
+
+- The LIR the JIT promotes from is absent, so a hydrated closure runs on the
+  interpreter tier until the encoded-LIR side-stream lands
+  ([plan.md](plan.md) owns that milestone).
+- `meta/origin` answers nil.
+- The SPIR-V cache is absent; the GPU path already recompiles (§ "What the
+  body refuses").
+- The nested-lambda blueprints a `MakeClosure` indexes cannot be absent —
+  the instruction would have nothing to build — so a template that carries
+  child blueprints fails the dump, naming the function. Child templates as
+  body data belong to the boot milestone ([plan.md](plan.md)).
+
+A closure a compiled WASM module built also fails the dump by name: its
+dispatch index names a function table of the module this process holds, which
+no other process can reopen.
 
 ## Capture cells are snapped, not persisted
 
