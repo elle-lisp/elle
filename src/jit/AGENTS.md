@@ -1,13 +1,16 @@
 # jit
 
+<!-- audited: 2026-09-13 -->
+
 JIT compilation for Elle using Cranelift.
 
 ## Responsibility
 
-Compile `LirFunction` to native x86_64 code. Non-polymorphic functions
-are JIT candidates (see `signals/AGENTS.md` for signal definitions).
-Yielding functions use side-exit: JIT code calls a runtime helper that
-builds a `SuspendedFrame` and returns `YIELD_SENTINEL` to the interpreter.
+Compile `LirFunction` to native x86_64 code. A function's signal decides
+nothing about admission (see `signals/AGENTS.md` for signal definitions);
+what it decides is the code around a call. Yielding functions use side-exit:
+JIT code calls a runtime helper that builds a `SuspendedFrame` and returns
+`YIELD_SENTINEL` to the interpreter.
 
 ## Architecture
 
@@ -18,10 +21,10 @@ LirFunction -> JitCompiler -> Cranelift IR -> Native code -> JitCode
 ### Background compilation
 
 JIT compilation runs on a dedicated background thread (`elle-jit`).
-When a function becomes hot (called `jit_hotness_threshold` times,
-default 10), its LIR is cloned, stripped of non-Send fields (`syntax`,
-`doc`), and sent to the worker via `crossbeam_channel`. The interpreter
-continues running the function while Cranelift compiles it.
+When a function becomes hot (called as many times as the `--jit` threshold,
+10 under `--jit=adaptive`), its LIR is cloned, stripped of non-Send fields
+(`syntax`, `doc`), and sent to the worker via `crossbeam_channel`. The
+interpreter continues running the function while Cranelift compiles it.
 
 The worker thread allocates no Elle values: string constants arrive
 pre-resolved as `ValueConst`, and symbols/keywords are immediates, so
@@ -30,7 +33,10 @@ runtime data helpers (`elle_jit_pair`/`_make_array`/`_make_capture`) that *do*
 allocate run later on the calling thread and reach the driving instance's heap
 through the VM pointer threaded into each call.
 
-On every call to `try_jit_call`, the VM polls for completed
+`VM::profile_jit_candidate` is the one place a call is counted and a hot
+function is submitted. Both tiers reach it: the interpreter through
+`try_jit_call`, and compiled code through the arm of `elle_jit_call` that
+finds no compiled code for the callee. Each visit polls for completed
 compilations via non-blocking `try_recv()`. Compiled code is inserted
 into `jit_cache`; rejections are recorded in `jit_rejections`. All three
 maps key by raw bytecode address, sound only because every entry pins the
@@ -54,11 +60,9 @@ execution). Combine with `--trace=jit` to log each synchronous install.
 | `JitCompiler` | Translates LIR to native code via Cranelift |
 | `JitCode` | Wrapper for native function pointer + module lifetime + yield metadata |
 | `JitError` | Compilation errors |
-| `BatchMember` | A member of an SCC compilation group (SymbolId + LirFunction) |
 | `YieldPointMeta` | Metadata for a yield point: resume IP and spilled register count |
 | `YIELD_SENTINEL` | Sentinel value indicating JIT function yielded (side-exited) |
-| `discover_compilation_group` | Discover call peers for batch JIT compilation |
-| `JitWorker` | Background compilation thread with persistent `FiberHeap` |
+| `JitWorker` | Background compilation thread; allocates no Elle values, so it carries no heap |
 | `JitTask` | Compilation request (cloned LIR + cache key) |
 | `JitResult` | Compilation result (JitCode or JitError) |
 
@@ -72,17 +76,18 @@ type JitFn = unsafe extern "C" fn(
     args: *const Value,     // arguments array
     nargs: u32,             // number of arguments
     vm: *mut VM,            // pointer to VM (for function calls, fiber access)
-    self_bits: u64,         // tag+payload bits of the closure (for self-tail-call detection)
+    self_tag: u64,          // the executing closure as a Value, tag half
+    self_payload: u64,      // and its payload half
 ) -> Value;
 ```
 
 Values are 16-byte tagged unions (see `value/repr/AGENTS.md`).
 
-The 5th parameter `self_bits` enables self-tail-call optimization: when a
-function tail-calls itself, the JIT compares the callee against `self_bits`.
-If equal, it updates the arg variables and jumps to the loop header instead
-of calling `elle_jit_tail_call`. This turns self-recursive tail calls into
-native loops.
+The last two parameters carry the executing closure, which is what makes
+self-tail-call optimization possible: when a function tail-calls itself, the
+JIT compares the callee against that pair. If equal, it updates the arg
+variables and jumps to the loop header instead of calling
+`elle_jit_tail_call`. This turns self-recursive tail calls into native loops.
 
 **Return values:**
 - Normal return: tagged-union `Value`
@@ -92,8 +97,7 @@ native loops.
 ## Supported Instructions
 
 The JIT supports closures with captures, data structures, lboxes, function
-calls, self-tail-call optimization, JIT-to-JIT calling, batch compilation, and
-`ValueConst`.
+calls, self-tail-call optimization, JIT-to-JIT calling, and `ValueConst`.
 
 Supported instructions:
 - **Constants**: `Const` (Int, Float, Bool, Nil, EmptyList, Symbol, Keyword), `ValueConst`
@@ -102,7 +106,7 @@ Supported instructions:
 - **Variables**: `Move`, `Dup`, `LoadLocal`, `StoreLocal` (via `local_slot_to_var`), `LoadCapture`, `LoadCaptureRaw`
 - **Data structures**: `Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`
 - **LBoxes**: `MakeCaptureCell`, `LoadCaptureCell`, `StoreCaptureCell`, `StoreCapture`
-- **Globals**: Accessed as depth-0 upvalues via `LoadCapture`/`LoadCaptureRaw`; `LoadGlobal`/`StoreGlobal` are dead instructions (unreachable in VM dispatch)
+- **Globals**: Read as depth-0 upvalues via `LoadCapture`/`LoadCaptureRaw`, or baked as a `ValueConst` immediate where the binding is immutable. The LIR carries no global-load instruction, so nothing names a global by symbol at this tier
 - **Function calls**: `Call`, `TailCall` (self-calls become native loops; non-self calls use `elle_jit_tail_call` trampoline)
 - **Terminators**: `Return`, `Jump`, `Branch`
 
@@ -221,21 +225,6 @@ Special cases:
   single-operand tag check (`icmp eq` against `TAG_INT`). Neg negates the
   i64 payload, re-tags. BitNot inverts the payload bits, re-tags.
 
-## Direct Self-Calls
-
-Solo-compiled functions with a known SymbolId (i.e., bound to a top-level def) get a
-one-entry `scc_peers` map pointing to themselves. This means self-recursive
-calls emit direct Cranelift calls instead of going through `elle_jit_call`.
-
-Benefits:
-- Eliminates hash lookup in `jit_cache` per self-call
-- Eliminates arity checking (known at compile time)
-- Eliminates dispatch overhead (direct call vs. indirect)
-- Passes correct `self_bits` so the callee's self-tail-call optimization works
-
-When `self_sym` is `None` (anonymous closures), behavior is unchanged — calls
-go through `elle_jit_call` as before.
-
 ## Fiber Integration and Yield Side-Exit
 
 The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
@@ -246,9 +235,11 @@ The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
   `Signal::silent()`. These all return `SIG_OK` or `SIG_ERROR`, which
   `jit_handle_primitive_signal` handles.
 
-- **JIT-excluded fiber primitives**: `fiber/resume` and `emit` have
-  `Signal::yields_errors()` — `may_suspend()` is true. Any closure calling
-  them transitively inherits this signal, so the JIT gate rejects them.
+- **Suspending fiber primitives**: `fiber/resume` and `emit` carry `SIG_YIELD`,
+  so `may_suspend()` is true and every closure calling them inherits it. Such a
+  closure compiles like any other; what the signal decides is that the call
+  site carries a yield check, and that the function's yield points reach the
+  interpreter through the side-exit below.
 
 - **Yield side-exit**: When a JIT-compiled function reaches a `Yield` terminator,
   it calls `elle_jit_yield` (a runtime helper) which:
@@ -281,6 +272,11 @@ The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
 
 ## JIT-to-JIT Calling
 
+Every call a compiled function makes leaves through a dispatch helper, and a
+tail call to the executing closure is the one exception (docs/impl/jit.md
+§ "How a call leaves compiled code"). Compiled functions never call one
+another directly.
+
 When `elle_jit_call` dispatches to a closure, it checks `vm.jit_cache` for
 the callee's bytecode pointer. If found, it calls the JIT code directly
 without building an interpreter environment — zero heap allocations on the
@@ -306,11 +302,11 @@ No errors are silently swallowed.
 
 ## Invariants
 
-1. **Only non-polymorphic functions.** `JitCompiler::compile` returns
-   `JitError::Polymorphic` for functions where `signal.propagates != 0` (polymorphic).
-   Functions with `Signal::silent()` or `Signal::yields()` are accepted.
-   Errors (SIG_ERROR) and FFI (SIG_FFI) are fine — they don't require frame
-   snapshot/restore.
+1. **The signal decides nothing about admission.** `JitCompiler::compile`
+   accepts a polymorphic function and a yielding one alike: the runtime
+   dispatch helper handles an arbitrary callable, and a callee that suspends
+   leaves through the yield side-exit. What `compile` refuses is a
+   `Struct`/`StrictStruct` variadic and a function containing `MakeClosure`.
 
 2. **Yield metadata is populated during emission.** `Emitter::emit()` returns
    `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`. The caller attaches
@@ -318,9 +314,9 @@ No errors are silently swallowed.
    storing on a `Closure`. The JIT reads this metadata to generate side-exit code.
 
 3. **YieldPointMeta is derived from YieldPointInfo.** During JIT compilation,
-   `YieldPointInfo.stack_regs.len()` is converted to `YieldPointMeta.num_spilled`
-   (the count of spilled values). The JIT stores this in `JitCode.yield_points`
-   for runtime lookup.
+   `YieldPointInfo.stack_regs.len()` becomes `YieldPointMeta.num_spilled`, and
+   `num_locals` travels beside it; `num_params` comes from the function. The
+   JIT stores all four in `JitCode.yield_points` for runtime lookup.
 
 4. **YIELD_SENTINEL is distinct from TAIL_CALL_SENTINEL.** Both are sentinel
    values returned by JIT code, but they trigger different handlers:
@@ -338,9 +334,9 @@ No errors are silently swallowed.
 8. **VM pointer for runtime calls.** The 4th parameter is `vm` to support
    function calls, fiber access, and yield side-exit helpers.
 
-9. **Self-tail-call identity.** The 5th parameter `self_bits` is the
-   tagged-union closure pointer. Self-tail-calls are detected by comparing the callee's bits
-   against `self_bits`.
+9. **Self-tail-call identity.** The 5th and 6th parameters are the executing
+   closure's own `Value`, tag half and payload half. Self-tail-calls are
+   detected by comparing the callee against that pair.
 
 10. **No silent error swallowing.** Every error path in dispatch helpers sets
     `vm.fiber.signal` to `(SIG_ERROR, condition)` before returning `TAG_NIL`.
@@ -408,9 +404,12 @@ kernel time (2.4s → 80ms) from eliminated allocation pressure.
 Stored in `JitCode.yield_points`, indexed by yield point index:
 - `resume_ip: usize` — Bytecode offset to resume at (matches `SuspendedFrame.ip`)
 - `num_spilled: u16` — Number of values on the operand stack at yield time
+- `num_locals: u16` — Number of locally-defined variable slots (excludes params)
+- `num_params: u16` — Number of function parameters
 
-The JIT yield helper reads `num_spilled` to know how many u64 values to read
-from the spilled buffer and convert back to `Value`s.
+The JIT yield helper reads the three counts to know how many u64 values to
+read from the spilled buffer and convert back to `Value`s, and where each
+run of them belongs in the rebuilt frame.
 
 ### Yield Point Recording
 
@@ -426,6 +425,8 @@ During JIT compilation, `YieldPointInfo` is converted to `YieldPointMeta`:
 YieldPointMeta {
     resume_ip: yp.resume_ip,
     num_spilled: yp.stack_regs.len() as u16,
+    num_locals: yp.num_locals,
+    num_params: lir.num_params as u16,
 }
 ```
 
@@ -467,7 +468,6 @@ rejects.
 
 ## Roadmap
 
-- Inline type checks for arithmetic fast paths
 - JIT-native signal handling (setjmp/longjmp or Cranelift exception tables)
 - Benchmarks and profiling
 

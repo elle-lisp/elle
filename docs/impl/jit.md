@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-09-11 -->
+<!-- audited: 2026-09-13 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -83,6 +83,25 @@ building one — `tail_call_inner` in the interpreter, the tail-call sentinel in
 compiled code — so a function only ever reached in tail position stays
 interpreted.
 
+## How a call leaves compiled code
+
+Every call a compiled function makes goes through a runtime dispatch helper:
+`elle_jit_call` for a non-tail call, `elle_jit_tail_call` for a tail call. The
+helper resolves the callee and looks it up in `jit_cache`, so a compiled caller
+reaches a compiled callee without building an interpreter frame.
+
+A tail call to the executing closure is the one call that needs no helper. It
+updates the argument variables and jumps to the loop header, so self-recursion
+in tail position is a native loop.
+
+Compiled functions never call one another directly, in tail position or out of
+it. Each compile owns its own Cranelift module, so a peer is not a function
+that module can name. The helper is also what supplies the callee's
+environment, checks its arity, counts call depth, and carries the tail-call,
+yield and error protocol back to the caller; a direct call would have to
+reproduce all of it
+([clif.rs](../../src/jit/compiler/tests/clif.rs) pins the self-recursive case).
+
 ## Rejection tracking
 
 Not all functions can be JIT-compiled. The JIT rejects functions that:
@@ -109,7 +128,7 @@ how many times the function is called.
 
 **Every failed compile is recorded**, whichever kind it is, so the negative
 cache covers all of them. A refusal the translator plans for —
-`UnsupportedInstruction`, `Polymorphic`, `Yielding` — is recorded and says
+`UnsupportedInstruction` or `Polymorphic` — is recorded and says
 nothing further. A Cranelift failure or an invalid-LIR result is a defect in
 the compiler, so it is recorded and also printed on stderr, once. Every path
 that takes a result classifies it through `VM::record_jit_failure`: the
@@ -150,7 +169,7 @@ Pinning tests: [jit_entry/tests.rs](../../src/vm/jit_entry/tests.rs).
 Native samplers (`/usr/bin/sample`, `eu-stack`) cannot name JIT frames: the
 code lives in anonymous Cranelift mappings, so a wedged thread's stack shows
 `??? (in <unknown binary>)` exactly where the answer is. The registry closes
-that gap. Every successful compile — solo and batch, on every thread — records
+that gap. Every successful compile, on every thread, records
 `(entry address, label)` in one process-global table
 ([registry.rs](../../src/jit/registry.rs)).
 The label is the function's declared name when one exists, else its
