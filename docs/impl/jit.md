@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-09-06 -->
+<!-- audited: 2026-09-11 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -19,7 +19,7 @@ LIR → FunctionTranslator → Cranelift IR → Native code → JitCode
 - **`JitCode`** — wraps the native function pointer; keeps the module
   alive for the code's lifetime
 - **`RuntimeHelpers`** — extern symbols the JIT calls back into the
-  VM (allocation, GC barriers, signal checks)
+  VM (allocation, region accounting, calls, signal checks)
 
 ## Memory flags on emitted loads
 
@@ -36,7 +36,8 @@ is worth keeping: a handle means "trusted" only inside the function whose
 table minted it, so a handle cached across functions would index a table where
 the same slot holds different flags, or nothing at all.
 
-`load_value_slot` (`src/jit/translate.rs`) is where the JIT names those flags.
+`load_value_slot` ([translate.rs](../../src/jit/translate.rs)) is where the JIT
+names those flags.
 It emits both halves of a `Value` — tag at `+0`, payload at `+8` — so the
 16-byte stride is written once, from `size_of`/`offset_of` rather than as a
 literal.
@@ -44,7 +45,7 @@ literal.
 ## Arithmetic: the tag-check diamond, and skipping it
 
 A binary operation, a comparison and a negation each compile to a diamond
-(`src/jit/fastpath.rs`): test both tags for `TAG_INT`, then either the native
+([fastpath.rs](../../src/jit/fastpath.rs)): test both tags for `TAG_INT`, then either the native
 integer instruction or a call to the runtime helper, merging on a two-parameter
 block. Division and remainder add a second test for a zero divisor.
 
@@ -59,9 +60,28 @@ because the operands are integers.
 
 ## Function selection
 
-Functions become JIT candidates based on a hotness threshold
-(default 10, controlled by `--jit=N`). The VM increments a counter on
-each call; when it crosses the threshold, the function is compiled.
+Functions become JIT candidates based on a hotness threshold, which `--jit`
+sets. The VM increments a counter on each call; when it crosses the threshold,
+the function is compiled.
+
+**A non-tail call is counted by whichever tier makes it.** The interpreter
+counts in `try_jit_call`; compiled code counts in `elle_jit_call`, on the arm
+that finds no compiled code for the callee. Both reach the counter through
+`VM::profile_jit_candidate`, the one place a call is counted and a hot function
+is submitted.
+
+Counting the interpreter's calls alone stops promotion one level below whatever
+has already compiled. A compiled caller no longer reaches its callees through
+the interpreter, so a callee called from nowhere else never becomes hot. The
+worker's latency masks that, because the caller keeps running interpreted while
+Cranelift works. `--trace=syncjit` installs on the first call and leaves no such
+window, so it is where the two policies are held to the same answer
+([jit-compiled-caller-promotes-callee.lisp](../../tests/elle/jit-compiled-caller-promotes-callee.lisp)).
+
+A tail call is counted by neither tier. It replaces the frame rather than
+building one — `tail_call_inner` in the interpreter, the tail-call sentinel in
+compiled code — so a function only ever reached in tail position stays
+interpreted.
 
 ## Rejection tracking
 
@@ -86,6 +106,16 @@ thread, re-compiling the same function thousands of times and burning CPU that
 dwarfs the program's real work. The `jit/rejections` report exposes a per-
 function `:attempts` count; the negative cache holds `attempts == 1` no matter
 how many times the function is called.
+
+**Every failed compile is recorded**, whichever kind it is, so the negative
+cache covers all of them. A refusal the translator plans for —
+`UnsupportedInstruction`, `Polymorphic`, `Yielding` — is recorded and says
+nothing further. A Cranelift failure or an invalid-LIR result is a defect in
+the compiler, so it is recorded and also printed on stderr, once. Every path
+that takes a result classifies it through `VM::record_jit_failure`: the
+background poll, the diagnostic drain, and the synchronous compile that
+`--trace=syncjit` runs. A flag meant to show a codegen failure must not be the
+one place that swallows it.
 
 ## Cache identity
 
@@ -115,13 +145,14 @@ An alternative — validating entries at hit time by content — was rejected:
 it puts an O(bytecode) compare (or a hash plus per-template caching) on the
 hot dispatch path to detect a situation the pin makes impossible.
 
-Pinning tests: `src/vm/jit_entry/tests.rs`.
+Pinning tests: [jit_entry/tests.rs](../../src/vm/jit_entry/tests.rs).
 
 Native samplers (`/usr/bin/sample`, `eu-stack`) cannot name JIT frames: the
 code lives in anonymous Cranelift mappings, so a wedged thread's stack shows
 `??? (in <unknown binary>)` exactly where the answer is. The registry closes
 that gap. Every successful compile — solo and batch, on every thread — records
-`(entry address, label)` in one process-global table (`src/jit/registry.rs`).
+`(entry address, label)` in one process-global table
+([registry.rs](../../src/jit/registry.rs)).
 The label is the function's declared name when one exists, else its
 smallest-offset source location (`ClosureTemplate::display_label`) — lowering
 names almost nothing, so the location is what actually identifies a function
@@ -131,7 +162,7 @@ since been dropped.
 
 `(vm/query "jit/map" nil)` renders the table as one `0x<addr> <name>` line per
 entry, sorted by address. The test runner prints it after the thread
-photograph when a form misses its deadline (`src/test.lisp`,
+photograph when a form misses its deadline ([test.lisp](../../src/test.lisp),
 `note-timeout-stacks`), so a sampled JIT frame resolves to the nearest
 preceding entry — the registry records entry addresses, not sizes, and
 Cranelift lays functions out contiguously enough for nearest-preceding to
@@ -164,10 +195,11 @@ save/restore sequences so a yielded fiber can resume into JIT code.
 ## CLI flags
 
 ```text
---jit=0       Disable JIT entirely
---jit=N       Compile after N-1 calls (default: --jit=11, threshold 10)
---jit=1       Compile on first call
---stats       Print compilation stats on exit
+--jit=off       Disable the JIT. This is what the binary starts with
+--jit=eager     Compile on the first call (threshold 0)
+--jit=adaptive  Compile after 10 calls
+--jit=N         0 is off, 1 is eager, N above 1 compiles after N-1 calls
+--stats         Print compilation stats on exit
 ```
 
 ## Files

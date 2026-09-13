@@ -1,3 +1,9 @@
+// audited: 2026-09-12
+// docs/impl/jit.md
+// docs/impl/region/owner.md
+//! The helpers a compiled call site enters: dispatch by callee kind, and the
+//! call-depth, tail-call and parameter-frame steps around it.
+
 use super::*;
 
 /// Call a function from JIT code.
@@ -67,17 +73,10 @@ pub extern "C" fn elle_jit_call(
         }
         let result = vm.resolve_parameter(id, default);
         // Pass-through retain, mirror of `call_inner`'s parameter branch: a
-        // resolve returns a value bound in the dynamic-binding frame (region ≠
-        // this call's region_id), so hand the caller one owning reference for
-        // its `DecrefValueRegion` to consume.
-        // FIXME(leak): preserves the historical cross-id-space comparison
-        // (runtime `result_region` vs static `region_id`); see the matching
-        // note in `VM::dispatch_native_call`. Revisited in the leak phase.
-        // A parameter resolve never allocates a fresh region — always hand the
-        // caller one owning reference for its `DecrefValueRegion` to consume.
-        // `incref_for_escape(None, …)` no-ops an immediate. (Was gated on a
-        // static-vs-runtime `r.get() == region_id` compare — see the leak note
-        // in `VM::dispatch_native_call`.)
+        // resolve returns a value bound in the dynamic-binding frame, never a
+        // fresh allocation into this call's region, so hand the caller one
+        // owning reference for its `DecrefValueRegion` to consume. The retain
+        // is unconditional; `incref_for_escape(None, …)` no-ops an immediate.
         let heap = unsafe { &mut *vm.heap_ptr };
         let result_region = crate::value::arena::region_of(heap, result);
         crate::value::arena::incref_for_escape(
@@ -96,9 +95,19 @@ pub extern "C" fn elle_jit_call(
 
         let closure_squelch_mask = closure.squelch_mask;
 
-        // JIT-to-JIT fast path: check if callee has JIT code
+        // JIT-to-JIT fast path: check if callee has JIT code.
+        //
+        // The bare lookup comes first so a hit stays one hash probe. Only the
+        // miss counts the call and submits a hot callee, which is what keeps a
+        // function called from nowhere but compiled code reaching the JIT at
+        // all (docs/impl/jit.md § "Function selection"). The counter and the
+        // worker poll are worth their cost exactly where the alternative is an
+        // interpreter frame, which is the arm below.
         let bytecode_ptr = closure.template.bytecode().as_ptr();
-        if let Some(jit_code) = vm.jit_code_for(bytecode_ptr) {
+        let compiled = vm
+            .jit_code_for(bytecode_ptr)
+            .or_else(|| vm.profile_jit_candidate(closure));
+        if let Some(jit_code) = compiled {
             vm.fiber.call_depth += 1;
 
             // Stack overflow guard: resource exhaustion (not signal-theoretic).

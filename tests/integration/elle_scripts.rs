@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-11
 // Elle scripts that must run under a PROCESS-GLOBAL runtime mode the `elle test`
 // harness cannot vary per file.
 //
@@ -11,7 +11,8 @@
 //
 // What the harness CANNOT do is set a process-global mode for one file: the
 // page-guard UAF oracle (`--trace=guardfree`), the I/O backend (`--no-uring`),
-// or a backend toggle paired with the adaptive JIT (`--jit=adaptive --mlir=off`).
+// the JIT's compile schedule (`--trace=syncjit`), or a backend toggle paired
+// with the adaptive JIT (`--jit=adaptive --mlir=off`).
 // These live in config.rs as static, once-per-process settings (the runner
 // shares one process across every file's worker thread), and a guardfree UAF
 // deliberately SIGSEGVs — which would take the single-process harness down with
@@ -73,6 +74,9 @@ mod frames {
 }
 mod modes {
     include!("elle_scripts/modes.rs");
+}
+mod syncjit {
+    include!("elle_scripts/syncjit.rs");
 }
 mod tailcalls {
     include!("elle_scripts/tailcalls.rs");
