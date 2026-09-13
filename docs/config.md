@@ -1,8 +1,10 @@
 # Runtime Configuration (`vm/config`)
 
-Elle exposes a unified runtime configuration system accessible from both
-CLI flags and Elle code. All debug/trace flags, JIT policies, and WASM
-policies are controlled through a single mutable config struct on the VM.
+<!-- audited: 2026-09-10 -->
+
+Elle exposes a runtime configuration system reachable from both CLI flags and
+Elle code. All debug/trace flags, JIT policies, and WASM policies are
+controlled through a single mutable config struct on the VM.
 
 ## CLI flags
 
@@ -44,10 +46,14 @@ Available trace keywords:
 | `:anf` | A-normal form lift pass |
 | `:pages` | Region page allocation |
 | `:boot` | Boot-sequence timing: primitive registration, core, prelude, stdlib compile/execute (string-traced, no bit) |
-| `:census` | Post-boot heap census: per-tag object counts and bytes, capture cells, pointer-slot density, unsealed variants (string-traced, no bit; see docs/impl/image.md § Sealing) |
+| `:census` | Post-boot heap census: per-tag object counts and bytes, capture cells, pointer-slot density, unsealed variants (string-traced, no bit; see [sealing.md](impl/image/sealing.md)) |
 | `:free` | Region free diagnostics (string-traced, no bit) |
 | `:guardfree` | Guarded-free diagnostics (string-traced, no bit) |
 | `:freebt` | Free backtrace diagnostics (string-traced, no bit) |
+| `:scrub` | Zero a freed page's body so a stale deref lands on a tag no live value carries (string-traced, no bit) |
+| `:residue` | Teardown leak dump: the surviving regions and their cross-region edges (string-traced, no bit) |
+| `:park` | Park and resume diagnostics: every suspended-frame park and every frame replay, with the frame's shape (string-traced, no bit) |
+| `:syncjit` | Compile with Cranelift on the VM thread instead of the background worker (string-traced, no bit) |
 
 Trace output format: `[trace:KEYWORD] message` on stderr, for easy
 grep filtering.

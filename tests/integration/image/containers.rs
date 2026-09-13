@@ -1,7 +1,7 @@
-// audited: 2026-09-08
+// audited: 2026-09-10
 // The sorted containers: what a hydrated set and a hydrated struct still
 // answer, probed from an instance that shares no byte with the dump.
-// docs/impl/image.md
+// docs/impl/image/sealing.md
 
 use super::*;
 use elle::image;
@@ -36,7 +36,7 @@ fn round_trip(src: &mut FiberHeap, dst: &mut FiberHeap, root: Value, tag: &str) 
         .root
 }
 
-// § Sealing: a set is a sorted array of values inline in region pages, and
+// A set is a sorted array of values inline in region pages, and
 // every element an image may carry ranks by its own content. So the order
 // the dump wrote is the order the hydrating instance's comparator agrees
 // with, and the binary search a membership test performs still lands.

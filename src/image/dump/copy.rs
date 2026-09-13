@@ -1,20 +1,22 @@
-// audited: 2026-09-10
+// audited: 2026-09-11
 //! The compacting copy: what the dumper accepts into an image's body, and
 //! the spellings it records on the way through.
 //!
-//! docs/impl/image.md
+//! docs/impl/image/sealing.md
 //!
 //! One walk builds a sealed twin of the graph in a scratch region, sharing
 //! preserved through a map keyed on source payload address. A value outside
 //! the sealed set fails the copy, naming the variant, before any byte is
 //! written. Every symbol and keyword the walk meets — in a value position or
-//! as a struct key — leaves its spelling in the name table. A `traits` field
-//! either copies as program data or becomes a reconstruction the hydrating
-//! instance answers for itself.
+//! as a struct key — leaves its spelling in the name table. The two fields
+//! that may name a process-owned resource — a `traits` field and a
+//! `Parameter`'s `default` — either copy as program data or become a
+//! reconstruction the hydrating instance answers for itself.
 
 use std::collections::{BTreeSet, HashMap};
 
 use crate::hir::region::RuntimeRegion;
+use crate::port::Port;
 use crate::symbol::SymbolTable;
 use crate::syntax::SyntaxArena;
 use crate::value::fiberheap::FiberHeap;
@@ -25,7 +27,8 @@ use crate::value::repr::{
 };
 use crate::value::{TableKey, Value};
 
-use super::super::format::Ctor;
+use super::super::format::{Ctor, Stdio};
+use super::super::layout;
 use super::{primitive_name, ImageError};
 
 /// What the copying walk carries: the sharing map, and the spellings met so
@@ -39,9 +42,10 @@ pub(super) struct Walk<'a> {
     /// name table is written in, so one graph writes one table whatever order
     /// the memo learned them in.
     names: BTreeSet<Box<str>>,
-    /// Copied objects whose `traits` field the hydrating instance fills in for
-    /// itself, by the address of the copy. Emit turns each into a
-    /// reconstruction entry once it knows where that copy lands in the image.
+    /// The fields the hydrating instance fills in for itself, by the address
+    /// of the field inside its copy. Emit turns each into a reconstruction
+    /// entry once it knows where that address lands in the image. Keyed by the
+    /// field rather than by the object, because one object has two such fields.
     reconstructions: HashMap<usize, Ctor>,
 }
 
@@ -72,29 +76,37 @@ impl<'a> Walk<'a> {
         }
     }
 
+    /// Record that the field at `offset` inside the copy at `at` is one the
+    /// hydrating instance builds. `offset` comes from the layout probe, which
+    /// has a slot for every field a reconstruction may name.
+    fn reconstruct(&mut self, at: usize, offset: Option<usize>, ctor: Ctor) {
+        let offset = offset.expect("a reconstructed field's variant carries a probed slot");
+        self.reconstructions.insert(at + offset, ctor);
+    }
+
     pub(super) fn into_tables(self) -> (Vec<Box<str>>, HashMap<usize, Ctor>) {
         (self.names.into_iter().collect(), self.reconstructions)
     }
 }
 
-/// What the copy of an object carries in its `traits` field
-/// (docs/impl/image.md § Sealing).
-enum Traits {
-    /// Nothing: the source object carried no table.
+/// What the copy of an object carries in a field that may name a
+/// process-owned resource (docs/impl/image/sealing.md).
+enum Crossing {
+    /// Nothing: the source field was nil.
     None,
-    /// The hydrating instance's own table, named by a constructor. The copy
+    /// The hydrating instance's own value, named by a constructor. The copy
     /// carries nil until hydration fills the slot in.
     Reconstruct(Ctor),
-    /// A user table, copied into the image like any other struct.
+    /// Program data, copied into the image like any other value.
     Carried(Value),
 }
 
-impl Traits {
+impl Crossing {
     /// What the copy is built with. A reconstructed slot is written at
     /// hydration, so the dump leaves it nil and the emitter zeroes it.
     fn value(&self) -> Value {
         match self {
-            Traits::Carried(v) => *v,
+            Crossing::Carried(v) => *v,
             _ => Value::NIL,
         }
     }
@@ -111,9 +123,9 @@ fn copy_traits(
     region: RuntimeRegion,
     traits: Value,
     walk: &mut Walk,
-) -> Result<Traits, ImageError> {
+) -> Result<Crossing, ImageError> {
     let Some(ptr) = traits.as_heap_ptr() else {
-        return Ok(Traits::None);
+        return Ok(Crossing::None);
     };
     let default = heap
         .default_traits_table()
@@ -121,14 +133,42 @@ fn copy_traits(
         .position(|t| t.as_heap_ptr() == Some(ptr));
     if let Some(i) = default {
         let tag = super::super::format::tag_from_u64(i as u64)?;
-        return Ok(Traits::Reconstruct(Ctor::DefaultTraits(tag)));
+        return Ok(Crossing::Reconstruct(Ctor::DefaultTraits(tag)));
     }
-    Ok(Traits::Carried(copy_value(heap, region, traits, walk)?))
+    Ok(Crossing::Carried(copy_value(heap, region, traits, walk)?))
+}
+
+/// Decide what a `Parameter`'s `default` field crosses as.
+///
+/// An `External` is the one thing a default may hold that is not sealed data,
+/// and among externals only a standard stream travels: the hydrating instance
+/// opens its own. Everything else fails the dump here, naming what it met.
+fn copy_default(
+    heap: &mut FiberHeap,
+    region: RuntimeRegion,
+    default: Value,
+    walk: &mut Walk,
+) -> Result<Crossing, ImageError> {
+    let Some(type_name) = default.external_type_name() else {
+        return Ok(Crossing::Carried(copy_value(heap, region, default, walk)?));
+    };
+    let kind = default.as_external::<Port>().map(|p| p.kind());
+    match kind.and_then(Stdio::of) {
+        Some(stream) => Ok(Crossing::Reconstruct(Ctor::StdioPort(stream))),
+        None => Err(ImageError::Unsupported(match kind {
+            Some(kind) => format!(
+                "a {kind:?} port owns a descriptor this process opened, so no image carries it"
+            ),
+            None => format!(
+                "a parameter's default holds a {type_name} external, which the image cannot rebuild"
+            ),
+        })),
+    }
 }
 
 /// Deep-copy one sealed data value into the scratch region, preserving
 /// sharing through the walk's visited map (keyed on source payload address).
-/// A value outside the spike's sealed set fails the copy, naming the variant.
+/// A value outside the sealed set fails the copy, naming the variant.
 pub(super) fn copy_value(
     heap: &mut FiberHeap,
     region: RuntimeRegion,
@@ -166,6 +206,10 @@ pub(super) fn copy_value(
     let obj = unsafe { deref(v) };
     let traits = copy_traits(heap, region, obj.traits(), walk)?;
     let carried = traits.value();
+    let default = match obj {
+        HeapObject::Parameter { default, .. } => copy_default(heap, region, *default, walk)?,
+        _ => Crossing::None,
+    };
     let copy = match obj {
         HeapObject::Pair(pair) => {
             let first = copy_value(heap, region, pair.first, walk)?;
@@ -212,7 +256,7 @@ pub(super) fn copy_value(
         // A sorted container copies in order and is never re-sorted: every
         // key and element an image may carry ranks by its own content, so the
         // order the copy preserves is the order the hydrating instance's
-        // comparator agrees with (docs/impl/image.md § Sealing).
+        // comparator agrees with (docs/impl/image/sealing.md).
         HeapObject::LSet { data, .. } => {
             let mut copies = Vec::with_capacity(data.len());
             for &el in data.iter() {
@@ -257,17 +301,32 @@ pub(super) fn copy_value(
                 region,
             )
         }
+        // A parameter is sealed POD whose id crosses unchanged: resolution is
+        // by id, so the image records a watermark and hydration mints above it
+        // rather than renumbering anything here.
+        HeapObject::Parameter { id, .. } => heap.alloc_in_region(
+            HeapObject::Parameter {
+                id: *id,
+                default: default.value(),
+                traits: carried,
+            },
+            region,
+        ),
         HeapObject::Float(f) => heap.alloc_in_region(HeapObject::Float(*f), region),
         other => {
             return Err(ImageError::Unsupported(format!(
-                "{:?} is not sealed data (docs/impl/image.md § Sealing)",
+                "{:?} is not sealed data (docs/impl/image/sealing.md)",
                 other.tag()
             )))
         }
     };
-    if let Traits::Reconstruct(ctor) = traits {
-        let at = copy.as_heap_ptr().expect("a copied object is heap") as usize;
-        walk.reconstructions.insert(at, ctor);
+    let at = copy.as_heap_ptr().expect("a copied object is heap") as usize;
+    let tag = obj.tag();
+    if let Crossing::Reconstruct(ctor) = traits {
+        walk.reconstruct(at, layout::traits_slot_in(tag), ctor);
+    }
+    if let Crossing::Reconstruct(ctor) = default {
+        walk.reconstruct(at, layout::default_slot_in(tag), ctor);
     }
     walk.visited.insert(key, copy);
     Ok(copy)

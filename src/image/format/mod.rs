@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-11
 //! The image file's geometry and the fingerprint that gates hydration, with
 //! the codecs its tables are written and read through.
 //!
@@ -21,13 +21,14 @@ pub use sections::{sections, Sections};
 
 use std::mem::{align_of, size_of};
 
+use crate::port::{Port, PortKind};
 use crate::value::heap::{HeapObject, HeapTag};
 use crate::value::region_slice::RegionSlice;
 use crate::value::Value;
 
 use super::ImageError;
 
-pub(crate) const VERSION: u32 = 2;
+pub(crate) const VERSION: u32 = 3;
 
 /// Fixed size of the serialized header block: the magic, the section
 /// geometry, the root, and the fingerprint string. The pages section starts
@@ -161,27 +162,89 @@ pub(crate) fn read_names(buf: &[u8]) -> Result<Vec<&str>, ImageError> {
     Ok(out)
 }
 
+/// A standard stream a hydrating instance can open for itself.
+///
+/// The three are spelled here rather than reached through `PortKind`, whose
+/// other variants own a descriptor this process opened — nothing an image can
+/// carry, and nothing another process could reopen from a name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Stdio {
+    In,
+    Out,
+    Err,
+}
+
+impl Stdio {
+    /// The stream `kind` names, or `None` for a port that owns its descriptor.
+    pub(crate) fn of(kind: PortKind) -> Option<Stdio> {
+        match kind {
+            PortKind::Stdin => Some(Stdio::In),
+            PortKind::Stdout => Some(Stdio::Out),
+            PortKind::Stderr => Some(Stdio::Err),
+            _ => None,
+        }
+    }
+
+    /// A fresh port on this stream, owning no descriptor.
+    pub(crate) fn open(self) -> Port {
+        match self {
+            Stdio::In => Port::stdin(),
+            Stdio::Out => Port::stdout(),
+            Stdio::Err => Port::stderr(),
+        }
+    }
+
+    /// The constant this stream travels as. Written out rather than taken from
+    /// a discriminant, which is an accident of declaration order.
+    fn code(self) -> u64 {
+        match self {
+            Stdio::In => 0,
+            Stdio::Out => 1,
+            Stdio::Err => 2,
+        }
+    }
+
+    fn from_code(raw: u64) -> Result<Stdio, ImageError> {
+        match raw {
+            0 => Ok(Stdio::In),
+            1 => Ok(Stdio::Out),
+            2 => Ok(Stdio::Err),
+            _ => Err(ImageError::Corrupt(format!(
+                "{raw} names no standard stream in the reconstruction stream"
+            ))),
+        }
+    }
+}
+
 /// What a reconstruction entry asks the hydrating instance to build. The tag
 /// is a kind in the high word and its argument in the low one, so a
 /// constructor added later needs no re-encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Ctor {
-    /// This instance's default traitset for a heap tag.
+    /// This instance's default traitset for a heap tag — a lookup, since VM
+    /// init built the tables before any image could load.
     DefaultTraits(HeapTag),
+    /// A fresh port on one of this process's standard streams. This one
+    /// allocates, so its value lands in a companion region.
+    StdioPort(Stdio),
 }
 
 const CTOR_DEFAULT_TRAITS: u64 = 1;
+const CTOR_STDIO_PORT: u64 = 2;
 
 impl Ctor {
     pub(crate) fn encode(self) -> u64 {
         match self {
             Ctor::DefaultTraits(tag) => (CTOR_DEFAULT_TRAITS << 32) | tag as u64,
+            Ctor::StdioPort(stream) => (CTOR_STDIO_PORT << 32) | stream.code(),
         }
     }
 
     pub(crate) fn decode(raw: u64) -> Result<Ctor, ImageError> {
+        let arg = raw & 0xFFFF_FFFF;
         match raw >> 32 {
-            CTOR_DEFAULT_TRAITS => Ok(Ctor::DefaultTraits(tag_from_u64(raw & 0xFFFF_FFFF)?)),
+            CTOR_DEFAULT_TRAITS => Ok(Ctor::DefaultTraits(tag_from_u64(arg)?)),
+            CTOR_STDIO_PORT => Ok(Ctor::StdioPort(Stdio::from_code(arg)?)),
             _ => Err(ImageError::Corrupt(format!(
                 "unknown constructor tag {raw} in the reconstruction stream"
             ))),

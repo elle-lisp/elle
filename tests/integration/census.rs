@@ -1,6 +1,7 @@
-// audited: 2026-09-08
+// audited: 2026-09-10
 // The post-boot heap census: the regression net for the image design's
 // sealing claims.
+// docs/impl/image/sealing.md
 // docs/impl/image/measurements.md
 //
 // After `Runtime::new()` completes, every live object in the instance's
@@ -16,7 +17,7 @@ use std::process::Command;
 
 // ── The sealing net ─────────────────────────────────────────────────
 
-// docs/impl/image.md § Sealing names the boot graph's only unsealed leaves,
+// The design names the boot graph's only unsealed leaves,
 // both handled by the reconstruction stream: the three `External` stdio
 // ports (the *stdin*/*stdout*/*stderr* `Parameter` defaults) and the
 // instance's two default traitsets (`@struct`s built by `init_default_traits`
@@ -48,8 +49,8 @@ fn boot_heap_unsealed_leaves_are_exactly_the_reconstructible_set() {
     );
 }
 
-// § Sealing: "The stdlib file-letrec allocates one `CaptureCell` per captured
-// top-level binding" — the cells snapping must rewrite. Zero cells would mean
+// The stdlib file-letrec allocates one `CaptureCell` per captured top-level
+// binding — the cells snapping must rewrite. Zero cells would mean
 // the letrec lowering changed shape and the snapping design step is stale.
 #[test]
 fn boot_heap_holds_capture_cells_for_snapping() {
@@ -98,8 +99,8 @@ fn boot_census_reports_the_expected_shape() {
     assert_eq!(count_sum, census.objects, "per-tag counts drift from total");
 }
 
-// The sealing classification is the image design's sealed set (§ Sealing),
-// not an implementation echo: every mutable variant and every process/foreign
+// The sealing classification is the image design's sealed set, not an
+// implementation echo: every mutable variant and every process/foreign
 // handle is refused, CaptureCell is snapped, everything else is body data.
 #[test]
 fn sealing_classification_matches_the_design() {

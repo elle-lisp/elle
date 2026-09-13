@@ -8,10 +8,12 @@ The two are the **boot** image (core, prelude, and stdlib pre-compiled into the
 binary) and **environment** images (user `save`/`load`) — the same format,
 dumper, and hydrator throughout, differing only in dependency list and dump
 policy (see *One mechanism, two configurations*). This document owns the design
-argument. Three companions carry the rest:
+argument. Five companions carry the rest:
 
 - [foundations.md](image/foundations.md) — the four representation fixes the
   image needed first, all landed.
+- [sealing.md](image/sealing.md) — what the body may hold, what the hydrating
+  instance rebuilds, and what fails the dump.
 - [format.md](image/format.md) — the file's sections, and the fingerprint that
   gates a load.
 - [plan.md](image/plan.md) — the landing order, and the pins each milestone
@@ -139,98 +141,6 @@ environment-over-boot are simply the two depths this design ships.
   change constant materialization. `MaterializeConst` keeps building fresh
   values per execution — image templates carry the same encoded
   `ConstTemplate` bytes, which are already name-stable.
-
-## Sealing
-
-After the foundations, the body may contain only *sealed* heap objects:
-byte-self-contained, pointing only into this image (or an image it depends
-on), and free of Rust heap ownership (no `Rc`, `Vec`, `Box`, or `RefCell`
-inside) — page bytes must *be* the object. Sealed objects have no real
-destructors, so the hydrated region's teardown drops are no-ops by
-construction.
-
-Sealed and portable after the foundations: `Pair`, `LString`, `LArray`,
-`LBytes`, `LSet`, `LStruct`, `Syntax`, closure templates, closure instances
-(env is an inline `RegionSlice<Value>`), keywords and symbols (payloads are
-stable name hashes), native-fns (dense `prim_id`, remapped by name), ints
-and floats, `Parameter`.
-
-A native-fn's `prim_id` is dense and process-local, so it travels as a name
-([format.md](image/format.md) owns the stream). A def the canonical primitive
-tables do not name — a trait-method handler the registry appended at run time —
-fails the dump instead. Nothing loses by that refusal: those handlers are
-reachable only through the default trait tables, which hydration reconstructs.
-
-A sorted container copies in order and is never re-sorted. Every key an image
-may carry ranks by its own content — a name hash for a symbol or a keyword, the
-bytes for a string, its elements for an array, its structure for anything else
-— so the order the dump wrote is the order the hydrating instance's comparator
-agrees with, and a binary search over the mapped entries finds what it found
-before. The keys that rank by address instead belong to values the dumper
-refuses anyway.
-
-**Capture cells are snapped, not persisted.** The stdlib file-letrec
-allocates one `CaptureCell` (`Rc<RefCell<Value>>`) per captured top-level
-binding. After the letrec fixpoint completes, a cell whose binding is never
-`assign`ed again holds its final value; the dumper rewrites each closure env
-to reference that value directly. The compiler knows which top-level
-bindings are assigned anywhere in the file; the dumper refuses to snap
-those. The boot image requires stdlib to have no post-boot-mutable
-top-levels — a property the dump step enforces, and a reasonable one to
-demand of a standard library.
-
-Refused from the body outright: every mutable variant, `LBox`, `Fiber`,
-thread and library handles, ports, externals, FFI signatures, managed
-pointers. Mutable *bindings* may still be persisted through the side-stream
-(below) where the image's dump policy permits it — the environment policy
-does, opt-in; the strict boot policy does not. The `spirv` kernel cache is
-the one true drop: the GPU path recompiles.
-
-**Process-owned resources reconstruct in place.** The boot graph is not
-fully pure: stdlib defines `*stdin*`/`*stdout*`/`*stderr*` as dynamic
-parameters, and a `Parameter` heap object — itself sealed POD
-(`{id, default, traits}`) — holds as its *default* an `External` wrapping
-the stdio port. `send` already made the semantic call for this case: a
-stdio port is reconstructed fresh on the receiving side, never carried.
-The image does the same via the **reconstruction stream**: (slot location,
-constructor tag) entries emitted by the dumper wherever it meets a
-reconstructible resource. Hydration runs each constructor, allocates the
-fresh value into a companion region (an ordinary region whose edge from the
-hydrated region is recorded, so the teardown cascade releases it), and
-writes the pointer into the listed slot — a handful of dirtied frames.
-Reconstruction must be in place, not re-evaluation of the defining forms:
-closures like `println` capture the `Parameter` object itself, so a
-re-evaluated `def` would mint a second parameter the captured references
-never see. Anything the dumper meets that is neither sealed nor
-reconstructible nor side-streamable fails the dump with a named binding.
-
-The **default trait tables** are the second reconstructible class, found by
-the census ([measurements.md](image/measurements.md) item 2): every
-collection the runtime allocates carries a `traits` field pointing at one of
-the instance's two default traitsets — `@struct`s built by
-`init_default_traits` at VM init, before any stdlib load or hydration. They
-are instance infrastructure, not program state, so the dumper never copies
-them: a `traits` slot aimed at a default traitset becomes a reconstruction
-entry whose constructor resolves the hydrating instance's own table for that
-tag. The tables exist before hydration by construction (VM-init order), so
-the constructor is a lookup, not an allocation. The dumper tests the slot
-against the whole default table rather than against the object's own tag,
-because one traitset serves seven tags and a program may attach the array's
-table to a string.
-
-A `traits` slot naming anything else is program data and copies into the body
-like any other struct. `with-traits` attaches an ordinary immutable struct
-whose methods are native-fns or closures the body already carries, so a user
-traitset needs no mechanism of its own. A traits slot therefore has three
-answers: nil, a reconstruction entry, and an ordinary pointer relocation.
-
-**Macros persist whole.** A manifest macro entry carries its parameter
-lists, its template syntax (a body value), and its transformer cache's body
-location. The filled caches — ordinary closures — hydrate without
-recompiling, preserving the hygiene property the lazy fill exists for: the
-persisted transformer is the one compiled in a real expansion context,
-which is exactly what later compiles reuse in a source boot. A cache the
-boot never filled stays empty and fills lazily as today.
 
 ## Compiler state is part of the environment
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-10
 // docs/impl/values.md
 //! Value representation and tagged-union architecture
 //!
@@ -21,6 +21,7 @@ pub mod heap;
 #[cfg(test)]
 pub mod intern;
 pub mod keyword;
+pub(crate) mod parameter;
 pub mod region_slice;
 pub mod repr;
 pub mod send;

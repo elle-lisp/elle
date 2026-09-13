@@ -1,6 +1,6 @@
 # fiberheap
 
-<!-- audited: 2026-09-08 -->
+<!-- audited: 2026-09-10 -->
 
 The per-VM heap: the physical region allocator (docs/impl/region/model.md). One
 `FiberHeap` per VM, shared by all of that VM's fibers; every allocation names its
@@ -25,8 +25,15 @@ heap and region explicitly through `arena`.
 | File | Purpose |
 |------|---------|
 | `mod.rs` | `FiberHeap` struct, custom-allocator stack, `needs_drop()`, `holds_value_refs()` |
+| `region.rs` | The `FiberHeap` region-allocator surface: every method that allocates into, reference-counts, adopts, or inspects the per-heap `RegionStore` |
+| `custom.rs` | The `with-allocator` stack and heap teardown: raw allocations, their destructors, and the loop `clear`/`Drop` share |
+| `dropsafety.rs` | The two exhaustive per-tag predicates region teardown drives: which variants own inner allocations needing `Drop`, and which hold `Value` references needing cascade decref |
 | `regionstore.rs` | `RegionStore` + the `Reclaim` typestate (`Counted` xor `Owned`): id mint/recycle, per-id generations, `region_of_ptr`, and the ownership-forest primitives `adopt_region` / `reparent_owned_children` / `region_is_owned` (`owned_children` + `outgoing` on each `RegionEntry`) |
+| `regionstore/alloc.rs` | Id minting, lazy entry materialization (`ensure`/`ensure_raw`), and the allocation funnel where the edge-recording cross-region incref happens once per stored object |
 | `regionstore/refcount.rs` | `incref`/`decref` + cascade, `outgoing` edge recording, phantom/double-free debug asserts |
+| `regionstore/ownership.rs` | The ownership forest: adoption, ownership queries, and subtree transfer, keeping the forward and back edges consistent |
+| `regionstore/pointer.rs` | Pointer → region classification: the ownership-validated page-base walk behind every runtime RC decision |
+| `regionstore/introspect.rs` | Read-only counts, byte totals, cross-ref and edge dumps behind the `arena/*` diagnostics and the free-time equivalence oracle |
 | `regionstore/free.rs` | `free_runtime_region_pages` / `free_region_group` → the four-phase `free_region_set`: subtree / set drop over `owned_children`, frontier from the recorded `outgoing` table, and the `#[cfg(debug_assertions)]` edge-table equivalence oracle |
 | `regionstore/mintscope.rs` | closed allocation-scope mint log (macro expansion): `begin_mint_log` / `reclaim_mint_scope` RC-balance the scratch DAG by `rc − in_degree` (an `Owned` survivor is left to its owner's drop) |
 | `regionpool.rs` | `RegionPool`: dual-ended pages, object and data cursors, page claim and release |
@@ -35,7 +42,7 @@ heap and region explicitly through `arena`.
 | `pagepool.rs` | `PagePool`: per-thread mmap page cache by size class; the `PageDirty` release-time body reset; live traffic counters (`arena/page-claims`); guardfree leak hook; file-backed (hydrated image) pages bypass the cache — their release is `munmap` |
 | `regionstore/hydrate.rs` | Install a hydrated image region: adopt mapped pages, rebuild object bookkeeping from the image's index (docs/impl/image.md § Hydration) |
 | `freelog.rs` | `--trace=free`/`freebt` free-log; guardfree arming |
-| `census.rs` | `--trace=census` post-boot heap census: per-tag histogram, sealing classification, relocation-slot counts (docs/impl/image.md § Sealing) |
+| `census.rs` | `--trace=census` post-boot heap census: per-tag histogram, sealing classification, relocation-slot counts (docs/impl/image/sealing.md) |
 | `tests.rs` | `FiberHeap` unit tests |
 
 ## Page layout

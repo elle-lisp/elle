@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-11
 //! Layout probes for the records the dumper writes into page bytes: each
 //! variant's discriminant byte and the byte extents of its leaf fields.
 //!
@@ -125,16 +125,27 @@ pub(crate) fn dumpable(tag: HeapTag) -> bool {
     variant_layout(tag).is_some()
 }
 
-/// Where `tag`'s `traits` field sits inside a `HeapObject`, or `None` for a
-/// variant that has none. The probe measured it with every other leaf extent,
-/// so the dumper names the slot from the same measurement the fingerprint
-/// records rather than from a second one of its own.
-pub(crate) fn traits_slot_in(tag: HeapTag) -> Option<usize> {
+/// Where `tag`'s field called `name` sits inside a `HeapObject`, or `None` for
+/// a variant that has no such field. The probe measured it with every other
+/// leaf extent, so the dumper names a slot from the same measurement the
+/// fingerprint records rather than from a second one of its own.
+fn slot_in(tag: HeapTag, name: &str) -> Option<usize> {
     variant_layout(tag)?
         .fields
         .iter()
-        .find(|f| f.name == "traits")
+        .find(|f| f.name == name)
         .map(|f| f.offset)
+}
+
+/// Where `tag`'s `traits` field sits, or `None` for a variant that has none.
+pub(crate) fn traits_slot_in(tag: HeapTag) -> Option<usize> {
+    slot_in(tag, "traits")
+}
+
+/// Where `tag`'s `default` field sits — a `Parameter`'s, and no other
+/// variant's.
+pub(crate) fn default_slot_in(tag: HeapTag) -> Option<usize> {
+    slot_in(tag, "default")
 }
 
 /// Copy `v`'s canonical bytes into the zeroed slot `dst`: the discriminant

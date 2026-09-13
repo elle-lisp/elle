@@ -44,8 +44,8 @@ Then the image milestones:
    and guardfree pins over a hydrated region. The format, mapping,
    relocation, and teardown are proven end to end over every value the
    foundations sealed as data. What the dumper still refuses is the rest of
-   the sealed set, which only a boot graph holds: closures, closure
-   templates, native-fns, and `Parameter`.
+   the sealed set, which only a boot graph holds: closures and closure
+   templates.
 6. **boot** — cell snapping, closures and closure templates in the body, the
    primitive table that remaps a native-fn by name and the user traitsets it
    makes dumpable, the reconstruction stream — which the default trait tables
@@ -131,10 +131,17 @@ Then the image milestones:
   raises with the replayed bit matching the baked profile.
 - Macros: a macro whose transformer cache was empty at dump expands
   correctly after hydration (the lazy fill still works).
-- Parameters: after image boot, `println` writes to the process's real
-  stdout (the reconstructed default, not a stale dump-time resource), and
-  `parameterize` of `*stdout*` redirects it — the captured `Parameter`
-  identity and the fiber's frame lookup both survived hydration.
+- Parameters: a parameter's id crosses unchanged, and a fresh instance mints
+  above the image's watermark — the counter-factual is a hydrated body whose
+  next new parameter would otherwise repeat `*stdin*`'s id. A standard-stream
+  default hydrates as a port this instance opened, in a region of its own
+  rather than out of the image's pages, and freeing the hydrated region
+  releases that region exactly once. A file port refuses the dump by name, and
+  the artifact records no port address whatever the dumping process held. After
+  image boot, `println` writes to the process's real stdout (the reconstructed
+  default, not a stale dump-time resource), and `parameterize` of `*stdout*`
+  redirects it — the captured `Parameter` identity and the fiber's frame lookup
+  both survived hydration.
 - Determinism: dump the same graph twice and assert byte-identical whole
   files. The counter-factual: scribble a pattern into a live object's
   padding bytes before the dump and assert the file does not change — a
