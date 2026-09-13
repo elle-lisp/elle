@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-13
 // docs/impl/jit.md
 //! What the solo-compilation gate accepts and rejects, and what the compiled
 //! entry it produces records about itself.
@@ -9,7 +9,6 @@ use crate::lir::{BinOp, LirInstr, Reg, Terminator};
 use crate::signals::Signal;
 use crate::value::Arity;
 
-mod batch;
 mod blueprint;
 mod clif;
 mod regions;
@@ -61,7 +60,7 @@ fn test_compile_identity() {
     let lir = make_simple_lir();
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let code = compiler
-        .compile(&lir, None, Vec::new())
+        .compile(&lir, Vec::new())
         .expect("Failed to compile");
 
     // Call the compiled function with self_tag=0, self_payload=0 (no self-tail-call).
@@ -88,7 +87,7 @@ fn test_compile_add() {
     let lir = make_add_lir();
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let code = compiler
-        .compile(&lir, None, Vec::new())
+        .compile(&lir, Vec::new())
         .expect("Failed to compile");
 
     // Call the compiled function with self_tag=0, self_payload=0
@@ -114,7 +113,7 @@ fn test_accept_polymorphic() {
     lir.signal = Signal::polymorphic(0);
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let result = compiler.compile(&lir, None, Vec::new());
+    let result = compiler.compile(&lir, Vec::new());
     assert!(
         result.is_ok(),
         "JIT should accept polymorphic functions (runtime dispatch handles callables): {:?}",
@@ -129,7 +128,7 @@ fn test_accept_yielding() {
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     // Should compile (no Yield terminators in this simple LIR)
-    let result = compiler.compile(&lir, None, Vec::new());
+    let result = compiler.compile(&lir, Vec::new());
     assert!(result.is_ok());
 }
 
@@ -164,7 +163,7 @@ fn test_compile_yielding_function() {
         .build();
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let result = compiler.compile(&func, None, Vec::new());
+    let result = compiler.compile(&func, Vec::new());
     assert!(
         result.is_ok(),
         "Yielding function should compile: {:?}",
@@ -180,7 +179,7 @@ fn test_reject_struct_variadic() {
     lir.vararg_kind = crate::hir::VarargKind::Struct;
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let result = compiler.compile(&lir, None, Vec::new());
+    let result = compiler.compile(&lir, Vec::new());
     assert!(
         matches!(result, Err(JitError::UnsupportedInstruction(_))),
         "Struct variadic functions should be rejected: {:?}",
@@ -195,7 +194,7 @@ fn test_reject_strict_struct_variadic() {
     lir.vararg_kind = crate::hir::VarargKind::StrictStruct(vec!["key".to_string()]);
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let result = compiler.compile(&lir, None, Vec::new());
+    let result = compiler.compile(&lir, Vec::new());
     assert!(
         matches!(result, Err(JitError::UnsupportedInstruction(_))),
         "StrictStruct variadic functions should be rejected: {:?}",
@@ -213,7 +212,7 @@ fn test_compile_list_variadic() {
     lir.num_params = 2; // x + rest
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let result = compiler.compile(&lir, None, Vec::new());
+    let result = compiler.compile(&lir, Vec::new());
     assert!(
         result.is_ok(),
         "List variadic functions should compile: {:?}",
@@ -227,7 +226,7 @@ fn compile_records_entry_in_code_address_registry() {
     lir.name = Some("registry-probe-solo".to_string());
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let code = compiler
-        .compile(&lir, None, Vec::new())
+        .compile(&lir, Vec::new())
         .expect("Failed to compile");
     let entry = code.fn_ptr() as usize;
     let name = crate::jit::registry::snapshot()

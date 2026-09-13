@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-13
 // docs/impl/region/owner.md
 //! What a compiled activation reclaims when it completes normally.
 
@@ -45,7 +45,7 @@ fn adopt_into_activation_frees_member_at_compiled_return() {
     let lir = make_adopt_into_activation_lir();
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let code = compiler
-        .compile(&lir, None, Vec::new())
+        .compile(&lir, Vec::new())
         .expect("Failed to compile");
 
     let mut vm = crate::vm::VM::new();

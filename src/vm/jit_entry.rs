@@ -1,4 +1,4 @@
-// audited: 2026-09-12
+// audited: 2026-09-13
 // docs/impl/jit.md
 //! Where a closure call meets the JIT: the hotness counter, the code cache, and
 //! the trampolines back into the interpreter.
@@ -168,9 +168,7 @@ impl VM {
     ) {
         if !matches!(
             error,
-            crate::jit::JitError::UnsupportedInstruction(_)
-                | crate::jit::JitError::Polymorphic
-                | crate::jit::JitError::Yielding
+            crate::jit::JitError::UnsupportedInstruction(_) | crate::jit::JitError::Polymorphic
         ) {
             eprintln!("[jit] compilation failed: {}", error);
         }
@@ -188,8 +186,7 @@ impl VM {
     ) {
         let label = closure.template.display_label();
         let template = (*closure.template).clone();
-        let task =
-            crate::jit::worker::prepare_task(lir_func, None, bytecode_ptr as usize, Some(&label));
+        let task = crate::jit::worker::prepare_task(lir_func, bytecode_ptr as usize, Some(&label));
 
         // `--trace=syncjit`: compile here on the VM thread and install
         // immediately; the `elle-jit` worker never spawns. Codegen inputs are
@@ -200,8 +197,7 @@ impl VM {
         // suspected JIT race starts here; `--trace=jit,syncjit` logs each
         // synchronous install like the background path logs its own.
         if crate::config::get().has_trace("syncjit") {
-            let res = crate::jit::JitCompiler::new()
-                .and_then(|c| c.compile(&task.lir, task.self_sym, Vec::new()));
+            let res = crate::jit::JitCompiler::new().and_then(|c| c.compile(&task.lir, Vec::new()));
             match res {
                 Ok(jit_code) => {
                     if self

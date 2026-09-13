@@ -1,3 +1,5 @@
+// audited: 2026-09-13
+// docs/impl/jit.md
 //! `compile/run-on :jit` — force Cranelift JIT execution.
 //!
 //! Both variants live here: the real entry point under `--features jit`, and
@@ -55,7 +57,7 @@ impl VM {
                         )
                     }
                 };
-                match compiler.compile(&lir, None, Vec::new()) {
+                match compiler.compile(&lir, Vec::new()) {
                     Ok(jc) => {
                         let jc = Arc::new(jc);
                         self.install_jit_code((*closure.template).clone(), jc.clone());

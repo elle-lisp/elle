@@ -1,7 +1,10 @@
-// JIT compilation integration tests
+// audited: 2026-09-13
+// docs/impl/jit.md
+// The JIT integration corpus: hand-built LIR compiled to native code, run, and
+// held to the answer the interpreter gives.
 //
-// These tests verify that the JIT compiler correctly translates LIR to native
-// code and produces the same results as the interpreter.
+// This root holds the shims and fixtures every submodule shares; each `mod`
+// below is one instruction family.
 
 use elle::jit::{JitCompiler, JitError};
 use elle::lir::{
@@ -117,7 +120,7 @@ fn compile_and_call(lir: &LirFunction, args: &[Value]) -> Result<Value, JitError
     let _signals = register_primitives(&mut vm, &mut symbols);
 
     let compiler = JitCompiler::new()?;
-    let code = compiler.compile(lir, None, Vec::new())?;
+    let code = compiler.compile(lir, Vec::new())?;
     // self_tag/self_payload = 0 since we're not testing self-tail-calls in these basic tests
     let result = unsafe {
         code.call(

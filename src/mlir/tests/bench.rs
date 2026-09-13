@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-13
 // docs/impl/mlir.md
 //! A two-operation kernel, `a * b + a`, and the timings that say what each MLIR
 //! phase costs beside Cranelift's.
@@ -102,7 +102,7 @@ fn bench_mlir() {
     let cranelift_init = start.elapsed();
 
     let start = Instant::now();
-    let _jit_code = compiler.compile(&func, None, vec![]).unwrap();
+    let _jit_code = compiler.compile(&func, vec![]).unwrap();
     let cranelift_compile = start.elapsed();
 
     eprintln!();

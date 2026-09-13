@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-13
 // src/jit/AGENTS.md
 //! What a `FunctionTranslator` reaches for: constants, fast paths, call shapes
 //! and register pairs.
@@ -16,7 +16,6 @@ use crate::lir::{BinOp, CmpOp, LirConst, OperandProof, UnaryOp};
 use crate::value::repr::{
     TAG_EMPTY_LIST, TAG_FALSE, TAG_FLOAT, TAG_INT, TAG_KEYWORD, TAG_NIL, TAG_SYMBOL, TAG_TRUE,
 };
-use crate::value::SymbolId;
 
 use super::translate::FunctionTranslator;
 use super::JitError;
@@ -361,70 +360,6 @@ impl<'a> FunctionTranslator<'a> {
                 vm,
                 region_id,
                 args_region,
-            ],
-        );
-        Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))
-    }
-
-    /// Emit a direct call to an SCC peer function.
-    /// Returns (tag, payload).
-    pub(crate) fn emit_direct_scc_call(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        peer_func_id: FuncId,
-        target_sym: SymbolId,
-        args: &[crate::lir::Reg],
-        vm: cranelift_codegen::ir::Value,
-    ) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
-        let func_ref = self.module.declare_func_in_func(peer_func_id, builder.func);
-
-        // Build args on stack (each Value is 16 bytes)
-        let (args_ptr, nargs) = if args.is_empty() {
-            let null = builder.ins().iconst(I64, 0);
-            let zero = builder.ins().iconst(I64, 0);
-            (null, zero)
-        } else {
-            let slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
-                cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                (args.len() * 16) as u32, // 16 bytes per Value
-                0,
-            ));
-            for (i, arg_reg) in args.iter().enumerate() {
-                let (arg_tag, arg_payload) = self.use_var_pair(builder, arg_reg.0);
-                let tag_offset = (i * 16) as i32;
-                let payload_offset = (i * 16 + 8) as i32;
-                builder.ins().stack_store(arg_tag, slot, tag_offset);
-                builder.ins().stack_store(arg_payload, slot, payload_offset);
-            }
-            let addr = builder.ins().stack_addr(I64, slot, 0);
-            let count = builder.ins().iconst(I64, args.len() as i64);
-            (addr, count)
-        };
-
-        // Null env for capture-free functions
-        let null_env = builder.ins().iconst(I64, 0);
-        // self_tag/self_payload for self-call detection
-        let (call_self_tag, call_self_payload) = if self.self_sym == Some(target_sym) {
-            if let Some((st, sp)) = self.self_tag_payload {
-                (st, sp)
-            } else {
-                let z = builder.ins().iconst(I64, 0);
-                (z, z)
-            }
-        } else {
-            let z = builder.ins().iconst(I64, 0);
-            (z, z)
-        };
-
-        let call = builder.ins().call(
-            func_ref,
-            &[
-                null_env,
-                args_ptr,
-                nargs,
-                vm,
-                call_self_tag,
-                call_self_payload,
             ],
         );
         Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))

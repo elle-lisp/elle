@@ -1,9 +1,15 @@
-// audited: 2026-09-10
+// audited: 2026-09-13
 // docs/impl/jit.md
 //! One Cranelift signature per `elle_jit_*` runtime helper, declared into the
 //! module before any function is translated.
 
-use super::*;
+use cranelift_codegen::ir::types::{I32, I64};
+use cranelift_codegen::ir::{AbiParam, Signature};
+use cranelift_jit::JITModule;
+use cranelift_module::{FuncId, Linkage, Module};
+
+use super::RuntimeHelpers;
+use crate::jit::JitError;
 
 /// Declare all runtime helper functions in the JITModule, returning their FuncIds.
 ///
@@ -66,8 +72,6 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         &[I64, I64, I64, I64, I64, I32, I32, I32],
         &[I64, I64],
     );
-    // resolve_tail_call: (result_tag, result_payload, vm) -> (tag, payload)
-    let resolve_tc_sig = make_sig(module, &[I64, I64, I64], &[I64, I64]);
     // store_capture: (env_ptr, index, val_tag, val_payload, vm) -> (tag, payload)
     let store_capture_sig = make_sig(module, &[I64, I64, I64, I64, I64], &[I64, I64]);
     // store_capture_cell: (cell_tag, cell_payload, val_tag, val_payload, vm) -> (tag, payload)
@@ -198,9 +202,6 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         call: declare(module, "elle_jit_call", &call_sig)?,
         tail_call: declare(module, "elle_jit_tail_call", &tail_call_sig)?,
         has_exception: declare(module, "elle_jit_has_exception", &vm_only)?,
-        resolve_tail_call: declare(module, "elle_jit_resolve_tail_call", &resolve_tc_sig)?,
-        call_depth_enter: declare(module, "elle_jit_call_depth_enter", &vm_only)?,
-        call_depth_exit: declare(module, "elle_jit_call_depth_exit", &vm_only)?,
         pop_param_frame: declare(module, "elle_jit_pop_param_frame", &vm_only)?,
         call_array: declare(module, "elle_jit_call_array", &call_array_sig)?,
         tail_call_array: declare(module, "elle_jit_tail_call_array", &call_array_sig)?,

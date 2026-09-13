@@ -1,8 +1,8 @@
-// audited: 2026-09-12
+// audited: 2026-09-13
 // docs/impl/jit.md
 // docs/impl/region/owner.md
 //! The helpers a compiled call site enters: dispatch by callee kind, and the
-//! call-depth, tail-call and parameter-frame steps around it.
+//! tail-call and parameter-frame steps around it.
 
 use super::*;
 
@@ -288,72 +288,14 @@ pub extern "C" fn elle_jit_call(
     }
 }
 
-/// Resolve a pending tail call after a direct SCC call.
-///
-/// When a directly-called SCC peer returns TAIL_CALL_SENTINEL (because it
-/// tail-called something outside the SCC), the caller must resolve it.
-/// This helper checks for the sentinel and executes the pending tail call.
-///
-/// Returns the final `JitValue`, or `JitValue::nil()` if an error occurred.
-#[no_mangle]
-pub extern "C" fn elle_jit_resolve_tail_call(
-    result_tag: u64,
-    result_payload: u64,
-    vm: *mut (),
-) -> JitValue {
-    let result = JitValue {
-        tag: result_tag,
-        payload: result_payload,
-    };
-    if result != TAIL_CALL_SENTINEL {
-        return result;
-    }
-    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    if let Some(tail) = vm.pending_tail_call.take() {
-        // The resolved body is the tail callee's — hand it its
-        // executing-closure register (see `elle_jit_call`'s sentinel arm).
-        vm.pending_entry_closure = tail.closure;
-        let exec_result = vm.execute_bytecode_saving_stack(&tail.code, &tail.env);
-        // Park the tail callee's inner frame on a fuel/signal suspend (see the
-        // sentinel arm in elle_jit_call).
-        interp_exec_result_to_jit_value(vm, exec_result)
-    } else {
-        panic!(
-            "VM bug: TAIL_CALL_SENTINEL returned but no pending_tail_call set. \
-             This indicates a bug in the JIT tail call protocol."
-        );
-    }
-}
-
 /// No-op. Regions reclaim at `FreeRegion`, so a self-tail-call boundary has
 /// nothing to release here.
 ///
 /// Retained only because the JIT vtable declares and exports the symbol
-/// (`vtable.rs`, `vtable/helpers.rs`); no emit site calls it, which is why its
-/// `FuncId` carries `#[allow(dead_code)]`.
+/// (`vtable/helpers.rs`, `vtable/symbols.rs`); no emit site calls it, which is
+/// why its `FuncId` carries `#[allow(dead_code)]`.
 #[no_mangle]
 pub extern "C" fn elle_jit_rotate_pools(_vm: *mut ()) {}
-
-/// Increment call depth and check for stack overflow.
-///
-/// Returns FALSE on success, or TRUE if the call depth exceeds 1000
-/// (after setting the error signal on the fiber).
-#[no_mangle]
-pub extern "C" fn elle_jit_call_depth_enter(vm: *mut ()) -> JitValue {
-    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    vm.fiber.call_depth += 1;
-    JitValue::bool_val(false) // falsy — ok
-}
-
-/// Decrement call depth after a direct SCC call returns.
-///
-/// Pairs with `elle_jit_call_depth_enter`. Always returns NIL (ignored).
-#[no_mangle]
-pub extern "C" fn elle_jit_call_depth_exit(vm: *mut ()) -> JitValue {
-    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    vm.fiber.call_depth -= 1;
-    JitValue::nil()
-}
 
 /// Pop one dynamic parameter frame from the fiber.
 /// Pairs with PushParamFrame. Returns NIL (ignored by caller).

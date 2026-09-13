@@ -1,10 +1,13 @@
-//! JIT compiler: LirFunction -> Cranelift IR -> Native code
+// audited: 2026-09-13
+// docs/impl/jit.md
+//! `JitCompiler`: the Cranelift module a compile owns, and the two entry points
+//! that drive one `LirFunction` through it.
 //!
-//! This module translates LIR (Low-level Intermediate Representation) to
-//! Cranelift IR, then compiles to native code (x86_64, aarch64).
+//! `compile` produces native code and the `JitCode` that keeps it alive;
+//! `clif_text` stops at the rendered Cranelift IR, for diagnostics. Both refuse
+//! the same two shapes, and the refusals are the whole of what admission asks.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types::{I32, I64};
@@ -13,10 +16,10 @@ use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
+use cranelift_module::{Linkage, Module};
 
 use crate::lir::{Label, LirFunction};
-use crate::value::{Arity, SymbolId};
+use crate::value::Arity;
 
 use super::code::JitCode;
 use super::translate::{load_value_slot, FunctionTranslator};
@@ -30,14 +33,6 @@ type TranslatedConsts = (
     Vec<std::rc::Rc<crate::value::TemplateProto>>,
     Vec<Box<crate::value::ConstTemplate>>,
 );
-
-/// A member of a compilation group (SCC) for batch JIT compilation.
-pub struct BatchMember<'a> {
-    /// Symbol ID for this function (used to identify it for direct calls)
-    pub sym: SymbolId,
-    /// The LIR function to compile
-    pub lir: &'a LirFunction,
-}
 
 /// JIT compiler that translates LirFunction to native code
 pub struct JitCompiler {
@@ -104,7 +99,6 @@ impl JitCompiler {
     pub fn compile(
         mut self,
         lir: &LirFunction,
-        self_sym: Option<SymbolId>,
         module_closures: Vec<LirFunction>,
     ) -> Result<JitCode, JitError> {
         // Polymorphic and yielding functions are supported via side-exit.
@@ -124,11 +118,10 @@ impl JitCompiler {
             ));
         }
 
-        // Functions containing MakeClosure fall back to the interpreter.
-        // The JIT has the infrastructure to handle MakeClosure (module_closures
-        // lookup + bytecode emission), but the per-compilation cost of emitting
-        // all module closures' bytecodes is too high for --jit=1 threshold.
-        // TODO: cache compiled module closures across JIT compilations.
+        // Functions containing MakeClosure fall back to the interpreter. The
+        // translator handles MakeClosure (module_closures lookup + bytecode
+        // emission), but emitting every module closure's bytecode per compile
+        // costs more than the compile saves at a threshold of 1.
         for block in &lir.blocks {
             for si in &block.instructions {
                 if matches!(si.instr, crate::lir::LirInstr::MakeClosure { .. }) {
@@ -147,26 +140,14 @@ impl JitCompiler {
             .declare_function(func_name, Linkage::Local, &sig)
             .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
 
-        // Build a one-entry scc_peers map for direct self-calls
-        let scc_peers = self_sym.map(|sym| {
-            let mut map = HashMap::new();
-            map.insert(sym, func_id);
-            map
-        });
-
         // Create function context
         let mut ctx = self.module.make_context();
         ctx.func.signature = sig;
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         // Translate LIR to Cranelift IR
-        let (closure_protos, templates) = self.translate_function(
-            lir,
-            &mut ctx.func,
-            scc_peers.as_ref(),
-            self_sym,
-            module_closures,
-        )?;
+        let (closure_protos, templates) =
+            self.translate_function(lir, &mut ctx.func, module_closures)?;
 
         // Compile the function
         self.module
@@ -217,11 +198,7 @@ impl JitCompiler {
 
     /// Build Cranelift IR for a LirFunction and return it as lines of text.
     /// Does NOT compile to native code — this is for diagnostic display only.
-    pub fn clif_text(
-        mut self,
-        lir: &LirFunction,
-        self_sym: Option<SymbolId>,
-    ) -> Result<Vec<String>, JitError> {
+    pub fn clif_text(mut self, lir: &LirFunction) -> Result<Vec<String>, JitError> {
         let sig = self.make_jit_signature();
 
         let func_name = lir.name.as_deref().unwrap_or("jit_func");
@@ -230,142 +207,15 @@ impl JitCompiler {
             .declare_function(func_name, Linkage::Local, &sig)
             .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
 
-        // Build a one-entry scc_peers map for direct self-calls
-        let scc_peers = self_sym.map(|sym| {
-            let mut map = HashMap::new();
-            map.insert(sym, func_id);
-            map
-        });
-
         let mut ctx = self.module.make_context();
         ctx.func.signature = sig;
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
-        self.translate_function(lir, &mut ctx.func, scc_peers.as_ref(), self_sym, Vec::new())?;
+        self.translate_function(lir, &mut ctx.func, Vec::new())?;
         // closure_constants from clif_text are discarded — diagnostic only
 
         let text = format!("{}", ctx.func);
         Ok(text.lines().map(String::from).collect())
-    }
-
-    /// Compile multiple mutually recursive functions into a single Cranelift module.
-    ///
-    /// Functions within the group call each other via direct Cranelift `call`
-    /// instructions, eliminating the `elle_jit_call` dispatch overhead.
-    /// External calls (to functions outside the group) still use `elle_jit_call`.
-    pub fn compile_batch(
-        mut self,
-        members: &[BatchMember],
-    ) -> Result<Vec<(SymbolId, JitCode)>, JitError> {
-        // Validate all members are non-polymorphic and non-yielding.
-        // Yielding functions require per-function YieldPointMeta in JitCode,
-        // but compile_batch creates shared JitCode with empty yield_points.
-        // If a yielding function were batch-compiled, elle_jit_yield would
-        // panic on index-out-of-bounds when looking up yield point metadata.
-        for member in members {
-            if member.lir.signal.propagates != 0 {
-                return Err(JitError::Polymorphic);
-            }
-            if member.lir.signal.may_suspend() {
-                return Err(JitError::Yielding);
-            }
-            if matches!(member.lir.arity, Arity::AtLeast(_))
-                && !matches!(member.lir.vararg_kind, crate::hir::VarargKind::List)
-            {
-                return Err(JitError::UnsupportedInstruction(
-                    "variadic function with struct/named varargs".to_string(),
-                ));
-            }
-        }
-
-        let sig = self.make_jit_signature();
-
-        // Declare all functions upfront so they can reference each other
-        let mut func_ids: Vec<(SymbolId, FuncId)> = Vec::with_capacity(members.len());
-        let mut scc_peers: HashMap<SymbolId, FuncId> = HashMap::new();
-
-        for (i, member) in members.iter().enumerate() {
-            let name = member
-                .lir
-                .name
-                .as_deref()
-                .map(|n| format!("scc_{}_{}", i, n))
-                .unwrap_or_else(|| format!("scc_{}", i));
-            let func_id = self
-                .module
-                .declare_function(&name, Linkage::Local, &sig)
-                .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
-            func_ids.push((member.sym, func_id));
-            scc_peers.insert(member.sym, func_id);
-        }
-
-        // Define each function with the SCC peer map, collecting closure
-        // template blueprints so they stay alive as long as the JitCode does.
-        let mut all_closure_protos: Vec<(SymbolId, Vec<std::rc::Rc<crate::value::TemplateProto>>)> =
-            Vec::new();
-        let mut all_templates: Vec<(SymbolId, Vec<Box<crate::value::ConstTemplate>>)> = Vec::new();
-        for (i, member) in members.iter().enumerate() {
-            let (_, func_id) = func_ids[i];
-            let mut ctx = self.module.make_context();
-            ctx.func.signature = sig.clone();
-            ctx.func.name = UserFuncName::user(0, func_id.as_u32());
-
-            let (closure_protos, templates) = self.translate_function(
-                member.lir,
-                &mut ctx.func,
-                Some(&scc_peers),
-                Some(member.sym),
-                Vec::new(),
-            )?;
-            all_closure_protos.push((member.sym, closure_protos));
-            all_templates.push((member.sym, templates));
-
-            self.module
-                .define_function(func_id, &mut ctx)
-                .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
-        }
-
-        // Finalize all functions at once
-        self.module
-            .finalize_definitions()
-            .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
-
-        // Collect fn_ptrs before moving module into Arc
-        let fn_ptrs: Vec<(SymbolId, *const u8)> = func_ids
-            .iter()
-            .map(|(sym, fid)| (*sym, self.module.get_finalized_function(*fid)))
-            .collect();
-
-        // `fn_ptrs` is index-aligned with `members` (both walk `func_ids`'s
-        // insertion order), so each entry is recorded under its member's name.
-        for (i, (_, ptr)) in fn_ptrs.iter().enumerate() {
-            let name = members[i].lir.name.as_deref().unwrap_or("jit_func");
-            super::registry::record(*ptr as usize, name);
-        }
-
-        // Wrap module in shared Arc so all JitCode entries keep it alive
-        let shared_module = Arc::new(super::code::ModuleHolder::new(self.module));
-
-        // Build results — all share the same module, each with its closure +
-        // string-literal template constants (both kept alive by the JitCode).
-        let mut constants_map: std::collections::HashMap<
-            SymbolId,
-            Vec<std::rc::Rc<crate::value::TemplateProto>>,
-        > = all_closure_protos.into_iter().collect();
-        let mut templates_map: std::collections::HashMap<
-            SymbolId,
-            Vec<Box<crate::value::ConstTemplate>>,
-        > = all_templates.into_iter().collect();
-        let results = fn_ptrs
-            .into_iter()
-            .map(|(sym, ptr)| {
-                let cc = constants_map.remove(&sym).unwrap_or_default();
-                let sc = templates_map.remove(&sym).unwrap_or_default();
-                (sym, JitCode::new_shared(ptr, shared_module.clone(), cc, sc))
-            })
-            .collect();
-
-        Ok(results)
     }
 }
 

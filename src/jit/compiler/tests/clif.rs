@@ -1,7 +1,7 @@
-// audited: 2026-09-06
+// audited: 2026-09-13
 // docs/impl/jit.md
 //! What only the rendered Cranelift IR settles: a load's flags, an operation's
-//! tag test, and the pop before every exit.
+//! tag test, a call's target, and the pop before every exit.
 
 use super::*;
 
@@ -64,7 +64,7 @@ fn branch_lines(clif: &[String]) -> Vec<&str> {
 fn arith_clif(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> Vec<String> {
     JitCompiler::new()
         .expect("Failed to create compiler")
-        .clif_text(&make_arith_lir(op, make_op), None)
+        .clif_text(&make_arith_lir(op, make_op))
         .expect("Failed to translate")
 }
 
@@ -130,7 +130,6 @@ fn a_proven_comparison_compiles_without_a_tag_check() {
                         Terminator::Return(Reg(2)),
                     )
                     .build(),
-                None,
             )
             .expect("Failed to translate");
         assert!(
@@ -159,7 +158,6 @@ fn a_proven_comparison_compiles_without_a_tag_check() {
                         Terminator::Return(Reg(2)),
                     )
                     .build(),
-                None,
             )
             .expect("Failed to translate");
         let branches = branch_lines(&proven);
@@ -197,7 +195,7 @@ fn an_argument_load_carries_trusted_flags() {
     // unaligned-tolerant access on every parameter of every hot function.
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let clif = compiler
-        .clif_text(&make_simple_lir(), None)
+        .clif_text(&make_simple_lir())
         .expect("Failed to translate");
     let loads = load_lines(&clif);
     assert!(
@@ -219,7 +217,7 @@ fn a_capture_load_carries_trusted_flags() {
     // different translator path than the argument array.
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let clif = compiler
-        .clif_text(&make_capture_read_lir(), None)
+        .clif_text(&make_capture_read_lir())
         .expect("Failed to translate");
     let loads = load_lines(&clif);
     assert!(
@@ -311,6 +309,95 @@ fn call_target_before(clif: &[String], at: usize) -> Option<String> {
     None
 }
 
+/// fn(x) -> f(x), where `f` is the function being compiled. `LoadSelf` is the
+/// one callee register whose target the translator knows while it translates,
+/// so this is the shape a direct call between compiled functions would reach
+/// first.
+fn make_self_call_lir() -> LirFunction {
+    use crate::hir::region::StaticRegion;
+    LirFixture::new(Arity::Exact(1))
+        .name("self-recursive")
+        .signal(Signal::silent())
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCapture {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::LoadSelf { dst: Reg(1) },
+                LirInstr::Call {
+                    dst: Reg(2),
+                    func: Reg(1),
+                    args: vec![Reg(0)],
+                    arity_checked: false,
+                    region: StaticRegion::new(1).unwrap(),
+                },
+            ],
+            Terminator::Return(Reg(2)),
+        )
+        .build()
+}
+
+/// The `u0:N` id a rendered function names itself by, read off its signature
+/// line (`function u0:3(i64, …) -> i64, i64 system_v {`).
+fn own_func_id(clif: &[String]) -> u32 {
+    clif.iter()
+        .find_map(|line| {
+            let rest = line.trim().strip_prefix("function ")?;
+            let id = rest.split('(').next()?.trim().strip_prefix("u0:")?;
+            id.parse::<u32>().ok()
+        })
+        .expect("a rendered function names itself")
+}
+
+/// Every `fnN` a rendered function calls, in emission order.
+fn called_refs(clif: &[String]) -> Vec<String> {
+    clif.iter()
+        .filter_map(|line| {
+            let pos = line.find("call ")?;
+            let name = line[pos + "call ".len()..].split('(').next()?.trim();
+            name.starts_with("fn").then(|| name.to_string())
+        })
+        .collect()
+}
+
+/// A self-recursive call leaves compiled code through `elle_jit_call`, like
+/// every other call (docs/impl/jit.md § "How a call leaves compiled code").
+#[test]
+fn a_self_recursive_call_goes_through_the_dispatch_helper() {
+    // Trap: a direct Cranelift call to the function itself reads as free here,
+    // the callee being a function this module already names. It is not code
+    // motion. The callee needs its environment passed, its arity checked and
+    // its call depth counted, and the dispatch helper is what does all three.
+    //
+    // Counter-factual: a translator that emitted the direct call computes the
+    // same answers for a capture-free function, and reads garbage captures for
+    // every other one, because a direct call has no environment to hand over.
+    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let dispatch_id = compiler.helpers.call.as_u32();
+    let lir = make_self_call_lir();
+    let clif = compiler.clif_text(&lir).expect("Failed to translate");
+
+    let refs = func_refs(&clif);
+    let called: Vec<u32> = called_refs(&clif)
+        .iter()
+        .filter_map(|name| refs.get(name).copied())
+        .collect();
+    assert!(
+        called.contains(&dispatch_id),
+        "a self-recursive call must reach `elle_jit_call` (u0:{dispatch_id}); got {called:?} in:\n{}",
+        clif.join("\n")
+    );
+    let own = own_func_id(&clif);
+    assert!(
+        !called.contains(&own),
+        "the function calls itself directly (u0:{own}), which the documents say \
+         no compiled function does; got {called:?} in:\n{}",
+        clif.join("\n")
+    );
+}
+
 /// Every `return` a compiled function emits is preceded by the call that pops
 /// this activation's region-remap frame, so the prologue's push is balanced on
 /// every path out (docs/impl/region/mechanism.md § "An abandoned frame runs the
@@ -332,7 +419,7 @@ fn every_compiled_exit_pops_the_region_map() {
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let pop_id = compiler.helpers.pop_region_map.as_u32();
     let clif = compiler
-        .clif_text(&make_suspending_call_lir(), None)
+        .clif_text(&make_suspending_call_lir())
         .expect("Failed to translate");
     let refs = func_refs(&clif);
 

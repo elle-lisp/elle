@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-13
 // docs/impl/jit.md
 //! Cranelift JIT compilation of LIR functions, and the types every stage of it
 //! shares.
@@ -23,7 +23,7 @@
 //!     env: *const Value,      // closure environment (captures array)
 //!     args: *const Value,     // arguments array
 //!     nargs: u32,             // number of arguments
-//!     vm: *mut VM,            // pointer to VM (for globals, function calls)
+//!     vm: *mut VM,            // pointer to VM (for calls, fiber access)
 //!     self_tag: u64,          // the executing closure's own Value, tag half
 //!     self_payload: u64,      // and its payload half
 //! ) -> Value;
@@ -41,8 +41,6 @@ mod compiler;
 mod data;
 pub(crate) mod dispatch;
 mod fastpath;
-#[allow(dead_code)]
-mod group;
 mod helpers;
 pub(crate) mod registry;
 mod runtime;
@@ -53,7 +51,7 @@ mod vtable;
 pub(crate) mod worker;
 
 pub use code::JitCode;
-pub use compiler::{BatchMember, JitCompiler};
+pub use compiler::JitCompiler;
 pub use dispatch::{TAIL_CALL_SENTINEL, YIELD_SENTINEL};
 pub use value::JitValue;
 pub use worker::{JIT_COMPILE_NS, JIT_COMPILE_TASKS};
@@ -152,8 +150,6 @@ pub enum JitError {
     UnsupportedInstruction(String),
     /// Function has polymorphic signal
     Polymorphic,
-    /// Function has yielding signal (rejected by batch compilation only)
-    Yielding,
     /// Cranelift compilation failed
     CompilationFailed(String),
     /// Invalid LIR structure
@@ -167,7 +163,6 @@ impl fmt::Display for JitError {
                 write!(f, "JIT: unsupported instruction: {}", name)
             }
             JitError::Polymorphic => write!(f, "JIT: function has polymorphic signal"),
-            JitError::Yielding => write!(f, "JIT: yielding functions cannot be batch-compiled"),
             JitError::CompilationFailed(msg) => write!(f, "JIT compilation failed: {}", msg),
             JitError::InvalidLir(msg) => write!(f, "JIT: invalid LIR: {}", msg),
         }
