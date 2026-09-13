@@ -166,6 +166,15 @@ impl RuntimeCore {
         (&mut self.vm, &mut self.symbols, &mut self.compile)
     }
 
+    /// The heap and the symbol table as disjoint borrows — the pair the image
+    /// dumper and hydrator take: the heap for the value graph, the table for
+    /// the spellings that travel beside it (docs/impl/image.md).
+    pub fn heap_and_symbols(
+        &mut self,
+    ) -> (&mut crate::value::fiberheap::FiberHeap, &mut SymbolTable) {
+        (&mut self.heap, &mut self.symbols)
+    }
+
     /// The compile context and this instance's heap as disjoint borrows — the
     /// pair [`CompileCtx::register_repl_binding`] needs (it roots the binding's
     /// region through the heap). They are separate boxed fields, so the two
@@ -292,6 +301,14 @@ impl Runtime {
         &mut self,
     ) -> (&mut CompileCtx, &mut crate::value::fiberheap::FiberHeap) {
         self.core.compile_and_heap()
+    }
+
+    /// The heap and the symbol table as disjoint borrows — the pair the image
+    /// dumper and hydrator take (see [`RuntimeCore::heap_and_symbols`]).
+    pub fn heap_and_symbols(
+        &mut self,
+    ) -> (&mut crate::value::fiberheap::FiberHeap, &mut SymbolTable) {
+        self.core.heap_and_symbols()
     }
 
     /// Run the process teardown sweep and return its observable report. RC-driven

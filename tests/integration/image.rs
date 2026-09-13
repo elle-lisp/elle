@@ -186,6 +186,9 @@ mod containers {
 mod names {
     include!("image/names.rs");
 }
+mod closures {
+    include!("image/closures.rs");
+}
 mod primitives {
     include!("image/primitives.rs");
 }
