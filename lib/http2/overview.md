@@ -59,20 +59,19 @@ handshake.
 2. HPACK dynamic tables are per session and per direction.
 3. After the handshake the writer fiber is the only writer. Handshake
    writes go straight to the transport, before that fiber starts.
-4. `eprintln` yields, so it cannot appear inside a `let*` binding here.
-5. Stream ids: client odd, server even.
-6. PUSH_PROMISE draws RST_STREAM REFUSED_STREAM.
-7. A handler fiber always runs inside `protect` and `defer`.
-8. A header block over max-frame-size splits across CONTINUATION frames.
-9. `apply-remote-settings` shifts every existing stream's send window by
+4. Stream ids: client odd, server even.
+5. PUSH_PROMISE draws RST_STREAM REFUSED_STREAM.
+6. A handler fiber always runs inside `protect` and `defer`.
+7. A header block over max-frame-size splits across CONTINUATION frames.
+8. `apply-remote-settings` shifts every existing stream's send window by
    the delta.
-10. SETTINGS values are validated: ENABLE_PUSH is 0 or 1,
-    INITIAL_WINDOW_SIZE is at most 2^31-1, MAX_FRAME_SIZE falls in
-    16384..16777215.
-11. A WINDOW_UPDATE increment of zero is refused, per RFC 9113.
-12. The PADDED flag's padding is stripped from DATA and HEADERS payloads.
-13. `local-settings` and `remote-settings` are mutable structs.
-14. Closing a session returns in bounded time, whatever the peer does.
+9. SETTINGS values are validated: ENABLE_PUSH is 0 or 1,
+   INITIAL_WINDOW_SIZE is at most 2^31-1, MAX_FRAME_SIZE falls in
+   16384..16777215.
+10. A WINDOW_UPDATE increment of zero is refused, per RFC 9113.
+11. The PADDED flag's padding is stripped from DATA and HEADERS payloads.
+12. `local-settings` and `remote-settings` are mutable structs.
+13. Closing a session returns in bounded time, whatever the peer does.
     The server's connection handler waits under the same bound.
 
 ## Running tests
