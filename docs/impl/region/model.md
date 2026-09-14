@@ -1,5 +1,7 @@
 # Region representation — id-spaces, per-execution model, layout
 
+<!-- audited: 2026-09-14 -->
+
 Implementation-facing. How the compiler and runtime represent regions: the two
 id-spaces, the per-activation physical-region model, the page layout, and how an
 object's inline payload shares its region. The correctness obligations these
@@ -230,13 +232,23 @@ A physical region id has three states, and every id must reach `free` again.
   the id onto `free_physical`, where the next mint finds it.
 
 The reserved state has a second exit: a caller can mint an id and never allocate
-into it. The **per-call result region** is that case, on the hottest path in the
-runtime. `dispatch_native_call` and `dispatch_collection_call` each mint one
-region per call, before the call runs, because the callee may allocate its
-result into it. A primitive that returns an
+into it. Two sites reserve an id ahead of work that may allocate nothing, and
+that id never reaches `ensure_raw`, so no teardown can ever return it.
+
+The **per-call result region** is the hot one. `dispatch_native_call` and
+`dispatch_collection_call` each mint one region per call, before the call runs,
+because the callee may allocate its result into it. A primitive that returns an
 immediate (`(< a b)`), or one that returns a value borrowed from an argument
-(`first`, `rest`, `get`), allocates nothing into it. That id never reaches
-`ensure_raw`, so no teardown can ever return it.
+(`first`, `rest`, `get`), allocates nothing into it.
+
+The **macro-expansion transient** is the other. An expansion wraps each argument
+as a `Value` born in a region of its own, and an atom argument becomes an
+immediate rather than a heap value, so a macro call whose arguments are all
+atoms — `(when true 1)` — wraps nothing at all. The scope's own open and close
+own that region: `begin_macro_scope` mints it and answers with a `MacroScope`
+carrying the receipt, and `reclaim_macro_scope` consumes the scope and returns
+the id. The expander cannot name the region without holding the receipt, so it
+cannot reach the close having lost it.
 
 An id stranded that way costs no heap object, no page, and no reference count,
 which is why the object and region gauges cannot see it. It costs the region
@@ -246,11 +258,11 @@ which is why the object and region gauges cannot see it. It costs the region
 Resident memory then grows with total work while `arena/count`,
 `arena/region-count`, and `arena/bytes` all stay flat.
 
-So both dispatchers close the reserved state themselves: after the call,
-`recycle_unmaterialized` pushes the result region back onto `free_physical` when
-the call left it unmaterialized. Unmaterialized means two things together —
-`regions[id]` is empty **and** the id's generation still equals the generation
-read at the mint.
+So each site closes the reserved state itself, through one call:
+`recycle_unmaterialized` pushes the id back onto `free_physical` when the mint
+left it unmaterialized. Unmaterialized means two things together — `regions[id]`
+is empty **and** the id's generation still equals the generation read at the
+mint.
 
 The generation half is what makes the test exact, and it is not optional. A
 region that materialized and was freed inside the call (a native that re-enters
@@ -267,8 +279,11 @@ moment an id fails to come back — and `arena/region-table` reads what the tabl
 costs. The bound is pinned by the `id-*` probes of `tests/elle/oracle.lisp`,
 which measure id issuance per call against a live-growth discriminator of their
 own: a loop of calls that allocate nothing issues no new id, and a materializing
-call's id comes back by its teardown. `regionstore::tests::recycle` pins the
-store-level contract, the duplicate the generation check refuses included.
+call's id comes back by its teardown. `tests/elle/region-macro-id-recycle.lisp`
+gauges the expansion site the same way, against the same discriminator.
+`regionstore::tests::recycle` pins the store-level contract, the duplicate the
+generation check refuses included, and `arena::tests::macroscope` pins what the
+scope's open and close owe each other.
 
 ## RegionSlice contents share their object's region
 
