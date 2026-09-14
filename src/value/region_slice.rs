@@ -1,7 +1,8 @@
-// audited: 2026-09-08
+// audited: 2026-09-14
 //! `RegionSlice`: a `(ptr, len)` view into data owned by a region.
 //!
 //! docs/impl/region/model.md
+//! docs/impl/region/generations.md
 //!
 //! Used by immutable collection types (LString, LArray, LStruct, LBytes,
 //! LSet) and closure environments to store variable-length data contiguously
@@ -56,6 +57,16 @@ use std::fmt;
 pub struct RegionSlice<T: 'static> {
     ptr: *const T,
     len: u32,
+    /// The four bytes after `len`, written rather than left as padding.
+    ///
+    /// They land exactly where a page header's `size_tag` is read, and the
+    /// page-base walk reads that word at every `base_page`-aligned address
+    /// inside a larger page. A slice header on one of those addresses that
+    /// left these bytes alone would publish whatever the page's last occupant
+    /// wrote there, which can be a real `size_tag`
+    /// (docs/impl/region/generations.md). Zero can never be one — a `size_tag`
+    /// carries the magic in its high 24 bits.
+    tag_guard: u32,
 }
 
 impl<T: 'static> RegionSlice<T> {
@@ -64,6 +75,7 @@ impl<T: 'static> RegionSlice<T> {
         RegionSlice {
             ptr: std::ptr::NonNull::<T>::dangling().as_ptr(),
             len: 0,
+            tag_guard: 0,
         }
     }
 
@@ -72,7 +84,11 @@ impl<T: 'static> RegionSlice<T> {
     /// # Safety
     /// `ptr` must be aligned and valid for reading `len` elements, or `len` must be 0.
     pub unsafe fn from_raw(ptr: *const T, len: u32) -> Self {
-        RegionSlice { ptr, len }
+        RegionSlice {
+            ptr,
+            len,
+            tag_guard: 0,
+        }
     }
 
     /// Reconstruct a Rust slice. Safe given the crate-wide invariant that
@@ -118,9 +134,9 @@ impl<T: 'static> RegionSlice<T> {
     }
 }
 
-// Manual Clone/Copy: just copies the pointer and length.
-// Written manually rather than derived because `T` is not required to be Clone
-// or Copy — `RegionSlice` is still Copy regardless of T.
+// Manual Clone/Copy: a bitwise copy of the whole header. Written manually
+// rather than derived because `T` is not required to be Clone or Copy —
+// `RegionSlice` is still Copy regardless of T.
 impl<T: 'static> Copy for RegionSlice<T> {}
 impl<T: 'static> Clone for RegionSlice<T> {
     fn clone(&self) -> Self {
