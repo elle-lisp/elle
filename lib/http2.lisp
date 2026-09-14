@@ -1,4 +1,5 @@
 (elle/epoch 12)
+# audited: 2026-09-14
 ## lib/http2.lisp — HTTP/2 client and server for Elle
 ##
 ## Plain h2c (cleartext):
@@ -26,9 +27,13 @@
   (def transport ((import "std/http2/transport") :tls tls))
   (def session
     ((import "std/http2/session") :frame frame :stream stream :hpack hpack))
+  (def reader
+    ((import "std/http2/reader") :frame frame :stream stream :hpack hpack
+                                 :session session))
   (def server
     ((import "std/http2/server") :hpack hpack :frame frame :stream stream
-                                 :session session :tls tls :transport transport))
+                                 :session session :reader reader :tls tls
+                                 :transport transport))
 
   ## ── Convenience aliases ────────────────────────────────────────────────
 
@@ -119,7 +124,7 @@
       (put sess :writer-fiber (ev/spawn (fn [] (session:writer-loop sess))))
       (put sess
            :reader-fiber (ev/spawn (fn []
-                                     (session:read-loop sess
+                                     (reader:read-loop sess
                                      :on-headers (fn [sess s sid hdrs end?]
                                        (put s :headers hdrs)
                                        (when end?
@@ -295,15 +300,16 @@
 
   ## ── Client: close ──────────────────────────────────────────────────────
 
-  (defn h2-close [sess]
-    "Close an HTTP/2 session gracefully."
+  (defn h2-close [sess &named grace]
+    "Close an HTTP/2 session gracefully. Returns in bounded time however
+     the peer behaves: the writer fiber gets `grace` seconds (5 by
+     default) to flush GOAWAY, and is aborted when that runs out."
     (when (not sess:closed?)
       (put sess :closed? true)  # Close all stream data-queues so reader unblocks from any full-queue wait
       (each sid in (keys sess:streams)
         (when-let [s (get sess:streams sid)] (protect (s:data-queue:close))))
       (session:send-goaway sess sess:last-stream-id C:err-no-error)
-      (sess:write-queue:put :shutdown)
-      (when sess:writer-fiber (ev/join-protected sess:writer-fiber))  # Abort reader before closing transport — the reader may have a pending
+      (session:close-writer sess :grace grace)  # Abort reader before closing transport — the reader may have a pending
       # read on the socket (started by fuel preemption or concurrent sub-fiber).
       # Closing the fd while a read is in-flight causes partial-read errors.
       (when sess:reader-fiber
@@ -320,6 +326,7 @@
     (frame:test)
     (stream:test)
     (session:test)
+    (reader:test)
     (server:test)
 
     # ── URL parsing ──

@@ -1,37 +1,33 @@
 (elle/epoch 12)
-## tests/http2/modules.lisp — submodule unit tests
+# audited: 2026-09-14
+## tests/http2/modules.lisp — every h2 submodule's own unit tests
+##
+## One `let*` per module, built from the arguments that module takes, so
+## a module whose init signature changed fails here rather than in the
+## first program that loads it.
 
-(let [m ((import "std/http2/huffman"))]
-  (m:test))
+(def huffman ((import "std/http2/huffman")))
+(def hpack ((import "std/http2/hpack") :huffman huffman))
+(def frame ((import "std/http2/frame")))
+(def stream ((import "std/http2/stream") :frame frame))
+(def transport ((import "std/http2/transport")))
+(def session
+  ((import "std/http2/session") :frame frame :stream stream :hpack hpack))
+(def reader
+  ((import "std/http2/reader") :frame frame :stream stream :hpack hpack
+                               :session session))
+(def server
+  ((import "std/http2/server") :hpack hpack :frame frame :stream stream
+                               :session session :reader reader
+                               :transport transport))
 
-(let* [h ((import "std/http2/huffman"))
-       m ((import "std/http2/hpack") :huffman h)]
-  (m:test))
-
-(let [m ((import "std/http2/frame"))]
-  (m:test))
-
-(let* [s ((import "std/sync"))
-       f ((import "std/http2/frame"))
-       m ((import "std/http2/stream") :sync s :frame f)]
-  (m:test))
-
-(let* [s ((import "std/sync"))
-       f ((import "std/http2/frame"))
-       st ((import "std/http2/stream") :sync s :frame f)
-       h ((import "std/http2/hpack") :huffman ((import "std/http2/huffman")))
-       m ((import "std/http2/session") :sync s :frame f :stream st :hpack h)]
-  (m:test))
-
-(let* [s ((import "std/sync"))
-       f ((import "std/http2/frame"))
-       st ((import "std/http2/stream") :sync s :frame f)
-       h ((import "std/http2/hpack") :huffman ((import "std/http2/huffman")))
-       sess ((import "std/http2/session") :sync s :frame f :stream st :hpack h)
-       tr ((import "std/http2/transport"))
-       m ((import "std/http2/server") :sync s :hpack h :frame f :stream st
-                                      :session sess :transport tr)]
-  (m:test))
+(huffman:test)
+(hpack:test)
+(frame:test)
+(stream:test)
+(session:test)
+(reader:test)
+(server:test)
 
 (let [m ((import "std/http2"))]
   (m:test))

@@ -16,7 +16,8 @@ decisions that shape them, and the invariants that cross files.
 | `frame.lisp` | Frame codec: 9-byte header, ten frame types, builders, CONTINUATION |
 | `stream.lisp` | Stream state machine, per-stream flow control, the channel |
 | `transport.lisp` | Transport abstraction over TCP and TLS |
-| `session.lisp` | Session state, the shared reader loop, the writer loop, send helpers |
+| `session.lisp` | Session state, the writer loop and its shutdown, the send side |
+| `reader.lisp` | The frame reader both roles run |
 | `server.lisp` | Server connection handler and the accept loop |
 
 ## How a connection divides
@@ -30,11 +31,12 @@ handshake.
 
 ## Design decisions
 
-- **One reader loop for both roles.** `session:read-loop` handles every
+- **One reader loop for both roles.** `reader:read-loop` handles every
   frame type the same way for a client and a server. Two callbacks
   differ: `on-headers` enqueues on the client and spawns a handler on
   the server, and `on-goaway` records the state on the client and stops
-  the loop on the server.
+  the loop on the server. The reader imports the session and never the
+  other way round, so the send side knows nothing about who reads.
 
 - **One transport definition.** `transport.lisp` builds the TCP and TLS
   transports once, and both the client and the server import it.
