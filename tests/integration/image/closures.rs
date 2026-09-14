@@ -9,7 +9,7 @@ use std::rc::Rc;
 use super::*;
 use elle::hir::region::StaticRegion;
 use elle::hir::VarargKind;
-use elle::image::{self, ImageError};
+use elle::image::{self, ImageError, Sections};
 use elle::pipeline::eval_all;
 use elle::runtime::Runtime;
 use elle::signals::Signal;
@@ -231,6 +231,45 @@ fn two_headers_from_one_blueprint_hydrate_sharing_one_payload() {
         "the hydrated headers each carry a payload copy of their own"
     );
     assert_eq!(ha.template.bytecode(), &[3, 1, 4]);
+}
+
+// § Test plan, "Closures": the relocation stream records a shared payload's
+// slots once, however many headers name it. The counter-factual is a
+// per-header walk, which appends the payload's inner entries again for the
+// second header — exact duplicates, adjacent once the stream is sorted.
+#[test]
+fn a_shared_payloads_slots_relocate_once() {
+    let dir = crate::common::ScratchDir::new("image-closure-reloc-once");
+    let path = dir.join("pair.image");
+
+    let mut src = FiberHeap::new();
+    let region = src.new_runtime_region();
+    let proto = Rc::new(TemplateProto::new(
+        vec![3, 1, 4],
+        Arity::Exact(1),
+        vec![Value::int(6)],
+    ));
+    let a = closure_in(&mut src, region, &proto, &[], SignalBits::EMPTY);
+    let b = closure_in(&mut src, region, &proto, &[], SignalBits::EMPTY);
+    let root = alloc_pair(&mut src, region, a, b);
+    image::dump(&mut src, &SymbolTable::new(), root, &path).expect("dump");
+
+    let bytes = std::fs::read(&path).expect("read image");
+    let s = image::sections(&bytes).expect("a freshly dumped image parses");
+    let entry = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().expect("8 bytes"));
+    let entries: Vec<(u64, u64)> = s
+        .relocations
+        .clone()
+        .step_by(Sections::RELOC_BYTES)
+        .map(|e| (entry(e), entry(e + 8)))
+        .collect();
+    for pair in entries.windows(2) {
+        assert_ne!(
+            pair[0], pair[1],
+            "the relocation stream repeats an entry, so the shared payload \
+             was walked once per header"
+        );
+    }
 }
 
 // ── Refusals ────────────────────────────────────────────────────────
