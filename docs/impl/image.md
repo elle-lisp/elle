@@ -1,6 +1,6 @@
 # Images — regions hydrated at load
 
-<!-- audited: 2026-09-10 -->
+<!-- audited: 2026-09-14 -->
 
 Design for image-style persistence: one mechanism, two shipped configurations.
 
@@ -11,7 +11,7 @@ policy (see *One mechanism, two configurations*). This document owns the design
 argument. Five companions carry the rest:
 
 - [foundations.md](image/foundations.md) — the four representation fixes the
-  image needed first, all landed.
+  image rests on.
 - [sealing.md](image/sealing.md) — what the body may hold, what the hydrating
   instance rebuilds, and what fails the dump.
 - [format.md](image/format.md) — the file's sections, and the fingerprint that
@@ -107,8 +107,8 @@ environment-over-boot are simply the two depths this design ships.
   types). Load re-allocates every object, re-interns every symbol, and
   rebuilds every `Rc` — O(objects) allocator and decode work on every start,
   and the measured shape confirms it: deserialization dominates the cache-hit
-  path. The content-addressed *keying* survives in this design (the
-  warm-cache path below); the per-value decode does not.
+  path. This design keeps the content-addressed *keying* — the warm-cache
+  path below — and decodes no value.
 - **Position-independent (offset-based) pointers in the runtime
   representation.** Zero-fixup load, but every deref pays the add forever.
   The region system's point is raw-pointer deref; do not tax it for a load
@@ -136,7 +136,7 @@ environment-over-boot are simply the two depths this design ships.
   mapping's cost approaches a copy's: one implementation, kernel-enforced
   immutability, and a clean set that grows as the layout improves beat a
   second code path at equal cost.
-- **A constant-pool region owned by the code object** is still rejected for
+- **A constant-pool region owned by the code object** is rejected for
   ordinary constants ([region/model.md](region/model.md)); images do not
   change constant materialization. `MaterializeConst` keeps building fresh
   values per execution — image templates carry the same encoded
@@ -159,10 +159,9 @@ produce identical user-code compiles.
 `FnInlineRegistry` holds `HirFragment`s — HIR bodies closed over their own
 binding tables ([impl/hir.md](hir.md) § "A fragment is closed over its
 bindings") — so the registry is plain data that crosses a process boundary as
-it stands. The image records it the way the stdlib disk cache already does,
-with no re-derivation from syntax and no dependency on the syntax foundation.
-The parity test in [plan.md](image/plan.md) is the acceptance gate, and it
-belongs to the **boot** milestone, not a follow-up.
+it stands. The image records it the way the stdlib disk cache does, with no
+re-derivation from syntax. The parity test in [plan.md](image/plan.md) is the
+acceptance gate.
 
 ## Hydration
 
@@ -310,8 +309,8 @@ its discriminant byte and the leaf-field extents the layout probes record
 ([format.md](image/format.md) § Fingerprint) — an object slot, a struct entry
 whose key is an enum with padding of its own, and a syntax node, which is a
 struct with a `bool` in it around an enum. A `repr(Rust)` enum copy carries
-uninitialized padding from its construction temporary — the store spike
-measured this residue — so the dumper never copies a record wholesale; the
+uninitialized padding from its construction temporary, so the dumper never
+copies a record wholesale; the
 extent copy leaves padding out, and two dumps of the same graph are
 byte-identical whole files. The warm cache still keys on the fingerprint,
 not a content hash; whole-file determinism buys reproducible embedded blobs,
@@ -338,8 +337,6 @@ The LIR stream is not optional for the boot configuration. An image boot
 whose stdlib cannot reach the JIT tier trades startup for steady-state
 throughput — a deal-breaker, and a violation of the parity principle: the
 two boot modes must be indistinguishable to running code, tiers included.
-The stream ships inside the **boot** milestone, and tier parity is part of
-its acceptance gate.
 
 ## Build integration
 
@@ -387,7 +384,10 @@ a slice's backing bytes — an extent is checked from the `ptr` and `len` in
 the shell — so the clean set is untouched. A syntax object's root node rides
 in its shell, so that node's two extents are shell reads like any other; the
 nodes behind them are covered by the relocation bounds check, exactly as an
-array's elements are. The shells themselves are already
+array's elements are. A code payload's child table is checked one step
+further, because what it names is read back as a header rather than as data:
+each slot must name an object the index itself calls a header. The shells
+themselves are already
 resident: relocation writes a pointer slot in every object that has one, so
 the frames this walk reads are the frames it just dirtied
 (§ "The clean set is the currency"). An image whose objects hold no pointers

@@ -1,6 +1,6 @@
 # Sealing
 
-<!-- audited: 2026-09-13 -->
+<!-- audited: 2026-09-14 -->
 
 What an image's body may hold, what the hydrating instance rebuilds for itself,
 and what fails the dump.
@@ -53,8 +53,8 @@ blueprint is Rust-heap data and does not cross — a hydrated header carries
 none, and its slot hydrates as absent.
 
 Everything the payload answers is therefore identical after hydration:
-bytecode, constants, arity, signal, masks, locations, the region tables. The
-four blueprint-only answers degrade, each within the design:
+bytecode, constants, arity, signal, masks, locations, the region tables. Three
+blueprint-only answers degrade, each within the design:
 
 - The LIR the JIT promotes from is absent, so a hydrated closure runs on the
   interpreter tier until the encoded-LIR side-stream lands
@@ -62,14 +62,37 @@ four blueprint-only answers degrade, each within the design:
 - `meta/origin` answers nil.
 - The SPIR-V cache is absent; the GPU path already recompiles (§ "What the
   body refuses").
-- The nested-lambda blueprints a `MakeClosure` indexes cannot be absent —
-  the instruction would have nothing to build — so a template that carries
-  child blueprints fails the dump, naming the function. Child templates as
-  body data belong to the boot milestone ([plan.md](plan.md)).
 
-A closure a compiled WASM module built also fails the dump by name: its
-dispatch index names a function table of the module this process holds, which
-no other process can reopen.
+The fourth cannot degrade. The nested-lambda blueprints a `MakeClosure`
+indexes decide what that instruction builds, so an absent one leaves it with
+nothing — which is why they cross as body data instead (§ "A child code object
+crosses as a header").
+
+A closure a compiled WASM module built fails the dump by name: its dispatch
+index names a function table of the module this process holds, which no other
+process can reopen.
+
+## A child code object crosses as a header
+
+A payload carries a **child table**: the code objects this function's
+`MakeClosure` instructions index, in instruction order, each one a
+blueprint-less header in the body like the parent's own. So a `MakeClosure`
+has two places to find the code object it builds — the blueprint on a
+materialized header, the child table on a hydrated one — and materializes a
+fresh region-local header out of either. The header it builds is the same
+allocation in the same region under both boots.
+
+A live payload's child table is empty. Filling it at materialization would
+materialize the payload of every lambda a function nests, run or not, and a
+header that has a blueprint already answers from it. The dumper fills the
+table instead, because the blueprint is the part that does not cross: it walks
+the blueprint's children in order, materializes each child's payload through
+the heap's ordinary cache, and copies it like any other payload.
+
+A child's own children are its payload's child table, so a nest of any depth
+crosses by one rule. A child payload two parents name copies once, exactly as
+a payload two headers name does. A child that dispatches into a WASM module
+fails the dump where any other WASM closure does.
 
 ## Capture cells are snapped, not persisted
 

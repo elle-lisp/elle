@@ -1,6 +1,6 @@
 # Code objects — a blueprint, a payload, and a header
 
-<!-- audited: 2026-09-13 -->
+<!-- audited: 2026-09-14 -->
 
 A closure template is the code object of one lambda: its bytecode, constant
 pool, source locations, and the region tables its body needs. This doc owns the
@@ -129,6 +129,7 @@ heap memory, so the object's bytes *are* the object — the sealing property
 | frame-release slots / regions | `RegionSlice<u16>` / `RegionSlice<u32>`, ascending |
 | capture-locals mask | `RegionSlice<u64>` — the mask's words, unbounded in width |
 | strict-struct keys | `RegionSlice<RegionSlice<u8>>` — the `&named` key set |
+| children | `RegionSlice<Value>` — the code objects a `MakeClosure` indexes, empty until a dump fills it ([sealing.md](../image/sealing.md)) |
 | arity, param and local counts, signal, capture-params mask, vararg kind, WASM index | scalars, inline |
 
 Two of those changed shape rather than merely moving.
@@ -233,7 +234,7 @@ blueprint-less header answers each with absence:
 
 | Question | Answered by | Without a blueprint |
 |----------|-------------|---------------------|
-| Which blueprints do my `MakeClosure` instructions index? | `child_protos` | none — the dump refuses a template that has any, until child templates become body data |
+| Which code objects do my `MakeClosure` instructions index? | `child_protos` | the payload's child table, which the dumper fills because the blueprint cannot cross ([sealing.md](../image/sealing.md)) |
 | What LIR does the JIT promote me from? | `lir_function` | none — interpreter tier, until the encoded-LIR side-stream ([image.md](../image.md) § JIT) |
 | Where was I written? | `origin` | none — `meta/origin` answers nil |
 | What SPIR-V did `(git f)` compile for me? | `spirv` | none, and nothing caches — the GPU path recompiles ([sealing.md](../image/sealing.md)) |
@@ -246,8 +247,9 @@ payload, which is the part an image carries.
 `Code` — what the dispatch loop, the tail-call trampoline, and every suspended
 frame thread as the template-derived half of the execution context — is the
 header plus nothing. Bytecode, constants, locations, the merge set, and the two
-release tables all come from the payload; the nested-lambda blueprints and the
-reserved-local count come from the blueprint. So `Code` wraps a
+release tables all come from the payload, and so does the reserved-local
+count; the nested-lambda code objects come from whichever side the header has
+(§ "What the header still carries, and what removes it"). So `Code` wraps a
 `ClosureTemplate` and adds no fields of its own, and swapping the executing
 code object on a tail call copies two words and bumps one refcount.
 
