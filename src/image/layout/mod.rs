@@ -37,8 +37,10 @@ use crate::value::region_slice::RegionSlice;
 use crate::value::{TableKey, Value};
 
 /// One leaf field of a variant: `len` meaningful bytes at `offset` from the
-/// record's base. Leaf means padding-free — a field with interior padding
-/// (a `RegionSlice`) contributes one extent per inner field instead.
+/// record's base. Leaf means every byte of the extent means something — a
+/// field that is not one such run contributes one extent per inner field
+/// instead, which is how a `RegionSlice` is measured and why a `Parameter`'s
+/// four-byte `id` does not reach into the word it sits in.
 pub(crate) struct FieldExtent {
     pub name: &'static str,
     pub offset: usize,
