@@ -1,5 +1,9 @@
 # Signal Questions
 
+<!-- audited: 2026-09-07 -->
+
+What the signal design has not settled, and what it has.
+
 ## Open Questions
 
 ### Signal bit allocation
@@ -23,28 +27,29 @@ and faster. Current implementation: flat.
 ## Resolved Questions
 
 - **Signal resumption**: Yes. Resume value is pushed onto the child's operand
-  stack. See `docs/fibers.md`.
+  stack. See [fibers.md](fibers.md).
 
 - **Error representation**: Errors are values — by convention a struct
   `{:error :keyword :message "..."}`, but any value works. No `Condition`
   type, no signal hierarchy. Pattern matching on the payload replaces hierarchy
-  checks. See the "Error Signalling" section below.
+  checks. See [recovery.md](recovery.md).
 
 - **Coroutine pattern**: `yield` works as a special form (emits
   `SIG_YIELD`). A generator fiber is `(fiber/new fn |:yield|)`, resumed
   with `(fiber/resume f val)`. `try`/`catch` is a prelude macro.
 
-- **Signal erasure**: Signal bits are stored on the `Closure` struct
-  (`SignalBits` = 4 bytes per closure). Acceptable cost.
+- **Signal erasure**: A `ClosureTemplate` carries the code's signal, and a
+  `Closure` carries the squelch mask that narrows it — `effective_signal()`
+  combines the two. `SignalBits` wraps a `u64`. Acceptable cost.
 
 - **Compound signals**: Functions routinely carry multiple signal bits.
   A function that does I/O and can error has bits `|:error :io|`. The
   compiler infers compound signals by unioning the bits of all callees.
-  Compound signals that include `:io` receive special treatment: a fiber
-  mask that catches `:error` but not `:io` will *not* catch a compound
-  `:error :io` signal. The signal remains uncaught until a handler that
-  catches `:io` is reached — the scheduler must see the `:io` bit to
-  submit the operation to the backend.
+  No bit is privileged: a mask catches a compound signal when the two share
+  any bit, so `|:error|` catches `|:error :io|`. The scheduler still sees
+  every request it must service, because an I/O request raises `|:io|` and
+  carries no `:yield` — so a `|:yield|` mask shares no bit with one and
+  cannot swallow it. See [capabilities.md](capabilities.md).
 
 ---
 

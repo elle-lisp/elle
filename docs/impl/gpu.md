@@ -1,12 +1,16 @@
 # GPU Compute
 
+<!-- audited: 2026-09-07 -->
+
+How a plain Elle closure becomes a dispatched compute kernel, across the
+MLIR backend and the Vulkan plugin.
+
 > **Feature-gated:** End-to-end GPU compute requires `--features mlir`
 > (for compiler-generated SPIR-V) and the `vulkan` plugin built and
 > loadable. Tested on AMD RADV; any Vulkan 1.0 + `Int64` driver should
 > work.
 
-The GPU pipeline turns a plain Elle closure into a dispatched compute
-kernel. Three layers cooperate:
+Three layers cooperate:
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
@@ -40,8 +44,8 @@ What happens:
    :dtype dtype}`; one output buffer of size `n * elem-size`.
 6. Dispatch: `(plugin:dispatch shader wg-count 1 1 bufs)` returns a
    handle.
-7. Suspend the fiber: `(plugin:wait handle)` blocks on the GPU fence
-   fd via `IoOp::Task` (no thread pool thread is held).
+7. Suspend the fiber: `(plugin:wait handle)` polls the GPU fence fd
+   through the scheduler (no thread pool thread is held).
 8. Decode: `(plugin:decode (plugin:collect handle) dtype)` produces
    an Elle array.
 
@@ -79,26 +83,27 @@ etc. See `lib/spirv.lisp` for the full opcode surface and
 
 `vulkan/init` creates `VkInstance` + `VkDevice` + queue (one of each;
 no multi-device support). The state is wrapped in
-`Arc<Mutex<VulkanState>>` so it can be cloned into Send closures for
-the thread pool.
+`Arc<Mutex<VulkanState>>`, which is what lets a shader hold the context
+it was built against and lock it again at dispatch.
 
 `vulkan/shader` accepts SPIR-V either as bytes (compiler-generated or
 loaded into Elle) or as a string path to a `.spv` file, then builds
 a `VkComputePipeline` with one storage buffer per binding.
 
-`vulkan/submit` is the only async primitive. It:
+`vulkan/dispatch` allocates the GPU buffers, uploads the input data,
+records the dispatch, and submits it to the queue. It returns a handle
+carrying the fence FD, and it does not wait.
 
-1. Takes an array of buffer specs.
-2. Builds a Send closure that allocates GPU buffers, uploads input
-   data, records the dispatch, submits to the queue, waits on a
-   fence FD.
-3. Returns `(SIG_IO, IoRequest::task(closure))` — the fiber suspends,
-   the thread pool runs the closure, the fiber resumes with the result
-   bytes.
+`vulkan/wait` is the only async primitive. It returns
+`SIG_YIELD | SIG_IO` with a poll request on the handle's fence FD, so the
+fiber suspends until the GPU signals the fence and no thread-pool thread
+is held.
 
-Numeric data is extracted from Elle arrays into `Vec<f32>` (or
-`Vec<i64>`, etc., per `dtype`) **before** the closure is built — the
-closure carries plain `Vec<T>` so it satisfies `Send`.
+`vulkan/collect` reads the result bytes once the fence has signalled.
+
+`vulkan/submit` does all three in one call. It blocks the calling thread
+on `wait_for_fences` rather than suspending the fiber, because the stable
+ABI exposes no `IoRequest::task` for a plugin to return.
 
 `vulkan/decode` parses the result-bytes envelope:
 
@@ -157,10 +162,19 @@ plugins/vulkan/src/decode.rs     Result bytes → Elle array
 | `vulkan/init` | errors | Create Vulkan context |
 | `vulkan/shader` | errors | Build a compute pipeline from SPIR-V |
 | `vulkan/dispatch` | errors | Submit a compute dispatch (returns handle) |
-| `vulkan/wait` | yields+io+errors | Block on the GPU fence |
+| `vulkan/wait` | yields+io+errors | Suspend on the GPU fence fd |
 | `vulkan/collect` | errors | Read result bytes |
 | `vulkan/decode` | errors | Bytes → Elle array (per dtype) |
-| `vulkan/submit` | yields+io+errors | One-shot dispatch + wait |
+| `vulkan/submit` | errors | One-shot dispatch + wait, blocking the thread |
+| `vulkan/f32-bits` | errors | IEEE 754 f32 bit pattern of a number |
+| `vulkan/persist` | errors | Create a persistent GPU buffer |
+| `vulkan/update` | errors | Re-upload data to a persistent GPU buffer |
+
+No primitive here declares `:gpu`, so denying that bit withholds none of
+them. The one primitive that declares `:gpu` is `git`, which compiles a
+closure to SPIR-V and dispatches nothing. What a capability for the GPU
+would have to ask instead is in
+[signals/authority.md](../signals/authority.md).
 
 ## Configuration
 

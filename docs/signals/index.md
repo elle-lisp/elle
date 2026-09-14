@@ -1,5 +1,7 @@
 # Signals
 
+<!-- audited: 2026-09-07 -->
+
 Elle's unified signal and capability system. Two directions:
 
 - **Signals flow up** — from callee to caller. Inferred at compile time,
@@ -13,6 +15,7 @@ Elle's unified signal and capability system. Two directions:
 |------|---------|
 | [emit](emit.md) | `emit` special form, yield/error macros, signal emission |
 | [capabilities](capabilities.md) | Capability enforcement, `:deny`, `fiber/caps` |
+| [authority](authority.md) | What holds authority, and where a fiber's right to spend it is asked |
 | [design](design.md) | Motivation, prior art, terminology, core insight |
 | [protocol](protocol.md) | Signal protocol, registry, user signals |
 | [inference](inference.md) | Compile-time verification, restrictions |
