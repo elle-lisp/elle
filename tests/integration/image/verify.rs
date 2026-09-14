@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-14
 // What the verifier refuses: a table entry that would send a write, a read,
 // or a rebuild outside the image.
 // docs/impl/image.md
@@ -536,6 +536,91 @@ fn a_misaligned_payload_is_refused() {
         ImageError::Corrupt(what) => assert!(
             what.contains("misaligned"),
             "the refusal does not name the misalignment: {what}"
+        ),
+        other => panic!("expected a corrupt-image refusal, got {other:?}"),
+    }
+}
+
+/// A lone closure whose one `MakeClosure` indexes a child, so the image
+/// carries two headers and the child slot between them.
+fn dumped_parent(dir: &crate::common::ScratchDir) -> (Vec<u8>, Sections) {
+    dumped_value(dir, |heap, region| {
+        let mut proto = TemplateProto::new(vec![7, 1, 4], Arity::Exact(0), Vec::new());
+        proto.child_protos = vec![std::rc::Rc::new(TemplateProto::new(
+            vec![2, 2],
+            Arity::Exact(0),
+            Vec::new(),
+        ))];
+        let template = TemplateRef::region(materialize(heap, &std::rc::Rc::new(proto), region));
+        let env = heap.alloc_region_slice_in_region::<Value>(&[], region);
+        heap.alloc_in_region(
+            HeapObject::Closure {
+                closure: Closure::new(template, env, SignalBits::EMPTY),
+                traits: Value::NIL,
+            },
+            region,
+        )
+    })
+}
+
+/// Every `(entry, slot, target)` the relocation stream carries, in file
+/// offsets for the entry and pages-relative offsets for the two words.
+fn relocations(bytes: &[u8], s: &Sections) -> Vec<(usize, usize, usize)> {
+    s.relocations
+        .clone()
+        .step_by(Sections::RELOC_BYTES)
+        .map(|e| (e, get_u64(bytes, e) as usize, get_u64(bytes, e + 8) as usize))
+        .collect()
+}
+
+/// The pages-relative offsets of every object the index gives `tag`.
+fn indexed(bytes: &[u8], s: &Sections, tag: HeapTag) -> Vec<usize> {
+    s.index
+        .clone()
+        .step_by(Sections::INDEX_BYTES)
+        .filter(|&e| get_u64(bytes, e + 8) == tag as u64)
+        .map(|e| get_u64(bytes, e) as usize)
+        .collect()
+}
+
+// A child slot's target is read back as a header — its payload slice
+// dereferenced, its blueprint word checked — so it is the one slot whose
+// target must be an object the index itself calls a header. Aimed at the
+// closure instance instead, every range and alignment check still passes:
+// the target is an indexed object inside the image, just not this kind of
+// one (docs/impl/image/sealing.md § "A child code object crosses as a
+// header").
+#[test]
+fn a_child_slot_naming_a_non_header_is_refused() {
+    let dir = crate::common::ScratchDir::new("image-child-slot");
+    let (mut bytes, s) = dumped_parent(&dir);
+    let relocs = relocations(&bytes, &s);
+    let headers = indexed(&bytes, &s, HeapTag::ClosureTemplate);
+    assert_eq!(headers.len(), 2, "the image carries a parent and a child");
+    let instance = indexed(&bytes, &s, HeapTag::Closure)[0];
+
+    // The parent is the header the closure instance's own shell names; the
+    // child is the other one, and the slot naming it is the child table's.
+    let shell = instance..instance + std::mem::size_of::<HeapObject>();
+    let parent = relocs
+        .iter()
+        .find(|&&(_, slot, target)| shell.contains(&slot) && headers.contains(&target))
+        .map(|&(_, _, target)| target)
+        .expect("the closure names its template");
+    let child = *headers
+        .iter()
+        .find(|&&h| h != parent)
+        .expect("the parent and the child are two objects");
+    let (entry, ..) = *relocs
+        .iter()
+        .find(|&&(_, _, target)| target == child)
+        .expect("the child table names the child");
+
+    put_u64(&mut bytes, entry + 8, instance as u64);
+    match refusal(&bytes) {
+        ImageError::Corrupt(what) => assert!(
+            what.contains("header"),
+            "the refusal does not name the header: {what}"
         ),
         other => panic!("expected a corrupt-image refusal, got {other:?}"),
     }

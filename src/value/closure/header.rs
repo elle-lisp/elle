@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-14
 //! `ClosureTemplate` — the region-resident header of a code object.
 //!
 //! Two words: a `RegionSlice` naming the shared payload, and an optional `Rc`
@@ -40,6 +40,14 @@ pub struct ClosureTemplate {
     /// none — its payload backing is image pages no cache sweeps — and answers
     /// the four questions with absence (docs/impl/image/sealing.md).
     proto: Option<Rc<TemplateProto>>,
+}
+
+/// One code object a `MakeClosure` indexes: the blueprint a materialized
+/// header carries, or the header an image's body carries beside its parent
+/// (docs/impl/image/sealing.md).
+pub enum ChildCode<'a> {
+    Blueprint(&'a Rc<TemplateProto>),
+    Header(ClosureTemplate),
 }
 
 impl std::fmt::Debug for ClosureTemplate {
@@ -234,6 +242,16 @@ impl ClosureTemplate {
             .as_ref()
             .map(|p| p.child_protos.as_slice())
             .unwrap_or(&[])
+    }
+
+    /// How many code objects this one's `MakeClosure` instructions index.
+    pub fn num_children(&self) -> usize {
+        self.child_protos().len()
+    }
+
+    /// The code object the `MakeClosure` at `idx` builds.
+    pub fn child(&self, idx: usize) -> ChildCode<'_> {
+        ChildCode::Blueprint(&self.child_protos()[idx])
     }
 
     #[inline]

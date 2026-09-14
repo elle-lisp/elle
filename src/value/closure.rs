@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-14
 // docs/impl/region/template.md
 //! Closure type for the Elle runtime
 //!
@@ -22,7 +22,7 @@ mod header;
 mod payload;
 mod proto;
 
-pub use header::ClosureTemplate;
+pub use header::{ChildCode, ClosureTemplate};
 pub use payload::{CodePayload, LocEntry, LocationTable, MaskRef, MergedSlots, StrKeys, VarargTag};
 pub use proto::{materialize, TemplateProto, WasmClosureMeta};
 
