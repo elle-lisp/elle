@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-14
 //! What the file gets from the copied graph: page bytes, the four relocation
 //! streams, the object index, and the two watermarks.
 //!
@@ -333,6 +333,13 @@ impl Emitted {
         }
         self.values_backing(&p.constants, at, backings)?;
         for v in p.constants.iter() {
+            self.value_slot(v, at)?;
+        }
+        // A child is a header object of its own, so the walk above reaches it
+        // like any other live object and this records only the slot that
+        // names it (docs/impl/image/sealing.md).
+        self.values_backing(&p.children, at, backings)?;
+        for v in p.children.iter() {
             self.value_slot(v, at)?;
         }
         if let Some((rel, src)) = self.slice_backing(&p.locations, at)? {

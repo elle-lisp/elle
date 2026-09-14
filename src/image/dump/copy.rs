@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-14
 //! The compacting copy: what the dumper accepts into an image's body, and
 //! the spellings it records on the way through.
 //!
@@ -12,8 +12,8 @@
 //! that may name a process-owned resource — a `traits` field and a
 //! `Parameter`'s `default` — either copy as program data or become a
 //! reconstruction the hydrating instance answers for itself. A closure's
-//! code payload copies once per blueprint, and its header crosses without
-//! the blueprint (docs/impl/image/sealing.md).
+//! header crosses without its blueprint; code.rs owns what the payload
+//! behind it costs (docs/impl/image/sealing.md).
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -33,6 +33,7 @@ use crate::value::{TableKey, Value};
 
 use super::super::format::{Ctor, Stdio};
 use super::super::layout;
+use super::code::copy_payload;
 use super::{primitive_name, ImageError};
 
 /// What the copying walk carries: the sharing map, and the spellings met so
@@ -42,7 +43,13 @@ pub(super) struct Walk<'a> {
     visited: HashMap<usize, Value>,
     /// Source code-payload backing → its copy, so two headers materialized
     /// from one blueprint keep one payload copy (docs/impl/image/sealing.md).
-    payloads: HashMap<usize, RegionSlice<CodePayload>>,
+    /// code.rs is the only reader.
+    pub(super) payloads: HashMap<usize, RegionSlice<CodePayload>>,
+    /// Source code-payload backing → the body header the walk built for it as
+    /// somebody's child. Keyed like `payloads`, because one payload is one
+    /// code object, and separate from it because a child table names the
+    /// header rather than the payload.
+    pub(super) children: HashMap<usize, Value>,
     /// The dumping instance's display memo, read for spellings.
     memo: &'a SymbolTable,
     /// The spellings met, deduplicated and ordered by name — the order the
@@ -61,6 +68,7 @@ impl<'a> Walk<'a> {
         Walk {
             visited: HashMap::new(),
             payloads: HashMap::new(),
+            children: HashMap::new(),
             memo,
             names: BTreeSet::new(),
             reconstructions: HashMap::new(),
@@ -367,80 +375,6 @@ pub(super) fn copy_value(
     }
     walk.visited.insert(key, copy);
     Ok(copy)
-}
-
-/// Copy one code payload into the scratch region, deduplicated on the source
-/// backing so every header from one blueprint keeps one copy. Constants go
-/// through the value walk; every other field is plain data.
-///
-/// The two refusals live here because only the blueprint can answer them: a
-/// template whose `MakeClosure` instructions index child blueprints would
-/// hydrate as a closure that cannot build its lambdas, and a WASM-built
-/// closure dispatches through a function table this process holds
-/// (docs/impl/image/sealing.md).
-fn copy_payload(
-    heap: &mut FiberHeap,
-    region: RuntimeRegion,
-    t: &ClosureTemplate,
-    walk: &mut Walk,
-) -> Result<RegionSlice<CodePayload>, ImageError> {
-    if !t.child_protos().is_empty() {
-        return Err(ImageError::Unsupported(format!(
-            "closure {} builds nested lambdas, which the body cannot carry yet \
-             (docs/impl/image/sealing.md)",
-            t.display_label()
-        )));
-    }
-    if t.wasm_func_idx().is_some() {
-        return Err(ImageError::Unsupported(format!(
-            "closure {} dispatches into a WASM module this process holds, so no \
-             image carries it",
-            t.display_label()
-        )));
-    }
-    let key = t.payload_backing() as usize;
-    if let Some(&copy) = walk.payloads.get(&key) {
-        return Ok(copy);
-    }
-    let src = *t.payload();
-    let mut constants = Vec::with_capacity(src.constants.len());
-    for &c in src.constants.iter() {
-        constants.push(copy_value(heap, region, c, walk)?);
-    }
-    let payload = CodePayload {
-        bytecode: heap.alloc_region_slice_in_region(src.bytecode.as_slice(), region),
-        constants: heap.alloc_region_slice_in_region(&constants, region),
-        locations: heap.alloc_region_slice_in_region(src.locations.as_slice(), region),
-        files: copy_bytes_slices(heap, region, &src.files),
-        name: heap.alloc_region_slice_in_region(src.name.as_slice(), region),
-        doc: heap.alloc_region_slice_in_region(src.doc.as_slice(), region),
-        region_table: heap.alloc_region_slice_in_region(src.region_table.as_slice(), region),
-        merged_slots: heap.alloc_region_slice_in_region(src.merged_slots.as_slice(), region),
-        frame_release_slots: heap
-            .alloc_region_slice_in_region(src.frame_release_slots.as_slice(), region),
-        frame_release_regions: heap
-            .alloc_region_slice_in_region(src.frame_release_regions.as_slice(), region),
-        capture_locals: heap.alloc_region_slice_in_region(src.capture_locals.as_slice(), region),
-        strict_keys: copy_bytes_slices(heap, region, &src.strict_keys),
-        ..src
-    };
-    let copy = heap.alloc_region_slice_in_region(&[payload], region);
-    walk.payloads.insert(key, copy);
-    Ok(copy)
-}
-
-/// Copy a slice of byte slices — a payload's interned file names, or its
-/// `&named` key set — every element's bytes landing in the scratch region.
-fn copy_bytes_slices(
-    heap: &mut FiberHeap,
-    region: RuntimeRegion,
-    src: &RegionSlice<RegionSlice<u8>>,
-) -> RegionSlice<RegionSlice<u8>> {
-    let mut copies = Vec::with_capacity(src.len());
-    for inner in src.iter() {
-        copies.push(heap.alloc_region_slice_in_region(inner.as_slice(), region));
-    }
-    heap.alloc_region_slice_in_region(&copies, region)
 }
 
 /// Copy one struct key into the scratch region: its own value goes through

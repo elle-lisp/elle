@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-14
 // docs/impl/region/template.md
 // docs/impl/image/sealing.md
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
@@ -75,6 +75,12 @@ pub struct CodePayload {
     pub(crate) capture_locals: RegionSlice<u64>,
     /// The `&named` key set, empty unless `vararg` is `StrictStruct`.
     pub(crate) strict_keys: RegionSlice<RegionSlice<u8>>,
+    /// The code objects this function's `MakeClosure` instructions index, in
+    /// instruction order, each a `HeapObject::ClosureTemplate`. Empty on a
+    /// materialized payload, because the header that owns it answers from its
+    /// blueprint; the image dumper fills it, because the blueprint is the
+    /// part that cannot cross (docs/impl/image/sealing.md).
+    pub(crate) children: RegionSlice<Value>,
     pub(crate) arity: Arity,
     pub(crate) signal: Signal,
     pub(crate) capture_params_mask: u64,
@@ -262,6 +268,7 @@ impl CodePayload {
             frame_release_regions: RegionSlice::empty(),
             capture_locals: RegionSlice::empty(),
             strict_keys: RegionSlice::empty(),
+            children: RegionSlice::empty(),
             arity: Arity::Exact(0),
             signal: Signal::silent(),
             capture_params_mask: 0,
@@ -318,6 +325,12 @@ impl CodePayload {
 
     pub fn strict_keys(&self) -> StrKeys<'_> {
         StrKeys::new(self.strict_keys.as_slice())
+    }
+
+    /// The code objects a `MakeClosure` indexes, empty unless this payload
+    /// came out of an image (docs/impl/image/sealing.md).
+    pub fn children(&self) -> &[Value] {
+        self.children.as_slice()
     }
 
     pub fn arity(&self) -> Arity {

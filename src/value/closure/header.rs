@@ -32,21 +32,29 @@ pub struct ClosureTemplate {
     /// backing lands in its own region instead — a self-edge.
     payload: RegionSlice<CodePayload>,
     /// The blueprint this header came from — the one Rust-heap owner left on a
-    /// code object. It answers what the payload cannot yet hold: the
+    /// code object. It answers what the payload does not hold: the
     /// nested-lambda blueprints a `MakeClosure` indexes, the LIR the JIT
     /// promotes from, the defining span, and the SPIR-V cache. Holding it
     /// strongly is also what stops the heap's payload cache from sweeping a
     /// payload this header still reads. A header hydrated from an image has
     /// none — its payload backing is image pages no cache sweeps — and answers
-    /// the four questions with absence (docs/impl/image/sealing.md).
+    /// three of those four with absence. The fourth comes off the payload's
+    /// child table instead (docs/impl/image/sealing.md).
     proto: Option<Rc<TemplateProto>>,
 }
 
 /// One code object a `MakeClosure` indexes: the blueprint a materialized
 /// header carries, or the header an image's body carries beside its parent
 /// (docs/impl/image/sealing.md).
+///
+/// The two are the same question answered from the two sides a header can
+/// have, so every reader of one reads the other — a `MakeClosure`
+/// materializing a fresh header, the dumper copying a child into the body,
+/// the `send` encoder rebuilding a blueprint for a worker.
 pub enum ChildCode<'a> {
+    /// Compile-time data, held by the header that was materialized from it.
     Blueprint(&'a Rc<TemplateProto>),
+    /// A body header, read out of the parent payload's child table.
     Header(ClosureTemplate),
 }
 
@@ -229,29 +237,67 @@ impl ClosureTemplate {
         self.payload().wasm_func_idx()
     }
 
+    // ── children ───────────────────────────────────────────────────────
+    //
+    // A `MakeClosure` indexes these, and both sides of a header answer:
+    // blueprints where there is a blueprint, the payload's child table where
+    // there is not (docs/impl/image/sealing.md). Read them through
+    // [`Self::child`], which is the only place that decides which side
+    // answers.
+
+    /// How many code objects this one's `MakeClosure` instructions index.
+    #[inline]
+    pub fn num_children(&self) -> usize {
+        match self.proto.as_ref() {
+            Some(p) => p.child_protos.len(),
+            None => self.payload().children().len(),
+        }
+    }
+
+    /// The code object the `MakeClosure` at `idx` builds.
+    ///
+    /// Panics for an index past the table, as a constant-pool read does: the
+    /// index is baked into the instruction by the emitter that registered the
+    /// child, so an out-of-range one is a corrupt code object.
+    pub fn child(&self, idx: usize) -> ChildCode<'_> {
+        let Some(proto) = self.proto.as_ref() else {
+            let value = self.payload().children()[idx];
+            let obj: &'static crate::value::heap::HeapObject =
+                unsafe { crate::value::arena::deref(value) };
+            let crate::value::heap::HeapObject::ClosureTemplate(child) = obj else {
+                unreachable!(
+                    "a child table entry is a code object, got {}",
+                    obj.type_name()
+                );
+            };
+            return ChildCode::Header(child.clone());
+        };
+        ChildCode::Blueprint(&proto.child_protos[idx])
+    }
+
+    /// A header over this one's payload and no blueprint, which is what a
+    /// `MakeClosure` materializes from a hydrated child: the instruction
+    /// allocates a fresh header per creation whichever side answered, so the
+    /// two boots build one shape (docs/impl/image/sealing.md).
+    #[inline]
+    pub(crate) fn without_blueprint(&self) -> ClosureTemplate {
+        ClosureTemplate::new(self.payload, None)
+    }
+
     // ── blueprint ──────────────────────────────────────────────────────
     //
-    // Each of these answers with absence for a blueprint-less header. The
-    // dump refuses a template with child blueprints, so the empty-children
-    // answer is never a lie a `MakeClosure` could act on
-    // (docs/impl/image/sealing.md).
+    // Each of these answers with absence for a blueprint-less header.
 
+    /// The blueprints this header's `MakeClosure` instructions index, for the
+    /// readers that want compile-time data and nothing else. A hydrated
+    /// header has none and answers empty; dispatch goes through
+    /// [`Self::child`], which reads the child table instead.
     #[inline]
     pub fn child_protos(&self) -> &[Rc<TemplateProto>] {
         self.proto
             .as_ref()
             .map(|p| p.child_protos.as_slice())
             .unwrap_or(&[])
-    }
-
-    /// How many code objects this one's `MakeClosure` instructions index.
-    pub fn num_children(&self) -> usize {
-        self.child_protos().len()
-    }
-
-    /// The code object the `MakeClosure` at `idx` builds.
-    pub fn child(&self, idx: usize) -> ChildCode<'_> {
-        ChildCode::Blueprint(&self.child_protos()[idx])
     }
 
     #[inline]

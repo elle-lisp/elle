@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-14
 // docs/impl/region/template.md
 //! `TemplateProto` — a code object's compile-time blueprint.
 //!
@@ -322,6 +322,11 @@ pub(super) fn materialize_payload(
         frame_release_regions,
         capture_locals,
         strict_keys,
+        // The blueprint answers for the children of a header that has one,
+        // so materializing this table would materialize the payload of every
+        // lambda the function nests, run or not
+        // (docs/impl/image/sealing.md).
+        children: RegionSlice::empty(),
         arity: proto.arity,
         signal: proto.signal,
         capture_params_mask: proto.capture_params_mask,

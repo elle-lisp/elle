@@ -1,3 +1,8 @@
+// audited: 2026-09-14
+// docs/impl/vm.md
+//! The interpreter's inner loop: decode one opcode, route it, and check what
+//! the handler left on the fiber.
+
 use super::*;
 
 // The dispatch match and its longest inline opcode bodies live in submodules;
@@ -6,6 +11,7 @@ use super::*;
 // method-call syntax, not by name path.
 mod opcodes;
 mod params;
+mod scalar;
 mod signals;
 
 impl VM {

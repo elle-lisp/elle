@@ -1,12 +1,16 @@
-//! The bytecode dispatch match.
+// audited: 2026-09-14
+// docs/impl/vm.md
+// docs/impl/bytecode.md
+//! The bytecode dispatch match: one decoded instruction routed to its handler.
 //!
-//! Extracted verbatim from the inner execution loop so the loop root stays a
-//! thin fuel/signal/decode harness. `dispatch_instruction` is the single arm of
-//! that harness: it routes one already-decoded instruction to its handler.
+//! Extracted from the inner execution loop so the loop root stays a thin
+//! fuel/signal/decode harness. `dispatch_instruction` is the single arm of that
+//! harness. The opcodes whose whole effect is on the operand stack are handled
+//! in scalar.rs, and the arm that routes there names every one of them.
 //!
-//! `#[inline]` is load-bearing — the loop is hot and the match must fold back
-//! into the caller so the harness's fall-through and the handlers stay in one
-//! function body, exactly as before the split.
+//! `#[inline]` is what keeps the cost down: the loop is hot and the match must
+//! fold back into the caller, so the harness's fall-through and the handlers
+//! stay in one function body.
 //!
 //! Contract: `Some((bits, ip))` means the enclosing loop must return that value
 //! (exit dispatch); `None` means fall through to the loop's post-handler signal
@@ -151,14 +155,7 @@ impl VM {
             // Closures
             Instruction::MakeClosure => {
                 let region = self.read_static_region(bc, ip);
-                closure::handle_make_closure(
-                    self,
-                    bc,
-                    ip,
-                    code.child_protos(),
-                    region,
-                    code.merged_slots(),
-                );
+                closure::handle_make_closure(self, bc, ip, code, region);
             }
 
             // Data structures
@@ -230,116 +227,68 @@ impl VM {
                 data::handle_array_ref_or_nil(self, bc, ip);
             }
 
-            // Arithmetic (integer)
-            Instruction::AddInt => {
-                arithmetic::handle_add_int(self);
-            }
-            Instruction::SubInt => {
-                arithmetic::handle_sub_int(self);
-            }
-            Instruction::MulInt => {
-                arithmetic::handle_mul_int(self);
-            }
-            Instruction::DivInt => {
-                arithmetic::handle_div_int(self);
-            }
-
-            // Arithmetic (polymorphic)
-            Instruction::Add => {
-                arithmetic::handle_add(self);
-            }
-            Instruction::Sub => {
-                arithmetic::handle_sub(self);
-            }
-            Instruction::Mul => {
-                arithmetic::handle_mul(self);
-            }
-            Instruction::Div => {
-                arithmetic::handle_div(self);
-            }
-            Instruction::Rem => {
-                arithmetic::handle_rem(self);
-            }
-
-            // Bitwise operations
-            Instruction::BitAnd => {
-                arithmetic::handle_bit_and(self);
-            }
-            Instruction::BitOr => {
-                arithmetic::handle_bit_or(self);
-            }
-            Instruction::BitXor => {
-                arithmetic::handle_bit_xor(self);
-            }
-            Instruction::BitNot => {
-                arithmetic::handle_bit_not(self);
-            }
-            Instruction::Shl => {
-                arithmetic::handle_shl(self);
-            }
-            Instruction::Shr => {
-                arithmetic::handle_shr(self);
-            }
-
-            // Type conversions
-            Instruction::IntToFloat => {
-                arithmetic::handle_int_to_float(self);
-            }
-            Instruction::FloatToInt => {
-                arithmetic::handle_float_to_int(self);
-            }
-
-            // Comparisons
-            Instruction::Eq => {
-                comparison::handle_eq(self);
-            }
-            Instruction::Lt => {
-                comparison::handle_lt(self);
-            }
-            Instruction::Gt => {
-                comparison::handle_gt(self);
-            }
-            Instruction::Le => {
-                comparison::handle_le(self);
-            }
-            Instruction::Ge => {
-                comparison::handle_ge(self);
-            }
-
-            // Type checks
-            Instruction::IsNil => {
-                types::handle_is_nil(self);
-            }
-            Instruction::IsEmptyList => {
-                types::handle_is_empty_list(self);
-            }
-            Instruction::IsPair => {
-                types::handle_is_pair(self);
-            }
-            Instruction::IsArray => {
-                types::handle_is_array(self);
-            }
-            Instruction::IsArrayMut => {
-                types::handle_is_array_mut(self);
-            }
-            Instruction::IsStruct => {
-                types::handle_is_struct(self);
-            }
-            Instruction::IsStructMut => {
-                types::handle_is_struct_mut(self);
-            }
-            Instruction::ArrayMutLen => {
-                types::handle_array_len(self);
-            }
-            Instruction::IsNumber => {
-                types::handle_is_number(self);
-            }
-            Instruction::IsSymbol => {
-                types::handle_is_symbol(self);
-            }
-            Instruction::Not => {
-                types::handle_not(self);
-            }
+            // The stack-only opcodes: each takes its operands off the stack
+            // and pushes a result, so none reads the bytecode, advances the
+            // ip, or asks the code object anything (scalar.rs). Every one is
+            // named here rather than caught by a wildcard, so a new opcode
+            // still fails to compile until some arm claims it.
+            Instruction::AddInt
+            | Instruction::SubInt
+            | Instruction::MulInt
+            | Instruction::DivInt
+            | Instruction::Add
+            | Instruction::Sub
+            | Instruction::Mul
+            | Instruction::Div
+            | Instruction::Rem
+            | Instruction::BitAnd
+            | Instruction::BitOr
+            | Instruction::BitXor
+            | Instruction::BitNot
+            | Instruction::BitNotIntr
+            | Instruction::Shl
+            | Instruction::Shr
+            | Instruction::IntToFloat
+            | Instruction::FloatToInt
+            | Instruction::Eq
+            | Instruction::Ne
+            | Instruction::Lt
+            | Instruction::Gt
+            | Instruction::Le
+            | Instruction::Ge
+            | Instruction::Identical
+            | Instruction::IsNil
+            | Instruction::IsEmptyList
+            | Instruction::IsPair
+            | Instruction::IsArray
+            | Instruction::IsArrayMut
+            | Instruction::IsStruct
+            | Instruction::IsStructMut
+            | Instruction::IsSet
+            | Instruction::IsSetMut
+            | Instruction::IsBool
+            | Instruction::IsInt
+            | Instruction::IsFloat
+            | Instruction::IsString
+            | Instruction::IsKeyword
+            | Instruction::IsBytes
+            | Instruction::IsBox
+            | Instruction::IsClosure
+            | Instruction::IsFiber
+            | Instruction::IsNumber
+            | Instruction::IsSymbol
+            | Instruction::Not
+            | Instruction::TypeOf
+            | Instruction::ArrayMutLen
+            | Instruction::Length
+            | Instruction::IntrGet
+            | Instruction::IntrPut
+            | Instruction::IntrDel
+            | Instruction::IntrHas
+            | Instruction::IntrPush
+            | Instruction::IntrStringPush
+            | Instruction::IntrBytesPush
+            | Instruction::IntrPop => self.dispatch_scalar(instr),
 
             // Literals
             Instruction::Nil => {
@@ -458,76 +407,6 @@ impl VM {
             Instruction::PopParamFrame => {
                 self.fiber.param_frames.pop();
             }
-            Instruction::IsSet => {
-                types::handle_is_set(self);
-            }
-            Instruction::IsSetMut => {
-                types::handle_is_set_mut(self);
-            }
-            // New intrinsic opcodes
-            Instruction::Ne => {
-                types::handle_ne(self);
-            }
-            Instruction::BitNotIntr => {
-                types::handle_bit_not_intr(self);
-            }
-            Instruction::IsBool => {
-                types::handle_is_bool(self);
-            }
-            Instruction::IsInt => {
-                types::handle_is_int(self);
-            }
-            Instruction::IsFloat => {
-                types::handle_is_float(self);
-            }
-            Instruction::IsString => {
-                types::handle_is_string(self);
-            }
-            Instruction::IsKeyword => {
-                types::handle_is_keyword(self);
-            }
-            Instruction::IsBytes => {
-                types::handle_is_bytes(self);
-            }
-            Instruction::IsBox => {
-                types::handle_is_box(self);
-            }
-            Instruction::IsClosure => {
-                types::handle_is_closure(self);
-            }
-            Instruction::IsFiber => {
-                types::handle_is_fiber(self);
-            }
-            Instruction::TypeOf => {
-                types::handle_type_of(self);
-            }
-            Instruction::Length => {
-                types::handle_length(self);
-            }
-            Instruction::IntrGet => {
-                types::handle_intr_get(self);
-            }
-            Instruction::IntrPut => {
-                types::handle_intr_put(self);
-            }
-            Instruction::IntrDel => {
-                types::handle_intr_del(self);
-            }
-            Instruction::IntrHas => {
-                types::handle_intr_has(self);
-            }
-            Instruction::IntrPush => {
-                types::handle_intr_push(self);
-            }
-            Instruction::IntrStringPush => {
-                types::handle_intr_string_push(self);
-            }
-            Instruction::IntrBytesPush => {
-                types::handle_intr_bytes_push(self);
-            }
-            Instruction::IntrPop => {
-                types::handle_intr_pop(self);
-            }
             Instruction::IntrFreeze => {
                 // IntrFreeze allocates a fresh immutable container
                 // holding the source's entries. The lowerer's
@@ -549,9 +428,6 @@ impl VM {
                 let region_id =
                     self.runtime_region_for_alloc_slot_maybe_merged(region, code.merged_slots());
                 types::handle_intr_thaw(self, region_id);
-            }
-            Instruction::Identical => {
-                types::handle_identical(self);
             }
             Instruction::CheckSignalBound => {
                 self.handle_check_signal_bound(bc, ip);

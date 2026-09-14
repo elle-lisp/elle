@@ -1,11 +1,11 @@
-// audited: 2026-09-13
+// audited: 2026-09-14
 //! The code-payload half of the layout probe: where a `CodePayload` keeps
 //! each field, the `Arity` probe, and the writer that assembles one.
 //!
 //! docs/impl/image/format.md
 //! docs/impl/image/sealing.md
 //!
-//! A payload is the widest record the dumper writes: twelve slice headers, a
+//! A payload is the widest record the dumper writes: thirteen slice headers, a
 //! `repr(Rust)` arity, a signal, and a tail of scalars and flags. Copying one
 //! would carry its construction temporary's padding into the artifact, so a
 //! payload is assembled from these offsets like an object slot is.
@@ -79,11 +79,11 @@ impl Probed for Arity {
     }
 }
 
-/// Where a payload keeps each field: the twelve slice headers by name, and
+/// Where a payload keeps each field: the thirteen slice headers by name, and
 /// the scalar tail. Measured once; the fingerprint records the result.
 pub(crate) struct PayloadOffsets {
     /// `(name, offset)` per `RegionSlice` field, in declaration order.
-    pub slices: [(&'static str, usize); 12],
+    pub slices: [(&'static str, usize); 13],
     pub arity: usize,
     pub signal_bits: usize,
     pub signal_propagates: usize,
@@ -120,6 +120,7 @@ pub(crate) fn payload_offsets() -> &'static PayloadOffsets {
             ),
             ("capture_locals", offset_of!(CodePayload, capture_locals)),
             ("strict_keys", offset_of!(CodePayload, strict_keys)),
+            ("children", offset_of!(CodePayload, children)),
         ],
         arity: offset_of!(CodePayload, arity),
         signal_bits: offset_of!(CodePayload, signal) + offset_of!(Signal, bits),

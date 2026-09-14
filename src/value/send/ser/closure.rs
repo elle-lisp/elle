@@ -1,3 +1,5 @@
+// audited: 2026-09-14
+// docs/threads.md
 //! Serializing a live closure instance into the bundle's intern table.
 //!
 //! Split from the value-tag `match` because the closure arm is by far the
@@ -9,7 +11,7 @@ use super::super::*;
 use super::ctx::SerContext;
 use super::from_value_inner;
 use super::lir::convert_lir_for_send;
-use super::template::sendable_from_template;
+use super::template::sendable_from_child;
 
 /// Serialize a closure instance reached at heap value `value`, interning it
 /// into `ctx.closures` with cycle detection and returning a `Ref` to its slot.
@@ -98,13 +100,12 @@ pub(super) fn send_closure(
         None => (None, Vec::new()),
     };
 
-    // Serialize the nested-lambda blueprints so the worker's reconstructed
-    // template carries them and `MakeClosure` resolves by index.
-    let child_protos: Vec<SendableClosure> = closure_rc
-        .template
-        .child_protos()
-        .iter()
-        .map(|p| sendable_from_template(p, ctx))
+    // Serialize the nested lambdas' code objects so the worker's reconstructed
+    // template carries them and `MakeClosure` resolves by index. A hydrated
+    // closure answers with body headers rather than blueprints, and the worker
+    // rebuilds a blueprint out of either (docs/impl/image/sealing.md).
+    let child_protos: Vec<SendableClosure> = (0..closure_rc.template.num_children())
+        .map(|i| sendable_from_child(closure_rc.template.child(i), ctx))
         .collect::<Result<_, _>>()?;
 
     // Replace placeholder with complete entry.

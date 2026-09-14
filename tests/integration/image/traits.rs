@@ -1,22 +1,10 @@
-// audited: 2026-09-10
+// audited: 2026-09-14
 // What a `traits` field crosses as: the instance's own table on one side, and
 // program data on the other.
 // docs/impl/image.md
 
 use super::*;
-use elle::image::{self, ImageError};
-use elle::primitives::traitregistry::init_default_traits;
-use elle::value::heap::deref;
 use elle::value::HeapTag;
-
-/// A heap with its default trait tables built, as VM init leaves one. Every
-/// collection a running program allocates carries a pointer into these, so a
-/// bare `FiberHeap` is not the instance an image ever meets.
-fn traited_heap() -> FiberHeap {
-    let mut heap = FiberHeap::new();
-    init_default_traits(&mut heap);
-    heap
-}
 
 /// An array of one int carrying `traits`, dumped to `path`. The array is the
 /// image's only object, so its traits slot is the only one in the file.

@@ -1,6 +1,7 @@
-//! The fresh-frame invariant of a frame-replacing tail call: a callee entered
-//! by `TailCall` sees every local slot it has not written as NIL, exactly as a
-//! fresh activation does.
+// audited: 2026-09-14
+// docs/impl/region/mechanism.md
+//! A `TailCall` callee sees every local slot it has not written as NIL,
+//! exactly as a fresh activation does.
 //!
 //! The compiler leans on that invariant: a branch-arm-bound ANF temp is
 //! NIL-initialized only inside its own arm, yet its value-based release
@@ -38,9 +39,10 @@ fn tail_call_frame_delivers_nil_locals() {
     // as a constant, exactly as compiled code reaches a callee through a slot.
     let heap = unsafe { &mut *heap_ptr };
     let callee_region = heap.new_runtime_region();
+    let callee_proto = std::rc::Rc::new(callee_bc.into_proto());
     let callee_value = crate::vm::closure::materialize_closure_in_region(
         heap,
-        &std::rc::Rc::new(callee_bc.into_proto()),
+        crate::value::closure::ChildCode::Blueprint(&callee_proto),
         &[],
         callee_region,
     );

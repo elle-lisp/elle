@@ -1,17 +1,24 @@
-// audited: 2026-09-13
+// audited: 2026-09-14
 // The image store milestone: dump a sealed value graph, hydrate it by
 // private file mapping, and prove the mechanism end to end.
 // docs/impl/image/plan.md
 //
 // An image is page bytes plus relocations, hydrated into an ordinary counted
 // region. The submodules below hold the test plan's pins, and this file holds
-// the graph every one of them dumps.
+// what they share: the graph every one of them dumps, the closures several of
+// them build, and the damage-and-hydrate harness the refusals run through.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 use elle::hir::region::RuntimeRegion;
+use elle::image::{self, ImageError, Sections};
+use elle::runtime::Runtime;
+use elle::value::closure::materialize;
+use elle::value::fiber::SignalBits;
 use elle::value::fiberheap::FiberHeap;
-use elle::value::{HeapObject, Pair, SymbolId, TableKey, Value};
+use elle::value::heap::{deref, Closure};
+use elle::value::{HeapObject, Pair, SymbolId, TableKey, TemplateProto, TemplateRef, Value};
 use elle::SymbolTable;
 
 /// The keyword and the symbol [`build_graph`] carries. Neither spelling is in
@@ -171,6 +178,127 @@ fn dump_graph(src: &mut FiberHeap, path: &std::path::Path) -> Value {
     root
 }
 
+// ── Closure scaffolding ─────────────────────────────────────────────
+
+/// A closure over `proto`, its env holding `env_vals`, allocated in `region`.
+fn closure_in(
+    heap: &mut FiberHeap,
+    region: RuntimeRegion,
+    proto: &Rc<TemplateProto>,
+    env_vals: &[Value],
+    squelch: SignalBits,
+) -> Value {
+    let template = TemplateRef::region(materialize(heap, proto, region));
+    let env = heap.alloc_region_slice_in_region(env_vals, region);
+    heap.alloc_in_region(
+        HeapObject::Closure {
+            closure: Closure::new(template, env, squelch),
+            traits: Value::NIL,
+        },
+        region,
+    )
+}
+
+fn closure_of(v: Value) -> &'static Closure {
+    let HeapObject::Closure { closure, .. } = (unsafe { deref(v) }) else {
+        panic!("the value is not a closure");
+    };
+    closure
+}
+
+/// Dump `root` and expect a refusal whose message contains `named`.
+fn refused(src: &mut FiberHeap, root: Value, path: &std::path::Path, named: &str) {
+    match image::dump(src, &SymbolTable::new(), root, path) {
+        Err(ImageError::Unsupported(what)) => assert!(
+            what.contains(named),
+            "the refusal does not name {named}: {what}"
+        ),
+        other => panic!("expected a refused dump, got {other:?}"),
+    }
+    assert!(!path.exists(), "a refused dump left a partial file");
+}
+
+/// Hydrate `path` into `rt` and bind its root as `hydrated-f`, so a call
+/// reaches it through the ordinary dispatch path. Answers the root.
+fn bind_hydrated(rt: &mut Runtime, path: &std::path::Path) -> Value {
+    let hydrated = {
+        let (heap, symbols) = rt.heap_and_symbols();
+        image::hydrate_path(heap, symbols, path).expect("hydrate")
+    };
+    let (signal, arity) = {
+        let closure = hydrated
+            .root
+            .as_closure()
+            .expect("the hydrated root is a closure");
+        (closure.template.signal(), closure.template.arity())
+    };
+    let sym = rt.symbols().intern("hydrated-f");
+    {
+        let (cctx, heap) = rt.compile_and_heap();
+        cctx.register_repl_binding(heap, sym, hydrated.root, signal, Some(arity));
+    }
+    hydrated.root
+}
+
+// ── Damaged images ──────────────────────────────────────────────────
+
+/// A heap with its default trait tables built, as VM init leaves one — the
+/// instance an image is dumped from and hydrated into.
+fn traited_heap() -> FiberHeap {
+    let mut heap = FiberHeap::new();
+    elle::primitives::traitregistry::init_default_traits(&mut heap);
+    heap
+}
+
+/// Dump one lone value and answer its bytes and section ranges. The graph is
+/// the caller's, so a test can put a single object in the image and know
+/// exactly where its inline data sits.
+fn dumped_value(
+    dir: &crate::common::ScratchDir,
+    build: impl FnOnce(&mut FiberHeap, RuntimeRegion) -> Value,
+) -> (Vec<u8>, Sections) {
+    let path = dir.join("lone.image");
+    let mut src = traited_heap();
+    let region = src.new_runtime_region();
+    let root = build(&mut src, region);
+    image::dump(&mut src, &graph_names(), root, &path).expect("dump");
+    let bytes = std::fs::read(&path).expect("read image");
+    let sections = image::sections(&bytes).expect("a freshly dumped image parses");
+    (bytes, sections)
+}
+
+/// Hydrate `bytes` in a fresh heap and answer the refusal, asserting the
+/// failed load left neither a region nor page bytes behind.
+fn refusal(bytes: &[u8]) -> ImageError {
+    let source = image::ImageSource::from_bytes(bytes).expect("anonymous file");
+    let mut dst = traited_heap();
+    let regions_before = dst.active_region_count();
+    let bytes_before = dst.allocated_bytes();
+    let err = match image::hydrate(&mut dst, &mut SymbolTable::new(), &source) {
+        Err(e) => e,
+        Ok(_) => panic!("the damaged image hydrated instead of being refused"),
+    };
+    assert_eq!(
+        dst.active_region_count(),
+        regions_before,
+        "a refused hydration minted a region"
+    );
+    assert_eq!(
+        dst.allocated_bytes(),
+        bytes_before,
+        "a refused hydration left pages mapped into the heap"
+    );
+    err
+}
+
+fn put_u64(bytes: &mut [u8], at: usize, v: u64) {
+    bytes[at..at + 8].copy_from_slice(&v.to_le_bytes());
+}
+
+fn get_u64(bytes: &[u8], at: usize) -> u64 {
+    u64::from_le_bytes(bytes[at..at + 8].try_into().expect("8 bytes"))
+}
+
 mod roundtrip {
     include!("image/roundtrip.rs");
 }
@@ -189,6 +317,9 @@ mod names {
 mod closures {
     include!("image/closures.rs");
 }
+mod children {
+    include!("image/children.rs");
+}
 mod primitives {
     include!("image/primitives.rs");
 }
@@ -203,4 +334,7 @@ mod syntax {
 }
 mod verify {
     include!("image/verify.rs");
+}
+mod headers {
+    include!("image/headers.rs");
 }
