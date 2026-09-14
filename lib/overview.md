@@ -1,0 +1,33 @@
+# lib
+
+<!-- audited: 2026-09-14 -->
+
+Reusable Elle modules, one closure each: `(import "std/name")` gives you the closure, and calling it returns the struct of exports.
+
+A module that depends on another module or on a plugin takes it as an
+argument. The export struct at the bottom of a module's source is the
+list of what it offers, and `(doc name)` gives a function its contract.
+A guide here therefore carries only what the source cannot: the wire
+shapes, the flow between fibers, and the invariants a caller breaks at
+its own cost.
+
+## Modules
+
+| File | Purpose | Guide |
+|------|---------|-------|
+| [http.lisp](http.lisp) | HTTP/1.1 client and server over TCP | [http.md](http.md) |
+| [http2.lisp](http2.lisp) | HTTP/2 client and server (h2 over TLS, h2c cleartext) | [http2.md](http2.md) |
+| [http2/](http2/AGENTS.md) | HTTP/2 submodules: huffman, hpack, frame, stream, session, server | [http2/overview.md](http2/overview.md) |
+| [websocket.lisp](websocket.lisp) | WebSocket client and server (RFC 6455, ws:// and wss://) | |
+| [grpc.lisp](grpc.lisp) | gRPC client over HTTP/2 with length-prefixed framing | |
+| [tls.lisp](tls.lisp) | TLS 1.2/1.3 client and server, with ALPN | [tls.md](tls.md) |
+| [redis.lisp](redis.lisp) | Redis client (RESP2) over TCP | [redis.md](redis.md) |
+| [dns.lisp](dns.lisp) | DNS client (RFC 1035) | |
+| [aws.lisp](aws.lisp) | AWS client: SigV4 signing, HTTPS, service dispatch | [aws/](aws/AGENTS.md) |
+| [contract.lisp](contract.lisp) | Compositional validation for function boundaries | |
+| [lua.lisp](lua.lisp) | Lua standard library compatibility prelude | |
+| [process.lisp](process.lisp) | Erlang-style processes, GenServer, Actor, Supervisor | [process.md](process.md) |
+| [irc.lisp](irc.lisp) | IRCv3 client: CAP negotiation, SASL PLAIN, message tags | [irc.md](irc.md) |
+| [sync.lisp](sync.lisp) | Lock, semaphore, condvar, rwlock, barrier, latch, once, queue, monitor | |
+| [spirv.lisp](spirv.lisp) | SPIR-V compute shader emitter | |
+| [gpu.lisp](gpu.lisp) | GPU compute over the vulkan plugin and the SPIR-V emitter | |
