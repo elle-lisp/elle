@@ -11,7 +11,7 @@
 //! (backing.rs holds the writers), so no construction temporary's padding
 //! reaches the artifact.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem::size_of;
 
 use crate::hir::region::StaticRegion;
@@ -111,6 +111,10 @@ pub(super) fn emit(
         param_watermark: 0,
     };
     let mut backings: Vec<Backing> = Vec::new();
+    // Image offsets of the payloads already walked: a shared payload's inner
+    // slots relocate once, however many headers name it (docs/impl/image/plan.md
+    // § Test plan, "Closures"). Membership only — never iterated.
+    let mut payloads_walked: HashSet<u64> = HashSet::new();
 
     for obj in pool.into_iter().flat_map(|p| p.live_objects()) {
         let addr = obj as *const HeapObject as usize;
@@ -183,11 +187,15 @@ pub(super) fn emit(
             // behind it is a record of its own, assembled from probed
             // offsets like a node is. The blueprint field is not probed, so
             // the canonical shell leaves it zero and it hydrates as absent.
+            // A later header naming the same payload records its own slot
+            // and nothing else.
             HeapObject::ClosureTemplate(t) => {
                 if let Some((rel, _)) = out.slice_backing(t.payload_slice(), at)? {
-                    let payload = t.payload();
-                    backings.push(Backing::payload(rel, payload));
-                    out.payload(payload, at, &mut backings)?;
+                    if payloads_walked.insert(rel) {
+                        let payload = t.payload();
+                        backings.push(Backing::payload(rel, payload));
+                        out.payload(payload, at, &mut backings)?;
+                    }
                 }
             }
             HeapObject::Float(_) => {}

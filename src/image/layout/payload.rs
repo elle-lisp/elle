@@ -1,3 +1,4 @@
+// audited: 2026-09-13
 //! The code-payload half of the layout probe: where a `CodePayload` keeps
 //! each field, the `Arity` probe, and the writer that assembles one.
 //!
