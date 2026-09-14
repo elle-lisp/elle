@@ -89,7 +89,11 @@ Then the image milestones:
 - Verifier: each of a relocation slot outside the image, a relocation slot
   that is not 8-byte aligned, a `RegionSlice` whose extent leaves the image,
   and a page cursor that disagrees with the object index fails the load with
-  a named error and leaves no region and no mapping behind.
+  a named error and leaves no region and no mapping behind. A closure header
+  is refused the same way four ways: a nonzero blueprint word (the one bit
+  pattern teardown could hurt on — a fabricated `Rc`), a header naming zero
+  payloads, a payload landing misaligned, and a payload field whose extent
+  leaves the image.
 - Hygiene: hydrate, run, exit — the live region count returns to baseline
   and the leak suite stays green with no image-specific carve-out. Free the
   hydrated region explicitly under `--trace=guardfree` and assert the
@@ -115,7 +119,10 @@ Then the image milestones:
   and the JIT is never entered. A template carrying child blueprints, a
   WASM-dispatch closure, and an env holding a capture cell each refuse the
   dump with a named error. A dumped closure writes one file across two
-  dumps, whatever its construction temporaries held.
+  dumps, whatever its construction temporaries held. The relocation stream
+  records a shared payload's slots once, however many headers name it — the
+  counter-factual is a per-header walk, which appends every inner entry
+  again for each header and grows the tables with the header count.
 - Traits: a value carrying its instance's default traitset hydrates carrying
   the *hydrating* instance's table for that tag, and a user traitset hydrates
   out of the body with its methods intact. The counter-factual is the identity
