@@ -1,6 +1,6 @@
 // audited: 2026-09-14
-// What a macro scope's open and close owe each other: the transient argument
-// region's physical id comes back, once, whatever the expansion did with it.
+// What a macro scope's open and close owe each other: the transient region's
+// physical id comes back, and comes back once.
 //
 // docs/impl/region/model.md
 

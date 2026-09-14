@@ -287,12 +287,12 @@ scope's open and close owe each other.
 
 ## RegionSlice contents share their object's region
 
-Non-obvious and load-bearing: immutable aggregates (string, array, struct, and a
-**closure's captured env**) store their variable-length payload as an
-`RegionSlice` laid out *in the same region pages* as the HeapObject header. Such
-contents therefore have **no** region of their own and **no** cross-region RC
-edge — their lifetime *is* the containing object's region's lifetime. Freeing the
-object's region frees its inline payload with it.
+Non-obvious, and every claim below rests on it. Immutable aggregates (string,
+array, struct, and a **closure's captured env**) store their variable-length
+payload as a `RegionSlice` laid out *in the same region pages* as the HeapObject
+header. Such contents therefore have **no** region of their own and **no**
+cross-region RC edge — their lifetime *is* the containing object's region's
+lifetime. Freeing the object's region frees its inline payload with it.
 
 The consequence to keep in mind: a closure's captured environment dies with the
 closure's region. A prematurely-freed closure region surfaces as a *torn
