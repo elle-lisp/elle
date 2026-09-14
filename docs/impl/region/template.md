@@ -1,6 +1,6 @@
 # Code objects — a blueprint, a payload, and a header
 
-<!-- audited: 2026-09-10 -->
+<!-- audited: 2026-09-14 -->
 
 A closure template is the code object of one lambda: its bytecode, constant
 pool, source locations, and the region tables its body needs. This doc owns the
@@ -22,7 +22,9 @@ and different lifetimes:
   once per heap and shared by every header built from that blueprint.
 - **`ClosureTemplate`** — the region-resident *header*, the thing
   `HeapObject::ClosureTemplate` holds. It is two words: a `RegionSlice` naming
-  its payload, and an `Rc` to the blueprint it came from.
+  its payload, and an optional `Rc` to the blueprint it came from — present on
+  every header `MakeClosure` materializes, absent on a hydrated one
+  (§ "What the header still carries, and what removes it").
 
 A closure instance references a header; a header references a payload; a
 blueprint owns the right to materialize more headers. `MakeClosure` builds a
@@ -115,6 +117,10 @@ Every field is inline in region pages. Nothing in a `CodePayload` owns Rust
 heap memory, so the object's bytes *are* the object — the sealing property
 [sealing.md](../image/sealing.md) requires of body data.
 
+One field holds a process-local number inside those bytes: the origin span's
+file id indexes a process-wide interner, exactly as a syntax node's does, so an
+image rewrites it from the file table ([format.md](../image/format.md)).
+
 | Field | Representation |
 |-------|----------------|
 | bytecode | `RegionSlice<u8>` |
@@ -127,6 +133,8 @@ heap memory, so the object's bytes *are* the object — the sealing property
 | frame-release slots / regions | `RegionSlice<u16>` / `RegionSlice<u32>`, ascending |
 | capture-locals mask | `RegionSlice<u64>` — the mask's words, unbounded in width |
 | strict-struct keys | `RegionSlice<RegionSlice<u8>>` — the `&named` key set |
+| children | `RegionSlice<Value>` — the code objects a `MakeClosure` indexes, empty until a dump fills it ([sealing.md](../image/sealing.md)) |
+| origin | a `Span` and a present flag — where the lambda was written, for `meta/origin` |
 | arity, param and local counts, signal, capture-params mask, vararg kind, WASM index | scalars, inline |
 
 Two of those changed shape rather than merely moving.
@@ -223,26 +231,34 @@ packed into it dies, and by teardown otherwise.
 ## What the header still carries, and what removes it
 
 The header's `Rc<TemplateProto>` is the one Rust-heap owner left on a code
-object. It answers four questions the payload does not hold, and two of them
-leave as their milestones land:
+object, and it is optional: `MakeClosure` materializes every header with one,
+and a header hydrated from an image has none
+([sealing.md](../image/sealing.md) § "A closure crosses without its
+blueprint"). It answers three questions the payload does not hold, and a
+blueprint-less header answers each with absence:
 
-| Question | Answered by | Leaves with |
-|----------|-------------|-------------|
-| Which blueprints do my `MakeClosure` instructions index? | `child_protos` | the image milestone, when child templates become body data |
-| What LIR does the JIT promote me from? | `lir_function` | the encoded-LIR side-stream ([image.md](../image.md) § JIT) |
-| Where was I written? | `origin` | nothing — a `Span` is plain bytes, so the payload could hold it |
-| What SPIR-V did `(git f)` compile for me? | `spirv` | nothing — the GPU path recompiles ([sealing.md](../image/sealing.md)) |
+| Question | Answered by | Without a blueprint |
+|----------|-------------|---------------------|
+| Which code objects do my `MakeClosure` instructions index? | `child_protos` | the payload's child table, which the dumper fills because the blueprint cannot cross ([sealing.md](../image/sealing.md)) |
+| What LIR does the JIT promote me from? | `lir_function` | none — interpreter tier, until the encoded-LIR side-stream ([image.md](../image.md) § JIT) |
+| What SPIR-V did `(git f)` compile for me? | `spirv` | none, and nothing caches — the GPU path recompiles ([sealing.md](../image/sealing.md)) |
 
-Until then the census classifies `ClosureTemplate` as sealed on the strength of
-its payload, which is the part an image would carry.
+"Where was I written?" is not among them. A defining span is twenty bytes of
+plain data, so the payload carries it and `meta/origin` answers the same on
+either side of a dump. Materializing it costs a copy of those bytes, where the
+child table would cost the payload of every lambda the function nests.
+
+The census classifies `ClosureTemplate` as sealed on the strength of its
+payload, which is the part an image carries.
 
 ## The executing context is the header
 
 `Code` — what the dispatch loop, the tail-call trampoline, and every suspended
 frame thread as the template-derived half of the execution context — is the
 header plus nothing. Bytecode, constants, locations, the merge set, and the two
-release tables all come from the payload; the nested-lambda blueprints and the
-reserved-local count come from the blueprint. So `Code` wraps a
+release tables all come from the payload, and so does the reserved-local
+count; the nested-lambda code objects come from whichever side the header has
+(§ "What the header still carries, and what removes it"). So `Code` wraps a
 `ClosureTemplate` and adds no fields of its own, and swapping the executing
 code object on a tail call copies two words and bumps one refcount.
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-11
+// audited: 2026-09-13
 //! Image persistence: an image is the page bytes of one compacted region plus
 //! a relocation table, and hydration maps those pages privately.
 //!
@@ -9,10 +9,10 @@
 //! tables into the hydrating instance, runs the reconstruction stream, raises
 //! the watermarked counters, and installs the result as an ordinary counted
 //! region. The body carries the whole sealed data set: pairs, strings, bytes,
-//! arrays, sets, structs, syntax, floats, parameters, user trait tables, and
-//! the portable immediates — symbols, keywords and native-fns among them.
-//! Closures and the boot and environment configurations arrive with the later
-//! milestones (docs/impl/image/plan.md).
+//! arrays, sets, structs, syntax, floats, parameters, user trait tables,
+//! closures and their code objects, and the portable immediates — symbols,
+//! keywords and native-fns among them. The boot and environment
+//! configurations arrive with the later milestones (docs/impl/image/plan.md).
 
 mod dump;
 mod format;

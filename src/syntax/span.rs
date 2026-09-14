@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-14
 //! Source location tracking: where a form came from, in bytes a region can
 //! hold.
 //!
@@ -28,6 +28,12 @@ pub struct Span {
     pub col: u32,
     file: FileId,
 }
+
+/// A span is five `u32`s with nothing between them, so the records that carry
+/// one copy it as a single extent rather than probing five
+/// (docs/impl/image/format.md). A field added between them would make that
+/// copy carry padding into an image.
+const _: () = assert!(std::mem::size_of::<Span>() == 5 * std::mem::size_of::<u32>());
 
 impl Span {
     pub fn new(start: usize, end: usize, line: u32, col: u32) -> Self {

@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-13
 //! What the layout probe answers for: the probed set, and what canonical
 //! bytes keep and drop.
 //!
@@ -20,7 +20,8 @@ fn probes_cover_exactly_the_dumpable_set() {
     }
     assert_eq!(HeapObject::layouts().len(), HeapObject::TAGS.len());
     assert!(!dumpable(HeapTag::LArrayMut));
-    assert!(!dumpable(HeapTag::Closure));
+    assert!(dumpable(HeapTag::Closure));
+    assert!(dumpable(HeapTag::ClosureTemplate));
 }
 
 // Every key an immutable struct can hold is probed, because a struct the

@@ -1,4 +1,4 @@
-// audited: 2026-09-11
+// audited: 2026-09-14
 //! The compacting copy: what the dumper accepts into an image's body, and
 //! the spellings it records on the way through.
 //!
@@ -11,7 +11,9 @@
 //! as a struct key — leaves its spelling in the name table. The two fields
 //! that may name a process-owned resource — a `traits` field and a
 //! `Parameter`'s `default` — either copy as program data or become a
-//! reconstruction the hydrating instance answers for itself.
+//! reconstruction the hydrating instance answers for itself. A closure's
+//! header crosses without its blueprint; code.rs owns what the payload
+//! behind it costs (docs/impl/image/sealing.md).
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -19,8 +21,10 @@ use crate::hir::region::RuntimeRegion;
 use crate::port::Port;
 use crate::symbol::SymbolTable;
 use crate::syntax::SyntaxArena;
+use crate::value::closure::{Closure, ClosureTemplate, CodePayload, TemplateRef};
 use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::{deref, HeapObject, Pair};
+use crate::value::region_slice::RegionSlice;
 use crate::value::repr::{
     TAG_EMPTY_LIST, TAG_FALSE, TAG_FLOAT, TAG_INT, TAG_KEYWORD, TAG_NATIVE_FN, TAG_NIL, TAG_SYMBOL,
     TAG_TRUE,
@@ -29,6 +33,7 @@ use crate::value::{TableKey, Value};
 
 use super::super::format::{Ctor, Stdio};
 use super::super::layout;
+use super::code::copy_payload;
 use super::{primitive_name, ImageError};
 
 /// What the copying walk carries: the sharing map, and the spellings met so
@@ -36,6 +41,15 @@ use super::{primitive_name, ImageError};
 pub(super) struct Walk<'a> {
     /// Source payload address → its copy in the scratch region.
     visited: HashMap<usize, Value>,
+    /// Source code-payload backing → its copy, so two headers materialized
+    /// from one blueprint keep one payload copy (docs/impl/image/sealing.md).
+    /// code.rs is the only reader.
+    pub(super) payloads: HashMap<usize, RegionSlice<CodePayload>>,
+    /// Source code-payload backing → the body header the walk built for it as
+    /// somebody's child. Keyed like `payloads`, because one payload is one
+    /// code object, and separate from it because a child table names the
+    /// header rather than the payload.
+    pub(super) children: HashMap<usize, Value>,
     /// The dumping instance's display memo, read for spellings.
     memo: &'a SymbolTable,
     /// The spellings met, deduplicated and ordered by name — the order the
@@ -53,6 +67,8 @@ impl<'a> Walk<'a> {
     pub(super) fn new(memo: &'a SymbolTable) -> Self {
         Walk {
             visited: HashMap::new(),
+            payloads: HashMap::new(),
+            children: HashMap::new(),
             memo,
             names: BTreeSet::new(),
             reconstructions: HashMap::new(),
@@ -312,6 +328,35 @@ pub(super) fn copy_value(
             },
             region,
         ),
+        // A closure is its template, its env, and its squelch mask. The env
+        // values go through the ordinary walk, so a capture cell in one
+        // refuses here as unsealed data until snapping lands
+        // (docs/impl/image/sealing.md).
+        HeapObject::Closure { closure, .. } => {
+            let template = copy_value(heap, region, closure.template.value(), walk)?;
+            let mut env = Vec::with_capacity(closure.env.len());
+            for &slot in closure.env.iter() {
+                env.push(copy_value(heap, region, slot, walk)?);
+            }
+            let env = heap.alloc_region_slice_in_region(&env, region);
+            heap.alloc_in_region(
+                HeapObject::Closure {
+                    closure: Closure::new(TemplateRef::region(template), env, closure.squelch_mask),
+                    traits: carried,
+                },
+                region,
+            )
+        }
+        // A header crosses as its payload alone: the blueprint is Rust-heap
+        // data the hydrating instance never holds, so the copy carries none
+        // and the hydrated header answers its questions with absence.
+        HeapObject::ClosureTemplate(t) => {
+            let payload = copy_payload(heap, region, t, walk)?;
+            heap.alloc_in_region(
+                HeapObject::ClosureTemplate(ClosureTemplate::new(payload, None)),
+                region,
+            )
+        }
         HeapObject::Float(f) => heap.alloc_in_region(HeapObject::Float(*f), region),
         other => {
             return Err(ImageError::Unsupported(format!(

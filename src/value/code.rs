@@ -1,10 +1,13 @@
+// audited: 2026-09-14
+// docs/impl/region/template.md
 //! The template-derived execution context.
 //!
 //! When the VM runs a function body, it threads everything that comes from the
 //! function's *code object* through the dispatch loop, the tail-call
 //! trampoline, and the suspend/resume frames: the bytecode, the constant pool,
-//! the location table, the nested-lambda blueprints, and the function's region
-//! tables. These always travel together — they are the same code object — so
+//! the location table, the nested lambdas' code objects, and the function's
+//! region tables. These always travel together — they are the same code
+//! object — so
 //! `Code` carries the code object itself rather than a bundle of parts.
 //!
 //! Since a [`ClosureTemplate`] is a payload slice plus a blueprint pointer
@@ -18,10 +21,8 @@
 //! instance of the same lambda. The VM threads `(code, env)` as the full
 //! execution context; a tail call to a different function swaps both.
 
-use std::rc::Rc;
-
 use crate::hir::region::StaticRegion;
-use crate::value::closure::{ClosureTemplate, LocationTable, MergedSlots, TemplateProto};
+use crate::value::closure::{ChildCode, ClosureTemplate, LocationTable, MergedSlots};
 use crate::value::Value;
 
 /// A code object's executable context. See the module docs.
@@ -60,12 +61,14 @@ impl Code {
         self.template.locations()
     }
 
-    /// Blueprints for this code object's `MakeClosure` instructions. A
-    /// `MakeClosure` indexes this list and materializes a fresh
-    /// region-allocated header per execution, reclaimed by region RC.
+    /// The code object this code object's `MakeClosure` at `idx` builds — a
+    /// blueprint, or a header out of an image's body
+    /// (docs/impl/image/sealing.md). The instruction materializes a fresh
+    /// region-allocated header per execution from either, reclaimed by region
+    /// RC.
     #[inline]
-    pub fn child_protos(&self) -> &[Rc<TemplateProto>] {
-        self.template.child_protos()
+    pub fn child(&self, idx: usize) -> ChildCode<'_> {
+        self.template.child(idx)
     }
 
     /// The static region slots this function's allocations SHARE after a

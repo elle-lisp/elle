@@ -1,6 +1,6 @@
 # The image file
 
-<!-- audited: 2026-09-10 -->
+<!-- audited: 2026-09-14 -->
 
 The byte layout of an image, and the fingerprint that decides whether this
 binary may map it.
@@ -96,11 +96,12 @@ standing contract, not an image rule.
 
 ## A span names its file by name, not by id
 
-A syntax node carries a `Span`, and a span carries a `FileId` — a dense index
-into a process-wide interner ([syntax.md](../syntax.md) owns the model). The
-index is an accident of which files this process read and in what order, so it
-means nothing in another process. It is the one process-local id the
-foundations left in the body.
+A syntax node carries a `Span`, and so does a code payload — its `origin`, the
+lambda's defining span ([region/template.md](../region/template.md)). A span
+carries a `FileId`: a dense index into a process-wide interner
+([syntax.md](../syntax.md) owns the model). The index is an accident of which
+files this process read and in what order, so it means nothing in another
+process. It is the one process-local id the foundations left in the body.
 
 So a file travels the way a primitive does: by name. The file table holds the
 spellings the body's spans point at, sorted, and the file stream names each
@@ -111,8 +112,9 @@ it and checks its alignment like any other slot.
 
 The cost is frames. Every node of a tree read from a real file carries a file
 id, so the file stream dirties every frame those nodes sit in — where an atom
-node with no pointers would otherwise have stayed clean. Leaving the ids alone
-is not the cheaper alternative but the wrong one: the span would name whatever
+node with no pointers would otherwise have stayed clean. A payload pays one
+slot for its whole code object, because one origin is all it holds. Leaving
+the ids alone would be wrong rather than cheap: the span would name whatever
 file the hydrating process happens to have interned at that index, and print
 it in an error message.
 

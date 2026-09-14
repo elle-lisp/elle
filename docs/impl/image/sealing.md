@@ -1,6 +1,6 @@
 # Sealing
 
-<!-- audited: 2026-09-10 -->
+<!-- audited: 2026-09-14 -->
 
 What an image's body may hold, what the hydrating instance rebuilds for itself,
 and what fails the dump.
@@ -36,6 +36,70 @@ bytes for a string, its elements for an array, its structure for anything else
 agrees with, and a binary search over the mapped entries finds what it found
 before. The keys that rank by address instead belong to values the dumper
 refuses anyway.
+
+## A closure crosses without its blueprint
+
+A closure instance is three sealed fields: the template it references, its env
+slice, and its squelch mask. All three cross whole, traits beside them, and
+every env value goes through the ordinary walk — so a capture cell in an env
+still refuses the dump until snapping lands ([plan.md](plan.md)).
+
+A closure template is a header naming a shared payload, plus an `Rc` to the
+compile-time blueprint it came from
+([region/template.md](../region/template.md)). The payload is sealed data and
+copies into the body: every slice lands in the image, constants go through the
+value walk, and two headers from one blueprint keep one payload copy. The
+blueprint is Rust-heap data and does not cross — a hydrated header carries
+none, and its slot hydrates as absent.
+
+Everything the payload answers is therefore identical after hydration:
+bytecode, constants, arity, signal, masks, locations, the region tables, and
+the defining span `meta/origin` reports. Two blueprint-only answers degrade,
+each within the design:
+
+- The LIR the JIT promotes from is absent, so a hydrated closure runs on the
+  interpreter tier until the encoded-LIR side-stream lands
+  ([plan.md](plan.md) owns that milestone).
+- The SPIR-V cache is absent; the GPU path already recompiles (§ "What the
+  body refuses").
+
+The defining span is on the payload's side of the split rather than the
+blueprint's, so it needs no degrading answer: it is twenty bytes of plain
+data, and every header carries it whichever boot built it
+([region/template.md](../region/template.md)). Its file id is the one
+process-local number a payload holds, and it travels by name like a syntax
+node's ([format.md](format.md)).
+
+The fourth cannot degrade. The nested-lambda blueprints a `MakeClosure`
+indexes decide what that instruction builds, so an absent one leaves it with
+nothing — which is why they cross as body data instead (§ "A child code object
+crosses as a header").
+
+A closure a compiled WASM module built fails the dump by name: its dispatch
+index names a function table of the module this process holds, which no other
+process can reopen.
+
+## A child code object crosses as a header
+
+A payload carries a **child table**: the code objects this function's
+`MakeClosure` instructions index, in instruction order, each one a
+blueprint-less header in the body like the parent's own. So a `MakeClosure`
+has two places to find the code object it builds — the blueprint on a
+materialized header, the child table on a hydrated one — and materializes a
+fresh region-local header out of either. The header it builds is the same
+allocation in the same region under both boots.
+
+A live payload's child table is empty. Filling it at materialization would
+materialize the payload of every lambda a function nests, run or not, and a
+header that has a blueprint already answers from it. The dumper fills the
+table instead, because the blueprint is the part that does not cross: it walks
+the blueprint's children in order, materializes each child's payload through
+the heap's ordinary cache, and copies it like any other payload.
+
+A child's own children are its payload's child table, so a nest of any depth
+crosses by one rule. A child payload two parents name copies once, exactly as
+a payload two headers name does. A child that dispatches into a WASM module
+fails the dump where any other WASM closure does.
 
 ## Capture cells are snapped, not persisted
 

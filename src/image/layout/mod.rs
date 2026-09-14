@@ -1,4 +1,4 @@
-// audited: 2026-09-11
+// audited: 2026-09-14
 //! Layout probes for the records the dumper writes into page bytes: each
 //! variant's discriminant byte and the byte extents of its leaf fields.
 //!
@@ -12,10 +12,11 @@
 //! a discriminant or reorders fields fails loudly before any image is written
 //! or trusted.
 //!
-//! Three records carry a discriminant into the body, so three are probed: the
+//! Four records carry a discriminant into the body, so four are probed: the
 //! `HeapObject` an object slot holds, the `TableKey` a struct entry begins
-//! with, and the `SyntaxKind` inside a node (syntax.rs, which also writes the
-//! node around it). Two callers consume the extents. The fingerprint records
+//! with, the `SyntaxKind` inside a node (syntax.rs, which also writes the
+//! node around it), and the `Arity` inside a code payload (payload.rs, which
+//! also writes the payload around it). The fingerprint records
 //! them, so a binary whose layout shifted rejects foreign images. The dumper
 //! copies only the discriminant byte and these extents into zeroed slots, so
 //! a construction temporary's uninitialized padding never reaches the file
@@ -23,8 +24,10 @@
 
 mod heap;
 mod key;
+mod payload;
 mod syntax;
 
+pub(crate) use payload::{file_slot_in_payload, write_canonical_payload};
 pub(crate) use syntax::{file_slot_in_node, write_canonical_node};
 
 use std::mem::{offset_of, size_of};
@@ -34,8 +37,10 @@ use crate::value::region_slice::RegionSlice;
 use crate::value::{TableKey, Value};
 
 /// One leaf field of a variant: `len` meaningful bytes at `offset` from the
-/// record's base. Leaf means padding-free — a field with interior padding
-/// (a `RegionSlice`) contributes one extent per inner field instead.
+/// record's base. Leaf means every byte of the extent means something — a
+/// field that is not one such run contributes one extent per inner field
+/// instead, which is how a `RegionSlice` is measured and why a `Parameter`'s
+/// four-byte `id` does not reach into the word it sits in.
 pub(crate) struct FieldExtent {
     pub name: &'static str,
     pub offset: usize,
@@ -224,9 +229,12 @@ pub(crate) fn fingerprint_component() -> String {
     );
     out.push(';');
     out.push_str(&syntax::fingerprint_component());
+    out.push(';');
+    out.push_str(&payload::fingerprint_component());
     describe::<crate::value::heap::HeapObject>(&mut out);
     describe::<TableKey>(&mut out);
     describe::<crate::syntax::SyntaxKind>(&mut out);
+    describe::<crate::value::types::Arity>(&mut out);
     out
 }
 
@@ -287,12 +295,43 @@ fn assert_nested_layout() {
             "ScopeId",
             RegionSlice::<crate::syntax::ScopeId>::header_layout(),
         ),
+        (
+            "CodePayload",
+            RegionSlice::<crate::value::closure::CodePayload>::header_layout(),
+        ),
+        (
+            "LocEntry",
+            RegionSlice::<crate::value::closure::LocEntry>::header_layout(),
+        ),
+        (
+            "StaticRegion",
+            RegionSlice::<crate::hir::region::StaticRegion>::header_layout(),
+        ),
+        ("u16", RegionSlice::<u16>::header_layout()),
+        ("u32", RegionSlice::<u32>::header_layout()),
+        ("u64", RegionSlice::<u64>::header_layout()),
+        (
+            "RegionSlice<u8>",
+            RegionSlice::<RegionSlice<u8>>::header_layout(),
+        ),
     ] {
         assert_eq!(
             u8_layout, other,
             "image layout probe: RegionSlice<{what}> is laid out differently"
         );
     }
+    // A closure's template field is a `Value` in a newtype and its squelch
+    // mask is one meaningful word, so each is a single extent.
+    assert_eq!(
+        size_of::<crate::value::closure::TemplateRef>(),
+        size_of::<Value>(),
+        "image layout probe: TemplateRef is not a bare Value"
+    );
+    assert_eq!(
+        size_of::<crate::value::fiber::SignalBits>(),
+        8,
+        "image layout probe: SignalBits is not one word"
+    );
 }
 
 /// Measure every variant of one record, checking the probe's own assumptions

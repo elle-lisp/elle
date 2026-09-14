@@ -1,6 +1,6 @@
 # What the experiments measured
 
-<!-- audited: 2026-09-13 -->
+<!-- audited: 2026-09-14 -->
 
 Six assumptions the image design rests on, each dispatched by an experiment,
 with the numbers it produced.
@@ -164,7 +164,7 @@ cleared, and [plan.md](plan.md) the order everything lands in.
 6. **Fingerprint strength — dispatched, probes landed.** Size/align probes
    do not pin field offsets; the fingerprint now records, per dumpable
    variant, the discriminant byte and every leaf field's offset and length
-   (`src/image/layout.rs`), so the two-stage embed build cannot pass the
+   (`src/image/layout`), so the two-stage embed build cannot pass the
    fingerprint with a shifted layout. Mechanism finding: `offset_of!`
    cannot name an enum variant's field on stable Rust (E0658,
    rust-lang/rust#120141), so the probes construct one exemplar per variant
@@ -177,9 +177,13 @@ cleared, and [plan.md](plan.md) the order everything lands in.
    pointer. The discriminant is one byte at offset 0 (declaration index
    plus 3) with bytes 1–7 zero; every probed variant places its payload
    field at 8 and `traits` at 24 (`Pair` nests its whole struct at 8).
-   `RegionSlice`'s `u32` len leaves interior padding at bytes 12–16 of the
-   field, which is why extents are recorded per leaf field, never per
-   variant field. The probes verify themselves on first use — distinct
+   Extents are recorded per leaf field, never per variant field, because a
+   variant field is not always one run of meaningful bytes: a `Parameter`'s
+   `id` is four bytes in a word-aligned slot, and a `RegionSlice` is a
+   pointer, a `u32` length, and the zero word behind it that keeps a slice
+   header from reading as a page header
+   ([region/generations.md](../region/generations.md)).
+   The probes verify themselves on first use — distinct
    discriminant bytes, zero upper discriminant bytes, disjoint in-bounds
    extents, and a canonicalize-then-read-back check per variant — and
    panic on violation, so a rustc that moves the tag or reorders fields

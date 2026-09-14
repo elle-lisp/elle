@@ -1,6 +1,6 @@
 # Landing order and test plan
 
-<!-- audited: 2026-09-10 -->
+<!-- audited: 2026-09-14 -->
 
 What lands in which order, and the pins each milestone must land with.
 
@@ -43,19 +43,22 @@ Then the image milestones:
    and the scope watermark a fresh expander must mint above, and the scrub
    and guardfree pins over a hydrated region. The format, mapping,
    relocation, and teardown are proven end to end over every value the
-   foundations sealed as data. What the dumper still refuses is the rest of
-   the sealed set, which only a boot graph holds: closures and closure
-   templates.
-6. **boot** — cell snapping, closures and closure templates in the body, the
-   primitive table that remaps a native-fn by name and the user traitsets it
-   makes dumpable, the reconstruction stream — which the default trait tables
-   need before `Parameter`'s stdio default does — dump-boot, warm cache, embedded
-   blob, per-worker hydration for `sys/spawn`, the encoded-LIR side-stream
-   with lazy decode, compiler-state persistence, the hydrated-region interval
-   table that keeps `region_of_ptr` off the probe ladder
-   ([image.md](../image.md) § "Pointer resolution must not regress" — the
-   regression it prevents needs a region the size of stdlib to show), and the
-   parity gate (bytecode *and* tier).
+   foundations sealed as data.
+6. **boot** — in progress. Landed so far: the primitive table that remaps a
+   native-fn by name and the user traitsets it makes dumpable, the
+   reconstruction stream — which the default trait tables need before
+   `Parameter`'s stdio default does — and closures and closure templates in
+   the body: the payload crosses whole and shared, the header hydrates
+   without its blueprint, and the code objects a `MakeClosure` indexes cross
+   as the payload's child table ([sealing.md](sealing.md) § "A child code
+   object crosses as a header"), with the defining span on the payload so
+   `meta/origin` answers after a boot from image. Still to land: cell snapping,
+   dump-boot, warm cache, embedded blob, per-worker hydration for
+   `sys/spawn`, the encoded-LIR side-stream with lazy decode, compiler-state
+   persistence, the hydrated-region interval table that keeps
+   `region_of_ptr` off the probe ladder ([image.md](../image.md) § "Pointer
+   resolution must not regress" — the regression it prevents needs a region
+   the size of stdlib to show), and the parity gate (bytecode *and* tier).
 7. **environment** — `image/save` and `image/load`, manifest deltas over
    boot, mutable side-stream.
 
@@ -87,7 +90,13 @@ Then the image milestones:
 - Verifier: each of a relocation slot outside the image, a relocation slot
   that is not 8-byte aligned, a `RegionSlice` whose extent leaves the image,
   and a page cursor that disagrees with the object index fails the load with
-  a named error and leaves no region and no mapping behind.
+  a named error and leaves no region and no mapping behind. A closure header
+  is refused the same way five ways: a nonzero blueprint word (the one bit
+  pattern teardown could hurt on — a fabricated `Rc`), a header naming zero
+  payloads, a payload landing misaligned, a payload field whose extent
+  leaves the image, and a child slot naming an object the index does not call
+  a header — the one slot whose target is read back as a header rather than
+  as data.
 - Hygiene: hydrate, run, exit — the live region count returns to baseline
   and the leak suite stays green with no image-specific carve-out. Free the
   hydrated region explicitly under `--trace=guardfree` and assert the
@@ -102,6 +111,38 @@ Then the image milestones:
 - Mapping: replace the image file by rename while a hydration is live, then
   read the hydrated values — the old inode's mapping is intact. Release a
   file-backed page and assert the pool unmapped it rather than caching it.
+- Closures: a closure compiled in one runtime hydrates in a fresh one and
+  answers a call with the same result — through a REPL binding, so the call
+  goes through the ordinary dispatch path. The payload survives field by
+  field: bytecode, constants (a heap constant included), arity, signal,
+  name, doc, and the capture masks. Two headers materialized from one
+  blueprint hydrate naming one payload copy — the counter-factual is a
+  per-header deep copy, which round-trips equal and silently doubles every
+  payload. A hydrated header has no blueprint, so the JIT is never entered.
+  `meta/origin` still answers, because the defining span is the payload's:
+  a hydrated closure reports the line, the column and the file it was
+  written at, and the file table is what decides the file — rename the
+  spelling there and the origin follows it. A lambda with no origin still
+  answers nil, which is what stops the file stream from writing the table's
+  first entry over an absent id. A WASM-dispatch closure and an env holding a
+  capture cell each refuse the dump with a named error. A dumped closure
+  writes one file across two
+  dumps, whatever its construction temporaries held. The relocation stream
+  records a shared payload's slots once, however many headers name it — the
+  counter-factual is a per-header walk, which appends every inner entry
+  again for each header and grows the tables with the header count.
+- Children: a hydrated closure builds its nested lambda, and the lambda
+  answers a call — through a REPL binding, so `MakeClosure` runs on the
+  ordinary dispatch path. The child's payload crosses field by field, and a
+  lambda nested two deep builds out of the child's own child table. The
+  instruction materializes a fresh header per creation: two lambdas built
+  from one hydrated parent are two headers over one payload, and the
+  counter-factual is handing out the image's own header, which answers every
+  call correctly and quietly moves the instance-to-template edge across
+  regions. A child a WASM module built refuses the dump like any other WASM
+  closure, and a parent with a child writes one file across two dumps. A
+  hydrated closure sent to a worker carries its children, which the worker
+  rebuilds as the blueprints its own `MakeClosure` indexes.
 - Traits: a value carrying its instance's default traitset hydrates carrying
   the *hydrating* instance's table for that tag, and a user traitset hydrates
   out of the body with its methods intact. The counter-factual is the identity

@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-14
 // docs/impl/region/template.md
 //! Closure type for the Elle runtime
 //!
@@ -22,7 +22,7 @@ mod header;
 mod payload;
 mod proto;
 
-pub use header::ClosureTemplate;
+pub use header::{ChildCode, ClosureTemplate};
 pub use payload::{CodePayload, LocEntry, LocationTable, MaskRef, MergedSlots, StrKeys, VarargTag};
 pub use proto::{materialize, TemplateProto, WasmClosureMeta};
 
@@ -61,6 +61,13 @@ impl TemplateRef {
     #[inline]
     pub fn value(&self) -> Value {
         self.0
+    }
+
+    /// The `Value` field itself, for the image dumper: the relocation slot it
+    /// records is this field's own payload word.
+    #[inline]
+    pub(crate) fn value_ref(&self) -> &Value {
+        &self.0
     }
 }
 

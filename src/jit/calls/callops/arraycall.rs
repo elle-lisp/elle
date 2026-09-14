@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-14
 // docs/impl/jit.md
 // docs/impl/region/relocate.md
 //! Array-call, closure-construction, tail-call, and env-building JIT entry points.
@@ -178,8 +178,12 @@ pub extern "C" fn elle_jit_make_closure(
     // The heap is the driving VM's own, reached through the threaded vm pointer —
     // this instance's heap, not a per-thread slot (docs/impl/region/ctx.md).
     let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
-    let result =
-        crate::vm::closure::materialize_closure_in_region(heap, &blueprint, env_slice, region);
+    let result = crate::vm::closure::materialize_closure_in_region(
+        heap,
+        crate::value::closure::ChildCode::Blueprint(&blueprint),
+        env_slice,
+        region,
+    );
     JitValue::from_value(result)
 }
 
