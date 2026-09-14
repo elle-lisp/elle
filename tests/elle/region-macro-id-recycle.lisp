@@ -23,8 +23,13 @@
 # id already booked — is pinned in Rust by `regionstore::tests::recycle`, and
 # what the scope's open and close owe each other by `arena::tests::macroscope`.
 
-(def window 2000)
-(def warm 200)
+# The window is sized against a DEBUG binary's clock rather than against what
+# sharpens the reading: the per-file corpus pass runs this file unoptimized under
+# a 30-second timeout, and every subject here drives an `eval`, which costs some
+# 2 ms there. What the window has to buy is separation from the `settle` ceiling
+# below, and it buys that at any size worth running.
+(def window 300)
+(def warm 50)
 
 (defn ids [thunk]
   "Physical ids issued over WINDOW calls of THUNK, after WARM untimed calls."
@@ -85,8 +90,8 @@
 # reading a per-call one. A loop's first turns hold one or two more regions at
 # once than the free list was carrying, and each of those raises `next_physical`
 # once for the whole run — a settling cost that does not grow with the window. A
-# shape that strands an id per CALL issues `window` of them, three orders of
-# magnitude above this, so the two cannot be confused at any window size.
+# shape that strands an id per CALL issues one per call, so it reads the whole
+# window instead, and the gap between the two widens with every call added.
 (def settle 8)
 
 (defn at-most [d label]
@@ -108,34 +113,21 @@
 # beside the discriminator above — a sink that grows both of them by one per call
 # is what says these two gauges are alive.
 
-(defn objects-gained [thunk]
-  "Heap objects the loop gained over WINDOW calls of THUNK, after WARM untimed."
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
-
-(defn regions-gained [thunk]
-  "Live regions the loop gained over WINDOW calls of THUNK, after WARM untimed."
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/region-count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/region-count) before))
-
-(def blind-objs (objects-gained (fn [] (eval '(when true 1)))))
-(def blind-regions (regions-gained (fn [] (eval '(when true 1)))))
+# One loop, read on both gauges, rather than a helper called twice: each call
+# would drive its own window of expansions, and the file's whole cost is the
+# expansions it drives.
+(var blind-warm 0)
+(while (%lt blind-warm warm)
+  (eval '(when true 1))
+  (assign blind-warm (%add blind-warm 1)))
+(def objs-before (arena/count))
+(def regions-before (arena/region-count))
+(var blind-i 0)
+(while (%lt blind-i window)
+  (eval '(when true 1))
+  (assign blind-i (%add blind-i 1)))
+(def blind-objs (%sub (arena/count) objs-before))
+(def blind-regions (%sub (arena/region-count) regions-before))
 (println "  the blind gauges:   objects " blind-objs "  regions " blind-regions
          " over " window " calls")
 (assert (%le blind-objs settle)
