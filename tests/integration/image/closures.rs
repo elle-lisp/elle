@@ -134,8 +134,9 @@ fn a_closures_code_object_round_trips_field_by_field() {
 }
 
 // A hydrated header has no blueprint, so the blueprint-only answers are
-// absence. The counter-factual is the source header, which answers `origin`
-// — only the dump can have dropped it.
+// absence. The counter-factual is the source header, which answers
+// `lir_function` — only the dump can have dropped it. The origin is not one
+// of these: it rides on the payload, and origin.rs pins that it crosses.
 #[test]
 fn a_hydrated_header_has_no_blueprint() {
     let dir = crate::common::ScratchDir::new("image-closure-blueprint");
@@ -145,16 +146,11 @@ fn a_hydrated_header_has_no_blueprint() {
     let region = src.new_runtime_region();
     let (proto, _) = full_proto(&mut src, region);
     let root = closure_in(&mut src, region, &Rc::new(proto), &[], SignalBits::EMPTY);
-    assert!(
-        closure_of(root).template.origin().is_some(),
-        "the source header answers origin"
-    );
     image::dump(&mut src, &SymbolTable::new(), root, &path).expect("dump");
 
     let mut dst = FiberHeap::new();
     let hydrated = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("hydrate");
     let t = &closure_of(hydrated.root).template;
-    assert!(t.origin().is_none(), "a hydrated header answers no origin");
     assert!(t.lir_function().is_none(), "a hydrated header has no LIR");
     assert!(t.child_protos().is_empty());
 }

@@ -320,6 +320,9 @@ mod closures {
 mod children {
     include!("image/children.rs");
 }
+mod origin {
+    include!("image/origin.rs");
+}
 mod primitives {
     include!("image/primitives.rs");
 }
