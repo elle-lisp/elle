@@ -1,9 +1,9 @@
 (elle/epoch 12)
+# audited: 2026-09-14
 ## tests/http2/flow.lisp — h2 flow control, GOAWAY, and protocol tests
 
-(def sync ((import "std/sync")))
 (def frame ((import "std/http2/frame")))
-(def stream ((import "std/http2/stream") :sync sync :frame frame))
+(def stream ((import "std/http2/stream") :frame frame))
 (def hpack ((import "std/http2/hpack") :huffman ((import "std/http2/huffman"))))
 (def http2 ((import "std/http2")))
 (def C frame:constants)
@@ -30,27 +30,6 @@
   (let [[ft fl si pl] (frame:make-settings-ack)]
     (frame:write-frame t ft fl si pl))
   (t:flush))
-
-(defn server-handshake-with-settings [t settings]
-  "Server handshake with custom SETTINGS."
-  (frame:read-exact t 24)
-  (frame:read-frame t 16384)
-  (let [[ft fl si pl] (frame:make-settings-frame settings)]
-    (frame:write-frame t ft fl si pl))
-  (let [[ft fl si pl] (frame:make-settings-ack)]
-    (frame:write-frame t ft fl si pl))
-  (t:flush))
-
-(defn drain-control-frames [t]
-  "Read and discard SETTINGS/WINDOW_UPDATE frames until something else arrives."
-  (forever
-    (let [[ok? f] (protect (frame:read-frame t 262144))]
-      (when (or (not ok?) (nil? f)) (break nil))
-      (cond
-        (= f:type C:type-settings) nil
-        (= f:type C:type-window-update) nil
-        (= f:type C:type-goaway) (break f)
-        true (break f)))))
 
 ## ── Tests ────────────────────────────────────────────────────────────────
 
@@ -231,9 +210,7 @@
                           (server-handshake t)  # Wait for client SETTINGS ACK, then send our own SETTINGS
                           # changing INITIAL_WINDOW_SIZE
                           (ev/sleep 0.1)
-                          (let [payload (concat (frame:u16->bytes C:settings-initial-window-size)
-                                (frame:u32->bytes 32768))
-                                [ft fl si pl] (frame:make-settings-frame [[C:settings-initial-window-size
+                          (let [[ft fl si pl] (frame:make-settings-frame [[C:settings-initial-window-size
                                 32768]])]
                             (frame:write-frame t ft fl si pl))
                           (t:flush)  # Read frames until done

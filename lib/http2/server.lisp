@@ -1,14 +1,15 @@
 (elle/epoch 12)
+# audited: 2026-09-14
 ## lib/http2/server.lisp — HTTP/2 server connection handler
 ##
 ## Loaded via:
 ##   (def server ((import "std/http2/server")
 ##                :hpack hpack :frame frame :stream stream
-##                :session session :tls tls :transport transport))
+##                :session session :reader reader :tls tls :transport transport))
 ##
-## Exports: {:serve :test}
+## Exports: {:serve :serve-streaming :test}
 
-(fn [&named hpack frame stream session tls transport]
+(fn [&named hpack frame stream session reader tls transport]
   (def C frame:constants)
 
   ## ── Server request handler ─────────────────────────────────────────────
@@ -124,11 +125,14 @@
             (frame:write-frame transport ftype flags sid payload))))
       (transport:flush)  # Start writer fiber
       (put sess :writer-fiber (ev/spawn (fn [] (session:writer-loop sess))))  # Shared reader loop with server callbacks
-      (session:read-loop sess :on-headers (mk-on-headers handler on-error)
-                         :on-goaway (fn [sess payload]
-                                      (sess:write-queue:put :shutdown)
-                                      true))  # Wait for writer to drain queued frames before returning
-      (when sess:writer-fiber (ev/join-protected sess:writer-fiber))))
+      (reader:read-loop sess :on-headers (mk-on-headers handler on-error)
+                        :on-goaway (fn [sess payload]
+                                     (sess:write-queue:put :shutdown)
+                                     true))  # Let the writer drain what is queued, but not past its grace:
+      # a client that stopped reading parks it inside port/write, and a
+      # plain join would hold this connection fiber and its socket for
+      # as long as that client stays away.
+      (session:close-writer sess)))
 
   ## ── h2-serve ───────────────────────────────────────────────────────────
 

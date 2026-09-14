@@ -1,6 +1,6 @@
 # Scheduler
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-14 -->
 
 The async scheduler is the only supported execution backend, and user code runs inside it automatically.
 
@@ -69,15 +69,15 @@ Two invariants govern the queues:
   leaves every queue it sits in. A terminated fiber left in a queue takes
   a wake slot from a live waiter, so `(ev/futex-wake key 1)` reports a
   wake that no fiber received. The single-permit wake is the common case:
-  `lib/http2/stream.lisp` wakes one taker per channel put, and
-  `lib/http2/session.lisp` wakes one waiter per SETTINGS ACK.
+  [stream.lisp](../lib/http2/stream.lisp) wakes one taker per channel put, and
+  [session.lisp](../lib/http2/session.lisp) wakes one waiter per SETTINGS ACK.
 - **An empty queue has no key.** The scheduler drops a key once its queue
   empties. The event loop reports `:done` only when no fiber waits on
   I/O, a join, a select, or a park, so a key that outlives its last
   waiter keeps the loop running with nothing left to run.
 
 `ev/abort` and `ev/timeout` both terminate fibers that may be parked, so
-both rely on these invariants. `tests/elle/park-abort.lisp` pins them.
+both rely on these invariants. [park-abort.lisp](../tests/elle/park-abort.lisp) pins them.
 
 ## Completion delivery
 
@@ -113,8 +113,8 @@ Two invariants govern delivery:
   and a descriptor for a fiber that can never read the result, and the
   loop keeps waiting on a completion nobody wants.
 
-`tests/elle/io-late-completion.lisp` pins both over a portless timer, and
-`tests/elle/io-stale-operation-ends.lisp` over a port operation whose
+[io-late-completion.lisp](../tests/elle/io-late-completion.lisp) pins both over a portless timer, and
+[io-stale-operation-ends.lisp](../tests/elle/io-stale-operation-ends.lisp) over a port operation whose
 operands are gone — the case where the entry holds values to read.
 
 ## Completion records
@@ -163,11 +163,11 @@ they last until the loop ends.
   re-derived from the fiber's own status, which is the same route every
   fiber retired at completion already takes.
 
-`tests/elle/sched-completion-records.lisp` pins the bound through
+[sched-completion-records.lisp](../tests/elle/sched-completion-records.lisp) pins the bound through
 `ev/report`'s `:records` / `:marks`, and that the pump leaves none of them
-behind; `tests/elle/ev-unjoined-error.lisp` pins that retiring the records
+behind; [ev-unjoined-error.lisp](../tests/elle/ev-unjoined-error.lisp) pins that retiring the records
 still leaves an unjoined failure to crash the program.
-`tests/region_process_teardown.rs` pins what the two together are worth: a
+[region_process_teardown.rs](../tests/region_process_teardown.rs) pins what the two together are worth: a
 completed run leaves no live region at all.
 
 ---
@@ -202,11 +202,11 @@ so a watchdog spawned as `(ev/spawn (fn [] (ev/sleep n) (ev/report)))`
 reports even when every other fiber is parked.
 
 The park keys are whatever the caller of `ev/futex-wait` passed —
-`lib/http2` uses a `(gensym)` per channel and per flow-control window, so
+[http2](../lib/http2/AGENTS.md) uses a `(sys/unique)` per channel and per flow-control window, so
 a count above one on a single key means several fibers wait on one
 channel.
 
-`tests/elle/sched-report.lisp` pins the shape.
+[sched-report.lisp](../tests/elle/sched-report.lisp) pins the shape.
 
 ## See also
 
