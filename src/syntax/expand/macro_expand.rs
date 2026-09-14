@@ -1,4 +1,10 @@
-//! Macro call expansion via VM evaluation
+// audited: 2026-09-14
+//! Expands one macro call by running its transformer closure on the VM and
+//! deep-copying the result back to owned `Syntax`.
+//!
+//! docs/macros.md
+//! docs/impl/region/rules.md
+//! docs/impl/region/model.md
 //!
 //! On first invocation, the macro body `(fn (params...) template)` is compiled
 //! and stored in `MacroDef.cached_transformer`. Subsequent invocations skip the
@@ -31,9 +37,11 @@
 //! (docs/impl/region/rules.md § "Macro expansion — a closed allocation scope"):
 //! a per-call mint log records every region the transformer mints, and after the
 //! result is deep-copied to owned Syntax the scope is reclaimed by balancing each
-//! survivor's unexplained references. This keeps the per-invocation region cost
-//! constant — without it every expansion leaked its construction scratch (the
-//! dominant teardown residue, the `Pair` class).
+//! survivor's unexplained references. The scope also owns the transient region
+//! the argument wrapping below allocates into, so its physical id goes back to
+//! the free list whether or not anything was wrapped into it. Together those
+//! keep the per-invocation cost of an expansion constant in every dimension:
+//! objects, regions, bytes, and physical ids.
 //!
 //! Known limitations:
 //! - Macros cannot return improper lists (e.g. `(pair 1 2)`). The
@@ -54,12 +62,14 @@ use crate::vm::VM;
 /// closure call.
 ///
 /// These are **ordinary mortal allocations** born in the per-expansion transient
-/// `region` the sole caller mints (docs/impl/region/ctx.md — the region is named
-/// explicitly as an argument). That region is part of the expansion's closed allocation scope
-/// (docs/impl/region/rules.md), so the wrapped args are reclaimed with the rest
-/// of the transformer's scratch once the result is deep-copied to owned Syntax —
-/// they do not leak per expansion. Only the heap cases (`String`, compound
-/// `_ => syntax`) take the region; the atom cases are immediates with no region.
+/// `region` the scope mints (docs/impl/region/ctx.md — the region is named
+/// explicitly as an argument). That region is part of the expansion's closed
+/// allocation scope (docs/impl/region/rules.md), so the wrapped args are
+/// reclaimed with the rest of the transformer's scratch once the result is
+/// deep-copied to owned Syntax. Only the heap cases (`String`, compound
+/// `_ => syntax`) take the region; the atom cases are immediates with no region,
+/// so an all-atom argument list leaves the region unmaterialized and the scope's
+/// close is what returns its id (docs/impl/region/model.md).
 fn wrap_macro_arg_value(
     heap: &mut crate::value::fiberheap::FiberHeap,
     arg: &Syntax,
@@ -265,17 +275,16 @@ impl Expander {
         // Macro expansion is a CLOSED ALLOCATION SCOPE (docs/impl/region/rules.md
         // § "Macro expansion — a closed allocation scope"): the transformer's
         // entire `Value` output is deep-copied to owned `Syntax` below, so every
-        // region it mints — the arg-wrap region `region_id`, the constructed
-        // output tree, and the scratch its constructors discard internally — is
-        // dead afterward. Open a mint log around the whole call so the reclaim
-        // pass can balance each survivor's unexplained references by RC. The
-        // reclaim covers every region — root, interior, and orphan scratch — and
-        // subsumes the explicit `region_id` free.
-        crate::value::arena::begin_macro_scope(unsafe { &mut *vm.heap_ptr });
-        // Mint this expansion's transient arg region explicitly: the Rust-side
-        // argument wrapping below allocates into it. It is part of the mint scope
-        // and reclaimed with the rest.
-        let region_id = vm.heap().new_runtime_region();
+        // region it mints — the arg-wrap region, the constructed output tree, and
+        // the scratch its constructors discard internally — is dead afterward.
+        // Open a mint log around the whole call so the reclaim pass can balance
+        // each survivor's unexplained references by RC. The reclaim covers every
+        // region the log names: root, interior, and orphan scratch.
+        let scope = crate::value::arena::begin_macro_scope(unsafe { &mut *vm.heap_ptr });
+        // This expansion's transient arg region: the Rust-side argument wrapping
+        // below allocates into it. The scope mints it and the reclaim closes it,
+        // so it is covered whether or not anything was wrapped into it.
+        let region_id = scope.arg_region();
         // The expansion's heap, reached through the VM's raw `heap_ptr` (a `Copy`
         // pointer that holds no borrow), so the `stamp` closure stays `Fn + Copy`
         // — it captures the pointer, not a `&mut VM` — and the `.map(stamp)` reuse
@@ -330,7 +339,7 @@ impl Expander {
         // is not held alive by a live edge (and is not a process-lifetime root).
         // Runs on both Ok and Err — on error there is no expansion to keep, so
         // all scratch is reclaimed too.
-        crate::value::arena::reclaim_macro_scope(unsafe { &mut *vm.heap_ptr });
+        crate::value::arena::reclaim_macro_scope(unsafe { &mut *vm.heap_ptr }, scope);
         let result_syntax = result_syntax?;
 
         // Hygiene flip: template-origin identifiers (never saw the intro
