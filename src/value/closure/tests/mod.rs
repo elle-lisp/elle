@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-14
 //! Which payload a header reads, and how long the region behind it lives.
 //! docs/impl/region/template.md
 //!
@@ -211,14 +211,14 @@ fn a_payload_materialized_inside_a_macro_scope_survives_the_reclaim() {
     let mut heap = FiberHeap::new();
     let p = proto(vec![1, 2, 3, 4, 5, 6, 7, 8]);
 
-    crate::value::arena::begin_macro_scope(&mut heap);
+    let scope = crate::value::arena::begin_macro_scope(&mut heap);
     let scratch = region(&mut heap);
     let tv = materialize(&mut heap, &p, scratch);
     let payload =
         RuntimeRegion::new(heap.region_of_ptr(header(tv).bytecode().as_ptr() as *const ()))
             .expect("the payload lives in a real region");
     let generation = heap.region_generation(payload.get());
-    crate::value::arena::reclaim_macro_scope(&mut heap);
+    crate::value::arena::reclaim_macro_scope(&mut heap, scope);
 
     assert!(
         heap.region_rc(payload) > 0,
@@ -256,7 +256,7 @@ fn a_payload_region_opened_inside_a_macro_scope_survives_the_reclaim() {
         RuntimeRegion::new(heap.region_of_ptr(header(first).bytecode().as_ptr() as *const ()))
             .expect("the payload lives in a real region");
 
-    crate::value::arena::begin_macro_scope(&mut heap);
+    let scope = crate::value::arena::begin_macro_scope(&mut heap);
     let scratch = region(&mut heap);
     let p = proto(vec![7, 7, 7, 7]);
     let tv = materialize(&mut heap, &p, scratch);
@@ -268,7 +268,7 @@ fn a_payload_region_opened_inside_a_macro_scope_survives_the_reclaim() {
         "the first blueprint must fill its region, so this payload opens a \
          fresh one inside the scope"
     );
-    crate::value::arena::reclaim_macro_scope(&mut heap);
+    crate::value::arena::reclaim_macro_scope(&mut heap, scope);
 
     assert!(
         heap.region_rc(payload) > 0,

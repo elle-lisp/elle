@@ -1,9 +1,11 @@
-// audited: 2026-09-05
+// audited: 2026-09-14
 //! Process roots, the pinned root region, and the macro-expansion scope.
 //! docs/impl/region/rules.md
 //! docs/impl/region/template.md
+//! docs/impl/region/model.md
 
 use super::*;
+use crate::value::fiberheap::regionstore::RegionMint;
 
 /// Record `region` as a process root of `heap` — a region the teardown sweep
 /// will release (decref once) so its RC can reach zero and cascade. Idempotent
@@ -63,12 +65,38 @@ pub(crate) fn root_region(heap: &mut FiberHeap) -> RuntimeRegion {
     r
 }
 
+/// One open macro-expansion scope: the transient region the expansion wraps its
+/// arguments into, held as the mint receipt that returns the region's physical
+/// id (docs/impl/region/model.md § "Physical id recycling").
+///
+/// The open hands this out rather than a bare `RuntimeRegion`, so the expander
+/// cannot name the region without also holding what closes it. The close is
+/// [`reclaim_macro_scope`], which consumes the scope.
+#[must_use = "an unreclaimed macro scope strands the transient region's id and \
+              leaves the transformer's scratch holding unbalanced references"]
+pub struct MacroScope {
+    arg: RegionMint,
+}
+
+impl MacroScope {
+    /// The region this expansion's wrapped arguments are born in.
+    pub fn arg_region(&self) -> RuntimeRegion {
+        self.arg.region()
+    }
+}
+
 /// Open a macro-expansion allocation scope (docs/impl/region/rules.md § "Macro
 /// expansion — a closed allocation scope"). Every region minted until the
 /// matching [`reclaim_macro_scope`] is recorded so its dead scratch can be
 /// reclaimed by RC.
-pub fn begin_macro_scope(heap: &mut FiberHeap) {
+///
+/// The transient argument region is minted here, inside the log, so the reclaim
+/// covers it like any other region the expansion mints.
+pub fn begin_macro_scope(heap: &mut FiberHeap) -> MacroScope {
     heap.begin_region_mint_log();
+    MacroScope {
+        arg: heap.new_runtime_region_tracked(),
+    }
 }
 
 /// Close the scope opened by [`begin_macro_scope`] and reclaim the transformer's
@@ -88,7 +116,8 @@ pub fn begin_macro_scope(heap: &mut FiberHeap) {
 /// Excluding them delays no reclamation, because each answers to its own
 /// owner: teardown for a process root, the death of the last blueprint packed
 /// into it for a payload region.
-pub fn reclaim_macro_scope(heap: &mut FiberHeap) {
+pub fn reclaim_macro_scope(heap: &mut FiberHeap, scope: MacroScope) {
+    let _ = scope;
     let mut protected = heap.process_roots_snapshot();
     if let Some(root) = heap.root_region_slot() {
         protected.push(root);
