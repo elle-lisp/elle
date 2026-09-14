@@ -237,6 +237,14 @@ impl ClosureTemplate {
         self.payload().wasm_func_idx()
     }
 
+    /// Where the source lambda was written, for `(meta/origin f)`. A span is
+    /// plain data, so it rides on the payload rather than on the blueprint and
+    /// a hydrated header answers it too (docs/impl/region/template.md).
+    #[inline]
+    pub fn origin(&self) -> Option<crate::syntax::Span> {
+        self.payload().origin()
+    }
+
     // ── children ───────────────────────────────────────────────────────
     //
     // A `MakeClosure` indexes these, and both sides of a header answer:
@@ -303,11 +311,6 @@ impl ClosureTemplate {
     #[inline]
     pub fn lir_function(&self) -> Option<&Rc<crate::lir::LirFunction>> {
         self.proto.as_ref()?.lir_function.as_ref()
-    }
-
-    #[inline]
-    pub fn origin(&self) -> Option<crate::syntax::Span> {
-        self.proto.as_ref()?.origin
     }
 
     /// The SPIR-V bytes `(git f)` compiled for this code object, if any.

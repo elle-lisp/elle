@@ -327,6 +327,11 @@ pub(super) fn materialize_payload(
         // lambda the function nests, run or not
         // (docs/impl/image/sealing.md).
         children: RegionSlice::empty(),
+        // A span is twenty bytes of plain data, so it crosses on the payload
+        // rather than degrading to absence at a hydration
+        // (docs/impl/region/template.md).
+        origin: proto.origin.unwrap_or_else(crate::syntax::Span::synthetic),
+        has_origin: proto.origin.is_some(),
         arity: proto.arity,
         signal: proto.signal,
         capture_params_mask: proto.capture_params_mask,

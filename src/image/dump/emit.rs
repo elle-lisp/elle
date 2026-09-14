@@ -328,6 +328,14 @@ impl Emitted {
         at: &Placement,
         backings: &mut Vec<Backing>,
     ) -> Result<(), ImageError> {
+        // The payload's own span. A file id is an index into a process-wide
+        // interner, so the file travels by name and hydration writes the live
+        // id into this slot — the same treatment a node's span gets
+        // (docs/impl/image/format.md).
+        if let Some(name) = p.origin().and_then(|s| s.file()) {
+            let slot = p as *const CodePayload as usize + layout::file_slot_in_payload();
+            self.files.push((at.offset(slot)?, name.into()));
+        }
         if let Some((rel, src)) = self.slice_backing(&p.bytecode, at)? {
             backings.push(Backing::raw::<u8>(rel, src, p.bytecode.len()));
         }

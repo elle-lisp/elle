@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-14
 //! Layout probes for the records the dumper writes into page bytes: each
 //! variant's discriminant byte and the byte extents of its leaf fields.
 //!
@@ -27,7 +27,7 @@ mod key;
 mod payload;
 mod syntax;
 
-pub(crate) use payload::write_canonical_payload;
+pub(crate) use payload::{file_slot_in_payload, write_canonical_payload};
 pub(crate) use syntax::{file_slot_in_node, write_canonical_node};
 
 use std::mem::{offset_of, size_of};

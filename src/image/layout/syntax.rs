@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-14
 //! The syntax half of the layout probe: exemplars and field extents for every
 //! `SyntaxKind`, and the writer for the node that wraps one.
 //!
@@ -221,13 +221,8 @@ fn slice_extents(base: usize) -> Vec<FieldExtent> {
 fn node_offsets() -> &'static [usize; 4] {
     static OFFSETS: OnceLock<[usize; 4]> = OnceLock::new();
     OFFSETS.get_or_init(|| {
-        // A span is five `u32`s with nothing between them, so one extent
-        // covers it. The image would otherwise have to probe a fourth record.
-        assert_eq!(
-            size_of::<crate::syntax::Span>(),
-            5 * size_of::<u32>(),
-            "image layout probe: Span has padding"
-        );
+        // A span copies as one extent; span.rs holds the check that it has no
+        // padding to carry.
         [
             offset_of!(Syntax, kind),
             offset_of!(Syntax, span),

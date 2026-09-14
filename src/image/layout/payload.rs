@@ -14,6 +14,7 @@ use std::mem::{offset_of, size_of};
 use std::sync::OnceLock;
 
 use crate::signals::Signal;
+use crate::syntax::Span;
 use crate::value::closure::CodePayload;
 use crate::value::region_slice::RegionSlice;
 use crate::value::types::Arity;
@@ -84,6 +85,10 @@ impl Probed for Arity {
 pub(crate) struct PayloadOffsets {
     /// `(name, offset)` per `RegionSlice` field, in declaration order.
     pub slices: [(&'static str, usize); 13],
+    /// Where the defining span starts. A span is five `u32`s with nothing
+    /// between them, so it is one extent rather than five.
+    pub origin: usize,
+    pub has_origin: usize,
     pub arity: usize,
     pub signal_bits: usize,
     pub signal_propagates: usize,
@@ -122,6 +127,8 @@ pub(crate) fn payload_offsets() -> &'static PayloadOffsets {
             ("strict_keys", offset_of!(CodePayload, strict_keys)),
             ("children", offset_of!(CodePayload, children)),
         ],
+        origin: offset_of!(CodePayload, origin),
+        has_origin: offset_of!(CodePayload, has_origin),
         arity: offset_of!(CodePayload, arity),
         signal_bits: offset_of!(CodePayload, signal) + offset_of!(Signal, bits),
         signal_propagates: offset_of!(CodePayload, signal) + offset_of!(Signal, propagates),
@@ -156,6 +163,10 @@ pub(crate) fn write_canonical_payload(p: &CodePayload, dst: &mut [u8]) {
         raw(p, dst, at + ptr_at, size_of::<*const u8>());
         raw(p, dst, at + len_at, len_size);
     }
+    // A span is five `u32`s with nothing between them, so it copies whole —
+    // the same reading of the same type the syntax probe makes (syntax.rs).
+    raw(p, dst, off.origin, size_of::<Span>());
+    raw(p, dst, off.has_origin, 1);
     write_canonical(
         &p.arity,
         &mut dst[off.arity..off.arity + size_of::<Arity>()],
@@ -173,6 +184,14 @@ pub(crate) fn write_canonical_payload(p: &CodePayload, dst: &mut [u8]) {
     raw(p, dst, off.has_doc, 1);
 }
 
+/// Where a payload keeps the file id hydration rewrites in place: the origin
+/// span's offset in the payload plus the id's offset in the span. The twin of
+/// `file_slot_in_node` — the two records that carry a span
+/// (docs/impl/image/format.md).
+pub(crate) fn file_slot_in_payload() -> usize {
+    payload_offsets().origin + Span::file_offset()
+}
+
 /// The fingerprint's payload section: every measured offset, plus the header
 /// offset of the payload slice inside a `ClosureTemplate`.
 pub(crate) fn fingerprint_component() -> String {
@@ -186,7 +205,9 @@ pub(crate) fn fingerprint_component() -> String {
         out.push_str(&format!("{name}@{at}"));
     }
     out.push_str(&format!(
-        ",arity@{},signal@{}+{},cpm@{},nl@{},nc@{},np@{},wasm@{}+{},vararg@{},hn@{},hd@{}",
+        ",origin@{}+{},arity@{},signal@{}+{},cpm@{},nl@{},nc@{},np@{},wasm@{}+{},vararg@{},hn@{},hd@{}",
+        off.origin,
+        off.has_origin,
         off.arity,
         off.signal_bits,
         off.signal_propagates,

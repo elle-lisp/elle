@@ -11,6 +11,7 @@
 use crate::hir::region::StaticRegion;
 use crate::reader::SourceLoc;
 use crate::signals::Signal;
+use crate::syntax::Span;
 use crate::value::region_slice::RegionSlice;
 use crate::value::types::Arity;
 use crate::value::Value;
@@ -81,6 +82,15 @@ pub struct CodePayload {
     /// blueprint; the image dumper fills it, because the blueprint is the
     /// part that cannot cross (docs/impl/image/sealing.md).
     pub(crate) children: RegionSlice<Value>,
+    /// Where the source lambda was written, for `(meta/origin f)`. Meaningful
+    /// only when `has_origin`, because a span of zeros is a real answer for
+    /// the first form of a file.
+    ///
+    /// The `FileId` inside it indexes a process-wide interner, so it is the
+    /// one process-local number a payload holds and an image rewrites it from
+    /// the file table (docs/impl/image/format.md).
+    pub(crate) origin: Span,
+    pub(crate) has_origin: bool,
     pub(crate) arity: Arity,
     pub(crate) signal: Signal,
     pub(crate) capture_params_mask: u64,
@@ -269,6 +279,8 @@ impl CodePayload {
             capture_locals: RegionSlice::empty(),
             strict_keys: RegionSlice::empty(),
             children: RegionSlice::empty(),
+            origin: Span::synthetic(),
+            has_origin: false,
             arity: Arity::Exact(0),
             signal: Signal::silent(),
             capture_params_mask: 0,
@@ -331,6 +343,12 @@ impl CodePayload {
     /// came out of an image (docs/impl/image/sealing.md).
     pub fn children(&self) -> &[Value] {
         self.children.as_slice()
+    }
+
+    /// Where the source lambda was written, or `None` for a lambda no reader
+    /// produced.
+    pub fn origin(&self) -> Option<Span> {
+        self.has_origin.then_some(self.origin)
     }
 
     pub fn arity(&self) -> Arity {
