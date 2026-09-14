@@ -51,7 +51,8 @@ Then the image milestones:
    the body: the payload crosses whole and shared, the header hydrates
    without its blueprint, and the code objects a `MakeClosure` indexes cross
    as the payload's child table ([sealing.md](sealing.md) § "A child code
-   object crosses as a header"). Still to land: cell snapping,
+   object crosses as a header"), with the defining span on the payload so
+   `meta/origin` answers after a boot from image. Still to land: cell snapping,
    dump-boot, warm cache, embedded blob, per-worker hydration for
    `sys/spawn`, the encoded-LIR side-stream with lazy decode, compiler-state
    persistence, the hydrated-region interval table that keeps
@@ -117,8 +118,13 @@ Then the image milestones:
   name, doc, and the capture masks. Two headers materialized from one
   blueprint hydrate naming one payload copy — the counter-factual is a
   per-header deep copy, which round-trips equal and silently doubles every
-  payload. A hydrated header has no blueprint: `meta/origin` answers nil
-  and the JIT is never entered. A WASM-dispatch closure and an env holding a
+  payload. A hydrated header has no blueprint, so the JIT is never entered.
+  `meta/origin` still answers, because the defining span is the payload's:
+  a hydrated closure reports the line, the column and the file it was
+  written at, and the file table is what decides the file — rename the
+  spelling there and the origin follows it. A lambda with no origin still
+  answers nil, which is what stops the file stream from writing the table's
+  first entry over an absent id. A WASM-dispatch closure and an env holding a
   capture cell each refuse the dump with a named error. A dumped closure
   writes one file across two
   dumps, whatever its construction temporaries held. The relocation stream

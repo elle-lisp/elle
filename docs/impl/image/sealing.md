@@ -53,15 +53,22 @@ blueprint is Rust-heap data and does not cross — a hydrated header carries
 none, and its slot hydrates as absent.
 
 Everything the payload answers is therefore identical after hydration:
-bytecode, constants, arity, signal, masks, locations, the region tables. Three
-blueprint-only answers degrade, each within the design:
+bytecode, constants, arity, signal, masks, locations, the region tables, and
+the defining span `meta/origin` reports. Two blueprint-only answers degrade,
+each within the design:
 
 - The LIR the JIT promotes from is absent, so a hydrated closure runs on the
   interpreter tier until the encoded-LIR side-stream lands
   ([plan.md](plan.md) owns that milestone).
-- `meta/origin` answers nil.
 - The SPIR-V cache is absent; the GPU path already recompiles (§ "What the
   body refuses").
+
+The defining span is on the payload's side of the split rather than the
+blueprint's, so it needs no degrading answer: it is twenty bytes of plain
+data, and every header carries it whichever boot built it
+([region/template.md](../region/template.md)). Its file id is the one
+process-local number a payload holds, and it travels by name like a syntax
+node's ([format.md](format.md)).
 
 The fourth cannot degrade. The nested-lambda blueprints a `MakeClosure`
 indexes decide what that instruction builds, so an absent one leaves it with

@@ -117,6 +117,10 @@ Every field is inline in region pages. Nothing in a `CodePayload` owns Rust
 heap memory, so the object's bytes *are* the object — the sealing property
 [sealing.md](../image/sealing.md) requires of body data.
 
+One field holds a process-local number inside those bytes: the origin span's
+file id indexes a process-wide interner, exactly as a syntax node's does, so an
+image rewrites it from the file table ([format.md](../image/format.md)).
+
 | Field | Representation |
 |-------|----------------|
 | bytecode | `RegionSlice<u8>` |
@@ -130,6 +134,7 @@ heap memory, so the object's bytes *are* the object — the sealing property
 | capture-locals mask | `RegionSlice<u64>` — the mask's words, unbounded in width |
 | strict-struct keys | `RegionSlice<RegionSlice<u8>>` — the `&named` key set |
 | children | `RegionSlice<Value>` — the code objects a `MakeClosure` indexes, empty until a dump fills it ([sealing.md](../image/sealing.md)) |
+| origin | a `Span` and a present flag — where the lambda was written, for `meta/origin` |
 | arity, param and local counts, signal, capture-params mask, vararg kind, WASM index | scalars, inline |
 
 Two of those changed shape rather than merely moving.
@@ -229,15 +234,19 @@ The header's `Rc<TemplateProto>` is the one Rust-heap owner left on a code
 object, and it is optional: `MakeClosure` materializes every header with one,
 and a header hydrated from an image has none
 ([sealing.md](../image/sealing.md) § "A closure crosses without its
-blueprint"). It answers four questions the payload does not hold, and a
+blueprint"). It answers three questions the payload does not hold, and a
 blueprint-less header answers each with absence:
 
 | Question | Answered by | Without a blueprint |
 |----------|-------------|---------------------|
 | Which code objects do my `MakeClosure` instructions index? | `child_protos` | the payload's child table, which the dumper fills because the blueprint cannot cross ([sealing.md](../image/sealing.md)) |
 | What LIR does the JIT promote me from? | `lir_function` | none — interpreter tier, until the encoded-LIR side-stream ([image.md](../image.md) § JIT) |
-| Where was I written? | `origin` | none — `meta/origin` answers nil |
 | What SPIR-V did `(git f)` compile for me? | `spirv` | none, and nothing caches — the GPU path recompiles ([sealing.md](../image/sealing.md)) |
+
+"Where was I written?" is not among them. A defining span is twenty bytes of
+plain data, so the payload carries it and `meta/origin` answers the same on
+either side of a dump. Materializing it costs a copy of those bytes, where the
+child table would cost the payload of every lambda the function nests.
 
 The census classifies `ClosureTemplate` as sealed on the strength of its
 payload, which is the part an image carries.
