@@ -1,6 +1,6 @@
 # Region generations: stale derefs detonate in debug builds
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-14 -->
 
 The per-region generation counter and page stamps that turn a stale region deref
 into a debug-build panic at the deref site. Pairs with the `--trace=guardfree` oracle described in
@@ -56,12 +56,40 @@ can coincidentally equal the smaller size's log2 — read as a false header
 yielding a garbage `(region_id, stamp)`. The magic makes that ~`1/2^32` instead
 of ~`1/256`.
 
-`region_of_ptr` is **authoritative** beyond the magic: it accepts a candidate
-base only when the region it names is live in *this* store and genuinely *owns*
-the pointer. A mid-page coincidence names a region that does not own the pointer,
-so the walk passes it over and resolves the true base — even for a pointer deep
-inside a large page. (The free-time cross-ref scan reads headers without a store
-in hand, so it relies on the magic plus its `valid_region` filter.)
+`region_of_ptr` prefers ownership over the magic: a candidate base whose header
+names a live region of *this* store that genuinely *owns* the pointer is the
+authoritative answer, and the walk stops there. A header that validates but owns
+nothing is still where the walk stops — it is a real base of a foreign store or
+of a region since freed, and masking further would mask *below* this page, into
+memory nothing mapped — so its id is the fallback answer. The free-time cross-ref
+scan reads headers without a store in hand, so it has only the magic and its
+`valid_region` filter.
+
+### Every byte the magic screens has to be written
+
+The magic bounds a *coincidence*, so it holds only over bytes something chose.
+A claimed page's body is whatever its last occupant left ([model.md](model.md)
+§ "Page recycling"), and the walk reads the word at offset 12 of every
+`base_page`-aligned address inside a large page. A 16-byte record that lands on
+one of those addresses and leaves its last four bytes as padding does not
+overwrite what was there — it publishes it. What was there can be a real
+`size_tag`, in which case the walk stops at a forged base mid-page and the odds
+the magic bought never apply.
+
+`RegionSlice` is that record: a pointer and a `u32` length, with the four bytes
+a `size_tag` occupies left over. It carries them as a field written to zero, so
+writing a slice header clears those four bytes instead of leaving them, and no
+live page holds a forged base at a slice header's address. A `size_tag` always
+carries the magic in its high 24 bits, so a zero word never reads as one. The
+same rule binds the next 16-byte record a region writes inline.
+
+The free-time cross-ref scan is where a forged base costs the most and says the
+least. It resolves a pointer through this same walk and then filters the answer
+by ownership, so a forged id is dropped — and the real cross-region edge behind
+it is dropped with it, while the table recorded at allocation still carries it. In
+a debug build the edge-table oracle reports the disagreement at the free
+([ownership.md](ownership.md) § "The outgoing edge table"); in a release build
+the edge is simply never released, and the target region is held to teardown.
 
 `ensure_raw` then carries an **always-on backstop** (the generation and ownership
 checks above are debug-only / store-bound; a release path could still, in
