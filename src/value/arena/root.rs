@@ -116,8 +116,15 @@ pub fn begin_macro_scope(heap: &mut FiberHeap) -> MacroScope {
 /// Excluding them delays no reclamation, because each answers to its own
 /// owner: teardown for a process root, the death of the last blueprint packed
 /// into it for a payload region.
+///
+/// The transient argument region's physical id comes back here, and the recycle
+/// runs FIRST so it reads the region as the expansion left it. An expansion that
+/// wrapped nothing left it unmaterialized, and no teardown can ever return an id
+/// that names no region; one that wrapped an argument left a live region the
+/// reclaim below frees, whose own teardown books the id, so the recycle reads it
+/// live and pushes nothing (docs/impl/region/model.md § "Physical id recycling").
 pub fn reclaim_macro_scope(heap: &mut FiberHeap, scope: MacroScope) {
-    let _ = scope;
+    heap.recycle_unmaterialized_region(scope.arg);
     let mut protected = heap.process_roots_snapshot();
     if let Some(root) = heap.root_region_slot() {
         protected.push(root);
