@@ -1,5 +1,5 @@
 // audited: 2026-09-14
-//! Region RC emission: the retain side, and what names a value for it.
+//! Region RC emission from the solver's `RegionInfo`.
 //!
 //! The release side is `regiondecref.rs`. Split by the question each submodule
 //! answers, all methods hanging off the shared `impl<'a> Lowerer<'a>`:

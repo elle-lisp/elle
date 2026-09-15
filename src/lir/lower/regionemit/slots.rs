@@ -1,7 +1,8 @@
 // audited: 2026-09-14
-//! The static slots this function's emission resolves: which slot a region's
-//! value is read from, the address space that slot was minted in, and the slots
-//! a builder-idiom merge collapses onto one.
+//! The static slots this function's emission resolves.
+//!
+//! Which slot a region's value is read from, the address space that slot was
+//! minted in, and the slots a builder-idiom merge collapses onto one.
 //! docs/impl/region/mechanism.md
 //! docs/impl/region/merging.md
 

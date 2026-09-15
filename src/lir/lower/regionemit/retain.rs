@@ -1,7 +1,8 @@
 // audited: 2026-09-14
-//! What a node emits for the references its own stores take: the cross-region
-//! incref, the ownership adopt that stands in for one, and the region frees a
-//! tail-call site defers to itself.
+//! What a node emits for the references its own stores take.
+//!
+//! The cross-region incref, the ownership adopt that stands in for one, and the
+//! region frees a tail-call site defers to itself.
 //! docs/impl/region/mechanism.md
 //! docs/impl/region/ownership.md
 

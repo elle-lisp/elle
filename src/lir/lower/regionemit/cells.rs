@@ -1,6 +1,8 @@
 // audited: 2026-09-14
-//! What a 1-slot container's binder emits: the retains a read and an aliased
-//! init take, and the cell store that ends a reassigned binding's init claim.
+//! What a 1-slot container's binder emits for the init it stores.
+//!
+//! The retains a read and an aliased init take, and the cell store that ends a
+//! reassigned binding's claim on its own init.
 //! docs/impl/region/bindings.md
 //! docs/impl/region/cells.md
 
