@@ -1,7 +1,8 @@
-//! Global configuration parsed from CLI arguments.
+// audited: 2026-09-14
+//! Two configurations: `Config` is set once at startup and read anywhere,
+//! `RuntimeConfig` rides on one VM and a running program may change it.
 //!
-//! Set once at startup via `init`, read anywhere via `get`.
-//! Runtime configuration parsed from CLI flags. See `Config::parse` and `elle --help`.
+//! docs/config.md
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -216,7 +217,7 @@ pub struct Config {
     /// JSON output on stderr (errors, stats, timing).
     pub json: bool,
 
-    /// Dump WASM module bytes to /dev/shm/elle-wasm-dump.wasm.
+    /// Write the emitted WASM module bytes out. `src/wasm/mod.rs` owns where.
     pub wasm_dump: bool,
 
     /// Print LIR before WASM emission.
@@ -230,22 +231,15 @@ pub struct Config {
     /// O(live_regs * suspend_points). On by default.
     pub wasm_sparse_spill: bool,
 
-    /// Enable the A-normal form lift pass (`src/hir/anf.rs`).
+    /// Enable the A-normal form lift pass (`src/hir/anf.rs`). Default: on.
     ///
-    /// Default: on. `--anf=off` short-circuits `anf_lift` to a
-    /// no-op — i.e. the HIR is handed to region inference exactly as
-    /// `functionalize` produced it, with allocating call results
-    /// unnamed and the lowerer falling back on the shadow
+    /// `--anf=off` short-circuits `anf_lift` to a no-op, so region inference
+    /// receives the HIR exactly as `functionalize` produced it: allocating
+    /// call results unnamed, and the lowerer falling back on the shadow
     /// `call_region_slot` mechanism (`src/lir/lower/mod.rs`).
     ///
-    /// Provided as a counter-factual switch. With `--anf=off` the
-    /// closure-binding-overwrite bug (Family C in
-    /// `tests/integration/anf_counterfactual.rs`) returns; without
-    /// the flag the same scripts pass. This is the canonical proof
-    /// that the ANF transform is what closes the bug class — not some
-    /// other change between the failing and passing trees.
-    ///
-    /// Should be removed in a follow-up once causality is reviewed.
+    /// The flag exists so the pass can be switched off under a test that
+    /// passes with it and fails without it.
     pub anf: bool,
 
     /// Compiler stages to dump (from `--dump=kw1,kw2,...`). Valid keywords
@@ -278,11 +272,9 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            // NOTE: the struct `Default` is the *library/test* baseline
-            // (optimizing tiers adaptive). The CLI default differs —
-            // `Config::parse` starts with jit/mlir **off** and `--jit`/
-            // `--mlir` opt in. One intrinsic semantics either way
-            // (prove-or-reject; docs/intrinsics.md).
+            // `Config::parse` starts from this and overrides `mlir` alone, so
+            // the JIT policy here is also the one `elle` runs with
+            // (docs/config.md).
             jit: JitPolicy::Adaptive { threshold: 10 },
             stats: false,
             mlir: MlirPolicy::Adaptive { threshold: 10 },

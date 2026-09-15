@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-14
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -92,6 +92,9 @@ mod trace_compile {
 }
 mod flip_cli {
     include!("flip_cli.rs");
+}
+mod tier_cli {
+    include!("tier_cli.rs");
 }
 mod embedding {
     include!("embedding.rs");

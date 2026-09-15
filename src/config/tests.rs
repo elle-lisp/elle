@@ -1,4 +1,4 @@
-// audited: 2026-09-07
+// audited: 2026-09-14
 //! Unit tests (`super` is the parent impl module).
 
 use super::*;
@@ -125,13 +125,55 @@ fn trace_keywords_are_known() {
     }
 }
 
-// ── `--region-page-size` (docs/impl/region/model.md § "The base page is the OS
-// page") ──
-
 fn parse_args(args: &[&str]) -> Result<Config, String> {
     let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
     Config::parse(&owned).map(|(c, _)| c)
 }
+
+// ── The tier a fresh config starts from (docs/config.md) ──
+
+/// The binary and the embedding library start from one JIT policy.
+///
+/// The counter-factual this pins: `Config::parse` used to override the struct
+/// `Default` with `Off`, so `elle script.lisp` ran interpreted forever while a
+/// host calling `Config::default()` compiled. Two answers to one question, and
+/// whichever document a reader found, it was wrong half the time.
+#[test]
+fn the_cli_starts_the_jit_where_the_library_does() {
+    assert_eq!(Config::default().jit, JitPolicy::Adaptive { threshold: 10 });
+    assert_eq!(
+        parse_args(&[]).unwrap().jit,
+        Config::default().jit,
+        "no flag must mean what the struct Default means"
+    );
+}
+
+/// `--jit=off` is how a run asks for the interpreter alone. A default that
+/// moves must not take the flag with it — the corpus runs its VM tier through
+/// this spelling, and the integer alias predates the named policies.
+#[test]
+fn an_explicit_jit_flag_outranks_the_default() {
+    assert_eq!(parse_args(&["--jit=off"]).unwrap().jit, JitPolicy::Off);
+    assert_eq!(parse_args(&["--jit=0"]).unwrap().jit, JitPolicy::Off);
+    assert_eq!(parse_args(&["--jit=eager"]).unwrap().jit, JitPolicy::Eager);
+}
+
+/// MLIR keeps its own answer. `mlir` is not a default feature, so a stock
+/// build has no tier to start and the CLI leaves it off.
+///
+/// The counter-factual: the two defaults were written on one struct literal,
+/// so the obvious edit moves both and nothing else complains.
+#[test]
+fn the_cli_starts_mlir_off() {
+    assert_eq!(parse_args(&[]).unwrap().mlir, MlirPolicy::Off);
+    assert_eq!(
+        parse_args(&["--mlir=adaptive"]).unwrap().mlir,
+        MlirPolicy::Adaptive { threshold: 10 }
+    );
+}
+
+// ── `--region-page-size` (docs/impl/region/model.md § "The base page is the OS
+// page") ──
 
 /// A region's first page is one OS page, so a program that sets nothing gets
 /// the page the kernel charges for rather than a fraction of it.

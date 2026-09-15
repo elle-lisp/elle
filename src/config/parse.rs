@@ -1,3 +1,9 @@
+// audited: 2026-09-14
+//! `Config::parse`: turn an argv into a `Config` and the positional arguments
+//! left over. Every flag `elle --help` lists is recognized here.
+//!
+//! docs/config.md
+
 use super::*;
 
 impl Config {
@@ -6,11 +12,11 @@ impl Config {
     /// Returns `(config, subcommand_or_none, remaining_args)`.
     /// `remaining_args` contains file args and everything after `--`.
     pub fn parse(args: &[String]) -> Result<(Config, Vec<String>), String> {
-        // CLI effective defaults (distinct from the struct `Default`, which is
-        // the library/test baseline): the optimizing tiers are opt-in
-        // (`--jit`/`--mlir`).
+        // The JIT starts where the struct `Default` starts, so the binary and
+        // an embedding host answer the same question the same way. MLIR is the
+        // one tier the CLI overrides: `mlir` is not a default feature, so a
+        // stock build has nothing to start (docs/config.md).
         let mut config = Config {
-            jit: JitPolicy::Off,
             mlir: MlirPolicy::Off,
             ..Default::default()
         };

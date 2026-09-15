@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-09-13 -->
+<!-- audited: 2026-09-14 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -213,13 +213,9 @@ save/restore sequences so a yielded fiber can resume into JIT code.
 
 ## CLI flags
 
-```text
---jit=off       Disable the JIT. This is what the binary starts with
---jit=eager     Compile on the first call (threshold 0)
---jit=adaptive  Compile after 10 calls
---jit=N         0 is off, 1 is eager, N above 1 compiles after N-1 calls
---stats         Print compilation stats on exit
-```
+[config.md](../config.md) owns the `--jit` policy table and the policy the
+binary starts from. `--stats` prints this tier's compiled and rejected counts
+on exit, with the call count behind each rejection.
 
 ## Files
 
