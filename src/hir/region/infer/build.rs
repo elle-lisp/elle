@@ -135,7 +135,7 @@ impl RegionInference {
             cell_containers: HashMap::new(),
             cell_stored_regions: FxHashSet::default(),
             begin_cell_regions: self.begin_cell_regions,
-            pattern_rest_regions: HashMap::new(),
+            pattern_rest_regions: self.pattern_rest_regions,
             // Populated by the `region::infer::merge` post-pass in `analyze_regions_with`,
             // after `region_data` decref_points are final (the seed's
             // coincident-decref_point gate reads them). Empty here.

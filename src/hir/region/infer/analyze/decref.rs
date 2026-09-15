@@ -53,6 +53,25 @@ pub(super) fn populate_decref_points(
             .pin_all_to(cells.iter().map(|&(_b, region)| region), lu, porder);
     }
 
+    // The collection a rest pattern BUILDS (`pattern_rest_regions`, keyed by
+    // the `Destructure`/`Match` node rather than held in `alloc_region`, which
+    // is one region per HirId). The base is the node itself: a rest name
+    // nothing reads leaves the binding chain below with no use to extend a
+    // release over, and a region with no `region_data` entry gets no release
+    // emitted at all — the shape that provokes the defect most often
+    // (docs/impl/region/anchors.md § "A rest pattern's collection is built, not
+    // read out").
+    //
+    // The node, not its last use. A `Match` node's own last use is wherever the
+    // match's VALUE goes, which is a different value from the collection an arm
+    // built — extending to it would carry the release past a loop that builds a
+    // fresh collection per iteration. The node is post-ordered after every arm
+    // body, which is all the base has to reach.
+    for (node_id, rests) in &info.pattern_rest_regions {
+        info.region_data
+            .pin_all_to(rests.iter().map(|&(_b, region)| region), *node_id, porder);
+    }
+
     // Extend decref_point through binding chains: when a binding b holds a
     // value whose region r is somewhere else (e.g., `(let [result (let
     // [f ...] (array ok val))])`, `result`'s value lives in `array`'s

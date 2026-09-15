@@ -11,6 +11,12 @@ impl RegionInference {
                 // (ArrayMutSliceFrom, StructRest from destructuring).
                 self.alloc_here(hir.id);
                 let val_regions = self.walk(value);
+                // A rest name over an array or a struct holds a collection the
+                // arm BUILT rather than a projection of the scrutinee, so it
+                // owns a region of its own (see `record_pattern_rest_regions`).
+                // Recorded before the arms are walked so a body that reads the
+                // name already sees the placeholder among its regions.
+                self.record_pattern_rest_regions(hir.id, arms.iter().map(|(p, _, _)| p));
                 let mut out = Vec::new();
                 for (pat, guard, body) in arms {
                     for b in pat.bindings().bindings {
@@ -346,6 +352,11 @@ impl RegionInference {
                 // `&named`-param prologue) frees the source before the
                 // extraction (region-named-param-uaf.lisp).
                 self.destructure_sites.push((hir.id, val_regions.clone()));
+                // A rest name over an array or a struct holds a collection this
+                // destructure BUILT rather than a projection of the scrutinee,
+                // so it owns a region of its own (see
+                // `record_pattern_rest_regions`).
+                self.record_pattern_rest_regions(hir.id, std::iter::once(pattern));
                 for b in pattern.bindings().bindings {
                     self.binding_region.insert(b, self.current_region);
                     // A leaf NAMES the source without holding it, which the
