@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-15
 //! The relocation points that say which paths a release still has to cover.
 //! A frame-replacing tail call opens one and a `break` opens one; a branch merge
 //! inherits them.
@@ -9,30 +9,14 @@
 use super::*;
 
 /// A position some path leaves the release stream at, into which a release
-/// emitted later may be replicated (docs/impl/region/replicate.md).
+/// emitted later may be MOVED or REPLICATED.
 ///
-/// Two openers. A **frame-replacing tail call** opens one in its own block:
-/// everything the lowerer emits after a `TailCall` runs only on the NATIVE
-/// fall-through — a native pushes no bytecode frame, so the dispatch loop
-/// continues into that block, while a closure callee replaces the frame and
-/// never arrives. A release landing there is therefore emitted where control may
-/// never reach, and the frame's own reference is stranded once per call. Moving
-/// that one release to just before the `TailCall` costs no count argument (it is
-/// the same single release, relocated), and is legal for every region the call
-/// itself cannot reach.
+/// Two openers: a frame-replacing tail call opens one in its own block, and a
+/// `break` opens one at the end of the block it leaves. A branch merge inherits
+/// the points of the arms that reach it and the points that already covered the
+/// branch's entry, so a point outlives its own block.
 ///
-/// A **`break`** opens the other, at the end of the block it leaves: the jump
-/// goes to that block's exit label, so a release emitted while the block is
-/// still open is one the break path passed over. What the break window cannot
-/// re-anchor there — a region the loop body allocates, whose release is one per
-/// iteration — is replicated at the break instead.
-///
-/// A branch merge inherits the points of the arms that reach it AND the points
-/// that already covered the branch's entry, so a point outlives its own block
-/// (docs/impl/region/replicate.md). There the release is emitted at
-/// the merge *and* replicated at each point, which is sound only for a
-/// self-cancelling run — one that nil-stamps the slot it read, so the copy a path
-/// reaches second no-ops.
+/// docs/impl/region/replicate.md
 #[derive(Clone)]
 pub(crate) struct TailExitHoist {
     /// Where in the block's instruction list a replica is spliced: the index of
@@ -42,44 +26,27 @@ pub(crate) struct TailExitHoist {
     pub(super) at: usize,
     /// The block the point sits in.
     pub(super) block: HoistBlock,
-    /// The local slots and capture indices the call's operands were loaded from.
-    /// A release that reloads one of these reloads the very value now sitting on
-    /// the operand stack, so it IS the ownership move however ANF spelled the
-    /// argument — the reading `exempt` cannot give, since ANF is free to rewrite
-    /// an operand into a synthetic binding whose region the syntax walk does not
-    /// connect back to the call.
+    /// The local slots and capture indices the call's operands were loaded
+    /// from, read off the emitted instructions rather than the HIR. A release
+    /// that reloads one of these IS the ownership move, however ANF spelled the
+    /// argument.
     pub(super) operand_locals: rustc_hash::FxHashSet<u16>,
     pub(super) operand_captures: rustc_hash::FxHashSet<u16>,
-    /// Regions the callee or an argument subtree names, canonicalized through
-    /// the merge forest. These releases must STAY in the dead block: an
-    /// argument's is the ownership move the calling convention rests on, and the
-    /// callee's belongs to the activation that takes it over. For a break's
-    /// point these are the regions the value it CARRIES names: the block is
-    /// about to hand that value to its consumer, and its release is already
-    /// pinned there.
+    /// Regions whose release must STAY where the lowerer put it, canonicalized
+    /// through the merge forest: those the callee or an argument subtree names,
+    /// and for a break's point those the value it carries names.
     pub(super) exempt: rustc_hash::FxHashSet<crate::hir::region::Region>,
-    /// The labeled block a `break` left through, for a point a break opened.
-    ///
-    /// It is the point's whole lifetime. A break jumps to this block's exit
-    /// label, so every position the lowerer fills while the block is still being
-    /// lowered is a position the jump passed over, and the exit label is the
-    /// first one the break path reaches. Keeping the point exactly while that
-    /// block is open is therefore what makes the count exact: the replica and
-    /// the release it copies can never both run.
-    ///
-    /// `None` for a tail call's point, which has no such scope — nothing rejoins
-    /// it — and dies at the next block boundary unless a merge inherits it.
+    /// The labeled block a `break` left through, and the point's whole lifetime:
+    /// it is kept exactly while that block is open. `None` for a tail call's
+    /// point, which dies at the next block boundary unless a merge inherits it.
     pub(super) left_block: Option<BlockId>,
 }
 
-/// What a branch lowering holds across its arms, so `open_branch_merge` can hand
-/// the merge block everything that covers it.
+/// What a branch lowering holds across its arms, so `open_branch_merge` can
+/// hand the merge block everything that covers it. Two sources, collected at
+/// different moments because they are sealed differently.
 ///
-/// Two sources, collected at different moments because they are sealed
-/// differently: an arm's own points name a block the arm just closed and are
-/// sealed at that close (`seal_arm_hoists`), while the points covering the
-/// branch's ENTRY are already sealed when the branch begins and are read there
-/// (docs/impl/region/replicate.md).
+/// docs/impl/region/replicate.md
 pub(crate) struct BranchHoists {
     /// The enclosing branch's `arm_exit_hoists`, restored at the merge so a
     /// nested branch's arms never leak into it.
@@ -108,33 +75,15 @@ impl<'a> Lowerer<'a> {
     /// position this branch is entered at.
     ///
     /// Each branch lowering brackets its arms with this pair — `if`, `cond`,
-    /// `match`, and the branch `and`/`or` compile to, whose arms are their
-    /// operands. A branch nested inside an arm therefore collects into its own
-    /// list and hands its union up as that arm's contribution.
+    /// `match`, and the branch `and`/`or` compile to. A branch nested inside an
+    /// arm collects into its own list and hands its union up.
     ///
-    /// The **inherited** half is the merge's second source. A merge is reached
-    /// only through the branch, so the paths that arrive at it are the paths that
-    /// arrived at the entry, minus the ones an arm's own tail call took away — and
-    /// a point that covered the entry covers the merge for the same reason it
-    /// covered the entry (docs/impl/region/replicate.md). Without it a branch that follows an
-    /// earlier branch starts life covering nothing: the condition block closes like
-    /// any other and clears what it was carrying.
+    /// Only the [`super::HoistBlock::Finished`] points are inherited: one still
+    /// naming the open block has no closed instruction list to be spliced into.
+    /// They are MOVED out rather than copied, a point being mutable state that
+    /// two records of would diverge.
     ///
-    /// Read here rather than sealed later, because this runs while the branch's own
-    /// entry block is the one still open — the position the points describe. Only
-    /// the [`super::HoistBlock::Finished`] ones are taken: a point still naming the
-    /// open block dies with that block exactly as before, having no closed
-    /// instruction list to be spliced into.
-    ///
-    /// The points are MOVED out rather than copied, so the branch holds the only
-    /// record of each. A point is mutable state — every replica spliced into its
-    /// block advances its `at` past what it inserted — so two records of one point
-    /// diverge, and the stale one then splices into the middle of the run the
-    /// current one already put there. What that costs is the position between here
-    /// and the branch's own first block boundary: a `cond`'s first clause test and a
-    /// `match`'s first pattern test are lowered into the entry block and emit their
-    /// releases plainly. That is the conservative baseline this whole mechanism
-    /// improves on, never a mis-free.
+    /// docs/impl/region/replicate.md
     pub(super) fn begin_branch_arms(&mut self) -> super::BranchHoists {
         let mut inherited = Vec::new();
         self.tail_exit_hoist.retain(|h| match h.block {
@@ -175,22 +124,13 @@ impl<'a> Lowerer<'a> {
         self.arm_exit_hoists.extend(sealed);
     }
 
-    /// Hand the merge block just opened the points its arms sealed and the points
-    /// that covered the branch's entry, and restore the enclosing branch's
-    /// collection.
+    /// Hand the merge block just opened the points its arms sealed and the
+    /// points that covered the branch's entry, and restore the enclosing
+    /// branch's collection. The two sets cannot double-count each other. The
+    /// break scope filter is asked here too, the merge being a position past
+    /// the branch.
     ///
-    /// Every path into a merge arrives through one of the arms, and every path
-    /// into the branch arrived at its entry, so the two sets together cover the
-    /// merge — which is what licenses replicating a release emitted here back into
-    /// each of them. Neither can double-count the other: a point handed over from
-    /// the entry was never in an arm's `tail_exit_hoist` to be sealed, the block
-    /// boundary between the two having cleared it.
-    ///
-    /// A break's point can reach the merge by either route, and the merge is a
-    /// position past the branch — so the scope filter is asked here too. A point
-    /// whose block closed while the branch was being lowered names an exit label
-    /// the break path has already rejoined, and replicating into it would add a
-    /// release on a path that ran one.
+    /// docs/impl/region/replicate.md
     pub(super) fn open_branch_merge(&mut self, hoists: super::BranchHoists) {
         let super::BranchHoists { saved, inherited } = hoists;
         self.tail_exit_hoist = std::mem::replace(&mut self.arm_exit_hoists, saved);
@@ -198,16 +138,16 @@ impl<'a> Lowerer<'a> {
         self.retain_open_break_points();
     }
 
-    /// Open the relocation point a frame-replacing tail call leaves behind: the
+    /// Open the relocation point a frame-replacing tail call leaves behind. The
     /// `TailCall` was just emitted as the last instruction of `current_block`,
-    /// and every release the lowerer emits after it into this block runs only on
-    /// the native fall-through (docs/impl/region/relocate.md).
+    /// so every release the lowerer emits after it runs on the native
+    /// fall-through alone.
     ///
-    /// `exempt` is read off the call itself — the regions the callee, an operand's
-    /// own VALUE, or the call's own result placeholder name — because those are
-    /// exactly the ones the tail call can still reach, and their releases are
-    /// owed to the ownership move, to the activation that takes over the callee's
-    /// region, and to the caller that consumes the result.
+    /// `exempt` is read off the call itself: the regions the callee, an
+    /// operand's own VALUE, the call's result placeholder, or a deferred
+    /// channel name.
+    ///
+    /// docs/impl/region/relocate.md
     pub(super) fn open_tail_exit_hoist(
         &mut self,
         call_id: HirId,
@@ -240,10 +180,8 @@ impl<'a> Lowerer<'a> {
             exempt.insert(self.region_info.merged_root(r));
         }
         // The merged arena a letrec body's tail call hands to the runtime's
-        // deferred release (`TailCall::deferred_release_slot`,
-        // docs/impl/region/letrec.md): its binding-scope `DecrefRegion` is dead
-        // past the frame replacement BY DESIGN, and the deferred channel supplies
-        // it. Hoisting it would make both fire.
+        // deferred release: that channel supplies the release, so hoisting it
+        // here would make both fire (docs/impl/region/letrec.md).
         if let Some(&root) = self.region_info.cycle_tail_release.get(&call_id) {
             exempt.insert(self.region_info.merged_root(root));
         }
@@ -265,10 +203,8 @@ impl<'a> Lowerer<'a> {
         }
         exempt.extend(by_args);
         // This call dominates every position after it in the block, so it alone
-        // covers them — any points a merge left here name arms that reach this
-        // call, not the releases that follow it. A break's point goes with them:
-        // dropping a licence to replicate can only over-keep, so the release
-        // after a tail call keeps the conservative baseline.
+        // covers them and every earlier point is dropped. Dropping a licence to
+        // replicate can only over-keep.
         self.tail_exit_hoist.clear();
         self.tail_exit_hoist.push(super::TailExitHoist {
             at: self.current_block.instructions.len() - 1,
@@ -281,20 +217,18 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Open the relocation point a `break` leaves at the end of the block it is
-    /// jumping out of (docs/impl/region/replicate.md).
+    /// jumping out of.
     ///
     /// Called with the break's value already stored into the block's result slot
-    /// and the jump not yet emitted, so the point names the end of an instruction
-    /// list nothing else will append to. The block is closed immediately
-    /// afterwards, so the point is sealed here rather than left to
-    /// [`Self::seal_arm_hoists`]: `finish_block` is about to give this block the
-    /// index `blocks.len()` names.
+    /// and the jump not yet emitted, so the point names the end of an
+    /// instruction list nothing else will append to. Sealed here rather than in
+    /// [`Self::seal_arm_hoists`], `finish_block` being about to give this block
+    /// the index `blocks.len()` names.
     ///
     /// `exempt` is the value the break CARRIES, read the same two ways a tail
-    /// call's operands are — off the value expression, and off the load that put
-    /// the value in its register. The block is about to hand that value to its
-    /// consumer, and its release is already pinned there
-    /// (docs/impl/region/anchors.md), so a replica here would free it early.
+    /// call's operands are.
+    ///
+    /// docs/impl/region/replicate.md
     pub(super) fn open_break_exit_hoist(&mut self, block_id: BlockId, value: &Hir, value_reg: Reg) {
         let mut operand_locals = rustc_hash::FxHashSet::default();
         let mut operand_captures = rustc_hash::FxHashSet::default();
@@ -323,13 +257,11 @@ impl<'a> Lowerer<'a> {
         });
     }
 
-    /// Drop every break point whose block has finished lowering.
+    /// Drop every break point whose block has finished lowering. A tail call's
+    /// point has no such scope and is left alone; the block boundaries decide
+    /// its life instead.
     ///
-    /// That block's exit label is the first position its jump reaches, so from
-    /// there on the break path has rejoined and a replica would add a release on
-    /// a path that already ran one. A tail call's point has no such scope and is
-    /// left alone; the block boundaries decide its life instead
-    /// (docs/impl/region/replicate.md).
+    /// docs/impl/region/replicate.md
     pub(super) fn retain_open_break_points(&mut self) {
         if self.tail_exit_hoist.iter().all(|h| h.left_block.is_none()) {
             return;
@@ -355,38 +287,16 @@ impl<'a> Lowerer<'a> {
         self.region_info.operand_value_regions(h, out);
     }
 
-    /// Take back the exemption of a region an argument only NAMES.
+    /// Take back the exemption of a region an argument only NAMES, one region at
+    /// a time.
     ///
-    /// An argument's region is exempt because the callee's owned-parameter
-    /// release stands in for the caller's — which holds only where the reference
-    /// the callee takes over is the one the caller's release would have dropped.
-    /// A destructured leaf is where the two come apart: `(let [[a b] t] (f a b))`
-    /// hands `f` the leaves, never `t`, yet each leaf names `t`'s region through
-    /// `binding_source_regions` (a leaf may BE an element living in it). So `t`'s
-    /// release is withheld, nothing takes it over, and `t` is held to fiber
-    /// teardown — one region per call, which every h2 frame builder pays.
+    /// Only a destructured leaf is reconsidered; every other binding that names a
+    /// region names the whole value. A region keeps its exemption where the call
+    /// passes the very slot that region's release route loads. A region with no
+    /// recorded slot releases by id and keeps it too, there being no slot to
+    /// compare.
     ///
-    /// Only a leaf is reconsidered (`RegionInfo::destructure_leaf_bindings`).
-    /// Every other binding that names a region names the whole value: an alias
-    /// binder is a second name for the very reference the call moves — `arrs` for
-    /// the array `a` built and returned by an inner `let` (stdlib `zip`) — and
-    /// hoisting its release ahead of the call would free what the callee is about
-    /// to take over.
-    ///
-    /// The slot is the second half of the reading, and it is what admits the leaf
-    /// that IS the whole: a rest pattern binds a tail that shares the source's
-    /// region and can be the reference the call moves. Where the region's value
-    /// route loads a slot the call passes, the move is real and the exemption
-    /// stands whatever the binding's kind. A region with no recorded slot releases
-    /// by id, where there is no slot to compare, and stands too.
-    ///
-    /// A slot comparison rests on one value having one slot, which the collection
-    /// a rest pattern BUILDS does not: the lowerer parks it in a slot of its own
-    /// so the release has a stamped route, while the call passes the binding's
-    /// slot (docs/impl/region/anchors.md). So the region the rest name holds is
-    /// asked about first, and keeps its exemption whatever slot its route loads —
-    /// it IS the reference the callee takes over. The scrutinee's regions, which
-    /// the same name only borrows, keep the comparison.
+    /// docs/impl/region/relocate.md
     fn drop_named_only_arg_exemptions(
         &self,
         h: &Hir,
@@ -406,9 +316,6 @@ impl<'a> Lowerer<'a> {
             .flatten()
         {
             let root = self.region_info.merged_root(r);
-            if self.region_info.holds_built_rest_collection(*b, root) {
-                continue;
-            }
             let moved = match self.region_to_slot.get(&root) {
                 Some(super::ValueSlot::Local(s)) => operand_locals.contains(s),
                 Some(super::ValueSlot::Env(i)) => operand_captures.contains(i),

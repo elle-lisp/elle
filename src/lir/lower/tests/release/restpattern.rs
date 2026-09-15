@@ -1,16 +1,15 @@
-// audited: 2026-09-14
+// audited: 2026-09-15
 // ── The collection a rest pattern built, at a tail call ──────────
 //
-// A rest name holds a collection the destructure BUILT, and the lowerer parks
-// that collection in a slot of its own so the release has a stamped route
-// (docs/impl/region/anchors.md). The rest name is also a destructured leaf, so
-// the relocation reconsiders its exemption against that route — and the route
-// slot is not the slot the call passes, because the parked slot is a second
-// name for the one reference (docs/impl/region/relocate.md).
+// THE TRAP: the collection's release route is the slot the lowerer parked it
+// in, and the call passes the binding's slot. A reading that compares those two
+// slots alone finds them different and carries the release ahead of the call.
 //
 // These pin the PLACEMENT of that one release, per slot. The counts are the
 // same either way, so only position tells the ownership move from a free under
 // the callee's own read.
+//
+// docs/impl/region/relocate.md
 
 use super::*;
 
