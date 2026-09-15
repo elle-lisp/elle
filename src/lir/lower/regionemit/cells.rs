@@ -55,9 +55,12 @@ impl<'a> Lowerer<'a> {
             self.emit(LirInstr::IncrefValueRegion { src });
         }
     }
-    /// Store a top-level captured binding's init value into its pre-allocated
-    /// `MakeCaptureCell` (the binding `slot` holds the CELL, created nil by the
-    /// `lower_begin`/`lower_letrec` pre-pass).
+    /// Store a captured binding's init value into the nil-valued
+    /// `MakeCaptureCell` already sitting in its `slot` — put there by the
+    /// `lower_begin`/`lower_letrec` pre-pass, or by `lower_let` immediately
+    /// ahead of this call. Every binder that mints a compiled cell reaches the
+    /// store through here, so the cell's membership reference and the init drop
+    /// below cannot come apart at one of them (docs/impl/region/cells.md).
     ///
     /// `reassigned` selects how the init value's ALLOC reference is dropped:
     ///
