@@ -279,6 +279,91 @@ impl HirPattern {
         }
     }
 
+    /// Every name bound DIRECTLY by a rest whose lowering builds a fresh
+    /// collection, in the order the lowerer reaches them.
+    ///
+    /// The one predicate the region walk and the lowerer both read, so a
+    /// placeholder region and the slot its release loads name the same
+    /// allocation (docs/impl/region/anchors.md § "A rest pattern's collection
+    /// is built, not read out"). The building rests are those `allocates`
+    /// names: `Array`/`Tuple` lower to `ArrayMutSliceFrom` and `Struct`/`Table`
+    /// to `StructRest`, while a `List` rest is the remaining cons tail and
+    /// builds nothing.
+    ///
+    /// "Directly" is the whole restriction: a rest matched by a further pattern
+    /// binds no name to the collection itself, so no slot can name it and no
+    /// value route can release it (elle-lisp/elle#1127).
+    pub fn allocating_rest_bindings(&self) -> Vec<Binding> {
+        let mut out = Vec::new();
+        self.collect_allocating_rest_bindings(&mut out);
+        out
+    }
+
+    fn collect_allocating_rest_bindings(&self, out: &mut Vec<Binding>) {
+        // Sub-patterns first, then this pattern's own rest, then whatever the
+        // rest itself contains: the order every lowering path reaches them in,
+        // so an index into the result names the same allocation on both sides.
+        fn rest_name(rest: &Option<Box<HirPattern>>, out: &mut Vec<Binding>) {
+            if let Some(HirPattern::Var(b)) = rest.as_deref() {
+                out.push(*b);
+            }
+        }
+        match self {
+            HirPattern::Pair { head, tail } => {
+                head.collect_allocating_rest_bindings(out);
+                tail.collect_allocating_rest_bindings(out);
+            }
+            // A `List` rest is the remaining cons tail — a pointer into the
+            // scrutinee's own cells, so it builds nothing and names nothing
+            // here. Its sub-patterns still can.
+            HirPattern::List { elements, rest } => {
+                for p in elements {
+                    p.collect_allocating_rest_bindings(out);
+                }
+                if let Some(r) = rest {
+                    r.collect_allocating_rest_bindings(out);
+                }
+            }
+            HirPattern::Tuple { elements, rest } | HirPattern::Array { elements, rest } => {
+                for p in elements {
+                    p.collect_allocating_rest_bindings(out);
+                }
+                rest_name(rest, out);
+                if let Some(r) = rest {
+                    r.collect_allocating_rest_bindings(out);
+                }
+            }
+            HirPattern::Struct { entries, rest } | HirPattern::Table { entries, rest } => {
+                for (_, p) in entries {
+                    p.collect_allocating_rest_bindings(out);
+                }
+                rest_name(rest, out);
+                if let Some(r) = rest {
+                    r.collect_allocating_rest_bindings(out);
+                }
+            }
+            HirPattern::NamedStruct { entries } => {
+                for (_, p) in entries {
+                    p.collect_allocating_rest_bindings(out);
+                }
+            }
+            HirPattern::Set { binding } | HirPattern::SetMut { binding } => {
+                binding.collect_allocating_rest_bindings(out)
+            }
+            // Every alternative, not just the first: an or-pattern's cases bind
+            // the same NAMES, and the arena gives each case its own `Binding`.
+            HirPattern::Or(alternatives) => {
+                for alt in alternatives {
+                    alt.collect_allocating_rest_bindings(out);
+                }
+            }
+            HirPattern::Wildcard
+            | HirPattern::Nil
+            | HirPattern::Literal(_)
+            | HirPattern::Var(_) => {}
+        }
+    }
+
     /// True when this pattern matches every value: a wildcard, a bare
     /// variable, or an or-pattern with an irrefutable alternative.
     /// A match with a guardless irrefutable arm cannot raise
