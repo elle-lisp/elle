@@ -189,6 +189,27 @@ fn region_splice_args_uaf() {
     );
 }
 
+// Guard — a rest name owns the collection its pattern BUILT, so it now carries
+// a release where it carried none (docs/impl/region/anchors.md § "A rest
+// pattern's collection is built, not read out"). The collection holds copies of
+// the scrutinee's element values, so its allocation counted each element's
+// region and its free cascades those references away: the scrutinee is a
+// separate holder the cascade must leave alone, and an element borrowed back
+// out of the collection outlives the collection's own name. This drives every
+// way a rest collection leaves the destructure — read in its own scope,
+// returned, stored into a container that outlives the loop, captured by a
+// closure called afterwards, borrowed element-wise, carried across a fiber
+// yield, left behind by a failed guard, and broken out of a loop. Freeing any
+// of them at the destructure faults on the read — SIGSEGV under guardfree. The
+// leak face is `region-rest-pattern-slice.lisp`.
+#[test]
+fn region_rest_pattern_slice_uaf() {
+    run_elle_script_with_args(
+        "region-rest-pattern-slice-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a `def` evaluates to what it bound, so its initializer's demise must
 // not be narrowed onto the initializer when nothing reads the binding
 // (docs/impl/region/mechanism.md § "A binder's init release lands after the slot
