@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-14
 //! The relocation points that say which paths a release still has to cover.
 //! A frame-replacing tail call opens one and a `break` opens one; a branch merge
 //! inherits them.
@@ -379,6 +379,14 @@ impl<'a> Lowerer<'a> {
     /// route loads a slot the call passes, the move is real and the exemption
     /// stands whatever the binding's kind. A region with no recorded slot releases
     /// by id, where there is no slot to compare, and stands too.
+    ///
+    /// A slot comparison rests on one value having one slot, which the collection
+    /// a rest pattern BUILDS does not: the lowerer parks it in a slot of its own
+    /// so the release has a stamped route, while the call passes the binding's
+    /// slot (docs/impl/region/anchors.md). So the region the rest name holds is
+    /// asked about first, and keeps its exemption whatever slot its route loads —
+    /// it IS the reference the callee takes over. The scrutinee's regions, which
+    /// the same name only borrows, keep the comparison.
     fn drop_named_only_arg_exemptions(
         &self,
         h: &Hir,
@@ -398,6 +406,9 @@ impl<'a> Lowerer<'a> {
             .flatten()
         {
             let root = self.region_info.merged_root(r);
+            if self.region_info.holds_built_rest_collection(*b, root) {
+                continue;
+            }
             let moved = match self.region_to_slot.get(&root) {
                 Some(super::ValueSlot::Local(s)) => operand_locals.contains(s),
                 Some(super::ValueSlot::Env(i)) => operand_captures.contains(i),
