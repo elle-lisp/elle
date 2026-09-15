@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-14 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -121,7 +121,11 @@ is a correctness defect, not a tuning knob.
    its Owned subtree, `extract_owned_region`), so the container keeps its own last
    use. A `Match` arm's pattern binding is a borrowing read of the **scrutinee**, so
    where its release lands is decided by the loop-containment test every binder's
-   scope node feeds ([mechanism.md](mechanism.md) § "Every binder records its scope").
+   scope node feeds ([anchors.md](anchors.md) § "Every binder records its scope").
+   A **rest** name is the one pattern name that is not a borrow: `[a b & r]` and
+   `{:k v & r}` BUILD a fresh collection rather than reading one out, so the name
+   owns it and releases it ([anchors.md](anchors.md) § "A rest pattern's
+   collection is built, not read out").
    It is *per
    activation*: each activation remaps its static region slots to fresh physical
    regions, so the same static `DecrefRegion` frees a different physical region
