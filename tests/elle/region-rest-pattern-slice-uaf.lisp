@@ -185,4 +185,42 @@
             "a rest collection broken out of a loop must survive"))
   (assign y (+ y 1)))
 
+# ── 11. handed to a TAIL call ─────────────────────────────────────────────────
+# THE TRAP. A release is carried back ahead of a frame-replacing tail call
+# unless the call itself names the region, and for a name a pattern bound that
+# question is answered by comparing the region's release route against the
+# slots the call passes. The collection's route is the slot the lowerer parked
+# it in; the call passes the binding's own slot. Read off those two slots alone
+# the rest name looks like a leaf the call does not move, and the release runs
+# before the callee ever reads the collection.
+#
+# Three callees, because what follows the call differs. A native tail call
+# returns into the block the release sits in, a closure one replaces the frame,
+# and a struct rest reaches the same relocation through `StructRest`.
+
+(defn tail-native []
+  (let [[x y & r] src]
+    (length r)))
+
+(defn count-it [v]
+  (length v))
+
+(defn tail-closure []
+  (let [[x y & r] src]
+    (count-it r)))
+
+(defn tail-struct []
+  (let [{:a one & r} rec]
+    (length r)))
+
+(var aa 0)
+(while (< aa 40)
+  (assert (= (tail-native) 3)
+          "a rest collection handed to a native tail call must survive it")
+  (assert (= (tail-closure) 3)
+          "a rest collection handed to a closure tail call must survive it")
+  (assert (= (tail-struct) 3)
+          "a struct rest collection handed to a tail call must survive it")
+  (assign aa (+ aa 1)))
+
 (println "region-rest-pattern-slice-uaf: ok")
