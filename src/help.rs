@@ -1,4 +1,8 @@
-//! `--help` / `--dump` keyword rendering.
+// audited: 2026-09-14
+//! `elle --help`: the usage text, with the `--trace` and `--dump` keyword
+//! lists generated from the tables that define them.
+//!
+//! docs/config.md
 
 /// Word-wrap a comma-joined keyword list into lines no wider than `width`,
 /// so `--help` renders the live `TRACE_KEYWORDS` set without a hand-kept copy.
@@ -54,6 +58,7 @@ pub(super) fn print_help() {
     println!("       elle rewrite [options] <file...>  Source-to-source rewriting\n");
     println!("Options:");
     println!("  -h, --help            Show this help");
+    println!("  --version             Show the version");
     println!("  -e, --eval EXPR       Evaluate expression");
     println!("  -                     Read from stdin");
     println!("  --dump=KW[,KW,...]    Dump compiler artifacts and exit. Keywords:");
@@ -66,7 +71,7 @@ pub(super) fn print_help() {
         );
     }
     println!("  --dump=all            Dump every stage");
-    println!("  --jit=POLICY          JIT policy: off (default), eager, adaptive, or integer N");
+    println!("  --jit=POLICY          JIT policy: off, eager, adaptive (default), or integer N");
     println!("  --mlir=POLICY         MLIR policy: off (default), eager, adaptive, or integer N");
     println!("  --wasm=POLICY         WASM policy: off (default), full, lazy, or integer N");
     println!("  --flip=on|off         Legacy no-op (accepted for backwards compat)");
