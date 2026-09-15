@@ -1,3 +1,4 @@
+// audited: 2026-09-14
 //! Recursive/scoped binding forms: `let` and `letrec`.
 //!
 //! These share the region-scope, capture-cell, and tail-call stranding
@@ -71,7 +72,26 @@ impl<'a> Lowerer<'a> {
             // would leak. Defer the init node's decrefs, store the value,
             // then emit them against the now-populated slot.
             let slot = self.allocate_slot(*binding);
-            self.record_region_slot(init.id, *binding, slot);
+            // EXCEPTION — a captured AND reassigned binding's slot holds the
+            // `MakeCaptureCell` this binder is about to mint, and a later
+            // reassignment repoints that cell; routing the init's region through
+            // the slot makes its decref reload the cell and — via
+            // `result_region_of`, which unwraps a capture cell — free whatever
+            // the cell holds when the release fires, a different and live value
+            // (the capture-cell reassign UAF). Skip the routing and drop the
+            // init's alloc reference off its own register below, exactly as
+            // `lower_letrec` and `lower_define` do for the same binding class
+            // (docs/impl/region/cells.md § "Every binder that mints the cell owes
+            // the rule too"). A captured binding never reassigned keeps the
+            // routing — its cell content is stable, so the unwrap always names
+            // this init value.
+            let captured_reassigned = self
+                .region_info
+                .captured_reassigned_bindings
+                .contains(binding);
+            if !captured_reassigned {
+                self.record_region_slot(init.id, *binding, slot);
+            }
             self.deferred_decref_points.insert(init.id);
             let init_reg = self.lower_expr(init)?;
             self.emit_counted_cell_read_retain(init.id, init_reg);
@@ -99,20 +119,35 @@ impl<'a> Lowerer<'a> {
                     // single slot (the shared-slot capture-cell leak;
                     // docs/impl/region/model.md, "one allocation execution per slot
                     // between drops").
+                    //
+                    // The cell is minted holding NIL and the init stored THROUGH
+                    // it, which is the shape the other two binders take and the
+                    // reason this one can share their store routine. Minting the
+                    // cell with the init already in it is one instruction shorter
+                    // and leaves the init's register consumed: `MakeCapture` pops
+                    // its value and pushes the cell, so a release naming that
+                    // register afterwards finds it untracked and the emitter
+                    // releases whatever sits on top instead. `UpdateCapture`
+                    // pushes the value back, so the init drop has an operand.
                     let region = self.cell_region_for(*binding);
+                    let nil_reg = self.emit_const(LirConst::Nil)?;
                     let cell_reg = self.fresh_reg();
                     self.emit_alloc_in(region, |region| LirInstr::MakeCaptureCell {
                         region,
                         dst: cell_reg,
-                        value: init_reg,
+                        value: nil_reg,
                     });
-                    // `cell ⊇ content`: adopt the init value into the cell's own region if
-                    // the forest admitted it. A `lower_let` compiled cell is always a
-                    // re-storable `@`-mutable local (a `let` binding is never prebound), so
-                    // this is a no-op today (gate D refuses re-storable content); kept for
-                    // uniformity with the letrec/define cell-store sites.
-                    self.maybe_emit_cell_content_adopt(*binding, cell_reg, init_reg);
                     self.emit_binding_store(slot, cell_reg);
+                    // One routine owns the cell store, the `cell ⊇ content` adopt
+                    // and the init drop a reassigned binding owes, for every
+                    // binder that mints a compiled cell.
+                    self.store_captured_cell_init(
+                        *binding,
+                        slot,
+                        init_reg,
+                        init,
+                        captured_reassigned,
+                    );
                 } else {
                     self.emit_binding_store(slot, init_reg);
                 }

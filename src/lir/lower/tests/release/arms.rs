@@ -1,3 +1,9 @@
+// audited: 2026-09-14
+// Where a release lands across branch arms, and why a re-storable capture
+// cell's slot is no release route at all.
+// docs/impl/region/mechanism.md
+// docs/impl/region/cells.md
+
 use super::*;
 
 // ── A tail-calling arm does not hold back its falling-through siblings ───────
@@ -209,5 +215,38 @@ fn nested_closure_reassign_leaves_no_cell_slot_release() {
          (def outer (fn (x) (inner x))) \
          (outer 7) (outer 8) slot)",
         "a cell repointed two closures deep",
+    );
+}
+
+#[test]
+fn let_bound_reassign_leaves_no_cell_slot_release() {
+    // The binder decides nothing about the rule: a `let` mints the same compiled
+    // cell into the same slot, so it owes the same init drop and the same skipped
+    // routing (docs/impl/region/cells.md § "Every binder that mints the cell owes
+    // the rule too"). `let` is the third binder, and the one whose cell takes its
+    // membership reference from `MakeCaptureCell` itself rather than from a later
+    // `StoreCaptureCell`. End-to-end witness:
+    // tests/integration/fixtures/region-capture-cell-let-reassign-uaf.lisp.
+    assert_no_cell_slot_value_release(
+        "(let [@acc (list 0)] \
+         (def push (fn (x) (assign acc (list x acc)))) \
+         (push 1) (push 2) acc)",
+        "a let-bound cell repointed by a closure",
+    );
+}
+
+#[test]
+fn let_bound_reassign_in_place_leaves_no_cell_slot_release() {
+    // The same binder with the write in the `let`'s own body rather than inside
+    // the closure — the shape issue #1124 reports, where the capturing closure is
+    // a fiber body that only READS the cell. The reassignment is what repoints
+    // the cell, so the routing has to go whether or not the write sits in a
+    // lambda.
+    assert_no_cell_slot_value_release(
+        "(let [@buf (list 0)] \
+         (assign buf (list 1 2)) \
+         (def read (fn () buf)) \
+         (read))",
+        "a let-bound cell repointed in its own body",
     );
 }

@@ -1,6 +1,6 @@
 # Capture cells
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-14 -->
 
 How a captured binding's cell is realized, what a read through one borrows, and where the cell's own release lands.
 
@@ -33,16 +33,39 @@ is a `make-scheduler` local) is exactly as exposed as a top-level `def @cell`
 read, and both are pinned by
 `region-reassign-captured-cell-reader.lisp`.
 
-The writer side owes one rule of its own, at the **init**. A compiled-cell
-binding's slot holds the CELL, so routing the init value's release through that
-slot makes `DecrefValueRegion` reload the slot and — via `result_region_of`,
-which unwraps a capture cell — free whatever the cell holds when the release
-fires. Once a reassignment has repointed the cell, that is a different, live
-value (the capture-cell reassign UAF). So a reassigned captured binding drops
-its init's producer reference off the value register at the define
+The writer side owes one rule of its own, at the **init**. A celled binding's
+slot holds the CELL, so routing the init value's release through that slot
+makes `DecrefValueRegion` reload the slot and — via `result_region_of`, which
+unwraps a capture cell — free whatever the cell holds when the release fires.
+Once a reassignment has repointed the cell, that is a different, live value (the
+capture-cell reassign UAF). So a reassigned captured binding drops its init's
+producer reference off the value register at its binder
 (`store_captured_cell_init`) and the cell-slot routing is skipped; the cell's
 own counted reference (taken by the store, `capture_store_with_rebind`) then
 holds the init until the next overwrite or the cell's free cascade.
+
+**Both realizations route through the slot, so both owe the rule.** The
+question the rule answers is what the slot names at the release, and neither
+cell answers "the init" once an `assign` has run. A compiled cell is reloaded
+with `LoadLocal`; an env cell is reloaded RAW with `LoadCaptureRaw` so the same
+unwrap reaches the content (`emit_decrefs_for`). Stating the rule of the
+compiled cell alone leaves a `@`-mutable captured local — an env cell — freeing
+its live content at the binding's last use.
+
+**Every binder that mints the cell owes the rule too.** The slot is the
+binding's, so the rule binds wherever the binding was bound: `def` and `var`
+through the `Begin` pre-pass, `letrec` through its own, and `let`. A binder that
+keeps the routing and takes no init drop frees the cell's content while the cell
+still holds it. What reads that freed content is any later reader of the cell,
+a closure the defining scope encloses included — the shape a spawned fiber
+reaches when it writes a captured `@`-mutable buffer to a port
+(`region-capture-cell-let-reassign-uaf.lisp`).
+
+`let` mints its cell inline, with the init already in it, so it is the one
+binder whose cell takes its membership reference from the allocation itself (the
+alloc-time cross-region scan) rather than from a later `StoreCaptureCell`. The
+reference the cell ends up holding is the same one either way, and so is the
+producer reference the binder owes a drop.
 
 **The reassign is a fact about the BINDING, not about where the assign sits.**
 `RegionInfo::captured_reassigned_bindings` names every captured binding some
