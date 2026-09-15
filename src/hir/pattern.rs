@@ -294,7 +294,74 @@ impl HirPattern {
     /// binds no name to the collection itself, so no slot can name it and no
     /// value route can release it (elle-lisp/elle#1127).
     pub fn allocating_rest_bindings(&self) -> Vec<Binding> {
-        Vec::new()
+        let mut out = Vec::new();
+        self.collect_allocating_rest_bindings(&mut out);
+        out
+    }
+
+    fn collect_allocating_rest_bindings(&self, out: &mut Vec<Binding>) {
+        // Sub-patterns first, then this pattern's own rest, then whatever the
+        // rest itself contains: the order every lowering path reaches them in,
+        // so an index into the result names the same allocation on both sides.
+        fn rest_name(rest: &Option<Box<HirPattern>>, out: &mut Vec<Binding>) {
+            if let Some(HirPattern::Var(b)) = rest.as_deref() {
+                out.push(*b);
+            }
+        }
+        match self {
+            HirPattern::Pair { head, tail } => {
+                head.collect_allocating_rest_bindings(out);
+                tail.collect_allocating_rest_bindings(out);
+            }
+            // A `List` rest is the remaining cons tail — a pointer into the
+            // scrutinee's own cells, so it builds nothing and names nothing
+            // here. Its sub-patterns still can.
+            HirPattern::List { elements, rest } => {
+                for p in elements {
+                    p.collect_allocating_rest_bindings(out);
+                }
+                if let Some(r) = rest {
+                    r.collect_allocating_rest_bindings(out);
+                }
+            }
+            HirPattern::Tuple { elements, rest } | HirPattern::Array { elements, rest } => {
+                for p in elements {
+                    p.collect_allocating_rest_bindings(out);
+                }
+                rest_name(rest, out);
+                if let Some(r) = rest {
+                    r.collect_allocating_rest_bindings(out);
+                }
+            }
+            HirPattern::Struct { entries, rest } | HirPattern::Table { entries, rest } => {
+                for (_, p) in entries {
+                    p.collect_allocating_rest_bindings(out);
+                }
+                rest_name(rest, out);
+                if let Some(r) = rest {
+                    r.collect_allocating_rest_bindings(out);
+                }
+            }
+            HirPattern::NamedStruct { entries } => {
+                for (_, p) in entries {
+                    p.collect_allocating_rest_bindings(out);
+                }
+            }
+            HirPattern::Set { binding } | HirPattern::SetMut { binding } => {
+                binding.collect_allocating_rest_bindings(out)
+            }
+            // Every alternative, not just the first: an or-pattern's cases bind
+            // the same NAMES, and the arena gives each case its own `Binding`.
+            HirPattern::Or(alternatives) => {
+                for alt in alternatives {
+                    alt.collect_allocating_rest_bindings(out);
+                }
+            }
+            HirPattern::Wildcard
+            | HirPattern::Nil
+            | HirPattern::Literal(_)
+            | HirPattern::Var(_) => {}
+        }
     }
 
     /// True when this pattern matches every value: a wildcard, a bare

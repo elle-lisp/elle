@@ -9,6 +9,7 @@ use super::super::binding::Binding;
 use super::super::defuse::DefUseBuilder;
 use super::super::expr::{Hir, HirId, HirKind};
 use super::super::liveness::{compute_last_use, compute_order, compute_subtree_low};
+use super::super::pattern::HirPattern;
 use super::{CallClassification, CellStores, Region, RegionData, RegionInfo, RegionStats};
 
 use std::collections::HashMap;
@@ -74,6 +75,10 @@ struct RegionInference {
     /// (mirrors `lower_begin`'s MakeCaptureCell pre-pass; one region PER CELL —
     /// see `RegionInfo::begin_cell_regions`).
     begin_cell_regions: HashMap<HirId, Vec<(Binding, Region)>>,
+    /// `Destructure`/`Match` HirId → per-binding placeholder region for each
+    /// rest name whose pattern BUILDS a collection (see
+    /// `RegionInfo::pattern_rest_regions`).
+    pattern_rest_regions: HashMap<HirId, Vec<(Binding, Region)>>,
     /// Every binding a scope arm above minted a COMPILED cell for. Its forward
     /// cell lives in the binding's own slot, so it takes no `populate_env` env
     /// cell — the mirror of the lowerer's own `compiled_cell_bindings`. The
@@ -303,6 +308,7 @@ impl RegionInference {
             local_reassigns: HashMap::new(),
             loop_forwarded_params: HashMap::new(),
             begin_cell_regions: HashMap::new(),
+            pattern_rest_regions: HashMap::new(),
             compiled_cell_bindings: rustc_hash::FxHashSet::default(),
             cross_region_refs: Vec::new(),
             hard_edge_sites: rustc_hash::FxHashSet::default(),
@@ -740,6 +746,48 @@ impl RegionInference {
             .or_default()
             .push((binding, cell_region));
         self.compiled_cell_bindings.insert(binding);
+    }
+
+    /// Give every rest name `patterns` binds to a BUILT collection a
+    /// placeholder region of its own, and hand that region to the name
+    /// (docs/impl/region/anchors.md § "A rest pattern's collection is built,
+    /// not read out").
+    ///
+    /// The region is phantom — no `alloc_here`, because the opcode mints the
+    /// physical region at runtime and no compiled allocation names a static
+    /// slot for it — so it is filtered out of `live_regions` and records no
+    /// cross-region edge, exactly as a lambda's owned parameter is. Membership
+    /// of `call_result_regions` is what routes its release through the slot the
+    /// lowerer parks the collection in.
+    ///
+    /// Idempotent per node: `try_inline_call` re-walks a callee's body, and a
+    /// second mint against one destructure would leave the first region with no
+    /// route at all.
+    pub(super) fn record_pattern_rest_regions<'p>(
+        &mut self,
+        node: HirId,
+        patterns: impl Iterator<Item = &'p HirPattern>,
+    ) {
+        if self.pattern_rest_regions.contains_key(&node) {
+            return;
+        }
+        let bindings: Vec<Binding> = patterns
+            .flat_map(|p| p.allocating_rest_bindings())
+            .collect();
+        if bindings.is_empty() {
+            return;
+        }
+        let mut recorded = Vec::with_capacity(bindings.len());
+        for b in bindings {
+            let r = self.fresh_region(self.current_region);
+            self.call_result_regions.insert(r);
+            recorded.push((b, r));
+            let entry = self.binding_regions.entry(b).or_default();
+            if !entry.contains(&r) {
+                entry.push(r);
+            }
+        }
+        self.pattern_rest_regions.insert(node, recorded);
     }
 
     fn env_cell_placeholder(&mut self, binding: Binding) -> Option<Region> {

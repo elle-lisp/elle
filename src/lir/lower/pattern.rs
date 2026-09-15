@@ -40,7 +40,80 @@ pub(super) fn access_is_borrowed_element(access: &AccessPath) -> bool {
     }
 }
 
+/// Does this access path's OUTERMOST step build a fresh collection?
+///
+/// `Slice` and `StructRest` are the two that do, and a binding reached through
+/// one directly is the decision tree's spelling of a rest name bound by a bare
+/// name — the same set `HirPattern::allocating_rest_bindings` names on the
+/// pattern side. A `Slice` further IN is an intermediate no name holds
+/// (elle-lisp/elle#1127).
+pub(super) fn access_builds_a_collection(access: &AccessPath) -> bool {
+    matches!(access, AccessPath::Slice(..) | AccessPath::StructRest(..))
+}
+
 impl<'a> Lowerer<'a> {
+    // ── The collection a rest pattern builds ───────────────────────
+
+    /// Park the collection a rest pattern just built in a slot of its own,
+    /// record that slot as its placeholder region's release route, and hand the
+    /// value back for the rest pattern to bind.
+    ///
+    /// The slot is the lowerer's rather than the rest name's, because the name
+    /// is an ordinary binding and may be captured — an env slot carries no
+    /// nil-stamp, so the release leaves the abandoned-frame walk no receipt
+    /// (docs/impl/region/anchors.md § "A rest pattern's collection is built,
+    /// not read out").
+    ///
+    /// A no-op with the value unchanged unless the solver minted a placeholder,
+    /// which it does exactly where the rest sub-pattern is a bare name. Absent,
+    /// the collection keeps the conservative baseline: no route, no release.
+    pub(in crate::lir::lower) fn park_rest_collection(
+        &mut self,
+        rest: &HirPattern,
+        value: Reg,
+    ) -> Reg {
+        match rest {
+            HirPattern::Var(b) => self.park_rest_collection_for(*b, value),
+            _ => value,
+        }
+    }
+
+    /// [`park_rest_collection`](Self::park_rest_collection) for a binding the
+    /// caller already resolved — the decision tree, which reaches a rest name
+    /// through its access path rather than through the pattern.
+    pub(in crate::lir::lower) fn park_rest_collection_for(
+        &mut self,
+        binding: Binding,
+        value: Reg,
+    ) -> Reg {
+        let Some(region) = self.rest_collection_region(binding) else {
+            return value;
+        };
+        let slot = self.current_func.num_locals;
+        self.current_func.num_locals += 1;
+        self.emit(LirInstr::StoreLocal { slot, src: value });
+        self.region_to_slot
+            .insert(region, super::ValueSlot::Local(slot));
+        let dst = self.fresh_reg();
+        self.emit(LirInstr::LoadLocal { dst, slot });
+        dst
+    }
+
+    /// The placeholder region the solver minted for `binding` at the node being
+    /// lowered (`RegionInfo::pattern_rest_regions`), or `None` where the
+    /// pattern builds no collection for it.
+    ///
+    /// Keyed on the current node exactly as `cell_region_for` is: a pattern is
+    /// lowered while its own `Destructure` or `Match` is the node in hand.
+    fn rest_collection_region(&self, binding: Binding) -> Option<crate::hir::region::Region> {
+        self.region_info
+            .pattern_rest_regions
+            .get(&self.current_hir_id?)?
+            .iter()
+            .find(|(b, _)| *b == binding)
+            .map(|&(_, r)| r)
+    }
+
     // ── Decision tree lowering ─────────────────────────────────────
 
     /// Emit the no-match path: raise :match-error carrying the scrutinee.
@@ -101,6 +174,14 @@ impl<'a> Lowerer<'a> {
                 // and keeping it on the operand stack would leak intermediates.
                 for (binding, access) in bindings {
                     let val_reg = self.load_access_path(access, scrutinee_slot)?;
+                    // A rest name reached through a `Slice`/`StructRest` step owns the
+                    // collection that step BUILT, so it takes the release route
+                    // `park_rest_collection` records.
+                    let val_reg = if access_builds_a_collection(access) {
+                        self.park_rest_collection_for(*binding, val_reg)
+                    } else {
+                        val_reg
+                    };
                     // A borrowed subview of the scrutinee — mark it
                     // (see `destructure_alias_bindings`).
                     if access_is_borrowed_element(access) {
@@ -166,6 +247,14 @@ impl<'a> Lowerer<'a> {
                 // Establish bindings — pop after each store (same as Leaf).
                 for (binding, access) in bindings {
                     let val_reg = self.load_access_path(access, scrutinee_slot)?;
+                    // A rest name reached through a `Slice`/`StructRest` step owns the
+                    // collection that step BUILT, so it takes the release route
+                    // `park_rest_collection` records.
+                    let val_reg = if access_builds_a_collection(access) {
+                        self.park_rest_collection_for(*binding, val_reg)
+                    } else {
+                        val_reg
+                    };
                     // A borrowed subview of the scrutinee — mark it
                     // (see `destructure_alias_bindings`).
                     if access_is_borrowed_element(access) {

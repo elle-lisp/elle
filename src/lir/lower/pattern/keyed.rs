@@ -87,6 +87,7 @@ impl<'a> Lowerer<'a> {
                         src: reloaded,
                         exclude_keys: exclude,
                     });
+                    let rest_reg = self.park_rest_collection(rest_pat, rest_reg);
                     self.lower_pattern_match(rest_pat, rest_reg, fail_label)?;
                 }
 
@@ -169,6 +170,7 @@ impl<'a> Lowerer<'a> {
                         src: reloaded,
                         exclude_keys: exclude,
                     });
+                    let rest_reg = self.park_rest_collection(rest_pat, rest_reg);
                     self.lower_pattern_match(rest_pat, rest_reg, fail_label)?;
                 }
 
