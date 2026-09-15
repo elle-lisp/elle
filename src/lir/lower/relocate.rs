@@ -291,10 +291,10 @@ impl<'a> Lowerer<'a> {
     /// a time.
     ///
     /// Only a destructured leaf is reconsidered; every other binding that names a
-    /// region names the whole value. A region keeps its exemption where the call
-    /// passes the very slot that region's release route loads. A region with no
-    /// recorded slot releases by id and keeps it too, there being no slot to
-    /// compare.
+    /// region names the whole value. A region the leaf HOLDS keeps its exemption
+    /// outright, and each remaining one keeps it where the call passes the very
+    /// slot that region's release route loads. A region with no recorded slot
+    /// releases by id and keeps it too, there being no slot to compare.
     ///
     /// docs/impl/region/relocate.md
     fn drop_named_only_arg_exemptions(
@@ -316,6 +316,9 @@ impl<'a> Lowerer<'a> {
             .flatten()
         {
             let root = self.region_info.merged_root(r);
+            if self.region_info.holds_built_rest_collection(*b, root) {
+                continue;
+            }
             let moved = match self.region_to_slot.get(&root) {
                 Some(super::ValueSlot::Local(s)) => operand_locals.contains(s),
                 Some(super::ValueSlot::Env(i)) => operand_captures.contains(i),

@@ -68,6 +68,18 @@ impl RegionInfo {
         h.for_each_child(|c| self.operand_value_regions(c, out));
     }
 
+    /// Does `binding` HOLD `region` as the collection a rest pattern built for
+    /// it (`pattern_rest_regions`), rather than merely name it? A rest name does
+    /// both, so the question is asked per region. `region` is a merged root.
+    ///
+    /// docs/impl/region/relocate.md
+    pub fn holds_built_rest_collection(&self, binding: Binding, region: Region) -> bool {
+        self.pattern_rest_regions
+            .values()
+            .flatten()
+            .any(|&(b, r)| b == binding && self.merged_root(r) == region)
+    }
+
     /// Does this scope have any allocations whose solved region matches it?
     pub fn scope_has_local_allocs(&self, hir_id: HirId) -> bool {
         self.scope_region
