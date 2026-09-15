@@ -1,28 +1,38 @@
 # tests/integration
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-14 -->
 
 Full-pipeline integration tests: end-to-end behavior verification.
 
 ## Responsibility
 
-Test end-to-end pipeline behavior by evaluating Elle source code through the full pipeline (Reader → Expander → Analyzer → Lowerer → Emitter → VM) and checking the result. Cover:
-- Core language features (arithmetic, conditionals, lists, functions)
-- Advanced features (closures, recursion, higher-order functions, match)
-- Concurrency (fibers, thread transfer)
-- Signal enforcement (interprocedural signal tracking)
-- Error reporting (error messages include correct source locations)
-- Destructuring, blocks, splice, booleans, dispatch
-- Prelude macros (defn, let*, when, unless, etc.)
-- Lint and LSP features
-- FFI integration
-- JIT compilation
-- REPL exit codes
+Test end-to-end pipeline behavior by evaluating Elle source code through the
+full pipeline (Reader → Expander → Analyzer → Lowerer → Emitter → VM) and
+checking the result.
 
 Does NOT:
 - Test individual modules in isolation (that's unit tests)
 - Test invariants across random inputs (that's property tests)
 - Test Elle scripts (that's `tests/elle/`)
+
+## Finding a test
+
+`mod.rs` lists every file that runs, and each file opens with a call-out saying
+what it covers. Read the two together; there is no third list here to consult,
+because a hand-kept copy of the directory goes stale the week somebody adds a
+file and it then sends readers to tests that no longer exist.
+
+Three groups are worth knowing about, because their names do not say that they
+check the repository rather than the language:
+
+| Group | Files |
+|-------|-------|
+| The documents and their policy | `agents.rs`, `audit.rs`, `prose.rs`, `paths.rs`, `bytecode_doc.rs`, `doctest.rs`, `rustsource.rs` |
+| CI and the corpus runner | `workflows.rs`, `plugins.rs`, `budget.rs`, `capacity.rs`, `profiles.rs`, `truncation.rs`, `runner_exit_trap.rs`, `timeout_capture.rs` |
+| CLI surfaces | `dump_cli.rs`, `flip_cli.rs`, `tier_cli.rs`, `version.rs`, `dispatch.rs`, `repl_exit_codes.rs` |
+
+`allocator.rs` sits in the directory unregistered and does not compile; the
+comment at the foot of `mod.rs` says why.
 
 ## Key patterns
 
@@ -33,16 +43,20 @@ use crate::common::eval_source;
 use elle::Value;
 
 #[test]
-fn test_my_feature() {
+fn a_call_reaches_the_primitive() {
     eval_source("(my-feature 42)", |r| assert_eq!(r.unwrap(), Value::int(42)));
 }
 ```
+
+`eval_source` hands the result to a closure and runs it while the `Runtime`'s
+heap is still alive. A heap-valued result dangles past teardown otherwise, so
+the closure is not a style choice.
 
 ### Testing errors
 
 ```rust
 #[test]
-fn test_error_case() {
+fn an_unbound_name_says_so() {
     eval_source("(undefined-function)", |result| {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("undefined"));
@@ -50,114 +64,49 @@ fn test_error_case() {
 }
 ```
 
-### Testing with setup
+### Direct VM access
+
+`setup()` answers a `Runtime`. Take the three disjoint borrows from it with
+`parts()`:
 
 ```rust
 use crate::common::setup;
 
 #[test]
-fn test_with_vm_access() {
-    let (mut symbols, mut vm) = setup();
-    // Direct VM access for advanced testing
-    let result = eval_all("(+ 1 2)", &mut symbols, &mut vm, "<test>").unwrap();
-    assert_eq!(result.last().unwrap(), &Value::int(3));
+fn the_vm_answers_directly() {
+    let mut rt = setup();
+    let (vm, symbols, cctx) = rt.parts();
+    let result = elle::pipeline::eval("(+ 1 2)", symbols, vm, cctx, "<test>");
+    assert_eq!(result.unwrap(), elle::Value::int(3));
 }
 ```
 
-## Test organization
+### Driving the binary
 
-Tests are organized by feature area in separate files:
-
-| File | Coverage |
-|------|----------|
-| `core.rs` | Basic arithmetic, conditionals, lists, functions |
-| `advanced.rs` | Closures, recursion, higher-order functions |
-| `concurrency.rs` | Fibers, thread transfer |
-| `error_reporting.rs` | Error messages with source locations, and the names an uncaught error's report spells |
-| `diagnostics.rs` | What `debug/print` and `trace` write to stderr, and the unresolved-name canary over every output surface |
-| `repl_exit_codes.rs` | REPL exit code behavior |
-| ~~`coroutines.rs`~~ | Migrated to `tests/elle/coroutines.lisp` |
-| `lexical_scope.rs` | Lexical scoping and closures |
-| `new_pipeline.rs` | New pipeline features |
-| `new_pipeline_property.rs` | Property-based pipeline tests |
-| `pipeline.rs` | Pipeline integration |
-| `pipeline_property.rs` | Property-based pipeline tests |
-| `pipeline_point.rs` | Specific pipeline points |
-| `thread_transfer.rs` | Thread-safe value transfer |
-| `signal_enforcement.rs` | Signal system enforcement |
-| `signal_unsoundness.rs` | Signal system edge cases |
-| `jit.rs` | JIT compilation |
-| ~~`fibers.rs`~~ | Migrated to `tests/elle/fibers.lisp` |
-| `time_property.rs` | Time-based property tests |
-| `time_elapsed.rs` | Time measurement |
-| `hygiene.rs` | Macro hygiene |
-| ~~`destructuring.rs`~~ | Migrated to `tests/elle/destructuring.lisp` |
-| `blocks.rs` | Block and break control flow |
-| `primitives.rs` | Primitive function behavior |
-| `ffi.rs` | FFI integration |
-| `bracket_errors.rs` | Bracket syntax errors |
-| `dispatch.rs` | Function dispatch |
-| `lint.rs` | Linter behavior |
-| `lsp.rs` | LSP features |
-| `compliance.rs` | Language compliance |
-| ~~`buffer.rs`~~ | Merged into `string.rs` |
-| `splice.rs` | Splice syntax |
-| `bytes.rs` | Bytes operations |
-| `regex.rs` | Regular expressions |
-| ~~`table_keys.rs`~~ | Migrated to `tests/elle/table-keys.lisp` |
-| `glob.rs` | Glob patterns |
-| `elle_scripts.rs` | Process-global runtime-mode pins (guardfree/no-uring/mlir-off); the corpus itself runs via `elle test` |
-| `paths.rs` | The paths and URLs the Makefile and the doc generator name in text, checked against the tree |
-| `agents.rs` | Call-out extraction and the generated `AGENTS.md` index ([docs/impl/agents.md](../../docs/impl/agents.md)) |
-| `audit.rs` | The audit stamp's commit gate, and the queue's cost ordering ([docs/impl/audit.md](../../docs/impl/audit.md)) |
-| `prose.rs` | The checkable half of [DOCUMENTATION.md](../../DOCUMENTATION.md), swept over every file that carries a stamp |
-| `bytecode_doc.rs` | The instruction names and source paths the bytecode documents spell, checked against the `Instruction` enum |
-| `workflows.rs` | The PR workflow's merge gate: every job needed and enforced by `all-checks`, a job that builds every plugin in the `plugins/` submodule, no job serializing the corpus and the Rust suite, no shared cache key |
-| `plugins.rs` | Every plugin directory checked against the submodule workspace's `members`, the plugin artifacts the Makefile demands checked against the submodule's crates, and the assertion that fails when one is missing |
-| `budget.rs` | The wall-clock budget the Makefile's per-file corpus passes give one file |
-| `doctest.rs` | The plugins the literate documents load, checked against what the Makefile's `doctest` target builds |
-| `environment.rs` | Environment variables |
-| `escape.rs` | Escape analysis |
-| `arena.rs` | Arena allocation |
-| `trace_boot.rs` | `--trace=boot`/`--trace=compile` phase-timing marks |
-| `census.rs` | Post-boot heap census: the sealing regression net and the `--trace=census` report ([image.md](../../docs/impl/image.md)) |
-| `image.rs` | Image store milestone, in submodules: the round trip and its determinism, the descriptor input form, the verifier's refusals, mapping and pool interplay, and the dump policy ([plan.md](../../docs/impl/image/plan.md)) |
-| `allocator.rs` | Memory allocation |
-| ~~`parameters.rs`~~ | Migrated to `tests/elle/parameters.lisp` |
-| `ports.rs` | I/O ports |
-| `fn_graph.rs` | Function call graphs |
-| `fn_flow.rs` | Function control flow |
-
-## Test helpers
-
-All tests use `eval_source()` from `tests/common/mod.rs`. It takes a closure that
-inspects the result while the `Runtime`'s heap is still alive (a heap-valued
-result dangles past teardown otherwise):
+A flag, an exit code or anything `main` decides needs the binary, not the
+library. Spawn it by its Cargo-supplied path:
 
 ```rust
-use crate::common::eval_source;
-
-eval_source("(+ 1 2)", |r| assert_eq!(r.unwrap(), Value::int(3)));
-```
-
-For tests that need direct VM access:
-
-```rust
-use crate::common::setup;
-
-let (mut symbols, mut vm) = setup();
-// Use symbols and vm directly
+let out = std::process::Command::new(env!("CARGO_BIN_EXE_elle"))
+    .args(["--version"])
+    .output()
+    .expect("spawn elle");
 ```
 
 ## Naming conventions
 
-- Test files: lowercase, hyphenated concepts joined with underscores (e.g., `closures_and_lambdas.rs`, `signal_enforcement.rs`)
-- Test functions: `test_` prefix for example-based, descriptive name for property tests (e.g., `fn test_basic_arithmetic()`, `fn int_roundtrip(...)`)
-- Property test names describe the invariant, not the implementation
+- Test files: lowercase words joined with underscores (`signal_enforcement.rs`,
+  `trace_isolation.rs`). A file driving one CLI flag is named for it and ends
+  `_cli.rs`.
+- Test functions: a sentence naming the claim the body proves
+  (`a_hot_function_compiles_with_no_flag_at_all`). The older `test_` prefix
+  survives in about a third of the suite and says nothing a reader needs.
+- Property test names describe the invariant, not the implementation.
 
 ## Registration
 
-All test files must be registered in `mod.rs` using the `include!()` pattern:
+A file here is not compiled until `mod.rs` names it, so an unregistered file is
+a test suite that reports success having run nothing. Add it:
 
 ```rust
 mod myfile {
@@ -165,28 +114,34 @@ mod myfile {
 }
 ```
 
-This is required because `tests/lib.rs` uses `include!()` to pull in the `mod.rs` file. Without registration, the test file will be ignored.
+The `include!()` shape is what `tests/lib.rs` needs to pull the directory in as
+one crate.
+
 ## Invariants
 
-1. **Tests are independent.** Each test creates a fresh VM (via `eval_source()`) or uses a cached VM with restored globals (via `eval_reuse()`). No cross-test contamination.
+1. **Tests are independent.** Each test creates a fresh VM (`eval_source`) or
+   uses a cached VM with restored globals (`eval_reuse`). No cross-test
+   contamination.
 
-2. **Tests use the full pipeline.** `eval_source()` runs Reader → Expander → Analyzer → Lowerer → Emitter → VM. Tests verify end-to-end behavior, not individual components.
+2. **Tests use the full pipeline.** `eval_source` runs Reader → Expander →
+   Analyzer → Lowerer → Emitter → VM, so a test here verifies end-to-end
+   behavior rather than one component.
 
-3. **Error tests check error messages.** When testing error cases, use `result.is_err()` and `result.unwrap_err().contains("substring")` to verify the error message.
+3. **Error tests check the message.** `result.unwrap_err().contains(...)` —
+   `is_err()` alone passes when the run fails for a reason the test never
+   meant to cover.
 
-4. **Tests are deterministic.** Same source always produces same result. No randomness or timing dependencies (except `time_property.rs` and `time_elapsed.rs`).
-
-## When to add a test
-
-- **New language feature**: Add to the appropriate feature file (e.g., `blocks.rs` for block/break)
-- **Bug regression**: Add a test that reproduces the bug, then fix the bug
-- **Error message improvement**: Add a test that checks the new error message
-- **Performance regression**: Add to `time_property.rs` or `time_elapsed.rs`
-- **Compliance issue**: Add to `compliance.rs`
+4. **Tests are deterministic.** The same source gives the same result. No
+   randomness, and no timing dependency outside `time_property.rs` and
+   `time_elapsed.rs`.
 
 ## Common pitfalls
 
-- **Using `eval_source()` in property tests**: Creates a fresh VM for every case, which is slow. Use `eval_reuse()` or `eval_reuse_bare()` instead.
-- **Not checking error messages**: When testing error cases, verify the error message contains the expected substring
-- **Assuming determinism**: Don't use `time::now()` or other non-deterministic functions in tests (except in `time_property.rs`)
-- **Forgetting to register new files**: New test files must be added to `mod.rs` with `include!()`
+- **`eval_source` in a property test.** It builds a fresh VM per case, which is
+  slow. Use `eval_reuse` or `eval_reuse_bare`.
+- **A scratch path under `/tmp`.** Derive it from `std::env::temp_dir()` and
+  give it a unique name; `scratch.rs` fails the build over this.
+- **Racing the JIT worker.** Compilation runs on the `elle-jit` thread, so
+  `(jit? f)` after a hot loop is a race. `--trace=syncjit` compiles on the VM
+  thread and makes the answer deterministic.
+- **Forgetting to register a new file.** It is silent, and it looks like a pass.
