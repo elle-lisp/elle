@@ -8,6 +8,19 @@ controlled through a single mutable config struct on the VM.
 
 ## CLI flags
 
+### Where elle's flags stop
+
+`--` ends them. Elle reads every flag below wherever it appears before that
+separator, and hands the program every argument after it — the separator
+included — through `sys/args`.
+
+```bash
+elle --jit=off script.lisp -- --jit=off   # elle takes the first, the script the second
+```
+
+`--help` and `--version` obey the same boundary, so a script is free to carry
+flags of those names.
+
 ### Version
 
 ```bash
