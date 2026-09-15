@@ -1,12 +1,27 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-09-10 -->
+<!-- audited: 2026-09-14 -->
 
 Elle exposes a runtime configuration system reachable from both CLI flags and
 Elle code. All debug/trace flags, JIT policies, and WASM policies are
 controlled through a single mutable config struct on the VM.
 
 ## CLI flags
+
+### Version
+
+```bash
+elle --version                       # print the version and exit
+```
+
+`--version` prints the banner — `Elle v` and the version — then exits 0. It
+answers before the VM starts, so it works in a tree where the stdlib or a
+plugin is broken.
+
+One number feeds every surface that names a version: `[package] version` in
+[the root manifest](../Cargo.toml), read at build time into `elle::VERSION`.
+`--version`, the `--help` banner, the REPL greeting and the language server's
+`serverInfo` all render that constant.
 
 ### Trace flags
 
@@ -88,6 +103,34 @@ Named policies replace opaque integers:
 
 Old integer syntax still works as aliases.
 
+The binary and the embedding library start from the same JIT policy. A host
+that wants the interpreter alone asks for it, the way the CLI does.
+
+### MLIR policy
+
+```bash
+elle --mlir=off script.lisp         # disable MLIR (default)
+elle --mlir=eager script.lisp       # compile on first eligible call
+elle --mlir=adaptive script.lisp    # compile after threshold
+```
+
+| Policy | CLI | Behavior |
+|--------|-----|----------|
+| Off | `--mlir=off` | MLIR disabled (default) |
+| Eager | `--mlir=eager` | Compile on first eligible call |
+| Adaptive | `--mlir=adaptive` | Compile after 10 calls |
+
+Integer syntax works too: `--mlir=N` sets threshold to N-1.
+
+The MLIR policy is independent of the JIT policy. When compiled with
+`--features mlir`, GPU-eligible functions are compiled through
+MLIR → LLVM for optimized native execution. The policy controls when
+this compilation happens. Functions not eligible for MLIR fall through
+to the Cranelift JIT regardless of the MLIR policy.
+
+`mlir` is not a default feature, so a stock build has no tier to start. The
+CLI therefore starts this one off, and `--mlir=` opts in.
+
 ### WASM policy
 
 ```bash
@@ -111,29 +154,37 @@ elle --wasm=lazy script.lisp        # per-function lazy compilation
 (vm/config :trace)             # returns the current trace keyword set
 (vm/config :jit)               # returns the JIT policy keyword
 (vm/config :wasm)              # returns the WASM policy keyword
+(vm/config :mlir)              # returns the MLIR policy keyword
 ```
 
 ### Setting configuration
 
+`vm/config-set` is the setter. `(vm/config)` answers an immutable struct, so
+`put` on it builds a new value and changes nothing on the VM.
+
 ```lisp
 # Enable trace keywords (takes effect immediately)
-(put (vm/config) :trace |:call :signal|)
+(vm/config-set :trace |:call :signal|)
 
 # Change JIT policy
-(put (vm/config) :jit :eager)
-(put (vm/config) :jit :off)
-(put (vm/config) :jit :adaptive)
+(vm/config-set :jit :eager)
+(vm/config-set :jit :off)
+(vm/config-set :jit :adaptive)
 
 # Custom JIT policy via closure
-(put (vm/config) :jit
+(vm/config-set :jit
   (fn [info]
     (if (and (get info :silent) (> (get info :calls) 5))
       :jit
       :skip)))
 
 # Change WASM policy
-(put (vm/config) :wasm :full)
-(put (vm/config) :wasm :off)
+(vm/config-set :wasm :full)
+(vm/config-set :wasm :off)
+
+# Change MLIR policy
+(vm/config-set :mlir :eager)
+(vm/config-set :mlir :off)
 ```
 
 ### Custom JIT policy
@@ -155,35 +206,6 @@ It must return one of:
 - `:wasm` — compile with WASM backend
 - `:skip` — keep in interpreter
 
-### MLIR policy
-
-```bash
-elle --mlir=off script.lisp         # disable MLIR (never fires)
-elle --mlir=eager script.lisp       # compile on first eligible call
-elle --mlir=adaptive script.lisp    # compile after threshold (default)
-```
-
-| Policy | CLI | Behavior |
-|--------|-----|----------|
-| Off | `--mlir=off` | MLIR disabled |
-| Eager | `--mlir=eager` | Compile on first eligible call |
-| Adaptive | `--mlir=adaptive` | Compile after 10 calls (default) |
-
-Integer syntax works too: `--mlir=N` sets threshold to N-1.
-
-The MLIR policy is independent of the JIT policy. When compiled with
-`--features mlir`, GPU-eligible functions are compiled through
-MLIR → LLVM for optimized native execution. The policy controls when
-this compilation happens. Functions not eligible for MLIR fall through
-to the Cranelift JIT regardless of the MLIR policy.
-
-```lisp
-(vm/config :mlir)              # → :adaptive
-(vm/config-set :mlir :off)     # disable MLIR tier
-(vm/config-set :mlir :eager)   # compile immediately
-(vm/config-set :mlir :adaptive) # default behavior
-```
-
 ### Future feature flags
 
 The following keywords are accepted in trace sets without error, for
@@ -198,8 +220,8 @@ forward compatibility:
 `RuntimeConfig` is stored on the VM struct (not in a global static).
 This allows per-fiber or per-test configuration without global state.
 
-The `vm/config` primitive uses SIG_QUERY to read/write the VM's
-RuntimeConfig. Changes take effect immediately — no restart needed.
+`vm/config` reads that struct through SIG_QUERY and `vm/config-set` writes it.
+A write takes effect immediately — no restart needed.
 
 For hot paths (VM dispatch loop), trace keywords are mirrored in a
 `trace_bits: u32` bitfield to avoid HashSet lookups on every instruction.
