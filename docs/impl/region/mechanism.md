@@ -1,6 +1,6 @@
 # The mechanism
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-14 -->
 
 The RC-instruction machinery the [rules](rules.md) constrain: how each
 instruction names its region, and when a static slot may stand in. Two nets keep
@@ -340,7 +340,7 @@ makes its cascade free a live region. The net for a coalesced *mint* (the
 value→slot substitution, [region selection](mechanism.md)) is the debug-only
 `AssertRegionMatches { region_id, src }`, emitted immediately before every
 coalesced `IncrefRegion`. (Self-edge *elimination* carries no coalesced incref
-to guard — its net is the decref-dominance assertion and guardfree, � "".) In
+to guard — its net is the decref-dominance assertion and guardfree, above.) In
 the bytecode interpreter it panics when
 `activation_region_map.resolve(region_id) != region_of(src)` — turning an
 inference bug into a deterministic panic at the exact instruction, under the

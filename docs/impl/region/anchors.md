@@ -1,6 +1,6 @@
 # Where a release is anchored
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-14 -->
 
 Where the solver anchors a release: what each binding form pins, and what a
 `break` does to the releases its jump passes over.
@@ -87,6 +87,69 @@ arm-taken, arm-not-taken, nested-loop and guard faces driven as rows) and the
 `tests/elle/region-match-bind-loop-uaf.lisp` as the soundness complement — a
 pattern-bound projection stored, returned, broken out of the loop, captured, or
 carried across a yield must survive the per-iteration release.
+
+## A rest pattern's collection is built, not read out
+
+Every other name a pattern binds is a projection of the scrutinee, and a
+projection is an uncounted read ([rules.md](rules.md) Rule 4's borrowing node):
+it hands back a value living inside the scrutinee's own pages, so it owes no
+release of its own. A **rest** name is the one that is not a projection.
+`[a b & r]` and `{:k v & r}` lower to `ArrayMutSliceFrom` and `StructRest`, and
+each of those BUILDS a fresh collection — a new array of the elements past the
+fixed ones, a new struct of the keys the pattern did not name — in a region the
+opcode mints for it. Read as a borrow, that region has nobody to release it:
+one region per destructure, whether or not the rest name is ever read, at a rate
+flat in the scrutinee's length.
+
+So a rest name holds an **owned** value, and the solver gives it what it gives a
+lambda's owned parameter: a placeholder region in `call_result_regions`, and no
+`alloc_here`. The region is phantom on purpose — the opcode mints the physical
+region at runtime, so there is no compiled allocation for a static slot to name,
+and a slot-resolved release would name nothing. The lowerer parks the built
+collection in a stack slot of its own and records that slot as the region's
+route, which leaves the ordinary value route to do the rest: `LoadLocal`,
+`DecrefValueRegion`, nil-stamp, at the placeholder's `decref_point`.
+
+The slot is the lowerer's rather than the rest name's, because the rest name is
+an ordinary binding and may be captured. A captured binding lives in the env,
+where a release leaves no nil-stamp and the abandoned-frame walk can read no
+receipt ([unwind.md](unwind.md)). A stack slot of the lowerer's own gives every
+rest collection one stamped, walkable route whatever its name goes on to do.
+
+Two pins decide where the release lands, and both are the general machinery
+rather than anything this shape adds:
+
+- **The binding chain**, which carries the release over the rest name's uses
+  exactly as it does for any other binding. A rest name read after the
+  destructure, stored, captured, or returned keeps its collection as long as any
+  other owned value does, and the escape that funds each of those is counted at
+  its own site.
+- **The destructure node**, as the base. A rest name nothing reads has no uses
+  for the chain to extend over, and a region with no pin at all gets no release
+  emitted — which is the whole defect for the shape that provokes it most,
+  `(let [[x y & _] a] x)`. Each placeholder is therefore pinned to the
+  `Destructure` or `Match` node whose pattern binds it, the same base a
+  pre-allocated capture cell takes from its `Begin`. Every pin is a max, so a
+  read still moves the release later.
+
+For a `Match` that base also decides the paths a failed arm leaves behind. The
+node is post-ordered after every arm body, so the base pin wins unless the rest
+name's value escapes the match, and the lowerer emits a node's releases after
+it — past the merge every arm, every failed guard and every rejected alternative
+arrives at. A collection built by an arm that then failed its guard is released
+there, on the path that abandoned it.
+
+Only a rest sub-pattern that is a bare name takes this. A rest matched by a
+further pattern — `[a & [p q]]` — builds a collection no name holds, and the
+names the inner pattern binds are projections of that collection rather than of
+the scrutinee; it keeps the conservative baseline (elle-lisp/elle#1127).
+
+Pinned by `tests/elle/region-rest-pattern-slice.lisp` (the reclamation, with the
+flat pattern and the list rest as the discriminators that must already read
+zero), `regions::tests::patterns` (the placement, structurally), and
+`tests/elle/region-rest-pattern-slice-uaf.lisp` (the soundness complement — a
+rest collection returned, stored, captured, carried across a yield, or read
+after the loop iteration that built it must survive the release).
 
 ## `break` transfers its value; it does not consume it
 
