@@ -1,0 +1,212 @@
+(elle/epoch 12)
+# audited: 2026-09-14
+# A rest pattern's collection is built, not read out
+# (docs/impl/region/anchors.md § "A rest pattern's collection is built, not
+# read out").
+#
+# Every other name a pattern binds is a projection of the scrutinee — an
+# uncounted read that owes no release. A rest name is the one that is not:
+# `[a b & r]` and `{:k v & r}` BUILD a fresh collection in a region the opcode
+# mints, so the borrowing reading leaves that region with nobody to release it.
+#
+# THE TRAP the (a)/(c)/(e) rows guard. The rate does not depend on the rest
+# name being READ. An unread name has no uses for the binding chain to extend a
+# release over, so the placeholder needs a base pin of its own — the destructure
+# node — or the shape that provokes the defect most often is the one the fix
+# misses.
+#
+# THE COUNTER-FACTUAL the controls catch. The rate is flat in the scrutinee's
+# length and the same for a pattern that binds the same names flatly, so an
+# object-count match with the copy-scratch family proves nothing. (j) binds all
+# five elements with no rest and (k) takes a LIST rest, whose cons tail is a
+# borrow of the scrutinee and allocates nothing: both already read zero, so a
+# subject's rate is the built collection and nothing else.
+#
+# This file is the LEAK gauge — an `arena/region-count` delta over a fixed
+# window, BOUNDED for every subject. The soundness complement is
+# region-rest-pattern-slice-uaf.lisp.
+
+(def window 400)
+
+(def arr [1 2 3 4 5])
+(def marr @[1 2 3 4 5])
+(def rec {:a 1 :b 2 :c 3 :d 4})
+(def lst '(1 2 3 4 5))
+
+(defn measure [thunk warm window]
+  (var i 0)
+  (while (%lt i warm)
+    (thunk)
+    (assign i (%add i 1)))
+  (def before (arena/region-count))
+  (var j 0)
+  (while (%lt j window)
+    (thunk)
+    (assign j (%add j 1)))
+  (%sub (arena/region-count) before))
+
+# subjects ─────────────────────────────────────────────────────────────────────
+
+# (a) the issue's shape: an array rest whose name the body never reads. The
+# collection is built regardless, so nothing about the body can be what
+# releases it.
+(defn a-array-rest-unread []
+  (let [[x y & r] arr]
+    x))
+
+# (b) the same pattern with the name READ. The binding chain carries the
+# release over the read; the collection must still go.
+(defn b-array-rest-read []
+  (let [[x y & r] arr]
+    (length r)))
+
+# (c) `match` reads the pattern the same way `let` does — the decision tree
+# loads the rest name by an access path ending in the slice.
+(defn c-match-rest-unread []
+  (match arr
+    [x y & r] x))
+
+(defn d-match-rest-read []
+  (match arr
+    [x y & r] (length r)))
+
+# (e) a STRUCT rest builds a new struct of the keys the pattern did not name —
+# the same defect through `StructRest` rather than `ArrayMutSliceFrom`.
+(defn e-struct-rest []
+  (let [{:a x & r} rec]
+    x))
+
+(defn f-match-struct-rest []
+  (match rec
+    {:a x & r} (length r)))
+
+# (g) a MUTABLE `@array` rest. The built collection is a container the free
+# cascade walks rather than an immutable one it scanned at allocation.
+(defn g-array-mut-rest []
+  (let [@[x & r] marr]
+    x))
+
+# (h) a PARAMETER destructure — the prologue's own pattern, whose scrutinee is
+# an argument rather than a named binding.
+(defn take-rest-pattern [[x y & r]]
+  (+ x (length r)))
+(defn h-param-rest []
+  (take-rest-pattern arr))
+
+# (i) the rest name handed OUT. The collection leaves on the return, so its
+# release is the caller's — the row that says the fix releases an owned value
+# rather than an unconditional one.
+(defn hand-back []
+  (let [[x & r] arr]
+    r))
+(defn i-rest-returned []
+  (length (hand-back)))
+
+# (j) the rest name stored into a container that is emptied each call. The
+# escape is counted, so the release must drop the destructure's reference and
+# leave the container's standing.
+(def sink @[])
+(defn j-rest-stored []
+  (let [[x & r] arr]
+    (push sink r)
+    (pop sink)
+    x))
+
+# controls ─────────────────────────────────────────────────────────────────────
+
+# (k) the flat pattern: the same five elements out of the same array, bound by
+# name, with no rest. The discriminator for "this is the built collection".
+(defn k-flat-pattern []
+  (let [[x y z w v] arr]
+    x))
+
+# (l) a LIST rest. The remaining cons tail is a pointer into the scrutinee, so
+# this pattern allocates nothing and must stay at zero either way.
+(defn l-list-rest []
+  (let [(x y & r) lst]
+    (length r)))
+
+# measurement ──────────────────────────────────────────────────────────────────
+
+(def d-a (measure a-array-rest-unread 20 window))
+(def d-b (measure b-array-rest-read 20 window))
+(def d-c (measure c-match-rest-unread 20 window))
+(def d-d (measure d-match-rest-read 20 window))
+(def d-e (measure e-struct-rest 20 window))
+(def d-f (measure f-match-struct-rest 20 window))
+(def d-g (measure g-array-mut-rest 20 window))
+(def d-h (measure h-param-rest 20 window))
+(def d-i (measure i-rest-returned 20 window))
+(def d-j (measure j-rest-stored 20 window))
+(def d-k (measure k-flat-pattern 20 window))
+(def d-l (measure l-list-rest 20 window))
+
+# (m) the issue's own shape, INLINE in the driving loop rather than inside a
+# thunk the driver calls. A release hoisted to a loop node fires once per CALL
+# in the thunk form and reads zero there while the inline form reads the full
+# rate, so the subject is measured both ways.
+(def m-before (arena/region-count))
+(var m 0)
+(while (%lt m window)
+  (let [[x y & r] arr]
+    x)
+  (assign m (%add m 1)))
+(def d-m (%sub (arena/region-count) m-before))
+
+(println "region-rest-pattern-slice over " window " iters (region deltas):")
+(println "  a array-rest-unread " d-a)
+(println "  b array-rest-read   " d-b)
+(println "  c match-rest-unread " d-c)
+(println "  d match-rest-read   " d-d)
+(println "  e struct-rest       " d-e)
+(println "  f match-struct-rest " d-f)
+(println "  g array-mut-rest    " d-g)
+(println "  h param-rest        " d-h)
+(println "  i rest-returned     " d-i)
+(println "  j rest-stored       " d-j)
+(println "  k flat-pattern      " d-k " (control)")
+(println "  l list-rest         " d-l " (control)")
+(println "  m inline-loop       " d-m)
+
+(assert (%lt d-k 40)
+        (concat "control: a flat array pattern must be bounded, delta="
+                (number->string d-k)))
+(assert (%lt d-l 40)
+        (concat "control: a list rest borrows the cons tail and must be "
+                "bounded, delta=" (number->string d-l)))
+
+(assert (%lt d-a 40)
+        (concat "an unread array rest name strands its collection, delta="
+                (number->string d-a)))
+(assert (%lt d-b 40)
+        (concat "a read array rest name strands its collection, delta="
+                (number->string d-b)))
+(assert (%lt d-c 40)
+        (concat "an unread `match` rest name strands its collection, delta="
+                (number->string d-c)))
+(assert (%lt d-d 40)
+        (concat "a read `match` rest name strands its collection, delta="
+                (number->string d-d)))
+(assert (%lt d-e 40)
+        (concat "a struct rest name strands its collection, delta="
+                (number->string d-e)))
+(assert (%lt d-f 40)
+        (concat "a `match` struct rest name strands its collection, delta="
+                (number->string d-f)))
+(assert (%lt d-g 40)
+        (concat "an `@array` rest name strands its collection, delta="
+                (number->string d-g)))
+(assert (%lt d-h 40)
+        (concat "a parameter pattern's rest name strands its collection, "
+                "delta=" (number->string d-h)))
+(assert (%lt d-i 40)
+        (concat "a returned rest collection strands at its consumer, delta="
+                (number->string d-i)))
+(assert (%lt d-j 40)
+        (concat "a stored rest collection strands the destructure's reference, "
+                "delta=" (number->string d-j)))
+(assert (%lt d-m 40)
+        (concat "an inline rest destructure strands its collection, delta="
+                (number->string d-m)))
+
+(println "region-rest-pattern-slice: ok")

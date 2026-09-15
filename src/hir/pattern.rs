@@ -279,6 +279,24 @@ impl HirPattern {
         }
     }
 
+    /// Every name bound DIRECTLY by a rest whose lowering builds a fresh
+    /// collection, in the order the lowerer reaches them.
+    ///
+    /// The one predicate the region walk and the lowerer both read, so a
+    /// placeholder region and the slot its release loads name the same
+    /// allocation (docs/impl/region/anchors.md § "A rest pattern's collection
+    /// is built, not read out"). The building rests are those `allocates`
+    /// names: `Array`/`Tuple` lower to `ArrayMutSliceFrom` and `Struct`/`Table`
+    /// to `StructRest`, while a `List` rest is the remaining cons tail and
+    /// builds nothing.
+    ///
+    /// "Directly" is the whole restriction: a rest matched by a further pattern
+    /// binds no name to the collection itself, so no slot can name it and no
+    /// value route can release it (elle-lisp/elle#1127).
+    pub fn allocating_rest_bindings(&self) -> Vec<Binding> {
+        Vec::new()
+    }
+
     /// True when this pattern matches every value: a wildcard, a bare
     /// variable, or an or-pattern with an irrefutable alternative.
     /// A match with a guardless irrefutable arm cannot raise

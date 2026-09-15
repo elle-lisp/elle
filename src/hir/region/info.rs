@@ -645,6 +645,21 @@ pub struct RegionInfo {
     /// the shared-slot capture-cell leak). Each region's `decref_point` is
     /// extended over its own binding's uses by the binding-chain post-pass.
     pub begin_cell_regions: HashMap<HirId, Vec<(Binding, Region)>>,
+    /// `Destructure`/`Match` HirId → per-binding placeholder region for each
+    /// rest name whose pattern BUILDS a collection: an array `& r` lowering to
+    /// `ArrayMutSliceFrom`, a struct `& r` lowering to `StructRest`
+    /// (docs/impl/region/anchors.md § "A rest pattern's collection is built,
+    /// not read out").
+    ///
+    /// The region is phantom — the opcode mints the physical region at runtime,
+    /// so there is no compiled allocation for a static slot to name, and the
+    /// release is the value route through the slot the lowerer parks the
+    /// collection in. Each region is in `call_result_regions`, is pinned to the
+    /// node keying it as its base `decref_point`, and is extended over its own
+    /// binding's uses by the binding-chain post-pass. A rest matched by a
+    /// further pattern binds no name to the collection and is absent
+    /// (elle-lisp/elle#1127).
+    pub pattern_rest_regions: HashMap<HirId, Vec<(Binding, Region)>>,
     /// The builder-idiom merge seed (docs/impl/region/merging.md § Merging): for a
     /// fresh child aggregate that is stored into the parent `%pair` it becomes a
     /// field of — sole-held, non-escaping, and dying at the same `decref_point` —
@@ -910,6 +925,7 @@ impl RegionInfo {
             cell_containers: HashMap::new(),
             cell_stored_regions: FxHashSet::default(),
             begin_cell_regions: HashMap::new(),
+            pattern_rest_regions: HashMap::new(),
             merged_parent: HashMap::new(),
             closure_cycle_members: FxHashSet::default(),
             cycle_tail_release: HashMap::new(),

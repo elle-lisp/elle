@@ -34,6 +34,7 @@ mod inline;
 mod looprc;
 mod merge;
 mod owned;
+mod patterns;
 mod realalloc;
 mod reassign;
 mod seeds;
