@@ -245,11 +245,19 @@ fn main() {
 
     // --help and --version answer before VM init, so they still answer in a
     // tree whose stdlib or plugin is broken — which is when somebody asks.
-    if args.iter().any(|a| a == "--help" || a == "-h") {
+    //
+    // The scan stops where `Config::parse` stops reading flags: at `--`. Past
+    // it every argument belongs to the program, so a script carries a --help
+    // or a --version of its own the way it already carries a --jit.
+    let own_flags = match args.iter().position(|a| a == "--") {
+        Some(i) => &args[..i],
+        None => &args[..],
+    };
+    if own_flags.iter().any(|a| a == "--help" || a == "-h") {
         print_help();
         return;
     }
-    if args.iter().any(|a| a == "--version") {
+    if own_flags.iter().any(|a| a == "--version") {
         println!("{}", elle::BANNER);
         return;
     }
