@@ -1,3 +1,9 @@
+// audited: 2026-09-15
+//! Assembling `RegionInfo` from the walk's outputs, and marking which of its
+//! fields a later post-pass fills.
+//!
+//! docs/impl/region/model.md
+
 use super::*;
 
 impl RegionInference {

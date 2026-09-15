@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-15
 // src/lir/lower/AGENTS.md
 // docs/destructuring.md
 //! Lowering the sequence patterns: pair, list, tuple, array.

@@ -1,3 +1,8 @@
+// audited: 2026-09-15
+//! The region-inference unit tests, one module per subject the solver decides.
+//!
+//! docs/impl/region/diagnostics.md
+
 use super::*;
 use crate::hir::functionalize::functionalize;
 use crate::hir::tailcall::mark_tail_calls;

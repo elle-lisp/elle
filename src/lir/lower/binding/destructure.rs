@@ -1,3 +1,10 @@
+// audited: 2026-09-15
+//! Lowering a binding form's destructure: the extraction each pattern shape
+//! emits, and the slot each extracted value is stored into.
+//!
+//! src/lir/lower/AGENTS.md
+//! docs/destructuring.md
+
 use super::*;
 
 impl<'a> Lowerer<'a> {

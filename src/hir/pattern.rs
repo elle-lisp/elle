@@ -1,4 +1,9 @@
-//! Pattern matching in HIR
+// audited: 2026-09-15
+//! The HIR pattern: every shape a `match` arm or a binding form can destructure,
+//! and the questions the passes downstream ask of one.
+//!
+//! docs/match.md
+//! docs/destructuring.md
 
 use super::binding::Binding;
 use crate::hir::arena::BindingArena;
@@ -282,17 +287,15 @@ impl HirPattern {
     /// Every name bound DIRECTLY by a rest whose lowering builds a fresh
     /// collection, in the order the lowerer reaches them.
     ///
-    /// The one predicate the region walk and the lowerer both read, so a
-    /// placeholder region and the slot its release loads name the same
-    /// allocation (docs/impl/region/anchors.md § "A rest pattern's collection
-    /// is built, not read out"). The building rests are those `allocates`
-    /// names: `Array`/`Tuple` lower to `ArrayMutSliceFrom` and `Struct`/`Table`
-    /// to `StructRest`, while a `List` rest is the remaining cons tail and
-    /// builds nothing.
+    /// The building rests are those [`Self::allocates`] names: `Array`/`Tuple`
+    /// lower to `ArrayMutSliceFrom` and `Struct`/`Table` to `StructRest`, while
+    /// a `List` rest is the remaining cons tail. "Directly" excludes a rest
+    /// matched by a further pattern, which binds no name to the collection.
     ///
-    /// "Directly" is the whole restriction: a rest matched by a further pattern
-    /// binds no name to the collection itself, so no slot can name it and no
-    /// value route can release it (elle-lisp/elle#1127).
+    /// The region walk and the lowerer both read this, so a placeholder region
+    /// and the slot its release loads name the same allocation.
+    ///
+    /// docs/impl/region/anchors.md
     pub fn allocating_rest_bindings(&self) -> Vec<Binding> {
         let mut out = Vec::new();
         self.collect_allocating_rest_bindings(&mut out);
@@ -313,8 +316,7 @@ impl HirPattern {
                 head.collect_allocating_rest_bindings(out);
                 tail.collect_allocating_rest_bindings(out);
             }
-            // A `List` rest is the remaining cons tail — a pointer into the
-            // scrutinee's own cells, so it builds nothing and names nothing
+            // A `List` rest is the remaining cons tail, so it names nothing
             // here. Its sub-patterns still can.
             HirPattern::List { elements, rest } => {
                 for p in elements {

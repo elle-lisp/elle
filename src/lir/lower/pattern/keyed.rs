@@ -1,4 +1,7 @@
-//! Keyed and or-pattern lowering: Struct / Table / Or.
+// audited: 2026-09-15
+//! Keyed and or-pattern lowering: `Struct`, `Table`, `Or`.
+//!
+//! docs/match.md
 
 use super::*;
 

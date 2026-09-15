@@ -1,21 +1,11 @@
-// audited: 2026-09-14
-// What a pattern's rest name owns, and where the solver anchors its release.
-// docs/impl/region/anchors.md
+// audited: 2026-09-15
+//! What a pattern's rest name owns, and where the solver anchors its release.
+//!
+//! docs/impl/region/anchors.md
 
 use super::*;
 use crate::hir::HirPattern;
 use crate::value::SymbolId;
-
-// ── A rest pattern's collection is built, not read out ────────────────
-//
-// Every other name a pattern binds is a projection of the scrutinee, so it
-// borrows and owes no release. A rest name over an array or a struct holds a
-// collection the destructure BUILT, so it owns one — a placeholder region in
-// `call_result_regions`, phantom (no `alloc_region` entry, since the opcode
-// mints the physical region at runtime), pinned to the destructure node as its
-// base and extended over the name's own uses.
-// See docs/impl/region/anchors.md § "A rest pattern's collection is built, not
-// read out".
 
 /// The HirId of the first `Destructure` node in the tree.
 fn first_destructure(hir: &Hir) -> Option<HirId> {
