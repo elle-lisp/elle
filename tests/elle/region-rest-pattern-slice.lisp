@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-14
+# audited: 2026-09-15
 # A rest pattern's collection is built, not read out
 # (docs/impl/region/anchors.md § "A rest pattern's collection is built, not
 # read out").
@@ -17,8 +17,8 @@
 #
 # THE COUNTER-FACTUAL the controls catch. The rate is flat in the scrutinee's
 # length and the same for a pattern that binds the same names flatly, so an
-# object-count match with the copy-scratch family proves nothing. (j) binds all
-# five elements with no rest and (k) takes a LIST rest, whose cons tail is a
+# object-count match with the copy-scratch family proves nothing. (k) binds all
+# five elements with no rest and (l) takes a LIST rest, whose cons tail is a
 # borrow of the scrutinee and allocates nothing: both already read zero, so a
 # subject's rate is the built collection and nothing else.
 #
@@ -112,6 +112,32 @@
     (pop sink)
     x))
 
+# (n) the rest name handed to a NATIVE tail call. The release sits in the block
+# the native falls through to, so it runs — if the relocation left it there.
+(defn n-tail-native []
+  (let [[x y & r] arr]
+    (length r)))
+
+# (o) the same through a CLOSURE tail call, which REPLACES the frame. The
+# release is dead code on that path and the callee's owned parameter is what
+# frees the collection, so this row reads the transfer rather than the release.
+(defn count-it [v]
+  (length v))
+(defn o-tail-closure []
+  (let [[x y & r] arr]
+    (count-it r)))
+
+# (p) the rest name and its SCRUTINEE in one argument list. The collection is a
+# region the name holds and the scrutinee one it only names, so the two take
+# opposite answers out of the same call.
+(defn both [a b]
+  (+ (length a) (length b)))
+(defn take-both [t]
+  (let [[x y & r] t]
+    (both r t)))
+(defn p-rest-and-scrutinee []
+  (take-both arr))
+
 # controls ─────────────────────────────────────────────────────────────────────
 
 # (k) the flat pattern: the same five elements out of the same array, bound by
@@ -138,6 +164,9 @@
 (def d-h (measure h-param-rest 20 window))
 (def d-i (measure i-rest-returned 20 window))
 (def d-j (measure j-rest-stored 20 window))
+(def d-n (measure n-tail-native 20 window))
+(def d-o (measure o-tail-closure 20 window))
+(def d-p (measure p-rest-and-scrutinee 20 window))
 (def d-k (measure k-flat-pattern 20 window))
 (def d-l (measure l-list-rest 20 window))
 
@@ -164,6 +193,9 @@
 (println "  h param-rest        " d-h)
 (println "  i rest-returned     " d-i)
 (println "  j rest-stored       " d-j)
+(println "  n tail-native       " d-n)
+(println "  o tail-closure      " d-o)
+(println "  p rest+scrutinee    " d-p)
 (println "  k flat-pattern      " d-k " (control)")
 (println "  l list-rest         " d-l " (control)")
 (println "  m inline-loop       " d-m)
@@ -208,5 +240,14 @@
 (assert (%lt d-m 40)
         (concat "an inline rest destructure strands its collection, delta="
                 (number->string d-m)))
+(assert (%lt d-n 40)
+        (concat "a rest collection tail-called into a native strands, delta="
+                (number->string d-n)))
+(assert (%lt d-o 40)
+        (concat "a rest collection tail-called into a closure strands, delta="
+                (number->string d-o)))
+(assert (%lt d-p 40)
+        (concat "a rest collection passed beside its scrutinee strands, delta="
+                (number->string d-p)))
 
 (println "region-rest-pattern-slice: ok")

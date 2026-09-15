@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-14
+# audited: 2026-09-15
 # Soundness complement of region-rest-pattern-slice.lisp
 # (docs/impl/region/anchors.md § "A rest pattern's collection is built, not
 # read out"). Run under `--trace=guardfree` by the subprocess pin
@@ -222,5 +222,24 @@
   (assert (= (tail-struct) 3)
           "a struct rest collection handed to a tail call must survive it")
   (assign aa (+ aa 1)))
+
+# ── 12. the rest name and its scrutinee in one argument list ──────────────────
+# THE TRAP. The exemption is reconsidered per ARGUMENT, but the slot test it
+# makes reads the whole operand list. The scrutinee's region survives the rest
+# name's reconsideration only because the scrutinee is itself passed here; asked
+# of one argument in isolation, it is freed before the callee reads it.
+
+(defn sum-both [a b]
+  (+ (length a) (length b)))
+
+(defn rest-and-scrutinee [t]
+  (let [[x y & r] t]
+    (sum-both r t)))
+
+(var bb 0)
+(while (< bb 40)
+  (assert (= (rest-and-scrutinee src) 8)
+          "a rest collection and its scrutinee must both survive one call")
+  (assign bb (+ bb 1)))
 
 (println "region-rest-pattern-slice-uaf: ok")
