@@ -116,6 +116,11 @@ where a release leaves no nil-stamp and the abandoned-frame walk can read no
 receipt ([unwind.md](unwind.md)). A stack slot of the lowerer's own gives every
 rest collection one stamped, walkable route whatever its name goes on to do.
 
+The parked slot leaves the rest name holding one reference under two slot
+names, which the tail-call exemption has to be told about: it reads a region's
+release route as a slot and compares it against the slots the call passes
+([relocate.md](relocate.md)).
+
 Two pins decide where the release lands, and both are the general machinery
 rather than anything this shape adds:
 

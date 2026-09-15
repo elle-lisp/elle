@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-09-10 -->
+<!-- audited: 2026-09-14 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -103,6 +103,31 @@ hoisting its release ahead of the call would free what the callee is about to ta
 over (stdlib `zip`'s `arrs`, a second name for the array an inner `let` returned).
 Pinned by `tests/elle/region-tailcall-arg-transfer.lisp`, whose alias case is the
 counter-factual for reading a leaf's rule onto a whole.
+
+**A slot comparison cannot see a value held under two slot names.** The route
+reading above rests on one value having one slot, which is true of every leaf a
+pattern projects and false of the one it BUILDS. A rest name over an array or a
+struct holds a collection the destructure made, and the lowerer parks that
+collection in a slot of its own so the release has a stamped route the
+abandoned-frame walk can read ([anchors.md](anchors.md)). The call still passes
+the binding's slot, so the comparison finds two different slots and reads the
+argument as one the call does not move.
+
+Nothing then takes the release over, and the relocation carries it ahead of the
+call: `(let [[x y & r] a] (length r))` releases the collection two instructions
+before `length` derefs it. The failure is a use-after-free rather than the leak
+the leaf reading was written to close, so the two cases need different answers
+and one comparison cannot give both.
+
+The answer is to ask what the name HOLDS before asking which slot holds it. The
+placeholder the solver minted for this rest name IS the reference the callee
+takes over, so that region keeps its exemption whatever slot its route loads
+(`RegionInfo::holds_built_rest_collection`). Every other region the rest name
+carries is the scrutinee's, which the name only borrows, and those keep the
+slot comparison — a rest name is both things at once, which is why the
+reconsideration is per region rather than per binding. Pinned by
+`tests/elle/region-rest-pattern-slice-uaf.lisp` (the fault) and
+`lir::lower::tests::release::restpattern` (the placement).
 
 **Whether the frame holds the region alone** — the admission, and escape is its
 sole authority. The exemption above is a statement about *arguments*, and
