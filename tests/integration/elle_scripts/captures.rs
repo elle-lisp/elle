@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-14
 // Guardfree pins for capture cells, letrec members and self-recursive closures.
 //
 // docs/analysis/testing.md
@@ -153,6 +153,26 @@ fn region_capture_cell_reassign_uaf() {
 fn region_capture_cell_closure_reassign_uaf() {
     run_elle_file_with_args(
         "tests/integration/fixtures/region-capture-cell-closure-reassign-uaf.lisp",
+        &["--trace=guardfree"],
+    );
+}
+
+// The same hazard reached through the THIRD binder. `lower_let` mints the same
+// compiled cell into the same slot as the `Begin` pre-pass and `lower_letrec` do,
+// so it owes the same two things: skip the cell-slot routing for the init, and
+// drop the init's producer reference off the value register
+// (docs/impl/region/cells.md § "Every binder that mints the cell owes the rule
+// too"). A `let` that kept the routing frees the cell's live content at the
+// binding's last use — which is the capture, so every later reader gets the freed
+// page. Issue #1124 reached it through `port/write` from a spawned fiber, and a
+// park is what makes the extra release fatal rather than latent: the park rebuilds
+// the value at rc 1, so the routed release takes it to zero. Compile-level twins,
+// which need no park and no timing luck: `lir::lower::tests::release::arms`'s
+// `let_bound_reassign_*_leaves_no_cell_slot_release`.
+#[test]
+fn region_capture_cell_let_reassign_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-capture-cell-let-reassign-uaf.lisp",
         &["--trace=guardfree"],
     );
 }
