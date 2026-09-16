@@ -1,3 +1,9 @@
+// audited: 2026-09-16
+// Structural pins on the ANF lift: which nodes come out of the pass named, and
+// which deliberately do not.
+//
+// src/hir/anf.rs
+
 use super::*;
 use crate::hir::expr::{HirId, HirKind};
 use crate::hir::testkit::HirFixture;
@@ -201,6 +207,33 @@ fn anf_wrap_init(hir: &Hir) -> &Hir {
         HirKind::Let { bindings, .. } if bindings.len() == 1 => &bindings[0].1,
         _ => panic!("expected ANF wrap"),
     }
+}
+
+/// The id of every node an ANF wrap names, anywhere in the tree. A position
+/// test that reads the shape from the outside in has to know which form the
+/// front end left around the node; this asks the one question the naming rule
+/// is about — did this node get a binding of its own?
+fn named_node_ids(hir: &Hir) -> Vec<HirId> {
+    let mut out = Vec::new();
+    let mut visit = |node: &Hir| {
+        if is_anf_wrap(node) {
+            out.push(anf_wrap_init(node).id);
+        }
+    };
+    walk_pre(hir, &mut visit);
+    out
+}
+
+/// The single call to `name`, which the naming tests then ask about.
+fn only_call_to<'a>(
+    hir: &'a Hir,
+    name: &str,
+    arena: &BindingArena,
+    symbols: &SymbolTable,
+) -> &'a Hir {
+    let calls = find_calls_to(hir, name, arena, symbols);
+    assert_eq!(calls.len(), 1, "expected exactly one call to {name}");
+    calls[0]
 }
 
 // ── 1. (g (f x)): outer Call's arg lifted ────────────────────
@@ -422,6 +455,55 @@ fn tail_call_in_let_body_keeps_is_tail_marker() {
             );
         }
     }
+}
+
+// ── 8b. a propagating tail is named through ───────────────────
+
+#[test]
+fn allocation_in_a_let_body_is_named_in_a_consumer_position() {
+    // `(g (let [a 1] (f a)))`. The `let` allocates nothing at its own id, so a
+    // name on the `let` records no region and the call's result reaches the
+    // lowerer with no release route. The name belongs on `(f a)`.
+    //
+    // Counter-factual: reading the position instead of the node passes as long
+    // as SOMETHING named the argument — and the wrap the old rule promised
+    // ("the outer consumer wraps the form itself") is exactly the wrap that
+    // names nothing.
+    let (hir, arena, symbols) = analyze_anf("(g (let [a 1] (f a)))");
+    let f_call = only_call_to(&hir, "f", &arena, &symbols).id;
+    assert!(
+        named_node_ids(&hir).contains(&f_call),
+        "the let body's call must carry the name, not the let"
+    );
+}
+
+#[test]
+fn allocation_in_a_let_body_is_named_under_a_binder() {
+    // `(let [b (let [a 1] (f a))] (g b))`. `b` names the value, and names it
+    // uselessly: `record_region_slot` keys `b`'s slot on what the INIT node
+    // allocates, and the inner `let` allocates nothing. So the inner call is
+    // named too, by the one rule, and `b`'s own slot is left to the shape it
+    // does cover — an init that allocates at its own id.
+    let (hir, arena, symbols) = analyze_anf("(let [b (let [a 1] (f a))] (g b))");
+    let f_call = only_call_to(&hir, "f", &arena, &symbols).id;
+    assert!(
+        named_node_ids(&hir).contains(&f_call),
+        "a binder whose init is a propagating tail must name the tail"
+    );
+}
+
+#[test]
+fn a_lambda_body_tail_is_not_named() {
+    // The one tail the rule leaves alone. `(fn () (let [a 1] (f a)))` hands
+    // `(f a)`'s value to the CALLER, which releases it through its own binding;
+    // this frame owes no release, so it needs no name — and naming a tail call
+    // would rebuild it as the let-bound form for nothing.
+    let (hir, arena, symbols) = analyze_anf("(g (fn () (let [a 1] (f a))))");
+    let f_call = only_call_to(&hir, "f", &arena, &symbols).id;
+    assert!(
+        !named_node_ids(&hir).contains(&f_call),
+        "a lambda body's tail value leaves by the return mint, unnamed"
+    );
 }
 
 // ── 9. match value with rest pattern is lifted ────────────────

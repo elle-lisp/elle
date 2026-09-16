@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-08
+# audited: 2026-09-16
 # The direct-loop rows for scope reclamation, branch compensation, collections, strings and cells — one per-op thunk each.
 #
 # docs/impl/region/diagnostics.md
@@ -320,7 +320,8 @@
     (fn [j]
       (each x in (list 1 2 3)
         {:val x})) 0]
-   # `map-while`/`filter-while` are DISSOLUTION controls: a non-capturing kernel
+   # `map-while`/`filter-while`/`mapcat-while` are DISSOLUTION controls: a
+   # non-capturing kernel
    # over a proven immutable array fuses to an inlined index-walk loop
    # (docs/impl/dissolution.md), so the stdlib op — and every per-call strand it
    # carried (the closure `map` mints for `f`, the `freeze` copy, the map-body
@@ -336,6 +337,12 @@
       (filter (fn [x]
                 (numeric!)
                 (%gt x 1)) [1 2 3])) 0]
+   # The `mapcat` row reads the axis the fusion's own gauges do not: they weigh
+   # `arena/total-allocs`, a cumulative count of allocation EVENTS, which a
+   # retained object raises exactly as a reclaimed one does. Only a rate sees
+   # retention, and the fan-out is the stage that has something to retain — the
+   # array its function returns, one per INPUT element per call.
+   ["mapcat-while" (fn [j] (mapcat (fn [x] [x x]) [1 2 3])) 0]
    # A CLOSED control for the call-result naming rule (undeclared, like
    # `rest-array-copy`), so a regression to open trips the completeness gate
    # loudly instead of being absorbed as F1a scratch. The walk inlines `f`'s
