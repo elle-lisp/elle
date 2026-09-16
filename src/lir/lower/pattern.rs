@@ -52,8 +52,10 @@ impl<'a> Lowerer<'a> {
     /// own, record that slot as its placeholder region's release route, and hand
     /// the value back for the rest pattern to bind.
     ///
-    /// A no-op with the value unchanged unless the solver minted a placeholder,
-    /// which it does exactly where the rest sub-pattern is a bare name.
+    /// A no-op with the value unchanged unless the solver minted a placeholder
+    /// for this collection. Whichever name the solver keyed it on, every name
+    /// the rest sub-pattern binds reaches the same one, so the first with a
+    /// region recorded gives it.
     ///
     /// docs/impl/region/anchors.md
     pub(in crate::lir::lower) fn park_rest_collection(
@@ -61,10 +63,12 @@ impl<'a> Lowerer<'a> {
         rest: &HirPattern,
         value: Reg,
     ) -> Reg {
-        match rest {
-            HirPattern::Var(b) => self.park_rest_collection_for(*b, value),
-            _ => value,
+        for b in rest.rest_collection_holders() {
+            if self.rest_collection_region(b).is_some() {
+                return self.park_rest_collection_for(b, value);
+            }
         }
+        value
     }
 
     /// [`park_rest_collection`](Self::park_rest_collection) for a binding the

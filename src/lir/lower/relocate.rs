@@ -316,7 +316,7 @@ impl<'a> Lowerer<'a> {
             .flatten()
         {
             let root = self.region_info.merged_root(r);
-            if self.region_info.holds_built_rest_collection(*b, root) {
+            if self.region_info.names_built_rest_collection(*b, root) {
                 continue;
             }
             let moved = match self.region_to_slot.get(&root) {

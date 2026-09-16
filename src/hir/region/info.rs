@@ -262,8 +262,9 @@ pub struct RegionInfo {
     /// docs/impl/region/cells.md
     pub begin_cell_regions: HashMap<HirId, Vec<(Binding, Region)>>,
     /// `Destructure`/`Match` HirId → one entry per collection the node's
-    /// pattern BUILDS. Each region is phantom, is in `call_result_regions`, and
-    /// is pinned to the node keying it.
+    /// pattern BUILDS and binds a name to. Each region is phantom, is in
+    /// `call_result_regions`, and is pinned to the node keying it. A collection
+    /// with no name to key a route on is absent.
     ///
     /// docs/impl/region/anchors.md
     pub pattern_rest_regions: HashMap<HirId, Vec<RestCollection>>,

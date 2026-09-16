@@ -284,22 +284,41 @@ impl HirPattern {
         }
     }
 
-    /// Every name bound DIRECTLY by a rest whose lowering builds a fresh
-    /// collection, in the order the lowerer reaches them.
+    /// Every rest sub-pattern whose lowering BUILDS a fresh collection, in the
+    /// order the lowerer reaches them.
     ///
     /// The building rests are those [`Self::allocates`] names: `Array`/`Tuple`
     /// lower to `ArrayMutSliceFrom` and `Struct`/`Table` to `StructRest`, while
-    /// a `List` rest is the remaining cons tail. "Directly" excludes a rest
-    /// matched by a further pattern, which binds no name to the collection.
+    /// a `List` rest is the remaining cons tail and builds nothing.
     ///
-    /// The region walk and the lowerer both read this, so a placeholder region
-    /// and the slot its release loads name the same allocation.
+    /// `lower_destructure` emits one build per entry here, so one placeholder
+    /// region per entry is one per allocation.
+    ///
+    /// docs/impl/region/anchors.md
+    pub fn building_rests(&self) -> Vec<&HirPattern> {
+        let mut out = Vec::new();
+        self.collect_building_rests(&mut out);
+        out
+    }
+
+    /// Every name bound DIRECTLY by a rest whose lowering builds a fresh
+    /// collection, in the order the lowerer reaches them.
+    ///
+    /// "Directly" excludes a rest matched by a further pattern, whose names
+    /// project the collection rather than hold it. The decision tree reads this
+    /// set, reaching a rest name through an access path whose outermost step is
+    /// the build itself; it re-runs that step per path, so it can key nothing
+    /// on the sub-pattern the way `lower_destructure` can.
     ///
     /// docs/impl/region/anchors.md
     pub fn allocating_rest_bindings(&self) -> Vec<Binding> {
-        let mut out = Vec::new();
-        self.collect_allocating_rest_bindings(&mut out);
-        out
+        self.building_rests()
+            .into_iter()
+            .filter_map(|r| match r {
+                HirPattern::Var(b) => Some(*b),
+                _ => None,
+            })
+            .collect()
     }
 
     /// The names that reach the collection this pattern is the rest of: every
@@ -308,74 +327,119 @@ impl HirPattern {
     ///
     /// The solver keys a placeholder region on this set and the lowerer reads
     /// the region back through it, so a disagreement is a placeholder with no
-    /// route or a route with no placeholder.
+    /// route or a route with no placeholder. Stopping at a further build is
+    /// also what keeps each name in one set, so either side may read the region
+    /// off whichever name it reaches first.
     ///
     /// docs/impl/region/anchors.md
     pub fn rest_collection_holders(&self) -> Vec<Binding> {
-        Vec::new()
+        let mut out = Vec::new();
+        self.collect_rest_collection_holders(&mut out);
+        out
     }
 
-    fn collect_allocating_rest_bindings(&self, out: &mut Vec<Binding>) {
+    fn collect_building_rests<'p>(&'p self, out: &mut Vec<&'p HirPattern>) {
         // Sub-patterns first, then this pattern's own rest, then whatever the
         // rest itself contains: the order every lowering path reaches them in,
         // so an index into the result names the same allocation on both sides.
-        fn rest_name(rest: &Option<Box<HirPattern>>, out: &mut Vec<Binding>) {
-            if let Some(HirPattern::Var(b)) = rest.as_deref() {
-                out.push(*b);
-            }
-        }
         match self {
             HirPattern::Pair { head, tail } => {
-                head.collect_allocating_rest_bindings(out);
-                tail.collect_allocating_rest_bindings(out);
+                head.collect_building_rests(out);
+                tail.collect_building_rests(out);
             }
-            // A `List` rest is the remaining cons tail, so it names nothing
+            // A `List` rest is the remaining cons tail, so it builds nothing
             // here. Its sub-patterns still can.
             HirPattern::List { elements, rest } => {
                 for p in elements {
-                    p.collect_allocating_rest_bindings(out);
+                    p.collect_building_rests(out);
                 }
                 if let Some(r) = rest {
-                    r.collect_allocating_rest_bindings(out);
+                    r.collect_building_rests(out);
                 }
             }
             HirPattern::Tuple { elements, rest } | HirPattern::Array { elements, rest } => {
                 for p in elements {
-                    p.collect_allocating_rest_bindings(out);
+                    p.collect_building_rests(out);
                 }
-                rest_name(rest, out);
                 if let Some(r) = rest {
-                    r.collect_allocating_rest_bindings(out);
+                    out.push(r);
+                    r.collect_building_rests(out);
                 }
             }
             HirPattern::Struct { entries, rest } | HirPattern::Table { entries, rest } => {
                 for (_, p) in entries {
-                    p.collect_allocating_rest_bindings(out);
+                    p.collect_building_rests(out);
                 }
-                rest_name(rest, out);
                 if let Some(r) = rest {
-                    r.collect_allocating_rest_bindings(out);
+                    out.push(r);
+                    r.collect_building_rests(out);
                 }
             }
             HirPattern::NamedStruct { entries } => {
                 for (_, p) in entries {
-                    p.collect_allocating_rest_bindings(out);
+                    p.collect_building_rests(out);
                 }
             }
             HirPattern::Set { binding } | HirPattern::SetMut { binding } => {
-                binding.collect_allocating_rest_bindings(out)
+                binding.collect_building_rests(out)
             }
             // Every alternative, not just the first: an or-pattern's cases bind
             // the same NAMES, and the arena gives each case its own `Binding`.
             HirPattern::Or(alternatives) => {
                 for alt in alternatives {
-                    alt.collect_allocating_rest_bindings(out);
+                    alt.collect_building_rests(out);
                 }
             }
             HirPattern::Wildcard
             | HirPattern::Nil
             | HirPattern::Literal(_)
             | HirPattern::Var(_) => {}
+        }
+    }
+
+    fn collect_rest_collection_holders(&self, out: &mut Vec<Binding>) {
+        match self {
+            HirPattern::Var(b) => out.push(*b),
+            HirPattern::Pair { head, tail } => {
+                head.collect_rest_collection_holders(out);
+                tail.collect_rest_collection_holders(out);
+            }
+            // A `List` rest builds nothing, so the names beneath it reach the
+            // same collection the elements' names do.
+            HirPattern::List { elements, rest } => {
+                for p in elements {
+                    p.collect_rest_collection_holders(out);
+                }
+                if let Some(r) = rest {
+                    r.collect_rest_collection_holders(out);
+                }
+            }
+            // The rest of one of these BUILDS, so the names beneath it reach
+            // that collection instead and the descent stops.
+            HirPattern::Tuple { elements, .. } | HirPattern::Array { elements, .. } => {
+                for p in elements {
+                    p.collect_rest_collection_holders(out);
+                }
+            }
+            HirPattern::Struct { entries, .. } | HirPattern::Table { entries, .. } => {
+                for (_, p) in entries {
+                    p.collect_rest_collection_holders(out);
+                }
+            }
+            HirPattern::NamedStruct { entries } => {
+                for (_, p) in entries {
+                    p.collect_rest_collection_holders(out);
+                }
+            }
+            HirPattern::Set { binding } | HirPattern::SetMut { binding } => {
+                binding.collect_rest_collection_holders(out)
+            }
+            HirPattern::Or(alternatives) => {
+                for alt in alternatives {
+                    alt.collect_rest_collection_holders(out);
+                }
+            }
+            HirPattern::Wildcard | HirPattern::Nil | HirPattern::Literal(_) => {}
         }
     }
 

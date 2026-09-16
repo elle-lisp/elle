@@ -16,7 +16,7 @@ impl RegionInference {
                 let val_regions = self.walk(value);
                 // Recorded before the arms are walked, so a body that reads a
                 // rest name already sees its placeholder among the regions.
-                self.record_pattern_rest_regions(hir.id, arms.iter().map(|(p, _, _)| p));
+                self.record_match_rest_regions(hir.id, arms.iter().map(|(p, _, _)| p));
                 let mut out = Vec::new();
                 for (pat, guard, body) in arms {
                     for b in pat.bindings().bindings {
@@ -261,7 +261,7 @@ impl RegionInference {
                 // post-pass extends the value's regions to this node
                 // (docs/impl/region/rules.md Rule 4).
                 self.destructure_sites.push((hir.id, val_regions.clone()));
-                self.record_pattern_rest_regions(hir.id, std::iter::once(pattern));
+                self.record_destructure_rest_regions(hir.id, pattern);
                 for b in pattern.bindings().bindings {
                     self.binding_region.insert(b, self.current_region);
                     // A leaf NAMES the source without holding it, which the

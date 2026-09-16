@@ -7,23 +7,28 @@
 
 use super::*;
 
+/// The name a rest sub-pattern binds to the collection ITSELF, where a bare
+/// name matched the rest. `None` where a further pattern did, whose names
+/// project the collection rather than hold it.
+fn bound_rest_name(rest: &HirPattern) -> Option<Binding> {
+    match rest {
+        HirPattern::Var(b) => Some(*b),
+        _ => None,
+    }
+}
+
 impl RegionInference {
-    /// Give every rest name `patterns` binds to a BUILT collection a
+    /// Give every rest name a `Match` arm binds to a BUILT collection a
     /// placeholder region of its own, and hand that region to the name
     /// (docs/impl/region/anchors.md § "A rest pattern's collection is built,
     /// not read out").
     ///
-    /// The region is phantom — no `alloc_here`, because the opcode mints the
-    /// physical region at runtime and no compiled allocation names a static
-    /// slot for it — so it is filtered out of `live_regions` and records no
-    /// cross-region edge, exactly as a lambda's owned parameter is. Membership
-    /// of `call_result_regions` is what routes its release through the slot the
-    /// lowerer parks the collection in.
-    ///
-    /// Idempotent per node: `try_inline_call` re-walks a callee's body, and a
-    /// second mint against one destructure would leave the first region with no
-    /// route at all.
-    pub(super) fn record_pattern_rest_regions<'p>(
+    /// A bare name and nothing else. A decision tree loads each name by walking
+    /// its own access path and re-runs the build on every path through the
+    /// rest, so a collection a further pattern matched has as many allocations
+    /// as it has names and one placeholder would not cover them
+    /// (docs/impl/region/anchors.md § "Where the holder set stops").
+    pub(super) fn record_match_rest_regions<'p>(
         &mut self,
         node: HirId,
         patterns: impl Iterator<Item = &'p HirPattern>,
@@ -31,23 +36,71 @@ impl RegionInference {
         if self.pattern_rest_regions.contains_key(&node) {
             return;
         }
-        let bindings: Vec<Binding> = patterns
+        let names: Vec<Binding> = patterns
             .flat_map(|p| p.allocating_rest_bindings())
             .collect();
-        if bindings.is_empty() {
+        if names.is_empty() {
             return;
         }
-        let mut recorded = Vec::with_capacity(bindings.len());
-        for b in bindings {
-            let r = self.fresh_region(self.current_region);
-            self.call_result_regions.insert(r);
+        let mut recorded = Vec::with_capacity(names.len());
+        for b in names {
+            let r = self.mint_rest_region(&[b]);
             recorded.push(RestCollection::bound(r, b));
+        }
+        self.pattern_rest_regions.insert(node, recorded);
+    }
+
+    /// Give every collection a `Destructure`'s pattern BUILDS a placeholder
+    /// region of its own, and hand that region to every name that reaches it.
+    ///
+    /// `lower_destructure` emits one build per rest sub-pattern, so one region
+    /// per sub-pattern is one per allocation whether a bare name or a further
+    /// pattern matched it. A sub-pattern that binds no name leaves the
+    /// collection with nothing to key a route on and takes none.
+    pub(super) fn record_destructure_rest_regions(&mut self, node: HirId, pattern: &HirPattern) {
+        if self.pattern_rest_regions.contains_key(&node) {
+            return;
+        }
+        let built: Vec<(Option<Binding>, Vec<Binding>)> = pattern
+            .building_rests()
+            .into_iter()
+            .map(|rest| (bound_rest_name(rest), rest.rest_collection_holders()))
+            .filter(|(_, holders)| !holders.is_empty())
+            .collect();
+        if built.is_empty() {
+            return;
+        }
+        let mut recorded = Vec::with_capacity(built.len());
+        for (name, holders) in built {
+            let r = self.mint_rest_region(&holders);
+            recorded.push(match name {
+                Some(b) => RestCollection::bound(r, b),
+                None => RestCollection::projected(r, holders),
+            });
+        }
+        self.pattern_rest_regions.insert(node, recorded);
+    }
+
+    /// Mint the phantom placeholder for one built collection, and record it
+    /// against every name that reaches the collection so the binding chain
+    /// carries the release over each name's uses.
+    ///
+    /// The region is phantom — no `alloc_here`, because the opcode mints the
+    /// physical region at runtime and no compiled allocation names a static
+    /// slot for it — so it is filtered out of `live_regions` and records no
+    /// cross-region edge, exactly as a lambda's owned parameter is. Membership
+    /// of `call_result_regions` is what routes its release through the slot the
+    /// lowerer parks the collection in.
+    fn mint_rest_region(&mut self, holders: &[Binding]) -> Region {
+        let r = self.fresh_region(self.current_region);
+        self.call_result_regions.insert(r);
+        for &b in holders {
             let entry = self.binding_regions.entry(b).or_default();
             if !entry.contains(&r) {
                 entry.push(r);
             }
         }
-        self.pattern_rest_regions.insert(node, recorded);
+        r
     }
 
     /// A captured (`needs_capture`) binding introduced INSIDE a lambda body is

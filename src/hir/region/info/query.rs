@@ -82,18 +82,19 @@ impl RegionInfo {
             .map(|c| c.region)
     }
 
-    /// Does `binding` HOLD `region` as the collection its rest pattern built,
-    /// rather than merely name it? A rest name does both, so the question is
-    /// asked per region. A name a further pattern bound projects the collection
-    /// and holds nothing, so it answers `false` and keeps the slot comparison.
+    /// Does `binding` reach `region` as a collection a rest pattern BUILT,
+    /// rather than as a region it merely names? Such a collection is routed
+    /// through a slot of the lowerer's own that no call passes, so the slot
+    /// comparison can only ever read it as unmoved. Every other region the name
+    /// carries is the scrutinee's, so the question is asked per region.
     /// `region` is a merged root.
     ///
     /// docs/impl/region/relocate.md
-    pub fn holds_built_rest_collection(&self, binding: Binding, region: Region) -> bool {
+    pub fn names_built_rest_collection(&self, binding: Binding, region: Region) -> bool {
         self.pattern_rest_regions
             .values()
             .flatten()
-            .any(|c| c.bound_name == Some(binding) && self.merged_root(c.region) == region)
+            .any(|c| c.holders.contains(&binding) && self.merged_root(c.region) == region)
     }
 
     /// Does this scope have any allocations whose solved region matches it?
