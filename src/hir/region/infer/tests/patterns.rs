@@ -1,10 +1,10 @@
-// audited: 2026-09-15
+// audited: 2026-09-16
 //! What a pattern's rest name owns, and where the solver anchors its release.
 //!
 //! docs/impl/region/anchors.md
 
 use super::*;
-use crate::hir::{HirPattern, PatternKey};
+use crate::hir::HirPattern;
 use crate::value::SymbolId;
 
 /// The HirId of the first `Destructure` node in the tree.
@@ -15,6 +15,47 @@ fn first_destructure(hir: &Hir) -> Option<HirId> {
 /// The HirId of the first `Match` node in the tree.
 fn first_match(hir: &Hir) -> Option<HirId> {
     find_first(hir, |h| matches!(&h.kind, HirKind::Match { .. }))
+}
+
+/// The pattern of the first `Destructure` node in the tree, so a test can ask
+/// the same question of the pattern that the lowerer asks.
+fn first_destructure_pattern(hir: &Hir) -> Option<&HirPattern> {
+    fn walk<'h>(h: &'h Hir, found: &mut Option<&'h HirPattern>) {
+        if found.is_none() {
+            if let HirKind::Destructure { pattern, .. } = &h.kind {
+                *found = Some(pattern);
+                return;
+            }
+            h.for_each_child(|c| walk(c, found));
+        }
+    }
+    let mut found = None;
+    walk(hir, &mut found);
+    found
+}
+
+/// One entry per collection `node`'s pattern builds, in the order the entries
+/// were recorded: the placeholder, and the source names of the holders keyed on
+/// it. A build no name reaches is an entry with an empty name list, which
+/// `rest_names` cannot show because it has no name to show.
+fn rest_entries(
+    info: &RegionInfo,
+    arena: &BindingArena,
+    node: HirId,
+) -> Vec<(Region, Vec<SymbolId>)> {
+    info.pattern_rest_regions
+        .get(&node)
+        .map(|v| {
+            v.iter()
+                .map(|c| {
+                    (
+                        c.region,
+                        c.holders.iter().map(|&b| arena.get(b).name).collect(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The placeholder regions recorded against `node`, each beside the source
@@ -199,28 +240,103 @@ fn the_holder_set_stops_at_a_nested_build() {
 
 #[test]
 fn a_wildcard_rest_takes_no_placeholder() {
-    // A wildcard binds nothing, so the collection has no name to key on and no
-    // slot for a value route to load. It keeps the conservative baseline.
+    // A wildcard reads nothing out of the collection, so the lowerer emits no
+    // build for it and there is no allocation for a placeholder to release.
+    // The fixed element's own strict extraction keeps the type check the
+    // skipped opcode would have made.
     let (hir, arena, info) = pipeline(&format!("{PRELUDE} (let [[x & _] src] x)"));
     let node = first_destructure(&hir).expect("a Destructure node");
     assert!(
-        rest_regions(&info, &arena, node).is_empty(),
-        "a wildcard rest binds no name to the collection"
+        rest_entries(&info, &arena, node).is_empty(),
+        "a wildcard rest builds nothing to release"
     );
 }
 
 #[test]
-fn a_rest_whose_only_name_holds_the_inner_collection_leaves_the_outer_bare() {
+fn a_bare_wildcard_rest_keeps_the_build_its_type_check_needs() {
+    // THE COUNTER-FACTUAL. `ArrayMutSliceFrom` signals a type error on a
+    // non-array as well as building the slice, and `[& _]` has no fixed
+    // element to make that check. So the build stays — and a build that stays
+    // owes a release, which no name of the program can key.
+    let (hir, arena, info) = pipeline(&format!("{PRELUDE} (let [[& _] src] 0)"));
+    let node = first_destructure(&hir).expect("a Destructure node");
+    let entries = rest_entries(&info, &arena, node);
+    assert_eq!(entries.len(), 1, "the build stays, so its placeholder does");
+    assert!(
+        entries[0].1.is_empty(),
+        "no name of the program reaches the collection"
+    );
+    assert!(
+        info.call_result_regions.contains(&entries[0].0),
+        "the placeholder takes the value route like any other"
+    );
+}
+
+#[test]
+fn a_rest_whose_only_name_holds_the_inner_collection_still_takes_a_placeholder() {
     // `[& q]` binds `q` beneath a further build, so the descent that stops
-    // there leaves the OUTER collection with no holder at all. One entry, for
-    // the inner collection alone.
+    // there leaves the OUTER collection with no holder at all. Keyed on a name
+    // it would take no placeholder and strand; keyed on its POSITION among the
+    // pattern's builds it takes one like any other.
     let (hir, arena, info) = pipeline(&format!("{PRELUDE} (let [[x & [& q]] src] x)"));
     let node = first_destructure(&hir).expect("a Destructure node");
-    assert_eq!(
-        rest_names(&info, &arena, node),
-        vec![SymbolId::of("q")],
-        "only the collection `q` holds is recorded"
+    let entries = rest_entries(&info, &arena, node);
+    assert_eq!(entries.len(), 2, "two builds, two placeholders");
+    assert!(
+        entries[0].1.is_empty(),
+        "the outer collection is reached by no name"
     );
+    assert_eq!(
+        entries[1].1,
+        vec![SymbolId::of("q")],
+        "the inner collection is the one `q` holds"
+    );
+    assert_ne!(
+        entries[0].0, entries[1].0,
+        "one region over both would park two collections in one slot"
+    );
+    let data = info
+        .region_data
+        .get(&entries[0].0)
+        .expect("the nameless collection still has a decref_point");
+    assert_eq!(
+        data.decref_point, node,
+        "with no holder to extend over, the release lands on the destructure node"
+    );
+}
+
+#[test]
+fn the_placeholders_follow_the_order_the_lowerer_builds_in() {
+    // THE TRAP. The lowerer takes the n-th placeholder at the n-th build site,
+    // so a solver that recorded a different count or a different order would
+    // park each collection against another one's region. Both sides read
+    // `building_rests`, and this is the assertion that they agree.
+    // Three builds, and the MIDDLE one is the nameless one: a recording that
+    // drops it shifts the inner collection's placeholder onto the middle build
+    // and leaves the inner one with none.
+    let (hir, arena, info) = pipeline(&format!(
+        "{PRELUDE} (let [[x & [p & [& q]]] src] (length q))"
+    ));
+    let node = first_destructure(&hir).expect("a Destructure node");
+    let pattern = first_destructure_pattern(&hir).expect("a Destructure pattern");
+    let entries = rest_entries(&info, &arena, node);
+    let built = pattern.building_rests();
+    assert_eq!(
+        entries.len(),
+        built.len(),
+        "one placeholder per build the lowerer emits"
+    );
+    for (i, rest) in built.iter().enumerate() {
+        let holders: Vec<SymbolId> = rest
+            .rest_collection_holders()
+            .into_iter()
+            .map(|b| arena.get(b).name)
+            .collect();
+        assert_eq!(
+            entries[i].1, holders,
+            "the {i}-th placeholder was recorded for the {i}-th build's holders"
+        );
+    }
 }
 
 #[test]
@@ -334,159 +450,6 @@ fn the_rest_name_is_the_only_pattern_name_that_owns_anything() {
     );
 }
 
-/// The pattern predicate the solver and the lowerer both read, over every shape
-/// the corpus writes. A disagreement here is a placeholder with no route (an
-/// over-keep) or a route with no placeholder (nothing emitted).
-#[test]
-fn the_allocating_rest_predicate_names_exactly_the_building_patterns() {
-    let count = |p: &HirPattern| p.allocating_rest_bindings().len();
-    let b = |n: u32| crate::hir::Binding(n);
-    let var = |n: u32| HirPattern::Var(b(n));
-
-    assert_eq!(
-        count(&HirPattern::Tuple {
-            elements: vec![var(1)],
-            rest: Some(Box::new(var(2))),
-        }),
-        1,
-        "an array rest lowers to ArrayMutSliceFrom"
-    );
-    assert_eq!(
-        count(&HirPattern::Array {
-            elements: vec![],
-            rest: Some(Box::new(var(2))),
-        }),
-        1,
-        "an `@array` rest lowers to the same opcode"
-    );
-    assert_eq!(
-        count(&HirPattern::Struct {
-            entries: vec![],
-            rest: Some(Box::new(var(2))),
-        }),
-        1,
-        "a struct rest lowers to StructRest"
-    );
-    assert_eq!(
-        count(&HirPattern::Table {
-            entries: vec![],
-            rest: Some(Box::new(var(2))),
-        }),
-        1,
-        "an `@struct` rest lowers to StructRest"
-    );
-    assert_eq!(
-        count(&HirPattern::List {
-            elements: vec![var(1)],
-            rest: Some(Box::new(var(2))),
-        }),
-        0,
-        "a list rest is the remaining cons tail"
-    );
-    assert_eq!(
-        count(&HirPattern::Tuple {
-            elements: vec![var(1)],
-            rest: None,
-        }),
-        0,
-        "no rest, nothing built"
-    );
-    assert_eq!(
-        count(&HirPattern::Tuple {
-            elements: vec![],
-            rest: Some(Box::new(HirPattern::Wildcard)),
-        }),
-        0,
-        "a wildcard rest binds no name to the collection"
-    );
-    assert_eq!(
-        count(&HirPattern::Tuple {
-            elements: vec![],
-            rest: Some(Box::new(HirPattern::Tuple {
-                elements: vec![var(1)],
-                rest: Some(Box::new(var(2))),
-            })),
-        }),
-        1,
-        "a nested rest contributes only the inner bare name it does bind"
-    );
-    assert_eq!(
-        count(&HirPattern::Tuple {
-            elements: vec![HirPattern::Struct {
-                entries: vec![],
-                rest: Some(Box::new(var(1))),
-            }],
-            rest: Some(Box::new(var(2))),
-        }),
-        2,
-        "a rest inside an element and the pattern's own rest are two builds"
-    );
-}
-
-/// The holder set of a rest sub-pattern, which the solver keys a placeholder on
-/// and the lowerer reads the region back through. A disagreement here is a
-/// placeholder with no route (an over-keep) or a route with no placeholder
-/// (nothing emitted).
-#[test]
-fn the_holder_set_of_a_rest_sub_pattern_stops_at_a_further_build() {
-    let b = |n: u32| crate::hir::Binding(n);
-    let var = |n: u32| HirPattern::Var(b(n));
-    let key = || PatternKey::Keyword("a".to_string());
-
-    assert_eq!(
-        var(1).rest_collection_holders(),
-        vec![b(1)],
-        "a bare name is the collection's one holder"
-    );
-    assert_eq!(
-        HirPattern::Wildcard.rest_collection_holders(),
-        vec![],
-        "a wildcard binds nothing to key on"
-    );
-    assert_eq!(
-        HirPattern::Tuple {
-            elements: vec![var(1), var(2)],
-            rest: None,
-        }
-        .rest_collection_holders(),
-        vec![b(1), b(2)],
-        "every name a further pattern binds projects the collection"
-    );
-    assert_eq!(
-        HirPattern::Tuple {
-            elements: vec![var(1)],
-            rest: Some(Box::new(var(2))),
-        }
-        .rest_collection_holders(),
-        vec![b(1)],
-        "a further BUILD's names reach the inner collection, so the descent \
-         stops there"
-    );
-    assert_eq!(
-        HirPattern::Tuple {
-            elements: vec![],
-            rest: Some(Box::new(var(2))),
-        }
-        .rest_collection_holders(),
-        vec![],
-        "`[& q]` leaves the outer collection with no holder at all"
-    );
-    assert_eq!(
-        HirPattern::List {
-            elements: vec![var(1)],
-            rest: Some(Box::new(var(2))),
-        }
-        .rest_collection_holders(),
-        vec![b(1), b(2)],
-        "a list rest is the remaining cons tail, so there is no build to stop at"
-    );
-    assert_eq!(
-        HirPattern::Struct {
-            entries: vec![(key(), var(1))],
-            rest: Some(Box::new(var(2))),
-        }
-        .rest_collection_holders(),
-        vec![b(1)],
-        "`StructRest` builds exactly as `ArrayMutSliceFrom` does"
-    );
-}
+// The pure pattern predicates these placements rest on — what a rest builds,
+// and which names reach it — are unit-tested beside `HirPattern` itself
+// (`hir::pattern::rest_tests`).

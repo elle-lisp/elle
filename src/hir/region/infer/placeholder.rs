@@ -1,4 +1,4 @@
-// audited: 2026-09-15
+// audited: 2026-09-16
 //! The phantom placeholder regions: a value with no compiled allocation to
 //! name still needs a release, so it is given a region of its own.
 //!
@@ -6,16 +6,6 @@
 //! docs/impl/region/anchors.md
 
 use super::*;
-
-/// The name a rest sub-pattern binds to the collection ITSELF, where a bare
-/// name matched the rest. `None` where a further pattern did, whose names
-/// project the collection rather than hold it.
-fn bound_rest_name(rest: &HirPattern) -> Option<Binding> {
-    match rest {
-        HirPattern::Var(b) => Some(*b),
-        _ => None,
-    }
-}
 
 impl RegionInference {
     /// Give every rest name a `Match` arm binds to a BUILT collection a
@@ -45,38 +35,37 @@ impl RegionInference {
         let mut recorded = Vec::with_capacity(names.len());
         for b in names {
             let r = self.mint_rest_region(&[b]);
-            recorded.push(RestCollection::bound(r, b));
+            recorded.push(RestCollection::new(r, vec![b]));
         }
         self.pattern_rest_regions.insert(node, recorded);
     }
 
     /// Give every collection a `Destructure`'s pattern BUILDS a placeholder
-    /// region of its own, and hand that region to every name that reaches it.
+    /// region of its own, in the order the lowerer builds them.
     ///
-    /// `lower_destructure` emits one build per rest sub-pattern, so one region
-    /// per sub-pattern is one per allocation whether a bare name or a further
-    /// pattern matched it. A sub-pattern that binds no name leaves the
-    /// collection with nothing to key a route on and takes none.
+    /// `lower_destructure` emits one build per entry of `building_rests` and
+    /// takes the n-th placeholder at the n-th build, so the ORDER is the key
+    /// and a name only decides where the release lands. An entry whose
+    /// sub-pattern binds no name still takes a region — no holder reaches it,
+    /// so it keeps the base pin at this node
+    /// (docs/impl/region/anchors.md § "A rest pattern's collection is built,
+    /// not read out").
     pub(super) fn record_destructure_rest_regions(&mut self, node: HirId, pattern: &HirPattern) {
         if self.pattern_rest_regions.contains_key(&node) {
             return;
         }
-        let built: Vec<(Option<Binding>, Vec<Binding>)> = pattern
+        let built: Vec<Vec<Binding>> = pattern
             .building_rests()
             .into_iter()
-            .map(|rest| (bound_rest_name(rest), rest.rest_collection_holders()))
-            .filter(|(_, holders)| !holders.is_empty())
+            .map(HirPattern::rest_collection_holders)
             .collect();
         if built.is_empty() {
             return;
         }
         let mut recorded = Vec::with_capacity(built.len());
-        for (name, holders) in built {
+        for holders in built {
             let r = self.mint_rest_region(&holders);
-            recorded.push(match name {
-                Some(b) => RestCollection::bound(r, b),
-                None => RestCollection::projected(r, holders),
-            });
+            recorded.push(RestCollection::new(r, holders));
         }
         self.pattern_rest_regions.insert(node, recorded);
     }

@@ -1,4 +1,4 @@
-// audited: 2026-09-15
+// audited: 2026-09-16
 // src/lir/lower/AGENTS.md
 // docs/destructuring.md
 //! Lowering the sequence patterns: pair, list, tuple, array.
@@ -307,7 +307,7 @@ impl<'a> Lowerer<'a> {
                 }
 
                 // Step 5: Handle & rest
-                if let Some(rest_pat) = rest {
+                if let Some(rest_pat) = rest.as_deref().filter(|_| pattern.own_rest_builds()) {
                     let reloaded = self.fresh_reg();
                     self.emit(LirInstr::LoadLocal {
                         dst: reloaded,
@@ -426,7 +426,7 @@ impl<'a> Lowerer<'a> {
                 }
 
                 // Step 5: Handle & rest
-                if let Some(rest_pat) = rest {
+                if let Some(rest_pat) = rest.as_deref().filter(|_| pattern.own_rest_builds()) {
                     let reloaded = self.fresh_reg();
                     self.emit(LirInstr::LoadLocal {
                         dst: reloaded,

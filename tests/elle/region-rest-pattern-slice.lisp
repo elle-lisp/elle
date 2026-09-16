@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-15
+# audited: 2026-09-16
 # A rest pattern's collection is built, not read out
 # (docs/impl/region/anchors.md § "A rest pattern's collection is built, not
 # read out").
@@ -22,12 +22,18 @@
 # borrow of the scrutinee and allocates nothing: both already read zero, so a
 # subject's rate is the built collection and nothing else.
 #
-# THE BOUNDARY the (u), (v) and (w) rows hold. A holder that is an operand of
-# the body's frame-replacing tail call keeps its collection's exemption, a
-# collection the pattern binds no name for has nothing to key a placeholder on,
-# and a `match` builds one per access path rather than one per sub-pattern. All
-# three are stated as rows reading the FULL rate, so a change that reaches one
-# of them fails here.
+# THE BOUNDARY the (u) and (w) rows hold. A holder that is an operand of the
+# body's frame-replacing tail call keeps its collection's exemption, and a
+# `match` builds one collection per access path rather than one per
+# sub-pattern. Both are stated as rows reading the FULL rate, so a change that
+# reaches one of them fails here.
+#
+# THE COUNTER-FACTUAL the (v), (x) and (y) rows catch. A build reaches its
+# placeholder by POSITION, so a collection no name of the program holds still
+# takes a release route. (x) binds its one name to the INNER collection and (y)
+# binds none at all; keyed on a name, each would find none and strand. (v) is
+# the wildcard rest, where the cheaper answer applies and no build is emitted —
+# a row that reads the full rate there says the build came back.
 #
 # This file is the LEAK gauge — an `arena/region-count` delta over a fixed
 # window, BOUNDED for every subject. The soundness complement is
@@ -173,9 +179,34 @@
     (let [s (+ p (length q))]
       s)))
 
+# (v) a WILDCARD rest. Nothing can read the collection this would build, so the
+# lowerer emits no build at all and the rate is zero rather than one built and
+# freed.
+(defn v-wildcard-rest []
+  (let [[x & _] arr]
+    x))
+
+# (x) a rest sub-pattern whose only name holds the INNER collection. The outer
+# one is a live intermediate — the inner pattern slices it — and no name of the
+# program reaches it, so only the positional key gives it a route.
+(defn x-inner-only-name []
+  (let [[x & [& q]] arr]
+    x))
+
+(defn x2-inner-only-name-read []
+  (let [[x & [& q]] arr]
+    (length q)))
+
+# (y) a bare wildcard rest, whose pattern has no fixed element. The build stays:
+# `ArrayMutSliceFrom` checks the scrutinee is an array, and this pattern makes
+# that check nowhere else. So the collection is built AND released.
+(defn y-bare-wildcard-rest []
+  (let [[& _] arr]
+    0))
+
 # baselines ────────────────────────────────────────────────────────────────────
 #
-# The three shapes the release does not reach, stated as rows so a change that
+# The two shapes the release does not reach, stated as rows so a change that
 # reaches one of them fails here and sends the author to anchors.md.
 
 # (u) a name the inner pattern bound, as an operand of the body's
@@ -188,12 +219,6 @@
 (defn u-nested-tail []
   (let [[x & [p q]] arr]
     (take-one p)))
-
-# (v) a WILDCARD rest. The collection is built, and the pattern binds no name
-# for the placeholder to be keyed on.
-(defn v-wildcard-rest []
-  (let [[x & _] arr]
-    x))
 
 # (w) a nested rest in a `match`. The decision tree loads each name by walking
 # its own access path and re-runs the `Slice` step on every path through the
@@ -238,6 +263,9 @@
 (def d-u (measure u-nested-tail 20 window))
 (def d-v (measure v-wildcard-rest 20 window))
 (def d-w (measure w-match-nested-rest 20 window))
+(def d-x (measure x-inner-only-name 20 window))
+(def d-x2 (measure x2-inner-only-name-read 20 window))
+(def d-y (measure y-bare-wildcard-rest 20 window))
 (def d-k (measure k-flat-pattern 20 window))
 (def d-l (measure l-list-rest 20 window))
 
@@ -271,8 +299,11 @@
 (println "  r nested-read       " d-r)
 (println "  s nested-struct     " d-s)
 (println "  t nested-in-nested  " d-t)
+(println "  v wildcard-rest     " d-v)
+(println "  x inner-only-name   " d-x)
+(println "  x2 inner-only-read  " d-x2)
+(println "  y bare-wildcard     " d-y)
 (println "  u nested-tail       " d-u " (baseline)")
-(println "  v wildcard-rest     " d-v " (baseline)")
 (println "  w match-nested      " d-w " (baseline)")
 (println "  k flat-pattern      " d-k " (control)")
 (println "  l list-rest         " d-l " (control)")
@@ -339,15 +370,24 @@
 (assert (%lt d-t 40)
         (concat "a rest nested inside a rest strands one of the two "
                 "collections, delta=" (number->string d-t)))
+(assert (%lt d-v 40)
+        (concat "a wildcard rest builds a collection nothing can read, delta="
+                (number->string d-v)))
+(assert (%lt d-x 40)
+        (concat "a rest whose only name holds the inner collection strands the "
+                "outer one, delta=" (number->string d-x)))
+(assert (%lt d-x2 40)
+        (concat "reading the inner name strands the outer collection, delta="
+                (number->string d-x2)))
+(assert (%lt d-y 40)
+        (concat "a bare wildcard rest strands the collection its type check "
+                "builds, delta=" (number->string d-y)))
 # The baselines read the FULL rate — one region per iteration at least. A row
 # that drops below it means the shape is covered now, which anchors.md says it
 # is not; repair the document and move the row up to a subject.
 (assert (>= d-u window)
         (concat "baseline: a nested rest name is an operand of the body's tail "
                 "call, delta=" (number->string d-u)))
-(assert (>= d-v window)
-        (concat "baseline: a wildcard rest binds no name to key a placeholder "
-                "on, delta=" (number->string d-v)))
 (assert (>= d-w window)
         (concat "baseline: a `match` nested rest re-slices per access path, "
                 "delta=" (number->string d-w)))
