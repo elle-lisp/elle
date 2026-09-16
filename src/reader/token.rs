@@ -1,3 +1,8 @@
+// audited: 2026-09-16
+// The reader's tokens and source locations, and the form each reader shorthand
+// stands for.
+// docs/impl/lexicon.md
+
 use std::fmt;
 
 /// Sentinel file name for a [`SourceLoc`] whose origin is unknown.
@@ -166,6 +171,31 @@ declare_tokens! {
         String(String),
         Bool(bool),
         Comment(String),
+    }
+}
+
+impl Token<'_> {
+    /// The head symbol this token's form is written under, when the token is
+    /// a reader shorthand: a prefix that wraps the form after it. `;x` reads
+    /// as `(splice x)`, so [`Token::Splice`] answers `"splice"`.
+    ///
+    /// The parser builds exactly these five wrappings (`Reader::read`), and
+    /// `MigrationRule::Desugar` spells a shorthand out by reading this. An
+    /// epoch therefore cannot desugar a token that wraps nothing, nor name
+    /// the wrong form for one that does (docs/impl/lexicon.md).
+    ///
+    /// `ListSugar` is not here. `@` wraps the form after it the same way, but
+    /// `@[1 2]` is a mutable array literal — there is no `(sym [1 2])` it
+    /// stands for.
+    pub fn shorthand_form(&self) -> Option<&'static str> {
+        match self {
+            Token::Quote => Some("quote"),
+            Token::Quasiquote => Some("quasiquote"),
+            Token::Unquote => Some("unquote"),
+            Token::UnquoteSplicing => Some("unquote-splicing"),
+            Token::Splice => Some("splice"),
+            _ => None,
+        }
     }
 }
 

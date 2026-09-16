@@ -17,7 +17,7 @@ Up: [..](../AGENTS.md)
 - [hir.md](hir.md) — **HIR — High-level IR** The HIR pass converts expanded syntax trees into a typed intermediate representation.
 - [image.md](image.md) — **Images — regions hydrated at load** Design for image-style persistence: one mechanism, two shipped configurations.
 - [jit.md](jit.md) — **JIT** The JIT compiles hot functions from LIR to native code using Cranelift.
-- [lexicon.md](lexicon.md) — **Lexicon: epoch-aware lexing** Status: implemented.
+- [lexicon.md](lexicon.md) — **Lexicon: epoch-aware lexing** An epoch selects the lexer rules that tokenize a file, so a breaking change can reach below the syntax tree to the tokens themselves.
 - [lir.md](lir.md) — **LIR — Low-level IR** LIR is an SSA-form intermediate representation with virtual registers, basic blocks, and explicit control flow.
 - [mlir.md](mlir.md) — **MLIR Backend (more...)**
 - [reader.md](reader.md) — **Reader** The reader transforms source text into syntax trees.

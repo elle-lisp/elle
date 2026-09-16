@@ -1,13 +1,16 @@
+//! audited: 2026-09-16
 //! CLI entry point for `elle rewrite`.
+//!
+//! docs/epochs.md
 
 use super::edit::{apply_edits, Edit};
 use super::engine::collect_edits;
 use super::rule::{RenameSymbol, RewriteRule};
 use super::text::SourceText;
 use crate::epoch::rules::{
-    collapsed_renames, flatten_clause_rules_in_range, flatten_rules_in_range,
-    lexical_changes_in_range, removals_in_range, replace_rules_in_range, unwrap_rules_in_range,
-    Lexicon, CURRENT_EPOCH,
+    collapsed_renames, desugar_rules_in_range, flatten_clause_rules_in_range,
+    flatten_rules_in_range, lexical_changes_in_range, removals_in_range, replace_rules_in_range,
+    unwrap_rules_in_range, Lexicon, CURRENT_EPOCH,
 };
 use crate::epoch::{check_declared_lexicon, detect_epoch_in_source};
 use crate::reader::{shebang_len, Token};
@@ -15,14 +18,23 @@ use std::collections::HashMap;
 
 /// Collect edits that respell every token whose spelling differs between
 /// `source`'s lexicon and `target` (docs/impl/lexicon.md).
+///
+/// `desugared` names the tokens a `MigrationRule::Desugar` owns. Those are
+/// exactly the tokens `respell` refuses — the target lexicon has no bytes for
+/// them — so leaving them here would abort the rewrite before
+/// `collect_desugar_edits` could spell them out as forms.
 pub(crate) fn collect_lexical_edits(
     source: SourceText<'_>,
     target: Lexicon,
+    desugared: &[Token<'static>],
 ) -> Result<Vec<Edit>, String> {
     let mut edits = Vec::new();
 
     for token in source.tokens()? {
         if source.in_shebang(&token) {
+            continue;
+        }
+        if desugared.contains(&token.token) {
             continue;
         }
         let replacement = source
@@ -105,6 +117,13 @@ pub fn run(args: &[String]) -> i32 {
                 println!(
                     "  flatten-clauses: {} (parenthesized → flat pairs)",
                     names.join(", ")
+                );
+            }
+            for shorthand in desugar_rules_in_range(0, CURRENT_EPOCH) {
+                println!(
+                    "  desugar: {:?} → ({} …)",
+                    shorthand,
+                    shorthand.shorthand_form().unwrap_or("?")
                 );
             }
             for change in lexical_changes_in_range(0, CURRENT_EPOCH) {
@@ -271,10 +290,23 @@ pub(crate) fn rewrite_file(
     let rules: Vec<&dyn RewriteRule> = rename_rule.iter().map(|r| r as &dyn RewriteRule).collect();
     let mut edits = collect_edits(text, &rules)?;
 
+    // Spell out every reader shorthand whose spelling this file's epoch still
+    // had. Runs before the respelling because the two divide the same tokens:
+    // a shorthand a rule owns has no spelling left to respell to.
+    let shorthands = file_epoch
+        .map(|epoch| desugar_rules_in_range(epoch, CURRENT_EPOCH))
+        .unwrap_or_default();
+    let desugar_edits = collect_desugar_edits(text, &shorthands)?;
+
     // Respell tokens whose lexical rules moved between the file's epoch and
     // this one. Token-level like the renames above, so the structural filter
     // below governs both (docs/impl/lexicon.md).
-    edits.extend(collect_lexical_edits(text, Lexicon::current())?);
+    edits.extend(collect_lexical_edits(
+        text,
+        Lexicon::current(),
+        &shorthands,
+    )?);
+    edits.extend(desugar_edits);
 
     // Merge all structural edits (unwrap + replace + flatten), filtering out
     // rename edits that fall within their spans.
