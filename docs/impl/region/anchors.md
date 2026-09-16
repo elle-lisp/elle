@@ -1,6 +1,6 @@
 # Where a release is anchored
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-15 -->
 
 Where the solver anchors a release: what each binding form pins, and what a
 `break` does to the releases its jump passes over.
@@ -116,15 +116,14 @@ where a release leaves no nil-stamp and the abandoned-frame walk can read no
 receipt ([unwind.md](unwind.md)). A stack slot of the lowerer's own gives every
 rest collection one stamped, walkable route whatever its name goes on to do.
 
-The parked slot leaves the rest name holding one reference under two slot
-names, which the tail-call exemption has to be told about: it reads a region's
-release route as a slot and compares it against the slots the call passes
-([relocate.md](relocate.md)).
+The parked slot is a route no name in the program loads, which the tail-call
+exemption has to be told about: it reads a region's release route as a slot and
+compares it against the slots the call passes ([relocate.md](relocate.md)).
 
 Two pins decide where the release lands, and both are the general machinery
 rather than anything this shape adds:
 
-- **The binding chain**, which carries the release over the rest name's uses
+- **The binding chain**, which carries the release over each holder's uses
   exactly as it does for any other binding. A rest name read after the
   destructure, stored, captured, or returned keeps its collection as long as any
   other owned value does, and the escape that funds each of those is counted at
@@ -132,7 +131,7 @@ rather than anything this shape adds:
 - **The destructure node**, as the base. A rest name nothing reads has no uses
   for the chain to extend over, and a region with no pin at all gets no release
   emitted — which is the whole defect for the shape that provokes it most,
-  `(let [[x y & _] a] x)`. Each placeholder is therefore pinned to the
+  `(let [[x y & r] a] x)`. Each placeholder is therefore pinned to the
   `Destructure` or `Match` node whose pattern binds it, the same base a
   pre-allocated capture cell takes from its `Begin`. Every pin is a max, so a
   read still moves the release later.
@@ -144,10 +143,11 @@ it — past the merge every arm, every failed guard and every rejected alternati
 arrives at. A collection built by an arm that then failed its guard is released
 there, on the path that abandoned it.
 
-Only a rest sub-pattern that is a bare name takes this. A rest matched by a
-further pattern — `[a & [p q]]` — builds a collection no name holds, and the
-names the inner pattern binds are projections of that collection rather than of
-the scrutinee; it keeps the conservative baseline (elle-lisp/elle#1127).
+The placeholder is keyed on the **rest sub-pattern**, not on a name. A rest
+matched by a further pattern — `[a & [p q]]` — builds a collection no single
+name holds, and `p` and `q` are projections of that collection rather than of
+the scrutinee, so it has to outlive both. One region therefore goes to every
+name the sub-pattern binds, and the binding chain covers each of them.
 
 Pinned by `tests/elle/region-rest-pattern-slice.lisp` (the reclamation, with the
 flat pattern and the list rest as the discriminators that must already read
@@ -155,6 +155,34 @@ zero), `regions::tests::patterns` (the placement, structurally), and
 `tests/elle/region-rest-pattern-slice-uaf.lisp` (the soundness complement — a
 rest collection returned, stored, captured, carried across a yield, or read
 after the loop iteration that built it must survive the release).
+
+### Where the holder set stops
+
+The descent stops at a nested rest that builds a collection of its own.
+`[a & [p & q]]` builds two, and `q` holds the inner one: that collection is a
+fresh array of values copied out of the outer one, so it points into no page
+the outer collection owns and owes it nothing. Stopping there is also what
+keeps each name in one group, which is what lets the lowerer read a
+collection's region off any name its sub-pattern binds.
+
+A sub-pattern that binds no name leaves the collection with nothing to key on,
+and it keeps the conservative baseline. Two shapes reach that: `[a & _]`, and
+`[a & [& q]]` whose only name holds the inner collection.
+
+`match` keeps the baseline for a nested rest whole (elle-lisp/elle#1127).
+`lower_destructure` emits one build per rest sub-pattern, so one placeholder
+per sub-pattern is one per allocation. The decision tree loads each name by
+walking its own access path and re-runs the `Slice` step on every path through
+the rest, so the count there is a fact about the tree rather than about the
+pattern.
+
+Pinned by the `q`–`u` rows of `tests/elle/region-rest-pattern-slice.lisp` (the
+reclamation, with the wildcard rest and the `match` nested rest stated as the
+shapes that stay on the baseline), `regions::tests::patterns` (the holder set,
+structurally), and rows 13 and 14 of
+`tests/elle/region-rest-pattern-slice-uaf.lisp` (the soundness complement — a
+name the inner pattern binds, read after the destructure and handed to a tail
+call, must survive the collection's release).
 
 ## `break` transfers its value; it does not consume it
 

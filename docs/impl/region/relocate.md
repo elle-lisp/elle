@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-15 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -119,13 +119,23 @@ before `length` derefs it. The failure is a use-after-free rather than the leak
 the leaf reading was written to close, so the two cases need different answers
 and one comparison cannot give both.
 
-The answer is to ask what the name HOLDS before asking which slot holds it. The
-placeholder the solver minted for this rest name IS the reference the callee
-takes over, so that region keeps its exemption whatever slot its route loads
-(`RegionInfo::holds_built_rest_collection`). Every other region the rest name
+The answer is to ask whether the name reaches a collection the destructure
+BUILT before asking which slot holds it. Such a collection is routed through a
+slot of the lowerer's own that no call passes, so the comparison can only read
+it as unmoved; the exemption therefore stands on that region whatever its route
+loads (`RegionInfo::names_built_rest_collection`). Every other region the name
 carries is the scrutinee's, which the name only borrows, and those keep the
-slot comparison — a rest name is both things at once, which is why the
-reconsideration is per region rather than per binding. Pinned by
+slot comparison — one name is both things at once, which is why the
+reconsideration is per region rather than per binding.
+
+What the exemption buys differs between the two kinds of name that reach a
+collection, and it is legal for both. For the **rest name** the call receives
+the collection itself, so the callee's owned-param release consumes the
+reference and the exemption is the ownership move. For a name the rest
+**sub-pattern** bound — `p` in `[a & [p q]]` — the call receives an element
+instead, so nothing takes the release over and the collection strands on the
+closure path: the bounded fallback the relocation takes for every region it
+refuses ([anchors.md](anchors.md)). Pinned by
 `tests/elle/region-rest-pattern-slice-uaf.lisp` (the fault) and
 `lir::lower::tests::release::restpattern` (the placement).
 
