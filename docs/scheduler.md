@@ -1,6 +1,6 @@
 # Scheduler
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-16 -->
 
 The async scheduler is the only supported execution backend, and user code runs inside it automatically.
 
@@ -78,6 +78,39 @@ Two invariants govern the queues:
 
 `ev/abort` and `ev/timeout` both terminate fibers that may be parked, so
 both rely on these invariants. [park-abort.lisp](../tests/elle/park-abort.lisp) pins them.
+
+## Join waiters and select sets
+
+`ev/join` parks a fiber on the waiter list of the fiber it joined.
+`ev/select` parks it in a select set naming several candidates. A fiber
+that completes resumes every waiter on its own list, and one waiter from
+every select set that names it.
+
+Two invariants govern both lists:
+
+- **Only live fibers wait.** A fiber that reaches `:dead` or `:error`
+  leaves the waiter list and the select set it sits in, on the rule that
+  takes it out of a park queue. A joiner reaches `:dead` with its wait
+  still recorded whenever `fiber/abort` injects an error its own
+  `protect` catches. Left on the list, it is resumed once the fiber it
+  joined finishes, and that resume raises `fiber/resume: cannot resume
+  completed fiber` out of the event loop.
+- **A list with no waiter left is gone.** An empty waiter list still
+  counts as a join the loop is holding, so the loop never reports
+  `:done`, exactly as an empty park key would keep it running.
+
+The scheduler holds the waiter list in two halves, the pairing it already
+keeps for a park: the joined fiber maps to its waiters, and each waiting
+fiber maps to the one fiber it joined. The second half is what lets a
+dying joiner leave its list without searching the others. A select set is
+keyed by the waiting fiber itself, so it needs no second half.
+
+`(ev/timeout n (fn [] (protect (ev/join-protected f))))` is the shape a
+program reaches this through — a deadline around a protected join, where
+`f` outlives the deadline. `ev/timeout` selects over the body and a
+timer, so one such call puts fibers in both lists.
+[abort-wait-lists.lisp](../tests/elle/abort-wait-lists.lisp) pins them,
+and reads the counts back through `ev/report`'s `:joins` and `:selects`.
 
 ## Completion delivery
 
