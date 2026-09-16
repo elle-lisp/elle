@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-15
+# audited: 2026-09-16
 # Soundness complement of region-rest-pattern-slice.lisp
 # (docs/impl/region/anchors.md § "A rest pattern's collection is built, not
 # read out"). Run under `--trace=guardfree` by the subprocess pin
@@ -27,6 +27,11 @@
 # by the lowerer's own slot and by no name, so its release is carried back ahead
 # of a frame-replacing tail call like the scrutinee's. The names that pattern
 # bound are elements of it, and the call is about to read one.
+#
+# THE TRAP row 15 guards. A collection the program names NOWHERE — the outer one
+# of `[h & [& q]]`, and the one a bare `[& _]` builds for its type check — takes
+# its release route by position alone. Both releases run with nothing keyed on a
+# name to hold them back, so each must drop its own reference and no other's.
 #
 # Every read below happens after the release for that collection has run, so an
 # over-release faults at the deref (SIGSEGV under guardfree) or trips the
@@ -331,5 +336,70 @@
   (assert (= (nested-tail-struct) 3)
           "a nested struct rest name handed to a tail call must survive it")
   (assign hh (+ hh 1)))
+
+# ── 15. the collection a NAMELESS rest sub-pattern built ──────────────────────
+# THE TRAP. `[h & [& q]]` builds two collections, and `q` holds the inner one.
+# The outer is reached by no name of the program, so its release is pinned at
+# the destructure node and nothing carries it later. `q`'s array copied the
+# outer's element values, counting a reference of its own on each, so the
+# outer's cascade must leave every one of them standing — and `q` outlives the
+# destructure on each of the four routes below.
+
+(defn inner-only-read []
+  (let [[h & [& q]] strs]
+    (+ (length q) (length (get q 0)))))
+
+(var ii 0)
+(while (< ii 40)
+  (assert (= (inner-only-read) 5)
+          "the inner collection must survive the outer one's release")
+  (assign ii (+ ii 1)))
+
+(defn inner-only-return []
+  (let [[h & [& q]] strs]
+    q))
+
+(var jj 0)
+(while (< jj 40)
+  (let [got (inner-only-return)]
+    (assert (= (length got) 3) "a returned inner collection must survive")
+    (assert (= (get got 2) "dd") "and so must its elements"))
+  (assign jj (+ jj 1)))
+
+(def inner-thunks @[])
+(var kk 0)
+(while (< kk 40)
+  (let [[h & [& q]] strs]
+    (push inner-thunks (fn [] (length q))))
+  (assign kk (+ kk 1)))
+(var ll 0)
+(while (< ll 40)
+  (assert (= ((get inner-thunks ll)) 3)
+          "a captured inner collection must survive its iteration")
+  (assign ll (+ ll 1)))
+
+(defn inner-only-tail []
+  (let [[h & [& q]] strs]
+    (len-of q)))
+
+(var mm 0)
+(while (< mm 40)
+  (assert (= (inner-only-tail) 3)
+          "an inner collection handed to a tail call must survive it")
+  (assign mm (+ mm 1)))
+
+# A bare wildcard rest keeps its build, because `ArrayMutSliceFrom` is the only
+# check this pattern makes. Nothing reads what it built, so the one thing the
+# release can reach wrongly is the SCRUTINEE it copied out of.
+
+(defn bare-wildcard []
+  (let [[& _] strs]
+    (length strs)))
+
+(var nn 0)
+(while (< nn 40)
+  (assert (= (bare-wildcard) 4) "the scrutinee must survive a discarded build")
+  (assert (= (get strs 0) "aa") "and keep its elements")
+  (assign nn (+ nn 1)))
 
 (println "region-rest-pattern-slice-uaf: ok")

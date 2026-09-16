@@ -156,7 +156,8 @@ flat pattern and the list rest as the discriminators that must already read
 zero), `regions::tests::patterns` (the placement, structurally), and
 `tests/elle/region-rest-pattern-slice-uaf.lisp` (the soundness complement — a
 rest collection returned, stored, captured, carried across a yield, or read
-after the loop iteration that built it must survive the release).
+after the loop iteration that built it must survive the release). The pure
+pattern queries the two sides read are `hir::pattern::rest_tests`.
 
 ### What the names reach, and where the descent stops
 
@@ -216,12 +217,17 @@ count in the same order, or every later index names the wrong allocation. The
 sequential `match` fallback a suspending guard forces reads the same predicate,
 its own `IsArray` test having already made the check the opcode would.
 
-Pinned by the `q`–`v` and `x` rows of
+The language-level half is `tests/elle/destructuring-rest-wildcard.lisp`: the
+fixed names a `& _` pattern still binds, and the type error the skipped opcode
+must not take with it.
+
+Pinned by the `q`–`v`, `x` and `y` rows of
 `tests/elle/region-rest-pattern-slice.lisp` (the reclamation), its `u` and `w`
 rows (the two baselines, each of which must read the FULL rate),
-`regions::tests::patterns` (the positional key and the holder set,
-structurally), `lir::lower::tests::release::restpattern` (the parked slot and
-the tail-call placement, per slot), and rows 13 to 15 of
+`regions::tests::patterns` (what the solver records against the node),
+`hir::pattern::rest_tests` (the three predicates both sides read),
+`lir::lower::tests::release::restpattern` (the parked slot and the tail-call
+placement, per slot), and rows 13 to 15 of
 `tests/elle/region-rest-pattern-slice-uaf.lisp` (the soundness complement — a
 name the inner pattern binds, read after the destructure and handed to a tail
 call, must survive the release).
