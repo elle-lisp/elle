@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-15
 //! Tofte-Talpin region inference for functional HIR: the walk's state, and how
 //! it mints a region.
 //!
@@ -15,7 +15,9 @@ use super::super::defuse::DefUseBuilder;
 use super::super::expr::{Hir, HirId, HirKind};
 use super::super::liveness::{compute_last_use, compute_order, compute_subtree_low};
 use super::super::pattern::HirPattern;
-use super::{CallClassification, CellStores, Region, RegionData, RegionInfo, RegionStats};
+use super::{
+    CallClassification, CellStores, Region, RegionData, RegionInfo, RegionStats, RestCollection,
+};
 
 use std::collections::HashMap;
 use tree::RegionTree;
@@ -80,10 +82,9 @@ struct RegionInference {
     /// (mirrors `lower_begin`'s MakeCaptureCell pre-pass; one region PER CELL —
     /// see `RegionInfo::begin_cell_regions`).
     begin_cell_regions: HashMap<HirId, Vec<(Binding, Region)>>,
-    /// `Destructure`/`Match` HirId → per-binding placeholder region for each
-    /// rest name whose pattern BUILDS a collection (see
-    /// `RegionInfo::pattern_rest_regions`).
-    pattern_rest_regions: HashMap<HirId, Vec<(Binding, Region)>>,
+    /// `Destructure`/`Match` HirId → one entry per collection the node's
+    /// pattern BUILDS (see `RegionInfo::pattern_rest_regions`).
+    pattern_rest_regions: HashMap<HirId, Vec<RestCollection>>,
     /// Every binding a scope arm above minted a COMPILED cell for. Its forward
     /// cell lives in the binding's own slot, so it takes no `populate_env` env
     /// cell — the mirror of the lowerer's own `compiled_cell_bindings`. The

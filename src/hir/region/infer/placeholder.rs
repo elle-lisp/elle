@@ -41,7 +41,7 @@ impl RegionInference {
         for b in bindings {
             let r = self.fresh_region(self.current_region);
             self.call_result_regions.insert(r);
-            recorded.push((b, r));
+            recorded.push(RestCollection::bound(r, b));
             let entry = self.binding_regions.entry(b).or_default();
             if !entry.contains(&r) {
                 entry.push(r);

@@ -17,8 +17,10 @@ use std::collections::HashMap;
 
 mod cellstore;
 mod query;
+mod restcollection;
 
 pub use cellstore::{CellContainer, CellStore, CellStores};
+pub use restcollection::RestCollection;
 
 /// What a frame-replacing tail call's own callee settles about the RC traffic
 /// the lowerer emits around it. Recorded per call, being a claim about *this*
@@ -259,14 +261,12 @@ pub struct RegionInfo {
     ///
     /// docs/impl/region/cells.md
     pub begin_cell_regions: HashMap<HirId, Vec<(Binding, Region)>>,
-    /// `Destructure`/`Match` HirId → per-binding placeholder region for each
-    /// rest name whose pattern BUILDS a collection. The region is phantom, is
-    /// in `call_result_regions`, and is pinned to the node keying it. A rest
-    /// matched by a further pattern binds no name to the collection and is
-    /// absent.
+    /// `Destructure`/`Match` HirId → one entry per collection the node's
+    /// pattern BUILDS. Each region is phantom, is in `call_result_regions`, and
+    /// is pinned to the node keying it.
     ///
     /// docs/impl/region/anchors.md
-    pub pattern_rest_regions: HashMap<HirId, Vec<(Binding, Region)>>,
+    pub pattern_rest_regions: HashMap<HirId, Vec<RestCollection>>,
     /// `merged_parent[child] = parent` for the builder-idiom merge. A forest,
     /// never a cycle; `merged_root` follows it to the outermost region, which
     /// `static_slot` canonicalizes through. Empty unless a merge fired.

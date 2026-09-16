@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-15
 //! `decref_point` population: the ordered passes that decide, for each region,
 //! the program point its release is emitted at.
 //!
@@ -83,7 +83,7 @@ pub(super) fn populate_decref_points(
     // body, which is all the base has to reach.
     for (node_id, rests) in &info.pattern_rest_regions {
         info.region_data
-            .pin_all_to(rests.iter().map(|&(_b, region)| region), *node_id, porder);
+            .pin_all_to(rests.iter().map(|c| c.region), *node_id, porder);
     }
 
     // Extend decref_point through binding chains: when a binding b holds a

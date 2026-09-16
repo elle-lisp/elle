@@ -23,7 +23,11 @@ fn first_match(hir: &Hir) -> Option<HirId> {
 fn rest_regions(info: &RegionInfo, arena: &BindingArena, node: HirId) -> Vec<(SymbolId, Region)> {
     info.pattern_rest_regions
         .get(&node)
-        .map(|v| v.iter().map(|&(b, r)| (arena.get(b).name, r)).collect())
+        .map(|v| {
+            v.iter()
+                .flat_map(|c| c.holders.iter().map(|&b| (arena.get(b).name, c.region)))
+                .collect()
+        })
         .unwrap_or_default()
 }
 

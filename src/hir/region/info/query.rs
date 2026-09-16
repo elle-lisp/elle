@@ -68,16 +68,32 @@ impl RegionInfo {
         h.for_each_child(|c| self.operand_value_regions(c, out));
     }
 
-    /// Does `binding` HOLD `region` as the collection a rest pattern built for
-    /// it (`pattern_rest_regions`), rather than merely name it? A rest name does
-    /// both, so the question is asked per region. `region` is a merged root.
+    /// The placeholder minted for the collection `binding` reaches at `node`,
+    /// or `None` where the node's pattern built none for it. One lookup answers
+    /// for either kind of name, the rest name and a name a further pattern
+    /// bound alike, because both must outlive the collection.
+    ///
+    /// docs/impl/region/anchors.md
+    pub fn rest_collection_region(&self, node: HirId, binding: Binding) -> Option<Region> {
+        self.pattern_rest_regions
+            .get(&node)?
+            .iter()
+            .find(|c| c.holders.contains(&binding))
+            .map(|c| c.region)
+    }
+
+    /// Does `binding` HOLD `region` as the collection its rest pattern built,
+    /// rather than merely name it? A rest name does both, so the question is
+    /// asked per region. A name a further pattern bound projects the collection
+    /// and holds nothing, so it answers `false` and keeps the slot comparison.
+    /// `region` is a merged root.
     ///
     /// docs/impl/region/relocate.md
     pub fn holds_built_rest_collection(&self, binding: Binding, region: Region) -> bool {
         self.pattern_rest_regions
             .values()
             .flatten()
-            .any(|&(b, r)| b == binding && self.merged_root(r) == region)
+            .any(|c| c.bound_name == Some(binding) && self.merged_root(c.region) == region)
     }
 
     /// Does this scope have any allocations whose solved region matches it?

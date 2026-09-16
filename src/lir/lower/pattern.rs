@@ -88,19 +88,15 @@ impl<'a> Lowerer<'a> {
         dst
     }
 
-    /// The placeholder region the solver minted for `binding` at the node being
-    /// lowered (`RegionInfo::pattern_rest_regions`), or `None` where the
-    /// pattern builds no collection for it.
+    /// The placeholder region the solver minted for the collection `binding`
+    /// reaches at the node being lowered, or `None` where the pattern builds
+    /// none for it.
     ///
     /// Keyed on the current node exactly as `cell_region_for` is: a pattern is
     /// lowered while its own `Destructure` or `Match` is the node in hand.
     fn rest_collection_region(&self, binding: Binding) -> Option<crate::hir::region::Region> {
         self.region_info
-            .pattern_rest_regions
-            .get(&self.current_hir_id?)?
-            .iter()
-            .find(|(b, _)| *b == binding)
-            .map(|&(_, r)| r)
+            .rest_collection_region(self.current_hir_id?, binding)
     }
 
     // ── Decision tree lowering ─────────────────────────────────────
