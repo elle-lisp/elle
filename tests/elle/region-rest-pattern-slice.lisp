@@ -22,10 +22,12 @@
 # borrow of the scrutinee and allocates nothing: both already read zero, so a
 # subject's rate is the built collection and nothing else.
 #
-# THE BOUNDARY the (v) and (w) rows hold. A collection the pattern binds no
-# name for has nothing to key a placeholder on, and a `match` builds one per
-# access path rather than one per sub-pattern. Both are stated as rows reading
-# the FULL rate, so a change that reaches either fails here.
+# THE BOUNDARY the (u), (v) and (w) rows hold. A holder that is an operand of
+# the body's frame-replacing tail call keeps its collection's exemption, a
+# collection the pattern binds no name for has nothing to key a placeholder on,
+# and a `match` builds one per access path rather than one per sub-pattern. All
+# three are stated as rows reading the FULL rate, so a change that reaches one
+# of them fails here.
 #
 # This file is the LEAK gauge — an `arena/region-count` delta over a fixed
 # window, BOUNDED for every subject. The soundness complement is
@@ -153,35 +155,39 @@
 
 (defn r-nested-rest-read []
   (let [[x & [p q]] arr]
-    (+ p q)))
+    (let [s (+ p q)]
+      s)))
 
 # (s) the same through `StructRest`, whose inner pattern reads a key out of the
 # struct the outer rest built.
 (defn s-nested-struct-rest []
   (let [{:a x & {:b bb}} rec]
-    (+ x bb)))
+    (let [s (+ x bb)]
+      s)))
 
 # (t) a nested rest INSIDE a nested rest: two collections, two regions. The
 # holder set stops at the inner build, so neither release covers the other and
 # both must still fire.
 (defn t-nested-in-nested []
   (let [[x & [p & q]] arr]
-    (+ p (length q))))
+    (let [s (+ p (length q))]
+      s)))
 
-# (u) a name the inner pattern bound, handed to a CLOSURE tail call. The call
-# receives an element rather than the collection, so nothing takes the
-# collection's release over and it is carried back ahead of the call — the leaf
-# reading, and the row that says the exemption did not over-reach.
+# baselines ────────────────────────────────────────────────────────────────────
+#
+# The three shapes the release does not reach, stated as rows so a change that
+# reaches one of them fails here and sends the author to anchors.md.
+
+# (u) a name the inner pattern bound, as an operand of the body's
+# frame-replacing tail call. The call receives an element, and the caller holds
+# no counted reference on an element to move, so the collection's release keeps
+# its exemption and strands on the closure path. Carried ahead of the call it
+# would free the element the callee is about to read.
 (defn take-one [v]
   (+ v 1))
 (defn u-nested-tail []
   (let [[x & [p q]] arr]
     (take-one p)))
-
-# baselines ────────────────────────────────────────────────────────────────────
-#
-# The two shapes the placeholder does not reach, stated as rows so a change
-# that reaches one of them fails here and sends the author to anchors.md.
 
 # (v) a WILDCARD rest. The collection is built, and the pattern binds no name
 # for the placeholder to be keyed on.
@@ -265,7 +271,7 @@
 (println "  r nested-read       " d-r)
 (println "  s nested-struct     " d-s)
 (println "  t nested-in-nested  " d-t)
-(println "  u nested-tail       " d-u)
+(println "  u nested-tail       " d-u " (baseline)")
 (println "  v wildcard-rest     " d-v " (baseline)")
 (println "  w match-nested      " d-w " (baseline)")
 (println "  k flat-pattern      " d-k " (control)")
@@ -333,13 +339,12 @@
 (assert (%lt d-t 40)
         (concat "a rest nested inside a rest strands one of the two "
                 "collections, delta=" (number->string d-t)))
-(assert (%lt d-u 40)
-        (concat "a nested rest name handed to a tail call strands its "
-                "collection, delta=" (number->string d-u)))
-
 # The baselines read the FULL rate — one region per iteration at least. A row
 # that drops below it means the shape is covered now, which anchors.md says it
 # is not; repair the document and move the row up to a subject.
+(assert (>= d-u window)
+        (concat "baseline: a nested rest name is an operand of the body's tail "
+                "call, delta=" (number->string d-u)))
 (assert (>= d-v window)
         (concat "baseline: a wildcard rest binds no name to key a placeholder "
                 "on, delta=" (number->string d-v)))

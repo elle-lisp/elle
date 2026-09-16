@@ -160,9 +160,9 @@ fn a_nested_rest_sub_pattern_takes_one_placeholder_for_every_name_it_binds() {
 #[test]
 fn a_read_of_a_nested_rest_name_moves_the_release_past_the_destructure() {
     // `p` is an uncounted read of the collection, so the collection is used for
-    // as long as `p` is. Anchored at the destructure, `(+ p q)` reads pages the
-    // release already cascaded.
-    let (hir, arena, info) = pipeline(&format!("{PRELUDE} (let [[x & [p q]] src] (+ p q))"));
+    // as long as `p` is. Anchored at the destructure, `(length p)` reads pages
+    // the release already cascaded.
+    let (hir, arena, info) = pipeline(&format!("{PRELUDE} (let [[x & [p q]] src] (length p))"));
     let node = first_destructure(&hir).expect("a Destructure node");
     let r = rest_region_of(&info, &arena, node, "p");
     let dp = info

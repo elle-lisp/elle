@@ -109,13 +109,12 @@ fn a_struct_rest_collection_handed_to_the_tail_call_is_released_after_it() {
 }
 
 #[test]
-fn a_nested_rest_collection_is_released_before_the_tail_call() {
-    // The counter-face of the exemption. The call receives `p`, an ELEMENT of
-    // the collection, so the callee's owned-param release names the element's
-    // region and never the collection's. Nothing takes the collection's release
-    // over, which is the leaf reading exactly — so it is carried back ahead of
-    // the call like the scrutinee's, and exempting it would strand one region
-    // per call.
+fn a_nested_rest_collection_reached_by_the_tail_call_is_released_after_it() {
+    // THE COUNTER-FACTUAL. The call receives `p`, an ELEMENT of the collection,
+    // and the caller holds no counted reference on an element to move. Carried
+    // back ahead of the call, the collection's release drops its reference on
+    // that element and the callee's owned-param release then takes the last one
+    // — under its own read. The strand is the answer, so the release stays.
     let module = compile_to_lir(
         "(begin (def s (fn (a) a)) \
                 (def f (fn (t) (let [[x & [p q]] t] (s p)))) \
@@ -128,9 +127,9 @@ fn a_nested_rest_collection_is_released_before_the_tail_call() {
         "no release is routed through the parked slot, so this pins nothing",
     );
     assert!(
-        parked.iter().all(|&r| r < at),
-        "a nested rest collection's release stayed in the dead fall-through \
-         (at={at}, parked={parked:?}) — nothing there takes it over",
+        parked.iter().all(|&r| r > at),
+        "a nested rest collection's release was carried ahead of the TailCall \
+         (at={at}, parked={parked:?}) — it frees the element the callee reads",
     );
 }
 
