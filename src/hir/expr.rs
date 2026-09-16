@@ -1,4 +1,8 @@
-//! HIR expression types
+// audited: 2026-09-16
+//! The HIR node — its kind, the span and signal it carries, and the identity
+//! every analysis side table keys on.
+//!
+//! docs/impl/hir.md
 
 use super::binding::{Binding, CaptureInfo};
 use super::pattern::HirPattern;
@@ -388,6 +392,9 @@ impl Hir {
     ///   `Pair`, `Freeze`, `Thaw`).
     /// - `Match` allocates iff any arm's pattern would allocate at
     ///   the destructure site (see `HirPattern::allocates`).
+    /// - A form with a **propagating tail** is not allocating either. It has no
+    ///   allocation of its own; the value it hands up was made inside its body
+    ///   (see [`Hir::propagating_tail_mut`]).
     pub fn allocates(&self) -> bool {
         match &self.kind {
             HirKind::Lambda { .. } => true,
@@ -401,6 +408,27 @@ impl Hir {
             HirKind::Intrinsic { op, .. } => op.allocates() || op.produces_call_result_region(),
             HirKind::Match { arms, .. } => arms.iter().any(|(p, _, _)| p.allocates()),
             _ => false,
+        }
+    }
+
+    /// The body a form hands its own value up from unchanged — its
+    /// **propagating tail** — where the form has one.
+    ///
+    /// Such a form allocates nothing at its own `HirId`: the value a consumer
+    /// receives from it was made by a node inside this body. Anything that
+    /// names a value therefore has to descend here to find the node it means
+    /// (`hir/anf.rs`).
+    ///
+    /// `Lambda` is not one of these. Its body runs in another activation, and
+    /// the value that leaves it crosses the return boundary rather than being
+    /// handed up inside this frame.
+    pub fn propagating_tail_mut(&mut self) -> Option<&mut Hir> {
+        match &mut self.kind {
+            HirKind::Let { body, .. }
+            | HirKind::Letrec { body, .. }
+            | HirKind::Loop { body, .. }
+            | HirKind::Parameterize { body, .. } => Some(body),
+            _ => None,
         }
     }
 }

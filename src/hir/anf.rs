@@ -132,8 +132,14 @@ impl<'a> AnfCtx<'a> {
     /// by wrapping in `Let([gensym, hir], Var(gensym))`. The wrap's
     /// `Hir::span` and `Hir::signal` reuse the child's so the
     /// synthetic Let's diagnostics still point at the original site.
-    fn name_if_alloc(&mut self, hir: Hir) -> Hir {
+    ///
+    /// A propagating tail is descended rather than wrapped: the node that
+    /// allocates is the one a name is worth anything on.
+    fn name_if_alloc(&mut self, mut hir: Hir) -> Hir {
         if is_anf_wrapped(&hir) {
+            return hir;
+        }
+        if self.name_tail(&mut hir) {
             return hir;
         }
         if !hir.allocates() {
@@ -161,12 +167,39 @@ impl<'a> AnfCtx<'a> {
         )
     }
 
+    /// Name the value a propagating tail hands up, in place. Answers whether
+    /// `hir` was one — the caller has nothing left to name when it was, the
+    /// form itself allocating nothing.
+    ///
+    /// The descent is recursive because a tail can hand up another tail:
+    /// `(let [a 1] (let [b 2] (f b)))` puts the call two forms down.
+    fn name_tail(&mut self, hir: &mut Hir) -> bool {
+        let span = hir.span;
+        let Some(tail) = hir.propagating_tail_mut() else {
+            return false;
+        };
+        let inner = std::mem::replace(tail, Hir::silent(HirKind::Nil, span));
+        *tail = self.name_if_alloc(inner);
+        true
+    }
+
     /// Transform a child in a NON-WRAP position: recurse into its
     /// own children but do not wrap the resulting node at this level.
-    /// Used for binding-RHS positions, MakeCell/DerefCell pass-through
-    /// children, and propagating tail bodies.
+    /// Used for MakeCell/DerefCell pass-through children, a lambda body, and
+    /// propagating tail bodies (their own consumer descends into them).
     fn t(&mut self, hir: &Hir) -> Hir {
         self.transform(hir)
+    }
+
+    /// Transform a child in a BINDER position — a `let`/`letrec`/`loop`
+    /// binding's value, or a `def`'s. The binder's own slot names an init that
+    /// allocates at its own id, so the form is never wrapped; a propagating
+    /// tail's value is allocated by a node that slot cannot stand for, so the
+    /// tail is named through exactly as a consumer names it.
+    fn b(&mut self, hir: &Hir) -> Hir {
+        let mut inner = self.transform(hir);
+        self.name_tail(&mut inner);
+        inner
     }
 
     /// Transform a child in a WRAP position: recurse, then wrap if
@@ -193,33 +226,33 @@ impl<'a> AnfCtx<'a> {
             | HirKind::QuoteConst(_)
             | HirKind::Error => hir.kind.clone(),
 
-            // ── Binding forms: RHS is already named ──
+            // ── Binding forms: the binder's own slot is the RHS's name ──
             HirKind::Let { bindings, body } => HirKind::Let {
                 bindings: bindings
                     .iter()
-                    .map(|(b, init)| (*b, self.t(init)))
+                    .map(|(binding, init)| (*binding, self.b(init)))
                     .collect(),
                 body: Box::new(self.t(body)),
             },
             HirKind::Letrec { bindings, body } => HirKind::Letrec {
                 bindings: bindings
                     .iter()
-                    .map(|(b, init)| (*b, self.t(init)))
+                    .map(|(binding, init)| (*binding, self.b(init)))
                     .collect(),
                 body: Box::new(self.t(body)),
             },
             HirKind::Loop { bindings, body } => HirKind::Loop {
                 bindings: bindings
                     .iter()
-                    .map(|(b, init)| (*b, self.t(init)))
+                    .map(|(binding, init)| (*binding, self.b(init)))
                     .collect(),
                 body: Box::new(self.t(body)),
             },
 
-            // ── Define: value position is already named ──
+            // ── Define: the binding's slot names the value ──
             HirKind::Define { binding, value } => HirKind::Define {
                 binding: *binding,
-                value: Box::new(self.t(value)),
+                value: Box::new(self.b(value)),
             },
 
             // ── Lambda body: propagating tail; do not wrap ──
