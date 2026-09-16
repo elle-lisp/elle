@@ -161,7 +161,71 @@
   (assert (= :done (join-by-deadline second-cand))
           "the second candidate must still deliver"))
 
-# ── 6. Repeated kills leave no residue ───────────────────────────────
+# ── 6. A waiter killed during the delivery is never reached ──────────
+#
+# The trap is reentrancy. Resuming one waiter runs that waiter's own
+# code before the next waiter is reached, so an `ev/abort` in there
+# takes a sibling off the list the delivery is walking.
+#
+# Each waiter below aborts the other, so whichever the delivery reaches
+# first kills the one it has not reached yet. Neither the waiter list
+# nor the select set promises an order, and this case needs none.
+
+(println "a joiner killed by the joiner ahead of it is skipped...")
+
+(let* [base (joins)
+       key (sys/unique)
+       bx (box 0)
+       target (parked-fiber key bx)
+       both @[]
+       joiner (fn [me]
+                (ev/spawn (fn []
+                            (let [[ok? _] (protect (ev/join-protected target))]
+                              (if ok?
+                                (begin
+                                  (ev/abort (get both (- 1 me)))
+                                  :woken)
+                                :killed)))))
+       a (joiner 0)
+       b (joiner 1)]
+  (push both a)
+  (push both b)
+  (ev/sleep 0.05)
+  (assert (= (+ base 1) (joins)) "both joiners must be on one waiter list")
+  (release key bx)
+  (let [outcome [(join-by-deadline a) (join-by-deadline b)]]
+    (assert (or (= outcome [:woken :killed]) (= outcome [:killed :woken]))
+            (string "one joiner woken, the other killed mid-delivery, got "
+                    (string outcome)))))
+
+(println "a select waiter killed by the one ahead of it is skipped...")
+
+(let* [base (selects)
+       key (sys/unique)
+       bx (box 0)
+       candidate (parked-fiber key bx)
+       both @[]
+       selector (fn [me]
+                  (ev/spawn (fn []
+                              (let [[ok? _] (protect (ev/select [candidate]))]
+                                (if ok?
+                                  (begin
+                                    (ev/abort (get both (- 1 me)))
+                                    :woken)
+                                  :killed)))))
+       a (selector 0)
+       b (selector 1)]
+  (push both a)
+  (push both b)
+  (ev/sleep 0.05)
+  (assert (= (+ base 2) (selects)) "both waiters must be parked on a select set")
+  (release key bx)
+  (let [outcome [(join-by-deadline a) (join-by-deadline b)]]
+    (assert (or (= outcome [:woken :killed]) (= outcome [:killed :woken]))
+            (string "one select waiter woken, the other killed, got "
+                    (string outcome)))))
+
+# ── 7. Repeated kills leave no residue ───────────────────────────────
 
 (println "twenty killed joiners leave the waiter list clean...")
 
