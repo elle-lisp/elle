@@ -1,8 +1,12 @@
 # Lexicon: epoch-aware lexing
 
-Status: implemented. Every registered epoch shares one lexicon, so no file
-lexes differently yet. The first client is the comment/splice swap proposed
-in issue #983.
+<!-- audited: 2026-09-16 -->
+
+An epoch selects the lexer rules that tokenize a file, so a breaking change can
+reach below the syntax tree to the tokens themselves.
+
+Every registered epoch shares one lexicon, so no file lexes differently yet.
+The first client is the comment/splice swap proposed in issue #983.
 
 Epochs rewrite parsed syntax trees (see [../epochs.md](../epochs.md)). This
 document extends the epoch system down one level, to the lexer, so that an
@@ -146,11 +150,53 @@ make this formatting-preserving by construction, matching the tool's existing
 contract. `--check`, `--dry-run`, and `--list-rules` cover lexical changes
 the same way they cover tree rules.
 
-Two shapes fall outside a respelling. A token the current lexicon cannot
-spell at all is not a byte-span rewrite; the rewriter stops and names the
-position, and the epoch that removes the shape carries a tree rule for it.
-And the shebang line is not Elle text, so no token inside it is respelled,
-however the lexer happened to tokenize it.
+Two shapes fall outside a respelling. The shebang line is not Elle text, so
+no token inside it is respelled, however the lexer happened to tokenize it.
+And a token the target lexicon cannot spell at all is not a byte-span
+rewrite: `respell` refuses it, the rewriter names the position, and the
+epoch that removed the spelling carries a `MigrationRule::Desugar` for it.
+
+## Desugaring a reader shorthand
+
+A reader shorthand is a prefix token that wraps the form written after it.
+`;expr` stands for `(splice expr)`, and `,;expr` stands for
+`(unquote-splicing expr)`. An epoch can take the spelling away without
+touching the form, so the migration replaces the prefix with the form.
+
+`respell` cannot express that rewrite. It answers about one token, and the
+replacement has to reach past the prefix to the end of the form the prefix
+wraps. The token stream gives up that extent only by walking it.
+
+`MigrationRule::Desugar { shorthand }` names the prefix token, and nothing
+else: `Token::shorthand_form` already says which form each shorthand stands
+for, because the reader decided it. One authority, so no epoch can pair a
+shorthand with a form the reader never built.
+
+`collect_desugar_edits` walks one balanced form and emits two edits. The
+first runs from the prefix to the start of the form and becomes `(<form> `,
+which absorbs any whitespace the author left between them. The second
+inserts `)` after the form. Two small edits rather than one span over the
+whole shorthand, so a shorthand nested inside another shorthand's form
+rewrites on its own instead of overlapping the outer edit.
+
+The compiler's tree transform has no arm for this rule. The shorthand and
+the form read to the same tree, so an old file already compiles: `;x` reads
+to `SyntaxKind::Splice`, and `Analyzer::unwrap_splice` accepts `(splice x)`
+in every position that node reaches. Only the file's text needs migrating,
+and text is `elle rewrite`'s job.
+
+That agreement is the condition on the rule, and an epoch must check it
+before declaring one. A `Desugar` whose form does not read back to the same
+tree changes what programs mean, which is a language change, not a
+migration.
+
+`,;` does not meet the condition today. `quasiquote_list_to_code`
+(`src/syntax/expand/quasiquote.rs`) matches `SyntaxKind::UnquoteSplicing`,
+the node the reader builds from the fused token. To that pass the list form
+`(unquote-splicing x)` is an ordinary list, quoted as data instead of
+spliced. A rule for `,;` would therefore compile and silently change what a
+macro expands to. The epoch that removes `,;` teaches the expander the list
+form first.
 
 **`elle fmt`** runs the epoch rewrite before it formats, unless `--no-epoch`
 skips it (`src/formatter/run.rs`), so the file it writes is current-epoch text
@@ -213,12 +259,14 @@ before the body, that selects the reader for the rest of the file.
 | The REPL's current-epoch entry point | `src/reader/mod.rs::read_syntax_all_current` |
 | The mismatch check | `src/epoch/mod.rs::check_lexicon_agreement` |
 | The token-level rewrite pass | `src/rewrite/run.rs::collect_lexical_edits` |
+| The shorthand desugar pass | `src/rewrite/run/edits.rs::collect_desugar_edits` |
 
-Every registered epoch shares one lexicon, so the paths that act on a
-difference cannot be reached through `Lexicon::for_epoch`. Tests build the
-differing pair directly — `Lexicon::divergent`, `Lexicon::no_semicolon` —
-rather than leave those paths to run for the first time on the epoch that
-needs them.
+Every registered epoch shares one lexicon, and no epoch declares a `Desugar`
+rule yet, so the paths that act on a difference cannot be reached through
+`Lexicon::for_epoch` or `MIGRATIONS`. Tests build the differing pair and the
+rule directly — `Lexicon::divergent`, `Lexicon::no_semicolon`, a rule slice
+passed to `collect_desugar_edits` — rather than leave those paths to run for
+the first time on the epoch that needs them.
 
 The first real lexical epoch (#983) exercises the mechanism end to end and
 lands with its own migration tests.
