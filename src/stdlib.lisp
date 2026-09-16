@@ -1757,6 +1757,7 @@
         pending @{}  # id → fiber (I/O submissions)
         fiber-io @{}  # fiber → id (reverse lookup for io/cancel)
         fiber-park @{}  # fiber → park key (reverse lookup for queue eviction)
+        fiber-join @{}  # fiber → fiber it joined (reverse lookup for list eviction)
         waiters @{}  # target-fiber → @[waiting-fibers...]
         select-sets @{}  # waiting-fiber → @{:candidates [...] :woken @[false]}
         completed @{}  # fiber → :ok | :error (already-completed fibers)
@@ -1793,6 +1794,17 @@
         (del completed fiber)
         (del joined fiber)))
 
+    (defn leave-queue [table key fiber]
+      "Take `fiber` out of the array `table` holds at `key`, and drop the
+       key once that empties it. An empty array left behind counts as a
+       wait the loop is still holding, so `step` never reports :done."
+      (let [q (get table key)]
+        (when (not (nil? q))
+          (let [@i 0]
+            (while (< i (length q))
+              (if (= (get q i) fiber) (remove q i) (assign i (+ i 1)))))
+          (when (= (length q) 0) (del table key)))))
+
     (defn wake-select-waiters [fiber]
       "Wake any select-set waiter that includes fiber as a candidate."
       (each [waiter entry] in (pairs select-sets)
@@ -1824,17 +1836,23 @@
       (let [key (get fiber-park fiber)]
         (when (not (nil? key))
           (del fiber-park fiber)
-          (let [q (get park-queues key)]
-            (when (not (nil? q))
-              (let [@i 0]
-                (while (< i (length q))
-                  (if (= (get q i) fiber) (remove q i) (assign i (+ i 1)))))
-              (when (= (length q) 0) (del park-queues key))))))  # Wake join waiters with [ok? value] pair
+          (leave-queue park-queues key fiber)))  # Leave the join waiter list and the select set. `fiber/abort`
+      # injects an error this fiber's own `protect` may catch, so it can
+      # reach :dead while the fiber it waited on still runs. Left where
+      # it was, it is resumed when that fiber finishes, and the resume
+      # raises out of the event loop. `fiber-join` names the one list to
+      # search; a select set is keyed by the waiting fiber itself.
+      (let [target (get fiber-join fiber)]
+        (when (not (nil? target))
+          (del fiber-join fiber)
+          (leave-queue waiters target fiber)))
+      (del select-sets fiber)  # Wake join waiters with [ok? value] pair
       (let [ws (get waiters fiber)]
         (when (not (nil? ws))
           (del waiters fiber)
           (let [pair [(= status :ok) (fiber/value fiber)]]
             (each w in ws
+              (del fiber-join w)
               (fiber/resume w pair)
               (handle-fiber-after-resume w))))  # Wake select waiters
         (wake-select-waiters fiber))  # A success record has no reader — the loop's tail raises failures
@@ -1877,6 +1895,7 @@
                        (let [w @[]]
                          (put waiters target w)
                          w))]
+            (put fiber-join caller target)
             (push ws caller)))))
 
     (defn handle-select [caller candidates]
@@ -2164,6 +2183,8 @@
         (del fiber-io f))
       (each [f _] in (pairs fiber-park)
         (del fiber-park f))
+      (each [f _] in (pairs fiber-join)
+        (del fiber-join f))
       (each [f _] in (pairs waiters)
         (del waiters f))
       (each [f _] in (pairs select-sets)
