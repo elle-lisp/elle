@@ -1,4 +1,9 @@
-//! A-normal form (ANF) lift.
+// audited: 2026-09-16
+//! A-normal form (ANF) lift: every heap-allocating value gets a binding whose
+//! slot the lowerer releases it through.
+//!
+//! docs/impl/hir.md
+//! docs/impl/region/rules.md
 //!
 //! Names every allocating expression by wrapping it in a synthetic
 //! `let` whose body is the bound variable. After this pass, every
@@ -19,6 +24,18 @@
 //! Pipeline placement: immediately after `functionalize`, before
 //! `typeinfer` and region analysis.
 //!
+//! ## The name has to land on the node that allocates
+//!
+//! A name is worth exactly what the lowerer can key off it, and what the lowerer
+//! keys off it is one map: `record_region_slot` records a binder's slot against
+//! `alloc_region[init.id]` — the region the init node **itself** allocates. A
+//! binder whose init allocates nothing at its own id therefore records nothing,
+//! its value gets no release route, and the release the solver placed for it
+//! emits no instruction at all.
+//!
+//! So "name the allocating value" is a claim about a node, not about a position.
+//! Every position below is read that way.
+//!
 //! ## What gets wrapped
 //!
 //! The traversal recurses through every child. After the recursive
@@ -37,8 +54,10 @@
 //! `SetCell.{cell, value}`; `Assign.value`; `Destructure.value`;
 //! `While.{cond, body}`.
 //!
-//! **Already named (do NOT wrap):**
-//! `Let` / `Letrec` / `Loop` binding RHS; `Define.value`.
+//! **Binder positions (the binder's own slot is the name):**
+//! `Let` / `Letrec` / `Loop` binding RHS; `Define.value`. An init that allocates
+//! at its own id is recorded against that binder's slot, so wrapping it would
+//! chain a second name for one region.
 //!
 //! **Transparent in the lowerer (do NOT wrap — Finding 1):**
 //! `MakeCell.value`, `DerefCell.cell`. The lowerer is transparent for
@@ -46,10 +65,24 @@
 //! site; wrapping their child manufactures a region with no matching
 //! allocation.
 //!
-//! **Propagating tail positions (do NOT wrap — the outer consumer
-//! wraps the form itself):**
-//! `Let` / `Letrec` / `Loop` body; `Lambda.body`;
-//! `Parameterize.body`; `Begin` non-last; `Block` non-last.
+//! ## A propagating tail is named through, never named
+//!
+//! A `Let`, `Letrec`, `Loop` or `Parameterize` hands its **body's** value up
+//! unchanged, and the lowerer stamps no allocation at the form's own id. The
+//! form is therefore the wrong node to name: a wrap around it binds a slot that
+//! `record_region_slot` leaves empty, and a binder that already holds it —
+//! `(let [a (let [x …] [x x])] …)` — holds a name with no route.
+//!
+//! So both naming positions descend the tail and name the node they find there.
+//! A consumer position wraps that node; a binder position names it too, because
+//! the binder's own slot cannot stand for a region the init node did not
+//! allocate. `(g (let [x 7] [x x]))` becomes `(g (let [x 7] (let [t [x x]] t)))`,
+//! and the inner walk a fused `mapcat` runs over its function's result reaches
+//! its per-element array the same way (docs/impl/dissolution.md).
+//!
+//! `Lambda.body` is the one tail that is not descended. Its value is the
+//! function's result, handed to the caller by the `Return` mint and released by
+//! the caller's own binding — this frame owes it no release to route.
 //!
 //! ## Idempotence
 //!
