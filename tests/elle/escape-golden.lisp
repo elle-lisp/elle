@@ -40,7 +40,14 @@
 # (writes the file); later runs COMPARE. To re-bless after an intended change,
 # delete the .snap (or the whole dir) and re-run.
 
+(def snapdiff ((import-file "tests/modules/snapdiff.lisp")))
+
 (def golden-dir "tests/golden/escape")
+
+# The renderer's contract: every dump carries all five, in this order.
+(def sections
+  ["[needs_capture]" "[lambda_captures]" "[return_frontier]"
+   "[suppressed_decref_regions]" "[region_instrs]"])
 
 # [name path] for each pinned real corpus file.
 (def corpus
@@ -60,22 +67,30 @@
 
 (defn check-escape-golden [name path]
   (let [src (slurp path)
-        escape (get (compile/dumps src path) :escape)]
+        render (fn [] (get (compile/dumps src path) :escape))
+        escape (render)]
     (assert (string? escape)
             (string "no :escape snapshot for " path
                     " — did it stop compiling?"))  # Structural sanity (the renderer's contract): all five sections are always
     # present. This guards a FIRST capture from blessing a malformed snapshot —
-    # the byte-compare below only catches drift once a golden exists.
-    (each section ["[needs_capture]" "[lambda_captures]" "[return_frontier]"
-                   "[suppressed_decref_regions]" "[region_instrs]"]
+    # the comparison below only catches drift once a golden exists.
+    (each section sections
       (assert (string/contains? escape section)
               (string "escape snapshot for " path " is missing section " section)))
-    (let [snap-path (string golden-dir "/" name ".snap")]
+    (let [snap-path (string golden-dir "/" name ".snap")
+          got-path (string golden-dir "/" name ".got")]
       (if (path/exists? snap-path)
-        (assert (= escape (slurp snap-path))
-                (string "escape snapshot drift for " path
-                        " — if intended, delete " snap-path
-                        " and re-run to re-capture"))
+        (let [r (snapdiff:drift-report escape render (slurp snap-path) sections)]
+          (if r
+            (begin
+              (spit got-path (get r :text))
+              (assert false
+                      (string (snapdiff:drift-message r) "\n  for " path
+                              "\n  rendered dump kept at " got-path
+                              "\n  if intended, delete " snap-path
+                              " and re-run to re-capture")))  # A stale .got from an earlier failure would read as evidence about a
+            # tree that is now clean.
+            (when (path/exists? got-path) (file/delete got-path))))
         (begin
           (spit snap-path escape)
           (println (string "captured " snap-path)))))))
