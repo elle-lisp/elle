@@ -23,6 +23,11 @@
 # covers both — and must not reach the NEXT arm's collection, which is a
 # different region with a slot of its own.
 #
+# THE TRAP rows 13 and 14 guard. A collection a further pattern matched is held
+# by the lowerer's own slot and by no name, so its release is carried back ahead
+# of a frame-replacing tail call like the scrutinee's. The names that pattern
+# bound are elements of it, and the call is about to read one.
+#
 # Every read below happens after the release for that collection has run, so an
 # over-release faults at the deref (SIGSEGV under guardfree) or trips the
 # generation check.
@@ -241,5 +246,90 @@
   (assert (= (rest-and-scrutinee src) 8)
           "a rest collection and its scrutinee must both survive one call")
   (assign bb (+ bb 1)))
+
+# ── 13. the names a NESTED rest sub-pattern bound ─────────────────────────────
+# `& [p q]` builds a collection no single name holds. `p` and `q` are uncounted
+# reads of THAT collection, so it must outlive both, and the strings it copied
+# out of the scrutinee must survive its cascade.
+
+(defn nested-read []
+  (let [[h & [p q]] strs]
+    (+ (length p) (length q))))
+
+(var cc 0)
+(while (< cc 40)
+  (assert (= (nested-read) 4)
+          "a name a nested rest bound must survive the collection's release")
+  (assign cc (+ cc 1)))
+
+(defn nested-return []
+  (let [[h & [p q]] strs]
+    p))
+
+(var dd 0)
+(while (< dd 40)
+  (assert (= (nested-return) "bb")
+          "a returned nested rest name must survive its collection")
+  (assign dd (+ dd 1)))
+
+(def nested-thunks @[])
+(var ee 0)
+(while (< ee 40)
+  (let [[h & [p q]] strs]
+    (push nested-thunks (fn [] (length p))))
+  (assign ee (+ ee 1)))
+(var ff 0)
+(while (< ff 40)
+  (assert (= ((get nested-thunks ff)) 2)
+          "a captured nested rest name must survive the iteration that bound it")
+  (assign ff (+ ff 1)))
+
+# A rest nested inside a rest builds TWO collections. The holder set stops at
+# the inner build, so the two releases are separate and neither may reach the
+# other's pages.
+
+(defn nested-in-nested []
+  (let [[h & [p & q]] strs]
+    (+ (length p) (length q))))
+
+(var gg 0)
+(while (< gg 40)
+  (assert (= (nested-in-nested) 4)
+          "two nested collections must each survive their own release")
+  (assign gg (+ gg 1)))
+
+# ── 14. a name the inner pattern bound, handed to a TAIL call ─────────────────
+# THE TRAP. The call receives an ELEMENT of the collection, so the callee's
+# owned-param release names the element's region and never the collection's.
+# Nothing takes the collection's release over, so it is carried back ahead of
+# the call — and it must not take the element the callee is about to read with
+# it. Three callees, because what follows the call differs: a native returns
+# into the block the release sits in, a closure replaces the frame, and a
+# struct rest reaches the same relocation through `StructRest`.
+
+(defn len-of [v]
+  (length v))
+
+(defn nested-tail-closure []
+  (let [[h & [p q]] strs]
+    (len-of p)))
+
+(defn nested-tail-native []
+  (let [[h & [p q]] strs]
+    (length p)))
+
+(defn nested-tail-struct []
+  (let [{:a one & {:b bb}} rec]
+    (+ one bb)))
+
+(var hh 0)
+(while (< hh 40)
+  (assert (= (nested-tail-closure) 2)
+          "a nested rest name handed to a closure tail call must survive it")
+  (assert (= (nested-tail-native) 2)
+          "a nested rest name handed to a native tail call must survive it")
+  (assert (= (nested-tail-struct) 3)
+          "a nested struct rest name handed to a tail call must survive it")
+  (assign hh (+ hh 1)))
 
 (println "region-rest-pattern-slice-uaf: ok")

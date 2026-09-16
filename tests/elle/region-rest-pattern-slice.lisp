@@ -22,6 +22,11 @@
 # borrow of the scrutinee and allocates nothing: both already read zero, so a
 # subject's rate is the built collection and nothing else.
 #
+# THE BOUNDARY the (v) and (w) rows hold. A collection the pattern binds no
+# name for has nothing to key a placeholder on, and a `match` builds one per
+# access path rather than one per sub-pattern. Both are stated as rows reading
+# the FULL rate, so a change that reaches either fails here.
+#
 # This file is the LEAK gauge — an `arena/region-count` delta over a fixed
 # window, BOUNDED for every subject. The soundness complement is
 # region-rest-pattern-slice-uaf.lisp.
@@ -138,6 +143,59 @@
 (defn p-rest-and-scrutinee []
   (take-both arr))
 
+# (q) a NESTED rest sub-pattern. `& [p q]` builds a collection no single name
+# holds, and the names it binds project that collection rather than the
+# scrutinee, so the placeholder is keyed on the sub-pattern and unioned into
+# both of them (elle-lisp/elle#1127).
+(defn q-nested-rest-unread []
+  (let [[x & [p q]] arr]
+    x))
+
+(defn r-nested-rest-read []
+  (let [[x & [p q]] arr]
+    (+ p q)))
+
+# (s) the same through `StructRest`, whose inner pattern reads a key out of the
+# struct the outer rest built.
+(defn s-nested-struct-rest []
+  (let [{:a x & {:b bb}} rec]
+    (+ x bb)))
+
+# (t) a nested rest INSIDE a nested rest: two collections, two regions. The
+# holder set stops at the inner build, so neither release covers the other and
+# both must still fire.
+(defn t-nested-in-nested []
+  (let [[x & [p & q]] arr]
+    (+ p (length q))))
+
+# (u) a name the inner pattern bound, handed to a CLOSURE tail call. The call
+# receives an element rather than the collection, so nothing takes the
+# collection's release over and it is carried back ahead of the call — the leaf
+# reading, and the row that says the exemption did not over-reach.
+(defn take-one [v]
+  (+ v 1))
+(defn u-nested-tail []
+  (let [[x & [p q]] arr]
+    (take-one p)))
+
+# baselines ────────────────────────────────────────────────────────────────────
+#
+# The two shapes the placeholder does not reach, stated as rows so a change
+# that reaches one of them fails here and sends the author to anchors.md.
+
+# (v) a WILDCARD rest. The collection is built, and the pattern binds no name
+# for the placeholder to be keyed on.
+(defn v-wildcard-rest []
+  (let [[x & _] arr]
+    x))
+
+# (w) a nested rest in a `match`. The decision tree loads each name by walking
+# its own access path and re-runs the `Slice` step on every path through the
+# rest, so the count is a fact about the tree rather than about the pattern.
+(defn w-match-nested-rest []
+  (match arr
+    [x y z & [p q]] x))
+
 # controls ─────────────────────────────────────────────────────────────────────
 
 # (k) the flat pattern: the same five elements out of the same array, bound by
@@ -167,6 +225,13 @@
 (def d-n (measure n-tail-native 20 window))
 (def d-o (measure o-tail-closure 20 window))
 (def d-p (measure p-rest-and-scrutinee 20 window))
+(def d-q (measure q-nested-rest-unread 20 window))
+(def d-r (measure r-nested-rest-read 20 window))
+(def d-s (measure s-nested-struct-rest 20 window))
+(def d-t (measure t-nested-in-nested 20 window))
+(def d-u (measure u-nested-tail 20 window))
+(def d-v (measure v-wildcard-rest 20 window))
+(def d-w (measure w-match-nested-rest 20 window))
 (def d-k (measure k-flat-pattern 20 window))
 (def d-l (measure l-list-rest 20 window))
 
@@ -196,6 +261,13 @@
 (println "  n tail-native       " d-n)
 (println "  o tail-closure      " d-o)
 (println "  p rest+scrutinee    " d-p)
+(println "  q nested-unread     " d-q)
+(println "  r nested-read       " d-r)
+(println "  s nested-struct     " d-s)
+(println "  t nested-in-nested  " d-t)
+(println "  u nested-tail       " d-u)
+(println "  v wildcard-rest     " d-v " (baseline)")
+(println "  w match-nested      " d-w " (baseline)")
 (println "  k flat-pattern      " d-k " (control)")
 (println "  l list-rest         " d-l " (control)")
 (println "  m inline-loop       " d-m)
@@ -249,5 +321,30 @@
 (assert (%lt d-p 40)
         (concat "a rest collection passed beside its scrutinee strands, delta="
                 (number->string d-p)))
+(assert (%lt d-q 40)
+        (concat "an unread nested rest sub-pattern strands its collection, "
+                "delta=" (number->string d-q)))
+(assert (%lt d-r 40)
+        (concat "a read nested rest sub-pattern strands its collection, delta="
+                (number->string d-r)))
+(assert (%lt d-s 40)
+        (concat "a nested struct rest strands its collection, delta="
+                (number->string d-s)))
+(assert (%lt d-t 40)
+        (concat "a rest nested inside a rest strands one of the two "
+                "collections, delta=" (number->string d-t)))
+(assert (%lt d-u 40)
+        (concat "a nested rest name handed to a tail call strands its "
+                "collection, delta=" (number->string d-u)))
+
+# The baselines read the FULL rate — one region per iteration at least. A row
+# that drops below it means the shape is covered now, which anchors.md says it
+# is not; repair the document and move the row up to a subject.
+(assert (>= d-v window)
+        (concat "baseline: a wildcard rest binds no name to key a placeholder "
+                "on, delta=" (number->string d-v)))
+(assert (>= d-w window)
+        (concat "baseline: a `match` nested rest re-slices per access path, "
+                "delta=" (number->string d-w)))
 
 (println "region-rest-pattern-slice: ok")

@@ -109,6 +109,32 @@ fn a_struct_rest_collection_handed_to_the_tail_call_is_released_after_it() {
 }
 
 #[test]
+fn a_nested_rest_collection_is_released_before_the_tail_call() {
+    // The counter-face of the exemption. The call receives `p`, an ELEMENT of
+    // the collection, so the callee's owned-param release names the element's
+    // region and never the collection's. Nothing takes the collection's release
+    // over, which is the leaf reading exactly — so it is carried back ahead of
+    // the call like the scrutinee's, and exempting it would strand one region
+    // per call.
+    let module = compile_to_lir(
+        "(begin (def s (fn (a) a)) \
+                (def f (fn (t) (let [[x & [p q]] t] (s p)))) \
+                (f (list 1 2 3)))",
+    );
+    let (at, parked, _) =
+        rest_collection_release_layout(&module).expect("the body lowers to a TailCall");
+    assert!(
+        !parked.is_empty(),
+        "no release is routed through the parked slot, so this pins nothing",
+    );
+    assert!(
+        parked.iter().all(|&r| r < at),
+        "a nested rest collection's release stayed in the dead fall-through \
+         (at={at}, parked={parked:?}) — nothing there takes it over",
+    );
+}
+
+#[test]
 fn the_scrutinee_release_still_precedes_the_tail_call() {
     // The counter-factual, and the over-fix this guards: the scrutinee is a
     // region the rest name only NAMES. The call never receives it, so nothing

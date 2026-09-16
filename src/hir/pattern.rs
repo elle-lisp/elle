@@ -302,6 +302,19 @@ impl HirPattern {
         out
     }
 
+    /// The names that reach the collection this pattern is the rest of: every
+    /// name it binds, stopping at a nested rest that builds a collection of its
+    /// own, whose names reach that one instead.
+    ///
+    /// The solver keys a placeholder region on this set and the lowerer reads
+    /// the region back through it, so a disagreement is a placeholder with no
+    /// route or a route with no placeholder.
+    ///
+    /// docs/impl/region/anchors.md
+    pub fn rest_collection_holders(&self) -> Vec<Binding> {
+        Vec::new()
+    }
+
     fn collect_allocating_rest_bindings(&self, out: &mut Vec<Binding>) {
         // Sub-patterns first, then this pattern's own rest, then whatever the
         // rest itself contains: the order every lowering path reaches them in,
