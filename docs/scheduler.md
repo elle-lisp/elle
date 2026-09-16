@@ -86,7 +86,7 @@ both rely on these invariants. [park-abort.lisp](../tests/elle/park-abort.lisp) 
 that completes resumes every waiter on its own list, and one waiter from
 every select set that names it.
 
-Two invariants govern both lists:
+Three invariants govern both lists:
 
 - **Only live fibers wait.** A fiber that reaches `:dead` or `:error`
   leaves the waiter list and the select set it sits in, on the rule that
@@ -98,6 +98,11 @@ Two invariants govern both lists:
 - **A list with no waiter left is gone.** An empty waiter list still
   counts as a join the loop is holding, so the loop never reports
   `:done`, exactly as an empty park key would keep it running.
+- **A delivery reads the list, never a copy of it.** Resuming one waiter
+  runs that waiter's own code before the next waiter is reached, and
+  that code can kill a sibling — `ev/abort` on a fiber waiting for the
+  same result is enough. The sibling leaves the list on the rule above,
+  which a copy taken before the first resume would not show.
 
 The scheduler holds the waiter list in two halves, the pairing it already
 keeps for a park: the joined fiber maps to its waiters, and each waiting
