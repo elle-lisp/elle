@@ -234,12 +234,10 @@ reconcile two different incoming shapes. That makes one rule mandatory:
 > **The first predecessor emitted fixes the merge block's operand depth, and
 > every later edge into that block must leave exactly that depth.**
 
-`pop_trailing_orphans_to` is the only tool the emitter has for meeting the rule.
-An orphan is a stack cell that no register's canonical position names — the
-residue `ensure_on_top` leaves when it copies a value up with `DupN` and the
-copy is then consumed. Orphans are dead, so popping them is free; popping
-them is also what keeps a loop body from growing the stack by one cell per
-iteration.
+A forward edge meets the rule with `pop_trailing_orphans_to`. An orphan is a
+stack cell that no register's canonical position names — the residue
+`ensure_on_top` leaves when it copies a value up with `DupN` and the copy is
+then consumed. Orphans are dead, so popping them is free.
 
 But the pops are per-edge, and only `Terminator::Jump` performs them, so they
 must be **bounded by the target's already-fixed depth**. Popping past it
@@ -247,18 +245,17 @@ splits the paths: the branch edge into the merge leaves the orphan, the jump
 edge removes it, and the merge's successors — which inherited the branch's
 simulation — pop it a second time on the path that already did. Two pops, one
 value, and the second one lands in the reserved local region. This is why
-`Terminator::Jump` trims only down to the target's recorded depth
-(`yield_stack_state`, or `block_entry_depth` for a back edge into a block
-already emitted) rather than to the first live value.
+`Terminator::Jump` trims a forward edge only down to the target's recorded
+depth (`yield_stack_state`) rather than to the first live value.
 
 ### A back edge restores the depth its target was fixed at
 
-The orphan trim alone does not meet rule 11. `pop_trailing_orphans_to` stops at
-the first live cell, so an orphan the block left *under* a live one survives the
-jump. Straight-line code absorbs that residue; a loop accumulates it. The header
-runs again a cell or two deeper each time, and the activation's operand stack
-grows for as long as the loop does — an unbounded leak that no region gauge
-sees, because the cells are a `Fiber`'s own `SmallVec` rather than heap objects.
+The orphan trim cannot meet the rule at a back edge. It stops at the first live
+cell, so an orphan the block left *under* a live one survives the jump.
+Straight-line code absorbs that residue; a loop accumulates it. The header runs
+again a cell or two deeper each time, and the activation's operand stack grows
+for as long as the loop does — an unbounded leak that no region gauge sees,
+because the cells are a `Fiber`'s own `SmallVec` rather than heap objects.
 
 A back edge is the one edge that may trim to the target's depth outright, so
 `Terminator::Jump` uses `pop_to` there: the target was emitted before this edge
