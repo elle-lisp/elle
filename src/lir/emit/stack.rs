@@ -1,3 +1,5 @@
+// audited: 2026-09-16
+// src/lir/AGENTS.md
 //! Stack simulation helpers for the LIR emitter.
 //!
 //! Tracks which virtual register is at each stack position during bytecode
@@ -70,6 +72,10 @@ impl super::Emitter {
     /// producing incorrect results (e.g. a struct value in a hash-key
     /// slot → "struct keys must be immutable (got struct)").
     ///
+    /// This is the FORWARD edge's trim, and it is deliberately partial: it
+    /// stops at the first live cell, leaving whatever the edge is carrying to
+    /// the merge. A back edge carries nothing and takes [`Self::pop_to`].
+    ///
     /// `floor` is the operand depth the target block has already been
     /// fixed at by an earlier predecessor (`Emitter::edge_depth`), and
     /// trimming past it is what turns this cleanup into a miscompilation:
@@ -96,6 +102,30 @@ impl super::Emitter {
             // Do not call self.pop() — the orphan's register either
             // isn't in reg_to_stack at all, or points to a different
             // (canonical) position that must not be disturbed.
+        }
+    }
+
+    /// Emit `Pop` until the operand stack is exactly `floor` deep, whatever the
+    /// cells above it are.
+    ///
+    /// The trim a BACK edge takes (src/lir/AGENTS.md § "Merge operand depth").
+    /// `pop_trailing_orphans_to` stops at the first live cell, so an orphan a
+    /// live one sits on top of survives it — and a loop body that reaches its
+    /// back edge with such a pair deepens the header's stack once per trip, for
+    /// as long as the loop runs. A back edge may go further than the orphan trim
+    /// because its target was emitted before the edge existed: the target's
+    /// simulation names only cells below `floor`, so it reads nothing this block
+    /// pushed and every surplus cell is dead.
+    pub(super) fn pop_to(&mut self, floor: usize) {
+        while self.stack.len() > floor {
+            self.bytecode.emit(Instruction::Pop);
+            let top = self.stack.len() - 1;
+            let reg = self.stack.pop().expect("len checked above");
+            // Only a canonical entry owns its `reg_to_stack` record; an orphan
+            // names a position some other cell holds, which must stay.
+            if self.reg_to_stack.get(&reg) == Some(&top) {
+                self.reg_to_stack.remove(&reg);
+            }
         }
     }
 

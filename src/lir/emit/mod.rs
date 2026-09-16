@@ -1,8 +1,10 @@
-// audited: 2026-09-05
+// audited: 2026-09-16
 // docs/impl/bytecode.md
 //! Converts register-based LIR to stack-based bytecode, simulating the operand
-//! stack to find where each register's value sits.
+//! stack to find where each register's value sits. `edge` emits the block
+//! terminators, `stack` holds the simulation, `instr` the instructions.
 
+mod edge;
 mod stack;
 
 use super::types::*;
@@ -266,142 +268,6 @@ impl Emitter {
         // Record source location for the terminator
         self.bytecode.record_location(&block.terminator.span);
         self.emit_terminator(&block.terminator.terminator);
-    }
-
-    /// The operand depth `label` is already fixed at, or `None` when this edge
-    /// is the first to reach it and so gets to fix it.
-    ///
-    /// A block's depth is decided by whichever predecessor is emitted first —
-    /// the simulation keeps that predecessor's stack and discards every later
-    /// one (see `Terminator::Jump`'s `or_insert_with`). The record lives in
-    /// `yield_stack_state` while the block is still ahead of the cursor, and
-    /// moves to `block_entry_depth` when `emit_block` consumes it, so a back
-    /// edge into an already-emitted loop header is answered too.
-    fn edge_depth(&self, label: Label) -> Option<usize> {
-        self.yield_stack_state
-            .get(&label)
-            .map(|(stack, _)| stack.len())
-            .or_else(|| self.block_entry_depth.get(&label).copied())
-    }
-
-    fn emit_terminator(&mut self, term: &Terminator) {
-        match term {
-            Terminator::Return(reg) => {
-                self.ensure_on_top(*reg);
-                self.bytecode.emit(Instruction::Return);
-            }
-
-            Terminator::Jump(label) => {
-                // Pop trailing orphan values so that all predecessors of a
-                // merge block agree on the operand-stack depth.  Orphans are
-                // created by DupN in ensure_on_top (e.g. inside the splice
-                // path for `apply`).  Without this, branches that create
-                // orphans leave a deeper stack than branches that don't,
-                // causing wrong DupN offsets in the merge block.
-                //
-                // Bounded by the depth the target is already fixed at: a
-                // `Terminator::Branch` edge into the same merge pops nothing, so
-                // trimming past that depth would leave the two edges at
-                // different depths — and the merge's successors, which inherited
-                // the branch's simulation, would pop the orphan again on the
-                // path that already dropped it (src/lir/AGENTS.md § "Merge
-                // operand depth").
-                let floor = self.edge_depth(*label).unwrap_or(0);
-                self.pop_trailing_orphans_to(floor);
-
-                // Save stack state for the target block if this is the first
-                // predecessor to jump there. Multiple blocks may jump to the
-                // same target (e.g., break + fallthrough, if/and/or merges).
-                // We keep the FIRST saved state and ignore later ones — the
-                // first predecessor is the reachable path (later predecessors
-                // may be dead code after break with a wrong stack layout).
-                if !self.label_offsets.contains_key(label) {
-                    self.yield_stack_state
-                        .entry(*label)
-                        .or_insert_with(|| (self.stack.clone(), self.reg_to_stack.clone()));
-                }
-
-                self.bytecode.emit(Instruction::Jump);
-                let pos = self.bytecode.current_pos();
-                self.bytecode.emit_i32(0); // placeholder
-                self.pending_jumps.push((pos, *label));
-            }
-
-            Terminator::Branch {
-                cond,
-                then_label,
-                else_label,
-            } => {
-                self.ensure_on_top(*cond);
-
-                // JumpIfFalse pops the condition from the stack
-                self.pop();
-
-                // Save stack state for both branches, but only if they haven't
-                // been processed yet. This handles the case where blocks are
-                // sorted by label and a target block might be processed before
-                // the branch that jumps to it.
-                if !self.label_offsets.contains_key(then_label) {
-                    self.yield_stack_state
-                        .insert(*then_label, (self.stack.clone(), self.reg_to_stack.clone()));
-                }
-                if !self.label_offsets.contains_key(else_label) {
-                    self.yield_stack_state
-                        .insert(*else_label, (self.stack.clone(), self.reg_to_stack.clone()));
-                }
-
-                // JumpIfFalse to else_label
-                self.bytecode.emit(Instruction::JumpIfFalse);
-                let else_pos = self.bytecode.current_pos();
-                self.bytecode.emit_i32(0); // placeholder
-                self.pending_jumps.push((else_pos, *else_label));
-
-                // Fall through or jump to then_label
-                self.bytecode.emit(Instruction::Jump);
-                let then_pos = self.bytecode.current_pos();
-                self.bytecode.emit_i32(0); // placeholder
-                self.pending_jumps.push((then_pos, *then_label));
-            }
-
-            Terminator::Emit {
-                signal,
-                value,
-                resume_label,
-            } => {
-                self.ensure_on_top(*value);
-                // The whole mask is baked in: `(signal :keyword)` resolves to a
-                // bit at analysis time, so nothing at runtime re-reads the
-                // registry for a literal `emit`, and the operand is the only
-                // place a user signal's bit (32-63) can live.
-                self.bytecode.emit(Instruction::Emit);
-                self.bytecode.emit_signal_bits(*signal);
-                self.pop();
-
-                let resume_ip = self.bytecode.current_pos();
-
-                self.yield_points.push(YieldPointInfo {
-                    resume_ip,
-                    stack_regs: self.stack.clone(),
-                    num_locals: self.current_func_num_locals,
-                });
-
-                self.yield_stack_state.insert(
-                    *resume_label,
-                    (self.stack.clone(), self.reg_to_stack.clone()),
-                );
-
-                self.bytecode.emit(Instruction::Jump);
-                let pos = self.bytecode.current_pos();
-                self.bytecode.emit_i32(0); // placeholder
-                self.pending_jumps.push((pos, *resume_label));
-            }
-
-            Terminator::Unreachable => {
-                // Emit nil and return as fallback
-                self.bytecode.emit(Instruction::Nil);
-                self.bytecode.emit(Instruction::Return);
-            }
-        }
     }
 
     /// Check if an upvalue index refers to a non-cell locally-defined variable.
