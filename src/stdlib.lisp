@@ -1806,16 +1806,22 @@
           (when (= (length q) 0) (del table key)))))
 
     (defn wake-select-waiters [fiber]
-      "Wake any select-set waiter that includes fiber as a candidate."
-      (each [waiter entry] in (pairs select-sets)
-        (when (not (nil? (find (fn [candidate] (= candidate fiber))
-                               (get entry :candidates))))
-          (let [woken (get entry :woken)]
-            (when (not (get woken 0))
-              (put woken 0 true)
-              (cleanup-select waiter entry)
-              (fiber/resume waiter fiber)
-              (handle-fiber-after-resume waiter))))))
+      "Wake any select-set waiter that includes fiber as a candidate.
+       `pairs` gives a copy, and resuming one waiter runs that waiter's
+       own code before the next is reached — an `ev/abort` in there takes
+       a later waiter out of the live table. So the copy supplies only
+       the key, and the table supplies the entry."
+      (each [waiter _] in (pairs select-sets)
+        (let [entry (get select-sets waiter)]
+          (when (and (not (nil? entry))
+                     (not (nil? (find (fn [candidate] (= candidate fiber))
+                                      (get entry :candidates)))))
+            (let [woken (get entry :woken)]
+              (when (not (get woken 0))
+                (put woken 0 true)
+                (cleanup-select waiter entry)
+                (fiber/resume waiter fiber)
+                (handle-fiber-after-resume waiter)))))))
 
     (defn complete-fiber [fiber status]
       "Handle fiber completion: wake join and select waiters."  # Record completion
@@ -1848,13 +1854,18 @@
           (leave-queue waiters target fiber)))
       (del select-sets fiber)  # Wake join waiters with [ok? value] pair
       (let [ws (get waiters fiber)]
-        (when (not (nil? ws))
-          (del waiters fiber)
+        (when (not (nil? ws))  # Take each waiter off the live list rather than walking a copy
+          # of it. Resuming one waiter runs that waiter's own code before
+          # the next is reached, and an `ev/abort` in there evicts a
+          # sibling from this very array.
           (let [pair [(= status :ok) (fiber/value fiber)]]
-            (each w in ws
-              (del fiber-join w)
-              (fiber/resume w pair)
-              (handle-fiber-after-resume w))))  # Wake select waiters
+            (while (> (length ws) 0)
+              (let [w (get ws 0)]
+                (remove ws 0)
+                (del fiber-join w)
+                (fiber/resume w pair)
+                (handle-fiber-after-resume w))))
+          (del waiters fiber))  # Wake select waiters
         (wake-select-waiters fiber))  # A success record has no reader — the loop's tail raises failures
       # alone, and a join that arrives later re-derives the status from the
       # fiber — so it is retired HERE, not at a join that may never come.
