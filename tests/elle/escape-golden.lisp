@@ -1,4 +1,5 @@
 (elle/epoch 12)
+# audited: 2026-09-16
 # escape-golden.lisp — the behaviour-preservation oracle for the escape
 # consolidation (docs/impl/escape.md).
 #
@@ -13,11 +14,18 @@
 #
 # The dump's last section is `[region_instrs]`, the emitted RC stream, so this
 # also fires on any change to WHERE the region solver places a retain or release —
-# a wider net than escape alone. Read a drift by section: one confined to
+# a wider net than escape alone.
+#
+# WHAT A DRIFT SAYS. The comparison reads the drift by section
+# (tests/modules/snapdiff.lisp) and the failure names it: a drift confined to
 # `[region_instrs]`, with the escape verdicts above it byte-identical, is a
 # region-placement change and re-blesses; one that moves `[needs_capture]`,
 # `[lambda_captures]`, `[return_frontier]` or `[suppressed_decref_regions]` is an
-# escape change and wants the migration argument this file exists to demand.
+# escape change and wants the migration argument this file exists to demand. The
+# rendered dump is written beside its snapshot as <name>.got (untracked), because
+# a drift that does not reproduce leaves the run's two texts as the only account
+# of it. A drift also renders a SECOND time: two renders that disagree are an
+# unstable renderer rather than a stale snapshot, and the failure says so.
 #
 # Why these files and not the whole corpus: compile/dumps compiles each source
 # twice and leaks regions (docs/test-runner.md § CAS asset capture — it OOMs a
@@ -25,7 +33,8 @@
 # So this pins a bounded set of real files covering the escape shapes — region
 # pins (escape-return, HOF-tail, discarded-tail, owned-arg, reassign, closure,
 # loop-closure, native-result), a leak-suite file, a fiber-boundary file, and the
-# general closure suite — rather than a curated set of toy reconstructions.
+# general closure suite — rather than a curated set of toy reconstructions. The
+# second render is on the failure path alone, so a clean run costs what it did.
 #
 # Storage: one tests/golden/escape/<name>.snap per file. First run CAPTURES
 # (writes the file); later runs COMPARE. To re-bless after an intended change,
