@@ -24,8 +24,26 @@ impl HirPattern {
     ///
     /// docs/impl/region/anchors.md
     pub fn own_rest_builds(&self) -> bool {
-        let _ = self;
-        false
+        match self {
+            HirPattern::Tuple { elements, rest } | HirPattern::Array { elements, rest } => rest
+                .as_deref()
+                .is_some_and(|r| r.reads_its_collection() || elements.is_empty()),
+            HirPattern::Struct { rest, .. } | HirPattern::Table { rest, .. } => rest
+                .as_deref()
+                .is_some_and(HirPattern::reads_its_collection),
+            // A `List` rest is the remaining cons tail, and every other shape
+            // has no rest at all.
+            _ => false,
+        }
+    }
+
+    /// Does this rest sub-pattern read the collection a build would hand it?
+    ///
+    /// A `_` binds no name and tests nothing, so the collection would be
+    /// garbage from birth. Every other sub-pattern either holds the collection
+    /// or projects it.
+    fn reads_its_collection(&self) -> bool {
+        !matches!(self, HirPattern::Wildcard)
     }
 
     /// Every rest sub-pattern whose lowering BUILDS a fresh collection, in the
@@ -101,7 +119,10 @@ impl HirPattern {
                 for p in elements {
                     p.collect_building_rests(out);
                 }
-                if let Some(r) = rest {
+                // A rest the lowerer skips is not reached at all, its own
+                // sub-pattern included — which is what keeps this list and the
+                // emission in step.
+                if let Some(r) = rest.as_deref().filter(|_| self.own_rest_builds()) {
                     out.push(r);
                     r.collect_building_rests(out);
                 }
@@ -110,7 +131,7 @@ impl HirPattern {
                 for (_, p) in entries {
                     p.collect_building_rests(out);
                 }
-                if let Some(r) = rest {
+                if let Some(r) = rest.as_deref().filter(|_| self.own_rest_builds()) {
                     out.push(r);
                     r.collect_building_rests(out);
                 }

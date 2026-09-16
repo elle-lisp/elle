@@ -1,4 +1,4 @@
-// audited: 2026-09-15
+// audited: 2026-09-16
 // src/lir/lower/AGENTS.md
 // docs/match.md
 //! Lowering a compiled decision tree to blocks: bindings, guards, arm bodies,
@@ -48,16 +48,33 @@ pub(super) fn access_builds_a_collection(access: &AccessPath) -> bool {
 impl<'a> Lowerer<'a> {
     // ── The collection a rest pattern builds ───────────────────────
 
-    /// Park the collection a rest pattern just built in a slot of the lowerer's
-    /// own, record that slot as its placeholder region's release route, and hand
-    /// the value back for the rest pattern to bind.
+    /// Park the `index`-th collection this node's pattern builds in a slot of
+    /// the lowerer's own, record that slot as its placeholder region's release
+    /// route, and hand the value back for the rest pattern to bind.
     ///
-    /// A no-op with the value unchanged unless the solver minted a placeholder
-    /// for this collection. Whichever name the solver keyed it on, every name
-    /// the rest sub-pattern binds reaches the same one, so the first with a
-    /// region recorded gives it.
+    /// The build sites and `HirPattern::building_rests` count in the same
+    /// order, so the index names the same allocation on both sides. It is the
+    /// only handle a collection no name of the program reaches has.
     ///
     /// docs/impl/region/anchors.md
+    pub(in crate::lir::lower) fn park_rest_collection_at(
+        &mut self,
+        index: usize,
+        value: Reg,
+    ) -> Reg {
+        let region = self
+            .current_hir_id
+            .and_then(|node| self.region_info.rest_collection_at(node, index));
+        self.park_in_lowerer_slot(region, value)
+    }
+
+    /// [`park_rest_collection_at`](Self::park_rest_collection_at) for a rest
+    /// sub-pattern the caller has in hand — the sequential `match` lowering,
+    /// whose builds a decision tree may also reach, so the region is found
+    /// through a name rather than through a build order.
+    ///
+    /// Every name the sub-pattern binds reaches the same collection, so the
+    /// first with a region recorded gives it.
     pub(in crate::lir::lower) fn park_rest_collection(
         &mut self,
         rest: &HirPattern,
@@ -79,7 +96,19 @@ impl<'a> Lowerer<'a> {
         binding: Binding,
         value: Reg,
     ) -> Reg {
-        let Some(region) = self.rest_collection_region(binding) else {
+        let region = self.rest_collection_region(binding);
+        self.park_in_lowerer_slot(region, value)
+    }
+
+    /// Park `value` in a fresh stack slot and record that slot as `region`'s
+    /// release route. A no-op with the value unchanged where the solver minted
+    /// no placeholder, which is every build it decided nothing owns.
+    fn park_in_lowerer_slot(
+        &mut self,
+        region: Option<crate::hir::region::Region>,
+        value: Reg,
+    ) -> Reg {
+        let Some(region) = region else {
             return value;
         };
         let slot = self.current_func.num_locals;

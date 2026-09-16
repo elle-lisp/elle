@@ -1,4 +1,4 @@
-// audited: 2026-09-15
+// audited: 2026-09-16
 //! Keyed and or-pattern lowering: `Struct`, `Table`, `Or`.
 //!
 //! docs/match.md
@@ -69,7 +69,7 @@ impl<'a> Lowerer<'a> {
                     self.lower_pattern_match(sub_pattern, elem_reg, fail_label)?;
                 }
 
-                if let Some(rest_pat) = rest {
+                if let Some(rest_pat) = rest.as_deref().filter(|_| pattern.own_rest_builds()) {
                     let reloaded = self.fresh_reg();
                     self.emit(LirInstr::LoadLocal {
                         dst: reloaded,
@@ -152,7 +152,7 @@ impl<'a> Lowerer<'a> {
                     self.lower_pattern_match(sub_pattern, elem_reg, fail_label)?;
                 }
 
-                if let Some(rest_pat) = rest {
+                if let Some(rest_pat) = rest.as_deref().filter(|_| pattern.own_rest_builds()) {
                     let reloaded = self.fresh_reg();
                     self.emit(LirInstr::LoadLocal {
                         dst: reloaded,

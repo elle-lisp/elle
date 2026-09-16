@@ -1,6 +1,10 @@
-//! Cell/destructure lowering: the transparent MakeCell/DerefCell/SetCell
-//! delegations and the Destructure-node entry point plus its `lower_bind_value`
-//! helper. Kept together because they all sit on the functionalize/lowerer
+// audited: 2026-09-16
+// src/lir/lower/AGENTS.md
+// docs/impl/region/cells.md
+//! The `Destructure` node's entry point, the cell delegations, and the store
+//! each bound name takes.
+//!
+//! Kept together because they all sit on the functionalize/lowerer
 //! double-handling contract for capture cells (see `lower_make_cell`).
 
 use super::*;
@@ -17,7 +21,10 @@ impl<'a> Lowerer<'a> {
         _span: &Span,
     ) -> Result<Reg, String> {
         let value_reg = self.lower_expr(value)?;
-        self.lower_destructure(pattern, value_reg, strict)?;
+        // One cursor per destructure: its builds and the placeholders the
+        // solver recorded against this node count in the same order
+        // (docs/impl/region/anchors.md).
+        self.lower_destructure(pattern, value_reg, strict, &mut RestBuilds::new())?;
         // Destructure produces nil as its expression value
         self.emit_const(LirConst::Nil)
     }
@@ -29,8 +36,7 @@ impl<'a> Lowerer<'a> {
     /// the lowerer's lower_let/lower_letrec/lower_define independently wrap
     /// needs_capture bindings in cells. The transparent delegation here works
     /// because both sides agree on which bindings need cells (via
-    /// `needs_capture()`). Phase 3 will remove the lowerer's implicit cell
-    /// creation and make these methods emit real cell instructions.
+    /// `needs_capture()`).
     pub(in crate::lir::lower) fn lower_make_cell(&mut self, value: &Hir) -> Result<Reg, String> {
         self.lower_expr(value)
     }

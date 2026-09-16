@@ -1,4 +1,8 @@
-//! Binding-related lowering: let, letrec, define, set
+// audited: 2026-09-16
+// src/lir/lower/AGENTS.md
+// docs/bindings.md
+//! Lowering the binding forms: `let`, `letrec`, `def`, `var`, `assign`, and the
+//! destructure any of them may bind through.
 //!
 //! Split by concern across submodules; all methods hang off the shared
 //! `impl<'a> Lowerer<'a>`:
@@ -14,3 +18,5 @@ mod cell;
 mod define;
 mod destructure;
 mod r#let;
+
+use destructure::RestBuilds;

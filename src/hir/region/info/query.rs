@@ -1,4 +1,4 @@
-// audited: 2026-09-15
+// audited: 2026-09-16
 //! The queries over [`RegionInfo`]: what a binding holds, what an operand
 //! hands a call, and where the merge forest sends a region.
 //!
@@ -68,10 +68,28 @@ impl RegionInfo {
         h.for_each_child(|c| self.operand_value_regions(c, out));
     }
 
+    /// The placeholder minted for the `index`-th collection `node`'s pattern
+    /// builds, counting in the order `lower_destructure` reaches them
+    /// (`HirPattern::building_rests`).
+    ///
+    /// The lookup a build site makes, and the only one that answers for a
+    /// collection no name of the program reaches.
+    ///
+    /// docs/impl/region/anchors.md
+    pub fn rest_collection_at(&self, node: HirId, index: usize) -> Option<Region> {
+        self.pattern_rest_regions
+            .get(&node)?
+            .get(index)
+            .map(|c| c.region)
+    }
+
     /// The placeholder minted for the collection `binding` reaches at `node`,
     /// or `None` where the node's pattern built none for it. One lookup answers
     /// for either kind of name, the rest name and a name a further pattern
     /// bound alike, because both must outlive the collection.
+    ///
+    /// The lookup a decision tree makes, which reaches a rest name through its
+    /// access path and has no build order to count with.
     ///
     /// docs/impl/region/anchors.md
     pub fn rest_collection_region(&self, node: HirId, binding: Binding) -> Option<Region> {
