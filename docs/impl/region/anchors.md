@@ -176,13 +176,21 @@ walking its own access path and re-runs the `Slice` step on every path through
 the rest, so the count there is a fact about the tree rather than about the
 pattern.
 
-Pinned by the `q`–`u` rows of `tests/elle/region-rest-pattern-slice.lisp` (the
-reclamation, with the wildcard rest and the `match` nested rest stated as the
-shapes that stay on the baseline), `regions::tests::patterns` (the holder set,
-structurally), and rows 13 and 14 of
-`tests/elle/region-rest-pattern-slice-uaf.lisp` (the soundness complement — a
-name the inner pattern binds, read after the destructure and handed to a tail
-call, must survive the collection's release).
+A third shape keeps the baseline for a reason of the relocation's rather than
+the pattern's. Where a holder is an operand of the body's frame-replacing tail
+call, the collection's release keeps its exemption and strands on the closure
+path, because the caller holds no counted reference on an element to move
+([relocate.md](relocate.md)). The destructure keeps its release on every other
+path, so `(let [[x & [p q]] a] (f p q))` is the one nested shape still paying
+the old rate.
+
+Pinned by the `q`–`t` rows of `tests/elle/region-rest-pattern-slice.lisp` (the
+reclamation), its `u`–`w` rows (the three baselines, each of which must read
+the FULL rate), `regions::tests::patterns` (the holder set, structurally),
+`lir::lower::tests::release::restpattern` (the tail-call placement, per slot),
+and rows 13 and 14 of `tests/elle/region-rest-pattern-slice-uaf.lisp` (the
+soundness complement — a name the inner pattern binds, read after the
+destructure and handed to a tail call, must survive the release).
 
 ## `break` transfers its value; it does not consume it
 

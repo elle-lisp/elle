@@ -131,11 +131,16 @@ reconsideration is per region rather than per binding.
 What the exemption buys differs between the two kinds of name that reach a
 collection, and it is legal for both. For the **rest name** the call receives
 the collection itself, so the callee's owned-param release consumes the
-reference and the exemption is the ownership move. For a name the rest
-**sub-pattern** bound — `p` in `[a & [p q]]` — the call receives an element
-instead, so nothing takes the release over and the collection strands on the
-closure path: the bounded fallback the relocation takes for every region it
-refuses ([anchors.md](anchors.md)). Pinned by
+reference and the exemption is the ownership move.
+
+For a name the rest **sub-pattern** bound — `p` in `[a & [p q]]` — the call
+receives an element instead, and the caller holds no counted reference on an
+element to move. So the two answers available are a strand and an over-free.
+Relocating drops the collection's reference on the element, and the callee's
+owned-param release then takes the element's last one, under its own read. The
+strand is the answer: the collection is held to fiber teardown on the closure
+path, at one region per call, and the destructure keeps the release it already
+had on every other path ([anchors.md](anchors.md)). Pinned by
 `tests/elle/region-rest-pattern-slice-uaf.lisp` (the fault) and
 `lir::lower::tests::release::restpattern` (the placement).
 
