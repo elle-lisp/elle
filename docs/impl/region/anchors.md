@@ -213,9 +213,10 @@ and `{& _}` both skip.
 
 One predicate answers this for both sides (`HirPattern::own_rest_builds`). A
 build the lowerer skips and a placeholder the solver mints have to be the same
-count in the same order, or every later index names the wrong allocation. The
-sequential `match` fallback a suspending guard forces reads the same predicate,
-its own `IsArray` test having already made the check the opcode would.
+count in the same order, or every later index names the wrong allocation. Every
+lowering of a rest reads it — `lower_destructure`, and the sequential `match`
+fallback a suspending guard forces — so `[a & _]` builds nothing wherever it is
+written.
 
 The language-level half is `tests/elle/destructuring-rest-wildcard.lisp`: the
 fixed names a `& _` pattern still binds, and the type error the skipped opcode
