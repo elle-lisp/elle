@@ -1,6 +1,6 @@
-// audited: 2026-09-14
-//! The phantom placeholder regions: a value the walk can name no compiled
-//! allocation for still needs a release, so it is given a region of its own.
+// audited: 2026-09-15
+//! The phantom placeholder regions: a value with no compiled allocation to
+//! name still needs a release, so it is given a region of its own.
 //!
 //! docs/impl/region/cells.md
 //! docs/impl/region/anchors.md

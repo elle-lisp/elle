@@ -1,6 +1,6 @@
-// audited: 2026-09-14
-//! What the walk records about a reassigned binding: which 1-slot-container
-//! class it falls in, where its binder stores, and who reads its content whole.
+// audited: 2026-09-15
+//! What the walk records about a reassigned binding: the 1-slot-container
+//! class it falls in, where its binder stores, and who reads it whole.
 //!
 //! docs/impl/region/bindings.md
 

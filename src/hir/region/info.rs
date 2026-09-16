@@ -1,6 +1,6 @@
 // audited: 2026-09-15
-//! `RegionInfo`: what region inference produces for one compilation unit — the
-//! per-allocation and per-scope assignments, and the cuts the lowerer consults.
+//! `RegionInfo`: what region inference produces for a compilation unit — the
+//! per-allocation and per-scope assignments, and the lowerer's cuts.
 //!
 //! docs/impl/region/model.md
 //!
