@@ -1,4 +1,7 @@
-//! Unit tests (`super` is the parent impl module).
+//! audited: 2026-09-16
+//! Tests for the epoch rule tables and the collectors that read them.
+//!
+//! docs/epochs.md
 
 use super::*;
 
@@ -149,6 +152,20 @@ fn a_fused_unquote_splice_the_target_cannot_spell_is_refused() {
         .respell(&Token::UnquoteSplicing, &Lexicon::no_semicolon())
         .unwrap_err();
     assert!(err.contains(",;"), "{err}");
+}
+
+#[test]
+fn every_desugar_rule_names_a_token_the_reader_wraps_a_form_in() {
+    // The rule carries the token alone and reads the form from it, so a rule
+    // naming a token that stands for no form has nothing to rewrite to. The
+    // pass would refuse it at run time; this refuses it at test time, before
+    // an epoch ships one.
+    for shorthand in desugar_rules_in_range(0, CURRENT_EPOCH) {
+        assert!(
+            shorthand.shorthand_form().is_some(),
+            "{shorthand:?} is not a reader shorthand"
+        );
+    }
 }
 
 #[test]
