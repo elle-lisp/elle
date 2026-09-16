@@ -1,6 +1,6 @@
 # Where a release is anchored
 
-<!-- audited: 2026-09-15 -->
+<!-- audited: 2026-09-16 -->
 
 Where the solver anchors a release: what each binding form pins, and what a
 `break` does to the releases its jump passes over.
@@ -143,11 +143,13 @@ it — past the merge every arm, every failed guard and every rejected alternati
 arrives at. A collection built by an arm that then failed its guard is released
 there, on the path that abandoned it.
 
-The placeholder is keyed on the **rest sub-pattern**, not on a name. A rest
-matched by a further pattern — `[a & [p q]]` — builds a collection no single
-name holds, and `p` and `q` are projections of that collection rather than of
-the scrutinee, so it has to outlive both. One region therefore goes to every
-name the sub-pattern binds, and the binding chain covers each of them.
+The placeholder is keyed on the rest sub-pattern **by position**, not on a
+name. `HirPattern::building_rests` enumerates a pattern's builds in the order
+`lower_destructure` reaches them, so an index into that list names the same
+allocation on both sides: the solver mints the n-th placeholder for the n-th
+build, and the lowerer parks the n-th collection against it. A name is what the
+release is then carried OVER, and never what the region is found by — which is
+what gives a build no name reaches a route like any other.
 
 Pinned by `tests/elle/region-rest-pattern-slice.lisp` (the reclamation, with the
 flat pattern and the list rest as the discriminators that must already read
@@ -156,18 +158,28 @@ zero), `regions::tests::patterns` (the placement, structurally), and
 rest collection returned, stored, captured, carried across a yield, or read
 after the loop iteration that built it must survive the release).
 
-### Where the holder set stops
+### What the names reach, and where the descent stops
+
+The position keys the region; the **holders** decide where its release lands.
+`HirPattern::rest_collection_holders` gives a sub-pattern the names that reach
+its collection, and the binding chain carries the release over each of their
+uses. A rest matched by a further pattern — `[a & [p q]]` — builds a collection
+no single name holds, and `p` and `q` are projections of that collection rather
+than of the scrutinee, so it has to outlive both.
 
 The descent stops at a nested rest that builds a collection of its own.
 `[a & [p & q]]` builds two, and `q` holds the inner one: that collection is a
 fresh array of values copied out of the outer one, so it points into no page
-the outer collection owns and owes it nothing. Stopping there is also what
-keeps each name in one group, which is what lets the lowerer read a
-collection's region off any name its sub-pattern binds.
+the outer collection owns and owes it nothing.
 
-A sub-pattern that binds no name leaves the collection with nothing to key on,
-and it keeps the conservative baseline. Two shapes reach that: `[a & _]`, and
-`[a & [& q]]` whose only name holds the inner collection.
+So a sub-pattern that binds no name has an empty holder set, and nothing
+extends its release past the base pin. `[a & [& q]]` is the shape that reaches
+it: the outer collection's only name holds the inner one. The destructure node
+is late enough for it, because the inner build reads the outer collection while
+the pattern is still being lowered and every name the pattern binds projects a
+collection of its own. No operand of a tail call can name such a collection
+either, so it takes none of the exemption below and its release is carried
+ahead of the call like the scrutinee's ([relocate.md](relocate.md)).
 
 `match` keeps the baseline for a nested rest whole (elle-lisp/elle#1127).
 `lower_destructure` emits one build per rest sub-pattern, so one placeholder
@@ -176,7 +188,7 @@ walking its own access path and re-runs the `Slice` step on every path through
 the rest, so the count there is a fact about the tree rather than about the
 pattern.
 
-A third shape keeps the baseline for a reason of the relocation's rather than
+One more shape keeps the baseline, for a reason of the relocation's rather than
 the pattern's. Where a holder is an operand of the body's frame-replacing tail
 call, the collection's release keeps its exemption and strands on the closure
 path, because the caller holds no counted reference on an element to move
@@ -184,13 +196,35 @@ path, because the caller holds no counted reference on an element to move
 path, so `(let [[x & [p q]] a] (f p q))` is the one nested shape still paying
 the old rate.
 
-Pinned by the `q`–`t` rows of `tests/elle/region-rest-pattern-slice.lisp` (the
-reclamation), its `u`–`w` rows (the three baselines, each of which must read
-the FULL rate), `regions::tests::patterns` (the holder set, structurally),
-`lir::lower::tests::release::restpattern` (the tail-call placement, per slot),
-and rows 13 and 14 of `tests/elle/region-rest-pattern-slice-uaf.lisp` (the
-soundness complement — a name the inner pattern binds, read after the
-destructure and handed to a tail call, must survive the release).
+### A wildcard rest builds nothing
+
+`[a & _]` is how a destructure says "ignore the rest". The sub-pattern binds no
+name and reads nothing out of the collection, so the collection is garbage from
+birth: `lower_destructure` emits no build for it at all, which takes the rate to
+zero rather than to one built and freed.
+
+`ArrayMutSliceFrom` signals a type error on a non-array, though, and that check
+is the pattern's whether or not anything reads what the opcode built. A fixed
+element's own strict extraction makes the identical check, so `[a & _]` skips
+the build while `[& _]` — which has no fixed element — keeps it and takes an
+ordinary placeholder. `StructRest` signals nothing on any input, so `{:k v & _}`
+and `{& _}` both skip.
+
+One predicate answers this for both sides (`HirPattern::own_rest_builds`). A
+build the lowerer skips and a placeholder the solver mints have to be the same
+count in the same order, or every later index names the wrong allocation. The
+sequential `match` fallback a suspending guard forces reads the same predicate,
+its own `IsArray` test having already made the check the opcode would.
+
+Pinned by the `q`–`v` and `x` rows of
+`tests/elle/region-rest-pattern-slice.lisp` (the reclamation), its `u` and `w`
+rows (the two baselines, each of which must read the FULL rate),
+`regions::tests::patterns` (the positional key and the holder set,
+structurally), `lir::lower::tests::release::restpattern` (the parked slot and
+the tail-call placement, per slot), and rows 13 to 15 of
+`tests/elle/region-rest-pattern-slice-uaf.lisp` (the soundness complement — a
+name the inner pattern binds, read after the destructure and handed to a tail
+call, must survive the release).
 
 ## `break` transfers its value; it does not consume it
 
