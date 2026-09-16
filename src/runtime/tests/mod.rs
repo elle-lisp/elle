@@ -1,3 +1,4 @@
+// audited: 2026-09-16
 //! Unit tests (`super` is the parent impl module).
 
 use super::*;
@@ -12,5 +13,6 @@ fn cons() -> HeapObject {
 }
 
 mod lifecycle;
+mod operandstack;
 mod ownership;
 mod selfrec;
