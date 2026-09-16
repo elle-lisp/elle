@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-16 -->
 
 Low-level Intermediate Representation. SSA form with virtual registers
 and basic blocks. Architecture-independent but close to target.
@@ -250,6 +250,26 @@ value, and the second one lands in the reserved local region. This is why
 `Terminator::Jump` trims only down to the target's recorded depth
 (`yield_stack_state`, or `block_entry_depth` for a back edge into a block
 already emitted) rather than to the first live value.
+
+### A back edge restores the depth its target was fixed at
+
+The orphan trim alone does not meet rule 11. `pop_trailing_orphans_to` stops at
+the first live cell, so an orphan the block left *under* a live one survives the
+jump. Straight-line code absorbs that residue; a loop accumulates it. The header
+runs again a cell or two deeper each time, and the activation's operand stack
+grows for as long as the loop does — an unbounded leak that no region gauge
+sees, because the cells are a `Fiber`'s own `SmallVec` rather than heap objects.
+
+A back edge is the one edge that may trim to the target's depth outright, so
+`Terminator::Jump` uses `pop_to` there: the target was emitted before this edge
+existed, its simulation names only cells below that depth, and it therefore
+reads nothing this block pushed. Every surplus cell goes, orphan and live alike,
+and the header meets the same stack shape on every pass.
+
+A forward merge keeps the orphan trim, because the same argument does not hold
+for it. Its target is still ahead of the cursor, and a later edge's own result
+may sit above an orphan — trimming to the depth would drop the result and keep
+the orphan.
 
 ## Key instructions
 
