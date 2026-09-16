@@ -1,3 +1,10 @@
+// audited: 2026-09-15
+//! Lowering a binding form's destructure: the extraction each pattern shape
+//! emits, and the slot each extracted value is stored into.
+//!
+//! src/lir/lower/AGENTS.md
+//! docs/destructuring.md
+
 use super::*;
 
 impl<'a> Lowerer<'a> {
@@ -146,6 +153,7 @@ impl<'a> Lowerer<'a> {
                         src: reloaded,
                         index: elements.len() as u16,
                     });
+                    let slice = self.park_rest_collection(rest_pat, slice);
                     self.lower_destructure(rest_pat, slice, strict)?;
                 }
                 Ok(())
@@ -194,6 +202,7 @@ impl<'a> Lowerer<'a> {
                         src: reloaded,
                         index: elements.len() as u16,
                     });
+                    let slice = self.park_rest_collection(rest_pat, slice);
                     self.lower_destructure(rest_pat, slice, strict)?;
                 }
                 Ok(())
@@ -288,6 +297,7 @@ impl<'a> Lowerer<'a> {
                         src: reloaded,
                         exclude_keys: exclude,
                     });
+                    let rest_reg = self.park_rest_collection(rest_pat, rest_reg);
                     self.lower_destructure(rest_pat, rest_reg, strict)?;
                 }
 
@@ -351,6 +361,7 @@ impl<'a> Lowerer<'a> {
                         src: reloaded,
                         exclude_keys: exclude,
                     });
+                    let rest_reg = self.park_rest_collection(rest_pat, rest_reg);
                     self.lower_destructure(rest_pat, rest_reg, strict)?;
                 }
 

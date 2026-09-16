@@ -1,3 +1,10 @@
+// audited: 2026-09-14
+//! Where the solver places a release around a loop: once per activation for a
+//! cell, once per iteration for what the body allocates.
+//!
+//! docs/impl/region/cells.md
+//! docs/impl/region/anchors.md
+
 use super::*;
 
 /// Counter-factual for the Family E capture-cell UAF: a `(begin (def x
@@ -120,7 +127,7 @@ fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() 
 }
 
 /// Counter-factual for the env-cell-in-loop UAF
-/// (tests/elle/region-capture-cell-loop-uaf.lisp, cap2.lisp). A
+/// (tests/elle/region-capture-cell-loop-uaf.lisp). A
 /// `@`-mutable captured local DEFINED INSIDE a loop and captured by a closure
 /// built in that loop is a `populate_env` env cell minted EXACTLY ONCE per
 /// activation (the box is not re-allocated per iteration; only its content is
@@ -130,7 +137,7 @@ fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() 
 /// place and dying within the iteration nets the box region -1 each pass
 /// (capture-incref +1, free-cascade -1, DecrefCellRegion -1), freeing the
 /// once-allocated box on iteration 1 → the next iteration reads the recycled
-/// cell. `hoist_cell_release_past_loops` lifts a cell-release region's
+/// cell. The env-cell hoist lifts a cell-release region's
 /// decref_point to the outermost enclosing While/Loop, which the lowerer emits
 /// AFTER the loop. Assert the hoist at the region-analysis layer:
 /// region_data[cell_region].decref_point is at/after the enclosing While node,
@@ -242,7 +249,7 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
 /// recorded scope node. A pattern that records no scope has none, absence reads as
 /// bound-outside, and the release is hoisted to the loop node: one release for N
 /// per-iteration scrutinees, N−1 held to fiber teardown
-/// (docs/impl/region/mechanism.md § "Every binder records its scope").
+/// (docs/impl/region/anchors.md § "Every binder records its scope").
 ///
 /// Region-analysis invariant: the scrutinee's region is allocated in the loop
 /// body, so its `decref_point` must stay STRICTLY inside the loop's subtree —

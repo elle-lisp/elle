@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-15
 // src/lir/lower/AGENTS.md
 // docs/destructuring.md
 //! Lowering the sequence patterns: pair, list, tuple, array.
@@ -321,6 +321,8 @@ impl<'a> Lowerer<'a> {
                         index: elements.len() as u16,
                     });
 
+                    let slice_reg = self.park_rest_collection(rest_pat, slice_reg);
+
                     self.lower_pattern_match(rest_pat, slice_reg, fail_label)?;
                 }
 
@@ -437,6 +439,8 @@ impl<'a> Lowerer<'a> {
                         src: reloaded,
                         index: elements.len() as u16,
                     });
+
+                    let slice_reg = self.park_rest_collection(rest_pat, slice_reg);
 
                     self.lower_pattern_match(rest_pat, slice_reg, fail_label)?;
                 }

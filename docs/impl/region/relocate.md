@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-09-10 -->
+<!-- audited: 2026-09-15 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -103,6 +103,46 @@ hoisting its release ahead of the call would free what the callee is about to ta
 over (stdlib `zip`'s `arrs`, a second name for the array an inner `let` returned).
 Pinned by `tests/elle/region-tailcall-arg-transfer.lisp`, whose alias case is the
 counter-factual for reading a leaf's rule onto a whole.
+
+**A slot comparison cannot see a value held under two slot names.** The route
+reading above rests on one value having one slot, which is true of every leaf a
+pattern projects and false of the one it BUILDS. A rest name over an array or a
+struct holds a collection the destructure made, and the lowerer parks that
+collection in a slot of its own so the release has a stamped route the
+abandoned-frame walk can read ([anchors.md](anchors.md)). The call still passes
+the binding's slot, so the comparison finds two different slots and reads the
+argument as one the call does not move.
+
+Nothing then takes the release over, and the relocation carries it ahead of the
+call: `(let [[x y & r] a] (length r))` releases the collection two instructions
+before `length` derefs it. The failure is a use-after-free rather than the leak
+the leaf reading was written to close, so the two cases need different answers
+and one comparison cannot give both.
+
+The answer is to ask whether the name reaches a collection the destructure
+BUILT before asking which slot holds it. Such a collection is routed through a
+slot of the lowerer's own that no call passes, so the comparison can only read
+it as unmoved; the exemption therefore stands on that region whatever its route
+loads (`RegionInfo::names_built_rest_collection`). Every other region the name
+carries is the scrutinee's, which the name only borrows, and those keep the
+slot comparison — one name is both things at once, which is why the
+reconsideration is per region rather than per binding.
+
+What the exemption buys differs between the two kinds of name that reach a
+collection, and it is legal for both. For the **rest name** the call receives
+the collection itself, so the callee's owned-param release consumes the
+reference and the exemption is the ownership move.
+
+For a name the rest **sub-pattern** bound — `p` in `[a & [p q]]` — the call
+receives an element instead, and the caller holds no counted reference on an
+element to move. So the two answers available are a strand and an over-free.
+Relocating drops the collection's reference on the element, and the callee's
+owned-param release then takes the element's last one, under its own read. The
+strand is the answer: the collection is held to fiber teardown on the closure
+path, at one region per call, and the destructure keeps the release it already
+had on every other path ([anchors.md](anchors.md)). Pinned by
+`tests/elle/region-rest-pattern-slice-uaf.lisp` (the fault) and
+`lir::lower::tests::release::restpattern` (the placement).
 
 **Whether the frame holds the region alone** — the admission, and escape is its
 sole authority. The exemption above is a statement about *arguments*, and

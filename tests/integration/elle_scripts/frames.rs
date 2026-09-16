@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-15
 // Guardfree pins for where a release lands: the branch-arm window, the break window, and the binder pins.
 //
 // docs/analysis/testing.md
@@ -70,7 +70,7 @@ fn region_match_rest_tail_move_uaf() {
 }
 
 // Guard — `break` TRANSFERS its value to the enclosing block
-// (docs/impl/region/mechanism.md § "`break` transfers its value; it does not
+// (docs/impl/region/anchors.md § "`break` transfers its value; it does not
 // consume it"). The transfer moves the broken value's release out of the block
 // body — which the break's jump to the exit label skips — and onto the `Block`
 // node, emitted after that label. That placement is correct only while the
@@ -92,7 +92,7 @@ fn region_break_transfer_uaf() {
 
 // Guard — the same jump that strands the broken value strands every OTHER
 // release between the break site and the exit label, and those are re-anchored
-// to the block too (docs/impl/region/mechanism.md § "A release the break jumps
+// to the block too (docs/impl/region/anchors.md § "A release the break jumps
 // over is not a release"). Moving a release later can only over-keep — while it
 // still names the same value when it runs, which is what this drives: a window
 // value read after the block, stored into a container, returned, captured by a
@@ -111,7 +111,7 @@ fn region_break_skip_uaf() {
 
 // Guard — a region live-in to a branch has ONE release, and it is anchored where
 // every arm reaches it rather than inside the arm that happens to name it last
-// (docs/impl/region/mechanism.md § "A release inside one arm is not a release on
+// (docs/impl/region/window.md § "A release inside one arm is not a release on
 // the other arms"). The release moves later, which can only over-keep — while it
 // still drops the frame's own reference and no other, which is what this drives:
 // an arm that stores the value into a container, hands it to a closure, returns
@@ -153,7 +153,7 @@ fn region_inline_result_naming_uaf() {
 // Guard — a `match` arm's pattern binding records its scope, so a read of it
 // inside a loop no longer reads as a read of a loop-external binding and the
 // scrutinee's release stays in the body that allocates it (docs/impl/region/
-// mechanism.md § "Every binder records its scope"). The release moves EARLIER —
+// anchors.md § "Every binder records its scope"). The release moves EARLIER —
 // from after the loop to once per iteration — so what it must not do is drop a
 // projection someone else still holds. This drives every hand-off out of the
 // iteration: the arm stores the projection into a fn-local cell, into a
@@ -189,9 +189,26 @@ fn region_splice_args_uaf() {
     );
 }
 
+// Guard — a rest name owns the collection its pattern BUILT, so it carries a
+// release where it carried none (docs/impl/region/anchors.md § "A rest
+// pattern's collection is built, not read out"). This drives every way such a
+// collection leaves the destructure: read in its own scope, returned, stored
+// into a container that outlives the loop, captured by a closure called
+// afterwards, borrowed element-wise, carried across a fiber yield, left behind
+// by a failed guard, broken out of a loop, and handed to a tail call. Freeing
+// any of them early faults on the read — SIGSEGV under guardfree. The leak face
+// is `region-rest-pattern-slice.lisp`.
+#[test]
+fn region_rest_pattern_slice_uaf() {
+    run_elle_script_with_args(
+        "region-rest-pattern-slice-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a `def` evaluates to what it bound, so its initializer's demise must
 // not be narrowed onto the initializer when nothing reads the binding
-// (docs/impl/region/mechanism.md § "A binder's init release lands after the slot
+// (docs/impl/region/anchors.md § "A binder's init release lands after the slot
 // store"). Every other binder's value is its BODY, so an unread init really is
 // dead at the init; a `def`'s value IS the init and flows straight on. This
 // drives every way it leaves — handed to a callee, returned, bound to a second
@@ -275,7 +292,7 @@ fn region_reassign_callresult_store() {
     );
 }
 
-// Guard — the per-path return frontier (docs/impl/region/mechanism.md § "The return
+// Guard — the per-path return frontier (docs/impl/region/compensate.md § "The return
 // frontier is per-path"). A returned region is the caller's to free only on the
 // paths that hand it over; a branch arm that leaves without it, or one that leaves
 // WITH it while a sibling arm holds the `decref_point`, still owes the callee-side
@@ -295,7 +312,7 @@ fn region_return_arm_escape_uaf() {
 }
 
 // Guard — branch compensation reads the ARM STRUCTURE, neither the branch's kind nor
-// its arity (docs/impl/region/mechanism.md § "The return frontier is per-path"). A `match` arm
+// its arity (docs/impl/region/compensate.md § "The return frontier is per-path"). A `match` arm
 // that never touches a live local owes that local's release, exactly as a two-armed
 // `if`'s dead arm does. The head release is the one admitted unconditionally past
 // the return frontier, so landing it on the wrong arm frees the value under the arm

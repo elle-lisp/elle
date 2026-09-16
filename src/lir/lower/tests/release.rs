@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-14
 // ── Region-lifecycle: decref/release emission ────────────────────
 //
 // Where the lowerer puts each region's release, split by the question each
@@ -15,6 +15,8 @@
 //   a release route.
 // - `shortcircuit` — the same placement across the branch `and`/`or` lower to,
 //   whose arms are their operands.
+// - `restpattern` — the collection a rest pattern built, whose release route is
+//   a parked slot rather than the slot a call passes.
 
 // Re-glob the parent's test imports so each submodule can `use super::*;`.
 use super::*;
@@ -24,6 +26,7 @@ mod breakexit;
 mod emission;
 mod frameexit;
 mod order;
+mod restpattern;
 mod shortcircuit;
 
 /// The local slots each block of `func` releases by value, tagged with whether

@@ -1,4 +1,7 @@
-//! Keyed and or-pattern lowering: Struct / Table / Or.
+// audited: 2026-09-15
+//! Keyed and or-pattern lowering: `Struct`, `Table`, `Or`.
+//!
+//! docs/match.md
 
 use super::*;
 
@@ -87,6 +90,7 @@ impl<'a> Lowerer<'a> {
                         src: reloaded,
                         exclude_keys: exclude,
                     });
+                    let rest_reg = self.park_rest_collection(rest_pat, rest_reg);
                     self.lower_pattern_match(rest_pat, rest_reg, fail_label)?;
                 }
 
@@ -169,6 +173,7 @@ impl<'a> Lowerer<'a> {
                         src: reloaded,
                         exclude_keys: exclude,
                     });
+                    let rest_reg = self.park_rest_collection(rest_pat, rest_reg);
                     self.lower_pattern_match(rest_pat, rest_reg, fail_label)?;
                 }
 
