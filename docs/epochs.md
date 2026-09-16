@@ -1,5 +1,7 @@
 # Epochs
 
+<!-- audited: 2026-09-16 -->
+
 Epochs are Elle's mechanism for making breaking changes to the language while
 preserving backwards compatibility. Each epoch is a numbered version of the
 language surface syntax. Source files can declare the epoch they target, and
@@ -54,8 +56,8 @@ registered today shares one set of rules, so no file lexes differently yet.
 ## Migration rule types
 
 Each epoch bump defines a set of migration rules. The `MigrationRule` enum in
-`src/epoch/rules.rs` has six variants: `Rename`, `Remove`, `Unwrap`, `Replace`,
-`FlattenBindings`, and `FlattenClauses`.
+`src/epoch/rules.rs` has seven variants: `Rename`, `Remove`, `Unwrap`,
+`Replace`, `FlattenBindings`, `FlattenClauses`, and `Desugar`.
 
 ### Rename
 
@@ -103,6 +105,26 @@ MigrationRule::Remove {
 
 Removals require the author to manually update the code. They are also checked
 by `elle rewrite` (see below).
+
+### Desugar
+
+Replaces a reader shorthand with the form it stands for. A shorthand is a
+prefix token that wraps the form written after it — `;expr` stands for
+`(splice expr)`:
+
+```rust
+MigrationRule::Desugar { shorthand: Token::Splice }
+```
+
+The rule names only the token. `Token::shorthand_form` says which form each
+shorthand stands for, so the rule cannot name the wrong one.
+
+An epoch declares this when it takes the shorthand's spelling away, which
+makes the change lexical as well as structural. The rule is the half that
+`Lexicon::respell` cannot reach: a respelling answers about one token, and
+this rewrite has to reach past the prefix to the end of the form the prefix
+wraps. See [`impl/lexicon.md`](impl/lexicon.md) for the mechanism and for
+the condition a shorthand must meet before an epoch may desugar it.
 
 ## The `elle rewrite` CLI tool
 
@@ -298,7 +320,7 @@ Multi-body arms are wrapped in `(begin ...)`. The `(else body)` form in
 
 ### Epoch 10 — cons→pair, car→first, cdr→rest
 
-Classic Lisp pair操作 names are replaced with descriptive alternatives:
+Classic Lisp pair operation names are replaced with descriptive alternatives:
 
 | Old (epoch ≤ 9) | New (epoch 10) |
 |-----------------|----------------|

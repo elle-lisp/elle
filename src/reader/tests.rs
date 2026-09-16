@@ -1,4 +1,8 @@
-//! Unit tests (`super` is the parent impl module).
+//! audited: 2026-09-16
+//! Tests for the reader: the epoch prescan, the lexicon it selects, and the
+//! tokens it builds.
+//!
+//! docs/impl/lexicon.md
 
 use super::*;
 use crate::epoch::rules::Lexicon;
@@ -8,6 +12,39 @@ use crate::epoch::CURRENT_EPOCH;
 /// exists for it, so every reader entry point must refuse the source.
 fn too_new() -> String {
     format!("(elle/epoch {})", CURRENT_EPOCH + 1)
+}
+
+#[test]
+fn a_shorthand_form_names_what_the_reader_actually_builds() {
+    // `Token::shorthand_form` is the single authority a `Desugar` migration
+    // reads to spell a shorthand out (docs/impl/lexicon.md). It answers from
+    // a hand-written table, so it can drift from the parser it describes:
+    // rename the wrapping the reader builds and the migration would emit a
+    // form that no longer means the same thing, with nothing failing here.
+    let cases = [
+        (Token::Quote, "'x"),
+        (Token::Quasiquote, "`x"),
+        (Token::Unquote, ",x"),
+        (Token::UnquoteSplicing, ",;x"),
+        (Token::Splice, ";x"),
+    ];
+    for (token, spelling) in cases {
+        let forms = read_syntax_all(crate::syntax::thread_arena(), spelling, "t.lisp").unwrap();
+        assert_eq!(
+            token.shorthand_form(),
+            Some(forms[0].kind_label()),
+            "{spelling}"
+        );
+    }
+}
+
+#[test]
+fn a_token_that_wraps_nothing_names_no_form() {
+    // `@[1 2]` wraps the form after it the same way a shorthand does, and
+    // stands for no `(sym ...)` — so it must not be desugarable.
+    assert_eq!(Token::ListSugar.shorthand_form(), None);
+    assert_eq!(Token::LeftParen.shorthand_form(), None);
+    assert_eq!(Token::Symbol("splice").shorthand_form(), None);
 }
 
 #[test]

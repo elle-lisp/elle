@@ -1,3 +1,8 @@
+// audited: 2026-09-16
+// The edit collectors behind `elle rewrite`: one per migration rule kind, each
+// turning a rule into byte-span edits over the source text.
+// docs/epochs.md
+
 use super::*;
 
 /// Scan source for removed symbols and return an error listing them.
@@ -224,6 +229,81 @@ pub(super) fn try_match_replace<'a>(
         byte_len: form_end - form_start,
         replacement: result,
     })
+}
+
+/// Collect edits that spell every named reader shorthand out as its form:
+/// `;x` becomes `(splice x)` (docs/impl/lexicon.md § "Desugaring a reader
+/// shorthand").
+///
+/// Each shorthand yields two edits rather than one span over the whole
+/// `<prefix><form>` text. A single span would have to build its replacement
+/// from source bytes, and a shorthand nested in those bytes would ride along
+/// unrewritten; two edits let the inner one rewrite itself.
+pub(super) fn collect_desugar_edits(
+    src: SourceText<'_>,
+    shorthands: &[Token<'static>],
+) -> Result<Vec<Edit>, String> {
+    if shorthands.is_empty() {
+        return Ok(Vec::new());
+    }
+    let tokens = src.code_tokens()?;
+    let shebang = crate::reader::shebang_len(src.text);
+
+    let mut edits = Vec::new();
+    for i in 0..tokens.len() {
+        let (token, offset, _) = &tokens[i];
+        if !shorthands.contains(token) {
+            continue;
+        }
+        // The shebang line is the operating system's, however this lexicon
+        // tokenized it (`SourceText::in_shebang`).
+        if *offset < shebang {
+            continue;
+        }
+        let Some(form) = token.shorthand_form() else {
+            return Err(format!(
+                "{}: {:?} names no form to desugar into",
+                src.name, token
+            ));
+        };
+
+        // A prefix with no form after it — `(f ;)` or a `;` at end of input —
+        // does not parse. The reader reports that. Wrapping whatever token
+        // comes next would rewrite it into different broken text, and a
+        // closing delimiter is the case that looks like a form and is not.
+        let Some((next, form_start, _)) = tokens.get(i + 1) else {
+            continue;
+        };
+        if matches!(
+            next,
+            Token::RightParen | Token::RightBracket | Token::RightBrace
+        ) {
+            continue;
+        }
+
+        // The extent of the form this prefix wraps. `skip_one_form` walks the
+        // prefix and then that form, so it answers the index just past it.
+        let end = skip_one_form(&tokens, i);
+        if end <= i + 1 || end > tokens.len() {
+            continue;
+        }
+        let (_, last_start, last_len) = tokens[end - 1];
+        let form_end = last_start + last_len;
+
+        // From the prefix to the start of the form, so any whitespace the
+        // author left between them is absorbed by the one space in `(form `.
+        edits.push(Edit {
+            byte_offset: *offset,
+            byte_len: form_start - offset,
+            replacement: format!("({} ", form),
+        });
+        edits.push(Edit {
+            byte_offset: form_end,
+            byte_len: 0,
+            replacement: ")".to_string(),
+        });
+    }
+    Ok(edits)
 }
 
 /// Skip past one balanced form starting at `pos`. Returns the index after the form.
