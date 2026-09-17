@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+//! audited: 2026-09-17
 //! Who a submission is for, and the reference it holds on its operands until
 //! its completion has been read.
 //!
@@ -181,7 +181,7 @@ pub(super) struct Entry {
 /// completion reads the operands *through* the take, and the entry's hold can be
 /// the last reference to them (docs/impl/io-inflight.md § "A submitted operation
 /// holds the values its completion reads"). It goes when this does, or moves
-/// back into the table with [`PendingTable::restore`] — which is why the
+/// back into the table with [`restore`](super::PendingTable::restore) — which is why the
 /// submitter rides along, a resubmission being the same operation.
 pub(crate) struct TakenOp {
     pub(super) op: PendingOp,

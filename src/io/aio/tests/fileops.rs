@@ -1,3 +1,9 @@
+//! audited: 2026-09-17
+//! Seek, tell, open and spawn through the backend: the submissions that answer
+//! immediately or create a value on completion.
+//!
+//! src/io/AGENTS.md
+
 use super::*;
 
 #[test]
@@ -107,14 +113,10 @@ fn test_async_submit_spawn_echo() {
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         let val = completions[0].result.as_ref().expect("spawn failed");
-        let fields = val.as_struct().expect("expected struct");
-        assert!(
-            sorted_struct_get(fields, &TableKey::keyword("pid"))
-                .unwrap()
-                .as_int()
-                .unwrap()
-                > 0
-        );
+        let child = val
+            .as_external::<crate::io::request::ProcessHandle>()
+            .expect("a spawn answers a subprocess");
+        assert!(child.pid() > 0, "and the subprocess names a live child");
     });
 }
 
@@ -171,15 +173,16 @@ fn test_async_open_regular_file_returns_port() {
     });
 }
 
-/// Regression: a backend dropped with an io_uring op still in flight must
-/// not leave the kernel holding a write pointer into a buffer it is about to
-/// free. A `read-all` on a pipe whose write end is held open and empty blocks
-/// in the kernel — it stays in flight. `quiesce_pending` cancels and drains
-/// such ops on teardown, so an op's `BufferPool` slot is never freed while the
-/// kernel still owns it (which would let the eventual write corrupt the heap:
-/// `malloc(): unsorted double linked list corrupted`). Here we prove the
-/// mechanism deterministically: `quiesce()` cancels the in-flight read and
-/// reaps it, so `has_pending()` goes false.
+/// A backend dropped with an io_uring op still in flight leaves the kernel
+/// holding no write pointer into a buffer it is about to free
+/// (docs/io.md § "Backend teardown").
+///
+/// The trap: the hazard is the kernel's, not this process's, so it cannot be
+/// observed directly — a freed slot the kernel later writes shows up as
+/// `malloc(): unsorted double linked list corrupted` somewhere else entirely.
+/// What is deterministic is the mechanism: a `read-all` on a pipe whose write
+/// end is held open and empty stays in flight, and `quiesce()` must cancel and
+/// reap it, so `has_pending()` goes false.
 ///
 /// Counter-factual: with `quiesce_pending` stubbed to a no-op, the cancel is
 /// never issued, the blocked read stays pending, and the final assertion

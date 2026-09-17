@@ -1,6 +1,6 @@
 # subprocess
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-17 -->
 
 Spawning OS child processes, and the `subprocess` value every later call takes.
 
@@ -10,10 +10,13 @@ Up: [..](../AGENTS.md)
 
 | File | Contains |
 |------|----------|
-| `subprocess.rs` | The module root: `exit`, `halt`, `sys/pid`, `sys/args`, `sys/argv`, `sys/env`, and the primitive table for everything below |
-| `subprocess/exec.rs` | `subprocess/exec` and the option parsing it runs first |
-| `subprocess/handle.rs` | The `subprocess` value: its boundary check, its reads, and `wait`/`kill` |
-| `subprocess/tests.rs` | `subprocess/kill` against a recorded exit status |
+| `subprocess.rs` | The module root: `sys/exit`, `sys/trap-exit!`, `sys/halt`, `sys/args`, `sys/argv`, `sys/pid`, `sys/env`, and the primitive table for everything below |
+| `subprocess/exec.rs` | `subprocess/exec`, the options it parses and the sequence widening its args take |
+| `subprocess/handle.rs` | The `subprocess` value: its boundary check, its key set, and `wait`/`kill`/`pid`/`exit`/`subprocess?` |
+| `subprocess/tests.rs` | `subprocess/kill` against a recorded exit status, and the boundary every primitive refuses through |
+
+The type itself is `ProcessHandle` in `src/io/request/process.rs`, beside the
+exit record it carries; this module is the surface over it.
 
 ## The subprocess value
 
@@ -110,7 +113,17 @@ on every run.
 is minted on the scheduler heap and delivered by a fiber resume. Pinned by
 `subprocess_exec_declares_opaque_no_arg_clique`.
 
-The reads that answer a port declare `PassThrough` — the port lives in the
-subprocess's own region, never in the call's. `subprocess/pid`, `subprocess/exit`
-and `subprocess?` answer immediates and declare `Immediate`. See
+`subprocess/wait`, `subprocess/kill`, `subprocess/pid`, `subprocess/exit` and
+`subprocess?` all answer immediates and declare `Immediate`.
+
+Nothing here declares an effect for the reads that answer a port, because
+nothing here performs one: `get` and `values` hand back the port `Value` the
+handle carries, and both already declare what they declare for a struct — `get`
+is `Funnel`, a container read whose result is interior to its argument
+(docs/impl/region/clique.md § "Hard edges"). A subprocess is one more container
+they read, not a new effect.
+
+That the ports need no count of their own is a property of how they are minted,
+not of the declaration: `spawn_to_subprocess` builds them and the handle through
+one `Alloc`, so they share a region. See
 [region effects](../../../docs/impl/region/effects.md).

@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-16
+# audited: 2026-09-17
 # subprocess/exec through wait, kill, pid and exit — the type, its reads, and
 # what every primitive refuses.
 
@@ -32,6 +32,20 @@
 (assert (not (subprocess? 42)) "subprocess?: an integer is not one")
 (assert (not (subprocess? nil)) "subprocess?: nil is not one")
 
+# A subprocess names itself, and prints the pid a reader needs.
+#
+# The trap: a keyword carries a name hash, not a spelling, and an external type
+# name reaches a reader only if it is in the static vocabulary
+# (src/value/keyword.rs). A name that is missing there prints as its hash, so
+# this asserts the spelling rather than merely that type-of answered something.
+(let [proc (subprocess/exec "true" [])]
+  (assert (= (type-of proc) :subprocess) "type-of: names the type")
+  (assert (= (string (type-of proc)) "subprocess")
+          "type-of: and the name has a spelling to print")
+  (assert (= (string proc) (string "#<subprocess " (get proc :pid) ">"))
+          "a subprocess prints as its type and its pid")
+  (subprocess/wait proc))
+
 # subprocess/exec: stdout is binary by default (bytes, not string)
 (let [raw (let [proc (subprocess/exec "echo" ["hello"])]
             (port/read-all (get proc :stdout)))]
@@ -63,17 +77,20 @@
 (assert (= (subprocess/wait (subprocess/exec "false" [])) 1)
         "subprocess/wait: /bin/false exits 1")
 
-# subprocess/wait, kill and pid each refuse a value that is not a subprocess,
-# and each refuses it the same way.
+# subprocess/wait, kill and pid each refuse a value that is not a subprocess.
 #
 # The trap: this is the whole point of the type. The struct these replaced was
 # accepted by all three whenever it carried a `:process` key, whatever sat
-# under it, and each primitive then built its own message some steps later. A
-# refusal that names the primitive and the type it got is what says the check
-# happened at the boundary.
+# under it, and each primitive then failed some steps later.
 #
 # The counter-factual is a struct shaped like the old exec result: it has the
 # key, so the extractor that read the key without checking it let this through.
+#
+# That all three refuse it with ONE message body is what says the check is at
+# the boundary, and it is asserted where a message may be read:
+# `every_subprocess_primitive_refuses_a_non_subprocess_alike`
+# (src/primitives/subprocess/tests.rs). A corpus file matches no message text
+# (tests/elle/AGENTS.md).
 (let [decoy {:pid 1 :stdin nil :stdout nil :stderr nil :process 42}]
   (each [name thunk] [["subprocess/wait" (fn [] (subprocess/wait decoy))]
                       ["subprocess/kill" (fn [] (subprocess/kill decoy))]
@@ -81,9 +98,7 @@
     (let [[ok? err] (protect (thunk))]
       (assert (not ok?) (string name ": a struct is refused"))
       (assert (= (get err :error) :type-error)
-              (string name ": refused as a type-error"))
-      (assert (has? (get err :message) "expected a subprocess")
-              (string name ": and every one says the same thing")))))
+              (string name ": refused as a type-error")))))
 
 # ── subprocess/pid ───────────────────────────────────────────────────────────────
 
@@ -121,8 +136,29 @@
   (assert (nil? (get proc :nope)) "get: an unknown key reads nil")
   (assert (= (get proc :nope :fallback) :fallback)
           "get: and takes the default it was given")
+  # Accessor syntax is its own form in the reader, desugared to a `get` call
+  # rather than written as one, so it reaches this key set only if the
+  # desugaring does. `demos/h2cross.lisp` reads a subprocess this way.
+  (assert (= proc:pid (get proc :pid)) "accessor syntax reads the same key set")
+  (assert (port? proc:stdout) "and reaches the ports through it")
   (port/close (get proc :stdin))
   (subprocess/wait proc))
+
+# A port read out of a subprocess still reads after the binding it came from
+# has ended.
+#
+# The trap: a subprocess holds its ports as heap values inside an external, and
+# nothing enumerates them — not the alloc-time scan, not the free-time cascade
+# (src/io/request/process.rs). What carries this port past the inner binding is
+# the read itself: `get` hands back a value from the subprocess's region and
+# increfs that region, and the binding here owns that reference until it ends.
+# Run it under `elle --trace=guardfree`, where a read of freed memory traps
+# instead of answering plausible bytes.
+(let [out (let [proc (subprocess/exec "echo" ["outlives"])]
+            (subprocess/wait proc)
+            (get proc :stdout))]
+  (assert (= (string (port/read-all out)) "outlives\n")
+          "a port outlives the binding its subprocess was reached through"))
 
 # A subprocess is read-only: the writes refuse it.
 #

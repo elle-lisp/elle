@@ -1,6 +1,14 @@
-//! Subprocess-related primitives
-use crate::io::request::{IoOp, IoRequest, ProcessHandle, SpawnRequest, StdioDisposition};
-use crate::primitives::def::RegionEffect;
+//! audited: 2026-09-17
+//! The process primitives: `sys/*` over this process, and `subprocess/*` over
+//! a child.
+//!
+//! docs/subprocess.md
+
+use crate::io::request::{
+    IoOp, IoRequest, ProcessHandle, SpawnRequest, StdioDisposition, SUBPROCESS,
+};
+use crate::primitives::ctx::NativeCtx;
+use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::{Signal, SIG_EXEC};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT, SIG_IO, SIG_OK};
 use crate::value::heap::TableKey;
@@ -8,7 +16,11 @@ use crate::value::types::Arity;
 use crate::value::{sorted_struct_get, Value};
 
 mod exec;
+mod handle;
 use exec::*;
+use handle::*;
+
+pub(crate) use handle::{read as subprocess_read, KEYS as SUBPROCESS_KEYS};
 
 #[cfg(test)]
 mod tests;
@@ -252,24 +264,25 @@ primitive! {
     "subprocess/exec" => prim_subprocess_exec {
         signal: Signal::subprocess(),
         arity: Arity::Range(2, 3),
-        doc: "Spawn a subprocess. Returns {:pid int :stdin port|nil :stdout port|nil :stderr port|nil :process <process>}",
+        doc: "Spawn a subprocess. Returns a subprocess: read :pid, :stdin, :stdout, :stderr and :exit from it with get.",
         params: &["program", "args", "opts"],
         category: "sys",
         example: "(subprocess/exec \"ls\" [\"-la\"])",
         // Opaque, not Mixed: copies every heap arg out (program/args/env →
         // Rust String/Vec in the SpawnRequest), storing none, while returning
-        // an opaque result minted on the scheduler heap (the {:pid … :process}
-        // struct). Mixed would force the multi-heap-arg clique on a no-store
-        // primitive — a per-call leak. Pinned by effects.rs
-        // `subprocess_exec_declares_opaque_no_arg_clique`. Yielding, so the
+        // an opaque result minted on the scheduler heap (the subprocess).
+        // Mixed would force the multi-heap-arg clique on a no-store
+        // primitive — a per-call leak. Pinned by
+        // `subprocess_exec_declares_opaque_no_arg_clique`
+        // (src/hir/region/infer/tests/declared.rs). Yielding, so the
         // result side is oracle-exempt. (docs/impl/region/effects.md § Opaque.)
         effect: RegionEffect::Opaque,
     }
     "subprocess/wait" => prim_subprocess_wait {
         signal: Signal::subprocess(),
         arity: Arity::Exact(1),
-        doc: "Wait for a subprocess to exit. Returns exit code (0 = success).",
-        params: &["handle"],
+        doc: "Wait for a subprocess to exit. Returns exit code (0 = success). A signalled child answers the negated signal number.",
+        params: &["subprocess"],
         category: "sys",
         example: "(subprocess/wait proc)",
         // Immediate: the ProcessWait completion returns the exit code Value::int(..).
@@ -279,8 +292,8 @@ primitive! {
     "subprocess/kill" => prim_subprocess_kill {
         signal: Signal::errors(),
         arity: Arity::Range(1, 2),
-        doc: "Send a signal to a subprocess. signal is an integer or a keyword like :sigterm, :sigkill, :sighup, :sigint, :sigquit, :sigpipe, :sigalrm, :sigusr1, :sigusr2, :sigchld, :sigcont, :sigstop, :sigtstp, :sigttin, :sigttou, :sigwinch (default: :sigterm). Returns :signaled when kill(2) took the signal, :exited when the handle holds the child's status and nothing was sent, :missing when no process holds the pid.",
-        params: &["handle", "signal"],
+        doc: "Send a signal to a subprocess. signal is an integer or a keyword like :sigterm, :sigkill, :sighup, :sigint, :sigquit, :sigpipe, :sigalrm, :sigusr1, :sigusr2, :sigchld, :sigcont, :sigstop, :sigtstp, :sigttin, :sigttou, :sigwinch (default: :sigterm). Returns :signaled when kill(2) took the signal, :exited when the child's status is already recorded and nothing was sent, :missing when no process holds the pid.",
+        params: &["subprocess", "signal"],
         category: "sys",
         example: "(subprocess/kill proc :sigterm)",
         effect: RegionEffect::Immediate,
@@ -288,12 +301,31 @@ primitive! {
     "subprocess/pid" => prim_subprocess_pid {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Return the OS process ID of a subprocess.",
-        params: &["handle"],
+        doc: "Return the OS process ID of a subprocess, whether or not the child has been reaped.",
+        params: &["subprocess"],
         category: "sys",
         example: "(subprocess/pid proc)",
         effect: RegionEffect::Immediate,
     }
+    "subprocess/exit" => prim_subprocess_exit {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Return a subprocess's recorded exit status, or nil while nothing has reaped the child. Reads the record; it never waits and never reaps.",
+        params: &["subprocess"],
+        category: "sys",
+        example: "(subprocess/exit proc)",
+        effect: RegionEffect::Immediate,
+    }
+    "subprocess?" => prim_is_subprocess {
+        ret: RetType::Bool,
+        arity: Arity::Exact(1),
+        doc: "Check if value is a subprocess.",
+        params: &["value"],
+        category: "predicate",
+        example: "(subprocess? 42) #=> false",
+        effect: RegionEffect::Immediate,
+    }
 }
 
-// Tests migrated to tests/elle/prim-subprocess.lisp
+// The `sys/*` surface is asserted in tests/elle/prim-subprocess.lisp, and the
+// `subprocess/*` surface in tests/elle/subprocess.lisp.

@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+//! audited: 2026-09-17
 //! `subprocess/kill` against a recorded exit status, and the boundary every
 //! subprocess primitive refuses through.
 
@@ -49,7 +49,7 @@ fn a_kill_on_a_reaped_child_sends_no_signal() {
         // The state a `subprocess/wait` leaves behind: the child this handle
         // was spawned for is gone, and its status is here.
         handle.exit().keep(0);
-        let handle_val = h.ctx().external("process", handle);
+        let handle_val = h.ctx().external(SUBPROCESS, handle);
 
         let (bits, answer) = kill(&h, handle_val, "sigkill");
 
@@ -93,7 +93,7 @@ fn a_kill_on_a_pid_nobody_holds_reports_it_missing() {
         let h = TestHeap::new();
         let handle_val = h
             .ctx()
-            .external("process", ProcessHandle::new(pid, reaped_child()));
+            .external(SUBPROCESS, ProcessHandle::new(pid, reaped_child()));
 
         let (bits, answer) = kill(&h, handle_val, "sigterm");
         assert_eq!(bits, SIG_OK, "a pid nobody holds is not an error");
@@ -116,7 +116,7 @@ fn a_kill_on_a_live_child_signals_it() {
         let pid = child.id();
 
         let h = TestHeap::new();
-        let handle_val = h.ctx().external("process", ProcessHandle::new(pid, child));
+        let handle_val = h.ctx().external(SUBPROCESS, ProcessHandle::new(pid, child));
 
         let (bits, answer) = kill(&h, handle_val, "sigkill");
         assert_eq!(bits, SIG_OK, "signalling a live child succeeds");

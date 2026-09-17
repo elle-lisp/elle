@@ -1,7 +1,11 @@
-//! audited: 2026-09-16
-//! AsyncBackend — asynchronous I/O backend.
+//! audited: 2026-09-17
+//! `AsyncBackend`: the state an in-flight operation is tracked through, and the
+//! platform that runs it.
 //!
-//! Uses io_uring on Linux (feature-gated), thread-pool fallback elsewhere.
+//! io_uring on Linux, the thread pool everywhere else.
+//!
+//! src/io/AGENTS.md
+//! docs/io.md
 
 use crate::io::completion;
 use crate::io::pending::{OpKind, PendingOp, PendingTable, Taken};
@@ -100,11 +104,12 @@ impl std::fmt::Debug for AsyncBackend {
 impl AsyncBackend {
     /// Create a new async backend.
     ///
-    /// On Linux with the `io-uring` feature, attempts io_uring first.
-    /// Falls back to thread-pool on failure or on non-Linux platforms.
-    /// Uses the process-default Unicode generation and the default worker
-    /// keepalive; a backend serving a VM with an explicit generation, or a
-    /// program that asked for a keepalive of its own, is built via
+    /// On Linux it tries io_uring first and takes the thread pool if the ring
+    /// will not open. Every other platform takes the pool outright.
+    ///
+    /// This takes the process-default Unicode generation and the default worker
+    /// keepalive. A backend serving a VM with a generation of its own, or a
+    /// program that asked for its own keepalive, is built through
     /// [`Self::new_with_unicode`].
     pub fn new() -> Result<Self, String> {
         Self::new_with_unicode(crate::config::get().unicode_generation(), None)
@@ -148,20 +153,19 @@ impl AsyncBackend {
         })
     }
 
-    /// A backend on the THREAD-POOL platform, whatever this host would pick.
+    /// A backend on the thread-pool platform, whatever this host would pick.
     ///
-    /// The pool is what every non-Linux build runs (`create_platform_backend`
-    /// has no other arm there) and what a Linux host runs when io_uring is
-    /// unavailable or `--no-uring` is set. Its wait path differs from the ring's,
-    /// so the properties that hold on one are not evidence about the other. A
-    /// test that built the host's default backend would exercise the ring on a
-    /// Linux dev box and the pool on CI — silently checking different code on
-    /// each, which is how a pool-only defect stays invisible. This constructor
-    /// makes the platform an explicit choice of the test rather than a property
-    /// of the box it runs on.
-    /// No eventfd bridge is wired: the pool platform has no ring to bridge into,
-    /// so its hub channel is the sole waitable — the same shape a non-Linux build
-    /// comes up with.
+    /// The pool is what every non-Linux build runs, and what a Linux host runs
+    /// when io_uring will not open or `--no-uring` is set. Its wait path is not
+    /// the ring's, so a property that holds on one is no evidence about the
+    /// other. A test that built the host's default backend would reach the ring
+    /// on a Linux desktop and the pool on another machine, checking different
+    /// code on each without saying so. This constructor makes the platform the
+    /// test's choice rather than the machine's.
+    ///
+    /// No eventfd bridge is wired. The pool platform has no ring to bridge into,
+    /// so its hub channel is the sole waitable, which is the shape a non-Linux
+    /// build comes up with.
     #[cfg(test)]
     pub(crate) fn new_thread_pool() -> Result<Self, String> {
         Self::new_thread_pool_with_keepalive(None)
@@ -282,17 +286,18 @@ impl AsyncBackend {
 
 impl Drop for AsyncBackend {
     fn drop(&mut self) {
-        // Bring the ring to a quiescent state before its buffer pool and SQ/CQ
-        // are freed: any operation still in flight (submitted but never reaped,
-        // e.g. `io/submit` with no matching `io/wait`) has the kernel holding a
-        // write pointer into a pool/arena buffer. Reaping it here keeps that
-        // write from landing in freed heap.
+        // Bring the ring to a quiescent state before its buffer pool and its
+        // submission and completion queues are freed. An operation still in
+        // flight — for example an `io/submit` no `io/wait` ever reaped — leaves
+        // the kernel holding a write pointer into a pooled buffer. Reaping it
+        // here keeps that write out of freed heap.
         self.quiesce();
     }
 }
 
 mod convert;
 mod drain;
+mod externals;
 mod poll;
 mod requests;
 mod submit;
@@ -395,15 +400,15 @@ impl AsyncBackendInner {
         Ok(id)
     }
 
-    /// Handle Seek and Tell as immediate completions.
+    /// Answer `Seek` and `Tell` inside the submit call.
     ///
-    /// Called from AsyncBackend::submit after port_key is determined and before
-    /// buffer allocation. Seek/Tell are synchronous (non-blocking lseek calls)
-    /// and never go to io_uring or the thread pool.
+    /// `AsyncBackend::submit` calls this once it has the `PortKey` and before it
+    /// reserves a buffer. Both operations are one `lseek(2)`, which does not
+    /// block, so neither reaches io_uring or the thread pool.
     ///
-    /// # Buffer invariant
-    /// After Seek: the per-fd buffer is cleared and status reset to Open.
-    /// After Tell: buffer is read-only; the formula is kernel_offset - buffer.len().
+    /// A seek clears the per-fd buffer, because the kernel offset and the
+    /// logical position diverge otherwise. A tell leaves the buffer alone and
+    /// answers the kernel offset less the bytes still buffered.
     fn handle_seek_tell(
         &mut self,
         id: SubmissionId,

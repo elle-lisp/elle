@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+//! audited: 2026-09-17
 //! One in-flight operation: the shapes it can take, the heap values it holds,
 //! and what it gives back when nobody will read its result.
 //!
@@ -35,12 +35,11 @@ pub(crate) enum OpKind {
     Poll,
 }
 
-/// Pending async I/O operation.
+/// Pending async I/O operation, one variant per operation shape.
 ///
-/// Three variants matching the three port lifecycles:
-/// - `Port`: operates on an existing port (stream I/O, accept, datagram, shutdown)
-/// - `Connect`: creates a new port on completion (no existing port)
-/// - `Sleep`: portless timer
+/// Three relationships to a port run through them. `Port` names one that
+/// already exists. `Connect` and `Open` build one on completion, from a value
+/// the call site pre-allocated. The rest are portless.
 pub(crate) enum PendingOp {
     /// Operation on an existing port.
     Port {
@@ -165,7 +164,7 @@ impl PendingOp {
     }
 
     /// The heap values this operation holds and a completion dereferences when
-    /// it cooks a result. [`OperandHold`] retains exactly this list
+    /// it cooks a result. `OperandHold` retains exactly this list
     /// (docs/impl/io-inflight.md § "A submitted operation holds the values its
     /// completion reads").
     ///

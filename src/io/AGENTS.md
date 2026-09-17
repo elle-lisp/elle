@@ -1,6 +1,6 @@
 # I/O Module
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-17 -->
 
 ## Purpose
 
@@ -15,10 +15,21 @@ to a backend for execution.
 |--------|----------------|
 | `types.rs` | Shared types: `PortKey`, `FdState` — used by both backends |
 | `pool.rs` | `BufferPool`, `BufferHandle` — pinned buffer management for async I/O |
-| `pending.rs` | `PendingOp` enum — in-flight async operation tracking, one variant per operation shape — and `PendingTable`, the backend's set of them plus the ids no fiber will read. `take` answers "does anybody want this?" once, for both backends. |
+| `pending.rs` | `PendingTable`, the backend's set of in-flight entries plus the ids no fiber will read. `take` answers "does anybody want this?" once, for both backends. |
+| `pending/op.rs` | `PendingOp` — what one in-flight operation's completion needs, one variant per operation shape — and `OpKind`. |
+| `pending/hold.rs` | `OperandHold` and `TakenOp` — the heap values a submitted operation retains, and the entry a completion reads them through. |
 | `aio.rs` | `AsyncBackend` — async I/O with io_uring (Linux) or thread-pool fallback |
-| `request.rs` | `IoRequest` and `IoOp` types — typed I/O request descriptors |
+| `aio/requests.rs` | `submit_op`, the frame every submission shares, and the operations that name no OS object of their own. |
+| `aio/externals.rs` | The submissions that name an OS object the request carries or creates: a watcher, a signal receiver, a file, a child, a background task. |
+| `aio/{submit,poll,drain,convert}.rs` | Dispatch into the request, the reap and wait loops, the CQE drain, and the value conversions a completion answers with. |
+| `request.rs` | `IoRequest`, `IoOp` and `PortOp` — typed I/O request descriptors |
+| `request/spawn.rs` | `SpawnRequest`, the command it builds, and `spawn_to_subprocess` |
+| `request/process.rs` | `ProcessHandle` and `ExitRecord` — the `subprocess` value and the record its status is kept in |
+| `request/{buffer,socket}.rs` | In-place buffer edits a completion makes, and the socket request shapes. |
 | `completion.rs` | `process_raw_completion` — converts raw CQE/thread results to `Completion` |
+| `frame.rs` | Where a read's answer ends in the bytes it owns, and how a port's remainder joins it |
+| `watch.rs` | `FsWatcher` — inotify (Linux) or kqueue (macOS), for `fs/watch` |
+| `mock.rs` | An in-memory backend for tests and benchmarks, with configurable latency |
 | `sigfd.rs` | `SignalReceiver` — POSIX signalfd (Linux) or kqueue+EVFILT_SIGNAL (macOS) external for `os/sig-watch`; also the worker-thread mask helper `mask_all_signals_on_this_thread` |
 | `sigmap.rs` | Shared keyword↔signum mapping; `resolve(value, ctx)` parses a `:sigterm`/integer Value to libc signum |
 | `sockaddr.rs` | Sockaddr construction, formatting, parsing — single source of truth |
@@ -33,40 +44,38 @@ to a backend for execution.
 
 ## Data Flow
 
-Sync path:
 ```
 Stream primitive → (SIG_IO, IoRequest) → Scheduler → io/submit → AsyncBackend → OS
-```
-
-Async path:
-```
-Stream primitive → (SIG_IO, IoRequest) → Scheduler → io/submit → AsyncBackend → OS (async)
-                                                    ← io/wait  ← completions ← OS
+                                                   ← io/wait   ← completions  ← OS
 ```
 
 ## Key Types
 
-### IoOp
+### IoOp and PortOp
 
-Enum of I/O operations (16 variants):
+`IoOp` has 15 variants. Every operation that names an existing port is one
+`PortOp` under `IoOp::Port`, so the port guard runs once for all of them:
 
-**Stream operations:** `ReadLine`, `Read { count }`, `ReadAll`, `Write { data }`, `Flush`
+**`PortOp` (10):** `ReadLine`, `Read { count }`, `ReadExact { count }`,
+`ReadAll`, `Write { data }`, `Flush`, `Accept`, `SendTo { addr, port_num,
+data }`, `RecvFrom { count, result }`, `Shutdown { how }`
 
 **File position:** `Seek { offset: i64, whence: i32 }`, `Tell`
 
-**Network operations:** `Accept`, `Connect { addr }`, `SendTo { addr, port_num, data }`, `RecvFrom { count, result }`, `Shutdown { how }`
+**The rest:** `Connect { addr }`, `Close`,
+`Open { path, flags, mode, direction, encoding }`, `Resolve { hostname }`,
+`PollFd`, `ChanSelectPark`
 
 `RecvFrom` pre-allocates its `{:data :addr :port}` result struct on the
 **requesting fiber's heap** (`prim_udp_recv_from`) and the completion fills it
 in place — the iovec receives the payload zero-copy into `:data`, and `:addr`/
 `:port` are stamped into the struct's slots (`set_struct_field_in_place`). This
-mirrors `Read`/`Accept`: nothing is instantiated on the scheduler's heap at
-completion, so the value the fiber resumes with has no cross-heap reference (the
-"datagram arrives zeroed" arena-lifetime bug).
+mirrors `Read`/`Accept`: nothing is built on the scheduler's heap at completion,
+so the value the fiber resumes with holds no cross-heap reference.
 
 **Timer:** `Sleep { duration }`
 
-**Subprocess operations:** `Spawn { program, args, env, cwd, stdin, stdout, stderr }`, `ProcessWait`
+**Subprocess operations:** `Spawn(SpawnRequest)`, `ProcessWait`
 
 **Filesystem watch:** `WatchNext` — portless; the `FsWatcher` external lives in `IoRequest.port`. Read from the inotify (Linux) or kqueue (macOS) fd.
 
@@ -86,16 +95,22 @@ Enum of port types (10 variants):
 
 ### ProcessHandle
 
-Struct representing a running subprocess. Fields:
+A running subprocess — the value Elle sees as a `subprocess`, stored as an external under the `SUBPROCESS` type name. Fields:
 - `pid: u32` — process ID
 - `child: RefCell<Child>` — the spawned child, kept so an unreaped one can be reaped on drop
 - `exit: ExitRecord` — where the child's exit status is kept once somebody reaps it. See § "A reap is never wasted"
+- `stdio: [Value; 3]` — the stdin, stdout and stderr ports, or `Value::NIL` where the disposition asked for no pipe
 
 Methods:
-- `new(pid, child) → ProcessHandle` — create from spawned child process
+- `new(pid, child) → ProcessHandle` — create from a spawned child, with no ports
+- `with_stdio([Value; 3]) → ProcessHandle` — the same handle carrying the ports the spawn created
 - `pid() → u32` — get process ID
+- `stdin()`/`stdout()`/`stderr() → Value` — a port, or nil
 - `exit() → &ExitRecord` — the record, for the waiters and the operations that clone it
+- `Display` — `#<subprocess 12345>`
 - `Drop` impl — calls `try_wait()` on a child nothing has reaped, to reap zombies
+
+The ports are heap `Value`s an external holds, which no alloc-time scan and no free-time cascade enumerates (docs/impl/region/rules.md Rule 5). They need no count because `spawn_to_subprocess` mints them and the handle through one `Alloc`, so they share a region and are freed together or not at all.
 
 ### ExitRecord
 
@@ -117,8 +132,9 @@ and both live here, beside the record they feed.
 ### PendingOp
 
 What one in-flight operation's completion needs, one variant per operation
-shape. Every variant carries a `BufferHandle`; the rest is what that operation
-alone must remember:
+shape. Every variant carries a `buffer_handle` — `Option<BufferHandle>` on
+`Port`, which has operations that reserve no buffer — and the rest of each
+variant is what that operation alone must remember:
 
 - `Port { op, port_key, port, descriptor, buffer_handle, listener_kind, filled, timeout }` — operation on an existing port (stream I/O, accept, datagram, shutdown). `descriptor` is this operation's share of the number it names — see [descriptors and workers](../../docs/impl/io-descriptor.md). `listener_kind` is `Some(PortKind)` for Accept only.
 - `Connect { addr, buffer_handle, connect_fd, port }` — creates a new port on completion. `connect_fd` starts as `Some(fd)` for io_uring (pre-created socket) or `None` for thread pool (set on completion).
@@ -144,19 +160,18 @@ Typed thread-pool submission and completion:
   cooked `Completion` (the cook fns need main-thread `pending`/`fd_states`/
   `buffer_pool`/`origin_heap`), so it sends its raw result; the receiver matches
   once and dispatches to `pool_to_completion` / `stdin_to_completion`.
-- `CompletionHub { sender, receiver, in_flight, eventfd, stops, pool }` — the **one** completion
-  channel all background work feeds: every thread-pool worker and the stdin worker
-  holds a `Sender<RawCompletion>` clone. Collapsing the former platform-pool,
-  network-pool, and stdin channels into one means the scheduler's blocking wait
-  reads exactly one source: a crossbeam `recv()` registers-before-sleeps on the
-  sole channel, so there is nothing to exclude and no wakeup to miss. `in_flight`
-  is the combined count of submitted-but-unreaped worker ops (pool + stdin): +1 per
-  worker submit, −1 once per `RawCompletion` reaped at the single drain site (a
-  cancelled op's reaped completion still decrements; `io/cancel` must not also
-  decrement). `eventfd` is the Linux/uring bridge fd (`None` on the pool-only
-  platforms) a worker writes after `send` so the ring's single wait observes the
-  edge. `stops` is the write end of each submitted operation's stop pipe, by id.
-  `pool` is the crew that runs the operations — see [descriptors and workers](../../docs/impl/io-descriptor.md).
+- `CompletionHub { sender, receiver, in_flight, eventfd, stops, pool }` — the one
+  completion channel all background work feeds: every thread-pool worker and the
+  stdin worker holds a `Sender<RawCompletion>` clone. One channel means the
+  scheduler's blocking wait reads one source, so a crossbeam `recv()`
+  registers-before-sleeps on it and there is no wakeup to miss. `in_flight`
+  counts submitted-but-unreaped worker ops, pool and stdin alike: +1 per worker
+  submit, −1 once per `RawCompletion` reaped at the single drain site. A
+  cancelled op's reaped completion still decrements, so `io/cancel` must not
+  decrement as well. `eventfd` is the bridge fd invariant 8 describes, `None` on
+  the pool-only platforms. `stops` is the write end of each submitted
+  operation's stop pipe, by id. `pool` is the crew that runs the operations —
+  see [descriptors and workers](../../docs/impl/io-descriptor.md).
 
 ### ConnectAddr
 
@@ -176,16 +191,10 @@ Returned to Elle as struct: `{:id n :value v :error nil}` (success) or `{:id n :
 
 ## Sockaddr Module
 
-`sockaddr.rs` provides the single source of truth for socket address operations:
-
-- `build_inet(addr) → (Vec<u8>, socklen_t)` — build sockaddr_in/in6 as bytes
-- `build_unix(path) → Result<(sockaddr_un, socklen_t), String>` — build sockaddr_un with abstract socket support
-- `format(storage, len) → String` — format as `"ip:port"`, `"[ipv6]:port"`, or unix path
-- `parse(storage, len) → (String, u16)` — parse to (addr_string, port)
-- `peer_address(fd) → String` — getpeername + format
-- `local_address(fd) → String` — getsockname + format
-
-All formatting uses `std::net::Ipv4Addr`/`Ipv6Addr` for canonical output (proper IPv6 shortening).
+`sockaddr.rs` builds, formats and parses socket addresses for both backends, and
+is the only place that does. Each function's own docstring carries its
+signature. All formatting goes through `std::net::Ipv4Addr`/`Ipv6Addr`, so IPv6
+output is canonically shortened.
 
 ## Primitives
 
@@ -193,8 +202,7 @@ All formatting uses `std::net::Ipv4Addr`/`Ipv6Addr` for canonical output (proper
 |-----------|--------|---------|
 | `io-request?` | silent | Check if value is an I/O request |
 | `io-backend?` | silent | Check if value is an I/O backend |
-| `io/backend` | errors | Create an I/O backend (`:sync` or `:async`) |
-
+| `io/backend` | errors | Create an I/O backend (`:async`, or `:mock` for tests), with an optional worker keepalive |
 | `io/submit` | errors | Submit async I/O request, return submission ID |
 | `io/reap` | errors | Non-blocking poll for completions (returns array) |
 | `io/wait` | errors | Blocking wait for completions with timeout (returns array) |
@@ -203,14 +211,12 @@ All formatting uses `std::net::Ipv4Addr`/`Ipv6Addr` for canonical output (proper
 
 ## Timeout Handling
 
-**Sync backend:** Post-hoc check after blocking syscall. Not preemptive.
+**io_uring:** a `LinkTimeout` SQE follows the operation SQE with the `IO_LINK` flag, so the kernel cancels the operation when the timeout fires first. The operation's CQE then carries `result = -ECANCELED` (errno 125). The timeout's own CQE carries a high-bit tag (`id | (1 << 63)`) and completion processing skips it.
 
-**Async backend (io_uring):** Linked timeout SQEs provide true preemptive timeout for all operations (stream, network, and timer). A `LinkTimeout` SQE is submitted immediately after the operation SQE with the `IO_LINK` flag. If the timeout fires first, the kernel cancels the linked operation. The operation CQE has `result = -ECANCELED` (errno 125). The timeout CQE is identified by a high-bit tag (`id | (1 << 63)`) and skipped during completion processing.
-
-**Thread-pool fallback:** `OpBound` (`threadpool/opbound.rs`) takes the
-descriptor non-blocking and waits in `poll(2)` for readiness, for the
-caller's `:timeout`, or for the stop pipe. See § "Operation timeouts" for
-the mechanism and [an operation in flight](../../docs/impl/io-inflight.md) for the cancellation half.
+**Thread pool:** `OpBound` (`threadpool/opbound.rs`) takes the descriptor
+non-blocking and waits in `poll(2)` for readiness, for the caller's `:timeout`,
+or for the stop pipe. § "Operation timeouts" holds the mechanism, and
+[an operation in flight](../../docs/impl/io-inflight.md) the cancellation half.
 
 ## I/O Cancellation
 
@@ -249,7 +255,8 @@ Three things hold however the operation ends.
   regions those live in. Pinned by
   `a_cancelled_operation_delivers_no_completion_on_either_backend`
   (`src/io/aio/tests/park.rs`), which holds both backends to the one answer.
-- **The descriptor outlives the operation.** See "Descriptor retirement" below.
+- **The descriptor outlives the operation.** See
+  [descriptors and workers](../../docs/impl/io-descriptor.md).
 
 Backend teardown marks everything in flight the same way (`PendingTable::
 cancel_all`, from `quiesce_pending`), for the same reason at a larger scale: the
@@ -333,7 +340,7 @@ Buffered data is never lost on EOF or error. The backend drains buffered data be
 
 ## Full-Write Invariant
 
-`IoOp::Write` completes only when the whole payload has left for the fd. One
+`PortOp::Write` completes only when the whole payload has left for the fd. One
 `write(2)` transfers at most what fits in the send buffer, so both backends
 loop: the io_uring path resubmits the unwritten tail from the same pooled
 buffer (`drain_cqes`, `PendingOp::Port.filled` counts the bytes already
@@ -388,7 +395,7 @@ Pinned by `tests/elle/port-write-timeout.lisp` and
 `tests/elle/port-read-timeout.lisp`, both run on each backend, each covering a
 socket peer and a pipe peer. `tests/elle/net-wait-timeout.lisp` covers the
 calls that wait for a peer, and `a_pool_connect_reports_its_own_deadline_as_a_timeout`
-(`src/io/aio/tests/net.rs`) covers the connect, whose stall needs a listener
+(`src/io/aio/tests/netend.rs`) covers the connect, whose stall needs a listener
 backlog an Elle script cannot set.
 
 ## The submission frame
@@ -438,18 +445,18 @@ the next `ring.submit()`.
 
 ### Subprocess Operations
 
-**`SpawnRequest::spawn_to_subprocess()`** (in `request.rs`) — Spawns a subprocess using `std::process::Command`. Returns one external, type name `subprocess`, wrapping a `ProcessHandle` that carries:
+**`SpawnRequest::spawn_to_subprocess()`** (in `request/spawn.rs`) — Spawns a subprocess using `std::process::Command`. Returns one external, type name `subprocess`, wrapping a `ProcessHandle` that carries:
 - the pid
 - the `stdin`, `stdout` and `stderr` port `Value`s (or `Value::NIL`), created per `StdioDisposition`
 - the `ExitRecord` every later wait and kill reads
 
-The ports and the handle are minted through one `Alloc` over the requesting instance's heap, so they share its region and hold no cross-heap reference. There is no wrapper struct: the external is what `subprocess/wait` and `subprocess/kill` take.
+The ports and the handle are minted through one `Alloc` over the requesting instance's heap, so they share its region and hold no cross-heap reference. The external itself is what `subprocess/wait`, `subprocess/kill`, `subprocess/pid` and `subprocess/exit` take.
 
-**`pipe_to_port()`** (in `request.rs`) — Converts a subprocess pipe (ChildStdin, ChildStdout, ChildStderr) to a Port Value.
+**`pipe_to_port()`** (in `request/spawn.rs`) — Converts a subprocess pipe (ChildStdin, ChildStdout, ChildStderr) to a Port Value.
 
-**`AsyncBackend::submit_spawn()`** — Calls `spawn_to_subprocess()`. Spawn is an immediate completion (no CQE arrives); the result is pushed directly to the completions queue.
+**`AsyncBackend::submit_spawn()`** (in `aio/externals.rs`) — Calls `spawn_to_subprocess()`. Spawn is an immediate completion (no CQE arrives); the result is pushed directly to the completions queue.
 
-**`AsyncBackend::submit_process_wait()`** — Submits subprocess wait via `IORING_OP_WAITID` (Linux 6.7+), or on the thread pool. Fast path: if the handle's `ExitRecord` already holds a status, returns an immediate completion. Otherwise, allocates a `siginfo_t` buffer, submits the SQE, and stores the pending operation — with a clone of the record in both the `PoolOp` and the `PendingOp`.
+**`AsyncBackend::submit_process_wait()`** (in `aio/externals.rs`) — Submits subprocess wait via `IORING_OP_WAITID` (Linux 6.7+), or on the thread pool. Fast path: if the handle's `ExitRecord` already holds a status, returns an immediate completion. Otherwise, allocates a `siginfo_t` buffer, submits the SQE, and stores the pending operation — with a clone of the record in both the `PoolOp` and the `PendingOp`.
 
 **`child::process_wait()`** (in `src/io/threadpool/child.rs`) — the thread-pool half. `ExitRecord::reap` asks with `waitpid(pid, .., WNOHANG)` and returns either way, and `pace_retry` waits between asks with the stop pipe visible — starting at a millisecond and growing to fifty, so a child that exits at once is reported at once while a long-running one costs few wakeups. The blocking `waitpid` it replaces held the worker for the child's whole life, where neither `io/cancel` nor a deadline could reach it. Asking through the record is what keeps a reap this worker's cancellation discards — see § "A reap is never wasted". Pinned by `src/io/threadpool/tests/process.rs`.
 
@@ -476,7 +483,8 @@ The ports and the handle are minted through one `Alloc` over the requesting inst
    never precede the item; the wait clears the eventfd and re-arms the one-shot
    poll. One blocking primitive per platform, no wakeup-rescue caps: a genuinely
    lost wakeup hangs rather than being downgraded to a bounded stall.
-9. `io/submit`, `io/reap`, `io/wait`, `io/cancel` only work with async backends.
+9. `io/submit`, `io/reap`, `io/wait` and `io/cancel` take an `AnyBackend`, so
+   they reach the async backend and the mock one alike.
 10. Network operations are yielding (`SIG_IO`). Synchronous network setup (tcp/listen, udp/bind, unix/listen) does not yield.
 11. **Dispatch-before-port-guard:** `Spawn` and `ProcessWait` must be dispatched before the `as_external::<Port>()` guard. `Spawn` has `Value::NIL` as its port field; `ProcessWait` has a `ProcessHandle` in the port field (not a `Port`).
 12. **ProcessWait siginfo lifetime:** The `siginfo_t` buffer in `PendingOp::ProcessWait` is heap-allocated via `Box::into_raw` and must remain valid until the CQE arrives. Completion processing reclaims it via `Box::from_raw`, and so does `PendingOp::retire` — which reads the exit status out of it first, because a retired wait may be the one that reaped the child (§ "A reap is never wasted"). The fast path (a status already on the handle) never inserts a `PendingOp::ProcessWait`, so the buffer is only allocated for truly pending operations.

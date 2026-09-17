@@ -1,4 +1,11 @@
+//! audited: 2026-09-17
+//! Spawning a child: the command it builds, the signal slate it hands the
+//! child, and the subprocess it answers with.
+//!
+//! docs/subprocess.md
+
 use super::*;
+use crate::io::request::SUBPROCESS;
 
 /// How to configure a subprocess stdio stream.
 #[derive(Debug, Clone, Copy)]
@@ -101,16 +108,19 @@ impl SpawnRequest {
         cmd
     }
 
-    /// Spawn the subprocess and convert it to an Elle struct value.
+    /// Spawn the subprocess and wrap it as the `subprocess` value the fiber
+    /// resumes with, or `Err(error_val)` when the spawn itself fails.
     ///
-    /// Returns `Ok(struct)` with `:pid`, `:stdin`, `:stdout`, `:stderr`,
-    /// `:process` fields, or `Err(error_val)` on failure.
-    pub(crate) fn spawn_to_struct(
+    /// The ports and the handle are minted through ONE `Alloc` over the
+    /// requesting instance's heap, so they share a region. That is what lets the
+    /// handle hold the ports without a count: an external's payload is opaque to
+    /// both the alloc-time scan and the free-time cascade
+    /// (docs/impl/region/rules.md Rule 5), and co-regional values are freed
+    /// together or not at all.
+    pub(crate) fn spawn_to_subprocess(
         &self,
         origin_heap: *mut crate::value::fiberheap::FiberHeap,
     ) -> Result<Value, Value> {
-        use crate::value::heap::TableKey;
-
         let mut child = self.build_command().spawn().map_err(|e| {
             crate::io::io_error(
                 "exec-error",
@@ -120,43 +130,33 @@ impl SpawnRequest {
         })?;
 
         let pid = child.id();
-        // One allocation capability over the requesting instance's heap: the pipe
-        // ports, the process handle, and the wrapper struct share its region and
-        // live on the heap the receiving fiber manages (no cross-heap references).
         let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
         let ctx = crate::primitives::ctx::Alloc::new(heap);
 
-        let stdin_val = child
-            .stdin
-            .take()
-            .map(|s| pipe_to_port(&ctx, s, Direction::Write, Encoding::Binary, pid, "stdin"))
-            .unwrap_or(Value::NIL);
-        let stdout_val = child
-            .stdout
-            .take()
-            .map(|s| pipe_to_port(&ctx, s, Direction::Read, Encoding::Binary, pid, "stdout"))
-            .unwrap_or(Value::NIL);
-        let stderr_val = child
-            .stderr
-            .take()
-            .map(|s| pipe_to_port(&ctx, s, Direction::Read, Encoding::Binary, pid, "stderr"))
-            .unwrap_or(Value::NIL);
+        let stdio = [
+            child
+                .stdin
+                .take()
+                .map(|s| pipe_to_port(&ctx, s, Direction::Write, Encoding::Binary, pid, "stdin"))
+                .unwrap_or(Value::NIL),
+            child
+                .stdout
+                .take()
+                .map(|s| pipe_to_port(&ctx, s, Direction::Read, Encoding::Binary, pid, "stdout"))
+                .unwrap_or(Value::NIL),
+            child
+                .stderr
+                .take()
+                .map(|s| pipe_to_port(&ctx, s, Direction::Read, Encoding::Binary, pid, "stderr"))
+                .unwrap_or(Value::NIL),
+        ];
 
-        let handle = ProcessHandle::new(pid, child);
-        let handle_val = ctx.external("process", handle);
-
-        let mut fields = std::collections::BTreeMap::new();
-        fields.insert(TableKey::keyword("pid"), Value::int(pid as i64));
-        fields.insert(TableKey::keyword("stdin"), stdin_val);
-        fields.insert(TableKey::keyword("stdout"), stdout_val);
-        fields.insert(TableKey::keyword("stderr"), stderr_val);
-        fields.insert(TableKey::keyword("process"), handle_val);
-        Ok(ctx.struct_from(fields))
+        Ok(ctx.external(SUBPROCESS, ProcessHandle::new(pid, child).with_stdio(stdio)))
     }
 }
 
 /// Convert a subprocess pipe (stdin/stdout/stderr) to a Port value, born in
-/// `ctx`'s region (the requesting instance's heap — see `spawn_to_struct`).
+/// `ctx`'s region (the requesting instance's heap — see `spawn_to_subprocess`).
 pub(super) fn pipe_to_port<T: Into<std::os::unix::io::OwnedFd>>(
     ctx: &crate::primitives::ctx::Alloc,
     pipe: T,
