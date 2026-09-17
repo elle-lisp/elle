@@ -1,13 +1,18 @@
 (elle/epoch 12)
-# estimator.lisp — the shared measurement core and ledger for the leak
-# dashboards (oracle.lisp, plumb.lisp). Each dashboard splices this file with
-# the top-level `include-file` directive (docs/modules.md § "Compile-Time
-# Inclusion"), so every dashboard compiles its own copy: fresh ledger state
-# per process — which is why each must run its own gauge-live discriminators
-# (oracle.lisp § "The gauge-live discriminator"); a gauge is proven live per
-# process, never per library — and the `check` macro crosses, splicing
-# preceding expansion. This directory is outside the corpus glob
-# (`tests/elle/*.lisp`), so the library is never run as a test itself.
+# audited: 2026-09-17
+## The instrument the leak dashboards share: the gauges, the estimator, the
+## ledger, and the channel each verdict is reported through.
+## docs/impl/region/diagnostics.md
+## docs/test-store.md
+##
+## Each dashboard (oracle.lisp, plumb.lisp) splices this file with the
+## top-level `include-file` directive (docs/modules.md § "Compile-Time
+## Inclusion"), so every dashboard compiles its own copy: fresh ledger state
+## per process — which is why each must run its own gauge-live discriminators
+## (oracle.lisp § "The gauge-live discriminator"); a gauge is proven live per
+## process, never per library — and the `check` macro crosses, splicing
+## preceding expansion. This directory is outside the corpus glob
+## (`tests/elle/*.lisp`), so the library is never run as a test itself.
 
 # ── Empirical-Bernstein half-width ────────────────────────────────────
 # Total error budget δ, spent across an unbounded number of peeks via a per-m
@@ -32,20 +37,28 @@
       (+ (math/sqrt (/ (* 2.0 (* var l)) m)) (/ (* 3.0 (* rng l)) m)))))
 
 # ── The gauges ────────────────────────────────────────────────────────
-(defn count-gauge []
-  (arena/count))
+# One instrument: the dimension it reads, the unit one point of a rate on it
+# carries, and the reading itself. The axis rides the GAUGE rather than the
+# probe's label because that is where it is a fact — every probe already hands
+# the estimator the gauge it wants, so no probe declares an axis and none can
+# declare the wrong one (docs/test-store.md § Measurements).
+#
+# `read` is pulled out once, before a measurement starts, and called inside the
+# window exactly as a bare gauge function was: a struct read between the two
+# samples would be work the gauge is supposed to be measuring.
+(defn gauge [axis unit read]
+  {:axis axis :unit unit :read read})
+
+(def count-gauge (gauge "objects" "objects/op" (fn [] (arena/count))))
 # object-count gauge
-(defn bytes-gauge []
-  (arena/bytes))
+(def bytes-gauge (gauge "bytes" "bytes/op" (fn [] (arena/bytes))))
 # bump-arena bytes gauge
-(defn region-gauge []
-  (arena/region-count))
+(def region-gauge (gauge "regions" "regions/op" (fn [] (arena/region-count))))
 # live-region-entry gauge — every active RegionEntry counts, a pages-less owner
 # node included. What the object count cannot see is a ZERO-OBJECT entry: an
 # owner node (docs/impl/region/owner.md § "Owner nodes"), or a region emptied
 # of objects but pinned by an unbalanced count.
-(defn ids-gauge []
-  (arena/region-ids))
+(def ids-gauge (gauge "ids" "ids/op" (fn [] (arena/region-ids))))
 # physical-id issuance gauge — `next_physical`, the dimension every other gauge
 # is blind to (docs/impl/region/diagnostics.md § the `arena/region-ids` bullet).
 # A physical id minted for a call whose callee allocates nothing never becomes a
@@ -61,11 +74,12 @@
 # verdict green, which is what the discriminator discipline exists to refuse.
 
 # ── The sequential estimator (general core) ───────────────────────────
-# RUN-BLOCK is (fn [b]) that performs b ops on the heap; GAUGE is (fn []) that
-# returns the heap measure (object count or bytes). Parameterizing both lets one
-# estimator serve every probe shape: a while-loop of thunks, a tail-recursion, a
-# fiber driven by external resumes, and a bytes gauge — the per-op rate is
-# (Δgauge)/b per block regardless of HOW the b ops ran.
+# RUN-BLOCK is (fn [b]) that performs b ops on the heap; GAUGE is one of the
+# instruments above, which reads the heap measure and names the dimension it
+# read. Parameterizing both lets one estimator serve every probe shape: a
+# while-loop of thunks, a tail-recursion, a fiber driven by external resumes,
+# and a bytes gauge — the per-op rate is (Δgauge)/b per block regardless of HOW
+# the b ops ran.
 (defn measure-core [label run-block gauge block minb maxb epsilon tau]
   "Adaptive empirical-Bernstein leak-rate estimator. Returns a struct with the
    measured :rate, :half (half-width), :blocks, :ops, and a :verdict:
@@ -79,6 +93,9 @@
   (when (%not (%int? minb)) (error :minb-not-int))
   (when (%not (%int? maxb)) (error :maxb-not-int))
   (run-block block)  # warmup block, discarded
+  # Resolved once, outside every measurement window: the reading is what the
+  # window must hold, not the lookup that finds it.
+  (def read (get gauge :read))
   (def @m 0)
   (def @mean 0.0)
   (def @m2 0.0)
@@ -87,13 +104,13 @@
   (def @half (math/inf))
   (def @blk 0)
   (while (and (%lt blk maxb) (or (%lt blk minb) (not (< half epsilon))))
-    (let [before (gauge)]
+    (let [before (read)]
       (run-block block)
-      # GAUGE is a closure VALUE, so its results are untyped; the diverging
+      # READ is a closure VALUE, so its results are untyped; the diverging
       # %int? guards prove them for the %sub operand contract. Single-opcode
       # predicates, placed after BOTH reads — nothing they do can land inside
       # the [before, after] measurement window.
-      (let [after (gauge)]
+      (let [after (read)]
         (when (%not (%int? before)) (error :gauge-not-integer))
         (when (%not (%int? after)) (error :gauge-not-integer))
         (let [net (%sub after before)
@@ -113,6 +130,8 @@
                   (> (- mean half) tau) :open
                   :inconclusive)]
     {:label label
+     :axis (get gauge :axis)
+     :unit (get gauge :unit)
      :rate mean
      :half half
      :blocks blk
@@ -190,6 +209,9 @@
   (when (%not (%int? minb)) (error :minb-not-int))
   (when (%not (%int? maxb)) (error :maxb-not-int))
   (run-block block)  # warmup block, discarded
+  # Both readings resolved once, outside every window (see measure-core).
+  (def reada (get ga :read))
+  (def readb (get gb :read))
   (def @ma 0)
   (def @meana 0.0)
   (def @m2a 0.0)
@@ -205,11 +227,11 @@
   (def @blk 0)
   (while (and (%lt blk maxb)
               (or (%lt blk minb) (not (and (< halfa ea) (< halfb eb)))))
-    (let [before-a (ga)
-          before-b (gb)]
+    (let [before-a (reada)
+          before-b (readb)]
       (run-block block)
-      (let [after-a (ga)
-            after-b (gb)]
+      (let [after-a (reada)
+            after-b (readb)]
         # gauge results arrive through closure values (untyped); the diverging
         # %int? guards prove them for %sub, placed after ALL FOUR reads so
         # nothing they do can land inside either measurement window.
@@ -239,6 +261,8 @@
             (eb-halfwidth mb (if (< mb 2) 0.0 (/ m2b (- mb 1))) (- hib lob))))))
     (assign blk (%add blk 1)))
   [{:label label
+    :axis (get ga :axis)
+    :unit (get ga :unit)
     :rate meana
     :half halfa
     :blocks blk
@@ -248,6 +272,8 @@
                (> (- meana halfa) ta) :open
                :inconclusive)}
    {:label (string label "@" suffix)
+    :axis (get gb :axis)
+    :unit (get gb :unit)
     :rate meanb
     :half halfb
     :blocks blk
@@ -307,13 +333,49 @@
           (if (nil? root) (push unclassified label) (put roots-seen root true)))
         :open))))
 
+# ── The measurement channel (docs/test-store.md § Measurements) ───────
+# Every verdict is reported as well as printed: one JSON object per line,
+# appended to the file ELLE_TEST_MEASUREMENTS names. Unset, the channel is
+# closed and nothing is written.
+#
+# Read once, into a binding: the variable cannot change under a running
+# process, and a dashboard reports a few hundred times.
+(def measurement-sink (sys/env "ELLE_TEST_MEASUREMENTS"))
+
+(defn subject-of [label]
+  "A probe's label without the `@axis` suffix `measure-2` gives its second
+   reading. The suffix is a rendering — the axis is a column of its own — so
+   one probe read on two dimensions stays one subject a query can group by."
+  (get (string/split label "@") 0))
+
+(defn report-measurement [r verdict]
+  "Append one verdict to the channel, or do nothing when it is closed. Appended
+   rather than rewritten, because every probe reports through here and the file
+   accumulates a dashboard's whole run. Best-effort under `protect`: a
+   dashboard's verdicts are what it exists to produce, and an unwritable sink
+   must not turn a measured run into a failed one."
+  (when measurement-sink
+    (protect (let [p (port/open measurement-sink :append)]
+               (port/write p
+                           (string (json/serialize {:subject (subject-of (get r
+                                   :label))
+                                   :axis (get r :axis)
+                                   :value (get r :rate)
+                                   :unit (get r :unit)
+                                   :verdict (string verdict)}) "\n"))
+               (port/close p))))
+  nil)
+
 (defn show [r]
-  "Print one measured class as a dashboard line."
-  (let [alt (get r :alt-rate)]
-    (println "  " (classify (get r :label) (get r :verdict)) "  " (get r :label)
-             ": rate=" (get r :rate) " ±" (get r :half)
-             (if (nil? alt) "" (string " [B-check " alt "]")) "  (" (get r :ops)
-             " ops / " (get r :blocks) " blocks)")))
+  "Print one measured class as a dashboard line, and report it through the
+   channel. `classify` runs once for both: it tallies as it goes, so a second
+   call would count the same probe twice."
+  (let [alt (get r :alt-rate)
+        verdict (classify (get r :label) (get r :verdict))]
+    (report-measurement r verdict)
+    (println "  " verdict "  " (get r :label) ": rate=" (get r :rate) " ±"
+             (get r :half) (if (nil? alt) "" (string " [B-check " alt "]"))
+             "  (" (get r :ops) " ops / " (get r :blocks) " blocks)")))
 
 # A pinned rate is an exact number (matched within ±0.5 — integer resolution on
 # the real-valued estimate) or a [lo hi] inclusive range (for the rare shape

@@ -283,7 +283,9 @@
       (let [h (string (hash src))
             [parse-ok? forms] (protect (test-forms src))
             msg (if parse-ok? (scan-children forms) nil)
-            cap (run-child (child-argv flags file) test-timeout-ms)
+            sink (measurement-sink run-id h)
+            cap (run-child (child-argv flags file) test-timeout-ms
+                           (measurement-env sink))
             c (classify-child cap test-timeout-ms)]
         # The label is scavenged from the source, and a file the child will
         # reject as unreadable has none to give — the child's own status is
@@ -291,7 +293,10 @@
         # else.
         (insert-form conn h file file 0 (if msg msg "") src)
         (let [rid (insert-result conn run-id h :process c)]
-          (capture-stdio conn rid (get cap :stdout) (get cap :stderr)))
+          (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
+          # A dashboard reports its verdicts through the channel named in the
+          # child's environment; every other file writes nothing there.
+          (record-measurements conn run-id rid sink))
         [(get c :status)]))))
 
 (defn process-eval [conn run-id expr]

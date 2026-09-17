@@ -350,8 +350,8 @@
 # already reaped the child, so the recorded status is consulted before the
 # timeout is believed; a reap is kept on the subprocess, never spent
 # (docs/subprocess.md § "A wait keeps the status it reaped").
-(defn run-child [argv budget-ms]
-  (let [child (subprocess/exec (elle/executable) argv {:stdin :null})
+(defn run-child [argv budget-ms env]
+  (let [child (subprocess/exec (elle/executable) argv {:stdin :null :env env})
         out-f (ev/spawn (fn [] (drain (get child :stdout))))
         err-f (ev/spawn (fn [] (drain (get child :stderr))))
         waited (ev/timeout (/ (float budget-ms) 1000.0)
