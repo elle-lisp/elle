@@ -120,6 +120,12 @@ mod run_identity {
 mod state_dir {
     include!("state_dir.rs");
 }
+mod isolation {
+    include!("isolation.rs");
+}
+mod measurements {
+    include!("measurements.rs");
+}
 mod census {
     include!("census.rs");
 }
