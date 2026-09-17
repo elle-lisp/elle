@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-09-10 -->
+<!-- audited: 2026-09-17 -->
 
 Elle has two test systems:
 
@@ -314,6 +314,7 @@ name needs no table and no formatting at all — use
 ## See also
 
 - [docs/test-runner.md](test-runner.md) — the runner's full specification and schema.
+- [docs/test-vision.md](test-vision.md) — the plan that folds every test product into `elle test`.
 - [tests/AGENTS.md](../tests/AGENTS.md) — Rust test categories, helpers, fixtures.
 - [docs/analysis/testing.md](analysis/testing.md) — Rust test decision tree.
 - [docs/threads.md](threads.md) — worker threads, `os/spawn`, the scheduler the runner ships into workers.

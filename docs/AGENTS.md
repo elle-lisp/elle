@@ -52,6 +52,7 @@ Up: [..](../AGENTS.md)
 - [structs.md](structs.md) — **Structs** Structs are key-value maps with keyword keys.
 - [syntax.md](syntax.md) — **Syntax** Elle is a Lisp.
 - [test-runner.md](test-runner.md) — **Agent-First Test Runner (more...)**
+- [test-vision.md](test-vision.md) — **One test system** The plan that folds every test product into `elle test`, keeps the results, and states what a run may skip.
 - [testing.md](testing.md) — **Testing** Elle has two test systems:
 - [threads.md](threads.md) — **Threads** OS threads for CPU-bound work.
 - [traits.md](traits.md) — **Traits** Every heap-allocated value carries a `traits` field — a pointer to a trait table (struct or @struct).
