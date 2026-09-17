@@ -182,10 +182,16 @@ fn a_child_over_its_budget_is_a_timeout() {
     let path = fixture(
         &dir,
         "slow.lisp",
-        "(elle/epoch 12)\n(println \"starting\")\n(ev/sleep 60)\n",
+        "(elle/epoch 12)\n(println \"starting\")\n(ev/sleep 120)\n",
     );
 
-    let out = isolate(&db, "", 1500, &[path]);
+    // The trap: the budget has to clear the child's own startup, not just beat
+    // its sleep. A debug binary loads its stdlib in ~0.3 s idle and several
+    // times that on a box running the rest of this suite, so a 1.5 s budget
+    // killed the child before it reached its `println` and the output
+    // assertion below failed on an empty asset. Ten seconds is thirty times
+    // the idle cost and a twelfth of the sleep, so both ends have room.
+    let out = isolate(&db, "", 10000, &[path]);
     assert!(!out.status.success(), "a timeout gates the run non-zero");
 
     let rows = results(&db);
