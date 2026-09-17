@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-16 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -248,7 +248,7 @@ is a correctness defect, not a tuning knob.
      (`EscapeSite::IoSubmit`); the backend's pending table is external to the
      region system in the same way a channel buffer is, so this retain is the
      operand's reference while the operation is in flight, and disposing of the
-     entry decrefs it (`OperandHold`, src/io/AGENTS.md § "A submitted operation
+     entry decrefs it (`OperandHold`, docs/impl/io-inflight.md § "A submitted operation
      holds the values its completion reads");
    - *terminal fiber signal* — a child's set-once return/error/halt result, read
      later via `fiber/value`, is park-retained when the fiber goes terminal and

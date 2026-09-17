@@ -8,6 +8,7 @@ Up: [..](../AGENTS.md)
 
 - [README.md](README.md) — **Elle Documentation** This directory contains language references, design documents, and contributor guides.
 - [arrays.md](arrays.md) — **Arrays** Arrays are indexed sequences.
+- [behaviors.md](behaviors.md) — **Process behaviors** The callback-driven roles `lib/process.lisp` builds on the bare process: GenServer, Actor, Task, Supervisor and EventManager.
 - [bindings.md](bindings.md) — **Bindings** Bindings associate names with values.
 - [bytes.md](bytes.md) — **Bytes** Bytes are sequences of raw byte values (0–255).
 - [coming-from.md](coming-from.md) — **Coming from Other Languages** Quick orientation for programmers arriving from specific languages.
@@ -50,6 +51,7 @@ Up: [..](../AGENTS.md)
 - [stdlib.md](stdlib.md) — **Standard Library** Elle's standard library has three layers: VM primitives (Rust), stdlib functions (Elle), and prelude macros (Elle).
 - [strings.md](strings.md) — **Strings** Strings are immutable sequences of grapheme clusters.
 - [structs.md](structs.md) — **Structs** Structs are key-value maps with keyword keys.
+- [subprocess.md](subprocess.md) — **Subprocesses** Elle spawns a child process as a `subprocess` value: one thing to read streams from, to signal, and to wait on.
 - [syntax.md](syntax.md) — **Syntax** Elle is a Lisp.
 - [test-runner.md](test-runner.md) — **Agent-First Test Runner (more...)**
 - [test-vision.md](test-vision.md) — **One test system** The plan that folds every test product into `elle test`, keeps the results, and states what a run may skip.
@@ -63,6 +65,6 @@ Up: [..](../AGENTS.md)
 
 - [analysis/](analysis/AGENTS.md) — Code Analysis and Semantic Understanding, Agent Reasoning in Elle, CI and Triage, Elle Debugging Toolkit, Analysis, Portrait, Test Scripts, Testing Strategy
 - [cookbook/](cookbook/AGENTS.md) — Adding a New Bytecode Instruction, Adding a New Heap Type, Cookbook, Adding a New Lint Rule, Adding a New Plugin, Adding a New Prelude Macro, Adding a New Primitive Function, Adding a New Special Form
-- [impl/](impl/AGENTS.md) — The generated index, The audit queue, Bytecode, Differential Tier Testing, Dissolution — HOF loop fusion, Escape analysis — the authoritative true-escape pass, Fleet — adhoc distributed execution over images, GPU Compute, HIR — High-level IR, Images — regions hydrated at load, JIT, Lexicon: epoch-aware lexing, LIR — Low-level IR, MLIR Backend, Reader, Self-recursion: the executing-closure mechanism (no cell), SPIR-V Backend, Standard Library Disk Cache, Symbols and keywords — identity is the name hash, Syntax — a region-native immutable tree, Type inference: the ascent, and what a call proves, Values, VM, WASM Backend
+- [impl/](impl/AGENTS.md) — The generated index, The audit queue, Bytecode, Differential Tier Testing, Dissolution — HOF loop fusion, Escape analysis — the authoritative true-escape pass, Fleet — adhoc distributed execution over images, GPU Compute, HIR — High-level IR, Images — regions hydrated at load, Descriptors and workers, An operation in flight, JIT, Lexicon: epoch-aware lexing, LIR — Low-level IR, MLIR Backend, Reader, Self-recursion: the executing-closure mechanism (no cell), SPIR-V Backend, Standard Library Disk Cache, Symbols and keywords — identity is the name hash, Syntax — a region-native immutable tree, Type inference: the ascent, and what a call proves, Values, VM, WASM Backend
 - [regions/](regions/AGENTS.md) — Value lifetime, constants, and teardown — the guarantees, Region performance — merging and the cost model, Region semantics — the model you write against
 - [signals/](signals/AGENTS.md) — Capability enforcement, Signal Design, emit, Fiber Architecture, Signals, Signal Inference, Signals and JIT, Fiber Primitives, Signal Protocol, Signal Questions, Signal Recovery

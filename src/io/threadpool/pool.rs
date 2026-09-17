@@ -1,9 +1,11 @@
+//! audited: 2026-09-16
 //! The crew of worker threads a [`CompletionHub`] runs its operations on.
 //!
 //! A worker outlives the operation it was started for: it parks on the job
 //! queue and takes the next submission, so a program that keeps asking for I/O
-//! pays for a thread once rather than per operation. See src/io/AGENTS.md
-//! § "How a worker is reused" for what that costs and what it must not cost.
+//! pays for a thread once rather than per operation. See
+//! docs/impl/io-descriptor.md § "How a worker is reused" for what that costs
+//! and what it must not cost.
 
 use super::*;
 use crossbeam_channel::Sender;
@@ -101,7 +103,7 @@ struct Parked {
     /// A submission takes from the end, so the next job goes to the worker that
     /// stopped working most recently — the warm one — and the workers the
     /// traffic no longer reaches sit at the bottom and age out of the
-    /// keepalive. See src/io/AGENTS.md § "How a worker is reused" for what this
+    /// keepalive. See docs/impl/io-descriptor.md § "How a worker is reused" for what this
     /// order is and is not known to buy.
     workers: Vec<Handoff>,
     /// True once the pool is gone. A worker still running a job when that

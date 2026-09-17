@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-16
 // Scripts pinned to a backend toggle or an I/O backend rather than to the guardfree oracle.
 //
 // docs/analysis/testing.md
@@ -98,9 +98,9 @@ fn port_shortwrite_threadpool() {
 // `:timeout` on a write that outgrows one syscall, on the OTHER backend. The
 // two backends bound a blocked operation by different means — io_uring links a
 // timeout SQE, the thread-pool worker relies on the fd's own send timeout — so
-// each needs its own coverage of the re-armed deadline. Measured before the
-// fix, both ignored `:timeout` on the resubmitted tail identically: the call
-// blocked until the peer closed the socket and then reported ECONNRESET.
+// each needs its own coverage of the re-armed deadline. The counter-factual is
+// a deadline armed on the first syscall only: the call then blocks until the
+// peer closes the socket and reports ECONNRESET instead of timing out.
 // See src/io/AGENTS.md § Full-Write Invariant.
 #[test]
 fn port_write_timeout_threadpool() {
@@ -109,10 +109,10 @@ fn port_write_timeout_threadpool() {
 
 // `:timeout` on the looping reads, on the OTHER backend. io_uring re-arms a
 // linked timeout on each resubmission; the thread-pool worker takes the fd
-// non-blocking and waits in `poll(2)`. The pool half needs its own coverage
-// twice over: it is the sole mechanism on macOS, and it was the weaker of the
-// two before — measured on this file, io_uring already bounded a single
-// `port/read` while the pool backend bounded no read at all.
+// non-blocking and waits in `poll(2)`. The pool half needs its own coverage:
+// it is the sole mechanism on macOS, and the two bound different things — a
+// backend can bound a single `port/read` and still bound none of the looping
+// reads this file measures.
 // See src/io/AGENTS.md § Operation timeouts.
 #[test]
 fn port_read_timeout_threadpool() {
@@ -177,7 +177,7 @@ fn io_cancel_releases_threadpool() {
 // `IORING_OP_ASYNC_CANCEL`, so neither half says anything about the other; the
 // pool's is what macOS always runs. `:workers` measures the second claim the
 // file makes — the thread comes back — and is zero on io_uring whatever the
-// pool does. See src/io/AGENTS.md § "Ending an operation whose operands are
+// pool does. See docs/impl/io-inflight.md § "Ending an operation whose fiber is
 // gone".
 #[test]
 fn io_stale_operation_ends_threadpool() {
@@ -210,30 +210,23 @@ fn fiber_deep_nesting_jit() {
     );
 }
 
-// A parked activation's region-map snapshot named a region it no longer owned,
-// so on resume the debug-only uncounted-borrow guard (src/vm/core/resume.rs →
-// `first_stale_borrow`, docs/impl/region/generations.md § "Uncounted-borrow
-// check") aborted: "stale suspended-frame region borrow on resume".
+// A parked activation resumes without tripping the uncounted-borrow guard
+// (src/vm/core/resume.rs → `first_stale_borrow`,
+// docs/impl/region/generations.md § "Uncounted-borrow check").
 //
-// Root cause: the activation region map records `static slot → physical region`
-// for every ALLOC-slot allocation and is cleared only by the slot-based
-// `DecrefRegion`. A region freed any OTHER way — a value-based `DecrefValueRegion`/
-// `DecrefCellRegion` (capture cells), a cross-region cascade, a subtree drop —
-// leaves its entry behind, and the physical id it names is recycled to an
-// unrelated region. `record_region_borrows` stamped each parked entry with the
-// id's CURRENT generation, so such a leftover was snapshotted as a live borrow of
-// an incarnation the activation never owned; when that unrelated incarnation was
-// later freed, the resume check tripped. signals.lisp's cumulative squelch/
-// silence/yield churn recycles ids fast enough to hit it (state-sensitive — it
-// does not minimize to a small standalone form, hence the coupling to the file).
+// The trap: the guard is DEBUG-ONLY. Release compiles it out, so this file
+// passes CI's release corpus whatever the region map holds; only the debug
+// cargo-test profile runs it armed. That is why the pin lives here and not in
+// the corpus.
 //
-// Fixed by carrying the establish-generation in the map (`MappedRegion`): the
-// snapshot records the generation the slot was valid at and skips entries whose
-// region has since moved on (dead leftovers), while a genuine borrow freed *while
-// parked* still trips the check. The abort was DEBUG-ONLY (release compiles the
-// guard out and the leftover's dead `DecrefRegion` never reads it, so signals.lisp
-// passed in CI's release corpus); this runs the file under the debug cargo-test
-// profile where the guard is live.
+// The counter-factual: an activation's region map is cleared by the slot-based
+// `DecrefRegion` alone, so a region freed any other way leaves its entry behind
+// and the physical id it names is recycled. Snapshot a parked entry at the id's
+// CURRENT generation instead of the one the slot was established at, and the
+// leftover reads as a live borrow of an incarnation the activation never owned.
+// signals.lisp is the file that gets there: its cumulative squelch/silence/yield
+// churn recycles ids fast enough, and the state it needs does not minimize to a
+// standalone form.
 #[test]
 fn signals_no_stale_suspended_frame_region_borrow() {
     run_elle_script_with_args("signals", &["--jit=off"]);

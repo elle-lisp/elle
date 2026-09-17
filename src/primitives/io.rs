@@ -1,3 +1,4 @@
+//! audited: 2026-09-16
 //! I/O primitives: type predicates and backend operations.
 
 use crate::io::aio::AsyncBackend;
@@ -109,7 +110,7 @@ fn prim_io_backend(
 /// Optional third arg: the fiber that issued the request, and the one its result
 /// is for. The backend asks that fiber what became of it before it assembles a
 /// completion, and ends an operation the fiber can no longer receive
-/// (src/io/AGENTS.md § "An operation whose fiber is gone has no reader"). A call
+/// (docs/impl/io-inflight.md § "An operation whose fiber is gone has no reader"). A call
 /// that names no fiber is submitting for a reader that is not a fiber of this
 /// scheduler — `handle-io-forward` submits for a child scheduler's queue — and
 /// nothing about such a submission is ever withheld.
@@ -365,7 +366,7 @@ primitive! {
         signal: Signal::errors(),
         arity: Arity::Range(2, 3),
         doc: "Submit an I/O request to an async backend. Optional third arg is the fiber the result is for, which the backend asks about before it assembles a completion. Returns submission ID.",
-        params: &["backend", "request"],
+        params: &["backend", "request", "fiber?"],
         category: "io",
         example: "(io/submit backend request)",
         effect: RegionEffect::Immediate,

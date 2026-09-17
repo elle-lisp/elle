@@ -1,3 +1,4 @@
+//! audited: 2026-09-16
 //! Unit tests (`super` is the parent impl module).
 
 use super::*;
@@ -161,7 +162,7 @@ fn test_pipe_display_closed() {
 /// This is what keeps a number out of circulation while a worker still holds it
 /// — a number reissued under a running worker gets read by that worker, and its
 /// bytes reach no fiber. The port must report closed at once even so, because
-/// that is what Elle promised the caller. See src/io/AGENTS.md § "Descriptor
+/// that is what Elle promised the caller. See docs/impl/io-descriptor.md § "Descriptor
 /// retirement".
 ///
 /// The trap: `F_GETFD` on a number a test just gave up says nothing on its own.

@@ -1,3 +1,4 @@
+//! audited: 2026-09-16
 //! The ownership forest: adoption, ownership queries, and transfer.
 //!
 //! An `Owned` region is reclaimed only by its owner's subtree drop, never by a
@@ -23,11 +24,7 @@ impl RegionStore {
     /// no count left to reach zero. No incref — an interior ownership edge is not
     /// reference-counted (the subtree frees as a unit).
     ///
-    /// A region is adopted **at most once**: a second adoption would mean two
-    /// owners, so it finds the child already `Owned` and is a debug-asserted bug
-    /// (the inference adopts each member once). This is the structural guard that
-    /// "owned-and-RC'd" cannot arise — the count is gone after the first adoption,
-    /// not merely frozen-and-ignored.
+    /// A region is adopted **at most once**, which the assert below enforces.
     ///
     /// Both regions are `ensure`d so the edge survives even if neither has
     /// allocated yet (a conditional alloc that never executed leaves an empty but
@@ -88,7 +85,7 @@ impl RegionStore {
     /// raise (§ [`Self::adopt_region`]). A seam outside the region system that
     /// must keep a value alive therefore counts against this instead: the root
     /// is `Counted`, so a reference on it does stop the subtree drop that would
-    /// take the member. The pending table is that seam (src/io/AGENTS.md § "A
+    /// take the member. The pending table is that seam (docs/impl/io-inflight.md § "A
     /// hold retains what reclamation listens to").
     ///
     /// The walk is bounded rather than trusting termination: `adopt_region`
@@ -130,18 +127,12 @@ impl RegionStore {
     /// left untouched (an idempotent no-op): a non-adopted element takes the
     /// ordinary RC moves-out path (escape-retain + un-record + decref), not this.
     ///
-    /// The rebuilt count is **1 + the recorded external incoming edges**: the 1 is
-    /// the caller's moves-out reference (the result, whose `DecrefValueRegion`
-    /// reclaims it — on an Owned region `incref`/`decref` are inert, so the
-    /// escape-retain the Counted path uses cannot establish that reference here;
-    /// this move IS the retain). Each admitted incoming edge is a live container
-    /// still holding a value in the child's region — the pop funnel un-records the
-    /// popped container edge *before* extracting, so what remains is genuinely
-    /// external and releases through the ordinary unrecord+decref / frontier
-    /// cascade of its holder. The child's own subtree's back-edges are excluded,
-    /// exactly as the drop-time rescue excludes them (they release only at the
-    /// child's own drop; docs/impl/region/ownership.md § "The incoming edge table
-    /// and the external-reference rescue").
+    /// The rebuilt count is **1 + the recorded external incoming edges**. The 1 is
+    /// this move itself: on an Owned region `incref` is inert, so the escape-retain
+    /// the Counted path would take cannot establish the caller's reference here.
+    /// The child's own subtree's back-edges are excluded from the sum, as they are
+    /// at the drop-time rescue — docs/impl/region/ownership.md § "The incoming edge
+    /// table and the external-reference rescue".
     pub(crate) fn extract_owned_region(&mut self, child: RuntimeRegion) {
         let owner = match self
             .regions

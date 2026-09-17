@@ -1,5 +1,7 @@
 # I/O
 
+<!-- audited: 2026-09-16 -->
+
 All I/O in Elle is async — reads and writes yield to the scheduler. User
 code runs inside the async scheduler automatically.
 
@@ -90,8 +92,10 @@ the edges. Two things come back when it does, on either backend:
   descriptor number until that operation ends, so the number cannot be
   handed to a new port while a worker holds it.
 
-`tests/elle/io-cancel-releases.lisp` pins both. See `src/io/AGENTS.md`
-§ "I/O Cancellation" for how the thread pool delivers them.
+`tests/elle/io-cancel-releases.lisp` pins both. See
+[an operation in flight](impl/io-inflight.md) for how a cancelled operation is
+ended, and [descriptors and workers](impl/io-descriptor.md) for what it gives
+back.
 
 ### How many operations run at once
 
@@ -360,23 +364,10 @@ same two endings — its own `:timeout` where it has one, and `ev/timeout` or
 what lets a caller poll in a loop — `lib/wayland.lisp` polls with a 33 ms bound
 on every iteration.
 
-```lisp
-(ev/run (fn []
-          (let [child (subprocess/exec "sleep" ["30"])]
-            (assert (nil? (ev/timeout 0.2 (fn [] (subprocess/wait child))))
-                    "a child that outlives the deadline must not hold the wait")
-            (subprocess/kill child :sigkill)
-            (subprocess/wait child))))
-```
-
-The last line above is entitled to the exit status the cancelled wait
-abandoned. A wait the deadline ends can still reap the child in the moment
-between the cancel and the wait noticing it, and a reap takes the status from
-the kernel for good. So the status is kept on the process handle rather than
-delivered and forgotten: a child's exit status goes to a waiter, or waits on
-the handle until one asks. Every `subprocess/wait` on a child that has exited
-answers with the same status, however many times it is called and whatever
-became of the wait before it.
+A cancelled `subprocess/wait` is the one that gives something back besides the
+fiber: it may have reaped the child on its way out, and a reap takes the exit
+status from the kernel for good. [subprocess.md](subprocess.md) owns what
+becomes of that status.
 
 `port/open` is the one with a direction to it. POSIX blocks an `open(2)` on a
 fifo until the other end is open, and Elle keeps that for the write side: the
@@ -430,116 +421,14 @@ All output functions are async — they yield to the scheduler.
 
 ## Subprocesses
 
-### Run to completion
+`subprocess/exec` spawns a child and answers a `subprocess` — the value its
+streams, pid and exit status are read from, and the value `subprocess/wait` and
+`subprocess/kill` take. Its stdio ports are ordinary ports, so everything above
+applies to them: the same reads and writes, the same `:timeout`, the same
+cancellation.
 
-`subprocess/system` runs a command and captures its output:
-
-```lisp
-# Run to completion — returns {:exit :stdout :stderr}
-(subprocess/system "echo" ["hello"])
-# => {:exit 0 :stdout "hello\n" :stderr ""}
-
-# With options
-(subprocess/system "ls" ["-la"] {:cwd "/usr"})
-(subprocess/system "env" [] {:env {:FOO "bar"}})
-```
-
-### Long-running subprocesses
-
-`subprocess/exec` spawns a subprocess and returns a handle with stdio
-ports. Use `subprocess/wait` to block until exit, `subprocess/kill` to
-send signals.
-
-```lisp
-# Spawn and interact
-(def proc (subprocess/exec "cat" []))
-(port/write (get proc :stdin) "hello")
-(port/close (get proc :stdin))
-(string (port/read-all (get proc :stdout)))  # => "hello"
-(subprocess/wait proc)                       # => 0
-
-# Spawn, kill, reap
-(def proc (subprocess/exec "sleep" ["60"]))
-(subprocess/kill proc :sigterm)              # => :signaled
-(subprocess/wait proc)                       # => non-zero
-```
-
-### Killing a child that may already be gone
-
-A pid names a child only until somebody reaps it. The kernel then returns the
-number to the pool and hands it out again, so a signal sent on a reaped child's
-pid reaches whatever holds that number now — nothing on a quiet machine, another
-child of this program or an unrelated process on a busy one.
-
-So `subprocess/kill` asks the handle before it asks the kernel. When the handle
-holds the child's exit status, the child is gone, and the call sends no signal
-at all. The status gets there by `subprocess/wait` — or by any other reap, since
-a reap is recorded rather than spent (see the wait section above).
-
-The answer says which happened, so a caller that cares can tell them apart.
-Each one reports what the call observed, and nothing beyond it:
-
-| Answer | What it means |
-|---|---|
-| `:signaled` | `kill(2)` took the signal for this handle's child. |
-| `:exited` | The handle holds the child's exit status. No signal was sent. |
-| `:missing` | No process holds that pid. Nothing was signalled. |
-
-`:exited` and `:missing` are two different pieces of evidence, which is why they
-are two answers. The handle's status says the child is gone and says whose child
-it was; `ESRCH` says only that the number named nobody at that moment, and a pid
-carries no record of who used to hold it.
-
-All three are success. Killing a child that is already dead is not an error —
-the state the kill asked for already holds — and a program that kills on a timer
-while a fiber waits reaches this as a race rather than a mistake:
-
-```lisp
-(ev/run (fn []
-          (let [child (subprocess/exec "sleep" ["30"])]
-            (assert (= :signaled (subprocess/kill child :sigterm))
-                    "the child is still there, so the signal goes to it")
-            (subprocess/wait child)
-            (assert (= :exited (subprocess/kill child :sigterm))
-                    "the wait reaped it, so this kill has nothing to signal"))))
-```
-
-`subprocess/pid` still answers the number after a reap, and so does the `:pid`
-field of the exec result. The number is what the child had; what a caller does
-with it afterwards is outside this runtime.
-
-### Subprocess options
-
-```lisp
-# (subprocess/exec program args)           — default: pipes for all stdio
-# (subprocess/exec program args opts)      — with options struct
-#
-# Options:
-#   :env    — struct of env vars (merged with inherited)
-#   :cwd    — working directory string
-#   :stdin  — :pipe (default) | :null | :inherit
-#   :stdout — :pipe (default) | :null | :inherit
-#   :stderr — :pipe (default) | :null | :inherit
-```
-
-### Supervised subprocesses
-
-For long-running daemons, use `lib/process` to supervise OS subprocesses.
-The supervisor automatically restarts them on crash:
-
-```lisp
-(def process ((import "std/process")))
-
-(process:start (fn []
-  (process:supervisor-start-link
-    [(process:make-subprocess-child :worker "/usr/bin/worker" []
-       :opts {:env {:PORT "8080"}})
-     (process:make-subprocess-child :monitor "/usr/bin/monitor" [])]
-    :name :daemon-sup
-    :max-restarts 5)))
-```
-
-See [processes.md](processes.md) for the full supervisor API.
+See [subprocess.md](subprocess.md) for the type, its reads, and what a kill
+answers.
 
 ## Temporary files
 
@@ -577,6 +466,7 @@ recursive delete (`file/delete-dir` only removes empty directories).
 
 ## See also
 
+- [subprocess.md](subprocess.md) — the subprocess type, its reads, kill and wait
 - [processes.md](processes.md) — supervised subprocesses, GenServer, actors
 - [concurrency.md](concurrency.md) — ev/spawn, ev/join, parallel I/O
 - [fibers](signals/fibers.md) — fiber-based async model

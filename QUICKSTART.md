@@ -1,5 +1,7 @@
 # Elle Quickstart
 
+<!-- audited: 2026-09-16 -->
+
 Elle is a Lisp with lexical scope, closures, and a signal system.
 
 ## Critical gotchas
@@ -35,7 +37,7 @@ make smoke                 # run all tests (~30s)
 |------|---------|
 | [syntax](docs/syntax.md) | Literals, comments, splice, quoting, collection literals |
 | [types](docs/types.md) | Type predicates, conversions, truthiness, equality |
-| [bindings](docs/bindings.md) | def, var, let, letrec, assign, scope rules |
+| [bindings](docs/bindings.md) | def, let, letrec, assign, `@` mutability, scope rules |
 | [destructuring](docs/destructuring.md) | List, array, struct patterns |
 | [destructuring-advanced](docs/destructuring-advanced.md) | Rest, wildcard, nested, match integration |
 | [functions](docs/functions.md) | fn, defn, closures, higher-order, sorting |
@@ -59,7 +61,8 @@ make smoke                 # run all tests (~30s)
 | [modules](docs/modules.md) | import, closure-as-module pattern |
 | [traits](docs/traits.md) | with-traits, trait dispatch |
 | [portrait](docs/analysis/portrait.md) | Semantic analysis and portraits |
-| [io](docs/io.md) | Ports, file I/O, subprocesses |
+| [io](docs/io.md) | Ports, file I/O |
+| [subprocess](docs/subprocess.md) | Spawning children, their streams, wait and kill |
 | [posix-signals](docs/posix-signals.md) | POSIX signals: `os/sig-send`, `os/sig-watch`, etc. |
 | [ffi](docs/ffi.md) | C interop, libloading, callbacks |
 | [lua](docs/lua.md) | Lua syntax mode |
@@ -74,7 +77,8 @@ make smoke                 # run all tests (~30s)
 | [debugger](docs/debugger.md) | Breakpoints, stepping, frame inspection, record/replay |
 | [embedding](docs/embedding.md) | Using Elle as a library |
 | [regions](docs/regions.md) | Region-based memory: per-region RC, `IncrefRegion`/`DecrefRegion`, merging |
-| [processes](docs/processes.md) | Erlang-style processes, GenServer, supervisors |
+| [processes](docs/processes.md) | Erlang-style processes: mailboxes, links, monitors |
+| [behaviors](docs/behaviors.md) | GenServer, Actor, Task, Supervisor, EventManager |
 
 ## Implementation
 
