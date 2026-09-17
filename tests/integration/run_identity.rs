@@ -1,6 +1,6 @@
 // audited: 2026-09-17
-// A `run` row names the code it ran against — commit, worktree, host, build —
-// so a result belongs to something and a warning can say whose run it warns
+// A `run` row names the code it ran against: commit, worktree, host, build.
+// So a result belongs to something, and a warning can say whose run it warns
 // about.
 //
 // docs/test-store.md

@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-17
 // src/pipeline/AGENTS.md
 //! Compilation pipeline: source -> bytecode.
 
@@ -353,7 +353,7 @@ fn compile_file_inner(
 }
 
 /// Compile a file in the per-form fault-barrier test mode
-/// (docs/test-runner.md § Mechanism → "How the barrier is realized").
+/// (docs/test-runner.md § Mechanism).
 ///
 /// The file is compiled ONCE through the whole-module `analyze_file_letrec`
 /// path (so binding resolution, capture analysis, signal inference, and epoch
@@ -364,7 +364,7 @@ fn compile_file_inner(
 /// (expression) form, each capturing that shared environment.
 ///
 /// The runner then runs each thunk on each tier with a fault barrier OUTSIDE the
-/// tiered closure (a worker fiber + `protect`); see `src/test.lisp`.
+/// tiered closure (a worker fiber + `protect`); see `src/test`.
 pub fn compile_barrier_module(
     source: &str,
     symbols: &mut SymbolTable,

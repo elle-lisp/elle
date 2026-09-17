@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-17
 //! The `elle` binary: dispatch a subcommand, or set up one `Runtime` and drive
 //! it from a file, `-e`, stdin or the REPL.
 //!
@@ -50,8 +50,34 @@ fn run_file(
     run_source(&contents, filename, vm, symbols, cctx)
 }
 
-/// The agent-first test runner, embedded at build time. See docs/test-runner.md.
-const TEST_RUNNER_SRC: &str = include_str!("test.lisp");
+/// The agent-first test runner, embedded at build time, in the order its
+/// definitions are evaluated. See docs/test-runner.md.
+const TEST_RUNNER_FRAGMENTS: &[&str] = &[
+    include_str!("test/store.lisp"),
+    include_str!("test/exec.lisp"),
+    include_str!("test/record.lisp"),
+    include_str!("test/view.lisp"),
+    include_str!("test/main.lisp"),
+];
+
+/// The runner as one module.
+///
+/// Each fragment is a whole Elle file — formatted, stamped, and read on its
+/// own — so each carries the epoch declaration a file needs. A module declares
+/// its epoch once, so every fragment past the first drops the line here.
+fn test_runner_source() -> String {
+    let mut src = String::new();
+    for (i, fragment) in TEST_RUNNER_FRAGMENTS.iter().enumerate() {
+        for line in fragment.lines() {
+            if i > 0 && line.starts_with("(elle/epoch") {
+                continue;
+            }
+            src.push_str(line);
+            src.push('\n');
+        }
+    }
+    src
+}
 
 /// `elle test ...` — set up a full VM and run the embedded runner with the
 /// post-`test` arguments exposed to it as the program argv (via `(sys/argv)`).
@@ -83,7 +109,7 @@ fn run_test_subcommand(sub_args: Vec<String>) -> i32 {
 
     let code = {
         let (vm, symbols, cctx) = rt.parts();
-        match run_source(TEST_RUNNER_SRC, "src/test.lisp", vm, symbols, cctx) {
+        match run_source(&test_runner_source(), "src/test", vm, symbols, cctx) {
             Ok(_) => 0,
             Err(_) => 1,
         }
@@ -231,7 +257,7 @@ fn main() {
             std::process::exit(exit_code);
         }
         Some("test") => {
-            // The runner is an Elle program (src/test.lisp). Unlike fmt/lint it
+            // The runner is an Elle program (src/test). Unlike fmt/lint it
             // needs a full VM (sqlite FFI, stdlib, threads), so run the embedded
             // source with the post-`test` args handed to it as the program argv.
             let sub_args: Vec<String> = args[2..].to_vec();

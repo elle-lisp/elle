@@ -100,13 +100,17 @@
             (if (> (length t) 0) t nil))
           nil)))))
 
+# What the working tree differs from HEAD by. Non-empty output is the dirty
+# flag, and the same listing is one of the three inputs to the tree hash.
+(def status-cmd "git status --porcelain 2>/dev/null")
+
 # The identity of the working tree, in one hash: the HEAD tree, the porcelain
 # status, and the diff from HEAD. Two runs share it when they ran against the
 # same code, dirty working tree included — which a commit alone cannot say.
 # `git hash-object` does the hashing, so a large diff never crosses into the
 # runner.
 (def tree-hash-cmd
-  (string "{ git rev-parse 'HEAD^{tree}'; git status --porcelain; "
+  (string "{ git rev-parse 'HEAD^{tree}'; " status-cmd "; "
           "git diff HEAD --binary; } 2>/dev/null | git hash-object --stdin 2>/dev/null"))
 
 # The code state and the machine this run ran on. Outside a repository the git
@@ -116,9 +120,8 @@
 (defn run-identity []
   (let [commit (capture-cmd "git rev-parse HEAD 2>/dev/null")]
     (struct :commit commit
-            :dirty (if commit
-                     (if (capture-cmd "git status --porcelain 2>/dev/null") 1 0)
-                     nil) :tree (if commit (capture-cmd tree-hash-cmd) nil)
+            :dirty (if commit (if (capture-cmd status-cmd) 1 0) nil)
+            :tree (if commit (capture-cmd tree-hash-cmd) nil)
             :worktree (capture-cmd "git rev-parse --show-toplevel 2>/dev/null")
             :host (capture-cmd "uname -n") :version (elle/version)
             :profile (elle/build-profile)

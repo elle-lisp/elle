@@ -1,3 +1,11 @@
+// audited: 2026-09-17
+//! The `compile/*` primitives that change a program or run one.
+//!
+//! Rename, extract, add-handler, the forced-tier call, and the module compiles
+//! the test runner drives.
+//!
+//! docs/test-runner.md
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::hir::{Binding, HirKind};
@@ -431,7 +439,7 @@ pub(super) fn prim_compile_whole_module_syntax(
 /// rendered text: `{:ast … :fhir … :defuse … :regions … :hir … :lir … :cfg …
 /// :dfa … :jit … :escape …}`. These are the same artifacts `elle --dump=KIND`
 /// prints, returned in-process instead of printed-and-exit, so the test runner
-/// (`src/test.lisp`) can capture them per form into the CAS (docs/test-runner.md
+/// (`src/test`) can capture them per form into the CAS (docs/test-runner.md
 /// § CAS asset capture). A stage that fails to compile or yields nothing is
 /// omitted from the struct.
 ///
