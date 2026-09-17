@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-17
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -113,6 +113,12 @@ mod scratch {
 }
 mod truncation {
     include!("truncation.rs");
+}
+mod run_identity {
+    include!("run_identity.rs");
+}
+mod state_dir {
+    include!("state_dir.rs");
 }
 mod census {
     include!("census.rs");
