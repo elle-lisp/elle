@@ -51,7 +51,9 @@ Up: [..](../AGENTS.md)
 - [strings.md](strings.md) — **Strings** Strings are immutable sequences of grapheme clusters.
 - [structs.md](structs.md) — **Structs** Structs are key-value maps with keyword keys.
 - [syntax.md](syntax.md) — **Syntax** Elle is a Lisp.
-- [test-runner.md](test-runner.md) — **Agent-First Test Runner (more...)**
+- [test-cli.md](test-cli.md) — **Driving the test runner** Why `elle test` exists, the command line it offers, what it refuses to offer, and what is still design.
+- [test-runner.md](test-runner.md) — **Agent-First Test Runner** How a run executes: each file compiled, isolated, gated, run on every tier, its output captured, and its end recorded honestly.
+- [test-store.md](test-store.md) — **The test runner store** Where `elle test` keeps a run, what every run and result records, and the queries that read them back.
 - [test-vision.md](test-vision.md) — **One test system** The plan that folds every test product into `elle test`, keeps the results, and states what a run may skip.
 - [testing.md](testing.md) — **Testing** Elle has two test systems:
 - [threads.md](threads.md) — **Threads** OS threads for CPU-bound work.
