@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-17 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -181,7 +181,7 @@ since been dropped.
 
 `(vm/query "jit/map" nil)` renders the table as one `0x<addr> <name>` line per
 entry, sorted by address. The test runner prints it after the thread
-photograph when a form misses its deadline ([test.lisp](../../src/test.lisp),
+photograph when a form misses its deadline ([exec.lisp](../../src/test/exec.lisp),
 `note-timeout-stacks`), so a sampled JIT frame resolves to the nearest
 preceding entry — the registry records entry addresses, not sizes, and
 Cranelift lays functions out contiguously enough for nearest-preceding to

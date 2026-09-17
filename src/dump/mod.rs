@@ -1,8 +1,9 @@
+// audited: 2026-09-17
 //! In-process rendering of the compiler's `--dump` artifacts.
 //!
 //! `elle --dump=KIND` (see `main.rs::run_dump`) runs the compiler up to a stage
 //! and prints the artifact to stdout, then exits. The agent-first test runner
-//! (`src/test.lisp`, docs/test-runner.md) needs those same artifacts *in
+//! (`src/test`, docs/test-runner.md) needs those same artifacts *in
 //! process* — captured per form and written to the on-disk CAS — so the agent
 //! can query the LIR of a failing form without re-running `--dump=lir`.
 //!

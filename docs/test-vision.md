@@ -10,7 +10,7 @@ and states what a run may skip.
 Six products test this repository today:
 
 - `elle test` runs the corpus and records every result in a SQLite session DB
-  ([test-runner](test-runner.md)).
+  ([test-store](test-store.md)).
 - [oracle.lisp](../tests/elle/oracle.lisp) and
   [plumb.lisp](../tests/elle/plumb.lisp) measure leak rates. The Makefile runs
   them outside the corpus, under hand-set timeouts.
@@ -26,22 +26,23 @@ does not survive:
 - CI writes the session DB inside the runner and uploads nothing. When a job
   fails, the reader gets the log, which is the medium the runner was built to
   replace.
-- Locally the DB lives under `ELLE_CACHE`, which sits on tmpfs. A reboot
-  erases the whole history.
+- The DB survives a reboot: it lives in the state directory, and each run names
+  the commit, worktree, host, and build it ran against
+  ([test-store](test-store.md)). Nothing moves it off the box yet.
 
 ## The decisions
 
 ### Results are state
 
-The session DB and CAS move to a persistent state directory. `ELLE_CACHE`
+The session DB and CAS live in a persistent state directory. `ELLE_CACHE`
 keeps the things a rebuild can regenerate; run history is a record, so it
 lives with state.
 
 Every CI corpus job uploads its DB and CAS as an artifact. A new
 `elle test --import` merges a downloaded run into local history. The schema
 makes the merge cheap: forms are keyed by syntax hash, assets by content hash,
-and runs append. The prerequisite is the deferred `run` columns — commit,
-host, and config — so an imported run says what it ran against.
+and runs append. A run row already carries the commit, worktree, host, and
+build, so an imported run says what it ran against.
 
 Later, the store becomes shared: a content-addressed blob store plus a small
 index, Redis first, exactly the `store` milestone in [fleet](impl/fleet.md).
@@ -149,8 +150,8 @@ the CI habit of reading failures out of logs.
 
 ## Landing order
 
-1. Persistence: the state directory, the CI artifact upload, `--import`, and
-   the `run` identity columns.
+1. Persistence: the CI artifact upload and `--import`. The state directory and
+   the `run` identity columns are in.
 2. Profiles with child-process isolation; fold in the guardfree family, the
    oracle, plumb, and the per-file passes.
 3. Derived budgets.

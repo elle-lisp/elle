@@ -13,7 +13,9 @@ Elle has two test systems:
    decision tree (which kind of Rust test to write).
 
 This document covers the Elle corpus and the runner; the runner's full
-specification is [docs/test-runner.md](test-runner.md).
+specification is [docs/test-runner.md](test-runner.md), with
+[docs/test-cli.md](test-cli.md) for its command line and
+[docs/test-store.md](test-store.md) for what it records.
 
 ## Quick start
 
@@ -29,11 +31,15 @@ specification is [docs/test-runner.md](test-runner.md).
 A run prints a tally and a line per failure to stderr, e.g.:
 
 ```
-elle test · run 7 of 7 · 184 pass · 6 skip · 1 fail · 0 diverge · 1 timeout
+elle test · run 7 of 7 · commit a1b2c3d (dirty)
+184 pass · 6 skip · 1 fail · 0 diverge · 1 timeout
 2 problems (query the DB for full detail):
   fail     tests/elle/foo.lisp:12  [jit]  expected 42, got 41
   timeout  tests/elle/subprocess.lisp  [vm]  join: deadline exceeded
 ```
+
+The commit line names the code the tally describes. A run outside a
+repository prints the run number alone.
 
 You read results from the run itself — never by hand-writing SQLite.
 
@@ -41,13 +47,16 @@ You read results from the run itself — never by hand-writing SQLite.
 
 The runner compiles and runs the **whole corpus in one process**, recording every
 `(form × tier)` result into a **SQLite DB** plus a filesystem CAS for
-artifacts. The thesis (see [docs/test-runner.md](test-runner.md)): *capture
+artifacts. The thesis (see [docs/test-cli.md](test-cli.md)): *capture
 everything once; query forever* — so an agent issues SQL against the stored run
 instead of re-running with `--dump`/`--trace`.
 
-- **The corpus is the source of truth, in git.** The DB is a derived, rebuildable
-  index living outside the repo (`$ELLE_CACHE/elle-tests.db`, or
-  `target/elle-tests.db` when that variable is unset).
+- **The corpus is the source of truth, in git.** The DB is a derived index
+  living outside the repo, in the state directory: `$ELLE_STATE`, else
+  `$XDG_STATE_HOME/elle`, else `$HOME/.local/state/elle`
+  ([docs/test-store.md](test-store.md) § Run history is state). Run history
+  is a record, so it does not live with the caches a rebuild regenerates.
+  `--db PATH` moves the database, its CAS, and its scratch files together.
 - **The DB tracks all runs.** Each invocation appends a `run` row; `--summary`
   shows the *latest* run (`run N of M` makes the history visible).
 
@@ -208,8 +217,11 @@ elle test --query \
 ```
 
 The schema (`run`, `form`, `result`, `asset`, `changed_file`) is documented in
-[docs/test-runner.md](test-runner.md) § Schema (with the v1 implemented-subset
-note — the `run` code-state/resource columns are deferred). Captured stdout/stderr
+[docs/test-store.md](test-store.md) § Schema (with the v1 implemented-subset
+note — the `run` resource columns are deferred). Each `run` row names the code
+it ran against — commit, dirty flag, tree hash, worktree — and the binary and
+machine that ran it, so a result belongs to something and the killed-run
+warning names the checkout it warns about. Captured stdout/stderr
 live in the CAS at `<db-dir>/cas/<hash>`, referenced by `asset` rows. `--dump`
 artifact capture (the LIR-as-a-hash-lookup path) is currently **omitted** — it
 OOMs the corpus run and does not dedup
@@ -236,7 +248,9 @@ A run killed mid-flight (OOM, signal) is recorded honestly: its `run` row's
 partial tally (computed from `result` rows — the stored counters are written
 only at completion), and the next `elle test` warns about it. An all-pass
 result set from a truncated run is partial coverage, not green
-(see [docs/test-runner.md](test-runner.md) § Run honesty).
+(see [docs/test-runner.md](test-runner.md) § Run honesty). The warning names
+the worktree of the run it warns about, so a sibling checkout's run is not read
+as this one's kill.
 
 ## Correctness the leak and UAF oracles cannot see
 
@@ -313,7 +327,9 @@ name needs no table and no formatting at all — use
 
 ## See also
 
-- [docs/test-runner.md](test-runner.md) — the runner's full specification and schema.
+- [docs/test-runner.md](test-runner.md) — how a run executes: compilation, isolation, gating, tiers, honesty.
+- [docs/test-store.md](test-store.md) — where a run is stored, what it records, and the schema.
+- [docs/test-cli.md](test-cli.md) — why the runner exists, its command line, and what is still design.
 - [docs/test-vision.md](test-vision.md) — the plan that folds every test product into `elle test`.
 - [tests/AGENTS.md](../tests/AGENTS.md) — Rust test categories, helpers, fixtures.
 - [docs/analysis/testing.md](analysis/testing.md) — Rust test decision tree.

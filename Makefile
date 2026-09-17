@@ -284,12 +284,12 @@ fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
 # `jit`), while single-form files run on every tier with divergence — so one
 # invocation is the whole vm/jit/differential gate. No per-pass skip list
 # applies: a test gates itself in-file (gate!/:gated) and a backend the build
-# lacks is dropped, not skip-listed. The session DB is the runner's default
-# ($ELLE_CACHE/elle-tests.db) — every run, make-driven or not, accumulates in
-# the one history that `--summary`/`--query` and the regression-archaeology
-# queries read. Never point a run at a private DB. Concurrent runs share it
-# safely: the connection waits on a busy database rather than raising
-# (docs/test-runner.md § Concurrent runs wait).
+# lacks is dropped, not skip-listed. The session DB is the runner's default —
+# the state directory, which survives a reboot — so every run, make-driven or
+# not, accumulates in the one history that `--summary`/`--query` and the
+# regression-archaeology queries read. Never point a run at a private DB.
+# Concurrent runs share it safely: the connection waits on a busy database
+# rather than raising (docs/test-runner.md § Concurrent runs wait).
 
 # Quarantine list for the gate — known HARNESS bugs (NOT test failures) get
 # parked here with a tracked reason, plus the one file whose budget the runner
