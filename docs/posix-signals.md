@@ -1,6 +1,6 @@
 # POSIX signals
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-17 -->
 
 Elle programs can send POSIX signals to other processes and observe
 signals delivered to themselves. The surface lives under `os/sig-*`.
@@ -51,6 +51,7 @@ Send a signal to yourself:
 | `(os/sig-pending)` | — | Returns a set of keywords for signals currently pending delivery on this thread (`sigpending(2)`). |
 | `(os/sig-mask)` | — | Returns a set of keywords for signals currently blocked on this thread (`pthread_sigmask`). |
 | `(os/sig-watching)` | — | Returns a set of keywords for signals currently being watched by at least one live receiver. |
+| `(os/sig-name n)` | — | Names a signum, or `nil` when this build knows no name for it. |
 
 ## Recognised signals
 
@@ -67,6 +68,15 @@ not exposed in v1.
 
 `:sigkill` and `:sigstop` can be *sent*; they cannot be watched (the
 kernel forbids blocking them).
+
+`os/sig-name` answers over a wider set, because naming a signal and
+sending one are different questions. It adds the fault set —
+`:sigsegv` `:sigabrt` `:sigbus` `:sigill` `:sigfpe` `:sigtrap`
+`:sigsys` — which the sending primitives go on refusing. A program
+does not raise those; it reads them off a child that died, where
+`signal 11` is not what the reader needs. The numbers differ by
+platform (`SIGBUS` is 7 on Linux and 10 on macOS), so the mapping is
+libc's rather than a table written in Lisp.
 
 ## Delivered-signal struct
 

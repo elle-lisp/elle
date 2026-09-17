@@ -170,9 +170,10 @@ recorded failure rather than ending the run.
 
 `subprocess/wait` answers a signalled child with its signal number negated
 ([subprocess](subprocess.md)), so the sign separates an exit code from a
-signal. The runner names the signal from a table of its own, because a child
-dies on SIGSEGV, SIGABRT and SIGBUS and the table `subprocess/kill` resolves
-against refuses all three — they are not signals a program sends.
+signal. `os/sig-name` names it, answering over the fault set as well: a child
+dies on SIGSEGV, SIGABRT and SIGBUS, and the table `subprocess/kill` resolves
+against refuses all three, because they are not signals a program sends
+([posix-signals](posix-signals.md)).
 
 `--timeout MS` bounds a child exactly as it bounds a worker. Two fibers drain
 the child's stdout and stderr while a third waits for it, so a chatty child
