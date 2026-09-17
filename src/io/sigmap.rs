@@ -1,3 +1,4 @@
+//! audited: 2026-09-17
 //! Shared keyword↔signum mapping for POSIX signals.
 //!
 //! Used by `src/primitives/subprocess.rs` (for `subprocess/kill`) and
@@ -30,6 +31,35 @@ const SIGNALS: &[(&str, libc::c_int)] = &[
     ("sigttou", libc::SIGTTOU),
     ("sigwinch", libc::SIGWINCH),
 ];
+
+/// The signals a process *dies* on that `SIGNALS` deliberately omits. The CPU
+/// raises them at an instruction, or `abort(3)` does; a program does not send
+/// them, so `subprocess/kill` and `os/sig-send` go on refusing them.
+///
+/// Naming one is a different question from sending one. A child's terminating
+/// status has to read as something, and `signal 11` is not what the reader of a
+/// test result needs. The numbers differ by platform — SIGBUS is 7 on Linux and
+/// 10 on macOS — so only libc can answer, which is why this table is here and
+/// not in the caller.
+const FATAL_SIGNALS: &[(&str, libc::c_int)] = &[
+    ("sigsegv", libc::SIGSEGV),
+    ("sigabrt", libc::SIGABRT),
+    ("sigbus", libc::SIGBUS),
+    ("sigill", libc::SIGILL),
+    ("sigfpe", libc::SIGFPE),
+    ("sigtrap", libc::SIGTRAP),
+    ("sigsys", libc::SIGSYS),
+];
+
+/// The canonical keyword name of any signal this build knows — one a program
+/// may send, or one it may die on. `None` for anything else.
+pub fn signum_name(signum: libc::c_int) -> Option<&'static str> {
+    signum_to_keyword(signum).or_else(|| {
+        FATAL_SIGNALS
+            .iter()
+            .find_map(|(k, v)| if *v == signum { Some(*k) } else { None })
+    })
+}
 
 /// Map a keyword name (without the colon, e.g. "sigterm") to its libc constant.
 pub fn keyword_to_signum(name: &str) -> Option<libc::c_int> {

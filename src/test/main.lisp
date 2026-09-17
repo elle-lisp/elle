@@ -12,48 +12,61 @@
 (defn drop-sep [args]
   (if (and (not (empty? args)) (= (first args) "--")) (rest args) args))
 
+# Every flag the runner takes, as [key how-it-reads]. Written as data because
+# the alternative is a stack of `if`s one level deeper per flag, where adding
+# one re-indents every flag under it and the diff hides which one was added.
+#
+# How a flag reads is the whole vocabulary: `:flag` takes nothing, `:value` the
+# next argument, `:int` the next argument as a number, `:append` the next
+# argument onto a list, `:pair` the next two. Anything not named here is a
+# path.
+(def flag-spec
+  @{"--db" [:db :value]
+    "--timeout" [:timeout :int]
+    "--isolate" [:isolate :value]
+    "--corpus" [:corpus :value]
+    "--reset" [:reset :flag]
+    "--query" [:query :value]
+    "--summary" [:summary :flag]
+    "-e" [:eval :append]
+    "--promote" [:promote :pair]})
+
+# How many arguments a flag consumes after itself.
+(defn flag-width [how]
+  (case how
+    :flag 0
+    :pair 2
+    1))
+
+# Record one flag's value under `key` and answer nothing; `rest-args` is what
+# follows the flag itself.
+(defn apply-flag [acc key how rest-args]
+  (case how
+    :flag (put acc key true)
+    :value (put acc key (first rest-args))
+    :int
+      (put acc key (parse-int (first rest-args)))
+    :append
+      (put acc key (concat (get acc key) [(first rest-args)]))
+    :pair
+      (put acc key [(first rest-args) (first (rest rest-args))]))
+  nil)
+
+(defn drop-n [xs n]
+  (if (or (= n 0) (empty? xs)) xs (drop-n (rest xs) (- n 1))))
+
 (defn parse-args [args acc]
   (if (empty? args)
     acc
-    (let [a (first args)]
-      (if (= a "--db")
+    (let [a (first args)
+          spec (get flag-spec a)]
+      (if (= spec nil)
         (begin
-          (put acc :db (first (rest args)))
-          (parse-args (rest (rest args)) acc))
-        (if (= a "--timeout")
-          (begin
-            (put acc :timeout (parse-int (first (rest args))))
-            (parse-args (rest (rest args)) acc))
-          (if (= a "--corpus")
-            (begin
-              (put acc :corpus (first (rest args)))
-              (parse-args (rest (rest args)) acc))
-            (if (= a "--reset")
-              (begin
-                (put acc :reset true)
-                (parse-args (rest args) acc))
-              (if (= a "--query")
-                (begin
-                  (put acc :query (first (rest args)))
-                  (parse-args (rest (rest args)) acc))
-                (if (= a "--summary")
-                  (begin
-                    (put acc :summary true)
-                    (parse-args (rest args) acc))
-                  (if (= a "-e")
-                    (begin
-                      (put acc
-                           :eval (concat (get acc :eval) [(first (rest args))]))
-                      (parse-args (rest (rest args)) acc))
-                    (if (= a "--promote")
-                      (begin
-                        (put acc
-                             :promote [(first (rest args))
-                                       (first (rest (rest args)))])
-                        (parse-args (rest (rest (rest args))) acc))
-                      (begin
-                        (put acc :paths (concat (get acc :paths) [a]))
-                        (parse-args (rest args) acc)))))))))))))
+          (put acc :paths (concat (get acc :paths) [a]))
+          (parse-args (rest args) acc))
+        (let [how (get spec 1)]
+          (apply-flag acc (get spec 0) how (rest args))
+          (parse-args (drop-n (rest args) (flag-width how)) acc))))))
 
 # ── main ─────────────────────────────────────────────────────────────
 (def opts
@@ -63,10 +76,26 @@
                 :reset false
                 :timeout 60000
                 :eval []
+                :isolate nil
                 :promote nil
                 :query nil
                 :summary false
                 :paths []}))
+
+# `--isolate FLAGS` runs each path as its own child, `elle FLAGS PATH`, for a
+# mode the process sets once and no worker thread can vary
+# (docs/test-runner.md § Isolation). The flag string may be empty; nil here is
+# the ordinary in-process run.
+(def isolate-flags (get opts :isolate))
+
+# An ad-hoc form has no file, and a child process is given a path. Refuse the
+# combination up front, rather than running part of the selection in-process
+# and leaving the run to read as though one mode covered all of it.
+(if (and isolate-flags (not (empty? (get opts :eval))))
+  (begin
+    (eprintln "elle test: --isolate runs a path in its own process, and -e has no file to give one")
+    (os/exit 2))
+  nil)
 
 # Per-test wall-clock budget (ms). A test form whose worker does not finish
 # within it is recorded `timeout` (not fail/pass), and the run gates non-zero.
@@ -123,7 +152,7 @@
 (def ident (run-identity))
 (sqlite:exec conn
              "INSERT INTO run (tiers, n_selected, git_commit, git_dirty, tree_hash, worktree, elle_version, build_profile, host, argv) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
-             [(tiers-str active-tiers)
+             [(if isolate-flags "process" (tiers-str active-tiers))
               (+ (length (get opts :paths)) (length (get opts :eval)))
               (get ident :commit) (get ident :dirty) (get ident :tree)
               (get ident :worktree) (get ident :version) (get ident :profile)
@@ -137,7 +166,9 @@
 # depth. The tally is a GROUP BY over the rows we just wrote (the DB is the
 # source of truth anyway), so it is independent of corpus size.
 (each f in (get opts :paths)
-  (process-file conn run-id f))
+  (if isolate-flags
+    (process-file-isolated conn run-id f isolate-flags)
+    (process-file conn run-id f)))
 (each e in (get opts :eval)
   (process-eval conn run-id e))
 

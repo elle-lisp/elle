@@ -66,6 +66,16 @@
                         :act (field-str payload :actual)
                         :exp (field-str payload :expected))))))))))
 
+# Insert the `form` row every recording path needs first. A form is deduped
+# across runs by the hash of its syntax, so a second run of the same code
+# re-uses the row rather than adding one — which is what lets a result join to
+# a form and a form's history join across runs. IGNORE, not REPLACE: the row
+# that is already there was written from the same hash.
+(defn insert-form [conn h origin file idx label src]
+  (sqlite:exec conn
+               "INSERT OR IGNORE INTO form (hash, origin, file, form_index, label, src) VALUES (?1,?2,?3,?4,?5,?6)"
+               [h (string origin) (string file) idx label src]))
+
 # Insert one (form × tier) result row and return its rowid (so assets can
 # reference it).
 (defn insert-result [conn run-id h tier-str c]
@@ -130,9 +140,7 @@
   record-thunk
   [conn run-id origin file idx src label exec-fn dumps tiers diverge?]
   (let [h (string (hash src))]
-    (sqlite:exec conn
-                 "INSERT OR IGNORE INTO form (hash, origin, file, form_index, label, src) VALUES (?1,?2,?3,?4,?5,?6)"
-                 [h (string origin) (string file) idx label src])
+    (insert-form conn h origin file idx label src)
     (let [tr (run-tiers conn run-id h exec-fn tiers dumps [] [])
           statuses (get tr 0)
           pass-pairs (get tr 1)
@@ -175,10 +183,7 @@
 (defn record-file-error [conn run-id origin file payload dumps]
   (let [msg (field-str payload :message)
         h (string (hash (string "file-error:" file)))]
-    (sqlite:exec conn
-                 "INSERT OR IGNORE INTO form (hash, origin, file, form_index, label, src) VALUES (?1,?2,?3,?4,?5,?6)"
-                 [h (string origin) (string file) -1 "file-level error"
-                  (if msg msg "")])
+    (insert-form conn h origin file -1 "file-level error" (if msg msg ""))
     (sqlite:exec conn
                  "INSERT INTO result (run_id, form_hash, tier, status, reason, signal) VALUES (?1,?2,?3,?4,?5,?6)"
                  [run-id h :vm :fail msg (sig-of payload)])  # Attach whatever artifacts compiled (a non-compiling file often still
@@ -197,10 +202,7 @@
 (defn record-file-gated [conn run-id origin file payload dumps]
   (let [reason (field-str payload :reason)
         h (string (hash (string "file-gated:" file)))]
-    (sqlite:exec conn
-                 "INSERT OR IGNORE INTO form (hash, origin, file, form_index, label, src) VALUES (?1,?2,?3,?4,?5,?6)"
-                 [h (string origin) (string file) -1 "file-level gated"
-                  (if reason reason "")])
+    (insert-form conn h origin file -1 "file-level gated" (if reason reason ""))
     (sqlite:exec conn
                  "INSERT INTO result (run_id, form_hash, tier, status, reason, signal) VALUES (?1,?2,?3,?4,?5,?6)"
                  [run-id h :vm :skip reason ":gated"])
@@ -267,6 +269,30 @@
 
 (defn process-file [conn run-id file]
   (process-source conn run-id file file file (slurp file)))
+
+# Run FILE as its own process under FLAGS and record what the child left
+# behind. The file is the unit here — a process cannot be given one form of it
+# — and it is identified by the hash of its source, the same identity the
+# whole-file path uses. So an isolated result and an in-process one are two
+# tiers of one form rather than two forms that never meet in a query.
+# See docs/test-runner.md § Isolation.
+(defn process-file-isolated [conn run-id file flags]
+  (let [[read-ok? src] (protect (slurp file))]
+    (if (not read-ok?)
+      (record-file-error conn run-id file file src [])
+      (let [h (string (hash src))
+            [parse-ok? forms] (protect (test-forms src))
+            msg (if parse-ok? (scan-children forms) nil)
+            cap (run-child (child-argv flags file) test-timeout-ms)
+            c (classify-child cap test-timeout-ms)]
+        # The label is scavenged from the source, and a file the child will
+        # reject as unreadable has none to give — the child's own status is
+        # the verdict either way, so a failed scan costs the label and nothing
+        # else.
+        (insert-form conn h file file 0 (if msg msg "") src)
+        (let [rid (insert-result conn run-id h :process c)]
+          (capture-stdio conn rid (get cap :stdout) (get cap :stderr)))
+        [(get c :status)]))))
 
 (defn process-eval [conn run-id expr]
   (process-source conn run-id ":adhoc" "<eval>" "<eval>" expr))

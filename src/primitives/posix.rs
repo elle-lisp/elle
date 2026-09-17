@@ -1,8 +1,11 @@
+//! audited: 2026-09-17
 //! POSIX signal primitives — send, raise, watch, next, close, plus
-//! introspection (pending / mask / watching).
+//! introspection (pending / mask / watching / name).
 //!
-//! See docs/posix-signals.md for the user-facing contract. Naming is
-//! `os/sig-*` to disambiguate from elle's runtime "signal" concept.
+//! docs/posix-signals.md
+//!
+//! That document is the user-facing contract. Naming is `os/sig-*` to
+//! disambiguate from elle's runtime "signal" concept.
 
 use crate::io::request::{IoOp, IoRequest};
 use crate::io::sigfd::SignalReceiver;
@@ -348,6 +351,35 @@ fn prim_sig_mask(
     (SIG_OK, signums_to_keyword_set(ctx, &signums))
 }
 
+// ── os/sig-name ────────────────────────────────────────────────────────
+
+/// (os/sig-name N) → :sigsegv | nil
+///
+/// Names a signal number, including the fatal ones `os/sig-send` refuses: what
+/// a process dies on and what it may be sent are different sets, and a
+/// terminating status is read far more often than it is produced.
+fn prim_sig_name(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let Some(n) = args[0].as_int() else {
+        return (
+            SIG_ERROR,
+            ctx.error(
+                "type-error",
+                format!(
+                    "os/sig-name: signum must be integer, got {}",
+                    args[0].type_name()
+                ),
+            ),
+        );
+    };
+    match sigmap::signum_name(n as libc::c_int) {
+        Some(name) => (SIG_OK, ctx.keyword(name)),
+        None => (SIG_OK, Value::NIL),
+    }
+}
+
 // ── os/sig-watching ────────────────────────────────────────────────────
 
 fn prim_sig_watching(
@@ -405,6 +437,15 @@ primitive! {
         params: &["receiver"],
         category: "posix",
         example: "(os/sig-close r)",
+        effect: RegionEffect::Immediate,
+    }
+    "os/sig-name" => prim_sig_name {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Name a signal number as its keyword (:sigterm, :sigsegv, ...), or nil when this build knows no name for it. Covers the fatal signals os/sig-send refuses, because a terminating status has to read as something.",
+        params: &["signum"],
+        category: "posix",
+        example: "(os/sig-name 11)",
         effect: RegionEffect::Immediate,
     }
     "os/sig-pending" => prim_sig_pending {
