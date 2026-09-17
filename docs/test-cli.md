@@ -220,10 +220,9 @@ and the in-process artifact-capture compile option, realized as the
 the `--dump` artifact set as strings rather than printing them and exiting.
 
 The run's code state comes from `git` and `uname` through `subprocess/exec`,
-and the binary's own identity from `(elle/build)`, which answers the version,
-the cargo profile, and the target this binary was compiled for. A build profile
-has no other source: it is a fact about compilation, so only the compiled
-binary can report it.
+and the binary's own identity from `(elle/version)` and `(elle/build-profile)`.
+The profile has no other source: it is a fact about how this binary was
+compiled, so only the binary can report it.
 
 ## Open implementation questions (for the tests/code phases)
 
