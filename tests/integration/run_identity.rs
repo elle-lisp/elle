@@ -73,9 +73,11 @@ fn a_run_row_carries_the_commit_and_the_host() {
         String::from_utf8_lossy(&out.stderr)
     );
 
+    // `commit` is an SQLite keyword, so the commit column answers to `sha`
+    // here. Every alias below is a column name the row is read back by.
     let rows = query(
         &db,
-        "SELECT git_commit AS commit, host AS host, worktree AS worktree, \
+        "SELECT git_commit AS sha, host AS host, worktree AS worktree, \
          elle_version AS version, build_profile AS profile, \
          (length(tree_hash) > 0) AS hastree FROM run WHERE id = (SELECT max(id) FROM run)",
     );
@@ -90,7 +92,7 @@ fn a_run_row_carries_the_commit_and_the_host() {
     };
 
     for (what, expected) in [
-        ("commit", head),
+        ("sha", head),
         ("host", host),
         ("worktree", worktree),
         ("version", env!("CARGO_PKG_VERSION").to_string()),

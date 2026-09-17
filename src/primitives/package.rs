@@ -1,3 +1,7 @@
+// audited: 2026-09-17
+//! What this build of Elle is: its version, its language epoch, and the cargo
+//! profile it was compiled under.
+
 use crate::epoch::CURRENT_EPOCH;
 use crate::primitives::def::RegionEffect;
 use crate::value::fiber::{SignalBits, SIG_OK};
@@ -24,6 +28,24 @@ pub(crate) fn prim_epoch(
     } else {
         (SIG_OK, args[0])
     }
+}
+
+/// The cargo profile this binary was compiled under.
+///
+/// `debug_assertions` is the profile's own switch: cargo sets it for `dev`
+/// and clears it for `release`, and module resolution already reads it to
+/// pick `target/debug` over `target/release`. No other reading of the profile
+/// survives into the running binary.
+pub(crate) fn prim_build_profile(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    (SIG_OK, ctx.string(profile))
 }
 
 /// Get package information
@@ -55,6 +77,12 @@ primitive! {
         category: "elle",
         example: "(elle/epoch) #=> 3",
         effect: RegionEffect::PassThrough,
+    }
+    "elle/build-profile" => prim_build_profile {
+        doc: "Return the cargo profile this binary was compiled under: \"debug\" or \"release\".",
+        category: "elle",
+        example: "(elle/build-profile)",
+        effect: RegionEffect::Fresh,
     }
     "elle/info" => prim_package_info {
         doc: "Get package information (name, version, description)",
