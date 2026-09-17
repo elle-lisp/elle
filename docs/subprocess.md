@@ -74,11 +74,16 @@ A subprocess answers `get` over a closed set of keys:
 `has?`, `keys` and `values` read the same set. `keys` answers in the order
 above, which is fixed rather than sorted.
 
+`has?` asks about the key, not the value, exactly as it does of a struct: every
+key above is present on every subprocess, whatever it currently answers. Use
+`nil?` on the value to ask whether a stream is there.
+
 ```lisp
 (def lister (subprocess/exec "true" []))
 (assert (= (keys lister) '(:pid :stdin :stdout :stderr :exit))
         "the key set is closed, and its order is part of the interface")
-(assert (has? lister :stdout) "a piped stream is present")
+(assert (has? lister :stdout) "a key the type declares")
+(assert (not (has? lister :process)) "and one it does not")
 (assert (nil? (get lister :nope)) "an unknown key reads as nil")
 (assert (= (get lister :nope :fallback) :fallback)
         "and takes the default get was given")
@@ -212,7 +217,7 @@ back:
 ```lisp
 (def quiet (subprocess/exec "echo" ["hi"] {:stdin :null}))
 (assert (nil? (get quiet :stdin)) ":null leaves no port behind")
-(assert (not (has? quiet :stdin)) "and has? agrees with get")
+(assert (has? quiet :stdin) "the key is still there — has? asks about the key")
 (subprocess/wait quiet)
 ```
 
