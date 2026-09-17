@@ -86,6 +86,31 @@ the whole run): `exit 0` is recorded `skip`, any other code `fail`. A worker tha
 can't host a thunk (an unsendable FFI/fiber capture) falls back to in-process
 execution.
 
+### A file that needs its own process
+
+`elle test --isolate 'FLAGS'` runs each path as `elle FLAGS PATH`, one child per
+path, recorded on the `process` tier. This is for a mode the process sets once
+and the runner cannot vary per file — `--no-uring`, or `--trace=guardfree`,
+whose use-after-free report is a SIGSEGV that would take a shared runner down.
+
+A child that dies on a signal is a `fail` naming the signal and the run
+continues; an exit code is a `fail` naming the code; a child over `--timeout`
+is killed and recorded `timeout`. Its stdout and stderr become assets either
+way ([docs/test-runner.md](test-runner.md) § Isolation).
+
+```sh
+elle test --isolate '--trace=guardfree' --timeout 120000 tests/elle/oracle.lisp
+```
+
+An isolated child also carries the **measurement channel**: a dashboard that
+reports a verdict through it — [oracle.lisp](../tests/elle/oracle.lisp) and
+[plumb.lisp](../tests/elle/plumb.lisp) do, through
+[estimator.lisp](../tests/elle/lib/estimator.lisp) — lands one `measurement`
+row per verdict, so a leak rate's history across commits is a query rather than
+scrollback ([docs/test-store.md](test-store.md) § Measurements). Run the same
+file directly and it prints its dashboard and records nothing, exactly as
+before.
+
 ### Statuses
 
 | Status | Meaning | Gates? |
@@ -216,7 +241,7 @@ elle test --query \
    JOIN form f ON f.hash = r.form_hash WHERE r.status = 'fail'"
 ```
 
-The schema (`run`, `form`, `result`, `asset`, `changed_file`) is documented in
+The schema (`run`, `form`, `result`, `asset`, `measurement`, `changed_file`) is documented in
 [docs/test-store.md](test-store.md) § Schema (with the v1 implemented-subset
 note — the `run` resource columns are deferred). Each `run` row names the code
 it ran against — commit, dirty flag, tree hash, worktree — and the binary and

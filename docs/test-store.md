@@ -158,6 +158,50 @@ explicit only (`elle test --prune`), except ad-hoc forms (§ Ad-hoc tests).
 > and does not dedup. stdout/stderr are still captured per (form × tier);
 > `--dump` capture returns once the region leak it exposes is fixed.
 
+## Measurements: a verdict a query can read
+
+A dashboard measures a rate and prints it. Printed, a rate is prose: nothing
+can ask what it was three commits ago, and nothing can check the dashboard's
+coverage against a declared set. So a dashboard also *reports* each verdict,
+and the runner records it.
+
+The channel is a file, and `ELLE_TEST_MEASUREMENTS` names it in the child's
+environment. The dashboard appends one JSON object per verdict:
+
+```json
+{"subject":"io-drop","axis":"regions","value":0.0,"unit":"regions/op","verdict":"closed"}
+```
+
+Unset, the channel is closed and the dashboard writes nothing — so a direct
+`elle tests/elle/oracle.lisp` run reads exactly as it read before, and the
+stdout rendering stays the human's copy. The runner names the file for each
+`--isolate` child ([test-runner](test-runner.md)), reads it once the child
+exits, and writes one `measurement` row per line against that child's result.
+The child process is what makes the variable safe to set: the environment is
+process-global, so a per-form value would race between workers sharing one.
+
+The axis is a property of the instrument rather than of the probe. A gauge in
+[estimator.lisp](../tests/elle/lib/estimator.lisp) names the dimension it reads
+and the unit a rate on it carries, and every probe already hands the estimator
+its gauge — so no probe declares an axis and none can declare the wrong one.
+The subject is the probe's label with the `label@axis` display suffix removed,
+so one probe read on two dimensions is one subject and two axes.
+
+The verdict recorded is the one displayed: a by-design growth probe reads
+`growth`, so `open` in this table means a defect, exactly as it does on the
+dashboard.
+
+A run that recorded any measurement says so, and names the ones that are
+neither `closed` nor `growth` — the two verdicts that are the expected answer:
+
+```
+3 measurements · 1 open · 2 closed
+  open  tests/elle/oracle.lisp  reduce  objects  1.002 objects/op
+```
+
+The rest is a query. The summary is a reading aid, and every number in it comes
+out of the table.
+
 ## Schema
 
 ```sql
@@ -194,6 +238,13 @@ CREATE TABLE asset (                -- artifact attached to a result; bytes live
   result_id INT REFERENCES result(id),
   kind TEXT,                        -- ast|fhir|hir|lir|cfg|dfa|jit|stats|stdout|stderr|trace
   hash TEXT, size INT, codec TEXT); -- bytes at <db-dir>/cas/<hash>; codec e.g. zstd
+
+CREATE TABLE measurement (          -- one dashboard verdict, reported through the channel
+  run_id INT REFERENCES run(id),
+  result_id INT REFERENCES result(id),  -- the child whose channel carried it
+  subject TEXT, axis TEXT,          -- the probe, and the dimension it was read on
+  value REAL, unit TEXT,            -- the rate, and what one unit of it is
+  verdict TEXT);                    -- closed|open|growth|inconclusive|contaminated
 ```
 
 The runner writes this with `lib/sqlite.lisp` (FFI to libsqlite3). The DB holds
@@ -202,8 +253,8 @@ stays small and merge/diff concerns never arise (it is gitignored regardless).
 
 **v1 implemented subset ([store.lisp](../src/test/store.lisp) `ensure-schema`).**
 The runner creates
-`form`, `result`, and `asset` with the columns above; `run` and `changed_file`
-are subsets:
+`form`, `result`, `asset` and `measurement` with the columns above; `run` and
+`changed_file` are subsets:
 
 - `run` carries every column above except the resource ones
   (`wall_ms`/`max_rss_kb`/`cpu_user_ms`/`cpu_sys_ms`), which are deferred. So a
@@ -237,5 +288,10 @@ SELECT cur.form_hash, cur.tier, base.cpu_us AS was, cur.cpu_us AS now
 FROM result cur JOIN result base
   ON base.form_hash = cur.form_hash AND base.tier = cur.tier
 WHERE cur.run_id = ? AND base.run_id = ? AND cur.cpu_us > base.cpu_us * 2;
+
+-- One leak rate's history across commits, which no printed dashboard can give.
+SELECT run.git_commit AS sha, m.value AS rate, m.unit AS unit, m.verdict AS verdict
+FROM measurement m JOIN run ON run.id = m.run_id
+WHERE m.subject = 'io-drop' AND m.axis = 'regions' ORDER BY m.run_id;
 ```
 
