@@ -1,18 +1,36 @@
 (elle/epoch 12)
-# Subprocess integration tests
+# audited: 2026-09-16
+# subprocess/exec through wait, kill, pid and exit — the type, its reads, and
+# what every primitive refuses.
 
 
 # ── subprocess/exec ──────────────────────────────────────────────────────────────
 
-# subprocess/exec: basic struct shape
+# subprocess/exec: what a subprocess reads as
 (let [proc (subprocess/exec "echo" ["hello"])]
+  (assert (subprocess? proc) "subprocess/exec: answers a subprocess")
   (assert (integer? (get proc :pid)) "subprocess/exec: :pid is integer")
   (assert (port? (get proc :stdout)) "subprocess/exec: :stdout is port")
   (assert (port? (get proc :stderr)) "subprocess/exec: :stderr is port")
   (assert (port? (get proc :stdin)) "subprocess/exec: :stdin is port")
-  (assert (not (nil? (get proc :process))) "subprocess/exec: :process is set")
   (assert (> (get proc :pid) 0) "subprocess/exec: pid > 0")
   (subprocess/wait proc))
+
+# subprocess/exec: the handle is not a key
+#
+# The counter-factual is the struct this replaced, where `:process` held the
+# external and a caller could pass it to `subprocess/wait` on its own. Reading
+# nil here is what says there is nothing left to pass separately.
+(let [proc (subprocess/exec "true" [])]
+  (assert (nil? (get proc :process)) "subprocess/exec: :process is not a key")
+  (assert (not (has? proc :process)) "subprocess/exec: and has? agrees")
+  (subprocess/wait proc))
+
+# subprocess?: false for everything that is not one
+(assert (not (subprocess? {:pid 1 :stdin nil}))
+        "subprocess?: a struct is not one")
+(assert (not (subprocess? 42)) "subprocess?: an integer is not one")
+(assert (not (subprocess? nil)) "subprocess?: nil is not one")
 
 # subprocess/exec: stdout is binary by default (bytes, not string)
 (let [raw (let [proc (subprocess/exec "echo" ["hello"])]
@@ -45,10 +63,27 @@
 (assert (= (subprocess/wait (subprocess/exec "false" [])) 1)
         "subprocess/wait: /bin/false exits 1")
 
-# subprocess/wait: with direct handle (not struct)
-(assert (= (let [proc (subprocess/exec "true" [])]
-             (subprocess/wait (get proc :process))) 0)
-        "subprocess/wait: works with direct process handle")
+# subprocess/wait, kill and pid each refuse a value that is not a subprocess,
+# and each refuses it the same way.
+#
+# The trap: this is the whole point of the type. The struct these replaced was
+# accepted by all three whenever it carried a `:process` key, whatever sat
+# under it, and each primitive then built its own message some steps later. A
+# refusal that names the primitive and the type it got is what says the check
+# happened at the boundary.
+#
+# The counter-factual is a struct shaped like the old exec result: it has the
+# key, so the extractor that read the key without checking it let this through.
+(let [decoy {:pid 1 :stdin nil :stdout nil :stderr nil :process 42}]
+  (each [name thunk] [["subprocess/wait" (fn [] (subprocess/wait decoy))]
+                      ["subprocess/kill" (fn [] (subprocess/kill decoy))]
+                      ["subprocess/pid" (fn [] (subprocess/pid decoy))]]
+    (let [[ok? err] (protect (thunk))]
+      (assert (not ok?) (string name ": a struct is refused"))
+      (assert (= (get err :error) :type-error)
+              (string name ": refused as a type-error"))
+      (assert (has? (get err :message) "expected a subprocess")
+              (string name ": and every one says the same thing")))))
 
 # ── subprocess/pid ───────────────────────────────────────────────────────────────
 
@@ -69,6 +104,60 @@
   (subprocess/wait proc)
   (assert (= (subprocess/pid proc) (get proc :pid))
           "subprocess/pid: still matches :pid after the child is reaped"))
+
+# ── reading a subprocess ─────────────────────────────────────────────────────
+
+# get, has?, keys and values agree on one closed key set, in a fixed order.
+#
+# The trap: a struct's keys come back in TableKey hash order, so a caller who
+# learned the order from the struct this replaced learned nothing portable. The
+# key set is declared by the type, so its order is ours and is asserted here.
+(let [proc (subprocess/exec "cat" [])]
+  (assert (= (keys proc) '(:pid :stdin :stdout :stderr :exit))
+          "keys: the closed set, in declaration order")
+  (assert (= (length (values proc)) 5) "values: one per key")
+  (assert (has? proc :stdout) "has?: a key it has")
+  (assert (not (has? proc :nope)) "has?: a key it does not")
+  (assert (nil? (get proc :nope)) "get: an unknown key reads nil")
+  (assert (= (get proc :nope :fallback) :fallback)
+          "get: and takes the default it was given")
+  (port/close (get proc :stdin))
+  (subprocess/wait proc))
+
+# A subprocess is read-only: the writes refuse it.
+#
+# The counter-factual is a struct, which takes all three and hands back a copy
+# carrying a pid that names nothing.
+(let [proc (subprocess/exec "true" [])]
+  (each [name thunk] [["put" (fn [] (put proc :pid 1))]
+                      ["del" (fn [] (del proc :pid))]
+                      ["merge" (fn [] (merge proc {:pid 1}))]]
+    (let [[ok? err] (protect (thunk))]
+      (assert (not ok?) (string name ": refuses a subprocess"))
+      (assert (= (get err :error) :type-error)
+              (string name ": refuses it as a type-error"))))
+  (subprocess/wait proc))
+
+# ── subprocess/exit ──────────────────────────────────────────────────────────
+
+# :exit reads the recorded status without waiting for it.
+#
+# The trap: reading it must not reap. A read that called waitpid would take the
+# status from the kernel, and the subprocess/wait below would then have nothing
+# to answer from — so asserting the wait's own answer is what catches it.
+(let [proc (subprocess/exec "false" [])]
+  (assert (nil? (get proc :exit)) ":exit is nil while nothing has reaped it")
+  (assert (nil? (subprocess/exit proc)) "subprocess/exit agrees")
+  (assert (= (subprocess/wait proc) 1) "the wait still answers /bin/false's 1")
+  (assert (= (get proc :exit) 1) ":exit answers the same status afterwards")
+  (assert (= (subprocess/exit proc) 1) "and so does subprocess/exit"))
+
+# A signalled child's status is the negated signal, the same number the wait
+# answers.
+(let [proc (subprocess/exec "sleep" ["60"])]
+  (subprocess/kill proc :sigkill)
+  (assert (= (subprocess/wait proc) -9) "a SIGKILLed child waits to -9")
+  (assert (= (get proc :exit) -9) "and :exit reads the same number"))
 
 # ── subprocess/kill ──────────────────────────────────────────────────────────────
 

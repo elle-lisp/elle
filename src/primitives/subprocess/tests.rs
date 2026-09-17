@@ -1,4 +1,6 @@
-//! `subprocess/kill` against the handle's exit record.
+//! audited: 2026-09-16
+//! `subprocess/kill` against a recorded exit status, and the boundary every
+//! subprocess primitive refuses through.
 
 use super::*;
 use crate::io::request::{reaped_child, Reap};
@@ -140,5 +142,79 @@ fn a_kill_on_a_live_child_signals_it() {
                 Reap::Failed(errno) => panic!("waitpid failed: errno {}", errno),
             }
         }
+    });
+}
+
+/// The error message a primitive answered with, or `None` for a success.
+fn refusal(answer: (SignalBits, Value)) -> Option<String> {
+    let (bits, err) = answer;
+    if bits != SIG_ERROR {
+        return None;
+    }
+    let fields = err.as_struct().expect("an error is a struct");
+    sorted_struct_get(fields, &TableKey::keyword("message"))?.with_string(|s| s.to_string())
+}
+
+/// Every primitive that takes a subprocess refuses anything else, at the
+/// boundary, with one message.
+///
+/// The trap: the struct built here is shaped exactly like the exec result this
+/// type replaced — it carries a `:process` key. The extractor that read that key
+/// without checking what sat under it let such a struct through, and each
+/// primitive then failed on its own, several steps later, with a message of its
+/// own. So a decoy with the key is what tells a boundary check from a use-site
+/// one; a decoy without it would be refused either way.
+///
+/// The counter-factual is three different messages. Asserting they are equal is
+/// what says one check answered for all three, rather than three checks that
+/// happen to agree today.
+#[test]
+fn every_subprocess_primitive_refuses_a_non_subprocess_alike() {
+    crate::value::arena::with_test_region(|| {
+        let h = TestHeap::new();
+        let decoy = {
+            let ctx = h.ctx();
+            let mut fields = std::collections::BTreeMap::new();
+            fields.insert(TableKey::keyword("pid"), Value::int(1));
+            fields.insert(TableKey::keyword("process"), Value::int(42));
+            ctx.struct_from(fields)
+        };
+
+        let messages: Vec<String> = ["wait", "kill", "pid"]
+            .iter()
+            .map(|which| {
+                let mut ctx = h.ctx();
+                let answer = match *which {
+                    "wait" => prim_subprocess_wait(&mut ctx, &[decoy]),
+                    "kill" => prim_subprocess_kill(&mut ctx, &[decoy]),
+                    _ => prim_subprocess_pid(&mut ctx, &[decoy]),
+                };
+                refusal(answer).unwrap_or_else(|| panic!("subprocess/{which} accepted a struct"))
+            })
+            .collect();
+
+        for (which, message) in ["wait", "kill", "pid"].iter().zip(&messages) {
+            assert!(
+                message.starts_with(&format!("subprocess/{which}: ")),
+                "the refusal names the primitive that made it: {message}"
+            );
+            assert!(
+                message.contains("expected a subprocess"),
+                "the refusal says what it wanted: {message}"
+            );
+            assert!(
+                message.contains("struct"),
+                "and what it got instead: {message}"
+            );
+        }
+
+        let bodies: Vec<&str> = messages
+            .iter()
+            .map(|m| m.split_once(": ").expect("a named refusal").1)
+            .collect();
+        assert!(
+            bodies.windows(2).all(|w| w[0] == w[1]),
+            "one check answers for all three, so the bodies agree: {bodies:?}"
+        );
     });
 }
