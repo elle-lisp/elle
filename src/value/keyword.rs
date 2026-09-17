@@ -1,3 +1,4 @@
+//! audited: 2026-09-17
 //! Keyword identity and the static keyword vocabulary.
 //!
 //! A keyword's payload is the 64-bit FNV-1a hash of its name — the same
@@ -261,11 +262,14 @@ static VOCABULARY: &[&str] = &[
     "@string",
     "struct",
     "@struct",
+    "subprocess",
     "syntax",
     "thread-handle",
     // External type names: the `ctx.external(type_name, …)` a primitive wraps
     // its handle in, which is what `type-of` hands back for that handle.
-    // "port" and "process" appear above.
+    // "port" and "subprocess" appear above; "process" is there as an ordinary
+    // keyword, not as a type name — an OS child is a `subprocess` here, and
+    // `process` means an Erlang-style process (docs/processes.md).
     "analysis",
     "chan/receiver",
     "chan/sender",

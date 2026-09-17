@@ -1,6 +1,12 @@
+//! audited: 2026-09-17
+//! `get` — the polymorphic read, one arm per collection shape.
+//!
+//! docs/structs.md
+
 use super::*;
 
-/// Polymorphic get - works on arrays, @arrays, strings, @strings, and structs
+/// Polymorphic get — arrays, @arrays, strings, @strings, bytes, @bytes, lists,
+/// structs, @structs, and a subprocess's closed key set.
 /// `(get collection key [default])`
 pub(crate) fn prim_get(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -299,11 +305,22 @@ pub(crate) fn prim_get(
         }
     }
 
+    // Subprocess — a closed key set, declared by the type rather than stored
+    // (src/primitives/subprocess/AGENTS.md). An unknown key takes the default,
+    // exactly as a struct's does.
+    if let Some(handle) = args[0].as_external::<crate::io::request::ProcessHandle>() {
+        return (
+            SIG_OK,
+            crate::primitives::subprocess::subprocess_read(handle, args[1]).unwrap_or(default),
+        );
+    }
+
     // Unsupported type
     type_error!(
         ctx,
         args[0],
         "get",
-        "collection (list, array, @array, string, @string, or struct)"
+        "collection (list, array, @array, string, @string, bytes, @bytes, \
+         struct, @struct, or subprocess)"
     )
 }

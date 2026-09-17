@@ -1,3 +1,9 @@
+//! audited: 2026-09-16
+//! `AsyncBackend::submit` — the one entry point, and how it routes a request to
+//! a portless path, an immediate answer, or a backend.
+//!
+//! src/io/AGENTS.md
+
 use super::*;
 
 impl AsyncBackend {
@@ -186,7 +192,7 @@ impl AsyncBackend {
             // are those of a close. What it gives up is its SHARE of the
             // descriptor — an operation still in flight holds one of its own,
             // and the number goes back to the OS with the last of them
-            // (src/io/AGENTS.md § "Descriptor retirement").
+            // (docs/impl/io-descriptor.md § "Descriptor retirement").
             port.close();
 
             // Queue immediate completion.
@@ -234,7 +240,7 @@ impl AsyncBackend {
         // The operation's own share of that descriptor, held until its entry is
         // retired. `fd` is resolved again when the worker runs, so the number
         // must stay this port's for as long as the operation names it — see
-        // src/io/AGENTS.md § "Descriptor retirement".
+        // docs/impl/io-descriptor.md § "Descriptor retirement".
         let descriptor = port.fd_share();
 
         let buf_handle = match op {
@@ -263,19 +269,11 @@ impl AsyncBackend {
             return Ok(id);
         }
 
-        // A previous read on this port took more from the kernel than it
-        // answered with, and the remainder belongs to this one. When it already
-        // answers the request in full, this read finishes here and no backend
-        // runs — which is not merely a saved syscall: a read submitted for bytes
-        // the port is already holding would park until the peer sent more, and a
-        // peer that has said everything it has to say never would.
-        //
-        // When the remainder falls short it stays exactly where it is. The
-        // completion joins it to the bytes this read produces (`assemble_read`),
-        // so the fiber's buffer holds only what a kernel read put there. Moving
-        // the remainder in instead would make the buffer hold both, and no size
-        // fixed in advance can promise that: a remainder is as long as whatever
-        // the last kernel read returned.
+        // Answer from the remainder a previous read on this port left behind,
+        // whenever it covers the request in full — `frame::line_end` and
+        // `frame::exact_end` are the same cuts the completion makes. A remainder
+        // that falls short stays where it is, for the completion to join
+        // (docs/impl/io-inflight.md § "Assembling a read's answer").
         let port_encoding = port.encoding();
         let gen = inner.unicode_generation;
         {
@@ -374,21 +372,11 @@ impl AsyncBackend {
                             | PortOp::Write { .. } => hub.bounds(id, request.timeout),
                             _ => Bounds::prompt(),
                         };
-                        // A `Read` asks the kernel for its whole count. The
-                        // remainder the port is holding is short of that count
-                        // — a remainder that met it answered above — but by how
-                        // much is a question in the port's own unit, and only
-                        // the completion, holding the join, can answer it. So
-                        // the worker may bring back more than the request needs,
-                        // and the completion gives the surplus to the port.
-                        //
-                        // A `ReadExact` cannot be left to that. It is the one
-                        // read that will not answer short, so a worker asked for
-                        // the whole count waits for the remainder a second time
-                        // — from a peer that has already sent it once. The
-                        // remainder goes with the operation instead, and the
-                        // worker reads only the shortfall; the ring counts the
-                        // same bytes in its resubmit test (`uring/drain.rs`).
+                        // `ReadExact` is the one op whose `held` carries the
+                        // port's remainder to the worker, so the worker reads
+                        // only the shortfall; every other read leaves it for the
+                        // completion to join (docs/impl/io-inflight.md §
+                        // "Assembling a read's answer").
                         let pool_op = match op {
                             PortOp::ReadLine { .. } => PoolOp::ReadLine { fd },
                             PortOp::ReadAll => PoolOp::ReadAll { fd },

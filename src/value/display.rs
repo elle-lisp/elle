@@ -1,3 +1,4 @@
+//! audited: 2026-09-17
 //! Display and Debug implementations for values
 //!
 //! The tagged-union `Value` renders through one body, `fmt_value`, parameterized
@@ -84,10 +85,10 @@ fn write_float(f: &mut fmt::Formatter<'_>, n: f64) -> fmt::Result {
 /// (docs/impl/symbol.md § "Reading a name, and not reading one").
 ///
 /// Where the two renderings diverge they branch on `debug`: strings (Debug quotes
-/// and escapes), and the element/key recursion of cons/array/set/struct. A struct
-/// value is always rendered in Debug style (matching the historical
-/// `"{} {:?}"`/`"{:?} {:?}"`); a box's contents are always rendered in Display
-/// style (matching the historical Debug-delegates-to-Display for boxes).
+/// and escapes), and the element/key recursion of cons/array/set/struct. Two
+/// containers ignore the flag for their contents: a struct value always renders
+/// Debug-style, so a string field stays quoted and distinguishable from a
+/// symbol, and a box's contents always render Display-style.
 pub(crate) fn fmt_value(
     v: &Value,
     symbols: Option<&SymbolTable>,
@@ -236,8 +237,8 @@ pub(crate) fn fmt_value(
         return write!(f, "<closure>");
     }
 
-    // Box — inner always rendered in Display mode (the original Debug impl had no
-    // box arm and fell through to Display).
+    // Box — the inner value always renders in Display mode, whatever the outer
+    // mode is.
     if let Some(cell_ref) = v.as_lbox_raw() {
         let _guard = match fmt_enter(v.payload as usize) {
             Some(g) => g,
@@ -351,6 +352,9 @@ pub(crate) fn fmt_value(
     if let Some(port) = v.as_external::<crate::port::Port>() {
         return write!(f, "{}", port);
     }
+    if let Some(child) = v.as_external::<crate::io::request::ProcessHandle>() {
+        return write!(f, "{}", child);
+    }
     if let Some(name) = v.external_type_name() {
         return write!(f, "#<{}>", name);
     }
@@ -360,8 +364,8 @@ pub(crate) fn fmt_value(
 }
 
 /// Format a cons cell (list) with cycle detection, threading `symbols` and the
-/// `debug` mode to every element. `debug` selects element rendering: `{:?}` vs
-/// `{}` in the original two impls.
+/// `debug` mode to every element, so a list renders its contents the way the
+/// list itself was asked for.
 fn fmt_cons(
     v: &Value,
     symbols: Option<&SymbolTable>,
@@ -439,7 +443,7 @@ impl fmt::Display for DebugWith<'_> {
 }
 
 impl Value {
-    /// Render through `symbols`, resolving symbol names (`'name`); pass `None` to
+    /// Render through `symbols`, resolving symbol names to the bare `name`; pass `None` to
     /// render `#<symbol:hash>`. The threaded-table alternative to a bare `Display`
     /// (docs/impl/symbol.md § "Reading a name, and not reading one").
     pub fn display_with<'a>(&self, symbols: Option<&'a SymbolTable>) -> DisplayWith<'a> {

@@ -1,8 +1,11 @@
+//! audited: 2026-09-17
 //! IoRequest — typed I/O request descriptors.
 //!
 //! Stream primitives build IoRequest values and yield them via SIG_IO.
 //! The scheduler catches SIG_IO and passes the request to a backend
 //! for execution.
+//!
+//! src/io/AGENTS.md
 
 use crate::port::{Direction, Encoding, Port};
 use crate::value::Value;
@@ -22,7 +25,7 @@ pub use spawn::*;
 pub(crate) use buffer::{
     bytes_to_string_in_place, set_struct_field_in_place, truncate_buffer, writeable_buffer_ptr,
 };
-pub(crate) use process::{exit_code_from_siginfo, ExitRecord, ProcessHandle, Reap};
+pub(crate) use process::{exit_code_from_siginfo, ExitRecord, ProcessHandle, Reap, SUBPROCESS};
 #[cfg(test)]
 pub(crate) use process::{reaped_child, zombie_child};
 
@@ -32,10 +35,10 @@ pub type TaskClosure = Box<dyn FnOnce() -> (i32, Vec<u8>) + Send>;
 /// A take-once closure for `IoOp::Task`.
 ///
 /// Wraps a `FnOnce` in `RefCell<Option<...>>` so it can be moved out of a
-/// shared `&IoRequest` reference. The closure runs on a background thread
-/// (async backend) or inline (sync backend) and returns `(i32, Vec<u8>)`:
-/// non-negative result_code = success (data returned as bytes),
-/// negative result_code = error (data is UTF-8 error message).
+/// shared `&IoRequest` reference. The closure runs on a background thread and
+/// returns `(i32, Vec<u8>)`: a non-negative result_code is success, with the
+/// data answered as bytes, and a negative one is an error, with the data a
+/// UTF-8 message.
 pub struct TaskFn {
     inner: RefCell<Option<TaskClosure>>,
 }
@@ -155,11 +158,11 @@ pub enum IoOp {
     Connect { addr: ConnectAddr },
     /// Async sleep. No port — just a timer. Returns nil after duration elapses.
     Sleep { duration: Duration },
-    /// Spawn a subprocess. Returns a struct:
-    /// {:pid int :stdin port|nil :stdout port|nil :stderr port|nil :process <external:process>}
+    /// Spawn a subprocess. Returns the `subprocess` external carrying the
+    /// child's pid, its stdio ports and its exit record.
     Spawn(SpawnRequest),
     /// Wait for a subprocess to exit. Returns exit code (int).
-    /// The request.port field carries the ProcessHandle value.
+    /// The request.port field carries the subprocess value.
     ProcessWait,
     /// Open a file. Returns a port on completion.
     /// No existing port — the port is created on completion.
@@ -273,8 +276,9 @@ impl IoRequest {
     /// - Non-negative result_code: success, data returned as `Value::bytes`
     /// - Negative result_code: error, data is UTF-8 error message
     ///
-    /// Async backend: closure runs on the thread pool, fiber yields until done.
-    /// Sync backend: closure runs inline (blocking).
+    /// The closure runs on the thread pool, and the asking fiber yields until
+    /// it returns. A closure has no io_uring form, so this holds on every
+    /// platform.
     #[allow(clippy::new_ret_no_self, dead_code)]
     pub fn task(
         ctx: &crate::primitives::ctx::Alloc,
@@ -285,8 +289,8 @@ impl IoRequest {
 
     /// Poll a raw fd for readiness. Portless.
     ///
-    /// Async backend: uses `IORING_OP_POLL_ADD` or `libc::poll()` on thread pool.
-    /// Returns revents mask as int on completion.
+    /// `IORING_OP_POLL_ADD` on io_uring, `libc::poll()` on the thread pool.
+    /// Answers the revents mask as an int on completion.
     #[allow(clippy::new_ret_no_self)]
     pub fn poll_fd(
         ctx: &crate::primitives::ctx::Alloc,

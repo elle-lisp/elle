@@ -1,5 +1,7 @@
 # Elle Documentation
 
+<!-- audited: 2026-09-16 -->
+
 This directory contains language references, design documents, and contributor
 guides. See [QUICKSTART.md](../QUICKSTART.md) for the full table of contents.
 
@@ -46,14 +48,16 @@ Focused files covering one topic each, all runnable via `elle docs/<file>.md`.
 [structs](structs.md) [sets](sets.md) [strings](strings.md) [bytes](bytes.md)
 [control](control.md) [loops](loops.md) [match](match.md) [errors](errors.md)
 [concurrency](concurrency.md) [threads](threads.md)
-[parameters](parameters.md) [traits](traits.md) [io](io.md) [lua](lua.md)
+[parameters](parameters.md) [traits](traits.md) [io](io.md)
+[subprocess](subprocess.md) [lua](lua.md)
 [epochs](epochs.md) [intrinsics](intrinsics.md) [compile-time](compile-time.md)
 
 ## Design Documents
 
 | Directory | Content |
 |-----------|---------|
-| [processes.md](processes.md) | Erlang-style processes, GenServer, supervisors |
+| [processes.md](processes.md) | Erlang-style processes: mailboxes, links, monitors |
+| [behaviors.md](behaviors.md) | GenServer, Actor, Task, Supervisor, EventManager |
 | [signals/](signals/) | Signal system design, protocol, inference, JIT |
 | [signals/fibers.md](signals/fibers.md) | Fiber architecture |
 
@@ -75,7 +79,7 @@ Focused files covering one topic each, all runnable via `elle docs/<file>.md`.
 
 | File | Content |
 |------|---------|
-| [plugins.md](plugins.md) | 29 shipped plugins |
+| [plugins.md](plugins.md) | Rust plugins and `std/` modules, and how to build one |
 | [stdlib.md](stdlib.md) | Standard library and prelude |
 | [modules.md](modules.md) | Import system |
 | [macros.md](macros.md) | Macro system |

@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-17
 // src/io/AGENTS.md
 //! Fixtures the async-backend tests share: sockets a peer never answers,
 //! scratch paths, and the assertion that a cancelled operation retires.
@@ -9,6 +9,7 @@ use crate::port::{Direction, Encoding, Port, PortKind};
 use crate::value::error_val_in;
 use crate::value::heap::TableKey;
 use crate::value::sorted_struct_get;
+use std::os::unix::io::RawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -231,10 +232,54 @@ fn fill_tcp_backlog(port: u16) -> Vec<libc::c_int> {
     }
     queued
 }
+// ── Descriptor helpers, shared by park.rs, gone.rs and descriptor.rs ──
+
+/// A pipe whose ends close with it.
+struct Pipe {
+    read_fd: RawFd,
+    write_fd: RawFd,
+}
+
+impl Pipe {
+    fn new() -> Pipe {
+        let mut fds = [0 as libc::c_int; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0, "pipe(2) failed");
+        Pipe {
+            read_fd: fds[0],
+            write_fd: fds[1],
+        }
+    }
+}
+
+impl Drop for Pipe {
+    fn drop(&mut self) {
+        unsafe {
+            libc::close(self.read_fd);
+            libc::close(self.write_fd);
+        }
+    }
+}
+
+/// What descriptor number `fd` currently names — its device and inode — or
+/// `None` when the number is not open.
+///
+/// Two numbers duplicated from one another answer alike, which is what makes
+/// this an identity rather than a liveness check: it says WHICH file a number
+/// refers to, so a number handed back to the OS and taken by something else is
+/// distinguishable from one that never moved.
+fn file_identity(fd: RawFd) -> Option<(u64, u64)> {
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::fstat(fd, &mut st) } != 0 {
+        return None;
+    }
+    Some((st.st_dev as u64, st.st_ino as u64))
+}
 
 mod backend;
 mod bridge;
+mod descriptor;
 mod fileops;
+mod gone;
 mod net;
 mod netcancel;
 mod netend;

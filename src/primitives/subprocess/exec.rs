@@ -1,3 +1,9 @@
+//! audited: 2026-09-17
+//! `subprocess/exec`: the options it parses, and the sequence widening its
+//! args take.
+//!
+//! docs/subprocess.md
+
 use super::*;
 use crate::primitives::ctx::NativeCtx;
 
@@ -135,44 +141,6 @@ pub(super) fn parse_exec_opts(
     Ok((env, cwd, stdin_disp, stdout_disp, stderr_disp))
 }
 
-/// Extract a ProcessHandle Value from either:
-/// - A Value with external_type_name "process" (direct handle)
-/// - A struct with a :process key containing the handle
-pub(super) fn extract_process_handle(
-    val: &Value,
-    fn_name: &str,
-    ctx: &mut NativeCtx,
-) -> Result<Value, (SignalBits, Value)> {
-    if val.external_type_name() == Some("process") {
-        return Ok(*val);
-    }
-    if let Some(fields) = val.as_struct() {
-        match sorted_struct_get(fields, &TableKey::keyword("process")) {
-            Some(v) => return Ok(*v),
-            None => {
-                return Err((
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!("{}: struct has no :process key", fn_name),
-                    ),
-                ))
-            }
-        }
-    }
-    Err((
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "{}: expected process handle or exec result struct, got {}",
-                fn_name,
-                val.type_name()
-            ),
-        ),
-    ))
-}
-
 /// Extract a `Vec<String>` from a sequence value (empty list, cons list,
 /// array, or mutable array). Each element must be a string.
 /// Returns `Err((SIG_ERROR, error_val(...)))` on type mismatch.
@@ -297,7 +265,8 @@ pub(super) fn extract_string_sequence(
 /// (subprocess/exec program args)
 /// (subprocess/exec program args opts)
 ///
-/// Returns (SIG_EXEC | SIG_IO | SIG_YIELD, io-request).
+/// Answers `(SIG_IO | SIG_EXEC, io-request)`. The yield is the scheduler's:
+/// `SIG_IO` is what routes the request to a backend and parks the fiber.
 pub(super) fn prim_subprocess_exec(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -352,131 +321,3 @@ pub(super) fn prim_subprocess_exec(
     );
     (SIG_IO | SIG_EXEC, request)
 }
-
-/// Wait for a subprocess to exit, returning an IoRequest that the scheduler executes.
-///
-/// (subprocess/wait handle-or-struct) → exit-code
-///
-/// Returns (SIG_EXEC | SIG_IO | SIG_YIELD, io-request).
-pub(super) fn prim_subprocess_wait(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    let handle_val = match extract_process_handle(&args[0], "subprocess/wait", ctx) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    // Validate it's actually a ProcessHandle (not just any external)
-    if handle_val.as_external::<ProcessHandle>().is_none() {
-        return (
-            SIG_ERROR,
-            ctx.error("type-error", "subprocess/wait: invalid process handle"),
-        );
-    }
-    let request = IoRequest::new(ctx, IoOp::ProcessWait, handle_val);
-    (SIG_IO | SIG_EXEC, request)
-}
-
-/// Send a signal to a subprocess.
-///
-/// (subprocess/kill handle-or-struct)           ; sends SIGTERM
-/// (subprocess/kill handle-or-struct 15)        ; integer (must round-trip to a named signal)
-/// (subprocess/kill handle-or-struct :sigterm)  ; keyword signal name
-///
-/// Synchronous. Each answer reports what the call observed: (SIG_OK,
-/// `:signaled`) when `kill(2)` took the signal, (SIG_OK, `:exited`) when the
-/// handle's record holds a status and no signal was sent, (SIG_OK, `:missing`)
-/// when no process holds the pid. (SIG_ERROR, error) on failure.
-pub(super) fn prim_subprocess_kill(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    if !(1..=2).contains(&args.len()) {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "argument-error",
-                format!(
-                    "subprocess/kill: expected 1 or 2 arguments, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
-    let handle_val = match extract_process_handle(&args[0], "subprocess/kill", ctx) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let handle = match handle_val.as_external::<ProcessHandle>() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error("type-error", "subprocess/kill: invalid process handle"),
-            )
-        }
-    };
-    let signal = if args.len() > 1 {
-        match crate::io::sigmap::resolve(&args[1], "subprocess/kill", ctx.symbols()) {
-            Ok(s) => s,
-            Err(e) => {
-                let (kind, msg) = e.parts("subprocess/kill");
-                return (SIG_ERROR, ctx.error(kind, msg));
-            }
-        }
-    } else {
-        libc::SIGTERM
-    };
-    // The handle decides whether there is a child to signal, not the kernel. A
-    // reap gives the pid back to the OS, which hands the number out again, so a
-    // `kill(2)` on a handle whose record holds a status would reach whoever
-    // holds that number now (src/io/AGENTS.md § "A reap is never wasted").
-    if handle.exit().status().is_some() {
-        return (SIG_OK, ctx.keyword("exited"));
-    }
-    let ret = unsafe { libc::kill(handle.pid() as i32, signal) };
-    if ret < 0 {
-        let err = std::io::Error::last_os_error();
-        if err.raw_os_error() == Some(libc::ESRCH) {
-            // Nothing holds the number, so nothing was signalled. A separate
-            // answer from `:exited` because it is separate evidence: a pid
-            // carries no record of who used to hold it, so `ESRCH` cannot say
-            // the process it names was ever this handle's child.
-            (SIG_OK, ctx.keyword("missing"))
-        } else {
-            (
-                SIG_ERROR,
-                ctx.error("exec-error", format!("subprocess/kill: {}", err)),
-            )
-        }
-    } else {
-        (SIG_OK, ctx.keyword("signaled"))
-    }
-}
-
-/// Return the OS process ID of a subprocess.
-///
-/// (subprocess/pid handle-or-struct) → int
-///
-/// Synchronous — no yield.
-pub(super) fn prim_subprocess_pid(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    let handle_val = match extract_process_handle(&args[0], "subprocess/pid", ctx) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let handle = match handle_val.as_external::<ProcessHandle>() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error("type-error", "subprocess/pid: invalid process handle"),
-            )
-        }
-    };
-    (SIG_OK, Value::int(handle.pid() as i64))
-}
-
-// Declarative primitive definitions for process operations

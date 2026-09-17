@@ -1,3 +1,9 @@
+//! audited: 2026-09-16
+//! `AsyncBackend`'s cancel, poll and wait — what the scheduler drives the
+//! backend with, on either platform.
+//!
+//! src/io/AGENTS.md
+
 use super::*;
 
 impl AsyncBackend {
@@ -7,7 +13,7 @@ impl AsyncBackend {
     /// stop** is platform-specific: io_uring takes `IORING_OP_ASYNC_CANCEL`
     /// (its own CQE is high-bit tagged and skipped; the operation's own CQE
     /// arrives with `-ECANCELED`), while a pool worker is asked through its stop
-    /// pipe (src/io/AGENTS.md § "The stop pipe"). **Marking the id** is shared:
+    /// pipe (docs/impl/io-inflight.md § "The stop pipe"). **Marking the id** is shared:
     /// the operation's completion, whenever it arrives, retires the entry
     /// instead of building a result nobody would read.
     ///
@@ -74,15 +80,13 @@ impl AsyncBackend {
             match platform {
                 #[cfg(target_os = "linux")]
                 PlatformBackend::Uring(ring) => {
-                    // One blocking wait, no cap. Ring ops post their own CQEs;
-                    // hub work (getaddrinfo, `Task`, stdin) that posts no ring
-                    // CQE wakes this wait through the standing eventfd POLL_ADD —
-                    // a worker raises the eventfd after publishing, its poll
-                    // fires a CQE, and `wait_uring` clears the eventfd and
-                    // re-arms. The hub channel is then drained by `drain_ready`
-                    // below. No cap means a genuinely lost wakeup hangs rather
-                    // than being downgraded to a bounded stall — the property
-                    // that makes the scheduler reasoned-about.
+                    // Ring ops post their own CQEs; hub work (getaddrinfo,
+                    // `Task`, stdin) posts none and wakes this wait through the
+                    // standing eventfd POLL_ADD, which `wait_uring` clears and
+                    // re-arms. `drain_ready` below takes the hub channel.
+                    //
+                    // The timeout passed here is the caller's, never a rescue
+                    // cap — src/io/AGENTS.md invariant 8.
                     crate::io::uring::wait_uring(
                         ring,
                         timeout,
@@ -97,12 +101,10 @@ impl AsyncBackend {
                 }
                 PlatformBackend::ThreadPool => {
                     // One channel, all sources. A crossbeam `recv()`
-                    // registers-before-sleeps on the sole hub channel, so a
-                    // worker's publish can never be missed while the scheduler is
-                    // asleep — the lost-wakeup fix by construction. No caps: a
-                    // genuinely lost wakeup would hang here rather than be
-                    // downgraded to a bounded stall, which is exactly the
-                    // property that makes the scheduler reasoned-about.
+                    // registers before it sleeps, so a worker's publish cannot
+                    // be missed while the scheduler is asleep. Same rule as the
+                    // ring arm above: the timeout is the caller's, never a
+                    // rescue cap — src/io/AGENTS.md invariant 8.
                     if hub.in_flight() > 0 {
                         let waited = match timeout {
                             None => hub.recv_blocking(None),

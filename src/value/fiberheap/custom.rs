@@ -1,3 +1,4 @@
+//! audited: 2026-09-16
 //! Custom-allocator stack and heap teardown.
 //!
 //! `with-allocator` pushes a `CustomAllocState` that tracks raw allocations and
@@ -43,26 +44,19 @@ impl FiberHeap {
         true
     }
 
-    /// Check whether a shared allocator is active (legacy, always false).
+    /// Whether a shared allocator is active. Always false: nothing sets one.
     pub fn has_shared_alloc(&self) -> bool {
         false
     }
 
     /// Bring every I/O backend still on this heap to a quiescent state, before
-    /// the region sweep that would otherwise run its destructor.
+    /// the region sweep that would otherwise run its destructor. Both callers
+    /// below run this first, and the order is the argument:
+    /// docs/impl/io-inflight.md § "A hold is let go while its store is still
+    /// there".
     ///
-    /// A backend nobody let go of — a top-level `(io/backend :async)`, the
-    /// scheduler's own, every value on the full-module WASM tier — is reachable
-    /// only from here when the heap goes. Its destructor runs the same drain
-    /// this does, but from inside `teardown_all`, which frees regions in id
-    /// order rather than lifetime order: the drain would then read, and let go
-    /// of, regions the same sweep has already freed. Doing it here, while every
-    /// region is still there, leaves that destructor nothing to do.
-    ///
-    /// Each backend is held through a clone of its `Rc` for the call, so a
-    /// release that frees the region the backend value itself lives in does not
-    /// free the backend under it. See src/io/AGENTS.md § "A hold is let go while
-    /// its store is still there".
+    /// `collect_external_data` hands back a clone of each backend's `Rc`, so the
+    /// backend outlives a release that frees the region its own value sits in.
     fn quiesce_io_backends(&mut self) {
         for data in self.collect_external_data("io-backend") {
             if let Some(backend) = data.downcast_ref::<crate::io::AnyBackend>() {

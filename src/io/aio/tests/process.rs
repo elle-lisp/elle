@@ -1,7 +1,10 @@
+//! audited: 2026-09-17
 //! `subprocess/wait` through the async backend.
+//!
+//! src/io/AGENTS.md
 
 use super::*;
-use crate::io::request::{reaped_child, zombie_child};
+use crate::io::request::{reaped_child, zombie_child, SUBPROCESS};
 
 /// Submit a wait on `handle` through `backend`.
 fn submit_wait(backend: &AsyncBackend, handle: Value) -> Result<SubmissionId, String> {
@@ -23,9 +26,11 @@ fn error_message(err: &Value) -> String {
         .expect("an io error carries a :message")
 }
 
-/// Test IORING_OP_WAITID via async backend.
-/// Requires Linux kernel 6.7+. The test skips gracefully on older kernels
-/// by checking for -EINVAL completion.
+/// A wait on the platform default answers the child's exit code.
+///
+/// `IORING_OP_WAITID` needs Linux 6.7, and an older kernel answers `-EINVAL` in
+/// the CQE instead of reaping. The test takes that as a skip rather than a
+/// failure, since the kernel is not the thing under test.
 #[test]
 #[cfg(target_os = "linux")]
 fn test_async_submit_process_wait_uring() {
@@ -33,34 +38,23 @@ fn test_async_submit_process_wait_uring() {
         let child = std::process::Command::new("/bin/true").spawn().unwrap();
         let pid = child.id();
         let h = crate::primitives::ctx::TestHeap::new();
-        let handle_val = h.ctx().external("process", ProcessHandle::new(pid, child));
+        let handle_val = h.ctx().external(SUBPROCESS, ProcessHandle::new(pid, child));
 
         let backend = AsyncBackend::new().unwrap();
-        match submit_wait(&backend, handle_val) {
-            Err(e) if e.contains("thread-pool") => {
-                // Thread-pool backend: ProcessWait not supported. Skip.
-            }
-            Err(e) => panic!("submit failed unexpectedly: {}", e),
-            Ok(id) => {
-                let completions = backend.wait(5000).unwrap();
-                assert_eq!(completions.len(), 1);
-                assert_eq!(completions[0].id, id);
-                match &completions[0].result {
-                    Err(e) => {
-                        // -EINVAL means IORING_OP_WAITID not supported on this kernel. Skip.
-                        let msg = format!("{:?}", e);
-                        if msg.contains("22")
-                            || msg.contains("EINVAL")
-                            || msg.contains("waitid failed")
-                        {
-                            return; // kernel < 6.7
-                        }
-                        panic!("ProcessWait failed: {:?}", e);
-                    }
-                    Ok(val) => {
-                        assert_eq!(val.as_int(), Some(0), "expected exit 0");
-                    }
+        let id = submit_wait(&backend, handle_val).expect("a wait submits on either platform");
+        let completions = backend.wait(5000).unwrap();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].id, id);
+        match &completions[0].result {
+            Err(e) => {
+                let msg = error_message(e);
+                if msg.contains("errno 22") || msg.contains("waitid failed") {
+                    return; // kernel < 6.7
                 }
+                panic!("ProcessWait failed: {msg}");
+            }
+            Ok(val) => {
+                assert_eq!(val.as_int(), Some(0), "expected exit 0");
             }
         }
     });
@@ -90,7 +84,7 @@ fn a_failed_pool_process_wait_names_waitpid() {
         let h = crate::primitives::ctx::TestHeap::new();
         let handle_val = h
             .ctx()
-            .external("process", ProcessHandle::new(pid, reaped_child()));
+            .external(SUBPROCESS, ProcessHandle::new(pid, reaped_child()));
 
         let backend = AsyncBackend::new_thread_pool().unwrap();
         let id = submit_wait(&backend, handle_val).unwrap();
@@ -134,7 +128,7 @@ fn a_cancelled_wait_that_reaped_the_child_answers_the_next_wait() {
         let child = zombie_child();
         let handle = h
             .ctx()
-            .external("process", ProcessHandle::new(child.id(), child));
+            .external(SUBPROCESS, ProcessHandle::new(child.id(), child));
 
         let backend = AsyncBackend::new_thread_pool().unwrap();
         let cancelled = submit_wait(&backend, handle).unwrap();
@@ -186,7 +180,7 @@ fn a_wait_on_a_held_status_files_no_operation() {
         let child = zombie_child();
         let handle = h
             .ctx()
-            .external("process", ProcessHandle::new(child.id(), child));
+            .external(SUBPROCESS, ProcessHandle::new(child.id(), child));
 
         let backend = AsyncBackend::new_thread_pool().unwrap();
         submit_wait(&backend, handle).unwrap();
@@ -291,7 +285,7 @@ fn a_cancelled_uring_wait_that_reaped_the_child_answers_the_next_wait() {
         let child = zombie_child();
         let handle = h
             .ctx()
-            .external("process", ProcessHandle::new(child.id(), child));
+            .external(SUBPROCESS, ProcessHandle::new(child.id(), child));
 
         let cancelled = submit_wait(&backend, handle).unwrap();
         backend.cancel(cancelled).unwrap();

@@ -1,3 +1,4 @@
+//! audited: 2026-09-16
 //! I/O subsystem: request types and backends.
 //!
 //! `IoBackend` is the async submission-and-completion model: `submit`
@@ -245,12 +246,11 @@ pub(crate) trait IoBackend {
     /// no pending table (the mock).
     ///
     /// The backend's own `Drop` runs this, but a heap that STRANDS a backend —
-    /// one the program never let go of — must run it BEFORE the region sweep:
-    /// the drain reads the op's `Port`/`ProcessHandle` heap values and releases
-    /// their regions, and the id-ordered sweep may already have freed them.
-    /// `FiberHeap::quiesce_io_backends` is that caller. See src/io/AGENTS.md §
-    /// "A hold is let go while its store is still there"; canonical reference
-    /// `tests/elle/posix.lisp` under `--wasm=full`.
+    /// one the program never let go of — must run it BEFORE the region sweep.
+    /// `FiberHeap::quiesce_io_backends` is that caller, and the order is the
+    /// argument: docs/impl/io-inflight.md § "A hold is let go while its store is
+    /// still there". Canonical reference `tests/elle/posix.lisp` under
+    /// `--wasm=full`.
     fn quiesce(&self) {}
 
     /// Background worker operations submitted but not yet reaped — the OS

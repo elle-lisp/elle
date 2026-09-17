@@ -1,5 +1,7 @@
 # POSIX signals
 
+<!-- audited: 2026-09-16 -->
+
 Elle programs can send POSIX signals to other processes and observe
 signals delivered to themselves. The surface lives under `os/sig-*`.
 
@@ -300,8 +302,8 @@ survives and can be reused:
   cancelling writes one byte and the read ends with `ECANCELED`. The
   descriptor is untouched, which is what lets the receiver be reused —
   shutting it down would reach the worker too, and would break a
-  receiver the caller still holds. See `src/io/AGENTS.md` § "The stop
-  pipe".
+  receiver the caller still holds. See
+  [an operation in flight](impl/io-inflight.md).
 
 So `(ev/race timer (os/sig-next r))` may be repeated on the same
 receiver; nothing needs re-creating on a timeout.
@@ -359,5 +361,5 @@ they observe process state without sending.
   concept, different word).
 - [`io.md`](io.md) — async scheduler that `os/sig-next` integrates
   with.
-- [`subprocess`](io.md#subprocesses) — `subprocess/kill` for sending
-  a signal to a child handle.
+- [subprocess.md](subprocess.md) — `subprocess/kill` for sending a
+  signal to a child.

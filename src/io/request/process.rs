@@ -1,11 +1,26 @@
-//! Subprocess handle stored behind an `IoOp::Spawn`/`ProcessWait` request, and
-//! the record a child's exit status is kept in.
+//! audited: 2026-09-17
+//! The `subprocess` a spawn answers with — its pid, its stdio ports and its
+//! exit record — and the record itself.
+//!
+//! docs/subprocess.md
 
+use crate::value::Value;
 use std::cell::RefCell;
 use std::process::Child;
 use std::sync::{Arc, Mutex};
 
-/// Handle to a running subprocess. Stored as ExternalObject with type_name "process".
+/// The external type name a spawned child is stored under.
+///
+/// One constant rather than the literal at each site: the spawn that mints the
+/// value, the extractor that checks it, `subprocess?`, and the display dispatch
+/// all have to agree, and a typo in any of them is a value nothing recognizes.
+/// `process` is deliberately not the word — that one already means an
+/// Erlang-style process here (docs/processes.md).
+pub(crate) const SUBPROCESS: &str = "subprocess";
+
+/// A spawned child. Stored as an external named [`SUBPROCESS`], and the only
+/// shape `subprocess/wait`, `subprocess/kill`, `subprocess/pid` and
+/// `subprocess/exit` take.
 #[derive(Debug)]
 pub(crate) struct ProcessHandle {
     pid: u32,
@@ -15,19 +30,53 @@ pub(crate) struct ProcessHandle {
     /// the process is still running.
     child: RefCell<Child>,
     exit: ExitRecord,
+    /// The child's stdio ports, or `Value::NIL` where the disposition asked for
+    /// no pipe. Read by `get`/`keys`/`values`, never written after the spawn.
+    ///
+    /// These are heap `Value`s an external holds, which no alloc-time scan and
+    /// no free-time cascade enumerates (docs/impl/region/rules.md Rule 5). They
+    /// need no count of their own because `spawn_to_subprocess` mints them and
+    /// this handle through ONE `Alloc`: they share a region, so nothing can free
+    /// a port while the subprocess holding it is alive.
+    stdio: [Value; 3],
 }
 
 impl ProcessHandle {
+    /// A handle over a child with no stdio ports — every spawn adds them with
+    /// [`with_stdio`](Self::with_stdio).
     pub fn new(pid: u32, child: Child) -> Self {
         ProcessHandle {
             pid,
             child: RefCell::new(child),
             exit: ExitRecord::new(),
+            stdio: [Value::NIL; 3],
         }
+    }
+
+    /// The same handle, carrying the ports the spawn created. Each is a port
+    /// `Value` or `Value::NIL`, in stdin/stdout/stderr order.
+    pub(crate) fn with_stdio(mut self, stdio: [Value; 3]) -> Self {
+        self.stdio = stdio;
+        self
     }
 
     pub fn pid(&self) -> u32 {
         self.pid
+    }
+
+    /// The child's stdin port, or nil.
+    pub(crate) fn stdin(&self) -> Value {
+        self.stdio[0]
+    }
+
+    /// The child's stdout port, or nil.
+    pub(crate) fn stdout(&self) -> Value {
+        self.stdio[1]
+    }
+
+    /// The child's stderr port, or nil.
+    pub(crate) fn stderr(&self) -> Value {
+        self.stdio[2]
     }
 
     /// Where this child's exit status is kept. Every operation that may reap
@@ -35,6 +84,14 @@ impl ProcessHandle {
     /// wasted".
     pub(crate) fn exit(&self) -> &ExitRecord {
         &self.exit
+    }
+}
+
+/// `#<subprocess 12345>` — the pid is what a reader needs and the rest is
+/// unprintable state.
+impl std::fmt::Display for ProcessHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "#<subprocess {}>", self.pid)
     }
 }
 

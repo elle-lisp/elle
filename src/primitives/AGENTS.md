@@ -1,5 +1,7 @@
 # primitives
 
+<!-- audited: 2026-09-16 -->
+
 Built-in functions. Registered into the VM at startup.
 
 ## Responsibility
@@ -39,16 +41,16 @@ call's own region.
 Return values:
 - `(SIG_OK, value)` — success
 - `(SIG_ERROR, error_val(kind, msg))` — error
-- `(SIG_RESUME, fiber_value)` — fiber context switch (see `vm/AGENTS.md`)
-- `(SIG_QUERY, cons(keyword, arg))` — VM state query (see `vm/AGENTS.md`)
+- `(SIG_RESUME, fiber_value)` — fiber context switch (see [vm/](../vm/AGENTS.md))
+- `(SIG_QUERY, cons(keyword, arg))` — VM state query (see [vm/](../vm/AGENTS.md))
 
 ## Adding a primitive
 
 1. Create function in appropriate module
 2. Register in that module's `register_*` function
 3. That function is called by `registration.rs`
-4. Declare its `effect: RegionEffect::…` (def.rs; spec in docs/impl/region/effects.md
-   § "Native region effects"). Every shipped table is fully declared —
+4. Declare its `effect: RegionEffect::…` (def.rs; the spec is
+   [region effects](../../docs/impl/region/effects.md)). Every shipped table is fully declared —
    do not leave a new primitive at the `Unknown` default. The claim is
    checked forever by the declaration oracle (`dispatch_native_call`,
    debug builds): Immediate = non-heap result; Fresh = heap result in
@@ -105,137 +107,73 @@ pub fn register_arithmetic(meta: &mut PrimitiveMeta, symbols: &mut SymbolTable) 
 
 ## Modules
 
-| Module | Contains |
-|--------|----------|
-| `arithmetic.rs` | `+`, `-`, `*`, `/`, `mod`, `rem`, `abs`, `min`, `max`, `pow`, `sqrt`, `sin`, `cos`, `tan`, `log`, `exp`, `floor`, `ceil`, `round`, `even?`, `odd?`, `pi`, `e` |
-| `comparison.rs` | `=` (numeric-aware), `identical?` (strict), `<`, `>`, `<=`, `>=` |
-| `logic.rs` | `not` |
-| `list.rs` | `cons`, `first`, `rest`, `list`, `length`, `empty?`, `append`, `concat`, `reverse`, `last`, `butlast`, `take`, `drop` |
-| `array.rs` | `array`, `@array`, `array/new`, `push`, `pop`, `popn`, `insert`, `remove` |
-| `string.rs` | `@string` (constructor), `string/upcase`, `string/downcase`, `string/slice`, `string/find`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join`, `string/size-of` |
-| `format.rs` | `string/format` |
-| `table.rs` | `@struct`, `del`, `keys`, `values`, `has-key?` (imports `get`/`put` from `access.rs`) |
-| `access.rs` | `get`, `put` — polymorphic collection access; @string `put` uses grapheme-cluster indexing (matching immutable `string`), value must be a string |
-| `sets.rs` | `set`, `@set`, `set?`, `contains?`, `add`, `del`, `union`, `intersection`, `difference`, `set->array`, `seq->set` |
-| `structs.rs` | `struct` |
-| `fileio.rs` | `file/read` (`slurp`), `file/write` (`spit`), `file/append`, `file/delete`, `file/delete-dir`, `file/delete-dir-all`, `file/mkdir`, `file/mkdir-all`, `file/mktempdir`, `file/rename`, `file/copy`, `file/size`, `file/ls`, `file/lines`, `file/stat`, `file/lstat` |
-| `path.rs` | `path/join`, `path/parent`, `path/filename`, `path/stem`, `path/extension`, `path/with-extension`, `path/normalize`, `path/absolute`, `path/canonicalize`, `path/relative`, `path/components`, `path/absolute?`, `path/relative?`, `path/cwd`, `path/exists?`, `path/file?`, `path/dir?` |
-| `ports.rs` | `port/open`, `port/open-bytes`, `port/close`, `port/stdin`, `port/stdout`, `port/stderr`, `port?`, `port/open?`, `port/set-options`, `port/path`, `port/seek`, `port/tell` |
-| `net.rs` | `tcp/listen`, `tcp/accept`, `tcp/connect-ip`, `tcp/shutdown`, `udp/bind`, `udp/send-to`, `udp/recv-from`, `sys/resolve` (`tcp/connect` is a stdlib wrapper over `tcp/connect-ip`) |
-| `unix.rs` | `unix/listen`, `unix/accept`, `unix/connect`, `unix/shutdown` |
-| `posix.rs` | `os/sig-send`, `os/sig-raise`, `os/sig-watch`, `os/sig-next`, `os/sig-close`, `os/sig-pending`, `os/sig-mask`, `os/sig-watching` — POSIX signal send/receive. Send/raise gated on `:os-signal` capability (`SIG_OS_SIGNAL`); receive primitives are async (yield `:io`). See `docs/posix-signals.md`. |
-| `kwarg.rs` | `extract_keyword_timeout` helper function |
-| `display.rs` | `print`, `println`, `display`, `newline` |
-| `types.rs` | `nil?`, `pair?`, `list?`, `number?`, `integer?`, `float?`, `string?`, `boolean?`, `symbol?`, `keyword?`, `array?`, `struct?`, `bytes?`, `mutable?`, `type-of` |
-| `cell.rs` | `box`, `unbox`, `rebox`, `box?` |
-| `concurrency.rs` | `spawn`, `join`, `current-thread-id` |
-| `chan.rs` | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/try-select`, `chan/wait-ready` (see "Channel select wake protocol" below for the `chan/select` Lisp wrapper) |
-| `fibers.rs` | `fiber/new`, `fiber/resume`, `emit`, `fiber/status`, `fiber/value` |
-| `fiber_introspect.rs` | `fiber/bits`, `fiber/mask`, `fiber/parent`, `fiber/child`, `fiber/propagate`, `fiber/cancel`, `fiber?` |
-| `parameters.rs` | `make-parameter`, `parameter?` |
-| `traits.rs` | `with-traits`, `traits` |
-| `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
-| `time_def.rs` | `time/stopwatch`, `time/elapsed` (Elle definitions via `eval`) |
-| `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum`, `syntax-pair?`, `syntax-list?`, `syntax-symbol?`, `syntax-keyword?`, `syntax-nil?`, `syntax->list`, `syntax-first`, `syntax-rest`, `syntax-e`, `squelch`, `meta/origin` |
-| `introspection.rs` | `closure?`, `jit?`, `silent?`, `fn/mutates-params?`, `fn/errors?`, `fn/arity`, `fn/captures`, `fn/bytecode-size`, `doc`, `vm/query`, `jit/rejections`, `keyword` (alias: `string->keyword`) |
+Each row names a module's registered primitives by their canonical names.
+Aliases are declared beside each definition and are not repeated here; `(doc
+name)` answers for either spelling.
+
+| Module | Registers |
+|--------|-----------|
+| `allocator.rs` | `allocator/install`, `allocator/uninstall` |
+| `arena.rs` | `debug/arena-stats`, `debug/arena-count`, `debug/arena-bytes`, `debug/arena-allocs`, `debug/arena-peak`, `debug/arena-region-of`, `debug/arena-dump`, `debug/arena-region-table`, and the rest of the `debug/arena-*` family |
+| `arithmetic.rs` | nothing. `+`, `-`, `*` and their peers are stdlib closures over the `%`-intrinsics; the table here is empty and the file holds shared helpers |
+| `array.rs` | `array`, `@array`, `array/new`, `popn`, `insert`, `remove` |
+| `bitwise.rs` | `bit/and`, `bit/or`, `bit/xor`, `bit/not`, `bit/shl`, `bit/shr` |
+| `box.rs` | `box`, `unbox`, `rebox` |
+| `bytes.rs` | `bytes`, `@bytes`, `seq->hex`, `slice` |
+| `chan.rs` | `chan`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/try-select`, `chan/wait-ready` (see "Channel select wake protocol" below for the `chan/select` Lisp wrapper) |
+| `comparison.rs` | `=` (numeric-aware), `identical?` (strict), `hash`. The ordering comparisons are stdlib closures over `%lt`/`%gt`/`%le`/`%ge` |
+| `compile/` | `compile/analyze`, `compile/symbols`, `compile/captures`, `compile/call-graph`, `compile/run-on`, `compile/whole-module`, and the rest of the `compile/*` family |
+| `config.rs` | `vm/tier`, `backend?`, `vm/config`, `vm/config-set` |
+| `concurrency.rs` | `sys/spawn`, `sys/spawn-vm`, `sys/thread-state`, `sys/thread-id`, `sys/unique` |
+| `convert.rs` | `integer`, `float`, `parse-int`, `parse-float`, `string`, `number->string` |
+| `debug.rs` | `debug/print`, `debug/trace`, `debug/memory`, `debug/symbol-count` |
 | `disassembly.rs` | `fn/disasm`, `fn/disasm-jit`, `fn/flow`, `vm/list-primitives`, `vm/primitive-meta` |
-| `arena.rs` | `arena/count`, `arena/stats`, `arena/set-object-limit`, `arena/object-limit`, `arena/bytes`, `arena/checkpoint`, `arena/reset`, `arena/allocs`, `arena/peak`, `arena/reset-peak`, `environment` |
-| `debug.rs` | `debug/print`, `debug/trace`, `debug/memory` |
-| `ffi.rs` | `resolve_type_desc`, `extract_pointer_addr` helpers; FFI tests |
-| `loading.rs` | `ffi/native`, `ffi/lookup`, `ffi/signature`, `ffi/callback`, `ffi/callback-free` |
-| `calling.rs` | `ffi/call` |
+| `display.rs` | `pp`, `describe`. The output verbs (`print`, `println`, `eprint`, `eprintln`) are stdlib closures over the ports |
+| `fiber_introspect.rs` | `fiber/bits`, `fiber/mask`, `fiber/cancel`, `fiber/child`, `fiber/parent`, `fiber/propagate`, `fiber/caps`, `fiber/abort`, `fiber/refuse` |
+| `fibers.rs` | `fiber/new`, `fiber/resume`, `fiber/emit`, `fiber/status`, `fiber/value`, `fiber/set-fuel`, `fiber/fuel`, `fiber/clear-fuel` |
+| `fileio.rs` | `file/read`, `file/write`, `file/append`, `file/delete`, `file/delete-dir`, `file/delete-dir-all`, `file/mkdir`, `file/mkdir-all`, `file/mktempdir`, `file/rename`, `file/copy`, `file/size`, `file/ls`, `file/lines`, `file/stat`, `file/lstat` |
+| `format.rs` | `string/format` — see [format/](format/AGENTS.md) |
+| `intrinsics.rs` | the `%`-intrinsics: `%add`, `%get`, `%put`, `%has?`, `%first`, `%pop` and the rest. See [intrinsics](../../docs/intrinsics.md) |
+| `introspection.rs` | `jit?`, `silent?`, `fiber?`, `fn/arity`, `fn/captures`, `fn/errors?`, `fn/bytecode-size`, `fn/gpu-eligible?`, `doc`, `vm/query`, `signals`, `jit/rejections`, `keyword` |
+| `io.rs` | `read`, `write`, `read-write`, `io-request?`, `io-backend?`, `io/backend`, `io/submit`, `io/workers`, `io/reap`, `io/wait`, `io/cancel`, `ev/sleep`, `ev/poll-fd` |
+| `json/` | `json/parse`, `json/serialize`, `json/pretty` |
+| `list/` | `first`, `second`, `rest`, `list`, `length`, `empty?`, `->array`, `->list` |
+| `loading.rs` | `ffi/native`, `ffi/lookup`, `ffi/on-unload`, `ffi/run-teardowns`, `ffi/signature`, `ffi/call`, `ffi/callback`, `ffi/callback-free` |
+| `logic.rs` | `and`, `or` |
+| `lstruct.rs` | `@struct`, `get`, `keys`, `values`, `has?` (the `get` body lives in `access.rs`) |
+| `math.rs` | `math/sqrt`, `math/sin`, `math/cos`, `math/tan`, `math/log`, `math/exp`, `math/pow`, `math/atan2`, `math/pi`, `math/e`, `math/inf`, `math/nan`, and the rest of the `math/*` family |
 | `memory.rs` | `ffi/size`, `ffi/align`, `ffi/malloc`, `ffi/free`, `ffi/read`, `ffi/write`, `ffi/string`, `ffi/struct`, `ffi/array`, `ptr/add`, `ptr/diff`, `ptr/to-int`, `ptr/from-int` |
-| `subprocess.rs` | `exit`, `halt`, `sys/args` (returns args after the source file in argv as a list, empty list if none), `sys/env`, `subprocess/exec`, `subprocess/wait`, `subprocess/kill`, `subprocess/pid` |
+| `meta.rs` | `meta/gensym`, `meta/datum->syntax`, `meta/syntax->datum`, the `meta/syntax-*` predicates, `meta/origin`, `squelch`, `attune`, `git`, `fn/git?`, `disgit` |
+| `modules.rs` | `import` |
+| `net.rs` | `tcp/listen`, `tcp/accept`, `tcp/connect-ip`, `tcp/shutdown`, `udp/bind`, `udp/send-to`, `udp/recv-from`, `sys/resolve`, `sys/ip?` (`tcp/connect` is a stdlib wrapper over `tcp/connect-ip`) |
+| `package.rs` | `elle/version`, `elle/epoch`, `elle/info` |
+| `parameters.rs` | `parameter` |
+| `path.rs` | `path/join`, `path/parent`, `path/filename`, `path/stem`, `path/extension`, `path/with-extension`, `path/normalize`, `path/absolute`, `path/canonicalize`, `path/relative`, `path/components`, `path/absolute?`, `path/relative?`, `path/cwd`, `path/exists?`, `path/file?`, `path/dir?` |
+| `ports.rs` | `port/open`, `port/open-bytes`, `port/close`, `port/stdin`, `port/stdout`, `port/stderr`, `port?`, `port/open?`, `port/set-options`, `port/encoding`, `port/path`, `port/seek`, `port/tell` |
+| `posix.rs` | `os/sig-send`, `os/sig-raise`, `os/sig-watch`, `os/sig-next`, `os/sig-close`, `os/sig-pending`, `os/sig-mask`, `os/sig-watching` — POSIX signal send and receive. Send and raise are gated on the `:os-signal` capability (`SIG_OS_SIGNAL`); the receive primitives are async and yield `:io`. See [posix signals](../../docs/posix-signals.md) |
+| `read.rs` | `read`, `read-all` |
+| `sets.rs` | `set`, `@set`, `union`, `intersection`, `difference`, `seq->set`, `string-contains?` |
+| `sort.rs` | `sort` |
+| `stream.rs` | `port/read-line`, `port/read`, `port/read-exact`, `port/read-all`, `port/write`, `port/flush` |
+| `string.rs` | `@string`, `string/uppercase`, `string/lowercase`, `string/find`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join`, `string/repeat`, `string/size-of`, `uri-encode` |
+| `structs.rs` | `struct`, `freeze`, `deep-freeze`, `thaw`, `pairs` |
+| `subprocess.rs` | `sys/exit`, `sys/trap-exit!`, `sys/halt`, `sys/args`, `sys/argv`, `sys/pid`, `sys/env`, and the `subprocess/*` table — see [subprocess/](subprocess/AGENTS.md) |
+| `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
+| `traits.rs` | `with-traits`, `traits` |
+| `types.rs` | `type-of`, `ptr?`, `callable?` |
+| `unix.rs` | `unix/listen`, `unix/accept`, `unix/connect`, `unix/shutdown` |
+| `watch.rs` | `watch`, `watch-add`, `watch-remove`, `watch-next`, `watch-close` |
+
+`access.rs` registers nothing of its own. It holds the polymorphic `get` and
+`put` bodies that `lstruct.rs` and `intrinsics.rs` both call, so the two tiers
+cannot drift. `get`, `keys`, `values` and `has?` also read a `subprocess`'s
+closed key set; `put` and `del` refuse one.
+
 
 ## string/format primitive
 
-**Location:** `src/primitives/format.rs`
-
-**Signature:** `(string/format template [args...])` or `(string/format template :key val ...)`
-
-**Purpose:** Format a template string with positional or named arguments, supporting format specifications for alignment, padding, and numeric bases.
-
-### Modes
-
-**Positional mode:** Arguments are substituted in order.
-```lisp
-(string/format "{} + {} = {}" 1 2 3)  #=> "1 + 2 = 3"
-(string/format "Hello, {}!" "Alice")  #=> "Hello, Alice!"
-```
-
-**Named mode:** Arguments are keyword-value pairs, substituted by name.
-```lisp
-(string/format "{name} is {age}" :name "Alice" :age 30)  #=> "Alice is 30"
-(string/format "{greeting}, {name}!" :greeting "Hello" :name "Bob")  #=> "Hello, Bob!"
-```
-
-Cannot mix positional and named in the same template — error if both `{}` and `{name}` appear.
-
-### Format specifications
-
-Syntax: `{[name][:spec]}` where spec is `[[fill]align][width][.precision][type]`.
-
-**Alignment:** `<` (left), `>` (right), `^` (center). Default: right for numbers, left for strings.
-
-**Fill character:** Any char before alignment. Default: space. Example: `{:*^10}` → center with `*` padding.
-
-**Width:** Minimum field width. Example: `{:10}` → pad to 10 chars.
-
-**Precision:** For floats, decimal places. For strings, max chars. Example: `{:.2f}` → 2 decimal places.
-
-**Type:** `d` (decimal), `x` (hex lowercase), `X` (hex uppercase), `o` (octal), `b` (binary), `f` (float), `e` (scientific), `s` (string).
-
-**Examples:**
-- `{:.2f}` — float with 2 decimal places
-- `{:>10}` — right-align to 10 chars
-- `{:<10}` — left-align to 10 chars
-- `{:^10}` — center to 10 chars
-- `{:05d}` — zero-pad integer to 5 digits
-- `{:x}` — hex lowercase
-- `{:X}` — hex uppercase
-- `{:o}` — octal
-- `{:b}` — binary
-- `{:e}` — scientific notation
-- `{:*^10}` — center with `*` fill to 10 chars
-
-### Brace escaping
-
-`{{` → `{`, `}}` → `}`. Escaping is processed in literal segments (outside placeholders).
-
-```lisp
-(string/format "literal {{braces}}")  #=> "literal {braces}"
-```
-
-### Error cases
-
-| Condition | Error kind | Message |
-|-----------|-----------|---------|
-| Template not string | `type-error` | `"string/format: template must be string, got {type}"` |
-| Unmatched `{` | `format-error` | `"string/format: unmatched '{' in template"` |
-| Unmatched `}` | `format-error` | `"string/format: unmatched '}' in template"` |
-| Positional arg count mismatch | `format-error` | `"string/format: expected N arguments, got M"` |
-| Mixed positional/named | `format-error` | `"string/format: cannot mix positional and named arguments"` |
-| Odd keyword args | `format-error` | `"string/format: odd number of keyword arguments"` |
-| Non-keyword in named position | `type-error` | `"string/format: expected keyword, got {type}"` |
-| Missing named key | `format-error` | `"string/format: missing key '{name}'"` |
-| Extra named key | `format-error` | `"string/format: unexpected key '{name}'"` |
-| Invalid format spec | `format-error` | `"string/format: invalid format spec '{spec}'"` |
-| Type mismatch in format | `format-error` | `"string/format: cannot format {type} with spec '{char}'"` |
-
-### Implementation details
-
-- **Template parsing:** `parse_placeholders()` extracts `{...}` placeholders, handling `{{` and `}}` escapes.
-- **Format spec parsing:** `parse_format_spec()` parses alignment, fill, width, precision, and type.
-- **Value formatting:** `format_value()` applies spec to value, `format_raw()` produces unpadded string, `apply_width_align()` adds padding.
-- **Mode dispatch:** `format_positional()` for `{}` placeholders, `format_named()` for `{name}` placeholders.
-- **Output building:** `build_output()` reconstructs template with formatted values, `unescape_into()` handles brace escaping.
-
-### Invariants
-
-1. **No mixing modes.** Positional and named placeholders cannot coexist in the same template.
-2. **Arity enforcement.** Positional mode requires exactly as many args as placeholders. Named mode requires even args (key-value pairs).
-3. **Type safety.** Format specs are validated against value types (e.g., `d` requires integer, `f` requires number).
-4. **Brace escaping.** `{{` and `}}` are unescaped only in literal segments, not inside placeholders.
+Template parsing, the format specification grammar, and the positional and
+named substitution modes: [format/](format/AGENTS.md).
 
 ## string/size-of primitive
 
@@ -294,35 +232,11 @@ Syntax: `{[name][:spec]}` where spec is `[[fill]align][width][.precision][type]`
 
 ## Subprocess Primitives
 
-**Location:** `src/primitives/subprocess.rs`
+`subprocess/exec`, `subprocess/wait`, `subprocess/kill`, `subprocess/pid`,
+`subprocess/exit` and `subprocess?`, with the `subprocess` value they all take
+and the one boundary that checks it: [subprocess/](subprocess/AGENTS.md).
 
-**Capability bit:** `SIG_EXEC` (bit 11) gives subprocess operations their own bit, so a fiber mask can allow or deny them independently of general I/O. Subprocess primitives emit `SIG_EXEC | SIG_IO`. `SIG_IO` is what routes the request to the scheduler — `SIG_EXEC` selects no backend of its own — but both bits route for a fiber mask: `|:exec|` catches a subprocess request exactly as `|:io|` does (#895).
-
-**Primitives:**
-
-- `subprocess/exec program args [opts]` — Spawns a subprocess. Returns `{:pid int :stdin port|nil :stdout port|nil :stderr port|nil :process <external:process>}`. Emits `SIG_EXEC | SIG_IO | SIG_YIELD`. Pipes are binary by default; text decoding is the caller's responsibility.
-  - `program` (string): path to executable
-  - `args` (list or array of strings): command-line arguments — accepts empty list `()`, cons list, immutable array `[...]`, or mutable array `@[...]`
-  - `opts` (optional struct): configuration with keys `:env` (struct of env vars, default: inherit), `:cwd` (string, default: inherit), `:stdin` (keyword `:pipe`/`:inherit`/`:null`, default: `:pipe`), `:stdout` (keyword, default: `:pipe`), `:stderr` (keyword, default: `:pipe`)
-  - Error cases: non-sequence `args` → `type-error "subprocess/exec: args must be list, array, or @array, got {type}"`; non-string element → `type-error "subprocess/exec: args element must be string, got {type}"`; improper list → `type-error "subprocess/exec: improper list ending in {type}"`
-  - Note: `subprocess/system` gets sequence widening for free via pass-through — it calls `subprocess/exec` directly with the `args` argument unchanged.
-
-- `subprocess/wait handle` — Waits for a subprocess to exit. Returns exit code as integer (0 = success). Emits `SIG_EXEC | SIG_IO | SIG_YIELD`. Accepts either a process handle (external) or an exec result struct (extracts `:process` key).
-
-- `subprocess/kill handle [signal]` — Sends a signal to a subprocess synchronously. Emits `SIG_ERROR` only (no yield). Default signal is `SIGTERM` (15). Accepts either a process handle or an exec result struct. Three answers, each reporting what the call observed and nothing beyond it:
-  - `:signaled` — `kill(2)` took the signal for this handle's child.
-  - `:exited` — the handle's `ExitRecord` holds a status, so no `kill(2)` was made. The handle decides this, not the kernel: a reaped pid belongs to the OS again and gets handed out again, so the syscall would reach whatever holds that number now. See `src/io/AGENTS.md` § "A reap is never wasted" for the record, and `docs/io.md` § "Killing a child that may already be gone" for the argument.
-  - `:missing` — `kill(2)` reported `ESRCH`. Separate from `:exited` because it is separate evidence: a pid carries no record of who used to hold it, so `ESRCH` says the number named nobody at that moment and cannot say the process it names was ever this handle's child.
-
-- `subprocess/pid handle` — Extracts the OS process ID from a process handle or exec result struct. Returns integer PID, whether or not the child has been reaped — the same number the exec result's `:pid` field carries. Emits `SIG_ERROR` only (no yield). Accepts either a process handle (external) or an exec result struct (extracts `:process` key).
-
-**Handle extraction pattern:** `subprocess/wait`, `subprocess/kill`, and `subprocess/pid` all accept either:
-1. A direct process handle (external with type name "process")
-2. An exec result struct with a `:process` key containing the handle
-
-This allows both `(subprocess/wait proc)` (where `proc` is the result of `subprocess/exec`) and `(subprocess/wait (get proc :process))` (extracting the handle directly).
-
-**Pipe ports:** Ports returned by `subprocess/exec` are created with `PortKind::Pipe` and `Encoding::Binary`. Subprocess output is an arbitrary byte stream; text decoding is the caller's responsibility via `(string bytes-val)` or `port/lines`.
+**Pipe ports:** Ports a subprocess carries are created with `PortKind::Pipe` and `Encoding::Binary`. Subprocess output is an arbitrary byte stream; text decoding is the caller's responsibility via `(string bytes-val)` or `port/lines`.
 
 ## Network Primitives
 
@@ -454,7 +368,7 @@ converts them to `:error` with kind `"signal-violation"`.
 - Creates new closure with `squelch_mask = closure.squelch_mask | new_bits`
 - Returns the new closure as a Value
 
-**Tail-call enforcement:** Squelch enforcement works correctly on tail-call invocation (fixes issue #588). The `squelch_mask` is carried through the tail-call trampoline loop in `execute_bytecode_saving_stack` via the `TailCallInfo` struct. After each tail-call iteration, the mask is re-applied before the next callee executes.
+**Tail-call enforcement:** A squelch holds across a tail call. The `squelch_mask` rides the tail-call trampoline loop in `execute_bytecode_saving_stack` on the `TailCallInfo` struct, and is re-applied after each iteration, before the next callee runs.
 
 ## meta/origin Primitive
 
@@ -542,17 +456,18 @@ Cancellation: if the fiber is aborted while parked, the scheduler
 removes the `PendingOp::ChanSelectPark` entry, which drops the guard,
 which closes the fd and deregisters. No leak.
 
-The same plumbing made `submit_uring_poll_add` accept an
-`Option<Duration>` (linked `LinkTimeout` SQE) — `ev/poll-fd`'s timeout
-was previously dropped on uring; that path now honors it.
+`submit_uring_poll_add` takes an `Option<Duration>` and emits a linked
+`LinkTimeout` SQE for it, which is what carries `ev/poll-fd`'s timeout on
+uring.
 
 ## Stream Primitive Timeout Support
 
 **Location:** `src/primitives/stream.rs`
 
-All 5 stream primitives now accept optional `:timeout ms` keyword argument:
+Every stream primitive takes an optional `:timeout ms` keyword argument:
 - `port/read-line port` or `port/read-line port :timeout ms`
 - `port/read port count` or `port/read port count :timeout ms`
+- `port/read-exact port count` or `port/read-exact port count :timeout ms`
 - `port/read-all port` or `port/read-all port :timeout ms`
 - `port/write port data` or `port/write port data :timeout ms`
 - `port/flush port` or `port/flush port :timeout ms`

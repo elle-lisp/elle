@@ -1,3 +1,4 @@
+//! audited: 2026-09-16
 //! Port type — Elle's abstraction for file descriptors.
 //!
 //! A port wraps an OS file descriptor with metadata (direction, encoding,
@@ -259,7 +260,7 @@ impl Port {
     /// it was submitted, so it takes a share of its own and holds it for its
     /// whole lifetime: the number cannot be handed to a new port under a
     /// running worker, however the port itself goes away
-    /// (src/io/AGENTS.md § "Descriptor retirement").
+    /// (docs/impl/io-descriptor.md § "Descriptor retirement").
     ///
     /// `None` for a port that owns no descriptor (stdio) or is already closed.
     pub(crate) fn fd_share(&self) -> Option<Rc<OwnedFd>> {

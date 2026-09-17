@@ -1,5 +1,7 @@
 # Concurrency
 
+<!-- audited: 2026-09-16 -->
+
 User code runs inside the async scheduler automatically. Fibers are
 single-threaded cooperative tasks — concurrent but not parallel. Because
 only one fiber runs at a time, shared data requires no synchronization.
@@ -177,16 +179,19 @@ On top of the core process API, the module provides:
       _ nil))))
 ```
 
-See [processes.md](processes.md) for the complete API reference,
-including supervised subprocesses, deferred replies, restart strategies,
-logging, and structured concurrency inside processes.
+See [processes.md](processes.md) for the core API — mailboxes, links, monitors,
+registration, and structured concurrency inside processes — and
+[behaviors.md](behaviors.md) for the roles above: deferred replies, restart
+strategies, supervisor logging, and supervised subprocesses.
 
 ---
 
 ## See also
 
-- [processes.md](processes.md) — full process API, GenServer, supervisors
+- [processes.md](processes.md) — full process API
+- [behaviors.md](behaviors.md) — GenServer, Actor, Task, Supervisor, EventManager
 - [fibers](signals/fibers.md) — fiber architecture
-- [io.md](io.md) — port I/O, subprocesses
+- [io.md](io.md) — port I/O
+- [subprocess.md](subprocess.md) — spawning and waiting on child processes
 - [threads.md](threads.md) — OS threads for CPU parallelism
 - [signals](signals/index.md) — signal system

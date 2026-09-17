@@ -1,3 +1,4 @@
+//! audited: 2026-09-17
 //! The submission frame — what every operation the backend issues shares.
 //!
 //! A submission mints an id, hands the operation to io_uring or to a
@@ -9,6 +10,8 @@
 //!
 //! `PendingOp::Port` (stream I/O, accept, datagram, shutdown) takes its own
 //! route through `submit`; `backend.rs` and `net.rs` pin that one.
+//!
+//! src/io/AGENTS.md
 
 use super::*;
 use crate::io::request::{SpawnRequest, StdioDisposition, TaskFn};
@@ -247,13 +250,13 @@ fn a_process_wait_completes_under_the_id_it_was_submitted_with() {
         backend
             .submit(&spawn, crate::io::pending::Submitter::for_test())
             .unwrap();
+        // The spawn's answer IS the handle a wait names — there is no key to
+        // reach through, which is the point of the type.
         let spawned = backend.poll().pop().unwrap().result.unwrap();
-        let handle = sorted_struct_get(spawned.as_struct().unwrap(), &TableKey::keyword("process"))
-            .expect("spawn result carries a :process handle");
 
         let req = IoRequest {
             op: IoOp::ProcessWait,
-            port: *handle,
+            port: spawned,
             timeout: None,
         };
         let id = submit_pending(&backend, &req, "process-wait");
