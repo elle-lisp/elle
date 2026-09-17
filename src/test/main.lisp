@@ -97,6 +97,15 @@
     (os/exit 2))
   nil)
 
+# The child is this binary, so a box whose OS will not name the running
+# executable cannot have this mode. Say so here: the alternative is every path
+# failing on a spawn with no program, which reads as the corpus being broken.
+(if (and isolate-flags (= (elle/executable) nil))
+  (begin
+    (eprintln "elle test: --isolate needs the path of this binary, and the OS did not give one")
+    (os/exit 2))
+  nil)
+
 # Per-test wall-clock budget (ms). A test form whose worker does not finish
 # within it is recorded `timeout` (not fail/pass), and the run gates non-zero.
 # os/join yields to the scheduler while waiting (no polling); on the deadline it
