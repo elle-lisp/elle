@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-18
 // The image store milestone: dump a sealed value graph, hydrate it by
 // private file mapping, and prove the mechanism end to end.
 // docs/impl/image/plan.md
@@ -340,4 +340,7 @@ mod verify {
 }
 mod headers {
     include!("image/headers.rs");
+}
+mod snapping {
+    include!("image/snapping.rs");
 }
