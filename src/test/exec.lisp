@@ -320,6 +320,94 @@
             r))
         (salvage-capture [false (get outcome 1)] out-path err-path)))))
 
+# ── running a file as its own process ────────────────────────────────
+# A worker thread isolates a fault and shares the process, which is not enough
+# for a mode the process sets once: --no-uring picks the I/O backend for the
+# whole binary, and --trace=guardfree reports a use-after-free as a SIGSEGV
+# that would take the runner down with every result it had not written yet.
+# `--isolate FLAGS` runs each path as `elle FLAGS PATH` instead, and the
+# child's exit status is the whole verdict. See docs/test-runner.md § Isolation.
+
+# The child is THIS binary, never whatever `elle` a PATH lookup finds: a run
+# has to say something about the build under test, and a different build would
+# make it say nothing. (sys/argv) cannot answer — under a subcommand its head
+# is the subcommand's own source name — so the binary reports its own path.
+(defn child-argv [flags path]
+  (concat (filter (fn [f] (> (length f) 0)) (string/split flags " ")) [path]))
+
+# Read a child's stream to EOF. Spawned as a fiber per stream, so both drain
+# while the wait runs: a child that fills a pipe buffer with nobody reading is
+# stopped in a write, which would read as a hang against its own budget.
+(defn drain [p]
+  (if (= p nil)
+    ""
+    (let [[ok? b] (protect (port/read-all p))]
+      (if ok? (string b) ""))))
+
+# Run one child to its end, or to the deadline. Returns
+# {:status INT-OR-NIL :stdout S :stderr S} — nil status means the budget ran
+# out and the child was killed. A deadline can land in the moment a wait has
+# already reaped the child, so the recorded status is consulted before the
+# timeout is believed; a reap is kept on the subprocess, never spent
+# (docs/subprocess.md § "A wait keeps the status it reaped").
+(defn run-child [argv budget-ms env]
+  (let [child (subprocess/exec (elle/executable) argv {:stdin :null :env env})
+        out-f (ev/spawn (fn [] (drain (get child :stdout))))
+        err-f (ev/spawn (fn [] (drain (get child :stderr))))
+        waited (ev/timeout (/ (float budget-ms) 1000.0)
+                           (fn [] (subprocess/wait child)))
+        status (if (= waited nil) (subprocess/exit child) waited)]
+    (if (= status nil)
+      (begin
+        (subprocess/kill child :sigkill)
+        (protect (subprocess/wait child)))
+      nil)
+    (struct :status status :stdout (ev/join out-f) :stderr (ev/join err-f))))
+
+# What a terminating status says, rendered for a reader. A signalled child
+# answers its signal number negated (docs/subprocess.md), so the sign is what
+# separates the two cases and no second read is needed. os/sig-name covers the
+# fault set that os/sig-send refuses, which is where a child's death lives.
+(defn signal-note [n]
+  (let [kw (os/sig-name n)]
+    (if kw
+      (struct :sig (string ":" (string kw))
+              :reason (string "killed by " (string/uppercase (string kw))
+                              " (signal " n ")"))
+      (struct :sig ":signal" :reason (string "killed by signal " n)))))
+
+# The line the binary prints when a loud gate refuses to run a file. A gated
+# child exits 0, so its exit status alone would read as a vacuous pass — the
+# coverage-hiding failure gate! exists to prevent. src/main.rs writes it.
+(def gated-marker "SKIP (gated): ")
+
+(defn gated-reason [text]
+  (let [i (string/find text gated-marker)]
+    (if i
+      (let [rest (slice text (+ i (length gated-marker)) (length text))
+            end (string/find rest "\n")]
+        (if end (slice rest 0 end) rest))
+      nil)))
+
+# Classify a finished child into the same row shape a form's outcome takes
+# (see classify). The child is gone, so there is nothing left to read but what
+# it left behind: its status, and what it printed on the way.
+(defn classify-child [cap budget-ms]
+  (let [status (get cap :status)]
+    (if (= status nil)
+      (struct :status :timeout
+              :reason (string "child exceeded the " budget-ms " ms budget"))
+      (if (= status 0)
+        (let [reason (gated-reason (get cap :stderr))]
+          (if reason
+            (struct :status :skip :sig ":gated" :reason reason)
+            (struct :status :pass)))
+        (if (< status 0)
+          (let [note (signal-note (- 0 status))]
+            (struct :status :fail :sig (get note :sig)
+                    :reason (get note :reason)))
+          (struct :status :fail :reason (string "exit " status)))))))
+
 # ── tier set: probe which backends this build carries ────────────────
 # compile/run-on answers :tier-rejected/:feature-disabled for a tier whose
 # feature wasn't compiled in. Such a tier is dropped from the run entirely (a

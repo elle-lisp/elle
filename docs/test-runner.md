@@ -139,6 +139,55 @@ isolated, timeout-bounded worker path; only the unsendable ones degrade. (The
 durable fix is per-form self-contained setup — the connection opened *inside*
 each form, so it lives in the worker — which the corpus will migrate toward.)
 
+### Isolation: a file can have its own process
+
+A worker thread isolates a fault and shares the process. That is enough for a
+form that raises, and not enough for a mode the process sets once: `--no-uring`
+picks the I/O backend for the whole binary, and `--trace=guardfree` reports a
+use-after-free as a SIGSEGV, which takes the runner down along with every
+result it had not written yet. Those files live in
+[elle_scripts.rs](../tests/integration/elle_scripts.rs) today, and their
+verdicts reach no database.
+
+`--isolate FLAGS` runs each selected path as its own child — `elle FLAGS PATH`,
+one process per path — and records it on the `process` tier. The flag string is
+split on spaces and may be empty.
+
+The child's exit status is the whole verdict, because it is the whole account a
+process leaves behind:
+
+| The child | Status | Reason |
+|---|---|---|
+| exited 0 | `pass` | none |
+| exited N | `fail` | `exit N` |
+| died on a signal | `fail` | `killed by SIGSEGV (signal 11)` |
+| outlived the budget | `timeout` | the budget that ran out |
+| printed `SKIP (gated)` and exited 0 | `skip` | the reason the gate gave |
+
+A signalled child is one `fail` row, and the run goes on to the next path. That
+is the point of the path: a guardfree SIGSEGV kills one child and lands as a
+recorded failure rather than ending the run.
+
+`subprocess/wait` answers a signalled child with its signal number negated
+([subprocess](subprocess.md)), so the sign separates an exit code from a
+signal. `os/sig-name` names it, answering over the fault set as well: a child
+dies on SIGSEGV, SIGABRT and SIGBUS, and the table `subprocess/kill` resolves
+against refuses all three, because they are not signals a program sends
+([posix-signals](posix-signals.md)).
+
+`--timeout MS` bounds a child exactly as it bounds a worker. Two fibers drain
+the child's stdout and stderr while a third waits for it, so a chatty child
+cannot fill a pipe buffer and read as a hang. A child over its budget is killed
+with SIGKILL, and what it printed before the kill is kept — the bargain a
+timed-out worker's partial capture already makes. Both streams become `stdout`
+and `stderr` assets in the CAS whatever the status.
+
+A gated child exits 0, so its exit status alone would read as a vacuous pass —
+the coverage-hiding failure the loud gate exists to prevent. The binary prints
+`SKIP (gated): REASON` on that path ([main.rs](../src/main.rs)), and the runner
+reads that line, so a self-gated file under `--isolate` is counted the way it
+is counted everywhere else.
+
 ## Gating: compile-time enable/disable (replaces skip-lists)
 
 Backend- and platform-specific tests should not live in a `Makefile` grep — they

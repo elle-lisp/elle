@@ -16,8 +16,9 @@ How a run executes is [test-runner](test-runner.md); where it is stored is
 > index (a **subset** of the schema — see the note there), the per-run code
 > state (commit, tree hash, worktree, host, build), the on-disk CAS for
 > stdout/stderr, run honesty (a killed run reads `DID NOT COMPLETE`), `:gated`
-> skips, and the `--query`/`--summary`/`--reset`/`--promote`/`-e`/`--timeout`/
-> `--corpus`/`--db` flags. Still design (not built): semantic selection
+> skips, child-process isolation with the measurement channel it carries, and
+> the `--query`/`--summary`/`--reset`/`--promote`/`-e`/`--timeout`/
+> `--corpus`/`--db`/`--isolate` flags. Still design (not built): semantic selection
 > (`--touches`/`--caps`/`--impacted-by`/`--changed`/`--rerun-failed`/`-k`),
 > `--rust`/`--watch`/`--prune`/`-N`/`--format`, the per-run RSS/CPU capture,
 > `--dump`/`--trace` asset capture, `changed_file` population, and the
@@ -90,12 +91,13 @@ agent would normally re-run *with special flags to obtain* (`--dump=lir`,
   disappear.
 - **Elle drives `cargo`, not the reverse.** `cargo`'s `integration::elle_scripts`
   harness no longer drives the `.lisp` corpus — `elle test` does. What remains in
-  `elle_scripts.rs` is only the few files that need a *process-global* runtime
-  mode the runner cannot vary per file (`--trace=guardfree`, `--no-uring`,
-  `--mlir=off`+adaptive), each run as a one-off subprocess. The remaining
-  dependency to invert is the other direction: the runner *invoking* `cargo` for
-  the Rust suite (`--rust`), folding its results into the same run — still future
-  work.
+  `elle_scripts.rs` is the few files that need a *process-global* runtime mode
+  (`--trace=guardfree`, `--no-uring`, `--mlir=off`+adaptive), each run as a
+  one-off subprocess. `--isolate` now runs a file that way and records it
+  ([test-runner](test-runner.md)), so those files have a home in the database;
+  moving them is the [profiles](test-vision.md) step. The remaining dependency
+  to invert is the other direction: the runner *invoking* `cargo` for the Rust
+  suite (`--rust`), folding its results into the same run — still future work.
 
 ## CLI surface
 
@@ -118,6 +120,7 @@ elle test [paths...]            # default: tests/elle, ALL tiers, write DB
   --query 'SQL'                 # convenience: run SQL against the DB and exit
   --summary                     # re-print the latest run's tally and problems; no re-run
   --db PATH                     # session DB path, overriding the state directory
+  --isolate 'FLAGS'             # run each path as its own process: elle FLAGS PATH
   --timeout MS                  # per-form wall-clock budget (default 60000)
   --prune POLICY                # explicit history pruning (e.g. --prune adhoc)
   -N                            # stop after N failures (-1 = fail-fast); default: run to completion
@@ -220,9 +223,11 @@ and the in-process artifact-capture compile option, realized as the
 the `--dump` artifact set as strings rather than printing them and exiting.
 
 The run's code state comes from `git` and `uname` through `subprocess/exec`,
-and the binary's own identity from `(elle/version)` and `(elle/build-profile)`.
-The profile has no other source: it is a fact about how this binary was
-compiled, so only the binary can report it.
+and the binary's own identity from `(elle/version)`, `(elle/build-profile)` and
+`(elle/executable)`. None has another source: each is a fact about this binary,
+so only this binary can report it. The executable path is what `--isolate`
+spawns — a child resolved off `PATH` would be a different build, and the run
+would say nothing about the one under test.
 
 ## Open implementation questions (for the tests/code phases)
 

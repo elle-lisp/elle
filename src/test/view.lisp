@@ -69,6 +69,46 @@
   (let [w (get meta :worktree)]
     (if w (string " (worktree " w ")") "")))
 
+# ── the measurements a run recorded (docs/test-store.md § Measurements) ──
+# A tally by verdict, then a line for each reading that is neither `closed` nor
+# `growth`. Those two are the expected answers — a reclaimed shape and a
+# declared growth probe — so listing them would bury the readings a reader acts
+# on under a few hundred that say nothing happened. The rest is a query.
+(defn measurement-tally [conn run-id]
+  (sqlite:query conn
+                "SELECT verdict AS verdict, count(*) AS n FROM measurement WHERE run_id = ?1 GROUP BY verdict ORDER BY verdict"
+                [run-id]))
+
+(defn render-tally [rows]
+  (if (empty? rows)
+    ""
+    (let [r (first rows)
+          one (string (get r :n) " " (get r :verdict))]
+      (if (empty? (rest rows))
+        one
+        (string one " · " (render-tally (rest rows)))))))
+
+(defn print-measurements [conn run-id]
+  (let [tally (measurement-tally conn run-id)
+        total (get (get (sqlite:query conn
+                                      "SELECT count(*) AS c FROM measurement WHERE run_id = ?1"
+                                      [run-id]) 0) :c)]
+    (when (> total 0)
+      (eprintln total " measurement" (if (= total 1) "" "s") " · "
+                (render-tally tally))
+      (each m in (sqlite:query conn
+                               (string "SELECT f.file AS file, m.subject AS subject, "
+                                       "m.axis AS axis, m.value AS value, m.unit AS unit, "
+                                       "m.verdict AS verdict FROM measurement m "
+                                       "JOIN result r ON r.id = m.result_id "
+                                       "JOIN form f ON f.hash = r.form_hash "
+                                       "WHERE m.run_id = ?1 "
+                                       "AND m.verdict NOT IN ('closed', 'growth') "
+                                       "ORDER BY m.verdict, m.subject") [run-id])
+        (eprintln "  " (get m :verdict) "  " (get m :file) "  " (get m :subject)
+                  "  " (get m :axis) "  " (get m :value) " " (get m :unit)))))
+  nil)
+
 # Tally line + the problem rows (only when there are any). Tallies are computed
 # live (count-status); a run without finished_at was KILLED mid-flight (OOM,
 # signal — docs/test-runner.md § Run honesty) and is labelled so, because a
@@ -102,7 +142,8 @@
         (eprintln bad " problem" (if (= bad 1) "" "s")
                   " (query the DB for full detail):")
         (print-problems conn run-id))
-      nil)))
+      nil)
+    (print-measurements conn run-id)))
 
 # Gate honesty at startup: if this session DB's latest run never completed,
 # say so before starting a new one — the killed process could not report

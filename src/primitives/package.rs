@@ -48,6 +48,26 @@ pub(crate) fn prim_build_profile(
     (SIG_OK, ctx.string(profile))
 }
 
+/// The path of the running binary, or nil when the OS will not say.
+///
+/// A program that wants to run Elle again has to name the Elle it is already
+/// running, and nothing else in the process can: `(sys/argv)` carries the
+/// source it was pointed at, and a subcommand replaces even that. Resolving
+/// `elle` off `PATH` would answer with a different build, so the test runner
+/// spawns this (docs/test-cli.md § Substrate).
+pub(crate) fn prim_executable(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
+    match std::env::current_exe() {
+        Ok(path) => {
+            let owned = path.to_string_lossy().into_owned();
+            (SIG_OK, ctx.string(&owned))
+        }
+        Err(_) => (SIG_OK, Value::NIL),
+    }
+}
+
 /// Get package information
 pub(crate) fn prim_package_info(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -82,6 +102,12 @@ primitive! {
         doc: "Return the cargo profile this binary was compiled under: \"debug\" or \"release\".",
         category: "elle",
         example: "(elle/build-profile)",
+        effect: RegionEffect::Fresh,
+    }
+    "elle/executable" => prim_executable {
+        doc: "Return the path of the running elle binary, or nil when the OS will not say.",
+        category: "elle",
+        example: "(elle/executable)",
         effect: RegionEffect::Fresh,
     }
     "elle/info" => prim_package_info {
