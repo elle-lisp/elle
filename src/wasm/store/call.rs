@@ -459,7 +459,12 @@ fn build_env_in_store(
     for (i, arg) in args.iter().enumerate().take(num_params) {
         let val = if i < 64 && capture_params_mask & (1u64 << i) != 0 {
             let region = fresh_region();
-            crate::value::build::capture_cell(unsafe { &mut *env_heap_ptr }, *arg, region)
+            crate::value::build::capture_cell(
+                unsafe { &mut *env_heap_ptr },
+                *arg,
+                crate::value::heap::CellOrigin::Runtime,
+                region,
+            )
         } else {
             *arg
         };
@@ -477,6 +482,7 @@ fn build_env_in_store(
             crate::value::build::capture_cell(
                 unsafe { &mut *env_heap_ptr },
                 crate::value::Value::NIL,
+                crate::value::heap::CellOrigin::Runtime,
                 region,
             )
         } else {
@@ -498,6 +504,7 @@ fn build_env_in_store(
             crate::value::build::capture_cell(
                 unsafe { &mut *env_heap_ptr },
                 crate::value::Value::NIL,
+                crate::value::heap::CellOrigin::Runtime,
                 region,
             )
         } else {

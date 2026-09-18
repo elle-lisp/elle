@@ -1,3 +1,4 @@
+// audited: 2026-09-18
 //! Capture-cell (box) operations for JIT-compiled code.
 //!
 //! These mint and access the `CaptureCell`s that back mutable captured locals,
@@ -10,12 +11,15 @@ use super::region_of_raw;
 use crate::jit::value::JitValue;
 use crate::value::Value;
 
-/// Create a LocalCell wrapping a value
+/// Create a LocalCell wrapping a value. `name` and `mutated` are the compiled
+/// cell's provenance, passed through from the `MakeCaptureCell` instruction.
 #[no_mangle]
 pub extern "C" fn elle_jit_make_capture(
     tag: u64,
     payload: u64,
     region: u32,
+    name: u64,
+    mutated: u64,
     vm: *mut (),
 ) -> JitValue {
     let val = Value { tag, payload };
@@ -24,6 +28,10 @@ pub extern "C" fn elle_jit_make_capture(
     JitValue::from_value(crate::value::build::capture_cell(
         heap,
         val,
+        crate::value::heap::CellOrigin::Compiled {
+            name: crate::value::SymbolId(name),
+            mutated: mutated != 0,
+        },
         region_of_raw(region),
     ))
 }
@@ -41,19 +49,17 @@ pub extern "C" fn elle_jit_make_capture(
 /// exactly as the interpreter does.
 #[no_mangle]
 pub extern "C" fn elle_jit_make_capture_owned(tag: u64, payload: u64, vm: *mut ()) -> JitValue {
-    use crate::value::heap::HeapObject;
-    use std::cell::RefCell;
-    use std::rc::Rc;
     let val = Value { tag, payload };
     // The driving instance's heap, reached through the threaded vm pointer
     // (docs/impl/region/ctx.md).
     let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
     let region = heap.new_runtime_region();
-    let obj = HeapObject::CaptureCell {
-        cell: Rc::new(RefCell::new(val)),
-        traits: Value::NIL,
-    };
-    JitValue::from_value(heap.alloc_in_region(obj, region))
+    JitValue::from_value(crate::value::build::capture_cell(
+        heap,
+        val,
+        crate::value::heap::CellOrigin::Runtime,
+        region,
+    ))
 }
 
 /// Build a rest-arg list from `args[start..nargs]`, the JIT-prologue analog of

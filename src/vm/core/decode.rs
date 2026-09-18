@@ -1,3 +1,7 @@
+// audited: 2026-09-18
+//! Bytecode operand readers: each decodes one big-endian operand and advances
+//! the instruction pointer.
+
 use super::*;
 
 impl VM {
@@ -53,7 +57,7 @@ impl VM {
     /// Read a `SignalBits` operand: eight bytes, big-endian.
     ///
     /// The counterpart of [`crate::compiler::bytecode::Bytecode::emit_signal_bits`].
-    /// The full width is load-bearing: a `(signal :keyword)` declaration
+    /// The full width matters: a `(signal :keyword)` declaration
     /// allocates bits 32-63, so a mask read at any narrower width names no
     /// user signal at all. See `docs/impl/bytecode.md` § "Signal-bits operands".
     #[inline(always)]
@@ -61,6 +65,15 @@ impl VM {
         let raw = u64::from_be_bytes(bytecode[*ip..*ip + 8].try_into().expect("8 bytes"));
         *ip += 8;
         SignalBits::new(raw)
+    }
+
+    /// Read a u64 (big-endian) operand — a `SymbolId` name hash.
+    /// The counterpart of [`crate::compiler::bytecode::Bytecode::emit_u64`].
+    #[inline(always)]
+    pub fn read_u64(&self, bytecode: &[u8], ip: &mut usize) -> u64 {
+        let raw = u64::from_be_bytes(bytecode[*ip..*ip + 8].try_into().expect("8 bytes"));
+        *ip += 8;
+        raw
     }
 
     #[inline(always)]

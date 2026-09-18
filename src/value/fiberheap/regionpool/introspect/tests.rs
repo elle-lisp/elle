@@ -1,3 +1,4 @@
+// audited: 2026-09-18
 //! Unit tests (`super` is the parent impl module).
 
 use super::*;
@@ -21,7 +22,7 @@ struct Channels {
 /// Construct one instance of `tag` with a cross-region value in EVERY
 /// `Value` channel the variant has: `v2` in each content channel, `vt`
 /// in the `traits` channel. The two live in DIFFERENT regions so each
-/// channel is individually load-bearing — a dropped content arm cannot
+/// channel is tested on its own — a dropped content arm cannot
 /// hide behind the traits edge or vice versa. Returns `None` for
 /// variants with no channel at all (provably value-free: the scan must
 /// find nothing in them).
@@ -260,6 +261,7 @@ fn obj_with_value_in_every_channel(
         HeapTag::CaptureCell => (
             HeapObject::CaptureCell {
                 cell: Rc::new(RefCell::new(v2)),
+                origin: crate::value::heap::CellOrigin::Runtime,
                 traits: vt,
             },
             both,
@@ -287,7 +289,7 @@ fn obj_with_value_in_every_channel(
     })
 }
 
-/// Every `HeapTag`, for iteration. Completeness is NOT load-bearing:
+/// Every `HeapTag`, for iteration. Completeness here forces nothing:
 /// the exhaustive `match` above is what forces a decision for a new
 /// variant (at compile time); this list only drives the runtime loop.
 const ALL_TAGS: &[HeapTag] = &[

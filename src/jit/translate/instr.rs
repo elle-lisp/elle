@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-18
 // src/jit/AGENTS.md
 //! Translating one LIR instruction to Cranelift IR.
 //!
@@ -329,17 +329,25 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             LirInstr::MakeCaptureCell {
-                dst, value, region, ..
+                dst,
+                value,
+                region,
+                name,
+                mutated,
             } => {
                 let (vt, vp) = self.use_var_pair(builder, value.0);
                 let region_val = self.emit_resolve_alloc_region(builder, *region)?;
+                let name_val = builder.ins().iconst(I64, name.0 as i64);
+                let mutated_val = builder.ins().iconst(I64, *mutated as i64);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("MakeCaptureCell without vm pointer".to_string())
                 })?;
                 let func_ref = self
                     .module
                     .declare_func_in_func(self.helpers.make_capture, builder.func);
-                let call = builder.ins().call(func_ref, &[vt, vp, region_val, vm]);
+                let call = builder
+                    .ins()
+                    .call(func_ref, &[vt, vp, region_val, name_val, mutated_val, vm]);
                 let rt = builder.inst_results(call)[0];
                 let rp = builder.inst_results(call)[1];
                 self.def_var_pair(builder, dst.0, rt, rp);

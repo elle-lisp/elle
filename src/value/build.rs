@@ -1,7 +1,10 @@
-//! Region-and-heap-explicit value construction — the single source of
-//! `HeapObject` construction shared by the `NativeCtx` capability
-//! (`ctx.*`, which passes its own `heap`/`region`) and the compiler-internal
-//! region-threaded population (which passes a region and the heap).
+// audited: 2026-09-18
+//! Region-and-heap-explicit value construction, one constructor per heap type.
+//!
+//! The single source of `HeapObject` construction, shared by the `NativeCtx`
+//! capability (`ctx.*`, which passes its own `heap`/`region`) and the
+//! compiler-internal region-threaded population (which passes a region and
+//! the heap).
 //!
 //! Every fn here names BOTH its destination region (Rule 3: born in the right
 //! region) and its heap, so the allocation target is visible in the signature:
@@ -184,10 +187,16 @@ pub(crate) fn lbox(heap: &mut FiberHeap, value: Value, region: RuntimeRegion) ->
 
 /// Allocate a compiler capture cell into `region` on `heap`.
 #[inline]
-pub(crate) fn capture_cell(heap: &mut FiberHeap, value: Value, region: RuntimeRegion) -> Value {
+pub(crate) fn capture_cell(
+    heap: &mut FiberHeap,
+    value: Value,
+    origin: crate::value::heap::CellOrigin,
+    region: RuntimeRegion,
+) -> Value {
     heap.alloc_in_region(
         HeapObject::CaptureCell {
             cell: Rc::new(RefCell::new(value)),
+            origin,
             traits: Value::NIL,
         },
         region,

@@ -333,7 +333,12 @@ pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
     for (i, arg) in args.iter().enumerate().take(num_params) {
         let val = if i < 64 && capture_params_mask & (1u64 << i) != 0 {
             let region = fresh_region();
-            crate::value::build::capture_cell(unsafe { &mut *env_heap_ptr }, *arg, region)
+            crate::value::build::capture_cell(
+                unsafe { &mut *env_heap_ptr },
+                *arg,
+                crate::value::heap::CellOrigin::Runtime,
+                region,
+            )
         } else {
             *arg
         };
@@ -344,7 +349,12 @@ pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
     for i in args.len()..num_params {
         let val = if i < 64 && capture_params_mask & (1u64 << i) != 0 {
             let region = fresh_region();
-            crate::value::build::capture_cell(unsafe { &mut *env_heap_ptr }, Value::NIL, region)
+            crate::value::build::capture_cell(
+                unsafe { &mut *env_heap_ptr },
+                Value::NIL,
+                crate::value::heap::CellOrigin::Runtime,
+                region,
+            )
         } else {
             Value::NIL
         };
@@ -356,7 +366,12 @@ pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
     for i in 0..extra_locals {
         let val = if capture_locals_mask.is_set(i) {
             let region = fresh_region();
-            crate::value::build::capture_cell(unsafe { &mut *env_heap_ptr }, Value::NIL, region)
+            crate::value::build::capture_cell(
+                unsafe { &mut *env_heap_ptr },
+                Value::NIL,
+                crate::value::heap::CellOrigin::Runtime,
+                region,
+            )
         } else {
             Value::NIL
         };

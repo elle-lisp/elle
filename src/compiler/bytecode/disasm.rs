@@ -1,3 +1,8 @@
+// audited: 2026-09-18
+//! Bytecode disassembly: decode each instruction's operands into one line.
+//!
+//! docs/impl/bytecode.md
+
 use super::*;
 
 /// Disassemble bytecode and return one string per instruction
@@ -225,7 +230,7 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             Instruction::PopParamFrame => {
                 // No operands
             }
-            Instruction::Pair | Instruction::MakeCapture if i + 3 < instructions.len() => {
+            Instruction::Pair if i + 3 < instructions.len() => {
                 let region_id = u32::from_be_bytes([
                     instructions[i],
                     instructions[i + 1],
@@ -236,6 +241,22 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                     line.push_str(&format!(" (region={})", region_id));
                 }
                 i += 4;
+            }
+            Instruction::MakeCapture if i + 12 < instructions.len() => {
+                let region_id = u32::from_be_bytes([
+                    instructions[i],
+                    instructions[i + 1],
+                    instructions[i + 2],
+                    instructions[i + 3],
+                ]);
+                let mutated = instructions[i + 4];
+                let name =
+                    u64::from_be_bytes(instructions[i + 5..i + 13].try_into().expect("8 bytes"));
+                line.push_str(&format!(
+                    " (region={}, mutated={}, name=0x{:016x})",
+                    region_id, mutated, name
+                ));
+                i += 13;
             }
             Instruction::IntrFreeze | Instruction::IntrThaw if i + 3 < instructions.len() => {
                 let region_id = u32::from_be_bytes([

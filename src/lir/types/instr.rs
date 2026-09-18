@@ -238,6 +238,11 @@ pub enum LirInstr {
         dst: Reg,
         value: Reg,
         region: StaticRegion,
+        /// The bound name, minted onto the cell for the image dumper's snap
+        /// decision (docs/impl/image/sealing.md).
+        name: crate::value::SymbolId,
+        /// Whether the compilation unit assigns the binding anywhere.
+        mutated: bool,
     },
     /// Load value from capture cell
     LoadCaptureCell { dst: Reg, cell: Reg },

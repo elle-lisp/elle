@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-18
 // src/jit/AGENTS.md
 // What JIT-compiled code makes of values that are not integers: floats, pairs,
 // arrays, and capture cells.
@@ -227,6 +227,8 @@ fn test_jit_make_lbox() {
             value: Reg(0),
             // Real per-execution slot (>= 2).
             region: elle::hir::region::StaticRegion::new(2).unwrap(),
+            name: elle::value::SymbolId::of("jit-cell"),
+            mutated: true,
         },
         span(),
     ));
@@ -264,7 +266,9 @@ fn test_jit_load_lbox() {
     // Heap arg (capture cell) built in a live region (see test_jit_car_cdr).
     let result = {
         let h = elle::primitives::ctx::TestHeap::new();
-        let cell = h.ctx().capture_cell(Value::int(42));
+        let cell = h
+            .ctx()
+            .capture_cell(Value::int(42), elle::value::heap::CellOrigin::Runtime);
         compile_and_call(&func, &[cell])
     }
     .unwrap();
@@ -303,7 +307,9 @@ fn test_jit_store_lbox() {
     // Heap arg (capture cell) built in a live region (see test_jit_car_cdr).
     let result = {
         let h = elle::primitives::ctx::TestHeap::new();
-        let cell = h.ctx().capture_cell(Value::int(0));
+        let cell = h
+            .ctx()
+            .capture_cell(Value::int(0), elle::value::heap::CellOrigin::Runtime);
         compile_and_call(&func, &[cell, Value::int(42)])
     }
     .unwrap();

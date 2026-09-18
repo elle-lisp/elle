@@ -289,6 +289,7 @@ fn spawn_closure_impl(
                         env_values.push(crate::value::build::capture_cell(
                             vm.heap(),
                             Value::NIL,
+                            crate::value::heap::CellOrigin::Runtime,
                             cell_region,
                         ));
                     } else {

@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-18
 //! Heap-allocated value types for the tagged-union value system.
 //!
 //! docs/impl/values.md
@@ -101,6 +101,21 @@ impl Ord for Pair {
             .then_with(|| self.rest.cmp(&other.rest))
         // traits intentionally excluded
     }
+}
+
+/// Where a capture cell was minted — the fact the image dumper's snap
+/// decision reads (docs/impl/image/sealing.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellOrigin {
+    /// Minted at run time (`populate_env`, the JIT prologue, `send`): no
+    /// binding identity, so the dumper never snaps it.
+    Runtime,
+    /// A compiled forward cell for the binding named `name`; `mutated` is
+    /// whether the compilation unit assigns that binding anywhere.
+    Compiled {
+        name: crate::value::SymbolId,
+        mutated: bool,
+    },
 }
 
 /// Discriminant for heap object types.
@@ -230,6 +245,7 @@ pub enum HeapObject {
     /// `capture_store_with_rebind` (see `LArrayMut`).
     CaptureCell {
         cell: std::rc::Rc<RefCell<Value>>,
+        origin: CellOrigin,
         traits: Value,
     },
 

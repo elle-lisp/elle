@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-18
 //! The ergonomic `ctx.*` allocation surface: one constructor per heap type,
 //! each born on the ctx's heap in the ctx's own region.
 //! docs/impl/region/ctx.md
@@ -62,7 +62,7 @@ ctx_ctors! {
     /// Allocate a user box (`LBox`) into the call's region.
     lbox (value: Value);
     /// Allocate a compiler capture cell into the call's region.
-    capture_cell (value: Value);
+    capture_cell (value: Value, origin: crate::value::heap::CellOrigin);
     /// Allocate a mutable `@string` into the call's region.
     string_mut (bytes: Vec<u8>);
     /// Allocate immutable bytes into the call's region.

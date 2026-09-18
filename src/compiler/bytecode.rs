@@ -1,3 +1,9 @@
+// audited: 2026-09-18
+//! Compiled bytecode: the instruction bytes, the constant pool, and the
+//! emit/patch surface the emitter writes through.
+//!
+//! docs/impl/bytecode.md
+
 use crate::error::LocationMap;
 use crate::reader::SourceLoc;
 use crate::value::Value;
@@ -152,6 +158,12 @@ impl Bytecode {
         self.instructions.push((value >> 16) as u8);
         self.instructions.push((value >> 8) as u8);
         self.instructions.push((value & 0xff) as u8);
+    }
+
+    /// Emit a u64 (big-endian) — a `SymbolId` name-hash operand.
+    /// [`crate::vm::VM::read_u64`] reads it.
+    pub fn emit_u64(&mut self, value: u64) {
+        self.instructions.extend_from_slice(&value.to_be_bytes());
     }
 
     /// Emit a `SignalBits` operand: eight bytes, big-endian.

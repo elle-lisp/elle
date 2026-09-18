@@ -1,5 +1,8 @@
+// audited: 2026-09-18
+//! The capture-cell opcodes: MakeCapture, UnwrapCapture, and UpdateCapture.
+
 use crate::hir::region::RuntimeRegion;
-use crate::value::Value;
+use crate::value::heap::CellOrigin;
 use crate::vm::core::VM;
 
 /// Handle MakeCapture instruction - wraps a value in a capture cell for shared mutable access
@@ -9,10 +12,11 @@ use crate::vm::core::VM;
 /// Creates a CaptureCell (not LBox) because MakeCapture is emitted by the compiler for
 /// mutable captured variables, which should auto-unwrap on LoadUpvalue.
 /// User-created boxes via `box` use a different code path.
-pub(crate) fn handle_make_capture(vm: &mut VM, region_id: RuntimeRegion) {
-    use crate::value::heap::HeapObject;
-    use std::cell::RefCell;
-    use std::rc::Rc;
+///
+/// `origin` carries the instruction's binding name and assigned bit — the
+/// compiled provenance the image dumper's snap decision reads
+/// (docs/impl/image/sealing.md).
+pub(crate) fn handle_make_capture(vm: &mut VM, region_id: RuntimeRegion, origin: CellOrigin) {
     let value = vm
         .fiber
         .stack
@@ -24,11 +28,7 @@ pub(crate) fn handle_make_capture(vm: &mut VM, region_id: RuntimeRegion) {
     } else {
         // alloc_in_region → alloc_obj → incref_cross_region_refs handles
         // the cross-region incref for the initial value automatically.
-        let obj = HeapObject::CaptureCell {
-            cell: Rc::new(RefCell::new(value)),
-            traits: Value::NIL,
-        };
-        let val = vm.heap().alloc_in_region(obj, region_id);
+        let val = crate::value::build::capture_cell(vm.heap(), value, origin, region_id);
         vm.fiber.stack.push(val);
     }
 }

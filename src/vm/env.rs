@@ -291,16 +291,14 @@ impl VM {
             .saturating_sub(closure.template.num_params());
         for i in 0..num_locally_defined {
             if closure.template.capture_locals_mask().is_set(i) {
-                use crate::value::heap::HeapObject;
-                use std::cell::RefCell;
-                use std::rc::Rc;
-                let obj = HeapObject::CaptureCell {
-                    cell: Rc::new(RefCell::new(Value::NIL)),
-                    traits: Value::NIL,
-                };
                 // Each captured-local cell gets its own region (see `env_value_region`).
                 let cell_region = env_value_region(heap);
-                buf.push(heap.alloc_in_region(obj, cell_region));
+                buf.push(crate::value::build::capture_cell(
+                    heap,
+                    Value::NIL,
+                    crate::value::heap::CellOrigin::Runtime,
+                    cell_region,
+                ));
             } else {
                 buf.push(Value::NIL);
             }
@@ -321,20 +319,18 @@ impl VM {
         own_params: bool,
     ) {
         if i < 64 && (closure.template.capture_params_mask() & (1 << i)) != 0 {
-            use crate::value::heap::HeapObject;
-            use std::cell::RefCell;
-            use std::rc::Rc;
             // alloc_in_region → alloc_obj → incref_cross_region_refs handles
             // the cross-region incref for the wrapped value automatically. An
             // LBox/captured param is owned by its cell (not an owned local), so
             // it takes NO `CallArgument` incref — `own_params` does not apply.
-            let obj = HeapObject::CaptureCell {
-                cell: Rc::new(RefCell::new(val)),
-                traits: Value::NIL,
-            };
             // Each capture cell gets its own region (see `env_value_region`).
             let cell_region = env_value_region(heap);
-            buf.push(heap.alloc_in_region(obj, cell_region));
+            buf.push(crate::value::build::capture_cell(
+                heap,
+                val,
+                crate::value::heap::CellOrigin::Runtime,
+                cell_region,
+            ));
         } else {
             // Non-captured fixed param. On the NON-tail closure path
             // (`own_params`), the callee owns this param and releases it

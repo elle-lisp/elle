@@ -1,3 +1,7 @@
+// audited: 2026-09-18
+//! Deserializing a `SendBundle`: every received value is rebuilt on the
+//! receiving heap, in the call's region.
+
 use super::*;
 
 /// Resolve a received traits value: if NIL, stamp the receiving thread's
@@ -279,6 +283,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
             let traits_val = into_value_inner(*traits, ctx);
             let cell_val = ctx.alloc(HeapObject::CaptureCell {
                 cell: std::rc::Rc::new(RefCell::new(inner_val)),
+                origin: crate::value::heap::CellOrigin::Runtime,
                 traits: traits_val,
             });
             if let Some(idx) = fixup_idx {

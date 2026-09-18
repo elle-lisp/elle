@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-18
 // src/lir/AGENTS.md
 //! Emitting the operator, region-refcount and parameter-frame instructions.
 //!
@@ -176,10 +176,18 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::MakeCaptureCell { dst, value, region } => {
+            LirInstr::MakeCaptureCell {
+                dst,
+                value,
+                region,
+                name,
+                mutated,
+            } => {
                 self.ensure_on_top(*value);
                 self.bytecode.emit(Instruction::MakeCapture);
                 self.bytecode.emit_u32(region.get());
+                self.bytecode.emit_byte(*mutated as u8);
+                self.bytecode.emit_u64(name.0);
                 self.pop();
                 self.push_reg(*dst);
             }
