@@ -1,6 +1,6 @@
 # Landing order and test plan
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-18 -->
 
 What lands in which order, and the pins each milestone must land with.
 
@@ -52,7 +52,10 @@ Then the image milestones:
    without its blueprint, and the code objects a `MakeClosure` indexes cross
    as the payload's child table ([sealing.md](sealing.md) § "A child code
    object crosses as a header"), with the defining span on the payload so
-   `meta/origin` answers after a boot from image. Still to land: cell snapping,
+   `meta/origin` answers after a boot from image; and cell snapping — a
+   compiled forward cell crosses as its content when its binding is never
+   assigned, an assigned binding fails the dump by name, and a run-time cell
+   still refuses ([sealing.md](sealing.md)). Still to land:
    dump-boot, warm cache, embedded blob, per-worker hydration for
    `sys/spawn`, the encoded-LIR side-stream with lazy decode, compiler-state
    persistence, the hydrated-region interval table that keeps
@@ -125,7 +128,7 @@ Then the image milestones:
   spelling there and the origin follows it. A lambda with no origin still
   answers nil, which is what stops the file stream from writing the table's
   first entry over an absent id. A WASM-dispatch closure and an env holding a
-  capture cell each refuse the dump with a named error. A dumped closure
+  run-time-minted capture cell each refuse the dump with a named error. A dumped closure
   writes one file across two
   dumps, whatever its construction temporaries held. The relocation stream
   records a shared payload's slots once, however many headers name it — the
@@ -155,9 +158,15 @@ Then the image milestones:
   name, in an instance that minted its ids differently. A def the canonical
   tables do not name fails the dump by name, and two dumps write one file
   whatever ids the dumping process handed out.
-- Snapping: boot from image, run the full smoke corpus — behavior identical
-  to source boot. A stdlib top-level that is `assign`ed must fail the dump
-  with a named error.
+- Snapping: a captured top-level crosses as its final value — the hydrated
+  closure's env holds no cell, and a call through a REPL binding answers as
+  the source closure did. Two closures over one cell hydrate naming one
+  content copy; the counter-factual is a per-capture copy, which answers
+  every read correctly and silently doubles the value. A top-level that is
+  `assign`ed anywhere in the file fails the dump naming the binding, and a
+  cell minted at run time (a captured lambda-local) still refuses. A snapped
+  dump writes one file across two dumps. Boot from image running the full
+  smoke corpus identically to source boot is dump-boot's gate.
 - Compile parity: compile the same user file under image boot and source
   boot and assert byte-identical bytecode — the acceptance gate for the
   persisted compiler state (inline fragments, dispatch wrappers).

@@ -1,6 +1,6 @@
 # Sealing
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-18 -->
 
 What an image's body may hold, what the hydrating instance rebuilds for itself,
 and what fails the dump.
@@ -41,8 +41,9 @@ refuses anyway.
 
 A closure instance is three sealed fields: the template it references, its env
 slice, and its squelch mask. All three cross whole, traits beside them, and
-every env value goes through the ordinary walk — so a capture cell in an env
-still refuses the dump until snapping lands ([plan.md](plan.md)).
+every env value goes through the ordinary walk — a capture cell in an env
+snaps to its content or fails the dump (§ "Capture cells are snapped, not
+persisted").
 
 A closure template is a header naming a shared payload, plus an `Rc` to the
 compile-time blueprint it came from
@@ -105,12 +106,26 @@ fails the dump where any other WASM closure does.
 
 The stdlib file-letrec allocates one `CaptureCell` (`Rc<RefCell<Value>>`) per
 captured top-level binding. After the letrec fixpoint completes, a cell whose
-binding is never `assign`ed again holds its final value; the dumper rewrites
-each closure env to reference that value directly. The compiler knows which
-top-level bindings are assigned anywhere in the file; the dumper refuses to
-snap those. The boot image requires stdlib to have no post-boot-mutable
-top-levels — a property the dump step enforces, and a reasonable one to demand
-of a standard library.
+binding is never `assign`ed holds its final value. The dumper snaps such a
+cell: the copy references the content directly, with no cell between. The
+sharing map keys the cell, so every closure that captured it hydrates naming
+one copy of the content. Snapping is read-transparent by the env read's own
+rule — a non-cell slot is pushed as it is, and only an `assign` needs the
+cell back.
+
+The compiler knows which top-level bindings are assigned anywhere in the
+file, and the mint of a compiled forward cell records that fact on the cell,
+the binding's name beside it. A cell whose binding is assigned fails the
+dump, naming the binding: its content is post-boot-mutable state, which the
+strict policy refuses outright and the environment policy routes through the
+side-stream. The boot image therefore requires stdlib to have no assigned
+top-levels — a property the dump enforces, and a reasonable one to demand of
+a standard library. [measurements.md](measurements.md) item 2 counts the boot
+graph's cells; stdlib assigns no top-level, so every one of them snaps.
+
+A cell minted at run time — a captured parameter, a captured lambda-local —
+records no binding and never snaps: it fails the dump as unsealed data,
+named by variant.
 
 ## What the body refuses
 

@@ -1,6 +1,6 @@
 # Values
 
-<!-- audited: 2026-09-08 -->
+<!-- audited: 2026-09-18 -->
 
 Every Elle value is a 16-byte tagged union: an 8-byte tag and an 8-byte
 payload.
@@ -77,7 +77,7 @@ TAG_MANAGED_PTR (30)  ManagedPointer { addr, traits }
 TAG_EXTERNAL (31)     External { obj: ExternalObject, traits }
 TAG_PARAMETER (32)    Parameter { id: u32, default: Value, traits }
 TAG_THREAD (33)       ThreadHandle { handle, traits }
-TAG_CAPTURE_CELL (34) CaptureCell { cell: Rc<RefCell<Value>>, traits }
+TAG_CAPTURE_CELL (34) CaptureCell { cell: Rc<RefCell<Value>>, origin, traits }
 TAG_CLOSURE_TEMPLATE (35) ClosureTemplate(ClosureTemplate)  # never user-visible
 ```
 
