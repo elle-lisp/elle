@@ -1,9 +1,8 @@
 # An operation in flight
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-17 -->
 
-What a submitted I/O operation holds while the kernel works, how it ends when
-the fiber that asked is gone, and how its answer is assembled.
+What a submitted I/O operation holds and owns, how it ends when the fiber that asked is gone, and how its answer is assembled.
 
 Up: [io/](../../src/io/AGENTS.md)
 
@@ -97,6 +96,59 @@ before there was a hold to release, and the rule now covers both.
 
 Pinned by `a_stranded_backend_lets_go_before_its_heap_tears_down`
 (`src/io/aio/tests/backend.rs`).
+
+## A completion owns what it builds, and hands it over once
+
+Most operations answer with a value the requesting call already allocated: the
+port `port/open` and `connect` fill a descriptor into, the buffer a read writes
+through, the struct `recvfrom` stamps its sender into. Such a value lives in the
+region that call minted for its own result, beside the `IoRequest`. One release
+covers the whole region, and the install that ends the park owes it — see
+[owner nodes](region/owner.md).
+
+The rest cannot answer that way. A spawn does not know its child until the child
+runs, a `read-all` does not know its bytes until the stream ends, and a
+resolution does not know its addresses until the resolver replies. Each builds
+its answer when the operation finishes, and every error a completion reports is
+built then too.
+
+A region minted there is nobody's. The requesting call allocated nothing, so the
+compiler emitted no release naming it. The resume that delivers the value mints
+a reference of its own for the continuation to consume, which answers for the
+delivery rather than for the allocation. The reference the mint left is
+therefore the **completion's**, and the completion holds it until the value
+reaches the region system. That happens in one place: `Completion::to_value`
+builds the `{:id :value :error}` struct the reaping call answers with, and that
+struct records a counted edge to the value as it stores it. The completion lets
+go there, and the struct's edge is the value's reference from then on.
+
+`Birthplace` is the capability that makes the rule hold with no per-arm
+decision. An arm that builds its answer allocates through the birthplace, which
+records the region by the act of allocating; an arm that hands back a
+pre-allocated value never touches it and records nothing. One birthplace serves
+one completion, minting on its first allocation and reusing that region after,
+so an answer assembled out of several objects — a struct per signal event, a
+string per address — is one region and one reference.
+
+What a birthplace must not hold is a value stored into a value the CALLER owns.
+The handover releases the region whole, and an uncounted in-place store would
+leave the caller's value pointing into it. `recvfrom` is the one completion that
+writes into a caller-owned struct, and what it writes is that caller's own
+pre-allocated buffer re-tagged, never a value born here.
+
+A completion that never becomes a value keeps its reference, and two routes
+reach that. `AsyncBackend::quiesce` discards the queue a backend is torn down
+holding, which releases what each of those completions built while the store is
+still there. The WASM tier's inline path reads the value straight out of the
+completion instead, and takes the reference with it; that tier reclaims no
+region while it runs — see [the WASM backend](wasm.md).
+
+Pinned by `a_run_that_spawns_a_child_leaves_no_residue` and
+`a_run_that_reads_a_whole_file_leaves_no_residue`
+(`tests/region_process_teardown/census.rs`), and measured as a rate by the
+`subprocess-exec` and `port-read-all` probes in `tests/elle/plumb.lisp` beside
+`io-yield ev/sleep`, whose answer is an immediate the completion builds nothing
+for.
 
 ## An operation whose fiber is gone has no reader
 

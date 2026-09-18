@@ -110,7 +110,7 @@ Methods:
 - `Display` — `#<subprocess 12345>`
 - `Drop` impl — calls `try_wait()` on a child nothing has reaped, to reap zombies
 
-The ports are heap `Value`s an external holds, which no alloc-time scan and no free-time cascade enumerates (docs/impl/region/rules.md Rule 5). They need no count because `spawn_to_subprocess` mints them and the handle through one `Alloc`, so they share a region and are freed together or not at all.
+The ports are heap `Value`s an external holds, which no alloc-time scan and no free-time cascade enumerates (docs/impl/region/rules.md Rule 5). They need no count because `spawn_to_subprocess` builds them and the handle at one `Birthplace`, so they share a region and are freed together or not at all.
 
 ### ExitRecord
 
@@ -187,7 +187,7 @@ Struct: `{ op: IoOp, port: Value, timeout: Option<Duration> }`.
 
 ### Completion
 
-Returned to Elle as struct: `{:id n :value v :error nil}` (success) or `{:id n :value nil :error e}` (failure).
+Returned to Elle as struct: `{:id n :value v :error nil}` (success) or `{:id n :value nil :error e}` (failure). A completion that BUILT its answer — a spawn, a `read-all`, a resolution, every error — owns the region its `Birthplace` coined and hands that reference to this struct ([an operation in flight](../../docs/impl/io-inflight.md)).
 
 ## Sockaddr Module
 
@@ -450,7 +450,7 @@ the next `ring.submit()`.
 - the `stdin`, `stdout` and `stderr` port `Value`s (or `Value::NIL`), created per `StdioDisposition`
 - the `ExitRecord` every later wait and kill reads
 
-The ports and the handle are minted through one `Alloc` over the requesting instance's heap, so they share its region and hold no cross-heap reference. The external itself is what `subprocess/wait`, `subprocess/kill`, `subprocess/pid` and `subprocess/exit` take.
+The ports and the handle are built at the completion's `Birthplace` — one region on the requesting instance's heap, whose one reference the completion hands over when it becomes a value ([an operation in flight](../../docs/impl/io-inflight.md)). So they hold no cross-heap reference, and the region they share is nobody's to leak. The external itself is what `subprocess/wait`, `subprocess/kill`, `subprocess/pid` and `subprocess/exit` take.
 
 **`pipe_to_port()`** (in `request/spawn.rs`) — Converts a subprocess pipe (ChildStdin, ChildStdout, ChildStderr) to a Port Value.
 
