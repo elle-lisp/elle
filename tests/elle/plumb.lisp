@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-08
+# audited: 2026-09-17
 # plumb.lisp — the io leak dashboard: every probe whose drive reaches the io
 # backend. oracle.lisp is the pure region dashboard and owns the discipline
 # this file follows — the estimator, the gauge-live discriminator rule, the
@@ -106,14 +106,50 @@
   (let [f (mk-io)]
     (fiber/resume f)
     (fiber/refuse f "no")))
-(defn pin-io-2 [label probe opin rpin]
+(defn pin-io-2-at [label probe opin rpin block minb maxb]
   (let [[r rr] (measure-2 label (fn [b] (run-thunk-block probe b)) count-gauge
-                          0.4 0.5 "regions" region-gauge 0.4 0.5 100 6 60)]
+                          0.4 0.5 "regions" region-gauge 0.4 0.5 block minb maxb)]
     (pin r opin)
     (pin rr rpin)))
+(defn pin-io-2 [label probe opin rpin]
+  (pin-io-2-at label probe opin rpin 100 6 60))
 (pin-io-2 "io-drop" probe-io-drop 0 0)
 (pin-io-2 "io-abort" probe-io-abort 0 0)
 (pin-io-2 "io-refuse" probe-io-refuse 0 0)
+
+# ── The answer a completion BUILDS ────────────────────────────────────
+# `io-yield ev/sleep` above answers with nil, so its completion builds nothing
+# and the whole round trip costs the request's region alone. These two answer
+# with a value the completion had to BUILD, because nothing could reserve it
+# before the operation finished: a `subprocess` whose pid the spawn decides, and
+# the bytes a `read-all` has only once the stream ends. Such a value is born in
+# a region the completion owns and hands over as it becomes a value
+# (docs/impl/io-inflight.md § "A completion owns what it builds").
+#
+# The three must stay together. `io-yield` removes the built answer and reads
+# the same 0, so the gap between it and either of these is the whole of what a
+# completion's own region costs — one region and its objects per call, linear in
+# the calls a program makes, and invisible to every other probe in this file.
+#
+# `subprocess-exec` runs at a tenth of the block size the rest of the file uses:
+# a block here is a block of CHILD PROCESSES, and the estimator's stopping rule
+# converges on a deterministic shape in its minimum blocks either way.
+(def built-dir (file/mktempdir))
+(def built-path (string built-dir "/plumb-read-all"))
+(spit built-path "plumb")
+(defn probe-subprocess-exec [j]
+  (let [p (subprocess/exec "/bin/sh" ["-c" ":"]
+                           {:stdin :null :stdout :null :stderr :null})]
+    (subprocess/wait p)))
+(defn probe-read-all [j]
+  (let [p (port/open built-path :read)
+        s (port/read-all p)]
+    (port/close p)
+    (length s)))
+(pin-io-2-at "subprocess-exec" probe-subprocess-exec 0 0 10 6 40)
+(pin-io-2 "port-read-all" probe-read-all 0 0)
+(delete-file built-path)
+(delete-directory built-dir)
 
 # The over-free gate closes here, over every probe above and the load before it.
 (def over-frees-after (arena/over-frees))

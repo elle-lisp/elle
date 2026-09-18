@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-17
 // What one run leaves behind: the gates on the post-teardown residue, and the
 // per-shape censuses that name the classes it is made of.
 // docs/impl/region/rules.md
@@ -133,27 +133,85 @@ fn a_cache_hit_leaves_no_unexplained_references() {
 #[test]
 fn teardown_leaves_no_residue() {
     for src in PROGRAMS {
-        let mut rt = Runtime::with_stdlib_cache(StdlibCache::Off);
-        let value = {
-            let (vm, symbols, cctx) = rt.parts();
-            let result = compile_file(src, symbols, cctx, "<residue>").expect("compiles");
-            vm.execute_scheduled(&result.bytecode, cctx).expect("runs")
-        };
-        // The program value reaches the caller with one owning reference; route it
-        // through the process-root registry so the sweep consumes it, or it counts
-        // as residue of the caller's own making.
-        elle::value::arena::register_process_root(rt.heap(), value);
-        let report = rt.teardown();
-        if report.live_regions != 0 {
-            report_census(rt.heap(), &report);
-        }
         assert_eq!(
-            report.live_regions, 0,
-            "{src}: {} regions survived teardown — every one is a reference the run \
+            residue_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), src),
+            0,
+            "{src}: regions survived teardown — every one is a reference the run \
              never dropped",
-            report.live_regions,
         );
     }
+}
+
+/// Run `src` on `rt`, tear the runtime down, and answer how many regions
+/// survived, printing the census whenever any did.
+///
+/// The stdlib is compiled rather than read from the disk cache, so every region
+/// in the residue was minted by this run and the verdict does not move with the
+/// state of a cache file. The run goes through `execute_scheduled`, the path
+/// every entry point takes, so the scheduler wrapper is inside the measurement.
+fn residue_after_teardown(mut rt: Runtime, src: &str) -> usize {
+    let value = {
+        let (vm, symbols, cctx) = rt.parts();
+        let result = compile_file(src, symbols, cctx, "<residue>").expect("compiles");
+        vm.execute_scheduled(&result.bytecode, cctx).expect("runs")
+    };
+    // The program value reaches the caller with one owning reference; route it
+    // through the process-root registry so the sweep consumes it, or it counts
+    // as residue of the caller's own making.
+    elle::value::arena::register_process_root(rt.heap(), value);
+    let report = rt.teardown();
+    if report.live_regions != 0 {
+        report_census(rt.heap(), &report);
+    }
+    report.live_regions
+}
+
+/// A run that spawns a child leaves nothing either. The `subprocess` value is
+/// built when the spawn finishes rather than by the call that asked for it, so
+/// the region it lives in is one the completion owns and hands over
+/// (docs/impl/io-inflight.md § "A completion owns what it builds").
+///
+/// The counter-factual is `teardown_leaves_no_residue` beside it, which cannot
+/// see this at all: neither of its programs reaches the io backend, so no
+/// completion in that run ever builds a value. A completion that keeps what it
+/// built leaves one region per child, linear in the number of children, and
+/// every gate in this file reads clean while it does.
+///
+/// The child is `/bin/sh -c :`, an absolute path so no `PATH` decides whether
+/// this test measures a spawn or an `exec-error`. Both answers are built the
+/// same way, so the error would read as a pass.
+#[test]
+fn a_run_that_spawns_a_child_leaves_no_residue() {
+    let src = "(let [p (subprocess/exec \"/bin/sh\" [\"-c\" \":\"])] \
+               (subprocess/wait p))";
+    assert_eq!(
+        residue_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), src),
+        0,
+        "{src}: regions survived teardown",
+    );
+}
+
+/// The same claim for the other shape a completion builds: bytes whose length
+/// nothing could reserve ahead of the read.
+///
+/// `port/read` and `port/read-line` answer from a buffer the call pre-allocated
+/// and reach none of this, so a read alone is no evidence. `read-all` has no
+/// count to reserve against, so its answer is born when the stream ends — which
+/// is what makes it the discriminator for the same defect the spawn shows.
+#[test]
+fn a_run_that_reads_a_whole_file_leaves_no_residue() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("residue-read-all");
+    std::fs::write(&path, b"census").expect("write");
+    let src = format!(
+        "(let [p (port/open \"{}\" :read) s (port/read-all p)] (port/close p) (length s))",
+        path.display()
+    );
+    assert_eq!(
+        residue_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), &src),
+        0,
+        "{src}: regions survived teardown",
+    );
 }
 
 /// Diagnostic, not a gate: dump the post-teardown residue (id, rc, objs, tags)

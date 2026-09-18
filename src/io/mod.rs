@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+//! audited: 2026-09-17
 //! I/O subsystem: request types and backends.
 //!
 //! `IoBackend` is the async submission-and-completion model: `submit`
@@ -151,6 +151,49 @@ pub(crate) fn completion_heap_ptr(
          the requesting instance's heap"
     );
     origin_heap
+}
+
+/// Where an io completion builds the answer it could not be handed, and the one
+/// reference that region is born with (docs/impl/io-inflight.md).
+///
+/// A spawn, a `read-all`, a resolution and every error are built when the
+/// operation finishes, on the scheduler's side of the park, so no
+/// `decref_point` names the region they are born in. That region's birth
+/// reference is the completion's, and [`hand_over`](Self::hand_over) is where it
+/// goes: the struct `Completion::to_value` builds records a counted edge of its
+/// own as it stores the value, so the handover follows that store.
+///
+/// The region is coined on the first allocation and reused by every one after
+/// it, so an answer assembled out of several objects is one region and one
+/// reference. A completion whose answer is a value the CALLER allocated — a
+/// port, a read's buffer — never allocates here and so coins nothing.
+#[allow(dead_code)]
+pub(crate) struct Birthplace {
+    heap: *mut crate::value::fiberheap::FiberHeap,
+    region: Option<crate::hir::region::RuntimeRegion>,
+}
+
+#[allow(dead_code)]
+impl Birthplace {
+    /// A birthplace on `heap`, the requesting instance's own (see
+    /// [`completion_heap_ptr`]), holding nothing yet.
+    pub(crate) fn on(heap: *mut crate::value::fiberheap::FiberHeap) -> Birthplace {
+        Birthplace { heap, region: None }
+    }
+
+    /// The allocation capability every value this completion builds goes
+    /// through, over the one region this birthplace coins.
+    pub(crate) fn alloc(&mut self) -> crate::primitives::ctx::Alloc<'_> {
+        let heap = unsafe { &mut *completion_heap_ptr(self.heap) };
+        crate::primitives::ctx::Alloc::new(heap)
+    }
+
+    /// Let go of the birth reference: whoever took the value has recorded a
+    /// count of its own. Taking the region is the receipt, so a second handover
+    /// releases nothing, and a birthplace that coined nothing reaches nothing.
+    pub(crate) fn hand_over(&mut self) {
+        let _ = self.region.take();
+    }
 }
 
 /// An io-completion error value `{:error :kind :message msg}`, born in a fresh
