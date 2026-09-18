@@ -1,6 +1,6 @@
 # An operation in flight
 
-<!-- audited: 2026-09-17 -->
+<!-- audited: 2026-09-18 -->
 
 What a submitted I/O operation holds and owns, how it ends when the fiber that asked is gone, and how its answer is assembled.
 
@@ -117,7 +117,7 @@ compiler emitted no release naming it. The resume that delivers the value mints
 a reference of its own for the continuation to consume, which answers for the
 delivery rather than for the allocation. The reference the mint left is
 therefore the **completion's**, and the completion holds it until the value
-reaches the region system. That happens in one place: `Completion::to_value`
+reaches the region system. That happens in one place: `Completion::into_value`
 builds the `{:id :value :error}` struct the reaping call answers with, and that
 struct records a counted edge to the value as it stores it. The completion lets
 go there, and the struct's edge is the value's reference from then on.

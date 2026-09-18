@@ -1,3 +1,9 @@
+//! audited: 2026-09-18
+//! What a request carries, what the submit path's copy of it keeps, and the
+//! in-place fills a completion makes through its buffers.
+//!
+//! src/io/AGENTS.md
+
 use super::*;
 use libc;
 
@@ -188,9 +194,8 @@ fn test_bytes_to_string_in_place_valid_utf8() {
             truncate_buffer(&buffer, 11);
         }
 
-        let result = unsafe {
-            bytes_to_string_in_place(buffer, h.heap() as *mut crate::value::fiberheap::FiberHeap)
-        };
+        let mut birth = crate::io::Birthplace::on(h.heap());
+        let result = unsafe { bytes_to_string_in_place(buffer, &mut birth) };
         assert!(result.is_ok(), "valid UTF-8 should succeed");
         let string_val = result.unwrap();
         assert_eq!(string_val.type_name(), "string");
@@ -211,9 +216,8 @@ fn test_bytes_to_string_in_place_invalid_utf8() {
             truncate_buffer(&buffer, 2);
         }
 
-        let result = unsafe {
-            bytes_to_string_in_place(buffer, h.heap() as *mut crate::value::fiberheap::FiberHeap)
-        };
+        let mut birth = crate::io::Birthplace::on(h.heap());
+        let result = unsafe { bytes_to_string_in_place(buffer, &mut birth) };
         assert!(result.is_err(), "invalid UTF-8 should fail");
         let err = result.unwrap_err();
         assert_eq!(err.type_name(), "struct");
@@ -225,9 +229,8 @@ fn test_bytes_to_string_in_place_empty() {
     crate::value::arena::with_test_region(|| {
         let h = crate::primitives::ctx::TestHeap::new();
         let buffer = h.ctx().bytes(vec![]);
-        let result = unsafe {
-            bytes_to_string_in_place(buffer, h.heap() as *mut crate::value::fiberheap::FiberHeap)
-        };
+        let mut birth = crate::io::Birthplace::on(h.heap());
+        let result = unsafe { bytes_to_string_in_place(buffer, &mut birth) };
         assert!(result.is_ok(), "empty bytes should become empty string");
         let string_val = result.unwrap();
         assert_eq!(string_val.with_string(|s| s.len()).unwrap(), 0);

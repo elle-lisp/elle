@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-18
 //! `AsyncBackend`: the state an in-flight operation is tracked through, and the
 //! platform that runs it.
 //!
@@ -256,6 +256,14 @@ impl AsyncBackend {
             // sweep (`FiberHeap::quiesce_io_backends`), and the `Drop` that
             // calls this again from inside that sweep reaches an empty hold.
             inner.pending.release_holds();
+            // A completion nobody reaped is in the same position, one step
+            // further on: it was assembled, so it holds what it built rather
+            // than what it read (docs/impl/io-inflight.md). Discarding here is
+            // what makes the release name a live store, and it empties the
+            // queue, so the second call reaches nothing.
+            for completion in inner.completions.drain(..) {
+                completion.discard();
+            }
         }
     }
 
@@ -424,10 +432,9 @@ impl AsyncBackendInner {
                 IoOp::Tell => format!("port/tell: expected file port, got {:?}", port.kind()),
                 _ => unreachable!(),
             };
-            self.completions.push_back(Completion::err(
-                id,
-                crate::io::io_error("type-error", err_msg, self.origin_heap),
-            ));
+            let birth = crate::io::Birthplace::on(self.origin_heap);
+            self.completions
+                .push_back(Completion::failed(id, birth, "type-error", err_msg));
             return Ok(id);
         }
 
@@ -478,11 +485,10 @@ impl AsyncBackendInner {
             _ => unreachable!(),
         };
 
-        let origin_heap = self.origin_heap;
-        self.completions.push_back(Completion::new(
-            id,
-            result.map_err(|e| crate::io::io_error("io-error", e.to_string(), origin_heap)),
-        ));
+        let mut birth = crate::io::Birthplace::on(self.origin_heap);
+        let result = result.map_err(|e| birth.error("io-error", e.to_string()));
+        self.completions
+            .push_back(Completion::new(id, birth, result));
         Ok(id)
     }
 }

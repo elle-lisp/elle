@@ -1,4 +1,7 @@
+//! audited: 2026-09-18
 //! Filesystem watch primitives — event-driven via inotify (Linux) / kqueue (macOS).
+//!
+//! docs/io.md
 
 use crate::io::request::{IoOp, IoRequest};
 use crate::io::watch::FsWatcher;
@@ -164,10 +167,10 @@ primitive! {
         params: &["watcher"],
         category: "watch",
         example: "(watch-next w)",
-        // Opaque: stores nothing, but the event array is minted at completion on
-        // the origin heap (`Alloc::new(completion_heap_ptr(..))`, like sig-next /
-        // sys/resolve), neither this call's region nor an arg's. No clique,
-        // non-fresh result. (NOT Fresh: no caller-region buffer is pre-allocated.)
+        // Opaque: stores nothing, but the event array is built at the
+        // completion's own `Birthplace` (like sig-next / sys/resolve), neither
+        // this call's region nor an arg's. No clique, non-fresh result.
+        // (NOT Fresh: no caller-region buffer is pre-allocated.)
         effect: RegionEffect::Opaque,
     }
     "watch-close" => prim_watch_close {

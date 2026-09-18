@@ -1,12 +1,12 @@
-// audited: 2026-09-17
-// src/io/AGENTS.md
+//! audited: 2026-09-18
 //! Fixtures the async-backend tests share: sockets a peer never answers,
 //! scratch paths, and the assertion that a cancelled operation retires.
+//!
+//! src/io/AGENTS.md
 
 use super::*;
 use crate::io::request::{IoOp, IoRequest};
 use crate::port::{Direction, Encoding, Port, PortKind};
-use crate::value::error_val_in;
 use crate::value::heap::TableKey;
 use crate::value::sorted_struct_get;
 use std::os::unix::io::RawFd;

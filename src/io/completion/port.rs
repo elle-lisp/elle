@@ -1,4 +1,8 @@
+//! audited: 2026-09-18
 //! Completion handling for the PendingOp::Port (stream/socket I/O) case.
+//!
+//! src/io/AGENTS.md
+//! docs/impl/io-inflight.md
 
 use super::*;
 use crate::io::frame::{exact_end, line_end, read_result};
@@ -34,9 +38,10 @@ pub(super) fn complete_port_op(
     data: Vec<u8>,
     pending: &PendingOp,
     fd_states: &mut HashMap<PortKey, FdState>,
-    // The requesting instance's heap; result values are born on it
-    // (`crate::io::completion_heap_ptr`).
-    origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    // Where this completion builds a result it cannot be handed — a read whose
+    // bytes outgrew the caller's buffer, a `read-all`, and every error
+    // (docs/impl/io-inflight.md).
+    mut birth: crate::io::Birthplace,
     // The owning VM's Unicode generation; text ReadExact splits the byte
     // stream at its cluster boundaries and stashes the remainder.
     gen: crate::segment::Generation,
@@ -63,7 +68,7 @@ pub(super) fn complete_port_op(
                     format!("I/O error: {}", errno_message(errno))
                 };
                 let error_type = if is_timeout { "timeout" } else { "io-error" };
-                return Completion::err(id, crate::io::io_error(error_type, msg, origin_heap));
+                return Completion::failed(id, birth, error_type, msg);
             }
 
             // The three buffer-backed reads answer the same way whether the
@@ -115,7 +120,7 @@ pub(super) fn complete_port_op(
                     _ => unreachable!(),
                 };
                 let Some((end, rest)) = split else {
-                    return Completion::ok(id, Value::NIL);
+                    return Completion::ok(id, birth, Value::NIL);
                 };
                 if rest < all.len() {
                     state.buffer.extend_from_slice(&all[rest..]);
@@ -127,7 +132,8 @@ pub(super) fn complete_port_op(
                 } else {
                     encoding
                 };
-                return Completion::new(id, read_result(buffer, all, as_text, origin_heap));
+                let result = read_result(buffer, all, as_text, &mut birth);
+                return Completion::new(id, birth, result);
             }
 
             if result_code == 0 && matches!(op, PortOp::ReadAll) {
@@ -135,17 +141,13 @@ pub(super) fn complete_port_op(
                 // an empty file, not nil.
                 let state = crate::io::types::fd_state_mut(fd_states, port_key);
                 let all: Vec<u8> = std::mem::take(&mut state.buffer);
-                let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
-                let ctx = crate::primitives::ctx::Alloc::new(heap);
-                let val = ctx.bytes(all);
-                return Completion::new(
-                    id,
-                    if encoding == Encoding::Text {
-                        unsafe { crate::io::request::bytes_to_string_in_place(val, origin_heap) }
-                    } else {
-                        Ok(val)
-                    },
-                );
+                let val = birth.alloc().bytes(all);
+                let result = if encoding == Encoding::Text {
+                    unsafe { crate::io::request::bytes_to_string_in_place(val, &mut birth) }
+                } else {
+                    Ok(val)
+                };
+                return Completion::new(id, birth, result);
             }
 
             // Everything below completes the same way at any non-negative
@@ -164,13 +166,12 @@ pub(super) fn complete_port_op(
                     let state = crate::io::types::fd_state_mut(fd_states, port_key);
                     state.buffer.extend_from_slice(&data);
                     let all: Vec<u8> = std::mem::take(&mut state.buffer);
-                    let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
-                    let ctx = crate::primitives::ctx::Alloc::new(heap);
-                    let val = ctx.bytes(all);
+                    let val = birth.alloc().bytes(all);
                     if encoding == Encoding::Text {
-                        return Completion::new(id, unsafe {
-                            crate::io::request::bytes_to_string_in_place(val, origin_heap)
-                        });
+                        let result = unsafe {
+                            crate::io::request::bytes_to_string_in_place(val, &mut birth)
+                        };
+                        return Completion::new(id, birth, result);
                     }
                     val
                 }
@@ -224,10 +225,7 @@ pub(super) fn complete_port_op(
                     let sockaddr_size = std::mem::size_of::<libc::sockaddr_storage>();
                     let addr_offset = 4 + sockaddr_size;
                     if data.len() < addr_offset {
-                        return Completion::err(
-                            id,
-                            crate::io::io_error("io-error", "invalid recvfrom data", origin_heap),
-                        );
+                        return Completion::failed(id, birth, "io-error", "invalid recvfrom data");
                     }
                     let addr_len =
                         u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as libc::socklen_t;
@@ -274,8 +272,13 @@ pub(super) fn complete_port_op(
                         let n = abytes.len().min(cap);
                         std::ptr::copy_nonoverlapping(abytes.as_ptr(), dst, n);
                         truncate_buffer(&addr_buf, n);
+                        // The error arm builds a value nobody reads, and it is
+                        // released with everything else this birthplace coined.
+                        // What is stamped into the caller's struct is that
+                        // caller's own buffer re-tagged — never a value born
+                        // here, which the handover would free under the struct.
                         let addr_val =
-                            bytes_to_string_in_place(addr_buf, origin_heap).unwrap_or(addr_buf);
+                            bytes_to_string_in_place(addr_buf, &mut birth).unwrap_or(addr_buf);
                         set_struct_field_in_place(result, &TableKey::keyword("addr"), addr_val);
 
                         // :port — stamp the sender port int into the slot.
@@ -288,7 +291,7 @@ pub(super) fn complete_port_op(
                     *result
                 }
             };
-            Completion::ok(id, value)
+            Completion::ok(id, birth, value)
         }
         _ => unreachable!("complete_port_op: non-Port pending"),
     }

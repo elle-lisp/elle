@@ -1,4 +1,4 @@
-// audited: 2026-09-17
+//! audited: 2026-09-18
 //! Unit tests (`super` is the parent impl module).
 //!
 //! src/io/AGENTS.md
