@@ -104,6 +104,57 @@ fn two_closures_over_one_cell_hydrate_sharing_one_content() {
     assert_eq!(content.first.as_int(), Some(1));
 }
 
+// § Test plan, "Snapping": mutual recursion is a cycle through two snapped
+// cells — f's env holds g's cell and g's env holds f's — and the walk must
+// close it onto one copy of each closure. The counter-factual is a bottom-up
+// copy with no reservation, which recurses through the cycle without ever
+// finding a visited entry.
+#[test]
+fn a_mutual_recursion_cycle_snaps_onto_one_copy_of_each() {
+    let dir = crate::common::ScratchDir::new("image-snap-cycle");
+    let path = dir.join("cycle.image");
+
+    let (mut rt, f) = compiled(
+        "(defn walk-a [p] (if (%pair? p) (walk-b (%rest p)) :a-done))\n\
+         (defn walk-b [p] (if (%pair? p) (walk-a (%rest p)) :b-done))\n\
+         walk-a",
+    );
+    assert!(
+        closure_of(f).env.iter().any(|v| v.is_capture_cell()),
+        "the source closure captures no cell, so this test exercises nothing"
+    );
+    {
+        let (heap, symbols) = rt.heap_and_symbols();
+        image::dump(heap, symbols, f, &path).expect("dump");
+    }
+
+    let mut rt2 = Runtime::new();
+    let root = bind_hydrated(&mut rt2, &path);
+    let walk_b = closure_of(root).env.as_slice()[0];
+    let back = closure_of(walk_b).env.as_slice()[0];
+    assert_eq!(
+        back.as_heap_ptr(),
+        root.as_heap_ptr(),
+        "the cycle did not close onto the root's own copy"
+    );
+    let result = {
+        let (vm, symbols, cctx) = rt2.parts();
+        eval_all(
+            "(hydrated-f (%pair 1 (%pair 2 ())))",
+            symbols,
+            vm,
+            cctx,
+            "<image-snapping>",
+        )
+        .expect("call")
+    };
+    assert_eq!(
+        result,
+        Value::keyword("a-done"),
+        "the hydrated mutual recursion answered wrong"
+    );
+}
+
 // § Test plan, "Snapping": a top-level that is `assign`ed anywhere in the
 // file fails the dump naming the binding. The name matters: an unnamed
 // refusal leaves the author of a boot dump hunting through every top-level
