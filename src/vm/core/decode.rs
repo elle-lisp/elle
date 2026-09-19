@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 //! Bytecode operand readers: each decodes one big-endian operand and advances
 //! the instruction pointer.
 

@@ -1,3 +1,4 @@
+// audited: 2026-09-19
 //! Lazy (tiered) WASM compilation.
 //!
 //! Compiles individual hot closures to WASM on demand. The bytecode VM
@@ -20,7 +21,9 @@ use super::emit;
 use super::host::ElleHost;
 
 mod env;
+mod linker;
 use env::*;
+use linker::*;
 
 /// Compiled single-closure WASM module ready for instantiation.
 struct CompiledClosure {

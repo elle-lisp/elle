@@ -1,9 +1,9 @@
-// audited: 2026-09-06
+// audited: 2026-09-19
 // docs/impl/wasm.md
 //! What the standalone single-closure emission gate accepts and refuses.
 //!
 //! A standalone single-closure module is served by hosts whose suspension and
-//! tail-call imports are panic stubs (src/wasm/lazy/env.rs) and whose funcref
+//! tail-call imports are panic stubs (src/wasm/lazy/linker.rs) and whose funcref
 //! table has one entry, so `emit_single_closure` must refuse every shape whose
 //! execution would reach one of them — see src/wasm/AGENTS.md § "Constraints
 //! on per-closure compilation". Refusal means `None`: the tiered caller falls

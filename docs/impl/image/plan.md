@@ -1,6 +1,6 @@
 # Landing order and test plan
 
-<!-- audited: 2026-09-18 -->
+<!-- audited: 2026-09-19 -->
 
 What lands in which order, and the pins each milestone must land with.
 
@@ -33,35 +33,43 @@ code, and each deletes image machinery
 
 Then the image milestones:
 
-5. **store** — landed. The file-backed page flag in the pool, the dumper and
-   hydrator, the object-index rebuild, the fingerprint fallback, the
-   `(fd, offset)` input form with an anonymous memory file for an image that
-   arrives as bytes, the verifier's two passes, the name table that teaches a
-   hydrating instance the spellings its symbols and keywords carry, the
-   sorted containers, whose entries the dumper assembles from probed extents
-   exactly as it does an object's, syntax, with the file table its spans need
-   and the scope watermark a fresh expander must mint above, and the scrub
-   and guardfree pins over a hydrated region. The format, mapping,
-   relocation, and teardown are proven end to end over every value the
-   foundations sealed as data.
-6. **boot** — in progress. Landed so far: the primitive table that remaps a
-   native-fn by name and the user traitsets it makes dumpable, the
-   reconstruction stream — which the default trait tables need before
-   `Parameter`'s stdio default does — and closures and closure templates in
-   the body: the payload crosses whole and shared, the header hydrates
-   without its blueprint, and the code objects a `MakeClosure` indexes cross
-   as the payload's child table ([sealing.md](sealing.md) § "A child code
-   object crosses as a header"), with the defining span on the payload so
-   `meta/origin` answers after a boot from image; and cell snapping — a
-   compiled forward cell crosses as its content when its binding is never
-   assigned, an assigned binding fails the dump by name, and a run-time cell
-   still refuses ([sealing.md](sealing.md)). Still to land:
-   dump-boot, warm cache, embedded blob, per-worker hydration for
-   `sys/spawn`, the encoded-LIR side-stream with lazy decode, compiler-state
-   persistence, the hydrated-region interval table that keeps
+5. **store** — landed. The format, mapping, relocation, and teardown are
+   proven end to end over every value the foundations sealed as data. The
+   milestone landed with:
+   - the file-backed page flag in the pool, the dumper and the hydrator, the
+     object-index rebuild, and the fingerprint fallback;
+   - the `(fd, offset)` input form, with an anonymous memory file for an
+     image that arrives as bytes;
+   - the verifier's two passes;
+   - the name table that teaches a hydrating instance the spellings its
+     symbols and keywords carry;
+   - the sorted containers, whose entries the dumper assembles from probed
+     extents exactly as it does an object's;
+   - syntax, with the file table its spans need and the scope watermark a
+     fresh expander must mint above;
+   - the scrub and guardfree pins over a hydrated region.
+6. **boot** — in progress. Landed so far:
+   - the primitive table that remaps a native-fn by name, and the user
+     traitsets it makes dumpable;
+   - the reconstruction stream — which the default trait tables need before
+     `Parameter`'s stdio default does;
+   - closures and closure templates in the body: the payload crosses whole
+     and shared, the header hydrates without its blueprint, and the code
+     objects a `MakeClosure` indexes cross as the payload's child table
+     ([sealing.md](sealing.md) § "A child code object crosses as a header"),
+     with the defining span on the payload so `meta/origin` answers after a
+     boot from image;
+   - cell snapping — a compiled forward cell crosses as its content when its
+     binding is never assigned, an assigned binding fails the dump by name,
+     and a run-time cell still refuses ([sealing.md](sealing.md)).
+
+   Still to land: dump-boot, the warm cache, the embedded blob, per-worker
+   hydration for `sys/spawn`, the encoded-LIR side-stream with lazy decode,
+   compiler-state persistence, the hydrated-region interval table, and the
+   parity gate (bytecode *and* tier). The interval table keeps
    `region_of_ptr` off the probe ladder ([image.md](../image.md) § "Pointer
-   resolution must not regress" — the regression it prevents needs a region
-   the size of stdlib to show), and the parity gate (bytecode *and* tier).
+   resolution must not regress"); the regression it prevents needs a region
+   the size of stdlib to show.
 7. **environment** — `image/save` and `image/load`, manifest deltas over
    boot, mutable side-stream.
 
@@ -80,9 +88,9 @@ Then the image milestones:
   determinism pin: a struct whose key padding differs between two dumps must
   still write one file.
 - Syntax: a tree round-trips with its structure, its spans, its scope sets,
-  and its scope-exempt flags intact. The file table is what decides a
-  hydrated span's file: rename the spelling in the table, and every span
-  follows it. A synthetic span still names no file. The scope watermark
+  and its scope-exempt flags intact. The file table decides a hydrated
+  span's file: rename the spelling in the table, and every span follows it. A
+  synthetic span still names no file. The scope watermark
   exceeds every counter value the body carries, intro scopes included.
 - Source: an image parked at a non-zero, base-page-aligned offset inside a
   larger file hydrates from that descriptor and offset. A misaligned offset
@@ -90,16 +98,16 @@ Then the image milestones:
 - Bytes: an image that arrives as bytes hydrates through an anonymous memory
   file, with no filesystem path anywhere in the path. On Linux the seal holds:
   a write to that descriptor after hydration fails.
-- Verifier: each of a relocation slot outside the image, a relocation slot
-  that is not 8-byte aligned, a `RegionSlice` whose extent leaves the image,
-  and a page cursor that disagrees with the object index fails the load with
-  a named error and leaves no region and no mapping behind. A closure header
-  is refused the same way five ways: a nonzero blueprint word (the one bit
-  pattern teardown could hurt on — a fabricated `Rc`), a header naming zero
-  payloads, a payload landing misaligned, a payload field whose extent
-  leaves the image, and a child slot naming an object the index does not call
-  a header — the one slot whose target is read back as a header rather than
-  as data.
+- Verifier: four defects each fail the load with a named error and leave no
+  region and no mapping behind — a relocation slot outside the image, a
+  relocation slot that is not 8-byte aligned, a `RegionSlice` whose extent
+  leaves the image, and a page cursor that disagrees with the object index.
+  A closure header is refused the same way five ways: a nonzero blueprint
+  word (the one bit pattern teardown could hurt on — a fabricated `Rc`), a
+  header naming zero payloads, a payload landing misaligned, a payload field
+  whose extent leaves the image, and a child slot naming an object the index
+  does not call a header. The child slot is the one slot whose target is
+  read back as a header rather than as data.
 - Hygiene: hydrate, run, exit — the live region count returns to baseline
   and the leak suite stays green with no image-specific carve-out. Free the
   hydrated region explicitly under `--trace=guardfree` and assert the
@@ -124,22 +132,22 @@ Then the image milestones:
   payload. A hydrated header has no blueprint, so the JIT is never entered.
   `meta/origin` still answers, because the defining span is the payload's:
   a hydrated closure reports the line, the column and the file it was
-  written at, and the file table is what decides the file — rename the
-  spelling there and the origin follows it. A lambda with no origin still
-  answers nil, which is what stops the file stream from writing the table's
-  first entry over an absent id. A WASM-dispatch closure and an env holding a
-  run-time-minted capture cell each refuse the dump with a named error. A dumped closure
-  writes one file across two
-  dumps, whatever its construction temporaries held. The relocation stream
-  records a shared payload's slots once, however many headers name it — the
-  counter-factual is a per-header walk, which appends every inner entry
-  again for each header and grows the tables with the header count.
+  written at. The file table decides the file — rename the spelling there
+  and the origin follows it. A lambda with no origin still answers nil,
+  which is what stops the file stream from writing the table's first entry
+  over an absent id. A WASM-dispatch closure and an env holding a
+  run-time-minted capture cell each refuse the dump with a named error. A
+  dumped closure writes one file across two dumps, whatever its construction
+  temporaries held. The relocation stream records a shared payload's slots
+  once, however many headers name it. The counter-factual is a per-header
+  walk, which appends every inner entry again for each header and grows the
+  tables with the header count.
 - Children: a hydrated closure builds its nested lambda, and the lambda
   answers a call — through a REPL binding, so `MakeClosure` runs on the
   ordinary dispatch path. The child's payload crosses field by field, and a
   lambda nested two deep builds out of the child's own child table. The
   instruction materializes a fresh header per creation: two lambdas built
-  from one hydrated parent are two headers over one payload, and the
+  from one hydrated parent are two headers over one payload. The
   counter-factual is handing out the image's own header, which answers every
   call correctly and quietly moves the instance-to-template edge across
   regions. A child a WASM module built refuses the dump like any other WASM
@@ -150,8 +158,8 @@ Then the image milestones:
   the *hydrating* instance's table for that tag, and a user traitset hydrates
   out of the body with its methods intact. The counter-factual is the identity
   check: a default traitset copied into the body would hydrate as a table equal
-  to the instance's own and distinct from it, which only a pointer comparison
-  against `default_traits_for` can see. Freeing the hydrated region releases the
+  to the instance's own and distinct from it. Only a pointer comparison
+  against `default_traits_for` can see that. Freeing the hydrated region releases the
   trait table's region exactly once, and the free-time edge oracle agrees with
   the recorded table.
 - Primitives: a native-fn in the body answers to the live registry's id for its
@@ -174,8 +182,8 @@ Then the image milestones:
   exactly as under source boot — the lazy LIR decode feeds `submit_jit_task`
   and the compiled result executes.
 - Names: a fresh instance prints an image's symbol and its keyword by name,
-  having met neither spelling before, and two dumps of one graph write one
-  name table whatever order the dumping memo learned the spellings in. A
+  having met neither spelling before. Two dumps of one graph write one name
+  table, whatever order the dumping memo learned the spellings in. A
   spelling the dumping instance never learned hydrates as an equal value that
   still prints as `#<keyword:hash>`. Under boot, an image-defined signal
   raises with the replayed bit matching the baked profile.
@@ -190,8 +198,8 @@ Then the image milestones:
   the artifact records no port address whatever the dumping process held. After
   image boot, `println` writes to the process's real stdout (the reconstructed
   default, not a stale dump-time resource), and `parameterize` of `*stdout*`
-  redirects it — the captured `Parameter` identity and the fiber's frame lookup
-  both survived hydration.
+  redirects it. Both prove the captured `Parameter` identity and the fiber's
+  frame lookup survived hydration.
 - Determinism: dump the same graph twice and assert byte-identical whole
   files. The counter-factual: scribble a pattern into a live object's
   padding bytes before the dump and assert the file does not change — a

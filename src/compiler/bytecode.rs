@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 //! Compiled bytecode: the instruction bytes, the constant pool, and the
 //! emit/patch surface the emitter writes through.
 //!
@@ -101,9 +101,8 @@ impl Bytecode {
     }
 
     /// Record a source location for the current bytecode position.
-    /// Only records non-synthetic spans (line > 0).
+    /// A synthetic span (all fields zero) is not recorded.
     pub fn record_location(&mut self, span: &crate::syntax::Span) {
-        // Skip synthetic spans (all zeros)
         if span.line == 0 && span.col == 0 && span.start == 0 && span.end == 0 {
             return;
         }

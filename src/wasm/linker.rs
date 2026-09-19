@@ -1,4 +1,8 @@
-//! Host function registration for the Wasmtime linker.
+// audited: 2026-09-19
+//! Host function registration for the Wasmtime linker, and the two call
+//! fallbacks both dispatch sites share.
+//!
+//! docs/impl/wasm.md
 
 use wasmtime::*;
 
@@ -16,7 +20,7 @@ pub use create::*;
 /// Execute a **bytecode closure** — one with no `wasm_func_idx` — by calling
 /// back into the host VM's interpreter, returning `(tag, payload, signal)` for
 /// the wasm caller. The full-module twin of the tiered linker's bytecode-closure
-/// path (`src/wasm/lazy/env.rs`).
+/// path (`src/wasm/lazy/linker.rs`).
 ///
 /// Only `stdlib.lisp` is compiled into the full module (see `wasm/mod.rs`
 /// `eval_wasm_with_stdlib`); `core.lisp` and the prelude are loaded as

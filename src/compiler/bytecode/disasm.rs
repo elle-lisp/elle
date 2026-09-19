@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 //! Bytecode disassembly: decode each instruction's operands into one line.
 //!
 //! docs/impl/bytecode.md

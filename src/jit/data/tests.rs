@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 //! Unit tests for the JIT data helpers: cons, arrays, capture cells, and the
 //! prologue's own-region env values.
 
@@ -112,7 +112,8 @@ fn test_cell_operations() {
 // A JIT-compiled function's prologue builds env values — capture cells (a
 // mutable-captured param/local) and the variadic rest cons-list — that the
 // interpreter's `populate_env` mints a FRESH per-value region for
-// (`env_value_region` / `args_to_list`, src/vm/env.rs). The prologue must do the
+// (`env_value_region`, src/vm/env.rs; `args_to_list`, src/vm/env/rest.rs).
+// The prologue must do the
 // same. On a JIT->JIT call the callee inherits the caller's region; an env value
 // allocated into the *caller's* region commingles with it
 // (docs/impl/region/rules.md Rule 6) and its value-based `DecrefCellRegion` /

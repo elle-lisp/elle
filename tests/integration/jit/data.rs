@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 // src/jit/AGENTS.md
 // What JIT-compiled code makes of values that are not integers: floats, pairs,
 // arrays, and capture cells.

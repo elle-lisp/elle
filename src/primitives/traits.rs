@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 //! Trait table primitives: `with-traits` and `traits`.
 //!
 //! `with-traits` attaches an immutable struct as a trait table to a value,

@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 // A closure and its code object cross the body; the header hydrates without
 // its blueprint.
 // docs/impl/image/sealing.md

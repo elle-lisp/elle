@@ -1,10 +1,10 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 //! Heap-allocated value types for the tagged-union value system.
 //!
 //! docs/impl/values.md
 //!
-//! All non-immediate values (strings, cons cells, vectors, closures, etc.)
-//! are stored on the heap and accessed through `HeapObject`.
+//! All non-immediate values (strings, cons cells, arrays, closures, and the
+//! rest) are stored on the heap and accessed through `HeapObject`.
 
 use std::any::Any;
 use std::cell::RefCell;

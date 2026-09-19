@@ -1,6 +1,6 @@
 # WASM Backend
 
-<!-- audited: 2026-09-06 -->
+<!-- audited: 2026-09-19 -->
 
 LIR → WASM emission via `wasm-encoder`, execution via Wasmtime.
 
@@ -203,8 +203,9 @@ and hot closures are compiled to per-closure WASM modules on demand.
 `standalone_emittable` gate in `emit.rs` (`emit_single_closure` returns `None`;
 the tiered/precache callers fall back to the VM / full-module dispatch). A
 standalone module serves one closure through hosts whose suspension and
-tail-call imports are panic stubs (`lazy/env.rs`, this directory) and whose funcref table has a
-single entry, so the gate refuses every shape whose execution would reach one:
+tail-call imports are panic stubs (`lazy/linker.rs`, this directory) and whose
+funcref table has a single entry, so the gate refuses every shape whose
+execution would reach one:
 - No `TailCall`/`TailCallArrayMut` (`return_call_indirect` needs callee table
   indices + `rt_prepare_tail_call`)
 - No `SuspendingCall` and no `Emit` terminators — any signal emission, yield

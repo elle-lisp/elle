@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 //! Capture-cell (box) operations for JIT-compiled code.
 //!
 //! These mint and access the `CaptureCell`s that back mutable captured locals,
@@ -11,8 +11,9 @@ use super::region_of_raw;
 use crate::jit::value::JitValue;
 use crate::value::Value;
 
-/// Create a LocalCell wrapping a value. `name` and `mutated` are the compiled
-/// cell's provenance, passed through from the `MakeCaptureCell` instruction.
+/// Create a `CaptureCell` wrapping a value. `name` and `mutated` are the
+/// compiled cell's provenance, passed through from the `MakeCaptureCell`
+/// instruction.
 #[no_mangle]
 pub extern "C" fn elle_jit_make_capture(
     tag: u64,
@@ -63,7 +64,7 @@ pub extern "C" fn elle_jit_make_capture_owned(tag: u64, payload: u64, vm: *mut (
 }
 
 /// Build a rest-arg list from `args[start..nargs]`, the JIT-prologue analog of
-/// the interpreter's `VM::args_to_list` (src/vm/env.rs): EACH cons is born in
+/// the interpreter's `VM::args_to_list` (src/vm/env/rest.rs): EACH cons is born in
 /// its OWN fresh per-execution region, built tail→head so each new cons pins the
 /// prior head via its `rest` (whose region `alloc_obj` increfs), and the minting
 /// reference on that prior head is then dropped — leaving the chain owned solely
@@ -137,10 +138,10 @@ pub extern "C" fn elle_jit_load_capture_cell(cell_tag: u64, cell_payload: u64) -
     }
 }
 
-/// Load from env slot, auto-unwrapping LocalCell if present.
-/// This matches the interpreter's LoadUpvalue semantics:
-/// - LocalCell (compiler-created mutable capture): unwrap and return inner value
-/// - Everything else (plain value, user Cell, etc.): return as-is
+/// Load from an env slot, matching the interpreter's `LoadUpvalue` semantics:
+/// a `CaptureCell` (the compiler's mutable capture) unwraps to its inner
+/// value, and everything else — a plain value, a user `LBox` — returns as it
+/// is.
 #[no_mangle]
 pub extern "C" fn elle_jit_load_capture(tag: u64, payload: u64) -> JitValue {
     let val = Value { tag, payload };
@@ -148,7 +149,8 @@ pub extern "C" fn elle_jit_load_capture(tag: u64, payload: u64) -> JitValue {
         if let Some(cell_ref) = val.as_capture_cell() {
             JitValue::from_value(*cell_ref.borrow())
         } else {
-            JitValue { tag, payload } // shouldn't happen, but safe fallback
+            // Unreachable: `is_capture_cell` implies the accessor answers.
+            JitValue { tag, payload }
         }
     } else {
         JitValue { tag, payload }
@@ -174,8 +176,8 @@ pub extern "C" fn elle_jit_store_capture_cell(
     };
     if cell.is_capture_cell() {
         // The funnel tracks cross-region refs relative to the cell's region
-        // — the JIT twin of the interpreter's UpdateCapture (Rule 5,
-        // capture store); the raw store here was an uncounted store. The heap is
+        // — the JIT twin of the interpreter's UpdateCapture (Rule 5, capture
+        // store); a raw store here would be an uncounted store. The heap is
         // the driving VM's own, via the threaded vm pointer.
         let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
         crate::value::arena::capture_store_with_rebind(heap, cell, val);
@@ -193,10 +195,9 @@ pub extern "C" fn elle_jit_store_capture_cell(
     JitValue::nil()
 }
 
-/// Store to a capture slot, handling cells automatically.
-/// If the slot contains a LocalCell, stores into the cell.
-/// Otherwise, stores directly to the slot.
-/// env_ptr: *mut Value (16 bytes each)
+/// Store to a capture slot. If the slot holds a `CaptureCell`, store into
+/// the cell; otherwise store directly to the slot. `env_ptr` is a
+/// `*mut Value` array, 16 bytes per element.
 #[no_mangle]
 pub extern "C" fn elle_jit_store_capture(
     env_ptr: *mut Value,
@@ -214,8 +215,8 @@ pub extern "C" fn elle_jit_store_capture(
 
     if slot.is_capture_cell() {
         // The funnel tracks cross-region refs relative to the cell's region
-        // — the JIT twin of the interpreter's StoreUpvalue (Rule 5,
-        // capture store); the raw store here was an uncounted store. The heap is
+        // — the JIT twin of the interpreter's StoreUpvalue (Rule 5, capture
+        // store); a raw store here would be an uncounted store. The heap is
         // the driving VM's own, via the threaded vm pointer.
         let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
         crate::value::arena::capture_store_with_rebind(heap, slot, new_val);

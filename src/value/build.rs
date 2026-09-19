@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 //! Region-and-heap-explicit value construction, one constructor per heap type.
 //!
 //! The single source of `HeapObject` construction, shared by the `NativeCtx`

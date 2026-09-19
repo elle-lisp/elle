@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 //! Deserializing a `SendBundle`: every received value is rebuilt on the
 //! receiving heap, in the call's region.
 
@@ -89,7 +89,6 @@ impl<'a, 'h> DeserContext<'a, 'h> {
     }
 }
 
-/// Recursive worker for deserialization. Threads DeserContext through all recursive calls.
 /// Reconstruct a closure **template** blueprint (a `SendableClosure` produced by
 /// `sendable_from_template`) into an `Rc<TemplateProto>`. The inverse of
 /// `sendable_from_template`: recurses on `child_protos` and ignores
@@ -141,6 +140,8 @@ pub(in crate::value::send) fn template_from_sendable(
     })
 }
 
+/// The recursive deserialization worker: one arm per `SendValue` variant,
+/// threading `DeserContext` through every recursive call.
 pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) -> Value {
     use crate::value::closure::{Closure, TemplateProto};
     use crate::value::heap::{HeapObject, Pair};

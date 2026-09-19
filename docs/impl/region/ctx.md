@@ -1,6 +1,6 @@
 # NativeCtx — explicit allocation: every value names its region and heap
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-19 -->
 
 Implementation-facing. Native code allocates only through a capability it is
 handed. The `PrimFn` signature carries a `&mut NativeCtx`; that ctx owns the
@@ -113,13 +113,11 @@ Why the split and not a nullable `vm`: a `NativeCtx` with `vm: Option<*mut VM>`
 manufactures a `None` that never legitimately occurs at a `vm()` call, and
 re-imports the very uncertainty the capability split removes. With the split,
 *null is unrepresentable, not merely unused* — an allocation-only site holds an
-`Alloc`, which has no `vm()` to call. The migration is compiler-driven: a helper
-the compiler flags as reached from an allocation-only site changes `&mut NativeCtx`
-→ `&mut Alloc` (always safe — `&mut NativeCtx` deref-coerces to `&mut Alloc`, so
-native callers are unaffected); a helper that calls `ctx.vm()` stays `&mut
-NativeCtx`, and is by construction never reached from an allocation-only site. The
-`PrimFn` type is unchanged (`fn(&mut NativeCtx, &[Value]) -> (SignalBits, Value)`),
-so no primitive body churns.
+`Alloc`, which has no `vm()` to call. The rule for a shared helper follows: one
+reached only from allocation-only sites takes `&mut Alloc`, and one that calls
+`ctx.vm()` takes `&mut NativeCtx`, which is never reached from an
+allocation-only site. `&mut NativeCtx` deref-coerces to `&mut Alloc`, so a
+native body calls either kind unchanged.
 
 Invariants:
 
@@ -281,7 +279,7 @@ ctx at the flip, minting the per-call region exactly as `dispatch_native_call`
 does:
 
 - The WASM hosts: `call_primitive` (full backend) and the tiered linker's
-  `rt_call` NativeFn branch (`src/wasm/lazy/env.rs`).
+  `rt_call` NativeFn branch (`src/wasm/lazy/linker.rs`).
 - `plugin_api::call_plugin` — see Plugins.
 
 `traitregistry::call_method_fn` also calls a native's pointer directly, but does
@@ -352,8 +350,8 @@ hands them out as the disjoint borrows `parts() -> (&mut VM, &mut SymbolTable,
 explicitly. `register_stdlib_exports`, the REPL-binding registration, and the
 projection lookup are `CompileCtx` methods. Two owners construct a `RuntimeCore`:
 `Runtime` (the `elle foo.lisp` / REPL / embedding path) and the `os/spawn` worker
-(`src/primitives/concurrency.rs`), so a spawned thread compiles against its own
-instance, never a shared cache.
+(`src/primitives/concurrency/worker.rs`), so a spawned thread compiles against
+its own instance, never a shared cache.
 
 Three seams reach the compile context where no `CompileCtx` parameter is in
 scope, without reintroducing shared state:

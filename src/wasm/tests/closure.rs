@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-19
 // docs/impl/wasm.md
 // docs/impl/region/template.md
 //! The code object `rt_make_closure` builds for a WASM closure.
@@ -149,7 +149,8 @@ fn a_wasm_built_closure_carries_the_locations_and_the_merge_set_its_body_names()
 // ── Spawning a WASM-built closure to an OS-thread VM worker ───────────
 //
 // `sys/spawn`/`sys/spawn-vm` deep-copy a closure to a fresh OS-thread bytecode
-// VM and run its `template.code()` there (src/primitives/concurrency.rs). Under
+// VM and run its `template.code()` there (src/primitives/concurrency/worker.rs).
+// Under
 // `--wasm=full` the closure is built by `rt_make_closure`, which reconstructs a
 // `ClosureTemplate` from the module's dual-compiled bytecode. That bytecode's
 // `MakeClosure` instructions index into the template's `child_protos` (the

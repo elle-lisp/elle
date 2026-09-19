@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 //! Register and slot allocation, instruction emission, and block management for
 //! the LIR lowerer.
 //!

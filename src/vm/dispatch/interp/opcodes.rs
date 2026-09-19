@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 // docs/impl/vm.md
 // docs/impl/bytecode.md
 //! The bytecode dispatch match: one decoded instruction routed to its handler.

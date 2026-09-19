@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 // A never-assigned top-level's capture cell snaps to its content; an assigned
 // one fails the dump by name; a run-time cell still refuses.
 // docs/impl/image/sealing.md

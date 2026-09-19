@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 // src/jit/AGENTS.md
 //! Translating one LIR instruction to Cranelift IR.
 //!
@@ -81,7 +81,8 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             LirInstr::StoreLocalRefcounted { slot, src } => {
-                // Refcounting removed — just store (identical to StoreLocal).
+                // Region RC owns reclamation, so this stores exactly as
+                // StoreLocal does — the variant adds nothing at this tier.
                 let base = self.local_slot_to_var(*slot);
                 let (tag, payload) = self.use_var_pair(builder, src.0);
                 self.def_var_pair(builder, base, tag, payload);
@@ -96,7 +97,7 @@ impl<'a> FunctionTranslator<'a> {
                         JitError::InvalidLir("LoadCapture without env pointer".to_string())
                     })?;
                     let (raw_tag, raw_payload) = load_value_slot(builder, env_ptr, *index as u32);
-                    // Auto-unwrap LocalCell if present
+                    // Auto-unwrap a CaptureCell if present
                     let (val_tag, val_payload) = self.call_helper_value_unary(
                         builder,
                         self.helpers.load_capture,

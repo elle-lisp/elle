@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 // src/lir/AGENTS.md
 //! Emitting the operator, region-refcount and parameter-frame instructions.
 //!
@@ -67,7 +67,7 @@ impl Emitter {
                     CmpOp::Gt => Instruction::Gt,
                     CmpOp::Le => Instruction::Le,
                     CmpOp::Ge => Instruction::Ge,
-                    CmpOp::Ne => Instruction::Eq, // Will need Not after
+                    CmpOp::Ne => Instruction::Eq, // Ne lowers as Eq + Not
                 };
                 self.bytecode.emit(instr);
                 if matches!(op, CmpOp::Ne) {
@@ -203,12 +203,11 @@ impl Emitter {
                 self.ensure_on_top(*cell);
                 self.ensure_on_top(*value);
                 self.bytecode.emit(Instruction::UpdateCapture);
-                // UpdateCapture pops value, pops cell, pushes value back.
-                // Unlike other stores, UpdateCapture pushes the value back.
-                // We do NOT auto-pop here because lower_set needs the value.
+                // Unlike the other stores, UpdateCapture pushes the value
+                // back after popping it and the cell — lower_set reads it,
+                // so there is no auto-pop here.
                 self.pop(); // value (consumed by UpdateCapture, re-pushed)
                 self.pop(); // cell (consumed by UpdateCapture)
-                            // Value is now on the stack (pushed back by UpdateCapture).
                 self.push_reg(*value);
             }
 

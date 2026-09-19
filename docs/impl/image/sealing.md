@@ -1,6 +1,6 @@
 # Sealing
 
-<!-- audited: 2026-09-18 -->
+<!-- audited: 2026-09-19 -->
 
 What an image's body may hold, what the hydrating instance rebuilds for itself,
 and what fails the dump.
@@ -13,7 +13,7 @@ and what fails the dump.
 After the foundations, the body may contain only *sealed* heap objects:
 byte-self-contained, pointing only into this image (or an image it depends
 on), and free of Rust heap ownership (no `Rc`, `Vec`, `Box`, or `RefCell`
-inside) — page bytes must *be* the object. Sealed objects have no real
+inside). Page bytes must *be* the object. Sealed objects have no real
 destructors, so the hydrated region's teardown drops are no-ops by
 construction.
 
@@ -31,8 +31,8 @@ reachable only through the default trait tables, which hydration reconstructs.
 
 A sorted container copies in order and is never re-sorted. Every key an image
 may carry ranks by its own content — a name hash for a symbol or a keyword, the
-bytes for a string, its elements for an array, its structure for anything else
-— so the order the dump wrote is the order the hydrating instance's comparator
+bytes for a string, its elements for an array, its structure for anything else.
+So the order the dump wrote is the order the hydrating instance's comparator
 agrees with, and a binary search over the mapped entries finds what it found
 before. The keys that rank by address instead belong to values the dumper
 refuses anyway.
@@ -65,7 +65,7 @@ each within the design:
   body refuses").
 
 The defining span is on the payload's side of the split rather than the
-blueprint's, so it needs no degrading answer: it is twenty bytes of plain
+blueprint's, so it needs no degrading answer. It is twenty bytes of plain
 data, and every header carries it whichever boot built it
 ([region/template.md](../region/template.md)). Its file id is the one
 process-local number a payload holds, and it travels by name like a syntax
@@ -93,7 +93,7 @@ allocation in the same region under both boots.
 A live payload's child table is empty. Filling it at materialization would
 materialize the payload of every lambda a function nests, run or not, and a
 header that has a blueprint already answers from it. The dumper fills the
-table instead, because the blueprint is the part that does not cross: it walks
+table instead, because the blueprint is the part that does not cross. It walks
 the blueprint's children in order, materializes each child's payload through
 the heap's ordinary cache, and copies it like any other payload.
 
@@ -146,9 +146,10 @@ a stdio port is reconstructed fresh on the receiving side, never carried.
 The image does the same via the **reconstruction stream**: (slot location,
 constructor tag) entries emitted by the dumper wherever it meets a
 reconstructible resource. Hydration runs each constructor, allocates the
-fresh value into a companion region (an ordinary region whose edge from the
-hydrated region is recorded, so the teardown cascade releases it), and
-writes the pointer into the listed slot — a handful of dirtied frames.
+fresh value into a companion region, and writes the pointer into the listed
+slot — a handful of dirtied frames. The companion region is an ordinary
+region whose edge from the hydrated region is recorded, so the teardown
+cascade releases it.
 
 Reconstruction must be in place, not re-evaluation of the defining forms:
 closures like `println` capture the `Parameter` object itself, so a
@@ -159,11 +160,11 @@ reconstructible nor side-streamable fails the dump with a named binding.
 ## A traits slot has three answers
 
 The **default trait tables** are the first reconstructible class, found by
-the census ([measurements.md](measurements.md) item 2): every collection the
+the census ([measurements.md](measurements.md) item 2). Every collection the
 runtime allocates carries a `traits` field pointing at one of the instance's
 two default traitsets — `@struct`s built by `init_default_traits` at VM init,
 before any stdlib load or hydration. They are instance infrastructure, not
-program state, so the dumper never copies them: a `traits` slot aimed at a
+program state, so the dumper never copies them. A `traits` slot aimed at a
 default traitset becomes a reconstruction entry whose constructor resolves the
 hydrating instance's own table for that tag. The tables exist before hydration
 by construction (VM-init order), so the constructor is a lookup, not an
@@ -202,7 +203,7 @@ over either one rebinds both.
 A manifest macro entry carries its parameter lists, its template syntax (a
 body value), and its transformer cache's body location. The filled caches —
 ordinary closures — hydrate without recompiling, preserving the hygiene
-property the lazy fill exists for: the persisted transformer is the one
+property the lazy fill exists for. The persisted transformer is the one
 compiled in a real expansion context, which is exactly what later compiles
 reuse in a source boot. A cache the boot never filled stays empty and fills
 lazily as today.

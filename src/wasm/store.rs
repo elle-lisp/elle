@@ -1,4 +1,8 @@
-//! Wasmtime Engine/Store/Linker setup.
+// audited: 2026-09-19
+//! Wasmtime Engine/Store/Linker setup, and the closure-env builder both
+//! WASM hosts share.
+//!
+//! docs/impl/wasm.md
 
 use wasmtime::*;
 
@@ -228,7 +232,7 @@ pub fn create_store(
 /// Build a WASM closure's environment in linear memory at `env_base`.
 ///
 /// Layout: `[captures...][params...][local_slots...]`, each slot 16 bytes.
-/// Handles varargs, LBox wrapping, and memory growth.
+/// Handles varargs, capture-cell wrapping, and memory growth.
 /// Updates `env_stack_ptr` to point past the new env region.
 ///
 /// Generic over host type: works with both `ElleHost` (full-module) and
@@ -329,7 +333,7 @@ pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
         write_slot(&mut *caller, &memory, i, *val);
     }
 
-    // Params (with optional LBox wrapping)
+    // Params, celled when the capture mask names them
     for (i, arg) in args.iter().enumerate().take(num_params) {
         let val = if i < 64 && capture_params_mask & (1u64 << i) != 0 {
             let region = fresh_region();
@@ -361,8 +365,9 @@ pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
         write_slot(&mut *caller, &memory, num_captures + i, val);
     }
 
-    // Extra local slots (nil or LBox(nil)). Precise at any index: a captured
-    // local is celled, an uncaptured one (even >= 64) gets bare NIL.
+    // Extra local slots: nil, or a capture cell holding nil. Precise at any
+    // index: a captured local is celled, an uncaptured one (even >= 64) gets
+    // bare NIL.
     for i in 0..extra_locals {
         let val = if capture_locals_mask.is_set(i) {
             let region = fresh_region();

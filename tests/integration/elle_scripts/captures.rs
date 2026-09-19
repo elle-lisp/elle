@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-19
 // Guardfree pins for capture cells, letrec members and self-recursive closures.
 //
 // docs/analysis/testing.md
@@ -164,9 +164,9 @@ fn region_capture_cell_closure_reassign_uaf() {
 // (docs/impl/region/cells.md § "Every binder that mints the cell owes the rule
 // too"). A `let` that kept the routing frees the cell's live content at the
 // binding's last use — which is the capture, so every later reader gets the freed
-// page. Issue #1124 reached it through `port/write` from a spawned fiber, and a
-// park is what makes the extra release fatal rather than latent: the park rebuilds
-// the value at rc 1, so the routed release takes it to zero. Compile-level twins,
+// page. The trap: a `port/write` park from a spawned fiber is what makes the
+// extra release fatal rather than latent, because the park rebuilds the value
+// at rc 1, so the routed release takes it to zero. Compile-level twins,
 // which need no park and no timing luck: `lir::lower::tests::release::arms`'s
 // `let_bound_reassign_*_leaves_no_cell_slot_release`.
 #[test]
@@ -383,7 +383,7 @@ fn region_compose_closure_acc_uaf() {
 // cleanup `decref_region(recv_region)` then double-frees a phantom region. This
 // subprocess runs the JIT tier under the guardfree oracle, where a regression
 // faults deterministically on the worker thread. The cell loop is in
-// src/primitives/concurrency.rs.
+// src/primitives/concurrency/worker.rs.
 #[test]
 fn region_spawn_capture_mutate_guardfree() {
     run_elle_script_with_args(

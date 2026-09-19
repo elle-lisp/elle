@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-19
 // docs/impl/wasm.md
 //! LIR → WASM emission: the module's shape, the emitter's state, and what
 //! drives one function body after another.
@@ -129,7 +129,7 @@ pub fn emit_module(
 /// Whether `func` can be served as a standalone single-closure module.
 ///
 /// A standalone module runs through hosts whose suspension and tail-call
-/// imports are panic stubs (src/wasm/lazy/env.rs) and whose funcref table has a
+/// imports are panic stubs (src/wasm/lazy/linker.rs) and whose funcref table has a
 /// single entry, so every shape whose execution would reach one of them is
 /// refused here rather than detonated at runtime
 /// (src/wasm/AGENTS.md § "Constraints on per-closure compilation"):

@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 //! The WASM host's data-operation dispatch: one opcode routed to the value
 //! constructors and intrinsic bodies it stands for.
 

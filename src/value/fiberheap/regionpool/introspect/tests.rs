@@ -1,4 +1,4 @@
-// audited: 2026-09-18
+// audited: 2026-09-19
 //! Unit tests (`super` is the parent impl module).
 
 use super::*;
