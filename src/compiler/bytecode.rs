@@ -1,3 +1,9 @@
+// audited: 2026-09-19
+//! Compiled bytecode: the instruction bytes, the constant pool, and the
+//! emit/patch surface the emitter writes through.
+//!
+//! docs/impl/bytecode.md
+
 use crate::error::LocationMap;
 use crate::reader::SourceLoc;
 use crate::value::Value;
@@ -95,9 +101,8 @@ impl Bytecode {
     }
 
     /// Record a source location for the current bytecode position.
-    /// Only records non-synthetic spans (line > 0).
+    /// A synthetic span (all fields zero) is not recorded.
     pub fn record_location(&mut self, span: &crate::syntax::Span) {
-        // Skip synthetic spans (all zeros)
         if span.line == 0 && span.col == 0 && span.start == 0 && span.end == 0 {
             return;
         }
@@ -152,6 +157,12 @@ impl Bytecode {
         self.instructions.push((value >> 16) as u8);
         self.instructions.push((value >> 8) as u8);
         self.instructions.push((value & 0xff) as u8);
+    }
+
+    /// Emit a u64 (big-endian) — a `SymbolId` name-hash operand.
+    /// [`crate::vm::VM::read_u64`] reads it.
+    pub fn emit_u64(&mut self, value: u64) {
+        self.instructions.extend_from_slice(&value.to_be_bytes());
     }
 
     /// Emit a `SignalBits` operand: eight bytes, big-endian.

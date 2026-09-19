@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-19
 //! Register and slot allocation, instruction emission, and block management for
 //! the LIR lowerer.
 //!
@@ -126,10 +126,14 @@ impl<'a> Lowerer<'a> {
         let region = self.cell_region_for(binding);
         let nil_reg = self.emit_const(LirConst::Nil)?;
         let cell_reg = self.fresh_reg();
+        let bi = self.arena.get(binding);
+        let (name, mutated) = (bi.name, bi.is_mutated);
         self.emit_alloc_in(region, |region| LirInstr::MakeCaptureCell {
             region,
             dst: cell_reg,
             value: nil_reg,
+            name,
+            mutated,
         });
         self.emit_binding_store(slot, cell_reg);
         Ok(slot)

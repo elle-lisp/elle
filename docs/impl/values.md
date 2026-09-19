@@ -1,6 +1,6 @@
 # Values
 
-<!-- audited: 2026-09-08 -->
+<!-- audited: 2026-09-19 -->
 
 Every Elle value is a 16-byte tagged union: an 8-byte tag and an 8-byte
 payload.
@@ -42,8 +42,8 @@ ffi tables). `prim_def(id)` is the inverse, resolving a native-fn back to its
 (it is not heap, so `region_of` is `None`), and two native-fns are equal iff
 their `prim_id`s match. Because the identity is a position-stable index rather
 than a pointer, the immediate rides the `Immediate` arm of `send` unchanged
-across the process boundary, and `prim_table_snapshot()` materializes an
-indexable table agreeing with these payloads for the WASM host's dispatch.
+across the process boundary. `prim_table_snapshot()` materializes an indexable
+table that agrees with these payloads, for the WASM host's dispatch.
 
 ## Heap types
 
@@ -77,7 +77,7 @@ TAG_MANAGED_PTR (30)  ManagedPointer { addr, traits }
 TAG_EXTERNAL (31)     External { obj: ExternalObject, traits }
 TAG_PARAMETER (32)    Parameter { id: u32, default: Value, traits }
 TAG_THREAD (33)       ThreadHandle { handle, traits }
-TAG_CAPTURE_CELL (34) CaptureCell { cell: Rc<RefCell<Value>>, traits }
+TAG_CAPTURE_CELL (34) CaptureCell { cell: Rc<RefCell<Value>>, origin, traits }
 TAG_CLOSURE_TEMPLATE (35) ClosureTemplate(ClosureTemplate)  # never user-visible
 ```
 
@@ -189,11 +189,12 @@ not interned, stays a real cross-region reference, and both ledgers count it.
 
 The rule has to be the same on both sides, because the remove half cannot
 tell how the key it removes arrived. Count a self-edge in the put funnel
-alone and the container's region holds a reference to itself that the free
-cascade never releases — the cascade filters `own_id` — so every `put` of a
-string or array key leaks the whole region unless a later `del` cancels it.
-Count one in the remove funnel alone and `del` decrefs a reference the
-constructor never took, which frees the container under its own reader.
+alone, and the container's region holds a reference to itself that the free
+cascade never releases, because the cascade filters `own_id`. Every `put` of
+a string or array key then leaks the whole region unless a later `del`
+cancels it. Count one in the remove funnel alone and `del` decrefs a
+reference the constructor never took, which frees the container under its
+own reader.
 
 ### The wire key owns its bytes
 

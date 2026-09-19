@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-19
 //! Recursive/scoped binding forms: `let` and `letrec`.
 //!
 //! These share the region-scope, capture-cell, and tail-call stranding
@@ -132,10 +132,14 @@ impl<'a> Lowerer<'a> {
                     let region = self.cell_region_for(*binding);
                     let nil_reg = self.emit_const(LirConst::Nil)?;
                     let cell_reg = self.fresh_reg();
+                    let bi = self.arena.get(*binding);
+                    let (name, mutated) = (bi.name, bi.is_mutated);
                     self.emit_alloc_in(region, |region| LirInstr::MakeCaptureCell {
                         region,
                         dst: cell_reg,
                         value: nil_reg,
+                        name,
+                        mutated,
                     });
                     self.emit_binding_store(slot, cell_reg);
                     // One routine owns the cell store, the `cell ⊇ content` adopt
@@ -355,10 +359,8 @@ impl<'a> Lowerer<'a> {
             // ALSO captured by a sibling (`needs_capture`) is held by a letrec
             // cell whose lifetime outlives this tail-call activation; its
             // closure region is released by the cell's cascade, so a tail-call
-            // deferred release would decref it a SECOND time and free it under the still-live
-            // cell (the scheduler's `handle-fiber-after-resume` — self-recursive
-            // AND sibling-captured — freed under its forward cell; a stale
-            // `tail_callee_release_region` deref of the next self-call).
+            // deferred release would decref it a SECOND time and free it under
+            // the still-live cell.
             // docs/impl/selfrec.md: the cell-free case is exactly the one the
             // self-edge leaves uncaptured. Pinned by
             // tests/elle/region-selfrec-captured-tail-release.lisp.

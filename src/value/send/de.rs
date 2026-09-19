@@ -1,3 +1,7 @@
+// audited: 2026-09-19
+//! Deserializing a `SendBundle`: every received value is rebuilt on the
+//! receiving heap, in the call's region.
+
 use super::*;
 
 /// Resolve a received traits value: if NIL, stamp the receiving thread's
@@ -85,7 +89,6 @@ impl<'a, 'h> DeserContext<'a, 'h> {
     }
 }
 
-/// Recursive worker for deserialization. Threads DeserContext through all recursive calls.
 /// Reconstruct a closure **template** blueprint (a `SendableClosure` produced by
 /// `sendable_from_template`) into an `Rc<TemplateProto>`. The inverse of
 /// `sendable_from_template`: recurses on `child_protos` and ignores
@@ -137,6 +140,8 @@ pub(in crate::value::send) fn template_from_sendable(
     })
 }
 
+/// The recursive deserialization worker: one arm per `SendValue` variant,
+/// threading `DeserContext` through every recursive call.
 pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) -> Value {
     use crate::value::closure::{Closure, TemplateProto};
     use crate::value::heap::{HeapObject, Pair};
@@ -279,6 +284,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
             let traits_val = into_value_inner(*traits, ctx);
             let cell_val = ctx.alloc(HeapObject::CaptureCell {
                 cell: std::rc::Rc::new(RefCell::new(inner_val)),
+                origin: crate::value::heap::CellOrigin::Runtime,
                 traits: traits_val,
             });
             if let Some(idx) = fixup_idx {

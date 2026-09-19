@@ -1,3 +1,4 @@
+// audited: 2026-09-19
 //! Trait table primitives: `with-traits` and `traits`.
 //!
 //! `with-traits` attaches an immutable struct as a trait table to a value,
@@ -165,8 +166,9 @@ unsafe fn clone_with_traits(
             cell: std::rc::Rc::new(std::cell::RefCell::new(*cell.borrow())),
             traits: table,
         })),
-        HeapObject::CaptureCell { cell, .. } => Ok(ctx.alloc(HeapObject::CaptureCell {
+        HeapObject::CaptureCell { cell, origin, .. } => Ok(ctx.alloc(HeapObject::CaptureCell {
             cell: std::rc::Rc::new(std::cell::RefCell::new(*cell.borrow())),
+            origin: *origin,
             traits: table,
         })),
         HeapObject::Fiber { handle, .. } => Ok(ctx.alloc(HeapObject::Fiber {

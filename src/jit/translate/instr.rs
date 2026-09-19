@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-19
 // src/jit/AGENTS.md
 //! Translating one LIR instruction to Cranelift IR.
 //!
@@ -81,7 +81,8 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             LirInstr::StoreLocalRefcounted { slot, src } => {
-                // Refcounting removed — just store (identical to StoreLocal).
+                // Region RC owns reclamation, so this stores exactly as
+                // StoreLocal does — the variant adds nothing at this tier.
                 let base = self.local_slot_to_var(*slot);
                 let (tag, payload) = self.use_var_pair(builder, src.0);
                 self.def_var_pair(builder, base, tag, payload);
@@ -96,7 +97,7 @@ impl<'a> FunctionTranslator<'a> {
                         JitError::InvalidLir("LoadCapture without env pointer".to_string())
                     })?;
                     let (raw_tag, raw_payload) = load_value_slot(builder, env_ptr, *index as u32);
-                    // Auto-unwrap LocalCell if present
+                    // Auto-unwrap a CaptureCell if present
                     let (val_tag, val_payload) = self.call_helper_value_unary(
                         builder,
                         self.helpers.load_capture,
@@ -329,17 +330,25 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             LirInstr::MakeCaptureCell {
-                dst, value, region, ..
+                dst,
+                value,
+                region,
+                name,
+                mutated,
             } => {
                 let (vt, vp) = self.use_var_pair(builder, value.0);
                 let region_val = self.emit_resolve_alloc_region(builder, *region)?;
+                let name_val = builder.ins().iconst(I64, name.0 as i64);
+                let mutated_val = builder.ins().iconst(I64, *mutated as i64);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("MakeCaptureCell without vm pointer".to_string())
                 })?;
                 let func_ref = self
                     .module
                     .declare_func_in_func(self.helpers.make_capture, builder.func);
-                let call = builder.ins().call(func_ref, &[vt, vp, region_val, vm]);
+                let call = builder
+                    .ins()
+                    .call(func_ref, &[vt, vp, region_val, name_val, mutated_val, vm]);
                 let rt = builder.inst_results(call)[0];
                 let rp = builder.inst_results(call)[1];
                 self.def_var_pair(builder, dst.0, rt, rp);

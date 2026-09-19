@@ -1,6 +1,6 @@
 # primitives
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-19 -->
 
 Built-in functions. Registered into the VM at startup.
 
@@ -124,7 +124,7 @@ name)` answers for either spelling.
 | `comparison.rs` | `=` (numeric-aware), `identical?` (strict), `hash`. The ordering comparisons are stdlib closures over `%lt`/`%gt`/`%le`/`%ge` |
 | `compile/` | `compile/analyze`, `compile/symbols`, `compile/captures`, `compile/call-graph`, `compile/run-on`, `compile/whole-module`, and the rest of the `compile/*` family |
 | `config.rs` | `vm/tier`, `backend?`, `vm/config`, `vm/config-set` |
-| `concurrency.rs` | `sys/spawn`, `sys/spawn-vm`, `sys/thread-state`, `sys/thread-id`, `sys/unique` |
+| `concurrency.rs` | `sys/spawn`, `sys/spawn-vm`, `sys/thread-state`, `sys/thread-id`, `sys/unique`; the spawn worker body is `concurrency/worker.rs` |
 | `convert.rs` | `integer`, `float`, `parse-int`, `parse-float`, `string`, `number->string` |
 | `debug.rs` | `debug/print`, `debug/trace`, `debug/memory`, `debug/symbol-count` |
 | `disassembly.rs` | `fn/disasm`, `fn/disasm-jit`, `fn/flow`, `vm/list-primitives`, `vm/primitive-meta` |

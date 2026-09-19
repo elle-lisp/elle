@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-19
 // docs/impl/vm.md
 // docs/impl/bytecode.md
 //! The bytecode dispatch match: one decoded instruction routed to its handler.
@@ -307,9 +307,15 @@ impl VM {
             // Box operations
             Instruction::MakeCapture => {
                 let region = self.read_static_region(bc, ip);
+                let mutated = self.read_u8(bc, ip) != 0;
+                let name = crate::value::SymbolId(self.read_u64(bc, ip));
                 let region_id =
                     self.runtime_region_for_alloc_slot_maybe_merged(region, code.merged_slots());
-                capture::handle_make_capture(self, region_id);
+                capture::handle_make_capture(
+                    self,
+                    region_id,
+                    crate::value::heap::CellOrigin::Compiled { name, mutated },
+                );
             }
             Instruction::UnwrapCapture => {
                 capture::handle_unwrap_capture(self);

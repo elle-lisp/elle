@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-19
 // docs/impl/jit.md
 //! The prologue: what a compiled function does with its six parameters before
 //! the first LIR block runs.
@@ -195,7 +195,7 @@ impl JitCompiler {
             // Collect args[non_rest_params..nargs] into the rest list. Each cons
             // is minted in its OWN fresh per-execution region with ownership
             // transfer down the chain — `elle_jit_collect_rest_list`, the JIT
-            // analog of the interpreter's `args_to_list` (src/vm/env.rs). Each
+            // analog of the interpreter's `args_to_list` (src/vm/env/rest.rs). Each
             // cons owning its own per-execution region keeps the rest list's
             // regions independent of a JIT->JIT callee's. docs/impl/region/rules.md.
             let rest_var_idx = arg_var_base + non_rest_params as u32;

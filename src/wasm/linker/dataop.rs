@@ -1,3 +1,7 @@
+// audited: 2026-09-19
+//! The WASM host's data-operation dispatch: one opcode routed to the value
+//! constructors and intrinsic bodies it stands for.
+
 use super::*;
 
 /// Read (tag, payload) pairs from linear memory at `regs_ptr`.
@@ -78,7 +82,10 @@ pub fn dispatch_data_op(
             None => (SIG_OK, Value::EMPTY_LIST),
         },
         x if x == DataOp::MakeArray as i32 => (SIG_OK, ctx.array_mut(args.to_vec())),
-        x if x == DataOp::MakeCapture as i32 => (SIG_OK, ctx.capture_cell(args[0])),
+        x if x == DataOp::MakeCapture as i32 => (
+            SIG_OK,
+            ctx.capture_cell(args[0], crate::value::heap::CellOrigin::Runtime),
+        ),
         x if x == DataOp::LoadCapture as i32 => match args[0].as_capture_cell() {
             Some(cell) => (SIG_OK, *cell.borrow()),
             None => (SIG_OK, args[0]),

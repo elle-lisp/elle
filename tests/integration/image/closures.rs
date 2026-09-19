@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-19
 // A closure and its code object cross the body; the header hydrates without
 // its blueprint.
 // docs/impl/image/sealing.md
@@ -257,8 +257,8 @@ fn a_wasm_closure_refuses_the_dump() {
     refused(&mut src, root, &path, "wasm-borne");
 }
 
-// A capture cell in an env still refuses: snapping is the boot milestone's
-// answer, and until it lands a mutable capture is not sealed data.
+// A run-time capture cell in an env still refuses: it records no binding, so
+// the snapping rule has nothing to snap it as (snapping.rs owns the snaps).
 #[test]
 fn an_env_capture_cell_refuses_the_dump() {
     let dir = crate::common::ScratchDir::new("image-closure-cell");
@@ -269,6 +269,7 @@ fn an_env_capture_cell_refuses_the_dump() {
     let cell = src.alloc_in_region(
         HeapObject::CaptureCell {
             cell: Rc::new(std::cell::RefCell::new(Value::int(1))),
+            origin: elle::value::heap::CellOrigin::Runtime,
             traits: Value::NIL,
         },
         region,

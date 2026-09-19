@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-19
 // docs/impl/jit.md
 //! One Cranelift signature per `elle_jit_*` runtime helper, declared into the
 //! module before any function is translated.
@@ -47,7 +47,6 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     let value_unary_vm = make_sig(module, &[I64, I64, I64], &[I64, I64]);
     // Value binary + vm: (atag, apay, btag, bpay, vm) -> (tag, payload)
     let value_binary_vm = make_sig(module, &[I64, I64, I64, I64, I64], &[I64, I64]);
-    // Value ternary + vm: (t1,p1, t2,p2, t3,p3, vm) -> (tag, payload) -- not needed currently
     // vm only (pointer param): (vm) -> (tag, payload)
     let vm_only = make_sig(module, &[I64], &[I64, I64]);
     // make_array: (elements_ptr, count, region, vm) -> (tag, payload). The vm
@@ -100,9 +99,11 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     // cons: (car_tag, car_pay, cdr_tag, cdr_pay, region, vm) -> (tag, payload).
     // The trailing vm pointer names the heap the cons cell is born on.
     let cons_sig = make_sig(module, &[I64, I64, I64, I64, I32, I64], &[I64, I64]);
-    // make_capture: (tag, payload, region: I32, vm) -> (tag, payload). The vm
-    // pointer names the heap the cell is born on (the driving instance's own).
-    let make_capture_sig = make_sig(module, &[I64, I64, I32, I64], &[I64, I64]);
+    // make_capture: (tag, payload, region: I32, name: I64, mutated: I64, vm)
+    // -> (tag, payload). The vm pointer names the heap the cell is born on
+    // (the driving instance's own); name and mutated are the compiled cell's
+    // provenance (docs/impl/image/sealing.md).
+    let make_capture_sig = make_sig(module, &[I64, I64, I32, I64, I64, I64], &[I64, I64]);
     // put + jit_ctx: (otag,opay, ktag,kpay, vtag,vpay, jit_ctx) -> (tag, payload).
     // The trailing I64 is the `*mut JitCtx` the intrinsic resolves its VM from.
     let put_ctx_sig = make_sig(module, &[I64, I64, I64, I64, I64, I64, I64], &[I64, I64]);

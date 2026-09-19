@@ -47,7 +47,7 @@ pub enum LirInstr {
     /// decref_and_free(old), incref(new), then store.
     /// Used for mutable binding init and assignment.
     StoreLocalRefcounted { slot: u16, src: Reg },
-    /// Load from capture (auto-unwraps LocalCell)
+    /// Load from capture (auto-unwraps a CaptureCell)
     LoadCapture { dst: Reg, index: u16 },
     /// Load from capture without unwrapping (for forwarding cells to nested closures)
     LoadCaptureRaw { dst: Reg, index: u16 },
@@ -238,6 +238,11 @@ pub enum LirInstr {
         dst: Reg,
         value: Reg,
         region: StaticRegion,
+        /// The bound name, minted onto the cell for the image dumper's snap
+        /// decision (docs/impl/image/sealing.md).
+        name: crate::value::SymbolId,
+        /// Whether the compilation unit assigns the binding anywhere.
+        mutated: bool,
     },
     /// Load value from capture cell
     LoadCaptureCell { dst: Reg, cell: Reg },

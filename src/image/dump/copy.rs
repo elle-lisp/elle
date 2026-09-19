@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-19
 //! The compacting copy: what the dumper accepts into an image's body, and
 //! the spellings it records on the way through.
 //!
@@ -23,7 +23,7 @@ use crate::symbol::SymbolTable;
 use crate::syntax::SyntaxArena;
 use crate::value::closure::{Closure, ClosureTemplate, CodePayload, TemplateRef};
 use crate::value::fiberheap::FiberHeap;
-use crate::value::heap::{deref, HeapObject, Pair};
+use crate::value::heap::{deref, CellOrigin, HeapObject, Pair};
 use crate::value::region_slice::RegionSlice;
 use crate::value::repr::{
     TAG_EMPTY_LIST, TAG_FALSE, TAG_FLOAT, TAG_INT, TAG_KEYWORD, TAG_NATIVE_FN, TAG_NIL, TAG_SYMBOL,
@@ -328,25 +328,73 @@ pub(super) fn copy_value(
             },
             region,
         ),
-        // A closure is its template, its env, and its squelch mask. The env
-        // values go through the ordinary walk, so a capture cell in one
-        // refuses here as unsealed data until snapping lands
-        // (docs/impl/image/sealing.md).
+        // A closure is its template, its env, and its squelch mask. The copy
+        // is reserved before its children are walked: a letrec cycle through
+        // two snapped cells re-enters this closure, and the reservation's
+        // visited entry is what closes the cycle onto one copy. Every patched
+        // value lands in the same scratch region, so the patch writes
+        // self-edges the RC ledger never counts.
         HeapObject::Closure { closure, .. } => {
-            let template = copy_value(heap, region, closure.template.value(), walk)?;
-            let mut env = Vec::with_capacity(closure.env.len());
-            for &slot in closure.env.iter() {
-                env.push(copy_value(heap, region, slot, walk)?);
-            }
-            let env = heap.alloc_region_slice_in_region(&env, region);
-            heap.alloc_in_region(
+            let nils = vec![Value::NIL; closure.env.len()];
+            let env = heap.alloc_region_slice_in_region(&nils, region);
+            let copy = heap.alloc_in_region(
                 HeapObject::Closure {
-                    closure: Closure::new(TemplateRef::region(template), env, closure.squelch_mask),
+                    closure: Closure::new(
+                        TemplateRef::region(Value::NIL),
+                        env,
+                        closure.squelch_mask,
+                    ),
                     traits: carried,
                 },
                 region,
-            )
+            );
+            walk.visited.insert(key, copy);
+            let template = copy_value(heap, region, closure.template.value(), walk)?;
+            let slots = env.as_ptr() as *mut Value;
+            for (i, &slot) in closure.env.iter().enumerate() {
+                let v = copy_value(heap, region, slot, walk)?;
+                unsafe { slots.add(i).write(v) };
+            }
+            let obj = copy.as_heap_ptr().expect("a copied object is heap") as *mut HeapObject;
+            match unsafe { &mut *obj } {
+                HeapObject::Closure { closure, .. } => {
+                    closure.template = TemplateRef::region(template);
+                }
+                _ => unreachable!("the reserved copy is a closure"),
+            }
+            copy
         }
+        // A compiled cell for a never-assigned binding snaps: the copy is the
+        // content, keyed under the cell so every capturer shares it
+        // (docs/impl/image/sealing.md). The refusals are the assigned
+        // binding, by name, and the run-time cell, by variant.
+        HeapObject::CaptureCell { cell, origin, .. } => match origin {
+            CellOrigin::Compiled { mutated: false, .. } => {
+                let content = *cell.borrow();
+                let copy = copy_value(heap, region, content, walk)?;
+                walk.visited.insert(key, copy);
+                return Ok(copy);
+            }
+            CellOrigin::Compiled {
+                name,
+                mutated: true,
+            } => {
+                let spelled = walk
+                    .memo
+                    .name(*name)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("#<symbol:{:#x}>", name.0));
+                return Err(ImageError::Unsupported(format!(
+                    "top-level {spelled} is assigned, so its capture cell is \
+                     mutable state no image carries"
+                )));
+            }
+            CellOrigin::Runtime => {
+                return Err(ImageError::Unsupported(
+                    "a run-time CaptureCell is mutable state no image carries".into(),
+                ));
+            }
+        },
         // A header crosses as its payload alone: the blueprint is Rust-heap
         // data the hydrating instance never holds, so the copy carries none
         // and the hydrated header answers its questions with absence.

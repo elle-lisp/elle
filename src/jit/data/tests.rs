@@ -1,3 +1,7 @@
+// audited: 2026-09-19
+//! Unit tests for the JIT data helpers: cons, arrays, capture cells, and the
+//! prologue's own-region env values.
+
 use super::*;
 
 /// Mint a fresh region on `heap` — the explicit region the JIT data helpers
@@ -82,7 +86,15 @@ fn test_cell_operations() {
     let heap = vm.heap_ptr;
     let vm_ptr = &mut vm as *mut crate::vm::VM as *mut ();
     let v = Value::int(42);
-    let cell = elle_jit_make_capture(v.tag, v.payload, fresh(heap), vm_ptr).to_value();
+    let cell = elle_jit_make_capture(
+        v.tag,
+        v.payload,
+        fresh(heap),
+        crate::value::SymbolId::of("jit-cell").0,
+        0,
+        vm_ptr,
+    )
+    .to_value();
     assert!(cell.is_capture_cell());
 
     let loaded = elle_jit_load_capture_cell(cell.tag, cell.payload).to_value();
@@ -100,7 +112,8 @@ fn test_cell_operations() {
 // A JIT-compiled function's prologue builds env values — capture cells (a
 // mutable-captured param/local) and the variadic rest cons-list — that the
 // interpreter's `populate_env` mints a FRESH per-value region for
-// (`env_value_region` / `args_to_list`, src/vm/env.rs). The prologue must do the
+// (`env_value_region`, src/vm/env.rs; `args_to_list`, src/vm/env/rest.rs).
+// The prologue must do the
 // same. On a JIT->JIT call the callee inherits the caller's region; an env value
 // allocated into the *caller's* region commingles with it
 // (docs/impl/region/rules.md Rule 6) and its value-based `DecrefCellRegion` /
