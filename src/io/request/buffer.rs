@@ -1,4 +1,4 @@
-//! audited: 2026-09-18
+//! audited: 2026-09-20
 //! Unsafe in-place buffer fill helpers for io completions.
 //!
 //! src/io/AGENTS.md
@@ -117,9 +117,12 @@ pub(crate) unsafe fn bytes_to_string_in_place(
     if std::str::from_utf8(bytes).is_err() {
         // The error is built at the completion's own birthplace, like every
         // other value a completion has to build (docs/impl/io-inflight.md).
+        // Every text-port read reaches here — `read`, `read-line`, `read-exact`
+        // and `read-all` alike — so the message names the operation class rather
+        // than one call that was once the only caller.
         return Err(birth.error(
             "encoding-error",
-            format!("port/read-line: invalid UTF-8 in {} bytes", slice_len),
+            format!("port read: invalid UTF-8 in {} bytes", slice_len),
         ));
     }
 

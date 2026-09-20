@@ -1,6 +1,6 @@
-//! audited: 2026-09-18
-//! Completion processing for async I/O operations: one arm per operation
-//! shape, each answering with a value it was handed or one it builds itself.
+//! audited: 2026-09-20
+//! Completion processing for async I/O: one arm per operation shape, each
+//! answering with a value it was handed or one it builds.
 //!
 //! src/io/AGENTS.md
 //! docs/impl/io-inflight.md
@@ -17,10 +17,10 @@ use std::collections::HashMap;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::io::{FromRawFd, OwnedFd, RawFd};
 
-/// Set TCP_NODELAY on a TCP stream fd to disable Nagle's algorithm.
 mod port;
 use port::complete_port_op;
 
+/// Set TCP_NODELAY on a TCP stream fd to disable Nagle's algorithm.
 fn set_tcp_nodelay(fd: &OwnedFd) {
     unsafe {
         let opt: libc::c_int = 1;
