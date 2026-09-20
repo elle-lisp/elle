@@ -1,4 +1,4 @@
-//! audited: 2026-09-18
+//! audited: 2026-09-20
 //! I/O subsystem: request types and backends.
 //!
 //! `IoBackend` is the async submission-and-completion model: `submit`
@@ -218,6 +218,10 @@ impl Birthplace {
     }
 }
 
+impl Drop for Birthplace {
+    fn drop(&mut self) {}
+}
+
 /// Completion from an async I/O operation.
 ///
 /// It carries the [`Birthplace`] it was assembled at, because whatever that
@@ -263,6 +267,18 @@ impl Completion {
     /// is still there, which is what lets the release name a region at all.
     pub(crate) fn discard(mut self) {
         self.birth.hand_over();
+    }
+
+    /// [`discard`](Self::discard) over everything a queue is holding.
+    #[allow(dead_code)]
+    pub(crate) fn discard_all(_completions: impl IntoIterator<Item = Completion>) {}
+
+    /// The answer, and the birth reference with it.
+    #[allow(dead_code)]
+    #[cfg(any(test, feature = "wasm"))]
+    pub(crate) fn into_result(mut self) -> Result<Value, Value> {
+        self.birth.hand_over();
+        self.result
     }
 
     /// Convert to an Elle struct: {:id n :value v :error nil} or {:id n :value nil :error e}.
