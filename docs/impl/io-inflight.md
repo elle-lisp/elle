@@ -1,6 +1,6 @@
 # An operation in flight
 
-<!-- audited: 2026-09-18 -->
+<!-- audited: 2026-09-20 -->
 
 What a submitted I/O operation holds and owns, how it ends when the fiber that asked is gone, and how its answer is assembled.
 
@@ -45,14 +45,15 @@ reads it back: `operands` is one list, and holding a value nobody will read
 costs a reference until the operation ends.
 
 Pinned by `a_submitted_operations_operands_outlive_the_fiber_that_asked`
-(`src/io/aio/tests/park.rs`) and, for the fiber itself, by
-`a_held_fiber_survives_the_release_of_its_region` (`src/io/pending.rs`).
+(`src/io/aio/tests/gone.rs`) and, for the fiber itself, by
+`a_held_fiber_survives_the_release_of_its_region`
+(`src/io/pending/tests/hold.rs`).
 
 ## A hold retains what reclamation listens to
 
 A retain on an `Owned` region is inert: that region is reclaimed by its owner's
 subtree drop however many references point at it
-(docs/impl/region/ownership.md). So the hold does not retain the operand's own
+([ownership.md](region/ownership.md)). So the hold does not retain the operand's own
 region — it retains the operand's **reclamation root**, the ancestor whose count
 the subtree's fate hangs on. For a `Counted` operand the root is the region
 itself and nothing changes; for an `Owned` one the root is what a count can
@@ -71,7 +72,7 @@ already makes for a write's copied payload: one seam, one rule, and a reference
 costs until the operation ends.
 
 Pinned by `an_owned_operand_is_held_through_its_reclamation_root`
-(`src/io/pending.rs`).
+(`src/io/pending/tests/hold.rs`).
 
 ## A hold is let go while its store is still there
 
@@ -136,12 +137,17 @@ leave the caller's value pointing into it. `recvfrom` is the one completion that
 writes into a caller-owned struct, and what it writes is that caller's own
 pre-allocated buffer re-tagged, never a value born here.
 
-A completion that never becomes a value keeps its reference, and two routes
-reach that. `AsyncBackend::quiesce` discards the queue a backend is torn down
-holding, which releases what each of those completions built while the store is
-still there. The WASM tier's inline path reads the value straight out of the
-completion instead, and takes the reference with it; that tier reclaims no
-region while it runs — see [the WASM backend](wasm.md).
+A completion that never becomes a value still owes that reference, and a reader
+that is finished with one must say which it means: release what was built, or
+take it over. A backend tearing down releases, because nobody is left to read
+the answer and the store is still there to release it into. The WASM tier takes
+it over, because that tier reclaims no region while it runs and has nothing to
+hand a reference to (see [the WASM backend](wasm.md)).
+
+Letting the completion drop says neither, and strands the region with nothing
+to report it. So `Birthplace` refuses to be dropped holding one: the assertion
+fails a debug build where the leak would otherwise cost a region per operation,
+unmeasured.
 
 Pinned by `a_run_that_spawns_a_child_leaves_no_residue` and
 `a_run_that_reads_a_whole_file_leaves_no_residue`
@@ -191,7 +197,7 @@ than a fiber in this one, and `io/cancel` through `handle-io-forward-cancel` is
 how that reader lets go.
 
 Pinned by `a_completion_is_withheld_when_the_fiber_that_asked_is_gone`
-(`src/io/aio/tests/park.rs`), which builds the state directly and asserts on the
+(`src/io/aio/tests/gone.rs`), which builds the state directly and asserts on the
 answer. No corpus file pins it end to end: the answer goes to a fiber that is
 gone, so nothing in the program can observe it.
 `tests/elle/io-stale-operation-ends.lisp` reaches the same state and asserts on
@@ -238,7 +244,7 @@ descriptor, which is the platform's choice rather than a promise (§ "The stop
 pipe").
 
 Pinned by `an_operation_that_parks_ends_when_the_fiber_that_asked_is_gone`
-(`src/io/aio/tests/park.rs`), which gives the operation no peer at all, and end
+(`src/io/aio/tests/gone.rs`), which gives the operation no peer at all, and end
 to end by `tests/elle/io-stale-operation-ends.lisp`.
 
 ## The stop pipe
@@ -279,7 +285,7 @@ wakes a thread parked in `poll(2)` on that descriptor is the platform's choice:
 macOS and the BSDs wake it, and Linux does not, because `poll` holds a reference
 to the file it waits on. So an operation that can park carries a pipe on every
 platform, and a close ends such an operation by writing to that pipe rather than
-by being a close (§ "How a close wakes the operations it retires").
+by being a close ([descriptors and workers](io-descriptor.md)).
 
 Two operations meet the first condition and cannot meet the second, because the
 kernel reports no readiness for what they wait on: an `Open` of a fifo for
