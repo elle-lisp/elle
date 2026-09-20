@@ -1,4 +1,5 @@
 (elle/epoch 12)
+# audited: 2026-09-19
 # Counterfactual for the strand a `Fresh` io op leaves on its own region.
 #
 # `port/read` and its siblings declare `RegionEffect::Fresh` and mint ONE
@@ -10,7 +11,7 @@
 #     back — the request at the park, the buffer at the resume;
 #   - the `SuspendEscape` retain the park takes so the scheduler can read the
 #     request out of `fiber.signal`, which the install that displaces the park
-#     owes (docs/impl/region/owner.md § "A payload the RUNTIME built is
+#     owes (docs/impl/region/park.md § "A payload the RUNTIME built is
 #     released by the install that displaces it").
 #
 # An install that releases only the first leaves the second standing, and the

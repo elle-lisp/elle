@@ -1,10 +1,11 @@
 (elle/epoch 12)
+# audited: 2026-09-19
 # A spawned fiber outlives the parameterize scope it inherited from.
 #
 # fiber/new snapshots the creator's dynamic-parameter bindings at creation,
 # precisely because the creator's parameterize blocks unwind long before the
 # scheduler resumes the child. The snapshot must therefore COUNT what it
-# holds (docs/impl/region/owner.md, "A child's inherited parameter baseline
+# holds (docs/impl/region/park.md, "A child's inherited parameter baseline
 # is a counted holder"): here the bound list's only other holder is
 # spawn-reader's activation, which completes while the child sleeps. The
 # child then reads the parameter after every structural holder is gone.

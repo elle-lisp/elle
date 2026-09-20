@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-19 -->
 
 Low-level Intermediate Representation. SSA form with virtual registers
 and basic blocks. Architecture-independent but close to target.
@@ -356,14 +356,15 @@ A suspending emit whose payload the body releases nowhere
 resume block, with a copy parked in a local slot of its own since the value
 register is consumed by the `Emit`. That gives a fiber body one reference of every
 value it yields, which is what a discarded fiber's discharge releases
-(docs/impl/region/owner.md § "Park/unpark symmetry").
+(docs/impl/region/park.md).
 
 A **dynamic** emit has no `Emit` terminator to wrap — its first argument is not a
 literal keyword set, so it lowers as an ordinary call — and `lower_call` carries the
 same obligation there. In non-tail position it takes the mint at the payload
 argument and releases it after the call, which is where the resume lands; in tail
-position the borrowed-argument retain already is that reference (docs/impl/region/
-owner.md § "What yields is the emit OPERATION, not the `Emit` node").
+position the borrowed-argument retain already is that reference
+(docs/impl/region/park.md § "What yields is the emit OPERATION, not the `Emit`
+node").
 
 The emitter preserves stack state across the emit boundary via
 `yield_stack_state`. This ensures intermediate values computed before emit

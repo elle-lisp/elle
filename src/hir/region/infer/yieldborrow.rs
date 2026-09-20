@@ -1,28 +1,11 @@
-//! Which `Emit` sites yield a payload the emitting body owns no reference of
-//! (docs/impl/region/owner.md § "Park/unpark symmetry" — "A fiber body owns one
-//! reference of every value it yields").
+// audited: 2026-09-19
+//! Which `Emit` sites yield a payload the emitting body owns no reference of.
 //!
-//! A park delivers its payload to the resumer and leaves a copy in `fiber.signal`.
-//! Two references answer for that, and they answer to different consumers:
+//! docs/impl/region/park.md
 //!
-//! - the park's `EmitEscape` retain is the **delivery** reference, consumed by the
-//!   resumer's compiler-emitted release of the resume result;
-//! - the body's own reference is released by the continuation past the yield —
-//!   the release a fiber abandoned while suspended never runs, and the one the
-//!   region free's fiber discharge stands in for.
-//!
-//! A payload the body allocated supplies the second reference itself: its
-//! `decref_point` is at or after the `Emit`, in the emitting function. A payload
-//! the body merely borrows — a capture, a parameter, a module-level binding —
-//! supplies none, so the discharge would release the delivery reference the
-//! resumer already consumed. This pass names those sites; `lower_emit` mints the
-//! missing reference at each **suspending** one. A terminal emit takes no mint:
-//! a halt promotes the fiber to `:dead` and its delivery has no consumer at
-//! all, and an error's body-owned reference is reclaimed through the frames'
-//! own release tables instead — the raise records its minted delivery
-//! (the delivery ledger's `record_mint`), so the abandoned-frame walk and the parked frame's
-//! discharge run the payload's owed releases with their receipts, where a
-//! blanket discharge could not tell a borrowed payload from an owned one.
+//! The rule is park.md's "A fiber body owns one reference of every value it
+//! yields". What this pass decides is which sites fail it, and `lower_emit`
+//! mints the missing reference at each **suspending** one.
 //!
 //! The question is per-**function**, not per-region: a borrowed payload usually
 //! does have a `decref_point`, just in the activation that allocated it, whose

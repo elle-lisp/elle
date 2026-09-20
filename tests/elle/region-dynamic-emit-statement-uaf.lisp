@@ -1,7 +1,8 @@
 (elle/epoch 12)
+# audited: 2026-09-19
 # A raised payload's DELIVERY reference is the one the catcher's read consumes, and
 # the site's own retain answers to the continuation past the call — two references,
-# two consumers, wherever the raise leaves the emit PRIMITIVE (docs/impl/region/owner.md
+# two consumers, wherever the raise leaves the emit PRIMITIVE (docs/impl/region/park.md
 # § "What yields is the emit OPERATION, not the `Emit` node").
 #
 # A first argument the compiler cannot read as a keyword set falls through to that

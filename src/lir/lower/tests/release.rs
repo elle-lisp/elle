@@ -1,10 +1,14 @@
-// audited: 2026-09-14
+// audited: 2026-09-19
 // ── Region-lifecycle: decref/release emission ────────────────────
 //
 // Where the lowerer puts each region's release, split by the question each
 // group answers:
 //
 // - `emission` — that a release is emitted at all, and at which `decref_point`.
+// - `parkmint` — the reference a park mints for a payload the emitting body
+//   borrows (docs/impl/region/park.md).
+// - `frametables` — that the abandoned-frame release tables name exactly the
+//   routes the emitter wrote.
 // - `order` — the order releases take when several share one decref_point
 //   (docs/impl/region/rules.md Rule 4).
 // - `frameexit` — the release a frame owes on the way out.
@@ -25,7 +29,9 @@ mod arms;
 mod breakexit;
 mod emission;
 mod frameexit;
+mod frametables;
 mod order;
+mod parkmint;
 mod restpattern;
 mod shortcircuit;
 

@@ -1,11 +1,14 @@
+// audited: 2026-09-19
 //! The delivery ledger: how the current park's delivery references are funded.
+//!
+//! docs/impl/region/park.md
 //!
 //! Every value that crosses a fiber boundary carries exactly one delivery
 //! reference, minted by the crossing and consumed by exactly one reader on the
 //! other side. Which side mints, and what else the park owes, depends on the
 //! park's shape — and only the site that builds the park knows the shape. The
 //! ledger is the one record that carries the answer from the park to the seam
-//! that ends it (docs/impl/region/owner.md § "A park names its funding in the
+//! that ends it (docs/impl/region/park.md § "A park names its funding in the
 //! delivery ledger").
 //!
 //! The fields are private: a park names its funding through a method or not at
@@ -19,7 +22,7 @@ use crate::value::{SignalBits, Value};
 
 /// The funding record of a fiber's current park. One instance rides each
 /// `Fiber` (`Fiber::delivery`); see the module doc for the model and
-/// docs/impl/region/owner.md for the per-shape rules the methods encode.
+/// docs/impl/region/park.md for the per-shape rules the methods encode.
 #[derive(Default)]
 pub struct Delivery {
     /// The parked `SIG_ERROR` payload whose delivery reference the raise or
@@ -42,7 +45,7 @@ pub struct Delivery {
     /// names it and no `decref_point` names its region; the reference the
     /// allocation left is owed by whatever replaces the payload in the slot —
     /// a resume's delivery, or an abort's / refusal's injected error
-    /// (docs/impl/region/owner.md § "Park/unpark symmetry" — "A payload the
+    /// (docs/impl/region/park.md § "A payload the
     /// RUNTIME built is released by the install that displaces it"). Carried
     /// as the payload rather than a flag so the release is gated on
     /// representation identity with the live parked signal, and TAKEN by the
@@ -55,7 +58,7 @@ pub struct Delivery {
     /// release of the resume result is that reader, so [`Self::take_resume_funding`]
     /// clears the record at the crossing. A `squelch`/`attune` boundary is the
     /// one end of a park that has no reader at all, and it releases what this
-    /// names (docs/impl/region/owner.md § "A boundary ends a park with no reader
+    /// names (docs/impl/region/park.md § "A boundary ends a park with no reader
     /// and no install").
     ///
     /// Written by the site that TAKES the retain — the two suspend arms, the two
@@ -84,7 +87,7 @@ pub struct Delivery {
     /// re-enters at its suspending call's continuation, which runs that call's
     /// compiler-emitted result release; a bytecode callee funds that reference
     /// with its `Return` mint, but a primitive that suspends never returns, so
-    /// the delivery mints it instead (docs/impl/region/owner.md § "A delivery
+    /// the delivery mints it instead (docs/impl/region/park.md § "A delivery
     /// into a replayed frame carries one owning reference"). Rides the fiber
     /// rather than the frame because a tail suspend's park is built later and
     /// elsewhere, by a driver that never saw the primitive.
@@ -154,7 +157,7 @@ impl Delivery {
             !self.resume_unfunded,
             "delivery ledger: parking over an unconsumed park — a route ended \
              the previous park without consuming its resume funding \
-             (docs/impl/region/owner.md § \"A park names its funding in the \
+             (docs/impl/region/park.md § \"A park names its funding in the \
              delivery ledger\")",
         );
     }

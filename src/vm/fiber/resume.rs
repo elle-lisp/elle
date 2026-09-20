@@ -1,3 +1,10 @@
+// audited: 2026-09-19
+//! One level of fiber resumption: the swap in and out, and what it funds.
+//!
+//! The abort that injects an error at the suspension point instead is here too.
+//!
+//! docs/impl/region/park.md
+
 use super::*;
 
 impl VM {
@@ -54,7 +61,7 @@ impl VM {
         // returns and the resume value stands in for its result. Without the
         // retain the continuation consumes a reference the resumer still owns,
         // and the value is freed under every holder that outlives the resume
-        // (docs/impl/region/owner.md § "A delivery into a replayed frame carries
+        // (docs/impl/region/park.md § "A delivery into a replayed frame carries
         // one owning reference"; `tests/elle/region-primitive-resume-uaf.lisp`).
         // `region_of` no-ops an immediate.
         if unfunded {
@@ -78,7 +85,7 @@ impl VM {
             let flat = super::flatten_param_frames(&self.fiber.param_frames);
             #[cfg(debug_assertions)]
             let borrows = super::record_param_borrows(&flat, self.heap());
-            // The seeded baseline is a counted holder (docs/impl/region/owner.md
+            // The seeded baseline is a counted holder (docs/impl/region/park.md
             // § "A child's inherited parameter baseline is a counted holder"):
             // retain each heap entry and record the fiber → value edge; the
             // fiber object's free releases them through the baseline walk.
@@ -148,7 +155,7 @@ impl VM {
                 // `fiber/resume` itself — this is the route a `protect`ed
                 // body's denial takes, the denial parking in the inner fiber
                 // the outer one awaits through a `FiberResume` frame
-                // (docs/impl/region/owner.md § "Park/unpark symmetry") — and
+                // (docs/impl/region/park.md) — and
                 // the displace clears the mint record. The resume funding
                 // survives for the delivery funnel that runs when the
                 // trampoline descends.
@@ -340,7 +347,7 @@ impl VM {
             // replayed frame re-enters with `SIG_ERROR` set and leaves before the
             // parked call's result release — so the displaced park's funding goes
             // with the signal it rode in on; each arm below funds what it does
-            // hand over (docs/impl/region/owner.md § "A delivery into a replayed
+            // hand over (docs/impl/region/park.md § "A delivery into a replayed
             // frame carries one owning reference").
             vm.fiber.delivery.install_abort(error_value);
 

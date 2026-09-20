@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-17
+# audited: 2026-09-19
 # plumb.lisp — the io leak dashboard: every probe whose drive reaches the io
 # backend. oracle.lisp is the pure region dashboard and owns the discipline
 # this file follows — the estimator, the gauge-live discriminator rule, the
@@ -82,7 +82,7 @@
 # The three exits of a parked io op. Its `IoRequest` is the RUNTIME's value —
 # the native built it and the body names it nowhere — so no continuation
 # releases it and whatever ends the park owes that release
-# (docs/impl/region/owner.md § "Park/unpark symmetry"). `io-drop` is the exit
+# (docs/impl/region/park.md). `io-drop` is the exit
 # with no install at all, covered by the free-path discharge; `io-abort` and
 # `io-refuse` each end the park by raising at the fiber's own suspension point.
 # The three must stay together: `io-drop` removes the displacing install, so the

@@ -1,4 +1,7 @@
+// audited: 2026-09-19
 //! Arena allocation layer.
+//!
+//! docs/impl/region/rules.md
 //!
 //! Every funnel here takes the `FiberHeap` it allocates on and names the
 //! `RuntimeRegion` the value is born in, so a value's region and heap are visible
@@ -185,8 +188,7 @@ pub enum EscapeSite {
     /// A child's parked payload re-installed as the propagating fiber's own
     /// `signal` (`fiber/propagate`). The install is a fresh park, so it owes the
     /// delivery reference its resumer's result release consumes — the child's
-    /// park funded its own resumer, not this one (docs/impl/region/owner.md
-    /// § "Park/unpark symmetry").
+    /// park funded its own resumer, not this one (docs/impl/region/park.md).
     PropagateEscape,
     /// An error payload injected into a paused fiber's `signal` by `fiber/abort`
     /// or `fiber/refuse`. The payload belongs to the CALLER, whose own reference
@@ -201,13 +203,13 @@ pub enum EscapeSite {
     /// call. The primitive never returns, so its `Return` mint never runs and
     /// the resume value takes the place of the result the continuation's
     /// compiler-emitted release consumes — this retain is that missing mint
-    /// (docs/impl/region/owner.md § "A delivery into a replayed frame carries
+    /// (docs/impl/region/park.md § "A delivery into a replayed frame carries
     /// one owning reference").
     ResumeDelivery,
     /// A heap value in a child fiber's inherited dynamic-parameter baseline,
     /// retained at the seed until the fiber is freed (released by the Fiber
     /// content scan's baseline walk — the terminal-signal shape;
-    /// docs/impl/region/owner.md § "A child's inherited parameter baseline is
+    /// docs/impl/region/park.md § "A child's inherited parameter baseline is
     /// a counted holder").
     ParamBaseline,
     /// An operand of a submitted I/O operation, retained by the pending table

@@ -1,8 +1,10 @@
-// audited: 2026-09-10
-// docs/impl/region/owner.md
-// docs/impl/region/mechanism.md
+// audited: 2026-09-19
 //! Abandoning suspended work: the squelch boundary, and the chokepoint that runs
 //! what the discarded frames still owed.
+//!
+//! docs/impl/region/park.md
+//! docs/impl/region/owner.md
+//! docs/impl/region/mechanism.md
 
 use super::VM;
 use crate::value::{SignalBits, Value};
@@ -39,7 +41,7 @@ impl VM {
     /// rather than read from `fiber.signal`: two sites reach here through
     /// `invoke_closure_jit`, which restores the CALLER's signal before it asks
     /// the boundary's question and holds the parked one in a local. What the
-    /// park owed is released against it (docs/impl/region/owner.md § "A boundary
+    /// park owed is released against it (docs/impl/region/park.md § "A boundary
     /// ends a park with no reader and no install").
     pub(crate) fn squelch_violation(
         &mut self,
@@ -96,7 +98,7 @@ impl VM {
     /// A fourth reading answers for the PARK rather than for the frames, and it
     /// is the delivery ledger's: this exit is neither the reader that consumes a
     /// park's delivery retain nor the install that releases a runtime-built
-    /// payload, so both are owed here (docs/impl/region/owner.md § "A boundary
+    /// payload, so both are owed here (docs/impl/region/park.md § "A boundary
     /// ends a park with no reader and no install").
     ///
     /// `payload` is the value the exit leaves with — the boundary's own
@@ -133,7 +135,7 @@ impl VM {
     /// or reports it, and the fiber runs on. The park that raised the signal
     /// is dead at that moment, so its funding record must not survive into
     /// the fiber's next park — the delivery funnel that would consume it
-    /// belongs to a resume no host will ever run (docs/impl/region/owner.md
+    /// belongs to a resume no host will ever run (docs/impl/region/park.md
     /// § "A park names its funding in the delivery ledger"). A no-op for a
     /// completion, an error (an `:error` fiber is resumable and its records
     /// are identity-gated), a halt, or the switch trampoline — none of those

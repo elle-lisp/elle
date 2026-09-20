@@ -1,6 +1,7 @@
 (elle/epoch 12)
+# audited: 2026-09-19
 # A fiber body owns one reference of every value it yields
-# (docs/impl/region/owner.md § "Park/unpark symmetry").
+# (docs/impl/region/park.md).
 #
 # A park's `EmitEscape` retain is the DELIVERY reference: the resumer's
 # compiler-emitted release of the resume result consumes it, exactly as a
