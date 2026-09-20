@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-20
 //! What becomes of an operation whose asking fiber has gone: the answer it
 //! gets, the operands it still holds, and the sweep that ends it.
 //!
@@ -94,10 +94,11 @@ fn a_completion_is_withheld_when_the_fiber_that_asked_is_gone() {
             );
             let completion = delivered.pop().unwrap();
             assert_eq!(completion.id, id, "{which}: the submitted id came back");
-            completion.result.expect_err(
+            completion.result.as_ref().expect_err(
                 "an operation whose fiber has gone must answer with an error: a \
                  value would be assembled for a reader that is not there",
             );
+            completion.discard();
             assert!(
                 !backend.has_pending(),
                 "{which}: the retired operation kept its pending entry",
@@ -178,7 +179,7 @@ fn a_submitted_operations_operands_outlive_the_fiber_that_asked() {
 
         // Draining disposes of the entry, which is what lets the hold go.
         for _ in 0..40 {
-            let _ = backend.wait(50).unwrap();
+            Completion::discard_all(backend.wait(50).unwrap());
             if !backend.has_pending() && backend.workers() == 0 {
                 break;
             }
@@ -314,10 +315,11 @@ fn an_operation_that_parks_ends_when_the_fiber_that_asked_is_gone() {
             );
             let completion = delivered.pop().unwrap();
             assert_eq!(completion.id, id, "{which}: the submitted id came back");
-            completion.result.expect_err(
+            completion.result.as_ref().expect_err(
                 "an operation whose fiber has gone must answer with an error: a \
                  value would be assembled for a reader that is not there",
             );
+            completion.discard();
             assert!(
                 !backend.has_pending(),
                 "{which}: the ended operation kept its pending entry",

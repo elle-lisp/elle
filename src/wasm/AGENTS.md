@@ -1,6 +1,6 @@
 # WASM Backend
 
-<!-- audited: 2026-09-19 -->
+<!-- audited: 2026-09-20 -->
 
 LIR → WASM emission via `wasm-encoder`, execution via Wasmtime.
 
@@ -87,6 +87,7 @@ WASM closure host-side via `handle_fiber_resume` (in resume.rs).
 | `outcome.rs` | `CallOutcome`: what a call reports back to emitted code. |
 | `handle.rs` | `HandleTable`: maps u64 handles to `Rc<HeapObject>`. |
 | `host.rs` | `ElleHost` state (handle table + primitives + suspension frames). |
+| `host/io.rs` | Top-level I/O with no scheduler to take it: the backend a request reaches, and the completion it reads its answer out of. |
 | `linker.rs` | Host function registration (`create_linker`); `linker/` holds the registrations and the data-op dispatch. |
 | `resume.rs` | Fiber resume chain (`drive_resume_chain`, `handle_fiber_resume`). |
 | `store.rs` | Engine/Store creation, `call_wasm_closure`, `resume_wasm_closure`, `run_module`. |

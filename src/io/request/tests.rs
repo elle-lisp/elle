@@ -1,4 +1,4 @@
-//! audited: 2026-09-18
+//! audited: 2026-09-20
 //! What a request carries, what the submit path's copy of it keeps, and the
 //! in-place fills a completion makes through its buffers.
 //!
@@ -221,6 +221,9 @@ fn test_bytes_to_string_in_place_invalid_utf8() {
         assert!(result.is_err(), "invalid UTF-8 should fail");
         let err = result.unwrap_err();
         assert_eq!(err.type_name(), "struct");
+        // The error was built here, so this stands in for the completion that
+        // would have carried it away (docs/impl/io-inflight.md).
+        birth.hand_over();
     });
 }
 

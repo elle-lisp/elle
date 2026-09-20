@@ -1,4 +1,4 @@
-//! audited: 2026-09-18
+//! audited: 2026-09-20
 //! The backend's own lifecycle: construction, one submission through to its
 //! completion, and what a backend nobody dropped lets go of.
 //!
@@ -119,6 +119,7 @@ fn test_submit_and_wait_read() {
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         assert!(completions[0].result.is_ok());
+        Completion::discard_all(completions);
 
         std::fs::remove_file(&path).ok();
     });
@@ -148,6 +149,7 @@ fn test_submit_and_wait_write() {
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         assert!(completions[0].result.is_ok());
+        Completion::discard_all(completions);
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "async write");

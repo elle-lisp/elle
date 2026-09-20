@@ -216,10 +216,37 @@ impl Birthplace {
         let heap = unsafe { &mut *self.heap };
         crate::value::arena::decref_region(heap, Some(region));
     }
+
+    /// Let go of the RECORD and not of the reference: whoever took the value
+    /// took the reference with it, and nothing here will release it.
+    ///
+    /// [`Completion::into_result`] is the one caller and carries the same gate:
+    /// a build with neither the tests nor the WASM tier has no reader that
+    /// takes a reference over, so neither this nor that one exists.
+    #[cfg(any(test, feature = "wasm"))]
+    fn forget(&mut self) {
+        self.region = None;
+    }
 }
 
 impl Drop for Birthplace {
-    fn drop(&mut self) {}
+    /// A birthplace still holding a region is a completion nobody ended. The
+    /// region has a reference and nothing left to name it, so it lives until
+    /// the store does (docs/impl/io-inflight.md).
+    ///
+    /// An unwinding thread is let past. A panic inside a drop that is itself
+    /// running for a panic aborts the process, which would cost every other
+    /// test in the binary its result to report a stranded region behind an
+    /// assertion that already failed.
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        debug_assert!(
+            self.region.is_none(),
+            "a completion was let go still holding the region it built its answer in"
+        );
+    }
 }
 
 /// Completion from an async I/O operation.
@@ -269,15 +296,24 @@ impl Completion {
         self.birth.hand_over();
     }
 
-    /// [`discard`](Self::discard) over everything a queue is holding.
-    #[allow(dead_code)]
-    pub(crate) fn discard_all(_completions: impl IntoIterator<Item = Completion>) {}
+    /// [`discard`](Self::discard) over a whole queue. A reader that takes one
+    /// completion out of what a wait returned owes the rest this.
+    pub(crate) fn discard_all(completions: impl IntoIterator<Item = Completion>) {
+        for completion in completions {
+            completion.discard();
+        }
+    }
 
-    /// The answer, and the birth reference with it.
-    #[allow(dead_code)]
+    /// The answer, and the birth reference with it: the caller takes over what
+    /// this completion built rather than releasing it.
+    ///
+    /// The WASM tier's inline path is the one caller. It hands the value back
+    /// to the compiled module as a signal result, and reclaims no region while
+    /// it runs, so there is nothing there to hand the reference to
+    /// (docs/impl/io-inflight.md).
     #[cfg(any(test, feature = "wasm"))]
     pub(crate) fn into_result(mut self) -> Result<Value, Value> {
-        self.birth.hand_over();
+        self.birth.forget();
         self.result
     }
 

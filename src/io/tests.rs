@@ -21,15 +21,13 @@ fn a_birthplace_coins_one_region_for_every_value_it_builds() {
     let first = birth.alloc().string("first");
     let second = birth.alloc().string("second");
     let region_of = |v| crate::value::arena::region_of(h.heap(), v);
+    let (first_region, second_region) = (region_of(first), region_of(second));
+    birth.hand_over();
     assert_eq!(
-        region_of(first),
-        region_of(second),
+        first_region, second_region,
         "a completion's answer is one region, whatever it is assembled from"
     );
-    assert!(
-        region_of(first).is_some(),
-        "a built value lives in a region"
-    );
+    assert!(first_region.is_some(), "a built value lives in a region");
 }
 
 /// The birth reference goes exactly once, and a birthplace that built nothing

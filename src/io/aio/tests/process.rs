@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-20
 //! `subprocess/wait` through the async backend.
 //!
 //! src/io/AGENTS.md
@@ -45,17 +45,19 @@ fn test_async_submit_process_wait_uring() {
         let completions = backend.wait(5000).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
-        match &completions[0].result {
-            Err(e) => {
-                let msg = error_message(e);
+        let answer = match &completions[0].result {
+            Err(e) => Err(error_message(e)),
+            Ok(val) => Ok(val.as_int()),
+        };
+        Completion::discard_all(completions);
+        match answer {
+            Err(msg) => {
                 if msg.contains("errno 22") || msg.contains("waitid failed") {
                     return; // kernel < 6.7
                 }
                 panic!("ProcessWait failed: {msg}");
             }
-            Ok(val) => {
-                assert_eq!(val.as_int(), Some(0), "expected exit 0");
-            }
+            Ok(code) => assert_eq!(code, Some(0), "expected exit 0"),
         }
     });
 }
@@ -97,6 +99,7 @@ fn a_failed_pool_process_wait_names_waitpid() {
             .as_ref()
             .expect_err("a wait for a child that is gone must fail");
         let msg = error_message(err);
+        Completion::discard_all(completions);
         assert!(
             msg.contains("waitpid failed"),
             "the pool's process wait must name waitpid, the call it makes; got {msg:?}",
@@ -158,6 +161,7 @@ fn a_cancelled_wait_that_reaped_the_child_answers_the_next_wait() {
                 error_message(e)
             ),
         };
+        Completion::discard_all(completions);
         assert_eq!(
             value.as_int(),
             Some(1),
@@ -184,7 +188,9 @@ fn a_wait_on_a_held_status_files_no_operation() {
 
         let backend = AsyncBackend::new_thread_pool().unwrap();
         submit_wait(&backend, handle).unwrap();
-        assert_eq!(backend.wait(5000).unwrap().len(), 1, "the first wait reaps");
+        let reaped = backend.wait(5000).unwrap();
+        assert_eq!(reaped.len(), 1, "the first wait reaps");
+        Completion::discard_all(reaped);
 
         let held = submit_wait(&backend, handle).unwrap();
         assert!(
@@ -202,6 +208,7 @@ fn a_wait_on_a_held_status_files_no_operation() {
             Ok(Some(1)),
             "the held status is the answer",
         );
+        Completion::discard_all(completions);
     });
 }
 
@@ -259,9 +266,11 @@ fn a_wait_that_finds_no_child_answers_from_the_record() {
         )
         .expect("a live submission is cooked");
 
-        let value = completion
+        let value = *completion
             .result
+            .as_ref()
             .expect("a status this process holds is an answer, not a failure");
+        completion.discard();
         assert_eq!(value.as_int(), Some(7));
     });
 }
@@ -304,10 +313,14 @@ fn a_cancelled_uring_wait_that_reaped_the_child_answers_the_next_wait() {
         let completions = backend.wait(5000).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, again);
-        let value = match &completions[0].result {
-            Ok(v) => *v,
-            Err(e) => {
-                let msg = error_message(e);
+        let answer = match &completions[0].result {
+            Ok(v) => Ok(*v),
+            Err(e) => Err(error_message(e)),
+        };
+        Completion::discard_all(completions);
+        let value = match answer {
+            Ok(v) => v,
+            Err(msg) => {
                 if msg.contains("errno 22") {
                     return; // kernel < 6.7: nothing was ever reaped
                 }

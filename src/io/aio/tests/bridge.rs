@@ -1,4 +1,7 @@
+//! audited: 2026-09-20
 //! Eventfd-bridge tests for the io_uring platform.
+//!
+//! src/io/AGENTS.md
 //!
 //! On the uring platform the scheduler's single blocking wait is one
 //! `io_uring_enter`. Work that cannot lift to the ring (a `Task` closure, a
@@ -51,5 +54,6 @@ fn uring_pool_task_wakes_the_single_wait_past_old_cap() {
             "task completion: {:?}",
             completions[0].result
         );
+        Completion::discard_all(completions);
     });
 }

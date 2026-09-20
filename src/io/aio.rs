@@ -1,4 +1,4 @@
-//! audited: 2026-09-18
+//! audited: 2026-09-20
 //! `AsyncBackend`: the state an in-flight operation is tracked through, and the
 //! platform that runs it.
 //!
@@ -242,10 +242,12 @@ impl AsyncBackend {
         PlatformBackend::ThreadPool
     }
 
-    /// Cancel and drain every in-flight io_uring operation so no kernel-owned
-    /// buffer outlives this backend. Idempotent — a no-op once `pending` is
-    /// empty. Called from `Drop`; also callable directly (tests). See
-    /// `AsyncBackendInner::quiesce_pending` and docs/io.md "Backend teardown".
+    /// Bring this backend to rest: drain every in-flight io_uring operation so
+    /// no kernel-owned buffer outlives it, then let go of every region it still
+    /// holds — its filed entries' operands, and what its unreaped completions
+    /// built. Idempotent once nothing is pending and nothing is queued. Called
+    /// from `Drop` and from `FiberHeap::quiesce_io_backends`; see docs/io.md
+    /// "Backend teardown" and docs/impl/io-inflight.md.
     pub(crate) fn quiesce(&self) {
         if let Ok(mut inner) = self.inner.try_borrow_mut() {
             inner.quiesce_pending();
@@ -261,9 +263,7 @@ impl AsyncBackend {
             // than what it read (docs/impl/io-inflight.md). Discarding here is
             // what makes the release name a live store, and it empties the
             // queue, so the second call reaches nothing.
-            for completion in inner.completions.drain(..) {
-                completion.discard();
-            }
+            Completion::discard_all(inner.completions.drain(..));
         }
     }
 
