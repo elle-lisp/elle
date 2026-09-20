@@ -1,6 +1,6 @@
 # Images — regions hydrated at load
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-20 -->
 
 Design for image-style persistence: one mechanism, two shipped configurations.
 
@@ -293,6 +293,13 @@ cells snapped, strings and file names interned. Every internal reference is
 a self-edge by construction. It records a relocation entry per pointer slot
 as it writes, then dumps the scratch region's pages verbatim and drops the
 region. Unsupported values fail the dump with an error naming the binding.
+
+The walk down a list's `rest` spine is a loop, not a recursion. A list's
+length is bounded by memory rather than by the text that built it, so a
+recursive spine walk aborts the process on a stack overflow where a loop
+writes the image. The spine reserves each copy before it fills it, exactly as
+a closure does, so a cycle that re-enters a pair closes onto the one copy.
+What hangs off the spine still recurses, and so does every other nesting.
 
 The root set is defined once, in *One mechanism, two configurations*: the
 bindings the dependency stack does not already provide. For the boot
