@@ -1,4 +1,7 @@
+//! audited: 2026-09-20
 //! Unit tests (`super` is the parent impl module).
+//!
+//! src/io/AGENTS.md
 
 use super::*;
 use crate::io::IoBackend;
@@ -23,6 +26,7 @@ fn test_mock_read() {
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id.as_u64(), 1);
         assert!(completions[0].result.is_ok());
+        Completion::discard_all(completions);
     });
 }
 
@@ -47,6 +51,7 @@ fn test_mock_write() {
         assert_eq!(completions[0].id, id);
         let val = completions[0].result.as_ref().unwrap();
         assert_eq!(val.as_int(), Some(9));
+        Completion::discard_all(completions);
     });
 }
 
@@ -67,6 +72,7 @@ fn test_mock_error_injection() {
         let completions = mock.poll();
         assert_eq!(completions.len(), 1);
         assert!(completions[0].result.is_err());
+        Completion::discard_all(completions);
     });
 }
 
@@ -116,6 +122,7 @@ fn test_mock_eof_no_data() {
         let completions = mock.poll();
         assert_eq!(completions.len(), 1);
         assert_eq!(*completions[0].result.as_ref().unwrap(), Value::NIL);
+        Completion::discard_all(completions);
     });
 }
 
@@ -183,6 +190,7 @@ fn test_mock_latency_wait() {
     // Wait should sleep until deadline and return the completion
     let completions = mock.wait(-1).unwrap();
     assert_eq!(completions.len(), 1);
+    Completion::discard_all(completions);
 }
 
 #[test]
@@ -249,4 +257,5 @@ fn test_mock_sleep_uses_duration() {
     // Wait should return after the sleep duration
     let completions = mock.wait(-1).unwrap();
     assert_eq!(completions.len(), 1);
+    Completion::discard_all(completions);
 }

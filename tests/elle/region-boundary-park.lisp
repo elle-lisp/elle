@@ -1,6 +1,7 @@
 (elle/epoch 12)
+# audited: 2026-09-19
 # A boundary ends a park with no reader and no install
-# (docs/impl/region/owner.md § "A boundary ends a park with no reader and no
+# (docs/impl/region/park.md § "A boundary ends a park with no reader and no
 # install, so it owes both references").
 #
 # A `squelch`/`attune` violation is the third way a park can end. The other two

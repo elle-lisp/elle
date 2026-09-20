@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-19
 // Guardfree pins for the fiber frontier: parks, resumes, error unwinds, squelch boundaries and the compiled tier.
 //
 // docs/analysis/testing.md
@@ -21,7 +21,7 @@ fn region_jit_passthrough() {
 // rides it instead of refusing (docs/impl/region/mechanism.md § "A fiber crossing
 // is a counted holder too"). Going out that reference is the park's `EmitEscape`
 // retain; coming back it is the resume value's own mint, which nothing took before
-// (docs/impl/region/owner.md § "A resume value crosses counted, or not at all").
+// (docs/impl/region/park.md § "A resume value crosses counted, or not at all").
 // So this drives what must outlive the OTHER side's release: a body that keeps its
 // resume value past a further park, two bodies keeping the same delivered value, a
 // resumer reading what it was yielded after the emitting body ran on, and a value
@@ -58,7 +58,7 @@ fn region_fiber_child_effect_uaf() {
 }
 
 // Guard — a fiber body owns one reference of every value it yields
-// (docs/impl/region/owner.md § "Park/unpark symmetry"). A park's `EmitEscape`
+// (docs/impl/region/park.md). A park's `EmitEscape`
 // retain is the DELIVERY reference the resumer's result release consumes, so what
 // a discarded fiber's discharge stands in for is the body's separate reference,
 // released by the continuation past the yield. A body-allocated payload carries
@@ -79,7 +79,7 @@ fn region_fiber_yield_borrow_uaf() {
 }
 
 // Guard — what yields is the emit OPERATION, not the `Emit` node
-// (docs/impl/region/owner.md § "What yields is the emit OPERATION, not the `Emit`
+// (docs/impl/region/park.md § "What yields is the emit OPERATION, not the `Emit`
 // node"). A first argument the compiler cannot read as a keyword set falls through
 // to the `emit` primitive, so the park is an ordinary call and the body reference
 // the discard discharge stands in for has to come from the call: a NON-TAIL one
@@ -122,7 +122,7 @@ fn region_dynamic_emit_terminal_uaf() {
 }
 
 // Guard — the same raised delivery where the raise leaves the emit PRIMITIVE OFF
-// TAIL POSITION (docs/impl/region/owner.md § "What yields is the emit OPERATION, not
+// TAIL POSITION (docs/impl/region/park.md § "What yields is the emit OPERATION, not
 // the `Emit` node"). There the site takes the retain, so the exit mints the delivery
 // and leaves that retain to the continuation past the call. An `:error` fiber is
 // resumable, so a RESTART replays that continuation: without the mint the replay
@@ -147,7 +147,7 @@ fn region_dynamic_emit_statement_uaf() {
 
 // Guard — the resume of a mediated capability denial releases the one reference
 // the park has no body to release, and that decref answers for the payload's own
-// left-over reference, never for a holder's (docs/impl/region/owner.md § "A
+// left-over reference, never for a holder's (docs/impl/region/park.md § "A
 // payload the RUNTIME built is released by the install that displaces it"). The
 // witness binds the payload in the mediating parent, resumes the fiber past the
 // denial, churns the heap, then reads three payload fields; taking the holder's
@@ -165,7 +165,7 @@ fn region_capability_denial_resume_uaf() {
 }
 
 // Guard — a park payload the RUNTIME built is released by the install that
-// displaces it (docs/impl/region/owner.md § "Park/unpark symmetry"). A capability
+// displaces it (docs/impl/region/park.md). A capability
 // denial's payload is built by the denial path, so the body never names it and no
 // continuation releases it; `fiber/resume`, `fiber/refuse` and `fiber/abort` each
 // replace it in the slot and each owe that release. Every one of those releases
@@ -186,8 +186,8 @@ fn region_denial_park_uaf() {
     );
 }
 
-// Guard — the other park a payload the RUNTIME built (docs/impl/region/owner.md
-// § "Park/unpark symmetry"): a yielding io op's `IoRequest`, which the native
+// Guard — the other park a payload the RUNTIME built (docs/impl/region/park.md
+// § "A payload the RUNTIME built"): a yielding io op's `IoRequest`, which the native
 // built and the body never named, so no continuation releases it. Every install
 // that displaces the park owes that release, and `fiber/abort` / `fiber/refuse`
 // each run one where none ran before. The mediator reads the request out of the
@@ -208,7 +208,7 @@ fn region_io_park_uaf() {
 
 // Guard — `fiber/propagate` installs the child's parked payload as this fiber's
 // own `signal`, which is a fresh park and owes its own delivery reference
-// (docs/impl/region/owner.md § "Park/unpark symmetry"). The propagating fiber's
+// (docs/impl/region/park.md). The propagating fiber's
 // resumer reads that payload as its resume result and runs the compiler-emitted
 // release on it; the child's park funded its own resumer's release, not this one.
 // One propagate hides the shortfall — an error unwind runs no continuation, so
@@ -264,7 +264,7 @@ fn region_squelch_unwind_uaf() {
 }
 
 // Guard — a squelch/attune boundary ends a park with no reader and no install,
-// so it releases both of the park's references (docs/impl/region/owner.md § "A
+// so it releases both of the park's references (docs/impl/region/park.md § "A
 // boundary ends a park with no reader and no install"). Each is a decref that
 // never ran before, and the fiber SURVIVES, so what must be whole afterwards is
 // everything that still names the payload: a body-allocated one the emitting
@@ -337,8 +337,8 @@ fn region_chan_send_owned_param_uaf() {
     );
 }
 
-// Guard — the abort-delivery retain (docs/impl/region/owner.md § "Park/unpark
-// symmetry", the delivery rule). A replayed frame's pending release consumes
+// Guard — the abort-delivery retain (docs/impl/region/park.md,
+// the delivery rule). A replayed frame's pending release consumes
 // one owning reference of the value it is resumed with; a normally-completing
 // child funds it with its Return's ReturnValue retain, but an ABORTED child's
 // error exit runs no Return — so the reference it consumes is the one
@@ -375,8 +375,8 @@ fn region_fiber_exhume_uaf() {
     );
 }
 
-// Guard — park/unpark symmetry for fiber suspension (docs/impl/region/owner.md
-// § "Park/unpark symmetry"): a parked-then-dropped / drained / cancelled /
+// Guard — park/unpark symmetry for fiber suspension (docs/impl/region/park.md):
+// a parked-then-dropped / drained / cancelled /
 // aborted / denied fiber reclaims its region and parked state, the nested
 // tail-position resume frees the inner fiber, and a literal-lambda tail callee
 // defers its closure release. Leak faces assert bounded region growth; the
@@ -463,7 +463,7 @@ fn region_io_read_strand_guardfree() {
 }
 
 // A spawned fiber outlives the parameterize scope it inherited from, so its
-// baseline snapshot must COUNT what it holds (docs/impl/region/owner.md § "A
+// baseline snapshot must COUNT what it holds (docs/impl/region/park.md § "A
 // child's inherited parameter baseline is a counted holder"). This binary runs
 // with debug assertions, where a missing seeding retain panics deterministically
 // at the resume boundary (the generation-stamped borrow check,

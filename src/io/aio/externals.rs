@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-18
 //! The submissions that name an OS object the request carries or creates: a
 //! watcher, a signal receiver, a file, a child, a background task.
 //!
@@ -182,11 +182,14 @@ impl AsyncBackend {
         // this value via fiber/resume and the heap that built it is the heap that
         // manages its lifetime. Built before the backend is borrowed, so the
         // spawn cannot re-enter it.
-        let result = req.spawn_to_subprocess(origin_heap);
+        let mut birth = crate::io::Birthplace::on(origin_heap);
+        let result = req.spawn_to_subprocess(&mut birth);
 
         let mut inner = self.inner.borrow_mut();
         let id = inner.mint_id();
-        inner.completions.push_back(Completion::new(id, result));
+        inner
+            .completions
+            .push_back(Completion::new(id, birth, result));
         Ok(id)
     }
 
@@ -233,9 +236,10 @@ impl AsyncBackend {
         if let Some(code) = handle.exit().status() {
             let mut inner = self.inner.borrow_mut();
             let id = inner.mint_id();
+            let birth = crate::io::Birthplace::on(inner.origin_heap);
             inner
                 .completions
-                .push_back(Completion::ok(id, Value::int(code as i64)));
+                .push_back(Completion::ok(id, birth, Value::int(code as i64)));
             return Ok(id);
         }
 

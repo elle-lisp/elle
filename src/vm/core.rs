@@ -1,7 +1,8 @@
-// audited: 2026-09-10
-// docs/impl/vm.md
+// audited: 2026-09-19
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
+//!
+//! docs/impl/vm.md
 
 use crate::error::StackFrame;
 use crate::ffi::FFISubsystem;
@@ -298,6 +299,16 @@ impl VM {
     #[inline]
     pub fn heap(&mut self) -> &mut crate::value::fiberheap::FiberHeap {
         unsafe { &mut *self.heap_ptr }
+    }
+
+    /// The FFI subsystem this VM owns — its loaded libraries, signatures, and
+    /// the error a callback left behind.
+    pub(crate) fn ffi(&self) -> &FFISubsystem {
+        &self.ffi
+    }
+
+    pub(crate) fn ffi_mut(&mut self) -> &mut FFISubsystem {
+        &mut self.ffi
     }
 
     /// Point this VM at its owning instance's compile context. Set by

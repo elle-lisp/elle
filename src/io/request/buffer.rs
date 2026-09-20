@@ -1,4 +1,8 @@
+//! audited: 2026-09-20
 //! Unsafe in-place buffer fill helpers for io completions.
+//!
+//! src/io/AGENTS.md
+//! docs/impl/io-inflight.md
 //!
 //! Each helper mutates a pre-allocated value that was born on the requesting
 //! fiber's heap. They exist so an io completion can stamp kernel-derived data
@@ -92,7 +96,7 @@ pub(crate) unsafe fn truncate_buffer(buffer: &Value, new_len: usize) {
 /// `Err(Value)` with an encoding error on invalid UTF-8.
 pub(crate) unsafe fn bytes_to_string_in_place(
     buffer: Value,
-    origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    birth: &mut crate::io::Birthplace,
 ) -> Result<Value, Value> {
     use crate::value::heap::HeapObject;
     use crate::value::region_slice::RegionSlice;
@@ -111,12 +115,14 @@ pub(crate) unsafe fn bytes_to_string_in_place(
     // Validate UTF-8
     let bytes = std::slice::from_raw_parts(slice_ptr, slice_len);
     if std::str::from_utf8(bytes).is_err() {
-        // The error value is built on the requesting instance's heap, threaded
-        // in by the caller (the same `origin_heap` every io completion uses).
-        return Err(crate::io::io_error(
+        // The error is built at the completion's own birthplace, like every
+        // other value a completion has to build (docs/impl/io-inflight.md).
+        // Every text-port read reaches here — `read`, `read-line`, `read-exact`
+        // and `read-all` alike — so the message names the operation class rather
+        // than one call that was once the only caller.
+        return Err(birth.error(
             "encoding-error",
-            format!("port/read-line: invalid UTF-8 in {} bytes", slice_len),
-            origin_heap,
+            format!("port read: invalid UTF-8 in {} bytes", slice_len),
         ));
     }
 

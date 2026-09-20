@@ -1,4 +1,7 @@
+// audited: 2026-09-19
 //! Fiber lifecycle primitives.
+//!
+//! docs/impl/region/park.md
 //!
 //! Core fiber operations: creation, resumption, signaling, status, and
 //! value extraction. Introspection and management primitives (bits, mask,
@@ -105,7 +108,7 @@ pub(crate) fn prim_fiber_new(
             fiber.param_borrows = crate::vm::fiber::record_param_borrows(&flat, ctx.heap_mut());
         }
         fiber.param_frames = vec![flat];
-        // The seeded baseline is a counted holder (docs/impl/region/owner.md
+        // The seeded baseline is a counted holder (docs/impl/region/park.md
         // § "A child's inherited parameter baseline is a counted holder").
         // Setting the flag BEFORE `ctx.fiber` is the whole retain here: the
         // allocation funnel scans the new object's content, and the Fiber
@@ -159,7 +162,7 @@ pub(crate) fn prim_fiber_resume(
             // capability-denial struct, named by the classifier's record, and a
             // yielding io op's `IoRequest`, named by the payload's own type. The
             // two readings name disjoint payloads, so both run
-            // (docs/impl/region/owner.md § "Park/unpark symmetry"). The io arm
+            // (docs/impl/region/park.md). The io arm
             // goes first because it is the one that READS the parked value to
             // decide, and the denial arm's release may have been the payload's
             // last (`release_displaced_denial_payload`).

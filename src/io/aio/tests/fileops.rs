@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-20
 //! Seek, tell, open and spawn through the backend: the submissions that answer
 //! immediately or create a value on completion.
 //!
@@ -31,6 +31,7 @@ fn test_async_seek_returns_immediate_completion() {
         assert_eq!(completions[0].id, id);
         assert!(completions[0].result.is_ok());
         assert_eq!(completions[0].result.as_ref().unwrap().as_int(), Some(6));
+        Completion::discard_all(completions);
 
         std::fs::remove_file(&path).ok();
     });
@@ -57,6 +58,7 @@ fn test_async_tell_returns_immediate_completion() {
         assert_eq!(completions[0].id, id);
         assert!(completions[0].result.is_ok());
         assert_eq!(completions[0].result.as_ref().unwrap().as_int(), Some(0));
+        Completion::discard_all(completions);
 
         std::fs::remove_file(&path).ok();
     });
@@ -85,6 +87,7 @@ fn test_async_seek_non_file_port_errors() {
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         assert!(completions[0].result.is_err());
+        Completion::discard_all(completions);
     });
 }
 
@@ -117,6 +120,7 @@ fn test_async_submit_spawn_echo() {
             .as_external::<crate::io::request::ProcessHandle>()
             .expect("a spawn answers a subprocess");
         assert!(child.pid() > 0, "and the subprocess names a live child");
+        Completion::discard_all(completions);
     });
 }
 
@@ -168,6 +172,7 @@ fn test_async_open_regular_file_returns_port() {
             Some("port"),
             "open result must be a port"
         );
+        Completion::discard_all(completions);
 
         std::fs::remove_file(&path).ok();
     });
@@ -273,6 +278,7 @@ fn test_async_open_nonexistent_path_errors() {
             completions[0].result.is_err(),
             "open must error for nonexistent path"
         );
+        Completion::discard_all(completions);
     });
 }
 
@@ -316,6 +322,7 @@ fn test_async_open_with_timeout_succeeds_on_regular_file() {
             "open with generous timeout must succeed for regular file: {:?}",
             completions[0].result
         );
+        Completion::discard_all(completions);
 
         std::fs::remove_file(&path).ok();
     });

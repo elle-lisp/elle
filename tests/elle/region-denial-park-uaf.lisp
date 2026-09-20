@@ -1,6 +1,7 @@
 (elle/epoch 12)
+# audited: 2026-09-19
 # A payload the RUNTIME built is released by the install that displaces it —
-# the soundness face (docs/impl/region/owner.md § "Park/unpark symmetry").
+# the soundness face (docs/impl/region/park.md).
 #
 # The leak face is region-denial-park.lisp: a mediated denial stranded its
 # payload because no continuation of the body releases a value the body never

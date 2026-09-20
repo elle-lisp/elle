@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+//! audited: 2026-09-20
 //! Draining what is ready: the ring's CQEs, the shared hub, and the teardown
 //! pass that brings the ring to rest before its buffers are freed.
 //!
@@ -25,7 +25,9 @@ impl AsyncBackendInner {
         }
         // Where `drain_cqes` puts what it cooked. Every entry here is marked
         // cancelled, so it stays empty; it exists because the drain is one
-        // function with one signature.
+        // function with one signature. Emptied through `discard` all the same,
+        // because a completion owns what it built
+        // (docs/impl/io-inflight.md) and dropping one here would strand that.
         let mut sink: VecDeque<Completion> = VecDeque::new();
         let mut passes = 0u32;
         while !self.pending.is_empty() && passes < 64 {
@@ -85,7 +87,7 @@ impl AsyncBackendInner {
                 );
             }
 
-            sink.clear();
+            Completion::discard_all(sink.drain(..));
             // No shrink ⇒ only channel-serviced ops remain; stop.
             if self.pending.len() >= before {
                 break;

@@ -1,4 +1,8 @@
-//! Yield side-exit helpers for JIT-compiled code
+// audited: 2026-09-19
+//! Yield side-exit helpers for JIT-compiled code.
+//!
+//! docs/impl/jit.md
+//! docs/impl/region/park.md
 
 use super::dispatch::YIELD_SENTINEL;
 use crate::jit::value::JitValue;
@@ -179,7 +183,7 @@ pub extern "C" fn elle_jit_yield(
     } else {
         // …and every other emit records the PARK, so a `squelch`/`attune`
         // boundary can release the delivery retain no reader will consume
-        // (docs/impl/region/owner.md § "A boundary ends a park with no reader
+        // (docs/impl/region/park.md § "A boundary ends a park with no reader
         // and no install"). The record follows the retain this helper took just
         // above, which is what keeps the two balanced whatever the bits are.
         vm.fiber.delivery.park_emit(sig, yielded);

@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+//! audited: 2026-09-18
 //! The operations a backend has in flight, and which of them no fiber will
 //! receive a result for.
 //!
@@ -154,17 +154,12 @@ impl PendingTable {
         id: SubmissionId,
         origin_heap: *mut crate::value::fiberheap::FiberHeap,
     ) -> crate::io::Completion {
-        crate::io::Completion::err(
-            id,
-            crate::io::io_error(
-                "io-error",
-                format!(
-                    "io completion {id}: the fiber that requested this operation \
-                     ended before it finished, so its result reaches nobody"
-                ),
-                origin_heap,
-            ),
-        )
+        let birth = crate::io::Birthplace::on(origin_heap);
+        let msg = format!(
+            "io completion {id}: the fiber that requested this operation ended \
+             before it finished, so its result reaches nobody"
+        );
+        crate::io::Completion::failed(id, birth, "io-error", msg)
     }
 
     /// Mark `id` as having no reader, so its completion is retired rather than

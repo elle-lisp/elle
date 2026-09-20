@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-20
 // src/io/AGENTS.md
 //! The endings a pool operation reaches with nobody cancelling it: a close on
 //! the port beneath it, its own deadline, and a retirement.
@@ -110,6 +110,7 @@ fn closing_a_listener_ends_its_parked_pool_accept() {
                     accept_completion = Some(c);
                 } else {
                     assert_eq!(c.id, close_id, "unexpected completion");
+                    c.discard();
                 }
             }
             if accept_completion.is_some() {
@@ -124,6 +125,7 @@ fn closing_a_listener_ends_its_parked_pool_accept() {
             accept_completion.result.is_err(),
             "an accept on a closed listener must not report success",
         );
+        accept_completion.discard();
         assert_eq!(
             backend.workers(),
             0,
@@ -212,6 +214,7 @@ fn a_pool_connect_reports_its_own_deadline_as_a_timeout() {
             "a connect that ran out its deadline must report :timeout, not a \
              generic :io-error — `ev/timeout` and `timed-out?` match on the kind",
         );
+        Completion::discard_all(completions);
 
         for c in queued {
             unsafe { libc::close(c) };
@@ -304,7 +307,7 @@ fn a_retired_accept_closes_the_connection_it_took() {
             heap.decref_region(region);
 
             for _ in 0..40 {
-                let _ = backend.wait(50).unwrap();
+                Completion::discard_all(backend.wait(50).unwrap());
                 if !backend.has_pending() && backend.workers() == 0 {
                     break;
                 }

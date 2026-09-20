@@ -1,6 +1,7 @@
 (elle/epoch 12)
+# audited: 2026-09-19
 # A payload the RUNTIME built is released by the install that displaces it
-# (docs/impl/region/owner.md § "Park/unpark symmetry").
+# (docs/impl/region/park.md).
 #
 # A park leaves two references on its payload's region: the DELIVERY, which the
 # resumer's release of the resume result consumes, and the BODY's own, released

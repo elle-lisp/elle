@@ -1,8 +1,12 @@
+//! audited: 2026-09-18
 //! Stream primitives — yield SIG_IO with IoRequest descriptors.
 //!
 //! These primitives do not perform I/O themselves. They build an
 //! IoRequest and return (SIG_IO, request), which suspends
 //! the fiber. The scheduler catches SIG_IO and dispatches to a backend.
+//!
+//! docs/io.md
+//! docs/impl/io-inflight.md
 
 use crate::io::request::{IoRequest, PortOp};
 use crate::port::Port;
@@ -269,9 +273,9 @@ primitive! {
         example: "(port/read-all (port/open \"file.txt\" :read))",
         aliases: &["port/read-all"],
         // Opaque: stores nothing, but unlike the sized reads it has no
-        // pre-allocated buffer — the result bytes are minted at completion on the
-        // origin heap (`Alloc::new(completion_heap_ptr(..)).bytes(all)`), neither
-        // this call's region nor an arg's. No clique, non-fresh result.
+        // pre-allocated buffer — the result bytes are built at the completion's
+        // own `Birthplace`, neither this call's region nor an arg's. No clique,
+        // non-fresh result.
         effect: RegionEffect::Opaque,
     }
     "port/write" => prim_stream_write {

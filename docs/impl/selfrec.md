@@ -1,9 +1,12 @@
 # Self-recursion: the executing-closure mechanism (no cell)
 
-Implementation-facing: how a self-recursive closure bound inside a lambda body —
-`(letrec [loop (fn [m] … (loop …))] …)`, or the same as a nested `def` — refers
-to itself without a forward cell, so it is reclaimed by ordinary region RC exactly
-like a top-level recursive `defn`. Builds on the region model
+<!-- audited: 2026-09-19 -->
+
+How a self-recursive closure refers to itself without a forward cell, and is reclaimed by ordinary region RC.
+
+Implementation-facing, for a binding inside a lambda body —
+`(letrec [loop (fn [m] … (loop …))] …)`, or the same as a nested `def`. It is
+reclaimed exactly like a top-level recursive `defn`. Builds on the region model
 ([region/model.md](region/model.md)), the escape authority ([escape.md](escape.md)),
 and the tail-call deferred release ([region/rules.md](region/rules.md) Rule 5).
 
@@ -90,8 +93,8 @@ gives the analysis to hang the demise on:
 | `def`, body tail-calls the binding | the binding's last use IS that `TailCall` — dead code past it | the tail-call **deferred release** |
 | `def`, any other body | the binding's last use — the node that CONSUMES the closure | the live `DecrefRegion` |
 
-The tail-call rows are the load-bearing case (the dominant self-recursive helper is a
-tail loop). There the closure's release must not run before the recursion completes,
+The tail-call rows carry the dominant shape — a self-recursive helper is usually a
+tail loop. There the closure's release must not run before the recursion completes,
 because the recursion re-enters the closure living in that region; freeing it there is a
 use-after-free of the closure's own env — the self-call re-dispatch reads a recycled page.
 
@@ -232,7 +235,7 @@ at the crossing, so the receiver's hold is never the frame's.
 - an **emitted** value (`yield`/`emit`) takes the park retain as it escapes into
   `fiber.signal` (`EscapeSite::EmitEscape`, `handle_emit`), and the resumer consumes that
   retain through its own result release — the delivery hands the resumer one owning
-  reference ([region/owner.md](region/owner.md) § "Park/unpark symmetry");
+  reference ([region/park.md](region/park.md));
 - a **sent** message — the other fiber-frontier seed, `chan/send`'s `Sends` declaration —
   takes the seam's runtime retain at the enqueue (`EscapeSite::ChanSend`) and is held
   until the receive builds the result carrying it

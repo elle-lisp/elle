@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+//! audited: 2026-09-18
 //! `AsyncBackend::submit` — the one entry point, and how it routes a request to
 //! a portless path, an immediate answer, or a backend.
 //!
@@ -135,7 +135,10 @@ impl AsyncBackend {
                 port.close();
                 let mut inner = self.inner.borrow_mut();
                 let id = inner.mint_id();
-                inner.completions.push_back(Completion::ok(id, Value::NIL));
+                let birth = crate::io::Birthplace::on(inner.origin_heap);
+                inner
+                    .completions
+                    .push_back(Completion::ok(id, birth, Value::NIL));
                 return Ok(id);
             }
             if let PortKey::Fd(fd, _) = &port_key {
@@ -198,7 +201,10 @@ impl AsyncBackend {
             // Queue immediate completion.
             let mut inner = self.inner.borrow_mut();
             let id = inner.mint_id();
-            inner.completions.push_back(Completion::ok(id, Value::NIL));
+            let birth = crate::io::Birthplace::on(inner.origin_heap);
+            inner
+                .completions
+                .push_back(Completion::ok(id, birth, Value::NIL));
             return Ok(id);
         }
 
@@ -265,7 +271,10 @@ impl AsyncBackend {
             if let Some(bh) = buf_handle {
                 inner.buffer_pool.release(bh);
             }
-            inner.completions.push_back(Completion::ok(id, Value::NIL));
+            let birth = crate::io::Birthplace::on(inner.origin_heap);
+            inner
+                .completions
+                .push_back(Completion::ok(id, birth, Value::NIL));
             return Ok(id);
         }
 
@@ -303,11 +312,14 @@ impl AsyncBackend {
                 } else {
                     chunk
                 };
-                let result = crate::io::frame::read_result(buffer, answer, encoding, origin_heap);
+                let mut birth = crate::io::Birthplace::on(origin_heap);
+                let result = crate::io::frame::read_result(buffer, answer, encoding, &mut birth);
                 if let Some(bh) = buf_handle {
                     inner.buffer_pool.release(bh);
                 }
-                inner.completions.push_back(Completion::new(id, result));
+                inner
+                    .completions
+                    .push_back(Completion::new(id, birth, result));
                 return Ok(id);
             }
         }

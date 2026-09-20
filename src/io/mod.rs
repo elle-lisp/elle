@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+//! audited: 2026-09-20
 //! I/O subsystem: request types and backends.
 //!
 //! `IoBackend` is the async submission-and-completion model: `submit`
@@ -153,46 +153,168 @@ pub(crate) fn completion_heap_ptr(
     origin_heap
 }
 
-/// An io-completion error value `{:error :kind :message msg}`, born in a fresh
-/// region on `origin_heap` (the requesting instance's heap, see
-/// [`completion_heap_ptr`]). The io backends build completion errors through a
-/// `NativeCtx` over that heap, and the value escapes to the requesting fiber,
-/// freed value-based by its `DecrefValueRegion`.
-pub(crate) fn io_error(
-    kind: &str,
-    msg: impl Into<String>,
-    origin_heap: *mut crate::value::fiberheap::FiberHeap,
-) -> Value {
-    let heap = unsafe { &mut *completion_heap_ptr(origin_heap) };
-    let ctx = crate::primitives::ctx::Alloc::new(heap);
-    ctx.error(kind, msg)
+/// Where an io completion builds the answer it could not be handed, and the one
+/// reference that region is born with (docs/impl/io-inflight.md).
+///
+/// A spawn, a `read-all`, a resolution and every error are built when the
+/// operation finishes, on the scheduler's side of the park, so no
+/// `decref_point` names the region they are born in. That region's birth
+/// reference is the completion's, and [`hand_over`](Self::hand_over) is where it
+/// goes: the struct `Completion::into_value` builds records a counted edge of its
+/// own as it stores the value, so the handover follows that store.
+///
+/// The region is coined on the first allocation and reused by every one after
+/// it, so an answer assembled out of several objects is one region and one
+/// reference. A completion whose answer is a value the CALLER allocated — a
+/// port, a read's buffer — never allocates here and so coins nothing.
+pub(crate) struct Birthplace {
+    heap: *mut crate::value::fiberheap::FiberHeap,
+    region: Option<crate::hir::region::RuntimeRegion>,
+}
+
+impl Birthplace {
+    /// A birthplace on `heap`, the requesting instance's own (see
+    /// [`completion_heap_ptr`]), holding nothing yet.
+    pub(crate) fn on(heap: *mut crate::value::fiberheap::FiberHeap) -> Birthplace {
+        Birthplace { heap, region: None }
+    }
+
+    /// The allocation capability every value this completion builds goes
+    /// through, over the one region this birthplace coins.
+    pub(crate) fn alloc(&mut self) -> crate::primitives::ctx::Alloc<'_> {
+        // SAFETY (both reborrows): the requesting instance's heap, live for as
+        // long as the completion being built is — see `hand_over`.
+        let region = match self.region {
+            Some(region) => region,
+            None => {
+                let coined = unsafe { (*completion_heap_ptr(self.heap)).new_runtime_region() };
+                self.region = Some(coined);
+                coined
+            }
+        };
+        let heap = unsafe { &mut *completion_heap_ptr(self.heap) };
+        crate::primitives::ctx::Alloc::with_region(region, heap)
+    }
+
+    /// An io-completion error value `{:error :kind :message msg}`, built here
+    /// like every other answer a completion has to build itself.
+    pub(crate) fn error(&mut self, kind: &str, msg: impl Into<String>) -> Value {
+        self.alloc().error(kind, msg)
+    }
+
+    /// Let go of the birth reference: whoever took the value has recorded a
+    /// count of its own. Taking the region is the receipt, so a second handover
+    /// releases nothing, and a birthplace that coined nothing reaches nothing.
+    pub(crate) fn hand_over(&mut self) {
+        let Some(region) = self.region.take() else {
+            return;
+        };
+        // SAFETY: the store this birthplace coined on. Every route that ends a
+        // completion runs while that store is live — a value is built on it, and
+        // the teardown discard runs before the store tears its regions down
+        // (`FiberHeap::quiesce_io_backends`).
+        let heap = unsafe { &mut *self.heap };
+        crate::value::arena::decref_region(heap, Some(region));
+    }
+
+    /// Let go of the RECORD and not of the reference: whoever took the value
+    /// took the reference with it, and nothing here will release it.
+    ///
+    /// [`Completion::into_result`] is the one caller and carries the same gate:
+    /// a build with neither the tests nor the WASM tier has no reader that
+    /// takes a reference over, so neither this nor that one exists.
+    #[cfg(any(test, feature = "wasm"))]
+    fn forget(&mut self) {
+        self.region = None;
+    }
+}
+
+impl Drop for Birthplace {
+    /// A birthplace still holding a region is a completion nobody ended. The
+    /// region has a reference and nothing left to name it, so it lives until
+    /// the store does (docs/impl/io-inflight.md).
+    ///
+    /// An unwinding thread is let past. A panic inside a drop that is itself
+    /// running for a panic aborts the process, which would cost every other
+    /// test in the binary its result to report a stranded region behind an
+    /// assertion that already failed.
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        debug_assert!(
+            self.region.is_none(),
+            "a completion was let go still holding the region it built its answer in"
+        );
+    }
 }
 
 /// Completion from an async I/O operation.
+///
+/// It carries the [`Birthplace`] it was assembled at, because whatever that
+/// birthplace coined is this completion's to hand over
+/// (docs/impl/io-inflight.md). A completion whose answer the requesting call
+/// pre-allocated coined nothing there, and hands over nothing.
 pub(crate) struct Completion {
     pub(crate) id: SubmissionId,
     pub(crate) result: Result<Value, Value>,
+    birth: Birthplace,
 }
 
 impl Completion {
-    pub(crate) fn new(id: SubmissionId, result: Result<Value, Value>) -> Self {
-        Completion { id, result }
+    pub(crate) fn new(id: SubmissionId, birth: Birthplace, result: Result<Value, Value>) -> Self {
+        Completion { id, result, birth }
     }
 
     /// A successful completion carrying `value`.
-    pub(crate) fn ok(id: SubmissionId, value: Value) -> Self {
-        Completion {
-            id,
-            result: Ok(value),
-        }
+    pub(crate) fn ok(id: SubmissionId, birth: Birthplace, value: Value) -> Self {
+        Completion::new(id, birth, Ok(value))
     }
 
     /// A failed completion carrying the Elle error value `error`.
-    pub(crate) fn err(id: SubmissionId, error: Value) -> Self {
-        Completion {
-            id,
-            result: Err(error),
+    pub(crate) fn err(id: SubmissionId, birth: Birthplace, error: Value) -> Self {
+        Completion::new(id, birth, Err(error))
+    }
+
+    /// A failed completion whose error this completion builds. Every error a
+    /// completion reports is built rather than handed, so this is the one shape
+    /// they all take and the birthplace is always the one that coined it.
+    pub(crate) fn failed(
+        id: SubmissionId,
+        mut birth: Birthplace,
+        kind: &str,
+        msg: impl Into<String>,
+    ) -> Self {
+        let error = birth.error(kind, msg);
+        Completion::err(id, birth, error)
+    }
+
+    /// Nobody will read this completion, so nothing takes over what it built.
+    /// The backend's teardown drain is the one caller: it runs while the store
+    /// is still there, which is what lets the release name a region at all.
+    pub(crate) fn discard(mut self) {
+        self.birth.hand_over();
+    }
+
+    /// [`discard`](Self::discard) over a whole queue. A reader that takes one
+    /// completion out of what a wait returned owes the rest this.
+    pub(crate) fn discard_all(completions: impl IntoIterator<Item = Completion>) {
+        for completion in completions {
+            completion.discard();
         }
+    }
+
+    /// The answer, and the birth reference with it: the caller takes over what
+    /// this completion built rather than releasing it.
+    ///
+    /// The WASM tier's inline path is the one caller. It hands the value back
+    /// to the compiled module as a signal result, and reclaims no region while
+    /// it runs, so there is nothing there to hand the reference to
+    /// (docs/impl/io-inflight.md).
+    #[cfg(any(test, feature = "wasm"))]
+    pub(crate) fn into_result(mut self) -> Result<Value, Value> {
+        self.birth.forget();
+        self.result
     }
 
     /// Convert to an Elle struct: {:id n :value v :error nil} or {:id n :value nil :error e}.
@@ -207,7 +329,12 @@ impl Completion {
     /// requesting instance's heap (see [`completion_heap_ptr`]), so the struct
     /// records a counted edge to each and the resumed fiber's own reference
     /// carries it past this array's demise.
-    pub(crate) fn to_value(&self, ctx: &crate::primitives::ctx::Alloc<'_>) -> Value {
+    ///
+    /// That edge is also what the completion hands its own reference over TO,
+    /// which is why this consumes the completion and releases afterwards: the
+    /// struct counts the payload as it stores it, and the region the completion
+    /// built the payload in has a holder from that moment on.
+    pub(crate) fn into_value(mut self, ctx: &crate::primitives::ctx::Alloc<'_>) -> Value {
         let mut fields = BTreeMap::new();
         fields.insert(TableKey::keyword("id"), Value::int(self.id.as_u64() as i64));
         match &self.result {
@@ -220,7 +347,9 @@ impl Completion {
                 fields.insert(TableKey::keyword("error"), *e);
             }
         }
-        ctx.struct_from(fields)
+        let wrapper = ctx.struct_from(fields);
+        self.birth.hand_over();
+        wrapper
     }
 }
 
@@ -241,9 +370,9 @@ pub(crate) trait IoBackend {
     fn wait(&self, timeout_ms: i64) -> Result<Vec<Completion>, String>;
     fn cancel(&self, id: SubmissionId) -> Result<(), String>;
     /// Cancel and drain every in-flight kernel op, and let go of every region
-    /// the operations still filed are holding. Idempotent and a no-op once
-    /// nothing is pending. Default no-op for a backend with no kernel state and
-    /// no pending table (the mock).
+    /// this backend still holds: the ones its filed operations retain, and the
+    /// ones its unreaped completions built. Idempotent and a no-op once nothing
+    /// is pending. The default is a no-op for a backend that has neither.
     ///
     /// The backend's own `Drop` runs this, but a heap that STRANDS a backend —
     /// one the program never let go of — must run it BEFORE the region sweep.

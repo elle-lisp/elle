@@ -1,5 +1,9 @@
+//! audited: 2026-09-18
 //! Where a read's answer ends in the bytes it owns, and how that answer is
 //! handed back.
+//!
+//! src/io/AGENTS.md
+//! docs/impl/io-inflight.md
 //!
 //! A read is answered from two places. The port may already hold enough — the
 //! remainder a previous read took past what it answered with — in which case the
@@ -56,15 +60,19 @@ pub(crate) fn exact_end(
 /// a text port's result is that same allocation transmuted in place rather than
 /// a copy. It cannot always be used. A grapheme cluster has no upper bound in
 /// bytes, and neither has a line, so a read can answer with more bytes than any
-/// count could have reserved; that result is born on the requesting instance's
-/// heap instead, exactly as `read-all`'s is. Clamping to the buffer instead
-/// would drop the bytes past it, and they are bytes the port has already taken
-/// from the kernel — nothing would be left to read them again.
+/// count could have reserved; that result is built at the completion's
+/// `Birthplace` instead, exactly as `read-all`'s is. Clamping to the buffer
+/// instead would drop the bytes past it, and they are bytes the port has already
+/// taken from the kernel — nothing would be left to read them again.
+///
+/// Which of the two a read takes is what decides whether the birthplace coins
+/// anything: the buffer path allocates nothing there, so a read that fits owes
+/// the handover nothing.
 pub(crate) fn read_result(
     buffer: &Value,
     bytes: Vec<u8>,
     encoding: Encoding,
-    origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    birth: &mut crate::io::Birthplace,
 ) -> Result<Value, Value> {
     // SAFETY: the buffer is the requesting fiber's pre-allocated LBytes and that
     // fiber is parked until this answer reaches it.
@@ -76,14 +84,12 @@ pub(crate) fn read_result(
         }
         *buffer
     } else {
-        let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
-        let ctx = crate::primitives::ctx::Alloc::new(heap);
-        ctx.bytes(bytes)
+        birth.alloc().bytes(bytes)
     };
     if encoding == Encoding::Text {
         // SAFETY: `value` is an LBytes this call owns — either the parked
         // fiber's buffer or an allocation made just above.
-        unsafe { crate::io::request::bytes_to_string_in_place(value, origin_heap) }
+        unsafe { crate::io::request::bytes_to_string_in_place(value, birth) }
     } else {
         Ok(value)
     }

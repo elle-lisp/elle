@@ -1,6 +1,7 @@
 (elle/epoch 12)
+# audited: 2026-09-19
 # A propagated signal is a fresh park, and owes its own delivery reference
-# (docs/impl/region/owner.md § "Park/unpark symmetry").
+# (docs/impl/region/park.md).
 #
 # `fiber/propagate` installs the child's parked payload as the propagating
 # fiber's own `signal`. That fiber's resumer reads the payload as its resume

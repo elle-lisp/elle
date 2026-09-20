@@ -1,9 +1,8 @@
 # An operation in flight
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-20 -->
 
-What a submitted I/O operation holds while the kernel works, how it ends when
-the fiber that asked is gone, and how its answer is assembled.
+What a submitted I/O operation holds and owns, how it ends when the fiber that asked is gone, and how its answer is assembled.
 
 Up: [io/](../../src/io/AGENTS.md)
 
@@ -46,14 +45,15 @@ reads it back: `operands` is one list, and holding a value nobody will read
 costs a reference until the operation ends.
 
 Pinned by `a_submitted_operations_operands_outlive_the_fiber_that_asked`
-(`src/io/aio/tests/park.rs`) and, for the fiber itself, by
-`a_held_fiber_survives_the_release_of_its_region` (`src/io/pending.rs`).
+(`src/io/aio/tests/gone.rs`) and, for the fiber itself, by
+`a_held_fiber_survives_the_release_of_its_region`
+(`src/io/pending/tests/hold.rs`).
 
 ## A hold retains what reclamation listens to
 
 A retain on an `Owned` region is inert: that region is reclaimed by its owner's
 subtree drop however many references point at it
-(docs/impl/region/ownership.md). So the hold does not retain the operand's own
+([ownership.md](region/ownership.md)). So the hold does not retain the operand's own
 region — it retains the operand's **reclamation root**, the ancestor whose count
 the subtree's fate hangs on. For a `Counted` operand the root is the region
 itself and nothing changes; for an `Owned` one the root is what a count can
@@ -72,7 +72,7 @@ already makes for a write's copied payload: one seam, one rule, and a reference
 costs until the operation ends.
 
 Pinned by `an_owned_operand_is_held_through_its_reclamation_root`
-(`src/io/pending.rs`).
+(`src/io/pending/tests/hold.rs`).
 
 ## A hold is let go while its store is still there
 
@@ -97,6 +97,64 @@ before there was a hold to release, and the rule now covers both.
 
 Pinned by `a_stranded_backend_lets_go_before_its_heap_tears_down`
 (`src/io/aio/tests/backend.rs`).
+
+## A completion owns what it builds, and hands it over once
+
+Most operations answer with a value the requesting call already allocated: the
+port `port/open` and `connect` fill a descriptor into, the buffer a read writes
+through, the struct `recvfrom` stamps its sender into. Such a value lives in the
+region that call minted for its own result, beside the `IoRequest`. One release
+covers the whole region, and the install that ends the park owes it — see
+[owner nodes](region/owner.md).
+
+The rest cannot answer that way. A spawn does not know its child until the child
+runs, a `read-all` does not know its bytes until the stream ends, and a
+resolution does not know its addresses until the resolver replies. Each builds
+its answer when the operation finishes, and every error a completion reports is
+built then too.
+
+A region minted there is nobody's. The requesting call allocated nothing, so the
+compiler emitted no release naming it. The resume that delivers the value mints
+a reference of its own for the continuation to consume, which answers for the
+delivery rather than for the allocation. The reference the mint left is
+therefore the **completion's**, and the completion holds it until the value
+reaches the region system. That happens in one place: `Completion::into_value`
+builds the `{:id :value :error}` struct the reaping call answers with, and that
+struct records a counted edge to the value as it stores it. The completion lets
+go there, and the struct's edge is the value's reference from then on.
+
+`Birthplace` is the capability that makes the rule hold with no per-arm
+decision. An arm that builds its answer allocates through the birthplace, which
+records the region by the act of allocating; an arm that hands back a
+pre-allocated value never touches it and records nothing. One birthplace serves
+one completion, minting on its first allocation and reusing that region after,
+so an answer assembled out of several objects — a struct per signal event, a
+string per address — is one region and one reference.
+
+What a birthplace must not hold is a value stored into a value the CALLER owns.
+The handover releases the region whole, and an uncounted in-place store would
+leave the caller's value pointing into it. `recvfrom` is the one completion that
+writes into a caller-owned struct, and what it writes is that caller's own
+pre-allocated buffer re-tagged, never a value born here.
+
+A completion that never becomes a value still owes that reference, and a reader
+that is finished with one must say which it means: release what was built, or
+take it over. A backend tearing down releases, because nobody is left to read
+the answer and the store is still there to release it into. The WASM tier takes
+it over, because that tier reclaims no region while it runs and has nothing to
+hand a reference to (see [the WASM backend](wasm.md)).
+
+Letting the completion drop says neither, and strands the region with nothing
+to report it. So `Birthplace` refuses to be dropped holding one: the assertion
+fails a debug build where the leak would otherwise cost a region per operation,
+unmeasured.
+
+Pinned by `a_run_that_spawns_a_child_leaves_no_residue` and
+`a_run_that_reads_a_whole_file_leaves_no_residue`
+(`tests/region_process_teardown/census.rs`), and measured as a rate by the
+`subprocess-exec` and `port-read-all` probes in `tests/elle/plumb.lisp` beside
+`io-yield ev/sleep`, whose answer is an immediate the completion builds nothing
+for.
 
 ## An operation whose fiber is gone has no reader
 
@@ -139,7 +197,7 @@ than a fiber in this one, and `io/cancel` through `handle-io-forward-cancel` is
 how that reader lets go.
 
 Pinned by `a_completion_is_withheld_when_the_fiber_that_asked_is_gone`
-(`src/io/aio/tests/park.rs`), which builds the state directly and asserts on the
+(`src/io/aio/tests/gone.rs`), which builds the state directly and asserts on the
 answer. No corpus file pins it end to end: the answer goes to a fiber that is
 gone, so nothing in the program can observe it.
 `tests/elle/io-stale-operation-ends.lisp` reaches the same state and asserts on
@@ -186,7 +244,7 @@ descriptor, which is the platform's choice rather than a promise (§ "The stop
 pipe").
 
 Pinned by `an_operation_that_parks_ends_when_the_fiber_that_asked_is_gone`
-(`src/io/aio/tests/park.rs`), which gives the operation no peer at all, and end
+(`src/io/aio/tests/gone.rs`), which gives the operation no peer at all, and end
 to end by `tests/elle/io-stale-operation-ends.lisp`.
 
 ## The stop pipe
@@ -227,7 +285,7 @@ wakes a thread parked in `poll(2)` on that descriptor is the platform's choice:
 macOS and the BSDs wake it, and Linux does not, because `poll` holds a reference
 to the file it waits on. So an operation that can park carries a pipe on every
 platform, and a close ends such an operation by writing to that pipe rather than
-by being a close (§ "How a close wakes the operations it retires").
+by being a close ([descriptors and workers](io-descriptor.md)).
 
 Two operations meet the first condition and cannot meet the second, because the
 kernel reports no readiness for what they wait on: an `Open` of a fifo for

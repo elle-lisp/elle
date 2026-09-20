@@ -1,3 +1,9 @@
+// audited: 2026-09-19
+//! Where a yielded value's release lands, and which `Emit` sites yield a payload
+//! their own body releases nowhere.
+//!
+//! docs/impl/region/park.md
+
 use super::*;
 
 // ── Emit / yield ────────────────────────────────────────────────
@@ -69,7 +75,7 @@ fn yield_value_region_outlives_emit_scope() {
 // consumes; the reference a discarded fiber's discharge stands in for is the
 // body's own, released past the suspend. So the question each `Emit` answers is
 // whether its own body releases the payload anywhere
-// (docs/impl/region/owner.md § "Park/unpark symmetry").
+// (docs/impl/region/park.md).
 
 #[test]
 fn body_allocated_yield_payload_is_not_borrowed() {
@@ -142,7 +148,7 @@ fn own_parameter_yield_payload_is_not_borrowed() {
 // A first argument the compiler cannot read as a keyword set falls through to the
 // `emit` primitive, so the park is an ordinary call and there is no `Emit` node to
 // key on. The walk records the payload argument's regions against the CALL, so the
-// borrowed-payload reading covers both shapes (docs/impl/region/owner.md
+// borrowed-payload reading covers both shapes (docs/impl/region/park.md
 // § "What yields is the emit OPERATION, not the `Emit` node"). Both need the real
 // classification: `emit_natives` is empty under the default one.
 

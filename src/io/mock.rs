@@ -1,3 +1,4 @@
+//! audited: 2026-09-18
 //! Mock I/O backend for testing and benchmarking.
 //!
 //! Fulfills `IoRequest`s from in-memory state. No OS resources needed.
@@ -116,7 +117,7 @@ impl crate::io::IoBackend for MockBackend {
         // The mock completes inline and files no pending entry, so it has no
         // operands to hold and no fiber to ask about — only the heap its
         // results are born on.
-        let origin_heap = submitter.heap();
+        let mut birth = crate::io::Birthplace::on(submitter.heap());
         let mut inner = self.inner.borrow_mut();
         let id = inner.mint_id();
 
@@ -152,11 +153,7 @@ impl crate::io::IoBackend for MockBackend {
         let result = if inner.error_cursor < inner.error_queue.len() {
             let errno = inner.error_queue[inner.error_cursor];
             inner.error_cursor += 1;
-            Err(crate::io::io_error(
-                "io-error",
-                format!("mock error: errno {}", errno),
-                origin_heap,
-            ))
+            Err(birth.error("io-error", format!("mock error: errno {}", errno)))
         } else {
             match &request.op {
                 IoOp::Port(op) => match op {
@@ -170,10 +167,9 @@ impl crate::io::IoBackend for MockBackend {
                             if data.is_empty() {
                                 Ok(Value::NIL) // EOF
                             } else {
-                                let heap =
-                                    unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
-                                let ctx = crate::primitives::ctx::Alloc::new(heap);
-                                Ok(ctx.string(String::from_utf8_lossy(&data).as_ref()))
+                                Ok(birth
+                                    .alloc()
+                                    .string(String::from_utf8_lossy(&data).as_ref()))
                             }
                         } else {
                             Ok(Value::NIL) // EOF — no data seeded
@@ -187,11 +183,9 @@ impl crate::io::IoBackend for MockBackend {
                         Ok(Value::int(len as i64))
                     }
                     PortOp::Flush | PortOp::Shutdown { .. } => Ok(Value::NIL),
-                    PortOp::Accept { .. } => Err(crate::io::io_error(
-                        "io-error",
-                        "mock: accept not supported",
-                        origin_heap,
-                    )),
+                    PortOp::Accept { .. } => {
+                        Err(birth.error("io-error", "mock: accept not supported"))
+                    }
                     PortOp::SendTo { data, .. } => {
                         let len = data
                             .with_string(|s| s.len())
@@ -236,7 +230,7 @@ impl crate::io::IoBackend for MockBackend {
                                 let n2 = abytes.len().min(cap);
                                 std::ptr::copy_nonoverlapping(abytes.as_ptr(), dst, n2);
                                 truncate_buffer(&addr_buf, n2);
-                                let addr_val = bytes_to_string_in_place(addr_buf, origin_heap)
+                                let addr_val = bytes_to_string_in_place(addr_buf, &mut birth)
                                     .unwrap_or(addr_buf);
                                 set_struct_field_in_place(
                                     result,
@@ -256,60 +250,26 @@ impl crate::io::IoBackend for MockBackend {
                     let deadline = Instant::now() + *duration;
                     inner.pending.push(Pending {
                         deadline,
-                        completion: Completion::ok(id, Value::NIL),
+                        completion: Completion::ok(id, birth, Value::NIL),
                     });
                     return Ok(id);
                 }
-                IoOp::Connect { .. } => Err(crate::io::io_error(
-                    "io-error",
-                    "mock: connect not supported",
-                    origin_heap,
-                )),
-                IoOp::Spawn(_) | IoOp::ProcessWait => Err(crate::io::io_error(
-                    "io-error",
-                    "mock: subprocess ops not supported",
-                    origin_heap,
-                )),
-                IoOp::Open { .. } => Err(crate::io::io_error(
-                    "io-error",
-                    "mock: open not supported",
-                    origin_heap,
-                )),
-                IoOp::Seek { .. } | IoOp::Tell => Err(crate::io::io_error(
-                    "io-error",
-                    "mock: seek/tell not supported",
-                    origin_heap,
-                )),
-                IoOp::Task(_) => Err(crate::io::io_error(
-                    "io-error",
-                    "mock: task not supported",
-                    origin_heap,
-                )),
-                IoOp::Resolve { .. } => Err(crate::io::io_error(
-                    "io-error",
-                    "mock: resolve not supported",
-                    origin_heap,
-                )),
-                IoOp::WatchNext => Err(crate::io::io_error(
-                    "io-error",
-                    "mock: watch not supported",
-                    origin_heap,
-                )),
-                IoOp::SigNext => Err(crate::io::io_error(
-                    "io-error",
-                    "mock: sig-next not supported",
-                    origin_heap,
-                )),
-                IoOp::PollFd { .. } => Err(crate::io::io_error(
-                    "io-error",
-                    "mock: poll-fd not supported",
-                    origin_heap,
-                )),
-                IoOp::ChanSelectPark(_) => Err(crate::io::io_error(
-                    "io-error",
-                    "mock: chan/wait-ready not supported",
-                    origin_heap,
-                )),
+                IoOp::Connect { .. } => Err(birth.error("io-error", "mock: connect not supported")),
+                IoOp::Spawn(_) | IoOp::ProcessWait => {
+                    Err(birth.error("io-error", "mock: subprocess ops not supported"))
+                }
+                IoOp::Open { .. } => Err(birth.error("io-error", "mock: open not supported")),
+                IoOp::Seek { .. } | IoOp::Tell => {
+                    Err(birth.error("io-error", "mock: seek/tell not supported"))
+                }
+                IoOp::Task(_) => Err(birth.error("io-error", "mock: task not supported")),
+                IoOp::Resolve { .. } => Err(birth.error("io-error", "mock: resolve not supported")),
+                IoOp::WatchNext => Err(birth.error("io-error", "mock: watch not supported")),
+                IoOp::SigNext => Err(birth.error("io-error", "mock: sig-next not supported")),
+                IoOp::PollFd { .. } => Err(birth.error("io-error", "mock: poll-fd not supported")),
+                IoOp::ChanSelectPark(_) => {
+                    Err(birth.error("io-error", "mock: chan/wait-ready not supported"))
+                }
                 // Close completes synchronously in submit
                 IoOp::Close => Ok(Value::NIL),
             }
@@ -318,7 +278,7 @@ impl crate::io::IoBackend for MockBackend {
         let deadline = Instant::now() + inner.latency;
         inner.pending.push(Pending {
             deadline,
-            completion: Completion::new(id, result),
+            completion: Completion::new(id, birth, result),
         });
         Ok(id)
     }
@@ -374,9 +334,36 @@ impl crate::io::IoBackend for MockBackend {
         for p in old {
             if p.completion.id != id {
                 inner.pending.push(p);
+            } else {
+                // Nobody will read it, so what it built is nobody's
+                // (docs/impl/io-inflight.md).
+                p.completion.discard();
             }
         }
         Ok(())
+    }
+
+    /// The mock files no pending entry and holds no operand, so it has no hold
+    /// to release — but it does hold completions it assembled, and each of those
+    /// owns what it built. Discarding them here is what lets those releases name
+    /// a live store, exactly as the async backend's drain does.
+    fn quiesce(&self) {
+        let Ok(mut inner) = self.inner.try_borrow_mut() else {
+            return;
+        };
+        let queued: Vec<Pending> = inner.pending.drain().collect();
+        for p in queued {
+            p.completion.discard();
+        }
+    }
+}
+
+impl Drop for MockBackend {
+    fn drop(&mut self) {
+        // The same reason `AsyncBackend` drops through its quiesce: a completion
+        // nobody reaped owns what it built, and this is the last moment anything
+        // can let that go.
+        crate::io::IoBackend::quiesce(self);
     }
 }
 

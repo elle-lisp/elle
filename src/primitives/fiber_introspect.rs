@@ -1,4 +1,7 @@
+// audited: 2026-09-19
 //! Fiber introspection and management primitives.
+//!
+//! docs/impl/region/park.md
 //!
 //! These primitives provide access to fiber state and control flow:
 //! - fiber/bits: Get signal bits from last signal
@@ -196,13 +199,13 @@ fn inject_error_at_suspension(
     // (`release_displaced_terminal_signal`). A parked non-terminal signal is
     // released only where the RUNTIME built its payload (below); a body-allocated
     // one keeps its body reference, which the unwinding frames' own owed-release
-    // tables claim (docs/impl/region/owner.md § "Park/unpark symmetry").
+    // tables claim (docs/impl/region/park.md).
     let parked = handle.with(|fiber| fiber.signal);
     crate::vm::fiber::release_displaced_terminal_signal(ctx.heap_mut(), fiber_value, parked);
     // A park whose payload the RUNTIME built is what this install does answer
     // for: the child's continuation releases nothing for such a value, and
     // raising at the suspension point displaces it exactly as a resume would
-    // (docs/impl/region/owner.md § "Park/unpark symmetry" — "A payload the
+    // (docs/impl/region/park.md § "A payload the
     // RUNTIME built is released by the install that displaces it"). Two parks
     // are that shape and each has its own reading — a capability denial's
     // payload by the classifier's record, a yielding io op's `IoRequest` by the

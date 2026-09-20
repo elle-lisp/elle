@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-18
 //! Spawning a child: the command it builds, the signal slate it hands the
 //! child, and the subprocess it answers with.
 //!
@@ -111,27 +111,25 @@ impl SpawnRequest {
     /// Spawn the subprocess and wrap it as the `subprocess` value the fiber
     /// resumes with, or `Err(error_val)` when the spawn itself fails.
     ///
-    /// The ports and the handle are minted through ONE `Alloc` over the
-    /// requesting instance's heap, so they share a region. That is what lets the
-    /// handle hold the ports without a count: an external's payload is opaque to
-    /// both the alloc-time scan and the free-time cascade
-    /// (docs/impl/region/rules.md Rule 5), and co-regional values are freed
-    /// together or not at all.
+    /// The ports and the handle are built at ONE `Birthplace`, so they share a
+    /// region. That is what lets the handle hold the ports without a count: an
+    /// external's payload is opaque to both the alloc-time scan and the
+    /// free-time cascade (docs/impl/region/rules.md Rule 5), and co-regional
+    /// values are freed together or not at all. The region is the completion's
+    /// to hand over (docs/impl/io-inflight.md).
     pub(crate) fn spawn_to_subprocess(
         &self,
-        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+        birth: &mut crate::io::Birthplace,
     ) -> Result<Value, Value> {
         let mut child = self.build_command().spawn().map_err(|e| {
-            crate::io::io_error(
+            birth.error(
                 "exec-error",
                 format!("subprocess/exec: {}: {e}", self.program),
-                origin_heap,
             )
         })?;
 
         let pid = child.id();
-        let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
-        let ctx = crate::primitives::ctx::Alloc::new(heap);
+        let ctx = birth.alloc();
 
         let stdio = [
             child

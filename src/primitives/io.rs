@@ -1,5 +1,8 @@
-//! audited: 2026-09-16
+//! audited: 2026-09-18
 //! I/O primitives: type predicates and backend operations.
+//!
+//! src/io/AGENTS.md
+//! docs/io.md
 
 use crate::io::aio::AsyncBackend;
 use crate::io::mock::MockBackend;
@@ -194,7 +197,7 @@ fn prim_io_reap(
     let completions = backend.0.poll();
     // The completion-wrapper structs share the array's region — this call's own
     // — so the declared `Fresh` result is one region the caller releases whole.
-    let values: Vec<Value> = completions.iter().map(|c| c.to_value(ctx)).collect();
+    let values: Vec<Value> = completions.into_iter().map(|c| c.into_value(ctx)).collect();
     (SIG_OK, ctx.array(values))
 }
 
@@ -218,7 +221,7 @@ fn prim_io_wait(
     let timeout_ms = prim_arg!(ctx, args, 1, as_int, "io/wait", "integer timeout");
     match backend.0.wait(timeout_ms) {
         Ok(completions) => {
-            let values: Vec<Value> = completions.iter().map(|c| c.to_value(ctx)).collect();
+            let values: Vec<Value> = completions.into_iter().map(|c| c.into_value(ctx)).collect();
             (SIG_OK, ctx.array(values))
         }
         Err(msg) => (SIG_ERROR, ctx.error("io-error", msg)),

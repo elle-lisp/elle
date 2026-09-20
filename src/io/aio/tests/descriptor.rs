@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-20
 //! A descriptor number stays out of the OS's hands while an operation names it,
 //! even after the value that owned it is gone.
 //!
@@ -106,7 +106,7 @@ fn a_port_freed_with_its_fibers_regions_keeps_its_descriptor_number() {
             // number goes back with the entry that held the last share of it.
             let mut delivered = Vec::new();
             for _ in 0..40 {
-                delivered.extend(backend.wait(50).unwrap().into_iter().map(|c| c.id));
+                delivered.extend(completion_ids(backend.wait(50).unwrap()));
                 if !backend.has_pending() && backend.workers() == 0 {
                     break;
                 }
@@ -206,7 +206,7 @@ fn a_watcher_freed_with_its_fibers_regions_keeps_its_descriptor_number() {
         // goes back with the hold that kept the watcher alive.
         let mut delivered = Vec::new();
         for _ in 0..40 {
-            delivered.extend(backend.wait(50).unwrap().into_iter().map(|c| c.id));
+            delivered.extend(completion_ids(backend.wait(50).unwrap()));
             if !backend.has_pending() && backend.workers() == 0 {
                 break;
             }

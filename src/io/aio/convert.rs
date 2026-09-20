@@ -1,3 +1,9 @@
+//! audited: 2026-09-18
+//! Cooking a raw worker completion into one a fiber can be handed.
+//!
+//! src/io/AGENTS.md
+//! docs/impl/io-inflight.md
+
 use super::*;
 
 /// Cook one `RawCompletion` reaped from the hub into a `Completion`, dispatching
@@ -79,17 +85,17 @@ pub(super) fn stdin_to_completion(
     // answer to one kind.
     if let Some(mismatch) = misrouted(&pending_op, OpKind::Port, id) {
         std::mem::forget(pending_op);
-        return Some(Completion::err(
-            id,
-            crate::io::io_error("io-error", mismatch, origin_heap),
-        ));
+        let birth = crate::io::Birthplace::on(origin_heap);
+        return Some(Completion::failed(id, birth, "io-error", mismatch));
     }
     // Release BufferPool handle if present
     if let Some(bh) = pending_op.buffer_handle() {
         buffer_pool.release(bh);
     }
     Some(match sc.result {
-        Ok(data) if data.is_empty() => Completion::ok(id, Value::NIL),
+        Ok(data) if data.is_empty() => {
+            Completion::ok(id, crate::io::Birthplace::on(origin_heap), Value::NIL)
+        }
         // The worker's bytes are cooked where the pool's are, and for the same
         // reason: a line has no upper bound, so staging them into the fiber's
         // pre-allocated buffer first would clamp them to its size. `read_result`
@@ -112,7 +118,10 @@ pub(super) fn stdin_to_completion(
             origin_heap,
             gen,
         ),
-        Err(e) => Completion::err(id, crate::io::io_error("io-error", e, origin_heap)),
+        Err(e) => {
+            let birth = crate::io::Birthplace::on(origin_heap);
+            Completion::failed(id, birth, "io-error", e)
+        }
     })
 }
 
@@ -149,10 +158,8 @@ pub(super) fn pool_to_completion(
         // the same way, so the regions it named stay retained too. Leaking all
         // of it is the cheap half of the trade.
         std::mem::forget(pending_op);
-        return Some(Completion::err(
-            id,
-            crate::io::io_error("io-error", mismatch, origin_heap),
-        ));
+        let birth = crate::io::Birthplace::on(origin_heap);
+        return Some(Completion::failed(id, birth, "io-error", mismatch));
     }
     if let PendingOp::Connect {
         ref mut connect_fd, ..

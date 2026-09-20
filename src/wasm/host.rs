@@ -1,7 +1,10 @@
-// audited: 2026-09-06
+// audited: 2026-09-20
 // docs/impl/wasm.md
 //! Wasmtime host state and primitive dispatch: everything the compiled module
 //! reaches across the boundary for.
+//!
+//! `host/io.rs` carries the one part that is not dispatch: what a top-level
+//! primitive's I/O does when no scheduler is there to take it.
 //!
 //! The host state (`ElleHost`) lives in the Wasmtime `Store` and holds the
 //! handle table heap objects are named by, the flattened primitive dispatch
@@ -12,15 +15,15 @@
 //! namespace. `rt_call` is the one a compiled call reaches: it resolves the
 //! callee and dispatches on its runtime type, primitives included.
 
-use crate::io::request::IoRequest;
 use crate::io::AnyBackend;
 use crate::primitives::def::PrimitiveDef;
-use crate::signals::SIG_IO;
 use crate::value::fiber::SignalBits;
 use crate::value::repr::TAG_HEAP_START;
 use crate::value::Value;
 
 use super::handle::HandleTable;
+
+mod io;
 
 /// A closure's dual-compiled blueprint, used by spawn for cross-thread
 /// execution. `rt_make_closure` builds a code object from it plus the shape the
@@ -329,109 +332,6 @@ impl ElleHost {
         } else {
             (def.func)(&mut ctx, args)
         }
-    }
-
-    /// Handle SIG_IO from a primitive call.
-    ///
-    /// When inside a fiber (fiber_id_stack is non-empty), propagate
-    /// SIG_IO so the scheduler can drive I/O through the event loop.
-    /// Otherwise, execute I/O inline via the bound backend or SyncBackend.
-    pub fn maybe_execute_io(&mut self, bits: SignalBits, value: Value) -> (SignalBits, Value) {
-        if bits.raw() & SIG_IO.raw() == 0 {
-            return (bits, value);
-        }
-
-        // Inside a fiber: propagate SIG_IO to the scheduler
-        if !self.fiber_id_stack.is_empty() {
-            return (bits, value);
-        }
-
-        // Top-level: execute I/O inline
-        let request = match value.as_external::<IoRequest>() {
-            Some(r) => r,
-            None => return (bits, value),
-        };
-
-        if let Some(backend_val) = self.find_io_backend() {
-            if let Some(async_be) = backend_val.as_external::<AnyBackend>() {
-                if let Ok(_id) = async_be.0.submit(
-                    request,
-                    crate::io::pending::Submitter::detached(self.heap_ptr()),
-                ) {
-                    if let Ok(completions) = async_be.0.wait(-1) {
-                        if let Some(c) = completions.into_iter().next() {
-                            return match c.result {
-                                Ok(v) => (crate::value::fiber::SIG_OK, v),
-                                Err(e) => (crate::value::fiber::SIG_ERROR, e),
-                            };
-                        }
-                    }
-                }
-            }
-        }
-        // Fallback: use the lazily-initialized backend
-        self.execute_io_inline(request)
-    }
-
-    /// Execute an I/O request using the lazily-initialized backend.
-    pub(crate) fn execute_io_inline(
-        &mut self,
-        request: &IoRequest,
-    ) -> (crate::value::fiber::SignalBits, Value) {
-        let backend = match &self.io_backend {
-            Some(_) => self.io_backend.as_ref().unwrap(),
-            None => match crate::io::aio::AsyncBackend::new_with_unicode(
-                unsafe { &*self.vm }.unicode_generation(),
-                // This backend serves inline I/O for a WASM module rather than
-                // a scheduler a program parameterized, so nothing named a
-                // keepalive for it: the default stands.
-                None,
-            ) {
-                Ok(be) => {
-                    self.io_backend = Some(AnyBackend(Box::new(be)));
-                    self.io_backend.as_ref().unwrap()
-                }
-                Err(e) => {
-                    let heap = unsafe { &mut *self.heap_ptr() };
-                    let ctx = crate::primitives::ctx::Alloc::new(heap);
-                    return (
-                        crate::value::fiber::SIG_ERROR,
-                        ctx.error("io-error", format!("failed to create I/O backend: {}", e)),
-                    );
-                }
-            },
-        };
-        if let Ok(_id) = backend.0.submit(
-            request,
-            crate::io::pending::Submitter::detached(self.heap_ptr()),
-        ) {
-            if let Ok(completions) = backend.0.wait(-1) {
-                if let Some(c) = completions.into_iter().next() {
-                    return match c.result {
-                        Ok(v) => (crate::value::fiber::SIG_OK, v),
-                        Err(e) => (crate::value::fiber::SIG_ERROR, e),
-                    };
-                }
-            }
-        }
-        let heap = unsafe { &mut *self.heap_ptr() };
-        let ctx = crate::primitives::ctx::Alloc::new(heap);
-        (
-            crate::value::fiber::SIG_ERROR,
-            ctx.error("io-error", "I/O submission failed"),
-        )
-    }
-
-    /// Search param_frames for a value that is an I/O backend.
-    fn find_io_backend(&self) -> Option<Value> {
-        for frame in self.param_frames.iter().rev() {
-            for &(_, value) in frame {
-                if value.as_external::<AnyBackend>().is_some() {
-                    return Some(value);
-                }
-            }
-        }
-        None
     }
 
     /// Resolve a parameter's current value by walking param_frames.

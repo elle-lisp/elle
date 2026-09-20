@@ -1,8 +1,9 @@
-// audited: 2026-09-05
+// audited: 2026-09-19
 //! Replaying a fiber's suspended frame chain: each frame's stack, region map and
 //! dues are restored before its body is re-entered.
 //!
 //! docs/impl/region/owner.md
+//! docs/impl/region/park.md
 //! docs/impl/region/generations.md
 
 use super::*;
@@ -66,7 +67,7 @@ impl VM {
                     // The install displaces this inner fiber's park, so a payload
                     // the RUNTIME built there is owed the release its body has
                     // none for, exactly as at `fiber/resume` itself
-                    // (docs/impl/region/owner.md § "Park/unpark symmetry").
+                    // (docs/impl/region/park.md).
                     crate::vm::fiber::release_displaced_denial_payload(self.heap(), handle);
                     handle.with_mut(|f| {
                         f.signal = Some((SIG_OK, current_value));

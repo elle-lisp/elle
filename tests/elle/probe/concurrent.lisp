@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-08
+# audited: 2026-09-19
 # The direct-loop rows whose drive crosses a fiber: closures, protect and defer, the park families, the emit and error deliveries.
 #
 # docs/impl/region/diagnostics.md
@@ -130,7 +130,7 @@
         (fiber/cancel f :dead))) 0]  # A parked fiber hard-killed by `fiber/cancel` reclaims fully: the kill
    # frees everything the fiber owns (owner nodes, the parked signal's park
    # escape retain), and no carrier retain pins the fiber region
-   # (docs/impl/region/owner.md § "Park/unpark symmetry").
+   # (docs/impl/region/park.md).
    ["cancel-discard"
     (fn [j]
       (let [f (fiber/new (fn []
@@ -159,7 +159,7 @@
    # emit path: a first argument the compiler cannot read as a keyword set falls
    # through to the `emit` primitive, so the park is an ordinary call rather than the
    # `Emit` terminator and the body reference the discharge stands in for comes from
-   # the call rather than from `lower_emit` (docs/impl/region/owner.md § "What yields
+   # the call rather than from `lower_emit` (docs/impl/region/park.md § "What yields
    # is the emit OPERATION, not the `Emit` node"). Each gauges the reference's ARITY,
    # not its presence — withholding it over-frees, which no leak gauge sees and
    # `tests/elle/region-dynamic-emit-borrow-uaf.lisp` reports. The four must stay
@@ -244,7 +244,7 @@
         (fiber/resume f)
         (fiber/resume f))) 0]  # The same raise OFF TAIL POSITION, where the site
    # takes the retain instead of the call's argument convention and the exit leaves
-   # it standing for the continuation past the call (docs/impl/region/owner.md
+   # it standing for the continuation past the call (docs/impl/region/park.md
    # § "What yields is the emit OPERATION, not the `Emit` node"). CLOSED controls
    # (undeclared, like `rest-array-copy`). What each reads is where that retain's one
    # consumer is: `emit-dyn-error-discard` above resumes once, so no replay arrives

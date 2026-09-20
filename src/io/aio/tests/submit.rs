@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-20
 //! The submission frame — what every operation the backend issues shares.
 //!
 //! A submission mints an id, hands the operation to io_uring or to a
@@ -71,7 +71,7 @@ fn a_sleep_completes_under_the_id_it_was_submitted_with() {
             timeout: None,
         };
         let id = submit_pending(&backend, &req, "sleep");
-        expect_completion(&backend, id, "sleep");
+        expect_completion(&backend, id, "sleep").discard();
     });
 }
 
@@ -89,7 +89,7 @@ fn a_resolve_completes_under_the_id_it_was_submitted_with() {
             timeout: None,
         };
         let id = submit_pending(&backend, &req, "resolve");
-        expect_completion(&backend, id, "resolve");
+        expect_completion(&backend, id, "resolve").discard();
     });
 }
 
@@ -104,7 +104,7 @@ fn a_task_completes_under_the_id_it_was_submitted_with() {
             timeout: None,
         };
         let id = submit_pending(&backend, &req, "task");
-        expect_completion(&backend, id, "task");
+        expect_completion(&backend, id, "task").discard();
     });
 }
 
@@ -122,7 +122,7 @@ fn a_readiness_poll_completes_under_the_id_it_was_submitted_with() {
             timeout: None,
         };
         let id = submit_pending(&backend, &req, "poll-fd");
-        expect_completion(&backend, id, "poll-fd");
+        expect_completion(&backend, id, "poll-fd").discard();
     });
 }
 
@@ -157,6 +157,7 @@ fn an_open_completes_under_the_id_it_was_submitted_with() {
         let id = submit_pending(&backend, &req, "open");
         let completion = expect_completion(&backend, id, "open");
         assert!(completion.result.is_ok(), "open: the file opened");
+        completion.discard();
 
         std::fs::remove_file(&path).ok();
     });
@@ -183,7 +184,7 @@ fn a_watch_read_completes_under_the_id_it_was_submitted_with() {
             timeout: None,
         };
         let id = submit_pending(&backend, &req, "watch-next");
-        expect_completion(&backend, id, "watch-next");
+        expect_completion(&backend, id, "watch-next").discard();
 
         std::fs::remove_dir_all(&dir).ok();
     });
@@ -225,6 +226,7 @@ fn a_spawn_completes_inside_the_submit_call() {
             completions[0].id, id,
             "spawn: the completion carries the submitted id"
         );
+        Completion::discard_all(completions);
     });
 }
 
@@ -251,8 +253,11 @@ fn a_process_wait_completes_under_the_id_it_was_submitted_with() {
             .submit(&spawn, crate::io::pending::Submitter::for_test())
             .unwrap();
         // The spawn's answer IS the handle a wait names — there is no key to
-        // reach through, which is the point of the type.
-        let spawned = backend.poll().pop().unwrap().result.unwrap();
+        // reach through, which is the point of the type. Its completion owns
+        // the region that handle lives in, so it is held until the wait it
+        // names has answered.
+        let spawn = backend.poll().pop().unwrap();
+        let spawned = *spawn.result.as_ref().expect("the child spawned");
 
         let req = IoRequest {
             op: IoOp::ProcessWait,
@@ -260,7 +265,8 @@ fn a_process_wait_completes_under_the_id_it_was_submitted_with() {
             timeout: None,
         };
         let id = submit_pending(&backend, &req, "process-wait");
-        expect_completion(&backend, id, "process-wait");
+        expect_completion(&backend, id, "process-wait").discard();
+        spawn.discard();
     });
 }
 
@@ -378,10 +384,12 @@ fn a_completion_for_another_operation_is_withheld_from_the_entry_it_found() {
         )
         .expect("a mismatch is reported, not dropped — a dropped one hangs the fiber");
 
-        let err = completion
+        let err = *completion
             .result
+            .as_ref()
             .expect_err("a mismatched completion carries no result");
         let msg = format!("{}", err);
+        completion.discard();
         assert!(
             msg.contains("Port") && msg.contains("process wait"),
             "the report names the operation that completed and the entry it \

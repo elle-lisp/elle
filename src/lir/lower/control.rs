@@ -1,9 +1,10 @@
-// audited: 2026-09-08
+// audited: 2026-09-19
 //! Control flow lowering: the tail-argument ownership predicates, intrinsic
 //! specialization, `eval`, `emit`, and the call path. `and`/`or` and `match`
 //! lower in the submodules beside it.
 //!
 //! docs/impl/lir.md
+//! docs/impl/region/park.md
 
 use super::*;
 use crate::hir::CallArg;
@@ -267,7 +268,7 @@ impl<'a> Lowerer<'a> {
         let value_reg = self.lower_expr(value)?;
 
         // A fiber body owns one reference of every value it yields
-        // (docs/impl/region/owner.md § "Park/unpark symmetry"). The park's own
+        // (docs/impl/region/park.md). The park's own
         // `EmitEscape` retain is the DELIVERY reference — the resumer's release of
         // the resume result consumes it — so what a discarded fiber's discharge
         // stands in for is the body's separate reference, released by the

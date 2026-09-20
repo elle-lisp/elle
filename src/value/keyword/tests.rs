@@ -1,4 +1,7 @@
+//! audited: 2026-09-18
 //! Unit tests (`super` is the parent impl module).
+//!
+//! docs/impl/symbol.md
 
 use super::*;
 
@@ -147,8 +150,10 @@ fn vocabulary_membership_answers_in_a_const_context() {
 // defines for its struct keys (`primitives/compile/mod.rs`,
 // `primitives/fileio/manage.rs`) and the reader's syntax builder
 // (`reader/synbuild.rs`); it is the form the earlier scan missed, and the form
-// most of the runtime's struct keys are written in. `ctx.error("…")` and
-// `io_error("…")` name a kind that becomes the `:error` field's keyword.
+// most of the runtime's struct keys are written in. `ctx.error("…")`,
+// `birth.error("…")` and `Completion::failed(id, birth, "…")` name a kind that
+// becomes the `:error` field's keyword — the last one spelled out to the
+// argument before its literal, per the rule below.
 // `ctx.external("…")` names a type that becomes the keyword `type-of` returns.
 // `Syntax::keyword(arena, "…")` is a keyword a desugaring writes into the
 // tree: no source token backs it, so no reader learns it and only the
@@ -162,7 +167,8 @@ const LITERAL_MINT_FORMS: &[&str] = &[
     "TableKey::keyword(\"",
     "kw(\"",
     "ctx.error(\"",
-    "io_error(\"",
+    "birth.error(\"",
+    "Completion::failed(id, birth, \"",
     "ctx.external(\"",
     "Syntax::keyword(arena, \"",
 ];

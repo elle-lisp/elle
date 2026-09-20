@@ -1,6 +1,7 @@
 (elle/epoch 12)
+# audited: 2026-09-19
 # An io park's `IoRequest` is released by the install that displaces it — the
-# soundness face (docs/impl/region/owner.md § "Park/unpark symmetry").
+# soundness face (docs/impl/region/park.md).
 #
 # The leak face is region-io-park.lisp: an aborted or refused io park stranded
 # its request, because the release that answers for a runtime-built payload ran

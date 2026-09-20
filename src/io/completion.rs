@@ -1,4 +1,9 @@
-//! Completion processing for async I/O operations.
+//! audited: 2026-09-20
+//! Completion processing for async I/O: one arm per operation shape, each
+//! answering with a value it was handed or one it builds.
+//!
+//! src/io/AGENTS.md
+//! docs/impl/io-inflight.md
 
 use crate::io::pending::PendingOp;
 use crate::io::pool::{BufferHandle, BufferPool};
@@ -12,10 +17,10 @@ use std::collections::HashMap;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::io::{FromRawFd, OwnedFd, RawFd};
 
-/// Set TCP_NODELAY on a TCP stream fd to disable Nagle's algorithm.
 mod port;
 use port::complete_port_op;
 
+/// Set TCP_NODELAY on a TCP stream fd to disable Nagle's algorithm.
 fn set_tcp_nodelay(fd: &OwnedFd) {
     unsafe {
         let opt: libc::c_int = 1;
@@ -61,6 +66,11 @@ pub(super) fn process_raw_completion(
     // The owning VM's Unicode generation, forwarded to the port arm.
     gen: crate::segment::Generation,
 ) -> Completion {
+    // Where this completion builds an answer it cannot be handed: one region on
+    // that heap, whose reference the completion carries and hands over
+    // (docs/impl/io-inflight.md). One completion, one birthplace, coined here so
+    // no arm can reach for a second.
+    let mut birth = crate::io::Birthplace::on(origin_heap);
     // Release the buffer back to the pool (if present — reads don't use BufferPool)
     if let Some(bh) = buf_handle {
         buffer_pool.release(bh);
@@ -82,7 +92,7 @@ pub(super) fn process_raw_completion(
                             // once, and this arm is the single exit point.
                             unsafe { drop(Box::from_raw(*siginfo)) };
                         }
-                        return Completion::ok(id, Value::int(code as i64));
+                        return Completion::ok(id, birth, Value::int(code as i64));
                     }
                 }
                 // Which syscall actually ran is what the `siginfo` allocation
@@ -100,19 +110,13 @@ pub(super) fn process_raw_completion(
                     unsafe { drop(Box::from_raw(*siginfo)) };
                 }
                 let errno = -result_code;
-                return Completion::err(
-                    id,
-                    crate::io::io_error(
-                        "exec-error",
-                        format!(
-                            "subprocess/wait: {} failed: errno {} ({})",
-                            syscall,
-                            errno,
-                            errno_message(errno)
-                        ),
-                        origin_heap,
-                    ),
+                let msg = format!(
+                    "subprocess/wait: {} failed: errno {} ({})",
+                    syscall,
+                    errno,
+                    errno_message(errno)
                 );
+                return Completion::failed(id, birth, "exec-error", msg);
             }
 
             let exit_code: i32 = if siginfo.is_null() {
@@ -139,12 +143,12 @@ pub(super) fn process_raw_completion(
             // answer at all.
             exit.keep(exit_code);
 
-            Completion::ok(id, Value::int(exit_code as i64))
+            Completion::ok(id, birth, Value::int(exit_code as i64))
         }
         PendingOp::Sleep { .. } => {
             // Sleep completes with -ETIME (62) on io_uring, or 0 on thread pool.
             // Both are success for a timer.
-            Completion::ok(id, Value::NIL)
+            Completion::ok(id, birth, Value::NIL)
         }
         PendingOp::Open {
             path,
@@ -161,7 +165,7 @@ pub(super) fn process_raw_completion(
                     format!("port/open: {}: {}", path, os_err)
                 };
                 let error_type = if is_timeout { "timeout" } else { "io-error" };
-                return Completion::err(id, crate::io::io_error(error_type, msg, origin_heap));
+                return Completion::failed(id, birth, error_type, msg);
             }
             // SAFETY: result_code is a valid fd returned by the kernel (>= 0).
             let fd = unsafe { OwnedFd::from_raw_fd(result_code) };
@@ -170,7 +174,7 @@ pub(super) fn process_raw_completion(
                 .as_external::<Port>()
                 .expect("PendingOp::Open port must be a Port");
             port_ref.set_fd(fd);
-            Completion::ok(id, *port_val)
+            Completion::ok(id, birth, *port_val)
         }
         PendingOp::Connect {
             connect_fd,
@@ -186,7 +190,7 @@ pub(super) fn process_raw_completion(
                     format!("I/O error: {}", errno_message(errno))
                 };
                 let error_type = if is_timeout { "timeout" } else { "io-error" };
-                return Completion::err(id, crate::io::io_error(error_type, msg, origin_heap));
+                return Completion::failed(id, birth, error_type, msg);
             }
             // Connect: fd comes from PendingOp (set at submission time).
             let fd = connect_fd.unwrap_or(result_code as RawFd);
@@ -205,16 +209,15 @@ pub(super) fn process_raw_completion(
                 .as_external::<Port>()
                 .expect("PendingOp::Connect port must be a Port");
             port_ref.set_fd(fd);
-            Completion::ok(id, *port_val)
+            Completion::ok(id, birth, *port_val)
         }
         PendingOp::Task { .. } => {
             if result_code < 0 {
                 let msg = String::from_utf8_lossy(&data).to_string();
-                Completion::err(id, crate::io::io_error("task-error", msg, origin_heap))
+                Completion::failed(id, birth, "task-error", msg)
             } else {
-                let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
-                let ctx = crate::primitives::ctx::Alloc::new(heap);
-                Completion::ok(id, ctx.bytes(data))
+                let bytes = birth.alloc().bytes(data);
+                Completion::ok(id, birth, bytes)
             }
         }
         PendingOp::WatchNext { watcher, .. } => {
@@ -227,7 +230,7 @@ pub(super) fn process_raw_completion(
                         std::io::Error::from_raw_os_error(-result_code)
                     )
                 };
-                return Completion::err(id, crate::io::io_error("io-error", msg, origin_heap));
+                return Completion::failed(id, birth, "io-error", msg);
             }
             // Parse inotify events from raw bytes
             let events = if let Some(w) = watcher.as_external::<crate::io::watch::FsWatcher>() {
@@ -235,25 +238,27 @@ pub(super) fn process_raw_completion(
             } else {
                 Vec::new()
             };
-            // Convert to Elle array of structs. One shared region (the ctx's) for
-            // the whole nested result: the strings live inside the structs, which
-            // live inside the array.
-            let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
-            let ctx = crate::primitives::ctx::Alloc::new(heap);
-            let event_values: Vec<Value> = events
-                .iter()
-                .map(|ev| {
-                    let mut fields = std::collections::BTreeMap::new();
-                    fields.insert(
-                        crate::value::heap::TableKey::keyword("kind"),
-                        Value::keyword(ev.kind.as_keyword()),
-                    );
-                    let path = ctx.string(ev.path.to_string_lossy().as_ref());
-                    fields.insert(crate::value::heap::TableKey::keyword("path"), path);
-                    ctx.struct_from(fields)
-                })
-                .collect();
-            Completion::ok(id, ctx.array(event_values))
+            // Convert to Elle array of structs. One shared region (the
+            // birthplace's) for the whole nested result: the strings live inside
+            // the structs, which live inside the array.
+            let answer = {
+                let ctx = birth.alloc();
+                let event_values: Vec<Value> = events
+                    .iter()
+                    .map(|ev| {
+                        let mut fields = std::collections::BTreeMap::new();
+                        fields.insert(
+                            crate::value::heap::TableKey::keyword("kind"),
+                            Value::keyword(ev.kind.as_keyword()),
+                        );
+                        let path = ctx.string(ev.path.to_string_lossy().as_ref());
+                        fields.insert(crate::value::heap::TableKey::keyword("path"), path);
+                        ctx.struct_from(fields)
+                    })
+                    .collect();
+                ctx.array(event_values)
+            };
+            Completion::ok(id, birth, answer)
         }
         PendingOp::SigNext { receiver, .. } => {
             // The receiver's own instance trace cell gates these diagnostics
@@ -280,7 +285,7 @@ pub(super) fn process_raw_completion(
                         std::io::Error::from_raw_os_error(-result_code)
                     )
                 };
-                return Completion::err(id, crate::io::io_error("io-error", msg, origin_heap));
+                return Completion::failed(id, birth, "io-error", msg);
             }
             let events = if let Some(r) = recv {
                 r.parse_events(&data[..result_code as usize])
@@ -293,44 +298,48 @@ pub(super) fn process_raw_completion(
                     format_args!("completion: SigNext parsed {} events", events.len()),
                 );
             }
-            // One shared region (the ctx's): each event struct lives inside the array.
-            let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
-            let ctx = crate::primitives::ctx::Alloc::new(heap);
-            let event_values: Vec<Value> = events
-                .iter()
-                .map(|ev| {
-                    let name = crate::io::sigmap::signum_to_keyword(ev.signum).unwrap_or("unknown");
-                    let mut fields = std::collections::BTreeMap::new();
-                    fields.insert(
-                        crate::value::heap::TableKey::keyword("signal"),
-                        Value::keyword(name),
-                    );
-                    fields.insert(
-                        crate::value::heap::TableKey::keyword("sender-pid"),
-                        match ev.sender_pid {
-                            Some(p) => Value::int(p as i64),
-                            None => Value::NIL,
-                        },
-                    );
-                    fields.insert(
-                        crate::value::heap::TableKey::keyword("sender-uid"),
-                        match ev.sender_uid {
-                            Some(u) => Value::int(u as i64),
-                            None => Value::NIL,
-                        },
-                    );
-                    fields.insert(
-                        crate::value::heap::TableKey::keyword("code"),
-                        Value::int(ev.code as i64),
-                    );
-                    fields.insert(
-                        crate::value::heap::TableKey::keyword("count"),
-                        Value::int(ev.count as i64),
-                    );
-                    ctx.struct_from(fields)
-                })
-                .collect();
-            Completion::ok(id, ctx.array(event_values))
+            // One shared region (the birthplace's): each event struct lives
+            // inside the array.
+            let answer = {
+                let ctx = birth.alloc();
+                let event_values: Vec<Value> = events
+                    .iter()
+                    .map(|ev| {
+                        let name =
+                            crate::io::sigmap::signum_to_keyword(ev.signum).unwrap_or("unknown");
+                        let mut fields = std::collections::BTreeMap::new();
+                        fields.insert(
+                            crate::value::heap::TableKey::keyword("signal"),
+                            Value::keyword(name),
+                        );
+                        fields.insert(
+                            crate::value::heap::TableKey::keyword("sender-pid"),
+                            match ev.sender_pid {
+                                Some(p) => Value::int(p as i64),
+                                None => Value::NIL,
+                            },
+                        );
+                        fields.insert(
+                            crate::value::heap::TableKey::keyword("sender-uid"),
+                            match ev.sender_uid {
+                                Some(u) => Value::int(u as i64),
+                                None => Value::NIL,
+                            },
+                        );
+                        fields.insert(
+                            crate::value::heap::TableKey::keyword("code"),
+                            Value::int(ev.code as i64),
+                        );
+                        fields.insert(
+                            crate::value::heap::TableKey::keyword("count"),
+                            Value::int(ev.count as i64),
+                        );
+                        ctx.struct_from(fields)
+                    })
+                    .collect();
+                ctx.array(event_values)
+            };
+            Completion::ok(id, birth, answer)
         }
         PendingOp::PollFd { .. } => {
             // result_code is the revents mask (positive) or negative errno.
@@ -346,18 +355,12 @@ pub(super) fn process_raw_completion(
             if result_code < 0 {
                 let errno = -result_code;
                 if is_timeout_errno(errno) {
-                    return Completion::ok(id, Value::int(0));
+                    return Completion::ok(id, birth, Value::int(0));
                 }
-                return Completion::err(
-                    id,
-                    crate::io::io_error(
-                        "io-error",
-                        format!("ev/poll-fd: poll error: errno {}", errno),
-                        origin_heap,
-                    ),
-                );
+                let msg = format!("ev/poll-fd: poll error: errno {}", errno);
+                return Completion::failed(id, birth, "io-error", msg);
             }
-            Completion::ok(id, Value::int(result_code as i64))
+            Completion::ok(id, birth, Value::int(result_code as i64))
         }
         PendingOp::ChanSelectPark { .. } => {
             // The guard inside this PendingOp owns the fd(s) and the
@@ -368,7 +371,7 @@ pub(super) fn process_raw_completion(
             // value" from "timed out" via chan/try-select + its own
             // deadline tracking.  Returning nil keeps the protocol
             // stateless.
-            Completion::ok(id, Value::NIL)
+            Completion::ok(id, birth, Value::NIL)
         }
         PendingOp::Resolve { .. } => {
             if result_code < 0 {
@@ -377,22 +380,26 @@ pub(super) fn process_raw_completion(
                 } else {
                     String::from_utf8_lossy(&data).to_string()
                 };
-                return Completion::err(id, crate::io::io_error("dns-error", msg, origin_heap));
+                return Completion::failed(id, birth, "dns-error", msg);
             }
             // data contains newline-separated IP address strings. One shared
-            // region (the ctx's): each string lives inside the array.
+            // region (the birthplace's): each string lives inside the array.
             let ips_str = String::from_utf8_lossy(&data);
-            let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
-            let ctx = crate::primitives::ctx::Alloc::new(heap);
-            let ips: Vec<Value> = ips_str
-                .lines()
-                .filter(|s| !s.is_empty())
-                .map(|s| ctx.string(s))
-                .collect();
-            Completion::ok(id, ctx.array(ips))
+            let answer = {
+                let ctx = birth.alloc();
+                let ips: Vec<Value> = ips_str
+                    .lines()
+                    .filter(|s| !s.is_empty())
+                    .map(|s| ctx.string(s))
+                    .collect();
+                ctx.array(ips)
+            };
+            Completion::ok(id, birth, answer)
         }
+        // The port arm assembles its own answer, so it takes this completion's
+        // birthplace rather than coining a second one.
         PendingOp::Port { .. } => {
-            complete_port_op(id, result_code, data, pending, fd_states, origin_heap, gen)
+            complete_port_op(id, result_code, data, pending, fd_states, birth, gen)
         }
     }
 }

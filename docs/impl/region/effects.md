@@ -1,6 +1,6 @@
 # Native region effects: declared, not guessed
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-19 -->
 
 How each primitive declares its region behavior, and what each `RegionEffect`
 variant claims.
@@ -214,7 +214,7 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
     the RESUMED frame that counts it: the suspending call's continuation mints the
     resume value it re-enters on — the parked native call's own result retain, or
     the `Emit`'s (`RegionInfo::unfunded_resume_values`,
-    [owner.md](owner.md) § "A resume value crosses counted, or not at all"). A
+    [park.md](park.md) § "A resume value crosses counted, or not at all"). A
     compile-time incref at the install would double-count the first against its
     single cascade decref and duplicate the second, which is exactly the arg-clique
     leak (`tests/elle/region-fiber-install-clique-leak.lisp`).

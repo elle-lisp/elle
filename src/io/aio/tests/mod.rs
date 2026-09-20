@@ -1,12 +1,12 @@
-// audited: 2026-09-17
-// src/io/AGENTS.md
+//! audited: 2026-09-20
 //! Fixtures the async-backend tests share: sockets a peer never answers,
 //! scratch paths, and the assertion that a cancelled operation retires.
+//!
+//! src/io/AGENTS.md
 
 use super::*;
 use crate::io::request::{IoOp, IoRequest};
 use crate::port::{Direction, Encoding, Port, PortKind};
-use crate::value::error_val_in;
 use crate::value::heap::TableKey;
 use crate::value::sorted_struct_get;
 use std::os::unix::io::RawFd;
@@ -142,7 +142,7 @@ fn assert_cancel_retires(backend: &AsyncBackend, id: SubmissionId, what: &str) {
     // that this terminates: an operation left in `pending` with no worker out
     // would leave `wait` returning nothing for as long as it is asked.
     for _ in 0..40 {
-        let _ = backend.wait(50).unwrap();
+        Completion::discard_all(backend.wait(50).unwrap());
         if !backend.has_pending() && backend.workers() == 0 {
             break;
         }
@@ -163,6 +163,21 @@ fn assert_cancel_retires(backend: &AsyncBackend, id: SubmissionId, what: &str) {
         "the cancelled {} never gave its worker back",
         what,
     );
+}
+
+/// The ids of what a wait returned, discarding each completion as it is read.
+///
+/// A test that wants only the ids still owes every completion the region it
+/// built its answer in (docs/impl/io-inflight.md).
+fn completion_ids(completions: Vec<Completion>) -> Vec<SubmissionId> {
+    completions
+        .into_iter()
+        .map(|c| {
+            let id = c.id;
+            c.discard();
+            id
+        })
+        .collect()
 }
 
 /// Take a descriptor non-blocking, whatever the platform spells the flag.

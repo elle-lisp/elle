@@ -1,8 +1,14 @@
-//! The interpreter-level SIG_RESUME handlers (Call and TailCall position) and
-//! the trampoline entry `do_fiber_resume`, plus the child-inheritance seeding
-//! and dead-fiber finalization they lean on. At the ROOT these drive the child
+// audited: 2026-09-19
+//! The interpreter-level SIG_RESUME handlers, and the trampoline entry
+//! `do_fiber_resume`.
+//!
+//! Call and TailCall position, plus the child-inheritance seeding and
+//! dead-fiber finalization they lean on. At the ROOT these drive the child
 //! directly; INSIDE a fiber they suspend a continuation and hand the child to
 //! the driving trampoline (see the `super` module doc for the swap protocol).
+//!
+//! docs/impl/region/park.md
+//! docs/impl/region/owner.md
 
 use super::*;
 
@@ -61,7 +67,7 @@ impl VM {
             let flat = flatten_param_frames(&self.fiber.param_frames);
             #[cfg(debug_assertions)]
             let borrows = record_param_borrows(&flat, self.heap());
-            // The seeded baseline is a counted holder (docs/impl/region/owner.md
+            // The seeded baseline is a counted holder (docs/impl/region/park.md
             // § "A child's inherited parameter baseline is a counted holder"):
             // retain each heap entry and record the fiber → value edge; the
             // fiber object's free releases them through the baseline walk.
@@ -246,7 +252,7 @@ impl VM {
             // frame's continuation at the post-`TailCall` ip, and the resume
             // replays it — running the compiler's owned-arg releases exactly as
             // a non-suspending native tail call falls through to them
-            // (docs/impl/region/owner.md § "Park/unpark symmetry"). Parking an
+            // (docs/impl/region/park.md). Parking an
             // empty chain here instead would complete this fiber directly with
             // the child's result, stranding every owned tail arg's moved-in
             // reference (one region per nested drained fiber — the

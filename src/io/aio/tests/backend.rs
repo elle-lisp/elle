@@ -1,3 +1,10 @@
+//! audited: 2026-09-20
+//! The backend's own lifecycle: construction, one submission through to its
+//! completion, and what a backend nobody dropped lets go of.
+//!
+//! src/io/AGENTS.md
+//! docs/impl/io-inflight.md
+
 use super::*;
 
 #[test]
@@ -112,6 +119,7 @@ fn test_submit_and_wait_read() {
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         assert!(completions[0].result.is_ok());
+        Completion::discard_all(completions);
 
         std::fs::remove_file(&path).ok();
     });
@@ -141,6 +149,7 @@ fn test_submit_and_wait_write() {
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         assert!(completions[0].result.is_ok());
+        Completion::discard_all(completions);
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "async write");
@@ -150,12 +159,18 @@ fn test_submit_and_wait_write() {
 }
 
 #[test]
-fn test_completion_to_value_success() {
+fn test_completion_into_value_success() {
     crate::value::arena::with_test_region(|| {
         let h = crate::primitives::ctx::TestHeap::new();
-        let c = Completion::ok(SubmissionId::from_raw(42), h.ctx().string("hello"));
+        // A value the completion was HANDED rather than built, so its
+        // birthplace coins nothing and the handover releases nothing.
+        let c = Completion::ok(
+            SubmissionId::from_raw(42),
+            crate::io::Birthplace::on(h.heap()),
+            h.ctx().string("hello"),
+        );
         let ctx = h.ctx();
-        let v = c.to_value(&ctx);
+        let v = c.into_value(&ctx);
         // The struct is born in the REAPING call's own region, so the array
         // `io/wait` collects it into and the struct share one region and one
         // release (docs/impl/region/ctx.md § "A helper reached from inside a
@@ -179,17 +194,16 @@ fn test_completion_to_value_success() {
 }
 
 #[test]
-fn test_completion_to_value_error() {
+fn test_completion_into_value_error() {
     crate::value::arena::with_test_region(|| {
         let heap_ptr = crate::value::arena::leaked_test_heap();
-        let region = unsafe { (*heap_ptr).new_runtime_region() };
-        let c = Completion::err(
-            SubmissionId::from_raw(7),
-            error_val_in(unsafe { &mut *heap_ptr }, "io-error", "test error", region),
-        );
+        // An error is always a value the completion builds, so it goes through
+        // the birthplace the production paths use.
+        let birth = crate::io::Birthplace::on(heap_ptr);
+        let c = Completion::failed(SubmissionId::from_raw(7), birth, "io-error", "test error");
         let h = crate::primitives::ctx::TestHeap::new();
         let ctx = h.ctx();
-        let v = c.to_value(&ctx);
+        let v = c.into_value(&ctx);
         let fields = v.as_struct().unwrap();
         assert_eq!(
             sorted_struct_get(fields, &TableKey::keyword("id"))

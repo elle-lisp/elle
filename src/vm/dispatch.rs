@@ -1,7 +1,11 @@
+// audited: 2026-09-19
 //! Main instruction dispatch loop.
 //!
 //! This module contains the core bytecode execution loop that dispatches
 //! instructions to their handlers.
+//!
+//! docs/impl/vm.md
+//! docs/impl/region/park.md
 
 use crate::compiler::bytecode::Instruction;
 use crate::value::{
@@ -44,8 +48,8 @@ impl VM {
         // mints the reference that release consumes — the same service a
         // completing child's `Return` mint performs for a terminal result. The
         // body's own reference is a separate one, released by the continuation
-        // past this suspend (docs/impl/region/owner.md § "Park/unpark symmetry" —
-        // "A fiber body owns one reference of every value it yields").
+        // past this suspend (docs/impl/region/park.md § "A fiber body owns one
+        // reference of every value it yields").
         //
         // A HALT is the one signal whose decref never fires, so it is the one
         // signal that must not be retained. The dispatch loop leaves at this
@@ -77,7 +81,7 @@ impl VM {
             } else {
                 // A SUSPENDING emit records the park instead: this retain is the
                 // delivery, and a `squelch`/`attune` boundary ends the park with
-                // no reader to consume it (docs/impl/region/owner.md § "A
+                // no reader to consume it (docs/impl/region/park.md § "A
                 // boundary ends a park with no reader and no install"). The two
                 // arms partition what reaches here, the halt having taken no
                 // retain to account for.

@@ -1,6 +1,11 @@
-//! Call-classification input to region inference: which calls return
-//! immediates, and the per-primitive region effects/return types the walk
-//! reads to shape its clique, containment, and result-region decisions.
+// audited: 2026-09-19
+//! Call-classification input to region inference.
+//!
+//! Which calls return immediates, and the per-primitive region effects and
+//! return types the walk reads to shape its clique, containment and
+//! result-region decisions.
+//!
+//! docs/impl/region/effects.md
 
 use crate::hir::binding::Binding;
 use crate::value::SymbolId;
@@ -110,7 +115,7 @@ pub struct CallClassification {
     /// rather than to the `Emit` terminator (docs/signals/emit.md § "Dynamic
     /// emit"), and such a call parks and yields exactly as the terminator does —
     /// so the borrowed-payload reading must recognize it structurally
-    /// (docs/impl/region/owner.md § "What yields is the emit OPERATION, not the
+    /// (docs/impl/region/park.md § "What yields is the emit OPERATION, not the
     /// `Emit` node"). A set rather than one id because the primitive is reachable
     /// under its canonical name and its alias, and ordinary code uses the alias.
     /// Empty under the default classification, which disables the reading.
