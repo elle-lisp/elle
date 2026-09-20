@@ -1,5 +1,8 @@
 (elle/epoch 12)
-# tests/integration/fixtures/region-fiber-abort-io-protect-uaf.lisp
+# audited: 2026-09-19
+# region-fiber-abort-io-protect-uaf.lisp — the guardfree face of the
+# abort-delivery retain: an aborted child's replayed frame reads a freed region
+# when nothing funds the reference its pending release consumes.
 #
 # Quarantined here — NOT under tests/elle/ — because the failure mode is an
 # abort (a stale-region deref / guardfree SIGSEGV) and `make smoke` globs
@@ -7,8 +10,8 @@
 # subprocess pin in tests/integration/elle_scripts.rs
 # (`region_fiber_abort_io_protect_uaf`).
 #
-# WHAT IT PINS — the abort-delivery retain (docs/impl/region/owner.md
-# § "Park/unpark symmetry", the delivery rule): a replayed frame's pending
+# WHAT IT PINS — the abort-delivery retain (docs/impl/region/park.md, the
+# delivery rule): a replayed frame's pending
 # release consumes one owning reference of the value it is resumed with. A
 # normally-completing child funds it with its Return's ReturnValue retain;
 # an ABORTED child's error exit runs no Return, so the reference the replay

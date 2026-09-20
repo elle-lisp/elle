@@ -1,3 +1,11 @@
+// audited: 2026-09-19
+//! The region-inference pipeline: the walk, then every post-pass that decides
+//! where a release lands. The order is the point — each pass reads answers the
+//! ones before it settled.
+//!
+//! docs/impl/region/rules.md
+//! docs/impl/region/mechanism.md
+
 use super::letrec::classify_letrec_callees;
 use super::*;
 
@@ -259,9 +267,9 @@ pub fn analyze_regions_with(
     );
 
     // Which `Emit` sites yield a payload their own body releases nowhere, so the
-    // lowerer can mint the body's missing reference there (docs/impl/region/owner.md
-    // § "Park/unpark symmetry" — "A fiber body owns one reference of every value it
-    // yields"). Runs after every decref_point post-pass and both merge seeds: the
+    // lowerer can mint the body's missing reference there (docs/impl/region/park.md
+    // § "A fiber body owns one reference of every value it yields"). Runs after
+    // every decref_point post-pass and both merge seeds: the
     // question is where a region's release lands, and a merged child's release is
     // its root's.
     info.borrowed_emit_payloads = super::yieldborrow::compute_borrowed_emit_payloads(hir, &info);

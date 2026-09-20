@@ -1,5 +1,8 @@
 (elle/epoch 12)
-# tests/integration/fixtures/region-fiber-park-symmetry.lisp
+# audited: 2026-09-19
+# region-fiber-park-symmetry.lisp — that a parked fiber's accounting stays
+# symmetric with its unpark, in both directions: neither leaking what the park
+# retained nor releasing what the park still owes.
 #
 # Quarantined here — NOT under tests/elle/ — because a regression in either
 # direction is loud: an OVER-FREE faults under --trace=guardfree (and the debug
@@ -9,7 +12,7 @@
 # tests/integration/elle_scripts.rs (`region_fiber_park_symmetry_uaf`).
 #
 # WHAT IT PINS — park/unpark symmetry for fiber suspension
-# (docs/impl/region/owner.md § "Park/unpark symmetry"):
+# (docs/impl/region/park.md):
 #
 #   1. The SIG_RESUME carrier is never retained at dispatch: a fiber that parks
 #      (yield) and is then dropped — or drained across several yields — frees its

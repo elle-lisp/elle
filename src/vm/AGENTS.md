@@ -1,5 +1,7 @@
 # vm
 
+<!-- audited: 2026-09-19 -->
+
 Bytecode execution. Stack-based operand handling with register-addressed locals.
 
 ## Responsibility
@@ -21,7 +23,7 @@ Does NOT:
 | Type | Purpose |
 |------|---------|
 | `VM` | Global state + root Fiber. Per-execution state lives on `vm.fiber` |
-| `SignalBits` | Internal return type (see `signals/AGENTS.md`) |
+| `SignalBits` | Internal return type (see [signals](../signals/AGENTS.md)) |
 | `CallFrame` | The entered and calling code objects, IP, frame base |
 
 ## Data flow
@@ -49,8 +51,8 @@ Result<Value, String>  ← translation boundary
 
 ## Signal-based returns
 
-Internal VM methods return `SignalBits` (see `signals/AGENTS.md` for bit
-definitions). The dispatch loop handles each signal:
+Internal VM methods return `SignalBits` (see [signals](../signals/AGENTS.md) for
+bit definitions). The dispatch loop handles each signal:
 - `SIG_OK`: Normal completion. Value in `fiber.signal`.
 - `SIG_ERROR`: Error struct in `fiber.signal`.
 - `SIG_YIELD`: Fiber yield. Suspended frames in `fiber.suspended`.
@@ -98,7 +100,7 @@ dispatches the return signal in `handle_primitive_signal()` (`signal.rs`):
 - `SIG_YIELD` → store in `fiber.signal`, return yield
 - `SIG_RESUME` → dispatch to fiber handler
 - `SIG_PROPAGATE` → propagate child fiber's signal, preserve child chain
-- `SIG_CANCEL` → inject error into target fiber
+- `SIG_ABORT` → inject an error at the target fiber's suspension point
 - `SIG_QUERY` → dispatch to `dispatch_query()`, push result to stack. Operations: `arena/allocs` (re-entrant, handled before dispatch), `arena/stats` (0-arg: current fiber; 1-arg: suspended fiber; includes scope-enter/dtor counts), `call-count`, `doc`, `global?`, `fiber/self`, `jit/rejections`, `list-primitives`, `primitive-meta`
 
 All SIG_RESUME primitives (including fiber wrappers) return
@@ -179,9 +181,9 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `signal` | `Option<(SignalBits, Value)>` | Signal from execution (errors, yields) |
 | `error_loc` | `Option<(Value, SourceLoc)>` | The parked `SIG_ERROR` payload and where it was raised. Parked by `absorbs`, read back by `fiber/propagate` so a re-raised error keeps its raising form |
 | `suspended` | `Option<Vec<SuspendedFrame>>` | Suspended execution frames (for yield/signal resumption) |
-| `delivery` | `Delivery` | The delivery ledger: how the current park's delivery references are funded — the raise-minted payload, the bodyless (denial) payload whose release the displacing install owes, and whether the resume value owes a mint. Method-only surface (docs/impl/region/owner.md § "A park names its funding in the delivery ledger") |
-| `signal_mask` | `SignalBits` | Which signals this fiber catches |
-| `param_frames` | `Vec<Vec<(Value, Value)>>` | Parameter binding frames (stack of frames, each frame is vec of (param, value) pairs) |
+| `delivery` | `Delivery` | The delivery ledger: how the current park's delivery references are funded — the raise-minted payload, the bodyless (denial) payload whose release the displacing install owes, and whether the resume value owes a mint. Method-only surface (docs/impl/region/park.md § "A park names its funding in the delivery ledger") |
+| `mask` | `SignalBits` | Which of this fiber's signals its parent catches |
+| `param_frames` | `Vec<Vec<(u32, Value)>>` | Parameter binding frames (stack of frames, each frame a vec of (param id, value) pairs) |
 | `parent` | `Option<WeakFiberHandle>` | Weak back-pointer to parent fiber |
 | `parent_value` | `Option<Value>` | Cached Value for parent (identity-preserving) |
 | `child` | `Option<FiberHandle>` | Strong pointer to child fiber |
@@ -252,7 +254,7 @@ holds no record to defer to. The installs are `fiber/resume`, the `fiber/abort` 
 `fiber/refuse` injection, and the three `FiberResume` deliveries that reach an
 inner fiber directly, and each owes the release — a `Fresh` op whose completion
 buffer lives in the request's own region is a second value there, not a second
-consumer of the retain. See docs/impl/region/owner.md § "A payload the RUNTIME
+consumer of the retain. See docs/impl/region/park.md § "A payload the RUNTIME
 built is released by the install that displaces it".
 
 Key methods:
@@ -290,14 +292,17 @@ searches the parameter frame stack from top (most recent `parameterize`) to
 bottom. If a binding is found, its value is returned. Otherwise, the parameter's
 default value is returned.
 
-**Frame structure**: `param_frames: Vec<Vec<(Value, Value)>>` is a stack of frames.
-Each frame is a vector of (parameter, value) pairs. `PushParamFrame` pushes a new
-frame; `PopParamFrame` pops the current frame. When a parameter is called, the VM
-iterates from the top frame downward, searching for a matching parameter.
+**Frame structure**: `param_frames: Vec<Vec<(u32, Value)>>` is a stack of frames.
+Each frame is a vector of (parameter id, value) pairs. `PushParamFrame` pushes a
+new frame; `PopParamFrame` pops the current frame. When a parameter is called, the
+VM iterates from the top frame downward, searching for a matching parameter.
 
-**Inheritance**: Child fibers inherit parent parameter frames. When a child fiber
-is created, it copies the parent's `param_frames` stack. This allows child code
-to see parent-established parameter bindings.
+**Inheritance**: a child fiber inherits its creator's bindings as ONE baseline
+frame — the creator's stack flattened at `fiber/new`, innermost winning — because
+the creator's `parameterize` blocks unwind long before the scheduler resumes the
+child. The baseline is a counted holder of every heap value in it
+(docs/impl/region/park.md § "A child's inherited parameter baseline is a counted
+holder").
 ## Truthiness
 
 The VM evaluates truthiness via `Value::is_truthy()`:

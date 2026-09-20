@@ -1,3 +1,9 @@
+// audited: 2026-09-19
+//! How a primitive's signal is dispatched, and what each park records about the
+//! references it leaves standing.
+//!
+//! docs/impl/region/park.md
+
 use super::*;
 use crate::value::arena::with_test_region;
 use crate::value::{SIG_DEBUG, SIG_IO, SIG_YIELD};
@@ -158,7 +164,7 @@ fn dispatch_query_answer_is_born_in_the_ctx_region() {
 /// A suspending primitive's park owes its resume value one reference: the
 /// primitive never returns, so the `Return` mint that would fund the parked
 /// call's compiler-emitted result release never runs, and the resume value
-/// stands in for that result (docs/impl/region/owner.md § "A delivery into a
+/// stands in for that result (docs/impl/region/park.md § "A delivery into a
 /// replayed frame carries one owning reference"). The classifier is the only
 /// place that can tell — by the delivery the frame is built and, for a tail
 /// suspend, was built by a driver that never saw the primitive — so it records
@@ -225,7 +231,7 @@ fn a_completing_primitive_owes_its_resume_value_nothing() {
 
 /// A capability denial parks a payload the VM built in place of a call that never
 /// ran, so no body reference answers for it and the install that displaces it owes
-/// its region one decref (docs/impl/region/owner.md § "A payload the RUNTIME built
+/// its region one decref (docs/impl/region/park.md § "A payload the RUNTIME built
 /// is released by the install that displaces it"). Only the denial site can tell a
 /// park has that shape, so it records the payload for
 /// `release_displaced_denial_payload` to match against the live parked signal.

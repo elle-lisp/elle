@@ -1,7 +1,8 @@
 (elle/epoch 12)
+# audited: 2026-09-19
 # A fiber crossing is a counted holder too
 # (docs/impl/region/mechanism.md § "A fiber crossing is a counted holder too";
-# docs/impl/region/owner.md § "A resume value crosses counted, or not at all").
+# docs/impl/region/park.md § "A resume value crosses counted, or not at all").
 #
 # The branch-arm release window and the lowerer's frame-exit release both make a
 # release fire on a path where none fired before, so both are admitted only where

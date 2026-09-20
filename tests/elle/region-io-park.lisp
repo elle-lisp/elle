@@ -1,6 +1,7 @@
 (elle/epoch 12)
+# audited: 2026-09-19
 # An io park's `IoRequest` is released by the install that displaces it
-# (docs/impl/region/owner.md § "Park/unpark symmetry").
+# (docs/impl/region/park.md).
 #
 # A yielding io op returns its `IoRequest` with `SIG_IO`, and the suspend retains
 # the region it lives in so the scheduler can read the request out of

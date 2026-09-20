@@ -1,7 +1,7 @@
 (elle/epoch 12)
+# audited: 2026-09-19
 # A fiber body owns one reference of every value it yields, and what yields is the
-# emit OPERATION rather than the `Emit` node (docs/impl/region/owner.md
-# § "Park/unpark symmetry").
+# emit OPERATION rather than the `Emit` node (docs/impl/region/park.md).
 #
 # A park's escape retain is the DELIVERY reference: the resumer's compiler-emitted
 # release of the resume result consumes it. What a discarded fiber's discharge

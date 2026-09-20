@@ -1,6 +1,7 @@
 (elle/epoch 12)
+# audited: 2026-09-19
 # A resume value delivered into a parked PRIMITIVE call carries one owning
-# reference (docs/impl/region/owner.md § "A delivery into a replayed frame
+# reference (docs/impl/region/park.md § "A delivery into a replayed frame
 # carries one owning reference").
 #
 # A parked frame re-enters at its suspending call's continuation, and that

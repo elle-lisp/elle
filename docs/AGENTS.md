@@ -27,7 +27,6 @@ Up: [..](../AGENTS.md)
 - [fmt.md](fmt.md) — **elle fmt** Opinionated code formatter for Elle.
 - [functions.md](functions.md) — **Functions (more...)**
 - [intrinsics.md](intrinsics.md) — **Intrinsics** Intrinsics are silent bytecode operations prefixed with `%`.
-- [io-completion-heap.md](io-completion-heap.md) — **I/O Completion Region Routing (more...)**
 - [io.md](io.md) — **I/O** All I/O in Elle is async — reads and writes yield to the scheduler.
 - [libraries.md](libraries.md) — **Libraries** Elle ships with libraries in `lib/`.
 - [loops.md](loops.md) — **Loops** Elle's loop forms are `while`, `forever`, `repeat`, and `each`.

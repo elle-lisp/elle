@@ -1,6 +1,6 @@
 # Region generations: stale derefs detonate in debug builds
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-19 -->
 
 The per-region generation counter and page stamps that turn a stale region deref
 into a debug-build panic at the deref site. Pairs with the `--trace=guardfree` oracle described in
@@ -148,7 +148,7 @@ dynamic-parameter bindings as a baseline frame (`prim_fiber_new`,
 `seed_child_inheritance`); each heap value in that frame — a scheduler reached
 through a parameter, say — takes one seeding retain and a recorded
 `fiber → value` content edge, released by the fiber object's own free
-([owner.md](owner.md) § "A child's inherited parameter baseline is a counted
+([park.md](park.md) § "A child's inherited parameter baseline is a counted
 holder"). The check below is the oracle that the count holds: the borrowed
 region must outlive the borrowing fiber, and generations make that checked
 rather than assumed — a missing or displaced retain panics at the resume

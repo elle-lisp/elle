@@ -1,8 +1,13 @@
-//! Region refcount bookkeeping for fiber signals: park-retains on terminal
-//! results, and the symmetric releases when a parked signal is replaced at a
-//! resume or discarded with an unrunnable fiber. These balance the
+// audited: 2026-09-19
+//! Region refcount bookkeeping for fiber signals.
+//!
+//! Park-retains on terminal results, and the symmetric releases when a parked
+//! signal is replaced at a resume or discarded with an unrunnable fiber. These
+//! balance the
 //! `find_object_cross_refs` Fiber arm's free-time cascade against the retains
 //! taken while a fiber holds a `signal` value across a park.
+//!
+//! docs/impl/region/park.md
 
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
 
@@ -78,12 +83,12 @@ pub(crate) fn is_terminal_signal(bits: SignalBits) -> bool {
 /// for it: a yielded payload's *delivery* reference is separately consumed by the
 /// resumer's release of the resume result, and a payload the body borrows rather
 /// than allocates is given a body reference of its own at the `Emit`
-/// (docs/impl/region/owner.md § "Park/unpark symmetry" — "A fiber body owns one
+/// (docs/impl/region/park.md § "A fiber body owns one
 /// reference of every value it yields"). Distinct from
 /// [`release_displaced_io_request`], which answers for the ONE payload a
 /// discharged park has no body reference for; at a discard there is no install to
 /// owe that release and no body to double-release against
-/// (docs/impl/region/owner.md § "Park/unpark symmetry").
+/// (docs/impl/region/park.md).
 /// A no-op for `None` or an immediate.
 pub(crate) fn release_discarded_signal(
     heap: &mut crate::value::fiberheap::FiberHeap,
@@ -145,7 +150,7 @@ pub(crate) fn release_displaced_terminal_signal(
 /// never runs again, this stands in for on one that does: `fiber/resume`'s
 /// delivery and `fiber/abort` / `fiber/refuse`'s injected error each replace the
 /// payload in the slot, and each owes it one release
-/// (docs/impl/region/owner.md § "Park/unpark symmetry" — "A payload the RUNTIME
+/// (docs/impl/region/park.md § "A payload the RUNTIME
 /// built is released by the install that displaces it").
 ///
 /// Call this BEFORE the install, from every site that replaces another fiber's
@@ -174,7 +179,7 @@ pub(crate) fn release_displaced_terminal_signal(
 /// (`bit_identical`), and only a payload the record claims is dereferenced.
 ///
 /// The record is the delivery ledger's (`park_denial` writes it, this take
-/// consumes it; docs/impl/region/owner.md § "A park names its funding in the
+/// consumes it; docs/impl/region/park.md § "A park names its funding in the
 /// delivery ledger").
 pub(crate) fn release_displaced_denial_payload(
     heap: &mut crate::value::fiberheap::FiberHeap,
@@ -204,7 +209,7 @@ pub(crate) fn release_displaced_denial_payload(
 /// releases nothing for it and the suspend retain is what the allocation leaves
 /// behind. Whatever ends the park owes that release, exactly as it does for a
 /// capability denial's payload
-/// (docs/impl/region/owner.md § "Park/unpark symmetry" — "A payload the RUNTIME
+/// (docs/impl/region/park.md § "A payload the RUNTIME
 /// built is released by the install that displaces it"): the resume that
 /// delivers a completion, and the injected error `fiber/abort` / `fiber/refuse`
 /// raise at the fiber's own suspension point.
@@ -248,7 +253,7 @@ pub(crate) fn release_displaced_io_request(
 
 /// Release everything a park is left with when a `squelch`/`attune` boundary
 /// ends it — the one end of a park that is neither a resume nor an install
-/// (docs/impl/region/owner.md § "A boundary ends a park with no reader and no
+/// (docs/impl/region/park.md § "A boundary ends a park with no reader and no
 /// install, so it owes both references").
 ///
 /// Two references stand on a park's payload and each answers to a seam this exit

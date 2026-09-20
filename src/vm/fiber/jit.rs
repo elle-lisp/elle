@@ -1,12 +1,19 @@
+// audited: 2026-09-19
+//! The fiber signals a compiled frame raises — resume, propagate and abort —
+//! each answered as the interpreter answers it, or side-exited.
+//!
+//! docs/impl/jit.md
+//! docs/impl/region/park.md
+
 use super::*;
 
 impl VM {
     /// Handle SIG_RESUME from a fiber primitive in JIT context.
-    #[cfg(feature = "jit")]
     ///
     /// Runs the child fiber synchronously and returns the result as `JitValue`.
     /// On error: sets fiber.signal, returns `JitValue::nil()`.
     /// On yield propagation: sets fiber.signal, returns YIELD_SENTINEL.
+    #[cfg(feature = "jit")]
     pub(crate) fn handle_fiber_resume_signal_jit(&mut self, fiber_value: Value) -> JitValue {
         use crate::jit::YIELD_SENTINEL;
 
@@ -72,7 +79,7 @@ impl VM {
 
         // Same install as the bytecode handlers, so the same delivery reference
         // is owed — routed through the one helper rather than a third copy
-        // (docs/impl/region/owner.md § "Park/unpark symmetry").
+        // (docs/impl/region/park.md).
         let (child_bits, child_value) = self.take_propagated_signal(&handle);
 
         self.fiber.child = Some(handle);

@@ -1,9 +1,12 @@
+// audited: 2026-09-19
 //! Primitive signal dispatch.
 //!
 //! Routes signal bits returned by NativeFn primitives to the appropriate
 //! handler: stack push for SIG_OK, error storage for SIG_ERROR, fiber
 //! execution for SIG_RESUME/SIG_PROPAGATE/SIG_ABORT, VM state reads
 //! for SIG_QUERY.
+//!
+//! docs/impl/region/park.md
 
 use crate::signals::dispatch::{classify, SignalAction};
 use crate::value::{BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_OK};
@@ -21,7 +24,7 @@ impl VM {
     /// Mint the DELIVERY reference of a payload a native call is RAISING, where
     /// the payload is one of the call's own arguments — the shape a dynamic
     /// `emit` takes, its non-literal first argument making the raise an ordinary
-    /// native call (docs/impl/region/owner.md § "What yields is the emit
+    /// native call (docs/impl/region/park.md § "What yields is the emit
     /// OPERATION, not the `Emit` node").
     ///
     /// The catcher's read of the signal consumes exactly one reference, and every
@@ -134,7 +137,7 @@ impl VM {
                 // This primitive never returns, so the frame's continuation —
                 // the code after the Call, including the call's own result
                 // release — is funded by the delivery instead of by a `Return`
-                // mint (docs/impl/region/owner.md § "A delivery into a replayed
+                // mint (docs/impl/region/park.md § "A delivery into a replayed
                 // frame carries one owning reference"). The payload rides the
                 // record too: the retain above has no consumer where a boundary
                 // ends the park, and the boundary cannot read the signal slot
@@ -285,8 +288,8 @@ impl VM {
         // struct. The park records both facts — the delivery mint the resume
         // owes, and the payload whose release the displacing install owes —
         // because only this classifier can tell a denial from an `(emit …)`
-        // under the same withheld bits (docs/impl/region/owner.md § "Park/unpark
-        // symmetry"), and the payload once more as the park whose delivery
+        // under the same withheld bits (docs/impl/region/park.md), and the
+        // payload once more as the park whose delivery
         // retain a boundary would have to release (§ "A boundary ends a park
         // with no reader and no install").
         self.fiber.delivery.park_denial(blocked, payload);
@@ -390,10 +393,6 @@ impl VM {
         ctx.struct_from(fields)
     }
 }
-
-impl VM {}
-
-impl VM {}
 
 #[cfg(test)]
 mod tests;

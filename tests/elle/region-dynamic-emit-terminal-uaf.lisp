@@ -1,7 +1,8 @@
 (elle/epoch 12)
+# audited: 2026-09-19
 # A raised payload's DELIVERY reference is the one the catcher's read consumes,
 # and what raises here is the emit OPERATION rather than the `Emit` node
-# (docs/impl/region/owner.md § "What yields is the emit OPERATION, not the
+# (docs/impl/region/park.md § "What yields is the emit OPERATION, not the
 # `Emit` node").
 #
 # A first argument the compiler cannot read as a keyword set falls through to the
