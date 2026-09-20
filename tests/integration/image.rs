@@ -344,3 +344,6 @@ mod headers {
 mod snapping {
     include!("image/snapping.rs");
 }
+mod spine {
+    include!("image/spine.rs");
+}
