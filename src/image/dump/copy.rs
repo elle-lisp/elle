@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-20
 //! The compacting copy: what the dumper accepts into an image's body, and
 //! the spellings it records on the way through.
 //!
@@ -8,17 +8,14 @@
 //! preserved through a map keyed on source payload address. A value outside
 //! the sealed set fails the copy, naming the variant, before any byte is
 //! written. Every symbol and keyword the walk meets — in a value position or
-//! as a struct key — leaves its spelling in the name table. The two fields
-//! that may name a process-owned resource — a `traits` field and a
-//! `Parameter`'s `default` — either copy as program data or become a
-//! reconstruction the hydrating instance answers for itself. A closure's
+//! as a struct key — leaves its spelling in the name table. A closure's
 //! header crosses without its blueprint; code.rs owns what the payload
-//! behind it costs (docs/impl/image/sealing.md).
+//! behind it costs, and crossing.rs owns the two fields that may name a
+//! process-owned resource (docs/impl/image/sealing.md).
 
 use std::collections::{BTreeSet, HashMap};
 
 use crate::hir::region::RuntimeRegion;
-use crate::port::Port;
 use crate::symbol::SymbolTable;
 use crate::syntax::SyntaxArena;
 use crate::value::closure::{Closure, ClosureTemplate, CodePayload, TemplateRef};
@@ -31,13 +28,14 @@ use crate::value::repr::{
 };
 use crate::value::{TableKey, Value};
 
-use super::super::format::{Ctor, Stdio};
+use super::super::format::Ctor;
 use super::super::layout;
 use super::code::copy_payload;
+use super::crossing::{copy_default, copy_traits, Crossing};
 use super::{primitive_name, ImageError};
 
 /// What the copying walk carries: the sharing map, and the spellings met so
-/// far. Both are per-dump state the recursion threads through every value.
+/// far. Both are per-dump state the walk threads through every value.
 pub(super) struct Walk<'a> {
     /// Source payload address → its copy in the scratch region.
     visited: HashMap<usize, Value>,
@@ -105,83 +103,6 @@ impl<'a> Walk<'a> {
     }
 }
 
-/// What the copy of an object carries in a field that may name a
-/// process-owned resource (docs/impl/image/sealing.md).
-enum Crossing {
-    /// Nothing: the source field was nil.
-    None,
-    /// The hydrating instance's own value, named by a constructor. The copy
-    /// carries nil until hydration fills the slot in.
-    Reconstruct(Ctor),
-    /// Program data, copied into the image like any other value.
-    Carried(Value),
-}
-
-impl Crossing {
-    /// What the copy is built with. A reconstructed slot is written at
-    /// hydration, so the dump leaves it nil and the emitter zeroes it.
-    fn value(&self) -> Value {
-        match self {
-            Crossing::Carried(v) => *v,
-            _ => Value::NIL,
-        }
-    }
-}
-
-/// Decide what a source object's `traits` field crosses as, copying a user
-/// table into `region` on the way.
-///
-/// The identity test runs over the whole default table rather than the
-/// object's own tag: one traitset serves several tags, and `with-traits` can
-/// attach any of them to any value.
-fn copy_traits(
-    heap: &mut FiberHeap,
-    region: RuntimeRegion,
-    traits: Value,
-    walk: &mut Walk,
-) -> Result<Crossing, ImageError> {
-    let Some(ptr) = traits.as_heap_ptr() else {
-        return Ok(Crossing::None);
-    };
-    let default = heap
-        .default_traits_table()
-        .iter()
-        .position(|t| t.as_heap_ptr() == Some(ptr));
-    if let Some(i) = default {
-        let tag = super::super::format::tag_from_u64(i as u64)?;
-        return Ok(Crossing::Reconstruct(Ctor::DefaultTraits(tag)));
-    }
-    Ok(Crossing::Carried(copy_value(heap, region, traits, walk)?))
-}
-
-/// Decide what a `Parameter`'s `default` field crosses as.
-///
-/// An `External` is the one thing a default may hold that is not sealed data,
-/// and among externals only a standard stream travels: the hydrating instance
-/// opens its own. Everything else fails the dump here, naming what it met.
-fn copy_default(
-    heap: &mut FiberHeap,
-    region: RuntimeRegion,
-    default: Value,
-    walk: &mut Walk,
-) -> Result<Crossing, ImageError> {
-    let Some(type_name) = default.external_type_name() else {
-        return Ok(Crossing::Carried(copy_value(heap, region, default, walk)?));
-    };
-    let kind = default.as_external::<Port>().map(|p| p.kind());
-    match kind.and_then(Stdio::of) {
-        Some(stream) => Ok(Crossing::Reconstruct(Ctor::StdioPort(stream))),
-        None => Err(ImageError::Unsupported(match kind {
-            Some(kind) => format!(
-                "a {kind:?} port owns a descriptor this process opened, so no image carries it"
-            ),
-            None => format!(
-                "a parameter's default holds a {type_name} external, which the image cannot rebuild"
-            ),
-        })),
-    }
-}
-
 /// Deep-copy one sealed data value into the scratch region, preserving
 /// sharing through the walk's visited map (keyed on source payload address).
 /// A value outside the sealed set fails the copy, naming the variant.
@@ -220,6 +141,11 @@ pub(super) fn copy_value(
         return Ok(copy);
     }
     let obj = unsafe { deref(v) };
+    // A list's `rest` spine is walked by loop rather than by recursion, so a
+    // list costs memory rather than stack (docs/impl/image.md).
+    if matches!(obj, HeapObject::Pair(_)) {
+        return copy_pair_spine(heap, region, v, walk);
+    }
     let traits = copy_traits(heap, region, obj.traits(), walk)?;
     let carried = traits.value();
     let default = match obj {
@@ -227,14 +153,6 @@ pub(super) fn copy_value(
         _ => Crossing::None,
     };
     let copy = match obj {
-        HeapObject::Pair(pair) => {
-            let first = copy_value(heap, region, pair.first, walk)?;
-            let rest = copy_value(heap, region, pair.rest, walk)?;
-            heap.alloc_in_region(
-                HeapObject::Pair(Pair::with_traits(first, rest, carried)),
-                region,
-            )
-        }
         HeapObject::LString { s, .. } => {
             let slice = heap.alloc_region_slice_in_region(s.as_slice(), region);
             heap.alloc_in_region(
@@ -423,6 +341,77 @@ pub(super) fn copy_value(
     }
     walk.visited.insert(key, copy);
     Ok(copy)
+}
+
+/// Write one field of a reserved pair copy, which is scratch-region memory
+/// this walk allocated and nothing else has seen.
+fn patch_pair(copy: Value, write: impl FnOnce(&mut Pair)) {
+    let obj = copy.as_heap_ptr().expect("a copied object is heap") as *mut HeapObject;
+    match unsafe { &mut *obj } {
+        HeapObject::Pair(pair) => write(pair),
+        _ => unreachable!("the reserved copy is a pair"),
+    }
+}
+
+/// Copy a list, walking its `rest` spine with a loop.
+///
+/// A list's length is bounded by memory rather than by the text that built
+/// it, so a recursive walk down `rest` aborts the process on a stack overflow
+/// where this writes the image (docs/impl/image.md). Each copy is reserved
+/// before anything it holds is walked, exactly as a closure's is, so a cycle
+/// that re-enters a pair closes onto the one copy.
+///
+/// The spine ends at the first link that is not an unvisited pair: an empty
+/// list, an improper tail, or a link some earlier walk already copied. That
+/// value goes through the ordinary walk, so a tail two lists share is copied
+/// once.
+fn copy_pair_spine(
+    heap: &mut FiberHeap,
+    region: RuntimeRegion,
+    head: Value,
+    walk: &mut Walk,
+) -> Result<Value, ImageError> {
+    let mut spine: Vec<(Value, Value)> = Vec::new();
+    let mut cur = head;
+    let tail = loop {
+        if !cur.is_heap() {
+            break cur;
+        }
+        let key = cur.payload as usize;
+        if walk.visited.contains_key(&key) {
+            break cur;
+        }
+        let obj = unsafe { deref(cur) };
+        let HeapObject::Pair(pair) = obj else {
+            break cur;
+        };
+        let (first, rest) = (pair.first, pair.rest);
+        let traits = copy_traits(heap, region, obj.traits(), walk)?;
+        let copy = heap.alloc_in_region(
+            HeapObject::Pair(Pair::with_traits(Value::NIL, Value::NIL, traits.value())),
+            region,
+        );
+        walk.visited.insert(key, copy);
+        if let Crossing::Reconstruct(ctor) = traits {
+            let at = copy.as_heap_ptr().expect("a copied object is heap") as usize;
+            walk.reconstruct(at, layout::traits_slot_in(obj.tag()), ctor);
+        }
+        spine.push((first, copy));
+        cur = rest;
+    };
+
+    // Every value written below lands in the same scratch region as the copy
+    // holding it, so each patch writes a self-edge the RC ledger never counts.
+    for &(first, copy) in &spine {
+        let first = copy_value(heap, region, first, walk)?;
+        patch_pair(copy, |p| p.first = first);
+    }
+    let mut acc = copy_value(heap, region, tail, walk)?;
+    for &(_, copy) in spine.iter().rev() {
+        patch_pair(copy, |p| p.rest = acc);
+        acc = copy;
+    }
+    Ok(acc)
 }
 
 /// Copy one struct key into the scratch region: its own value goes through
