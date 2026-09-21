@@ -39,6 +39,7 @@ use query::prim_compile_query_signal;
 use query::prim_compile_signal;
 use query::prim_compile_symbols;
 use transform::prim_compile_add_handler;
+use transform::prim_compile_apply_rules;
 use transform::prim_compile_barrier_module;
 use transform::prim_compile_dumps;
 use transform::prim_compile_extract;
@@ -332,6 +333,17 @@ primitive! {
         params: &["analysis", "fn-name", "signal-kind"],
         category: "compile",
         example: r#"(compile/add-handler analysis :fetch-page :error)"#,
+        effect: RegionEffect::Fresh,
+    }
+    "compile/apply-rules" => prim_compile_apply_rules {
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Apply rename/replace/report migration rules, supplied as data, to SOURCE \
+              text via the rewrite edit engine, reapplied to a fixpoint. Returns \
+              {:source :count :reports}. The consumer-migration engine of `elle semver`.",
+        params: &["source", "rules"],
+        category: "compile",
+        example: r#"(compile/apply-rules "(old 1)" [{:kind :rename :from "old" :to "new"}])"#,
         effect: RegionEffect::Fresh,
     }
     "compile/run-on" => prim_compile_run_on {

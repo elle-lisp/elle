@@ -1,4 +1,4 @@
-// audited: 2026-09-17
+// audited: 2026-09-21
 //! The `compile/*` primitives that change a program or run one.
 //!
 //! Rename, extract, add-handler, the forced-tier call, and the module compiles
@@ -16,6 +16,8 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::sorted_struct_get;
 use crate::value::Value;
 
+mod apply_rules;
+pub(crate) use apply_rules::*;
 mod rewrite;
 pub(crate) use rewrite::*;
 

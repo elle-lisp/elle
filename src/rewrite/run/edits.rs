@@ -1,4 +1,4 @@
-// audited: 2026-09-16
+// audited: 2026-09-21
 // The edit collectors behind `elle rewrite`: one per migration rule kind, each
 // turning a rule into byte-span edits over the source text.
 // docs/epochs.md
@@ -150,7 +150,7 @@ pub(super) fn try_match_unwrap<'a>(
 
 /// Lex source and collect edits for forms matching replace rules.
 /// Works at the token level using byte offsets from the lexer.
-pub(super) fn collect_replace_edits(
+pub(crate) fn collect_replace_edits(
     src: SourceText<'_>,
     replaces: &[(&str, usize, &str)],
 ) -> Result<Vec<Edit>, String> {

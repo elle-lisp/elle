@@ -1,5 +1,7 @@
 # rewrite
 
+<!-- audited: 2026-09-21 -->
+
 Source-to-source rewriting engine. Token-level rewrites that preserve comments,
 whitespace, and formatting.
 
@@ -27,6 +29,7 @@ Does NOT:
 | `RenameSymbol` | Data-driven symbol rename from HashMap |
 | `collect_lexical_edits` | Respell tokens between two lexicons, by byte span |
 | `rewrite_source` | Core: lex + apply rules + produce (new_source, edits) |
+| `apply_library_rules` | Rename/replace/report rules as data, applied to a fixpoint (`compile/apply-rules`) |
 | `run` | CLI entry point for `elle rewrite` |
 
 ## Data flow
@@ -51,4 +54,4 @@ apply_edits(source, edits) → new source string
 Every pass reads its tokens through `SourceText`, never through a bare
 `Lexer`. A file written before a token-level change tokenizes under its own
 epoch's rules, and one pass reaching for the current epoch's would silently
-disagree with the others (`docs/impl/lexicon.md`).
+disagree with the others ([lexicon](../../docs/impl/lexicon.md)).
