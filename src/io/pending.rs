@@ -1,4 +1,4 @@
-//! audited: 2026-09-18
+//! audited: 2026-09-20
 //! The operations a backend has in flight, and which of them no fiber will
 //! receive a result for.
 //!
@@ -42,7 +42,10 @@ pub(crate) enum Taken {
 ///
 /// A cancelled operation KEEPS its entry until its own completion arrives. The
 /// worker it runs on and the descriptor it names come back with that
-/// completion; dropping the entry at the cancel would strand both.
+/// completion; dropping the entry at the cancel would strand both. What it does
+/// let go of is its hold: a cancelled completion is retired rather than cooked,
+/// so no operand is read again (docs/impl/io-inflight.md § "A cancelled
+/// operation reads nothing again").
 #[derive(Default)]
 pub(crate) struct PendingTable {
     ops: HashMap<SubmissionId, Entry>,
@@ -94,15 +97,18 @@ impl PendingTable {
         let Some(e) = self.ops.remove(&id) else {
             return Taken::Unknown;
         };
-        let orphaned = e.submitter.asker_finished();
         let taken = TakenOp {
             op: e.op,
             submitter: e.submitter,
             hold: e.hold,
         };
+        // A cancelled entry let go of its operands at the mark, the fiber that
+        // asked among them, so the terminal-state question must not be asked of
+        // it — and its answer would change nothing.
         if was_cancelled {
-            Taken::Cancelled(taken)
-        } else if orphaned {
+            return Taken::Cancelled(taken);
+        }
+        if taken.submitter.asker_finished() {
             Taken::Orphaned(taken)
         } else {
             Taken::Live(taken)
@@ -120,11 +126,20 @@ impl PendingTable {
     /// with the entry in [`take`](Self::take).
     pub(crate) fn orphaned_to_stop(&mut self) -> Vec<SubmissionId> {
         let PendingTable {
-            ops, stop_asked, ..
+            ops,
+            cancelled,
+            stop_asked,
         } = self;
+        // A cancelled entry is skipped on both counts: the cancel already asked
+        // its operation to stop, and the entry let go of the fiber this asks
+        // about at the mark.
         let ids: Vec<SubmissionId> = ops
             .iter()
-            .filter(|(id, e)| !stop_asked.contains(*id) && e.submitter.asker_finished())
+            .filter(|(id, e)| {
+                !stop_asked.contains(*id)
+                    && !cancelled.contains(*id)
+                    && e.submitter.asker_finished()
+            })
             .map(|(id, _)| *id)
             .collect();
         stop_asked.extend(ids.iter().copied());
@@ -167,15 +182,24 @@ impl PendingTable {
     /// already been reaped and its result already handed to the fiber that
     /// asked, so there is nothing left to withhold and a mark would sit in the
     /// set with no completion coming to clear it.
+    ///
+    /// The entry also lets go of its operands here, which is the one thing a
+    /// cancel takes away from it. A cancelled completion is retired rather than
+    /// cooked, so nothing reads an operand again — and a cancel is the ordinary
+    /// path, not the rare one, so a hold kept until the completion arrives is a
+    /// per-call cost on every `ev/timeout` a program makes
+    /// (docs/impl/io-inflight.md § "A cancelled operation reads nothing again").
     pub(crate) fn mark_cancelled(&mut self, id: SubmissionId) {
-        if self.ops.contains_key(&id) {
+        if let Some(e) = self.ops.get_mut(&id) {
+            e.hold.release();
             self.cancelled.insert(id);
         }
     }
 
-    /// Mark every operation still in flight as having no reader. Backend
-    /// teardown: the fibers are gone and the heap that carried their values may
-    /// be too, so the drain that follows must retire rather than cook.
+    /// Mark every operation still in flight as having no reader, and let go of
+    /// what each was holding. Backend teardown: the fibers are gone and the heap
+    /// that carried their values may be too, so the drain that follows must
+    /// retire rather than cook, and must read no operand on the way.
     ///
     /// Only `quiesce_pending` calls this, and only the ring has a teardown
     /// drain, so the allow is narrowed to the platforms that compile that path
@@ -184,6 +208,9 @@ impl PendingTable {
     /// teardown loop reads.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn cancel_all(&mut self) {
+        for e in self.ops.values_mut() {
+            e.hold.release();
+        }
         self.cancelled.extend(self.ops.keys().copied());
     }
 
