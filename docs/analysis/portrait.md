@@ -63,6 +63,45 @@ from a predicate that counts `:error`, so an error-only function reports
 The queries see the expanded program. A function that uses a macro such as
 `each` reports the calls and bindings of the expansion as its own (#1235).
 
+## Module exports
+
+`compile/exports` reads the module surface off an analysis: the export
+struct the file returns, plus the module closure's own shape. It is the
+static half of a version-bump verifier — [modules](../modules.md) explains
+why the returned struct literal is the public surface.
+
+```lisp
+(def modsrc (string "(fn [dep]\n"
+                    "  (letrec [helper (fn [x] x)\n"
+                    "           run (fn [job] \"Run one job.\" (helper job))]\n"
+                    "    {:run run :limit 3}))"))
+(def modana (compile/analyze modsrc {:file "mod.lisp"}))
+(def ex (compile/exports modana))
+
+# The constructor is the module closure's own shape.
+(assert (= (get (get ex :constructor) :required) 1) "constructor arity")
+
+# Each function export carries the record fn/signature would return,
+# read statically: counts, rest kind, params, signals, doc, line.
+(def run-rec (get (get ex :exports) :run))
+(assert (= (get run-rec :kind) :fn) "run is a function")
+(assert (= (get run-rec :required) 1) "run takes one argument")
+(assert (= (get run-rec :params) ["job"]) "param names ride along")
+(assert (= (get run-rec :doc) "Run one job.") "docstring rides along")
+
+# A non-function export is recorded as a value.
+(assert (= (get (get ex :exports) :limit) {:kind :value}) "limit is a value")
+
+# A file that returns no export struct has no surface to report.
+(assert (nil? (compile/exports (compile/analyze "(+ 1 2)"))) "no surface")
+```
+
+The exports map is keyed by export keyword, resolved through bindings —
+a private helper sharing an export's name never shadows it. `:rest` and
+`:named-keys` follow the vocabulary of `fn/signature`
+([functions](../functions.md)); `:signals` has the shape `compile/signal`
+returns.
+
 ## Portrait library
 
 [lib/portrait.lisp](../../lib/portrait.lisp) builds structured reports from

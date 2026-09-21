@@ -232,6 +232,7 @@ same semantic model the compiler builds. Full guide:
 | `compile/callers analysis :fn` | call-graph in-edges |
 | `compile/callees analysis :fn` | call-graph out-edges |
 | `compile/call-graph analysis` | `{:nodes :roots :leaves}` |
+| `compile/exports analysis` | the module surface: `{:constructor :exports}`, or nil |
 | `compile/parallelize analysis [:f1 :f2 …]` | whether functions may run in parallel |
 | `compile/primitives` | metadata for all Rust-defined primitives |
 
