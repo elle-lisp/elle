@@ -7,6 +7,7 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [agents.md](agents.md) — **The generated index** Every directory's `AGENTS.md` is built from the call-out of each document beneath it, so the index cannot rot or be posted to.
+- [assessment.md](assessment.md) — **The region roadmap** The region system's plan of work: the state gauges, the fix-selection discipline, the measured dead ends, and the open work in order.
 - [audit.md](audit.md) — **The audit queue** Every file carries the day it last met the documentation policy, and the queue names what to read next by what a stale file costs.
 - [bytecode.md](bytecode.md) — **Bytecode** The bytecode instruction set is a `repr(u8)` enum.
 - [differential.md](differential.md) — **Differential Tier Testing** Elle compiles closures through up to five execution tiers:
@@ -21,6 +22,7 @@ Up: [..](../AGENTS.md)
 - [jit.md](jit.md) — **JIT** The JIT compiles hot functions from LIR to native code using Cranelift.
 - [lexicon.md](lexicon.md) — **Lexicon: epoch-aware lexing** An epoch selects the lexer rules that tokenize a file, so a breaking change can reach below the syntax tree to the tokens themselves.
 - [lir.md](lir.md) — **LIR — Low-level IR** LIR is an SSA-form intermediate representation with virtual registers, basic blocks, and explicit control flow.
+- [memory.md](memory.md) — **The region memory model** The mission of the region system, the map of its documents, the settled invariants, and the leak classes that name the open frontier.
 - [mlir.md](mlir.md) — **MLIR Backend (more...)**
 - [reader.md](reader.md) — **Reader** The reader transforms source text into syntax trees.
 - [selfrec.md](selfrec.md) — **Self-recursion: the executing-closure mechanism (no cell)** How a self-recursive closure refers to itself without a forward cell, and is reclaimed by ordinary region RC.
@@ -36,4 +38,4 @@ Up: [..](../AGENTS.md)
 ## Directories
 
 - [image/](image/AGENTS.md) — The image file, Foundations, What the experiments measured, Landing order and test plan, Sealing
-- [region/](region/AGENTS.md) — Ownership adopts and the root's lifetime obligation, Where a release is anchored, Reassigned mutable bindings are 1-slot containers, Capture cells, What a region-effect declaration buys, Per-arm compensation, NativeCtx — explicit allocation: every value names its region and heap, Region diagnostics and validation, Native region effects: declared, not guessed, Rich errors — one region-coherent struct routine + `rich_error!`, Region generations: stale derefs detonate in debug builds, The letrec closure-cycle merge, The mechanism, Merging, Region representation — id-spaces, per-execution model, layout, Owner nodes — an activation as a forest root, Adoption and subtree drop (the ownership forest), What a park retains, and who releases it, Reads of a 1-slot container, A release past a frame-replacing tail call, The relocation point and its replicas, Region rules — the implementor's correctness obligations, What a signal exit owes, Code objects — a blueprint, a payload, and a header, An abandoned frame runs the releases it still owes, The branch-arm release window
+- [region/](region/AGENTS.md) — Ownership adopts and the root's lifetime obligation, Where a release is anchored, Reassigned mutable bindings are 1-slot containers, Capture cells, What a region-effect declaration buys, Per-arm compensation, NativeCtx — explicit allocation: every value names its region and heap, Region diagnostics and validation, Native region effects: declared, not guessed, Rich errors — one region-coherent struct routine + `rich_error!`, Region generations: stale derefs detonate in debug builds, The letrec closure-cycle merge, The mechanism, Merging, Region representation — id-spaces, per-execution model, layout, Owner nodes — an activation as a forest root, Adoption and subtree drop (the ownership forest), What a park retains, and who releases it, Reads of a 1-slot container, A release past a frame-replacing tail call, The relocation point and its replicas, Region rules — the implementor's correctness obligations, Settled invariants, What a signal exit owes, Code objects — a blueprint, a payload, and a header, An abandoned frame runs the releases it still owes, The branch-arm release window

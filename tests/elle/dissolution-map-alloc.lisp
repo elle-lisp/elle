@@ -1,11 +1,13 @@
 (elle/epoch 12)
+# audited: 2026-09-21
 # The REALIZATION gauge for map-chain fusion (docs/impl/dissolution.md § "The gauge").
 #
 # The codegen pins (`src/hir/typeinfer/fuse.rs`) prove the fused form's STRUCTURE
 # (the `map` dispatch and the closure are gone, the composed case has one
 # accumulator). This file proves the EXECUTION consequence the mission actually
-# cares about (`memory.md §1`: "fewer allocations… which the leak oracle does not
-# observe"): a fused chain MINTS STRICTLY FEWER heap objects per call.
+# cares about (docs/impl/memory.md § "The mission": "fewer allocations… which
+# the leak oracle does not observe"): a fused chain MINTS STRICTLY FEWER heap
+# objects per call.
 #
 # The instrument is `arena/total-allocs` — a CUMULATIVE, monotonic count of
 # objects ever minted. The intermediate array a `map`-of-`map` builds is
