@@ -1,5 +1,7 @@
 # Capability enforcement
 
+<!-- audited: 2026-09-21 -->
+
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
 parent can catch.
@@ -63,7 +65,7 @@ can deny nor what it can catch.
 `:yield` is not in this table. It is the cooperative suspension `(yield v)`
 raises, not a capability: an I/O request raises `|:io|` alone, so a
 generator masked `|:yield|` catches its own yields while its reads travel
-out to the scheduler. See `docs/signals/protocol.md`.
+out to the scheduler. See [protocol.md](protocol.md).
 
 | Keyword | Bit | Effect when denied | Dispatch |
 |---------|-----|--------------------|----------|
@@ -74,7 +76,7 @@ out to the scheduler. See `docs/signals/protocol.md`.
 | `:halt` | 8 | Blocks VM termination | yes |
 | `:io` | 9 | Blocks operations that reach the I/O scheduler | yes |
 | `:exec` | 11 | Blocks subprocess execution | no |
-| `:gpu` | 15 | Blocks GPU dispatch | no |
+| `:gpu` | 15 | Blocks compiling a closure to SPIR-V (`git`) | no |
 | `:os-signal` | 16 | Blocks POSIX signal send/raise | no |
 | `:fs` | 17 | Blocks filesystem access | no |
 
@@ -117,7 +119,7 @@ When a fiber calls a primitive whose declared signal bits overlap
 with the fiber's withheld capabilities, the primitive does not run.
 Instead, the fiber emits a signal with:
 
-- **Bits**: the blocked capability bits (e.g., `:io`)
+- **Bits**: the blocked capability bits, for example `:io`
 - **Payload**: a struct describing the denial
 
 ```text
@@ -129,6 +131,44 @@ Instead, the fiber emits a signal with:
 ```
 
 The parent catches this signal through the normal mask routing.
+
+## A requirement can ride an argument, not only a name
+
+A denial gates the primitive that **mints** authority, tested against the bits
+that primitive declares. Some primitives instead spend authority a value carries,
+and the value — not the primitive's name — says what the spend costs. For these
+the gate reads the requirement from the argument and tests it against the calling
+fiber, so a fiber cannot spend what it withholds however it obtained the value.
+
+Three primitives work this way, each in its own domain:
+
+- `io/submit` spends the operation its request argument carries. A spawn request
+  needs `|:io :exec|`, an open needs `|:io :fs|`, a plain read needs `|:io|`.
+- native `import` runs a shared library's `elle_plugin_init`, which is foreign
+  code, so a `.so`/`.dylib`/`.dll` spec needs `:ffi`. A `.lisp` module needs only
+  the `:fs` that `import` already declares.
+- dynamic `emit` raises the bits its first argument names, so it needs those
+  bits.
+
+```text
+# `minter` is allowed to build the request; `f` is not allowed to spend it.
+(let [req (fiber/resume
+            (fiber/new (fn [] (subprocess/exec "/bin/sh" ["-c" "echo hi"]))
+                       |:error :io :exec|))
+      f (fiber/new (fn [r] (io/submit (io/backend :async) r))
+                   |:error :io :exec| :deny |:exec|)]
+  (fiber/resume f req)
+  (fiber/status f))          # => :paused, denied :exec at io/submit
+```
+
+Three edges the gate does not reach. `io/submit` tests the fiber that submits, so
+a scheduler that submits a request on another fiber's behalf spends its own
+authority. A loaded module's own primitives carry whatever bits the plugin
+declared, so a fiber handed a module still reaches them. And the literal `emit`
+compiles to a bytecode instruction rather than a call, so a fiber raises any
+literal bit it names — a mask therefore audits a cooperative child, not a hostile
+one. [authority.md](authority.md) states the model these follow from, and
+[emit.md](emit.md) covers what `emit` does not check.
 
 ## Introspection
 
@@ -253,6 +293,11 @@ blocks `length` but not `+`.
 
 ## Examples
 
+Each sandbox below holds against the primitives the fiber names. A
+capability-bearing value handed in from outside is confined only where a crossing
+checks it: a submitted request is, and loading a native library is; a module
+already loaded and handed in is not — see the spend section above.
+
 ```text
 # Pure computation sandbox — no IO, no filesystem, no FFI, no subprocess
 (let [f (fiber/new compute |:io :fs :ffi :exec :error|
@@ -263,13 +308,20 @@ blocks `length` but not `+`.
 (let [f (fiber/new worker |:fs :error| :deny |:fs|)]
   (fiber/resume f))
 
-# Capability-check a plugin before running it
+# Watch what a plugin's init tries to do
 (let [f (fiber/new plugin-init |:error| :deny |:exec :ffi|)]
   (let [result (fiber/resume f)]
     (if (= (fiber/status f) :dead)
       result
       (do (println "plugin tried:" ((fiber/value f) :primitive))
           (fiber/cancel f)))))
+```
+
+Denying `:ffi` stops the fiber loading a native module: a `.so` spec requires
+`:ffi` for the foreign code its load runs. A `.lisp` module needs only the `:fs`
+that `import` declares.
+
+```text
 
 # Nested sandbox: outer denies IO, inner denies errors
 (let [outer (fiber/new
