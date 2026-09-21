@@ -1,3 +1,5 @@
+// audited: 2026-09-21
+// docs/impl/wasm.md
 //! Tail-call preparation host function: `rt_prepare_tail_call`.
 //!
 //! Isolated because it owns the env-stack reset / rebuild dance and the
@@ -142,10 +144,25 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 return return_via_slot(&mut caller, out);
             }
 
-            if func_val.is_native_fn() {
-                let native_fn = func_val
-                    .as_native_fn()
-                    .expect("rt_prepare_tail_call: expected NativeFn");
+            if let Some(def) = func_val.as_native_def() {
+                // The capability gate, before the primitive runs
+                // (`host::capability_denial`). The denial leaves by the same
+                // route a tail-position signal leaves by, which is what the
+                // interpreter's `handle_capability_denial_tail` does too: it
+                // builds no frame, and the driver it unwinds to parks one.
+                if let Some((blocked, payload)) = crate::wasm::host::capability_denial(
+                    caller.data(),
+                    caller.data().vm,
+                    def,
+                    &args,
+                ) {
+                    let (tag, payload) = caller.data_mut().value_to_wasm(payload);
+                    return return_via_slot(
+                        &mut caller,
+                        CallOutcome::parked(tag, payload, blocked),
+                    );
+                }
+                let native_fn = def.func;
                 let vm = caller.data().vm;
                 let heap = unsafe { &mut *caller.data().heap_ptr() };
                 let region = heap.new_runtime_region();

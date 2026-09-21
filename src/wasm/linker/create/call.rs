@@ -1,3 +1,5 @@
+// audited: 2026-09-21
+// docs/impl/wasm.md
 //! Primary call-dispatch host functions: `call_primitive` and `rt_call`.
 //!
 //! Grouped together because both resolve a callable and drive it host-side,
@@ -67,8 +69,25 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
             };
 
             // Dispatch based on function type
-            if func_val.is_native_fn() {
-                let native_fn = func_val.as_native_fn().expect("rt_call: expected NativeFn");
+            if let Some(def) = func_val.as_native_def() {
+                // The capability gate, before the primitive runs
+                // (`host::capability_denial`). `parked`, not `signalled`: a
+                // denial parks the caller whatever bits it carries, which is
+                // what the interpreter's `handle_capability_denial` does, while
+                // `signalled` would classify a `:error` denial as an ordinary
+                // error return and never park.
+                if let Some((blocked, payload)) =
+                    crate::wasm::host::capability_denial(
+                        caller.data(),
+                        caller.data().vm,
+                        def,
+                        &args,
+                    )
+                {
+                    let (tag, payload) = caller.data_mut().value_to_wasm(payload);
+                    return CallOutcome::parked(tag, payload, blocked).to_wasm();
+                }
+                let native_fn = def.func;
                 if caller.data().debug && nargs == 2 {
                     eprintln!(
                         "[rt_call] native 2args: [{}, {}]",

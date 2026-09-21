@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-09-21
 // docs/impl/wasm.md
 //! Wasmtime host state and primitive dispatch: everything the compiled module
 //! reaches across the boundary for.
@@ -88,6 +88,27 @@ pub struct WasmSuspensionFrame {
     pub redrive_child: Option<Value>,
 }
 
+/// A fiber the host is driving, and the authority that fiber carries.
+///
+/// The withheld set rides the same stack entry as the id because the capability
+/// gate needs the set of the fiber whose body is running, and this tier never
+/// installs that fiber as `vm.fiber` — the VM's own fiber stays the top-level
+/// one for the whole drive. Two stacks pushed side by side could disagree about
+/// which fiber is current; one entry cannot.
+#[derive(Clone, Copy)]
+pub struct DrivenFiber {
+    /// `FiberHandle::id`, the key every per-fiber host table uses.
+    pub id: usize,
+    /// The driven fiber's `withheld` set, read where it is pushed.
+    pub withheld: SignalBits,
+}
+
+impl DrivenFiber {
+    pub fn new(id: usize, withheld: SignalBits) -> Self {
+        DrivenFiber { id, withheld }
+    }
+}
+
 /// Host state stored in the Wasmtime `Store<ElleHost>`.
 pub struct ElleHost {
     /// Handle table for heap objects.
@@ -119,7 +140,7 @@ pub struct ElleHost {
     /// Stack of active fiber IDs. Pushed when entering handle_fiber_resume,
     /// popped on exit. rt_yield and rt_load_saved_reg use the top entry
     /// to find the correct fiber's frame list.
-    pub fiber_id_stack: Vec<usize>,
+    pub fiber_id_stack: Vec<DrivenFiber>,
     /// A pending child re-drive keyed by the PARENT fiber's ID. Set by
     /// `route_emit` when a `(fiber/resume child)` propagates `child`'s uncaught
     /// wait/io through the parent; consumed by `rt_yield` when it pushes the
@@ -194,7 +215,14 @@ impl ElleHost {
 
     /// Get the current fiber's ID from the stack, or 0 for top-level.
     pub fn current_fiber_id(&self) -> usize {
-        self.fiber_id_stack.last().copied().unwrap_or(0)
+        self.fiber_id_stack.last().map(|f| f.id).unwrap_or(0)
+    }
+
+    /// The withheld set the capability gate tests a native call against: the
+    /// fiber the host is driving, or `None` when it drives none and the caller
+    /// falls back to the VM's own fiber (top-level code).
+    pub fn current_withheld(&self) -> Option<SignalBits> {
+        self.fiber_id_stack.last().map(|f| f.withheld)
     }
 
     /// Push a suspension frame for the current fiber (appends to back).
@@ -319,6 +347,9 @@ impl ElleHost {
     /// Returns (signal_bits, result_value).
     pub fn call_primitive(&mut self, prim_id: u32, args: &[Value]) -> (SignalBits, Value) {
         let def = self.primitives[prim_id as usize];
+        if let Some(denial) = capability_denial(self, self.vm, def, args) {
+            return denial;
+        }
         let heap = unsafe { &mut *self.heap_ptr() };
         // Mint the boundary's fresh result region explicitly so it can be both
         // threaded to `call_plugin` (the plugin region slot — no `NativeCtx`
@@ -371,6 +402,52 @@ impl WasmEnvHost for ElleHost {
     fn heap_ptr(&self) -> *mut crate::value::fiberheap::FiberHeap {
         ElleHost::heap_ptr(self)
     }
+}
+
+/// The capability denial a native call owes the calling fiber, or `None` when
+/// that fiber may make the call.
+///
+/// Every host path that reaches a native asks this before it runs the
+/// primitive, so this tier gates on the same `fiber.withheld` the interpreter
+/// and the JIT gate on (`VM::capability_blocked`, src/vm/signal.rs). The
+/// requirement includes the argument-derived bits, so `io/submit` is denied for
+/// the operation its request carries rather than for the `:error` it declares.
+///
+/// The fiber asked is the one the HOST is driving, not `vm.fiber`. This tier
+/// runs a resumed fiber's body without installing it on the VM, so the VM's own
+/// fiber stays the top-level one throughout and its withheld set answers for
+/// nobody (`ElleHost::current_withheld`). Reading `vm.fiber` instead gates every
+/// call against the empty set, which is the whole defect wearing a gate.
+///
+/// The VM arrives as a parameter rather than off `ElleHost::vm`, because the
+/// tiered host owns its own `vm` pointer and leaves the `ElleHost` it wraps with
+/// a null one (`TieredHost`, src/wasm/lazy.rs). A caller that reached for the
+/// wrapped field would gate the full-module tier and silently skip the tiered
+/// one.
+///
+/// The payload is the shared `{:error :capability-denied …}` struct, which the
+/// caller hands back as the call's own signal. Nothing retains it here: the
+/// handle table `value_to_wasm` inserts it into is this tier's escape route for
+/// every value a call returns, where the interpreter's denial path instead
+/// retains the payload's region for the escape into `fiber.signal`.
+pub(in crate::wasm) fn capability_denial(
+    host: &ElleHost,
+    vm: *mut crate::vm::VM,
+    def: &'static PrimitiveDef,
+    args: &[Value],
+) -> Option<(SignalBits, Value)> {
+    let vm = unsafe { &mut *vm };
+    let withheld = host.current_withheld().unwrap_or(vm.fiber.withheld);
+    let blocked = crate::vm::VM::capability_blocked_for(withheld, def, args);
+    if blocked.is_empty() {
+        return None;
+    }
+    let heap_ptr = vm.heap_ptr;
+    let payload = {
+        let mut ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *heap_ptr });
+        crate::vm::VM::build_denial_payload(&mut ctx, def, blocked, args, vm.symbols())
+    };
+    Some((blocked, payload))
 }
 
 /// The WASM host's dispatch table (index = `prim_id`). This is the canonical

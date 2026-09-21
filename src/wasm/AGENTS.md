@@ -90,6 +90,7 @@ WASM closure host-side via `handle_fiber_resume` (in resume.rs).
 | `host/io.rs` | Top-level I/O with no scheduler to take it: the backend a request reaches, and the completion it reads its answer out of. |
 | `linker.rs` | Host function registration (`create_linker`); `linker/` holds the registrations and the data-op dispatch. |
 | `resume.rs` | Fiber resume chain (`drive_resume_chain`, `handle_fiber_resume`). |
+| `resume/route.rs` | What a fiber's own mask makes of its body's outcome: caught, parked, or propagated. |
 | `store.rs` | Engine/Store creation, `call_wasm_closure`, `resume_wasm_closure`, `run_module`. |
 | `lazy.rs` | `WasmTier`: per-closure WASM compilation and tiered dispatch. |
 | `regalloc.rs` | Register allocation for WASM locals. |

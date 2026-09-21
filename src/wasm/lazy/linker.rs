@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-21
 //! The tiered linker: host functions for a standalone per-closure module,
 //! with `rt_call` dispatching back into the VM for bytecode callees.
 //!
@@ -50,8 +50,19 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
             let func_val = caller.data().inner.wasm_to_value(func_tag, func_payload);
             let args = read_args(&mut caller, args_ptr, nargs);
 
-            if func_val.is_native_fn() {
-                let native_fn = func_val.as_native_fn().unwrap();
+            if let Some(def) = func_val.as_native_def() {
+                // The capability gate (`host::capability_denial`), reading this
+                // host's own `vm` — the `ElleHost` it wraps carries a null one.
+                if let Some((blocked, payload)) = crate::wasm::host::capability_denial(
+                    &caller.data().inner,
+                    caller.data().vm,
+                    def,
+                    &args,
+                ) {
+                    let (tag, payload) = caller.data_mut().inner.value_to_wasm(payload);
+                    return CallOutcome::parked(tag, payload, blocked).to_wasm();
+                }
+                let native_fn = def.func;
                 let vm = caller.data().vm;
                 let heap = unsafe { &mut *(*caller.data().vm).heap_ptr };
                 let region = heap.new_runtime_region();
