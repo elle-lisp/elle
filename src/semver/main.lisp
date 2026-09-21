@@ -6,6 +6,7 @@
 (def sfile ((import "std/semver/file")))
 (def surf ((import "std/semver/surface")))
 (def sdiff ((import "std/semver/diff")))
+(def arb ((import "std/semver/arbitrate")))
 (def sv ((import "std/semver")))
 
 # ── exits and small helpers ──────────────────────────────────────────
@@ -53,7 +54,11 @@
   (if (and (not (empty? args)) (= (first args) "--")) (rest args) args))
 
 (def flag-spec
-  @{"--json" [:json :flag] "--tests" [:tests :value] "--tag" [:tag :flag]})
+  @{"--json" [:json :flag]
+    "--tests" [:tests :value]
+    "--tag" [:tag :flag]
+    "--no-tests" [:no-tests :flag]
+    "--strict" [:strict :flag]})
 
 (defn parse-args [args acc]
   (if (empty? args)
@@ -165,23 +170,27 @@
 (defn unchanged? [j claimed]
   (and (empty? (->list ((j :d) :changes))) (= claimed (j :bv))))
 
+(defn print-initial [t]
+  (println (string (t :module) ": no .surface baseline (initial); elle semver"
+                   " release creates it")))
+
+(defn print-status [t j claimed]
+  (if (unchanged? j claimed)
+    (println (string (t :module) " " (j :bv) ": surface unchanged (floor: none)"))
+    (print-report (t :module) (j :bv) claimed (j :d) (j :v))))
+
 (defn status-target [t json?]
   (let [s (extract-target t)
         claimed (claimed-version t s)
         spath (surface-path (t :path))]
     (if (not (file/exists? spath))
       (begin
-        (println (string (t :module)
-                         ": no .surface baseline (initial); elle semver"
-                         " release creates it"))
+        (print-initial t)
         0)
       (let [j (judge (read-baseline spath) s claimed)]
-        (cond
-          json? (print-json (t :module) (j :bv) claimed (j :d) (j :v))
-          (unchanged? j claimed)
-            (println (string (t :module) " " (j :bv)
-                             ": surface unchanged (floor: none)"))
-          (print-report (t :module) (j :bv) claimed (j :d) (j :v)))
+        (if json?
+          (print-json (t :module) (j :bv) claimed (j :d) (j :v))
+          (print-status t j claimed))
         (j :code)))))
 
 (defn status-line [t]
@@ -201,6 +210,68 @@
                            (string ((j :d) :floor)) ", verdict "
                            (verdict-text (j :v)))))
         (j :code)))))
+
+# ── check: verdict + old-test arbitration ────────────────────────────
+(defn major-claim? [bv claimed]
+  "Does CLAIMED bump the major position over BV (pre-1.0: the y)?"
+  (>= (sv:compare claimed (sdiff:required bv :major)) 0))
+
+(defn run-arbitration [t base opts]
+  (cond
+    (get opts :no-tests) {:status :skipped :reason "--no-tests"}
+    (arb:arbitrate {:base base
+                    :module (t :module)
+                    :exe (elle/executable)
+                    :worktree "."})))
+
+(defn print-arbitration [res strict?]
+  (match (res :status)
+    :skipped
+      (println (string "arbitration: skipped (" (res :reason) ")"))
+    :pass (println "arbitration: previous release's tests pass against the worktree")
+    :fail (println "compat claim rejected: previous release's tests fail against the worktree")
+    :unavailable
+      (println (string (if strict? "" "note: ") "arbitration unavailable: "
+                       (res :reason)))
+    _ nil))
+
+(defn check-target [t opts]
+  (let [s (extract-target t)
+        claimed (claimed-version t s)
+        spath (surface-path (t :path))
+        json? (get opts :json)
+        strict? (get opts :strict)]
+    (if (not (file/exists? spath))
+      (begin
+        (if json?
+          (println (json/serialize {:module (t :module)
+                                    :claimed claimed
+                                    :initial true}))
+          (print-initial t))
+        0)
+      (let [base (read-baseline spath)
+            j (judge base s claimed)
+            res (if (major-claim? (j :bv) claimed)
+                  {:status :skipped
+                   :reason "a major claim promises no compatibility"}
+                  (run-arbitration t base opts))
+            gates? (or (= (res :status) :fail)
+                       (and strict? (= (res :status) :unavailable)))
+            code (if (and gates? (< (j :code) 1)) 1 (j :code))]
+        (if json?
+          (println (json/serialize {:module (t :module)
+                                    :baseline (j :bv)
+                                    :claimed claimed
+                                    :floor ((j :d) :floor)
+                                    :required ((j :v) :required)
+                                    :verdict ((j :v) :verdict)
+                                    :changes ((j :d) :changes)
+                                    :arbitration {:status (res :status)
+                                    :reason (get res :reason)}}))
+          (begin
+            (print-status t j claimed)
+            (print-arbitration res strict?)))
+        code))))
 
 # ── the walk ─────────────────────────────────────────────────────────
 (defn module-version [path]
@@ -285,10 +356,22 @@
       0)))
 
 # ── main ─────────────────────────────────────────────────────────────
+(defn over-paths [paths f]
+  "Run F over each resolved path; answer the worst exit code."
+  (let [@worst 0]
+    (each p paths
+      (let [c (f (resolve-target p))]
+        (when (> c worst) (assign worst c))))
+    worst))
+
 (def args (drop-sep (rest (sys/argv))))
 (def cmd
-  (if (and (not (empty? args)) (= (first args) "release")) :release :status))
-(def opts (parse-args (if (= cmd :release) (rest args) args) @{:paths []}))
+  (cond
+    (empty? args) :status
+    (= (first args) "release") :release
+    (= (first args) "check") :check
+    :status))
+(def opts (parse-args (if (= cmd :status) args (rest args)) @{:paths []}))
 (def paths (get opts :paths))
 
 (def code
@@ -297,11 +380,11 @@
       (if (empty? paths)
         (die "release needs a module path")
         (release-target (resolve-target (first paths)) opts))
+    (= cmd :check)
+      (if (empty? paths)
+        (over-paths (->list (walk-tree "." @[])) (fn [t] (check-target t opts)))
+        (over-paths paths (fn [t] (check-target t opts))))
     (empty? paths) (dashboard (get opts :json))
-    (let [@worst 0]
-      (each p paths
-        (let [c (status-target (resolve-target p) (get opts :json))]
-          (when (> c worst) (assign worst c))))
-      worst)))
+    (over-paths paths (fn [t] (status-target t (get opts :json))))))
 
 (os/exit code)

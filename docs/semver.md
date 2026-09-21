@@ -102,8 +102,8 @@ its shape and changes its answers; the old tests can.
    baseline rev by listing that commit's tree.
 3. The old files materialize in a scratch directory (removed
    afterwards) and run as `elle test` in a child whose working
-   directory is the worktree, so their `(import "std/...")` forms
-   resolve to the new code. No import is rewritten.
+   directory is the worktree, so their imports resolve through the
+   ordinary search path to the new code. No import is rewritten.
 4. The child failing rejects the claim: `compat claim rejected`,
    exit 1.
 

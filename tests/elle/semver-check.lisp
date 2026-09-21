@@ -25,8 +25,12 @@
   (string "(elle/epoch 12)\n(elle/version \"" version "\")\n(fn []\n"
           "  (letrec [f " body "]\n    {:f f}))\n"))
 
+# The old test imports by the spec the worktree's search path resolves:
+# the child runs with the worktree as its working directory, and "lib/x"
+# reaches lib/x.lisp there. The "std/" prefix names the interpreter's
+# own stdlib and would not reach a fixture tree.
 (def old-test
-  (string "(elle/epoch 12)\n" "(def m ((import \"std/x\")))\n"
+  (string "(elle/epoch 12)\n" "(def m ((import \"lib/x\")))\n"
           "(assert (= (m:f 1) 1) \"f answers its argument\")\n"
           "(println \"x: ok\")\n"))
 
@@ -51,7 +55,9 @@
                    (assert (= (r :exit) 0) "unchanged module, old tests pass"))
 
                  # ── behavior mutates under an unchanged shape ────────
-                 (file/write mod-path (module-text "1.0.1" "(fn [a] (+ a 1))"))
+                 # The body must stay silent: (+ a 1) would add the
+                 # :error signal bit, and that IS a surface change.
+                 (file/write mod-path (module-text "1.0.1" "(fn [a] 2)"))
                  (let [r (run-tool dir ["semver" "lib/x.lisp"])]
                    (assert (= (r :exit) 0) "the floor sees nothing"))
                  (let [r (run-tool dir ["semver" "check" "lib/x.lisp"])]
