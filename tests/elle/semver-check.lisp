@@ -73,15 +73,28 @@
                  (let [r (run-tool dir ["semver" "check" "lib/x.lisp"])]
                    (assert (= (r :exit) 0) "old tests pass against the patch"))
 
-                 # ── a major claim is not arbitrated ──────────────────
+                 # ── a major claim gates on coverage, not tests ───────
                  (file/write mod-path
                              (string "(elle/epoch 12)\n"
                                      "(elle/version \"2.0.0\")\n" "(fn []\n"
                                      "  (letrec [g (fn [b] b)]\n"
                                      "    {:g g}))\n"))
                  (let [r (run-tool dir ["semver" "check" "lib/x.lisp"])]
+                   (assert (= (r :exit) 1)
+                           "a bare major break carries no migration rule")
+                   (assert (string/contains? (r :stdout) "elle/migration 2")
+                           "the hint names the form to ship")
+                   (assert (string/contains? (r :stdout) "rename f g")
+                           "a removed shape an added one matches suggests rename"))
+                 (file/write mod-path
+                             (string "(elle/epoch 12)\n"
+                                     "(elle/version \"2.0.0\")\n"
+                                     "(elle/migration 2\n" "  (rename f g))\n"
+                                     "(fn []\n" "  (letrec [g (fn [b] b)]\n"
+                                     "    {:g g}))\n"))
+                 (let [r (run-tool dir ["semver" "check" "lib/x.lisp"])]
                    (assert (= (r :exit) 0)
-                           "a major claim promises no compatibility"))
+                           "a covered major claim passes, unarbitrated"))
 
                  # ── unavailable arbitration: note, or --strict ───────
                  (git:close repo)
