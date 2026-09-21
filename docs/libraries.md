@@ -76,6 +76,9 @@ pattern and are imported via `(import "std/<name>")`.
 | git | `((import "std/git"))` | Git repository operations (FFI to libgit2) |
 | glob | `((import "std/glob"))` | Filesystem glob pattern matching |
 | semver | `((import "std/semver"))` | Semantic version parsing and comparison |
+| semver/diff | `((import "std/semver/diff"))` | Surface diffs, bump floors, claim verdicts. See [semver.md](semver.md) |
+| semver/file | `((import "std/semver/file"))` | `.surface` file rendering and parsing |
+| semver/surface | `((import "std/semver/surface"))` | Public-surface extraction from a module |
 | sqlite | `((import "std/sqlite"))` | SQLite database (FFI to libsqlite3) |
 | uuid | `((import "std/uuid"))` | UUID generation and parsing |
 

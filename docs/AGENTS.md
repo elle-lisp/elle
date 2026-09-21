@@ -28,7 +28,7 @@ Up: [..](../AGENTS.md)
 - [functions.md](functions.md) — **Functions** How to make, call, compose and inspect functions, and how deep recursion may go.
 - [intrinsics.md](intrinsics.md) — **Intrinsics** Intrinsics are silent bytecode operations prefixed with `%`.
 - [io.md](io.md) — **I/O** All I/O in Elle is async — reads and writes yield to the scheduler.
-- [libraries.md](libraries.md) — **Libraries** Elle ships with libraries in `lib/`.
+- [libraries.md](libraries.md) — **Libraries** Elle ships with libraries in the lib directory.
 - [loops.md](loops.md) — **Loops** Elle's loop forms are `while`, `forever`, `repeat`, and `each`.
 - [lua.md](lua.md) — **Lua Syntax Mode** Elle supports a Lua surface syntax for `.lua` files.
 - [macros.md](macros.md) — **Macros** Elle's macros run as ordinary Elle code at expansion time, and are hygienic by sets of scopes; `datum->syntax` breaks hygiene on purpose.
@@ -47,6 +47,7 @@ Up: [..](../AGENTS.md)
 - [regions.md](regions.md) — **Region-Based Memory Management** Elle frees memory at compile-time-known program points: no tracing collector, no liveness scan, and no GC pause.
 - [runtime.md](runtime.md) — **Runtime Signals** The runtime uses fiber signals for internal coordination.
 - [scheduler.md](scheduler.md) — **Scheduler** The async scheduler is the only supported execution backend, and user code runs inside it automatically.
+- [semver.md](semver.md) — **elle semver** `elle semver` computes and verifies the version bump a library's surface change requires.
 - [sets.md](sets.md) — **Sets** Sets are unordered collections of unique values.
 - [stdlib.md](stdlib.md) — **Standard Library** Elle's standard library has four layers: Rust primitives, core operators, prelude macros, and stdlib functions.
 - [strings.md](strings.md) — **Strings** Strings are immutable sequences of grapheme clusters.
