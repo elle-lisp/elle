@@ -1,6 +1,6 @@
 // audited: 2026-09-21
-// The interpreter's Call-position dispatch: native, parameter, closure, and
-// callable-collection callees, the capability gate, and yield-through-call.
+// The interpreter's Call-position dispatch: native, parameter, closure and
+// collection callees, the capability gate, and yield-through-call.
 // docs/impl/vm.md
 use super::*;
 

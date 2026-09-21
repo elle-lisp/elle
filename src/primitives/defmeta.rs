@@ -1,6 +1,6 @@
 // audited: 2026-09-21
-//! Registration metadata a primitive carries beyond its call behavior: the
-//! `Doc` a lookup shows, and the `PrimitiveMeta` maps the pipeline threads.
+//! What a primitive carries beyond its call behavior: the `Doc` a lookup
+//! shows, and the `PrimitiveMeta` maps the pipeline threads.
 //!
 //! src/primitives/AGENTS.md
 

@@ -194,7 +194,9 @@ Set with `--trace=gpu,spirv` on the CLI or
 - [impl/mlir.md](mlir.md) — LIR → MLIR lowering and CPU tier
 - [impl/spirv.md](spirv.md) — SPIR-V emission paths and caching
 - [impl/lir.md](lir.md) — eligibility predicate
-- `plugins/vulkan/AGENTS.md` — plugin internals
-- `lib/AGENTS.md` (lib/gpu, lib/spirv) — Elle library reference
-- `tests/elle/gpu-map.lisp`, `tests/elle/gpu-select.lisp`,
-  `tests/elle/spirv.lisp` — runnable examples
+- [plugins.md](../plugins.md) — the plugin system, and the submodule the Vulkan
+  plugin's own reference lives in
+- [lib/AGENTS.md](../../lib/AGENTS.md) — Elle library reference (lib/gpu, lib/spirv)
+- [gpu-map.lisp](../../tests/elle/gpu-map.lisp),
+  [gpu-select.lisp](../../tests/elle/gpu-select.lisp),
+  [spirv.lisp](../../tests/elle/spirv.lisp) — runnable examples
