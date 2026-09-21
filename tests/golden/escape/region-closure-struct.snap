@@ -44,7 +44,7 @@
     block3: DecrefRegion s3
     block3: IncrefValueRegion v73
     block3: DecrefValueRegion v74
-  ; closure[0] <anon>
+  ; closure[0] make-adder
     block0: DecrefValueRegion v5
     block0: IncrefRegion s4
     block0: IncrefRegion s4

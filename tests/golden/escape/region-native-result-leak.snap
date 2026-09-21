@@ -37,7 +37,7 @@
     block6: DecrefRegion s4
     block8: DecrefValueRegion v74
     block7: IncrefValueRegion v76
-  ; closure[0] <anon>
+  ; closure[0] churn
     block4: DecrefRegion s5
     block4: DecrefRegion s6
     block4: DecrefValueRegion v22

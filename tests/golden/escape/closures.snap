@@ -141,7 +141,7 @@
     block0: IncrefValueRegion v6
     block0: DecrefValueRegion v7
     block0: DecrefRegion s22
-  ; closure[7] <anon>
+  ; closure[7] f
     block1: IncrefValueRegion v8
     block2: DecrefValueRegion v20
     block2: TailCall defer_callee_release=false

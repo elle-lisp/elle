@@ -28,7 +28,7 @@ Up: [..](../AGENTS.md)
 - [functions.md](functions.md) — **Functions** How to make, call, compose and inspect functions, and how deep recursion may go.
 - [intrinsics.md](intrinsics.md) — **Intrinsics** Intrinsics are silent bytecode operations prefixed with `%`.
 - [io.md](io.md) — **I/O** All I/O in Elle is async — reads and writes yield to the scheduler.
-- [libraries.md](libraries.md) — **Libraries** Elle ships with libraries in the lib directory.
+- [libraries.md](libraries.md) — **Libraries** Elle ships with libraries in `lib/`.
 - [loops.md](loops.md) — **Loops** Elle's loop forms are `while`, `forever`, `repeat`, and `each`.
 - [lua.md](lua.md) — **Lua Syntax Mode** Elle supports a Lua surface syntax for `.lua` files.
 - [macros.md](macros.md) — **Macros** Elle's macros run as ordinary Elle code at expansion time, and are hygienic by sets of scopes; `datum->syntax` breaks hygiene on purpose.
