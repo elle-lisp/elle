@@ -1,6 +1,6 @@
 # The test runner store
 
-<!-- audited: 2026-09-20 -->
+<!-- audited: 2026-09-21 -->
 
 Where `elle test` keeps a run, what every run and result records, and the
 queries that read them back.
@@ -113,7 +113,8 @@ prerequisite.
 
 Per **run** (one `elle test` invocation): wall time, peak RSS, user/sys CPU
 (`getrusage`), the `HEAD` commit, whether the working tree is dirty, a tree hash,
-the worktree the run ran in, the elle build version/profile/host, the full
+the worktree the run ran in, the elle build version/profile/host, the boot
+fingerprint (§ The boot fingerprint), the full
 `argv`, the tier set, and the working-tree files that differ from `HEAD` with
 their content hashes (the "hash of changed files").
 
@@ -157,6 +158,70 @@ explicit only (`elle test --prune`), except ad-hoc forms (§ Ad-hoc tests).
 > ([test-runner](test-runner.md) § CAS asset capture) — it OOMs the corpus run
 > and does not dedup. stdout/stderr are still captured per (form × tier);
 > `--dump` capture returns once the region leak it exposes is fixed.
+
+## The boot fingerprint
+
+A verdict is a function of the form, the binary, the boot sources, and the run
+configuration. A `run` row named the commit and the machine and said nothing
+about the executable, so no result could be safely reused, and archaeology
+across compiler changes had no axis to group by.
+
+`boot_fingerprint` is that axis: one hash over the bytes of the running
+executable. The three sources a boot compiles to become a runtime —
+[core.lisp](../src/core.lisp), [prelude.lisp](../src/prelude.lisp) and
+[stdlib.lisp](../src/stdlib.lisp) — are built into that executable, so one
+hash covers the binary and the boot sources together. Edit any of them, or
+change the compiler, and the rebuilt binary hashes differently; every result
+recorded under the old value belongs to the build that produced it.
+
+Only the binary can report this, so it arrives as `(elle/boot-fingerprint)`,
+beside the version and the profile ([test-cli](test-cli.md) § Substrate). On a
+box whose OS will not name the running executable the column is NULL: the run
+happened, and nothing identified what ran it.
+
+The value is the hash itself, a 64-bit number, and the column holds it as one.
+Nothing displays a fingerprint; what reads it compares, groups and joins it,
+and the same hash rendered as text costs twice the bytes and compares a
+character at a time. The form hash and the CAS address are text because each
+also names a file; a fingerprint names nothing.
+
+[image](impl/image.md) computes an identity of its own to gate hydration.
+Converge on one implementation when that lands.
+
+## What analysis says about a form
+
+A `form` row carries three columns the compiler fills: `signal`, `caps` and
+`touches`. They are what makes a category a query rather than a directory
+(§ The durable corpus is a flat set), and a form's effect profile is also what
+decides whether its result can be replayed.
+
+The runner analyzes each file once, at scan time, before it runs anything. It
+wraps the file's source in one function and reads that function's inferred
+profile back through `compile/analyze`. A file's top level and a function body
+are both letrec-scoped, so the wrapped body is the form, and the function's
+inferred signal is the form's own effect profile.
+
+| Column | What it holds |
+|--------|---------------|
+| `signal` | every signal bit the form may emit, named and space separated: `error fs io` |
+| `caps` | the capability bits among them: `debug`, `exec`, `ffi`, `fs`, `gpu`, `io`, `os-signal` |
+| `touches` | every binding the form's analysis calls, less the ones it defines itself: `= port/open struct` |
+
+`error` and `yield` reach `signal` and never `caps`. A form that raises, and a
+form that suspends, are both still functions of their own inputs; a form that
+opens a file is not.
+
+**An empty column is a claim, and NULL is not.** An empty `caps` says the
+compiler proved the form reaches no capability, which is what makes its result
+replayable under one boot fingerprint (§ The boot fingerprint). NULL says the
+analysis did not answer, and nothing may be read into it. A call the compiler
+cannot resolve answers with every capability bit, so a form that calls a stdlib
+closure records the whole set — the honest over-approximation, and the
+direction a skip decision has to round toward.
+
+The unit is the file because the row is the file: a multi-form file is one
+whole-file form, and the durable corpus is one form per file, so a file's
+profile is its form's profile.
 
 ## Measurements: a verdict a query can read
 
@@ -259,6 +324,7 @@ CREATE TABLE run (                  -- one row per `elle test` invocation
   id INTEGER PRIMARY KEY, started_at TEXT,
   finished_at TEXT,                 -- stamped at completion; NULL = the run was KILLED mid-flight
   git_commit TEXT, git_dirty INT, tree_hash TEXT, worktree TEXT,  -- the code state this run ran against
+  boot_fingerprint INT,             -- the binary and the boot sources, hashed
   elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, tiers TEXT,
   selection TEXT,                   -- the filter predicate; NULL = full run (the gate)
   n_selected INT,                   -- files + -e forms planned; written at insert
@@ -275,7 +341,7 @@ CREATE TABLE form (                 -- deduped across runs; the computer names i
   file TEXT, form_index INT, line INT, col INT,
   label TEXT,                       -- derived: assert message / leading symbols
   src TEXT,                         -- the form's syntax, rendered for display
-  caps TEXT, touches TEXT, signal TEXT);   -- from compile/analyze — drives selection
+  caps TEXT, touches TEXT, signal TEXT);   -- from compile/analyze (§ What analysis says about a form)
 
 CREATE TABLE result (               -- one row per (form × tier × run)
   id INTEGER PRIMARY KEY, run_id INT REFERENCES run(id),
@@ -312,14 +378,18 @@ stays small and merge/diff concerns never arise (it is gitignored regardless).
 **v1 implemented subset ([store.lisp](../src/test/store.lisp) `ensure-schema`).**
 The runner creates
 `form`, `result`, `asset`, `measurement` and `gauge` with the columns above;
-`run` and `changed_file` are subsets:
+`run`, `form` and `changed_file` are subsets:
 
 - `run` carries every column above except the resource ones
   (`wall_ms`/`max_rss_kb`/`cpu_user_ms`/`cpu_sys_ms`), which are deferred. So a
   resource query is design-only until they land; a `SELECT` of a deferred
   column errors with `no such column`. A session DB written before the
-  code-state columns existed gains them by `ALTER TABLE`, with NULL for every
-  run recorded until then.
+  code-state or fingerprint columns existed gains them by `ALTER TABLE`, with
+  NULL for every run recorded until then.
+- `form` is written without `line`, `col` and `session`: a form's location and
+  an ad-hoc form's session id are deferred, and each reads NULL. The three
+  analysis columns are written at scan time (§ What analysis says about a
+  form).
 - `changed_file` is created but never populated (no `--changed` capture yet).
 
 ## The agent workflow, as SQL
@@ -355,5 +425,16 @@ WHERE m.subject = 'io-drop' AND m.axis = 'regions' ORDER BY m.run_id;
 -- Which files cost the runner the most heap, across every run recorded.
 SELECT file, sum(delta) AS regions FROM gauge
 WHERE kind = 'regions' GROUP BY file ORDER BY regions DESC LIMIT 10;
+
+-- The forms a cache may replay: analyzed, and proved to reach no capability.
+SELECT file, label FROM form WHERE caps = '' ORDER BY file;
+
+-- Every form whose analysis calls one binding — category as a query.
+SELECT file FROM form WHERE instr(' ' || touches || ' ', ' chan/send ') > 0;
+
+-- One form's history, grouped by the build that produced each verdict.
+SELECT run.boot_fingerprint AS build, result.status AS status, count(*) AS n
+FROM result JOIN run ON run.id = result.run_id
+WHERE result.form_hash = ? GROUP BY build, status;
 ```
 

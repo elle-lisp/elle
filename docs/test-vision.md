@@ -1,6 +1,6 @@
 # One test system
 
-<!-- audited: 2026-09-20 -->
+<!-- audited: 2026-09-21 -->
 
 The plan that folds every test product into `elle test`, keeps the results,
 and states what a run may skip.
@@ -110,6 +110,9 @@ the same identity [image](impl/image.md) computes to gate hydration and
 [fleet](impl/fleet.md) uses for routing. Build it once; three systems consume
 it.
 
+The fingerprint is in: every run records one ([test-store](test-store.md)).
+What is missing is the lookup that spends it.
+
 Under this key, a compiler change moves the fingerprint and every cached
 result misses, so the full corpus re-runs. A change to one corpus file misses
 only its closure. `--changed` becomes a cache lookup with no impact heuristic
@@ -123,7 +126,9 @@ remains a full run.
 Within one fingerprint, a skip also needs the environment to hold still. The
 compiler's capability inference already classifies a form's effects, so the
 runner caches pure-compute forms and re-runs forms that touch io, net, ffi, or
-the clock.
+the clock. Each form's profile is recorded as it is scanned
+([test-store](test-store.md)), so the classification is a column rather than a
+re-analysis.
 
 ### Forms, where the compiler can prove it
 
@@ -164,6 +169,7 @@ the CI habit of reading failures out of logs.
 3. Derived budgets.
 4. The coverage gate (elle-lisp/elle#1144), then the runtime-structure gauges
    (elle-lisp/elle#1143, elle-lisp/elle#1135). The measurement channel is in.
-5. The boot fingerprint and content-keyed results; ordering signals.
+5. Content-keyed results; ordering signals. The boot fingerprint and the
+   per-form effect profile are in.
 6. Provable form slicing; parity rows (elle-lisp/elle#1142); golden
    comparisons that store both sides (elle-lisp/elle#1138).
