@@ -1,3 +1,4 @@
+// audited: 2026-09-21
 //! Branch-compensation decref placement: free a region on the arms where it dies.
 //!
 //! The region solver gives every region ONE `decref_point` — the textually-last
@@ -205,6 +206,7 @@ pub(super) fn compute_branch_compensation(
     order: &HashMap<HirId, u32>,
     last_use: &HashMap<HirId, HirId>,
     return_sites: &[(HirId, Vec<Region>)],
+    binder_init_sites: &HashMap<crate::hir::binding::Binding, Option<HirId>>,
 ) -> BranchComp {
     // The per-binding source regions are the solver's `binding_source_regions`
     // (== `inference_binding_regions`, already mirrored onto `info` before this
@@ -256,27 +258,57 @@ pub(super) fn compute_branch_compensation(
     // docs/impl/region/mechanism.md § "A compensating release of an env cell names
     // the box, not the holder's slot").
     let captured = super::escape::captured_bindings(hir);
-    let mut tainted: std::collections::HashSet<Region> = std::collections::HashSet::new();
+    let mut tainted: std::collections::HashSet<Region> =
+        super::escape::mutated_route_regions(arena, info, binding_regions, binder_init_sites)
+            .into_iter()
+            .collect();
     for (b, regions) in binding_regions {
         let uses = du.uses.get(b);
         let def = du.def_site.get(b);
-        let bi = arena.get(*b);
-        let unsafe_holder = bi.is_mutated || captured.contains(b);
+        let unsafe_holder = captured.contains(b);
+        // A holder's DEF site anchors the live-in premise only where that holder
+        // could be the release's ROUTE — the slot a value-routed release loads is
+        // the allocating binder's, so only that binder's def says where the slot
+        // is written (docs/impl/region/mechanism.md § "A region's release route
+        // belongs to ONE binding"). An alias, a functionalization version, or a
+        // phi merely names a value born elsewhere; anchoring its def would read
+        // the value as born inside whatever arm the naming sits in. An env
+        // CELL's release names the box at the holder's env index rather than a
+        // value slot, so the holder's def is exactly where its box is minted and
+        // keeps its anchor.
+        let route_regions: Vec<Region> =
+            match super::escape::binder_route(*b, arena, info, regions, binder_init_sites) {
+                super::escape::Route::Binder(r) => r.into_iter().collect(),
+                super::escape::Route::Prologue(rs) => rs,
+                super::escape::Route::Ambiguous => regions.clone(),
+                super::escape::Route::Unrouted => Vec::new(),
+            };
         for &r in regions {
             *holder_count.entry(r).or_default() += 1;
             if let Some(us) = uses {
                 region_uses.entry(r).or_default().extend(us.iter().copied());
             }
             if let Some(&d) = def {
-                region_anchors.entry(r).or_default().push(d);
+                if route_regions.contains(&r) || info.cell_release_regions.contains(&r) {
+                    region_anchors.entry(r).or_default().push(d);
+                }
             }
             if unsafe_holder && !info.cell_release_regions.contains(&r) {
                 tainted.insert(r);
             }
         }
     }
+    // The allocation sites alone, for the loop-invariant guard below. The full
+    // anchor set unions holder DEF sites in for the live-in premise, and a cell
+    // carried across a loop is defined outside it while the values it stores are
+    // born inside — reading the cell's def as an allocation would refuse the
+    // per-iteration release exactly where it is correct. A region with no
+    // recorded allocation is allocated elsewhere (a parameter's content), and
+    // stays refused by the guard's conservative reading of an empty set.
+    let mut region_allocs: HashMap<Region, Vec<HirId>> = HashMap::new();
     for (&alloc_id, &r) in &info.alloc_region {
         region_anchors.entry(r).or_default().push(alloc_id);
+        region_allocs.entry(r).or_default().push(alloc_id);
     }
     // Region → the uncounted opcode reads (`%get`/`%first`/`%rest`) that borrow out
     // of it. Such a read hands back a value living inside the container and raises
@@ -446,9 +478,17 @@ pub(super) fn compute_branch_compensation(
                 continue;
             }
             // loop-invariant guard: no loop encloses C but not r's allocation.
+            // Asked of the ALLOCATION sites where the region has any — a holder
+            // defined outside the loop (a cell the loop stores into) says
+            // nothing about where the value is born, and the per-iteration
+            // release is correct exactly when every birth is per-iteration. A
+            // region with no recorded allocation (an env cell's phantom, a
+            // parameter's content) falls back to the anchor set, which is then
+            // the only birth reading there is.
+            let allocs = region_allocs.get(&r).unwrap_or(anchors);
             let crosses_loop = loops.iter().any(|l| {
                 let c_in = l.lo <= br.node_lo && br.node_hi <= l.hi;
-                c_in && anchors.iter().any(|&a| ord(a) < l.lo || ord(a) > l.hi)
+                c_in && allocs.iter().any(|&s| ord(s) < l.lo || ord(s) > l.hi)
             });
             if crosses_loop {
                 continue;

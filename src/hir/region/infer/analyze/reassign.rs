@@ -29,12 +29,17 @@ use feeder::Feeders;
 /// from the application because the whole-chain rule needs every link's answer
 /// before any link may act on its own.
 struct LocalVerdict {
-    /// Every region the model PINS to a store site — the values this chain
-    /// stores — has no other holder (after the forwarding fold). The pin moves a
-    /// producer release EARLIER, so a second name reading the value would be
-    /// left holding a freed one. Cleared for every link of a chain any link
-    /// fails.
-    stored_sole: bool,
+    /// The whole-chain rule's veto (pass 2): a chain of forwarding edges hands
+    /// one reference along, so its links are admitted or declined together, and
+    /// a link whose init discharge fails declines every other link with it.
+    ///
+    /// The STORED values ask no sole-held question of their own. The counted
+    /// store claims nothing from anyone, and the store-site pin is a maximum
+    /// over every extension the region already carries — an alias's own reads
+    /// among them, through the ordinary binding chain — so no release moves
+    /// ahead of a second name's read (docs/impl/region/bindings.md § "An
+    /// aliased stored value takes the counted store").
+    chain_admitted: bool,
     /// Every region the model would SUPPRESS — the init, which the cell takes
     /// uncounted — has no other holder, so the donation is available. Where it
     /// is not, the cell counts its init instead and suppresses nothing
@@ -66,7 +71,7 @@ impl LocalVerdict {
     /// one way or the other: donated (its ordinary decref suppressed, released
     /// by drop-on-overwrite) or counted at the chain source's binder.
     fn takes_model(&self) -> bool {
-        self.stored_sole && (self.donates_init || self.init_site.is_some())
+        self.chain_admitted && (self.donates_init || self.init_site.is_some())
     }
 }
 
@@ -255,10 +260,11 @@ pub(super) fn apply_reassign_containers(
     // accounting holds for a cell written once and for one re-minted every
     // iteration of a loop alike.
     //
-    // The gate is sole-held, asked per region over the half it decides (BOTH
-    // not-returned and returned — see the split below and
+    // The gate is the INIT's discharge — donated where sole-held, counted at
+    // the chain source's binder otherwise (see the verdicts below and
     // docs/impl/region/bindings.md "Reassigned mutable bindings are 1-slot
-    // containers" § "Returned fn-local reassigned mutables"). Distinct
+    // containers"). Whether the content is returned decides nothing
+    // (§ "Returned fn-local reassigned mutables"). Distinct
     // mechanism: a `@`-mutable PARAMETER (a captured cell the callee owns)
     // reassigned then moved into a tail call is released by the callee's own cell
     // `DecrefCellRegion`, and the tail move's borrowed-arg retain must order ahead
@@ -320,26 +326,35 @@ pub(super) fn apply_reassign_containers(
             .get(b)
             .map(|v| v.as_slice())
             .unwrap_or(&[]);
-        // The sole-held question, asked separately of the two halves it decides.
-        // `kept` — the chain's stored values — is what the model PINS back to a
-        // store site, and moving a producer release earlier is unsafe under a
-        // second name. Everything else the binding holds is what the model would
-        // SUPPRESS, which is only ever the donation's business: an aliased init
-        // costs the donation, not the model (docs/impl/region/bindings.md § "What
-        // the cell donates it must hold alone; what it counts it need not").
+        // The sole-held question is the DONATION's alone. `kept` — the chain's
+        // stored values — is what the model PINS back to a store site, and the
+        // pin is a maximum over every extension the region carries, an alias's
+        // own reads included, so a second name refuses nothing there
+        // (docs/impl/region/bindings.md § "An aliased stored value takes the
+        // counted store"). Everything else the binding holds is what the model
+        // would SUPPRESS, which is the donation's business: an aliased init
+        // costs the donation, not the model (§ "What the cell donates it must
+        // hold alone; what it counts it need not"). A binding-source region
+        // that is ALSO stored is the one shape the two questions cannot split —
+        // the suppression loop skips `kept`, so a donation granted over the
+        // overlap would leave the define's uncounted store with no reference
+        // for drop-on-overwrite to release — and an aliased overlap therefore
+        // takes the counted-init route instead of donating.
         let kept = chain_kept.get(b).map(|v| v.as_slice()).unwrap_or(&regions);
         let last = Reassigns::last_of_chain(&next, *b);
+        let overlap_aliased = binding_regs
+            .iter()
+            .filter(|r| kept.contains(r))
+            .any(|&r| !sole_held(*b, r));
         verdicts.insert(
             *b,
             LocalVerdict {
-                stored_sole: binding_regs
-                    .iter()
-                    .filter(|r| kept.contains(r))
-                    .all(|&r| sole_held(*b, r)),
-                donates_init: binding_regs
-                    .iter()
-                    .filter(|r| !kept.contains(r))
-                    .all(|&r| sole_held(*b, r)),
+                chain_admitted: true,
+                donates_init: !overlap_aliased
+                    && binding_regs
+                        .iter()
+                        .filter(|r| !kept.contains(r))
+                        .all(|&r| sole_held(*b, r)),
                 init_site: chain_versions
                     .get(&last)
                     .and_then(|vs| Reassigns::init_store_site(vs, binder_init_sites)),
@@ -370,7 +385,7 @@ pub(super) fn apply_reassign_containers(
         }
         if !links.iter().all(|b| verdicts[b].is_cell()) {
             for b in links {
-                verdicts.get_mut(b).unwrap().stored_sole = false;
+                verdicts.get_mut(b).unwrap().chain_admitted = false;
             }
         }
     }

@@ -104,16 +104,21 @@ pub(super) fn populate_decref_points(
     let binding_uses = &du.uses;
 
     // Post-order subtree intervals `[low, order]`, so containment of a HirId is
-    // an interval test, and every iterative scope's. Computed once for the four
-    // cell passes that read them — the fn-local container's covering node and its
-    // demise hoist, the env cell's once-per-activation hoist, and the clamp that
-    // follows the value releases routed through an env cell — and skipped
-    // entirely when the unit has no cell of either kind.
+    // an interval test, with every iterative scope's and every branch's arm
+    // sets. Computed once for the cell passes that read them — the fn-local
+    // container's covering node and its demise hoist, the env cell's
+    // once-per-activation hoist, and the clamp that follows the value releases
+    // routed through an env cell — and skipped entirely when the unit has no
+    // cell of either kind.
     let mut subtree_low: HashMap<HirId, u32> = HashMap::new();
     let mut iter_scopes: Vec<(HirId, u32, u32)> = Vec::new();
+    let mut branches: Vec<super::super::arms::ArmSet> = Vec::new();
     if !info.cell_containers.is_empty() || !info.cell_release_regions.is_empty() {
         subtree_low = compute_subtree_low(hir, order);
         collect_iter_scopes(hir, order, &subtree_low, &mut iter_scopes);
+        if !info.cell_containers.is_empty() {
+            collect_branch_arm_sets(hir, order, &subtree_low, &mut branches);
+        }
     }
 
     // ── The fn-local 1-slot container's content drop ──────────────────────
@@ -166,7 +171,52 @@ pub(super) fn populate_decref_points(
                 .chain(carried_loop.get(b).copied())
                 .max_by_key(|id| ord(*id));
             if let Some(lu) = latest {
-                c.demise = lu;
+                // The drop must POST-DOMINATE every access: the cell holds one
+                // reference whichever path stored it, so a demise seeded at the
+                // structurally-latest access — which may sit inside one branch
+                // arm, or inside a loop the binder is bound outside — would run
+                // on that path alone (a leak on every sibling arm) or once per
+                // iteration (freeing content a later iteration reads). Hoist it
+                // to the node of every enclosing arm and loop that does not also
+                // enclose the BINDER: the lowerer emits a node's releases after
+                // it, so a branch node's land after the merge and a loop node's
+                // after the loop. An arm or loop the binder is bound inside
+                // keeps the seed — the cell itself is per-path or per-iteration
+                // there, and so is its drop.
+                // The BINDER's position, off the walk's binder-init record —
+                // `du.def_site` holds the latest def, and an `assign` is a def,
+                // so it would read the very store the hoist is asked about.
+                let bdef = binder_init_sites
+                    .get(b)
+                    .and_then(|s| *s)
+                    .map(ord)
+                    .unwrap_or(0);
+                let mut demise = lu;
+                for _ in 0..branches.len() + iter_scopes.len() + 1 {
+                    let o = ord(demise);
+                    let hoist = branches
+                        .iter()
+                        .filter(|br| {
+                            br.arms.iter().any(|a| o >= a.lo && o <= a.hi)
+                                && !(bdef >= br.node_lo && bdef <= br.node_hi)
+                        })
+                        .map(|br| br.id)
+                        .chain(
+                            iter_scopes
+                                .iter()
+                                .filter(|&&(_, llo, lhi)| {
+                                    o >= llo && o <= lhi && !(bdef >= llo && bdef <= lhi)
+                                })
+                                .map(|&(id, _, _)| id),
+                        )
+                        .filter(|&id| ord(id) > o)
+                        .max_by_key(|&id| ord(id));
+                    match hoist {
+                        Some(id) => demise = id,
+                        None => break,
+                    }
+                }
+                c.demise = demise;
             }
         }
     }
@@ -485,4 +535,18 @@ pub(super) fn populate_decref_points(
         inference_binding_regions,
         binder_init_sites,
     );
+}
+
+/// Collect every branch's arm sets in one walk (`super::super::arms` is the
+/// shared reading of what counts as an arm). Callers of `branch_arms` walk the
+/// tree themselves, each collecting different scopes alongside; the cell-demise
+/// hoist needs the arm intervals alone.
+fn collect_branch_arm_sets(
+    hir: &Hir,
+    order: &HashMap<HirId, u32>,
+    low: &HashMap<HirId, u32>,
+    out: &mut Vec<super::super::arms::ArmSet>,
+) {
+    out.extend(super::super::arms::branch_arms(hir, order, low));
+    hir.for_each_child(|c| collect_branch_arm_sets(c, order, low, out));
 }
