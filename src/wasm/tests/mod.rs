@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-21
 // docs/impl/wasm.md
 //! The WASM backend's tests, one file per subject, over the LIR fixtures and
 //! evaluation helpers they share.
@@ -10,6 +10,7 @@ use crate::signals::{Signal, SIG_YIELD};
 use crate::value::Arity;
 
 mod cache;
+mod caps;
 mod closure;
 mod collections;
 mod emitsize;
