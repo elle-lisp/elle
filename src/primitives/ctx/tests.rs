@@ -1,4 +1,8 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-09-21
+//! Unit tests for the ctx surface: the region every `ctx.*` value is born in,
+//! and the spellings it records.
+//! docs/impl/region/ctx.md
+//! docs/impl/symbol.md
 
 use super::Alloc;
 use crate::hir::region::RuntimeRegion;
@@ -212,4 +216,58 @@ fn ctx_allocates_on_its_own_heap_not_the_tls_heap() {
         "ctx.string must NOT allocate on the installed root heap A (A unchanged)",
     );
     heap_b.decref_region_if_present(region_b);
+}
+
+/// The `:error` field's keyword, which is the kind the error carries. Both error
+/// constructors build the same struct shape, so both tests read it this way.
+fn error_kind(err: Value) -> Value {
+    let fields = err.as_struct().expect("an error value is a struct");
+    *crate::value::types::sorted_struct_get(fields, &crate::value::heap::TableKey::keyword("error"))
+        .expect("the error struct carries :error")
+}
+
+/// A kind a native names in Rust prints by name, not as `#<keyword:hash>`.
+///
+/// The kind is an immediate whose payload is the spelling's hash, and no reader
+/// token carries the spelling a native writes in Rust. `ctx.error` records the
+/// spelling in the instance's memo as it builds the value.
+///
+/// Counter-factual: the assert reads the memo directly. `keyword_spelling` falls
+/// back to the static vocabulary, so a vocabulary entry would satisfy it whether
+/// or not the constructor recorded anything.
+#[test]
+fn error_kind_keyword_keeps_its_spelling() {
+    let mut symbols = crate::symbol::SymbolTable::new();
+
+    crate::primitives::ctx::with_test_ctx_symbols(&mut symbols, |ctx| {
+        let kind = error_kind(ctx.error("host-minted-kind", "the message"));
+        let hash = kind.keyword_hash().expect("the kind is a keyword");
+
+        assert_eq!(
+            ctx.symbols().and_then(|memo| memo.keyword_name(hash)),
+            Some("host-minted-kind"),
+            "ctx.error must record the kind's spelling in the instance's memo",
+        );
+    });
+}
+
+/// The extra-fields constructor records the kind's spelling too, so an error
+/// prints by name whichever constructor built it.
+#[test]
+fn error_extra_kind_keyword_keeps_its_spelling() {
+    let mut symbols = crate::symbol::SymbolTable::new();
+
+    crate::primitives::ctx::with_test_ctx_symbols(&mut symbols, |ctx| {
+        let detail = ctx.string("detail");
+        let err = ctx.error_extra("kind-with-extras", "the message", &[("where", detail)]);
+        let hash = error_kind(err)
+            .keyword_hash()
+            .expect("the kind is a keyword");
+
+        assert_eq!(
+            ctx.symbols().and_then(|memo| memo.keyword_name(hash)),
+            Some("kind-with-extras"),
+            "ctx.error_extra must record the kind's spelling too",
+        );
+    });
 }
