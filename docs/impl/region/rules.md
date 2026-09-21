@@ -394,9 +394,9 @@ value:
 - **Release it now**, with `release_program_value`. The run is over and nothing
   reads the value again. The `elle` binary does this for the value of a file, a
   `--eval:` expression, and stdin.
-- **Register it as a process root**, with `register_process_root`. The host
-  reads the value for as long as the runtime lives, and the sweep releases it.
-  A REPL binding does this.
+- **Register it as a process root**, with `register_process_root` and
+  `RootRef::Take`. The host reads the value for as long as the runtime lives,
+  and the sweep releases it. An embedded host that keeps the value does this.
 
 A host that does neither measures the residue of its own hand-off rather than
 the run's. That residue is one region per run, not one per call, so no leak
