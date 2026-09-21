@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-21
 // docs/impl/jit.md
 // docs/impl/region/owner.md
 //! The helpers a compiled call site enters: dispatch by callee kind, and the
@@ -44,11 +44,7 @@ pub extern "C" fn elle_jit_call(
         // a withheld primitive and suspend on its raw effect request instead of the
         // denial payload (pinned by region-capability-denial-value.lisp under
         // `--jit`).
-        let blocked = def
-            .signal
-            .bits
-            .intersection(vm.fiber.withheld)
-            .intersection(crate::signals::CAP_MASK);
+        let blocked = vm.capability_blocked(def, args_slice);
         if !blocked.is_empty() {
             return crate::jit::calls::jit_capability_denial(vm, def, blocked, args_slice);
         }

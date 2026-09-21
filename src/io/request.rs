@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-21
 //! IoRequest — typed I/O request descriptors.
 //!
 //! Stream primitives build IoRequest values and yield them via SIG_IO.
@@ -209,6 +209,41 @@ pub enum IoOp {
     /// closes when the op completes, is cancelled, or never makes it
     /// past submit.
     ChanSelectPark(crate::primitives::chan::ChanSelectGuardCell),
+}
+
+impl IoOp {
+    /// The capability bits spending this operation requires — derived from the
+    /// operation itself, not declared by whoever submits it.
+    ///
+    /// Every async operation reaches the scheduler, so each carries `SIG_IO`.
+    /// An operation that also exercises a gated authority adds its bit: a
+    /// subprocess spawn or wait adds `SIG_EXEC`, and opening a path adds
+    /// `SIG_FS`. This is the same requirement a legal mint already raises
+    /// (`subprocess/exec` raises `|:io :exec|`); the derivation lets the spend
+    /// gate at `io/submit` test a request whatever route it arrived by, without
+    /// trusting a declaration on the submission primitive.
+    ///
+    /// `IoOp::Task` wraps an arbitrary closure whose effects are not derivable,
+    /// so it is deny-by-default: it declares every gated bit. It is unreachable
+    /// today (no primitive mints one), so this costs nothing until one does.
+    pub fn required_bits(&self) -> crate::value::fiber::SignalBits {
+        use crate::signals::{SIG_EXEC, SIG_FS, SIG_GPU, SIG_IO, SIG_OS_SIGNAL};
+        let base = SIG_IO;
+        match self {
+            IoOp::Spawn(_) | IoOp::ProcessWait => base.union(SIG_EXEC),
+            IoOp::Open { .. } => base.union(SIG_FS),
+            IoOp::Task(_) => base
+                .union(SIG_EXEC)
+                .union(SIG_FS)
+                .union(SIG_GPU)
+                .union(SIG_OS_SIGNAL),
+            // Port ops, Connect, Sleep, PollFd, Seek, Tell, Resolve, WatchNext,
+            // SigNext, Close, ChanSelectPark: scheduler round trip only. A
+            // network bit, when one exists, attaches to Connect/SendTo/RecvFrom
+            // here.
+            _ => base,
+        }
+    }
 }
 
 impl From<PortOp> for IoOp {

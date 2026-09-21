@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-21
 // docs/impl/jit.md
 // docs/impl/region/relocate.md
 //! Array-call, closure-construction, tail-call, and env-building JIT entry points.
@@ -324,11 +324,7 @@ fn jit_tail_call_inner(
         // (`tail_call_inner`, src/vm/call/inner/tail.rs): a native whose signal
         // overlaps the fiber's withheld capabilities is denied, not run. The
         // Call-position path (`elle_jit_call`) asks the same question.
-        let blocked = def
-            .signal
-            .bits
-            .intersection(vm.fiber.withheld)
-            .intersection(crate::signals::CAP_MASK);
+        let blocked = vm.capability_blocked(def, args_slice);
         if !blocked.is_empty() {
             return crate::jit::calls::jit_capability_denial(vm, def, blocked, args_slice);
         }

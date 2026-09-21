@@ -1,3 +1,4 @@
+// audited: 2026-09-21
 //! Signal-bits resolution for fiber primitives.
 //!
 //! Fiber primitives accept signal specifications in many surface forms
@@ -172,4 +173,59 @@ pub(crate) fn resolve_signal_bits(
             ),
         ),
     ))
+}
+
+/// The signal bits a dynamic `(emit bits value)` raises, from its first argument
+/// alone — the requirement the capability gate tests against the emitting fiber
+/// (docs/signals/authority.md).
+///
+/// This is the pure `bits_from_args` seam, the same one `io/submit` and `import`
+/// use for other domains. It needs no ctx: an integer passes through, and a
+/// keyword or a keyword collection resolves through the registry by hash, which
+/// covers a user signal `(signal :kw)` coined without a symbol table. A spec the
+/// body's [`resolve_signal_bits`] would reject contributes no bits; the body
+/// raises the error.
+pub(crate) fn emit_required_bits(args: &[Value]) -> SignalBits {
+    args.first()
+        .map(bits_of_signal_spec)
+        .unwrap_or(SignalBits::EMPTY)
+}
+
+/// Resolve one signal-spec Value to bits by hash, with no ctx. An integer passes
+/// through; a keyword resolves through the registry; a set, array, or list ORs
+/// its elements. A non-signal or unregistered element adds nothing.
+fn bits_of_signal_spec(val: &Value) -> SignalBits {
+    if let Some(i) = val.as_int() {
+        return SignalBits::from_i64(i);
+    }
+    if let Some(hash) = val.keyword_hash() {
+        return crate::signals::registry::global_registry()
+            .lock()
+            .unwrap()
+            .bits_for_keyword_hash(hash)
+            .unwrap_or(SignalBits::EMPTY);
+    }
+    if let Some(set) = val.as_set() {
+        return set
+            .iter()
+            .fold(SignalBits::EMPTY, |b, e| b.union(bits_of_signal_spec(e)));
+    }
+    if let Some(elems) = val.as_array() {
+        return elems
+            .iter()
+            .fold(SignalBits::EMPTY, |b, e| b.union(bits_of_signal_spec(e)));
+    }
+    if let Some(arr) = val.as_array_mut() {
+        return arr
+            .borrow()
+            .iter()
+            .fold(SignalBits::EMPTY, |b, e| b.union(bits_of_signal_spec(e)));
+    }
+    let mut bits = SignalBits::EMPTY;
+    let mut cur = *val;
+    while let Some(pair) = cur.as_pair() {
+        bits = bits.union(bits_of_signal_spec(&pair.first));
+        cur = pair.rest;
+    }
+    bits
 }

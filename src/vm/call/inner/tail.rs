@@ -1,4 +1,7 @@
+//! audited: 2026-09-21
 //! VM::tail_call_inner — shared TailCall/TailCallArrayMut dispatch.
+//!
+//! docs/impl/vm.md
 
 use super::*;
 
@@ -119,11 +122,7 @@ impl VM {
         spliced_args: bool,
     ) -> Option<SignalBits> {
         if let Some(def) = func.as_native_def() {
-            let blocked = def
-                .signal
-                .bits
-                .intersection(self.fiber.withheld)
-                .intersection(crate::signals::CAP_MASK);
+            let blocked = self.capability_blocked(def, &args);
             if !blocked.is_empty() {
                 // The denial never runs the native at all, so the fall-through
                 // block is abandoned exactly as it is on any other signal exit.

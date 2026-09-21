@@ -1,4 +1,4 @@
-//! audited: 2026-09-18
+//! audited: 2026-09-21
 //! I/O primitives: type predicates and backend operations.
 //!
 //! src/io/AGENTS.md
@@ -106,6 +106,20 @@ fn prim_io_backend(
         ),
         None => type_error!(ctx, args[0], "io/backend", "keyword"),
     }
+}
+
+/// The capability bits an `io/submit` call requires: the request argument's
+/// own operation bits. A spawn request makes the submit require `|:io :exec|`;
+/// a plain read requires `|:io|`. Read from `args[1]`, the request; a call whose
+/// second argument is not an io-request adds nothing (the body's type-error
+/// handles it). This is the `bits_from_args` hook the capability gate consults
+/// so a denied fiber cannot spend a request handed to it. See
+/// docs/signals/authority.md.
+fn io_submit_required_bits(args: &[Value]) -> SignalBits {
+    args.get(1)
+        .and_then(|v| v.as_external::<IoRequest>())
+        .map(|req| req.op.required_bits())
+        .unwrap_or(crate::value::fiber::SignalBits::EMPTY)
 }
 
 /// `(io/submit backend request [fiber])` → submission-id
@@ -373,6 +387,7 @@ primitive! {
         category: "io",
         example: "(io/submit backend request)",
         effect: RegionEffect::Immediate,
+        bits_from_args: Some(io_submit_required_bits),
     }
     "io/workers" => prim_io_workers {
         signal: Signal::errors(),

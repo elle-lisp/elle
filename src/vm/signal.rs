@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-21
 //! Primitive signal dispatch.
 //!
 //! Routes signal bits returned by NativeFn primitives to the appropriate
@@ -246,6 +246,31 @@ impl VM {
     }
 
     // ── Capability denial ─────────────────────────────────────────────
+
+    /// The capability bits this native call is denied: the requirement
+    /// (declared `signal.bits`, plus any argument-derived bits) intersected
+    /// with the calling fiber's withheld set and the capability mask.
+    ///
+    /// One place the four dispatch tiers (`call_inner`, `tail_call_inner`,
+    /// `elle_jit_call`, `elle_jit_call_array`) share, so the gate cannot drift
+    /// between them. The argument-derived term is what lets `io/submit` be
+    /// denied for the operation its request carries rather than for the `:error`
+    /// it declares. See docs/signals/authority.md.
+    pub(crate) fn capability_blocked(
+        &self,
+        def: &'static crate::primitives::def::PrimitiveDef,
+        args: &[Value],
+    ) -> SignalBits {
+        let derived = def
+            .bits_from_args
+            .map(|f| f(args))
+            .unwrap_or(SignalBits::EMPTY);
+        def.signal
+            .bits
+            .union(derived)
+            .intersection(self.fiber.withheld)
+            .intersection(crate::signals::CAP_MASK)
+    }
 
     /// Handle capability denial in Call position.
     ///

@@ -1,6 +1,10 @@
+// audited: 2026-09-21
+// The import-file primitive: resolve a module spec, then run a .lisp module or
+// load a native plugin, with circular-import detection.
+// docs/modules.md
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_FFI, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
 use std::path::{Path, PathBuf};
@@ -8,6 +12,28 @@ use std::path::{Path, PathBuf};
 /// Check whether a file path has a native shared library extension.
 fn is_native_library(path: &str) -> bool {
     path.ends_with(".so") || path.ends_with(".dylib") || path.ends_with(".dll")
+}
+
+/// The capability bits an `import` call requires that depend on its argument.
+///
+/// Loading a native shared library runs its `elle_plugin_init` — foreign code,
+/// the authority `:ffi` exists to withhold. So a spec that names a library,
+/// directly (`foo.so`) or through a `plugin/` prefix that resolves to one,
+/// requires `:ffi`. A `.lisp` module requires nothing here; `import` still
+/// declares `:fs` for the read. This is the `bits_from_args` hook the capability
+/// gate consults, the same seam `io/submit` uses for a different domain, so
+/// denying `:ffi` stops a fiber loading a cdylib. See docs/signals/authority.md.
+fn import_required_bits(args: &[Value]) -> SignalBits {
+    let Some(spec) = args.first().and_then(|v| v.with_string(|s| s.to_string())) else {
+        return SignalBits::EMPTY;
+    };
+    if is_native_library(&spec) {
+        return SIG_FFI;
+    }
+    match resolve_import(&spec) {
+        Some(path) if is_native_library(&path) => SIG_FFI,
+        _ => SignalBits::EMPTY,
+    }
 }
 
 /// Resolve the Elle project root.
@@ -383,5 +409,6 @@ primitive! {
         // result, no store (docs/impl/region/effects.md § Opaque).
         effect: RegionEffect::Opaque,
         result_minted: true,
+        bits_from_args: Some(import_required_bits),
     }
 }
