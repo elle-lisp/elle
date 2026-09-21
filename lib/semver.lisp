@@ -1,4 +1,5 @@
 (elle/epoch 12)
+## audited: 2026-09-21
 ## lib/semver.lisp — Semantic versioning (pure Elle)
 ##
 ## Implements semver 2.0.0 parsing, comparison, and requirement matching.
@@ -12,6 +13,11 @@
 ##   (semver:increment "1.2.3" :minor) => "1.3.0"
 
 (fn []
+  (defn try-int [s]
+    "S as a base-10 integer, or nil; parse-int itself signals."
+    (let [[ok? n] (protect (parse-int s))]
+      (if ok? n nil)))
+
   (defn parse-int-strict [s ctx]
     "Parse s as a non-negative integer with no leading zeros."
     (when (empty? s)
@@ -20,7 +26,7 @@
     (when (and (> (length s) 1) (string/starts-with? s "0"))
       (error {:error :semver-error
               :message (string ctx ": leading zero in \"" s "\"")}))
-    (let [n (parse-int s)]
+    (let [n (try-int s)]
       (when (nil? n)
         (error {:error :semver-error
                 :message (string ctx ": non-numeric \"" s "\"")}))
@@ -82,8 +88,8 @@
                     1
                     (let* [av (as ai)
                            bv (bs bi)
-                           an (parse-int av)
-                           bn (parse-int bv)
+                           an (try-int av)
+                           bn (try-int bv)
                            r (match [an bn]
                                [nil nil] (compare av bv)
                                [nil _] 1
