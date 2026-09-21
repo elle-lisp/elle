@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-09-21
 // What one run leaves behind: the gates on the post-teardown residue, and the
 // per-shape censuses that name the classes it is made of.
 // docs/impl/region/rules.md
@@ -243,7 +243,11 @@ fn a_run_that_spawns_a_child_leaves_no_residue() {
 fn a_run_that_times_out_leaves_no_residue() {
     let src = "(ev/timeout 30 (fn [] 1))";
     assert_eq!(
-        residue_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), src),
+        residue_after_teardown(
+            Runtime::with_stdlib_cache(StdlibCache::Off),
+            src,
+            HandOff::Root
+        ),
         0,
         "{src}: regions survived teardown",
     );
