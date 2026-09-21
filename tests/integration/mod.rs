@@ -144,6 +144,12 @@ mod timeout_capture {
 mod runner_gauges {
     include!("runner_gauges.rs");
 }
+mod form_profile {
+    include!("form_profile.rs");
+}
+mod boot_fingerprint {
+    include!("boot_fingerprint.rs");
+}
 mod trace_boot {
     include!("trace_boot.rs");
 }
