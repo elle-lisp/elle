@@ -208,12 +208,14 @@ Four host paths reach a native, and all four ask: `rt_call`,
 `fiber.withheld` the interpreter and the JIT read, and it builds the denial
 through the shared `VM::build_denial_payload`.
 
-The denial travels back as the call's own signal, so emitted code parks on it
-the way it parks on any other suspending native signal. The handle table that
-`value_to_wasm` inserts the payload into is what keeps the payload alive, which
-is this tier's escape route for any value a call hands back. A fiber therefore
-reads the same `{:error :capability-denied …}` struct whichever tier ran its
-body. Pinned by
+The denial travels back as the call's own signal, classified by the same
+`is_suspending` rule as any other — never by a test on the denied bits. Where
+the fiber then comes to rest is its own mask's answer: `:paused` holding the
+payload where the mask names the denied bit, propagating to the resumer where it
+does not. The handle table that `value_to_wasm` inserts the payload into is what
+keeps the payload alive, which is this tier's escape route for any value a call
+hands back. A fiber therefore reads the same `{:error :capability-denied …}`
+struct whichever tier ran its body. Pinned by
 [caps-wasm-host.lisp](../../tests/elle/caps-wasm-host.lisp) and
 `wasm::tests::caps`.
 
