@@ -15,8 +15,8 @@ A surface diff proves a lower bound — the floor — on the bump a release
 must claim. Behavioral equivalence is undecidable, so the floor is one
 leg of three: the diff computes the floor, the prior release's tests
 arbitrate compatibility claims, and a major release ships migration
-rules. This page grows as the later legs land; today it covers the diff
-leg: the dev loop and `release`.
+rules. This page covers the first two legs — the dev loop, `release`,
+and `check` — and grows when migrations land.
 
 ## The dev loop
 
@@ -84,6 +84,36 @@ UTC date, and the test glob that pins the release — `--tests GLOB`, or
 lightweight git tag `<leaf>/v<version>`, which later arbitration
 prefers over the recorded commit.
 
+## Checking a claim
+
+```text
+elle semver check [PATH...] [--no-tests] [--strict] [--json]
+```
+
+`check` is the CI gate. It computes the dev-loop verdict, and then
+arbitrates a compatibility claim: a patch or minor bump promises the
+previous release's behavior, so the previous release's tests must pass
+against the worktree code. The floor cannot see a function that keeps
+its shape and changes its answers; the old tests can.
+
+1. The baseline rev is the tag `<leaf>/v<version>` when it exists,
+   otherwise the `.surface`'s recorded `(released :commit ...)`.
+2. The old test set is the `.surface`'s `(tests GLOB)`, resolved at the
+   baseline rev by listing that commit's tree.
+3. The old files materialize in a scratch directory (removed
+   afterwards) and run as `elle test` in a child whose working
+   directory is the worktree, so their `(import "std/...")` forms
+   resolve to the new code. No import is rewritten.
+4. The child failing rejects the claim: `compat claim rejected`,
+   exit 1.
+
+A major claim promises no compatibility, so arbitration is skipped.
+When arbitration is unavailable — no repository, an unresolvable
+baseline rev, no recorded tests — `check` prints a note and passes;
+`--strict` turns that into exit 1. `--no-tests` skips arbitration
+outright. With no `PATH`, `check` walks from the working directory
+like the dashboard and checks every versioned module it finds.
+
 ## Exit codes
 
 The codes separate the verdict from the tool, so CI can gate on 1
@@ -92,7 +122,7 @@ without treating a broken tree as a bad claim:
 | Code | Meaning |
 |---|---|
 | `0` | claim sufficient, or surface unchanged, or initial |
-| `1` | the verdict: claim insufficient, or `release` refused |
+| `1` | the verdict: claim insufficient, arbitration failed, or `release` refused |
 | `2` | tool error: unreadable module, missing version form, bad `.surface` |
 
 ## JSON
