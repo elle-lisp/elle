@@ -1,4 +1,4 @@
-// audited: 2026-09-17
+// audited: 2026-09-20
 // What one run leaves behind: the gates on the post-teardown residue, and the
 // per-shape censuses that name the classes it is made of.
 // docs/impl/region/rules.md
@@ -184,6 +184,38 @@ fn residue_after_teardown(mut rt: Runtime, src: &str) -> usize {
 fn a_run_that_spawns_a_child_leaves_no_residue() {
     let src = "(let [p (subprocess/exec \"/bin/sh\" [\"-c\" \":\"])] \
                (subprocess/wait p))";
+    assert_eq!(
+        residue_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), src),
+        0,
+        "{src}: regions survived teardown",
+    );
+}
+
+/// A run that bounds work with a deadline leaves nothing either. `ev/timeout`
+/// spawns the body and a timer, and aborts whichever lost — so a program that
+/// calls it once ends with one fiber aborted through the scheduler and one I/O
+/// operation cancelled.
+///
+/// Three holders keep an aborted fiber, and all three have to let go for this
+/// to read zero: the loop's completion record and its mark, both keyed by the
+/// fiber (docs/scheduler.md § "Completion records"); the runnable queue, which
+/// a completed fiber leaves on the same rule; and the cancelled operation's own
+/// entry, which retains the fiber it would have answered
+/// (docs/impl/io-inflight.md § "A cancelled operation reads nothing again").
+///
+/// The counter-factual is `teardown_leaves_no_residue` beside it, which reaches
+/// none of this: neither of its programs spawns a fiber, so no fiber is ever
+/// completed, aborted or cancelled for. Each holder is worth the fiber, its
+/// closure and the payload the abort delivered, and every gate in this file
+/// reads clean while they hold.
+///
+/// The body wins on purpose. A timer of 30 seconds cannot fire inside a test,
+/// so the abort always lands on the timer and the run never waits for one —
+/// and a body that wins at once is also what leaves the loop no chance to reap
+/// the cancellation it just issued.
+#[test]
+fn a_run_that_times_out_leaves_no_residue() {
+    let src = "(ev/timeout 30 (fn [] 1))";
     assert_eq!(
         residue_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), src),
         0,

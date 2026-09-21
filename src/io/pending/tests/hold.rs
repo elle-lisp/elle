@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+//! audited: 2026-09-20
 //! What a hold retains while its operation is in flight, and when it lets go.
 
 use super::*;
@@ -151,6 +151,52 @@ fn a_held_fiber_survives_the_release_of_its_region() {
         born,
         "disposing of the entry must let the fiber's region go",
     );
+}
+
+/// A cancelled entry lets go of what it held, at the mark rather than at the
+/// completion that eventually arrives.
+///
+/// The trap: the entry stays in the table — the worker it runs on and the
+/// descriptor it names come back with that completion — so it looks like
+/// nothing changed, and the hold rides along until a reap. A loop of
+/// `ev/timeout` calls never blocks on I/O, so it never reaps, and every
+/// cancelled timer's fiber, closure and captures stay held for the loop's life.
+///
+/// The counter-factual is `a_held_fiber_survives_the_release_of_its_region`
+/// above: the same release, the same assertion inverted, and the mark is the
+/// only difference between the two.
+#[test]
+fn a_cancelled_entry_holds_nothing() {
+    let mut pool = BufferPool::new();
+    let mut table = PendingTable::new();
+    let heap = crate::value::arena::leaked_test_heap();
+    // SAFETY: the heap is leaked for the process.
+    let h = unsafe { &mut *heap };
+    let (fiber, _handle) = fiber_in(h, FiberStatus::Paused);
+    let region = crate::value::arena::region_of(h, fiber).expect("the fiber has a region");
+    let born = h.region_generation(region.get());
+
+    table.insert(id(1), sleep_op(&mut pool), Submitter::new(heap, fiber));
+    table.mark_cancelled(id(1));
+    h.decref_region(region);
+
+    assert_ne!(
+        h.region_generation(region.get()),
+        born,
+        "a cancelled completion is retired rather than cooked, so the entry \
+         reads no operand again and must hold none",
+    );
+
+    // Both readings that dereference the fiber skip a cancelled entry, so
+    // neither reaches the region the release above took.
+    assert!(
+        table.orphaned_to_stop().is_empty(),
+        "the cancel has already asked this operation to stop",
+    );
+    match table.take(id(1)) {
+        Taken::Cancelled(op) => op.retire(0, &mut pool),
+        _ => panic!("a marked submission must be reported cancelled"),
+    }
 }
 
 /// A resubmission keeps its hold rather than dropping and retaking it.

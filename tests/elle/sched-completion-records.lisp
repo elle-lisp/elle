@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-09
+# audited: 2026-09-20
 # What the scheduler remembers about the fibers it has finished with.
 #
 # Two records outlive a fiber's run: its status (`:ok` / `:error`) and a
@@ -8,12 +8,13 @@
 # fiber closed over — for as long as the loop runs. A server that spawns
 # a fiber per request would then pay for every request it ever served.
 #
-# Nothing reads a SUCCESS record: a later join re-derives the status from
-# the fiber itself, and the unjoined-error tail at the end of the loop
-# looks only at failures. So a fiber that ends `:ok` retires both records
-# the moment it finishes, whether or not anyone joined it. The program's
-# own fibers are the exception — the loop reads their record to know the
-# program finished.
+# Both go the moment nothing can read them again. Nothing reads a SUCCESS
+# record at all, so that moment is completion, joined or not. A FAILURE
+# record has one reader, the unjoined-error tail at the end of the loop,
+# and the tail passes over every failure that carries a mark — so for a
+# failure the moment is the join, the protected join, or the abort that
+# marks it. The program's own fibers are the exception: the loop reads
+# their record to know the program finished.
 #
 # `ev/report` exposes the two counts (`:records`, `:marks`), which is
 # what makes the bound assertable from inside the program.
@@ -54,14 +55,22 @@
           (string "200 joined fibers left " (- marks base-marks)
                   " new join marks (must stay bounded)")))
 
-# ── 3. A fiber that FAILED is remembered ─────────────────────────────
-# An abort ends the target in `:error`, and a failure keeps its records:
-# the mark is what stops the loop from re-raising an error the aborter
-# already took, and any later look at the fiber re-derives the failure
-# from its own status. So these records grow with the number of failures,
-# not with the number of fibers.
+# ── 3. An ABORTED fiber leaves nothing behind either ─────────────────
+# An abort ends the target in `:error`, and an abort is an observation:
+# `ev/abort` marks its target before it touches it. So the tail will pass
+# over that failure whatever else happens, and the pair has no reader left
+# — the failure retires on the success rule.
+#
+# The fiber is what the records hold, so the heap gauges are read beside
+# the counts: `ev/timeout` and `ev/race` abort the loser on every call, and
+# a bounded record count over an unbounded heap would be no bound at all.
+#
+# The third holder is the runnable queue. The target is spawned and aborted
+# before the loop ever reaches it, so it is sitting there when it completes
+# — and a completed fiber left there is resumed once more and completes a
+# second time, writing a record whose mark the retirement already dropped.
 
-(println "a failed fiber keeps its record...")
+(println "an aborted fiber leaves no record...")
 
 (defn abort-churn [n]
   (def @i 0)
@@ -69,18 +78,40 @@
     (ev/abort (ev/spawn (fn [] (ev/sleep 30))))
     (assign i (+ i 1))))
 
-(def abort-base (get (ev/report) :records))
 (abort-churn 20)
+(def abort-base-records (get (ev/report) :records))
+(def abort-base-marks (get (ev/report) :marks))
+(def abort-base-objects (arena/count))
+(def abort-base-regions (arena/region-count))
 
-(let [records (get (ev/report) :records)]
-  (assert (>= (- records abort-base) 20)
-          (string "20 aborted fibers left only " (- records abort-base)
-                  " records — a failure must keep the mark that stops the "
-                  "loop re-raising it")))
+(abort-churn 200)
 
-# And the loop still ends normally with those failures on record: the
+(let [records (- (get (ev/report) :records) abort-base-records)
+      marks (- (get (ev/report) :marks) abort-base-marks)
+      objects (- (arena/count) abort-base-objects)
+      regions (- (arena/region-count) abort-base-regions)
+      runnable (get (ev/report) :runnable)]
+  (println "  200 aborts: records=" records " marks=" marks " objects=" objects
+           " regions=" regions " runnable=" runnable)
+  (assert (< records 5)
+          (string "200 aborted fibers left " records
+                  " new completion records (must stay bounded)"))
+  (assert (< marks 5)
+          (string "200 aborted fibers left " marks
+                  " new join marks (must stay bounded)"))
+  (assert (< objects 40)
+          (string "200 aborted fibers left " objects
+                  " objects behind — a bounded record count over an "
+                  "unbounded heap is no bound"))
+  (assert (< regions 40)
+          (string "200 aborted fibers left " regions " regions behind"))
+  (assert (< runnable 5)
+          (string "the loop holds " runnable
+                  " runnable fibers it has already finished with")))
+
+# And the loop still ends normally with those aborts behind it: the
 # aborter observed every one of them.
-(println "  aborted fibers on record do not crash the loop")
+(println "  aborted fibers do not crash the loop")
 
 # ── 4. What a retired record must not lose ───────────────────────────
 # The status and the value live in the fiber, so a second join answers
@@ -104,13 +135,35 @@
 # An UNJOINED failure is the loop's business, and its record is what the
 # loop reads to raise it. tests/elle/ev-unjoined-error.lisp pins that
 # crash; here we only pin that the record survives while unobserved.
+#
+# Read from a scheduler of our own, STEPPED rather than pumped. The pump's
+# tail is what raises an unjoined failure, so pumping this one would end
+# the file rather than report on it — and the enclosing program's own pump
+# has not returned, so its report cannot answer the question either. An
+# abort will not do as the shape: it marks its target, which is the whole
+# of why an aborted failure retires.
 
 (println "an unobserved failure keeps its record...")
 
-(def unjoined-failure-base (get (ev/report) :records))
-(ev/abort (ev/spawn (fn [] (ev/sleep 30))))
-(assert (> (get (ev/report) :records) unjoined-failure-base)
-        "a fiber that FAILED keeps the record the loop's tail reads")
+(defn step-once [thunk]
+  "Spawn one thunk under a scheduler of our own and step the loop once,
+   then report what it remembers."
+  (let [sched (make-async-scheduler)]
+    (parameterize ((*scheduler* sched)
+                   (*spawn* (get sched :spawn))
+                   (*shutdown* (get sched :shutdown))
+                   (*io-backend* (get sched :backend)))
+      (ev/spawn thunk)
+      ((get sched :step) 0)
+      ((get sched :report)))))
+
+(let [r (step-once (fn [] (error {:error :nobody-looked})))]
+  (assert (= (get r :records) 1)
+          (string "a failure nobody observed must keep the record the loop's "
+                  "tail reads, got " (get r :records)))
+  (assert (= (get r :marks) 0)
+          (string "and no mark, nobody having observed it — got "
+                  (get r :marks))))
 
 # ── 5. A fiber nobody joins leaves nothing behind either ─────────────
 # The success record has no reader at all, so it is retired at completion
