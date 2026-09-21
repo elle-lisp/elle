@@ -637,7 +637,7 @@ fn letrec_wrapper_read_of_restorable_cell_is_counted() {
 /// — the top-level model donates the producer's reference and drop-on-overwrite
 /// is that reference's ONLY release — so a whole-value read of it is exposed
 /// exactly as a read of the celled realization is, and takes the same counted
-/// reference (docs/impl/region/bindings.md § "A whole-value read of a 1-slot
+/// reference (docs/impl/region/reads.md § "A whole-value read of a 1-slot
 /// container takes a counted reference").
 ///
 /// Keying the reader rule on the cell rather than on the re-store would leave
@@ -828,7 +828,7 @@ fn reassign_gate_counts_an_aliased_init() {
 }
 
 /// A whole-value read of an UNCELLED 1-slot container takes a counted reference,
-/// exactly as a read of the celled realization does (docs/impl/region/bindings.md
+/// exactly as a read of the celled realization does (docs/impl/region/reads.md
 /// § "A whole-value read of a 1-slot container takes a counted reference"). The
 /// container releases what it held at every overwrite — here the compiler's own
 /// drop-on-overwrite rather than `capture_store_with_rebind` — so `keep` borrows
@@ -909,8 +909,8 @@ fn reassign_gate_counts_a_read_of_an_uncelled_cell() {
 }
 
 /// A BRANCH whose every arm is a whole-value read of a 1-slot container is a
-/// whole-value read (docs/impl/region/bindings.md § "A branch whose every arm is
-/// such a read is one too"). What obliges the reader is the value it holds, not
+/// whole-value read (docs/impl/region/reads.md § "A branch is a read of
+/// whichever arms read"). What obliges the reader is the value it holds, not
 /// the syntax that selected it: `keep` names, on every path, a borrow out of a
 /// container that re-stores, and one `IncrefValueRegion` at the binder covers
 /// every arm because it names the runtime value.
@@ -976,7 +976,7 @@ fn reassign_gate_counts_a_branch_read_of_a_container() {
 
 /// A MIXED branch — one arm reading the container, one allocating — takes the
 /// counted read too, and pays for the allocating arm by KEEPING that arm's source
-/// regions (docs/impl/region/bindings.md § "A branch is a read of whichever arms
+/// regions (docs/impl/region/reads.md § "A branch is a read of whichever arms
 /// read"). The replacement is per-arm: the reader stops holding the container's
 /// regions, so the donation runs, while the allocating arm's region stays in the
 /// reader's set — it is the only thing extending that value's last use out to the
@@ -1055,7 +1055,7 @@ fn reassign_gate_counts_a_mixed_branch_init() {
 
 /// A statement wrapper around the read is descended too: a `Begin`'s value is
 /// its tail's, so the reader ends up holding what the tail read and takes the
-/// same counted reference (docs/impl/region/bindings.md § "A branch is a read of
+/// same counted reference (docs/impl/region/reads.md § "A branch is a read of
 /// whichever arms read").
 #[test]
 fn reassign_gate_counts_a_begin_wrapped_read() {
