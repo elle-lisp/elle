@@ -1,3 +1,4 @@
+// audited: 2026-09-21
 //! HIR-based symbol extraction for IDE features
 //!
 //! Extracts symbol information from analyzed HIR trees to build a
@@ -22,6 +23,24 @@ pub fn extract_symbols_from_hir(
     extractor.walk(hir, &mut index, symbols);
     extractor.collect_available(symbols, &mut index);
     index
+}
+
+/// The one arity a single number can state: an exact-arity lambda's declared
+/// parameter count. A shape with optionals or a collector answers `None` —
+/// `compile/exports` carries the full shape.
+fn exact_arity(value: &Hir) -> Option<usize> {
+    if let HirKind::Lambda {
+        params,
+        num_required,
+        rest_param: None,
+        ..
+    } = &value.kind
+    {
+        if *num_required == params.len() {
+            return Some(params.len());
+        }
+    }
+    None
 }
 
 struct HirSymbolExtractor<'a> {
@@ -139,10 +158,11 @@ impl<'a> HirSymbolExtractor<'a> {
                     None
                 };
                 self.record_definition(*binding, kind, &hir.span, index, symbols);
-                if let Some(doc_str) = doc_string {
-                    if let Some(def) = index.definitions.get_mut(&binding.def_id()) {
+                if let Some(def) = index.definitions.get_mut(&binding.def_id()) {
+                    if let Some(doc_str) = doc_string {
                         def.documentation = Some(doc_str);
                     }
+                    def.arity = exact_arity(value);
                 }
                 self.walk(value, index, symbols);
             }
@@ -183,13 +203,14 @@ impl<'a> HirSymbolExtractor<'a> {
                         SymbolKind::Variable
                     };
                     self.record_definition(*binding_id, kind, &init.span, index, symbols);
-                    if let HirKind::Lambda {
-                        doc: Some(doc_val), ..
-                    } = &init.kind
-                    {
-                        if let Some(def) = index.definitions.get_mut(&binding_id.def_id()) {
+                    if let Some(def) = index.definitions.get_mut(&binding_id.def_id()) {
+                        if let HirKind::Lambda {
+                            doc: Some(doc_val), ..
+                        } = &init.kind
+                        {
                             def.documentation = Some(doc_val.to_string());
                         }
+                        def.arity = exact_arity(init);
                     }
                     self.walk(init, index, symbols);
                 }

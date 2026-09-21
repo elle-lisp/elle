@@ -1,4 +1,4 @@
-// audited: 2026-09-17
+// audited: 2026-09-21
 //! Compiler-as-library primitives: analyze Elle source and query the results.
 //!
 //! The `compile/analyze` primitive runs the full analysis pipeline (reader →
@@ -33,6 +33,7 @@ use query::prim_compile_callers;
 use query::prim_compile_captured_by;
 use query::prim_compile_captures;
 use query::prim_compile_diagnostics;
+use query::prim_compile_exports;
 use query::prim_compile_primitives;
 use query::prim_compile_query_signal;
 use query::prim_compile_signal;
@@ -267,6 +268,16 @@ primitive! {
         params: &["analysis", "name"],
         category: "compile",
         example: r#"(compile/callees analysis :main)"#,
+        effect: RegionEffect::Fresh,
+    }
+    "compile/exports" => prim_compile_exports {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Return the module surface of an analysis: {:constructor :exports}, or nil \
+              when the file's return expression is not an export struct.",
+        params: &["analysis"],
+        category: "compile",
+        example: r#"(compile/exports (compile/analyze src))"#,
         effect: RegionEffect::Fresh,
     }
     "compile/call-graph" => prim_compile_call_graph {

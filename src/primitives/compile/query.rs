@@ -1,3 +1,4 @@
+// audited: 2026-09-21
 //! Primitives that query a `compile/analyze` handle. The handlers are grouped
 //! by concern into submodules; this root re-exports them so the registration
 //! table in the parent `compile` module still resolves each `query::prim_*`.
@@ -15,6 +16,7 @@ use super::{get_handle, kw, resolve_name, signal_to_value};
 mod analysis;
 mod bindings;
 mod captures;
+mod exports;
 mod graph;
 mod signals;
 
@@ -22,6 +24,7 @@ pub(crate) use captures::*;
 
 pub(super) use analysis::{prim_compile_analyze, prim_compile_diagnostics, prim_compile_symbols};
 pub(super) use bindings::{prim_compile_binding, prim_compile_bindings};
+pub(super) use exports::prim_compile_exports;
 pub(super) use graph::{prim_compile_call_graph, prim_compile_callees, prim_compile_callers};
 pub(super) use signals::{prim_compile_query_signal, prim_compile_signal};
 
