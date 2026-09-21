@@ -108,6 +108,25 @@ its shape and changes its answers; the old tests can.
    exit 1.
 
 A major claim promises no compatibility, so arbitration is skipped.
+It is gated on migration coverage instead: every major-classified
+change must be named by a rule in the module's `(elle/migration N ...)`
+form for the claimed major — [versioning](versioning.md) owns the rule
+vocabulary. Missing coverage fails (exit 1) and prints the skeleton of
+the form to ship:
+
+```text
+hint: 2 major breaks have no migration rule; add to lib/x.lisp:
+  (elle/migration 2
+    (rename satisfies? matches?)
+    (warn parse "describe the break"))
+```
+
+A removed export whose shape an added export matches suggests a
+`rename`; a removed export suggests `remove`; any other major change
+suggests `warn`. A constructor change is covered by naming
+`constructor`. Pre-1.0 claims are exempt — a `0.y` release promises
+nothing to migrate.
+
 When arbitration is unavailable — no repository, an unresolvable
 baseline rev, no recorded tests — `check` prints a note and passes;
 `--strict` turns that into exit 1. `--no-tests` skips arbitration
