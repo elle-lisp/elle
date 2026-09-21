@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-21
 //! The process runtime: one lifecycle for compile/evaluate, shared by every
 //! entry path (`elle foo.lisp`, the REPL, and the embedding API).
 //!
@@ -23,10 +23,25 @@
 //! (immediates, occupying no region).
 
 use crate::compiler::stdlib_cache::StdlibCache;
+use crate::image::boot::{BootImage, BootSource};
 use crate::pipeline::CompileCtx;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
 use crate::{init_stdlib, register_primitives};
+
+/// The two caches one instance boots through: where its compiled stdlib is
+/// cached, and where its boot image is.
+///
+/// Both travel with the instance rather than coming from process state
+/// (docs/impl/image/boot.md), so the pair is one construction parameter.
+#[derive(Debug, Clone, Default)]
+pub struct BootCaches {
+    /// Where the compiled stdlib bytecode is cached
+    /// (docs/impl/stdlib-cache.md). Consulted only when no boot image loads.
+    pub stdlib: StdlibCache,
+    /// Where the boot image is (docs/impl/image/boot.md). `Off` by default.
+    pub image: BootImage,
+}
 
 /// The observable result of a teardown sweep (docs/impl/region/rules.md §
 /// "Teardown — every region frees", property 2). The standing target is
@@ -193,6 +208,7 @@ pub struct Runtime {
     core: RuntimeCore,
     torn_down: bool,
     stdlib_source: crate::primitives::module_init::StdlibSource,
+    boot_source: BootSource,
 }
 
 impl Runtime {
@@ -212,7 +228,14 @@ impl Runtime {
     /// given Unicode generation for its whole life. `Runtime::new()` uses
     /// the newest vendored generation (or the process `--unicode=` choice).
     pub fn with_unicode(gen: crate::segment::Generation) -> Self {
-        Self::build_with(true, gen, StdlibCache::Process)
+        Self::build_with(
+            true,
+            gen,
+            BootCaches {
+                stdlib: StdlibCache::Process,
+                image: crate::config::get().boot_image(),
+            },
+        )
     }
 
     /// Build a stdlib-loaded runtime that caches its compiled stdlib under
@@ -220,18 +243,31 @@ impl Runtime {
     /// same directory share a cache; two given different ones cannot see each
     /// other's, which is what lets tests run beside each other.
     pub fn with_stdlib_cache(cache: StdlibCache) -> Self {
-        Self::build_with(true, crate::config::get().unicode_generation(), cache)
+        Self::with_caches(BootCaches {
+            stdlib: cache,
+            ..BootCaches::default()
+        })
+    }
+
+    /// Build a stdlib-loaded runtime over both cache policies: where its boot
+    /// image lives, and where its compiled stdlib is cached.
+    pub fn with_caches(caches: BootCaches) -> Self {
+        Self::build_with(true, crate::config::get().unicode_generation(), caches)
     }
 
     fn build(load_stdlib: bool) -> Self {
         Self::build_with(
             load_stdlib,
             crate::config::get().unicode_generation(),
-            StdlibCache::Process,
+            BootCaches {
+                stdlib: StdlibCache::Process,
+                image: crate::config::get().boot_image(),
+            },
         )
     }
 
-    fn build_with(load_stdlib: bool, gen: crate::segment::Generation, cache: StdlibCache) -> Self {
+    fn build_with(load_stdlib: bool, gen: crate::segment::Generation, caches: BootCaches) -> Self {
+        let cache = caches.stdlib;
         let mut core = RuntimeCore::bare_with_unicode(gen);
 
         // `RuntimeCore::bare` already pointed the VM at this instance's symbol
@@ -256,6 +292,7 @@ impl Runtime {
             core,
             torn_down: false,
             stdlib_source,
+            boot_source: BootSource::Compiled,
         }
     }
 
@@ -264,6 +301,28 @@ impl Runtime {
     /// cannot tell the two apart — this is what it asserts on instead.
     pub fn stdlib_source(&self) -> crate::primitives::module_init::StdlibSource {
         self.stdlib_source
+    }
+
+    /// Whether this instance hydrated a boot image or compiled its three boot
+    /// sources. Reported for the reason [`stdlib_source`](Self::stdlib_source)
+    /// is (docs/impl/image/boot.md).
+    pub fn boot_source(&self) -> BootSource {
+        self.boot_source
+    }
+
+    /// Dump this instance's boot state as a boot image at `path`, atomically.
+    ///
+    /// The graph is the core exports, the stdlib exports and the macro
+    /// definitions, under a digest of the three sources they came from
+    /// (docs/impl/image/boot.md). A refused value fails the dump before any
+    /// byte is written.
+    pub fn dump_boot_image(
+        &mut self,
+        path: &std::path::Path,
+    ) -> Result<(), crate::image::ImageError> {
+        let state = crate::value::Value::NIL;
+        let (heap, symbols) = self.core.heap_and_symbols();
+        crate::image::boot::dump(heap, symbols, &state, path)
     }
 
     /// Mutable access to the VM.

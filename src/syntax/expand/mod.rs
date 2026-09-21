@@ -1,4 +1,15 @@
-//! Hygienic macro expansion
+// audited: 2026-09-21
+//! Hygienic macro expansion: the macro table, the scope counter hygiene turns
+//! on, and the walk that rewrites a form until no macro heads it.
+//!
+//! docs/macros.md
+//! docs/impl/syntax.md
+//!
+//! A `MacroDef` is its parameter lists and its template tree; the compiled
+//! transformer beside them is a cache filled on first expansion, because a
+//! template literal's scopes are the ones its real expansion context gives it.
+//! Scope ids come off one counter, and an instance that installed a boot image
+//! raises that counter past every scope the image's templates carry.
 
 mod collections;
 mod compiletime;
@@ -179,6 +190,23 @@ impl Expander {
     /// macros defined during expansion back to the compilation cache.
     pub fn macros(&self) -> &HashMap<String, MacroDef> {
         &self.macros
+    }
+
+    /// The next hygiene scope id this expander will mint. An instance that
+    /// installed a boot image must have raised this past every scope the
+    /// image's templates carry (docs/impl/image/format.md).
+    #[allow(dead_code)]
+    pub(crate) fn scope_counter(&self) -> u32 {
+        self.next_scope_id
+    }
+
+    /// Raise the scope counter to `watermark`, so the next scope this expander
+    /// mints is one no hydrated template already carries. Lowering it is not
+    /// this function's business: two images hydrated in one instance each
+    /// raise, and the highest wins.
+    #[allow(dead_code)]
+    pub(crate) fn raise_scope_counter(&mut self, watermark: u32) {
+        self.next_scope_id = self.next_scope_id.max(watermark);
     }
 
     /// Merge macro definitions from another Expander. Existing macros

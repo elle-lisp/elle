@@ -1,6 +1,6 @@
 # An operation in flight
 
-<!-- audited: 2026-09-20 -->
+<!-- audited: 2026-09-21 -->
 
 What a submitted I/O operation holds and owns, how it ends when the fiber that asked is gone, and how its answer is assembled.
 
@@ -189,7 +189,7 @@ pipe, and neither hands over a region that carries a port, so
 Pinned by `a_run_that_spawns_a_child_leaves_no_residue`,
 `a_run_that_reads_a_whole_file_leaves_no_residue` and
 `a_run_that_captures_what_a_child_wrote_leaves_no_residue`
-(`tests/region_process_teardown/census.rs`), and measured as a rate by the
+(`tests/region_process_teardown/residue.rs`), and measured as a rate by the
 `subprocess-exec`, `port-read-all` and `subprocess-system` probes in
 `tests/elle/plumb.lisp` beside `io-yield ev/sleep`, whose answer is an immediate
 the completion builds nothing for.

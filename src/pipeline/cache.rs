@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-09-21
 // src/pipeline/AGENTS.md
 //! `CompileCtx`: one instance's compile-time state.
 //!
@@ -205,6 +205,21 @@ impl CompileCtx {
         sym_id: crate::value::SymbolId,
     ) -> Option<crate::value::Value> {
         self.meta.functions.get(&sym_id).copied()
+    }
+
+    /// This instance's macro table: every prelude macro, plus whatever the
+    /// REPL and later compiles defined. The boot dump reads it, and so does
+    /// the pin that a hydrated table carries the same entries
+    /// (docs/impl/image/boot.md).
+    #[allow(dead_code)]
+    pub(crate) fn macros(&self) -> &HashMap<String, crate::syntax::MacroDef> {
+        self.expander.macros()
+    }
+
+    /// The next hygiene scope id this instance's expander will mint.
+    #[allow(dead_code)]
+    pub(crate) fn scope_counter(&self) -> u32 {
+        self.expander.scope_counter()
     }
 
     /// The core.lisp exports (name → Value), used to seed the expander's

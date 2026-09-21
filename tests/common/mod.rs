@@ -1,7 +1,8 @@
-//! Shared test helpers for the Elle test suite.
+// audited: 2026-09-21
+//! Shared test helpers: the canonical evals, the cached ones property tests
+//! use, and the scratch directory a test writes files under.
 //!
-//! Provides canonical eval and setup functions so test files don't need
-//! to copy-paste their own variants.
+//! tests/AGENTS.md
 //!
 //! Every helper drives a [`Runtime`] (`elle::runtime`), the one per-instance
 //! owner of the heap, `VM`, `SymbolTable`, and per-instance `CompileCtx`. There
@@ -129,8 +130,7 @@ pub fn proptest_cases(default: u32) -> proptest::prelude::ProptestConfig {
 // Use `eval_reuse` for tests that need stdlib functions (map, filter, etc.).
 //
 // The one-shot `eval_source` / `eval_source_bare` remain available for tests
-// that need a guaranteed-fresh Runtime (none currently do, but the option
-// exists).
+// that need a guaranteed-fresh Runtime.
 
 use std::cell::RefCell;
 use std::thread::LocalKey;
@@ -238,6 +238,12 @@ impl ScratchDir {
 
     pub fn join(&self, name: &str) -> std::path::PathBuf {
         self.0.join(name)
+    }
+
+    /// The directory itself, for a caller that hands it to something taking a
+    /// directory rather than a file.
+    pub fn path(&self) -> &std::path::Path {
+        &self.0
     }
 }
 

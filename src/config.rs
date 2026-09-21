@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-21
 //! Two configurations: `Config` is set once at startup and read anywhere,
 //! `RuntimeConfig` rides on one VM and a running program may change it.
 //!
@@ -202,6 +202,13 @@ pub struct Config {
     /// `Some(path)` = cache at that path.
     pub cache: Option<String>,
 
+    /// Where a boot image is read and stored (`--boot-image=`). `None` is the
+    /// default and means no image: boot compiles core, prelude and stdlib
+    /// (docs/impl/image/boot.md names the two milestones the default waits on).
+    /// `Some("")` selects the `--cache=` directory; any other string is a
+    /// directory of its own.
+    pub boot_image: Option<String>,
+
     // -- I/O --
     /// Disable io_uring on Linux.
     pub no_uring: bool,
@@ -281,6 +288,7 @@ impl Default for Config {
             wasm: WasmPolicy::Off,
             no_stdlib: false,
             cache: default_cache_dir(),
+            boot_image: None,
             no_uring: false,
             home: std::env::var("ELLE_HOME").ok(),
             path: std::env::var("ELLE_PATH").ok(),
@@ -305,6 +313,16 @@ impl Config {
     /// The Unicode segmentation generation new VMs default to.
     pub fn unicode_generation(&self) -> crate::segment::Generation {
         self.unicode.unwrap_or(crate::segment::Generation::NEWEST)
+    }
+
+    /// The boot-image policy this process starts instances with.
+    pub fn boot_image(&self) -> crate::image::boot::BootImage {
+        use crate::image::boot::BootImage;
+        match self.boot_image.as_deref() {
+            None => BootImage::Off,
+            Some("") => BootImage::Process,
+            Some(dir) => BootImage::Dir(std::path::PathBuf::from(dir)),
+        }
     }
 
     /// Check if a trace keyword is set.

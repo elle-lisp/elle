@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-21
 //! Image persistence: an image is the page bytes of one compacted region plus
 //! a relocation table, and hydration maps those pages privately.
 //!
@@ -11,9 +11,11 @@
 //! region. The body carries the whole sealed data set: pairs, strings, bytes,
 //! arrays, sets, structs, syntax, floats, parameters, user trait tables,
 //! closures and their code objects, and the portable immediates — symbols,
-//! keywords and native-fns among them. The boot and environment
-//! configurations arrive with the later milestones (docs/impl/image/plan.md).
+//! keywords and native-fns among them. `boot` is the configuration that dumps
+//! a booted instance and hydrates one; the environment configuration arrives
+//! with a later milestone (docs/impl/image/plan.md).
 
+pub mod boot;
 mod dump;
 mod format;
 mod hydrate;
@@ -64,6 +66,14 @@ pub enum ImageError {
         offset: u64,
         page: usize,
     },
+    /// The image was built from different boot sources. Its layout is one this
+    /// binary can map and its library is one this binary must not answer with,
+    /// so the digest refuses it where the fingerprint cannot
+    /// (docs/impl/image/boot.md).
+    Sources {
+        expected: String,
+        found: String,
+    },
     /// The graph holds a value the dump policy refuses, named.
     Unsupported(String),
     /// The file is not a well-formed image for this format version.
@@ -83,6 +93,10 @@ impl std::fmt::Display for ImageError {
             ImageError::Unaligned { offset, page } => write!(
                 f,
                 "image offset {offset} is not a multiple of the {page}-byte page size"
+            ),
+            ImageError::Sources { expected, found } => write!(
+                f,
+                "image was built from different boot sources: digest {found}, this binary is {expected}"
             ),
             ImageError::Unsupported(what) => write!(f, "image refuses: {what}"),
             ImageError::Corrupt(what) => write!(f, "corrupt image: {what}"),
