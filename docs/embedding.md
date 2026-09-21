@@ -75,6 +75,11 @@ The `elle-embed` cdylib provides a C-ABI surface:
 | `elle_make_int(n)` / `elle_make_nil()` | Build a value for a host primitive to return |
 | `elle_prim_result(signal, value)` | Pack a host primitive's signal and value |
 
+`elle_eval` holds the program value's owning reference for the host, so the
+result stays readable until the next `elle_eval` or `elle_destroy`. Each of
+those gives the displaced result back, which is step 6 done on the host's
+behalf. A C host reads a result before it evaluates again.
+
 Link against `libelle_embed.so` with `-lelle_embed`. See
 [the C host demo](../demos/embedding/host.c) and
 [its header](../demos/embedding/include/elle.h).
