@@ -134,7 +134,11 @@ fn a_cache_hit_leaves_no_unexplained_references() {
 fn teardown_leaves_no_residue() {
     for src in PROGRAMS {
         assert_eq!(
-            residue_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), src),
+            residue_after_teardown(
+                Runtime::with_stdlib_cache(StdlibCache::Off),
+                src,
+                HandOff::Root
+            ),
             0,
             "{src}: regions survived teardown — every one is a reference the run \
              never dropped",
@@ -142,23 +146,41 @@ fn teardown_leaves_no_residue() {
     }
 }
 
-/// Run `src` on `rt`, tear the runtime down, and answer how many regions
-/// survived, printing the census whenever any did.
+/// How the host gives back the one owning reference a run hands it with the
+/// program value (docs/impl/region/rules.md § "The program value is the host's
+/// to release"). A host that does neither reads the residue of its own
+/// hand-off rather than the run's.
+#[derive(Clone, Copy)]
+enum HandOff {
+    /// Register the value as a process root, so the sweep consumes it.
+    Root,
+    /// Release the value where the host stops reading it — the branch the
+    /// `elle` binary's run path takes.
+    Release,
+}
+
+/// Run `src` on `rt`, give the program value back as `handoff` says, tear the
+/// runtime down, and answer how many regions survived — printing the census
+/// whenever any did.
 ///
 /// The stdlib is compiled rather than read from the disk cache, so every region
 /// in the residue was minted by this run and the verdict does not move with the
 /// state of a cache file. The run goes through `execute_scheduled`, the path
 /// every entry point takes, so the scheduler wrapper is inside the measurement.
-fn residue_after_teardown(mut rt: Runtime, src: &str) -> usize {
+fn residue_after_teardown(mut rt: Runtime, src: &str, handoff: HandOff) -> usize {
     let value = {
         let (vm, symbols, cctx) = rt.parts();
         let result = compile_file(src, symbols, cctx, "<residue>").expect("compiles");
         vm.execute_scheduled(&result.bytecode, cctx).expect("runs")
     };
-    // The program value reaches the caller with one owning reference; route it
-    // through the process-root registry so the sweep consumes it, or it counts
-    // as residue of the caller's own making.
-    elle::value::arena::register_process_root(rt.heap(), value);
+    match handoff {
+        HandOff::Root => elle::value::arena::register_process_root(
+            rt.heap(),
+            value,
+            elle::value::arena::RootRef::Take,
+        ),
+        HandOff::Release => elle::value::arena::release_program_value(rt.heap(), value),
+    }
     let report = rt.teardown();
     if report.live_regions != 0 {
         report_census(rt.heap(), &report);
@@ -185,7 +207,11 @@ fn a_run_that_spawns_a_child_leaves_no_residue() {
     let src = "(let [p (subprocess/exec \"/bin/sh\" [\"-c\" \":\"])] \
                (subprocess/wait p))";
     assert_eq!(
-        residue_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), src),
+        residue_after_teardown(
+            Runtime::with_stdlib_cache(StdlibCache::Off),
+            src,
+            HandOff::Root
+        ),
         0,
         "{src}: regions survived teardown",
     );
@@ -240,7 +266,11 @@ fn a_run_that_reads_a_whole_file_leaves_no_residue() {
         path.display()
     );
     assert_eq!(
-        residue_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), &src),
+        residue_after_teardown(
+            Runtime::with_stdlib_cache(StdlibCache::Off),
+            &src,
+            HandOff::Root
+        ),
         0,
         "{src}: regions survived teardown",
     );
@@ -264,10 +294,47 @@ fn a_run_that_reads_a_whole_file_leaves_no_residue() {
 fn a_run_that_captures_what_a_child_wrote_leaves_no_residue() {
     let src = "(get (subprocess/system \"/bin/sh\" [\"-c\" \"echo census\"]) :exit)";
     assert_eq!(
-        residue_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), src),
+        residue_after_teardown(
+            Runtime::with_stdlib_cache(StdlibCache::Off),
+            src,
+            HandOff::Root
+        ),
         0,
         "{src}: regions survived teardown",
     );
+}
+
+/// A run whose program value is a HEAP value leaves nothing behind when the
+/// host releases that value instead of rooting it
+/// (docs/impl/region/rules.md § "The program value is the host's to release").
+///
+/// The counter-factual is the registration every gate above makes. Those route
+/// the returned reference into the process-root registry, so the sweep consumes
+/// it and the residue reads zero whether or not the release funnel works at
+/// all. This one takes the other branch of the same obligation — release now,
+/// register nothing — which is the branch the `elle` binary's run path takes.
+///
+/// Neither program in `PROGRAMS` can see it: both answer with an immediate,
+/// which occupies no region, so their hand-off releases nothing whichever
+/// branch it takes. Each shape here answers with a heap value, and is measured
+/// beside a program that allocates the same value and discards it — so the two
+/// readings differ in the hand-off alone.
+#[test]
+fn a_released_heap_program_value_leaves_no_residue() {
+    for answer in ["(list 1 2 3)", "\"str\"", "[1 2 3]", "{:a 1}", "(fn [x] x)"] {
+        for src in [answer.to_string(), format!("(begin {answer} nil)")] {
+            assert_eq!(
+                residue_after_teardown(
+                    Runtime::with_stdlib_cache(StdlibCache::Off),
+                    &src,
+                    HandOff::Release
+                ),
+                0,
+                "{src}: regions survived teardown after the host released the \
+                 program value",
+            );
+        }
+    }
 }
 
 /// Diagnostic, not a gate: dump the post-teardown residue (id, rc, objs, tags)

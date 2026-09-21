@@ -1,5 +1,6 @@
-// audited: 2026-09-14
-//! Process roots, the pinned root region, and the macro-expansion scope.
+// audited: 2026-09-20
+//! Process roots, the program value's hand-off, the pinned root region, and the
+//! macro-expansion scope.
 //! docs/impl/region/rules.md
 //! docs/impl/region/template.md
 //! docs/impl/region/model.md
@@ -14,14 +15,55 @@ use crate::value::fiberheap::regionstore::RegionMint;
 pub fn register_process_root_region(heap: &mut FiberHeap, region: RuntimeRegion) {
     heap.register_process_root_region(region);
 }
-/// Record `value`'s region as a process root of `heap` (see
-/// [`register_process_root_region`]). A value with no region (an immediate) is
-/// ignored — the type-level form of "only heap values pin a region."
-pub fn register_process_root(heap: &mut FiberHeap, value: Value) {
-    if let Some(r) = region_of(heap, value) {
-        heap.register_process_root_region(r);
-    }
+/// Which reference the process root a host registers is funded by
+/// (docs/impl/region/rules.md § "The program value is the host's to release").
+/// The sweep decrefs a registered region once, so every registration answers
+/// this or it decrefs a reference nobody holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RootRef {
+    /// Take the one owning reference the caller holds and give nothing back.
+    /// The program value of a completed run arrives this way.
+    Take,
+    /// Mint the root's own reference. The caller holds no reference to give:
+    /// the value is reachable from one it holds elsewhere and releases, such as
+    /// a leaf of the program value's trailing tuple.
+    Mint,
 }
+
+/// Record `value`'s region as a process root of `heap` (see
+/// [`register_process_root_region`]), funded as `funding` says. A value with no
+/// region (an immediate) is ignored — the type-level form of "only heap values
+/// pin a region."
+///
+/// The mint and the registration name one region, resolved once here, so a
+/// minted reference cannot land on a region other than the one the sweep will
+/// decref.
+pub fn register_process_root(heap: &mut FiberHeap, value: Value, funding: RootRef) {
+    let Some(r) = region_of(heap, value) else {
+        return;
+    };
+    if funding == RootRef::Mint {
+        incref_for_escape(heap, Some(r), EscapeSite::ProcessRoot);
+    }
+    heap.register_process_root_region(r);
+}
+/// Give back the one owning reference a completed run handed its host with the
+/// program value (docs/impl/region/rules.md § "The program value is the host's
+/// to release"). The mirror of the `DecrefValueRegion` a compiled caller runs:
+/// it resolves the value's own runtime region, seeing through a capture cell
+/// exactly as the return convention's mint did.
+///
+/// A host that reads the value for the rest of the runtime's life registers it
+/// with [`register_process_root`] instead, taking the reference, and the
+/// teardown sweep releases it. A host that keeps only a PART of the value —
+/// the REPL, whose destructuring `def` binds the leaves of a tuple — mints a
+/// reference for the part and still releases here. An immediate has no region,
+/// so this is a no-op for one.
+pub fn release_program_value(heap: &mut FiberHeap, value: Value) {
+    let region = result_region_of(heap, value);
+    decref_region(heap, region);
+}
+
 /// Release every registered process root of `heap` by reference count and return
 /// the number released. This is the *only* heap-region action the teardown sweep
 /// takes — it decrefs roots and lets the RC cascade do the rest (Rule 5/7); it

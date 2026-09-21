@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-20
 // Re-exports what the arena's own scope holds, so each themed file below reads
 // the same names an inline test module would.
 //
@@ -12,3 +12,4 @@ mod edges;
 mod keys;
 mod macroscope;
 mod refcount;
+mod root;

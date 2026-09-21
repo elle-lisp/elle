@@ -1,8 +1,9 @@
-// audited: 2026-09-17
+// audited: 2026-09-20
 //! The `elle` binary: dispatch a subcommand, or set up one `Runtime` and drive
 //! it from a file, `-e`, stdin or the REPL.
 //!
 //! docs/config.md
+//! docs/impl/region/rules.md
 
 use elle::pipeline::{compile_file, CompileCtx};
 use elle::repl::Repl;
@@ -172,8 +173,12 @@ fn run_source(
     }
 
     match vm.execute_scheduled(&result.bytecode, cctx) {
-        Ok(_) => {
-            // Script mode is silent except for explicit output (display, etc.)
+        Ok(value) => {
+            // The run hands its last form's value over with one owning
+            // reference, and nothing here reads the value again: script mode is
+            // silent except for the explicit output the program itself wrote.
+            // Give the reference back (docs/impl/region/rules.md).
+            elle::value::arena::release_program_value(vm.heap(), value);
             Ok(())
         }
         Err(e) => {

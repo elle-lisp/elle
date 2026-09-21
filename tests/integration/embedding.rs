@@ -1,3 +1,9 @@
+// audited: 2026-09-20
+// The embedding surface from a host's side: register a primitive, run source,
+// read the value back, step the scheduler.
+//
+// docs/embedding.md
+
 use elle::primitives::def::{PrimitiveDef, RegionEffect};
 use elle::runtime::Runtime;
 use elle::signals::Signal;
@@ -43,7 +49,14 @@ fn test_custom_primitive_registration() {
     let sym_id = rt.symbols().intern("host/add-ten");
     let native = Value::native_fn(&HOST_ADD_TEN);
     let (cctx, heap) = rt.compile_and_heap();
-    cctx.register_repl_binding(heap, sym_id, native, Signal::silent(), Some(Arity::Exact(1)));
+    cctx.register_repl_binding(
+        heap,
+        sym_id,
+        native,
+        elle::value::arena::RootRef::Take,
+        Signal::silent(),
+        Some(Arity::Exact(1)),
+    );
 
     let (vm, symbols, cctx) = rt.parts();
     let result = eval_all("(host/add-ten 32)", symbols, vm, cctx, "<test>").unwrap();
@@ -100,7 +113,14 @@ fn test_value_round_trip() {
     let sym_id = rt.symbols().intern("host/identity");
     let native = Value::native_fn(&IDENTITY);
     let (cctx, heap) = rt.compile_and_heap();
-    cctx.register_repl_binding(heap, sym_id, native, Signal::silent(), Some(Arity::Exact(1)));
+    cctx.register_repl_binding(
+        heap,
+        sym_id,
+        native,
+        elle::value::arena::RootRef::Take,
+        Signal::silent(),
+        Some(Arity::Exact(1)),
+    );
 
     let (vm, symbols, cctx) = rt.parts();
     // Int round-trip

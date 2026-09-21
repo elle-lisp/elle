@@ -1,8 +1,15 @@
-#![allow(improper_ctypes_definitions)]
-//! C-ABI embedding surface for Elle.
+// audited: 2026-09-20
+//! C-ABI embedding surface for Elle: an opaque `ElleCtx` over one `Runtime`,
+//! driven through the exported lifecycle functions.
 //!
-//! Provides opaque `ElleCtx` wrapping VM + SymbolTable. Host programs link
-//! against libelle_embed.so and drive the lifecycle through exported functions.
+//! docs/embedding.md
+//! docs/impl/region/rules.md
+//!
+//! A host program links against libelle_embed.so and holds nothing but the
+//! opaque pointer, so every reference the lifecycle creates is this surface's
+//! to answer for.
+
+#![allow(improper_ctypes_definitions)]
 
 use elle::plugin_api::{PluginPrimFn, PrimResult, PLUGIN_SENTINEL};
 use elle::primitives::def::PrimitiveDef;
@@ -23,6 +30,22 @@ use std::ffi::c_void;
 struct ElleCtx {
     runtime: Runtime,
     last_result: Option<Value>,
+}
+
+impl ElleCtx {
+    /// Store `value` as the result `elle_result_int` reads, and give back the
+    /// owning reference the result it displaces still holds
+    /// (docs/impl/region/rules.md).
+    ///
+    /// The C host has no value of its own to release, so this surface holds the
+    /// reference on its behalf: a result stays readable until the next
+    /// `elle_eval` or `elle_destroy`, and both come through here.
+    fn set_result(&mut self, value: Option<Value>) {
+        if let Some(displaced) = self.last_result.take() {
+            elle::value::arena::release_program_value(self.runtime.heap(), displaced);
+        }
+        self.last_result = value;
+    }
 }
 
 // ── Lifecycle ───────────────────────────────────────────────────────
@@ -49,12 +72,14 @@ pub unsafe extern "C" fn elle_destroy(ctx: *mut c_void) {
     if ctx.is_null() {
         return;
     }
+    let mut ctx = unsafe { Box::from_raw(ctx as *mut ElleCtx) };
+    // Nothing reads the stored result after this call, so its owning reference
+    // goes back before the sweep that would otherwise count it as residue.
+    ctx.set_result(None);
     // Dropping the `Runtime` runs the RC teardown sweep; the VM's symbol-table
     // and compile-context pointers drop with the instance, so no manual teardown
     // is needed.
-    unsafe {
-        drop(Box::from_raw(ctx as *mut ElleCtx));
-    }
+    drop(ctx);
 }
 
 // ── Eval ────────────────────────────────────────────────────────────
@@ -76,16 +101,21 @@ pub unsafe extern "C" fn elle_eval(ctx: *mut c_void, src: *const u8, len: usize)
     // the symbol table (interning/resolution), and the compile context (macro
     // expansion + meta). Compile against this instance's context, then run the
     // bytecode under the async scheduler.
-    let (vm, symbols, cctx) = ctx.runtime.parts();
-    match compile_file(source, symbols, cctx, "<embed>") {
-        Ok(compiled) => match vm.execute_scheduled(&compiled.bytecode, cctx) {
-            Ok(value) => {
-                ctx.last_result = Some(value);
-                0
-            }
-            Err(_) => -1,
-        },
-        Err(_) => -1,
+    let produced = {
+        let (vm, symbols, cctx) = ctx.runtime.parts();
+        match compile_file(source, symbols, cctx, "<embed>") {
+            Ok(compiled) => vm.execute_scheduled(&compiled.bytecode, cctx).ok(),
+            Err(_) => None,
+        }
+    };
+    // A failed eval leaves the previous result standing, so the host can still
+    // read what it last asked for.
+    match produced {
+        Some(value) => {
+            ctx.set_result(Some(value));
+            0
+        }
+        None => -1,
     }
 }
 
@@ -162,6 +192,7 @@ pub unsafe extern "C" fn elle_register_prim(
         heap,
         sym_id,
         native,
+        elle::value::arena::RootRef::Take,
         Signal::silent(),
         Some(Arity::Exact(arity as usize)),
     );
@@ -233,5 +264,38 @@ mod tests {
         );
 
         unsafe { elle_destroy(ctx) };
+    }
+
+    /// The C surface gives the program value's owning reference back
+    /// (docs/impl/region/rules.md § "The program value is the host's to
+    /// release"). `elle_result_int` reads the value after the eval returns, so
+    /// the release cannot land at the eval: it lands where the result is
+    /// displaced, which is the next `elle_eval` or the `elle_destroy`.
+    ///
+    /// The counter-factual is `v3_abi_threads_ctx_then_args_end_to_end` beside
+    /// it. Its program answers with an int — an immediate, occupying no region
+    /// — so it reads clean whether or not a stored heap result is ever
+    /// released. Both programs here answer with a heap value, and the second
+    /// displaces the first, so one unreleased result is one surviving region.
+    #[test]
+    fn a_stored_result_is_released_where_it_is_displaced() {
+        let raw = elle_init();
+        for src in ["(list 1 2 3)", "\"str\""] {
+            let rc = unsafe { elle_eval(raw, src.as_ptr(), src.len()) };
+            assert_eq!(rc, 0, "{src}: eval must succeed");
+        }
+        // `elle_destroy` drops the runtime, and the census goes with it. Take
+        // the context apart here and run the two steps destroy runs — release
+        // the stored result, then tear the runtime down — so the sweep's report
+        // can be read.
+        let mut ctx = unsafe { Box::from_raw(raw as *mut ElleCtx) };
+        ctx.set_result(None);
+        let report = ctx.runtime.teardown();
+        assert_eq!(
+            report.live_regions, 0,
+            "{} regions survived teardown: the stored result, the one it \
+             displaced, or both",
+            report.live_regions,
+        );
     }
 }

@@ -1,8 +1,16 @@
-//! Compilation pipeline: Syntax -> HIR -> LIR -> Bytecode
+// audited: 2026-09-20
+//! The compilation pipeline's entry points: source text to bytecode, or to HIR
+//! for a reader that wants the analysis alone.
 //!
-//! This module provides the end-to-end compilation functions.
+//! src/pipeline/AGENTS.md
+//!
+//! Each stage lives beside this file: the compile-context type an instance
+//! threads through every call (`cache`), the core.lisp bootstrap that builds
+//! one (`bootstrap`), and the three surfaces over them — `compile`, `analyze`
+//! and `eval`.
 
 mod analyze;
+mod bootstrap;
 mod cache;
 mod compile;
 mod eval;

@@ -150,6 +150,9 @@ mod trace_isolation {
 mod trace_residue {
     include!("trace_residue.rs");
 }
+mod program_value {
+    include!("program_value.rs");
+}
 mod spawn_stack {
     include!("spawn_stack.rs");
 }

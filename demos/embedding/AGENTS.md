@@ -1,5 +1,7 @@
 # embedding
 
+<!-- audited: 2026-09-20 -->
+
 Demonstrates embedding Elle as a scripting engine in host programs.
 
 ## Files
@@ -15,16 +17,24 @@ Demonstrates embedding Elle as a scripting engine in host programs.
 
 ## Architecture
 
-Two embedding paths:
+Two embedding paths, both walking the sequence
+[the embedding guide](../../docs/embedding.md) numbers:
 
-1. **Rust (idiomatic)** — `src/main.rs` uses `elle` crate directly:
-   VM::new → register_primitives → init_stdlib → compile_file → execute_scheduled
+1. **Rust (idiomatic)** — `src/main.rs` uses the `elle` crate directly:
+   Runtime::new → register_repl_binding → compile_file → execute_scheduled →
+   release_program_value → teardown
 
 2. **C (via cdylib)** — `host.c` links against `libelle_embed.so`:
    elle_init → elle_eval → elle_result_int → elle_destroy
 
 The cdylib (`src/lib.rs`) wraps the Rust API in `extern "C"` functions with
-an opaque `ElleCtx` pointer.
+an opaque `ElleCtx` pointer. It holds the program value's owning reference for
+the C host, whose result stays readable until the next `elle_eval` or
+`elle_destroy`; each of those gives the displaced result back.
+
+The Rust host runs the teardown sweep itself and reads the census it answers,
+so a host that keeps a reference fails the demo rather than printing a number
+nobody checks.
 
 ## Custom primitives
 

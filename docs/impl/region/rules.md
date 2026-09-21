@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-20 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -250,6 +250,11 @@ is a correctness defect, not a tuning knob.
      operand's reference while the operation is in flight, and disposing of the
      entry decrefs it (`OperandHold`, docs/impl/io-inflight.md § "A submitted operation
      holds the values its completion reads");
+   - *retained process root* — a value a host keeps reading past the run that
+     produced it, registered as a process root while the host holds no owning
+     reference to hand over (`EscapeSite::ProcessRoot`); the registry is
+     external to the region system in the way a channel buffer is, so this
+     retain is the root's reference, and the teardown sweep's decref lowers it;
    - *terminal fiber signal* — a child's set-once return/error/halt result, read
      later via `fiber/value`, is park-retained when the fiber goes terminal and
      released by the signal scan when the fiber is freed.
@@ -374,6 +379,40 @@ Because the sweep is RC-driven, the residue equals the set of regions whose RC
 never reached zero — the true leaks — rather than being hidden by a blanket free.
 As the leaks are fixed the residue falls to zero with no change to the teardown
 itself.
+
+### The program value is the host's to release
+
+A run answers with the value of its last form, and the return convention hands
+that value to the host with one owning reference (Rule 5, `ReturnValue`). The
+host holds a `Copy` `Value`, so dropping it releases nothing. The reference is
+the host's to give back, and a host that keeps it leaves the value's region —
+and every region that one reaches — standing at teardown.
+
+There are two ways to give it back, and a host picks by how long it reads the
+value:
+
+- **Release it now**, with `release_program_value`. The run is over and nothing
+  reads the value again. The `elle` binary does this for the value of a file, a
+  `--eval:` expression, and stdin.
+- **Register it as a process root**, with `register_process_root` and
+  `RootRef::Take`. The host reads the value for as long as the runtime lives,
+  and the sweep releases it. An embedded host that keeps the value does this.
+
+A host that does neither measures the residue of its own hand-off rather than
+the run's. That residue is one region per run, not one per call, so no leak
+*rate* ever sees it — the teardown census is the only instrument that does.
+
+A registration takes one owning reference, so a host that registers a value it
+holds no reference to must mint one first. `RootRef::Take` hands over the
+reference the caller holds; `RootRef::Mint` raises the count, so the root
+outlives whatever release the caller still owes. A registration that takes a
+reference nobody holds is an over-free, and it stands only while the value that
+holds the registered part leaks.
+
+The REPL is the host that needs both halves. It prints each form's value and
+releases it, and every binding it keeps mints a reference of its own. That
+covers each leaf of a destructuring `def`: the leaves belong to the trailing
+tuple, and that tuple is the program value the REPL releases.
 
 ## Macro expansion — a closed allocation scope
 

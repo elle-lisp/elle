@@ -1,7 +1,17 @@
+// audited: 2026-09-20
+//! Loading the standard library into one runtime: obtain its bytecode, run
+//! it, and register what it exports.
+//!
+//! Every later compile resolves a stdlib name out of what is registered here.
+//!
+//! docs/impl/stdlib-cache.md
+//! docs/stdlib.md
+
 use crate::pipeline::compile_file;
 use crate::pipeline::CompileCtx;
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
+use crate::value::arena::RootRef;
 use crate::value::SymbolId;
 use crate::value::Value;
 use crate::vm::VM;
@@ -115,8 +125,9 @@ fn register_exports(
     // caches still alias them. Rooting the aggregate keeps the exports live for
     // the process and lets teardown reclaim them by RC cascade. Distinct
     // regions, one registration each (R9).
-    crate::value::arena::register_process_root(unsafe { &mut *vm.heap_ptr }, closure_val);
-    crate::value::arena::register_process_root(unsafe { &mut *vm.heap_ptr }, exports_val);
+    let heap = unsafe { &mut *vm.heap_ptr };
+    crate::value::arena::register_process_root(heap, closure_val, RootRef::Take);
+    crate::value::arena::register_process_root(heap, exports_val, RootRef::Take);
     // Extract exports from the struct and register them.
     let exports = extract_exports(exports_val, symbols);
     register_stdlib_exports(cctx, symbols, &exports);

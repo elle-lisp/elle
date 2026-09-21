@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-20
 // src/pipeline/AGENTS.md
 //! `CompileCtx`: one instance's compile-time state.
 //!
@@ -17,8 +17,11 @@ use crate::primitives::{build_primitive_meta, register_primitives};
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
 use crate::syntax::Expander;
+use crate::value::arena::RootRef;
 use crate::vm::VM;
 use std::collections::HashMap;
+
+use super::bootstrap::compile_core;
 
 /// Per-instance compile-time state.
 ///
@@ -62,9 +65,6 @@ pub struct CompileCtx {
     /// `dispatch_wrappers`, compile-time-only state that never reaches the VM.
     fn_inline: FnInlineRegistry,
 }
-
-/// core.lisp source, embedded at compile time.
-const CORE: &str = include_str!("../core.lisp");
 
 impl CompileCtx {
     /// Build a fresh compile context on a standalone macro VM (its own
@@ -227,14 +227,22 @@ impl CompileCtx {
     /// return mint's +1 is balanced by the caller's decref at the result's
     /// decref_point, so without a root the value would be freed at the end of its
     /// line; register the value's region as a process root to keep it live for
-    /// the session and release it by RC at teardown. Each `def` (including a
-    /// redefinition) is a distinct fresh region, so one registration per call
-    /// does not double-decref (R9).
+    /// the session and release it by RC at teardown.
+    ///
+    /// `funding` says which reference that root is made of
+    /// (docs/impl/region/rules.md § "The program value is the host's to
+    /// release"): a caller holding the value's own reference hands it over with
+    /// `RootRef::Take`, and one registering a value it reaches through another
+    /// (a leaf of a destructuring `def`) asks for `RootRef::Mint`. A minted root
+    /// funds itself per registration, so two leaves that share one region mint
+    /// two references against the sweep's two decrefs. A taken root does not:
+    /// the caller holds one reference, so it registers the region once (R9).
     pub fn register_repl_binding(
         &mut self,
         heap: &mut crate::value::fiberheap::FiberHeap,
         sym_id: crate::value::SymbolId,
         value: crate::value::Value,
+        funding: RootRef,
         signal: Signal,
         arity: Option<crate::value::types::Arity>,
     ) {
@@ -243,7 +251,7 @@ impl CompileCtx {
         if let Some(a) = arity {
             self.meta.arities.insert(sym_id, a);
         }
-        crate::value::arena::register_process_root(heap, value);
+        crate::value::arena::register_process_root(heap, value, funding);
     }
 
     /// Merge REPL-defined macros into the expander so subsequent compilations
@@ -320,171 +328,4 @@ impl Default for CompileCtx {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Compile and execute core.lisp, storing exports in the Expander's core_env.
-///
-/// Runs the full pipeline (read → expand → analyze → lower → emit → execute)
-/// without using a `CompileCtx` (we're inside its construction). The bare
-/// expander has no prelude macros — core.lisp uses only special forms and
-/// %-prefixed intrinsics.
-fn compile_core(
-    vm: &mut VM,
-    symbols: &mut SymbolTable,
-    meta: &mut PrimitiveMeta,
-    expander: &mut Expander,
-) {
-    use crate::hir::{Analyzer, BindingArena, FileForm};
-    use crate::lir::{Emitter, Lowerer};
-    use crate::reader::read_syntax_all;
-    use crate::syntax::Span;
-    use std::rc::Rc;
-
-    // core.lisp is one compilation unit with its own working arena, freed
-    // when this returns; its exports are `Value`s, which carry no syntax.
-    let heap_ptr = vm.heap_ptr;
-    let syntax_arena = crate::syntax::SyntaxArena::mint(unsafe { &mut *heap_ptr });
-    let syntaxes =
-        read_syntax_all(syntax_arena, CORE, "<core>").expect("core.lisp parsing must succeed");
-
-    // Expand with bare expander (no prelude)
-    let mut bare_expander = unsafe { Expander::new(heap_ptr) };
-    bare_expander.set_arena(syntax_arena);
-    let expanded_forms: Vec<_> = syntaxes
-        .into_iter()
-        .map(|s| bare_expander.expand(s, symbols, vm))
-        .collect::<Result<_, _>>()
-        .expect("core.lisp expansion must succeed");
-
-    let forms: Vec<FileForm> = expanded_forms
-        .iter()
-        .map(crate::hir::classify_form)
-        .collect();
-    let span = if expanded_forms.is_empty() {
-        Span::synthetic()
-    } else {
-        expanded_forms[0]
-            .span
-            .merge(&expanded_forms[expanded_forms.len() - 1].span)
-    };
-
-    let mut arena = BindingArena::new();
-    let mut analyzer = Analyzer::new_with_primitives(
-        symbols,
-        &mut arena,
-        meta.signals.clone(),
-        meta.arities.clone(),
-    );
-    analyzer.bind_primitives(meta);
-    let mut hir = analyzer
-        .analyze_file_letrec(forms, span)
-        .expect("core.lisp analysis must succeed");
-    let prim_values = analyzer.primitive_values().clone();
-    let errors = analyzer.take_errors();
-    drop(analyzer);
-
-    if !errors.is_empty() {
-        for e in &errors {
-            eprintln!("core.lisp analysis error: {:?}", e);
-        }
-        panic!("core.lisp analysis produced {} error(s)", errors.len());
-    }
-
-    // core.lisp runs before the instance `CompileCtx` (and its registries) exists,
-    // during `on_vm` construction, so throwaway registries are correct here: it
-    // defines no container-dispatch wrappers (its `concat`/`reverse` fan to helpers,
-    // not single monomorphic-op arms), and its cross-unit-inlineable fns are not
-    // recorded for later units. The cross-unit templates every later unit reads
-    // (`inc`/`dec`) live in `stdlib.lisp`, which compiles through the instance
-    // registries.
-    let types = crate::hir::regularize(
-        &mut hir,
-        &mut arena,
-        symbols,
-        &mut DispatchWrapperRegistry::default(),
-        &mut FnInlineRegistry::default(),
-    )
-    .expect("core.lisp uses no monomorphic container ops, so the proof obligation holds");
-
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(meta);
-    let region_info =
-        crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
-    if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
-        eprintln!(
-            "[trace:regions] cache (core.lisp):\n{}",
-            crate::hir::format_regions(&region_info, &arena, Some(symbols))
-        );
-    }
-    let mut lowerer = Lowerer::new(&arena)
-        .with_symbols(symbols)
-        .with_primitive_classification(pc)
-        .with_primitive_values(prim_values)
-        .with_region_info(region_info)
-        .with_type_info(types);
-    let lir_module = lowerer
-        .lower(&hir)
-        .expect("core.lisp lowering must succeed");
-
-    let mut emitter = Emitter::new();
-    let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
-
-    let closure_val = vm
-        .execute(&bytecode)
-        .expect("core.lisp execution must succeed");
-
-    let closure = closure_val
-        .as_closure()
-        .expect("core.lisp must return a closure");
-    let env = Rc::new(crate::primitives::module_init::build_closure_call_env(
-        closure,
-        &[],
-    ));
-    let exports_val = vm
-        .execute_code(closure.template.code(), Some(&env))
-        .expect("core.lisp export closure must succeed");
-
-    // Root the core export aggregate, not each entry. `exports_val` is the
-    // struct returned by core.lisp; it references every core export (each was
-    // incref'd into the struct when built), and the per-name `Value`s copied
-    // into `core_env`/`meta` below are aliases into those same regions. Under the
-    // mint-at-return convention this struct survives on the top-level return
-    // mint's +1, which the caller balances at the result's decref_point — so
-    // without a root the struct would be freed there, cascade-freeing the exports
-    // while `core_env` and `meta` still alias them (dangling reads on later
-    // compiles). Registering the struct (and the module closure that produced it)
-    // as process roots keeps the exports live for the process and lets the
-    // teardown sweep reclaim them by RC cascade. One registration each — these
-    // are distinct regions, so no double-decref (R9).
-    crate::value::arena::register_process_root(unsafe { &mut *vm.heap_ptr }, closure_val);
-    crate::value::arena::register_process_root(unsafe { &mut *vm.heap_ptr }, exports_val);
-
-    let exports_struct = exports_val
-        .as_struct()
-        .expect("core.lisp must return a struct");
-    for (key, value) in exports_struct.iter() {
-        if let crate::value::types::TableKey::Keyword(hash) = key {
-            // The export struct was read from module source, so its key
-            // spellings are in the memo; a miss is a missed learning site.
-            let name = symbols
-                .keyword_name(*hash)
-                .map(str::to_string)
-                .unwrap_or_else(|| panic!("module export key {:#x} has no learned spelling", hash));
-            // core_env: name-keyed, used by eval_syntax for macro bodies
-            expander.core_env.insert(name.clone(), *value);
-            // meta: SymbolId-keyed, used by compile_file for user code
-            let sym_id = symbols.intern(&name);
-            let signal = if let Some(c) = value.as_closure() {
-                c.template.signal()
-            } else {
-                Signal::silent()
-            };
-            meta.signals.insert(sym_id, signal);
-            meta.functions.insert(sym_id, *value);
-        }
-    }
-
-    // core.lisp's tree has done its work: nothing beyond this point reads it,
-    // and the macros it might have defined were copied to the template arena
-    // as they were registered.
-    unsafe { (*heap_ptr).decref_region_if_present(syntax_arena.region()) };
 }
