@@ -28,7 +28,7 @@
   (b :items))
 
 # ============================================================================
-# The four the issue names: map, filter, reduce, each
+# map, filter, reduce, each
 # ============================================================================
 
 (assert (= (held (map (fn [x] (+ x 1)) (bag [1 2 3]))) [2 3 4])
@@ -86,10 +86,12 @@
 (assert (= (map freeze (held (partition 2 (bag [1 2 3 4])))) [[1 2] [3 4]])
         "partition chunks the iterator")
 
-# The operators written with `each` inherit its dispatch.
 (assert (any? (fn [x] (= x 2)) (bag [1 2 3])) "any?")
 (assert (all? (fn [x] (> x 0)) (bag [1 2 3])) "all?")
 (assert (= (find (fn [x] (> x 1)) (bag [1 2 3])) 2) "find")
+
+# frequencies and group-by are written with `each`, so they inherit its
+# dispatch rather than carrying a trait arm of their own.
 (assert (= (frequencies (bag [:a :a :b])) {:a 2 :b 1}) "frequencies")
 (assert (= (freeze (get (group-by (fn [x] (if (even? x) :even :odd))
                                   (bag [1 2 3 4])) :even)) [2 4]) "group-by")
@@ -105,9 +107,12 @@
   (let [[mapped? mapped-err] (protect (map identity opaque))]
     (assert (not mapped?) "no method and no :iter is still an error")
     (assert (= (get mapped-err :error) :type-error) "and it is a :type-error"))
-  (let [[walked? _] (protect (each x in opaque
+  # A traited struct still walks its own pairs under `each` — the struct arm
+  # is the builtin handling the third layer sits behind. A value that is no
+  # container at all is what `each` refuses.
+  (let [[walked? _] (protect (each x in 42
                                x))]
-    (assert (not walked?) "each refuses it too")))
+    (assert (not walked?) "each refuses a value that is no collection")))
 
 # A collection that iterates but cannot be rebuilt answers the scalar
 # operators and refuses the collection-valued ones.

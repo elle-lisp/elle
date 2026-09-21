@@ -37,6 +37,9 @@
                  :Collection {:fold (fn [self f init] [:fold (f init 2)])
                               :count (fn [self p] [:count (p 2)])
                               :find-index (fn [self p] [:find-index (p 2)])
+                              :find (fn [self p] [:find (p 2)])
+                              :any? (fn [self p] [:any? (p 2)])
+                              :all? (fn [self p] [:all? (p 2)])
                               :update (fn [self key f] [:update key (f 5)])}}))
 
 (defn ten [x]
@@ -80,6 +83,9 @@
 (assert (= (count ten probe) [:count 20]) "count calls its :count method")
 (assert (= (find-index ten probe) [:find-index 20])
         "find-index calls its :find-index method")
+(assert (= (find ten probe) [:find 20]) "find calls its :find method")
+(assert (= (any? ten probe) [:any? 20]) "any? calls its :any? method")
+(assert (= (all? ten probe) [:all? 20]) "all? calls its :all? method")
 (assert (= (update probe :k ten) [:update :k 50])
         "update calls its :update method with (self key f)")
 
@@ -97,11 +103,18 @@
   (assert (= (map ten traited-array) [10 20 30])
           "a traited array maps as an array"))
 
+# The trap, and why both values here are arrays: a table that declares a
+# protocol REPLACES it for the access primitives, with no fall back to the
+# default for a method it leaves out. A list carrying :Sequence loses `rest`,
+# and one carrying :Collection loses `empty?`, so either would raise inside
+# the walk before the assertion could read its answer. An array reaches its
+# elements through `length` and `get`, which :Collection answers, so a
+# :Sequence table leaves it whole.
 (begin
-  (def traited-list
-    (with-traits (list 1 2) @{:Sequence {:reverse (fn [self] :hijacked)}}))
-  (assert (= (reverse traited-list) (list 2 1))
-          "a traited list reverses as a list"))
+  (def traited-reverse
+    (with-traits [1 2 3] @{:Sequence {:reverse (fn [self] :hijacked)}}))
+  (assert (= (reverse traited-reverse) [3 2 1])
+          "a traited array reverses as an array"))
 
 # ============================================================================
 # A method beats the iterator
