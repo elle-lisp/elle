@@ -11,16 +11,11 @@
 // compiles, so a target that drops the flag runs the corpus on an ordinary
 // source boot and reports exactly the green a hydrated run reports.
 
-use crate::common::make_var;
-use std::path::PathBuf;
+use crate::common::{make_dry_run, make_var};
 use std::process::Command;
 
 fn elle_binary() -> &'static str {
     env!("CARGO_BIN_EXE_elle")
-}
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
 /// The gate target's name, spelled once.
@@ -33,21 +28,8 @@ const GATE: &str = "smoke-boot-image";
 /// arrive through variables, and a parser that resolved them itself would be a
 /// second `make` that can disagree with the first.
 fn gate_recipe() -> String {
-    let out = Command::new("make")
-        .current_dir(repo_root())
-        .arg("--dry-run")
-        .arg("--no-print-directory")
-        .arg(GATE)
-        .env_remove("GITHUB_ACTIONS")
-        .env_remove("JOBS")
-        .output()
-        .unwrap_or_else(|e| panic!("run `make --dry-run {GATE}`: {e}"));
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        out.status.success(),
-        "`make --dry-run {GATE}` failed; the Makefile defines no such target: {stderr}"
-    );
-    String::from_utf8(out.stdout).expect("make prints a recipe")
+    make_dry_run(GATE)
+        .unwrap_or_else(|| panic!("`make --dry-run {GATE}` failed; no such target"))
 }
 
 /// Every `--boot-image=` value the gate's recipe names.

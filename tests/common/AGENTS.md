@@ -1,5 +1,7 @@
 # tests/common
 
+<!-- audited: 2026-09-21 -->
+
 Shared test helpers for the Elle test suite.
 
 ## Responsibility
@@ -104,7 +106,23 @@ This is safe because:
 
 | File | Content |
 |------|---------|
-| `mod.rs` | `eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`, `setup`, `proptest_cases` |
+| `mod.rs` | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, the Makefile readers (`make_var`, `make_dry_run`), `paint_stack`, and `ScratchDir` |
+
+### Reading the Makefile
+
+**`make_var(name, env)`** and **`make_dry_run(target)`** answer what `make`
+itself will use: one variable's expanded value, and the commands a target will
+run. A test about how a CI pass is dimensioned reads through these rather than
+parsing the Makefile, because a parser that resolves variables, `ifdef`s and
+`$(shell …)` is a second `make` that disagrees with the first.
+
+**`paint_stack(pattern, depth)`** fills stack frames with a byte pattern, so a
+determinism test can prove an artifact carries none of what a construction
+temporary held.
+
+**`ScratchDir::new(tag)`** is a uniquely-named directory under the platform temp
+root, removed on drop — the panic path included. Never write a test file under a
+hardcoded `/tmp`; `tests/integration/scratch.rs` fails the build over it.
 
 ## Invariants
 

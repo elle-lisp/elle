@@ -224,6 +224,32 @@ pub fn make_var(name: &str, env: &[(&str, &str)]) -> Option<String> {
     Some(String::from_utf8(out.stdout).ok()?.trim().to_string())
 }
 
+/// The commands `make TARGET` will run, expanded, without running any of them.
+///
+/// `make_var` above answers one variable; a recipe is where those variables
+/// meet the flags written beside them, and a test about what a pass actually
+/// runs has to read the whole line. `--dry-run` is what prints it: every
+/// variable resolved, every `@` line shown, nothing executed.
+///
+/// The child runs over a slate cleared of `GITHUB_ACTIONS` and `JOBS`, for the
+/// reason `make_var` clears them.
+#[allow(dead_code)]
+pub fn make_dry_run(target: &str) -> Option<String> {
+    let out = std::process::Command::new("make")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .arg("--dry-run")
+        .arg("--no-print-directory")
+        .arg(target)
+        .env_remove("GITHUB_ACTIONS")
+        .env_remove("JOBS")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8(out.stdout).ok()
+}
+
 /// Fill `depth + 1` stack frames with `pattern`, so that any construction
 /// temporary a later call materializes inherits pattern bytes in its padding.
 ///
