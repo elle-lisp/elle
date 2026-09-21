@@ -85,7 +85,9 @@ form-by-form. Two shapes:
   and timestamps differ run-to-run by design).
 
 Test code is untrusted, so each file runs in a **worker thread** with its own VM,
-bounded by `--timeout MS` (default 60000); a form that never finishes is recorded
+bounded by the budget its path earned — `--timeout MS` (default 60000), or
+`--wide-timeout MS` for a path `--wide` names
+([docs/test-cli.md](test-cli.md)); a form that never finishes is recorded
 `timeout`. A `(exit)` inside a test is **trapped** (it would otherwise terminate
 the whole run): `exit 0` is recorded `skip`, any other code `fail`. A worker that
 can't host a thunk (an unsendable FFI/fiber capture) falls back to in-process
@@ -99,7 +101,7 @@ and the runner cannot vary per file — `--no-uring`, or `--trace=guardfree`,
 whose use-after-free report is a SIGSEGV that would take a shared runner down.
 
 A child that dies on a signal is a `fail` naming the signal and the run
-continues; an exit code is a `fail` naming the code; a child over `--timeout`
+continues; an exit code is a `fail` naming the code; a child over its budget
 is killed and recorded `timeout`. Its stdout and stderr become assets either
 way ([docs/test-runner.md](test-runner.md) § Isolation).
 
@@ -124,7 +126,7 @@ before.
 | `skip` | gated out (`gate!`/`:gated`), tier-ineligible, or `(exit 0)` | no |
 | `fail` | an assertion or error | **yes** |
 | `diverge` | tiers returned different values (synthetic `tier='*'` row) | **yes** |
-| `timeout` | the form exceeded `--timeout` | **yes** |
+| `timeout` | the form exceeded its budget | **yes** |
 
 The gate (exit code) is zero iff no form failed, diverged, or timed out. `status`
 and `tier` are keyword-valued in the runner and stored as their bare name in the

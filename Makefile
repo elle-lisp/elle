@@ -82,7 +82,8 @@ endef
 # reads as a flaky runner rather than as a budget that was never wide enough.
 # They get a wider one, which is the bargain ORACLE_TIMEOUT already makes, in
 # per-file form: an override for the files that need it, so every other file
-# still fails fast on a hang. The pins are tests/integration/budget.rs.
+# still fails fast on a hang. The pins are tests/integration/budget.rs for the
+# per-file passes and tests/integration/runner_budget.rs for the runner.
 #
 # The wider budget is a BACKSTOP, not the deadline. Each of these files carries
 # its own `deadline` and reports which request stalled and how long it waited;
@@ -99,9 +100,21 @@ endef
 # 30 s one and going unnoticed until a runner is slow enough. h2 files that
 # declare no deadline (h2-rfc9113, h2-recycle-cleanup, h2-stress-scoped) are not
 # in a family named here and keep TIMEOUT.
-WIDE_TIMEOUT ?= 150s
-WIDE_FILES   := -e h2-bidi- -e h2-load- -e h2-stream- -e h2-timeout- \
-                -e region-jit-io-suspend-uaf.lisp
+#
+# Two passes read the list, so the families are named once and each pass gets
+# the spelling it needs. `WIDE_FILES` is the `grep -e` list the per-file passes
+# select with. `WIDE_FLAGS` is what the corpus pass hands `elle test`: its
+# budget is per FORM and one runner process takes a whole batch of files, so no
+# shell ever sees a path in time to choose, and the policy has to travel as
+# flags. `WIDE_TIMEOUT_MS` is the one budget in the milliseconds the runner
+# takes. tests/integration/runner_budget.rs pins all three against each other.
+WIDE_TIMEOUT    ?= 150s
+WIDE_TIMEOUT_MS := $(patsubst %s,%000,$(WIDE_TIMEOUT))
+WIDE_FAMILIES   := h2-bidi- h2-load- h2-stream- h2-timeout- \
+                   region-jit-io-suspend-uaf.lisp
+WIDE_FILES      := $(patsubst %,-e %,$(WIDE_FAMILIES))
+WIDE_FLAGS      := --wide-timeout $(WIDE_TIMEOUT_MS) \
+                   $(patsubst %,--wide %,$(WIDE_FAMILIES))
 
 # The budget for ONE corpus file: `parallel` substitutes the path into `{}` and
 # the pass's shell picks a budget, once per file. Every pass that runs the corpus
@@ -353,19 +366,6 @@ WASM_SKIP := -e eval.lisp -e eval-env.lisp -e wasm-tier-error-signal.lisp
 # DB that `--query`/`--summary` read (docs/testing.md § Reading a run).
 CORPUS_BATCH ?= 25
 
-# The budget ONE form gets inside a batch, in milliseconds. A multi-form corpus
-# file runs as one whole-file thunk, so this covers the span `timeout
-# $(FILE_TIMEOUT)` covers in the per-file passes — and it has to clear the
-# widest deadline a corpus file gives itself, for the reason WIDE_TIMEOUT does:
-# the file's own stall report is why the file is worth running, and it only
-# prints if the outer kill lands after it. The runner takes ONE number for every
-# form, so it takes the widest, derived from WIDE_TIMEOUT rather than written
-# again here. The runner's own default is 60 s, which is under the 120 s eight
-# h2 files declare; a quiet box never shows it, and the slowest runner in the
-# workflow reports a `timeout` naming a file whose diagnostic never printed.
-# tests/integration/budget.rs is the standing check.
-RUNNER_TIMEOUT ?= $(WIDE_TIMEOUT:%s=%)000
-
 # The files are dealt to the batches in hash-of-name order, not alphabetically.
 # Sibling files share a name prefix and a subject, and a subject's files cost
 # about the same, so alphabetical order gathers the whole corpus's heaviest
@@ -387,7 +387,7 @@ ELLE_TEST_FLAGS ?=
 define RUN_CORPUS
 	@printf '%s\n' $(filter-out $(ELLE_TEST_SKIP),$(wildcard tests/elle/*.lisp)) \
 		| $(DEAL_CORPUS) \
-		| xargs -n $(CORPUS_BATCH) $(ELLE) test --timeout $(RUNNER_TIMEOUT) $(ELLE_TEST_FLAGS) \
+		| xargs -n $(CORPUS_BATCH) $(ELLE) test $(WIDE_FLAGS) $(ELLE_TEST_FLAGS) \
 		|| { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md § Reading a run)"; exit 1; }
 	$(call RUN_ORACLE,--jit=off)
 	$(call RUN_ORACLE,--jit=eager)

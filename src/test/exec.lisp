@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-17
+# audited: 2026-09-21
 ## elle test — running one test: worker isolation, output capture, the
 ## per-form deadline, and the tiers this build carries.
 ## docs/test-runner.md
@@ -20,8 +20,9 @@
 ## ...), with *stdout*/*stderr* rebound to temp files; non-empty output becomes
 ## `stdout`/`stderr` assets per (form × tier). See exec-thunk-capture.
 ##
-## Per-test timeout: --timeout MS (default 60000) bounds each form's worker via
-## os/join's deadline; an over-budget form is recorded `timeout` and gates
+## Per-test timeout: the budget the form's path earned (--timeout MS, default
+## 60000, or --wide-timeout for a path --wide names) bounds each form's worker
+## via os/join's deadline; an over-budget form is recorded `timeout` and gates
 ## non-zero. `--trace=KW` is split off by the `test` subcommand and applied to
 ## the runner's VM/free-log (e.g. `--trace=free` to attribute a UAF); the runner
 ## itself does not interpret it.
@@ -38,7 +39,7 @@
 # preserves the typed failure signal (e.g. {:error :failed-assertion ...}).
 # This probe path joins with no deadline (its closures are trivial and always
 # finish); real test forms run under exec-thunk-capture, which bounds the join
-# with `test-timeout-ms` so a hung test is recorded `timeout`, not a wedge.
+# with `form-budget` so a hung test is recorded `timeout`, not a wedge.
 (defn exec-thunk [tier thunk]
   (os/join (os/spawn-vm (fn [] (protect (compile/run-on tier thunk))))))
 
@@ -51,6 +52,16 @@
 (def *heavy-worker* (make-parameter false))
 (defn worker-spawn [closure]
   (if (*heavy-worker*) (os/spawn closure) (os/spawn-vm closure)))
+
+# The wall-clock budget bounding ONE form's worker, in ms. main.lisp binds it
+# per path to what that path earned, because the budget is a property of the
+# file a form came from rather than of the run (docs/test-cli.md). An ad-hoc
+# `-e` form has no path to earn one, so nil here falls through to `--timeout`.
+(def *form-budget-ms* (make-parameter nil))
+
+(defn form-budget []
+  (let [ms (*form-budget-ms*)]
+    (if ms ms test-timeout-ms)))
 
 # Like exec-thunk, but also CAPTURE the test's stdout/stderr.
 #
@@ -220,7 +231,7 @@
   (let [outcome (protect (os/join (worker-spawn (fn []
                                     (ev/run (fn []
                                       (capture-run tier thunk out-path err-path)))))
-                                  test-timeout-ms))]
+                                  (form-budget)))]
     (if (get outcome 0)
       (get outcome 1)  # The worker spawn/join failed. If the thunk simply can't cross into a
       # worker (unsendable capture), run it IN-PROCESS — no isolation, no
@@ -298,7 +309,7 @@
                                       name) 0) 1)]
                                       (capture-pumped w-evrun w-spawn w-join
                                       w-out w-err thunk out-path err-path))))
-                                  test-timeout-ms))]
+                                  (form-budget)))]
     (if (get outcome 0)
       (get outcome 1)  # Unsendable RESULT (an orphan fiber, an io-request, …) can't cross back
       # through os/join. Fall back to running IN-PROCESS — no isolation, no

@@ -23,6 +23,9 @@
 (def flag-spec
   @{"--db" [:db :value]
     "--timeout" [:timeout :int]
+    "--wide" [:wide :append]
+    "--wide-timeout" [:wide-timeout :int]
+    "--budget" [:budget :flag]
     "--isolate" [:isolate :value]
     "--corpus" [:corpus :value]
     "--reset" [:reset :flag]
@@ -75,6 +78,9 @@
                 :corpus "tests"
                 :reset false
                 :timeout 60000
+                :wide []
+                :wide-timeout nil
+                :budget false
                 :eval []
                 :isolate nil
                 :promote nil
@@ -106,11 +112,36 @@
     (os/exit 2))
   nil)
 
-# Per-test wall-clock budget (ms). A test form whose worker does not finish
-# within it is recorded `timeout` (not fail/pass), and the run gates non-zero.
+# The default per-form wall-clock budget (ms), which every path takes unless it
+# earns the wider one below. A test form whose worker does not finish within its
+# budget is recorded `timeout` (not fail/pass), and the run gates non-zero.
 # os/join yields to the scheduler while waiting (no polling); on the deadline it
 # raises {:error :timeout} and the runaway worker is abandoned (see § Isolation).
 (def test-timeout-ms (get opts :timeout))
+
+# A budget follows the FILE a form came from, not the run. Some corpus families
+# carry a `deadline` of their own that is wider than the default budget, and a
+# form killed at the narrower one never prints the report that deadline exists
+# to give. `--wide` names a path substring and `--wide-timeout` is what a named
+# path's forms get; the Makefile owns the list of families and hands it to every
+# pass, so no second copy of it lives here (docs/test-cli.md).
+(def wide-patterns (get opts :wide))
+(def wide-timeout-ms (or (get opts :wide-timeout) test-timeout-ms))
+
+(defn wide-path? [path]
+  (not (empty? (filter (fn [p] (string/contains? path p)) wide-patterns))))
+
+(defn budget-for [path]
+  (if (wide-path? path) wide-timeout-ms test-timeout-ms))
+
+# `--budget` answers and exits, ahead of the store: the answer follows from the
+# flags alone, and a query must leave no run row behind.
+(if (get opts :budget)
+  (begin
+    (each f in (get opts :paths)
+      (println (budget-for f) " " f))
+    (os/exit 0))
+  nil)
 
 # `--db` names the store outright; otherwise it is the state directory, which
 # survives a reboot (docs/test-store.md § Run history is state).
@@ -180,9 +211,10 @@
 # depth. The tally is a GROUP BY over the rows we just wrote (the DB is the
 # source of truth anyway), so it is independent of corpus size.
 (each f in (get opts :paths)
-  (if isolate-flags
-    (process-file-isolated conn run-id f isolate-flags)
-    (process-file conn run-id f))
+  (parameterize ((*form-budget-ms* (budget-for f)))
+    (if isolate-flags
+      (process-file-isolated conn run-id f isolate-flags)
+      (process-file conn run-id f)))
   (gauge-mark conn run-id gauge-prev f))
 (each e in (get opts :eval)
   (process-eval conn run-id e)
