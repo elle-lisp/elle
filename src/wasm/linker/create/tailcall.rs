@@ -159,7 +159,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                     let (tag, payload) = caller.data_mut().value_to_wasm(payload);
                     return return_via_slot(
                         &mut caller,
-                        CallOutcome::parked(tag, payload, blocked),
+                        CallOutcome::signalled(tag, payload, blocked),
                     );
                 }
                 let native_fn = def.func;

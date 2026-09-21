@@ -60,7 +60,7 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
                     &args,
                 ) {
                     let (tag, payload) = caller.data_mut().inner.value_to_wasm(payload);
-                    return CallOutcome::parked(tag, payload, blocked).to_wasm();
+                    return CallOutcome::signalled(tag, payload, blocked).to_wasm();
                 }
                 let native_fn = def.func;
                 let vm = caller.data().vm;

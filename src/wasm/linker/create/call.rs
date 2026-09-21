@@ -71,11 +71,12 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
             // Dispatch based on function type
             if let Some(def) = func_val.as_native_def() {
                 // The capability gate, before the primitive runs
-                // (`host::capability_denial`). `parked`, not `signalled`: a
-                // denial parks the caller whatever bits it carries, which is
-                // what the interpreter's `handle_capability_denial` does, while
-                // `signalled` would classify a `:error` denial as an ordinary
-                // error return and never park.
+                // (`host::capability_denial`). The denial rides back as this
+                // call's own signal and is classified by the shared rule, like
+                // every other signal a native raises here — never by a test on
+                // the denied bits, which is what `signalled` exists to prevent
+                // (docs/impl/wasm.md § rt_call). Where the fiber then comes to
+                // rest is its own mask's answer, `resume/route.rs`.
                 if let Some((blocked, payload)) =
                     crate::wasm::host::capability_denial(
                         caller.data(),
@@ -85,7 +86,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                     )
                 {
                     let (tag, payload) = caller.data_mut().value_to_wasm(payload);
-                    return CallOutcome::parked(tag, payload, blocked).to_wasm();
+                    return CallOutcome::signalled(tag, payload, blocked).to_wasm();
                 }
                 let native_fn = def.func;
                 if caller.data().debug && nargs == 2 {
