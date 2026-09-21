@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-21
 //! `elle --help`: the usage text, with the `--trace` and `--dump` keyword
 //! lists generated from the tables that define them.
 //!
@@ -51,7 +51,7 @@ fn dump_keyword_desc(kw: &str) -> &'static str {
 
 pub(super) fn print_help() {
     println!("{}\n", elle::BANNER);
-    println!("Usage: elle [file...] [-- args...]       Run files or start REPL");
+    println!("Usage: elle [file] [args...]             Run a file or start REPL");
     println!("       elle fmt [options] <file...>       Format source files");
     println!("       elle lint [options] <file|dir>... Static analysis");
     println!("       elle lsp                          Start language server");
