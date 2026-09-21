@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-09-21
 // src/pipeline/AGENTS.md
 //! `CompileCtx`: one instance's compile-time state.
 //!
@@ -21,7 +21,27 @@ use crate::value::arena::RootRef;
 use crate::vm::VM;
 use std::collections::HashMap;
 
-use super::bootstrap::compile_core;
+use super::bootstrap::{compile_core, install_core_exports};
+
+/// The two export structs a boot leaves behind: core.lisp's and stdlib.lisp's.
+///
+/// Both are process roots already, so holding them costs nothing; the boot
+/// dump is what reads them, because they are the root set an image carries
+/// (docs/impl/image/boot.md). Nil until the boot that produces each one runs.
+#[derive(Debug, Clone, Copy)]
+pub struct BootExports {
+    pub core: crate::value::Value,
+    pub stdlib: crate::value::Value,
+}
+
+impl Default for BootExports {
+    fn default() -> Self {
+        BootExports {
+            core: crate::value::Value::NIL,
+            stdlib: crate::value::Value::NIL,
+        }
+    }
+}
 
 /// Per-instance compile-time state.
 ///
@@ -64,6 +84,8 @@ pub struct CompileCtx {
     /// dissolution leg across the compile-unit boundary, `fuse.rs`). Like
     /// `dispatch_wrappers`, compile-time-only state that never reaches the VM.
     fn_inline: FnInlineRegistry,
+    /// The core and stdlib export aggregates this instance booted with.
+    exports: BootExports,
 }
 
 impl CompileCtx {
@@ -121,7 +143,7 @@ impl CompileCtx {
         expander.set_eval_meta(build_primitive_meta(&mut init_symbols));
         crate::phase!(boot, "boot", t, "primitives-macrovm");
         let t = std::time::Instant::now();
-        compile_core(&mut vm, &mut init_symbols, &mut meta, &mut expander);
+        let core = compile_core(&mut vm, &mut init_symbols, &mut meta, &mut expander);
         crate::phase!(boot, "boot", t, "core");
         let t = std::time::Instant::now();
         expander
@@ -140,6 +162,50 @@ impl CompileCtx {
             projections: HashMap::new(),
             dispatch_wrappers: DispatchWrapperRegistry::default(),
             fn_inline: FnInlineRegistry::default(),
+            exports: BootExports {
+                core,
+                ..BootExports::default()
+            },
+        }
+    }
+
+    /// Build a compile context out of a hydrated boot image instead of
+    /// compiling core.lisp and prelude.lisp (docs/impl/image/boot.md).
+    ///
+    /// The primitives still register on the macro VM, because a native-fn is a
+    /// process-local id no image carries; everything else is installed from the
+    /// image. `symbols` is the instance's own table, which the hydration has
+    /// already taught the image's spellings — the throwaway table `on_vm` uses
+    /// would know none of them.
+    pub(crate) fn from_boot_image(
+        heap_ptr: *mut crate::value::fiberheap::FiberHeap,
+        boot: &crate::image::boot::Boot,
+        symbols: &mut SymbolTable,
+    ) -> Self {
+        let trace = crate::trace::boot();
+        let t = std::time::Instant::now();
+        let mut vm = VM::new_with_heap(heap_ptr);
+        let mut init_symbols = SymbolTable::new();
+        let mut meta = register_primitives(&mut vm, &mut init_symbols);
+        let mut expander = Expander::on_vm(&mut vm);
+        expander.set_eval_meta(build_primitive_meta(&mut init_symbols));
+        crate::phase!(trace, "boot", t, "primitives-macrovm");
+        let t = std::time::Instant::now();
+        install_core_exports(boot.core_exports(), symbols, &mut meta, &mut expander);
+        boot.install_macros(unsafe { &mut *heap_ptr }, &mut expander, symbols);
+        crate::phase!(trace, "boot", t, "image-core-and-macros");
+        vm.set_symbols(std::ptr::null_mut());
+        CompileCtx {
+            vm,
+            expander,
+            meta,
+            projections: HashMap::new(),
+            dispatch_wrappers: DispatchWrapperRegistry::default(),
+            fn_inline: FnInlineRegistry::default(),
+            exports: BootExports {
+                core: boot.core_exports(),
+                ..BootExports::default()
+            },
         }
     }
 
@@ -205,6 +271,33 @@ impl CompileCtx {
         sym_id: crate::value::SymbolId,
     ) -> Option<crate::value::Value> {
         self.meta.functions.get(&sym_id).copied()
+    }
+
+    /// This instance's macro table: every prelude macro, plus whatever the
+    /// REPL and later compiles defined. The boot dump reads it, and so does
+    /// the pin that a hydrated table carries the same entries
+    /// (docs/impl/image/boot.md).
+    pub(crate) fn macros(&self) -> &HashMap<String, crate::syntax::MacroDef> {
+        self.expander.macros()
+    }
+
+    /// The next hygiene scope id this instance's expander will mint. Read by
+    /// the pin that an image boot mints the scopes a source boot would
+    /// (docs/impl/image/boot.md).
+    #[cfg(test)]
+    pub(crate) fn scope_counter(&self) -> u32 {
+        self.expander.scope_counter()
+    }
+
+    /// The core and stdlib export aggregates this instance booted with — the
+    /// root set a boot image carries (docs/impl/image/boot.md).
+    pub(crate) fn boot_exports(&self) -> BootExports {
+        self.exports
+    }
+
+    /// Record the stdlib export aggregate, whatever produced it.
+    pub(crate) fn set_stdlib_exports(&mut self, exports: crate::value::Value) {
+        self.exports.stdlib = exports;
     }
 
     /// The core.lisp exports (name → Value), used to seed the expander's

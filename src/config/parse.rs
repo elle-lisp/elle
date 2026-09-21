@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-21
 //! `Config::parse`: turn an argv into a `Config` and the positional arguments
 //! left over. Every flag `elle --help` lists is recognized here.
 //!
@@ -181,6 +181,15 @@ impl Config {
                     None
                 } else {
                     Some(rest.to_string())
+                };
+                i += 1;
+                continue;
+            }
+            if let Some(rest) = arg.strip_prefix("--boot-image=") {
+                config.boot_image = match rest {
+                    "off" | "" => None,
+                    "on" => Some(String::new()),
+                    dir => Some(dir.to_string()),
                 };
                 i += 1;
                 continue;

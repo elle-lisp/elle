@@ -1,5 +1,6 @@
 .PHONY: all elle docs docgen smoke test qa crosscheck clean space help \
-       smoke-elle smoke-vm smoke-noffi smoke-jit smoke-nouring smoke-wasm smoke-mlir \
+       smoke-elle smoke-boot-image smoke-vm smoke-noffi smoke-jit smoke-nouring \
+       smoke-wasm smoke-mlir \
        doctest myplugin elle-wasm check-wasm elle-mlir elle-noffi plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding \
        fmt fmt-check audit agents agents-check
@@ -352,6 +353,19 @@ WASM_SKIP := -e eval.lisp -e eval-env.lisp -e wasm-tier-error-signal.lisp
 # DB that `--query`/`--summary` read (docs/testing.md § Reading a run).
 CORPUS_BATCH ?= 25
 
+# The budget ONE form gets inside a batch, in milliseconds. A multi-form corpus
+# file runs as one whole-file thunk, so this covers the span `timeout
+# $(FILE_TIMEOUT)` covers in the per-file passes — and it has to clear the
+# widest deadline a corpus file gives itself, for the reason WIDE_TIMEOUT does:
+# the file's own stall report is why the file is worth running, and it only
+# prints if the outer kill lands after it. The runner takes ONE number for every
+# form, so it takes the widest, derived from WIDE_TIMEOUT rather than written
+# again here. The runner's own default is 60 s, which is under the 120 s eight
+# h2 files declare; a quiet box never shows it, and the slowest runner in the
+# workflow reports a `timeout` naming a file whose diagnostic never printed.
+# tests/integration/budget.rs is the standing check.
+RUNNER_TIMEOUT ?= $(WIDE_TIMEOUT:%s=%)000
+
 # The files are dealt to the batches in hash-of-name order, not alphabetically.
 # Sibling files share a name prefix and a subject, and a subject's files cost
 # about the same, so alphabetical order gathers the whole corpus's heaviest
@@ -373,7 +387,7 @@ ELLE_TEST_FLAGS ?=
 define RUN_CORPUS
 	@printf '%s\n' $(filter-out $(ELLE_TEST_SKIP),$(wildcard tests/elle/*.lisp)) \
 		| $(DEAL_CORPUS) \
-		| xargs -n $(CORPUS_BATCH) $(ELLE) test $(ELLE_TEST_FLAGS) \
+		| xargs -n $(CORPUS_BATCH) $(ELLE) test --timeout $(RUNNER_TIMEOUT) $(ELLE_TEST_FLAGS) \
 		|| { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md § Reading a run)"; exit 1; }
 	$(call RUN_ORACLE,--jit=off)
 	$(call RUN_ORACLE,--jit=eager)
@@ -383,6 +397,37 @@ endef
 
 smoke-elle: elle  ## Run the whole corpus through `elle test` (vm + jit + divergence)
 	@echo "=== elle test (vm + jit policies, cross-tier divergence) ==="
+	$(RUN_CORPUS)
+
+# The corpus booted from an image instead of from core.lisp, prelude.lisp and
+# stdlib.lisp — dump-boot's gate (docs/impl/image/boot.md). `--boot-image=` is
+# off by default and stays off while a hydrated stdlib reaches neither the JIT
+# tier nor cross-unit inlining, so nothing else in the tree boots from one.
+#
+# The directory lives under target/ rather than the temp root: an image is
+# megabytes, a store prunes the one an earlier digest left, and `make clean`
+# takes the directory with the rest of the build output. It starts empty, so
+# the first start below always pays the store the second one reads.
+#
+# The hydration proof is the `[trace:boot] image-hydrate` mark, and it is the
+# whole difference between this target and `smoke-elle`. A binary that ignored
+# `--boot-image=` would accept it and boot from source, and an image every
+# start refuses is replaced and refused again — either way the corpus passes
+# and the gate reports a boot that never happened. Same argument as
+# `check-wasm`'s `[wasm]` marker.
+BOOT_IMAGE_DIR ?= target/boot-image
+
+smoke-boot-image: ELLE_TEST_FLAGS += --boot-image=$(BOOT_IMAGE_DIR)
+smoke-boot-image: elle  ## Run the corpus booted from an image (dump-boot's gate)
+	@echo "=== boot image: store one, then hydrate it ==="
+	@rm -rf "$(BOOT_IMAGE_DIR)"
+	@$(ELLE) --boot-image=$(BOOT_IMAGE_DIR) -e '(+ 1 2)' >/dev/null
+	@out=$$($(ELLE) --boot-image=$(BOOT_IMAGE_DIR) --trace=boot -e '(+ 1 2)' 2>&1 >/dev/null); \
+	printf '%s\n' "$$out" | grep 'image-hydrate' \
+		|| { printf '%s\n' "$$out"; \
+		     echo "FAILED: the second start did not hydrate the stored image, so the corpus would boot from source"; \
+		     exit 1; }
+	@echo "=== elle test (booted from the image in $(BOOT_IMAGE_DIR)) ==="
 	$(RUN_CORPUS)
 
 smoke-vm: elle

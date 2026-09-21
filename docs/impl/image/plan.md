@@ -1,12 +1,13 @@
 # Landing order and test plan
 
-<!-- audited: 2026-09-19 -->
+<!-- audited: 2026-09-21 -->
 
 What lands in which order, and the pins each milestone must land with.
 
 [image.md](../image.md) owns the design, [foundations.md](foundations.md) the
-four representation fixes below, and [measurements.md](measurements.md) the
-experiments that dispatched the design's open risks.
+four representation fixes below, [boot.md](boot.md) the boot configuration, and
+[measurements.md](measurements.md) the experiments that dispatched the design's
+open risks.
 
 ## Landing order
 
@@ -61,15 +62,23 @@ Then the image milestones:
      boot from image;
    - cell snapping — a compiled forward cell crosses as its content when its
      binding is never assigned, an assigned binding fails the dump by name,
-     and a run-time cell still refuses ([sealing.md](sealing.md)).
+     and a run-time cell still refuses ([sealing.md](sealing.md));
+   - dump-boot — the root struct over the core exports, the stdlib exports and
+     the macro definitions, the source digest beside them, `elle image
+     dump-boot`, and the install path a fresh instance boots through
+     ([boot.md](boot.md)); the two boots share the export-registration tails,
+     and the corpus under image boot is the gate;
+   - the warm cache — `--boot-image=`, the digest-keyed file, the atomic store
+     and the prune. Opt-in rather than default: the two milestones below cost a
+     hydrating instance the JIT tier and cross-unit inlining, and
+     [boot.md](boot.md) argues the default waits on both.
 
-   Still to land: dump-boot, the warm cache, the embedded blob, per-worker
-   hydration for `sys/spawn`, the encoded-LIR side-stream with lazy decode,
-   compiler-state persistence, the hydrated-region interval table, and the
-   parity gate (bytecode *and* tier). The interval table keeps
-   `region_of_ptr` off the probe ladder ([image.md](../image.md) § "Pointer
-   resolution must not regress"); the regression it prevents needs a region
-   the size of stdlib to show.
+   Still to land: the embedded blob, per-worker hydration for `sys/spawn`, the
+   encoded-LIR side-stream with lazy decode, compiler-state persistence, the
+   hydrated-region interval table, and the parity gate (bytecode *and* tier).
+   The interval table keeps `region_of_ptr` off the probe ladder
+   ([image.md](../image.md) § "Pointer resolution must not regress"); the
+   regression it prevents needs a region the size of stdlib to show.
 7. **environment** — `image/save` and `image/load`, manifest deltas over
    boot, mutable side-stream.
 
@@ -82,9 +91,9 @@ Then the image milestones:
   structural equality — and a counter-factual load with a corrupted
   fingerprint falls back cleanly.
 - Sorted containers: a hydrated set and a hydrated struct answer the
-  membership and lookup questions their sources did, over keys that rank by
-  hash (a symbol, a keyword) and keys that rank by content (a string, an
-  array). The counter-factual for the entry canonicalization is the
+  membership and lookup questions their sources did. The keys span both
+  orders — a symbol and a keyword rank by hash, a string and an array by
+  content. The counter-factual for the entry canonicalization is the
   determinism pin: a struct whose key padding differs between two dumps must
   still write one file.
 - Syntax: a tree round-trips with its structure, its spans, its scope sets,
@@ -99,15 +108,15 @@ Then the image milestones:
   file, with no filesystem path anywhere in the path. On Linux the seal holds:
   a write to that descriptor after hydration fails.
 - Verifier: four defects each fail the load with a named error and leave no
-  region and no mapping behind — a relocation slot outside the image, a
-  relocation slot that is not 8-byte aligned, a `RegionSlice` whose extent
-  leaves the image, and a page cursor that disagrees with the object index.
-  A closure header is refused the same way five ways: a nonzero blueprint
-  word (the one bit pattern teardown could hurt on — a fabricated `Rc`), a
-  header naming zero payloads, a payload landing misaligned, a payload field
-  whose extent leaves the image, and a child slot naming an object the index
-  does not call a header. The child slot is the one slot whose target is
-  read back as a header rather than as data.
+  region and no mapping behind. The four are a relocation slot outside the
+  image, a relocation slot that is not 8-byte aligned, a `RegionSlice` whose
+  extent leaves the image, and a page cursor that disagrees with the object
+  index. A closure header is refused the same way five ways. A nonzero
+  blueprint word is the first — the one bit pattern teardown could hurt on, a
+  fabricated `Rc`. The other four are a header naming zero payloads, a payload
+  landing misaligned, a payload field whose extent leaves the image, and a
+  child slot naming an object the index does not call a header. The child slot
+  is the one slot whose target is read back as a header rather than as data.
 - Hygiene: hydrate, run, exit — the live region count returns to baseline
   and the leak suite stays green with no image-specific carve-out. Free the
   hydrated region explicitly under `--trace=guardfree` and assert the
@@ -173,8 +182,32 @@ Then the image milestones:
   every read correctly and silently doubles the value. A top-level that is
   `assign`ed anywhere in the file fails the dump naming the binding, and a
   cell minted at run time (a captured lambda-local) still refuses. A snapped
-  dump writes one file across two dumps. Boot from image running the full
-  smoke corpus identically to source boot is dump-boot's gate.
+  dump writes one file across two dumps.
+- Boot: an instance that hydrated a boot image answers a stdlib call, a core
+  call and a prelude macro expansion as a source-booted one does. It also
+  reports that it booted from the image, because behaviour alone cannot tell
+  the two apart. A macro the boot never expanded still expands after
+  hydration, which is the lazy transformer fill working over a hydrated
+  template. The installed expander mints the scopes a source boot would, above
+  the watermark the image records — which for a boot graph is one, because a
+  prelude template carries the prelude scope alone, so the raise itself is
+  pinned separately. A fresh instance prints a hydrated stdlib closure's name
+  and answers
+  `meta/origin` with the file it was written in, both out of the image's
+  tables. An image whose source digest is not this binary's is refused by its
+  own name, not the fingerprint's, and the instance boots from source instead.
+  The counter-factual is an instance that answers with the previous library. A
+  process holding a user signal bit fails the boot dump, naming the signal. Two dumps of one boot state write one file, which is determinism at
+  the scale where a code payload's padding can leak. Hygiene: an image-booted
+  instance tears down to the residue a source-booted one leaves, the whole boot
+  graph released through one root registration. Boot from image running the
+  full smoke corpus identically to source boot is dump-boot's gate.
+- Warm cache: a second instance over one directory boots from the image the
+  first stored, asserted on the reported boot source. A rejected file is
+  replaced rather than rejected again — the start that meets it compiles and
+  stores, and the start after that hits. A store prunes the superseded file and
+  leaves the kept one, and the default policy neither reads a directory nor
+  writes one.
 - Compile parity: compile the same user file under image boot and source
   boot and assert byte-identical bytecode — the acceptance gate for the
   persisted compiler state (inline fragments, dispatch wrappers).

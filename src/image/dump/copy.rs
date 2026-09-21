@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-09-21
 //! The compacting copy: what the dumper accepts into an image's body, and
 //! the spellings it records on the way through.
 //!
@@ -253,6 +253,7 @@ pub(super) fn copy_value(
         // value lands in the same scratch region, so the patch writes
         // self-edges the RC ledger never counts.
         HeapObject::Closure { closure, .. } => {
+            super::portable_signals(closure.squelch_mask, "a closure's squelch mask")?;
             let nils = vec![Value::NIL; closure.env.len()];
             let env = heap.alloc_region_slice_in_region(&nils, region);
             let copy = heap.alloc_in_region(

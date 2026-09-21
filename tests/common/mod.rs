@@ -1,7 +1,8 @@
-//! Shared test helpers for the Elle test suite.
+// audited: 2026-09-21
+//! Shared test helpers: the canonical evals, the cached ones property tests
+//! use, and the scratch directory a test writes files under.
 //!
-//! Provides canonical eval and setup functions so test files don't need
-//! to copy-paste their own variants.
+//! tests/AGENTS.md
 //!
 //! Every helper drives a [`Runtime`] (`elle::runtime`), the one per-instance
 //! owner of the heap, `VM`, `SymbolTable`, and per-instance `CompileCtx`. There
@@ -51,6 +52,7 @@ pub fn eval_source_bare<R>(input: &str, f: impl FnOnce(Result<Value, String>) ->
 /// its heap is alive (see the module note above). The canonical test eval — use
 /// it unless you have a specific reason not to (e.g. testing without stdlib).
 /// Handles single- and multi-form input via `eval_all`.
+#[allow(dead_code)]
 pub fn eval_source<R>(input: &str, f: impl FnOnce(Result<Value, String>) -> R) -> R {
     let mut rt = Runtime::new();
     let result = {
@@ -129,8 +131,7 @@ pub fn proptest_cases(default: u32) -> proptest::prelude::ProptestConfig {
 // Use `eval_reuse` for tests that need stdlib functions (map, filter, etc.).
 //
 // The one-shot `eval_source` / `eval_source_bare` remain available for tests
-// that need a guaranteed-fresh Runtime (none currently do, but the option
-// exists).
+// that need a guaranteed-fresh Runtime.
 
 use std::cell::RefCell;
 use std::thread::LocalKey;
@@ -223,6 +224,50 @@ pub fn make_var(name: &str, env: &[(&str, &str)]) -> Option<String> {
     Some(String::from_utf8(out.stdout).ok()?.trim().to_string())
 }
 
+/// The commands `make TARGET` will run, expanded, without running any of them.
+///
+/// `make_var` above answers one variable; a recipe is where those variables
+/// meet the flags written beside them, and a test about what a pass actually
+/// runs has to read the whole line. `--dry-run` is what prints it: every
+/// variable resolved, every `@` line shown, nothing executed.
+///
+/// The child runs over a slate cleared of `GITHUB_ACTIONS` and `JOBS`, for the
+/// reason `make_var` clears them.
+#[allow(dead_code)]
+pub fn make_dry_run(target: &str) -> Option<String> {
+    let out = std::process::Command::new("make")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .arg("--dry-run")
+        .arg("--no-print-directory")
+        .arg(target)
+        .env_remove("GITHUB_ACTIONS")
+        .env_remove("JOBS")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8(out.stdout).ok()
+}
+
+/// Fill `depth + 1` stack frames with `pattern`, so that any construction
+/// temporary a later call materializes inherits pattern bytes in its padding.
+///
+/// A determinism test paints between two dumps: a dumper that copied slot
+/// bytes wholesale would write whatever the stack held into the artifact. The
+/// xor keeps the recursion and the buffer observable.
+#[allow(dead_code)]
+#[inline(never)]
+pub fn paint_stack(pattern: u8, depth: usize) -> u64 {
+    let buf = [pattern; 4096];
+    let sum: u64 = buf.iter().map(|&b| b as u64).sum();
+    if depth == 0 {
+        sum
+    } else {
+        sum ^ paint_stack(pattern, depth - 1)
+    }
+}
+
 /// Uniquely-named scratch directory under the platform temp root, removed
 /// recursively on drop — the panic path included, so a failing test leaves no
 /// litter in `$TMPDIR`. See `tests/AGENTS.md` § Scratch files.
@@ -238,6 +283,12 @@ impl ScratchDir {
 
     pub fn join(&self, name: &str) -> std::path::PathBuf {
         self.0.join(name)
+    }
+
+    /// The directory itself, for a caller that hands it to something taking a
+    /// directory rather than a file.
+    pub fn path(&self) -> &std::path::Path {
+        &self.0
     }
 }
 

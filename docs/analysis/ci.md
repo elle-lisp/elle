@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-21 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -17,6 +17,7 @@ renamed heading breaks the site generator.
 | QA | ubuntu | `cargo fmt`, clippy, the macOS cross-check, rustdoc | — |
 | Documentation Build | ubuntu | `make docs` and the Elle doc site, minus the publish | — |
 | VM+JIT Tests | ubuntu | `doctest`, `smoke-vm`, `smoke-jit` | — |
+| Boot Image Tests | ubuntu | `smoke-boot-image` — the corpus booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, then property tests | 16 |
 | Thread-Pool I/O Tests | ubuntu | The corpus on the thread-pool I/O backend | — |
 | MLIR Tests | ubuntu | `smoke-mlir` | — |
@@ -220,6 +221,19 @@ that list is compiled by nothing and asserted by nothing, and the job stays
 green over it. `tests/integration/plugins.rs` pins every plugin directory to a
 workspace member.
 
+### The boot-image job
+
+`--boot-image=` is off by default, and stays off until the encoded-LIR
+side-stream and the two cross-unit registries land
+([boot.md](../impl/image/boot.md)). No other job boots from an image, so a
+change that breaks hydration passes every gate in the workflow.
+
+`Boot Image Tests` runs `make smoke-boot-image`. The target stores an image,
+proves the next start hydrates it, and runs the corpus through that instance.
+It sets `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` for the reason the two backend
+jobs do: a hydrated region is a region, and the region checks are compiled out
+of a release build without the flag.
+
 ### Adding a job
 
 `All Checks Passed` is the only status check branch protection requires
@@ -233,23 +247,23 @@ is missing.
 
 
 ```bash
-# Smoke test (what agents should run first)
+# The fast inner loop
+cargo test -p elle --lib
+
+# The QA job, locally — run it before every push
+make qa
+
+# The corpus, plus the doctests and the embedding demo
 make smoke
 
-# Fast feedback (examples + elle scripts + unit tests)
-make smoke
+# One corpus file
+./target/release/elle tests/elle/core.lisp
 
-# Run only Elle scripts
-cargo test elle::
+# Property tests, reduced
+PROPTEST_CASES=8 cargo test --test lib property::
 
-# Run only property tests, reduced
-PROPTEST_CASES=8 cargo test property::
-
-# Run a specific Elle test script
-cargo run -- tests/elle/core.lisp
-
-# Full suite (before opening PR, or let CI handle it)
-cargo test --workspace
+# What the PR gate runs, before opening a pull request
+make test
 ```
 
 
@@ -258,14 +272,14 @@ cargo test --workspace
 
 | Failure | Symptom | Likely cause | Fix |
 |---------|---------|--------------|-----|
-| **elle-doc generation** | `docs` job fails on `./target/release/elle elle-doc/generate.lisp` | Using `nil?` to check end-of-list. Lists terminate with `EMPTY_LIST`, not `NIL`. | Use `empty?` for list termination checks. Check `elle-doc/generate.lisp` and `elle-doc/lib/`. |
-| **Examples fail** | `examples` job fails | Runtime error in `.lisp` file. Assertions use `assert-eq`, `assert-true`, etc. from `examples/assertions.lisp`. | Run `cargo run -- examples/failing.lisp` locally. Check assertion message. |
-| **Elle scripts fail** | `examples` job fails on Elle script tests | Runtime error in `tests/elle/*.lisp`. | Run `cargo run -- tests/elle/failing.lisp` locally. Check assertion message. |
-| **Property tests fail** | `test-property` job fails with shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check `proptest-regressions/` files. |
-| **Integration tests fail** | `test-rust` job fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |
-| **Clippy** | `clippy` job fails | Any Rust warning. CI runs with `-D warnings`. | Run `cargo clippy --workspace --all-targets -- -D warnings` locally. |
-| **Formatting** | `fmt` job fails | Unformatted Rust code. | Run `cargo fmt`. |
-| **Rustdoc** | `docs` job fails on `cargo doc` step | Broken intra-doc links or malformed doc comments. CI documents private items, so a link into a `pub(crate)` item counts. A `#[cfg(test)]` item is absent from a doc build — gate it `#[cfg(any(test, doc))]` if the docs link to it. | Run `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items` locally. |
+| **Documentation site** | `Documentation Build` fails on `./target/release/elle demos/docgen/generate.lisp` | Using `nil?` to check end-of-list. Lists terminate with `EMPTY_LIST`, not `NIL`. | Use `empty?` for list termination checks. Check `demos/docgen/generate.lisp` and `demos/docgen/lib/`. |
+| **Elle scripts fail** | `VM+JIT Tests` fails on a corpus pass | Runtime error in `tests/elle/*.lisp`. | Run `./target/release/elle tests/elle/failing.lisp` locally. Check the assertion message. |
+| **Boot from an image fails** | `Boot Image Tests` fails and every other corpus job passes | The corpus file answers differently under a hydrated boot, or the image no longer hydrates. | Run `make smoke-boot-image` locally. Read the hydration proof first: a target that fails there never reached the corpus. |
+| **Property tests fail** | `Rust Tests` fails with a shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check `proptest-regressions/` files. |
+| **Integration tests fail** | `Rust Tests` fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |
+| **Clippy** | `QA` fails on the clippy step | Any Rust warning. CI runs with `-D warnings`. | Run `cargo clippy --workspace --all-targets -- -D warnings` locally. |
+| **Formatting** | `QA` fails on `cargo fmt --check` | Unformatted Rust code. | Run `cargo fmt`. |
+| **Rustdoc** | `QA` fails on the `cargo doc` step | Broken intra-doc links or malformed doc comments. CI documents private items, so a link into a `pub(crate)` item counts. A `#[cfg(test)]` item is absent from a doc build — gate it `#[cfg(any(test, doc))]` if the docs link to it. | Run `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items` locally. |
 | **macOS cross-check** | `qa` job fails on `Cross-check macOS`, or `macOS Smoke` fails on `Run clippy` | A binding or method used only by the io_uring backend reads as dead code on the thread-pool platform. The Linux clippy gate compiles only the `cfg(target_os = "linux")` arms and cannot see it. | Run `make crosscheck` locally. Gate the binding with `#[cfg(target_os = "linux")]`, or narrow the allow with `#[cfg_attr(not(target_os = "linux"), allow(dead_code))]`. |
 | **Android cross-check** | `android` job fails on `Cross-check Android` | A `not(target_os = "linux")` arm that assumed the other side was a desktop unix. Android is neither: `target_os` is `"android"`, so it takes the else-arm, and its libc is missing what a BSD or macOS arm reaches for. | Run `make crosscheck` locally — it covers both cross-targets. Split the arm by the call the platform has (`any(target_os = "linux", target_os = "android")`), not by the name. |
 

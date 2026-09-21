@@ -1,6 +1,7 @@
 // audited: 2026-09-21
 // The gates on the post-teardown residue: what one run may leave behind.
 // docs/impl/region/rules.md
+// docs/impl/image/boot.md
 
 use super::*;
 use elle::compiler::stdlib_cache::StdlibCache;
@@ -102,6 +103,41 @@ fn a_cache_hit_leaves_no_unexplained_references() {
             "this runtime must load the stdlib the seeding one stored; a miss \
              yields a working runtime too, so it would pass the assertion below \
              without ever exercising the reload"
+        );
+        let pinned = pinned_after_teardown(rt, src);
+        assert!(
+            pinned.is_empty(),
+            "{src}: regions pinned from outside the region graph: {pinned:#?}"
+        );
+    }
+}
+
+/// The same property on the image-boot path (docs/impl/image/boot.md). A whole
+/// boot graph arrives as one hydrated region registered as one process root,
+/// so the sweep either releases all of it or none of it.
+///
+/// The counter-factual is a per-root registration: registering the core
+/// exports, the stdlib exports and the macro table separately takes three
+/// references against a region that was minted with one, and the residue count
+/// alone cannot tell that from the reference cycle it sits inside — while the
+/// in-degree reading names it, rc above the in-edges it can explain.
+#[test]
+fn an_image_boot_leaves_no_unexplained_references() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let caches = || elle::runtime::BootCaches {
+        stdlib: StdlibCache::Dir(dir.path().join("stdlib")),
+        image: elle::image::boot::BootImage::Dir(dir.path().join("boot")),
+    };
+    // The first runtime meets an empty directory, so it compiles and stores.
+    drop(Runtime::with_caches(caches()));
+    for src in PROGRAMS {
+        let rt = Runtime::with_caches(caches());
+        assert_eq!(
+            rt.boot_source(),
+            elle::image::boot::BootSource::Image,
+            "this runtime must hydrate the image the seeding one stored; a miss \
+             yields a working runtime too, so it would pass the assertion below \
+             without ever exercising an image boot"
         );
         let pinned = pinned_after_teardown(rt, src);
         assert!(

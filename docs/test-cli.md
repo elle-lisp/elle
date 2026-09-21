@@ -127,11 +127,14 @@ elle test [paths...]            # default: tests/elle, ALL tiers, write DB
   -N                            # stop after N failures (-1 = fail-fast); default: run to completion
 ```
 
-Three global `elle` flags pass through to the runner's own VM rather than
-being read as corpus paths: `--trace=...`, `--stats`, and `--no-uring`.
-`--no-uring` runs the whole corpus on the thread-pool I/O backend — the
-only backend a Mac has — so a pool-only wedge can be chased on a Linux
-box (`elle test --no-uring tests/elle/process-io.lisp`).
+These global `elle` flags pass through to the runner's own VM rather than
+being read as corpus paths: `--trace=...`, `--boot-image=...`, `--stats`, and
+`--no-uring`. `--no-uring` runs the whole corpus on the thread-pool I/O
+backend — the only backend a Mac has — so a pool-only wedge can be chased on a
+Linux box (`elle test --no-uring tests/elle/process-io.lisp`).
+`--boot-image=` boots the runner from an image, so every corpus file is
+compiled against a hydrated stdlib rather than a freshly compiled one
+([boot](impl/image/boot.md)).
 
 ### Execution and completion
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-09-21
 //! The compilation pipeline's entry points: source text to bytecode, or to HIR
 //! for a reader that wants the analysis alone.
 //!
@@ -6,18 +6,20 @@
 //!
 //! Each stage lives beside this file: the compile-context type an instance
 //! threads through every call (`cache`), the core.lisp bootstrap that builds
-//! one (`bootstrap`), and the three surfaces over them — `compile`, `analyze`
-//! and `eval`.
+//! one (`bootstrap`), the three sources a boot compiles (`sources`), and the
+//! three surfaces over them — `compile`, `analyze` and `eval`.
 
 mod analyze;
 mod bootstrap;
 mod cache;
 mod compile;
 mod eval;
+pub mod sources;
 
 // Re-export public API
 pub use analyze::{analyze, analyze_file};
-pub use cache::CompileCtx;
+pub use bootstrap::install_core_exports;
+pub use cache::{BootExports, CompileCtx};
 pub use compile::{
     compile, compile_barrier_module, compile_file, compile_file_repl, compile_file_to_fhir,
     compile_file_to_lir, compile_whole_module, compile_whole_module_forms, splice_includes,

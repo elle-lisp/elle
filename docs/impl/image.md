@@ -1,6 +1,6 @@
 # Images — regions hydrated at load
 
-<!-- audited: 2026-09-20 -->
+<!-- audited: 2026-09-21 -->
 
 Design for image-style persistence: one mechanism, two shipped configurations.
 
@@ -8,12 +8,14 @@ The two are the **boot** image (core, prelude, and stdlib pre-compiled into the
 binary) and **environment** images (user `save`/`load`) — the same format,
 dumper, and hydrator throughout, differing only in dependency list and dump
 policy (see *One mechanism, two configurations*). This document owns the design
-argument. Five companions carry the rest:
+argument. Six companions carry the rest:
 
 - [foundations.md](image/foundations.md) — the four representation fixes the
   image rests on.
 - [sealing.md](image/sealing.md) — what the body may hold, what the hydrating
   instance rebuilds, and what fails the dump.
+- [boot.md](image/boot.md) — the boot configuration: its root set, its source
+  digest, and the warm cache.
 - [format.md](image/format.md) — the file's sections, and the fingerprint that
   gates a load.
 - [plan.md](image/plan.md) — the landing order, and the pins each milestone
@@ -85,12 +87,12 @@ policy**:
   visited map is seeded with the dependency regions' address intervals. The
   root set of a dump is therefore always the same thing: *the bindings the
   layers below do not already provide*.
-- The **boot** configuration is the image with an empty dependency list:
-  its roots are the boot bindings (stdlib exports, module closure, core
-  exports, macro definitions, meta tables, inline-fn syntax), its policy is
-  strict — no mutable bindings, in body or side-stream — and it is
-  distributed by the warm cache or the embedded blob, regenerated from
-  sources whenever the fingerprint misses.
+- The **boot** configuration is the image with an empty dependency list: its
+  root is one struct over the core exports, the stdlib exports and the macro
+  definitions ([boot.md](image/boot.md) owns the shape), its policy is strict
+  — no mutable bindings, in body or side-stream — and it is distributed by the
+  warm cache or the embedded blob, regenerated from sources whenever the
+  fingerprint or the source digest misses.
 - The **environment** configuration depends on a boot image: its roots are
   the session's bindings beyond that layer, its policy is user-facing
   (refuse mutables by default, `&allow-mutable` opt-in), and it is a file
@@ -347,11 +349,12 @@ two boot modes must be indistinguishable to running code, tiers included.
 
 ## Build integration
 
-- **Warm cache (default, no build changes):** when no valid boot image is
-  available, boot compiles from source as today, then dumps
-  `$ELLE_CACHE/boot/<fingerprint>.image` (written atomically: temp file,
-  rename). Subsequent starts hydrate it. Development builds get fast starts
-  from the second run onward.
+- **Warm cache (no build changes):** when no valid boot image is available,
+  boot compiles from source as today, then dumps
+  `$ELLE_CACHE/boot/<digest>.image` (written atomically: temp file, rename).
+  Subsequent starts hydrate it, so development builds get fast starts from the
+  second run onward. `--boot-image=` opts in; [boot.md](image/boot.md) owns the
+  policy and the two milestones the default waits on.
 - **Embedded (release):** a Makefile stage builds `elle`, runs
   `elle image dump-boot`, and rebuilds with the blob embedded (path passed
   by env var; `build.rs` declares the rerun-if). The blob is embedded

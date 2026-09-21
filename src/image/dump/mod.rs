@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-09-21
 //! The dumper: a compacting copy of a sealed data graph into a scratch
 //! region, written out as an image file.
 //!
@@ -57,6 +57,40 @@ pub fn dump(
     let result = dump_into(heap, scratch, symbols, root, path);
     heap.decref_region_if_present(scratch);
     result
+}
+
+/// The lowest bit a user declaration is handed. Below it are the built-ins and
+/// the VM's own, which every process registers alike
+/// (docs/signals/protocol.md).
+const FIRST_USER_SIGNAL_BIT: u32 = 32;
+
+/// Refuse a mask that names a signal this process declared, naming it.
+///
+/// Such a bit means whatever the registry handed out here, and no image
+/// carries a signal table (docs/impl/image/sealing.md). The test is against
+/// what the registry actually handed out rather than against the whole user
+/// range: signal inference sets high bits to mean "this may signal anything",
+/// and those mean the same in the instance that hydrates them as in the one
+/// that dumped them — a declared bit does not. `what` names the value the mask
+/// is on, so a refusal points at the closure rather than at a number.
+pub(super) fn portable_signals(
+    bits: crate::value::fiber::SignalBits,
+    what: &str,
+) -> Result<(), ImageError> {
+    let named = crate::signals::registry::with_registry(|registry| {
+        registry
+            .entries()
+            .iter()
+            .find(|e| e.bit_position >= FIRST_USER_SIGNAL_BIT && bits.has_bit(e.bit_position))
+            .map(|e| e.name.clone())
+    });
+    match named {
+        None => Ok(()),
+        Some(signal) => Err(ImageError::Unsupported(format!(
+            "{what} names the declared signal :{signal}, whose bit is this \
+             process's own and no image carries a signal table"
+        ))),
+    }
 }
 
 /// The canonical name a native-fn crosses as, or a refusal naming the def.

@@ -211,6 +211,9 @@ mod budget {
 mod capacity {
     include!("capacity.rs");
 }
+mod boot_image_gate {
+    include!("boot_image_gate.rs");
+}
 mod doctest {
     include!("doctest.rs");
 }

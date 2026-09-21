@@ -159,6 +159,35 @@ jobs:
       - name: make smoke-jit
         run: make smoke-jit
 
+  # The corpus booted from an image rather than from core.lisp, prelude.lisp
+  # and stdlib.lisp. `--boot-image=` is off by default (docs/impl/image/boot.md
+  # names the two milestones the default waits on), so no other job hydrates
+  # one and a break in hydration passes every gate in this workflow. See
+  # docs/analysis/ci.md § "The boot-image job".
+  boot-image:
+    name: Boot Image Tests
+    needs: changes
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    env:
+      # A hydrated region is a region, and the region checks are
+      # #[cfg(debug_assertions)] — without this the corpus drives the image's
+      # pages with every one of them compiled out.
+      CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install GNU parallel and Redis
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
+          sudo systemctl start redis-server
+      - name: make elle
+        run: make elle
+      - name: make smoke-boot-image
+        run: make smoke-boot-image
+
   # The corpus against the thread-pool I/O backend. Every other Linux job runs
   # io_uring, and every non-Linux build runs the pool, so without this job the
   # pool's only sampler is the macOS one below: one run per PR, on the slowest
@@ -544,7 +573,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, docs, tests-combined, tests, nouring, wasm, mlir, plugins, aarch64, aarch64-tests, aarch64-noffi, android, macos, macos-tests]
+    needs: [changes, qa, docs, tests-combined, tests, boot-image, nouring, wasm, mlir, plugins, aarch64, aarch64-tests, aarch64-noffi, android, macos, macos-tests]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -556,6 +585,11 @@ jobs:
         run: exit 1
       - name: Check tests
         if: needs.tests.result == 'failure'
+        run: exit 1
+      # The only job that boots from an image. A failure here is hydration or
+      # the corpus answering differently under it, and either blocks.
+      - name: Check boot image
+        if: needs.boot-image.result == 'failure'
         run: exit 1
       - name: Check thread-pool I/O tests
         if: needs.nouring.result == 'failure'

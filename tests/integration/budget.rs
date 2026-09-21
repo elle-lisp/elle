@@ -1,4 +1,6 @@
-// The wall-clock budget the corpus per-file passes give one file.
+// audited: 2026-09-21
+// The wall-clock budget the corpus passes give one file, in both shapes: the
+// per-file `timeout`, and the runner's own per-form deadline.
 //
 // `RUN_PER_FILE` runs every corpus file as its own process under `timeout`, and
 // a file that outlives its budget is killed: exit 124, no output, no assertion
@@ -23,7 +25,7 @@
 // it, so a construct that carries one — a `case` pattern — parses on the
 // development box and dies file by file on the macOS runner.
 
-use crate::common::make_var;
+use crate::common::{make_dry_run, make_var};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -268,6 +270,79 @@ fn no_corpus_file_outlives_the_budget_before_its_own_deadline_fires() {
              diagnostic can never print — the gate reports exit 124 with no \
              output, which reads as a flaky runner. Either name the file in \
              WIDE_FILES or lower the deadline below TIMEOUT."
+        );
+        checked += 1;
+    }
+    assert!(
+        checked > 0,
+        "no corpus file declares a deadline. Either the declaration changed \
+         shape or the argument no longer applies — teach this test the new \
+         shape rather than letting it pass by matching nothing."
+    );
+}
+
+/// The per-form budget the corpus gate hands `elle test`, in milliseconds, read
+/// off the command line the gate will run.
+///
+/// `--dry-run` rather than the Makefile's text: the flag and its value meet on
+/// a recipe line, through variables, and what the pass runs is the only thing
+/// worth asserting on. `None` when the batch line carries no `--timeout` at
+/// all, which is the runner's default and the defect this exists to catch.
+fn runner_budget_millis() -> Option<u64> {
+    let recipe = make_dry_run("smoke-elle").expect("`make --dry-run smoke-elle` did not run");
+    let batch = recipe
+        .lines()
+        .find(|line| line.contains(" test ") && line.contains("xargs"))
+        .unwrap_or_else(|| panic!("`make smoke-elle` runs no `elle test` batch:\n{recipe}"));
+    let millis = batch.split("--timeout").nth(1)?;
+    Some(
+        millis
+            .split_whitespace()
+            .next()
+            .and_then(|word| word.parse().ok())
+            .unwrap_or_else(|| panic!("the runner's budget is not a number of milliseconds: {batch}")),
+    )
+}
+
+// The same trap as the per-file budget above, one shape over. `elle test` wraps
+// a multi-form file as ONE whole-file thunk, so the runner's `--timeout` covers
+// exactly what `timeout $(FILE_TIMEOUT)` covers in the per-file passes — but it
+// is one number for every form in the corpus, and the runner's own default is
+// 60 s against eight h2 files that give themselves 120 s to report a stall.
+//
+// On a quiet box those files finish in seconds and nothing shows. On the macOS
+// runner, the slowest in the workflow and the one that also carries
+// `--trace=scrub` and the debug assertions, the kill lands first: the gate
+// reports `timeout` for a file whose own diagnostic never printed, which reads
+// as a flaky runner. That took `macOS Smoke` down on three branches in one day
+// (h2-stream-share.lisp, every time), and no local run can see it — the budget
+// only bites where the box is slow enough.
+//
+// The counter-factual is the per-file pin above, which cannot reach this: it
+// reads `FILE_TIMEOUT`, which the runner never consults.
+#[test]
+fn the_runner_budget_clears_every_deadline_a_corpus_file_declares() {
+    let budget = runner_budget_millis().unwrap_or_else(|| {
+        panic!(
+            "the corpus batches run under the runner's own default per-form \
+             budget. That default is below the widest deadline a corpus file \
+             declares, so on a slow box the kill lands before the file can \
+             report the stall it exists to report. Pass `--timeout` on the \
+             batch line."
+        )
+    });
+
+    let mut checked = 0;
+    for path in corpus_files() {
+        let Some(deadline) = declared_deadline(&path) else {
+            continue;
+        };
+        assert!(
+            budget > deadline * 1000,
+            "{path} gives itself {deadline} s to report a stall, and the corpus \
+             gate kills the form at {budget} ms. The kill lands first, so the \
+             file's own diagnostic can never print and the gate reports a \
+             timeout naming nothing."
         );
         checked += 1;
     }
