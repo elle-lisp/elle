@@ -5,7 +5,7 @@
 //! docs/test-store.md
 
 use std::fs::File;
-
+use std::hash::Hasher;
 use std::io::{self, Read};
 use std::sync::OnceLock;
 
@@ -113,9 +113,15 @@ fn compute_fingerprint() -> Option<u64> {
 /// stable for a build. It is not a content address, and a fingerprint that
 /// travels between machines wants a real digest first.
 fn digest(image: &mut impl Read) -> io::Result<u64> {
+    let mut hasher = rustc_hash::FxHasher::default();
     let mut buf = vec![0u8; CHUNK];
-    while fill(image, &mut buf)? > 0 {}
-    Ok(0)
+    loop {
+        let have = fill(image, &mut buf)?;
+        hasher.write(&buf[..have]);
+        if have < buf.len() {
+            return Ok(hasher.finish());
+        }
+    }
 }
 
 /// Fill `buf` from `image` and answer how many bytes arrived, short of the
