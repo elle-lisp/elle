@@ -1,7 +1,8 @@
 (elle/epoch 12)
-# audited: 2026-09-17
-## elle test — turning an outcome into rows: the label a form is known by, the
-## status a payload classifies to, and one row per (form × tier).
+# audited: 2026-09-21
+## elle test — turning an outcome into rows: the label a form is known by, what
+## analysis finds in it, the status a payload classifies to, and one row per
+## (form × tier).
 ## docs/test-store.md
 ##
 ## A fragment of one module (see store.lisp).
@@ -66,15 +67,94 @@
                         :act (field-str payload :actual)
                         :exp (field-str payload :expected))))))))))
 
+# ── what analysis says about a form (docs/test-store.md) ─────────────
+# The function a form's source is analyzed as. A file's top level and a
+# function body are both letrec-scoped, so one function whose body is the file
+# is the form, and the signal inferred for that function is the form's own
+# effect profile. The name is the runner's: a corpus file that defined it
+# would have its profile read off the wrong body.
+(def profile-probe "elle-test-form-profile")
+
+# The capability bits — the resource classes a verdict depends on. `error` and
+# `yield` are signals and not capabilities: a form that raises, and a form that
+# suspends, are both still functions of their own inputs.
+(def capability-bits |"debug" "exec" "ffi" "fs" "gpu" "io" "os-signal"|)
+
+# The profile of a form the compiler would not analyze. Three NULLs, which say
+# the analysis did not answer — never that the form reaches nothing.
+(def no-profile (struct :caps nil :touches nil :signal nil))
+
+(defn bit-names [sig]
+  "One inferred signal's bits, as sorted names."
+  (let [@out @[]]
+    (each b in (get sig :bits)
+      (push out (string b)))
+    (sort out)))
+
+(defn touched-names [a]
+  "Every binding the analysis calls, less the ones the source defines itself.
+   A form that touched its own helpers would answer a selection by binding
+   with the forms that merely named one."
+  (let [@own @{}]
+    (each s in (compile/symbols a)
+      (put own (get s :name) true))
+    (let [@out @[]]
+      (each n in (get (compile/call-graph a) :nodes)
+        (each c in (get n :callees)
+          (when (not (get own c)) (push out c))))
+      (sort (distinct out)))))
+
+(defn form-profile [src name]
+  "What the compiler finds in SRC, as {:caps :touches :signal}, each a
+   space-separated list. Every step is protected: a profile is a reading about
+   a form, so a form that will not analyze costs the three columns and nothing
+   else — the run still compiles it, runs it, and records its verdict."
+  (let [[ok? a] (protect (compile/analyze (string "(defn " profile-probe " []\n"
+                         src "\n)") {:file name}))]
+    (if (not ok?)
+      no-profile
+      (let [[read? sig] (protect (compile/signal a profile-probe))]
+        (if (not read?)
+          no-profile
+          (let [names (bit-names sig)]
+            (struct :caps (string/join (filter (fn [n]
+                                         (contains? capability-bits n)) names)
+                                       " ")
+                    :touches (string/join (touched-names a) " ")
+                    :signal (string/join names " "))))))))
+
+# ── the form row ─────────────────────────────────────────────────────
+# The row's own fields as one value: what identifies a form, what it is known
+# by, and what analysis found in it. One constructor, because a call site that
+# wrote the struct out could leave the profile off and nothing would say so —
+# the row would simply record NULL, which is the answer reserved for an
+# analysis that refused.
+(defn form-row [h origin file idx label src profile]
+  (struct :hash h :origin (string origin) :file (string file) :index idx
+          :label label :src src :caps (get profile :caps)
+          :touches (get profile :touches) :signal (get profile :signal)))
+
+(defn form-row-of [origin file idx label src profile]
+  "The row for a form identified by the hash of its own syntax."
+  (form-row (string (hash src)) origin file idx label src profile))
+
+(defn file-row [kind origin file label src profile]
+  "The row for a file that produced no test form — a compile error, or a gated
+   shared setup. KIND separates the two synthetic hashes."
+  (form-row (string (hash (string kind ":" file))) origin file -1 label src
+            profile))
+
 # Insert the `form` row every recording path needs first. A form is deduped
 # across runs by the hash of its syntax, so a second run of the same code
 # re-uses the row rather than adding one — which is what lets a result join to
 # a form and a form's history join across runs. IGNORE, not REPLACE: the row
 # that is already there was written from the same hash.
-(defn insert-form [conn h origin file idx label src]
+(defn insert-form [conn row]
   (sqlite:exec conn
-               "INSERT OR IGNORE INTO form (hash, origin, file, form_index, label, src) VALUES (?1,?2,?3,?4,?5,?6)"
-               [h (string origin) (string file) idx label src]))
+               "INSERT OR IGNORE INTO form (hash, origin, file, form_index, label, src, caps, touches, signal) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"
+               [(get row :hash) (get row :origin) (get row :file)
+                (get row :index) (get row :label) (get row :src) (get row :caps)
+                (get row :touches) (get row :signal)]))
 
 # Insert one (form × tier) result row and return its rowid (so assets can
 # reference it).
@@ -127,20 +207,18 @@
         one
         (string one " " (render-pairs (rest pairs)))))))
 
-# Record ONE thunk under the form identity (SRC, LABEL) at index IDX: insert its
-# `form` row and run it across every active tier (divergence appended as a
-# synthetic tier='*' row). Shared by the per-form path (record-form-result) and
-# the whole-file path (the legacy multi-form mode runs one thunk for the file).
+# Record ONE thunk under the form identity ROW carries: insert its `form` row
+# and run it across every active tier (divergence appended as a synthetic
+# tier='*' row). Shared by the per-form path (record-form-result) and the
+# whole-file path (the legacy multi-form mode runs one thunk for the file).
 # `diverge?` enables the synthetic tier='*' divergence row. The per-form path
 # (record-form-result) forces ONE form onto each backend, so distinct values are
 # a real cross-tier disagreement — diverge? true. The whole-file path runs an
 # imperative SCRIPT under each JIT policy, whose side effects (pids, timestamps)
 # differ run-to-run, so a value difference is NOT a bug — diverge? false.
-(defn
-  record-thunk
-  [conn run-id origin file idx src label exec-fn dumps tiers diverge?]
-  (let [h (string (hash src))]
-    (insert-form conn h origin file idx label src)
+(defn record-thunk [conn run-id row exec-fn dumps tiers diverge?]
+  (let [h (get row :hash)]
+    (insert-form conn row)
     (let [tr (run-tiers conn run-id h exec-fn tiers dumps [] [])
           statuses (get tr 0)
           pass-pairs (get tr 1)
@@ -155,35 +233,38 @@
           (concat statuses [:diverge]))
         statuses))))
 
-(defn record-form-result [conn run-id origin file idx form thunk dumps]
-  (let [msg (scan-msg form)]
-    (record-thunk conn run-id origin file idx (string form) (if msg msg "")
-                  (fn [tk o e] (exec-thunk-capture tk thunk o e)) dumps
-                  active-tiers true)))
+(defn record-form-result [conn run-id row thunk dumps]
+  (record-thunk conn run-id row (fn [tk o e] (exec-thunk-capture tk thunk o e))
+                dumps active-tiers true))
 
 # Iterate the [idx thunk] entries from compile/barrier-module. `forms` is the
 # file's source forms (unevaluated, epoch-dropped) indexed the same way, so
 # entry idx → forms[idx] supplies each test form's label/hash/src. def/var
 # setup forms produce no entry (they ran eagerly during the compile pass).
-(defn process-entries [conn run-id origin file forms entries dumps acc]
+# `profile` is the file's, which for the one-form-per-file corpus shape is the
+# form's own (docs/test-store.md § What analysis says about a form).
+(defn process-entries [conn run-id origin file forms profile entries dumps acc]
   (if (empty? entries)
     acc
     (let [e (first entries)
           idx (get e 0)
           thunk (get e 1)
           form (get forms idx)
-          statuses (record-form-result conn run-id origin file idx form thunk
-                                       dumps)]
-      (process-entries conn run-id origin file forms (rest entries) dumps
-                       (concat acc statuses)))))
+          msg (scan-msg form)
+          row (form-row-of origin file idx (if msg msg "") (string form) profile)
+          statuses (record-form-result conn run-id row thunk dumps)]
+      (process-entries conn run-id origin file forms profile (rest entries)
+                       dumps (concat acc statuses)))))
 
 # A file that won't compile (or whose setup faults) has no test forms to run:
 # record ONE file-level failure (a `vm` row joined to a synthetic form row whose
 # `file` is the offending file, so SQL selection by file still finds it).
-(defn record-file-error [conn run-id origin file payload dumps]
+(defn record-file-error [conn run-id origin file payload dumps profile]
   (let [msg (field-str payload :message)
-        h (string (hash (string "file-error:" file)))]
-    (insert-form conn h origin file -1 "file-level error" (if msg msg ""))
+        row (file-row "file-error" origin file "file-level error"
+                      (if msg msg "") profile)
+        h (get row :hash)]
+    (insert-form conn row)
     (sqlite:exec conn
                  "INSERT INTO result (run_id, form_hash, tier, status, reason, signal) VALUES (?1,?2,?3,?4,?5,?6)"
                  [run-id h :vm :fail msg (sig-of payload)])  # Attach whatever artifacts compiled (a non-compiling file often still
@@ -199,10 +280,12 @@
 # per-form results to record; we mirror record-file-error but as a SKIP (the
 # dependency is absent, not broken). One file-level row (form_index -1), counted
 # in n_skip, leaves the gate exit at 0. See docs/test-runner.md § Gating.
-(defn record-file-gated [conn run-id origin file payload dumps]
+(defn record-file-gated [conn run-id origin file payload dumps profile]
   (let [reason (field-str payload :reason)
-        h (string (hash (string "file-gated:" file)))]
-    (insert-form conn h origin file -1 "file-level gated" (if reason reason ""))
+        row (file-row "file-gated" origin file "file-level gated"
+                      (if reason reason "") profile)
+        h (get row :hash)]
+    (insert-form conn row)
     (sqlite:exec conn
                  "INSERT INTO result (run_id, form_hash, tier, status, reason, signal) VALUES (?1,?2,?3,?4,?5,?6)"
                  [run-id h :vm :skip reason ":gated"])
@@ -221,12 +304,12 @@
 # Interpret a compile/{barrier,whole}-module result: ENTRIES (the [idx thunk]
 # accumulator) on success → RUN-FN; a `:gated` shared-setup → one file-level
 # SKIP; any other setup/compile fault → one file-level FAIL.
-(defn dispatch-compiled [conn run-id origin file out dumps run-fn]
+(defn dispatch-compiled [conn run-id origin file out dumps profile run-fn]
   (if (get out 0)
     (run-fn (get out 1))
     (if (= (get (get out 1) :error) :gated)
-      (record-file-gated conn run-id origin file (get out 1) dumps)
-      (record-file-error conn run-id origin file (get out 1) dumps))))
+      (record-file-gated conn run-id origin file (get out 1) dumps profile)
+      (record-file-error conn run-id origin file (get out 1) dumps profile))))
 
 # A legacy multi-form file is one imperative script: compile it as a single
 # whole-file thunk (compile/whole-module) and run that ONE thunk per tier, in
@@ -235,19 +318,20 @@
 # script (read-before-write) and re-runs shared mutations per tier; one thunk
 # eliminates that. The file is its own form: src = the file, label = the first
 # assert message anywhere in it. See docs/test-runner.md § Multi-form files.
-(defn process-whole [conn run-id origin file name src forms dumps]  # Compile ONCE in the main VM to detect a compile error or a top-level :gated
+(defn process-whole [conn run-id origin file name src forms profile dumps]  # Compile ONCE in the main VM to detect a compile error or a top-level :gated
   # (dispatch-compiled records the file-level error/skip row) — but DON'T run that
   # thunk. For execution we ship the file's parsed SYNTAX to a worker that
   # compiles + runs it with its own stdlib (exec-source-capture), so a file whose
   # forms `import` a yielding module (sync/redis/http2/process/grpc/subprocess)
   # shares one scheduler with the worker's ev/run. read-forms is sendable syntax.
   (let [out (protect (compile/whole-module src name))]
-    (dispatch-compiled conn run-id origin file out dumps
+    (dispatch-compiled conn run-id origin file out dumps profile
                        (fn [entries]
                          (let [msg (scan-children forms)
                                read-forms (compile/read-forms src name)]
-                           (record-thunk conn run-id origin file 0 src
-                           (if msg msg "")
+                           (record-thunk conn run-id
+                           (form-row-of origin file 0 (if msg msg "") src
+                                        profile)
                            (fn [tk o e]
                              (exec-source-capture tk read-forms name o e)) dumps
                            whole-file-policies false))))))
@@ -258,14 +342,16 @@
 # compile/setup error becomes one file-level failure.
 (defn process-source [conn run-id origin file name src]
   (let [forms (test-forms src)
-        dumps (capture-dumps src name)]
+        dumps (capture-dumps src name)
+        profile (form-profile src name)]
     (if (> (length forms) 1)
-      (process-whole conn run-id origin file name src forms dumps)
+      (process-whole conn run-id origin file name src forms profile dumps)
       (dispatch-compiled conn run-id origin file
                          (protect (compile/barrier-module src name)) dumps
+                         profile
                          (fn [entries]
                            (process-entries conn run-id origin file forms
-                           entries dumps []))))))
+                           profile entries dumps []))))))
 
 (defn process-file [conn run-id file]
   (process-source conn run-id file file file (slurp file)))
@@ -279,10 +365,12 @@
 (defn process-file-isolated [conn run-id file flags]
   (let [[read-ok? src] (protect (slurp file))]
     (if (not read-ok?)
-      (record-file-error conn run-id file file src [])
-      (let [h (string (hash src))
-            [parse-ok? forms] (protect (test-forms src))
+      (record-file-error conn run-id file file src [] no-profile)
+      (let [[parse-ok? forms] (protect (test-forms src))
             msg (if parse-ok? (scan-children forms) nil)
+            row (form-row-of file file 0 (if msg msg "") src
+                             (form-profile src file))
+            h (get row :hash)
             sink (measurement-sink run-id h)
             cap (run-child (child-argv flags file) test-timeout-ms
                            (measurement-env sink))
@@ -290,8 +378,10 @@
         # The label is scavenged from the source, and a file the child will
         # reject as unreadable has none to give — the child's own status is
         # the verdict either way, so a failed scan costs the label and nothing
-        # else.
-        (insert-form conn h file file 0 (if msg msg "") src)
+        # else. The profile is read here rather than in the child: a form's
+        # effect profile is a property of its source, and this process has the
+        # compiler open already.
+        (insert-form conn row)
         (let [rid (insert-result conn run-id h :process c)]
           (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
           # A dashboard reports its verdicts through the channel named in the

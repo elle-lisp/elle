@@ -1,6 +1,6 @@
 # Driving the test runner
 
-<!-- audited: 2026-09-17 -->
+<!-- audited: 2026-09-21 -->
 
 Why `elle test` exists, the command line it offers, what it refuses to
 offer, and what is still design.
@@ -14,7 +14,8 @@ How a run executes is [test-runner](test-runner.md); where it is stored is
 > the per-form fault barrier and the whole-file mode, worker-thread isolation,
 > the vm/jit tier matrix with cross-tier divergence, the persistent SQLite
 > index (a **subset** of the schema — see the note there), the per-run code
-> state (commit, tree hash, worktree, host, build), the on-disk CAS for
+> state (commit, tree hash, worktree, host, build, boot fingerprint), the
+> per-form analysis columns (`caps`, `touches`, `signal`), the on-disk CAS for
 > stdout/stderr, run honesty (a killed run reads `DID NOT COMPLETE`), `:gated`
 > skips, child-process isolation with the measurement channel it carries, and
 > the `--query`/`--summary`/`--reset`/`--promote`/`-e`/`--timeout`/
@@ -223,11 +224,13 @@ and the in-process artifact-capture compile option, realized as the
 the `--dump` artifact set as strings rather than printing them and exiting.
 
 The run's code state comes from `git` and `uname` through `subprocess/exec`,
-and the binary's own identity from `(elle/version)`, `(elle/build-profile)` and
-`(elle/executable)`. None has another source: each is a fact about this binary,
-so only this binary can report it. The executable path is what `--isolate`
-spawns — a child resolved off `PATH` would be a different build, and the run
-would say nothing about the one under test.
+and the binary's own identity from `(elle/version)`, `(elle/build-profile)`,
+`(elle/executable)` and `(elle/boot-fingerprint)`. None has another source:
+each is a fact about this binary, so only this binary can report it. The
+executable path is what `--isolate` spawns — a child resolved off `PATH` would
+be a different build, and the run would say nothing about the one under test.
+The fingerprint hashes that executable, which carries the sources it boots
+from ([test-store](test-store.md) § The boot fingerprint).
 
 ## Open implementation questions (for the tests/code phases)
 

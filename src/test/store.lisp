@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-20
+# audited: 2026-09-21
 ## elle test — the session store: where a run is kept, the schema it is kept
 ## in, what a run row says about the code it ran against, and the CAS.
 ## docs/test-store.md
@@ -45,8 +45,8 @@
 # the migration below and the INSERT in main all have to agree about it.
 (def run-code-columns
   [["git_commit" "TEXT"] ["git_dirty" "INTEGER"] ["tree_hash" "TEXT"]
-   ["worktree" "TEXT"] ["elle_version" "TEXT"] ["build_profile" "TEXT"]
-   ["host" "TEXT"] ["argv" "TEXT"]])
+   ["worktree" "TEXT"] ["boot_fingerprint" "INTEGER"] ["elle_version" "TEXT"]
+   ["build_profile" "TEXT"] ["host" "TEXT"] ["argv" "TEXT"]])
 
 (defn ensure-code-columns [conn cols]
   (if (empty? cols)
@@ -57,7 +57,7 @@
 
 (defn ensure-schema [conn]
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0)")
+               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, boot_fingerprint INTEGER, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS form (hash TEXT PRIMARY KEY, origin TEXT, session TEXT, file TEXT, form_index INTEGER, line INTEGER, col INTEGER, label TEXT, src TEXT, caps TEXT, touches TEXT, signal TEXT)")
   (sqlite:exec conn
@@ -121,14 +121,18 @@
 # fields are nil, which lands as SQL NULL: the run happened, and nothing names
 # the code it ran against. The host and the build are facts about the box and
 # the binary, so they are recorded either way.
+#
+# The boot fingerprint is the binary itself, hashed (docs/test-store.md § The
+# boot fingerprint): a commit says which sources a run was meant to test, and
+# only this says which executable tested them.
 (defn run-identity []
   (let [commit (capture-cmd "git rev-parse HEAD 2>/dev/null")]
     (struct :commit commit
             :dirty (if commit (if (capture-cmd status-cmd) 1 0) nil)
             :tree (if commit (capture-cmd tree-hash-cmd) nil)
             :worktree (capture-cmd "git rev-parse --show-toplevel 2>/dev/null")
-            :host (capture-cmd "uname -n") :version (elle/version)
-            :profile (elle/build-profile)
+            :boot (elle/boot-fingerprint) :host (capture-cmd "uname -n")
+            :version (elle/version) :profile (elle/build-profile)
             :argv (string/join (rest (sys/argv)) " "))))
 
 # ── CAS: content-addressed artifact store (docs/test-runner.md § CAS) ─────
