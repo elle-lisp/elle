@@ -249,4 +249,4 @@
             (fail (string "missing (" (string field) " ...)"))))
         (put surface :exports exports))))
 
-  {:render render :parse parse})
+  {:render render :parse parse :render-shape render-shape})

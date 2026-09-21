@@ -197,4 +197,4 @@
                                  (hybrid-exports ctor sx))
         (static-mode module version sx))))
 
-  {:extract extract :short-hash short-hash})
+  {:extract extract :short-hash short-hash :declared-version declared-version})

@@ -254,6 +254,9 @@ fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
 	@# so bumping CURRENT_EPOCH must not flag every older-epoch file here.
 	@printf '%s\n' $(LISP_FILES) | parallel -j $(JOBS) '$(ELLE) fmt --check --no-epoch {}'
 
+semver-check: elle  ## Verify every versioned library surface against its committed .surface
+	$(ELLE) semver
+
 # ── Test ────────────────────────────────────────────────────────────
 
 # Approximate runtimes (for guidance — vary by machine):

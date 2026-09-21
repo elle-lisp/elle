@@ -129,6 +129,35 @@ fn run_test_subcommand(sub_args: Vec<String>) -> i32 {
     code
 }
 
+/// The semver gate, embedded at build time. See docs/semver.md.
+const SEMVER_RUNNER: &str = include_str!("semver/main.lisp");
+
+/// `elle semver ...` — the same lifecycle as `elle test`: one full VM, the
+/// embedded driver, the post-`semver` arguments as the program argv. The
+/// driver calls `(os/exit ...)` itself; an uncaught error maps to 2, the
+/// driver's tool-error code, so a crash never reads as a verdict.
+fn run_semver_subcommand(sub_args: Vec<String>) -> i32 {
+    let (config_flags, sub_args): (Vec<String>, Vec<String>) = sub_args
+        .into_iter()
+        .partition(|a| a.starts_with("--trace=") || a == "--stats" || a == "--no-uring");
+    let (config, _rest) = elle::config::Config::parse(&config_flags).unwrap_or_else(|e| {
+        eprintln!("elle semver: {}", e);
+        std::process::exit(2);
+    });
+    elle::config::init(config);
+    elle::io::init_process_signals();
+
+    let mut rt = Runtime::new();
+    rt.vm().source_arg = "<semver>".to_string();
+    rt.vm().user_args = sub_args;
+
+    let (vm, symbols, cctx) = rt.parts();
+    match run_source(SEMVER_RUNNER, "src/semver", vm, symbols, cctx) {
+        Ok(_) => 0,
+        Err(_) => 2,
+    }
+}
+
 fn run_source(
     contents: &str,
     source_name: &str,
@@ -281,6 +310,13 @@ fn main() {
             // A boot image is written by a full source boot, so this needs a
             // `Runtime` like `test` does rather than answering before VM init.
             let exit_code = run_image(&args[2..]);
+            std::process::exit(exit_code);
+        }
+        Some("semver") => {
+            // The gate is an Elle program (src/semver) and needs a full VM,
+            // like `elle test`.
+            let sub_args: Vec<String> = args[2..].to_vec();
+            let exit_code = run_semver_subcommand(sub_args);
             std::process::exit(exit_code);
         }
         Some("test") => {
