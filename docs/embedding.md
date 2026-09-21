@@ -47,8 +47,11 @@ The init sequence:
 6. `value::arena::release_program_value(vm.heap(), value)` — give back the one
    owning reference the run handed over, once the host has read what it needs
    from the value. A host that reads the value for the rest of the runtime's
-   life calls `value::arena::register_process_root` instead, and the sweep in
-   step 7 releases it. See the [region rules](impl/region/rules.md).
+   life calls `value::arena::register_process_root` with `RootRef::Take`
+   instead, and the sweep in step 7 releases it. A host that registers a value
+   it holds no reference to — a part of the program value, rather than the
+   value itself — passes `RootRef::Mint`, which raises the count for the root.
+   See the [region rules](impl/region/rules.md).
 7. Drop the `Runtime` (or call `rt.teardown()`) to run the region-RC
    teardown sweep when done.
 

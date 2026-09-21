@@ -250,6 +250,11 @@ is a correctness defect, not a tuning knob.
      operand's reference while the operation is in flight, and disposing of the
      entry decrefs it (`OperandHold`, docs/impl/io-inflight.md § "A submitted operation
      holds the values its completion reads");
+   - *retained process root* — a value a host keeps reading past the run that
+     produced it, registered as a process root while the host holds no owning
+     reference to hand over (`EscapeSite::ProcessRoot`); the registry is
+     external to the region system in the way a channel buffer is, so this
+     retain is the root's reference, and the teardown sweep's decref lowers it;
    - *terminal fiber signal* — a child's set-once return/error/halt result, read
      later via `fiber/value`, is park-retained when the fiber goes terminal and
      released by the signal scan when the fiber is freed.
@@ -396,6 +401,18 @@ value:
 A host that does neither measures the residue of its own hand-off rather than
 the run's. That residue is one region per run, not one per call, so no leak
 *rate* ever sees it — the teardown census is the only instrument that does.
+
+A registration takes one owning reference, so a host that registers a value it
+holds no reference to must mint one first. `RootRef::Take` hands over the
+reference the caller holds; `RootRef::Mint` raises the count, so the root
+outlives whatever release the caller still owes. A registration that takes a
+reference nobody holds is an over-free, and it stands only while the value that
+holds the registered part leaks.
+
+The REPL is the host that needs both halves. It prints each form's value and
+releases it, and every binding it keeps mints a reference of its own. That
+covers each leaf of a destructuring `def`: the leaves belong to the trailing
+tuple, and that tuple is the program value the REPL releases.
 
 ## Macro expansion — a closed allocation scope
 
