@@ -106,11 +106,15 @@ fn a_hydrated_stdlib_closure_reports_where_it_was_written() {
         Some("<stdlib>".to_string()),
         "a hydrated stdlib closure lost its origin"
     );
-    let name = eval(&mut rt, "(str (meta/origin +))");
-    assert!(
-        name.as_str().is_some_and(|s| s.contains(":line")),
-        "the origin struct did not render: {name}"
-    );
+    // The line and the column cross beside the file, so the whole span is
+    // pinned rather than the one field the file table rewrites.
+    for field in [":line", ":col"] {
+        let answer = eval(&mut rt, &format!("(get (meta/origin +) {field})"));
+        assert!(
+            answer.as_int().is_some_and(|n| n > 0),
+            "a hydrated origin answers {field} with {answer}"
+        );
+    }
 }
 
 // § Test plan, "Boot": a macro the boot never expanded still expands after
@@ -132,7 +136,7 @@ fn a_macro_expands_after_an_image_boot() {
     // A macro defined after the boot expands beside the hydrated ones, so the
     // expander is a working expander and not just a table of templates.
     assert_eq!(
-        eval(&mut rt, "(defmacro twice [x] `(+ ;x ;x)) (twice 21)").as_int(),
+        eval(&mut rt, "(defmacro twice [x] `(+ ,x ,x)) (twice 21)").as_int(),
         Some(42),
         "a macro defined after an image boot expanded wrong"
     );
@@ -206,7 +210,12 @@ fn two_dumps_of_one_boot_state_write_one_file() {
     let a = dir.join("a.image");
     let b = dir.join("b.image");
 
-    let mut rt = Runtime::new();
+    // The stdlib is compiled rather than read from its disk cache: a cache hit
+    // rebuilds the library's closures through the send codec, whose capture
+    // cells record no binding, and the dump refuses one of those
+    // (docs/impl/image/boot.md). With `Runtime::new()` here the verdict would
+    // move with the state of a file no assertion below names.
+    let mut rt = Runtime::with_stdlib_cache(StdlibCache::Off);
     paint_stack(0xAA, 16);
     rt.dump_boot_image(&a).expect("dump a");
     paint_stack(0x55, 16);
@@ -221,34 +230,6 @@ fn two_dumps_of_one_boot_state_write_one_file() {
     assert_eq!(diff, 0, "two boot dumps differ at {diff} offsets");
 }
 
-// § Test plan, "Boot": a process holding a user signal bit fails the boot
-// dump, naming the signal.
-//
-// The trap is the registry's scope: it is process-global, so registering a
-// signal here would follow every later test in this binary. Snapshot and
-// restore is what the diagnostic compile path already does for the same
-// reason (src/dump.rs).
-#[test]
-fn a_user_signal_bit_refuses_the_boot_dump() {
-    let dir = crate::common::ScratchDir::new("image-boot-signal");
-    let path = dir.join("signal.image");
-    let mut rt = Runtime::new();
-
-    let snapshot = elle::signals::registry::snapshot_registry();
-    elle::signals::registry::global_registry()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .register("image-boot-probe")
-        .expect("a fresh user bit");
-    let refusal = rt.dump_boot_image(&path);
-    elle::signals::registry::restore_registry(snapshot);
-
-    match refusal {
-        Err(ImageError::Unsupported(what)) => assert!(
-            what.contains("image-boot-probe"),
-            "the refusal does not name the signal: {what}"
-        ),
-        other => panic!("expected a refused dump, got {other:?}"),
-    }
-    assert!(!path.exists(), "a refused boot dump left a partial file");
-}
+// The signal-bit refusal is in `tests/image_boot_signal.rs`, a binary of its
+// own: the signal registry is process-global, so registering a bit here
+// refuses every boot dump running beside it.

@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-09-21
 //! The core.lisp bootstrap: compile and run the core module before any
 //! compile context exists, and hand its exports to the one being built.
 //!
@@ -18,7 +18,47 @@ use crate::value::arena::RootRef;
 use crate::vm::VM;
 
 /// core.lisp source, embedded at compile time.
-const CORE: &str = include_str!("../core.lisp");
+use super::sources::CORE;
+
+/// Install core.lisp's exports: by name into the expander's `core_env`, which
+/// macro bodies resolve through, and by id into `meta`, which user code sees
+/// as globals.
+///
+/// Both boots end here — a source boot with the struct core.lisp returned, an
+/// image boot with the one its image carries (docs/impl/image/boot.md) — so
+/// neither can register an export the other would not.
+pub fn install_core_exports(
+    exports_val: crate::value::Value,
+    symbols: &mut SymbolTable,
+    meta: &mut PrimitiveMeta,
+    expander: &mut Expander,
+) {
+    let exports_struct = exports_val
+        .as_struct()
+        .expect("core.lisp must return a struct");
+    for (key, value) in exports_struct.iter() {
+        if let crate::value::types::TableKey::Keyword(hash) = key {
+            // The export struct was read from module source, or its spellings
+            // came in with an image's name table; a miss is a missed learning
+            // site either way.
+            let name = symbols
+                .keyword_name(*hash)
+                .map(str::to_string)
+                .unwrap_or_else(|| panic!("module export key {:#x} has no learned spelling", hash));
+            // core_env: name-keyed, used by eval_syntax for macro bodies
+            expander.core_env.insert(name.clone(), *value);
+            // meta: SymbolId-keyed, used by compile_file for user code
+            let sym_id = symbols.intern(&name);
+            let signal = if let Some(c) = value.as_closure() {
+                c.template.signal()
+            } else {
+                Signal::silent()
+            };
+            meta.signals.insert(sym_id, signal);
+            meta.functions.insert(sym_id, *value);
+        }
+    }
+}
 
 /// Compile and execute core.lisp, storing exports in the Expander's core_env.
 ///
@@ -26,12 +66,14 @@ const CORE: &str = include_str!("../core.lisp");
 /// without using a `CompileCtx` (we're inside its construction). The bare
 /// expander has no prelude macros — core.lisp uses only special forms and
 /// %-prefixed intrinsics.
+///
+/// Answers the export struct, which the boot dump writes into its image.
 pub(super) fn compile_core(
     vm: &mut VM,
     symbols: &mut SymbolTable,
     meta: &mut PrimitiveMeta,
     expander: &mut Expander,
-) {
+) -> crate::value::Value {
     use crate::hir::{Analyzer, BindingArena, FileForm};
     use crate::lir::{Emitter, Lowerer};
     use crate::reader::read_syntax_all;
@@ -157,33 +199,11 @@ pub(super) fn compile_core(
     crate::value::arena::register_process_root(heap, closure_val, RootRef::Take);
     crate::value::arena::register_process_root(heap, exports_val, RootRef::Take);
 
-    let exports_struct = exports_val
-        .as_struct()
-        .expect("core.lisp must return a struct");
-    for (key, value) in exports_struct.iter() {
-        if let crate::value::types::TableKey::Keyword(hash) = key {
-            // The export struct was read from module source, so its key
-            // spellings are in the memo; a miss is a missed learning site.
-            let name = symbols
-                .keyword_name(*hash)
-                .map(str::to_string)
-                .unwrap_or_else(|| panic!("module export key {:#x} has no learned spelling", hash));
-            // core_env: name-keyed, used by eval_syntax for macro bodies
-            expander.core_env.insert(name.clone(), *value);
-            // meta: SymbolId-keyed, used by compile_file for user code
-            let sym_id = symbols.intern(&name);
-            let signal = if let Some(c) = value.as_closure() {
-                c.template.signal()
-            } else {
-                Signal::silent()
-            };
-            meta.signals.insert(sym_id, signal);
-            meta.functions.insert(sym_id, *value);
-        }
-    }
+    install_core_exports(exports_val, symbols, meta, expander);
 
     // core.lisp's tree has done its work: nothing beyond this point reads it,
     // and the macros it might have defined were copied to the template arena
     // as they were registered.
     unsafe { (*heap_ptr).decref_region_if_present(syntax_arena.region()) };
+    exports_val
 }

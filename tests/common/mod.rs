@@ -52,6 +52,7 @@ pub fn eval_source_bare<R>(input: &str, f: impl FnOnce(Result<Value, String>) ->
 /// its heap is alive (see the module note above). The canonical test eval — use
 /// it unless you have a specific reason not to (e.g. testing without stdlib).
 /// Handles single- and multi-form input via `eval_all`.
+#[allow(dead_code)]
 pub fn eval_source<R>(input: &str, f: impl FnOnce(Result<Value, String>) -> R) -> R {
     let mut rt = Runtime::new();
     let result = {
@@ -221,6 +222,24 @@ pub fn make_var(name: &str, env: &[(&str, &str)]) -> Option<String> {
         return None;
     }
     Some(String::from_utf8(out.stdout).ok()?.trim().to_string())
+}
+
+/// Fill `depth + 1` stack frames with `pattern`, so that any construction
+/// temporary a later call materializes inherits pattern bytes in its padding.
+///
+/// A determinism test paints between two dumps: a dumper that copied slot
+/// bytes wholesale would write whatever the stack held into the artifact. The
+/// xor keeps the recursion and the buffer observable.
+#[allow(dead_code)]
+#[inline(never)]
+pub fn paint_stack(pattern: u8, depth: usize) -> u64 {
+    let buf = [pattern; 4096];
+    let sum: u64 = buf.iter().map(|&b| b as u64).sum();
+    if depth == 0 {
+        sum
+    } else {
+        sum ^ paint_stack(pattern, depth - 1)
+    }
 }
 
 /// Uniquely-named scratch directory under the platform temp root, removed

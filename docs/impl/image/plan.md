@@ -188,9 +188,11 @@ Then the image milestones:
   reports that it booted from the image, because behaviour alone cannot tell
   the two apart. A macro the boot never expanded still expands after
   hydration, which is the lazy transformer fill working over a hydrated
-  template. The expander mints scopes above the image's watermark, so a macro
-  defined after an image boot cannot collide with a hydrated template's scopes.
-  A fresh instance prints a hydrated stdlib closure's name and answers
+  template. The installed expander mints the scopes a source boot would, above
+  the watermark the image records — which for a boot graph is one, because a
+  prelude template carries the prelude scope alone, so the raise itself is
+  pinned separately. A fresh instance prints a hydrated stdlib closure's name
+  and answers
   `meta/origin` with the file it was written in, both out of the image's
   tables. An image whose source digest is not this binary's is refused by its
   own name, not the fingerprint's, and the instance boots from source instead.

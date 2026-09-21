@@ -84,40 +84,65 @@ fn the_macro_table_crosses_with_its_filled_transformers() {
 }
 
 // § "The watermarks bound what a fresh instance may mint"
-// (docs/impl/image/format.md): an expander starts its counter at one, so a
-// hydrated template's scopes and a fresh expander's would collide. The
-// installed counter must clear every scope the image's templates carry.
+// (docs/impl/image/format.md): the installed expander's counter clears every
+// scope the image's syntax carries, and an image boot mints from the same
+// counter a source boot does.
 //
-// The counter-factual is an expander left at its own start: two unrelated
-// scopes compare equal, and a template symbol can resolve to a user binding
-// that happens to share the number.
+// The trap is the size of that watermark. A boot graph's templates carry the
+// prelude scope alone, which is zero, so the watermark is 1 — where a fresh
+// expander already starts. The boot's own expansions mint on per-compile
+// clones of the master expander, and a clone's counter never reaches the
+// master, so the two boots agree here whether or not the raise runs at all.
+// `raising_the_scope_counter_only_moves_it_up` below is the pin on the
+// mechanism; this one pins the agreement.
 #[test]
-fn a_fresh_expander_mints_scopes_above_the_images_watermark() {
+fn an_image_boot_mints_the_scopes_a_source_boot_would() {
     let scratch = Scratch::new("watermark");
-    drop(Runtime::with_caches(scratch.caches()));
+    let counter = {
+        let mut source = Runtime::with_caches(scratch.caches());
+        assert_eq!(source.boot_source(), BootSource::Compiled);
+        source.compile().scope_counter()
+    };
 
-    // Read the watermark out of the image directly, so the assertion compares
-    // the instance against the artifact rather than against itself.
+    let mut rt = Runtime::with_caches(scratch.caches());
+    assert_eq!(rt.boot_source(), BootSource::Image);
+    assert_eq!(
+        rt.compile().scope_counter(),
+        counter,
+        "an image boot mints from a different scope than the boot it was dumped from"
+    );
+    assert!(
+        rt.compile().scope_counter() >= watermark_of(&scratch),
+        "the expander mints inside the scopes the image's syntax carries"
+    );
+}
+
+/// The scope watermark the image in `scratch` records, read out of the
+/// artifact so the assertion above compares the instance against the file
+/// rather than against itself.
+fn watermark_of(scratch: &Scratch) -> u32 {
     let path = std::fs::read_dir(scratch.0.join("boot"))
         .expect("the boot directory exists")
         .flatten()
         .map(|e| e.path())
         .find(|p| p.extension().is_some_and(|e| e == "image"))
-        .expect("the first boot stored an image");
-    let watermark = {
-        let mut probe = Runtime::without_stdlib();
-        let (heap, symbols) = probe.heap_and_symbols();
-        super::hydrate_path(heap, symbols, &path)
-            .expect("hydrate")
-            .scope_watermark
-    };
-    assert!(watermark > 1, "the image carries no scopes: {watermark}");
+        .expect("a stored image");
+    let mut probe = Runtime::without_stdlib();
+    let (heap, symbols) = probe.heap_and_symbols();
+    super::hydrate_path(heap, symbols, &path)
+        .expect("hydrate")
+        .scope_watermark
+}
 
-    let mut rt = Runtime::with_caches(scratch.caches());
-    assert_eq!(rt.boot_source(), BootSource::Image);
-    assert!(
-        rt.compile().scope_counter() >= watermark,
-        "the expander mints from {}, inside the image's scopes (watermark {watermark})",
-        rt.compile().scope_counter()
-    );
+// The mechanism the test above rests on, over a watermark no boot graph
+// produces: a raise moves the counter and a lower one leaves it alone, so two
+// images hydrated into one instance each raise and the highest wins.
+#[test]
+fn raising_the_scope_counter_only_moves_it_up() {
+    let mut vm = crate::vm::VM::new();
+    let mut expander = crate::syntax::Expander::on_vm(&mut vm);
+    expander.raise_scope_counter(50);
+    assert_eq!(expander.scope_counter(), 50);
+    expander.raise_scope_counter(20);
+    assert_eq!(expander.scope_counter(), 50, "a lower watermark lowered it");
 }

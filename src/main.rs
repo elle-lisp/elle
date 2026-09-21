@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-09-21
 //! The `elle` binary: dispatch a subcommand, or set up one `Runtime` and drive
 //! it from a file, `-e`, stdin or the REPL.
 //!
@@ -15,6 +15,8 @@ use std::io::{self, Read};
 
 mod dump_cli;
 use dump_cli::run_dump;
+mod image_cli;
+use image_cli::run_image;
 mod help;
 use help::print_help;
 mod errors;
@@ -266,6 +268,12 @@ fn main() {
         Some("rewrite") => {
             let sub_args: Vec<String> = args[2..].to_vec();
             let exit_code = elle::rewrite::run::run(&sub_args);
+            std::process::exit(exit_code);
+        }
+        Some("image") => {
+            // A boot image is written by a full source boot, so this needs a
+            // `Runtime` like `test` does rather than answering before VM init.
+            let exit_code = run_image(&args[2..]);
             std::process::exit(exit_code);
         }
         Some("test") => {

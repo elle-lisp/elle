@@ -154,19 +154,7 @@ fn graph_names() -> SymbolTable {
     names
 }
 
-/// Fill `depth + 1` stack frames with `pattern` so that any construction
-/// temporary a later call materializes inherits pattern bytes in its
-/// padding. The xor keeps the recursion and the buffer observable.
-#[inline(never)]
-fn paint_stack(pattern: u8, depth: usize) -> u64 {
-    let buf = [pattern; 4096];
-    let sum: u64 = buf.iter().map(|&b| b as u64).sum();
-    if depth == 0 {
-        sum
-    } else {
-        sum ^ paint_stack(pattern, depth - 1)
-    }
-}
+use crate::common::paint_stack;
 
 /// Build [`build_graph`]'s graph in `src` and dump it to `path`, answering the
 /// source-heap root. The heap stays the caller's, because comparing a hydrated
@@ -353,10 +341,4 @@ mod snapping {
 }
 mod spine {
     include!("image/spine.rs");
-}
-mod boot {
-    include!("image/boot.rs");
-}
-mod warm {
-    include!("image/warm.rs");
 }

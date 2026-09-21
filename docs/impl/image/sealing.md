@@ -1,6 +1,6 @@
 # Sealing
 
-<!-- audited: 2026-09-19 -->
+<!-- audited: 2026-09-21 -->
 
 What an image's body may hold, what the hydrating instance rebuilds for itself,
 and what fails the dump.
@@ -130,7 +130,18 @@ named by variant.
 ## What the body refuses
 
 Refused outright: every mutable variant, `LBox`, `Fiber`, thread and library
-handles, ports, externals, FFI signatures, managed pointers. Mutable
+handles, ports, externals, FFI signatures, managed pointers.
+
+A closure whose signal or squelch mask names a signal this process *declared*
+is refused too, by the signal's name. Bits from 32 up are handed out in
+declaration order by a process-global registry, and no image carries a signal
+table, so such a bit would mean a different signal — or none — in the instance
+that hydrates it. The test is against what the registry handed out rather than
+against the whole high range: inference sets high bits to mean "this may signal
+anything", and those mean the same on both sides of a dump. One consequence is
+worth knowing: a core.lisp closure carries such an inference mask, so a process
+that has declared a signal can no longer dump a boot image. A boot dump runs
+before any program does, so the order holds where it matters. Mutable
 *bindings* may still be persisted through the side-stream where the image's
 dump policy permits it — the environment policy does, opt-in; the strict boot
 policy does not ([image.md](../image.md) owns the fork). The `spirv` kernel

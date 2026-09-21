@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-09-21
 //! Loading the standard library into one runtime: obtain its bytecode, run
 //! it, and register what it exports.
 //!
@@ -8,6 +8,8 @@
 //! docs/stdlib.md
 
 use crate::pipeline::compile_file;
+/// Standard library source, embedded at compile time.
+use crate::pipeline::sources::STDLIB;
 use crate::pipeline::CompileCtx;
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
@@ -17,8 +19,6 @@ use crate::value::Value;
 use crate::vm::VM;
 use std::collections::HashMap;
 use std::rc::Rc;
-/// Standard library source, embedded at compile time.
-const STDLIB: &str = include_str!("../stdlib.lisp");
 /// Initialize the standard library by evaluating stdlib.lisp.
 ///
 /// The stdlib is compiled as a single synthetic letrec so that
@@ -101,6 +101,10 @@ pub enum StdlibSource {
     Cache,
     /// Compiled from `stdlib.lisp`.
     Compiled,
+    /// Hydrated out of a boot image, which carries the exports themselves
+    /// rather than bytecode to run (docs/impl/image/boot.md). The disk cache
+    /// was never consulted.
+    Image,
 }
 
 /// Register each stdlib export into the compilation cache (the tail of the
@@ -113,8 +117,6 @@ fn register_exports(
     closure_val: Value,
     exports_val: Value,
 ) {
-    let boot = crate::trace::boot();
-    let t = std::time::Instant::now();
     // Root the stdlib export aggregate (the struct + its module closure), not
     // each export. `exports_val` references every stdlib export, and the `Value`s
     // registered into the compilation caches below are aliases into those
@@ -128,9 +130,23 @@ fn register_exports(
     let heap = unsafe { &mut *vm.heap_ptr };
     crate::value::arena::register_process_root(heap, closure_val, RootRef::Take);
     crate::value::arena::register_process_root(heap, exports_val, RootRef::Take);
-    // Extract exports from the struct and register them.
+    install_exports(symbols, cctx, exports_val);
+}
+
+/// Install a stdlib export struct into the compile context, whatever produced
+/// it: a compile, a disk-cache hit, or a boot image
+/// (docs/impl/image/boot.md). The aggregate's own rooting is the caller's,
+/// because an image arrives as one region rooted once.
+pub(crate) fn install_exports(
+    symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
+    exports_val: Value,
+) {
+    let boot = crate::trace::boot();
+    let t = std::time::Instant::now();
     let exports = extract_exports(exports_val, symbols);
     register_stdlib_exports(cctx, symbols, &exports);
+    cctx.set_stdlib_exports(exports_val);
     crate::phase!(boot, "boot", t, "stdlib-exports");
     // Arm guardfree page-protection (no-op unless --trace=guardfree): from
     // here on, freed pages are mprotected so the first user-program

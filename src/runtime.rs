@@ -22,26 +22,15 @@
 //! world returns to its pre-`main` state — only the native-fn primitives persist
 //! (immediates, occupying no region).
 
+mod core;
+
+pub use core::{BootCaches, RuntimeCore};
+
 use crate::compiler::stdlib_cache::StdlibCache;
 use crate::image::boot::{BootImage, BootSource};
 use crate::pipeline::CompileCtx;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
-use crate::{init_stdlib, register_primitives};
-
-/// The two caches one instance boots through: where its compiled stdlib is
-/// cached, and where its boot image is.
-///
-/// Both travel with the instance rather than coming from process state
-/// (docs/impl/image/boot.md), so the pair is one construction parameter.
-#[derive(Debug, Clone, Default)]
-pub struct BootCaches {
-    /// Where the compiled stdlib bytecode is cached
-    /// (docs/impl/stdlib-cache.md). Consulted only when no boot image loads.
-    pub stdlib: StdlibCache,
-    /// Where the boot image is (docs/impl/image/boot.md). `Off` by default.
-    pub image: BootImage,
-}
 
 /// The observable result of a teardown sweep (docs/impl/region/rules.md §
 /// "Teardown — every region frees", property 2). The standing target is
@@ -58,148 +47,6 @@ pub struct TeardownReport {
     pub regions: Vec<(u32, u32, usize)>,
     /// How many registered process roots the sweep released by RC.
     pub roots_released: usize,
-}
-
-/// The per-instance owner bundle: the `FiberHeap`, the `VM`, the `SymbolTable`,
-/// the per-instance compile-time state (`CompileCtx`), and the resident
-/// primitive metadata. Two embedded Elle instances in one process each own one
-/// privately, so neither sees the other's regions, stdlib exports, or REPL
-/// definitions. Both [`Runtime`] (the `elle foo.lisp`/REPL/embedding path) and
-/// the `os/spawn` worker construct one.
-///
-/// The members are boxed where an address must stay stable across the move out
-/// of a constructor: the `SymbolTable`, `CompileCtx`, and `FiberHeap` because the
-/// `VM` holds a raw pointer to each (`set_symbols` / `set_compile_ctx` /
-/// `heap_ptr`), through which the runtime `eval` instruction, value
-/// name-resolution, and every allocation/RC operation reach them.
-///
-/// The heap is a sibling of the `VM`, not a field inside it: the `VM` reaches it
-/// only through `heap_ptr`, so a `&mut VM` reborrow and a `&mut FiberHeap`
-/// reborrow never alias one allocation (the soundness contract `ctx.vm()` +
-/// `ctx.heap_mut()` already rely on). Declared after the `VM`/`CompileCtx` so it
-/// drops last — after teardown has run and after the pointer-holders drop.
-pub struct RuntimeCore {
-    vm: Box<VM>,
-    symbols: Box<SymbolTable>,
-    compile: Box<CompileCtx>,
-    /// This instance's region store. The program VM and the `CompileCtx`'s
-    /// macro-expansion VM both point their `heap_ptr` here, so an instance is one
-    /// heap. Two coexisting instances own two distinct heaps (tls.md).
-    heap: Box<crate::value::fiberheap::FiberHeap>,
-    /// Kept resident for the core's life (primitive signal/arity metadata).
-    _meta: crate::primitives::def::PrimitiveMeta,
-}
-
-impl RuntimeCore {
-    /// Build a core: a primitives-registered VM + symbol table and a fresh
-    /// `CompileCtx` (core.lisp + prelude). No stdlib, no thread-local contexts —
-    /// the caller (which knows its lifecycle) drives those. Uses the
-    /// process-default Unicode generation.
-    pub fn bare() -> Self {
-        Self::bare_with_unicode(crate::config::get().unicode_generation())
-    }
-
-    /// Build a core whose VMs (program and macro) segment strings under the
-    /// given Unicode generation for their whole lives.
-    pub fn bare_with_unicode(gen: crate::segment::Generation) -> Self {
-        // This instance's heap, owned here and shared by the program VM and the
-        // macro-expansion VM. Built first: both VMs point their `heap_ptr` at it,
-        // so the instance is one region store and core.lisp/stdlib closures
-        // (created on a VM) and runtime values all coexist in it. The `Box` has a
-        // stable address the raw `heap_ptr`s alias.
-        let mut heap = Box::new(crate::value::fiberheap::FiberHeap::new());
-        let heap_ptr: *mut crate::value::fiberheap::FiberHeap = &mut *heap;
-        let mut vm = Box::new(VM::new_with_heap(heap_ptr));
-        vm.set_unicode_generation(gen);
-        let mut symbols = Box::new(SymbolTable::new());
-        let t = std::time::Instant::now();
-        let meta = register_primitives(&mut vm, &mut symbols);
-        crate::phase!(crate::trace::boot(), "boot", t, "primitives");
-        // Point the VM at this instance's symbol table (stable boxed address),
-        // so the runtime `eval` instruction, the meta/read/debug primitives, and
-        // value name-resolution resolve in THIS instance's own table. Mirrors
-        // `set_compile_ctx` below.
-        vm.set_symbols(&mut *symbols as *mut SymbolTable);
-        // The macro VM shares this instance's heap (see `bare`'s heap comment).
-        let mut compile = Box::new(CompileCtx::new_with_heap(heap_ptr));
-        compile.set_unicode_generation(gen);
-        // The runtime `eval` instruction resolves macros/exports through this
-        // instance's compile context; point the VM at it (stable boxed address).
-        vm.set_compile_ctx(&mut *compile as *mut CompileCtx);
-        RuntimeCore {
-            vm,
-            symbols,
-            compile,
-            heap,
-            _meta: meta,
-        }
-    }
-
-    /// Compile and execute stdlib.lisp into this core's `CompileCtx`. The caller
-    /// must have installed the symbol-table context first (stdlib macros gensym).
-    pub fn load_stdlib(
-        &mut self,
-        cache: &crate::compiler::stdlib_cache::StdlibCache,
-    ) -> crate::primitives::module_init::StdlibSource {
-        // Record it on the VM so a `sys/spawn` worker, which reaches the
-        // spawning instance only through `ctx.vm()`, inherits this directory
-        // instead of falling back to the process-wide one.
-        self.vm.set_stdlib_cache(cache.clone());
-        let (vm, symbols, compile) = self.parts();
-        init_stdlib(vm, symbols, compile, cache)
-    }
-
-    /// Mutable access to the VM.
-    pub fn vm(&mut self) -> &mut VM {
-        &mut self.vm
-    }
-
-    /// Mutable access to the symbol table.
-    pub fn symbols(&mut self) -> &mut SymbolTable {
-        &mut self.symbols
-    }
-
-    /// Mutable access to the compile context.
-    pub fn compile(&mut self) -> &mut CompileCtx {
-        &mut self.compile
-    }
-
-    /// Mutable access to this instance's fiber heap — the region/RC store every
-    /// allocation and reference-count operation reads through. This is the
-    /// core-owned `Box<FiberHeap>` that the VM's `heap_ptr` aliases; reaching it
-    /// directly keeps the borrow disjoint from a `&mut VM`. Two embedded instances
-    /// on one thread each get their own (tls.md § Acceptance criterion); a shared
-    /// per-thread heap is the coexistence defect this axis removes.
-    pub fn heap(&mut self) -> &mut crate::value::fiberheap::FiberHeap {
-        &mut self.heap
-    }
-
-    /// The three disjoint borrows the pipeline needs at once: the VM (execution),
-    /// the symbol table (interning/resolution, shared with execution), and the
-    /// compile context (macro expansion, meta, projections).
-    pub fn parts(&mut self) -> (&mut VM, &mut SymbolTable, &mut CompileCtx) {
-        (&mut self.vm, &mut self.symbols, &mut self.compile)
-    }
-
-    /// The heap and the symbol table as disjoint borrows — the pair the image
-    /// dumper and hydrator take: the heap for the value graph, the table for
-    /// the spellings that travel beside it (docs/impl/image.md).
-    pub fn heap_and_symbols(
-        &mut self,
-    ) -> (&mut crate::value::fiberheap::FiberHeap, &mut SymbolTable) {
-        (&mut self.heap, &mut self.symbols)
-    }
-
-    /// The compile context and this instance's heap as disjoint borrows — the
-    /// pair [`CompileCtx::register_repl_binding`] needs (it roots the binding's
-    /// region through the heap). They are separate boxed fields, so the two
-    /// `&mut` never alias; an embedder registering a host primitive reaches both
-    /// without the `vm.heap_ptr` raw-pointer dance the in-crate REPL uses.
-    pub fn compile_and_heap(
-        &mut self,
-    ) -> (&mut CompileCtx, &mut crate::value::fiberheap::FiberHeap) {
-        (&mut self.compile, &mut self.heap)
-    }
 }
 
 /// The process runtime. Construct once per entry path; drop (or call
@@ -267,17 +114,52 @@ impl Runtime {
     }
 
     fn build_with(load_stdlib: bool, gen: crate::segment::Generation, caches: BootCaches) -> Self {
-        let cache = caches.stdlib;
-        let mut core = RuntimeCore::bare_with_unicode(gen);
+        use crate::primitives::module_init::StdlibSource;
+        // A boot image is the whole boot state, stdlib included, so an instance
+        // that wants no stdlib wants no image either — and `--no-stdlib` is how
+        // core.lisp and the prelude are debugged.
+        let image = if load_stdlib {
+            caches.image
+        } else {
+            BootImage::Off
+        };
+        let (mut core, boot) = RuntimeCore::for_boot(gen, &image);
 
-        // `RuntimeCore::bare` already pointed the VM at this instance's symbol
+        // `for_boot` already pointed the VM at this instance's symbol
         // table, so stdlib-load gensym (and all runtime name resolution) resolve
         // through `ctx.vm().symbols()` — this instance's own table.
-        let stdlib_source = if load_stdlib {
-            core.load_stdlib(&cache)
-        } else {
-            crate::primitives::module_init::StdlibSource::Compiled
+        let (stdlib_source, boot_source) = match (load_stdlib, &boot) {
+            (true, Some(boot)) => {
+                core.install_stdlib_from_image(boot);
+                (StdlibSource::Image, BootSource::Image)
+            }
+            (true, None) => {
+                // A boot image is dumped from a *compiled* stdlib. A disk-cache
+                // hit rebuilds the library's closures through the send codec,
+                // whose capture cells record no binding, and the dump refuses
+                // one of those by variant (docs/impl/image/boot.md). So an
+                // instance that owes an image compiles rather than reading the
+                // other cache — once per digest, for the start that stores it.
+                let stdlib = match image {
+                    BootImage::Off => caches.stdlib.clone(),
+                    _ => StdlibCache::Off,
+                };
+                let source = core.load_stdlib(&stdlib);
+                // The boot is complete, so this is the state the next start
+                // hydrates instead of repeating (docs/impl/image/boot.md).
+                let t = std::time::Instant::now();
+                let (heap, symbols, cctx) = core.dump_parts();
+                crate::image::boot::store(heap, symbols, cctx, &image);
+                crate::phase!(crate::trace::boot(), "boot", t, "image-store");
+                (source, BootSource::Compiled)
+            }
+            (false, _) => (StdlibSource::Compiled, BootSource::Compiled),
         };
+        // Record the caller's stdlib cache on the VM whichever arm ran: a
+        // `sys/spawn` worker reaches the spawning instance only through
+        // `ctx.vm()`, and it compiles its own stdlib whether or not this
+        // instance hydrated one.
+        core.vm().set_stdlib_cache(caches.stdlib.clone());
 
         // The post-boot heap census (docs/impl/image/measurements.md, item 2):
         // at this point every live object is boot state, the graph a boot
@@ -292,7 +174,7 @@ impl Runtime {
             core,
             torn_down: false,
             stdlib_source,
-            boot_source: BootSource::Compiled,
+            boot_source,
         }
     }
 
@@ -320,9 +202,8 @@ impl Runtime {
         &mut self,
         path: &std::path::Path,
     ) -> Result<(), crate::image::ImageError> {
-        let state = crate::value::Value::NIL;
-        let (heap, symbols) = self.core.heap_and_symbols();
-        crate::image::boot::dump(heap, symbols, &state, path)
+        let (heap, symbols, cctx) = self.core.dump_parts();
+        crate::image::boot::dump(heap, symbols, cctx, path)
     }
 
     /// Mutable access to the VM.
@@ -386,7 +267,7 @@ impl Runtime {
         // out so it holds no borrow of `self.core`) so the `&mut CompileCtx`
         // release borrow and the `&mut FiberHeap` it needs are disjoint.
         let heap_ptr = self.core.vm().heap_ptr;
-        self.core.compile.release(unsafe { &mut *heap_ptr });
+        self.core.compile().release(unsafe { &mut *heap_ptr });
         // The default trait tables are `alloc_root`'d into this instance's root
         // region the RC sweep below releases; clear the heap's table so a later
         // read sees `NIL` instead of `Value`s pointing into the freed region.

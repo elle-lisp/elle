@@ -55,7 +55,8 @@ pub(super) fn print_help() {
     println!("       elle fmt [options] <file...>       Format source files");
     println!("       elle lint [options] <file|dir>... Static analysis");
     println!("       elle lsp                          Start language server");
-    println!("       elle rewrite [options] <file...>  Source-to-source rewriting\n");
+    println!("       elle rewrite [options] <file...>  Source-to-source rewriting");
+    println!("       elle image dump-boot <file>       Write a boot image\n");
     println!("Options:");
     println!("  -h, --help            Show this help");
     println!("  --version             Show the version");
@@ -88,6 +89,7 @@ pub(super) fn print_help() {
     println!("  --home=DIR            Module resolution root (env: ELLE_HOME)");
     println!("  --path=DIRS           Colon-separated module search path (env: ELLE_PATH)");
     println!("  --cache=DIR           Disk cache directory (env: ELLE_CACHE)");
+    println!("  --boot-image=WHERE    Boot image cache: off (default), on, or DIR");
     println!("  --unicode=MAJ[.MIN]   Unicode generation for string semantics (default: newest vendored)");
     println!("  --json                JSON output on stderr\n");
     println!("Syntax:");

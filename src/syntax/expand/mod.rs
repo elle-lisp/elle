@@ -224,7 +224,7 @@ impl Expander {
     /// definitions in this Expander. Must be called after the VM
     /// has primitives registered but before user code expansion.
     pub fn load_prelude(&mut self, symbols: &mut SymbolTable, vm: &mut VM) -> Result<(), String> {
-        const PRELUDE: &str = include_str!("../../prelude.lisp");
+        use crate::pipeline::sources::PRELUDE;
         // The prelude is a compilation unit like any other: its tree lives in
         // its own working region, and only the macro templates it registers
         // (copied into the template arena by `handle_defmacro`) outlive it.

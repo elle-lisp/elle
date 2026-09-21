@@ -86,6 +86,13 @@ writes is the one those three sources produce. It never boots from an image
 itself: an artifact two hops from the sources it claims is one nobody can
 check by rebuilding it.
 
+The stdlib disk cache is off for that boot, and a warm-cache store compiles for
+the same reason. A cache hit rebuilds the library's closures through the send
+codec, which carries no cell's binding, so every restored capture cell reads as
+minted at run time — and the dump refuses one of those by variant
+([sealing.md](sealing.md)). A boot image therefore costs one stdlib compile per
+digest, paid by the start that stores it.
+
 The dump is the ordinary dumper over the root struct, so determinism, the
 refusals, and the cross-build name and primitive tables are the ones
 [image.md](../image.md) and [sealing.md](sealing.md) already describe. The boot
@@ -111,14 +118,21 @@ exists, and installs into the same structures a source boot writes:
    image is one region.
 4. Install `:core` into the expander's `core_env` and into `PrimitiveMeta`.
 5. Install `:macros` into the expander, and raise its scope counter past the
-   image's watermark, or two unrelated scopes compare equal
-   ([format.md](format.md)).
+   image's watermark ([format.md](format.md)).
 6. Install `:stdlib` into `PrimitiveMeta` and `eval_meta`.
 
 Steps 4 and 6 are the tails of `compile_core` and `init_stdlib`. Step 5 leaves
 the hydrated template trees where they are. The hydrated region is a process
 root, so it outlives every expansion that reads a template, and a copy into the
 expander's own template arena would buy nothing.
+
+The raise in step 5 has nothing to clear at boot. A prelude template carries
+the prelude scope, which is zero, so a boot image's watermark is one — where an
+expander starts anyway. Every scope a boot mints is minted on a per-compile
+clone of the master expander, and a clone's counter never reaches the master,
+so an image boot and a source boot hand out the same ids with or without the
+raise. The environment configuration is what will need it, because a macro a
+session defined carries its file's scope.
 
 The expander reads a template and never writes one, because it copies as it
 stamps scopes ([syntax.md](../syntax.md)). So a template's pages stay clean,
