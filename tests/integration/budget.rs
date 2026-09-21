@@ -1,6 +1,9 @@
 // audited: 2026-09-21
-// The wall-clock budget the corpus passes give one file, in both shapes: the
-// per-file `timeout`, and the runner's own per-form deadline.
+// The wall-clock budget the corpus per-file passes give one file.
+//
+// The runner's own per-form budget is next door, in
+// tests/integration/runner_budget.rs; the two share their readers of the corpus
+// and the Makefile.
 //
 // `RUN_PER_FILE` runs every corpus file as its own process under `timeout`, and
 // a file that outlives its budget is killed: exit 124, no output, no assertion
@@ -25,79 +28,11 @@
 // it, so a construct that carries one — a `case` pattern — parses on the
 // development box and dies file by file on the macOS runner.
 
-use crate::common::{make_dry_run, make_var};
-use std::fs;
-use std::path::PathBuf;
+use crate::common::{
+    budget_seconds as seconds, corpus_files, declared_deadline, make_expand as expand, makefile,
+    repo_root, wide_patterns,
+};
 use std::process::Command;
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
-
-fn makefile() -> String {
-    fs::read_to_string(repo_root().join("Makefile")).expect("read the Makefile")
-}
-
-/// One Makefile variable, as `make` expands it.
-///
-/// Asking `make` rather than parsing the assignment is the whole point: these
-/// tests measure what the corpus pass will actually run, and a parser that
-/// reimplements variable references, line continuations and `$(shell …)` is a
-/// second `make` that can disagree with the first.
-fn expand(name: &str) -> String {
-    make_var(name, &[]).unwrap_or_else(|| panic!("`make print-{name}` did not run"))
-}
-
-/// The patterns the Makefile gives the wider budget.
-///
-/// `WIDE_FILES` is a `grep` pattern list, `-e one -e two` — the shape the
-/// per-pass skip lists beside it already use. A pattern is a substring of a
-/// path, not a file name: a whole family of corpus files shares one deadline
-/// and one prefix, so the list names the prefix rather than every member.
-fn wide_patterns() -> Vec<String> {
-    let patterns = expand("WIDE_FILES");
-    let names: Vec<String> = patterns
-        .split_whitespace()
-        .filter(|word| *word != "-e")
-        .map(str::to_string)
-        .collect();
-    assert!(
-        !names.is_empty(),
-        "WIDE_FILES does not read as a `grep` pattern list: {patterns}"
-    );
-    names
-}
-
-/// Every corpus file the per-file passes run, as a repo-relative path.
-fn corpus_files() -> Vec<String> {
-    let mut paths: Vec<String> = fs::read_dir(repo_root().join("tests/elle"))
-        .expect("read tests/elle")
-        .map(|entry| entry.expect("a corpus directory entry").file_name())
-        .filter_map(|name| name.to_str().map(str::to_string))
-        .filter(|name| name.ends_with(".lisp"))
-        .map(|name| format!("tests/elle/{name}"))
-        .collect();
-    paths.sort();
-    assert!(paths.len() > 100, "the corpus did not read: {paths:?}");
-    paths
-}
-
-/// The deadline a corpus file gives itself, if it declares one.
-///
-/// A file that has to detect a stall carries `(def deadline N)` and reports
-/// through it — which request stalled, and how long it waited. That number is
-/// in seconds, and it is the only thing that knows what the file considers
-/// hung.
-fn declared_deadline(path: &str) -> Option<u64> {
-    let source = fs::read_to_string(repo_root().join(path)).expect("read a corpus file");
-    let (_, rest) = source.split_once("(def deadline ")?;
-    let digits = rest.split(')').next()?.trim();
-    Some(
-        digits
-            .parse()
-            .unwrap_or_else(|_| panic!("{path} declares a deadline this cannot read: {digits}")),
-    )
-}
 
 /// The Makefile's budget selector with `{}` replaced by `path`, ready for `sh`.
 fn expanded_budget_selector(path: &str) -> String {
@@ -111,15 +46,6 @@ fn expanded_budget_selector(path: &str) -> String {
         "the budget selector never names the file `parallel` substitutes: {selector}"
     );
     selector.replace("{}", path)
-}
-
-/// A `timeout` argument as a number: `120s` is 120.
-fn seconds(budget: &str) -> u64 {
-    budget
-        .trim()
-        .trim_end_matches('s')
-        .parse()
-        .unwrap_or_else(|_| panic!("a budget is a whole number of seconds: {budget}"))
 }
 
 /// The budget one corpus file gets, read the way the pass reads it: `parallel`
@@ -270,79 +196,6 @@ fn no_corpus_file_outlives_the_budget_before_its_own_deadline_fires() {
              diagnostic can never print — the gate reports exit 124 with no \
              output, which reads as a flaky runner. Either name the file in \
              WIDE_FILES or lower the deadline below TIMEOUT."
-        );
-        checked += 1;
-    }
-    assert!(
-        checked > 0,
-        "no corpus file declares a deadline. Either the declaration changed \
-         shape or the argument no longer applies — teach this test the new \
-         shape rather than letting it pass by matching nothing."
-    );
-}
-
-/// The per-form budget the corpus gate hands `elle test`, in milliseconds, read
-/// off the command line the gate will run.
-///
-/// `--dry-run` rather than the Makefile's text: the flag and its value meet on
-/// a recipe line, through variables, and what the pass runs is the only thing
-/// worth asserting on. `None` when the batch line carries no `--timeout` at
-/// all, which is the runner's default and the defect this exists to catch.
-fn runner_budget_millis() -> Option<u64> {
-    let recipe = make_dry_run("smoke-elle").expect("`make --dry-run smoke-elle` did not run");
-    let batch = recipe
-        .lines()
-        .find(|line| line.contains(" test ") && line.contains("xargs"))
-        .unwrap_or_else(|| panic!("`make smoke-elle` runs no `elle test` batch:\n{recipe}"));
-    let millis = batch.split("--timeout").nth(1)?;
-    Some(
-        millis
-            .split_whitespace()
-            .next()
-            .and_then(|word| word.parse().ok())
-            .unwrap_or_else(|| panic!("the runner's budget is not a number of milliseconds: {batch}")),
-    )
-}
-
-// The same trap as the per-file budget above, one shape over. `elle test` wraps
-// a multi-form file as ONE whole-file thunk, so the runner's `--timeout` covers
-// exactly what `timeout $(FILE_TIMEOUT)` covers in the per-file passes — but it
-// is one number for every form in the corpus, and the runner's own default is
-// 60 s against eight h2 files that give themselves 120 s to report a stall.
-//
-// On a quiet box those files finish in seconds and nothing shows. On the macOS
-// runner, the slowest in the workflow and the one that also carries
-// `--trace=scrub` and the debug assertions, the kill lands first: the gate
-// reports `timeout` for a file whose own diagnostic never printed, which reads
-// as a flaky runner. That took `macOS Smoke` down on three branches in one day
-// (h2-stream-share.lisp, every time), and no local run can see it — the budget
-// only bites where the box is slow enough.
-//
-// The counter-factual is the per-file pin above, which cannot reach this: it
-// reads `FILE_TIMEOUT`, which the runner never consults.
-#[test]
-fn the_runner_budget_clears_every_deadline_a_corpus_file_declares() {
-    let budget = runner_budget_millis().unwrap_or_else(|| {
-        panic!(
-            "the corpus batches run under the runner's own default per-form \
-             budget. That default is below the widest deadline a corpus file \
-             declares, so on a slow box the kill lands before the file can \
-             report the stall it exists to report. Pass `--timeout` on the \
-             batch line."
-        )
-    });
-
-    let mut checked = 0;
-    for path in corpus_files() {
-        let Some(deadline) = declared_deadline(&path) else {
-            continue;
-        };
-        assert!(
-            budget > deadline * 1000,
-            "{path} gives itself {deadline} s to report a stall, and the corpus \
-             gate kills the form at {budget} ms. The kill lands first, so the \
-             file's own diagnostic can never print and the gate reports a \
-             timeout naming nothing."
         );
         checked += 1;
     }

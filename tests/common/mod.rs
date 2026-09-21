@@ -1,6 +1,8 @@
 // audited: 2026-09-21
 //! Shared test helpers: the canonical evals, the cached ones property tests
 //! use, and the scratch directory a test writes files under.
+//! It also holds the readers of the corpus and the Makefile that the two
+//! budget tests share.
 //!
 //! tests/AGENTS.md
 //!
@@ -296,4 +298,102 @@ impl Drop for ScratchDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+// ---------------------------------------------------------------------------
+// The corpus, and what the Makefile says about it
+// ---------------------------------------------------------------------------
+//
+// Two test files ask the same questions of the corpus and the Makefile: which
+// files it holds, which of them declare a deadline of their own, and which
+// families the Makefile gives a wider budget. `budget.rs` asks about the
+// one-process-per-file passes and `runner_budget.rs` about `elle test`. The
+// readers live here because a second copy of them is a second answer, and the
+// two files exist to check that the two budgets agree.
+
+/// The repository root, as the test binary was compiled against it.
+#[allow(dead_code)]
+pub fn repo_root() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+/// The Makefile's text.
+#[allow(dead_code)]
+pub fn makefile() -> String {
+    std::fs::read_to_string(repo_root().join("Makefile")).expect("read the Makefile")
+}
+
+/// One Makefile variable, as `make` expands it.
+///
+/// Asking `make` rather than parsing the assignment is the whole point: these
+/// tests measure what a pass will actually run, and a parser that reimplements
+/// variable references, line continuations and `$(shell …)` is a second `make`
+/// that can disagree with the first.
+#[allow(dead_code)]
+pub fn make_expand(name: &str) -> String {
+    make_var(name, &[]).unwrap_or_else(|| panic!("`make print-{name}` did not run"))
+}
+
+/// The path patterns the Makefile gives the wider budget.
+///
+/// `WIDE_FILES` is a `grep` pattern list, `-e one -e two` — the shape the
+/// per-pass skip lists beside it already use. A pattern is a substring of a
+/// path, not a file name: a whole family of corpus files shares one deadline
+/// and one prefix, so the list names the prefix rather than every member.
+#[allow(dead_code)]
+pub fn wide_patterns() -> Vec<String> {
+    let patterns = make_expand("WIDE_FILES");
+    let names: Vec<String> = patterns
+        .split_whitespace()
+        .filter(|word| *word != "-e")
+        .map(str::to_string)
+        .collect();
+    assert!(
+        !names.is_empty(),
+        "WIDE_FILES does not read as a `grep` pattern list: {patterns}"
+    );
+    names
+}
+
+/// Every corpus file, as a repo-relative path.
+#[allow(dead_code)]
+pub fn corpus_files() -> Vec<String> {
+    let mut paths: Vec<String> = std::fs::read_dir(repo_root().join("tests/elle"))
+        .expect("read tests/elle")
+        .map(|entry| entry.expect("a corpus directory entry").file_name())
+        .filter_map(|name| name.to_str().map(str::to_string))
+        .filter(|name| name.ends_with(".lisp"))
+        .map(|name| format!("tests/elle/{name}"))
+        .collect();
+    paths.sort();
+    assert!(paths.len() > 100, "the corpus did not read: {paths:?}");
+    paths
+}
+
+/// The deadline a corpus file gives itself, if it declares one.
+///
+/// A file that has to detect a stall carries `(def deadline N)` and reports
+/// through it — which request stalled, and how long it waited. That number is
+/// in seconds, and it is the only thing that knows what the file considers
+/// hung.
+#[allow(dead_code)]
+pub fn declared_deadline(path: &str) -> Option<u64> {
+    let source = std::fs::read_to_string(repo_root().join(path)).expect("read a corpus file");
+    let (_, rest) = source.split_once("(def deadline ")?;
+    let digits = rest.split(')').next()?.trim();
+    Some(
+        digits
+            .parse()
+            .unwrap_or_else(|_| panic!("{path} declares a deadline this cannot read: {digits}")),
+    )
+}
+
+/// A `timeout` argument as a number: `120s` is 120.
+#[allow(dead_code)]
+pub fn budget_seconds(budget: &str) -> u64 {
+    budget
+        .trim()
+        .trim_end_matches('s')
+        .parse()
+        .unwrap_or_else(|_| panic!("a budget is a whole number of seconds: {budget}"))
 }

@@ -205,6 +205,9 @@ mod workflows {
 mod plugins {
     include!("plugins.rs");
 }
+mod runner_budget {
+    include!("runner_budget.rs");
+}
 mod budget {
     include!("budget.rs");
 }
