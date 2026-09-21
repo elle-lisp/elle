@@ -103,6 +103,13 @@ the dispatcher falls back to the default traitset from the registry.
 This means `(with-traits [1 2 3] {:tag :my-type})` still supports
 `first`, `length`, etc. — the user traits don't mask the defaults.
 
+The fallback is per protocol, not per method. A table that names a
+protocol owns every method in it, so `(with-traits (list 1 2)
+@{:Sequence {:first …}})` has no `rest` at all — the default `:Sequence`
+is out of reach the moment the user table declares one. Attach the
+methods to the protocol the value does not otherwise need, or write the
+whole protocol out.
+
 ### Edge cases
 
 - **Empty list** `()` is an immediate — no traitset. `first` returns
@@ -158,11 +165,12 @@ calls `(method coll n)`, and `(fold f init coll)` calls
 (assert (= (map (fn [x] x) tagged) :mapped))
 ```
 
-These operators take a method: `map`, `filter`, `count`, `find-index`,
-`flatten`, `take-while`, `drop-while`, `distinct`, `mapcat`,
-`map-indexed`, `partition`, `interpose`, `sort-by`, `sort-with`, `take`,
-`drop`, `update`, `last`, `butlast`, `reverse`, and `fold`. `reduce` is
-`fold`, and `keep` is `filter`, so each pair shares one method name.
+These operators take a method: `map`, `filter`, `any?`, `all?`, `find`,
+`find-index`, `count`, `flatten`, `take-while`, `drop-while`, `distinct`,
+`mapcat`, `map-indexed`, `partition`, `interpose`, `sort-by`,
+`sort-with`, `take`, `drop`, `update`, `last`, `butlast`, `reverse`, and
+`fold`. `reduce` is `fold`, and `keep` is `filter`, so each pair shares
+one method name.
 
 ### The generic fallback
 
@@ -200,8 +208,13 @@ the error out of the operator.
 
 `each` drives `:iter` alone, so that `break` and `assign` still reach the
 surrounding function; there is no `:each` method. `zip` reads `:iter` on
-each input it is given. `any?`, `all?`, `find`, `frequencies` and
-`group-by` are written with `each`, so they dispatch the way `each` does.
+each input it is given. `frequencies` and `group-by` are written with
+`each`, so they dispatch the way `each` does.
+
+`each` itself keeps the set and struct arms it always had, and reads
+`:iter` ahead of them. So a with-traits struct that carries `:iter`
+iterates as its protocol says, and a plain one still walks its
+key-value pairs.
 
 ### Reading the layers from Elle
 
