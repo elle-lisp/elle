@@ -7,6 +7,7 @@
 (def surf ((import "std/semver/surface")))
 (def sdiff ((import "std/semver/diff")))
 (def arb ((import "std/semver/arbitrate")))
+(def mig ((import "std/semver/migrate")))
 (def sv ((import "std/semver")))
 
 # ── exits and small helpers ──────────────────────────────────────────
@@ -233,7 +234,23 @@
     :unavailable
       (println (string (if strict? "" "note: ") "arbitration unavailable: "
                        (res :reason)))
+    :uncovered (println (res :hint))
     _ nil))
+
+(defn judge-major-claim [t base s j claimed]
+  "Coverage instead of arbitration: every major change named by a rule
+   in the claimed major's migration form. Pre-1.0 claims are exempt."
+  (let [maj ((sv:parse claimed) :major)]
+    (if (< maj 1)
+      {:status :skipped :reason "a pre-1.0 claim promises nothing to migrate"}
+      (let [recs (mig:rules (file/read (t :path)) maj)
+            un (mig:uncovered recs ((j :d) :changes))]
+        (if (empty? un)
+          {:status :skipped
+           :reason "a major claim promises no compatibility; coverage complete"}
+          {:status :uncovered
+           :missing (->array (map (fn [c] (c :export)) un))
+           :hint (mig:skeleton (t :path) maj base s un)})))))
 
 (defn check-target [t opts]
   (let [s (extract-target t)
@@ -252,10 +269,9 @@
       (let [base (read-baseline spath)
             j (judge base s claimed)
             res (if (major-claim? (j :bv) claimed)
-                  {:status :skipped
-                   :reason "a major claim promises no compatibility"}
+                  (judge-major-claim t base s j claimed)
                   (run-arbitration t base opts))
-            gates? (or (= (res :status) :fail)
+            gates? (or (= (res :status) :fail) (= (res :status) :uncovered)
                        (and strict? (= (res :status) :unavailable)))
             code (if (and gates? (< (j :code) 1)) 1 (j :code))]
         (if json?
@@ -267,7 +283,8 @@
                                     :verdict ((j :v) :verdict)
                                     :changes ((j :d) :changes)
                                     :arbitration {:status (res :status)
-                                    :reason (get res :reason)}}))
+                                    :reason (get res :reason)
+                                    :missing (get res :missing)}}))
           (begin
             (print-status t j claimed)
             (print-arbitration res strict?)))
