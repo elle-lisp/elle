@@ -97,6 +97,7 @@ static VOCABULARY: &[&str] = &[
     "rc",
     "reason",
     "region",
+    "reports",
     "regs",
     "required",
     "rest",
