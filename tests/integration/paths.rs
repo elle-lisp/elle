@@ -1,3 +1,4 @@
+// audited: 2026-09-21
 // What the Makefile and the doc generator name in text must match the tree.
 //
 // Neither driver is compiled, so every path and URL in them is a reference
@@ -24,6 +25,43 @@ fn generator_path() -> PathBuf {
 /// build output, git internals, and the `plugins` submodule (which runs its
 /// own format gate from its own Makefile).
 const UNOWNED: &[&str] = &["target", ".git", "plugins"];
+
+/// The directories the format-gate walk skips, as paths relative to the
+/// repository root: build output, git internals, and every submodule.
+fn unowned_dirs() -> Vec<PathBuf> {
+    UNOWNED.iter().map(PathBuf::from).collect()
+}
+
+// `.gitmodules` is the list of trees this repository does not own, and nothing
+// else holds the walk's skip list in step with it. CI checks no submodule out,
+// so a list that misses one stays green there and reddens the first worktree
+// that runs `git submodule update --init --recursive`. The counter-factual:
+// `.gitmodules` declares `mcp`, eleven `.lisp` files live there once it is
+// checked out, and the walk fed them to `format_gate_covers_every_elle_source`.
+#[test]
+fn the_walk_skips_every_submodule() {
+    let text =
+        fs::read_to_string(repo_root().join(".gitmodules")).expect("read .gitmodules");
+    let declared: Vec<&str> = text
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("path = "))
+        .collect();
+    assert!(
+        declared.len() >= 2,
+        "found {} submodule paths in .gitmodules; expected plugins and mcp. \
+         If the file changed shape, teach this test the new shape — do not \
+         let it pass by matching nothing.",
+        declared.len()
+    );
+    let unowned = unowned_dirs();
+    for path in declared {
+        assert!(
+            unowned.contains(&PathBuf::from(path)),
+            ".gitmodules declares the submodule `{path}`, but the format \
+             gate's walk does not skip it"
+        );
+    }
+}
 
 /// Every `*.lisp` file under `dir`, recursively, skipping `UNOWNED`.
 /// Paths come back relative to the repository root.
