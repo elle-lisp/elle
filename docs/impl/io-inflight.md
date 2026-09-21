@@ -98,6 +98,35 @@ before there was a hold to release, and the rule now covers both.
 Pinned by `a_stranded_backend_lets_go_before_its_heap_tears_down`
 (`src/io/aio/tests/backend.rs`).
 
+## A cancelled operation reads nothing again
+
+A cancel keeps its entry and lets go of its operands, and the two halves
+answer different questions. The **entry** is what the arriving completion
+resolves through, and it is what gives the worker and the descriptor back;
+dropping it at the cancel would strand both. The **hold** exists so a
+completion may read the operands it cooks from — and a cancelled completion
+is retired rather than cooked, so no operand is read again from the moment
+the mark goes in.
+
+Keeping the hold until the completion arrives costs a reference per call on
+the path a program takes most. A cancel is asked for in one direction and
+answered in the other: the kernel or the worker reports back, which needs a
+reap, and a loop of `ev/timeout` calls never blocks on I/O. So the holds of
+every cancelled timer accumulate for as long as such a loop runs, each one
+holding the fiber that asked, its closure, and everything the closure
+captured.
+
+Two readings move with the hold, because both dereference the fiber it held.
+`take` asks whether the asking fiber has ended, so it asks that of a live
+entry alone — a cancelled one is reported cancelled before the question
+arises, and the answer would change nothing. `orphaned_to_stop` skips a
+cancelled entry for the same reason and for one of its own: the cancel has
+already asked that operation to stop.
+
+Pinned by `a_cancelled_entry_holds_nothing`
+(`src/io/pending/tests/hold.rs`), and measured as a rate by the `ev-abort`
+and `ev-timeout` probes in `tests/elle/plumb.lisp`.
+
 ## A completion owns what it builds, and hands it over once
 
 Most operations answer with a value the requesting call already allocated: the

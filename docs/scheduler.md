@@ -1,6 +1,6 @@
 # Scheduler
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-20 -->
 
 The async scheduler is the only supported execution backend, and user code runs inside it automatically.
 
@@ -163,29 +163,41 @@ result someone took. Both are keyed by the fiber, so a record holds the
 fiber value — and the region the fiber and its closure live in — for as
 long as the record lasts.
 
-One invariant governs the records:
+Four invariants govern the records:
 
-- **A record lasts only as long as a reader needs it.** A fiber that ends
-  in success drops both records the moment it completes, joined or not.
-  Nothing reads a success record: the status is re-derived from the fiber
-  itself whenever the record is absent, the value was always read from
-  the fiber rather than from the record, and the unjoined-error tail at
-  the end of the loop looks only at failures. A record that outlives its
+- **A record lasts only as long as a reader needs it.** Both records go
+  the moment nothing can read them again. For a fiber that ends in
+  success that moment is completion, joined or not: nothing reads a
+  success record at all. For a fiber that **failed** it is the moment
+  somebody observes the failure — a join, a protected join, or an abort,
+  each of which marks the fiber. A failure record has exactly one reader,
+  the unjoined-error tail at the end of the loop, and the tail passes
+  over every failure that carries a mark. A record that outlives its
   readers makes every `ev/spawn` a permanent allocation, which a
-  long-running program pays for once per fiber it ever ran — and a server
-  that spawns a handler fiber per request and never joins it pays that
-  once per request.
+  long-running program pays for once per fiber it ever ran — and
+  `ev/timeout` and `ev/race` abort the loser on every call.
 
-Two kinds of fiber keep their records. A **failed** one, because the mark
-is what stops the tail from re-raising an error its joiner already took.
-And the program's own fibers — the thunks `ev/run` hands the loop —
-because their records are what tells the loop the program finished, so
-they last until the loop ends.
+- **An absent record is re-derived from the fiber, the way the loop
+  routes one.** An error does not unwind a fiber: it suspends holding the
+  error signal, so `fiber/status` answers `:paused` — what a fiber
+  waiting to resume answers — and only the `SIG_ERROR` bit tells the two
+  apart. The re-derivation reads that bit, which is the reading
+  `fiber-failed?` states and the one the loop already routes a completed
+  fiber by. Reading the status alone answers "still running" for every
+  retired failure, which parks a later joiner on a fiber nothing will
+  resume.
+
+- **A fiber the loop has finished with is not runnable.** Completing a
+  fiber takes it out of the runnable queue, on the rule that takes it out
+  of a park queue and a waiter list. Left there it is resumed once more
+  and completes a second time. That second completion writes a fresh
+  record for a failure whose mark the first retirement dropped, and the
+  tail reads the fresh record as a failure nobody observed.
 
 - **The loop's last act is to forget every fiber.** When `:pump` returns,
   every fiber the loop knows about is terminal and nothing will resume one,
-  so no record can be read again — including the two kinds above, whose
-  readers are the loop itself. Every record goes: the status records and
+  so no record can be read again — including the program's own, whose
+  reader is the loop itself. Every record goes: the status records and
   marks, the join and select waiter lists, the submission pairing, the park
   queues, and the runnable queue.
 
@@ -198,14 +210,19 @@ they last until the loop ends.
   teardown, on every run of every program (elle-lisp/elle#1081).
 
   A join that arrives afterward loses nothing: an absent record is
-  re-derived from the fiber's own status, which is the same route every
-  fiber retired at completion already takes.
+  re-derived from the fiber, which is the same route every fiber retired
+  at completion already takes.
+
+The program's own fibers — the thunks `ev/run` hands the loop — are the
+one exception to the first invariant. Their records are what tells the
+loop the program finished, so they last until the loop ends.
 
 [sched-completion-records.lisp](../tests/elle/sched-completion-records.lisp) pins the bound through
 `ev/report`'s `:records` / `:marks`, and that the pump leaves none of them
 behind; [ev-unjoined-error.lisp](../tests/elle/ev-unjoined-error.lisp) pins that retiring the records
 still leaves an unjoined failure to crash the program.
-[region_process_teardown.rs](../tests/region_process_teardown.rs) pins what the two together are worth: a
+[plumb.lisp](../tests/elle/plumb.lisp) reads what an abort costs as a rate, and
+[region_process_teardown.rs](../tests/region_process_teardown.rs) pins what all of it is worth: a
 completed run leaves no live region at all.
 
 ---
@@ -229,8 +246,9 @@ struct:
 
 `:records` and `:marks` are the completion bookkeeping above, not waits: a
 program that spawns in a loop reads them to see that finished fibers are let
-go. They stay flat under a join-and-discard loop and grow only with fibers
-nobody has observed yet.
+go. They stay flat under a join-and-discard loop, under an abort loop, and
+under a spawn loop that joins nothing; they grow only with failures nobody
+has observed yet.
 
 The loop blocks when `:runnable` is empty and everything else is not, so
 a report taken from a fiber the scheduler still runs names the waits that

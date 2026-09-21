@@ -1902,27 +1902,32 @@
       (del select-sets waiter))
 
     (defn retire-fiber [fiber]
-      "Drop the scheduler's records of a fiber that ended in success.
+      "Drop the scheduler's records of a fiber nothing can read again.
        Both records are keyed by the fiber, so keeping them keeps the fiber
        and its closure alive for the scheduler's whole life — one permanent
-       allocation per spawn. Nothing reads a success record at all:
-       `get-completion` re-derives the status from the fiber whenever the
-       record is absent, and the unjoined-error tail reads only failures.
-       So this runs at COMPLETION: a fiber nobody ever joins costs the loop
-       the same as one whose result a caller took.
+       allocation per spawn.
 
-       Two fibers keep their records. The program's own — `:pump` reads
-       their record to know the program finished. And a FAILED one: its
-       mark is what stops the tail from re-raising an error its joiner
-       already took, and a later `get-completion` (a second join, a select
-       over it, a completion that arrives for it) re-records the failure
-       from the fiber's own status. Re-recording a success is harmless —
-       the tail reads `:error` alone — so a success needs no such memory.
+       A SUCCESS record has no reader at all, so it goes at COMPLETION,
+       joined or not. A FAILURE record has one reader, the unjoined-error
+       tail, and the tail passes over every failure that carries a mark — so
+       a failure somebody observed goes the same way, and `ev/timeout` and
+       `ev/race` observe the loser they abort on every call. Either verdict
+       is re-derived from the fiber by `get-completion` whenever the record
+       is absent.
+
+       The program's own fibers are the one exception: `:pump` reads their
+       record to know the program finished.
        See docs/scheduler.md § Completion records."
-      (when (and (= (get completed fiber) :ok)
-                 (not (contains? entry-fibers fiber)))
+      (when (and (not (contains? entry-fibers fiber))
+                 (or (= (get completed fiber) :ok) (contains? joined fiber)))
         (del completed fiber)
         (del joined fiber)))
+
+    (defn leave-array [q fiber]
+      "Take every occurrence of `fiber` out of the array `q`."
+      (let [@i 0]
+        (while (< i (length q))
+          (if (= (get q i) fiber) (remove q i) (assign i (+ i 1))))))
 
     (defn leave-queue [table key fiber]
       "Take `fiber` out of the array `table` holds at `key`, and drop the
@@ -1930,9 +1935,7 @@
        wait the loop is still holding, so `step` never reports :done."
       (let [q (get table key)]
         (when (not (nil? q))
-          (let [@i 0]
-            (while (< i (length q))
-              (if (= (get q i) fiber) (remove q i) (assign i (+ i 1)))))
+          (leave-array q fiber)
           (when (= (length q) 0) (del table key)))))
 
     (defn wake-select-waiters [fiber]
@@ -1955,7 +1958,14 @@
 
     (defn complete-fiber [fiber status]
       "Handle fiber completion: wake join and select waiters."  # Record completion
-      (put completed fiber status)  # Give back the operation this fiber was waiting on. `pending` and
+      (put completed fiber status)  # Leave the queue of work the loop has yet to run, on the rule that
+      # takes a terminated fiber out of a park queue and a waiter list. A
+      # fiber aborted before the loop ever reached it is sitting there;
+      # left there it is resumed once more and completes a second time,
+      # writing a record for a failure whose mark `retire-fiber` already
+      # dropped, which the loop's tail then reads as a failure nobody
+      # observed.
+      (leave-array runnable fiber)  # Give back the operation this fiber was waiting on. `pending` and
       # `fiber-io` are the two halves of one pairing, so both go; the
       # submission itself is cancelled because the only fiber that could
       # read its result is this one, and it is finished. Left behind, the
@@ -2006,23 +2016,30 @@
 
     (defn get-completion [fiber]
       "Return fiber's completion status (:ok or :error), or nil if the fiber
-       has not yet terminated. Lazily records completion from the fiber's raw
-       status — if the fiber transitioned to :dead/:error via a path the
-       scheduler observed only indirectly (e.g. while handling another fiber),
-       record the completion atomically the first time we inspect it. This
-       keeps `completed` in sync with reality and lets handle-abort /
-       handle-join / handle-select make consistent decisions."
+       has not yet terminated. Records the completion the first time it is
+       seen, so a fiber that reached a terminal state by a path the scheduler
+       routed only indirectly — while it was handling another fiber, say — is
+       on record from then on, and handle-abort / handle-join / handle-select
+       read one answer.
+
+       The failure reading is `fiber-failed?` rather than a status test: an
+       error does not unwind a fiber, so one that stopped on an error answers
+       :paused and only the SIG_ERROR bit tells it from a fiber waiting to
+       resume. That is the reading `handle-fiber-after-resume` already routes
+       a completed fiber by, and it is what makes a retired failure
+       re-derivable. See docs/scheduler.md § Completion records."
       (let [recorded (get completed fiber)]
         (if (not (nil? recorded))
           recorded
-          (case (fiber/status fiber)
-            :dead (begin
-                    (complete-fiber fiber :ok)
-                    :ok)
-            :error (begin
-                     (complete-fiber fiber :error)
-                     :error)
-            nil))))
+          (if (= (fiber/status fiber) :dead)
+            (begin
+              (complete-fiber fiber :ok)
+              :ok)
+            (if (fiber-failed? fiber)
+              (begin
+                (complete-fiber fiber :error)
+                :error)
+              nil)))))
 
     (defn handle-join [caller target]
       "Handle a :join wait request. Resumes caller with [ok? value]."

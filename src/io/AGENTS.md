@@ -1,6 +1,6 @@
 # I/O Module
 
-<!-- audited: 2026-09-17 -->
+<!-- audited: 2026-09-20 -->
 
 ## Purpose
 
@@ -236,12 +236,12 @@ lost.
 
 Three things hold however the operation ends.
 
-- **The submission is accounted for.** `cancel` marks the id and leaves the
-  `pending` entry in place. The operation's completion still arrives, still
-  finds its entry, and — on the pool — still decrements `in_flight`. Removing
-  the entry at the cancel would strand the submission: the worker's thread would
-  never be accounted for again, and cancellation is a path `ev/timeout` takes on
-  every call.
+- **The submission is accounted for, and its operands are not.** `cancel` marks
+  the id and leaves the `pending` entry in place, and that entry lets go of what
+  it held. The completion still arrives, still finds its entry, and — on the
+  pool — still decrements `in_flight`; removing the entry would strand the
+  worker's thread. No operand is read after the mark, which is what makes the
+  release safe and a hold kept past it a cost `ev/timeout` pays every call.
 - **No completion is delivered.** `PendingTable::take` reports a cancelled
   submission as such, and its entry is retired rather than cooked — the pooled
   buffer released, a descriptor the completion would have wrapped in a port

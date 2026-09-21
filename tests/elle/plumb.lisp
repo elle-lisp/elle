@@ -117,6 +117,31 @@
 (pin-io-2 "io-abort" probe-io-abort 0 0)
 (pin-io-2 "io-refuse" probe-io-refuse 0 0)
 
+# ── The abort the scheduler routes ────────────────────────────────────
+# `io-abort` above ends a park through `fiber/abort` with no scheduler in the
+# picture. `ev/abort` reaches the same primitive through the event loop, which
+# then RECORDS what it did — a status record and a mark, both keyed by the
+# fiber (docs/scheduler.md § "Completion records") — and CANCELS the operation
+# the target was parked in, which leaves an entry holding its operands until
+# the completion arrives (docs/impl/io-inflight.md § "A cancelled operation
+# reads nothing again"). Either holder keeps the fiber, its closure, and the
+# payload the abort delivered, per call, for as long as the loop runs.
+#
+# The two probes must stay together, and neither subsumes the other.
+# `ev-abort` isolates the abort: it yields once so the target is genuinely
+# parked in io, then aborts it and nothing else. `ev-timeout` is the shape the
+# documentation tells a caller to bound work with, and it never blocks on io at
+# all — its body wins at once — so it is the one that reads what an unreaped
+# cancel costs a loop that gives the backend no chance to reap.
+(defn probe-ev-abort [j]
+  (let [f (ev/spawn (fn [] (ev/sleep 30)))]
+    (ev/sleep 0)
+    (ev/abort f)))
+(defn probe-ev-timeout [j]
+  (ev/timeout 30 (fn [] j)))
+(pin-io-2 "ev-abort" probe-ev-abort 0 0)
+(pin-io-2 "ev-timeout" probe-ev-timeout 0 0)
+
 # ── The answer a completion BUILDS ────────────────────────────────────
 # `io-yield ev/sleep` above answers with nil, so its completion builds nothing
 # and the whole round trip costs the request's region alone. These three answer
