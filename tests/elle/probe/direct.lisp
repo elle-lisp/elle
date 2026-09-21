@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-16
+# audited: 2026-09-21
 # The direct-loop rows for scope reclamation, branch compensation, collections, strings and cells — one per-op thunk each.
 #
 # docs/impl/region/diagnostics.md
@@ -265,19 +265,13 @@
         (while (not (empty? r))
           (assign n (%add n 1))
           (assign r (rest r)))
-        n)) 0]  # The same walk with the alias taken AFTER the cell binding, so the CELL's own
-   # binder is what allocated the init and the counted-init route has no untainted
-   # slot to release the producer's reference through — the only one recorded for
-   # the init region is the reassigned cell's, and no release may route through a
-   # mutated slot. What reclaims it is the reader instead: `keep` is a whole-value
-   # read of a 1-slot container, so it takes a COUNTED reference of its own,
-   # released through its own never-repointed slot, which withdraws it from the
-   # sole-held question and hands the donation back to the cell
-   # (docs/impl/region/bindings.md § "A whole-value read of a 1-slot container
-   # takes a counted reference"). `list-cursor` directly above is the same walk
-   # with the alias taken BEFORE, where the alias allocates and the counted-INIT
-   # route runs, so the gap between the two isolates the route rather than the
-   # model.
+        n)) 0]  # The same walk with the alias taken AFTER the cell binding: `keep` is a
+   # whole-value read of the container, so it takes a counted reference of its
+   # own and the cell keeps its donation (docs/impl/region/reads.md § "A
+   # whole-value read of a 1-slot container takes a counted reference").
+   # `list-cursor` directly above is the same walk with the alias taken BEFORE,
+   # where the counted-INIT route runs instead, so the gap between the two
+   # isolates the route rather than the model.
    ["cell-alias-after"
     (fn [j]
       (let [@r (list 1 2 3 4)]

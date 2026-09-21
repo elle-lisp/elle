@@ -1,9 +1,10 @@
 (elle/epoch 12)
+# audited: 2026-09-21
 # A whole-value read of a fn-local 1-slot container taken through a BRANCH. What
 # obliges the reader is the value it ends up holding, not the syntax that
 # selected it: an arm that reads a container that re-stores borrows a reference
 # the next `assign` releases, so the binder takes a counted one of its own
-# (docs/impl/region/bindings.md § "A branch is a read of whichever arms read").
+# (docs/impl/region/reads.md § "A branch is a read of whichever arms read").
 #
 # What the counted read is worth is the DONATION. Reading the branch as an
 # ordinary alias leaves the reader a holder of the container's init region, so the

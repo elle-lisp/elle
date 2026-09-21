@@ -24,6 +24,7 @@ Up: [..](../AGENTS.md)
 - [owner.md](owner.md) — **Owner nodes — an activation as a forest root** The pages-less region that realizes an activation or a fiber as a forest root, the two cuts that fill it, and what frees it.
 - [ownership.md](ownership.md) — **Adoption and subtree drop (the ownership forest)** Adoption links regions into a parent→child tree, so a whole subtree frees as a unit when its root frees.
 - [park.md](park.md) — **What a park retains, and who releases it** The references a suspended fiber's park leaves standing, and the one seam that consumes each.
+- [reads.md](reads.md) — **Reads of a 1-slot container** What a whole-value read of a reassigned binding's container takes, and which binder forms must emit the retain.
 - [relocate.md](relocate.md) — **A release past a frame-replacing tail call** Every release the lowerer emits after a `TailCall` is dead on the closure path, and what it costs to move one ahead of that call.
 - [replicate.md](replicate.md) — **The relocation point and its replicas** How a relocation point outlives its own block, so one release covers a merge and every path that leaves the frame before it.
 - [rules.md](rules.md) — **Region rules — the implementor's correctness obligations** The exhaustive correctness contract the compiler and runtime must uphold for regions.

@@ -1,4 +1,5 @@
 (elle/epoch 12)
+# audited: 2026-09-21
 # tests/integration/fixtures/region-container-read-toplevel-uaf.lisp
 #
 # Quarantined here — NOT under tests/elle/ — because an over-free in this shape
@@ -8,7 +9,7 @@
 # (`region_container_read_toplevel_uaf`).
 #
 # WHAT IT PINS — the counted container read is retained by EVERY binder form that
-# records it (docs/impl/region/bindings.md § "A whole-value read of a 1-slot
+# records it (docs/impl/region/reads.md § "A whole-value read of a 1-slot
 # container takes a counted reference", "Every binder form that records the read
 # must emit the retain"). A name bound to a whole-value read of a re-storing
 # container borrows a reference the container's next overwrite releases, so the
@@ -19,7 +20,7 @@
 # frees the value under the reader, and the reader's own placeholder release
 # decrefs it again.
 #
-# THE SHAPE'S INGREDIENTS (each is load-bearing):
+# THE SHAPE'S INGREDIENTS (removing any one un-pins it):
 #   * a MODULE-SCOPE reader, so the binder is the file-letrec's rather than a
 #     fn-local `let`'s — the fn-local half is pinned by
 #     tests/elle/region-reassign-captured-cell-reader.lisp and its guardfree twin;

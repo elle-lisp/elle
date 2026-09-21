@@ -1,7 +1,10 @@
-//! The structural walk that computes each node's raw last-use, plus the
-//! bookkeeping (`binding_init`/`binding_scope`, the iter-scope stack, and the
-//! lambda-capture-in-loop extension) the fixpoint solver in the module root
-//! consumes. Split out so the solver and the tree walk read as two concerns.
+//! audited: 2026-09-21
+//! The structural walk that computes each node's raw last-use.
+//!
+//! Also carries the bookkeeping the fixpoint solver in the module root
+//! consumes: `binding_init`/`binding_scope`, the iter-scope stack, and the
+//! lambda-capture-in-loop extension. Split out so the solver and the tree
+//! walk read as two concerns.
 
 use super::super::*;
 
@@ -216,7 +219,7 @@ impl LastUseBuilder<'_> {
             // the cell's life at the load, one node ahead of its reader, and the
             // cell's free cascade then reclaims the borrowed value under that
             // reader — latent on a plain build, a deref-site panic under
-            // `--trace=scrub` (docs/impl/region/bindings.md § "A read through an
+            // `--trace=scrub` (docs/impl/region/cells.md § "A read through an
             // env cell is an uncounted borrow"; tests/region_cell_borrow.rs).
             HirKind::DerefCell { cell } => self.walk(cell, true, my_last),
             HirKind::Destructure { pattern, value, .. } => {

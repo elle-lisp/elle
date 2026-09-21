@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-09-21
 //! Process-teardown contract (docs/impl/region/rules.md § "Teardown — every
 //! region frees").
 //!
@@ -21,6 +21,8 @@ use elle::runtime::Runtime;
 
 #[path = "region_process_teardown/census.rs"]
 mod census;
+#[path = "region_process_teardown/diagnostics.rs"]
+mod diagnostics;
 #[path = "region_process_teardown/growth.rs"]
 mod growth;
 

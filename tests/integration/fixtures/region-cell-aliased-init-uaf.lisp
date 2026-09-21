@@ -1,4 +1,5 @@
 (elle/epoch 12)
+# audited: 2026-09-21
 # tests/integration/fixtures/region-cell-aliased-init-uaf.lisp
 #
 # Quarantined here — NOT under tests/elle/ — because an over-free in this shape
@@ -17,7 +18,7 @@
 # still needs, and the cell's first overwrite would free the value under every
 # later read of that name.
 #
-# THE SHAPE'S INGREDIENTS (each is load-bearing):
+# THE SHAPE'S INGREDIENTS (removing any one un-pins it):
 #   * a HEAP init, so there is a reference to be claimed twice at all;
 #   * a SECOND name for the init value, read AFTER the loop, so a donated
 #     reference released at the first overwrite is observably gone;
@@ -71,7 +72,7 @@
 
 # The alias taken AFTER the cell binding, so the CELL's own binder is what
 # allocated the init. A whole-value read of a 1-slot container takes a COUNTED
-# reference of its own here (docs/impl/region/bindings.md § "A whole-value read of
+# reference of its own here (docs/impl/region/reads.md § "A whole-value read of
 # a 1-slot container takes a counted reference"), which hands the donation back to
 # the cell — so the cell's reference and the alias's are still distinct, and the
 # alias's release routes through its own slot rather than the cell's.

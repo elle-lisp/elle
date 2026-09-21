@@ -1,8 +1,9 @@
-// audited: 2026-09-15
+// audited: 2026-09-21
 //! What the walk records about a reassigned binding: the 1-slot-container
 //! class it falls in, where its binder stores, and who reads it whole.
 //!
 //! docs/impl/region/bindings.md
+//! docs/impl/region/reads.md
 
 use super::*;
 
@@ -95,7 +96,7 @@ impl RegionInference {
     /// a COUNTED reference of its own instead of aliasing the container's value
     /// uncounted. The container releases what it held at every re-store, so an
     /// uncounted alias is freed under the reader by the next overwrite
-    /// (docs/impl/region/bindings.md § "A whole-value read of a 1-slot container
+    /// (docs/impl/region/reads.md § "A whole-value read of a 1-slot container
     /// takes a counted reference").
     ///
     /// Realised as Rule 5's "new reference" pass-through: mint a placeholder
@@ -109,7 +110,7 @@ impl RegionInference {
     /// regions the reading arms contributed are withdrawn, and an arm that
     /// allocates keeps its own — those regions are the only thing extending that
     /// value's last use out to the binder's retain. One `IncrefValueRegion` names
-    /// whichever value arrived, so both halves balance (docs/impl/region/bindings.md
+    /// whichever value arrived, so both halves balance (docs/impl/region/reads.md
     /// § "A branch is a read of whichever arms read").
     ///
     /// The source test is `is_one_slot_container`, which reads the re-store fact
@@ -160,7 +161,7 @@ impl RegionInference {
     /// replaces with the placeholder.
     ///
     /// A **branch** is descended arm by arm, each arm being one path
-    /// (docs/impl/region/bindings.md § "A branch is a read of whichever arms
+    /// (docs/impl/region/reads.md § "A branch is a read of whichever arms
     /// read"). The reader's obligation is about the value it ends up holding, and
     /// one `IncrefValueRegion` at the binder names the runtime value — so it
     /// covers whichever arm ran, over one container or several. An arm that is
