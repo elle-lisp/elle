@@ -1,6 +1,6 @@
 # Agent-First Test Runner
 
-<!-- audited: 2026-09-17 -->
+<!-- audited: 2026-09-21 -->
 
 How a run executes: each file compiled, isolated, gated, run on every tier,
 its output captured, and its end recorded honestly.
@@ -121,7 +121,9 @@ Compilation stays in the main thread — a fresh worker has no compiler context
 internal parallelism the runner needs: workers run tests, and the main thread is
 the sole SQLite writer. A *hung* test is bounded by the per-test timeout:
 `os/join` takes a deadline, and a form that misses it is recorded `timeout`
-instead of wedging the run.
+instead of wedging the run. The deadline is a property of the path the form came
+from, not of the run — a path the caller named wide takes the wider budget, and
+every other path takes `--timeout` ([test-cli](test-cli.md)).
 
 **Unsendable captures fall back to in-process.** A worker receives the test
 thunk by deep-copying it across `os/spawn` (`SendBundle`). When the thunk
