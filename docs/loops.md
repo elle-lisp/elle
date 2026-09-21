@@ -1,5 +1,7 @@
 # Loops
 
+<!-- audited: 2026-09-20 -->
+
 Elle's loop forms are `while`, `forever`, `repeat`, and `each`. All
 support early exit via `break`. See [control.md](control.md) for the
 full control flow picture.
@@ -48,7 +50,9 @@ Iteration macro. `in` is optional sugar.
 total                      # => 60
 ```
 
-Works on lists, arrays, and other sequences.
+Works on lists, arrays, strings, bytes, sets, structs and fibers. A
+value outside those iterates through the `:iter` method in its trait
+table — see [traits.md](traits.md).
 
 ## Early exit
 
