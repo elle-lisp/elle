@@ -1,6 +1,6 @@
 # WASM Backend
 
-<!-- audited: 2026-09-06 -->
+<!-- audited: 2026-09-21 -->
 
 The WASM backend compiles Elle programs to WebAssembly and runs them under
 Wasmtime, over the same front end the bytecode VM uses.
@@ -194,6 +194,28 @@ bytecode closure or a collection-as-function raises a `cannot call …` type
 error that terminates the compiled entry. Pinned by
 [wasm-bytecode-closure-call.lisp](../../tests/elle/wasm-bytecode-closure-call.lisp)
 and [wasm-collection-call.lisp](../../tests/elle/wasm-collection-call.lisp).
+
+### The capability gate on a native call
+
+Every host path that reaches a native tests the calling fiber's withheld set
+first. `ElleHost::capability_denial` asks `VM::capability_blocked`
+([signal.rs](../../src/vm/signal.rs)) what that fiber may not spend, and a
+non-empty answer denies the call instead of running it.
+
+Four host paths reach a native, and all four ask: `rt_call`,
+`rt_prepare_tail_call`, the `call_primitive` import, and the tiered linker's own
+`rt_call`. The host holds the driving VM (`ElleHost::vm`), so it reads the same
+`fiber.withheld` the interpreter and the JIT read, and it builds the denial
+through the shared `VM::build_denial_payload`.
+
+The denial travels back as the call's own signal, so emitted code parks on it
+the way it parks on any other suspending native signal. The handle table that
+`value_to_wasm` inserts the payload into is what keeps the payload alive, which
+is this tier's escape route for any value a call hands back. A fiber therefore
+reads the same `{:error :capability-denied …}` struct whichever tier ran its
+body. Pinned by
+[caps-wasm-host.lisp](../../tests/elle/caps-wasm-host.lisp) and
+`wasm::tests::caps`.
 
 ### Suspension and resume
 
