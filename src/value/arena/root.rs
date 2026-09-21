@@ -1,5 +1,6 @@
-// audited: 2026-09-14
-//! Process roots, the pinned root region, and the macro-expansion scope.
+// audited: 2026-09-20
+//! Process roots, the program value's hand-off, the pinned root region, and the
+//! macro-expansion scope.
 //! docs/impl/region/rules.md
 //! docs/impl/region/template.md
 //! docs/impl/region/model.md
@@ -22,6 +23,17 @@ pub fn register_process_root(heap: &mut FiberHeap, value: Value) {
         heap.register_process_root_region(r);
     }
 }
+/// Give back the one owning reference a completed run handed its host with the
+/// program value (docs/impl/region/rules.md § "The program value is the host's
+/// to release"). The mirror of the `DecrefValueRegion` a compiled caller runs:
+/// it resolves the value's own runtime region, seeing through a capture cell
+/// exactly as the return convention's mint did.
+///
+/// A host that reads the value for the rest of the runtime's life registers it
+/// with [`register_process_root`] instead, and the teardown sweep releases it.
+/// An immediate has no region, so this is a no-op for one.
+pub fn release_program_value(_heap: &mut FiberHeap, _value: Value) {}
+
 /// Release every registered process root of `heap` by reference count and return
 /// the number released. This is the *only* heap-region action the teardown sweep
 /// takes — it decrefs roots and lets the RC cascade do the rest (Rule 5/7); it

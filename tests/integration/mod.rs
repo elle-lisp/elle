@@ -1,4 +1,4 @@
-// audited: 2026-09-17
+// audited: 2026-09-20
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -146,6 +146,9 @@ mod trace_isolation {
 }
 mod trace_residue {
     include!("trace_residue.rs");
+}
+mod program_value {
+    include!("program_value.rs");
 }
 mod spawn_stack {
     include!("spawn_stack.rs");
