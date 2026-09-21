@@ -32,7 +32,10 @@ pub fn register_process_root(heap: &mut FiberHeap, value: Value) {
 /// A host that reads the value for the rest of the runtime's life registers it
 /// with [`register_process_root`] instead, and the teardown sweep releases it.
 /// An immediate has no region, so this is a no-op for one.
-pub fn release_program_value(_heap: &mut FiberHeap, _value: Value) {}
+pub fn release_program_value(heap: &mut FiberHeap, value: Value) {
+    let region = result_region_of(heap, value);
+    decref_region(heap, region);
+}
 
 /// Release every registered process root of `heap` by reference count and return
 /// the number released. This is the *only* heap-region action the teardown sweep
