@@ -1,7 +1,6 @@
 // audited: 2026-09-21
-//! Lambda body compilation: saves/restores the lowerer's per-function state,
-//! lays out the closure environment (captures, params, locals), and lowers the
-//! body into a self-contained `LirFunction`.
+//! Lambda body compilation: state save/restore, environment layout, and
+//! lowering the body into its own `LirFunction`.
 
 use crate::hir::{CaptureInfo, ParamBound};
 use crate::lir::lower::*;

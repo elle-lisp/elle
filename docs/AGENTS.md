@@ -62,6 +62,7 @@ Up: [..](../AGENTS.md)
 - [threads.md](threads.md) — **Threads** OS threads for CPU-bound work.
 - [traits.md](traits.md) — **Traits** Every heap-allocated value carries a `traits` field — a pointer to a trait table (struct or @struct).
 - [types.md](types.md) — **Types** Elle values are 16-byte tagged unions.
+- [versioning.md](versioning.md) — **Versioning** How an Elle library declares its version and ships migration rules.
 - [warts.md](warts.md) — **Warts** Where Elle surprises a programmer from another Lisp: the intentional differences, then the known limitations.
 
 ## Directories
