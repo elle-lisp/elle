@@ -1,6 +1,6 @@
 # Symbols and keywords — identity is the name hash
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-21 -->
 
 A `SymbolId` is the 64-bit FNV-1a hash of the symbol's name. Nothing mints it
 and no table owns it: the same name yields the same id in every symbol table,
@@ -64,7 +64,7 @@ A memo learns a name where names already travel, and nowhere else:
 | Site | What arrives |
 |------|--------------|
 | the reader | every identifier and keyword token in the source text |
-| primitives | every keyword a native mints through its `NativeCtx` |
+| primitives | every keyword a native mints through its `NativeCtx`, including the kind of an error it raises |
 | the plugin ABI | every keyword a plugin mints through `make_keyword`'s call ctx, and the type name it wraps an external in — the string lives in the plugin's `.so`, so no vocabulary entry can carry it and `(type-of …)` has nowhere else to read it from |
 | the signal registry | every signal name read back out of the process-global registry — by `(signals)`, `fiber/caps`, a compile query's `:bits` set, or a capability denial |
 | `--trace` | every trace key the command line named, reported by `(vm/config)` |

@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-21
 //! The ergonomic `ctx.*` allocation surface: one constructor per heap type,
 //! each born on the ctx's heap in the ctx's own region.
 //! docs/impl/region/ctx.md
@@ -82,8 +82,14 @@ ctx_ctors! {
 impl<'h> Alloc<'h> {
     /// Construct an error value `{:error :kind :message msg}` born on the ctx's
     /// heap in the call's region (the ergonomic forwarder a native body uses
-    /// instead of the bare `error_val`). The kind keyword is interned
-    /// (immediate).
+    /// instead of the bare `error_val`).
+    ///
+    /// The kind keyword is an immediate: identity only, **spelling not
+    /// recorded**. `Alloc` holds no symbol table, so this method records
+    /// nothing. [`NativeCtx::error`](super::NativeCtx::error) overrides it to
+    /// record the spelling first, and every native that holds a ctx holds a
+    /// `NativeCtx`. The bare-boundary constructors reach this method directly
+    /// and have no memo to record into (docs/impl/symbol.md).
     #[inline]
     pub fn error(&self, kind: &str, msg: impl Into<String>) -> Value {
         crate::value::build::error(self.heap(), kind, msg, self.region)

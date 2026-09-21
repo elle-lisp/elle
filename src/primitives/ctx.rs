@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-21
 //! Allocation capabilities for native code (docs/impl/region/ctx.md).
 //! `Alloc` carries a call's region and heap; `NativeCtx` wraps it with the
 //! driving VM. A native cannot allocate without being handed one, so every
@@ -267,6 +267,39 @@ impl<'h> NativeCtx<'h> {
             symbols.keyword(name);
         }
         crate::value::Value::keyword(name)
+    }
+
+    /// Construct an error value, recording the kind's spelling first.
+    ///
+    /// Shadows [`Alloc::error`], which `Deref` reaches. `Alloc` holds no symbol
+    /// table, so it cannot record a spelling. This ctx reaches the instance's
+    /// memo, and a native names its kind in Rust, so no reader token carries the
+    /// spelling and no other learning site records it (docs/impl/symbol.md).
+    pub fn error(&self, kind: &str, msg: impl Into<String>) -> Value {
+        self.learn_keyword(kind);
+        self.alloc.error(kind, msg)
+    }
+
+    /// [`Alloc::error_extra`] with the kind's spelling recorded first, for the
+    /// same reason as [`NativeCtx::error`].
+    pub fn error_extra(
+        &self,
+        kind: &str,
+        msg: impl Into<String>,
+        extra: &[(&str, Value)],
+    ) -> Value {
+        self.learn_keyword(kind);
+        self.alloc.error_extra(kind, msg, extra)
+    }
+
+    /// Record `name`'s spelling in this instance's memo and build no value.
+    /// [`NativeCtx::keyword`] is the mint path; the error constructors build
+    /// their own keyword and take a shared ctx, so they want the recording
+    /// alone.
+    fn learn_keyword(&self, name: &str) {
+        if let Some(symbols) = unsafe { self.vm().symbols_ptr.as_mut() } {
+            symbols.keyword(name);
+        }
     }
 
     /// The VM's Unicode segmentation generation, for grapheme operations.
