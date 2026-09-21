@@ -17,6 +17,7 @@ use crate::primitives::{build_primitive_meta, register_primitives};
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
 use crate::syntax::Expander;
+use crate::value::arena::RootRef;
 use crate::vm::VM;
 use std::collections::HashMap;
 
@@ -226,14 +227,22 @@ impl CompileCtx {
     /// return mint's +1 is balanced by the caller's decref at the result's
     /// decref_point, so without a root the value would be freed at the end of its
     /// line; register the value's region as a process root to keep it live for
-    /// the session and release it by RC at teardown. Each `def` (including a
-    /// redefinition) is a distinct fresh region, so one registration per call
-    /// does not double-decref (R9).
+    /// the session and release it by RC at teardown.
+    ///
+    /// `funding` says which reference that root is made of
+    /// (docs/impl/region/rules.md § "The program value is the host's to
+    /// release"): a caller holding the value's own reference hands it over with
+    /// `RootRef::Take`, and one registering a value it reaches through another
+    /// (a leaf of a destructuring `def`) asks for `RootRef::Mint`. A minted root
+    /// funds itself per registration, so two leaves that share one region mint
+    /// two references against the sweep's two decrefs. A taken root does not:
+    /// the caller holds one reference, so it registers the region once (R9).
     pub fn register_repl_binding(
         &mut self,
         heap: &mut crate::value::fiberheap::FiberHeap,
         sym_id: crate::value::SymbolId,
         value: crate::value::Value,
+        funding: RootRef,
         signal: Signal,
         arity: Option<crate::value::types::Arity>,
     ) {
@@ -242,7 +251,7 @@ impl CompileCtx {
         if let Some(a) = arity {
             self.meta.arities.insert(sym_id, a);
         }
-        crate::value::arena::register_process_root(heap, value);
+        crate::value::arena::register_process_root(heap, value, funding);
     }
 
     /// Merge REPL-defined macros into the expander so subsequent compilations

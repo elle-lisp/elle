@@ -174,7 +174,11 @@ fn residue_after_teardown(mut rt: Runtime, src: &str, handoff: HandOff) -> usize
         vm.execute_scheduled(&result.bytecode, cctx).expect("runs")
     };
     match handoff {
-        HandOff::Root => elle::value::arena::register_process_root(rt.heap(), value),
+        HandOff::Root => elle::value::arena::register_process_root(
+            rt.heap(),
+            value,
+            elle::value::arena::RootRef::Take,
+        ),
         HandOff::Release => elle::value::arena::release_program_value(rt.heap(), value),
     }
     let report = rt.teardown();

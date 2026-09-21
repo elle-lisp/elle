@@ -11,6 +11,7 @@
 use crate::pipeline::{compile_file_repl, CompileCtx};
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
+use crate::value::arena::RootRef;
 use crate::value::types::Arity;
 use crate::value::Value;
 use crate::vm::VM;
@@ -86,7 +87,14 @@ fn eval_form(
         if let Some(binding) = form.bindings.first() {
             let sym_id = symbols.intern(&binding.name);
             let (signal, arity) = extract_signal_arity(&value);
-            cctx.register_repl_binding(unsafe { &mut *vm.heap_ptr }, sym_id, value, signal, arity);
+            cctx.register_repl_binding(
+                unsafe { &mut *vm.heap_ptr },
+                sym_id,
+                value,
+                RootRef::Take,
+                signal,
+                arity,
+            );
         }
 
         Ok(value)
@@ -112,6 +120,7 @@ fn eval_form(
                     unsafe { &mut *vm.heap_ptr },
                     sym_id,
                     *val,
+                    RootRef::Take,
                     signal,
                     arity,
                 );

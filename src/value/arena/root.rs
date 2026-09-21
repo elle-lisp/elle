@@ -15,11 +15,28 @@ use crate::value::fiberheap::regionstore::RegionMint;
 pub fn register_process_root_region(heap: &mut FiberHeap, region: RuntimeRegion) {
     heap.register_process_root_region(region);
 }
+/// Which reference the process root a host registers is funded by
+/// (docs/impl/region/rules.md § "The program value is the host's to release").
+/// The sweep decrefs a registered region once, so every registration answers
+/// this or it decrefs a reference nobody holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RootRef {
+    /// Take the one owning reference the caller holds and give nothing back.
+    /// The program value of a completed run arrives this way.
+    Take,
+    /// Mint the root's own reference. The caller holds no reference to give:
+    /// the value is reachable from one it holds elsewhere and releases, such as
+    /// a leaf of the program value's trailing tuple.
+    Mint,
+}
+
 /// Record `value`'s region as a process root of `heap` (see
-/// [`register_process_root_region`]). A value with no region (an immediate) is
-/// ignored — the type-level form of "only heap values pin a region."
-pub fn register_process_root(heap: &mut FiberHeap, value: Value) {
+/// [`register_process_root_region`]), funded as `funding` says. A value with no
+/// region (an immediate) is ignored — the type-level form of "only heap values
+/// pin a region."
+pub fn register_process_root(heap: &mut FiberHeap, value: Value, funding: RootRef) {
     if let Some(r) = region_of(heap, value) {
+        let _ = funding;
         heap.register_process_root_region(r);
     }
 }

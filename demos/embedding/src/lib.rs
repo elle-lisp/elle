@@ -192,6 +192,7 @@ pub unsafe extern "C" fn elle_register_prim(
         heap,
         sym_id,
         native,
+        elle::value::arena::RootRef::Take,
         Signal::silent(),
         Some(Arity::Exact(arity as usize)),
     );

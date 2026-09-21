@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-20
 // The image store milestone: dump a sealed value graph, hydrate it by
 // private file mapping, and prove the mechanism end to end.
 // docs/impl/image/plan.md
@@ -235,7 +235,14 @@ fn bind_hydrated(rt: &mut Runtime, path: &std::path::Path) -> Value {
     let sym = rt.symbols().intern("hydrated-f");
     {
         let (cctx, heap) = rt.compile_and_heap();
-        cctx.register_repl_binding(heap, sym, hydrated.root, signal, Some(arity));
+        cctx.register_repl_binding(
+            heap,
+            sym,
+            hydrated.root,
+            elle::value::arena::RootRef::Take,
+            signal,
+            Some(arity),
+        );
     }
     hydrated.root
 }

@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-20
 //! Process-teardown contract (docs/impl/region/rules.md § "Teardown — every
 //! region frees").
 //!
@@ -42,7 +42,11 @@ fn census_with(mut rt: Runtime, src: Option<&str>) {
         // is `Copy`); the caller owes a release. Routing it through the
         // process-root registry lets the teardown sweep consume it.
         // `register_process_root` takes the heap first.
-        elle::value::arena::register_process_root(rt.heap(), value);
+        elle::value::arena::register_process_root(
+            rt.heap(),
+            value,
+            elle::value::arena::RootRef::Take,
+        );
     }
     let report = rt.teardown();
     report_census(rt.heap(), &report);
@@ -85,7 +89,7 @@ fn pinned_after_teardown(mut rt: Runtime, src: &str) -> Vec<String> {
     // The program value reaches the caller with one owning reference; route it
     // through the process-root registry so the sweep consumes it, or it reports
     // as an unexplained reference of the caller's own making.
-    elle::value::arena::register_process_root(rt.heap(), value);
+    elle::value::arena::register_process_root(rt.heap(), value, elle::value::arena::RootRef::Take);
     let report = rt.teardown();
     let heap = rt.heap();
     unexplained_references(heap, &report)

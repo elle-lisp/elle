@@ -14,6 +14,7 @@ use crate::primitives::def::PrimitiveMeta;
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
 use crate::syntax::Expander;
+use crate::value::arena::RootRef;
 use crate::vm::VM;
 
 /// core.lisp source, embedded at compile time.
@@ -152,8 +153,9 @@ pub(super) fn compile_core(
     // as process roots keeps the exports live for the process and lets the
     // teardown sweep reclaim them by RC cascade. One registration each — these
     // are distinct regions, so no double-decref (R9).
-    crate::value::arena::register_process_root(unsafe { &mut *vm.heap_ptr }, closure_val);
-    crate::value::arena::register_process_root(unsafe { &mut *vm.heap_ptr }, exports_val);
+    let heap = unsafe { &mut *vm.heap_ptr };
+    crate::value::arena::register_process_root(heap, closure_val, RootRef::Take);
+    crate::value::arena::register_process_root(heap, exports_val, RootRef::Take);
 
     let exports_struct = exports_val
         .as_struct()

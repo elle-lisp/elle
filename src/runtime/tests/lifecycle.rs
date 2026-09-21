@@ -1,8 +1,16 @@
+// audited: 2026-09-20
+// What a runtime's teardown frees, and what two runtimes on one thread each
+// keep to themselves: the heap, the VM state, the compile context.
+//
+// docs/impl/region/rules.md
+// docs/impl/region/ctx.md
+
 use super::*;
-/// The load-bearing correctness test: teardown frees a *registered* root by
-/// RC reaching zero, and leaves an *unregistered* live region alone. The
-/// asymmetry is the proof that the sweep is RC-driven (it drops roots and
-/// cascades) and NOT iterate-and-free (which would have freed both).
+
+/// Teardown frees a *registered* root by RC reaching zero, and leaves an
+/// *unregistered* live region alone. The asymmetry is the proof that the sweep
+/// is RC-driven (it drops roots and cascades) and NOT iterate-and-free (which
+/// would have freed both).
 ///
 /// Counterfactual: if `teardown` walked the region table freeing entries,
 /// the unregistered region would also be gone and the second assertion would
@@ -83,6 +91,7 @@ fn two_instances_interleaved_defs_are_isolated() {
             unsafe { &mut *vm.heap_ptr },
             sym_id,
             value,
+            crate::value::arena::RootRef::Take,
             Signal::silent(),
             None,
         );

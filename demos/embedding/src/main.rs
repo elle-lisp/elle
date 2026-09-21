@@ -60,6 +60,7 @@ fn main() {
         heap,
         sym_id,
         native,
+        elle::value::arena::RootRef::Take,
         Signal::silent(),
         Some(Arity::Exact(1)),
     );

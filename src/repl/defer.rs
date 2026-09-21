@@ -12,6 +12,7 @@
 
 use crate::pipeline::{compile_file_repl, CompileCtx};
 use crate::symbol::SymbolTable;
+use crate::value::arena::RootRef;
 use crate::vm::VM;
 
 use super::eval::extract_signal_arity;
@@ -123,7 +124,14 @@ fn try_resolve_single(
     };
     let sym_id = symbols.intern(&form.name);
     let (signal, arity) = extract_signal_arity(&value);
-    cctx.register_repl_binding(unsafe { &mut *vm.heap_ptr }, sym_id, value, signal, arity);
+    cctx.register_repl_binding(
+        unsafe { &mut *vm.heap_ptr },
+        sym_id,
+        value,
+        RootRef::Take,
+        signal,
+        arity,
+    );
     true
 }
 
@@ -160,7 +168,14 @@ fn try_batch_resolve(
         for (form, val) in deferred.iter().zip(items.iter()) {
             let sym_id = symbols.intern(&form.name);
             let (signal, arity) = extract_signal_arity(val);
-            cctx.register_repl_binding(unsafe { &mut *vm.heap_ptr }, sym_id, *val, signal, arity);
+            cctx.register_repl_binding(
+                unsafe { &mut *vm.heap_ptr },
+                sym_id,
+                *val,
+                RootRef::Take,
+                signal,
+                arity,
+            );
         }
         let names: Vec<&str> = all_names.iter().map(|s| s.as_str()).collect();
         eprintln!("{}: resolved", names.join(", "));
