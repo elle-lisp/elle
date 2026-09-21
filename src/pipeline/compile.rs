@@ -1,4 +1,4 @@
-// audited: 2026-09-17
+// audited: 2026-09-21
 // src/pipeline/AGENTS.md
 //! Compilation pipeline: source -> bytecode.
 
@@ -163,6 +163,7 @@ fn compile_file_to_lir_inner(
     crate::epoch::check_lexicon_agreement(&syntaxes, source, source_name)?;
 
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
+    crate::pipeline::directives::extract_semver_directives(&mut syntaxes)?;
     if let Some(epoch) = source_epoch {
         if epoch_skip > 0 && epoch_skip < syntaxes.len() {
             crate::epoch::migrate_forms(&arena, &mut syntaxes[epoch_skip..], epoch)?;

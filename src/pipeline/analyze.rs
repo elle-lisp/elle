@@ -1,3 +1,4 @@
+// audited: 2026-09-21
 //! Analysis pipeline: source -> HIR (no bytecode generation).
 
 use super::AnalyzeResult;
@@ -80,7 +81,16 @@ fn analyze_file_in_arena(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<AnalyzeResult, String> {
-    let syntaxes = read_syntax_all(arena, source, source_name)?;
+    let mut syntaxes = read_syntax_all(arena, source, source_name)?;
+
+    // The compile front end consumes the epoch and versioning declarations
+    // and migrates old-epoch syntax; analysis must see the same file the
+    // compiler would, or the linter and portrait diverge from it.
+    let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
+    crate::pipeline::directives::extract_semver_directives(&mut syntaxes)?;
+    if let Some(epoch) = source_epoch {
+        crate::epoch::migrate_forms(&arena, &mut syntaxes, epoch)?;
+    }
 
     let (mut expander, meta) = cctx.expander_and_meta(arena);
 
