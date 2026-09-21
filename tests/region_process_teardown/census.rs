@@ -1,4 +1,4 @@
-// audited: 2026-09-17
+// audited: 2026-09-20
 // What one run leaves behind: the gates on the post-teardown residue, and the
 // per-shape censuses that name the classes it is made of.
 // docs/impl/region/rules.md
@@ -209,6 +209,30 @@ fn a_run_that_reads_a_whole_file_leaves_no_residue() {
     );
     assert_eq!(
         residue_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), &src),
+        0,
+        "{src}: regions survived teardown",
+    );
+}
+
+/// One call whose completions build more than one answer: `subprocess/system`
+/// spawns the child, reads both pipes to the end, and waits
+/// (docs/impl/io-inflight.md § "A completion owns what it builds").
+///
+/// It reaches what the two cases above do not. The `read-all` there reads a file
+/// its own call opened; this one reads a pipe, through a port a completion built
+/// and handed over. And neither of those can price a call that builds twice:
+/// with the handover removed, the spawn above leaves 1 region behind and the
+/// file read-all 3, where this leaves 5.
+///
+/// The child prints, so the `read-all` on its stdout answers with bytes rather
+/// than the `nil` an empty pipe gives — the shape a caller reads. It is named by
+/// an absolute path for the reason the spawn case gives: an `exec-error` is
+/// built the same way, so it would read as a pass.
+#[test]
+fn a_run_that_captures_what_a_child_wrote_leaves_no_residue() {
+    let src = "(get (subprocess/system \"/bin/sh\" [\"-c\" \"echo census\"]) :exit)";
+    assert_eq!(
+        residue_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), src),
         0,
         "{src}: regions survived teardown",
     );

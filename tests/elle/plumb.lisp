@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-19
+# audited: 2026-09-20
 # plumb.lisp — the io leak dashboard: every probe whose drive reaches the io
 # backend. oracle.lisp is the pure region dashboard and owns the discipline
 # this file follows — the estimator, the gauge-live discriminator rule, the
@@ -119,21 +119,27 @@
 
 # ── The answer a completion BUILDS ────────────────────────────────────
 # `io-yield ev/sleep` above answers with nil, so its completion builds nothing
-# and the whole round trip costs the request's region alone. These two answer
+# and the whole round trip costs the request's region alone. These three answer
 # with a value the completion had to BUILD, because nothing could reserve it
 # before the operation finished: a `subprocess` whose pid the spawn decides, and
 # the bytes a `read-all` has only once the stream ends. Such a value is born in
 # a region the completion owns and hands over as it becomes a value
 # (docs/impl/io-inflight.md § "A completion owns what it builds").
 #
-# The three must stay together. `io-yield` removes the built answer and reads
-# the same 0, so the gap between it and either of these is the whole of what a
+# All four must stay together. `io-yield` removes the built answer and reads
+# the same 0, so the gap between it and any of these is the whole of what a
 # completion's own region costs — one region and its objects per call, linear in
 # the calls a program makes, and invisible to every other probe in this file.
 #
-# `subprocess-exec` runs at a tenth of the block size the rest of the file uses:
-# a block here is a block of CHILD PROCESSES, and the estimator's stopping rule
-# converges on a deterministic shape in its minimum blocks either way.
+# `subprocess-system` is one call whose completions build three times: the
+# spawn's `subprocess`, and the answer each `read-all` on the child's two pipes
+# ends with. Its two siblings take each of those shapes in its simplest form: the
+# spawn with `:null` on all three streams, the `read-all` on a file. So neither
+# of them reads a pipe, and neither hands over a region that carries a port.
+#
+# The two spawning probes run at a tenth of the block size the rest of the file
+# uses: a block there is a block of CHILD PROCESSES, and the estimator's stopping
+# rule converges on a deterministic shape in its minimum blocks either way.
 (def built-dir (file/mktempdir))
 (def built-path (string built-dir "/plumb-read-all"))
 (spit built-path "plumb")
@@ -146,8 +152,11 @@
         s (port/read-all p)]
     (port/close p)
     (length s)))
+(defn probe-subprocess-system [j]
+  (get (subprocess/system "/bin/sh" ["-c" "echo plumb"]) :exit))
 (pin-io-2-at "subprocess-exec" probe-subprocess-exec 0 0 10 6 40)
 (pin-io-2 "port-read-all" probe-read-all 0 0)
+(pin-io-2-at "subprocess-system" probe-subprocess-system 0 0 10 6 40)
 (delete-file built-path)
 (delete-directory built-dir)
 
