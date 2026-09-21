@@ -59,7 +59,10 @@
     "--tests" [:tests :value]
     "--tag" [:tag :flag]
     "--no-tests" [:no-tests :flag]
-    "--strict" [:strict :flag]})
+    "--strict" [:strict :flag]
+    "--check" [:check :flag]
+    "--dry-run" [:dry-run :flag]
+    "--from" [:from :value]})
 
 (defn parse-args [args acc]
   (if (empty? args)
@@ -290,6 +293,77 @@
             (print-arbitration res strict?)))
         code))))
 
+# ── migrate: consumers repaired from shipped rules ───────────────────
+(defn lib-export-names [t]
+  "The library's current export names, read statically; the template
+   qualifier needs them."
+  (let [[ok? ex] (protect (compile/exports (compile/analyze (file/read (t :path))
+                          {:file (t :path)})))]
+    (if (and ok? ex)
+      (->list (map (fn [k] (string k)) (->list (keys (ex :exports)))))
+      ())))
+
+(defn import-specs [t]
+  "Every spelling a consumer may import the library by."
+  (let [p (t :path)
+        bare (if (string/ends-with? p ".lisp")
+               (slice p 0 (- (length p) 5))
+               p)]
+    [(t :module) p bare]))
+
+(defn print-migrate-reports [file r]
+  (each rep (r :reports)
+    (println (string file ":" (rep :line) ": " (rep :name) " — "
+                     (rep :message))))
+  (when (> (r :manual) 0)
+    (println (string file ": " (r :manual) " import(s) need manual migration"))))
+
+(defn migrate-file [file lib-source exports specs opts]
+  "One consumer file; answers the exit code it earns."
+  (let [[ok? src] (protect (file/read file))]
+    (unless ok?
+      (die (string file ": " (err-text src))))
+    (let [[mok? r] (protect (mig:migrate-source {:source src
+                            :specs specs
+                            :lib-source lib-source
+                            :exports exports
+                            :from (parse-int (or (get opts :from) "0"))}))]
+      (unless mok?
+        (die (string file ": " (err-text r))))
+      (print-migrate-reports file r)
+      (let [remove-hit? (any? (fn [rep] (= (rep :kind) :remove)) (r :reports))]
+        (cond
+          (get opts :check)
+            (begin
+              (when (> (r :count) 0)
+                (println (string file ": " (r :count) " edit(s) needed")))
+              (if (or (> (r :count) 0) remove-hit?) 1 0))
+          (get opts :dry-run)
+            (begin
+              (when (> (r :count) 0)
+                (println (string file ": " (r :count)
+                                 " edit(s) would be applied")))
+              0)
+          (begin
+            (when (> (r :count) 0)
+              (file/write file (r :source))
+              (println (string file ": " (r :count) " edit(s) applied")))
+            0))))))
+
+(defn migrate-cmd [opts]
+  (let [paths (get opts :paths)]
+    (when (< (length (->list paths)) 2)
+      (die "migrate needs a library and at least one consumer file"))
+    (let [t (resolve-target (first paths))
+          lib-source (file/read (t :path))
+          exports (lib-export-names t)
+          specs (import-specs t)
+          @worst 0]
+      (each f (rest paths)
+        (let [c (migrate-file f lib-source exports specs opts)]
+          (when (> c worst) (assign worst c))))
+      worst)))
+
 # ── the walk ─────────────────────────────────────────────────────────
 (defn module-version [path]
   "The declared version of the file at PATH, or nil."
@@ -387,6 +461,7 @@
     (empty? args) :status
     (= (first args) "release") :release
     (= (first args) "check") :check
+    (= (first args) "migrate") :migrate
     :status))
 (def opts (parse-args (if (= cmd :status) args (rest args)) @{:paths []}))
 (def paths (get opts :paths))
@@ -401,6 +476,7 @@
       (if (empty? paths)
         (over-paths (->list (walk-tree "." @[])) (fn [t] (check-target t opts)))
         (over-paths paths (fn [t] (check-target t opts))))
+    (= cmd :migrate) (migrate-cmd opts)
     (empty? paths) (dashboard (get opts :json))
     (over-paths paths (fn [t] (status-target t (get opts :json))))))
 
