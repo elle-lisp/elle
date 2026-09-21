@@ -1,5 +1,7 @@
 # Embedding
 
+<!-- audited: 2026-09-20 -->
+
 Elle can be embedded as a scripting engine in Rust or C programs. The host
 creates a runtime, optionally registers custom primitives, compiles and
 executes Elle code, and extracts results.
@@ -40,15 +42,24 @@ The init sequence:
 3. `let (vm, symbols, cctx) = rt.parts();` — borrow the three pieces the
    pipeline needs at once.
 4. `compile_file(source, symbols, cctx, filename)` — compile to bytecode.
-5. `vm.execute_scheduled(&bytecode, symbols)` — run under async scheduler.
-6. Drop the `Runtime` (or call `rt.teardown()`) to run the region-RC
+5. `vm.execute_scheduled(&bytecode, cctx)` — run under the async scheduler.
+   It answers with the program value.
+6. `value::arena::release_program_value(vm.heap(), value)` — give back the one
+   owning reference the run handed over, once the host has read what it needs
+   from the value. A host that reads the value for the rest of the runtime's
+   life calls `value::arena::register_process_root` instead, and the sweep in
+   step 7 releases it. See the [region rules](impl/region/rules.md).
+7. Drop the `Runtime` (or call `rt.teardown()`) to run the region-RC
    teardown sweep when done.
 
-Custom primitives are `fn(&[Value]) -> (SignalBits, Value)` wrapped in a
-`PrimitiveDef` struct with metadata (name, arity, signal, docs). Register
-the resulting value through `register_repl_binding` so the compiler sees it.
+Custom primitives are `fn(&mut NativeCtx, &[Value]) -> (SignalBits, Value)`
+wrapped in a `PrimitiveDef` struct with metadata (name, arity, signal, region
+effect, docs). The `NativeCtx` is the call's allocation capability: a primitive
+that builds a heap value names its region and heap through it. Register the
+resulting value through `register_repl_binding` so the compiler sees it.
 
-See `demos/embedding/src/main.rs` for the complete Rust host demo.
+See [the Rust host demo](../demos/embedding/src/main.rs) for the whole sequence
+in one file.
 
 ## C embedding
 
@@ -61,9 +72,12 @@ The `elle-embed` cdylib provides a C-ABI surface:
 | `elle_eval(ctx, src, len)` | Compile + execute (0=ok, -1=error) |
 | `elle_result_int(ctx, &out)` | Get result as integer |
 | `elle_register_prim(ctx, ...)` | Register host primitive |
+| `elle_make_int(n)` / `elle_make_nil()` | Build a value for a host primitive to return |
+| `elle_prim_result(signal, value)` | Pack a host primitive's signal and value |
 
 Link against `libelle_embed.so` with `-lelle_embed`. See
-`demos/embedding/host.c` and `demos/embedding/include/elle.h`.
+[the C host demo](../demos/embedding/host.c) and
+[its header](../demos/embedding/include/elle.h).
 
 ## Event loop cooperation
 
