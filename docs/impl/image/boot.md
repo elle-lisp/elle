@@ -163,6 +163,24 @@ dumps one for the next start.
 A store failure is reported and ignored. The cache is a speedup, and a source
 boot is always the fallback.
 
+## The gate
+
+`make smoke-boot-image` runs the corpus from an image instead of from the three
+sources. The target fills a cache directory, proves that the next start
+hydrates what it stored, and then runs the corpus with every `elle test` batch
+pointed at that directory. A pull request gets the same run from the `Boot
+Image Tests` job ([ci.md](../../analysis/ci.md)).
+
+The proof is a `--trace=boot` start that has to print an `image-hydrate` mark.
+Without it the target reports on a source boot: a binary that ignored
+`--boot-image=` would pass it, and so would an image every start refuses and
+replaces.
+
+The runner instance is the one that hydrates, so every corpus file is read,
+expanded and compiled against the image's macros and exports. A file's forms
+then run on a worker, which registers its own primitives and compiles its own
+stdlib. Per-worker hydration is a milestone of its own ([plan.md](plan.md)).
+
 ## Why the cache is opt-in
 
 `--boot-image=DIR` turns the warm cache on, `--boot-image=on` uses the
