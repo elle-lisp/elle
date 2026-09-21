@@ -1,6 +1,6 @@
 # One test system
 
-<!-- audited: 2026-09-17 -->
+<!-- audited: 2026-09-20 -->
 
 The plan that folds every test product into `elle test`, keeps the results,
 and states what a run may skip.
@@ -143,10 +143,11 @@ records into a `measurement` table: subject, axis, value, unit, verdict
 coverage question in elle-lisp/elle#1144 then becomes a gated table of
 (subject, axis) rows, checked once in the runner for every dashboard.
 
-The runner also samples the arena gauges between files and records the deltas.
-That turns its own growth into attributed measurements, which is the evidence
-needed to retire `CORPUS_BATCH` and, once the `compile/dumps` leak closes, to
-restore dump capture.
+The runner's own growth is in, on a table of its own: it samples the arena
+gauges between files and charges each file what it cost
+([test-store](test-store.md)). That is the evidence needed to retire
+`CORPUS_BATCH` and, once the `compile/dumps` leak closes, to restore dump
+capture.
 
 ## What this deletes
 
