@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-09-17 -->
+<!-- audited: 2026-09-20 -->
 
 Elle has two test systems:
 
@@ -28,7 +28,8 @@ specification is [docs/test-runner.md](test-runner.md), with
 | `elle test --summary` | Re-print the last run's summary (no re-run) |
 | `elle test --query 'SQL'` | Run ad-hoc SQL |
 
-A run prints a tally and a line per failure to stderr, e.g.:
+A run prints a tally, a line per failure, and what it cost the runner's own
+heap — all to stderr:
 
 ```
 elle test · run 7 of 7 · commit a1b2c3d (dirty)
@@ -36,10 +37,14 @@ elle test · run 7 of 7 · commit a1b2c3d (dirty)
 2 problems (query the DB for full detail):
   fail     tests/elle/foo.lisp:12  [jit]  expected 42, got 41
   timeout  tests/elle/subprocess.lisp  [vm]  join: deadline exceeded
+runner heap · objects +9021 · regions +28104 · pages +112
+  objects +4510  regions +14052  pages +56  tests/elle/a.lisp
 ```
 
 The commit line names the code the tally describes. A run outside a
-repository prints the run number alone.
+repository prints the run number alone. The `runner heap` block is the run's
+account of what it cost itself, file by file
+([docs/test-store.md](test-store.md) § The runner's own gauges).
 
 You read results from the run itself — never by hand-writing SQLite.
 
@@ -215,8 +220,8 @@ the deadline is the specification: a 50 ms `chan/select` has to return in about
 
 ### Per-thread native teardown
 
-An FFI library may register thread-local destructors (e.g. libgit2 via OpenSSL:
-`pthread_key_create`). If a worker that used such a library `dlclose`d it on
+An FFI library may register thread-local destructors — libgit2 does, through
+OpenSSL's `pthread_key_create`. If a worker that used such a library `dlclose`d it on
 teardown, glibc would later run the destructor — at worker thread exit — into the
 unmapped code, killing the process with SIGSEGV in `__nptl_deallocate_tsd`.
 
@@ -225,7 +230,7 @@ and **never `dlclose`d** (`src/ffi/registry.rs`; the same discipline plugins use
 so a worker that uses an FFI library and exits is always safe — the destructor runs
 against still-mapped code. No per-worker teardown is required. A program may attach
 an *optional, explicit* ordered teardown to a library with `(ffi/on-unload lib
-"sym")` and run them with `(ffi/run-teardowns)` (e.g. `lib/git.lisp`'s `git:shutdown`);
+"sym")` and run them with `(ffi/run-teardowns)` (`lib/git.lisp`'s `git:shutdown`, for example);
 these are graceful cleanup the program triggers when its worker threads have
 quiesced, never run automatically and never required for safety. Pinned by
 `tests/integration/ffi_worker.rs` (a worker that loads a TLS-destructor fixture and
@@ -241,7 +246,8 @@ elle test --query \
    JOIN form f ON f.hash = r.form_hash WHERE r.status = 'fail'"
 ```
 
-The schema (`run`, `form`, `result`, `asset`, `measurement`, `changed_file`) is documented in
+The schema (`run`, `form`, `result`, `asset`, `measurement`, `gauge`,
+`changed_file`) is documented in
 [docs/test-store.md](test-store.md) § Schema (with the v1 implemented-subset
 note — the `run` resource columns are deferred). Each `run` row names the code
 it ran against — commit, dirty flag, tree hash, worktree — and the binary and
@@ -253,6 +259,18 @@ OOMs the corpus run and does not dedup
 ([docs/test-runner.md](test-runner.md) § CAS asset capture) — so
 today only stdout/stderr assets exist; the LIR of a failing form still needs a
 re-run until that capture is re-enabled.
+
+What a run cost the runner's own heap is recorded per file, in objects,
+regions and pages, and the summary names the files that grew it most. A leak
+per compiled file used to reach us as an OOM kill and a batch size; now it
+reaches us as a file name and a number
+([docs/test-store.md](test-store.md) § The runner's own gauges).
+
+```sh
+elle test --query \
+  "SELECT file, sum(delta) AS regions FROM gauge
+   WHERE kind = 'regions' GROUP BY file ORDER BY regions DESC LIMIT 10"
+```
 
 A form that misses its deadline prints a native backtrace of every thread in
 the runner process to stderr, under `── threads at the deadline ──`. `sys/join`

@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-17
+# audited: 2026-09-20
 ## elle test — the session store: where a run is kept, the schema it is kept
 ## in, what a run row says about the code it ran against, and the CAS.
 ## docs/test-store.md
@@ -66,6 +66,8 @@
                "CREATE TABLE IF NOT EXISTS asset (result_id INTEGER, kind TEXT, hash TEXT, size INTEGER, codec TEXT)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS measurement (run_id INTEGER, result_id INTEGER, subject TEXT, axis TEXT, value REAL, unit TEXT, verdict TEXT)")
+  (sqlite:exec conn
+               "CREATE TABLE IF NOT EXISTS gauge (id INTEGER PRIMARY KEY, run_id INTEGER, file TEXT, kind TEXT, delta INTEGER, reading INTEGER)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS changed_file (run_id INTEGER, path TEXT, status TEXT, blob_hash TEXT)")
   # Run honesty (docs/test-runner.md § Run honesty): finished_at is stamped
@@ -236,6 +238,50 @@
           (let [[parsed? rec] (protect (json/parse line :keys :keyword))]
             (when parsed? (insert-measurement conn run-id result-id rec)))))
       (protect (file/delete sink))))
+  nil)
+
+# ── the runner's own gauges (docs/test-store.md § The runner's own gauges) ──
+# Three gauges of the runner's OWN heap, as [kind reader]. Each primitive is
+# Immediate, so a reading allocates nothing and cannot move the number it
+# reports. One list, because the sampling here and the growers query in the
+# views both have to agree about which gauges there are.
+#
+# A worker thread has its own VM and its own heap and an --isolate child is a
+# separate process, so what the test code allocates never reaches these. What
+# reaches them is what the runner does per file: the compile, the syntax it
+# holds, and the rows it writes.
+(def runner-gauges
+  [["objects" (fn [] (arena/count))] ["regions" (fn [] (arena/region-count))]
+   ["pages" (fn [] (arena/page-claims))]])
+
+# The gauge names alone, in the order a reading and a rendering both take them.
+(defn gauge-kinds []
+  (map (fn [g] (get g 0)) runner-gauges))
+
+# The reading every window starts from, as kind → value. The runner keeps one
+# of these and replaces it at each boundary.
+(defn gauge-baseline []
+  (let [@prev @{}]
+    (each g in runner-gauges
+      (put prev (get g 0) ((get g 1))))
+    prev))
+
+# One boundary: charge each gauge's change since the previous boundary to FILE,
+# and leave this reading as the next window's start.
+#
+# ONE reading per boundary, not a before/after pair around each file. A pair
+# leaves the rows written between them charged to nobody, and that gap is where
+# the runner's own work lives. With one reading every object the runner
+# allocates lands in exactly one file's window, and the readings chain: a
+# file's `reading` plus the next file's `delta` is the next file's `reading`.
+(defn gauge-mark [conn run-id prev file]
+  (each g in runner-gauges
+    (let [kind (get g 0)
+          now ((get g 1))]
+      (sqlite:exec conn
+                   "INSERT INTO gauge (run_id, file, kind, delta, reading) VALUES (?1,?2,?3,?4,?5)"
+                   [run-id (string file) kind (- now (get prev kind)) now])
+      (put prev kind now)))
   nil)
 
 # CAS-store a result's captured stdout/stderr (only when non-empty, so a silent

@@ -1,4 +1,4 @@
-// audited: 2026-09-17
+// audited: 2026-09-20
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -137,6 +137,9 @@ mod syntax_regions {
 }
 mod timeout_capture {
     include!("timeout_capture.rs");
+}
+mod runner_gauges {
+    include!("runner_gauges.rs");
 }
 mod trace_boot {
     include!("trace_boot.rs");

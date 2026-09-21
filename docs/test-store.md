@@ -1,6 +1,6 @@
 # The test runner store
 
-<!-- audited: 2026-09-17 -->
+<!-- audited: 2026-09-20 -->
 
 Where `elle test` keeps a run, what every run and result records, and the
 queries that read them back.
@@ -202,6 +202,56 @@ neither `closed` nor `growth` — the two verdicts that are the expected answer:
 The rest is a query. The summary is a reading aid, and every number in it comes
 out of the table.
 
+## The runner's own gauges
+
+The runner is the longest-running Elle program in this repository, and for most
+of its life it measured nothing about itself. A leak of about 28000 regions per
+compiled file reached us as an OOM kill of `make smoke`, and the answer was a
+batch size rather than a number naming the file.
+
+So the runner reads three gauges of its own heap — `arena/count` for objects,
+`arena/region-count` for regions, and `arena/page-claims` for pages — and
+records what each file cost it. All three are Immediate primitives
+([diagnostics](impl/region/diagnostics.md)), so a reading allocates nothing and
+cannot move the number it reports.
+
+### One reading per file boundary
+
+The runner takes a baseline before the first file, then one reading after each
+file, and charges the difference to that file. One reading per boundary is what
+makes the accounting close. The rows written for one file fall inside the next
+file's window, so every object the runner allocates is charged to exactly one
+file. Read back, the chain is exact: a file's `reading` plus the next file's
+`delta` is the next file's `reading`.
+
+A reading covers the runner's own heap and nothing else. Every worker thread
+has its own VM and its own heap, and an `--isolate` child is a whole separate
+process, so what the test code allocates never reaches these numbers. What
+reaches them is what the runner does per file: the compile, the syntax it
+holds, and the rows it writes.
+
+### Why a table of its own
+
+A delta belongs to the window between two boundaries rather than to a
+(form × tier), so a `result` column would copy one number onto every row of the
+file. A `measurement` row is the wrong home too: it carries a dashboard's
+verdict off the channel of an isolated child, and a per-file delta has no
+verdict to give.
+
+### The summary names the top growers
+
+Every run ends with the totals and the files that grew the heap most, ranked by
+regions:
+
+```
+runner heap · objects +9021 · regions +28104 · pages +112
+  objects +4510  regions +14052  pages +56  tests/elle/a.lisp
+  objects +4511  regions +14052  pages +56  tests/elle/b.lisp
+```
+
+The list is a reading aid. Which file, on which commit, in which run is a query
+over `gauge`.
+
 ## Schema
 
 ```sql
@@ -245,6 +295,14 @@ CREATE TABLE measurement (          -- one dashboard verdict, reported through t
   subject TEXT, axis TEXT,          -- the probe, and the dimension it was read on
   value REAL, unit TEXT,            -- the rate, and what one unit of it is
   verdict TEXT);                    -- closed|open|growth|inconclusive|contaminated
+
+CREATE TABLE gauge (                -- what one file cost the runner's own heap
+  id INTEGER PRIMARY KEY,           -- insertion order, which is boundary order
+  run_id INT REFERENCES run(id),
+  file TEXT,                        -- the file this boundary's window is charged to
+  kind TEXT,                        -- objects|regions|pages
+  delta INT,                        -- the change since the previous boundary
+  reading INT);                     -- the gauge at this boundary
 ```
 
 The runner writes this with `lib/sqlite.lisp` (FFI to libsqlite3). The DB holds
@@ -253,8 +311,8 @@ stays small and merge/diff concerns never arise (it is gitignored regardless).
 
 **v1 implemented subset ([store.lisp](../src/test/store.lisp) `ensure-schema`).**
 The runner creates
-`form`, `result`, `asset` and `measurement` with the columns above; `run` and
-`changed_file` are subsets:
+`form`, `result`, `asset`, `measurement` and `gauge` with the columns above;
+`run` and `changed_file` are subsets:
 
 - `run` carries every column above except the resource ones
   (`wall_ms`/`max_rss_kb`/`cpu_user_ms`/`cpu_sys_ms`), which are deferred. So a
@@ -293,5 +351,9 @@ WHERE cur.run_id = ? AND base.run_id = ? AND cur.cpu_us > base.cpu_us * 2;
 SELECT run.git_commit AS sha, m.value AS rate, m.unit AS unit, m.verdict AS verdict
 FROM measurement m JOIN run ON run.id = m.run_id
 WHERE m.subject = 'io-drop' AND m.axis = 'regions' ORDER BY m.run_id;
+
+-- Which files cost the runner the most heap, across every run recorded.
+SELECT file, sum(delta) AS regions FROM gauge
+WHERE kind = 'regions' GROUP BY file ORDER BY regions DESC LIMIT 10;
 ```
 
