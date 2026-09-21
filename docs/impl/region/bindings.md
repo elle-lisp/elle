@@ -153,22 +153,22 @@ mis-coalesce and what that oracle is for
 (`coalescible_refuses_a_cell_stored_value`,
 `tests/elle/region-pair-heap-content-uaf.lisp`).
 
-**The gate.** The model trades static releases for suppression plus a
-value-based store/overwrite pair, so it is sound only when the cell's claim on a
-value region's single compiler-owned reference is exclusive — and the two
-questions below are asked per region, over the regions each one governs (the
-next section splits them):
+**The gate.** The model is gated exactly where it claims a reference UNCOUNTED —
+and nowhere else. The sole-held question ("no other *read, user* binding may
+hold the region"; a synthetic ANF producer temp or a write-only statement
+wrapper is not an alias) is asked of:
 
-- **sole-held** — no other *read, user* binding may hold the region (a
-  synthetic ANF producer temp or a write-only statement wrapper is not an
-  alias); and
-- **not returned** — a *module-scope* cell's region must not appear in any
-  return site or lambda tail set. That cell ADOPTS the producer's reference,
-  and a return transfers the same reference to the caller, whose value-based
-  release consumes it — two static owners of one reference is a double-free.
-  A fn-local cell counts what it stores, so it claims nothing the return
-  needs and asks the question of nothing (see "Returned fn-local reassigned
-  mutables", below).
+- **the module-scope cell's every region** — that cell ADOPTS the producer's
+  reference for the init and every stored value alike, so a second name would
+  read a value the next overwrite frees. Its regions must also be **not
+  returned**: a return transfers the same reference to the caller, whose
+  value-based release consumes it — two static owners of one reference is a
+  double-free.
+- **the fn-local cell's INIT** — the one value it takes uncounted. An aliased
+  init withdraws the donation, not the model (next section).
+
+The fn-local cell's STORED values ask it of nothing — see "An aliased stored
+value takes the counted store", below.
 
 **A name the store consumes is not a second holder of the value.** The
 sole-held question protects the store-site pin, which moves a producer release
@@ -231,20 +231,44 @@ allocating arm keeps its own regions while the container's are withdrawn. What
 still leaves the alias a holder, and the container on the counted-init route, is
 an init NO path of which is a whole-value read.
 
-Refusing instead costs the **store-site pin**, not merely the donation. On the
-unsuppressed baseline the cell holds no reference at all, so each stored value is
-protected only by its producer's — whose release the binding chain then extends
-out to the cell's last use, one release for a region that names a different
-runtime value every iteration. A loop that stores N values then releases one
-(`tests/elle/region-cell-aliased-init.lisp`).
+**An aliased stored value takes the counted store.** The stored values are
+regions the model PINS, never regions it suppresses, and every `decref_point`
+pass is a maximum — each contributes a lower bound and the latest wins
+([the anchors](anchors.md)). An alias of a stored value is an ordinary binding,
+so its reads extend the region's release through the binding chain exactly as
+any holder's do, and the pin lands at or after the store AND at or after the
+alias's last read. No release moves ahead of a second name, so a second name
+refuses nothing here. The counted store itself claims nothing from anyone: the
+cell's reference is its own, taken by the incref-on-store and released by
+drop-on-overwrite or the content drop.
 
-The requirement that survives is over the regions the model still *moves*: the
-stored values, whose producer release is pinned back to the store site. A cell
-whose assign value is aliased keeps refusing, whole. The counted init also needs
-a store to retain at, which the chain's source binder supplies; a chain whose
-source is a parameter has no such store, so it keeps donate-or-refuse. The
-reference is the test: `reassign_gate_counts_an_aliased_init` for the admission,
-`reassign_gate_refuses_an_aliased_assign_value` for the decline.
+Refusing instead costs more than promptness. On the unsuppressed baseline the
+cell holds no reference at all, so each stored value is protected only by its
+producer's — whose release the binding chain extends out to the cell's last
+use, hoisted past any loop the cell is carried across. One release then serves
+a region minted per iteration, so a loop that stores an element it named first
+strands every iteration's value but the last, permanently. That is the
+ordinary conditional-accumulate idiom —
+`(each x in xs (when (better? x best) (assign best x)))` — and the scheduler's
+unjoined-error scan is one, where what each call stranded was the fiber table
+snapshot, the fiber inside it, and everything the fiber's closure reaches
+(elle-lisp/elle#1186).
+
+One overlap takes the counted-init route rather than the donation: an aliased
+stored region that is ALSO among the binding's own source regions, which the
+phi of a conditional `assign` produces by copying the store's regions onto the
+binding. The suppression never reaches a stored region, so a donation granted
+over the overlap would leave the binder's uncounted store with no reference
+for drop-on-overwrite to release; counting the init balances it, and an
+immediate init makes that retain a no-op. The counted init still needs a
+binder to retain at, which the chain's source supplies; a chain whose source
+is a parameter has no such store, so it keeps donate-or-refuse. The reference
+is the test: `reassign_gate_counts_an_aliased_init` for the aliased init,
+`reassign_gate_counts_an_aliased_assign_value` for the aliased store,
+`reassign_gate_counts_an_aliased_forwarding_link` for the chain, and
+`tests/elle/region-cell-aliased-store.lisp` for the measured shape, with
+`region-cell-aliased-store-uaf.lisp` pinning the alias's reads under
+guardfree.
 
 **What a read of the container takes is [reads.md](reads.md).** A whole-value
 read borrows a reference the next overwrite kills, so the reader takes a counted
@@ -323,10 +347,12 @@ unsuppressed baseline, where each value's ordinary decref is the release of the
 producer's reference — and the next link's drop-on-overwrite would then release
 that reference a second time. Declining every link together keeps the "one
 reference, one channel" accounting true by construction rather than by
-coincidence. The reference is the test:
-`reassign_gate_keeps_loop_carried_cell_forwarded_from_a_cell` for the admission,
-`reassign_gate_refuses_forwarding_chain_with_an_aliased_link` for the decline, and
-`tests/elle/region-cell-forward-chain.lisp` for the measured shape.
+coincidence. An alias of a link's STORED value declines nothing — its reads
+extend the store-site pin, exactly as outside a chain — and an alias of the
+fold's init moves the whole chain to the counted-init route. The reference is
+the test: `reassign_gate_keeps_loop_carried_cell_forwarded_from_a_cell` for the
+admission, `reassign_gate_counts_an_aliased_forwarding_link` for the aliased
+link, and `tests/elle/region-cell-forward-chain.lisp` for the measured shape.
 
 Module scope never reaches this edge: a top-level reassigned mutable compiles to
 a capture cell, and functionalization does not promote a capture cell to a loop
