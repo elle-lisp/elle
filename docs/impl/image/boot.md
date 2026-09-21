@@ -178,8 +178,9 @@ replaces.
 
 The runner instance is the one that hydrates, so every corpus file is read,
 expanded and compiled against the image's macros and exports. A file's forms
-then run on a worker, which registers its own primitives and compiles its own
-stdlib. Per-worker hydration is a milestone of its own ([plan.md](plan.md)).
+then run on a worker with a VM of its own, which registers its own primitives
+and loads its own stdlib where the file needs the library at run time.
+Per-worker hydration is a milestone of its own ([plan.md](plan.md)).
 
 ## Why the cache is opt-in
 
