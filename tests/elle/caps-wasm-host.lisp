@@ -78,6 +78,38 @@
           "denying :exec does not block a call that needs only :fs")
   (assert (= :ran (fiber/value f)) "and the body returns its own value"))
 
+# ── A denial parks whatever bits it carries, :error included ───────────
+
+# Mediation is built on this: the worked example in capabilities.md denies
+# :error, catches the denial, and resumes the fiber with the result of the
+# call it refused. A tier that classified the denial by its bits would not
+# park an :error denial at all, because :error is the one bit that does not
+# suspend on its own.
+(let [f (fiber/new (fn []
+                     (do
+                       (length "hello")
+                       1)) |:error| :deny |:error|)]
+  (fiber/resume f)
+  (assert (= (fiber/status f) :paused)
+          "an :error denial parks the fiber like any other")
+  (let [v (fiber/value f)]
+    (assert (= :capability-denied (get v :error))
+            "the :error denial carries the same payload")
+    (assert (= "length" (get v :primitive))
+            "and names the primitive the fiber called")))
+
+# ── The same, in tail position ─────────────────────────────────────────
+
+# A tail denial is carried differently: no frame is built where the call
+# was, and the driver it unwinds to parks one. The fiber must still come
+# to rest :paused holding the payload.
+(let [f (fiber/new (fn [] (length "hello")) |:error| :deny |:error|)]
+  (fiber/resume f)
+  (assert (= (fiber/status f) :paused)
+          "a tail-position :error denial comes to rest :paused")
+  (assert (= :capability-denied (get (fiber/value f) :error))
+          "and carries the denial payload"))
+
 # ── The argument-derived requirement is asked here too ─────────────────
 
 # This branch's seam: `io/submit` declares `:error` alone and derives the

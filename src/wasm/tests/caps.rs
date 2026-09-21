@@ -94,6 +94,55 @@ fn wasm_full_leaves_a_native_the_denial_does_not_name() {
     );
 }
 
+/// A denial parks whatever bits it carries, `:error` included.
+///
+/// This is the one case that separates the two ways a host call can report a
+/// suspension. `is_suspending` excludes `SIG_ERROR`, so classifying a denial by
+/// its bits would let an `:error` denial through as an ordinary error return and
+/// never park the fiber. The interpreter parks it — `handle_capability_denial`
+/// builds a frame whatever the bits are — and mediation is built on that: the
+/// worked example in docs/signals/capabilities.md denies `:error`, catches the
+/// denial, and resumes the fiber with the result of the call it refused.
+#[test]
+fn wasm_full_denial_of_error_parks_like_any_other() {
+    assert_eq!(
+        eval_with_stdlib(
+            "(let [f (fiber/new (fn [] (do (length \"hello\") 1)) \
+                                |:error| :deny |:error|)] \
+               (fiber/resume f) \
+               (and (= :paused (fiber/status f)) \
+                    (= :capability-denied (get (fiber/value f) :error))))"
+        ),
+        "true",
+        "an :error denial must park the fiber the way the interpreter's does; \
+         classifying the denial by its bits would not park it at all"
+    );
+}
+
+/// The same claim in TAIL position, where the two tiers carry a denial by
+/// different means and could disagree about it.
+///
+/// The interpreter's `handle_capability_denial_tail` builds no frame: it sets
+/// the signal and lets the driver it unwinds to park one. This tier's tail
+/// dispatch has no `suspended` word either — `return_via_slot` sends the bits
+/// through `SIGNAL_SLOT` and `handle_wasm_result` classifies them. So an
+/// `:error` denial reaches the fiber's own mask rather than a park decision,
+/// and the fiber must still come to rest `:paused` holding the payload.
+#[test]
+fn wasm_full_tail_denial_of_error_parks_like_any_other() {
+    assert_eq!(
+        eval_with_stdlib(
+            "(let [f (fiber/new (fn [] (length \"hello\")) |:error| :deny |:error|)] \
+               (fiber/resume f) \
+               (and (= :paused (fiber/status f)) \
+                    (= :capability-denied (get (fiber/value f) :error))))"
+        ),
+        "true",
+        "a tail-position :error denial must come to rest :paused, as it does on \
+         the interpreter"
+    );
+}
+
 /// The argument-derived requirement this branch adds is asked on this tier
 /// too: `io/submit` declares `:error` alone and derives the rest from the
 /// request's operation, so a tier gating on declared bits submits the spawn.
