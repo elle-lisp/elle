@@ -86,4 +86,33 @@
   (assert (= (either-arm false 3) 9) "the single-store arm's value is live")
   (assign r4 (%add r4 1)))
 
+# ── 5. each's list walk under a destructuring pattern ───────────────────
+# The pattern names alias the entry the cursor walk borrows, and the store
+# into `u` is the same counted store as everywhere above. With the per-holder
+# premises this shape's element release loaded a slot the walk had repointed,
+# freeing a live entry under its reader — a deterministic stale-generation
+# fault at the `(get u 0)` read once region ids recycled, conditional and
+# unconditional store alike.
+(defn keep-last-of-pairs []
+  (let [xs (list [[1] [2]] [[3] [4]])]
+    (let [@u nil]
+      (each [a b] in xs
+        (assign u a))
+      (get u 0))))
+
+(defn keep-first-of-pairs []
+  (let [xs (list [[1] [2]] [[3] [4]])]
+    (let [@u nil]
+      (each [a b] in xs
+        (when (nil? u) (assign u a)))
+      (get u 0))))
+
+(def @r5 0)
+(while (< r5 300)
+  (assert (= (keep-last-of-pairs) 3)
+          "the last destructured entry survives the walk that named it")
+  (assert (= (keep-first-of-pairs) 1)
+          "the first destructured entry survives the walk that named it")
+  (assign r5 (%add r5 1)))
+
 (println "region-cell-aliased-store-uaf: ok")
