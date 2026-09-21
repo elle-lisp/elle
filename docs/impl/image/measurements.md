@@ -1,12 +1,13 @@
 # What the experiments measured
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-21 -->
 
-Six assumptions the image design rests on, each dispatched by an experiment,
+Seven questions the image design turned on, each answered by an experiment,
 with the numbers it produced.
 
-The assumptions were cheap to test and expensive to be wrong about, so they ran
-before the foundations landed. [image.md](../image.md) owns the design they
+The first six were cheap to test and expensive to be wrong about, so they ran
+before the foundations landed. The seventh ran after the boot configuration
+landed, against the premise that kept LIR out of the image body. [image.md](../image.md) owns the design they
 support, [foundations.md](foundations.md) the representation fixes two of them
 cleared, and [plan.md](plan.md) the order everything lands in.
 
@@ -192,3 +193,57 @@ cleared, and [plan.md](plan.md) the order everything lands in.
    from the extents, dumps are byte-identical whole files, and the
    determinism pin asserts whole-file equality with a poisoned-padding
    counter-factual.
+7. **Region-native LIR — measured, one premise corrected.** The design keeps
+   LIR out of the body and ships it in an encoded side-stream
+   ([image.md](../image.md) § JIT). One premise behind that was that a
+   region-native LIR wins nothing: the JIT reads a function's LIR once, at
+   promotion, on a background thread. That covered the steady state and left
+   the compile path unmeasured, where the lowerer builds the LIR of 3,700
+   lines of library on every cache miss. `benches/lirshape` measures it. A
+   48-byte POD node in region pages runs against the 104-byte `SpannedInstr`,
+   both carrying the same graph. The bench asserts that the instruction and
+   register-operand counts agree, so a prototype that dropped part of the graph
+   fails rather than reports a win. Corpus: the LIR of core.lisp, prelude.lisp
+   and stdlib.lisp — 370 functions, 7,445 blocks, 83,723 instructions, 48,608
+   register operands. Fastest of 30 rounds, release build, one 7950X core:
+
+   | Per instruction | Rust-heap `LirFunction` | Region prototype |
+   |-----------------|------------------------|------------------|
+   | build — a vector per block, a push per instruction | 21.5 ns | 17.4 ns |
+   | copy — what `prepare_task` makes per promotion | 13.8 ns | 8.7 ns |
+   | walk — a backend's read, L3-resident | 3.1 ns | 1.4 ns |
+   | walk — the same read, from memory | 12.3 ns | 7.5 ns |
+   | rewrite — `send`'s `ValueConst` pass, in place | 1.2 ns | 0.8 ns |
+   | teardown | 5.8 ns | 1.7 ns |
+
+   One build's allocator traffic: **21,281 malloc calls and 23,396 KiB
+   requested, against 3 calls and 1 KiB**. What a built corpus holds while it
+   is live: 13,159 KiB of Rust heap, against 6,144 KiB of region pages, of
+   which 4,938 KiB is payload. The allocator-heavy rows move about a tenth
+   between runs; the region rows are stable to a few percent.
+
+   So the premise is wrong as stated — every operation is faster, and the
+   read-side ratios are the locality a 48-byte node buys over a 104-byte one.
+   The premise was right about the *size* of the prize. Build plus teardown
+   over the whole corpus is 2.28 ms against 1.59 ms, and a cold boot spends
+   ~201 ms compiling those three sources (item 1), so the saving is a third of
+   one percent of the compile it belongs to. Region inference, at 44% of that
+   compile, is where the compile-path money is.
+
+   Two rows understate the region form. Its build reads the Rust corpus and
+   runs a per-variant encode that a lowerer emitting region nodes directly
+   would not run. The Rust walk reads no `aux` or flag word, because reading
+   one costs a per-variant match the region node does not need.
+
+   What the experiment does not decide: whether to port LIR. Three facts carry
+   the side-stream's case, and none of them is a number. LIR is not a `Value`.
+   Its consumer runs on another thread, behind a `Send` boundary. Body-resident
+   LIR would relocate at hydration for every function, where the side-stream
+   decodes the hot ones alone. Against those sits what a port deletes:
+   `TemplateProto`, whose LIR is the last of the four questions a blueprint
+   answers ([foundations.md](foundations.md)); `send`'s LIR codec; and the
+   hand-written `Send` claim on `JitTask`. This measurement settles the cost
+   question and hands the decision to those. The prototype is also not the
+   whole port: the shipped passes mutate LIR in place and resize it, which a
+   fixed-extent slice turns into build-then-materialize, exactly as syntax had
+   to copy as it stamps. To redo: `cargo bench --bench lirshape`.

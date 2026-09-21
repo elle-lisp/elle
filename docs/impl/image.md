@@ -344,8 +344,18 @@ addresses and is not relocatable.
 
 The LIR stream is not optional for the boot configuration. An image boot
 whose stdlib cannot reach the JIT tier trades startup for steady-state
-throughput — a deal-breaker, and a violation of the parity principle: the
+throughput. That is a deal-breaker, and it violates the parity principle: the
 two boot modes must be indistinguishable to running code, tiers included.
+
+Making LIR region-native instead — the treatment syntax got
+([image/foundations.md](image/foundations.md)) — would put it in the body and
+retire the stream. Three facts hold it back, and none is a cost. LIR is not a
+`Value`. Its consumer runs on another thread, behind a `Send` boundary.
+Body-resident LIR relocates at hydration for every function, where the stream
+decodes the hot ones alone. The cost question is settled, and it answers the
+other way: the region form is faster on every operation, by a third of one
+percent of the compile it belongs to
+([image/measurements.md](image/measurements.md) item 7).
 
 ## Build integration
 

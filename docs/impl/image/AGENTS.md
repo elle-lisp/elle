@@ -9,6 +9,6 @@ Up: [..](../AGENTS.md)
 - [boot.md](boot.md) — **Booting from an image** What the boot configuration carries, how `elle image dump-boot` writes it, and how a fresh instance starts from it.
 - [format.md](format.md) — **The image file** The byte layout of an image, and the fingerprint that decides whether this binary may map it.
 - [foundations.md](foundations.md) — **Foundations** Four representation fixes the image needed first: each pays at runtime today, and each deletes image machinery.
-- [measurements.md](measurements.md) — **What the experiments measured** Six assumptions the image design rests on, each dispatched by an experiment, with the numbers it produced.
+- [measurements.md](measurements.md) — **What the experiments measured** Seven questions the image design turned on, each answered by an experiment, with the numbers it produced.
 - [plan.md](plan.md) — **Landing order and test plan** What lands in which order, and the pins each milestone must land with.
 - [sealing.md](sealing.md) — **Sealing** What an image's body may hold, what the hydrating instance rebuilds for itself, and what fails the dump.
