@@ -1,3 +1,4 @@
+// audited: 2026-09-21
 //! Lambda body compilation: saves/restores the lowerer's per-function state,
 //! lays out the closure environment (captures, params, locals), and lowers the
 //! body into a self-contained `LirFunction`.
@@ -31,6 +32,9 @@ impl<'a> Lowerer<'a> {
 
         // Save state
         let saved_func = std::mem::replace(&mut self.current_func, LirFunction::new(arity));
+        // Taken, not read: only the lambda the binder named gets it, never a
+        // nested anonymous one.
+        self.current_func.name = self.pending_lambda_name.take();
         let saved_block = std::mem::replace(&mut self.current_block, BasicBlock::new(Label(0)));
         let saved_reg = self.next_reg;
         let saved_label = self.next_label;

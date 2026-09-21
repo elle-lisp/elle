@@ -1,3 +1,4 @@
+// audited: 2026-09-21
 //! Non-scoped mutating binding forms: `define` (local `def`) and `set`
 //! (`lower_assign`). Grouped for the shared capture-cell store/reload and the
 //! 1-slot-container drop-on-overwrite reference discipline.
@@ -37,6 +38,7 @@ impl<'a> Lowerer<'a> {
         if let HirKind::Lambda { params, .. } = &value.kind {
             self.current_function_binding = Some(binding);
             self.current_function_params = Some(params.clone());
+            self.pending_lambda_name = self.binder_name(binding);
         }
 
         // Record the slot BEFORE lowering the value so
