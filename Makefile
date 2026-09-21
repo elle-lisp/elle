@@ -601,7 +601,7 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 # wall-clock-sensitive are only reachable the second way, which is why the PR
 # workflow's "VM+JIT Tests" job gates on those two targets. A `make smoke` that
 # skipped them was weaker than the gate it exists to predict.
-smoke: smoke-elle smoke-vm smoke-jit doctest embedding  ## Run the elle test corpus (runner + per-file VM and JIT passes) + docs + embedding
+smoke: smoke-elle smoke-vm smoke-jit doctest embedding semver-check  ## Run the elle test corpus (runner + per-file VM and JIT passes) + docs + embedding + surface gate
 	@echo "=== all smoke tests passed ==="
 
 MLIR_PREFIX ?= $(HOME)/git/tmp/mlir-install
