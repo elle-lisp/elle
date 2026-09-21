@@ -102,6 +102,35 @@ a private helper sharing an export's name never shadows it. `:rest` and
 ([functions](../functions.md)); `:signals` has the shape `compile/signal`
 returns.
 
+## Rule-driven rewriting
+
+`compile/apply-rules` drives the `elle rewrite` edit engine with rules
+supplied as data — the consumer-migration half of `elle semver`
+([semver](../semver.md)). Edits are token-level over the source text:
+comments and formatting survive, and a quoted symbol renames like any
+other token. The engine reapplies rules until the text stops moving, so
+a rename inside a replaced call's arguments still lands.
+
+```lisp
+(def rules [{:kind :rename :from "m:old" :to "m:new"}
+            {:kind :replace :name "m:bump" :arity 2
+             :template "(m:increment $2 $1)"}
+            {:kind :report :name "m:gone" :message "use m:new"}])
+(def r (compile/apply-rules "(m:old (m:bump a b)) (m:gone 1)" rules))
+(assert (= (r :source) "(m:new (m:increment b a)) (m:gone 1)")
+        "renames and replaces apply together")
+(assert (= (r :count) 2) "two edits")
+(def rep (first (->list (r :reports))))
+(assert (= (rep :name) "m:gone") "a report rule edits nothing")
+(assert (= (rep :line) 1) "each occurrence carries its line")
+(assert (= (rep :message) "use m:new") "and the shipped message")
+
+# A replace at a different arity leaves the call alone, exactly like an
+# epoch replace rule.
+(assert (= ((compile/apply-rules "(m:bump a)" rules) :source) "(m:bump a)")
+        "arity mismatch is not rewritten")
+```
+
 ## Portrait library
 
 [lib/portrait.lisp](../../lib/portrait.lisp) builds structured reports from

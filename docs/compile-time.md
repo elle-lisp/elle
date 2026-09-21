@@ -244,6 +244,12 @@ same semantic model the compiler builds. Full guide:
 | `compile/extract analysis {:from :fn :lines [s e] :name :new}` | extract a range into a new function |
 | `compile/add-handler analysis :fn :signal` | wrap call sites with signal handling |
 
+**Rule-driven rewriting (textual, no handle):**
+`(compile/apply-rules source rules)` returns `{:source :count :reports}`. It
+drives the `elle rewrite` edit engine with rename, replace and report rules
+supplied as data, and it is the consumer-migration half of `elle semver`
+([semver](semver.md)). In depth: [`analysis/portrait.md`](analysis/portrait.md).
+
 **Execution:** `(compile/run-on tier closure & args)` runs the closure on one
 tier: `:bytecode`, `:jit`, `:mlir-cpu` (built with MLIR) or `:wasm` (built with
 WASM). A tier that declines the closure raises `:tier-rejected`.
