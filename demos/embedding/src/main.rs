@@ -79,6 +79,10 @@ fn main() {
 
     println!("Result: {}", result);
 
+    // Nothing reads the result again, so its owning reference goes back here
+    // (docs/impl/region/rules.md).
+    elle::value::arena::release_program_value(rt.heap(), result);
+
     // The sweep runs here rather than in `rt`'s Drop, so the census it answers
     // can be read. Zero is the contract, and this demo is held to it like any
     // other host.

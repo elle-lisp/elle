@@ -41,6 +41,9 @@ impl ElleCtx {
     /// reference on its behalf: a result stays readable until the next
     /// `elle_eval` or `elle_destroy`, and both come through here.
     fn set_result(&mut self, value: Option<Value>) {
+        if let Some(displaced) = self.last_result.take() {
+            elle::value::arena::release_program_value(self.runtime.heap(), displaced);
+        }
         self.last_result = value;
     }
 }
@@ -69,12 +72,14 @@ pub unsafe extern "C" fn elle_destroy(ctx: *mut c_void) {
     if ctx.is_null() {
         return;
     }
+    let mut ctx = unsafe { Box::from_raw(ctx as *mut ElleCtx) };
+    // Nothing reads the stored result after this call, so its owning reference
+    // goes back before the sweep that would otherwise count it as residue.
+    ctx.set_result(None);
     // Dropping the `Runtime` runs the RC teardown sweep; the VM's symbol-table
     // and compile-context pointers drop with the instance, so no manual teardown
     // is needed.
-    unsafe {
-        drop(Box::from_raw(ctx as *mut ElleCtx));
-    }
+    drop(ctx);
 }
 
 // ── Eval ────────────────────────────────────────────────────────────
