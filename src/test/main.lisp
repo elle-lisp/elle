@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-17
+# audited: 2026-09-20
 ## elle test — the command line, the store it opens, and the run it drives.
 ## docs/test-cli.md
 ##
@@ -169,6 +169,11 @@
 (def run-id
   (get (get (sqlite:query conn "SELECT last_insert_rowid() AS id") 0) :id))
 
+# What the runner's own heap reads before the first file. Every later reading
+# is taken at a file boundary and charged to the file that boundary closes
+# (docs/test-store.md § The runner's own gauges).
+(def gauge-prev (gauge-baseline))
+
 # Run every file/eval for its side effect: each writes its result rows to the DB.
 # We do NOT aggregate the returned status lists in memory — for a large corpus
 # that built a list one recursive `flat` per file deep and blew the VM's call
@@ -177,9 +182,11 @@
 (each f in (get opts :paths)
   (if isolate-flags
     (process-file-isolated conn run-id f isolate-flags)
-    (process-file conn run-id f)))
+    (process-file conn run-id f))
+  (gauge-mark conn run-id gauge-prev f))
 (each e in (get opts :eval)
-  (process-eval conn run-id e))
+  (process-eval conn run-id e)
+  (gauge-mark conn run-id gauge-prev "<eval>"))
 
 (def nfail (count-status conn run-id :fail))
 (def npass (count-status conn run-id :pass))
