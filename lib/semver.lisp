@@ -1,4 +1,5 @@
 (elle/epoch 12)
+(elle/version "1.0.0")
 ## audited: 2026-09-21
 ## lib/semver.lisp — Semantic versioning (pure Elle)
 ##
