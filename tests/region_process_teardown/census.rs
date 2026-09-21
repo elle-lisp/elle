@@ -287,6 +287,42 @@ fn a_run_that_times_out_leaves_no_residue() {
     );
 }
 
+/// A run that leaves a fiber sleeping leaves nothing either. The program ends
+/// while its spawned fiber is parked in `ev/sleep`, so `do-shutdown` cancels
+/// the operation and aborts the fiber — and everything the loop remembered
+/// must still come apart (elle-lisp/elle#1186).
+///
+/// The counter-factual is `a_run_that_times_out_leaves_no_residue` beside it,
+/// whose abort travels through `handle-abort` on the program's own request.
+/// This one is the shutdown's abort, and what kept its residue was not the
+/// scheduler at all: `:pump`'s unjoined-error scan conditionally assigns each
+/// snapshot entry's fiber to a reassigned local, the shape whose stored
+/// value's release used to ride the binding chain out of the loop
+/// (docs/impl/region/bindings.md § "An aliased stored value takes the counted
+/// store") — stranding the snapshot, the fiber inside it, and everything the
+/// fiber's closure reaches: 108 regions for one sleeper.
+///
+/// The timer sleeps 30 seconds so it cannot fire inside the test; two
+/// sleepers pin the per-fiber slope, not only the constant.
+#[test]
+fn a_run_that_leaves_a_fiber_sleeping_leaves_no_residue() {
+    for src in [
+        "(ev/run (fn [] (ev/spawn (fn [] (ev/sleep 30))) 1))",
+        "(ev/run (fn [] (ev/spawn (fn [] (ev/sleep 30))) \
+                        (ev/spawn (fn [] (ev/sleep 30))) 1))",
+    ] {
+        assert_eq!(
+            residue_after_teardown(
+                Runtime::with_stdlib_cache(StdlibCache::Off),
+                src,
+                HandOff::Root
+            ),
+            0,
+            "{src}: regions survived teardown",
+        );
+    }
+}
+
 /// The same claim for the other shape a completion builds: bytes whose length
 /// nothing could reserve ahead of the read.
 ///

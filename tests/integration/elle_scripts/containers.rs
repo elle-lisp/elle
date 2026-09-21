@@ -276,6 +276,21 @@ fn region_struct_mut_put_heap_key_uaf() {
     );
 }
 
+// Guard — the counted store's pin never runs ahead of a second name's read
+// (docs/impl/region/bindings.md § "An aliased stored value takes the counted
+// store"). The pin rule is a maximum over the alias's own binding-chain
+// extension, so an alias read after the store, a forwarding chain's kept link,
+// a phi-carried returned value, and the post-branch content drop each read a
+// live value — a pin that landed early is a deterministic fault under the
+// page-guard oracle. The leak face is tests/elle/region-cell-aliased-store.lisp.
+#[test]
+fn region_cell_aliased_store_uaf() {
+    run_elle_script_with_args(
+        "region-cell-aliased-store-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a leaf helper called many times from a driver. The callee closure lives
 // in a letrec forward-reference cell the driver captures BY INDIRECTION (an
 // uncounted cell store the ownership scan cannot see). The forest must treat that

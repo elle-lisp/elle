@@ -1,17 +1,20 @@
+// audited: 2026-09-21
 use super::*;
 
-// ── 1-slot-container gate: sole-held AND not-returned ───────────────
+// ── The 1-slot-container gate ────────────────────────────────────────
 //
-// docs/impl/region/bindings.md "Reassigned mutable bindings are 1-slot containers":
-// the drop-on-overwrite + suppression model may be applied only when
-// every region the cell may hold is sole-held by the binding AND not
-// claimed by ownership transfer at a return/tail boundary (two static
-// owners of one initial reference is a double-free). Runtime-counted
-// escapes — container stores, captures, opaque-call cliques — are
-// value-based-balanced and MUST keep the gate: refusing them regresses
+// docs/impl/region/bindings.md "Reassigned mutable bindings are 1-slot
+// containers": the sole-held question is asked exactly where the model claims
+// a reference UNCOUNTED — the module-scope cell's every region (which must
+// also not be returned: two static owners of one reference is a double-free),
+// and the fn-local cell's init. A fn-local cell's STORED values ask it of
+// nothing: the counted store claims nothing from anyone, and the pin rule's
+// maximum orders each producer release after every alias's read.
+// Runtime-counted escapes — container stores, captures, opaque-call cliques —
+// are value-based-balanced and MUST keep the gate: refusing them regresses
 // region-mutable-reassign-{selfref,branch,flow} and
 // region-toplevel-{mutable-reassign,reassign-thunk-uaf} straight into
-// UAFs. The `keeps` tests below are the counterfactual pins against
+// UAFs. The `keeps`/`counts` tests below are the counterfactual pins against
 // that over-exclusion.
 
 /// Boundary pin (counterfactual against over-exclusion): a TOP-LEVEL
@@ -83,16 +86,18 @@ fn reassign_gate_keeps_container_stored_value_fn_local() {
     );
 }
 
-/// A reassigned binding a conditional `assign` gives a PHI is refused: the phi
-/// is a second name for the value, so the store-site pin — which moves a
-/// producer release earlier — would leave that name reading a freed value. The
-/// refusal is `sole_held`'s alone; being read at the tail decides nothing, since
-/// the `Return`'s mint is a reference the callee did not hold a moment earlier
-/// (docs/impl/region/bindings.md § "Returned fn-local reassigned mutables").
-/// Nothing may be suppressed on the fallback either: the unsuppressed baseline
-/// is what releases each value's producer reference there.
+/// A reassigned binding a conditional `assign` gives a PHI takes the model on
+/// the counted-init route: the phi copies the store's regions onto the binding's
+/// own source set, so the aliased overlap withholds the donation, the cell
+/// counts its heap init at the binder, and nothing is suppressed. Being read at
+/// the tail decides nothing, since the `Return`'s mint is a reference the
+/// callee did not hold a moment earlier (docs/impl/region/bindings.md
+/// § "Returned fn-local reassigned mutables"). The phi itself stays UNCOUNTED —
+/// a version hands the one reference along rather than claiming a second
+/// (docs/impl/region/reads.md § "A version of the container is not an alias of
+/// it").
 #[test]
-fn reassign_gate_refuses_returned_value() {
+fn reassign_gate_counts_a_phi_carried_returned_value() {
     let (hir, _, info) = pipeline(
         "(def @h (fn (c)\n\
            (begin (var x (%pair 1 2))\n\
@@ -102,17 +107,27 @@ fn reassign_gate_refuses_returned_value() {
     );
     let sites = find_reassign_sites(&hir);
     assert!(!sites.is_empty(), "shape must contain a reassign of x");
-    for (site, _) in &sites {
-        assert!(
-            !info.drop_on_overwrite_sites.contains(site),
-            "returned value: the gate must refuse drop-on-overwrite at @{}",
-            site.0
-        );
-    }
+    assert!(
+        sites
+            .iter()
+            .any(|(site, _)| info.drop_on_overwrite_sites.contains(site)),
+        "the phi-carried binding takes the model — its drop-on-overwrite \
+         releases the cell's own counted reference"
+    );
     assert!(
         info.suppressed_decref_regions.is_empty(),
-        "returned value: no decref may be suppressed (got {:?})",
+        "the counted-init route suppresses nothing (got {:?})",
         info.suppressed_decref_regions
+    );
+    assert!(
+        !info.counted_cell_init_sites.is_empty(),
+        "a heap init under an aliased overlap is counted at the binder",
+    );
+    assert!(
+        info.counted_cell_read_sites.is_empty(),
+        "the phi is a version, not a whole-value read — counting it would claim \
+         a second reference for a single holding (got {:?})",
+        info.counted_cell_read_sites,
     );
 }
 
@@ -126,9 +141,10 @@ fn reassign_gate_refuses_returned_value() {
 /// caller's read (`region_capture_cell_string_accum_uaf`). Suppressing the
 /// binding's own region keeps the single assign-value decref (the callee's one
 /// release) and lets the `Return` mint carry ownership to the caller. Contrast
-/// `reassign_gate_refuses_returned_value` (an `if`-shaped reassign is
-/// phi-aliased ⇒ not sole ⇒ no model at all) and a single-assign cell, whose
-/// binding and assign-value regions coalesce so there is nothing to suppress.
+/// `reassign_gate_counts_a_phi_carried_returned_value` (an `if`-shaped reassign
+/// is phi-aliased ⇒ the counted-init route, nothing suppressed) and a
+/// single-assign cell, whose binding and assign-value regions coalesce so there
+/// is nothing to suppress.
 #[test]
 fn reassign_gate_splits_returned_loop_carried_region() {
     let (hir, _, info) = pipeline(
@@ -1127,14 +1143,20 @@ fn reassign_gate_declines_a_branch_reading_no_container() {
     );
 }
 
-/// Counterfactual against over-admission: an aliased STORED value still refuses
-/// the model whole. The model moves each stored value's producer release back to
-/// the store site, and `v` is a second name reading the same value — a release
-/// pinned to the store would fire under it. Only the init, whose claim the cell
-/// can replace with a counted reference of its own, is exempt from the
-/// sole-held question.
+/// An aliased STORED value takes the model (docs/impl/region/bindings.md § "An
+/// aliased stored value takes the counted store"). `v` is a second name for the
+/// value each iteration stores, and it refuses nothing: the pin rule is a
+/// maximum and `v`'s own reads extend the stored region's release through the
+/// binding chain, so the release lands at or after `(%length v)`. What refusing
+/// bought instead was the baseline, whose one chain-extended release rode the
+/// cell's uses past the loop and served a region minted per iteration — the
+/// conditional-accumulate strand behind elle-lisp/elle#1186.
+///
+/// The stored region rides the phi onto the binding's own source set, so the
+/// aliased overlap withholds the donation and the cell counts its init at the
+/// chain source's binder instead; nothing is suppressed.
 #[test]
-fn reassign_gate_refuses_an_aliased_assign_value() {
+fn reassign_gate_counts_an_aliased_assign_value() {
     let (hir, _, info) = pipeline(
         "(def @h (fn (n)\n\
            (begin (var last (array 0 0))\n\
@@ -1148,22 +1170,28 @@ fn reassign_gate_refuses_an_aliased_assign_value() {
          (h 3)",
     );
     let (last, last_sites) = heap_carrying_reassign(&hir, &info);
-    for site in &last_sites {
+    assert!(
+        info.cell_containers.contains_key(&last),
+        "an aliased stored value must take the container model — the store-site \
+         pin is what keeps a loop's releases inside the loop"
+    );
+    assert!(
+        last_sites
+            .iter()
+            .any(|site| info.drop_on_overwrite_sites.contains(site)),
+        "the counted store's drop-on-overwrite releases the cell's OWN reference"
+    );
+    for r in &info.binding_source_regions[&last] {
         assert!(
-            !info.drop_on_overwrite_sites.contains(site),
-            "an aliased stored value must refuse the container model at @{}",
-            site.0
+            !info.suppressed_decref_regions.contains(r),
+            "an aliased overlap suppresses nothing — the alias keeps the decref \
+             that releases the producer's reference (region {r:?})",
         );
     }
     assert!(
-        !info.cell_containers.contains_key(&last),
-        "a refused cell records no container — the store-site pin it carries \
-         would move a release ahead of the alias's read"
-    );
-    assert!(
-        info.counted_cell_init_sites.is_empty(),
-        "a refused cell takes no init retain (got {:?})",
-        info.counted_cell_init_sites,
+        !info.counted_cell_init_sites.is_empty(),
+        "the aliased overlap withholds the donation, so the cell counts its \
+         init at the chain source's binder",
     );
 }
 
@@ -1310,18 +1338,16 @@ fn reassign_gate_keeps_loop_carried_cell_forwarded_from_a_cell() {
     }
 }
 
-/// Counterfactual against over-admission: the chain is admitted or declined
-/// WHOLE. A genuine alias of a middle link — `(var keep last)` between the two
-/// loops — is a second name holding the reference, so no link may claim it.
-/// Declining only that link would leave the next one's drop-on-overwrite
-/// releasing a reference the baseline already released at its ordinary decref.
-///
-/// The alias sits after the first loop, so it names that loop's STORED value
-/// and not merely the chain's init: the counted-init route cannot rescue it,
-/// because the model would still pin that value's release to a store site the
-/// alias's read outlives.
+/// An alias of a link's STORED value declines nothing: `keep` between the two
+/// loops names the first loop's stored value, and its `(%length keep)` read at
+/// the tail extends that region's release through the ordinary binding chain —
+/// the pin rule's maximum orders the release after it, so the model's claim is
+/// still only the cell's own counted reference (docs/impl/region/bindings.md
+/// § "An aliased stored value takes the counted store"). The chain is still
+/// admitted or declined WHOLE; what the alias moves is the init's discharge,
+/// donation to counted-init.
 #[test]
-fn reassign_gate_refuses_forwarding_chain_with_an_aliased_link() {
+fn reassign_gate_counts_an_aliased_forwarding_link() {
     let (hir, info) = two_loop_chain("(var keep last)", "(%length keep)");
     let links = chain_links(&hir, &info);
     assert!(
@@ -1333,20 +1359,56 @@ fn reassign_gate_refuses_forwarding_chain_with_an_aliased_link() {
             continue;
         }
         assert!(
-            !info.drop_on_overwrite_sites.contains(&site),
-            "an aliased link declines the whole chain at @{} — the alias holds a \
-             reference a link would claim a second time",
+            info.drop_on_overwrite_sites.contains(&site),
+            "every link of the aliased chain keeps the model at @{} — the \
+             alias's read extends the store-site pin instead of declining it",
             site.0
         );
     }
-    for b in &links {
-        for r in &info.binding_source_regions[b] {
-            assert!(
-                !info.suppressed_decref_regions.contains(r),
-                "a declined chain must suppress nothing (region {r:?} of {b:?} \
-                 was suppressed)",
-            );
-        }
+}
+
+/// The content drop POST-DOMINATES every store (docs/impl/region/bindings.md
+/// § "Where the content drop lands"). A store inside a loop inside one branch
+/// arm seeds the demise there — a point no other arm's path reaches, and one a
+/// later iteration re-enters — so the drop must hoist to the nodes of the loop
+/// and the branch, where the lowerer emits it after each on every path.
+///
+/// The counter-factual: left at the seed, the drop frees the just-stored value
+/// once per iteration on the storing path and never on any other, and nothing
+/// fails on it because each path alone stays consistent with SOME accounting.
+/// This is the `each`-expansion face of elle-lisp/elle#1186: the macro's arms
+/// each store the loop's element into the outer binding, and the seed lands in
+/// whichever arm is structurally last.
+#[test]
+fn cell_content_drop_postdominates_arm_stores() {
+    let (hir, _, info) = pipeline(
+        "(def @h (fn (t)\n\
+           (let [@u nil]\n\
+             (var i 0)\n\
+             (if t\n\
+                 (while (%lt i 2)\n\
+                   (begin (let [x (%pair i i)] (assign u x))\n\
+                          (assign i (%add i 1))))\n\
+                 nil)\n\
+             1)))\n\
+         (h 1)",
+    );
+    let order = crate::hir::liveness::compute_order(&hir);
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    let (u, sites) = heap_carrying_reassign(&hir, &info);
+    let cell = info
+        .cell_containers
+        .get(&u)
+        .expect("the in-arm store takes the container model");
+    for site in &sites {
+        assert!(
+            ord(cell.demise) > ord(*site),
+            "the content drop at @{} must post-date the store at @{} — a drop \
+             seeded inside the storing arm's loop runs per iteration there and \
+             never on the arm that stores nothing",
+            cell.demise.0,
+            site.0
+        );
     }
 }
 
