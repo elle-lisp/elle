@@ -353,6 +353,19 @@ WASM_SKIP := -e eval.lisp -e eval-env.lisp -e wasm-tier-error-signal.lisp
 # DB that `--query`/`--summary` read (docs/testing.md § Reading a run).
 CORPUS_BATCH ?= 25
 
+# The budget ONE form gets inside a batch, in milliseconds. A multi-form corpus
+# file runs as one whole-file thunk, so this covers the span `timeout
+# $(FILE_TIMEOUT)` covers in the per-file passes — and it has to clear the
+# widest deadline a corpus file gives itself, for the reason WIDE_TIMEOUT does:
+# the file's own stall report is why the file is worth running, and it only
+# prints if the outer kill lands after it. The runner takes ONE number for every
+# form, so it takes the widest, derived from WIDE_TIMEOUT rather than written
+# again here. The runner's own default is 60 s, which is under the 120 s eight
+# h2 files declare; a quiet box never shows it, and the slowest runner in the
+# workflow reports a `timeout` naming a file whose diagnostic never printed.
+# tests/integration/budget.rs is the standing check.
+RUNNER_TIMEOUT ?= $(WIDE_TIMEOUT:%s=%)000
+
 # The files are dealt to the batches in hash-of-name order, not alphabetically.
 # Sibling files share a name prefix and a subject, and a subject's files cost
 # about the same, so alphabetical order gathers the whole corpus's heaviest
@@ -374,7 +387,7 @@ ELLE_TEST_FLAGS ?=
 define RUN_CORPUS
 	@printf '%s\n' $(filter-out $(ELLE_TEST_SKIP),$(wildcard tests/elle/*.lisp)) \
 		| $(DEAL_CORPUS) \
-		| xargs -n $(CORPUS_BATCH) $(ELLE) test $(ELLE_TEST_FLAGS) \
+		| xargs -n $(CORPUS_BATCH) $(ELLE) test --timeout $(RUNNER_TIMEOUT) $(ELLE_TEST_FLAGS) \
 		|| { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md § Reading a run)"; exit 1; }
 	$(call RUN_ORACLE,--jit=off)
 	$(call RUN_ORACLE,--jit=eager)
