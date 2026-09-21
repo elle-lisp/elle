@@ -1,24 +1,100 @@
 (elle/epoch 12)
-## Pre-prelude definitions
+## audited: 2026-09-20
+## Pre-prelude definitions: the sequence operators, and the trait layer the
+## operators dispatch through.
+## docs/traits.md
 ##
 ## Compiled and executed before the prelude loads.
 ## Only raw special forms and %-prefixed primitives are available.
 ## Provides functions that prelude macros need at expansion time.
 
+## ── Trait dispatch for the collection operators ────────────────────
+## The access primitives (first/rest/length/empty?/has?) resolve through the
+## trait table inside the VM, and `trait/op` and `trait/iterable?` (primitives,
+## src/primitives/traits.rs) read that table for the Elle-level operators.
+## These two complete the layer: an iterator drains into an array, and an array
+## builds a collection back. A method named for an operator overrides that
+## operator outright; :iter together with :Collection :empty/:conj drives every
+## operator that has no method of its own. docs/traits.md holds the protocol,
+## the method names, and the order a method's arguments arrive in.
+
+(def iter-failed?
+  (fn [fib]
+    "True when an iterator fiber stopped on an error. An error does not unwind
+     a fiber: it suspends holding the error signal and still reports :paused,
+     so the status alone reads a failure as a pause. Internal helper."
+    (if (%eq (fiber/status fib) :error)
+      true
+      (%not (%eq 0 (bit/and (fiber/bits fib) 1))))))
+
+(def trait/elements
+  (fn [coll]
+    "Return COLL's elements as an immutable array. A value whose traits carry
+     :iter is drained through that iterator; every other value converts with
+     ->array, which is what a builtin container and a plain set or struct do.
+     An iterator that raises propagates its error to the caller."
+    (if (trait/iterable? coll)
+      (let [fib ((trait/op coll :iter) coll)
+            acc (@array)]
+        (letrec [drain (fn []
+                         (begin
+                           (fiber/resume fib)
+                           (if (iter-failed? fib)
+                             (fiber/propagate fib)
+                             (if (%eq (fiber/status fib) :dead)
+                               (freeze acc)
+                               (begin
+                                 (core-push acc (fiber/value fib))
+                                 (drain))))))]
+          (drain)))
+      (->array coll))))
+
+(def trait/rebuild
+  (fn [coll items]
+    "Build a collection like COLL out of the array ITEMS: seed with COLL's
+     :empty trait method, then add each element with its :conj method, in
+     order. Signals :type-error when COLL's traits carry no such pair."
+    (let [mk (trait/op coll :empty)
+          cj (trait/op coll :conj)]
+      (if (if mk cj false)
+        (let [n (length items)]
+          (letrec [go (fn [i acc]
+                        (if (%lt i n)
+                          (go (%add i 1) (cj acc (get items i)))
+                          acc))]
+            (go 0 (mk coll))))
+        (emit :error {:error :type-error
+                      :reason :not-a-collection
+                      :message "rebuild: no :empty and :conj trait methods"})))))
+
 (def last
   (fn [coll]
     "Return the last element of a sequence. Signals :argument-error if the
-     sequence is empty."
-    (if (%eq (length coll) 0)
-      (emit :error {:error :argument-error :message "last: empty sequence"})
-      (get coll (%sub (length coll) 1)))))
+     sequence is empty. COLL's :last trait method answers instead when it
+     carries one."
+    (let [m (trait/op coll :last)]
+      (if m
+        (m coll)
+        (let [xs (if (trait/iterable? coll) (trait/elements coll) coll)]
+          (if (%eq (length xs) 0)
+            (emit :error {:error :argument-error :message "last: empty sequence"})
+            (get xs (%sub (length xs) 1))))))))
 
 (def butlast
   (fn [coll]
     "Return a new sequence with the last element removed. An empty sequence
-     yields an empty slice."
-    (let [n (length coll)]
-      (if (%eq n 0) (slice coll 0 0) (slice coll 0 (%sub n 1))))))
+     yields an empty slice. COLL's :butlast trait method answers instead when
+     it carries one; otherwise a trait-driven collection is rebuilt from its
+     elements."
+    (let [m (trait/op coll :butlast)]
+      (if m
+        (m coll)
+        (if (trait/iterable? coll)
+          (let [xs (trait/elements coll)
+                n (length xs)]
+            (trait/rebuild coll (if (%eq n 0) xs (slice xs 0 (%sub n 1)))))
+          (let [n (length coll)]
+            (if (%eq n 0) (slice coll 0 0) (slice coll 0 (%sub n 1)))))))))
 
 ## ── Helpers (not exported) ─────────────────────────────────────────
 ## core.lisp uses %array-push/%put/%string-push/%bytes-push directly
@@ -129,11 +205,11 @@
 
 ## ── reverse ────────────────────────────────────────────────────────
 
-(def reverse
+(def reverse-builtin
   (fn [coll]
-    "Return a reversed copy of a sequence (list, array, string, or bytes).
-     Lists/syntax return a new list; other sequences return a new immutable
-     value of the same family. Signals :type-error for a non-sequence."
+    "Reverse a builtin sequence: list/syntax yield a new list, and the other
+     families a new immutable value of their own kind. Signals :type-error
+     for anything else. Internal helper for reverse."
     (let [t (type-of coll)]
       (if (if (%eq t :list) true (%eq t :syntax))
         (letrec [go (fn [xs acc]
@@ -166,9 +242,23 @@
             :bytes (freeze r)
             _ r))))))
 
+(def reverse
+  (fn [coll]
+    "Return a reversed copy of a sequence (list, array, string, or bytes).
+     Lists/syntax return a new list; other sequences return a new immutable
+     value of the same family. COLL's :reverse trait method answers instead
+     when it carries one, and a trait-driven collection is rebuilt from its
+     elements. Signals :type-error for a non-sequence."
+    (let [m (trait/op coll :reverse)]
+      (if m
+        (m coll)
+        (if (trait/iterable? coll)
+          (trait/rebuild coll (reverse-builtin (trait/elements coll)))
+          (reverse-builtin coll))))))
+
 ## ── fold / reduce ──────────────────────────────────────────────────
 
-## Normalize once with `->array`, then walk by INDEX — never (first/rest)
+## Normalize once with `trait/elements`, then walk by INDEX — never (first/rest)
 ## recursion (`rest` on an array copies the tail into a fresh slice per step: F1a
 ## transform-scratch, O(n²) time + a throwaway slice per element; `(get arr i)` is
 ## O(1)). The combiner is THREADED through `core-fold-step`, a self-recursive
@@ -196,10 +286,15 @@
   (fn [f init coll]
     "Left-fold `f` over `coll` from the seed `init`:
      (f (f (f init e0) e1) e2)…. Returns `init` unchanged for an empty
-     collection. `f` is called as (f acc element)."
-    (let [arr (->array coll)
-          n (length arr)]
-      (core-fold-step f arr n 0 init))))
+     collection. `f` is called as (f acc element). COLL's :fold trait method
+     answers instead when it carries one, and a trait-driven collection folds
+     over the elements its :iter method yields."
+    (let [m (trait/op coll :fold)]
+      (if m
+        (m coll f init)
+        (let [arr (trait/elements coll)
+              n (length arr)]
+          (core-fold-step f arr n 0 init))))))
 
 (def reduce fold)
 
@@ -210,7 +305,7 @@
      Internal helper (the user-facing reduce/reduce1 live in stdlib)."
     ## Index walk from element 1, seeded by element 0 — never (rest arr), which
     ## would mint a throwaway tail slice (the same F1a scratch fold avoids above).
-    (let [arr (->array coll)
+    (let [arr (trait/elements coll)
           n (length arr)]
       (if (%eq n 0)
         (emit :error {:error :argument-error
@@ -370,4 +465,6 @@
    :reverse reverse
    :fold fold
    :reduce reduce
-   :concat concat})
+   :concat concat
+   :trait/elements trait/elements
+   :trait/rebuild trait/rebuild})

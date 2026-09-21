@@ -1,5 +1,7 @@
 # Traits
 
+<!-- audited: 2026-09-20 -->
+
 Every heap-allocated value carries a `traits` field — a pointer to a
 trait table (struct or @struct). Collection and sequence types get a
 shared default traitset stamped at allocation time. Other heap types
@@ -70,6 +72,10 @@ to **immutable method structs**:
 The mutable shell lets users swap entire protocols on a shared traitset.
 Immutable method structs avoid RefCell borrow on per-method lookup.
 
+A method struct also holds whatever operator methods the collection
+overrides — `:map`, `:fold`, `:reverse` and the rest. § Collection
+operators below has the names and the argument order.
+
 ### Which types get which protocols
 
 | Type              | :Sequence | :Collection |
@@ -97,6 +103,13 @@ the dispatcher falls back to the default traitset from the registry.
 This means `(with-traits [1 2 3] {:tag :my-type})` still supports
 `first`, `length`, etc. — the user traits don't mask the defaults.
 
+The fallback is per protocol, not per method. A table that names a
+protocol owns every method in it, so `(with-traits (list 1 2)
+@{:Sequence {:first …}})` has no `rest` at all — the default `:Sequence`
+is out of reach the moment the user table declares one. Attach the
+methods to the protocol the value does not otherwise need, or write the
+whole protocol out.
+
 ### Edge cases
 
 - **Empty list** `()` is an immediate — no traitset. `first` returns
@@ -108,14 +121,112 @@ This means `(with-traits [1 2 3] {:tag :my-type})` still supports
 - **nil** supports `length` (returns 0) via pre-check. It does *not*
   support `empty?` — `(empty? nil)` raises a `:type-error`.
 
-### Non-overridable operations
+## Collection operators
 
-`last`, `butlast`, `reverse` are defined in terms of the underlying
-implementations (`last`/`butlast` in `core.lisp` via `length`/`get`/
-`slice`), not through trait dispatch. The `:Sequence` protocol carries a
-`:last` method, but the user-facing `last` primitive does not call it, so
-overriding `:last` via `with-traits` has no effect. User-defined Sequence
-types that only implement the trait protocol won't support these.
+`map`, `filter`, `fold`, `each` and the rest of the operator family are
+Elle functions and macros, not primitives, so they dispatch in three
+layers. The first layer that answers wins.
+
+1. **A builtin container family answers first.** A list, array, string,
+   bytes or syntax object — mutable or not — keeps its own traversal.
+   An operator never reads a trait table for one, so
+   `(with-traits [1 2 3] …)` still maps as an array, and a plain array
+   costs what it always did.
+2. **A per-operator method overrides the operator.** When the value's
+   trait table carries a method named for the operator, the operator
+   calls it and returns its answer. This is how a lazy or a remote
+   collection controls what `map` *means*, and not merely how its
+   elements stream out.
+3. **`:iter` drives everything else.** When the table carries no method
+   for this operator but does carry `:iter`, the operator drains the
+   iterator and works on the elements it yields.
+
+A value that answers none of the three raises `:type-error`, as before.
+A plain set or struct answers none: no default traitset carries `:iter`,
+so both convert and iterate exactly as they did.
+
+### Where an operator method lives
+
+An operator method goes in the `:Sequence` protocol or the
+`:Collection` protocol. The lookup reads `:Sequence` first and
+`:Collection` second, so either one carries it.
+
+The method's name is the operator's own name as a keyword. It takes the
+collection first, then the operator's remaining arguments in their
+declared order. `(map f coll)` calls `(method coll f)`, `(take n coll)`
+calls `(method coll n)`, and `(fold f init coll)` calls
+`(method coll f init)`.
+
+```lisp
+(def tagged
+  (with-traits {:from 0 :to 10}
+    @{:Sequence {:map (fn [self f] :mapped)}}))
+
+(assert (= (map (fn [x] x) tagged) :mapped))
+```
+
+These operators take a method: `map`, `filter`, `any?`, `all?`, `find`,
+`find-index`, `count`, `flatten`, `take-while`, `drop-while`, `distinct`,
+`mapcat`, `map-indexed`, `partition`, `interpose`, `sort-by`,
+`sort-with`, `take`, `drop`, `update`, `last`, `butlast`, `reverse`, and
+`fold`. `reduce` is `fold`, and `keep` is `filter`, so each pair shares
+one method name.
+
+### The generic fallback
+
+An operator with no method of its own drains `:iter` into an array and
+runs over that. An operator that answers with a collection of the same
+kind then rebuilds one: it seeds with the `:Collection` `:empty` method
+and adds each element with `:conj`, in iteration order. So `:iter`,
+`:empty` and `:conj` together carry the whole operator family.
+
+```lisp
+(defn make-bag [items]
+  (with-traits {:items items}
+    @{:Sequence {:iter (fn [self]
+                         (fiber/new (fn []
+                                      (each x in (self :items)
+                                        (yield x))) |:yield|))}
+      :Collection {:empty (fn [self] (make-bag []))
+                   :conj (fn [self x]
+                           (make-bag (append (self :items) [x])))}}))
+
+(assert (= ((map (fn [x] (* x 2)) (make-bag [1 2 3])) :items) [2 4 6]))
+```
+
+`:conj` decides the order of the answer. A `:conj` that appends keeps
+iteration order; one that prepends reverses it, the way conj-ing onto a
+list does.
+
+The fallback reads the whole collection before it answers, so `find` and
+`take` visit every element rather than stopping early. An endless
+collection, or one whose elements cost a round trip each, therefore
+wants its own per-operator methods. An iterator that raises propagates
+the error out of the operator.
+
+### Operators that do not take a method
+
+`each` drives `:iter` alone, so that `break` and `assign` still reach the
+surrounding function; there is no `:each` method. `zip` reads `:iter` on
+each input it is given. `frequencies` and `group-by` are written with
+`each`, so they dispatch the way `each` does.
+
+`each` itself keeps the set and struct arms it always had, and reads
+`:iter` ahead of them. So a with-traits struct that carries `:iter`
+iterates as its protocol says, and a plain one still walks its
+key-value pairs.
+
+### Reading the layers from Elle
+
+The dispatch is five functions, and a collection can call them:
+
+| Function | Answers |
+|----------|---------|
+| `(trait/method coll name)` | the method `name` from `coll`'s own table, or nil |
+| `(trait/op coll name)` | the same, but nil for a builtin container family |
+| `(trait/iterable? coll)` | true when `coll`'s elements come from `:iter` |
+| `(trait/elements coll)` | `coll`'s elements as an immutable array |
+| `(trait/rebuild coll items)` | a collection like `coll` holding `items` |
 
 ## Iterator protocol
 

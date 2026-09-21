@@ -159,7 +159,7 @@ name)` answers for either spelling.
 | `structs.rs` | `struct`, `freeze`, `deep-freeze`, `thaw`, `pairs` |
 | `subprocess.rs` | `sys/exit`, `sys/trap-exit!`, `sys/halt`, `sys/args`, `sys/argv`, `sys/pid`, `sys/env`, and the `subprocess/*` table — see [subprocess/](subprocess/AGENTS.md) |
 | `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
-| `traits.rs` | `with-traits`, `traits` |
+| `traits.rs` | `with-traits`, `traits`, `trait/method`, `trait/op`, `trait/iterable?` |
 | `types.rs` | `type-of`, `ptr?`, `callable?` |
 | `unix.rs` | `unix/listen`, `unix/accept`, `unix/connect`, `unix/shutdown` |
 | `watch.rs` | `watch`, `watch-add`, `watch-remove`, `watch-next`, `watch-close` |

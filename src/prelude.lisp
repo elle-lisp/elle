@@ -1,5 +1,7 @@
 (elle/epoch 12)
-## Elle standard prelude
+## audited: 2026-09-20
+## Elle standard prelude: the macros every program is expanded against.
+## docs/stdlib.md
 ##
 ## Loaded automatically by the Expander before user code expansion.
 ## These are defmacro definitions — they register macros in the
@@ -287,6 +289,13 @@
 ## each - iterate over a sequence
 ## Dispatches on type-of: lists use first/rest, indexed types use get/length.
 ## (each x coll body...) or (each x in coll body...)
+##
+## The last arm walks an array by index, and three sources fill that array: a
+## collection whose traits carry :iter, a set, and a struct's pairs. Anything
+## else raises. The iterator is drained into the array rather than driven by a
+## callback so that `break` and `assign` in BODY still reach the enclosing
+## function; a closure per element would trap both. docs/traits.md holds the
+## dispatch this arm completes.
 (defmacro each (var iter-or-in & forms)
   (let* [has-in (and (%not (empty? forms)) (%not (empty? (rest forms)))
                      (= (syntax->datum iter-or-in) 'in))
@@ -309,22 +318,6 @@
                (let [,var (get seq idx)]
                  ,;body)
                (assign idx (%add idx 1))))
-         (or :set :@set)
-           (let [items (->array seq)]
-             (def @idx 0)
-             (def @len (length items))
-             (while (%lt idx len)
-               (let [,var (get items idx)]
-                 ,;body)
-               (assign idx (%add idx 1))))
-         (or :struct :@struct)
-           (let [pairs (pairs seq)]
-             (def @idx 0)
-             (def @len (length pairs))
-             (while (%lt idx len)
-               (let [,var (get pairs idx)]
-                 ,;body)
-               (assign idx (%add idx 1))))
          :fiber
            (begin
              (def @v (fiber/resume seq))
@@ -332,9 +325,21 @@
                (let [,var v]
                  ,;body)
                (assign v (fiber/resume seq))))
-         _ (error {:error :type-error
-                   :reason :not-a-sequence
-                   :message "not a sequence"})))))
+         _
+           (let [items (if (trait/iterable? seq)
+                         (trait/elements seq)
+                         (match (type-of seq)
+                           (or :set :@set) (->array seq)
+                           (or :struct :@struct) (pairs seq)
+                           _ (error {:error :type-error
+                                     :reason :not-a-sequence
+                                     :message "not a sequence"})))]
+             (def @idx 0)
+             (def @len (length items))
+             (while (%lt idx len)
+               (let [,var (get items idx)]
+                 ,;body)
+               (assign idx (%add idx 1))))))))
 
 ## case - equality dispatch (flat pairs)
 ## (case expr val1 body1 val2 body2 ... [default])

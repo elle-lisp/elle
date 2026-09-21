@@ -1,4 +1,6 @@
+// audited: 2026-09-20
 //! Per-instance trait registry: default traitsets stamped at allocation.
+//! docs/traits.md
 //!
 //! Each collection/sequence HeapTag has a default @struct traitset. The tables
 //! are **instance state** living on the `FiberHeap` (tls.md: nothing
@@ -214,12 +216,16 @@ fn call_method_fn(
 }
 
 /// Look up a keyword key in a struct without allocating a TableKey.
+fn lookup_keyword(val: &Value, key: &str) -> Value {
+    lookup_keyword_hash(val, crate::value::keyword::keyword_hash(key))
+}
+
+/// Look up a keyword by its name hash, without allocating a TableKey.
 ///
 /// Trait tables are small (2–5 entries), so a linear scan comparing the
 /// keyword hash — one integer compare per entry, no allocation — beats a
 /// sorted probe.
-fn lookup_keyword(val: &Value, key: &str) -> Value {
-    let key_hash = crate::value::keyword::keyword_hash(key);
+pub(crate) fn lookup_keyword_hash(val: &Value, key_hash: u64) -> Value {
     // Immutable struct — linear scan (small tables)
     if let Some(entries) = val.as_struct() {
         for (k, v) in entries.iter() {
