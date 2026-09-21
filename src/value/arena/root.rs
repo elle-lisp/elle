@@ -34,11 +34,18 @@ pub enum RootRef {
 /// [`register_process_root_region`]), funded as `funding` says. A value with no
 /// region (an immediate) is ignored — the type-level form of "only heap values
 /// pin a region."
+///
+/// The mint and the registration name one region, resolved once here, so a
+/// minted reference cannot land on a region other than the one the sweep will
+/// decref.
 pub fn register_process_root(heap: &mut FiberHeap, value: Value, funding: RootRef) {
-    if let Some(r) = region_of(heap, value) {
-        let _ = funding;
-        heap.register_process_root_region(r);
+    let Some(r) = region_of(heap, value) else {
+        return;
+    };
+    if funding == RootRef::Mint {
+        incref_for_escape(heap, Some(r), EscapeSite::ProcessRoot);
     }
+    heap.register_process_root_region(r);
 }
 /// Give back the one owning reference a completed run handed its host with the
 /// program value (docs/impl/region/rules.md § "The program value is the host's
@@ -47,8 +54,11 @@ pub fn register_process_root(heap: &mut FiberHeap, value: Value, funding: RootRe
 /// exactly as the return convention's mint did.
 ///
 /// A host that reads the value for the rest of the runtime's life registers it
-/// with [`register_process_root`] instead, and the teardown sweep releases it.
-/// An immediate has no region, so this is a no-op for one.
+/// with [`register_process_root`] instead, taking the reference, and the
+/// teardown sweep releases it. A host that keeps only a PART of the value —
+/// the REPL, whose destructuring `def` binds the leaves of a tuple — mints a
+/// reference for the part and still releases here. An immediate has no region,
+/// so this is a no-op for one.
 pub fn release_program_value(heap: &mut FiberHeap, value: Value) {
     let region = result_region_of(heap, value);
     decref_region(heap, region);

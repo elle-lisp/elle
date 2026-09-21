@@ -3,15 +3,18 @@
 //! and register what it bound.
 //!
 //! docs/pipeline.md
+//! docs/impl/region/rules.md
 //!
 //! A `def` at the prompt has to outlive the line that produced it, so its
 //! value goes into the compilation cache as a REPL binding — the mechanism the
-//! stdlib exports use — and the next line resolves the name from there.
+//! stdlib exports use — and the next line resolves the name from there. That
+//! binding mints the reference that keeps it, because the value it is made of
+//! belongs to the form's own answer, which the print gives back.
 
 use crate::pipeline::{compile_file_repl, CompileCtx};
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
-use crate::value::arena::RootRef;
+use crate::value::arena::{release_program_value, RootRef};
 use crate::value::types::Arity;
 use crate::value::Value;
 use crate::vm::VM;
@@ -42,6 +45,11 @@ pub(super) fn try_eval_accumulated(
                             // and keyword spellings resolve.
                             println!("⟹ {}", value.debug_with(Some(symbols)));
                         }
+                        // The print is the last read of the form's value, so
+                        // the owning reference it arrived with goes back here
+                        // (docs/impl/region/rules.md). Whatever the form bound
+                        // holds a reference of its own.
+                        release_program_value(unsafe { &mut *vm.heap_ptr }, value);
                     }
                     Err(e) => {
                         if let Some(d) = try_defer(form, &e) {
@@ -70,6 +78,13 @@ pub(super) fn try_eval_accumulated(
 /// Compile and execute a single form. If it introduces bindings
 /// (def/var/defn, including destructuring), register each in the
 /// compilation cache so subsequent forms see them.
+///
+/// Answers the form's value holding the one owning reference the return
+/// convention minted, whichever branch ran — so the caller releases it once
+/// and needs to know nothing about what the form bound. Every binding
+/// registered here therefore mints a reference of its own: the simple `def`
+/// binds the very value being answered, and each leaf of a destructuring `def`
+/// belongs to the tuple that is.
 fn eval_form(
     form: &FormInfo,
     vm: &mut VM,
@@ -91,7 +106,7 @@ fn eval_form(
                 unsafe { &mut *vm.heap_ptr },
                 sym_id,
                 value,
-                RootRef::Take,
+                RootRef::Mint,
                 signal,
                 arity,
             );
@@ -120,7 +135,7 @@ fn eval_form(
                     unsafe { &mut *vm.heap_ptr },
                     sym_id,
                     *val,
-                    RootRef::Take,
+                    RootRef::Mint,
                     signal,
                     arity,
                 );

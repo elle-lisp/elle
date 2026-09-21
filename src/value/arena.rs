@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-20
 //! Arena allocation layer.
 //!
 //! docs/impl/region/rules.md
@@ -206,6 +206,14 @@ pub enum EscapeSite {
     /// (docs/impl/region/park.md § "A delivery into a replayed frame carries
     /// one owning reference").
     ResumeDelivery,
+    /// A value a host keeps reading past the run that produced it, registered
+    /// as a process root while the host holds no owning reference to hand over
+    /// (`RootRef::Mint`). The registry is external to the region system in the
+    /// way a channel buffer is — no free-time cascade reaches it — so this
+    /// retain IS the root's reference, and the teardown sweep's decref lowers
+    /// it (docs/impl/region/rules.md § "The program value is the host's to
+    /// release").
+    ProcessRoot,
     /// A heap value in a child fiber's inherited dynamic-parameter baseline,
     /// retained at the seed until the fiber is freed (released by the Fiber
     /// content scan's baseline walk — the terminal-signal shape;
@@ -239,6 +247,7 @@ impl EscapeSite {
             EscapeSite::AbortDelivery => "abort-delivery",
             EscapeSite::TerminalSignal => "terminal-signal",
             EscapeSite::ResumeDelivery => "resume-delivery",
+            EscapeSite::ProcessRoot => "process-root",
             EscapeSite::ParamBaseline => "param-baseline",
             EscapeSite::IoSubmit => "io-submit",
         }

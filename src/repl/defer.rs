@@ -3,6 +3,7 @@
 //! once later lines arrive.
 //!
 //! docs/pipeline.md
+//! docs/impl/region/rules.md
 //!
 //! A file compiles as one letrec, so a function may call one defined below it.
 //! A session has no such file: each line compiles alone, and a forward
@@ -12,7 +13,7 @@
 
 use crate::pipeline::{compile_file_repl, CompileCtx};
 use crate::symbol::SymbolTable;
-use crate::value::arena::RootRef;
+use crate::value::arena::{release_program_value, RootRef};
 use crate::vm::VM;
 
 use super::eval::extract_signal_arity;
@@ -128,10 +129,13 @@ fn try_resolve_single(
         unsafe { &mut *vm.heap_ptr },
         sym_id,
         value,
-        RootRef::Take,
+        RootRef::Mint,
         signal,
         arity,
     );
+    // The retry answers with the value like any other run, and nothing prints
+    // it, so its owning reference goes back here (docs/impl/region/rules.md).
+    release_program_value(unsafe { &mut *vm.heap_ptr }, value);
     true
 }
 
@@ -164,26 +168,32 @@ fn try_batch_resolve(
         return false;
     };
 
-    if let Some(items) = tuple_val.as_array() {
-        for (form, val) in deferred.iter().zip(items.iter()) {
-            let sym_id = symbols.intern(&form.name);
-            let (signal, arity) = extract_signal_arity(val);
-            cctx.register_repl_binding(
-                unsafe { &mut *vm.heap_ptr },
-                sym_id,
-                *val,
-                RootRef::Take,
-                signal,
-                arity,
-            );
-        }
-        let names: Vec<&str> = all_names.iter().map(|s| s.as_str()).collect();
-        eprintln!("{}: resolved", names.join(", "));
-        deferred.clear();
-        true
-    } else {
-        false
+    let Some(items) = tuple_val.as_array() else {
+        // The batch answered with something other than its trailing tuple, so
+        // no binding takes any of it. The reference still goes back.
+        release_program_value(unsafe { &mut *vm.heap_ptr }, tuple_val);
+        return false;
+    };
+    for (form, val) in deferred.iter().zip(items.iter()) {
+        let sym_id = symbols.intern(&form.name);
+        let (signal, arity) = extract_signal_arity(val);
+        cctx.register_repl_binding(
+            unsafe { &mut *vm.heap_ptr },
+            sym_id,
+            *val,
+            RootRef::Mint,
+            signal,
+            arity,
+        );
     }
+    // Every binding holds a reference of its own now, so the tuple that carried
+    // them goes back — the batch's program value, which nothing prints
+    // (docs/impl/region/rules.md).
+    release_program_value(unsafe { &mut *vm.heap_ptr }, tuple_val);
+    let names: Vec<&str> = all_names.iter().map(|s| s.as_str()).collect();
+    eprintln!("{}: resolved", names.join(", "));
+    deferred.clear();
+    true
 }
 
 /// Report unresolved deferred forms at session end. Returns true if
