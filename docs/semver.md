@@ -133,6 +133,34 @@ baseline rev, no recorded tests — `check` prints a note and passes;
 outright. With no `PATH`, `check` walks from the working directory
 like the dashboard and checks every versioned module it finds.
 
+## Migrating consumers
+
+```text
+elle semver migrate LIB FILE... [--check] [--dry-run] [--from N]
+```
+
+`migrate` reads `LIB`'s shipped `(elle/migration ...)` forms and
+applies them to each consumer `FILE`. Rules chain ascending by major,
+so a consumer two majors behind is repaired in one run; `--from N`
+skips the majors at or below `N`, which the consumer already crossed.
+
+Per file, the tool finds the top-level module bindings —
+`(def m ((import "std/x") ...))`, by the path or the spec `LIB`
+resolves to — and instantiates the rules per binding:
+
+- `rename old new` rewrites the token `m:old` to `m:new`.
+- `replace` rewrites calls of `m:old` at the shown arity, substituting
+  `$n` with the argument source text and re-qualifying the template's
+  export names with `m:`. A different arity is left alone.
+- `remove` and `warn` occurrences are reported with the shipped
+  message and their line; nothing is rewritten.
+
+An import the tool cannot see through — destructured, aliased through
+another binding, or dynamic — is reported for manual migration, never
+guessed. `--dry-run` prints what would change and writes nothing.
+`--check` writes nothing and exits 1 when a file still needs
+migration or still uses a removed export.
+
 ## Exit codes
 
 The codes separate the verdict from the tool, so CI can gate on 1
