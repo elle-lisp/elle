@@ -1,6 +1,6 @@
 # The image file
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-21 -->
 
 The byte layout of an image, and the fingerprint that decides whether this
 binary may map it.
@@ -24,7 +24,7 @@ One image is one file, or one blob embedded in a larger one:
 | file table | the source-file names the body's spans point at, one length-prefixed string each, sorted by name — the file stream indexes it |
 | signal table | user-defined signal names in dump-time bit order |
 | watermarks | dump-time counters, carried in the header block: parameter id and hygiene scope id today, static-region mint and next signal bit with the milestones that need them |
-| manifest | bindings: name, kind (function / macro / core), value location, signal, arity, doc location; macro entries add parameter lists, template-syntax and transformer-cache locations; inline-fn syntax locations; plus root locations and dependency fingerprints |
+| manifest | the bindings an image installs. It is body data, not a section: an export struct names each binding with a keyword key and each value answers its own signal, arity and doc ([boot.md](boot.md) owns the boot configuration's root struct). Dependency fingerprints are header fields, and an image with an empty dependency list records none |
 | side-stream | typed streams, present in any image: encoded `LirFunction`s keyed by template location (the boot configuration requires this stream); `SendValue`-encoded mutable bindings (present only where the dump policy permits mutables) |
 
 ## The pages section starts at a base-page boundary
@@ -176,8 +176,14 @@ layout agrees with the dumper's. The fingerprint records: format version,
 rustc version and target triple, `size_of`/`align_of` for `Value`,
 `HeapObject`, `RegionSlice`, `Closure`, `ClosureTemplate`, and `TableKey`, the
 instruction-set high-water mark, `CURRENT_EPOCH`, the feature set, a hash of
-the primitive name list in registration order, the OS base page size, and
-(for the boot configuration) the hashes of the three sources.
+the primitive name list in registration order, and the OS base page size.
+
+The three boot sources are not fingerprint inputs. An image built before
+somebody edited stdlib.lisp has a layout this binary can map and a library it
+must not answer with, so the boot configuration carries a digest of its sources
+in the body and refuses a mismatch there ([boot.md](boot.md)). Recording them
+here instead would invalidate every image — a user's environment image included
+— the day the standard library changed a line.
 
 The base page size earns its place because the file's geometry is built from
 it: the pages section starts at a base-page boundary and every page size in

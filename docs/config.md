@@ -173,6 +173,24 @@ elle --wasm=lazy script.lisp        # per-function lazy compilation
 | Full | `--wasm=full` | `--wasm=full` | Full-module compilation |
 | Lazy | `--wasm=lazy` | `--wasm=N` | Per-function lazy compilation |
 
+### Boot image
+
+```bash
+elle --boot-image=off script.lisp    # compile core, prelude and stdlib (default)
+elle --boot-image=on script.lisp     # warm-cache a boot image under --cache=
+elle --boot-image=DIR script.lisp    # warm-cache it in DIR
+```
+
+A boot image is core.lisp, prelude.lisp and stdlib.lisp already compiled, as
+page bytes an instance maps instead of running the front end. On a hit, boot
+hydrates it; on a miss, boot compiles from source and stores one for the next
+start. `elle image dump-boot FILE` writes one explicitly.
+
+The default is off. A hydrated stdlib reaches neither the JIT tier nor
+cross-unit inlining yet, so turning it on trades steady-state throughput for
+startup; [boot.md](impl/image/boot.md) owns the policy and names the two
+milestones the default waits on.
+
 ## Elle API
 
 ### Reading configuration
