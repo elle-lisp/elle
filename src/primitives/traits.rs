@@ -1,12 +1,21 @@
-// audited: 2026-09-19
-//! Trait table primitives: `with-traits` and `traits`.
+// audited: 2026-09-20
+//! Trait table primitives: attach a table, read it back, and resolve the
+//! method a collection operator dispatches through.
+//! docs/traits.md
 //!
 //! `with-traits` attaches an immutable struct as a trait table to a value,
 //! returning a new heap object with the same data and the given table.
 //!
 //! `traits` returns the trait table attached to a value, or `nil` if none.
+//!
+//! `trait/method`, `trait/op` and `trait/iterable?` answer what the Elle-level
+//! collection operators ask before they run: which method this value's own
+//! table names for this operator, and whether its elements come from `:iter`.
+//! The access primitives (`first`, `length`, …) dispatch through
+//! `traitregistry::dispatch_trait_method` instead, which also falls back to the
+//! registry default.
 
-use crate::primitives::def::RegionEffect;
+use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::heap::{deref, HeapObject};
@@ -241,6 +250,106 @@ pub(crate) fn prim_traits(
     )
 }
 
+/// True for the container families that carry their own traversal.
+///
+/// A collection operator answers for these itself and never reads their trait
+/// table, which is what keeps `(with-traits [1 2 3] …)` mapping as an array
+/// and keeps a plain array's cost where it was. Every other value — a struct,
+/// a set, a closure, a box — reaches the trait layer.
+fn is_builtin_sequence(val: &Value) -> bool {
+    if val.is_empty_list() || val.as_syntax().is_some() {
+        return true;
+    }
+    if !val.is_heap() {
+        return false;
+    }
+    use crate::value::heap::HeapTag;
+    matches!(
+        unsafe { deref(*val) }.tag(),
+        HeapTag::Pair
+            | HeapTag::LArray
+            | HeapTag::LArrayMut
+            | HeapTag::LString
+            | HeapTag::LStringMut
+            | HeapTag::LBytes
+            | HeapTag::LBytesMut
+            | HeapTag::Syntax
+    )
+}
+
+/// Read the method whose keyword hashes to `name` from a trait table's
+/// `:Sequence` protocol, then from its `:Collection` protocol. `Value::NIL`
+/// when neither carries it.
+///
+/// No fall back to the registry default: what an operator asks is what THIS
+/// value's own table says, and the access primitives answer from the default
+/// traitset already.
+fn table_method(table: Value, name: u64) -> Value {
+    use crate::primitives::traitregistry::lookup_keyword_hash;
+    if table.is_nil() {
+        return Value::NIL;
+    }
+    const SEQUENCE: u64 = crate::value::keyword::keyword_hash("Sequence");
+    const COLLECTION: u64 = crate::value::keyword::keyword_hash("Collection");
+    for protocol in [SEQUENCE, COLLECTION] {
+        let methods = lookup_keyword_hash(&table, protocol);
+        if methods.is_nil() {
+            continue;
+        }
+        let m = lookup_keyword_hash(&methods, name);
+        if !m.is_nil() {
+            return m;
+        }
+    }
+    Value::NIL
+}
+
+/// (trait/method value name) → method or nil
+pub(crate) fn prim_trait_method(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let Some(name) = args[1].keyword_hash() else {
+        return (
+            SIG_ERROR,
+            ctx.error(
+                "type-error",
+                format!(
+                    "trait/method: name must be a keyword, got {}",
+                    args[1].type_name()
+                ),
+            ),
+        );
+    };
+    let table = crate::primitives::traitregistry::get_traitset(&args[0]);
+    (SIG_OK, table_method(table, name))
+}
+
+/// (trait/op value name) → method or nil
+pub(crate) fn prim_trait_op(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    if is_builtin_sequence(&args[0]) {
+        return (SIG_OK, Value::NIL);
+    }
+    prim_trait_method(ctx, args)
+}
+
+/// (trait/iterable? value) → bool
+pub(crate) fn prim_trait_iterable(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    if is_builtin_sequence(&args[0]) {
+        return (SIG_OK, Value::FALSE);
+    }
+    const ITER: u64 = crate::value::keyword::keyword_hash("iter");
+    let table = crate::primitives::traitregistry::get_traitset(&args[0]);
+    let found = !table_method(table, ITER).is_nil();
+    (SIG_OK, if found { Value::TRUE } else { Value::FALSE })
+}
+
 primitive! {
     "with-traits" => prim_with_traits {
         signal: Signal::errors(),
@@ -268,6 +377,38 @@ primitive! {
         category: "traits",
         example: "(traits (with-traits [1 2 3] {:Seq {:first (fn (v) (get v 0))}}))",
         effect: RegionEffect::PassThrough,
+    }
+    "trait/method" => prim_trait_method {
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Return a value's trait method by name, read from its :Sequence protocol and then its :Collection protocol. Returns nil when the value's own table carries neither the protocol nor the method.",
+        params: &["value", "name"],
+        category: "traits",
+        example: "(trait/method [1 2 3] :first)",
+        // A read that hands back a method the traits table already holds:
+        // unbounded result, no argument stored. `Opaque` answers both, as it
+        // does for the `first`/`rest` dispatchers next door.
+        effect: RegionEffect::Opaque,
+    }
+    "trait/op" => prim_trait_op {
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Return the trait method that overrides a collection operator on a value, or nil. A list, array, string, bytes or syntax object answers nil — those carry their own traversal, so an operator never reads their trait table.",
+        params: &["value", "name"],
+        category: "traits",
+        example: "(trait/op (with-traits {:a 1} @{:Sequence {:map (fn [self f] :mapped)}}) :map)",
+        // `trait/method` behind a tag test, and `Opaque` for the same reason.
+        effect: RegionEffect::Opaque,
+    }
+    "trait/iterable?" => prim_trait_iterable {
+        ret: RetType::Bool,
+        signal: Signal::silent(),
+        arity: Arity::Exact(1),
+        doc: "True when a value's elements come from an :iter trait method rather than from a builtin container. A list, array, string, bytes, or a plain set or struct answers false.",
+        params: &["value"],
+        category: "traits",
+        example: "(trait/iterable? [1 2 3])",
+        effect: RegionEffect::Immediate,
     }
 }
 

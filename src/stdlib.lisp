@@ -286,7 +286,8 @@
                   (go (if (first xs) (+ n 1) n) (rest xs))))]
     (go 0 args)))
 (defn take [n coll]
-  "Take the first n elements of a list."
+  "Take the first n elements of a list. A :take trait method answers instead
+   when coll carries one; a collection driven by :iter is read whole first."
   # first/rest walk that STOPS after n (never materializes the whole coll), so
   # `(take k long-list)` is O(k), not O(length). A `(->array coll)` index-walk
   # trades that for materializing the entire input — an O(length) regression for
@@ -297,21 +298,29 @@
   (when (< n 0)
     (error {:error :argument-error
             :message (string "take: count must be non-negative, got " n)}))
-  (letrec [go (fn [i xs acc]
-                (if (or (= i 0) (empty? xs))
-                  (reverse acc)
-                  (go (- i 1) (rest xs) (pair (first xs) acc))))]
-    (go n coll ())))
+  (let [m (trait/op coll :take)]
+    (if m
+      (m coll n)
+      (letrec [go (fn [i xs acc]
+                    (if (or (= i 0) (empty? xs))
+                      (reverse acc)
+                      (go (- i 1) (rest xs) (pair (first xs) acc))))]
+        (go n (if (trait/iterable? coll) (trait/elements coll) coll) ())))))
 (defn drop [n coll]
-  "Drop the first n elements of a list."
+  "Drop the first n elements of a list. A :drop trait method answers instead
+   when coll carries one; a collection driven by :iter is read whole first."
   (when (not (integer? n))
     (error {:error :type-error
             :message (string "drop: expected integer, got " (type n))}))
   (when (< n 0)
     (error {:error :argument-error
             :message (string "drop: count must be non-negative, got " n)}))
-  (letrec [go (fn [i xs] (if (or (= i 0) (empty? xs)) xs (go (- i 1) (rest xs))))]
-    (go n coll)))
+  (let [m (trait/op coll :drop)]
+    (if m
+      (m coll n)
+      (letrec [go (fn [i xs]
+                    (if (or (= i 0) (empty? xs)) xs (go (- i 1) (rest xs))))]
+        (go n (if (trait/iterable? coll) (trait/elements coll) coll))))))
 
 ## ── Arithmetic ────────────────────────────────────────────────────────
 
@@ -623,60 +632,79 @@
 
 ## ── Higher-order functions ──────────────────────────────────────────
 
+## ── The trait arm every operator below carries ──────────────────────
+## Two clauses open each operator's cond, ahead of its type checks, because a
+## with-traits collection can raise from `empty?` — a table that declares
+## :Collection without :empty? is exactly what the third layer expects.
+##
+## The first clause is the per-operator method, which overrides the operator.
+## The second drives :iter, and rebuilds through :Collection :empty/:conj when
+## the operator answers with a collection of the same kind. A builtin family
+## reaches neither: `trait/op` and `trait/iterable?` (src/primitives/traits.rs)
+## answer nil and false for one. docs/traits.md § Collection operators.
+
 (defn map [f coll]
-  "Apply f to each element of coll, returning a new collection of the same type. Type-preserving: lists return lists, arrays return arrays, sets return sets."
-  (cond
-    (or (array? coll) (string? coll) (bytes? coll))
-      (let* [len (length coll)
-             acc @[]]
-        (def @i 0)
-        (while (< i len)
-          (push acc (f (get coll i)))
-          (assign i (+ i 1)))
-        (if (mutable? coll) acc (freeze acc)))
-    (set? coll)
-      (let* [items (->array coll)
-             acc @||]
-        (each item in items
-          (add acc (f item)))
-        (if (mutable? coll) acc (freeze acc)))
-    (or (pair? coll) (empty? coll))
-      (letrec [go (fn (c acc)
-                    (if (empty? c)
-                      (reverse acc)
-                      (go (rest c) (pair (f (first c)) acc))))]
-        (go coll ()))
-    true (error {:error :type-error
-                 :reason :not-a-sequence
-                 :message "not a sequence"})))
+  "Apply f to each element of coll, returning a new collection of the same type. Type-preserving: lists return lists, arrays return arrays, sets return sets. A :map trait method, or :iter with :empty and :conj, carries a collection of any other kind."
+  (let [m (trait/op coll :map)]
+    (cond
+      m (m coll f)
+      (trait/iterable? coll)
+        (trait/rebuild coll (map f (trait/elements coll)))
+      (or (array? coll) (string? coll) (bytes? coll))
+        (let* [len (length coll)
+               acc @[]]
+          (def @i 0)
+          (while (< i len)
+            (push acc (f (get coll i)))
+            (assign i (+ i 1)))
+          (if (mutable? coll) acc (freeze acc)))
+      (set? coll)
+        (let* [items (->array coll)
+               acc @||]
+          (each item in items
+            (add acc (f item)))
+          (if (mutable? coll) acc (freeze acc)))
+      (or (pair? coll) (empty? coll))
+        (letrec [go (fn (c acc)
+                      (if (empty? c)
+                        (reverse acc)
+                        (go (rest c) (pair (f (first c)) acc))))]
+          (go coll ()))
+      true (error {:error :type-error
+                   :reason :not-a-sequence
+                   :message "not a sequence"}))))
 
 (defn filter [p coll]
-  "Return elements of coll for which (p element) is truthy. Type-preserving."
-  (cond
-    (or (array? coll) (string? coll) (bytes? coll))
-      (let* [len (length coll)
-             acc @[]]
-        (def @i 0)
-        (while (< i len)
-          (let [item (get coll i)]
-            (when (p item) (push acc item)))
-          (assign i (+ i 1)))
-        (if (mutable? coll) acc (freeze acc)))
-    (set? coll)
-      (let* [items (->array coll)
-             acc (if (mutable? coll) (@set) (set))]
-        (each item in items
-          (when (p item) (add acc item)))
-        acc)
-    (or (pair? coll) (empty? coll))
-      (letrec [go (fn (c acc)
-                    (if (empty? c)
-                      (reverse acc)
-                      (go (rest c) (if (p (first c)) (pair (first c) acc) acc))))]
-        (go coll ()))
-    true (error {:error :type-error
-                 :reason :not-a-sequence
-                 :message "not a sequence"})))
+  "Return elements of coll for which (p element) is truthy. Type-preserving. A :filter trait method, or :iter with :empty and :conj, carries a collection of any other kind."
+  (let [m (trait/op coll :filter)]
+    (cond
+      m (m coll p)
+      (trait/iterable? coll)
+        (trait/rebuild coll (filter p (trait/elements coll)))
+      (or (array? coll) (string? coll) (bytes? coll))
+        (let* [len (length coll)
+               acc @[]]
+          (def @i 0)
+          (while (< i len)
+            (let [item (get coll i)]
+              (when (p item) (push acc item)))
+            (assign i (+ i 1)))
+          (if (mutable? coll) acc (freeze acc)))
+      (set? coll)
+        (let* [items (->array coll)
+               acc (if (mutable? coll) (@set) (set))]
+          (each item in items
+            (when (p item) (add acc item)))
+          acc)
+      (or (pair? coll) (empty? coll))
+        (letrec [go (fn (c acc)
+                      (if (empty? c)
+                        (reverse acc)
+                        (go (rest c) (if (p (first c)) (pair (first c) acc) acc))))]
+          (go coll ()))
+      true (error {:error :type-error
+                   :reason :not-a-sequence
+                   :message "not a sequence"}))))
 
 (def keep filter)
 
@@ -705,84 +733,112 @@
 ## ── Collection search & predicates ──────────────────────────────────
 
 (defn all? [pred coll]
-  (cond
-    (or (pair? coll) (empty? coll))
-      (if (empty? coll)
-        true
-        (if (pred (first coll)) (all? pred (rest coll)) false))
-    (or (array? coll) (array? coll))
-      (letrec [loop (fn (i)
-                      (if (>= i (length coll))
-                        true
-                        (if (pred (get coll i)) (loop (+ i 1)) false)))]
-        (loop 0))
-    true (error {:error :type-error
-                 :reason :not-a-sequence
-                 :message "not a sequence"})))
+  "Return true when pred is truthy for every element. Short-circuits on the
+   first failure. A :all? trait method, or :iter, carries a collection of any
+   other kind."
+  (let [m (trait/op coll :all?)]
+    (cond
+      m (m coll pred)
+      (trait/iterable? coll) (all? pred (trait/elements coll))
+      (or (pair? coll) (empty? coll))
+        (if (empty? coll)
+          true
+          (if (pred (first coll)) (all? pred (rest coll)) false))
+      (or (array? coll) (array? coll))
+        (letrec [loop (fn (i)
+                        (if (>= i (length coll))
+                          true
+                          (if (pred (get coll i)) (loop (+ i 1)) false)))]
+          (loop 0))
+      true (error {:error :type-error
+                   :reason :not-a-sequence
+                   :message "not a sequence"}))))
 
 (defn any? [pred coll]
-  (cond
-    (or (pair? coll) (empty? coll))
-      (if (empty? coll)
-        false
-        (if (pred (first coll)) true (any? pred (rest coll))))
-    (or (array? coll) (array? coll))
-      (letrec [loop (fn (i)
-                      (if (>= i (length coll))
-                        false
-                        (if (pred (get coll i)) true (loop (+ i 1)))))]
-        (loop 0))
-    true (error {:error :type-error
-                 :reason :not-a-sequence
-                 :message "not a sequence"})))
+  "Return true when pred is truthy for any element. Short-circuits on the
+   first hit. A :any? trait method, or :iter, carries a collection of any
+   other kind."
+  (let [m (trait/op coll :any?)]
+    (cond
+      m (m coll pred)
+      (trait/iterable? coll) (any? pred (trait/elements coll))
+      (or (pair? coll) (empty? coll))
+        (if (empty? coll)
+          false
+          (if (pred (first coll)) true (any? pred (rest coll))))
+      (or (array? coll) (array? coll))
+        (letrec [loop (fn (i)
+                        (if (>= i (length coll))
+                          false
+                          (if (pred (get coll i)) true (loop (+ i 1)))))]
+          (loop 0))
+      true (error {:error :type-error
+                   :reason :not-a-sequence
+                   :message "not a sequence"}))))
 
 (defn find [pred coll]
-  (cond
-    (or (pair? coll) (empty? coll))
-      (if (empty? coll)
-        nil
-        (if (pred (first coll)) (first coll) (find pred (rest coll))))
-    (or (array? coll) (array? coll))
-      (letrec [loop (fn (i)
-                      (if (>= i (length coll))
-                        nil
-                        (if (pred (get coll i)) (get coll i) (loop (+ i 1)))))]
-        (loop 0))
-    true (error {:error :type-error
-                 :reason :not-a-sequence
-                 :message "not a sequence"})))
+  "Return the first element for which pred is truthy, or nil. Short-circuits.
+   A :find trait method, or :iter, carries a collection of any other kind."
+  (let [m (trait/op coll :find)]
+    (cond
+      m (m coll pred)
+      (trait/iterable? coll) (find pred (trait/elements coll))
+      (or (pair? coll) (empty? coll))
+        (if (empty? coll)
+          nil
+          (if (pred (first coll)) (first coll) (find pred (rest coll))))
+      (or (array? coll) (array? coll))
+        (letrec [loop (fn (i)
+                        (if (>= i (length coll))
+                          nil
+                          (if (pred (get coll i)) (get coll i) (loop (+ i 1)))))]
+          (loop 0))
+      true (error {:error :type-error
+                   :reason :not-a-sequence
+                   :message "not a sequence"}))))
 
 (defn find-index [pred coll]
-  (cond
-    (or (pair? coll) (empty? coll))
-      (letrec [go (fn (i l)
-                    (if (empty? l)
-                      nil
-                      (if (pred (first l)) i (go (+ i 1) (rest l)))))]
-        (go 0 coll))
-    (or (array? coll) (array? coll))
-      (letrec [loop (fn (i)
-                      (if (>= i (length coll))
+  "Return the index of the first element for which pred is truthy, or nil.
+   A :find-index trait method, or :iter, carries a collection of any other
+   kind."
+  (let [m (trait/op coll :find-index)]
+    (cond
+      m (m coll pred)
+      (trait/iterable? coll) (find-index pred (trait/elements coll))
+      (or (pair? coll) (empty? coll))
+        (letrec [go (fn (i l)
+                      (if (empty? l)
                         nil
-                        (if (pred (get coll i)) i (loop (+ i 1)))))]
-        (loop 0))
-    true (error {:error :type-error
-                 :reason :not-a-sequence
-                 :message "not a sequence"})))
+                        (if (pred (first l)) i (go (+ i 1) (rest l)))))]
+          (go 0 coll))
+      (or (array? coll) (array? coll))
+        (letrec [loop (fn (i)
+                        (if (>= i (length coll))
+                          nil
+                          (if (pred (get coll i)) i (loop (+ i 1)))))]
+          (loop 0))
+      true (error {:error :type-error
+                   :reason :not-a-sequence
+                   :message "not a sequence"}))))
 
 (defn count [pred coll]
-  (cond
-    (or (pair? coll) (empty? coll))
-      (fold (fn (n x) (if (pred x) (+ n 1) n)) 0 coll)
-    (or (array? coll) (array? coll))
-      (letrec [loop (fn (i n)
-                      (if (>= i (length coll))
-                        n
-                        (loop (+ i 1) (if (pred (get coll i)) (+ n 1) n))))]
-        (loop 0 0))
-    true (error {:error :type-error
-                 :reason :not-a-sequence
-                 :message "not a sequence"})))
+  "Return how many elements pred is truthy for. A :count trait method, or
+   :iter, carries a collection of any other kind."
+  (let [m (trait/op coll :count)]
+    (cond
+      m (m coll pred)
+      (trait/iterable? coll) (count pred (trait/elements coll))
+      (or (pair? coll) (empty? coll))
+        (fold (fn (n x) (if (pred x) (+ n 1) n)) 0 coll)
+      (or (array? coll) (array? coll))
+        (letrec [loop (fn (i n)
+                        (if (>= i (length coll))
+                          n
+                          (loop (+ i 1) (if (pred (get coll i)) (+ n 1) n))))]
+          (loop 0 0))
+      true (error {:error :type-error
+                   :reason :not-a-sequence
+                   :message "not a sequence"}))))
 
 (defn nth [n coll]
   (get coll n))
@@ -812,7 +868,7 @@
       (zip-build-list arrs k (- i 1)
                       (pair (zip-tuple-at arrs k i (- k 1) ()) acc)))))
 (defn zip [& colls]
-  "Zip collections element-wise into a collection of lists. Stops at the shortest input."
+  "Zip collections element-wise into a collection of lists. Stops at the shortest input. Each input is read through its :iter trait method when it carries one."
   # One index walk builds each column tuple directly, over the inputs normalized
   # to arrays for O(1) positional access. Result family follows the first input
   # (array-family → mutable @array, list → list), matching the per-element list
@@ -824,7 +880,7 @@
            arrs (let [a @[]]
                   (letrec [go (fn [j]
                                 (when (< j k)
-                                  (push a (->array (get carr j)))
+                                  (push a (trait/elements (get carr j)))
                                   (go (+ j 1))))]
                     (go 0))
                   a)
@@ -840,114 +896,136 @@
         (zip-build-list arrs k (- n 1) ())))))
 
 (defn flatten [coll]
-  (letrec [to-list (fn (c)
-                     (letrec [loop (fn (i acc)
-                                     (if (>= i (length c))
-                                       (reverse acc)
-                                       (loop (+ i 1) (pair (get c i) acc))))]
-                       (loop 0 ())))
-           ## Deep flatten over an explicit cursor stack.
-           ##
-           ## `stack` is a list of cursors, innermost first; each cursor is the
-           ## not-yet-visited tail of one open sequence. `acc` collects output in
-           ## reverse. Descending into a nested sequence pushes a cursor, and
-           ## exhausting one pops it.
-           ##
-           ## The shape buys two properties. Every `walk` call sits in tail
-           ## position, so the trampoline in `execute_bytecode_saving_stack`
-           ## reuses a single frame and the native stack stays flat however long
-           ## the input is. And carrying the remaining work as a stack keeps the
-           ## whole walk O(n) — appending each expansion onto that work instead
-           ## would copy the tail once per nested sequence.
-           walk (fn (stack acc)
-                  (if (empty? stack)
-                    (reverse acc)
-                    (let [cur (first stack)]
-                      (if (empty? cur)
-                        (walk (rest stack) acc)
-                        (let [x (first cur)
-                              rest-stack (pair (rest cur) (rest stack))]
-                          (cond
-                            (pair? x) (walk (pair x rest-stack) acc)
-                            (array? x)
-                              (walk (pair (to-list x) rest-stack) acc)
-                            true (walk rest-stack (pair x acc))))))))]
-    (cond
-      (or (pair? coll) (empty? coll)) (walk (pair coll ()) ())
-      ## An `@[]` literal filled by `push`, so an array input yields a
-      ## *mutable* array. `->array` would hand back an immutable one.
-      (array? coll)
-        (let [result @[]]
-          (each x in (walk (pair (to-list coll) ()) ())
-            (push result x))
-          result)
-      true (error {:error :type-error
-                   :reason :not-a-sequence
-                   :message "not a sequence"}))))
+  "Flatten nested sequences into one. A :flatten trait method, or :iter with
+   :empty and :conj, carries a collection of any other kind."
+  (let [m (trait/op coll :flatten)]
+    (letrec [to-list (fn (c)
+                       (letrec [loop (fn (i acc)
+                                       (if (>= i (length c))
+                                         (reverse acc)
+                                         (loop (+ i 1) (pair (get c i) acc))))]
+                         (loop 0 ())))
+             ## Deep flatten over an explicit cursor stack.
+             ##
+             ## `stack` is a list of cursors, innermost first; each cursor is the
+             ## not-yet-visited tail of one open sequence. `acc` collects output in
+             ## reverse. Descending into a nested sequence pushes a cursor, and
+             ## exhausting one pops it.
+             ##
+             ## The shape buys two properties. Every `walk` call sits in tail
+             ## position, so the trampoline in `execute_bytecode_saving_stack`
+             ## reuses a single frame and the native stack stays flat however long
+             ## the input is. And carrying the remaining work as a stack keeps the
+             ## whole walk O(n) — appending each expansion onto that work instead
+             ## would copy the tail once per nested sequence.
+             walk (fn (stack acc)
+                    (if (empty? stack)
+                      (reverse acc)
+                      (let [cur (first stack)]
+                        (if (empty? cur)
+                          (walk (rest stack) acc)
+                          (let [x (first cur)
+                                rest-stack (pair (rest cur) (rest stack))]
+                            (cond
+                              (pair? x) (walk (pair x rest-stack) acc)
+                              (array? x)
+                                (walk (pair (to-list x) rest-stack) acc)
+                              true (walk rest-stack (pair x acc))))))))]
+      (cond
+        m (m coll)
+        (trait/iterable? coll)
+          (trait/rebuild coll (flatten (trait/elements coll)))
+        (or (pair? coll) (empty? coll)) (walk (pair coll ()) ())
+        ## An `@[]` literal filled by `push`, so an array input yields a
+        ## *mutable* array. `->array` would hand back an immutable one.
+        (array? coll)
+          (let [result @[]]
+            (each x in (walk (pair (to-list coll) ()) ())
+              (push result x))
+            result)
+        true (error {:error :type-error
+                     :reason :not-a-sequence
+                     :message "not a sequence"})))))
 
 (defn take-while [pred coll]
-  (letrec [tw-list (fn (lst acc)
-                     (if (empty? lst)
-                       (reverse acc)
-                       (if (pred (first lst))
-                         (tw-list (rest lst) (pair (first lst) acc))
-                         (reverse acc))))]
-    (cond
-      (or (pair? coll) (empty? coll)) (tw-list coll ())
-      (array? coll)
-        (let [result @[]]
-          (letrec [loop (fn (i)
-                          (when (< i (length coll))
-                            (let [x (get coll i)]
-                              (when (pred x)
-                                (push result x)
-                                (loop (+ i 1))))))]
-            (loop 0))
-          result)
-      (array? coll)
-        (let [lst (tw-list (letrec [loop (fn (i acc)
-                                      (if (>= i (length coll))
-                                        (reverse acc)
-                                        (loop (+ i 1) (pair (get coll i) acc))))]
-                             (loop 0 ())) ())]
-          (apply array lst))
-      true (error {:error :type-error
-                   :reason :not-a-sequence
-                   :message "not a sequence"}))))
-
-(defn drop-while [pred coll]
-  (letrec [dw-list (fn (lst)
-                     (if (empty? lst)
-                       ()
-                       (if (pred (first lst)) (dw-list (rest lst)) lst)))]
-    (cond
-      (or (pair? coll) (empty? coll)) (dw-list coll)
-      (array? coll)
-        (letrec [find-start (fn (i)
-                              (if (>= i (length coll))
-                                (length coll)
-                                (if (pred (get coll i)) (find-start (+ i 1)) i)))]
-          (let [start (find-start 0)
-                result @[]]
+  "Take elements while pred is truthy. A :take-while trait method, or :iter
+   with :empty and :conj, carries a collection of any other kind."
+  (let [m (trait/op coll :take-while)]
+    (letrec [tw-list (fn (lst acc)
+                       (if (empty? lst)
+                         (reverse acc)
+                         (if (pred (first lst))
+                           (tw-list (rest lst) (pair (first lst) acc))
+                           (reverse acc))))]
+      (cond
+        m (m coll pred)
+        (trait/iterable? coll)
+          (trait/rebuild coll (take-while pred (trait/elements coll)))
+        (or (pair? coll) (empty? coll)) (tw-list coll ())
+        (array? coll)
+          (let [result @[]]
             (letrec [loop (fn (i)
                             (when (< i (length coll))
-                              (push result (get coll i))
-                              (loop (+ i 1))))]
-              (loop start))
-            result))
-      (array? coll)
-        (let [lst (dw-list (letrec [loop (fn (i acc)
-                                      (if (>= i (length coll))
-                                        (reverse acc)
-                                        (loop (+ i 1) (pair (get coll i) acc))))]
-                             (loop 0 ())))]
-          (apply array lst))
-      true (error {:error :type-error
-                   :reason :not-a-sequence
-                   :message "not a sequence"}))))
+                              (let [x (get coll i)]
+                                (when (pred x)
+                                  (push result x)
+                                  (loop (+ i 1))))))]
+              (loop 0))
+            result)
+        (array? coll)
+          (let [lst (tw-list (letrec [loop (fn (i acc)
+                                        (if (>= i (length coll))
+                                          (reverse acc)
+                                          (loop (+ i 1) (pair (get coll i) acc))))]
+                               (loop 0 ())) ())]
+            (apply array lst))
+        true (error {:error :type-error
+                     :reason :not-a-sequence
+                     :message "not a sequence"})))))
+
+(defn drop-while [pred coll]
+  "Drop elements while pred is truthy, then keep the rest. A :drop-while trait
+   method, or :iter with :empty and :conj, carries a collection of any other
+   kind."
+  (let [m (trait/op coll :drop-while)]
+    (letrec [dw-list (fn (lst)
+                       (if (empty? lst)
+                         ()
+                         (if (pred (first lst)) (dw-list (rest lst)) lst)))]
+      (cond
+        m (m coll pred)
+        (trait/iterable? coll)
+          (trait/rebuild coll (drop-while pred (trait/elements coll)))
+        (or (pair? coll) (empty? coll)) (dw-list coll)
+        (array? coll)
+          (letrec [find-start (fn (i)
+                                (if (>= i (length coll))
+                                  (length coll)
+                                  (if (pred (get coll i)) (find-start (+ i 1)) i)))]
+            (let [start (find-start 0)
+                  result @[]]
+              (letrec [loop (fn (i)
+                              (when (< i (length coll))
+                                (push result (get coll i))
+                                (loop (+ i 1))))]
+                (loop start))
+              result))
+        (array? coll)
+          (let [lst (dw-list (letrec [loop (fn (i acc)
+                                        (if (>= i (length coll))
+                                          (reverse acc)
+                                          (loop (+ i 1) (pair (get coll i) acc))))]
+                               (loop 0 ())))]
+            (apply array lst))
+        true (error {:error :type-error
+                     :reason :not-a-sequence
+                     :message "not a sequence"})))))
 
 (defn distinct [coll]
-  (let [seen @{}]
+  "Keep the first occurrence of each element. A :distinct trait method, or
+   :iter with :empty and :conj, carries a collection of any other kind."
+  (let [seen @{}
+        m (trait/op coll :distinct)]
     (letrec [dist-list (fn (lst acc)
                          (if (empty? lst)
                            (reverse acc)
@@ -957,6 +1035,9 @@
                                (put seen (first lst) true)
                                (dist-list (rest lst) (pair (first lst) acc))))))]
       (cond
+        m (m coll)
+        (trait/iterable? coll)
+          (trait/rebuild coll (distinct (trait/elements coll)))
         (or (pair? coll) (empty? coll)) (dist-list coll ())
         (array? coll)
           (let [result @[]]
@@ -978,34 +1059,44 @@
                      :message "not a sequence"})))))
 
 (defn frequencies [coll]
+  "Count how often each element occurs. Written with `each`, so it dispatches
+   the way `each` does."
   (let [counts @{}]
     (each x in coll
       (put counts x (+ 1 (if (has? counts x) (get counts x) 0))))
     (freeze counts)))
 
 (defn mapcat [f coll]
-  (cond
-    (or (pair? coll) (empty? coll))
-      (fold (fn (acc x) (append acc (f x))) () coll)
-    (array? coll)
-      (let [result @[]]
-        (each x in coll
-          (each y in (f x)
-            (push result y)))
-        result)
-    (array? coll)
-      (apply array
-             (fold (fn (acc x) (append acc (f x))) ()
-                   (letrec [loop (fn (i acc)
-                                   (if (>= i (length coll))
-                                     (reverse acc)
-                                     (loop (+ i 1) (pair (get coll i) acc))))]
-                     (loop 0 ()))))
-    true (error {:error :type-error
-                 :reason :not-a-sequence
-                 :message "not a sequence"})))
+  "Map f over coll and concatenate the results. A :mapcat trait method, or
+   :iter with :empty and :conj, carries a collection of any other kind."
+  (let [m (trait/op coll :mapcat)]
+    (cond
+      m (m coll f)
+      (trait/iterable? coll)
+        (trait/rebuild coll (mapcat f (trait/elements coll)))
+      (or (pair? coll) (empty? coll))
+        (fold (fn (acc x) (append acc (f x))) () coll)
+      (array? coll)
+        (let [result @[]]
+          (each x in coll
+            (each y in (f x)
+              (push result y)))
+          result)
+      (array? coll)
+        (apply array
+               (fold (fn (acc x) (append acc (f x))) ()
+                     (letrec [loop (fn (i acc)
+                                     (if (>= i (length coll))
+                                       (reverse acc)
+                                       (loop (+ i 1) (pair (get coll i) acc))))]
+                       (loop 0 ()))))
+      true (error {:error :type-error
+                   :reason :not-a-sequence
+                   :message "not a sequence"}))))
 
 (defn group-by [f coll]
+  "Group elements by (f element). Written with `each`, so it dispatches the
+   way `each` does."
   (let [groups @{}]
     (each x in coll
       (let [k (f x)]
@@ -1013,99 +1104,117 @@
     groups))
 
 (defn map-indexed [f coll]
-  (cond
-    (or (pair? coll) (empty? coll))
-      (letrec [go (fn (i l acc)
-                    (if (empty? l)
-                      (reverse acc)
-                      (go (+ i 1) (rest l) (pair (f i (first l)) acc))))]
-        (go 0 coll ()))
-    (array? coll)
-      (let [result @[]]
-        (letrec [loop (fn (i)
-                        (when (< i (length coll))
-                          (push result (f i (get coll i)))
-                          (loop (+ i 1))))]
-          (loop 0))
-        result)
-    (array? coll)
-      (apply array
-             (letrec [go (fn (i)
-                           (if (>= i (length coll))
-                             ()
-                             (pair (f i (get coll i)) (go (+ i 1)))))]
-               (go 0)))
-    true (error {:error :type-error
-                 :reason :not-a-sequence
-                 :message "not a sequence"})))
-
-(defn partition [n coll]
-  (cond
-    (or (pair? coll) (empty? coll))
-      (if (or (<= n 0) (empty? coll))
-        ()
-        (pair (take n coll) (partition n (drop n coll))))
-    (array? coll)
-      (let [result @[]]
-        (letrec [loop (fn (i)
-                        (when (< i (length coll))
-                          (let [chunk @[]]
-                            (letrec [inner (fn (j)
-                                       (when (and (< j (+ i n))
-                                         (< j (length coll)))
-                                         (push chunk (get coll j))
-                                         (inner (+ j 1))))]
-                              (inner i))
-                            (push result chunk)
-                            (loop (+ i n)))))]
-          (loop 0))
-        result)
-    (array? coll)
-      (letrec [to-list (fn (c)
-                         (letrec [loop (fn (i acc)
-                                         (if (>= i (length c))
-                                           (reverse acc)
-                                           (loop (+ i 1) (pair (get c i) acc))))]
-                           (loop 0 ())))
-               part (fn (lst)
-                      (if (or (<= n 0) (empty? lst))
-                        ()
-                        (pair (apply array (take n lst)) (part (drop n lst)))))]
-        (apply array (part (to-list coll))))
-    true (error {:error :type-error
-                 :reason :not-a-sequence
-                 :message "not a sequence"})))
-
-(defn interpose [sep coll]
-  (letrec [ip-list (fn (lst acc)
-                     (if (empty? lst)
-                       (reverse acc)
-                       (if (empty? acc)
-                         (ip-list (rest lst) (pair (first lst) acc))
-                         (ip-list (rest lst) (pair (first lst) (pair sep acc))))))]
+  "Apply (f index element) over coll. A :map-indexed trait method, or :iter
+   with :empty and :conj, carries a collection of any other kind."
+  (let [m (trait/op coll :map-indexed)]
     (cond
-      (or (pair? coll) (empty? coll)) (ip-list coll ())
+      m (m coll f)
+      (trait/iterable? coll)
+        (trait/rebuild coll (map-indexed f (trait/elements coll)))
+      (or (pair? coll) (empty? coll))
+        (letrec [go (fn (i l acc)
+                      (if (empty? l)
+                        (reverse acc)
+                        (go (+ i 1) (rest l) (pair (f i (first l)) acc))))]
+          (go 0 coll ()))
       (array? coll)
-        (if (< (length coll) 2)
-          coll
-          (let [result @[(get coll 0)]]
-            (letrec [loop (fn (i)
-                            (when (< i (length coll))
-                              (push result sep)
-                              (push result (get coll i))
-                              (loop (+ i 1))))]
-              (loop 1))
-            result))
+        (let [result @[]]
+          (letrec [loop (fn (i)
+                          (when (< i (length coll))
+                            (push result (f i (get coll i)))
+                            (loop (+ i 1))))]
+            (loop 0))
+          result)
       (array? coll)
-        (let [lst (ip-list (letrec [loop (fn (i acc)
-                                      (if (>= i (length coll))
-                                        (reverse acc)
-                                        (loop (+ i 1) (pair (get coll i) acc))))]
-                             (loop 0 ())) ())]
-          (apply array lst))
+        (apply array
+               (letrec [go (fn (i)
+                             (if (>= i (length coll))
+                               ()
+                               (pair (f i (get coll i)) (go (+ i 1)))))]
+                 (go 0)))
       true (error {:error :type-error
                    :reason :not-a-sequence
                    :message "not a sequence"}))))
+
+(defn partition [n coll]
+  "Split coll into chunks of n. A :partition trait method, or :iter with
+   :empty and :conj, carries a collection of any other kind."
+  (let [m (trait/op coll :partition)]
+    (cond
+      m (m coll n)
+      (trait/iterable? coll)
+        (trait/rebuild coll (partition n (trait/elements coll)))
+      (or (pair? coll) (empty? coll))
+        (if (or (<= n 0) (empty? coll))
+          ()
+          (pair (take n coll) (partition n (drop n coll))))
+      (array? coll)
+        (let [result @[]]
+          (letrec [loop (fn (i)
+                          (when (< i (length coll))
+                            (let [chunk @[]]
+                              (letrec [inner (fn (j)
+                                         (when (and (< j (+ i n))
+                                           (< j (length coll)))
+                                           (push chunk (get coll j))
+                                           (inner (+ j 1))))]
+                                (inner i))
+                              (push result chunk)
+                              (loop (+ i n)))))]
+            (loop 0))
+          result)
+      (array? coll)
+        (letrec [to-list (fn (c)
+                           (letrec [loop (fn (i acc)
+                                      (if (>= i (length c))
+                                        (reverse acc)
+                                        (loop (+ i 1) (pair (get c i) acc))))]
+                             (loop 0 ())))
+                 part (fn (lst)
+                        (if (or (<= n 0) (empty? lst))
+                          ()
+                          (pair (apply array (take n lst)) (part (drop n lst)))))]
+          (apply array (part (to-list coll))))
+      true (error {:error :type-error
+                   :reason :not-a-sequence
+                   :message "not a sequence"}))))
+
+(defn interpose [sep coll]
+  "Put sep between every pair of elements. A :interpose trait method, or :iter
+   with :empty and :conj, carries a collection of any other kind."
+  (let [m (trait/op coll :interpose)]
+    (letrec [ip-list (fn (lst acc)
+                       (if (empty? lst)
+                         (reverse acc)
+                         (if (empty? acc)
+                           (ip-list (rest lst) (pair (first lst) acc))
+                           (ip-list (rest lst) (pair (first lst) (pair sep acc))))))]
+      (cond
+        m (m coll sep)
+        (trait/iterable? coll)
+          (trait/rebuild coll (interpose sep (trait/elements coll)))
+        (or (pair? coll) (empty? coll)) (ip-list coll ())
+        (array? coll)
+          (if (< (length coll) 2)
+            coll
+            (let [result @[(get coll 0)]]
+              (letrec [loop (fn (i)
+                              (when (< i (length coll))
+                                (push result sep)
+                                (push result (get coll i))
+                                (loop (+ i 1))))]
+                (loop 1))
+              result))
+        (array? coll)
+          (let [lst (ip-list (letrec [loop (fn (i acc)
+                                        (if (>= i (length coll))
+                                          (reverse acc)
+                                          (loop (+ i 1) (pair (get coll i) acc))))]
+                               (loop 0 ())) ())]
+            (apply array lst))
+        true (error {:error :type-error
+                     :reason :not-a-sequence
+                     :message "not a sequence"})))))
 
 (defn min-key [f & args]
   (fold (fn (best x) (if (< (f x) (f best)) x best)) (first args) (rest args)))
@@ -1124,6 +1233,18 @@
             result))))))
 
 (defn sort-by [keyfn coll]
+  "Sort coll by (keyfn element). Stable merge sort. Type-preserving. A :sort-by
+   trait method, or :iter with :empty and :conj, carries a collection of any
+   other kind."
+  (let [m (trait/op coll :sort-by)]
+    (if m
+      (m coll keyfn)
+      (if (trait/iterable? coll)
+        (trait/rebuild coll (sort-by keyfn (trait/elements coll)))
+        (sort-by-builtin keyfn coll)))))
+
+(defn sort-by-builtin [keyfn coll]
+  "Sort a list or array by (keyfn element). Internal helper for sort-by."
   (letrec [to-list (fn (c)
                      (cond
                        (or (pair? c) (empty? c)) c
@@ -1170,7 +1291,16 @@
       (from-list result coll))))
 
 (defn sort-with [cmp coll]
-  "Sort coll using comparator (cmp a b) which returns negative, zero, or positive. Stable merge sort. Type-preserving. Alias: sort-by-cmp."
+  "Sort coll using comparator (cmp a b) which returns negative, zero, or positive. Stable merge sort. Type-preserving. Alias: sort-by-cmp. A :sort-with trait method, or :iter with :empty and :conj, carries a collection of any other kind."
+  (let [m (trait/op coll :sort-with)]
+    (if m
+      (m coll cmp)
+      (if (trait/iterable? coll)
+        (trait/rebuild coll (sort-with cmp (trait/elements coll)))
+        (sort-with-builtin cmp coll)))))
+
+(defn sort-with-builtin [cmp coll]
+  "Sort a list or array with the comparator cmp. Internal helper for sort-with."
   (letrec [to-list (fn (c)
                      (cond
                        (or (pair? c) (empty? c)) c
@@ -2646,21 +2776,6 @@
   "Return x - 1."
   (- x 1))
 
-(defn any? [pred coll]
-  "Return true if any value in the sequence is truthy. Short-circuits."
-  (each x in coll
-    (when (pred x) (break true))))
-
-(defn all? [pred coll]
-  "Return true if pred is truthy for every element. Short-circuits on first failure."
-  (not (any? (fn [x] (not (pred x))) coll)))
-
-(defn find [pred coll]
-  "Return the first value in the sequence where (pred value) is truthy. Short-circuits.
-   Returns nil if no such value is found."
-  (each x in coll
-    (when (pred x) (break x))))
-
 ## ── Subprocess convenience ────────────────────────────────────────────
 
 (defn subprocess/system [program args & opts]
@@ -2744,19 +2859,24 @@
   "Apply f to the value at key, returning the modified collection.
    (update {:count 5} :count inc) => {:count 6}
    (update [10 20 30] 1 inc) => [10 21 30]
-   Errors if key does not exist."
-  (if (or (array? coll) (bytes? coll) (string? coll))
-    (when (or (< key 0) (>= key (length coll)))
-      (error {:error :key-error
-              :reason :index-out-of-bounds
-              :key key
-              :message (string "index out of bounds: " key)}))
-    (unless (has? coll key)
-      (error {:error :key-error
-              :reason :key-not-found
-              :key key
-              :message (string "key not found: " key)})))
-  (put coll key (f (get coll key))))
+   Errors if key does not exist. A :update trait method answers instead when
+   coll carries one."
+  (let [m (trait/op coll :update)]
+    (if m
+      (m coll key f)
+      (begin
+        (if (or (array? coll) (bytes? coll) (string? coll))
+          (when (or (< key 0) (>= key (length coll)))
+            (error {:error :key-error
+                    :reason :index-out-of-bounds
+                    :key key
+                    :message (string "index out of bounds: " key)}))
+          (unless (has? coll key)
+            (error {:error :key-error
+                    :reason :key-not-found
+                    :key key
+                    :message (string "key not found: " key)})))
+        (put coll key (f (get coll key)))))))
 
 (defn sum [xs]
   "Sum a sequence of numbers. (sum [1 2 3]) => 6"
