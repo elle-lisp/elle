@@ -149,12 +149,21 @@ to report it. So `Birthplace` refuses to be dropped holding one: the assertion
 fails a debug build where the leak would otherwise cost a region per operation,
 unmeasured.
 
-Pinned by `a_run_that_spawns_a_child_leaves_no_residue` and
-`a_run_that_reads_a_whole_file_leaves_no_residue`
+One call can drive several of these. `subprocess/system` spawns the child, reads
+both pipes to the end, and waits, so it hands over a region for every answer its
+completions built. The probes below take those shapes apart, and each takes the
+simplest form of one. The spawn gives all three streams `:null`, so the region it
+hands over holds the handle alone; the `read-all` reads a file. Neither reads a
+pipe, and neither hands over a region that carries a port, so
+`subprocess/system` is watched on its own.
+
+Pinned by `a_run_that_spawns_a_child_leaves_no_residue`,
+`a_run_that_reads_a_whole_file_leaves_no_residue` and
+`a_run_that_captures_what_a_child_wrote_leaves_no_residue`
 (`tests/region_process_teardown/census.rs`), and measured as a rate by the
-`subprocess-exec` and `port-read-all` probes in `tests/elle/plumb.lisp` beside
-`io-yield ev/sleep`, whose answer is an immediate the completion builds nothing
-for.
+`subprocess-exec`, `port-read-all` and `subprocess-system` probes in
+`tests/elle/plumb.lisp` beside `io-yield ev/sleep`, whose answer is an immediate
+the completion builds nothing for.
 
 ## An operation whose fiber is gone has no reader
 
