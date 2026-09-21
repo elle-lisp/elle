@@ -1,6 +1,6 @@
 # Capture cells
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-21 -->
 
 How a captured binding's cell is realized, what a read through one borrows, and where the cell's own release lands.
 
@@ -21,7 +21,7 @@ binding is the same 1-slot container realized at runtime — the capture
 cell's update increfs the new content and decrefs the displaced prior
 unconditionally; there is no fallback to suppress, because the cell's RC
 semantics live in the update opcode itself. Its readers are covered by the
-general rule in [bindings.md](bindings.md) ("A whole-value read of a 1-slot
+general rule in [reads.md](reads.md) ("A whole-value read of a 1-slot
 container takes a counted reference"): the overwrite-release is
 `capture_store_with_rebind`'s here rather than the compiler's
 drop-on-overwrite, and an uncounted alias would be freed under the reader by it

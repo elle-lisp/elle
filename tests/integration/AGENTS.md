@@ -1,6 +1,6 @@
 # tests/integration
 
-<!-- audited: 2026-09-20 -->
+<!-- audited: 2026-09-21 -->
 
 Full-pipeline integration tests: end-to-end behavior verification.
 
@@ -29,7 +29,7 @@ check the repository rather than the language:
 |-------|-------|
 | The documents and their policy | `agents.rs`, `audit.rs`, `prose.rs`, `paths.rs`, `bytecode_doc.rs`, `doctest.rs`, `rustsource.rs` |
 | CI and the corpus runner | `workflows.rs`, `plugins.rs`, `budget.rs`, `capacity.rs`, `profiles.rs`, `truncation.rs`, `runner_exit_trap.rs`, `timeout_capture.rs`, `runner_gauges.rs`, `measurements.rs`, `isolation.rs`, `state_dir.rs`, `run_identity.rs` |
-| CLI surfaces | `dump_cli.rs`, `flip_cli.rs`, `tier_cli.rs`, `version.rs`, `dispatch.rs`, `repl_exit_codes.rs` |
+| CLI surfaces | `argv_cli.rs`, `dump_cli.rs`, `flip_cli.rs`, `tier_cli.rs`, `version.rs`, `dispatch.rs`, `repl_exit_codes.rs` |
 
 `allocator.rs` sits in the directory unregistered and does not compile; the
 comment at the foot of `mod.rs` says why.

@@ -449,7 +449,7 @@ fn a_cell_box_release_follows_every_release_that_unwraps_it() {
     // and unwraps it to the content (so it READS the box's page), and
     // `DecrefCellRegion` frees that page. Emitting the free first leaves the
     // unwrap reading reclaimed memory — a stray release of whatever region id
-    // the recycled page spells (docs/impl/region/bindings.md § "A cell's release
+    // the recycled page spells (docs/impl/region/cells.md § "A cell's release
     // lands at or after every release routed through that cell").
     //
     // The shape is a `def` inside a lambda captured by a sibling closure: `p` is

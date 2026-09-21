@@ -1,3 +1,4 @@
+// audited: 2026-09-21
 // What the Makefile and the doc generator name in text must match the tree.
 //
 // Neither driver is compiled, so every path and URL in them is a reference
@@ -20,24 +21,67 @@ fn generator_path() -> PathBuf {
     repo_root().join("demos/docgen/generate.lisp")
 }
 
-/// Directories whose `.lisp` files are not this repository's to format:
-/// build output, git internals, and the `plugins` submodule (which runs its
-/// own format gate from its own Makefile).
-const UNOWNED: &[&str] = &["target", ".git", "plugins"];
+/// The directories the format-gate walk skips, as paths relative to the
+/// repository root: build output, git internals, and every submodule
+/// `.gitmodules` declares. A submodule runs its own format gate from its
+/// own repository, and reading the declarations means a submodule added
+/// later leaves this gate without an edit here.
+fn unowned_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![PathBuf::from("target"), PathBuf::from(".git")];
+    let text =
+        fs::read_to_string(repo_root().join(".gitmodules")).expect("read .gitmodules");
+    dirs.extend(
+        text.lines()
+            .filter_map(|line| line.trim().strip_prefix("path = "))
+            .map(PathBuf::from),
+    );
+    dirs
+}
 
-/// Every `*.lisp` file under `dir`, recursively, skipping `UNOWNED`.
-/// Paths come back relative to the repository root.
-fn collect_lisp(dir: &Path, root: &Path, out: &mut Vec<PathBuf>) {
+// `.gitmodules` is the list of trees this repository does not own, and nothing
+// else holds the walk's skip list in step with it. CI checks no submodule out,
+// so a list that misses one stays green there and reddens the first worktree
+// that runs `git submodule update --init --recursive`. The counter-factual:
+// `.gitmodules` declares `mcp`, eleven `.lisp` files live there once it is
+// checked out, and the walk fed them to `format_gate_covers_every_elle_source`.
+#[test]
+fn the_walk_skips_every_submodule() {
+    let text =
+        fs::read_to_string(repo_root().join(".gitmodules")).expect("read .gitmodules");
+    let declared: Vec<&str> = text
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("path = "))
+        .collect();
+    assert!(
+        declared.len() >= 2,
+        "found {} submodule paths in .gitmodules; expected plugins and mcp. \
+         If the file changed shape, teach this test the new shape — do not \
+         let it pass by matching nothing.",
+        declared.len()
+    );
+    let unowned = unowned_dirs();
+    for path in declared {
+        assert!(
+            unowned.contains(&PathBuf::from(path)),
+            ".gitmodules declares the submodule `{path}`, but the format \
+             gate's walk does not skip it"
+        );
+    }
+}
+
+/// Every `*.lisp` file under `dir`, recursively, skipping the `unowned`
+/// directories. Paths come back relative to the repository root.
+fn collect_lisp(dir: &Path, root: &Path, unowned: &[PathBuf], out: &mut Vec<PathBuf>) {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) => panic!("cannot read {}: {}", dir.display(), e),
     };
     for entry in entries {
         let path = entry.expect("directory entry").path();
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if path.is_dir() {
-            if !UNOWNED.contains(&name) {
-                collect_lisp(&path, root, out);
+            let rel = path.strip_prefix(root).expect("under root");
+            if !unowned.iter().any(|u| u == rel) {
+                collect_lisp(&path, root, unowned, out);
             }
         } else if path.extension().and_then(|e| e.to_str()) == Some("lisp") {
             out.push(path.strip_prefix(root).expect("under root").to_path_buf());
@@ -81,7 +125,7 @@ fn format_gate_covers_every_elle_source() {
     }
 
     let mut sources = Vec::new();
-    collect_lisp(&root, &root, &mut sources);
+    collect_lisp(&root, &root, &unowned_dirs(), &mut sources);
     assert!(
         sources.len() > 100,
         "found only {} .lisp files; the walk is broken, not the gate",

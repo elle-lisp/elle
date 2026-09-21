@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-21
 // Guardfree pins for container reads, native effects and the store funnel.
 //
 // docs/analysis/testing.md
@@ -152,7 +152,7 @@ fn region_container_read_borrow_uaf() {
 }
 
 // Guard — the counted container read is retained by every BINDER FORM that records
-// it (docs/impl/region/bindings.md § "Every binder form that records the read must
+// it (docs/impl/region/reads.md § "Every binder form that records the read must
 // emit the retain"). A name bound to a whole-value read of a re-storing container
 // borrows a reference the next overwrite releases, so the reader takes one of its
 // own — and the container is handed its donation on the strength of that. The

@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-09-20 -->
+<!-- audited: 2026-09-21 -->
 
 Elle has two test systems:
 
@@ -329,7 +329,7 @@ The **order of two correctly-counted releases** is the other hazard of this kind
 it needs a third detector rather than a behavioral pin. A captured binding's value and
 its env cell are two regions addressed by one env index; the value's release loads the
 box raw and unwraps it, so it reads the page the box's release frees
-([docs/impl/region/bindings.md](impl/region/bindings.md) § "A cell's release lands at
+([docs/impl/region/cells.md](impl/region/cells.md) § "A cell's release lands at
 or after every release routed through that cell"). Emit the two in the wrong order and
 both counts are still right: nothing leaks, so the leak oracle reads flat, and no count
 reaches zero early, so guardfree unmaps nothing to fault on. What catches it is a

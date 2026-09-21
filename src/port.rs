@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+//! audited: 2026-09-21
 //! Port type — Elle's abstraction for file descriptors.
 //!
 //! A port wraps an OS file descriptor with metadata (direction, encoding,
@@ -339,120 +339,46 @@ impl Port {
 
 impl fmt::Display for Port {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.kind {
-            PortKind::Stdin => {
-                write!(f, "#<port:stdin")?;
-                if self.closed.get() {
-                    write!(f, " [closed]")?;
-                }
-                write!(f, ">")
+        let name = match self.kind {
+            PortKind::Stdin => "stdin",
+            PortKind::Stdout => "stdout",
+            PortKind::Stderr => "stderr",
+            PortKind::File => "file",
+            PortKind::TcpListener => "tcp-listener",
+            PortKind::TcpStream => "tcp-stream",
+            PortKind::UdpSocket => "udp",
+            PortKind::UnixListener => "unix-listener",
+            PortKind::UnixStream => "unix-stream",
+            PortKind::Pipe => "pipe",
+        };
+        write!(f, "#<port:{}", name)?;
+        if let Some(ref path) = self.path {
+            write!(f, " \"{}\"", path)?;
+        }
+        // Stdio ports carry fixed metadata and listeners transfer no bytes, so
+        // only the data-carrying kinds print their direction and encoding.
+        if matches!(
+            self.kind,
+            PortKind::File
+                | PortKind::TcpStream
+                | PortKind::UdpSocket
+                | PortKind::UnixStream
+                | PortKind::Pipe
+        ) {
+            match self.direction {
+                Direction::Read => write!(f, " :read")?,
+                Direction::Write => write!(f, " :write")?,
+                Direction::ReadWrite => write!(f, " :read-write")?,
             }
-            PortKind::Stdout => {
-                write!(f, "#<port:stdout")?;
-                if self.closed.get() {
-                    write!(f, " [closed]")?;
-                }
-                write!(f, ">")
-            }
-            PortKind::Stderr => {
-                write!(f, "#<port:stderr")?;
-                if self.closed.get() {
-                    write!(f, " [closed]")?;
-                }
-                write!(f, ">")
-            }
-            PortKind::File => {
-                write!(f, "#<port:file")?;
-                if let Some(ref path) = self.path {
-                    write!(f, " \"{}\"", path)?;
-                }
-                match self.direction {
-                    Direction::Read => write!(f, " :read")?,
-                    Direction::Write => write!(f, " :write")?,
-                    Direction::ReadWrite => write!(f, " :read-write")?,
-                }
-                match self.encoding {
-                    Encoding::Text => write!(f, " :text")?,
-                    Encoding::Binary => write!(f, " :binary")?,
-                }
-                if self.closed.get() {
-                    write!(f, " [closed]")?;
-                }
-                write!(f, ">")
-            }
-            PortKind::TcpListener => {
-                write!(f, "#<port:tcp-listener")?;
-                if let Some(ref addr) = self.path {
-                    write!(f, " \"{}\"", addr)?;
-                }
-                if self.closed.get() {
-                    write!(f, " [closed]")?;
-                }
-                write!(f, ">")
-            }
-            PortKind::TcpStream => {
-                write!(f, "#<port:tcp-stream")?;
-                if let Some(ref addr) = self.path {
-                    write!(f, " \"{}\"", addr)?;
-                }
-                write!(f, " :read-write :text")?;
-                if self.closed.get() {
-                    write!(f, " [closed]")?;
-                }
-                write!(f, ">")
-            }
-            PortKind::UdpSocket => {
-                write!(f, "#<port:udp")?;
-                if let Some(ref addr) = self.path {
-                    write!(f, " \"{}\"", addr)?;
-                }
-                write!(f, " :read-write :binary")?;
-                if self.closed.get() {
-                    write!(f, " [closed]")?;
-                }
-                write!(f, ">")
-            }
-            PortKind::UnixListener => {
-                write!(f, "#<port:unix-listener")?;
-                if let Some(ref path) = self.path {
-                    write!(f, " \"{}\"", path)?;
-                }
-                if self.closed.get() {
-                    write!(f, " [closed]")?;
-                }
-                write!(f, ">")
-            }
-            PortKind::UnixStream => {
-                write!(f, "#<port:unix-stream")?;
-                if let Some(ref path) = self.path {
-                    write!(f, " \"{}\"", path)?;
-                }
-                write!(f, " :read-write :text")?;
-                if self.closed.get() {
-                    write!(f, " [closed]")?;
-                }
-                write!(f, ">")
-            }
-            PortKind::Pipe => {
-                write!(f, "#<port:pipe")?;
-                if let Some(ref path) = self.path {
-                    write!(f, " \"{}\"", path)?;
-                }
-                match self.direction {
-                    Direction::Read => write!(f, " :read")?,
-                    Direction::Write => write!(f, " :write")?,
-                    Direction::ReadWrite => write!(f, " :read-write")?,
-                }
-                match self.encoding {
-                    Encoding::Text => write!(f, " :text")?,
-                    Encoding::Binary => write!(f, " :binary")?,
-                }
-                if self.closed.get() {
-                    write!(f, " [closed]")?;
-                }
-                write!(f, ">")
+            match self.encoding {
+                Encoding::Text => write!(f, " :text")?,
+                Encoding::Binary => write!(f, " :binary")?,
             }
         }
+        if self.closed.get() {
+            write!(f, " [closed]")?;
+        }
+        write!(f, ">")
     }
 }
 

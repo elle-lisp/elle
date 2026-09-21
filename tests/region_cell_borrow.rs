@@ -1,3 +1,4 @@
+//! audited: 2026-09-21
 //! A value read out of an env cell must outlive the reader that consumes it.
 //!
 //! A `def` inside a function body that a nested lambda captures is materialized
@@ -142,7 +143,7 @@ fn a_cell_read_outlives_its_reader() {
             "under --trace=scrub, {name} answered {got} instead of {want} — the \
              env cell was released at the load rather than at the reader that \
              consumes the borrow, so the cell's free cascade reclaimed the \
-             value under its own reader (docs/impl/region/bindings.md § \"A read \
+             value under its own reader (docs/impl/region/cells.md § \"A read \
              through an env cell is an uncounted borrow\")",
         );
     }

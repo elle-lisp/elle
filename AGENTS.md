@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-21 -->
 
 Elle is a Lisp. Source text becomes bytecode; bytecode runs on a VM.
 
@@ -313,7 +313,7 @@ When in doubt, run the tests.
 ## MCP Server
 
 The MCP server lives in a [separate repository](https://github.com/elle-lisp/mcp)
-(available as a submodule at `tools/mcp/`). It requires the `elle-oxigraph`
+(available as a submodule at `mcp/`). It requires the `elle-oxigraph`
 and `elle-syn` plugins from [elle-lisp/plugins](https://github.com/elle-lisp/plugins).
 
 See [`docs/mcp.md`](docs/mcp.md) for protocol documentation.

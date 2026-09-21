@@ -1,4 +1,4 @@
-// audited: 2026-09-15
+// audited: 2026-09-21
 // Guardfree pins for where a release lands: the branch-arm window, the break window, and the binder pins.
 //
 // docs/analysis/testing.md
@@ -234,7 +234,7 @@ fn region_define_init_release_uaf() {
 // `DecrefValueRegion` at its last use). This is the std/process scheduler's
 // `ready` double-buffer (`sched-run`'s `(let [batch ready] (assign ready @[])
 // (each pid in batch (run-one pid)))`), whose regression SIGSEGVs
-// tests/elle/process-io.lisp. docs/impl/region/bindings.md § "Captured
+// tests/elle/process-io.lisp. docs/impl/region/cells.md § "Captured
 // reassigned cells".
 #[test]
 fn region_reassign_captured_cell_reader() {

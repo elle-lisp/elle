@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+//! audited: 2026-09-21
 //! Unit tests (`super` is the parent impl module).
 
 use super::*;
@@ -154,6 +154,39 @@ fn test_pipe_display_closed() {
     );
     p.close();
     assert!(format!("{}", p).contains("[closed]"));
+}
+
+/// A socket's display names the encoding the port has, for every socket kind
+/// and either encoding.
+///
+/// The counter-factual: the stream arms of `Display` answered `:text` from a
+/// literal, so a freshly built stream — constructed `Binary` — printed an
+/// encoding it did not have, and an explicit `:encoding` override never
+/// reached the display at all.
+#[test]
+fn a_socket_display_names_the_encoding_it_has() {
+    let constructors: [fn(OwnedFd, String) -> Port; 3] = [
+        Port::new_tcp_stream,
+        Port::new_unix_stream,
+        Port::new_udp_socket,
+    ];
+    for build in constructors {
+        for (encoding, shown, hidden) in [
+            (Encoding::Text, ":text", ":binary"),
+            (Encoding::Binary, ":binary", ":text"),
+        ] {
+            let p = build(devnull_fd(), "peer".into()).with_encoding(encoding);
+            assert_eq!(p.encoding(), encoding);
+            let s = format!("{}", p);
+            assert!(s.contains(shown), "display must name {}: {}", shown, s);
+            assert!(
+                !s.contains(hidden),
+                "display must not name {}: {}",
+                hidden,
+                s
+            );
+        }
+    }
 }
 
 /// A share holds the descriptor number past the port's close, and gives it back

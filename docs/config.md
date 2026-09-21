@@ -1,12 +1,27 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-21 -->
 
 Elle exposes a runtime configuration system reachable from both CLI flags and
 Elle code. All debug/trace flags, JIT policies, and WASM policies are
 controlled through a single mutable config struct on the VM.
 
 ## CLI flags
+
+### The program and its arguments
+
+The first argument that is not a flag names the program, and `elle` runs
+exactly one. Every argument after it belongs to the program, reachable
+through `sys/args` — no separator is needed:
+
+```bash
+elle server.lisp 8080      # the program reads ("8080") from (sys/args)
+elle walk.lisp data.lisp   # data.lisp is an argument, not a second program
+```
+
+So a shell glob does not run every match: the first match is the program
+and the rest are its arguments. The pinning test is
+`tests/integration/argv_cli.rs`.
 
 ### Where elle's flags stop
 

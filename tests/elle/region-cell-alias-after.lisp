@@ -1,8 +1,9 @@
 (elle/epoch 12)
+# audited: 2026-09-21
 # A whole-value read of a fn-local 1-slot container, taken AFTER the container's
 # own binder allocated the init. The reader takes a COUNTED reference of its own
 # — the container releases what it held at every overwrite, so an uncounted
-# borrow dies at the first `assign` (docs/impl/region/bindings.md § "A whole-value
+# borrow dies at the first `assign` (docs/impl/region/reads.md § "A whole-value
 # read of a 1-slot container takes a counted reference").
 #
 # What the counted read is worth here is the DONATION. The reader holds a

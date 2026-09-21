@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-08
+# audited: 2026-09-21
 # The ledger every probe is classified against: the roots, the by-design set, the dual-read table, and the driver each row table runs with.
 #
 # docs/impl/region/diagnostics.md
@@ -186,7 +186,7 @@
 # `cell-alias-after` is its ORDERING control (undeclared, like `rest-array-copy`):
 # the same walk with the alias taken after the cell, so a whole-value read of the
 # container takes a counted reference of its own and the cell donates its init
-# (docs/impl/region/bindings.md § "A whole-value read of a 1-slot container takes
+# (docs/impl/region/reads.md § "A whole-value read of a 1-slot container takes
 # a counted reference"). The two must stay a PAIR — each isolates one of the two
 # routes the init's producer reference can take — so a regression of either trips
 # the completeness gate rather than hiding behind its sibling.

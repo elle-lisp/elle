@@ -1,11 +1,14 @@
 # Region-Based Memory Management
 
+<!-- audited: 2026-09-21 -->
+
 Elle frees memory at compile-time-known program points: no tracing collector,
-no liveness scan, no `Rc<Value>` (a `Value` is a `Copy` 16-byte tag+pointer).
+no liveness scan, and no GC pause. There is no `Rc<Value>` either — a `Value`
+is a `Copy` 16-byte tag+pointer.
 Every value is born in a *region* — a set of pages with a reference count.
 The reference count reaches zero at a point the compiler named, the pages are
 returned, and the regions that value referenced are decremented in turn. You
-never call `free`, and there is no GC pause.
+never call `free`.
 
 The model is the Tofte–Talpin region calculus for immutable values, completed
 with per-region reference counting for the one case TT cannot express —
@@ -45,6 +48,7 @@ and how the compiler and runtime realize it:
 | [impl/region/effects](impl/region/effects.md) | Native region effects: the `RegionEffect` declarations (`Immediate`/`Fresh`/`PassThrough`/`Stores`/`Sends`/`Funnel`/`Opaque`/`Delivers`/`Mixed`/`Unknown`), the clique the solver derives, hard edges, and the declaration oracle. |
 | [impl/region/ctx](impl/region/ctx.md) | `NativeCtx` — the allocation-and-heap capability handed to every native: it owns the call's region, so a primitive cannot allocate without naming one. The `PrimFn` signature and the `ctx.*` allocation surface. |
 | [impl/region/bindings](impl/region/bindings.md) | Reassigned mutable bindings as 1-slot containers: the gate (sole-held, not-returned), the store-site pin, and the fallback. |
+| [impl/region/reads](impl/region/reads.md) | Reads of a 1-slot container: the counted reference, what a branch or `begin` reader holds, and the binder forms that emit the retain. |
 | [impl/region/cells](impl/region/cells.md) | Capture cells: the compiled and `populate_env` realizations, what a read through one borrows, the once-per-activation release, and the clamp that orders it after every release routed through the cell. |
 | [impl/region/template](impl/region/template.md) | Code objects as three things: the compile-time blueprint, the region-resident payload shared by every header built from it, and the per-creation header `MakeClosure` allocates. |
 | [impl/escape](impl/escape.md) | The authoritative true-escape analysis: the four facets (return/store/capture/fiber), interprocedural return transparency, its consumers (the reassign gate's return facet, `tail_callee_defers_release`), the recorded divergences, and lexical capture demoted to a structural hint. |

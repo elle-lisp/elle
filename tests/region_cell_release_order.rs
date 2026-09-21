@@ -1,3 +1,4 @@
+//! audited: 2026-09-21
 //! An env cell's box must outlive every release routed through that cell.
 //!
 //! A `def` inside a function body that a sibling closure captures is
@@ -5,7 +6,7 @@
 //! same env index: the init value's `DecrefValueRegion`, which loads the box RAW
 //! and unwraps it to the content, and the box's own `DecrefCellRegion`, which
 //! frees the page that unwrap reads. The box release must land at or after the
-//! value release (docs/impl/region/bindings.md § "A cell's release lands at or
+//! value release (docs/impl/region/cells.md § "A cell's release lands at or
 //! after every release routed through that cell").
 //!
 //! Each shape below gives the two releases different placements to reconcile:
@@ -91,7 +92,7 @@ fn a_cell_box_outlives_the_release_routed_through_it() {
             &got, want,
             "under --trace=scrub, {name} answered {got} instead of {want} — the \
              env cell's box was freed before the value release that unwraps it, \
-             so that release read a reclaimed page (docs/impl/region/bindings.md \
+             so that release read a reclaimed page (docs/impl/region/cells.md \
              § \"A cell's release lands at or after every release routed through \
              that cell\")",
         );
