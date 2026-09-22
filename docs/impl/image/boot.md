@@ -1,6 +1,6 @@
 # Booting from an image
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-22 -->
 
 What the boot configuration carries, how `elle image dump-boot` writes it, and
 how a fresh instance starts from it.
@@ -185,12 +185,13 @@ Per-worker hydration is a milestone of its own ([plan.md](plan.md)).
 ## Why the cache is opt-in
 
 `--boot-image=DIR` turns the warm cache on, `--boot-image=on` uses the
-`--cache=` directory, and the default is off. Two pieces of the boot
-configuration are still to land ([plan.md](plan.md)), and each costs a
-hydrating instance something a source boot does not pay:
+`--cache=` directory, and the default is off. Two pieces are still to land
+([plan.md](plan.md)) — one of them a foundation rather than a boot milestone —
+and each costs a hydrating instance something a source boot does not pay:
 
-- Without the encoded-LIR side-stream, a hydrated closure carries no LIR, so
-  no stdlib function is ever promoted to the JIT tier.
+- Until LIR is region-native, a hydrated closure carries no LIR, so no stdlib
+  function is ever promoted to the JIT tier
+  ([foundations.md](foundations.md) argues that fix).
 - Without the two cross-unit compile registries, user code compiles without
   cross-unit inlining and without stdlib dispatch monomorphization.
 

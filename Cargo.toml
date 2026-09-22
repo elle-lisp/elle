@@ -103,5 +103,10 @@ harness = false
 name = "regionrc"
 harness = false
 
+[[bench]]
+name = "lirshape"
+path = "benches/lirshape/main.rs"
+harness = false
+
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = "0.7"

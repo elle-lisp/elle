@@ -1,14 +1,16 @@
 # What the experiments measured
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-22 -->
 
-Six assumptions the image design rests on, each dispatched by an experiment,
+Seven questions the image design turned on, each answered by an experiment,
 with the numbers it produced.
 
-The assumptions were cheap to test and expensive to be wrong about, so they ran
-before the foundations landed. [image.md](../image.md) owns the design they
-support, [foundations.md](foundations.md) the representation fixes two of them
-cleared, and [plan.md](plan.md) the order everything lands in.
+The first six were cheap to test and expensive to be wrong about, so they ran
+before the foundations landed. The seventh ran after the boot configuration
+landed, against the premise that kept LIR out of the image body.
+[image.md](../image.md) owns the design they support,
+[foundations.md](foundations.md) the representation fixes two of them cleared,
+and [plan.md](plan.md) the order everything lands in.
 
 1. **Boot-time attribution — dispatched, value proposition confirmed.**
    `--trace=boot,compile` (landed with this design; pinned by
@@ -192,3 +194,84 @@ cleared, and [plan.md](plan.md) the order everything lands in.
    from the extents, dumps are byte-identical whole files, and the
    determinism pin asserts whole-file equality with a poisoned-padding
    counter-factual.
+7. **Region-native LIR — measured, one premise corrected.** The design kept
+   LIR out of the body and planned an encoded side-stream to carry it
+   ([image.md](../image.md) § JIT). One premise behind that was that a
+   region-native LIR wins nothing: the JIT reads a function's LIR once, at
+   promotion, on a background thread. That covered the steady state and left
+   the compile path unmeasured, where the lowerer builds the LIR of 3,700
+   lines of library on every cache miss. `benches/lirshape` measures it. A
+   48-byte POD node in region pages runs against the 104-byte `SpannedInstr`,
+   both carrying the same graph. The bench asserts that the instruction and
+   register-operand counts agree, so a prototype that dropped part of the graph
+   fails rather than reports a win. Corpus: the LIR of core.lisp, prelude.lisp
+   and stdlib.lisp — 370 functions, 7,445 blocks, 83,723 instructions, 48,608
+   register operands. Fastest of 30 rounds, release build, one 7950X core:
+
+   | Per instruction | Rust-heap `LirFunction` | Region prototype |
+   |-----------------|------------------------|------------------|
+   | build — a vector per block, a push per instruction | 21.5 ns | 17.4 ns |
+   | copy — what `prepare_task` makes per promotion | 13.8 ns | 8.7 ns |
+   | walk — a backend's read, L3-resident | 3.1 ns | 1.4 ns |
+   | walk — the same read, from memory | 12.3 ns | 7.5 ns |
+   | rewrite — `send`'s `ValueConst` pass, in place | 1.2 ns | 0.8 ns |
+   | teardown | 5.8 ns | 1.7 ns |
+
+   One build's allocator traffic: **21,281 malloc calls and 23,396 KiB
+   requested, against 3 calls and 1 KiB**. What a built corpus holds while it
+   is live: 13,159 KiB of Rust heap, against 6,144 KiB of region pages, of
+   which 4,991 KiB is payload. The allocator-heavy rows move about a tenth
+   between runs; the region rows are stable to a few percent.
+
+   Where those bytes go, in KiB, counting `capacity` on the Rust side because
+   nothing shrinks a lowered vector:
+
+   | | Rust-heap | Region |
+   |-|-----------|--------|
+   | instruction shells | 8,503 | 3,924 |
+   | instruction vector growth slack | 3,536 | — |
+   | block shells | 885 | 407 |
+   | per-instruction operand vectors | 35 | — |
+   | constants | — | 467 |
+   | function tables, templates, strings, pool | 257 | 192 |
+   | **total** | **13,218** | **4,991** |
+   | page slack the slices do not name | — | 1,152 |
+
+   Two rows carry the difference, and neither is about LIR. The first is the
+   enum: `LirInstr` is 80 bytes because every variant is as big as `TailCall`,
+   which carries two vectors, and 4,638 of 83,723 instructions carry a vector
+   at all. A `LoadLocal` holds a register and a slot in 80 bytes, then a 20-byte
+   `Span` pads the pair to 104. The prototype moves every variable-length field
+   to one pool per function, which fixes the node at 48. The second row is
+   growth slack: the lowerer pushes, `Vec` doubles, nobody calls
+   `shrink_to_fit`, and 3,536 KiB — 27% of the Rust total — is capacity no
+   instruction occupies. A build that copies once into an exact-size slice has
+   none. The region form pays 467 KiB back for the constant pool the small node
+   needs, and its own waste is page granularity: 1,152 KiB of region pages
+   beyond what the slices name.
+
+   So the premise is wrong as stated — every operation is faster, and the
+   read-side ratios are the locality a 48-byte node buys over a 104-byte one.
+   The premise was right about the *size* of the prize. Build plus teardown
+   over the whole corpus is 2.28 ms against 1.59 ms, and a cold boot spends
+   ~201 ms compiling those three sources (item 1), so the saving is a third of
+   one percent of the compile it belongs to. Region inference, at 44% of that
+   compile, is where the compile-path money is.
+
+   Two rows understate the region form. Its build reads the Rust corpus and
+   runs a per-variant encode that a lowerer emitting region nodes directly
+   would not run. The Rust walk reads no `aux` or flag word, because reading
+   one costs a per-variant match the region node does not need.
+
+   What the experiment decided is the cost question, and only that. The port is
+   ordered as a foundation on other grounds — one representation, one
+   portability rule, an image whose save and load need no mechanism of their
+   own, and allocation the region gauges can see
+   ([foundations.md](foundations.md) argues them). What these numbers add is
+   that none of it has to be paid for.
+
+   The prototype is not the whole port. The shipped passes mutate LIR in place
+   and resize it, which a fixed-extent slice turns into build-then-materialize,
+   exactly as syntax had to copy as it stamps. Nothing here measures that
+   route, and it is the part of the port worth prototyping next. To redo:
+   `cargo bench --bench lirshape`.

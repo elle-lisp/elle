@@ -1,19 +1,19 @@
 # Landing order and test plan
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-22 -->
 
 What lands in which order, and the pins each milestone must land with.
 
 [image.md](../image.md) owns the design, [foundations.md](foundations.md) the
-four representation fixes below, [boot.md](boot.md) the boot configuration, and
-[measurements.md](measurements.md) the experiments that dispatched the design's
-open risks.
+five representation fixes below, [boot.md](boot.md) the boot configuration, and
+[measurements.md](measurements.md) the experiments that answered the design's
+open questions.
 
 ## Landing order
 
 Foundations first — each lands green on the existing corpus with no image
 code, and each deletes image machinery
-([foundations.md](foundations.md) argues all four):
+([foundations.md](foundations.md) argues all five):
 
 1. **symbol** — landed. Stable content-addressed symbol identity
    ([symbol.md](../symbol.md)); deleted the symbol remap pass, the
@@ -31,10 +31,17 @@ code, and each deletes image machinery
    design would otherwise have needed, the `Box<Syntax>` inside
    `HeapObject::Syntax`, and the retained lambda tree on every closure
    template.
+5. **lir** — to land. The region-native `LirFunction`
+   ([foundations.md](foundations.md) argues it); deletes the encoded-LIR
+   side-stream this design would otherwise have needed, `send`'s LIR codec,
+   and `TemplateProto` — the last Rust-heap owner on a code object. It lands
+   after boot rather than before it, because the measurement that sized it
+   ([measurements.md](measurements.md) item 7) needed a boot configuration to
+   point at.
 
 Then the image milestones:
 
-5. **store** — landed. The format, mapping, relocation, and teardown are
+6. **store** — landed. The format, mapping, relocation, and teardown are
    proven end to end over every value the foundations sealed as data. The
    milestone landed with:
    - the file-backed page flag in the pool, the dumper and the hydrator, the
@@ -49,7 +56,7 @@ Then the image milestones:
    - syntax, with the file table its spans need and the scope watermark a
      fresh expander must mint above;
    - the scrub and guardfree pins over a hydrated region.
-6. **boot** — in progress. Landed so far:
+7. **boot** — in progress. Landed so far:
    - the primitive table that remaps a native-fn by name, and the user
      traitsets it makes dumpable;
    - the reconstruction stream — which the default trait tables need before
@@ -69,17 +76,18 @@ Then the image milestones:
      ([boot.md](boot.md)); the two boots share the export-registration tails,
      and the corpus under image boot is the gate;
    - the warm cache — `--boot-image=`, the digest-keyed file, the atomic store
-     and the prune. Opt-in rather than default: the two milestones below cost a
-     hydrating instance the JIT tier and cross-unit inlining, and
-     [boot.md](boot.md) argues the default waits on both.
+     and the prune. Opt-in rather than default: a hydrating instance still
+     loses the JIT tier and cross-unit inlining, and [boot.md](boot.md) argues
+     the default waits on both.
 
-   Still to land: the embedded blob, per-worker hydration for `sys/spawn`, the
-   encoded-LIR side-stream with lazy decode, compiler-state persistence, the
-   hydrated-region interval table, and the parity gate (bytecode *and* tier).
-   The interval table keeps `region_of_ptr` off the probe ladder
+   Still to land: the embedded blob, per-worker hydration for `sys/spawn`,
+   compiler-state persistence, the hydrated-region interval table, and the
+   parity gate (bytecode *and* tier). The tier half waits on the **lir**
+   foundation, which carries a function's LIR in the body rather than beside
+   it. The interval table keeps `region_of_ptr` off the probe ladder
    ([image.md](../image.md) § "Pointer resolution must not regress"); the
    regression it prevents needs a region the size of stdlib to show.
-7. **environment** — `image/save` and `image/load`, manifest deltas over
+8. **environment** — `image/save` and `image/load`, manifest deltas over
    boot, mutable side-stream.
 
 ## Test plan
@@ -87,6 +95,19 @@ Then the image milestones:
 - Foundations: existing corpus plus targeted unit tests pinning the new
   layouts, the no-clone `MakeClosure`, stable symbol ordering across two
   tables, and syntax round-trips through `send`.
+- LIR: every corpus file emits byte-identical bytecode through the ported
+  lowerer and emitter, which is the foundation's acceptance gate — a
+  representation change that moves one instruction is a defect, and the golden
+  is what the binary emits today. A promotion copies its function out of the
+  region, and the copy answers after that region is freed; the counter-factual
+  is handing the worker a slice into live pages, which is correct until the
+  free lands. Freeing a code object's region frees its LIR, and the leak suite
+  stays green with no carve-out. A pass that grows an instruction list answers
+  as the `Vec` pass did. A closure sent to a worker carries its LIR as region
+  data, and the worker's JIT re-emits from it. `TemplateProto` is gone, and a
+  code object answers every question from its payload — the counter-factual is
+  a blueprint kept "just for the JIT", which passes every other test here and
+  keeps the second copy of the bytecode alive.
 - Round-trip: dump a data graph, hydrate in a fresh runtime, assert
   structural equality — and a counter-factual load with a corrupted
   fingerprint falls back cleanly.
@@ -212,8 +233,8 @@ Then the image milestones:
   boot and assert byte-identical bytecode — the acceptance gate for the
   persisted compiler state (inline fragments, dispatch wrappers).
 - Tier parity: a hot stdlib function reaches the JIT under image boot
-  exactly as under source boot — the lazy LIR decode feeds `submit_jit_task`
-  and the compiled result executes.
+  exactly as under source boot — the hydrated payload's own LIR feeds
+  `submit_jit_task` and the compiled result executes.
 - Names: a fresh instance prints an image's symbol and its keyword by name,
   having met neither spelling before. Two dumps of one graph write one name
   table, whatever order the dumping memo learned the spellings in. A
