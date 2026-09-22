@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-22
 //! The encoder: one `LirFunction` into one region, through a reused buffer.
 //!
 //! docs/impl/image/measurements.md
@@ -21,10 +21,6 @@ use crate::node::{PBlock, PConst, PFunc, PInstr, PSite, PTemplate, NO_REG};
 use crate::opcode::opcode;
 
 /// The scratch a build reuses across functions, beside the region it fills.
-///
-/// The shipped region code builds the same way: fill a Rust-side buffer, then
-/// copy it into the region in one call (`SyntaxArena::nodes`). Reusing the
-/// buffers is what keeps a build's allocator traffic to the region itself.
 pub struct Builder {
     heap: *mut FiberHeap,
     region: RuntimeRegion,

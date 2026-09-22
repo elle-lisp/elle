@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-22
 //! Region-native LIR parity — the head-to-head the expander migration ran for
 //! syntax, over the LIR the stdlib compile produces.
 //!
@@ -16,6 +16,7 @@ mod build;
 mod node;
 mod opcode;
 mod ops;
+mod size;
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -135,22 +136,9 @@ fn evict(buf: &mut [u8]) {
     std::hint::black_box(&buf[0]);
 }
 
-/// The bytes the region form holds: every slice the functions name.
-fn region_bytes(built: &[PFunc]) -> usize {
-    use std::mem::size_of;
-    let mut total = 0;
-    for f in built {
-        total += size_of::<PFunc>();
-        total += f.blocks.len() * size_of::<node::PBlock>();
-        total += f.consts.len() * size_of::<node::PConst>();
-        total += f.templates.len() * size_of::<node::PTemplate>();
-        total += f.pool.len() * size_of::<u32>();
-        total += (f.yield_points.len() + f.call_sites.len()) * size_of::<node::PSite>();
-        for b in f.blocks.iter() {
-            total += b.instrs.len() * size_of::<node::PInstr>();
-        }
-    }
-    total
+/// What a set of rows holds in total.
+fn total(rows: &[size::Row]) -> usize {
+    rows.iter().map(|r| r.bytes).sum()
 }
 
 fn report(name: &str, per_round_ns: f64, instrs: usize) {
@@ -180,9 +168,21 @@ fn main() {
         uses,
     );
     println!(
-        "  node:   SpannedInstr {} bytes, prototype PInstr {} bytes",
+        "  node:   SpannedInstr {} bytes (LirInstr {} + Span {}), prototype PInstr {} bytes",
         std::mem::size_of::<elle::lir::SpannedInstr>(),
+        std::mem::size_of::<elle::lir::LirInstr>(),
+        std::mem::size_of::<elle::syntax::Span>(),
         std::mem::size_of::<node::PInstr>(),
+    );
+    println!(
+        "  block:  BasicBlock {} bytes, prototype PBlock {} bytes",
+        std::mem::size_of::<elle::lir::BasicBlock>(),
+        std::mem::size_of::<node::PBlock>(),
+    );
+    println!(
+        "  of {} instructions, {} carry the operand vector LirInstr is sized for",
+        instrs,
+        size::vector_bearing(&corpus),
     );
     println!();
 
@@ -249,6 +249,10 @@ fn main() {
     let held = ops::build_rust(&corpus);
     let rust_resident = live_bytes() - live0;
     let (a1, b1) = allocs();
+    // The accounting reads the build the resident number was taken around, so
+    // the two describe one object rather than two copies of a corpus whose
+    // vectors grew differently.
+    let rust_rows = size::rust_rows(&held);
     drop(held);
     let rust_build_allocs = a1 - a0;
     let rust_build_bytes = b1 - b0;
@@ -408,6 +412,9 @@ fn main() {
     );
     println!();
 
+    let region_rows = size::region_rows(&built);
+    let region_total = total(&region_rows);
+
     println!("  region prototype");
     report("build (encode into a region)", region_build, instrs);
     report("copy (a JIT promotion)", region_clone_ns, instrs);
@@ -423,7 +430,42 @@ fn main() {
     println!(
         "    {} KiB held while live (region pages), {} KiB of it payload",
         region_resident / 1024,
-        region_bytes(&built) / 1024,
+        region_total / 1024,
+    );
+    println!();
+
+    // Where the two totals differ, row by row. The Rust rows count `capacity`,
+    // so a vector's growth slack lands in the row that grew it.
+    println!("  where the bytes go (KiB)");
+    for row in &rust_rows {
+        let region: usize = region_rows
+            .iter()
+            .filter(|r| r.what == row.what)
+            .map(|r| r.bytes)
+            .sum();
+        println!(
+            "  {:<34} {:>9} {:>9}",
+            row.what,
+            row.bytes / 1024,
+            region / 1024
+        );
+    }
+    for row in &region_rows {
+        if !rust_rows.iter().any(|r| r.what == row.what) {
+            println!("  {:<34} {:>9} {:>9}", row.what, 0, row.bytes / 1024);
+        }
+    }
+    println!(
+        "  {:<34} {:>9} {:>9}",
+        "total",
+        total(&rust_rows) / 1024,
+        region_total / 1024
+    );
+    println!(
+        "  {:<34} {:>9} {:>9}",
+        "page slack the slices do not name",
+        0,
+        region_resident.saturating_sub(region_total) / 1024,
     );
     println!();
 

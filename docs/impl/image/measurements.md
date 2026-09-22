@@ -1,15 +1,16 @@
 # What the experiments measured
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-22 -->
 
 Seven questions the image design turned on, each answered by an experiment,
 with the numbers it produced.
 
 The first six were cheap to test and expensive to be wrong about, so they ran
 before the foundations landed. The seventh ran after the boot configuration
-landed, against the premise that kept LIR out of the image body. [image.md](../image.md) owns the design they
-support, [foundations.md](foundations.md) the representation fixes two of them
-cleared, and [plan.md](plan.md) the order everything lands in.
+landed, against the premise that kept LIR out of the image body.
+[image.md](../image.md) owns the design they support,
+[foundations.md](foundations.md) the representation fixes two of them cleared,
+and [plan.md](plan.md) the order everything lands in.
 
 1. **Boot-time attribution — dispatched, value proposition confirmed.**
    `--trace=boot,compile` (landed with this design; pinned by
@@ -219,8 +220,35 @@ cleared, and [plan.md](plan.md) the order everything lands in.
    One build's allocator traffic: **21,281 malloc calls and 23,396 KiB
    requested, against 3 calls and 1 KiB**. What a built corpus holds while it
    is live: 13,159 KiB of Rust heap, against 6,144 KiB of region pages, of
-   which 4,938 KiB is payload. The allocator-heavy rows move about a tenth
+   which 4,991 KiB is payload. The allocator-heavy rows move about a tenth
    between runs; the region rows are stable to a few percent.
+
+   Where those bytes go, in KiB, counting `capacity` on the Rust side because
+   nothing shrinks a lowered vector:
+
+   | | Rust-heap | Region |
+   |-|-----------|--------|
+   | instruction shells | 8,503 | 3,924 |
+   | instruction vector growth slack | 3,536 | — |
+   | block shells | 885 | 407 |
+   | per-instruction operand vectors | 35 | — |
+   | constants | — | 467 |
+   | function tables, templates, strings, pool | 257 | 192 |
+   | **total** | **13,218** | **4,991** |
+   | page slack the slices do not name | — | 1,152 |
+
+   Two rows carry the difference, and neither is about LIR. The first is the
+   enum: `LirInstr` is 80 bytes because every variant is as big as `TailCall`,
+   which carries two vectors, and 4,638 of 83,723 instructions carry a vector
+   at all. A `LoadLocal` holds a register and a slot in 80 bytes, then a 20-byte
+   `Span` pads the pair to 104. The prototype moves every variable-length field
+   to one pool per function, which fixes the node at 48. The second row is
+   growth slack: the lowerer pushes, `Vec` doubles, nobody calls
+   `shrink_to_fit`, and 3,536 KiB — 27% of the Rust total — is capacity no
+   instruction occupies. A build that copies once into an exact-size slice has
+   none. The region form pays 467 KiB back for the constant pool the small node
+   needs, and its own waste is page granularity: 1,152 KiB of region pages
+   beyond what the slices name.
 
    So the premise is wrong as stated — every operation is faster, and the
    read-side ratios are the locality a 48-byte node buys over a 104-byte one.
