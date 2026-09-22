@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-22
 //! The store's feeder: a name whose only job is to carry a value into a
 //! reassigned binding, and what disqualifies one.
 //!
@@ -34,15 +34,16 @@ fn one_binder_shape(body: &str) -> (RegionInfo, Binding, Vec<HirId>) {
 
 /// A name whose only job is to carry the value INTO the store is the store's
 /// FEEDER, and the gate reads it as no holder of that value
-/// (docs/impl/region/bindings.md § "A name the store consumes is not a second
-/// holder of the value"). Nothing reads `v` after the store, so the store-site
-/// pin lands where `v` dies and the sole-held question has nothing to protect.
+/// (docs/impl/region/bindings.md § "What the cell donates it must hold alone;
+/// what it counts it need not"). Nothing reads `v` after the store, so the
+/// donation's sole-held question has nothing to protect.
 ///
-/// The counter-factual is `reassign_gate_refuses_an_aliased_assign_value`, the
+/// The counter-factual is `reassign_gate_counts_an_aliased_assign_value`, the
 /// same shape with a `(%length v)` after the store: the pair isolates the read
-/// rather than the name. Refusing here leaves the unsuppressed baseline, whose
-/// one release covers every value the loop stored, so a walk's own collection
-/// strands per call (`tests/elle/region-cell-feeder.lisp`).
+/// rather than the name, and the read costs the donation alone. Refusing here
+/// leaves the unsuppressed baseline, whose one release covers every value the
+/// loop stored, so a walk's own collection strands per call
+/// (`tests/elle/region-cell-feeder.lisp`).
 #[test]
 fn reassign_gate_counts_a_feeder_as_no_holder() {
     let (info, last, last_sites) = one_binder_shape(
@@ -69,11 +70,11 @@ fn reassign_gate_counts_a_feeder_as_no_holder() {
 }
 
 /// Counterfactual against over-admission: a name bound OUTSIDE the loop that
-/// stores it is not a feeder, however little reads it. The store-site pin fires
-/// once per iteration against one producer reference, so a pin would release a
-/// reference the producer never took (docs/impl/region/bindings.md § "A name the
-/// store consumes is not a second holder of the value", the once-per-binding
-/// fact).
+/// stores it refuses the model, however little reads it. The store-site pin
+/// fires once per iteration against one producer reference, so it would release
+/// a reference the producer never took (docs/impl/region/bindings.md § "The
+/// store-site pin asks only that the store run once per binding of the name it
+/// reads").
 ///
 /// `reassign_gate_counts_a_feeder_as_no_holder` above is the same shape with the
 /// binder inside the loop, so the pair isolates where the name is bound. The
@@ -99,5 +100,41 @@ fn reassign_gate_refuses_a_feeder_bound_outside_the_loop() {
         !info.cell_containers.contains_key(&last),
         "a refused cell records no container — its store-site pin would fire \
          once per iteration against one producer reference"
+    );
+}
+
+/// The refusal above is about the name the STORE READS, not about every name
+/// that shares the region. `keep` is bound after the loop and read after that,
+/// so its scope contains the storing loop and a loop lies between the two — the
+/// structural reading `reassign_gate_refuses_a_feeder_bound_outside_the_loop`
+/// turns on. Yet no store reads `keep`: it holds one reference to whatever the
+/// loop left, against no pin at all, so the model stands
+/// (docs/impl/region/bindings.md § "The store-site pin asks only that the store
+/// run once per binding of the name it reads").
+///
+/// Without the read the two shapes are indistinguishable, and refusing this one
+/// returns the loop to the baseline whose single release covers every value it
+/// stored — the strand behind elle-lisp/elle#1186.
+#[test]
+fn reassign_gate_counts_a_name_no_store_reads() {
+    let (info, last, last_sites) = one_binder_shape(
+        "(var i 0)\n\
+         (while (%lt i n)\n\
+           (let [v (array i 7)]\n\
+             (assign last v)\n\
+             (assign i (%add i 1))))\n\
+         (var keep last)\n\
+         (%length keep)",
+    );
+    assert!(
+        last_sites
+            .iter()
+            .any(|site| info.drop_on_overwrite_sites.contains(site)),
+        "a name no store reads must not refuse the container model"
+    );
+    assert!(
+        info.cell_containers.contains_key(&last),
+        "the cell records its container — the store-site pin is what keeps the \
+         loop's releases inside the loop"
     );
 }
