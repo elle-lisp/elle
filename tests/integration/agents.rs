@@ -1,5 +1,5 @@
-// audited: 2026-09-05
-// The generated index, specified in docs/impl/agents.md.
+// audited: 2026-09-22
+// The generated index, specified in docs/impl/agents-index.md.
 //
 // scripts/agents builds each directory's AGENTS.md from the call-out sentence
 // of every document beneath it. These tests pin the extraction rules against
@@ -7,6 +7,7 @@
 // that drops a document produces a shorter index that still looks correct, and
 // the reader who needed that document goes to a search instead.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -287,7 +288,7 @@ fn check_fails_when_the_committed_index_is_stale() {
 #[test]
 fn every_document_in_this_repository_has_a_callout_within_budget() {
     // The standing check over the real tree. It reports rather than fails
-    // while the migration in docs/impl/agents.md is in progress; the count is
+    // while the migration in docs/impl/agents-index.md is in progress; the count is
     // the work queue, and it only goes down.
     let root = repo_root();
     let mut over = Vec::new();
@@ -313,6 +314,37 @@ fn every_document_in_this_repository_has_a_callout_within_budget() {
         }
     }
     eprintln!("documents without a call-out within budget: {}", over.len());
+}
+
+#[test]
+fn no_two_tracked_paths_differ_only_in_case() {
+    // A case-insensitive filesystem holds one file per case-folded name, so a
+    // pair of tracked paths that fold together is a pair no checkout can hold
+    // whole: whichever path wins stands for both, and every reader of the tree
+    // — the index generator among them — sees one of the two documents.
+    //
+    // `git ls-files` reads the index, which is case-sensitive on every
+    // platform, so this sees the pair the checkout cannot.
+    let root = repo_root();
+    let out = Command::new("git")
+        .args(["ls-files"])
+        .current_dir(&root)
+        .output()
+        .expect("git ls-files");
+    assert!(out.status.success(), "git ls-files failed");
+
+    let mut folded: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for rel in String::from_utf8_lossy(&out.stdout).lines() {
+        folded
+            .entry(rel.to_lowercase())
+            .or_default()
+            .push(rel.to_string());
+    }
+    let collisions: Vec<&Vec<String>> = folded.values().filter(|v| v.len() > 1).collect();
+    assert!(
+        collisions.is_empty(),
+        "tracked paths differing only in case: {collisions:?}"
+    );
 }
 
 /// The first sentence of the first paragraph under `# Title`, joined across

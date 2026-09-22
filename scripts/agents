@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# audited: 2026-09-05
+# audited: 2026-09-22
 # Builds a directory's AGENTS.md from the call-out sentence of every document
 # in it, so the index cannot rot and cannot be posted to.
-# docs/impl/agents.md
+# docs/impl/agents-index.md
 set -euo pipefail
 
 usage() {

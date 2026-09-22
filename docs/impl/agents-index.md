@@ -1,6 +1,6 @@
 # The generated index
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-22 -->
 
 Every directory's `AGENTS.md` is built from the call-out of each document
 beneath it, so the index cannot rot or be posted to.
@@ -35,6 +35,13 @@ lives in an `AGENTS.md` today becomes a leaf beside it.
 
 **An index is `AGENTS.md`.** It is generated. It holds no prose that a person
 wrote, so there is nothing in it to rot and nowhere in it to post.
+
+No document takes that name in another case. A case-insensitive filesystem
+holds one file per folded name, so a directory that tracks both keeps one of
+them on disk and the other nowhere — and the generator, reading whichever won,
+takes it for a hand-written index and skips the directory.
+[tests/integration/agents.rs](../../tests/integration/agents.rs) holds the
+check over every tracked path.
 
 An index lists, for its own directory:
 
