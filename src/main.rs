@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-22
 //! The `elle` binary: dispatch a subcommand, or set up one `Runtime` and drive
 //! it from a file, `-e`, stdin or the REPL.
 //!
@@ -57,6 +57,7 @@ fn run_file(
 /// definitions are evaluated. See docs/test-runner.md.
 const TEST_RUNNER_FRAGMENTS: &[&str] = &[
     include_str!("test/store.lisp"),
+    include_str!("test/import.lisp"),
     include_str!("test/exec.lisp"),
     include_str!("test/record.lisp"),
     include_str!("test/view.lisp"),

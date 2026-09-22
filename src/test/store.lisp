@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-21
+# audited: 2026-09-22
 ## elle test — the session store: where a run is kept, the schema it is kept
 ## in, what a run row says about the code it ran against, and the CAS.
 ## docs/test-store.md
@@ -46,7 +46,7 @@
 (def run-code-columns
   [["git_commit" "TEXT"] ["git_dirty" "INTEGER"] ["tree_hash" "TEXT"]
    ["worktree" "TEXT"] ["boot_fingerprint" "INTEGER"] ["elle_version" "TEXT"]
-   ["build_profile" "TEXT"] ["host" "TEXT"] ["argv" "TEXT"]])
+   ["build_profile" "TEXT"] ["host" "TEXT"] ["argv" "TEXT"] ["run_key" "TEXT"]])
 
 (defn ensure-code-columns [conn cols]
   (if (empty? cols)
@@ -57,7 +57,7 @@
 
 (defn ensure-schema [conn]
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, boot_fingerprint INTEGER, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0)")
+               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, run_key TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, boot_fingerprint INTEGER, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS form (hash TEXT PRIMARY KEY, origin TEXT, session TEXT, file TEXT, form_index INTEGER, line INTEGER, col INTEGER, label TEXT, src TEXT, caps TEXT, touches TEXT, signal TEXT)")
   (sqlite:exec conn
@@ -84,10 +84,21 @@
   # A run recorded before the code-state columns existed keeps NULL for each
   # of them: the run happened, and nothing recorded what it ran against.
   (ensure-code-columns conn run-code-columns)
+  # What makes a run the same run in two stores, so an import of one artifact
+  # lands it once (docs/test-store.md § The run key). SQLite holds every NULL
+  # distinct under a unique index, so a run recorded before the key existed
+  # keeps its row.
+  (sqlite:exec conn
+               "CREATE UNIQUE INDEX IF NOT EXISTS run_key_is_one_run ON run (run_key)")
   (sqlite:exec conn
                "UPDATE run SET finished_at = started_at WHERE finished_at IS NULL AND n_selected IS NULL AND (n_pass + n_fail + n_skip + n_diverge + n_timeout) > 0")
   (sqlite:exec conn
                "UPDATE run SET finished_at = started_at WHERE finished_at IS NULL AND n_selected IS NULL AND id NOT IN (SELECT DISTINCT run_id FROM result)"))
+
+(defn last-rowid [conn]
+  "The id the row just inserted landed at, which is how a run, a result and
+   an imported row each learn the id their children have to name."
+  (get (get (sqlite:query conn "SELECT last_insert_rowid() AS id") 0) :id))
 
 # ── what this run ran against ────────────────────────────────────────
 # One command's trimmed stdout, or nil when it cannot run or says nothing.
@@ -126,14 +137,23 @@
 # boot fingerprint): a commit says which sources a run was meant to test, and
 # only this says which executable tested them.
 (defn run-identity []
-  (let [commit (capture-cmd "git rev-parse HEAD 2>/dev/null")]
+  (let [commit (capture-cmd "git rev-parse HEAD 2>/dev/null")
+        host (capture-cmd "uname -n")
+        argv (string/join (rest (sys/argv)) " ")]
     (struct :commit commit
             :dirty (if commit (if (capture-cmd status-cmd) 1 0) nil)
             :tree (if commit (capture-cmd tree-hash-cmd) nil)
             :worktree (capture-cmd "git rev-parse --show-toplevel 2>/dev/null")
-            :boot (elle/boot-fingerprint) :host (capture-cmd "uname -n")
-            :version (elle/version) :profile (elle/build-profile)
-            :argv (string/join (rest (sys/argv)) " "))))
+            :boot (elle/boot-fingerprint) :host host :version (elle/version)
+            :profile (elle/build-profile) :argv argv :key (run-key host argv))))
+
+# What names this run in any store that holds it (docs/test-store.md § The run
+# key). The machine, the process and the instant are what separate two runs
+# that share every other column — two shards of one CI matrix, on one image,
+# on one commit, with one argv.
+(defn run-key [host argv]
+  (string (hash (string host "|" (sys/pid) "|" (clock/realtime) "|"
+                        (clock/monotonic) "|" argv))))
 
 # ── CAS: content-addressed artifact store (docs/test-runner.md § CAS) ─────
 # Artifacts (the --dump bodies) live on disk under `cas-dir` (a sibling of the
