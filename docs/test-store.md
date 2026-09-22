@@ -59,7 +59,8 @@ siblings of the database file — `<db-dir>/cas` and `<db-dir>/scratch` — so
 
 A run recorded on another box arrives as a file: the session DB, and the CAS
 beside it. `elle test --import PATH` merges that store into the local one, so a
-downloaded run answers the same queries a local run answers.
+downloaded run answers the same queries a local run answers. How to fetch one
+from a CI job is [ci](analysis/ci.md).
 
 PATH names the foreign database, and its CAS is the `cas` directory beside it —
 the layout `--db` already makes. What merges follows what each table is keyed

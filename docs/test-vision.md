@@ -26,15 +26,12 @@ Six products test this repository today:
   nouring, mlir, wasm — each with its own skip and timeout lists.
 
 The runner's thesis is "capture everything once; query forever", and the data
-does not survive:
-
-- CI writes the session DB inside the runner and uploads nothing. When a job
-  fails, the reader gets the log, which is the medium the runner was built to
-  replace.
-- The DB survives a reboot: it lives in the state directory, and each run names
-  the commit, worktree, host, and build it ran against
-  ([test-store](test-store.md)). A store that reaches another box merges into
-  its history; nothing publishes one yet.
+now survives the run that produced it. The DB lives in the state directory, so
+a reboot keeps it, and each run names the commit, worktree, host, and build it
+ran against ([test-store](test-store.md)). A CI job publishes its store as an
+artifact ([ci](analysis/ci.md)) and `--import` merges a downloaded one into
+local history, so a failure on a box you cannot reach is a query rather than a
+log.
 
 ## The decisions
 
@@ -44,12 +41,12 @@ The session DB and CAS live in a persistent state directory. `ELLE_CACHE`
 keeps the things a rebuild can regenerate; run history is a record, so it
 lives with state.
 
-The merge is in: `elle test --import` appends a downloaded run to local history
-([test-store](test-store.md)). The schema makes it cheap — forms are keyed by
-syntax hash, assets by content hash, and runs append under a key that makes a
-repeat import a no-op. A run row already carries the commit, worktree, host,
-and build, so an imported run says what it ran against. What is missing is the
-upload: every CI corpus job has to publish its DB and CAS as an artifact.
+Every CI job that records runs uploads its DB and CAS as an artifact
+([ci](analysis/ci.md)), and `elle test --import` appends a downloaded run to
+local history ([test-store](test-store.md)). The schema makes the merge cheap —
+forms are keyed by syntax hash, assets by content hash, and runs append under a
+key that makes a repeat import a no-op. A run row already carries the commit,
+worktree, host, and build, so an imported run says what it ran against.
 
 Later, the store becomes shared: a content-addressed blob store plus a small
 index, Redis first, exactly the `store` milestone in [fleet](impl/fleet.md).
@@ -164,8 +161,8 @@ the CI habit of reading failures out of logs.
 
 ## Landing order
 
-1. Persistence: the CI artifact upload. The state directory, the `run`
-   identity columns and `--import` are in.
+1. Persistence: in. The state directory, the `run` identity columns, the CI
+   artifact upload and `--import`.
 2. Profiles that select a flag set; fold in the guardfree family, the oracle,
    plumb, and the per-file passes. Child-process isolation is in.
 3. Derived budgets.
