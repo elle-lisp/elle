@@ -107,15 +107,25 @@ some earlier value whose region the compiler picked; a release aimed at a
 specific region must still refuse the slot ("a mutated slot is not a release
 route", below).
 
-The point is the cell's last access — the latest of its reads and its writes —
-with one hoist. A cell **carried across a loop** is re-pointed every iteration,
-so a drop inside the body would free what the next iteration reads. Such a cell
-is a loop *parameter*: its scope node is the loop itself, so hoisting to that
-node puts the one drop after the loop, where the lowerer emits the loop's own
-releases. A cell bound **inside** a loop body has a body scope node instead, so
-it is not hoisted and drops once per iteration — matching its per-iteration
-mint. The hoist is a max rather than a move because a loop's parameters stay
-readable past the loop (`(while … (assign acc …)) acc`).
+The point is the latest of the cell's own accesses — its reads and its writes —
+and of the cell's **scope node**. That floor answers two questions at once.
+
+A write is not a point every path reaches: a cell several mutually exclusive arms
+store into has its latest write inside one arm, and a drop there runs on that
+path alone. The scope node contains every write by construction, so it comes
+after all of them and lies on every path through the cell's life. The shape that
+needs it is a dispatch storing from each arm — `each` over a collection whose
+type picks the arm — with nothing reading the cell afterward to carry the drop
+past the dispatch (`tests/elle/region-cell-arm-demise.lisp`).
+
+A cell **carried across a loop** is re-pointed every iteration, so a drop inside
+the body would free what the next iteration reads. Such a cell is a loop
+*parameter*, whose scope node is the loop itself, so the floor puts the one drop
+after the loop — where the lowerer emits the loop's own releases. A cell bound
+**inside** a loop body has a body scope node instead, so it drops once per
+iteration, matching its per-iteration mint. The floor is a max rather than a move
+because a loop's parameters stay readable past the loop
+(`(while … (assign acc …)) acc`).
 
 **The counted store is emitted BEFORE the slot store.** `StoreLocal` consumes
 the value register, so a retain emitted after it no longer names the stored
@@ -155,6 +165,38 @@ next section splits them):
   A fn-local cell counts what it stores, so it claims nothing the return
   needs and asks the question of nothing (see "Returned fn-local reassigned
   mutables", below).
+
+**A name the store consumes is not a second holder of the value.** The
+sole-held question protects the store-site pin, which moves a producer release
+earlier: a second name still reading the value would hold a freed one. A name
+whose whole job is to carry the value INTO the store reads nothing afterward, so
+the pin lands where that name dies and the question has nothing to protect. Such
+a name is the store's **feeder**, excluded from the holder index exactly as the
+synthetic ANF producer temp `(let [_t e] _t)` is — the temp being the same value
+flow under a name the compiler chose. A reassigned binding is never a feeder: it
+names a slot, not a value.
+
+Two structural facts make a name one, and the pin needs both:
+
+- **The store runs once per binding of the name.** The name's scope node
+  contains the store, with no loop between the two. A name bound OUTSIDE a loop
+  that stores inside it holds one producer reference against N pins, so a pin
+  releases a reference the producer never took
+  (`reassign_gate_refuses_a_feeder_bound_outside_the_loop`).
+- **Nothing reads the name after the store.** Every use of the name is ordered
+  before the store site, the store's own value read included. A later use reads
+  the value whose producer release the pin has moved
+  (`reassign_gate_refuses_an_aliased_assign_value`). A name feeding two stores
+  fails this against the earlier one, so two pins never claim one reference.
+
+`reassign_gate_counts_a_feeder_as_no_holder` is the admission both decline into.
+
+The everyday feeder is a collection walk's element: `each` binds one
+(`(let [p (get items idx)] …)`), so `(each p in (pairs t) (assign u p))` stores
+through `p` where a hand-written `while` stores the read directly. Without the
+exclusion the walk's `u` takes the unsuppressed baseline, whose one release
+covers every value the loop stored, and the collection's whole region strands per
+call (`tests/elle/region-cell-feeder.lisp`).
 
 **What the cell donates it must hold alone; what it counts it need not.**
 The sole-held question is asked on behalf of exactly one thing: the
