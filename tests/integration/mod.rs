@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-22
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -122,6 +122,9 @@ mod run_identity {
 }
 mod state_dir {
     include!("state_dir.rs");
+}
+mod import {
+    include!("import.rs");
 }
 mod isolation {
     include!("isolation.rs");
