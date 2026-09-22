@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-22
 //! The mutable-reassign 1-slot-container gate: the questions asked of each
 //! reassigned binding, and what a yes records.
 //!
@@ -18,9 +18,11 @@ use crate::hir::region::CellContainer;
 
 // The two facts the gate reads but does not itself decide, each its own subject:
 // the forwarding chain one reassigned name becomes, and the feeder a store
-// consumes.
+// consumes. The module-scope half is a third, because what it claims — the
+// producer's own reference — is not what the fn-local half claims.
 mod chain;
 mod feeder;
+mod toplevel;
 
 pub(super) use chain::Reassigns;
 use feeder::Feeders;
@@ -29,12 +31,20 @@ use feeder::Feeders;
 /// from the application because the whole-chain rule needs every link's answer
 /// before any link may act on its own.
 struct LocalVerdict {
+    /// The whole-chain rule's veto (pass 2): a chain of forwarding edges hands
+    /// one reference along, so its links are admitted or declined together, and
+    /// a link whose own verdict fails declines every other link with it.
+    chain_admitted: bool,
     /// Every region the model PINS to a store site — the values this chain
-    /// stores — has no other holder (after the forwarding fold). The pin moves a
-    /// producer release EARLIER, so a second name reading the value would be
-    /// left holding a freed one. Cleared for every link of a chain any link
-    /// fails.
-    stored_sole: bool,
+    /// stores — is stored once per binding of every name that holds it.
+    ///
+    /// This is all the pin asks of a second name. The pin is a maximum over the
+    /// extensions the region already carries, so an alias's own reads move it
+    /// later and refuse nothing; what it cannot survive is N stores against one
+    /// producer reference, which a name bound outside the loop that stores it
+    /// produces (docs/impl/region/bindings.md § "The store-site pin asks only
+    /// that the store run once per binding of the name it reads").
+    stored_pinnable: bool,
     /// Every region the model would SUPPRESS — the init, which the cell takes
     /// uncounted — has no other holder, so the donation is available. Where it
     /// is not, the cell counts its init instead and suppresses nothing
@@ -66,7 +76,9 @@ impl LocalVerdict {
     /// one way or the other: donated (its ordinary decref suppressed, released
     /// by drop-on-overwrite) or counted at the chain source's binder.
     fn takes_model(&self) -> bool {
-        self.stored_sole && (self.donates_init || self.init_site.is_some())
+        self.chain_admitted
+            && self.stored_pinnable
+            && (self.donates_init || self.init_site.is_some())
     }
 }
 
@@ -96,149 +108,44 @@ pub(super) fn apply_reassign_containers(
     // whatever eligibility filter it is handed.
     let is_read = |b: Binding| -> bool { du.uses.get(&b).is_some_and(|u| !u.is_empty()) };
     // A read binding that merely carries a value INTO a store is the store's
-    // FEEDER, not a second holder of that value: the store-site pin lands where
-    // the feeder dies, so the sole-held question has nothing to protect
-    // (docs/impl/region/bindings.md § "A name the store consumes is not a second
-    // holder of the value"). The everyday one is the element name `each` binds,
-    // whose exclusion is what lets a walk's cell take the model at all.
+    // FEEDER, not a second holder of that value: nothing reads it after the
+    // store, so the donation's sole-held question has nothing to protect
+    // (docs/impl/region/bindings.md § "What the cell donates it must hold alone;
+    // what it counts it need not"). The everyday one is the element name `each`
+    // binds.
     let feeders = Feeders::collect(du, info, inference_binding_regions, reassigns, pd);
     let holds = |b: Binding| -> bool { is_read(b) && !feeders.contains(b) };
+    // The STORE-SITE PIN's index carries the ONE holder it cannot survive: a name
+    // that feeds a store running more than once per binding of it, whose single
+    // producer reference the pin would release N times. Every other second name
+    // refuses the pin nothing — the pin is a maximum over the extensions the
+    // region already carries, an alias's own reads among them, so a later read
+    // moves it later (docs/impl/region/bindings.md § "The store-site pin asks
+    // only that the store run once per binding of the name it reads").
+    let pins = |b: Binding| -> bool { is_read(b) && feeders.over_feeds(b) };
     let next = reassigns.forwarding_edges();
-    let mut region_holders = RegionHolders::with_aliases(
-        inference_binding_regions,
-        arena,
-        &holds,
-        Reassigns::forwarded_init_aliases(&next),
-    );
+    let aliases = Reassigns::forwarded_init_aliases(&next);
+    let mut region_holders =
+        RegionHolders::with_aliases(inference_binding_regions, arena, &holds, aliases.clone());
+    let mut pin_holders =
+        RegionHolders::with_aliases(inference_binding_regions, arena, &pins, aliases);
     for (b, stores) in top_level_reassigns.iter().chain(local_reassigns.iter()) {
         if is_read(*b) {
             region_holders.add(*b, arena, stores.value_regions());
+            pin_holders.add(*b, arena, stores.value_regions());
         }
     }
     let sole_held = |b: Binding, r: Region| -> bool { region_holders.sole_held(b, r) };
-    // ── Returned-value exclusion ────────────────────────────────────────
-    // (docs/impl/region/bindings.md "Reassigned mutable bindings are 1-slot
-    // containers".) The container model claims each value region's single
-    // compiler-owned reference for the cell (released by drop-on-overwrite
-    // or frame/scope teardown) and suppresses the region's ordinary decref.
-    // A value that ALSO flows to a function's tail/return is claimed a SECOND
-    // time by the return's `IncrefValueRegion` (the mint-at-return
-    // convention) — two static claims on one cell, so the gate must refuse
-    // and fall back to the unsuppressed baseline (over-keeping, never
-    // mis-freeing). The "is this cell's value returned" question is answered
-    // per-binding by `EscapeInfo`'s return facet (`binding_escapes_via_return`,
-    // below), not by projecting a region set.
-    //
-    // Deliberately NOT refused — runtime-counted escapes are compatible
-    // with the model and must keep the gate (the boundary is pinned by
-    // `reassign_gate_keeps_*` tests; refusing them regresses the
-    // mutable-reassign pins straight back to UAFs):
-    //   - mutable-container stores (push/put funnels incref at runtime),
-    //   - capture into a closure env (alloc-scan incref + free cascade),
-    //   - opaque-call arg cliques (mutual may-store edges; a real store
-    //     increfs at runtime, and the edge's compile-time IncrefRegion is
-    //     balanced by the target's free-time cascade),
-    //   - value-succession into the binding's own next value
-    //     (`(assign acc (pair i acc))` — alloc-scan counted).
-    // Like sole_held, the check is per-binding, all-or-nothing.
-    for (b, stores) in top_level_reassigns {
-        let regions = stores.value_region_set();
-        let init_regions = inference_binding_regions
-            .get(b)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[]);
-        // Backstop (docs/impl/region/bindings.md "a mutated slot is not a
-        // release route"), recorded UNCONDITIONALLY — before the
-        // sole/returned gate. A top-level (file-letrec) reassigned binding's
-        // slot is overwritten over time, so a value-routed release
-        // (`LoadLocal slot` + `DecrefValueRegion`) of ANY region it holds —
-        // init OR assign value — at that region's `decref_point` loads
-        // whatever the slot holds THEN (a later, live value) and frees it,
-        // not the region intended (the no-alias corruption UAF,
-        // region-mutable-reassign-flow facet 3: a deref-cell read is solved
-        // to the cell's init region, pushing the init's decref to the read's
-        // last use and routing it through the now-reassigned cell slot). When
-        // the gate SUCCEEDS these are already in `suppressed_decref_regions`;
-        // when it FAILS the lowerer skips the value route for any region here.
-        // The final never-overwritten value is freed by file-letrec frame
-        // teardown (its region lives in the frame region, cascade-freed), not
-        // by a slot route, so skipping ALL of them only over-keeps until
-        // teardown — never a leak, never a mis-free. (Fn-local reassigns are
-        // NOT recorded: their final value's release IS a legitimate
-        // scope-exit slot route, and the scope-based solver shares regions, so
-        // skipping there leaks an aliased value — region-tailcall-arg-transfer.)
-        for &r in init_regions.iter().chain(regions.iter()) {
-            info.mutated_binding_value_regions.insert(r);
-        }
-        // **Not-returned check reads `EscapeInfo`** (the one authoritative
-        // escape analysis). The gate refuses the container model for a *returned*
-        // value (the return transfers the value's reference to the caller, which
-        // the cell also claims — two static owners) but keeps it for a value that
-        // merely stores into a container or is captured (runtime-counted). That
-        // is exactly the *return facet*: `binding_escapes_via_return`.
-        //
-        // Read per-binding (atom-level), NOT by projecting a returned-region set
-        // onto the cell's regions — `binding_source_regions` is "where the value
-        // points", not "where it lives", so that projection is unsound. Where the
-        // return facet is precise about a cell that merely *points* at a returned
-        // region without itself flowing to a tail, the value is genuinely not
-        // returned, so applying the model is correct; and such shapes are
-        // independently sole-held-refused (the "refused twice over" invariant
-        // below), so the gate *outcome* is unchanged.
-        //
-        // Guarded by "the cell carries a heap region": the return facet is
-        // value-flow, so an immediate-valued cell read in tail position is
-        // "returned", but it carries no reference to transfer — the region model
-        // never refused on one, and there is no decref to suppress regardless.
-        let has_heap_region = !init_regions.is_empty() || !regions.is_empty();
-        let returned = has_heap_region && escape_info.binding_escapes_via_return(*b);
-        let all_sole = !returned
-            && init_regions
-                .iter()
-                .chain(regions.iter())
-                .all(|&r| sole_held(*b, r));
-        if !all_sole {
-            continue;
-        }
-        // Module-scope container: the producer's reference is donated to the
-        // cell (its ordinary decref is suppressed below), so the lowerer's
-        // drop-on-overwrite is its sole release and NO incref-on-store is added.
-        // `donated_overwrite_sites` carries that to `lower_assign` — without it
-        // an unbalanced incref holds every displaced prior to teardown
-        // (docs/impl/region/bindings.md "Reassigned mutable bindings are 1-slot
-        // containers"). The fn-local loop deliberately does NOT mark its
-        // sites here (its assign-value decref is kept, balancing the incref).
-        //
-        // CALL-RESULT content is excluded from the donation, exactly as in the
-        // fn-local branch below. A call result carries a SECOND compile-time name
-        // for the same runtime value — the opaque placeholder region the lowerer
-        // releases by value through the ANF temp's slot (Rule 2's bound-result
-        // shape) — and the suppression below reaches only the value's own source
-        // regions, never that placeholder. So the placeholder release still fires
-        // and consumes the callee's single returned reference; donating on top of
-        // it leaves the cell holding a freed value (`region-hof-tail-return-uaf.lisp`,
-        // whose callee returns a frozen array through a `cond` arm). Taking the
-        // counted store instead balances: store incref + placeholder release = the
-        // cell's one reference, dropped at the next overwrite.
-        let donates = !regions.iter().any(|r| info.call_result_regions.contains(r));
-        for s in stores.sites() {
-            info.drop_on_overwrite_sites.insert(s);
-            if donates {
-                info.donated_overwrite_sites.insert(s);
-            }
-        }
-        // Suppress the compiler's ordinary decrefs for BOTH the init region
-        // and every assign-value region. Each of those values ALSO carries a
-        // static `DecrefRegion` (its `(let [_t v] _t)` ANF scope region) that
-        // is its single owning demise; the value-based `DecrefValueRegion`
-        // here would be a SECOND decref of the same region (the read-time
-        // double-free witnessed in the rc trace). The cell's own reference is
-        // supplied by `lower_assign`'s incref-on-store and released by
-        // drop-on-overwrite (priors) or frame teardown (final value).
-        for &r in init_regions.iter().chain(regions.iter()) {
-            info.suppressed_decref_regions.insert(r);
-        }
-    }
+    let pin_sole = |b: Binding, r: Region| -> bool { pin_holders.sole_held(b, r) };
+    // The module-scope half, whose cell ADOPTS the producer reference and whose
+    // final content the file-letrec frame teardown frees.
+    toplevel::apply_module_scope(
+        info,
+        top_level_reassigns,
+        inference_binding_regions,
+        escape_info,
+        &sole_held,
+    );
 
     // ── Fn-local (in-lambda) reassigned mutables ───────────────────────────
     // Same 1-slot-container model as the top-level loop above — the cell takes a
@@ -255,10 +162,11 @@ pub(super) fn apply_reassign_containers(
     // accounting holds for a cell written once and for one re-minted every
     // iteration of a loop alike.
     //
-    // The gate is sole-held, asked per region over the half it decides (BOTH
-    // not-returned and returned — see the split below and
+    // The gate is the INIT's discharge — donated where sole-held, counted at
+    // the chain source's binder otherwise (see the verdicts below and
     // docs/impl/region/bindings.md "Reassigned mutable bindings are 1-slot
-    // containers" § "Returned fn-local reassigned mutables"). Distinct
+    // containers"). Whether the content is returned decides nothing
+    // (§ "Returned fn-local reassigned mutables"). Distinct
     // mechanism: a `@`-mutable PARAMETER (a captured cell the callee owns)
     // reassigned then moved into a tail call is released by the callee's own cell
     // `DecrefCellRegion`, and the tail move's borrowed-arg retain must order ahead
@@ -320,26 +228,39 @@ pub(super) fn apply_reassign_containers(
             .get(b)
             .map(|v| v.as_slice())
             .unwrap_or(&[]);
-        // The sole-held question, asked separately of the two halves it decides.
-        // `kept` — the chain's stored values — is what the model PINS back to a
-        // store site, and moving a producer release earlier is unsafe under a
-        // second name. Everything else the binding holds is what the model would
-        // SUPPRESS, which is only ever the donation's business: an aliased init
-        // costs the donation, not the model (docs/impl/region/bindings.md § "What
-        // the cell donates it must hold alone; what it counts it need not").
+        // The sole-held question is the DONATION's alone. `kept` — the chain's
+        // stored values — is what the model PINS back to a store site, and the
+        // pin is a maximum over every extension the region carries, an alias's
+        // own reads included, so a second name refuses nothing there
+        // (docs/impl/region/bindings.md § "The store-site pin asks only that the
+        // store run once per binding of the name it reads"). What the model
+        // would SUPPRESS, which is the donation's business: an aliased init
+        // costs the donation, not the model (§ "What the cell donates it must
+        // hold alone; what it counts it need not"). A binding-source region
+        // that is ALSO stored is the one shape the two questions cannot split —
+        // the suppression loop skips `kept`, so a donation granted over the
+        // overlap would leave the define's uncounted store with no reference
+        // for drop-on-overwrite to release — and an aliased overlap therefore
+        // takes the counted-init route instead of donating.
         let kept = chain_kept.get(b).map(|v| v.as_slice()).unwrap_or(&regions);
         let last = Reassigns::last_of_chain(&next, *b);
+        let overlap_aliased = binding_regs
+            .iter()
+            .filter(|r| kept.contains(r))
+            .any(|&r| !sole_held(*b, r));
         verdicts.insert(
             *b,
             LocalVerdict {
-                stored_sole: binding_regs
+                chain_admitted: true,
+                stored_pinnable: binding_regs
                     .iter()
                     .filter(|r| kept.contains(r))
-                    .all(|&r| sole_held(*b, r)),
-                donates_init: binding_regs
-                    .iter()
-                    .filter(|r| !kept.contains(r))
-                    .all(|&r| sole_held(*b, r)),
+                    .all(|&r| pin_sole(*b, r)),
+                donates_init: !overlap_aliased
+                    && binding_regs
+                        .iter()
+                        .filter(|r| !kept.contains(r))
+                        .all(|&r| sole_held(*b, r)),
                 init_site: chain_versions
                     .get(&last)
                     .and_then(|vs| Reassigns::init_store_site(vs, binder_init_sites)),
@@ -370,7 +291,7 @@ pub(super) fn apply_reassign_containers(
         }
         if !links.iter().all(|b| verdicts[b].is_cell()) {
             for b in links {
-                verdicts.get_mut(b).unwrap().stored_sole = false;
+                verdicts.get_mut(b).unwrap().chain_admitted = false;
             }
         }
     }

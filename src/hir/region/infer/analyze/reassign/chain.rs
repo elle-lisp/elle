@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-22
 //! The forwarding chain functionalization gives one reassigned name, and what
 //! the gate reads off it.
 //!
@@ -9,7 +9,7 @@ use crate::hir::region::CellStores;
 
 /// Binding → its stores, each an assign site with the regions of the value
 /// stored there.
-type ReassignSites = HashMap<Binding, CellStores>;
+pub(super) type ReassignSites = HashMap<Binding, CellStores>;
 
 /// Everything the walk recorded about reassigned bindings. One value rather than
 /// three parameters because no consumer wants a subset: the scope split decides

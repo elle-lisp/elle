@@ -1,6 +1,6 @@
 # Reassigned mutable bindings are 1-slot containers
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-22 -->
 
 Implementation-facing: how the solver and lowerer handle a binding that is
 reassigned over its lifetime. This specializes Rule 5's mutable-container
@@ -32,13 +32,12 @@ agree with which of the value's ordinary decrefs are suppressed:
   an unbounded over-keep on a module mutable reassigned in a long-running loop
   (`runtime::tests::reassign_toplevel_prior_release_is_bounded`).
   **CALL-RESULT content is excluded from the donation** and takes the counted
-  store instead, as all fn-local content does. A call result carries a
-  second compile-time name for the same runtime value — the opaque placeholder
-  region the lowerer releases by value through the ANF temp's slot (rules.md
-  Rule 2's bound-result shape) — and the suppression above reaches only the
-  value's own source regions, never that placeholder. So the placeholder release
-  fires regardless and consumes the callee's one returned reference; donating on
-  top of it leaves the cell pointing at a freed value
+  store instead, as all fn-local content does. A call result carries a second
+  compile-time name for the same runtime value — the opaque placeholder region
+  the lowerer releases by value through the ANF temp's slot (rules.md Rule 2's
+  bound-result shape) — which the suppression above never reaches. So the
+  placeholder release fires regardless and consumes the callee's one returned
+  reference; donating on top of it leaves the cell pointing at a freed value
   (`region-reassign-callresult-store.lisp`, `region-hof-tail-return-uaf.lisp`).
 - **Fn-local (the cell takes a COUNTED reference).** A fn-local cell's scope
   *exits*, so its final content has no teardown to fall back on and the cell
@@ -46,39 +45,37 @@ agree with which of the value's ordinary decrefs are suppressed:
   therefore suppresses at most the init region's decref (the init is stored
   uncounted at the define, so drop-on-overwrite is its release; where another
   binding names that same value the init takes a counted store as well, and the
-  suppression goes away with the donation — see "What the cell donates it must
-  hold alone", below) and the lowerer
-  **increfs on store** for every assign, whatever produced the value. That one
-  reference is released by drop-on-overwrite for each displaced prior and by the
-  **content drop** for the final one — the two channels a container's holding
-  needs, recorded per binding in `RegionInfo::cell_containers`. A cell that
-  forwards its final content into a second cell hands that second channel over
-  with it (see "A chain of forwarding edges", below).
+  suppression goes away with the donation — "What the cell donates", below) and
+  the lowerer **increfs on store** for every assign, whatever produced the value.
+  That one reference is released by drop-on-overwrite for each displaced prior
+  and by the **content drop** for the final one — the two channels a container's
+  holding needs, recorded per binding in `RegionInfo::cell_containers`. A cell
+  that forwards its final content into a second cell hands that second channel
+  over with it ("A chain of forwarding edges", below).
 
   The producer's reference is a *separate* claim, and it is dead at the store:
   from there on the cell's own reference keeps the value alive. So each stored
   value's region is released at its **store site**, pinned there exactly as a
-  returned value's is pinned to its `Return`. Two things make the pin necessary
-  rather than a nicety. ANF names the stored value in a `let` nested inside the
-  assign, so the structural last use is *before* `lower_assign` increfs and
-  stores it. And the binding-chain extension would otherwise carry the release
-  out to the cell's last use — one release for a region that, in a loop, names a
-  different runtime value every iteration, so every value but the last keeps a
-  reference nobody drops.
+  returned value's is pinned to its `Return`. Two facts make the pin necessary.
+  ANF names the stored value in a `let` nested inside the assign, so the
+  structural last use is *before* `lower_assign` increfs and stores it. And the
+  binding-chain extension would otherwise carry the release out to the cell's
+  last use — one release for a region that, in a loop, names a different runtime
+  value every iteration, so every value but the last keeps a reference nobody
+  drops.
 
   **The store site is the store that took THAT value.** A cell records one entry
   per store — the site, and the regions of the value stored there — so the pin
   follows the value (`CellStore`). Reading the stores as one set instead pins
-  every value at the cell's *last* store, and that is a point the earlier value's
-  path need not reach. Two `assign`s in mutually exclusive arms of a branch inside
-  a loop are the ordinary shape: the first arm's value is pinned in the second
-  arm, so an iteration that takes the first arm again displaces the previous value
-  from its own ANF slot before the pin ever runs. That strands one region per
-  repeat and grows with the iteration count
+  every value at the cell's *last* store, a point the earlier value's path need
+  not reach. Two `assign`s in mutually exclusive arms of a branch inside a loop
+  are the ordinary shape: the first arm's value is pinned in the second arm, so
+  an iteration that takes the first arm again displaces the previous value from
+  its own ANF slot before the pin ever runs, stranding one region per repeat
   (`tests/elle/region-cell-arm-store.lisp`). Where one region really is stored at
-  several sites, the pin is the latest of *those* sites: it must sit after every
-  store that takes a reference of it, which is what pinning each store in turn
-  computes, the pin rule being a maximum.
+  several sites, the pin is the latest of *those* sites — it must sit after every
+  store that takes a reference of it, which pinning each store in turn computes,
+  the pin rule being a maximum.
 
   Because no release does double duty, the accounting is per-value in every
   shape: born `+1`, store `+1`, then either the overwrite or the content drop
@@ -107,29 +104,34 @@ some earlier value whose region the compiler picked; a release aimed at a
 specific region must still refuse the slot ("a mutated slot is not a release
 route", below).
 
-The point is the cell's last access — the latest of its reads and of the node
-**covering** its writes — with one hoist.
+The point must **post-dominate every access**: the cell holds one reference
+whichever path stored it, so a drop only some paths reach leaks on every other
+one, and a drop inside a loop the cell outlives frees what a later iteration
+reads. It is seeded at the cell's last access — the latest of its reads, of the
+node **covering** its writes, and of the loop it is carried across — then hoisted
+outward until nothing partial encloses it. Every step is a max rather than a
+move, because a loop's parameters stay readable past the loop
+(`(while … (assign acc …)) acc`).
 
-A single write is that covering node itself. Several are not: a cell reached from
+A single write is its own covering node. Several are not: a cell reached from
 mutually exclusive arms has its latest write inside ONE arm, and a drop there
-runs on that path alone, leaving every other arm's value held by the cell and
-released nowhere. The writes' innermost covering node — their lowest common
-ancestor — is the nearest point after all of them that every storing path
-reaches, and it lies inside the same lambda the writes do, which the cell's own
-scope node need not (a `(var u nil)` at a function's head has the `Lambda` for a
-scope node, whose releases the lowerer runs in the ENCLOSING function). The shape
-that needs it is a dispatch storing from each arm, with nothing reading the cell
-afterward to carry the drop past the dispatch
+runs on that path alone, leaving every other arm's value held and released
+nowhere. The writes' innermost covering node — their lowest common ancestor — is
+the nearest point after all of them that every storing path reaches, and it lies
+inside the same lambda the writes do, which the cell's own scope node need not (a
+`(var u nil)` at a function's head has the `Lambda` for a scope node, whose
+releases the lowerer runs in the ENCLOSING function). The shape that needs it is
+a dispatch storing from each arm, with nothing reading the cell afterward
 (`tests/elle/region-cell-arm-demise.lisp`).
 
-A cell **carried across a loop** is re-pointed every iteration, so a drop inside
-the body would free what the next iteration reads. Such a cell is a loop
-*parameter*: its scope node is the loop itself, so hoisting to that node puts the
-one drop after the loop, where the lowerer emits the loop's own releases. A cell
-bound **inside** a loop body has a body scope node instead, so it is not hoisted
-and drops once per iteration — matching its per-iteration mint. The hoist is a
-max rather than a move because a loop's parameters stay readable past the loop
-(`(while … (assign acc …)) acc`).
+The **hoist** takes the seed to the node of every enclosing branch arm and loop
+that does not also enclose the BINDER, iterated outward: a read can sit in an arm
+the writes never reach, and a covering node can sit inside a loop the cell
+outlives. The lowerer emits a node's releases after it, so a branch node's land
+after the merge and a loop node's after the loop. An arm or loop the binder is
+bound INSIDE keeps the seed — the cell is per-path or per-iteration there, and so
+is its drop, matching its per-iteration mint
+(`cell_content_drop_postdominates_arm_stores`).
 
 **The counted store is emitted BEFORE the slot store.** `StoreLocal` consumes
 the value register, so a retain emitted after it no longer names the stored
@@ -148,57 +150,64 @@ producer claim with a release that *unmaps* the allocation's static slot
 nothing. `cell_stored_regions` carries the class to the one predicate that
 decides the encoding (`coalescible_solver_region`), beside the module-scope
 dynamic classes it already refuses. Left coalescible, the mint resolves an
-emptied slot and the equivalence oracle detonates, which is the loud face of a
-mis-coalesce and what that oracle is for
+emptied slot and the equivalence oracle detonates — the loud face of a
+mis-coalesce, and what that oracle is for
 (`coalescible_refuses_a_cell_stored_value`,
 `tests/elle/region-pair-heap-content-uaf.lisp`).
 
-**The gate.** The model trades static releases for suppression plus a
-value-based store/overwrite pair, so it is sound only when the cell's claim on a
-value region's single compiler-owned reference is exclusive — and the two
-questions below are asked per region, over the regions each one governs (the
-next section splits them):
+**The gate.** The model is gated exactly where it claims a reference UNCOUNTED —
+and nowhere else. The sole-held question ("no other *read, user* binding may
+hold the region"; a synthetic ANF producer temp or a write-only statement
+wrapper is not an alias) is asked of:
 
-- **sole-held** — no other *read, user* binding may hold the region (a
-  synthetic ANF producer temp or a write-only statement wrapper is not an
-  alias); and
-- **not returned** — a *module-scope* cell's region must not appear in any
-  return site or lambda tail set. That cell ADOPTS the producer's reference,
-  and a return transfers the same reference to the caller, whose value-based
-  release consumes it — two static owners of one reference is a double-free.
-  A fn-local cell counts what it stores, so it claims nothing the return
-  needs and asks the question of nothing (see "Returned fn-local reassigned
-  mutables", below).
+- **the module-scope cell's every region** — that cell ADOPTS the producer's
+  reference for the init and every stored value alike, so a second name would
+  read a value the next overwrite frees. Its regions must also be **not
+  returned**: a return transfers the same reference to the caller, whose
+  value-based release consumes it — two static owners of one reference is a
+  double-free.
+- **the fn-local cell's INIT** — the one value it takes uncounted. An aliased
+  init withdraws the donation, not the model ("What the cell donates", below).
 
-**A name the store consumes is not a second holder of the value.** The
-sole-held question protects the store-site pin, which moves a producer release
-earlier: a second name still reading the value would hold a freed one. A name
-whose whole job is to carry the value INTO the store reads nothing afterward, so
-the pin lands where that name dies and the question has nothing to protect. Such
-a name is the store's **feeder**, excluded from the holder index exactly as the
-synthetic ANF producer temp `(let [_t e] _t)` is — the temp being that same value
-flow under a name the compiler chose. A reassigned binding is never a feeder: it
-names a slot, not a value. Two structural facts make a name one, and the pin
-needs both:
+Its STORED values ask the narrower question the next section states.
 
-- **The store runs once per binding of the name.** The name's scope node
-  contains the store, with no loop between the two. A name bound OUTSIDE a loop
-  that stores inside it holds one producer reference against N pins, so a pin
-  releases a reference the producer never took
-  (`reassign_gate_refuses_a_feeder_bound_outside_the_loop`).
-- **Nothing reads the name after the store.** Every use of the name is ordered
-  before the store site, the store's own value read included. A later use reads
-  the value whose producer release the pin has moved
-  (`reassign_gate_refuses_an_aliased_assign_value`). A name feeding two stores
-  fails this against the earlier one, so two pins never claim one reference.
+**The store-site pin asks only that the store run once per binding of the name
+it reads.** The pin moves a producer release EARLIER, back to the store that took
+the value, and every `decref_point` pass is a maximum — each contributes a lower
+bound and the latest wins ([the anchors](anchors.md)). So an alias of a stored
+value refuses nothing: its reads extend the region's release through the ordinary
+binding chain, and the pin lands at or after the store AND at or after that
+alias's last read. The counted store itself claims nothing from anyone — the
+cell's reference is its own, taken by the incref-on-store and released by
+drop-on-overwrite or the content drop.
 
-The everyday feeder is a collection walk's element: `each` binds one
+What the pin cannot survive is **one producer reference against N pins**: a name
+the store READS, bound outside a loop that re-runs the store, hands that one
+reference to every iteration, so a per-iteration release frees a reference the
+producer never took (`reassign_gate_refuses_a_feeder_bound_outside_the_loop`).
+The read is what makes a name the store's source rather than a bystander of its
+region — a phi version an `if` merge introduces, or an alias bound after the
+loop, shares the region while holding no reference the pin can release twice
+(`reassign_gate_counts_a_phi_carried_returned_value`,
+`reassign_gate_counts_an_aliased_forwarding_link`).
+
+The everyday name a store reads is a collection walk's element: `each` binds one
 (`(let [p (get items idx)] …)`), so `(each p in (pairs t) (assign u p))` stores
-through `p` where a hand-written `while` stores the read directly. Without the
-exclusion the walk's `u` takes the unsuppressed baseline, whose one release
-covers every value the loop stored, and the collection's whole region strands per
-call — `reassign_gate_counts_a_feeder_as_no_holder` for the admission the two
-declines bound, `tests/elle/region-cell-feeder.lisp` for the measured shape.
+through `p` where a hand-written `while` stores the read directly. Each binding
+of `p` faces one store, so the pin is exact
+(`reassign_gate_counts_a_feeder_as_no_holder`,
+`tests/elle/region-cell-feeder.lisp`).
+
+Refusing the idiom costs more than promptness. On the baseline the cell holds no
+reference at all, so each stored value is protected only by its producer's —
+whose release the binding chain extends out to the cell's last use, hoisted past
+any loop the cell is carried across. One release then serves a region minted per
+iteration, so a loop that stores an element it named first strands every
+iteration's value but the last, permanently. That is the conditional-accumulate
+idiom — `(each x in xs (when (better? x best) (assign best x)))` — and the
+scheduler's unjoined-error scan is one, where what each call stranded was the
+fiber table snapshot, the fiber inside it, and everything the fiber's closure
+reaches (elle-lisp/elle#1186).
 
 **What the cell donates it must hold alone; what it counts it need not.**
 The sole-held question is asked on behalf of exactly one thing: the
@@ -210,6 +219,16 @@ overwrite. Every *assign*, by contrast, takes a counted store, which claims
 nothing from anyone: the region keeps its ordinary decref and the cell's
 reference is its own.
 
+A name the store consumes is no holder here either, and the donation asks one
+fact more of it than the pin does: **nothing reads the name after the store**.
+The donated reference has no release of its own, so a later use would read a
+value the first overwrite has freed — where the pin, being a maximum, would
+merely land later. Such a name is the store's **feeder**, excluded from the
+donation's holder index exactly as the synthetic ANF producer temp
+`(let [_t e] _t)` is, the temp being that same value flow under a name the
+compiler chose. A reassigned binding is never a feeder: it names a slot, not a
+value.
+
 So an alias of the init is a reason to stop donating, not a reason to refuse the
 model. Where another read binding names the init value — `(let [xs (list …)
 @r xs] …)`, a cursor walk's shape — the cell **counts its init too**: an
@@ -220,37 +239,35 @@ it, which is the *allocating* binder's. Nothing is suppressed, so nothing is
 claimed twice, and the alias's own read stays safe however late it sits.
 
 That route is the allocating binder's slot, so the shape it serves is the one
-whose init the **alias** allocated — `xs` above, whose slot no `assign`
-repoints. An alias of a value the **cell's own** binder allocated has no such
-slot to offer: the only recorded one is the cell's, which "a mutated slot is not
-a release route" (below) refuses. Such an alias instead takes a reference of its
-own wherever its read is a whole-value one ([reads.md](reads.md)), which withdraws it
-from the sole-held question and hands the donation back — including where only
-*some* path of the init reads the container, `(let [k (if c r (list))] …)`, whose
-allocating arm keeps its own regions while the container's are withdrawn. What
-still leaves the alias a holder, and the container on the counted-init route, is
-an init NO path of which is a whole-value read.
+whose init the **alias** allocated — `xs` above, whose slot no `assign` repoints.
+An alias of a value the **cell's own** binder allocated has no such slot to
+offer: the only recorded one is the cell's, which "a mutated slot is not a
+release route" (below) refuses. Such an alias instead takes a reference of its
+own wherever its read is a whole-value one ([reads.md](reads.md)), which
+withdraws it from the sole-held question and hands the donation back — including
+where only *some* path of the init reads the container,
+`(let [k (if c r (list))] …)`. What still leaves the alias a holder is an init NO
+path of which is a whole-value read.
 
-Refusing instead costs the **store-site pin**, not merely the donation. On the
-unsuppressed baseline the cell holds no reference at all, so each stored value is
-protected only by its producer's — whose release the binding chain then extends
-out to the cell's last use, one release for a region that names a different
-runtime value every iteration. A loop that stores N values then releases one
-(`tests/elle/region-cell-aliased-init.lisp`).
-
-The requirement that survives is over the regions the model still *moves*: the
-stored values, whose producer release is pinned back to the store site. A cell
-whose assign value is aliased keeps refusing, whole. The counted init also needs
-a store to retain at, which the chain's source binder supplies; a chain whose
-source is a parameter has no such store, so it keeps donate-or-refuse. The
-reference is the test: `reassign_gate_counts_an_aliased_init` for the admission,
-`reassign_gate_refuses_an_aliased_assign_value` for the decline.
+One overlap takes the counted-init route rather than the donation: an aliased
+stored region that is ALSO among the binding's own source regions, which the phi
+of a conditional `assign` produces by copying the store's regions onto the
+binding. The suppression never reaches a stored region, so a donation granted
+over the overlap would leave the binder's uncounted store with no reference for
+drop-on-overwrite to release; counting the init balances it, and an immediate
+init makes that retain a no-op. The counted init still needs a binder to retain
+at, which the chain's source supplies; a chain whose source is a parameter has no
+such store, so it keeps donate-or-refuse. The reference is the test:
+`reassign_gate_counts_an_aliased_init`,
+`reassign_gate_counts_an_aliased_assign_value`,
+`reassign_gate_counts_an_aliased_forwarding_link`, and
+`tests/elle/region-cell-aliased-store.lisp` for the measured shape, with
+`region-cell-aliased-store-uaf.lisp` pinning the alias's reads under guardfree.
 
 **What a read of the container takes is [reads.md](reads.md).** A whole-value
 read borrows a reference the next overwrite kills, so the reader takes a counted
-reference of its own. Which reads count, what a branch or `begin` reader is left
-holding, and which binder forms emit the retain are that document's; the model
-its readers read from is this one's.
+one of its own. Which reads count, and which binder forms emit the retain, are
+that document's; the model its readers read from is this one's.
 
 **A loop parameter's init source is not a second holder.** `sole_held` counts
 distinct *bindings*, and functionalization gives a cell carried across a loop a
@@ -271,11 +288,10 @@ content drop for one never displaced) against exactly one reference. So a holder
 that is the binding's own loop-init source does not count as an alias of it.
 
 The exclusion is that edge and nothing wider. A **genuine alias** — a *different*
-source name bound to the same value, `(var keep last)` — is not a forwarding edge
+source name bound to the same value, `(var keep last)` — is no forwarding edge
 and keeps refusing the fold, which it must: the region-keyed suppression would
-cancel that name's own decref while it still holds the value. What such an alias
-costs is the donation alone (above): the cell counts that init instead, and the
-alias keeps the decref the fold would have cancelled.
+cancel that name's own decref while it still holds the value. It costs the
+donation alone (above): the cell counts that init instead.
 
 **A chain of forwarding edges hands one reference along, so the fold follows it
 whole.** Two sequential loops over one binding give the name three versions —
@@ -290,42 +306,42 @@ A middle link differs from `last#0` in the one way that matters: it carries a
 the chain forwards. The link that **receives** that reference already releases it
 — at its first overwrite, where its slot still names the forwarded value, or at
 its own content drop when nothing overwrites it. So a **forwarding** link emits
-no content drop. It keeps the two other things a cell owes: drop-on-overwrite for
-each prior it displaces, and the store-site pin that discharges each producer's
-separate claim.
+no content drop, keeping the two other things a cell owes: drop-on-overwrite for
+each prior it displaces, and the store-site pin.
 
 The suppression is read over the chain rather than over one link. Every link
 keeps its **own** assign-value regions' decrefs — one producer release per stored
 value — and a downstream link's source regions include every upstream link's,
-because the `Loop` init copies them. So a link suppresses only what **no** link
-in the chain keeps: the init region, and nothing else. Suppressing an upstream
-link's value regions would leave each value that link displaced with a store
-incref and no producer release.
+because the `Loop` init copies them. So a link suppresses only what **no** link in
+the chain keeps: the init region, and nothing else. Suppressing an upstream link's
+value regions would leave each value it displaced with a store incref and no
+producer release.
 
 The same fact decides *where* those regions are released, against two routes
 that would each drag one release past a loop that stores N values. A cell binding
 names the slot rather than any one value, so no cell's stored value rides **any**
 cell binding's uses — the downstream link's uses sit past the loop the upstream
 link stores in. And an **uncounted opcode read** of a cell (`%get`/`%first`/
-`%rest`) borrows out of whatever the cell holds now, and the *cell's* reference
-is a second protector of that borrow: where the cell drops it at or after the
-borrow dies, extending the producer's release to the reader buys nothing, so the
-stored value keeps the store-site pin. Where the borrow flows on past the cell's
-own last access, the producer's reference is its only protection and the
-extension stands. An ANF producer temp is neither a cell binding nor a stored
-value, and still extends normally, which is what keeps the release after the
-allocation it names. (An uncounted read in **tail** position is a different
-question and keeps its own answer: the borrow leaves the activation, so the
-return claims the cell's reference and the gate refuses the model.)
+`%rest`) borrows out of whatever the cell holds now, with the *cell's* reference
+a second protector of that borrow: where the cell drops it at or after the borrow
+dies, extending the producer's release to the reader buys nothing, so the stored
+value keeps the store-site pin. Where the borrow flows on past the cell's own
+last access, the producer's reference is its only protection and the extension
+stands. An ANF producer temp is neither a cell binding nor a stored value and
+still extends normally, which keeps the release after the allocation it names.
+(An uncounted read in **tail** position keeps its own answer: the borrow leaves
+the activation, so the return claims the cell's reference and the gate refuses.)
 
 The chain is admitted or declined **whole**. A link the gate refuses stays at the
 unsuppressed baseline, where each value's ordinary decref is the release of the
 producer's reference — and the next link's drop-on-overwrite would then release
 that reference a second time. Declining every link together keeps the "one
-reference, one channel" accounting true by construction rather than by
-coincidence. The reference is the test:
-`reassign_gate_keeps_loop_carried_cell_forwarded_from_a_cell` for the admission,
-`reassign_gate_refuses_forwarding_chain_with_an_aliased_link` for the decline, and
+reference, one channel" accounting true by construction. An alias of a link's
+STORED value declines nothing — its reads extend the store-site pin, as outside a
+chain — and an alias of the fold's init moves the whole chain to the counted-init
+route. The reference is the test:
+`reassign_gate_keeps_loop_carried_cell_forwarded_from_a_cell`,
+`reassign_gate_counts_an_aliased_forwarding_link`, and
 `tests/elle/region-cell-forward-chain.lisp` for the measured shape.
 
 Module scope never reaches this edge: a top-level reassigned mutable compiles to
@@ -333,23 +349,22 @@ a capture cell, and functionalization does not promote a capture cell to a loop
 parameter (its RC lives in the cell-update opcode — see "Captured reassigned
 cells" below).
 
-Runtime-counted escapes do **not** refuse the gate, deliberately: a store
-into another container (the push/put funnel increfs at runtime), a capture
-into a closure env (alloc-scan incref, cascade decref), an opaque-call arg
-clique (mutual may-store edges whose compile-time increfs the target's
-free-time cascade balances), and value-succession into the binding's own
-next value (`(assign acc (pair i acc))`, alloc-scan counted) each add a
-*counted* reference with its own balanced release — orthogonal to the cell's
-claim. Refusing them regresses the canonical accumulator and reassign pins
-straight back to UAFs; the boundary is pinned by tests.
+Runtime-counted escapes do **not** refuse the gate, deliberately: a store into
+another container (the push/put funnel increfs at runtime), a capture into a
+closure env (alloc-scan incref, cascade decref), an opaque-call arg clique
+(mutual may-store edges whose compile-time increfs the target's free-time cascade
+balances), and value-succession into the binding's own next value
+(`(assign acc (pair i acc))`, alloc-scan counted) each add a *counted* reference
+with its own balanced release — orthogonal to the cell's claim. Refusing them
+regresses the canonical accumulator and reassign pins straight back to UAFs.
 
-The check is per-binding, all-or-nothing: if any held region fails, the
-binding falls back entirely. Failing the gate is never a correctness loss —
-the fallback is the unsuppressed baseline, where every value region is
-released by its ordinary decref at its binding-chain-extended `decref_point`:
-over-keeping (a displaced prior lives until the binding's last use), never
-mis-freeing — *with one exception the returned-binding case introduces, below,
-and one the fallback's own value-route demands a backstop for, next.*
+The check is per-binding, all-or-nothing: if any held region fails, the binding
+falls back entirely. Failing the gate is never a correctness loss — the fallback
+is the unsuppressed baseline, where every value region is released by its
+ordinary decref at its binding-chain-extended `decref_point`: over-keeping (a
+displaced prior lives until the binding's last use), never mis-freeing — *with
+one exception the returned-binding case introduces, below, and one the
+fallback's own value route demands a backstop for, next.*
 
 **The fallback's value route is not unconditionally safe — the mutated-slot
 backstop.** "Released by its ordinary decref at its `decref_point`" is, for a
@@ -397,10 +412,9 @@ emitted before the `Return` node's own releases (`lower_return`), and the cell's
 demise is that node — the tail read of the binding is the cell's last access. So
 the sequence at the tail is mint, then content drop: the caller leaves holding
 the reference the mint created and the cell's is gone. A loop-carried cell's
-displaced priors take drop-on-overwrite exactly as an unreturned cell's do, which
-is what keeps the accounting per-value rather than per-binding. Without it every
-value but the last is stranded, one region per trip
-(`tests/elle/region-loop-acc-return.lisp`).
+displaced priors take drop-on-overwrite as an unreturned cell's do, which keeps
+the accounting per-value rather than per-binding; without it every value but the
+last is stranded, one region per trip (`tests/elle/region-loop-acc-return.lisp`).
 
 What the returned binding does still suppress is the binding's OWN regions
 (`binding_regs \ kept`). When the binding is assigned ONCE its binding region and
@@ -426,13 +440,13 @@ drags the store-site pin back out to the `Return`, where one release names
 whatever the producer's ANF slot holds LAST — every earlier value of a loop
 stranded.
 
-The hold-back is the same predicate the uncounted-read extension already asks,
-against the same `cell_drop_point`, because it rests on the same fact: the cell's
-reference protects a borrow only up to the point the cell drops it. Where the
-cell drops the value at or after the `Return`, the extension buys nothing and is
-skipped; where it drops EARLIER the producer's reference is the return's only
-protection and the extension stands, which costs the store-site pin and leaves
-the over-keep — the safe direction to be wrong in. The reference is the test:
+The hold-back is the predicate the uncounted-read extension already asks, against
+the same `cell_drop_point`, resting on the same fact: the cell's reference
+protects a borrow only up to the point the cell drops it. Where the cell drops
+the value at or after the `Return`, the extension buys nothing and is skipped;
+where it drops EARLIER the producer's reference is the return's only protection
+and the extension stands, which costs the store-site pin and leaves the
+over-keep — the safe direction to be wrong in. The reference is the test:
 `reassign_return_does_not_extend_a_cell_stored_value` for the hold-back, and
 `tests/elle/region-loop-acc-return.lisp` (guardfree pin
 `region_loop_acc_return_uaf`) for the measured shape.
@@ -449,36 +463,31 @@ never a mis-free.
 `Return` (and the native-tail post-block in `src/lir/lower/control.rs`) emits an
 `IncrefValueRegion` that hands the caller exactly one owning reference, which the
 caller balances with a `DecrefValueRegion` at the result binding's decref_point.
-This single mint-at-return convention is what makes a returned **borrowed
-captured upvalue** safe. Such a value is owned by the closure env (the
-capture-incref, cascade-released when the closure region dies), so this
-activation has no claim of its own to hand out. The mint supplies the caller's
-reference *without* touching the env's: the caller's `DecrefValueRegion` drains
-the mint, not the captured value's rc, so the env keeps holding the upvalue and
-the next read is safe (`lib/http.lisp`'s `require-compress` returning the
-captured compress module; `tests/elle/region-captured-return-move-uaf.lisp`).
-Symmetrically, a freshly-allocated callee result survives its own decref_point
-because the mint is emitted *before* it: the producer's claim is released there,
-but the mint keeps the value alive for the caller.
+That single convention is what makes a returned **borrowed captured upvalue**
+safe. Such a value is owned by the closure env (the capture-incref,
+cascade-released when the closure region dies), so this activation has no claim
+of its own to hand out. The mint supplies the caller's reference *without*
+touching the env's: the caller's `DecrefValueRegion` drains the mint, not the
+captured value's rc, so the env keeps holding the upvalue and the next read is
+safe (`lib/http.lisp`'s `require-compress`;
+`tests/elle/region-captured-return-move-uaf.lisp`). Symmetrically, a
+freshly-allocated callee result survives its own decref_point because the mint is
+emitted *before* it.
 
-Because `lower_return` mints unconditionally, the distinction
-between an escaping-closure return (needs a mint) and a same-activation return
-(could move) does not affect the return path: both get the mint, and the only
-cost of minting a return that *could* have moved is a +1 that the caller's
-decref reclaims. Whether a closure escapes its
-definition is answered authoritatively by the escape analysis
-(`EscapeInfo`/`src/hir/escape.rs`), read by the consumers that genuinely need it
-(`tail_callee_defers_release`, the reassign gate's return facet) — not by the return-mint
-path, which is unconditional. The tail-call-arg twin (`tail_arg_is_borrowed`,
-`src/lir/lower/control.rs`) likewise needs no escape test — its mint is balanced
+The mint is unconditional, so an escaping-closure return and a same-activation
+return take the same path; minting one that could have moved costs a +1 the
+caller's decref reclaims. Whether a closure escapes is the escape analysis's
+answer (`EscapeInfo`/`src/hir/escape.rs`), read by the consumers that need it
+(`tail_callee_defers_release`, the reassign gate's return facet), never by the
+return-mint path. The tail-call-arg twin (`tail_arg_is_borrowed`,
+`src/lir/lower/control.rs`) needs no escape test either — its mint is balanced
 by the callee's owned-param release, which always fires.
 
 **How a captured binding realizes its cell is [cells.md](cells.md).** A captured
 binding is the same 1-slot container this document describes, realized at
 runtime: the capture cell's update increfs the new content and decrefs the
-displaced prior unconditionally, so there is no fallback to suppress — the
-cell's RC semantics live in the update opcode itself. Which realization a
-binding takes (a compiled `MakeCaptureCell` in its own slot, or a
+displaced prior unconditionally, so there is no fallback to suppress. Which
+realization a binding takes (a compiled `MakeCaptureCell` in its own slot, or a
 `populate_env` env cell), what a read through one borrows, and where the cell's
 own release lands are that document's; the model they realize is this one's.
 

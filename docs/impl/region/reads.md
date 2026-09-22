@@ -108,8 +108,9 @@ for the admission, `reassign_gate_counts_a_mixed_branch_init` for the mixed
 branch whose allocating arm keeps its regions,
 `reassign_gate_counts_a_begin_wrapped_read` for the statement wrapper,
 `reassign_gate_declines_a_branch_reading_no_container` for the decline,
-`reassign_gate_refuses_returned_value` for the phi that must stay uncounted, and
-`tests/elle/region-cell-alias-branch.lisp` for the measured shape.
+`reassign_gate_counts_a_phi_carried_returned_value` for the phi that must stay
+uncounted, and `tests/elle/region-cell-alias-branch.lisp` for the measured
+shape.
 
 **Every binder form that records the read must emit the retain.** The analysis
 side is one function reached from both binder arms of the walk, and what it

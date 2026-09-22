@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-22
 //! `decref_point` population: the ordered passes that decide, for each region,
 //! the program point its release is emitted at.
 //!
@@ -28,8 +28,8 @@ mod cells;
 use branch::pin_branch_arm_releases;
 use breakwindow::pin_break_skipped_releases;
 use cells::{
-    collect_iter_scopes, innermost_covering, pin_cell_release_after_routed_releases,
-    post_loop_placement,
+    collect_branch_arm_sets, collect_iter_scopes, pin_cell_release_after_routed_releases,
+    place_content_drops, post_loop_placement, CellPlacement,
 };
 
 /// Populate and extend `region_data[*].decref_point` across the several passes
@@ -104,72 +104,38 @@ pub(super) fn populate_decref_points(
     let binding_uses = &du.uses;
 
     // Post-order subtree intervals `[low, order]`, so containment of a HirId is
-    // an interval test, and every iterative scope's. Computed once for the four
-    // cell passes that read them — the fn-local container's covering node and its
-    // demise hoist, the env cell's once-per-activation hoist, and the clamp that
-    // follows the value releases routed through an env cell — and skipped
-    // entirely when the unit has no cell of either kind.
+    // an interval test, with every iterative scope's and every branch's arm
+    // sets. Computed once for the cell passes that read them — the fn-local
+    // container's covering node and its demise hoist, the env cell's
+    // once-per-activation hoist, and the clamp that follows the value releases
+    // routed through an env cell — and skipped entirely when the unit has no
+    // cell of either kind.
     let mut subtree_low: HashMap<HirId, u32> = HashMap::new();
     let mut iter_scopes: Vec<(HirId, u32, u32)> = Vec::new();
+    let mut branches: Vec<super::super::arms::ArmSet> = Vec::new();
     if !info.cell_containers.is_empty() || !info.cell_release_regions.is_empty() {
         subtree_low = compute_subtree_low(hir, order);
         collect_iter_scopes(hir, order, &subtree_low, &mut iter_scopes);
-    }
-
-    // ── The fn-local 1-slot container's content drop ──────────────────────
-    // The cell's own reference to its current content dies at its last access —
-    // the latest of its reads and of the node COVERING its writes — with one
-    // hoist (docs/impl/region/bindings.md § "Where the content drop lands").
-    //
-    // A single write is that covering node itself. Several are not: a cell
-    // reached from mutually exclusive arms has its latest write inside ONE arm,
-    // and a drop there runs on that path alone, leaving every other arm's value
-    // held by the cell and released nowhere. The writes' innermost covering node
-    // — their lowest common ancestor — is the nearest point after all of them
-    // that every storing path reaches.
-    //
-    // The hoist: a cell CARRIED ACROSS a loop is re-pointed every iteration, so
-    // a drop inside the body would free the content the next iteration reads.
-    // Such a cell is a loop PARAMETER, i.e. its scope node is the loop itself, so
-    // hoisting to that node lands the one drop after the loop — where the lowerer
-    // emits the loop's own releases. A cell bound INSIDE a loop body has a body
-    // scope node instead, so it is not hoisted and drops once per iteration,
-    // matching its per-iteration mint. And a loop's parameters stay readable past
-    // the loop (the `(while … (assign acc …)) acc` idiom), which is why the hoist
-    // is a max and not a move.
-    if !info.cell_containers.is_empty() {
-        let loop_ids: rustc_hash::FxHashSet<HirId> =
-            iter_scopes.iter().map(|&(id, _, _)| id).collect();
-        // Each scope node by the region it introduces, so a binding's scope node
-        // is one lookup through `binding_region`.
-        let scope_of_region: HashMap<Region, HirId> =
-            info.scope_region.iter().map(|(&id, &r)| (r, id)).collect();
-        let carried_loop: HashMap<Binding, HirId> = info
-            .cell_containers
-            .keys()
-            .filter_map(|&b| {
-                let scope = *info.binding_region.get(&b)?;
-                let node = *scope_of_region.get(&scope)?;
-                loop_ids.contains(&node).then_some((b, node))
-            })
-            .collect();
-        for (b, c) in info.cell_containers.iter_mut() {
-            let store_ords: Vec<u32> = c.stores.sites().map(ord).collect();
-            let covering = innermost_covering(hir, order, &subtree_low, &store_ords);
-            let latest = du
-                .uses
-                .get(b)
-                .into_iter()
-                .flat_map(|v| v.iter())
-                .map(|use_id| last_use.get(use_id).copied().unwrap_or(*use_id))
-                .chain(covering)
-                .chain(carried_loop.get(b).copied())
-                .max_by_key(|id| ord(*id));
-            if let Some(lu) = latest {
-                c.demise = lu;
-            }
+        if !info.cell_containers.is_empty() {
+            collect_branch_arm_sets(hir, order, &subtree_low, &mut branches);
         }
     }
+
+    // Where each fn-local 1-slot container's content drop lands
+    // (docs/impl/region/bindings.md § "Where the content drop lands").
+    place_content_drops(
+        info,
+        &CellPlacement {
+            hir,
+            du,
+            order,
+            last_use,
+            subtree_low: &subtree_low,
+            iter_scopes: &iter_scopes,
+            branches: &branches,
+            binder_init_sites,
+        },
+    );
 
     // Snapshot both cell views before the passes below start mutating
     // `region_data`: the value regions to hold back from the binding chain, and

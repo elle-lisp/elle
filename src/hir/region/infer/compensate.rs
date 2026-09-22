@@ -1,3 +1,4 @@
+// audited: 2026-09-22
 //! Branch-compensation decref placement: free a region on the arms where it dies.
 //!
 //! The region solver gives every region ONE `decref_point` — the textually-last
@@ -22,42 +23,22 @@
 //!    passes the stored value to a different store intrinsic in each arm.
 //!
 //! A `tail` release of a VALUE is admitted only where a retain on the SAME node
-//! funds it, so the per-arm decref provably cannot drop a live value to zero (an env
-//! cell's box needs no such retain — see below). Three such retains:
-//!  - the **stored value** — a `put`/`push`/`add` funnel raises the value's RC, so
-//!    releasing the wrapper's own reference to it leaves the container's reference
-//!    live (`funnel_store_sites`);
-//!  - the **`-mut` container** — a mutable-container funnel returns arg0 in place,
-//!    so the wrapper's mutable arm hands the container back pass-through and never
-//!    releases the owned-param reference it holds. The funnel's `pass_through_retain`
-//!    raised the RETURNED value's RC, so releasing that stranded owned-param
-//!    reference leaves the live returned container ≥ 1 (`funnel_container_sites`).
-//!    Freeing the container promptly cascades its stored heap members through the
-//!    outgoing-edge table, so one per-arm release reclaims the whole subtree.
-//!  - the **return mint** — at a `Return` node `lower_return` raises the returned
-//!    region's RC for the caller, before the node's own releases, so a per-arm decref
-//!    keyed there drops the callee's reference and leaves the caller's. This is the
-//!    base case of a walk (`(if (= i 0) xs (go … xs))`), whose returning arm loses
-//!    the `decref_point` max to the recursive arm's later use and is otherwise left
-//!    with a mint and no release at all.
+//! funds it, so the per-arm decref provably cannot drop a live value to zero; an
+//! env cell's box needs no such retain. Which retains count is [`admit`], and
+//! what each region's premises are is [`premises`].
 //!
 //! Soundness rests on structural facts about region `r` and a branch `C` one of
 //! whose arms holds `r`'s `decref_point`:
 //!  - **the leak is real and in-arm**: `r`'s `decref_point` is inside an arm of
 //!    `C`, so its last use is within `C` (nothing uses `r` after `C`);
-//!  - **live-in**: every allocation site of `r` (its `alloc_region` HirIds and
-//!    holder-binding def sites) is OUTSIDE `C`'s subtree, so `r` is allocated
-//!    before `C` and enters every arm live with RC ≥ 1;
+//!  - **live-in**: every anchor of `r` (its `alloc_region` HirIds and its route
+//!    binder's def site) is OUTSIDE `C`'s subtree, so `r` is allocated before `C`
+//!    and enters every arm live with RC ≥ 1;
 //!  - **loop-invariant guard**: no `While`/`Loop` encloses `C` but not `r`'s
 //!    allocation — otherwise `r` is allocated once outside the loop and a
 //!    per-iteration arm free would reclaim it mid-loop (a use-after-free, the same
 //!    hazard the `Var` iter-scope extension in `liveness/lastuse.rs` guards). When
 //!    the alloc IS inside the loop with `C`, the per-iteration free is correct.
-//!
-//! Regions whose release is owned by another mechanism are excluded, since
-//! compensating would double-free: merge children (the root's single decref frees
-//! them), co-owned-group members, mutated-slot 1-slot containers, and the
-//! already-`suppressed_decref_regions`.
 //!
 //! An **env cell** — a `cell_release_regions` member — takes BOTH routes, and every
 //! refusal that would decline one is a claim about the *value* its holder binding
@@ -80,22 +61,6 @@
 //! holder binding is captured by construction, so the capture taint reaches it, and
 //! its release is a `DecrefRegion` by static slot rather than a box load.
 //!
-//! The **return frontier** is an exclusion of a different kind, and it is
-//! *per-path*: a returned region is the caller's to free only on the paths that
-//! actually hand it over (docs/impl/region/mechanism.md § "The return frontier is
-//! per-path"). So a return-escaping region is admitted here on exactly the arms
-//! where no hand-over happened, or where the hand-over's own mint funds the release:
-//!  - **head**, unconditionally — the arm has no use of the region at all, so no mint
-//!    fires on this path, the caller receives nothing, and the callee's reference is
-//!    the only one in existence. Otherwise the whole region — and every member its
-//!    free cascade would reclaim — is held to fiber teardown;
-//!  - **tail**, through the return-mint guard above, which is the hand-over site
-//!    itself. Any other `tail` guard keeps the frontier exclusion: a store site's
-//!    retain says nothing about whether this arm also returns the value.
-//!  - the `-mut` funnel **container** is the one non-return retain admitted past the
-//!    frontier: it is handed back pass-through yet holds a *distinct* stranded
-//!    owned-param reference no return covers (`mut_container_regions`).
-//!
 //! Both routes read the **arm structure**, never the branch's arity or kind: an
 //! `If`'s two arms and a `Match`'s N arms are alike mutually exclusive, and at most
 //! one body runs per execution. Every premise above is stated over one arm and its
@@ -108,20 +73,6 @@
 //! partition the paths — the compensating side of level *k* is disjoint from every
 //! other level's — so a path takes one compensating release or the region's own
 //! `decref_point`, never both.
-//!
-//! The `tail` route's same-node retain requirement is **not** a redundant belt on
-//! the placement argument, and must not be relaxed into "any arm-last-use node".
-//! Placement symmetry says only that the release lands after this arm's last *named*
-//! use; it does not say the callee's reference is the only one in existence there.
-//! An arm that USES the region can have handed out a reference the solver does not
-//! name — an uncounted borrow held by a suspended frame's activation region map is
-//! the reachable one — and a release that reaches zero then frees a region a parked
-//! fiber still resolves through its slot (the generation stamp detonates it at the
-//! resume, `docs/impl/region/generations.md` § "Uncounted-borrow check"). The retain
-//! on the node is what makes the per-arm decref provably non-zeroing, which is why
-//! a used sibling arm with no such retain keeps the baseline. The dead sibling arm
-//! needs no retain precisely because it creates no reference at all, and the env
-//! cell below needs none because its box's holders are known outright.
 //!
 //! This pass sees only the regions the **branch-arm release window** declined
 //! (`analyze/decref.rs`, docs/impl/region/mechanism.md § "A release inside one arm
@@ -136,6 +87,14 @@
 use super::arms::ArmSet;
 use super::*;
 use crate::hir::region::Region;
+
+// What the arm loop below reads, each its own subject: the per-region premises
+// it tests, and what funds a `tail` release at the node it would be keyed to.
+mod admit;
+mod premises;
+
+use admit::TailFunding;
+use premises::Premises;
 
 /// The two per-arm compensation maps. `head[arm_body]` releases at that arm's head
 /// (dead sibling arm); `tail[node]` releases after that node — the region's last
@@ -205,6 +164,7 @@ pub(super) fn compute_branch_compensation(
     order: &HashMap<HirId, u32>,
     last_use: &HashMap<HirId, HirId>,
     return_sites: &[(HirId, Vec<Region>)],
+    binder_init_sites: &HashMap<crate::hir::binding::Binding, Option<HirId>>,
 ) -> BranchComp {
     // The per-binding source regions are the solver's `binding_source_regions`
     // (== `inference_binding_regions`, already mirrored onto `info` before this
@@ -224,211 +184,21 @@ pub(super) fn compute_branch_compensation(
         };
     }
 
-    // Region → its use HirIds and allocation-anchor HirIds, unioned over every
-    // holder binding (so an aliased region sees all uses) plus its `alloc_region`
-    // sites. A region with no recorded use cannot be analyzed (we don't know where
-    // it dies), so it is skipped — the conservative, leak-preserving default.
-    let mut region_uses: HashMap<Region, Vec<HirId>> = HashMap::new();
-    let mut region_anchors: HashMap<Region, Vec<HirId>> = HashMap::new();
-    // How many distinct holder bindings name each region. The `tail` value-route
-    // releases through `region_to_slot[r]` — ONE slot. A region named by several
-    // bindings (an alias) has several slots but one `region_to_slot` entry, so the
-    // per-arm load could target the wrong slot; restrict `tail` to single-holder
-    // regions where the slot is unambiguous.
-    let mut holder_count: HashMap<Region, u32> = HashMap::new();
-    // A region held by a MUTATED (reassigned) or CAPTURED binding cannot be freed
-    // by a local-slot value-route: a reassigned slot is repointed over time (the
-    // value-route loads whatever it holds NOW, freeing a live later value — the
-    // "mutated slot is not a release route" UAF, region-mutable-reassign-param),
-    // and a captured value is held cross-region by the closure env (freeing it via
-    // the local slot dangles the env reference). Their release is owned by the
-    // store / capture-cell path, never this one. The capture fact is the region
-    // forest's own reachability question, read from the region capture-graph
-    // (`super::escape::captured_bindings`), never the lexical proxy `is_captured`
-    // the solver is locked out of; mutation stays a direct structural read.
-    //
-    // Both taints are claims about a release routed through the holder's SLOT, so
-    // neither reaches an env cell, whose release names the cell BOX instead — a box
-    // `populate_env` mints once per activation, that an `assign` never repoints (it
-    // writes the cell's content), and that a capturer holds by the funnel's counted
-    // `closure ⊇ cell` edge rather than through this frame's slot. Read per region,
-    // exactly as the frame-exit admission reads the same two facts (module doc;
-    // docs/impl/region/mechanism.md § "A compensating release of an env cell names
-    // the box, not the holder's slot").
-    let captured = super::escape::captured_bindings(hir);
-    let mut tainted: std::collections::HashSet<Region> = std::collections::HashSet::new();
-    for (b, regions) in binding_regions {
-        let uses = du.uses.get(b);
-        let def = du.def_site.get(b);
-        let bi = arena.get(*b);
-        let unsafe_holder = bi.is_mutated || captured.contains(b);
-        for &r in regions {
-            *holder_count.entry(r).or_default() += 1;
-            if let Some(us) = uses {
-                region_uses.entry(r).or_default().extend(us.iter().copied());
-            }
-            if let Some(&d) = def {
-                region_anchors.entry(r).or_default().push(d);
-            }
-            if unsafe_holder && !info.cell_release_regions.contains(&r) {
-                tainted.insert(r);
-            }
-        }
-    }
-    for (&alloc_id, &r) in &info.alloc_region {
-        region_anchors.entry(r).or_default().push(alloc_id);
-    }
-    // Region → the uncounted opcode reads (`%get`/`%first`/`%rest`) that borrow out
-    // of it. Such a read hands back a value living inside the container and raises
-    // no count on it, so the container's release must post-date the READER, not the
-    // read (`analyze/decref.rs`, `uncounted_read_sites`). The global `decref_point`
-    // already carries that extension; the env-cell `tail` route below carries it per
-    // arm, since that route has no same-node retain to prove the borrow counted.
-    let mut region_reads: HashMap<Region, Vec<HirId>> = HashMap::new();
-    for (&read_id, containers) in &info.uncounted_read_sites {
-        for &r in containers {
-            region_reads.entry(r).or_default().push(read_id);
-        }
-    }
-
-    // Regions whose compiler decref is suppressed or owned by another release
-    // mechanism — compensating them would double-free. The escaping (returned)
-    // regions are the caller's to free; projected from escape's authoritative
-    // return verdict (`super::escape`), not a solver-local tail set.
-    let tail_regions = super::escape::return_frontier_regions(
-        escape,
-        &info.alloc_region,
-        &info.binding_source_regions,
-    );
-
-    // The CONTAINER compensation input: a `-mut` retaining store returns its
-    // container (arg0) pass-through, so a dispatch wrapper's mutable arm hands the
-    // container back and never releases the owned-param reference it holds — a leak
-    // on the container's own region (and, by the outgoing-edge cascade, every heap
-    // member stored into it). The funnel's `pass_through_retain` raised the RETURNED
-    // value's RC, so a per-arm decref of the container here releases only that
-    // stranded owned-param reference and can never drop the live returned container
-    // to zero — the exact dual of the stored-value guard below. Because the container
-    // is return-escaping, the ordinary return-frontier exclusion would suppress this
-    // compensation, so the container is admitted through that gate
-    // (`mut_container_regions`) while every other exclusion still applies.
-    let mut container_at_site: HashMap<HirId, std::collections::HashSet<Region>> = HashMap::new();
-    let mut mut_container_regions: std::collections::HashSet<Region> =
-        std::collections::HashSet::new();
-    for (&site, containers) in &info.funnel_container_sites {
-        container_at_site
-            .entry(site)
-            .or_default()
-            .extend(containers.iter().copied());
-        mut_container_regions.extend(containers.iter().copied());
-    }
-
-    let excluded = |r: Region| -> bool {
-        info.suppressed_decref_regions.contains(&r)
-            || info.owned_group_members.contains(&r)
-            || info.mutated_binding_value_regions.contains(&r)
-            || info.merged_root(r) != r
-            || tainted.contains(&r)
-    };
-
-    // The return-frontier gate, consulted by `tail_admitted` below and by nothing
-    // else — `head` compensation is admitted unconditionally, since an arm with no
-    // use of `r` cannot have handed it to a caller (module doc; mechanism.md § "The
-    // return frontier is per-path"). The `-mut` funnel container is exempt: it is
-    // handed back pass-through yet holds a DISTINCT stranded owned-param reference no
-    // return covers.
-    let tail_excluded =
-        |r: Region| -> bool { tail_regions.contains(&r) && !mut_container_regions.contains(&r) };
-
-    // A `tail` per-arm decref is sound only at a node whose own instructions raise
-    // the value's RC on the same path — for a STORE, the stored value of
-    // `put`/`set`/`push`. The store raises the value's RC (compile-time `IncrefRegion`,
-    // unchecked: `cross_region_refs` source = value; or the runtime mutable-store
-    // funnel, checked: `funnel_store_sites`), so the live container reference keeps
-    // RC ≥ 1 AFTER the per-arm decref: it releases only the value's OWN owning
-    // reference (the leak — the temp/arg ref the single `decref_point` frees on just
-    // one arm) and can NEVER drop a live value to zero. A node that merely READS the
-    // value (a closure CALLED there, a pass-through whose result co-locates in the
-    // same region) has no such guard and could over-free, so it keeps the
-    // conservative single-`decref_point` baseline. Site-keyed (not mere membership):
-    // the store and the decref must be the same node, on one mutually-exclusive arm.
-    let mut store_value_at_site: HashMap<HirId, std::collections::HashSet<Region>> = HashMap::new();
-    for &(site, src, _) in &info.cross_region_refs {
-        store_value_at_site.entry(site).or_default().insert(src);
-    }
-    for (&site, vals) in &info.funnel_store_sites {
-        store_value_at_site
-            .entry(site)
-            .or_default()
-            .extend(vals.iter().copied());
-    }
-    // The byte-copy dual: a `%string-push`/`%bytes-push` funnel copies the value's
-    // bytes and touches neither its incref nor its decref, so the wrapper's stranded
-    // `val` per-arm release is the value's TRUE last use — sound at the same tail
-    // sites as a retaining store's (and `%del`'s in-body decref is excluded upstream,
-    // so no double-free reaches here).
-    for (&site, vals) in &info.funnel_bytecopy_value_sites {
-        store_value_at_site
-            .entry(site)
-            .or_default()
-            .extend(vals.iter().copied());
-    }
-    // The return dual, and the one guard that admits a RETURN-ESCAPING region to the
-    // `tail` route: at a `Return` node `lower_return` mints the caller's owning
-    // reference to the returned value's region, and the lowerer emits that mint
-    // BEFORE the node's releases. So a per-arm decref keyed here releases the
-    // callee's own reference and leaves the caller's — the same "the retain on this
-    // node funds this release" argument the stores above make. This is the base case
-    // of a walk (`(if (= i 0) xs (go … xs))`): the recursive arm's later use wins the
-    // `decref_point` max, so without this the returning arm carries a mint and no
-    // release at all (docs/impl/region/mechanism.md § "The return frontier is
-    // per-path").
-    let mut return_mint_at_site: HashMap<HirId, std::collections::HashSet<Region>> = HashMap::new();
-    for (site, regions) in return_sites {
-        return_mint_at_site
-            .entry(*site)
-            .or_default()
-            .extend(regions.iter().copied());
-    }
-
-    // Is a `tail` release of `r` at `node` funded by a retain on that same node?
-    // The return mint doubles as the per-path return-frontier admission — it IS the
-    // hand-over — while the store and container retains say nothing about whether
-    // this arm also returns the value, so they keep the frontier exclusion.
-    //
-    // The container case: `node` is a monomorphic funnel whose container (arg0) is
-    // `r`. A `-mut` funnel returns the container pass-through (its
-    // `pass_through_retain` keeps the returned value's RC ≥ 1 after the per-arm
-    // release of the stranded owned-param reference); an immutable funnel returns a
-    // fresh copy, so the container is genuinely dead in the arm.
-    let tail_admitted = |r: Region, node: HirId| -> bool {
-        if return_mint_at_site
-            .get(&node)
-            .is_some_and(|s| s.contains(&r))
-        {
-            return true;
-        }
-        if tail_excluded(r) {
-            return false;
-        }
-        store_value_at_site
-            .get(&node)
-            .is_some_and(|s| s.contains(&r))
-            || container_at_site.get(&node).is_some_and(|s| s.contains(&r))
-    };
+    let p = Premises::collect(hir, info, du, arena, binding_regions, binder_init_sites);
+    let funding = TailFunding::collect(info, escape, return_sites);
 
     let mut head: HashMap<HirId, Vec<Region>> = HashMap::new();
     let mut tail: HashMap<HirId, Vec<Region>> = HashMap::new();
     let mut container_release_sites: std::collections::HashSet<HirId> =
         std::collections::HashSet::new();
-    for (&r, uses) in &region_uses {
-        if uses.is_empty() || excluded(r) {
+    for (&r, uses) in &p.uses {
+        if uses.is_empty() || p.excluded(info, r) {
             continue;
         }
         let Some(d) = info.region_data.get(&r).map(|rd| ord(rd.decref_point)) else {
             continue;
         };
-        let anchors = match region_anchors.get(&r) {
+        let anchors = match p.anchors.get(&r) {
             Some(a) => a,
             None => continue,
         };
@@ -446,9 +216,17 @@ pub(super) fn compute_branch_compensation(
                 continue;
             }
             // loop-invariant guard: no loop encloses C but not r's allocation.
+            // Asked of the ALLOCATION sites where the region has any — a holder
+            // defined outside the loop (a cell the loop stores into) says
+            // nothing about where the value is born, and the per-iteration
+            // release is correct exactly when every birth is per-iteration. A
+            // region with no recorded allocation (an env cell's phantom, a
+            // parameter's content) falls back to the anchor set, which is then
+            // the only birth reading there is.
+            let allocs = p.allocs.get(&r).unwrap_or(anchors);
             let crosses_loop = loops.iter().any(|l| {
                 let c_in = l.lo <= br.node_lo && br.node_hi <= l.hi;
-                c_in && anchors.iter().any(|&a| ord(a) < l.lo || ord(a) > l.hi)
+                c_in && allocs.iter().any(|&s| ord(s) < l.lo || ord(s) > l.hi)
             });
             if crosses_loop {
                 continue;
@@ -478,7 +256,7 @@ pub(super) fn compute_branch_compensation(
                         .copied()
                         .filter(|&u| in_arm(u))
                         .chain(
-                            region_reads
+                            p.reads
                                 .get(&r)
                                 .into_iter()
                                 .flatten()
@@ -490,7 +268,7 @@ pub(super) fn compute_branch_compensation(
                     if candidates.is_empty() {
                         // Dead sibling arm: the head release, as below.
                         head.entry(arm_id).or_default().push(r);
-                    } else if holder_count.get(&r).copied().unwrap_or(0) == 1
+                    } else if p.single_holder(r)
                         && candidates.iter().all(|&n| in_arm(n) && ord(n) != d)
                     {
                         let node = candidates
@@ -544,8 +322,8 @@ pub(super) fn compute_branch_compensation(
                     // own holders rather than off a retain (module doc).
                     Some(node)
                         if info.call_result_regions.contains(&r)
-                            && holder_count.get(&r).copied().unwrap_or(0) == 1
-                            && tail_admitted(r, node) =>
+                            && p.single_holder(r)
+                            && funding.admits(r, node) =>
                     {
                         // Record the site for the lowerer's ReturnValue suppression
                         // ONLY when the funnel is a `-mut` PASS-THROUGH (the result IS
@@ -556,7 +334,7 @@ pub(super) fn compute_branch_compensation(
                         // into a reassigned slot. Pinned by `set-add`/`struct-put`/
                         // `del-wrapper`/`native-tail-put-*` and the container-compensation
                         // guardfree fixture.
-                        if container_at_site.get(&node).is_some_and(|s| s.contains(&r))
+                        if funding.container_at(r, node)
                             && info
                                 .funnel_passthrough_sites
                                 .get(&node)

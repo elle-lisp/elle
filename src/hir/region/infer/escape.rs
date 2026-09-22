@@ -1,3 +1,4 @@
+// audited: 2026-09-21
 //! Solver-side projection of escape's frontier verdict onto regions.
 //!
 //! Escape ([`crate::hir::EscapeInfo`]) is the authority for *whether* a value
@@ -261,7 +262,7 @@ pub(super) fn frame_held_regions(
 /// records a PARAMETER's slot for the call-result regions its value may name and
 /// for no others. So a binding absent from the mirror is read by what introduced it
 /// rather than by a blanket verdict either way.
-enum Route {
+pub(super) enum Route {
     /// One binder, so one route: the region that binder's init allocated. `None`
     /// where the init allocates nothing — an init that merely names another binding
     /// is absent from `alloc_region`, exactly as it records no slot in the lowerer.
@@ -282,7 +283,7 @@ enum Route {
 
 /// Read [`Route`] for one binding. `regions` is the binding's source-region set,
 /// which only the prologue's answer is stated over.
-fn binder_route(
+pub(super) fn binder_route(
     b: Binding,
     arena: &crate::hir::arena::BindingArena,
     info: &RegionInfo,
@@ -373,7 +374,7 @@ pub(super) fn value_routed_regions(
 ///
 /// An env cell is exempt throughout: its release names the BOX at its env index,
 /// which `populate_env` mints once per activation and an `assign` never repoints.
-fn mutated_route_regions(
+pub(super) fn mutated_route_regions(
     arena: &crate::hir::arena::BindingArena,
     info: &RegionInfo,
     binding_regions: &std::collections::HashMap<Binding, Vec<Region>>,

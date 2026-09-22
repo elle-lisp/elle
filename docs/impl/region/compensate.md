@@ -1,10 +1,40 @@
 # Per-arm compensation
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-21 -->
 
 The releases a branch adds one per arm, each funded by a retain on its own node.
 The head route takes an arm that never names the region, the tail route one that
 does.
+
+## The premises are read per route, never per holder
+
+A value-routed release loads ONE slot — the allocating binder's
+([mechanism.md](mechanism.md) § "A region's release route belongs to ONE
+binding") — so every refusal and premise about that release is a claim about
+that binder, and asking it of every holder refuses the ordinary shapes:
+
+- The **mutated taint** poisons the regions `mutated_route_regions` names
+  ([the window](window.md) reads the same set), never every region a
+  reassigned binding holds. A 1-slot container that merely stores the value
+  cannot make the release mistarget — the release never loads its slot.
+- The **live-in anchors** are the region's allocation sites plus the route
+  binder's def, where the slot is written. An alias's or a functionalization
+  version's def says nothing about where the value was born; anchoring it read
+  a value stored inside an arm as born there, and refused the sibling-arm
+  release. An env cell keeps its holder's def as an anchor — its release names
+  the box at the holder's env index, minted where the holder is bound.
+- The **loop-invariant guard** asks the allocation sites alone: a cell the
+  loop stores into is defined outside it, and reading its def as a birth
+  refused the per-iteration release exactly where it is correct. A region with
+  no recorded allocation falls back to its anchors, the only birth reading
+  there is.
+
+The shape that demanded all three at once is the conditional accumulate — a
+loop that names each element, then stores it into an outer 1-slot container in
+one arm of a `when` — whose element release sat in the storing arm and leaked
+on every other path (`tests/elle/region-cell-aliased-store.lisp`;
+[bindings.md](bindings.md) § "An aliased stored value takes the counted
+store").
 
 ## The return frontier is per-path
 
