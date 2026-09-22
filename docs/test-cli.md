@@ -18,8 +18,8 @@ How a run executes is [test-runner](test-runner.md); where it is stored is
 > per-form analysis columns (`caps`, `touches`, `signal`), the on-disk CAS for
 > stdout/stderr, run honesty (a killed run reads `DID NOT COMPLETE`), `:gated`
 > skips, child-process isolation with the measurement channel it carries, and
-> the `--query`/`--summary`/`--reset`/`--promote`/`-e`/`--timeout`/
-> `--corpus`/`--db`/`--isolate` flags. Still design (not built): semantic selection
+> the `--query`/`--summary`/`--reset`/`--promote`/`-e`/`--timeout`/`--wide`/
+> `--wide-timeout`/`--budget`/`--corpus`/`--db`/`--isolate` flags. Still design (not built): semantic selection
 > (`--touches`/`--caps`/`--impacted-by`/`--changed`/`--rerun-failed`/`-k`),
 > `--rust`/`--watch`/`--prune`/`-N`/`--format`, the per-run RSS/CPU capture,
 > `--dump`/`--trace` asset capture, `changed_file` population, and the
@@ -123,6 +123,9 @@ elle test [paths...]            # default: tests/elle, ALL tiers, write DB
   --db PATH                     # session DB path, overriding the state directory
   --isolate 'FLAGS'             # run each path as its own process: elle FLAGS PATH
   --timeout MS                  # per-form wall-clock budget (default 60000)
+  --wide PATTERN                # a path substring whose forms take --wide-timeout (repeats)
+  --wide-timeout MS             # the budget a wide path's forms get (default: --timeout)
+  --budget                      # print each named path's budget in ms, then exit; no run
   --prune POLICY                # explicit history pruning (e.g. --prune adhoc)
   -N                            # stop after N failures (-1 = fail-fast); default: run to completion
 ```
@@ -135,6 +138,28 @@ Linux box (`elle test --no-uring tests/elle/process-io.lisp`).
 `--boot-image=` boots the runner from an image, so every corpus file is
 compiled against a hydrated stdlib rather than a freshly compiled one
 ([boot](impl/image/boot.md)).
+
+### The budget follows the file
+
+`--timeout MS` is one number for every form in a run, and the corpus does not
+hold one kind of file. The `h2-bidi-`, `h2-load-`, `h2-stream-` and
+`h2-timeout-` families drive hundreds of requests or streams over one session,
+and each file carries its own `deadline`. That deadline is what says which
+request stalled and how long it waited, and it prints only if the runner's
+budget outlasts it. A file killed at the narrower budget reports `timeout` and
+nothing else, which reads as a slow runner rather than as the stall it found.
+
+So the budget follows the path, not the run. `--wide PATTERN` names a path
+substring, and a path holding any named substring gives its forms
+`--wide-timeout MS` instead of `--timeout MS`. The [`Makefile`](../Makefile)
+already writes that family list down for the one-process-per-file passes; it
+names the families once and hands the same list to both budgets, so a family
+added there widens in both.
+
+`--budget` answers rather than runs. It prints the budget each named path would
+get, in milliseconds, one path per line, and exits zero without touching the
+session store. [budget.rs](../tests/integration/budget.rs) reads the runner's
+own selector through it rather than restating the rule in Rust.
 
 ### Execution and completion
 

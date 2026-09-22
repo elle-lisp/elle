@@ -372,9 +372,9 @@
                              (form-profile src file))
             h (get row :hash)
             sink (measurement-sink run-id h)
-            cap (run-child (child-argv flags file) test-timeout-ms
-                           (measurement-env sink))
-            c (classify-child cap test-timeout-ms)]
+            budget (form-budget)
+            cap (run-child (child-argv flags file) budget (measurement-env sink))
+            c (classify-child cap budget)]
         # The label is scavenged from the source, and a file the child will
         # reject as unreadable has none to give — the child's own status is
         # the verdict either way, so a failed scan costs the label and nothing

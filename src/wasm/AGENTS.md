@@ -1,6 +1,6 @@
 # WASM Backend
 
-<!-- audited: 2026-09-20 -->
+<!-- audited: 2026-09-21 -->
 
 LIR → WASM emission via `wasm-encoder`, execution via Wasmtime.
 
@@ -90,6 +90,7 @@ WASM closure host-side via `handle_fiber_resume` (in resume.rs).
 | `host/io.rs` | Top-level I/O with no scheduler to take it: the backend a request reaches, and the completion it reads its answer out of. |
 | `linker.rs` | Host function registration (`create_linker`); `linker/` holds the registrations and the data-op dispatch. |
 | `resume.rs` | Fiber resume chain (`drive_resume_chain`, `handle_fiber_resume`). |
+| `resume/route.rs` | What a fiber's own mask makes of its body's outcome: caught, parked, or propagated. |
 | `store.rs` | Engine/Store creation, `call_wasm_closure`, `resume_wasm_closure`, `run_module`. |
 | `lazy.rs` | `WasmTier`: per-closure WASM compilation and tiered dispatch. |
 | `regalloc.rs` | Register allocation for WASM locals. |
@@ -155,6 +156,12 @@ the parent's continuation frame with `redrive_child`; `drive_resume_chain`
 honours that marker (via `redrive_child`) before resuming the frame. This is
 what makes `protect`/`defer`/`with` around a suspending body work. Pinned by
 tests/elle/wasm-protect-suspend.lisp.
+
+**The capability gate.** Every host path that reaches a native — `rt_call`,
+`rt_prepare_tail_call`, the `call_primitive` import, and the tiered linker's own
+`rt_call` — calls `ElleHost::capability_denial` before it runs the primitive, so
+this tier denies a withheld primitive exactly as the interpreter and the JIT do.
+See [wasm.md](../../docs/impl/wasm.md).
 
 **Signal handling in `rt_call`.** `rt_call` intercepts three fiber signals from a
 native call's return: `SIG_RESUME` (`fiber/resume` → `handle_fiber_resume`),

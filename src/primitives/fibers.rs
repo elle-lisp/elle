@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-21
 //! Fiber lifecycle primitives.
 //!
 //! docs/impl/region/park.md
@@ -25,8 +25,8 @@ mod fuel;
 mod resolve;
 
 use fuel::*;
-pub(crate) use resolve::resolve_signal_bits;
 use resolve::status_keyword;
+pub(crate) use resolve::{emit_required_bits, resolve_signal_bits};
 
 /// (fiber/new fn mask [:deny bits]) → fiber
 ///
@@ -283,6 +283,13 @@ primitive! {
         // (`handle_primitive_signal`), so no clique. The result is what the
         // resumer delivers back: unbounded.
         effect: RegionEffect::Delivers { args: &[1] },
+        // A dynamic `(emit bits value)` raises whatever bits its first argument
+        // names, so the requirement rides that argument. `yields_errors` above
+        // is what the declaration alone can promise; the gate reads the real
+        // bits here so a fiber cannot raise a capability it withholds. The
+        // literal `emit` compiles to the `Emit` instruction and never reaches
+        // this gate. See docs/signals/authority.md.
+        bits_from_args: Some(emit_required_bits),
     }
     "fiber/status" => prim_fiber_status {
         signal: Signal::errors(),

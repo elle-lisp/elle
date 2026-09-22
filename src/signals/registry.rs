@@ -1,3 +1,4 @@
+//! audited: 2026-09-21
 //! Signal registry for mapping signal keywords to bit positions.
 //!
 //! The registry maintains a global mapping of signal keywords (`:error`,
@@ -153,6 +154,21 @@ impl SignalRegistry {
     /// Returns `Some(SignalBits)` if the signal is registered, `None` otherwise.
     pub fn to_signal_bits(&self, name: &str) -> Option<SignalBits> {
         self.lookup(name).map(SignalBits::from_bit)
+    }
+
+    /// The bits of the signal a keyword's hash names, or `None` if no registered
+    /// signal has that name.
+    ///
+    /// A keyword Value carries its name's hash, not the name, so this resolves a
+    /// keyword to bits without a symbol table. The registry holds every
+    /// registered name — the built-ins and every user signal `(signal :kw)`
+    /// coined — so it covers a user signal a static table could not. The
+    /// dynamic-`emit` spend gate reads it (docs/signals/authority.md).
+    pub fn bits_for_keyword_hash(&self, hash: u64) -> Option<SignalBits> {
+        self.entries
+            .iter()
+            .find(|e| crate::value::keyword::keyword_hash(&e.name) == hash)
+            .map(|e| SignalBits::from_bit(e.bit_position))
     }
 
     /// Convert signal bits to a Vec of keyword Values, recording each name in

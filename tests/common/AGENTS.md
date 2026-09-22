@@ -10,6 +10,9 @@ Provide canonical eval and setup functions so test files don't need to copy-past
 - Fresh `Runtime` creation with primitives and stdlib
 - Cached `RuntimeCore` reuse for property tests (eliminates per-case bootstrap cost)
 - Proptest configuration respecting `PROPTEST_CASES` env var
+- A scratch directory under the platform temp root, removed on drop
+- Readers of the corpus and of the Makefile, for the tests that check how CI
+  dimensions a run
 
 Does NOT:
 - Run tests (that's the test harness)
@@ -106,7 +109,7 @@ This is safe because:
 
 | File | Content |
 |------|---------|
-| `mod.rs` | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, the Makefile readers (`make_var`, `make_dry_run`), `paint_stack`, and `ScratchDir` |
+| `mod.rs` | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, the Makefile readers (`make_var`, `make_dry_run`, `make_expand`, `makefile`), the corpus readers (`repo_root`, `corpus_files`, `declared_deadline`, `wide_patterns`, `budget_seconds`), `paint_stack`, and `ScratchDir` |
 
 ### Reading the Makefile
 
@@ -115,6 +118,18 @@ itself will use: one variable's expanded value, and the commands a target will
 run. A test about how a CI pass is dimensioned reads through these rather than
 parsing the Makefile, because a parser that resolves variables, `ifdef`s and
 `$(shell …)` is a second `make` that disagrees with the first.
+**`make_expand(name)`** is `make_var` with the failure spelled out, for a test
+that cannot proceed without the value.
+
+### Reading the corpus
+
+**`corpus_files()`**, **`declared_deadline(path)`**, **`wide_patterns()`** and
+**`budget_seconds(budget)`** answer which files the corpus holds, which of them
+declare a deadline of their own, which families the Makefile gives a wider
+budget, and what a `timeout` argument is as a number. Two test files ask those
+questions — one about the per-file passes, one about the runner — and they exist
+to check that the two budgets agree, which a second copy of the readers would
+quietly undermine.
 
 **`paint_stack(pattern, depth)`** fills stack frames with a byte pattern, so a
 determinism test can prove an artifact carries none of what a construction
@@ -123,6 +138,9 @@ temporary held.
 **`ScratchDir::new(tag)`** is a uniquely-named directory under the platform temp
 root, removed on drop — the panic path included. Never write a test file under a
 hardcoded `/tmp`; `tests/integration/scratch.rs` fails the build over it.
+=======
+| `mod.rs` | `eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`, `setup`, `proptest_cases`, `ScratchDir`, `make_var`, `make_expand`, `makefile`, `repo_root`, `corpus_files`, `declared_deadline`, `wide_patterns`, `budget_seconds` |
+>>>>>>> 568f8797e (tests: what budget the runner gives a form, and where it learned it)
 
 ## Invariants
 
