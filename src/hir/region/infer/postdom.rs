@@ -1,10 +1,14 @@
-//! Structural post-dominance for the single-drop lifetime obligation shared by
+// audited: 2026-09-21
+//! Structural position over the scope tree: subtree ancestry, loop enclosure,
+//! and the post-dominance the single-drop lifetime obligation needs.
+//!
+//! The obligation is shared by
 //! the builder-idiom MERGE (`merge.rs` gate 6) and the ownership-forest ADOPT
 //! (`ownership/adopt.rs`). Both route a member's reclamation onto **one** drop
 //! point — the parent/root's `DecrefRegion`, fired at its `decref_point` after
 //! that node's whole subtree executes (post-order). For that single drop to be
 //! sound it must come **after** the member's last use on every path, with no
-//! re-execution of the use afterward (region/adopt.md § "The lifetime obligation
+//! re-execution of the use afterward (docs/impl/region/adopt.md § "The lifetime obligation
 //! the root carries").
 //!
 //! Domination is **structural, never numeric**: a smaller `compute_order` index
@@ -65,8 +69,23 @@ impl<'a> PostDom<'a> {
         PostDom { order, low, ctrl }
     }
 
-    fn ord(&self, id: HirId) -> u32 {
+    /// This node's post-order execution index.
+    pub(super) fn ord(&self, id: HirId) -> u32 {
         self.order.get(&id).copied().unwrap_or(0)
+    }
+
+    /// Is there no `While`/`Loop` enclosing `inner` that does not also enclose
+    /// `outer`? Asked of an ancestor `outer` and a descendant `inner`, this is
+    /// "does `inner` execute once per execution of `outer`": a loop between the
+    /// two re-runs `inner` alone, so the counts diverge. A loop enclosing both is
+    /// immaterial — it re-runs the pair together.
+    pub(super) fn no_loop_between(&self, inner: HirId, outer: HirId) -> bool {
+        let i = self.ord(inner);
+        let o = self.ord(outer);
+        !self
+            .ctrl
+            .iter()
+            .any(|c| c.is_loop && Self::ctrl_contains(c, i) && !Self::ctrl_contains(c, o))
     }
 
     /// Is `inner` inside `outer`'s post-order subtree interval — i.e. is `outer`

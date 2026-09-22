@@ -1,3 +1,4 @@
+// audited: 2026-09-21
 //! Region → holder-binding index: the shared `sole_held` / alias model.
 //!
 //! A *holder* of a region `r` is a user binding whose value may point into `r`
@@ -14,8 +15,9 @@
 //!   aliases nothing a consumer reasons about, so it is excluded universally, at
 //!   construction and in `add` alike. Each consumer layers its own *eligibility*
 //!   predicate on top (the reassign gate additionally requires the binding to be
-//!   read; the merge seed does not), because the genuinely shared core is the index
-//!   and its queries, not the per-consumer filter.
+//!   read and not to be a store's feeder; the merge seed requires neither),
+//!   because the genuinely shared core is the index and its queries, not the
+//!   per-consumer filter.
 //! - **Holders are a set, so a region is counted once per distinct binding.** The
 //!   underlying `binding_source_regions[b]` is duplicate-free by construction —
 //!   every `binding_regions` write in `region::infer::walk{,rest}` either stores a

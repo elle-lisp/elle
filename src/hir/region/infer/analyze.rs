@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-21
 //! The region-inference pipeline: the walk, then every post-pass that decides
 //! where a release lands. The order is the point — each pass reads answers the
 //! ones before it settled.
@@ -114,6 +114,14 @@ pub fn analyze_regions_with(
     let mut du = DefUseBuilder::new();
     du.walk(hir);
 
+    // Explicit structural execution-order index. `decref_point` selection
+    // compares these indices, never `HirId` magnitude (which ANF makes
+    // meaningless — see `compute_order`). Computed here, ahead of the reassign
+    // gate: the gate's feeder question is about where a store sits relative to a
+    // name's scope and reads, which is the same structural order.
+    let order = compute_order(hir);
+    let postdom = super::postdom::PostDom::new(hir, &order);
+
     // ── Mutable-reassign: the cell as a 1-slot container ───────────────────
     // A reassigned mutable binding holds different values over time; no single
     // static program point names "the value's last use", so model the cell as a
@@ -127,12 +135,9 @@ pub fn analyze_regions_with(
         &inference_binding_regions,
         &reassigns,
         &escape_info,
+        &postdom,
     );
 
-    // Explicit structural execution-order index. `decref_point` selection
-    // compares these indices, never `HirId` magnitude (which ANF
-    // makes meaningless — see `compute_order`).
-    let order = compute_order(hir);
     let last_use_info = compute_last_use(hir, &du.uses, &order);
 
     // Escape's answer to the COUNT question, projected onto regions: which regions

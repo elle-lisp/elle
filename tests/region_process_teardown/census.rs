@@ -342,6 +342,39 @@ fn a_run_that_captures_what_a_child_wrote_leaves_no_residue() {
     );
 }
 
+/// A run that gives the scheduler more than one thunk leaves nothing either.
+/// `ev/run` records a completion per entry fiber and, once the work is done,
+/// walks those records looking for an error nobody joined — a walk whose element
+/// it binds a name to and assigns to a mutable it reads afterward.
+///
+/// The counter-factual is the single-thunk call, which every other gate here
+/// already covers by proxy: with the walk's element read as a second holder of
+/// the record collection, `(ev/run (fn [] 1))` still reads zero, because one
+/// entry leaves nothing for the loop to displace. Two entries strand the whole
+/// record collection, and the fibers it points at with it — 103 regions where one
+/// thunk leaves 0, plus 2 more per extra thunk.
+///
+/// Three thunks rather than two, so the residue is priced on the slope as well
+/// as on the zero: a per-entry strand grows with the entry count, and a fixed
+/// one-off would not.
+#[test]
+fn a_run_with_several_thunks_leaves_no_residue() {
+    for src in [
+        "(ev/run (fn [] 1) (fn [] 2))",
+        "(ev/run (fn [] 1) (fn [] 2) (fn [] 3))",
+    ] {
+        assert_eq!(
+            residue_after_teardown(
+                Runtime::with_stdlib_cache(StdlibCache::Off),
+                src,
+                HandOff::Root
+            ),
+            0,
+            "{src}: regions survived teardown",
+        );
+    }
+}
+
 /// A run whose program value is a HEAP value leaves nothing behind when the
 /// host releases that value instead of rooting it
 /// (docs/impl/region/rules.md § "The program value is the host's to release").

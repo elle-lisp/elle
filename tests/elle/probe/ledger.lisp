@@ -173,6 +173,14 @@
 # value by threading the accumulator as a parameter to a self-recursive binding,
 # so the gap between them is exactly what a programmer would have to give up to be
 # leak-free, and a regression of either trips the completeness gate.
+# `walk-feeder-return` and `walk-feeder-discard` are CLOSED controls too
+# (undeclared, like `rest-array-copy`) for the element a WALK stores: the name
+# `each` binds the element to is the store's feeder, so the container model holds
+# and each element's producer reference dies at its own store
+# (docs/impl/region/bindings.md § "A name the store consumes is not a second
+# holder of the value"). They must stay a PAIR — only the returned one reaches the
+# `Return`'s mint, and only the discarded one leaves the content drop with nothing
+# but the cell's scope node to place it.
 (declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell"])
 # F6 has NO declared probe: a cursor walk's rate was the ALIASED INIT, not the
 # cursor. `list-cursor` is now a CLOSED control (undeclared, like
