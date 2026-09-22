@@ -243,11 +243,13 @@ query rather than a log. On a runner you cannot reach, the store has to be
 uploaded or that is exactly what it is not.
 
 So each job that records runs points `ELLE_STATE` at a directory in the
-workspace and uploads that directory as an artifact, pass or fail, under a
-retention window. The state directory is named rather than left to default
-because the default sits under `HOME`, which moves with the runner image; a
-workspace path is one the upload step and the reader both name. A fresh runner
-has no history to accumulate, so nothing is lost by moving it.
+workspace, and uploads the session DB and the CAS beside it as an artifact,
+pass or fail, under a retention window. The scratch directory stays behind: a
+worker's redirect files are disposable, and the two the artifact carries are
+what `--import` reads. The state directory is named rather than left to
+default because the default sits under `HOME`, which moves with the runner
+image. A fresh runner has no history to accumulate, so nothing is lost by
+moving it.
 
 Read one back by merging it into local history:
 

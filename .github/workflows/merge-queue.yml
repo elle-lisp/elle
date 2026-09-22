@@ -18,6 +18,11 @@ jobs:
     env:
       PROPTEST_CASES: 1
       RUST_TEST_THREADS: 2
+      # The corpus records every verdict in a session DB, with each result's
+      # output in the CAS beside it. Naming the state directory here is what
+      # lets the upload below name it too — the default sits under HOME, which
+      # moves with the runner image. See docs/analysis/ci.md.
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -31,6 +36,18 @@ jobs:
         run: cargo build --release -p elle
       - name: Run smoke tests
         run: make smoke
+      # Pass or fail: a red queue run is the one whose store a reader wants,
+      # and the machine goes away with it. `elle test --import` merges the
+      # artifact into local history (docs/test-store.md).
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-merge-queue-tests
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
 
   all-checks:
     name: All Checks Passed
