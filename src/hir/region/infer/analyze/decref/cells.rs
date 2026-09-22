@@ -1,8 +1,9 @@
-// audited: 2026-09-14
-//! Where an env cell's box release lands: at or after every release routed
-//! through that cell, and outside every loop that drew it inward.
+// audited: 2026-09-21
+//! Where a cell's release lands: the env cell's box, and the node a 1-slot
+//! container's content drop must cover.
 //!
 //! docs/impl/region/cells.md
+//! docs/impl/region/bindings.md
 
 use super::super::super::*;
 use crate::hir::region::{PinDecref, ProgramOrder};
@@ -107,6 +108,40 @@ pub(super) fn post_loop_placement(
         .map(|&(id, _, _)| id)
         .filter(|&id| ord(id) > at_ord)
 }
+/// The innermost node whose post-order subtree covers every one of `sites` — the
+/// sites' lowest common ancestor.
+///
+/// A 1-slot container's content drop must run once on every path any store ran
+/// on, and the stores' LCA is the nearest node that qualifies: it contains them
+/// all, so a post-order index puts it after each, and it is a single node rather
+/// than one position per arm (docs/impl/region/bindings.md § "Where the content
+/// drop lands"). One store answers itself, which is the placement a straight-line
+/// cell already had.
+///
+/// The LCA is inside the same lambda the stores are, which the cell's own scope
+/// node is not: a `(var u nil)` at the head of a function body has the `Lambda`
+/// for a scope node, and the lowerer runs that node's releases in the ENCLOSING
+/// function, where the cell has no slot at all.
+pub(super) fn innermost_covering(
+    hir: &Hir,
+    order: &HashMap<HirId, u32>,
+    low: &HashMap<HirId, u32>,
+    sites: &[u32],
+) -> Option<HirId> {
+    let lo = low.get(&hir.id).copied().unwrap_or(0);
+    let hi = order.get(&hir.id).copied().unwrap_or(0);
+    if !sites.iter().all(|&s| lo <= s && s <= hi) {
+        return None;
+    }
+    let mut inner = None;
+    hir.for_each_child(|c| {
+        if inner.is_none() {
+            inner = innermost_covering(c, order, low, sites);
+        }
+    });
+    inner.or(Some(hir.id))
+}
+
 /// Collect every iterative-scope node (`While` or `Loop` — `while` lowers to
 /// either) with its post-order subtree interval `[low, order]`, so containment
 /// of a HirId is an interval test (`low <= ord(x) <= order`; see
