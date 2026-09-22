@@ -1,6 +1,6 @@
 # Sealing
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-22 -->
 
 What an image's body may hold, what the hydrating instance rebuilds for itself,
 and what fails the dump.
@@ -59,8 +59,8 @@ the defining span `meta/origin` reports. Two blueprint-only answers degrade,
 each within the design:
 
 - The LIR the JIT promotes from is absent, so a hydrated closure runs on the
-  interpreter tier until the encoded-LIR side-stream lands
-  ([plan.md](plan.md) owns that milestone).
+  interpreter tier until the LIR foundation lands and the payload answers for
+  it too ([plan.md](plan.md) owns that order).
 - The SPIR-V cache is absent; the GPU path already recompiles (§ "What the
   body refuses").
 

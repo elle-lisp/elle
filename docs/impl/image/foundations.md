@@ -1,16 +1,16 @@
 # Foundations
 
-<!-- audited: 2026-09-08 -->
+<!-- audited: 2026-09-22 -->
 
-Four representation fixes the image needed first: each pays at runtime today,
-and each deletes image machinery.
+Five representation fixes the image needs: each pays at runtime today, and each
+deletes image machinery.
 
 The image effort does not start with images. Each fix below lands green
 against the existing corpus with no image machinery, and **deletes** image
 machinery that would otherwise have to be built and then thrown away. Building
-the image first would mean shipping remap passes, re-sort passes, and a syntax
-codec whose only purpose is to compensate for representations we intend to fix
-anyway.
+the image first would mean shipping remap passes, re-sort passes, and the
+syntax and LIR codecs whose only purpose is to compensate for representations
+we intend to fix anyway.
 
 [image.md](../image.md) owns the design these four serve, and
 [plan.md](plan.md) records the order they landed in.
@@ -72,9 +72,10 @@ any price.
 The header keeps one `Rc` to its blueprint, for the four questions the payload
 cannot yet answer: the nested-lambda blueprints a `MakeClosure` indexes, the
 LIR the JIT promotes from, the defining syntax, and the SPIR-V cache. The
-syntax foundation and the LIR side-stream remove two; the image milestone's own
-dump removes the third by making child templates body data; the fourth is the
-GPU cache the design drops.
+syntax foundation removed one; the image milestone's own dump removed the
+second by making child templates body data; the third is the GPU cache the
+design drops. The LIR foundation below is the last of them, and it takes the
+`Rc` with it.
 
 ## Region-native syntax — landed
 
@@ -104,3 +105,41 @@ expansion-hot operation, so the boundary-only split never had a case.
 Hygiene scope ids minted by the expander remain process-local counters; the
 image records a scope watermark so a fresh expander mints above every scope
 baked into persisted syntax.
+
+## Region-native LIR — to land
+
+The JIT compiles from `lir_function`: a Rust-heap `LirFunction` hanging off the
+blueprint every code object still carries. It is the last of the four questions
+that blueprint answers (§ "Region-native closure templates"), so it is what
+keeps `TemplateProto` alive — and `TemplateProto` is a second copy of the
+bytecode, the constants, the masks and the region tables the payload already
+holds region-natively.
+
+Four things the port buys. None is a compile-time number;
+[measurements.md](measurements.md) item 7 measured those, and they are real but
+small.
+
+- **Save and load become the mechanism the image already has.** Body-resident
+  LIR dumps in the dumper's own walk and arrives with the mapping. The
+  alternative is an encoded side-stream: a second encoder, a per-function
+  decode, and a lazy seam — the shape the syntax foundation exists to delete.
+- **One representation.** The port retires `TemplateProto`, `send`'s LIR codec
+  (`convert_value_consts_for_send`, `LirConst::ClosureRef`, `LirConst::ValueRef`
+  and the value pool behind them), and the stream. A code object becomes region
+  data end to end.
+- **One portability rule.** Sealed region data crosses a worker, an image and a
+  socket the way every other value does. The hand-written `Send` claim on
+  `JitTask` becomes a property of the type instead of a comment.
+- **Allocation the project can see.** Building the boot sources' LIR costs
+  21,281 `malloc` calls, which no gauge the region system owns can see. As
+  region pages they answer to `--region-page-size`, `--page-pool-max`,
+  `arena/page-claims`, the leak suite, `--trace=scrub` and `--trace=guardfree`.
+
+Two things stay work rather than argument. The JIT worker runs on another
+thread and a region belongs to one `RegionStore`, so a promotion still copies
+its function out — 8.7 ns an instruction against the Rust clone's 13.8 ns, but
+a copy either way. And the passes that rewrite LIR in place also resize it,
+which a fixed-extent slice turns into build-then-materialize. Syntax met that
+wall and answered it by copying as it stamps ([syntax.md](../syntax.md)); the
+better answer is a slice that grows in its own region, which no foundation has
+needed yet.

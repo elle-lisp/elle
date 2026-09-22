@@ -194,8 +194,8 @@ and [plan.md](plan.md) the order everything lands in.
    from the extents, dumps are byte-identical whole files, and the
    determinism pin asserts whole-file equality with a poisoned-padding
    counter-factual.
-7. **Region-native LIR — measured, one premise corrected.** The design keeps
-   LIR out of the body and ships it in an encoded side-stream
+7. **Region-native LIR — measured, one premise corrected.** The design kept
+   LIR out of the body and planned an encoded side-stream to carry it
    ([image.md](../image.md) § JIT). One premise behind that was that a
    region-native LIR wins nothing: the JIT reads a function's LIR once, at
    promotion, on a background thread. That covered the steady state and left
@@ -263,15 +263,15 @@ and [plan.md](plan.md) the order everything lands in.
    would not run. The Rust walk reads no `aux` or flag word, because reading
    one costs a per-variant match the region node does not need.
 
-   What the experiment does not decide: whether to port LIR. Three facts carry
-   the side-stream's case, and none of them is a number. LIR is not a `Value`.
-   Its consumer runs on another thread, behind a `Send` boundary. Body-resident
-   LIR would relocate at hydration for every function, where the side-stream
-   decodes the hot ones alone. Against those sits what a port deletes:
-   `TemplateProto`, whose LIR is the last of the four questions a blueprint
-   answers ([foundations.md](foundations.md)); `send`'s LIR codec; and the
-   hand-written `Send` claim on `JitTask`. This measurement settles the cost
-   question and hands the decision to those. The prototype is also not the
-   whole port: the shipped passes mutate LIR in place and resize it, which a
-   fixed-extent slice turns into build-then-materialize, exactly as syntax had
-   to copy as it stamps. To redo: `cargo bench --bench lirshape`.
+   What the experiment decided is the cost question, and only that. The port is
+   ordered as a foundation on other grounds — one representation, one
+   portability rule, an image whose save and load need no mechanism of their
+   own, and allocation the region gauges can see
+   ([foundations.md](foundations.md) argues them). What these numbers add is
+   that none of it has to be paid for.
+
+   The prototype is not the whole port. The shipped passes mutate LIR in place
+   and resize it, which a fixed-extent slice turns into build-then-materialize,
+   exactly as syntax had to copy as it stamps. Nothing here measures that
+   route, and it is the part of the port worth prototyping next. To redo:
+   `cargo bench --bench lirshape`.

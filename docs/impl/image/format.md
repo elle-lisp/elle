@@ -1,6 +1,6 @@
 # The image file
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-22 -->
 
 The byte layout of an image, and the fingerprint that decides whether this
 binary may map it.
@@ -25,7 +25,7 @@ One image is one file, or one blob embedded in a larger one:
 | signal table | user-defined signal names in dump-time bit order |
 | watermarks | dump-time counters, carried in the header block: parameter id and hygiene scope id today, static-region mint and next signal bit with the milestones that need them |
 | manifest | the bindings an image installs. It is body data, not a section: an export struct names each binding with a keyword key and each value answers its own signal, arity and doc ([boot.md](boot.md) owns the boot configuration's root struct). Dependency fingerprints are header fields, and an image with an empty dependency list records none |
-| side-stream | typed streams, present in any image: encoded `LirFunction`s keyed by template location (the boot configuration requires this stream); `SendValue`-encoded mutable bindings (present only where the dump policy permits mutables) |
+| side-stream | `SendValue`-encoded mutable bindings, present only where the dump policy permits mutables. A function's LIR is body data rather than a stream, because the type is region-native ([foundations.md](foundations.md)) |
 
 ## The pages section starts at a base-page boundary
 

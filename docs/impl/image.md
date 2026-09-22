@@ -1,6 +1,6 @@
 # Images — regions hydrated at load
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-22 -->
 
 Design for image-style persistence: one mechanism, two shipped configurations.
 
@@ -10,7 +10,7 @@ dumper, and hydrator throughout, differing only in dependency list and dump
 policy (see *One mechanism, two configurations*). This document owns the design
 argument. Six companions carry the rest:
 
-- [foundations.md](image/foundations.md) — the four representation fixes the
+- [foundations.md](image/foundations.md) — the five representation fixes the
   image rests on.
 - [sealing.md](image/sealing.md) — what the body may hold, what the hydrating
   instance rebuilds, and what fails the dump.
@@ -20,8 +20,8 @@ argument. Six companions carry the rest:
   gates a load.
 - [plan.md](image/plan.md) — the landing order, and the pins each milestone
   must land with.
-- [measurements.md](image/measurements.md) — the six experiments that
-  dispatched the design's open risks, with their numbers.
+- [measurements.md](image/measurements.md) — the seven experiments that
+  answered the design's open questions, with their numbers.
 
 ## The problem
 
@@ -196,8 +196,8 @@ acceptance gate.
    manifest — hundreds of entries, microseconds.
 8. Decode side-stream mutable bindings (present only when the dump policy
    permitted them) through the existing `SendValue` deserializer into
-   ordinary regions, rooted like REPL bindings. The LIR stream is not
-   decoded here at all — it decodes lazily, per function, on JIT promotion.
+   ordinary regions, rooted like REPL bindings. A function's LIR needs no step
+   here: it is body data, mapped with everything else (§ JIT).
 
 An environment image hydrates on top of a boot image and relocates its
 cross-image slots against the boot region's hydrated pages. References
@@ -334,28 +334,36 @@ manifest's per-binding kind field makes the opt-in mode additive.
 
 ## JIT
 
-The JIT compiles from `lir_function`, which is Rust-heap LIR and cannot live
-in the body. Every image stores an encoded `LirFunction` per template in the
-side-stream, decoded lazily the first time the hotness counter promotes that
-function — so decode fees are paid once, only for hot code. `jit_cache` keys
-on the bytecode address, which is stable for the hydrated region's life.
-Machine code itself is never persisted: Cranelift output bakes absolute
-addresses and is not relocatable.
+The JIT compiles from `lir_function`, which is Rust-heap LIR today and cannot
+live in the body as it stands. **The LIR becomes region-native and the body
+carries it** — the fifth foundation
+([image/foundations.md](image/foundations.md) argues it, and names the
+side-stream it deletes). A function's LIR then dumps in the dumper's own walk
+and arrives with the mapping, so an image's save and load gain no mechanism of
+their own, a code object stops holding a second Rust-heap copy of what its
+payload already has, and the allocator traffic of building it becomes region
+pages the project's own gauges can see. `jit_cache` keys on the bytecode
+address, which is stable for the hydrated region's life. Machine code itself is
+never persisted: Cranelift output bakes absolute addresses and is not
+relocatable.
 
-The LIR stream is not optional for the boot configuration. An image boot
+A promotion still copies. The JIT worker runs on another thread, and a region
+belongs to one `RegionStore`, so the compiler gets a copy of its function
+either way — which is what `prepare_task` already does with the Rust-heap form.
+
+Carrying the LIR is not optional for the boot configuration. An image boot
 whose stdlib cannot reach the JIT tier trades startup for steady-state
 throughput. That is a deal-breaker, and it violates the parity principle: the
-two boot modes must be indistinguishable to running code, tiers included.
+two boot modes must be indistinguishable to running code, tiers included. So
+the boot image's default waits on the foundation
+([image/plan.md](image/plan.md) orders them).
 
-Making LIR region-native instead — the treatment syntax got
-([image/foundations.md](image/foundations.md)) — would put it in the body and
-retire the stream. Three facts hold it back, and none is a cost. LIR is not a
-`Value`. Its consumer runs on another thread, behind a `Send` boundary.
-Body-resident LIR relocates at hydration for every function, where the stream
-decodes the hot ones alone. The cost question is settled, and it answers the
-other way: the region form is faster on every operation, by a third of one
-percent of the compile it belongs to
-([image/measurements.md](image/measurements.md) item 7).
+The cost of the change is measured and small: the region form is faster on
+every operation a `LirFunction` meets, by about a third of one percent of the
+compile it belongs to, and it holds less than half the memory
+([image/measurements.md](image/measurements.md) item 7). The case for it is
+never that number. It is that an image stops needing a mechanism of its own
+for one type.
 
 ## Build integration
 
