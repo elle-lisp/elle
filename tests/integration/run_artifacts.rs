@@ -128,6 +128,14 @@ fn field(block: &str, key: &str) -> Option<String> {
     Some(rest.lines().next().unwrap_or("").trim().to_string())
 }
 
+/// The artifact a step uploads, which is the `name:` under its `with:`. The
+/// step's own `name:` comes first in the text and is a label for the log, so
+/// reading the first one would compare two labels and prove nothing.
+fn artifact_name(upload: &str) -> Option<String> {
+    let (_, with) = upload.split_once("with:")?;
+    field(with, "name")
+}
+
 /// Every (workflow, job, body) that runs a target recording runs.
 fn recording_jobs() -> Vec<(String, String, String)> {
     let targets = recording_targets(&makefile());
@@ -199,7 +207,7 @@ fn no_two_jobs_upload_under_one_artifact_name() {
         let Some(upload) = upload_step(&body) else {
             continue;
         };
-        let artifact = field(&upload, "name")
+        let artifact = artifact_name(&upload)
             .unwrap_or_else(|| panic!("{path} job `{name}` uploads an unnamed artifact"));
         found += 1;
         if let Some(other) = seen.insert(format!("{path}:{artifact}"), name.clone()) {
