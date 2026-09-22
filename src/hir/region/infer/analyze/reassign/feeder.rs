@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-22
 //! The store's feeder: a name that merely carries a value into a reassigned
 //! binding's store, which the gate's holder index must not count.
 //!
@@ -11,15 +11,27 @@ use crate::hir::defuse::DefUseBuilder;
 
 /// The store's **feeders**: the bindings that merely carry a value INTO a
 /// reassigned binding's store, and which the holder index must therefore not
-/// count (docs/impl/region/bindings.md § "A name the store consumes is not a
-/// second holder of the value").
+/// count (docs/impl/region/bindings.md § "What the cell donates it must hold
+/// alone; what it counts it need not").
 ///
 /// Judged once per binding, against every store that takes a region the binding
-/// holds. A name feeding TWO stores cannot satisfy that: the later store reads
-/// the name at a position ordered after the earlier store, so the read fact
-/// fails there — which is what keeps two store-site pins off one producer
-/// reference.
-pub(super) struct Feeders(rustc_hash::FxHashSet<Binding>);
+/// holds. Two facts decide it, and the gate's two questions need different
+/// amounts of them, so each answer is recorded on its own:
+///
+/// - `full` — the store runs once per binding of the name AND nothing reads the
+///   name after the store. This is what the **donation** needs: the donated
+///   reference has no release of its own, so a second name still reading the
+///   value outlives it.
+/// - `over_fed` — the complement of the first fact alone: the name feeds a store
+///   that runs MORE than once per binding of it. This is the only thing the
+///   **store-site pin** cannot survive — the pin is a maximum over every
+///   extension the region carries, so a later read moves it later and costs
+///   nothing, while N stores against one producer reference release a reference
+///   the producer never took.
+pub(super) struct Feeders {
+    full: rustc_hash::FxHashSet<Binding>,
+    over_fed: rustc_hash::FxHashSet<Binding>,
+}
 
 impl Feeders {
     pub(super) fn collect(
@@ -46,7 +58,8 @@ impl Feeders {
         // nothing. The scope node contains the body of every binder form.
         let scope_of_region: HashMap<Region, HirId> =
             info.scope_region.iter().map(|(&id, &r)| (r, id)).collect();
-        let mut out = rustc_hash::FxHashSet::default();
+        let mut full = rustc_hash::FxHashSet::default();
+        let mut over_fed = rustc_hash::FxHashSet::default();
         for (&b, regions) in binding_regions {
             // A reassigned binding names a slot rather than a value, so it is
             // never a feeder — and excluding one would withdraw a genuine
@@ -71,26 +84,52 @@ impl Feeders {
                 .filter(|(_, vr)| vr.iter().any(|r| regions.contains(r)))
                 .map(|&(site, _)| site)
                 .collect();
-            let feeds_every = fed.iter().all(|&site| {
-                // The store runs once per binding of the name: the name's scope
-                // contains the store, and no loop lies between the two. A name
-                // bound outside a loop that stores inside it holds one producer
-                // reference against N pins.
-                pd.in_subtree(site, scope)
-                    && pd.no_loop_between(site, scope)
-                    // Nothing reads the name after the store, the store's own
-                    // value read included. A later use would read the value whose
-                    // producer release the pin has moved.
-                    && uses.iter().all(|&u| pd.ord(u) < pd.ord(site))
-            });
-            if !fed.is_empty() && feeds_every {
-                out.insert(b);
+            if fed.is_empty() {
+                continue;
+            }
+            // Over-fed: a store this name is READ by, which a loop re-runs
+            // without re-running the binder — one producer reference against N
+            // store-site pins. The read is what makes the name the store's
+            // source rather than a bystander of its region: a phi version the
+            // `if` merge introduces, or an alias bound after the loop, shares
+            // the region while holding no reference the pin can release twice.
+            if fed.iter().any(|&site| {
+                uses.iter().any(|&u| pd.in_subtree(u, site)) && !pd.no_loop_between(site, scope)
+            }) {
+                over_fed.insert(b);
+                continue;
+            }
+            // The store runs once per binding of the name: the name's scope
+            // contains the store, and no loop lies between the two.
+            if fed
+                .iter()
+                .any(|&site| !pd.in_subtree(site, scope) || !pd.no_loop_between(site, scope))
+            {
+                continue;
+            }
+            // Nothing reads the name after the store, the store's own value
+            // read included. A later use would read a value the donation left
+            // with no release of its own.
+            if fed
+                .iter()
+                .all(|&site| uses.iter().all(|&u| pd.ord(u) < pd.ord(site)))
+            {
+                full.insert(b);
             }
         }
-        Feeders(out)
+        Feeders { full, over_fed }
     }
 
+    /// A feeder in every respect: excluded from the holder index the DONATION's
+    /// sole-held question reads.
     pub(super) fn contains(&self, b: Binding) -> bool {
-        self.0.contains(&b)
+        self.full.contains(&b)
+    }
+
+    /// This name feeds a store that runs more than once per binding of it — the
+    /// one holding the store-site pin cannot survive, and so the only holder its
+    /// index carries.
+    pub(super) fn over_feeds(&self, b: Binding) -> bool {
+        self.over_fed.contains(&b)
     }
 }

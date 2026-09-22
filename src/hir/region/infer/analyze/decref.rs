@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-22
 //! `decref_point` population: the ordered passes that decide, for each region,
 //! the program point its release is emitted at.
 //!
@@ -28,8 +28,8 @@ mod cells;
 use branch::pin_branch_arm_releases;
 use breakwindow::pin_break_skipped_releases;
 use cells::{
-    collect_iter_scopes, innermost_covering, pin_cell_release_after_routed_releases,
-    post_loop_placement,
+    collect_branch_arm_sets, collect_iter_scopes, pin_cell_release_after_routed_releases,
+    place_content_drops, post_loop_placement, CellPlacement,
 };
 
 /// Populate and extend `region_data[*].decref_point` across the several passes
@@ -121,105 +121,21 @@ pub(super) fn populate_decref_points(
         }
     }
 
-    // ── The fn-local 1-slot container's content drop ──────────────────────
-    // The cell's own reference to its current content dies at its last access —
-    // the latest of its reads and of the node COVERING its writes — with one
-    // hoist (docs/impl/region/bindings.md § "Where the content drop lands").
-    //
-    // A single write is that covering node itself. Several are not: a cell
-    // reached from mutually exclusive arms has its latest write inside ONE arm,
-    // and a drop there runs on that path alone, leaving every other arm's value
-    // held by the cell and released nowhere. The writes' innermost covering node
-    // — their lowest common ancestor — is the nearest point after all of them
-    // that every storing path reaches.
-    //
-    // The hoist: a cell CARRIED ACROSS a loop is re-pointed every iteration, so
-    // a drop inside the body would free the content the next iteration reads.
-    // Such a cell is a loop PARAMETER, i.e. its scope node is the loop itself, so
-    // hoisting to that node lands the one drop after the loop — where the lowerer
-    // emits the loop's own releases. A cell bound INSIDE a loop body has a body
-    // scope node instead, so it is not hoisted and drops once per iteration,
-    // matching its per-iteration mint. And a loop's parameters stay readable past
-    // the loop (the `(while … (assign acc …)) acc` idiom), which is why the hoist
-    // is a max and not a move.
-    if !info.cell_containers.is_empty() {
-        let loop_ids: rustc_hash::FxHashSet<HirId> =
-            iter_scopes.iter().map(|&(id, _, _)| id).collect();
-        // Each scope node by the region it introduces, so a binding's scope node
-        // is one lookup through `binding_region`.
-        let scope_of_region: HashMap<Region, HirId> =
-            info.scope_region.iter().map(|(&id, &r)| (r, id)).collect();
-        let carried_loop: HashMap<Binding, HirId> = info
-            .cell_containers
-            .keys()
-            .filter_map(|&b| {
-                let scope = *info.binding_region.get(&b)?;
-                let node = *scope_of_region.get(&scope)?;
-                loop_ids.contains(&node).then_some((b, node))
-            })
-            .collect();
-        for (b, c) in info.cell_containers.iter_mut() {
-            let store_ords: Vec<u32> = c.stores.sites().map(ord).collect();
-            let covering = innermost_covering(hir, order, &subtree_low, &store_ords);
-            let latest = du
-                .uses
-                .get(b)
-                .into_iter()
-                .flat_map(|v| v.iter())
-                .map(|use_id| last_use.get(use_id).copied().unwrap_or(*use_id))
-                .chain(covering)
-                .chain(carried_loop.get(b).copied())
-                .max_by_key(|id| ord(*id));
-            if let Some(lu) = latest {
-                // The drop must POST-DOMINATE every access: the cell holds one
-                // reference whichever path stored it, so a demise seeded at the
-                // structurally-latest access — which may sit inside one branch
-                // arm, or inside a loop the binder is bound outside — would run
-                // on that path alone (a leak on every sibling arm) or once per
-                // iteration (freeing content a later iteration reads). Hoist it
-                // to the node of every enclosing arm and loop that does not also
-                // enclose the BINDER: the lowerer emits a node's releases after
-                // it, so a branch node's land after the merge and a loop node's
-                // after the loop. An arm or loop the binder is bound inside
-                // keeps the seed — the cell itself is per-path or per-iteration
-                // there, and so is its drop.
-                // The BINDER's position, off the walk's binder-init record —
-                // `du.def_site` holds the latest def, and an `assign` is a def,
-                // so it would read the very store the hoist is asked about.
-                let bdef = binder_init_sites
-                    .get(b)
-                    .and_then(|s| *s)
-                    .map(ord)
-                    .unwrap_or(0);
-                let mut demise = lu;
-                for _ in 0..branches.len() + iter_scopes.len() + 1 {
-                    let o = ord(demise);
-                    let hoist = branches
-                        .iter()
-                        .filter(|br| {
-                            br.arms.iter().any(|a| o >= a.lo && o <= a.hi)
-                                && !(bdef >= br.node_lo && bdef <= br.node_hi)
-                        })
-                        .map(|br| br.id)
-                        .chain(
-                            iter_scopes
-                                .iter()
-                                .filter(|&&(_, llo, lhi)| {
-                                    o >= llo && o <= lhi && !(bdef >= llo && bdef <= lhi)
-                                })
-                                .map(|&(id, _, _)| id),
-                        )
-                        .filter(|&id| ord(id) > o)
-                        .max_by_key(|&id| ord(id));
-                    match hoist {
-                        Some(id) => demise = id,
-                        None => break,
-                    }
-                }
-                c.demise = demise;
-            }
-        }
-    }
+    // Where each fn-local 1-slot container's content drop lands
+    // (docs/impl/region/bindings.md § "Where the content drop lands").
+    place_content_drops(
+        info,
+        &CellPlacement {
+            hir,
+            du,
+            order,
+            last_use,
+            subtree_low: &subtree_low,
+            iter_scopes: &iter_scopes,
+            branches: &branches,
+            binder_init_sites,
+        },
+    );
 
     // Snapshot both cell views before the passes below start mutating
     // `region_data`: the value regions to hold back from the binding chain, and
@@ -535,18 +451,4 @@ pub(super) fn populate_decref_points(
         inference_binding_regions,
         binder_init_sites,
     );
-}
-
-/// Collect every branch's arm sets in one walk (`super::super::arms` is the
-/// shared reading of what counts as an arm). Callers of `branch_arms` walk the
-/// tree themselves, each collecting different scopes alongside; the cell-demise
-/// hoist needs the arm intervals alone.
-fn collect_branch_arm_sets(
-    hir: &Hir,
-    order: &HashMap<HirId, u32>,
-    low: &HashMap<HirId, u32>,
-    out: &mut Vec<super::super::arms::ArmSet>,
-) {
-    out.extend(super::super::arms::branch_arms(hir, order, low));
-    hir.for_each_child(|c| collect_branch_arm_sets(c, order, low, out));
 }

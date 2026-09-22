@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-22
 //! Where a cell's release lands: the env cell's box, and the node a 1-slot
 //! container's content drop must cover.
 //!
@@ -6,7 +6,148 @@
 //! docs/impl/region/bindings.md
 
 use super::super::super::*;
+use crate::hir::defuse::DefUseBuilder;
 use crate::hir::region::{PinDecref, ProgramOrder};
+
+/// The structural tables the content-drop placement reads, gathered once by the
+/// driver: it computes them for the env-cell passes too, and a placement that
+/// rebuilt them would walk the tree a second time per unit.
+pub(super) struct CellPlacement<'a> {
+    pub(super) hir: &'a Hir,
+    pub(super) du: &'a DefUseBuilder,
+    pub(super) order: &'a HashMap<HirId, u32>,
+    pub(super) last_use: &'a HashMap<HirId, HirId>,
+    /// Post-order subtree low ends, so containment is an interval test.
+    pub(super) subtree_low: &'a HashMap<HirId, u32>,
+    pub(super) iter_scopes: &'a [(HirId, u32, u32)],
+    pub(super) branches: &'a [super::super::super::arms::ArmSet],
+    pub(super) binder_init_sites: &'a HashMap<Binding, Option<HirId>>,
+}
+
+/// Give every fn-local 1-slot container the point its content drop is emitted at
+/// (docs/impl/region/bindings.md § "Where the content drop lands").
+///
+/// The cell's own reference to its current content dies at its last access — the
+/// latest of its reads and of the node COVERING its writes — and the point is
+/// then hoisted until it post-dominates them all.
+///
+/// A single write is that covering node itself. Several are not: a cell reached
+/// from mutually exclusive arms has its latest write inside ONE arm, and a drop
+/// there runs on that path alone, leaving every other arm's value held by the
+/// cell and released nowhere. The writes' innermost covering node — their lowest
+/// common ancestor — is the nearest point after all of them that every storing
+/// path reaches.
+///
+/// A cell CARRIED ACROSS a loop is re-pointed every iteration, so a drop inside
+/// the body would free the content the next iteration reads. Such a cell is a
+/// loop PARAMETER, i.e. its scope node is the loop itself, so seeding from that
+/// node lands the one drop after the loop — where the lowerer emits the loop's
+/// own releases. A cell bound INSIDE a loop body has a body scope node instead,
+/// so it keeps its seed and drops once per iteration, matching its per-iteration
+/// mint. And a loop's parameters stay readable past the loop (the
+/// `(while … (assign acc …)) acc` idiom), which is why every step here is a max
+/// and not a move.
+pub(super) fn place_content_drops(info: &mut RegionInfo, p: &CellPlacement) {
+    if info.cell_containers.is_empty() {
+        return;
+    }
+    let ord = |id: HirId| p.order.get(&id).copied().unwrap_or(0);
+    let loop_ids: rustc_hash::FxHashSet<HirId> =
+        p.iter_scopes.iter().map(|&(id, _, _)| id).collect();
+    // Each scope node by the region it introduces, so a binding's scope node is
+    // one lookup through `binding_region`.
+    let scope_of_region: HashMap<Region, HirId> =
+        info.scope_region.iter().map(|(&id, &r)| (r, id)).collect();
+    let carried_loop: HashMap<Binding, HirId> = info
+        .cell_containers
+        .keys()
+        .filter_map(|&b| {
+            let scope = *info.binding_region.get(&b)?;
+            let node = *scope_of_region.get(&scope)?;
+            loop_ids.contains(&node).then_some((b, node))
+        })
+        .collect();
+    for (b, c) in info.cell_containers.iter_mut() {
+        let store_ords: Vec<u32> = c.stores.sites().map(ord).collect();
+        let covering = innermost_covering(p.hir, p.order, p.subtree_low, &store_ords);
+        let latest =
+            p.du.uses
+                .get(b)
+                .into_iter()
+                .flat_map(|v| v.iter())
+                .map(|use_id| p.last_use.get(use_id).copied().unwrap_or(*use_id))
+                .chain(covering)
+                .chain(carried_loop.get(b).copied())
+                .max_by_key(|id| ord(*id));
+        if let Some(seed) = latest {
+            c.demise = hoist_past_partial_paths(seed, *b, p);
+        }
+    }
+}
+
+/// Move `seed` out to the node of every enclosing branch arm and loop that does
+/// not also enclose the BINDER, iterated outward until nothing encloses it.
+///
+/// The drop must POST-DOMINATE every access: the cell holds one reference
+/// whichever path stored it, so a point seeded at the structurally-latest access
+/// — which may sit inside one branch arm, or inside a loop the binder is bound
+/// outside — would run on that path alone (a leak on every sibling arm) or once
+/// per iteration (freeing content a later iteration reads). The lowerer emits a
+/// node's releases after it, so a branch node's land after the merge and a loop
+/// node's after the loop. An arm or loop the binder is bound INSIDE keeps the
+/// seed: the cell itself is per-path or per-iteration there, and so is its drop.
+fn hoist_past_partial_paths(seed: HirId, b: Binding, p: &CellPlacement) -> HirId {
+    let ord = |id: HirId| p.order.get(&id).copied().unwrap_or(0);
+    // The BINDER's position, off the walk's binder-init record — `du.def_site`
+    // holds the latest def, and an `assign` is a def, so it would read the very
+    // store the hoist is asked about.
+    let bdef = p
+        .binder_init_sites
+        .get(&b)
+        .and_then(|s| *s)
+        .map(ord)
+        .unwrap_or(0);
+    let mut demise = seed;
+    // One step per enclosing node at most; the bound is a backstop, not a count.
+    for _ in 0..p.branches.len() + p.iter_scopes.len() + 1 {
+        let o = ord(demise);
+        let hoist = p
+            .branches
+            .iter()
+            .filter(|br| {
+                br.arms.iter().any(|a| o >= a.lo && o <= a.hi)
+                    && !(bdef >= br.node_lo && bdef <= br.node_hi)
+            })
+            .map(|br| br.id)
+            .chain(
+                p.iter_scopes
+                    .iter()
+                    .filter(|&&(_, llo, lhi)| o >= llo && o <= lhi && !(bdef >= llo && bdef <= lhi))
+                    .map(|&(id, _, _)| id),
+            )
+            .filter(|&id| ord(id) > o)
+            .max_by_key(|&id| ord(id));
+        match hoist {
+            Some(id) => demise = id,
+            None => break,
+        }
+    }
+    demise
+}
+
+/// Collect every branch's arm sets in one walk (`super::super::super::arms` is
+/// the shared reading of what counts as an arm). Callers of `branch_arms` walk
+/// the tree themselves, each collecting different scopes alongside; the
+/// cell-demise hoist needs the arm intervals alone.
+pub(super) fn collect_branch_arm_sets(
+    hir: &Hir,
+    order: &HashMap<HirId, u32>,
+    low: &HashMap<HirId, u32>,
+    out: &mut Vec<super::super::super::arms::ArmSet>,
+) {
+    out.extend(super::super::super::arms::branch_arms(hir, order, low));
+    hir.for_each_child(|c| collect_branch_arm_sets(c, order, low, out));
+}
 
 /// Clamp each env cell's box release to at-or-after every release routed THROUGH
 /// that cell (docs/impl/region/cells.md § "A cell's release lands at or after
