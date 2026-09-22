@@ -1,6 +1,6 @@
 # One test system
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-22 -->
 
 The plan that folds every test product into `elle test`, keeps the results,
 and states what a run may skip.
@@ -33,7 +33,8 @@ does not survive:
   replace.
 - The DB survives a reboot: it lives in the state directory, and each run names
   the commit, worktree, host, and build it ran against
-  ([test-store](test-store.md)). Nothing moves it off the box yet.
+  ([test-store](test-store.md)). A store that reaches another box merges into
+  its history; nothing publishes one yet.
 
 ## The decisions
 
@@ -43,11 +44,12 @@ The session DB and CAS live in a persistent state directory. `ELLE_CACHE`
 keeps the things a rebuild can regenerate; run history is a record, so it
 lives with state.
 
-Every CI corpus job uploads its DB and CAS as an artifact. A new
-`elle test --import` merges a downloaded run into local history. The schema
-makes the merge cheap: forms are keyed by syntax hash, assets by content hash,
-and runs append. A run row already carries the commit, worktree, host, and
-build, so an imported run says what it ran against.
+The merge is in: `elle test --import` appends a downloaded run to local history
+([test-store](test-store.md)). The schema makes it cheap — forms are keyed by
+syntax hash, assets by content hash, and runs append under a key that makes a
+repeat import a no-op. A run row already carries the commit, worktree, host,
+and build, so an imported run says what it ran against. What is missing is the
+upload: every CI corpus job has to publish its DB and CAS as an artifact.
 
 Later, the store becomes shared: a content-addressed blob store plus a small
 index, Redis first, exactly the `store` milestone in [fleet](impl/fleet.md).
@@ -162,8 +164,8 @@ the CI habit of reading failures out of logs.
 
 ## Landing order
 
-1. Persistence: the CI artifact upload and `--import`. The state directory and
-   the `run` identity columns are in.
+1. Persistence: the CI artifact upload. The state directory, the `run`
+   identity columns and `--import` are in.
 2. Profiles that select a flag set; fold in the guardfree family, the oracle,
    plumb, and the per-file passes. Child-process isolation is in.
 3. Derived budgets.
