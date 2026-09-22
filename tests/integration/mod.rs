@@ -126,6 +126,9 @@ mod state_dir {
 mod import {
     include!("import.rs");
 }
+mod run_artifacts {
+    include!("run_artifacts.rs");
+}
 mod isolation {
     include!("isolation.rs");
 }

@@ -1,6 +1,6 @@
 # tests/common
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-22 -->
 
 Shared test helpers for the Elle test suite.
 
@@ -11,8 +11,8 @@ Provide canonical eval and setup functions so test files don't need to copy-past
 - Cached `RuntimeCore` reuse for property tests (eliminates per-case bootstrap cost)
 - Proptest configuration respecting `PROPTEST_CASES` env var
 - A scratch directory under the platform temp root, removed on drop
-- Readers of the corpus and of the Makefile, for the tests that check how CI
-  dimensions a run
+- Readers of the corpus, of the Makefile and of the workflow files, for the
+  tests that check how CI dimensions a run and what it keeps
 
 Does NOT:
 - Run tests (that's the test harness)
@@ -109,7 +109,7 @@ This is safe because:
 
 | File | Content |
 |------|---------|
-| `mod.rs` | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, the Makefile readers (`make_var`, `make_dry_run`, `make_expand`, `makefile`), the corpus readers (`repo_root`, `corpus_files`, `declared_deadline`, `wide_patterns`, `budget_seconds`), `paint_stack`, and `ScratchDir` |
+| `mod.rs` | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, the Makefile readers (`make_var`, `make_dry_run`, `make_expand`, `makefile`), the corpus readers (`repo_root`, `corpus_files`, `declared_deadline`, `wide_patterns`, `budget_seconds`), the workflow readers (`workflow_files`, `workflow_jobs`), `paint_stack`, and `ScratchDir` |
 
 ### Reading the Makefile
 
@@ -138,9 +138,15 @@ temporary held.
 **`ScratchDir::new(tag)`** is a uniquely-named directory under the platform temp
 root, removed on drop — the panic path included. Never write a test file under a
 hardcoded `/tmp`; `tests/integration/scratch.rs` fails the build over it.
-=======
-| `mod.rs` | `eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`, `setup`, `proptest_cases`, `ScratchDir`, `make_var`, `make_expand`, `makefile`, `repo_root`, `corpus_files`, `declared_deadline`, `wide_patterns`, `budget_seconds` |
->>>>>>> 568f8797e (tests: what budget the runner gives a form, and where it learned it)
+
+### Reading the workflows
+
+**`workflow_files()`** answers every file under `.github/workflows`, and
+**`workflow_jobs(text)`** splits one into (name, body) pairs with the comment
+lines dropped — a job that discusses a command it does not run must not read as
+a job that runs it. `workflows.rs` asks what the gate waits for and
+`run_artifacts.rs` asks what a corpus job leaves behind, so the reading lives
+here rather than twice.
 
 ## Invariants
 
