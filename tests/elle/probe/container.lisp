@@ -1,6 +1,6 @@
 (elle/epoch 12)
-# audited: 2026-09-08
-# Persistent fn-local containers, the loop-carried accumulator a function returns, and the captured accumulator a builder fills.
+# audited: 2026-09-21
+# Persistent fn-local containers, the loop-carried accumulator a function returns, the element a walk stores, and the captured accumulator a builder fills.
 #
 # docs/impl/region/diagnostics.md
 # ── Persistent fn-local containers ────────────────────────────────────
@@ -149,6 +149,41 @@
               6 60 0.4 0.5) 0)
 (pin (measure "recur-acc-return" (fn [j] (length (recur-acc-return-shape 4)))
               100 6 60 0.4 0.5) 0)
+
+# ── The walk's element, stored through a name of the walk's own ────────
+# `loop-acc-return` above accumulates a value its own body allocated. A walk
+# stores something else: an ELEMENT of a collection, and it arrives through a
+# name the walk binds — `each` expands to `(let [p (get items idx)] BODY)`. That
+# name is the store's FEEDER, so the cell keeps the container model and each
+# element's producer reference dies at the store that took it
+# (docs/impl/region/bindings.md § "A name the store consumes is not a second
+# holder of the value").
+#
+# `walk-feeder-return` hands the last element back and `walk-feeder-discard`
+# drops it, and they must stay a PAIR: only the returned one reaches the
+# `Return`'s mint, and only the discarded one leaves the content drop with
+# nothing but the cell's scope node to place it — the collection type picks the
+# `each` arm, so the latest store sits inside an arm the walk need not take
+# (§ "Where the content drop lands"). CLOSED controls, undeclared like
+# `rest-array-copy`: the elements live in the call-result region of a `Fresh`
+# native, so a regression strands the whole collection — one region and two
+# objects per entry — and must trip the completeness gate rather than be absorbed
+# under a root.
+(def @feeder-table @{:a 1 :b 2 :c 3})
+(defn walk-feeder-return-shape []
+  (def @u nil)
+  (each p in (pairs feeder-table)
+    (assign u p))
+  u)
+(defn walk-feeder-discard-shape []
+  (def @u nil)
+  (each p in (pairs feeder-table)
+    (assign u p))
+  nil)
+(pin (measure "walk-feeder-return" (fn [j] (length (walk-feeder-return-shape)))
+              100 6 60 0.4 0.5) 0)
+(pin (measure "walk-feeder-discard" (fn [j] (walk-feeder-discard-shape)) 100 6
+              60 0.4 0.5) 0)
 
 # ── The captured mutable accumulator — the shape a builder is WRITTEN in ──
 # Every container probe above drives its accumulator from a bare `while` in the
