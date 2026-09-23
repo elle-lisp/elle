@@ -13,6 +13,9 @@
 (def make-commands (import "std/process/commands"))
 
 (defn make-scheduler [&named fuel backend]
+  "A process scheduler whose processes run :fuel instructions a turn (1000 by
+   default). It builds no I/O backend: it forwards each I/O request to the
+   root scheduler."
   (let* [core (make-core (or fuel 1000))
          waits (make-waits core)
          handle-cmd (make-commands core)

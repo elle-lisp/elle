@@ -61,6 +61,11 @@ scheduler stops, where `r` is the exit reason as a string.
   (assert (= (get err :error) :process-error) "as a process error"))
 ```
 
+`make-scheduler` and `start` take `:fuel`, the instructions a process runs
+before it is preempted, 1000 by default. Neither builds an I/O backend, because
+a process scheduler forwards its I/O to the root scheduler (see "Forwarded I/O
+and the root scheduler" below).
+
 Use `process:run` when you need a pre-configured or shared scheduler:
 
 ```text
@@ -388,7 +393,7 @@ gets to finish sending it would wait forever.
 |----------|-------------|
 | `start init` | Create scheduler, run init as first process |
 | `run sched init` | Run init on existing scheduler |
-| `make-scheduler` | Create scheduler (`:fuel`, `:backend`) |
+| `make-scheduler` | Create scheduler (`:fuel`) |
 | `self` | Current process PID |
 | `spawn fn` | Start new process |
 | `spawn-link fn` | Start linked (crash propagation) |
