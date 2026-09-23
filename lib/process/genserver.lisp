@@ -98,7 +98,8 @@
   # ── client API ──────────────────────────────────────────────────────
 
   (defn gen-server-reply [from reply]
-    "Send a reply to a pending call. from is the [pid ref] pair from handle-call."
+    "Send a reply to a pending call. from is the [pid ref] pair from handle-call.
+     A call that has already ended, by a timeout or a raise, never receives it."
     (send (get from 0) [:$reply (get from 1) reply]))
 
   (defn gen-server-call [server request &named timeout]

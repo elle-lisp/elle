@@ -101,6 +101,26 @@ Without `:timeout`, they wait until the server replies or exits.
     (assert (= (get err :error) :gen-server-timeout) "with :gen-server-timeout"))))
 ```
 
+A call that has timed out leaves nothing in the caller's mailbox, even when the
+server replies later. The call's ref works as an alias for the caller, and the
+call turns the alias off when it ends. The scheduler drops a reply sent to an
+alias that is off, and removes one that arrived before the call turned it off.
+
+```lisp
+(def process ((import "std/process")))
+
+(process:start (fn []
+  (process:gen-server-start-link
+    {:init        (fn [_] nil)
+     :handle-call (fn [_req _from state]
+       (process:recv-timeout 10)
+       [:reply :late state])}
+    nil :name :slow)
+  (let [[ok? _] (protect (process:gen-server-call :slow :ping :timeout 2))]
+    (assert (not ok?) "the call timed out"))
+  (assert (= (process:recv-timeout 30) :timeout) "the late reply never arrives")))
+```
+
 ## A server that exits during a call
 
 `gen-server-call` and `gen-server-stop` monitor the server while they wait.
@@ -145,6 +165,9 @@ from `handle-call` and use `gen-server-reply` later:
   (process:gen-server-reply (get state :pending) msg)
   [:noreply nil])}
 ```
+
+A deferred reply goes through the same alias as any other. When the call has
+already ended, because it timed out or raised, the reply goes nowhere.
 
 
 # Actor
