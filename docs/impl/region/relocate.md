@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-09-15 -->
+<!-- audited: 2026-09-23 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -10,11 +10,11 @@ and what it costs to move one ahead of that call.
 A tail call whose callee turns out to be a *closure* replaces the frame. Every
 instruction the lowerer emits after the `TailCall` therefore belongs to the
 **native fall-through**: a native pushes no bytecode frame, so on normal
-completion the dispatch loop continues into that block (`tail_call_inner`,
-src/vm/call/inner/tail.rs) and runs it. A closure callee never arrives there.
+completion the dispatch loop continues into that block (`tail_call_inner` in
+[src/vm/call/inner/tail.rs](../../../src/vm/call/inner/tail.rs)) and runs it. A closure callee never arrives there.
 
 For a region the call's own **arguments** name, that is precisely the intent, and
-it is the ownership transfer the calling convention rests on (rules.md Rule 5,
+it is the ownership transfer the calling convention rests on ([rules.md](rules.md) Rule 5,
 move-on-tail-call): the caller does not incref a moved argument, and the release
 it never runs *is* the reference the callee's owned-param release consumes. The
 callee's own region has the same story through a different channel — the new
@@ -101,7 +101,7 @@ slot that route loads. Every other binding that names a region names the whole
 value — an alias binder is a second name for the reference the call moves, and
 hoisting its release ahead of the call would free what the callee is about to take
 over (stdlib `zip`'s `arrs`, a second name for the array an inner `let` returned).
-Pinned by `tests/elle/region-tailcall-arg-transfer.lisp`, whose alias case is the
+Pinned by [tests/elle/region-tailcall-arg-transfer.lisp](../../../tests/elle/region-tailcall-arg-transfer.lisp), whose alias case is the
 counter-factual for reading a leaf's rule onto a whole.
 
 **A slot comparison cannot see a value held under two slot names.** The route
@@ -141,7 +141,7 @@ owned-param release then takes the element's last one, under its own read. The
 strand is the answer: the collection is held to fiber teardown on the closure
 path, at one region per call, and the destructure keeps the release it already
 had on every other path ([anchors.md](anchors.md)). Pinned by
-`tests/elle/region-rest-pattern-slice-uaf.lisp` (the fault) and
+[tests/elle/region-rest-pattern-slice-uaf.lisp](../../../tests/elle/region-rest-pattern-slice-uaf.lisp) (the fault) and
 `lir::lower::tests::release::restpattern` (the placement).
 
 **Whether the frame holds the region alone** — the admission, and escape is its
@@ -207,11 +207,18 @@ the return facet's refusal and nothing else — which is why escape must be able
 say "*this* facet and no other" (`EscapeInfo::binding_escapes_beyond_return`, the
 complement of `binding_escapes_via_return`).
 
-The everyday shape this reaches is the index-walk fold driver — `fold`, `reduce`
-and `concat` all walk with it:
+The everyday shape this reaches is the index-walk fold driver, `core-fold-step` in
+[src/core.lisp](../../../src/core.lisp) — `fold`, `reduce` and `concat` all walk
+with it. A copy of it runs here:
 
-```
-(fn [f n i acc] (if (%lt i n) (recur f n (%add i 1) (f acc i)) acc))
+```lisp
+(def fold-step
+  (fn [f arr n i acc]
+    (if (%lt i n)
+      (fold-step f arr n (%add i 1) (f acc (get arr i)))
+      acc)))
+
+(assert (= (fold-step + [1 2 3] 3 0 0) 6))
 ```
 
 The base arm returns `acc`, so the region is on the return frontier. The recursive
@@ -400,8 +407,8 @@ callee's one release frees the collection and drops the collection's reference �
 never the caller's moved one. The move arrives and nothing consumes it: one
 region per collected argument per call, plus its cascade.
 
-The runtime closes it where the collection is built (`populate_env`,
-src/vm/env.rs). On a **move** — a tail call or an FFI callback, the calls that
+The runtime closes it where the collection is built (`populate_env` in
+[src/vm/env.rs](../../../src/vm/env.rs)). On a **move** — a tail call or an FFI callback, the calls that
 pass `own_params = false` — the surplus reference is released once the collected
 value holds its own. The release is per collector *kind*-independent: what makes
 the reference surplus is that the argument went into a collection rather than
@@ -417,6 +424,6 @@ An **owned** call (`own_params = true`, the ordinary non-tail call) is not this
 case at all: the caller keeps its reference and releases it at the argument's own
 last use, so releasing here would over-free.
 
-`tests/elle/region-collector-arg-move.lisp` pins the rate for each collector kind
+[tests/elle/region-collector-arg-move.lisp](../../../tests/elle/region-collector-arg-move.lisp) pins the rate for each collector kind
 against a positional-parameter control.
 

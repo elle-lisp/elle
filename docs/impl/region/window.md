@@ -1,6 +1,6 @@
 # The branch-arm release window
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-23 -->
 
 Where a branch puts the ONE release of a region several arms use. The anchor is
 the merge every path reaches, not the arm that happens to name it last.
@@ -37,10 +37,10 @@ The shape this closes is the dominant polymorphic stdlib entry point: a
 each arm. `a`'s single `decref_point` lands in the textually-last arm that names
 it, so every earlier arm strands `a`'s whole region — a per-call cost equal to
 the argument's entire object graph. Where a call site proves the argument's type
-the dispatch prunes to a single arm (`typeinfer/prune.rs`) and never reaches this
+the dispatch prunes to a single arm ([src/hir/typeinfer/prune.rs](../../../src/hir/typeinfer/prune.rs)) and never reaches this
 at all; the cost is what every unproven call site pays.
 
-Once a region's `decref_point` leaves the arms, `regions::compensate` no longer
+Once a region's `decref_point` leaves the arms, `region::infer::compensate` no longer
 finds it inside one, so neither the head nor the tail route fires for it: the
 single anchored release is exactly what those compensating releases were
 approximating, and the arm-structure premises they rest on are unchanged for
@@ -58,19 +58,19 @@ test *k* runs only where tests 0..*k*-1 all failed. So a region live-in to the
 form whose last use is a later clause's test has its `decref_point` where no
 earlier body's path passes, and no arm holds it. That is where the polymorphic
 entry point puts it. `distinct` dispatches with
-`(cond (or (pair? coll) (empty? coll)) … (array? coll) … (array? coll) …)`,
-naming `coll` in every test, so the argument's one release lands in the LAST test
+`(cond m … (trait/iterable? coll) … (or (pair? coll) (empty? coll)) … (array? coll) … (array? coll) …)`,
+naming `coll` in every test after the first, so the argument's one release lands in the LAST test
 and every call that takes an earlier body strands the argument's whole object
 graph. `and`/`or` do the same with one position: `(or (array? v) (string? v))`
 never evaluates the second test when the first is true.
 
 The arms are read off the nested-`If` each form is equivalent to:
 
-```
-(cond t0 b0 t1 b1 … e)  ≡  (if t0 b0 (if t1 b1 … e))
-(and e0 e1 … en)        ≡  (if e0 (and e1 … en) false)
-(or  e0 e1 … en)        ≡  (if e0 true (or e1 … en))
-```
+| Form | Read as |
+|------|---------|
+| `(cond t0 b0 t1 b1 … e)` | `(if t0 b0 (if t1 b1 … e))` |
+| `(and e0 e1 … en)` | `(if e0 (and e1 … en) false)` |
+| `(or e0 e1 … en)` | `(if e0 true (or e1 … en))` |
 
 So each clause boundary of a `cond` contributes a two-armed branch — the clause
 **body**, and **the rest of the chain** from the next test through the `else` —
@@ -94,15 +94,17 @@ of level *k* and in no arm of any other level. One inside test *k* is in the
 whose paths skip that test.
 
 The rows are `cond-later-test`, `cond-else-path`, `cond-dispatch`, `or-short` and
-`and-short` in `tests/elle/region-branch-arm-window.lisp`, beside the
+`and-short` in [tests/elle/region-branch-arm-window.lisp](../../../tests/elle/region-branch-arm-window.lisp), beside the
 `ctl-cond-last-test` / `ctl-or-full` controls that drive the path which does
 evaluate the position holding the release; the `w-cond`, `w-cond-store` and
-`w-or-short` soundness rows in `tests/elle/region-branch-arm-window-uaf.lisp`;
+`w-or-short` soundness rows in [tests/elle/region-branch-arm-window-uaf.lisp](../../../tests/elle/region-branch-arm-window-uaf.lisp);
 the unit pins
-`regions::tests::compensate::a_cond_clause_test_is_a_conditional_position`,
+`region::infer::tests::compensate::a_cond_clause_test_is_a_conditional_position`,
 `a_cond_body_is_an_arm_like_any_other`, `a_short_circuit_tail_is_an_arm` and
 `an_and_tail_is_an_arm_too`; and the `distinct`, `pipeline`, `wrap-map` and
-`push-accum` probes in `tests/elle/oracle.lisp` as the production gauges.
+`push-accum` probes of the [tests/elle/oracle.lisp](../../../tests/elle/oracle.lisp) dashboard as the
+production gauges, defined in [tests/elle/probe/direct.lisp](../../../tests/elle/probe/direct.lisp) and
+[tests/elle/probe/container.lisp](../../../tests/elle/probe/container.lisp).
 
 ### The admission: this frame must be the region's only holder
 
@@ -183,7 +185,7 @@ facet already marks every binding such a closure captures. A closure the frame
 merely hands back carries its captures on the same counted edge, so it refuses
 nothing ([the relocation](relocate.md)). That is
 a flow fact. The structural capture-graph
-(`regions::escape::captured_bindings`) marks every captured binding whether or not
+(`region::infer::escape::captured_bindings`) marks every captured binding whether or not
 its closure ever leaves — the right conservatism for the **merge** gate, which
 asks where a value may *live* and so needs raw reachability, and the wrong one
 here, where the question is who holds a count.
@@ -214,7 +216,7 @@ reference it owns. That is why the admission reads the containment facets
 (`EscapeInfo::binding_escapes_by_containment`) rather than everything beyond
 return. The two halves stand or fall together: withdraw the resume value's mint and
 a body that parks again holding it reads the resumer's freed reference, which is
-what `region-fiber-frontier-window-uaf.lisp` drives. The fiber frontier's **atomless
+what [tests/elle/region-fiber-frontier-window-uaf.lisp](../../../tests/elle/region-fiber-frontier-window-uaf.lisp) drives. The fiber frontier's **atomless
 site half** still refuses — a value emitted or sent with no binding to name it is
 judged by no holder here at all, so it keeps the conservative baseline the same way
 a region with no holder binding does.
@@ -223,9 +225,9 @@ The leak this closes is the owned parameter a frame receives, hands to another
 fiber on one path, and reaches the end of on every other. `wake-select-waiters`
 takes the completed fiber by tail-call move from `complete-fiber` and resumes a
 select waiter with it, so its release sat inside the arm that finds a waiter — and
-a program with no select outstanding never runs that arm. Every `ev/spawn` /
-`ev/join` pair stranded the fiber, the closure it was made from, and the
-`[ok? value]` pair the join delivered.
+a program with no select outstanding never runs that arm. Without the window,
+every `ev/spawn` / `ev/join` pair would strand the fiber, the closure it was made
+from, and the `[ok? value]` pair the join delivered.
 
 #### A mutated holder poisons its value route, not its cell box
 
@@ -244,8 +246,8 @@ mutated question is asked of the route's binding, and a second name bound *from*
 the value refuses nothing: a cursor an arm walks with repoints its own slot and
 leaves the allocating binding's alone. That is the everyday `each` over a list —
 the type dispatch receives the cons chain as `seq`, the `:list` arm opens with
-`(def @cur seq)`, and reading the mutation off `cur` held `seq`'s whole chain
-for the life of the frame while `seq`'s own slot stayed untouched.
+`(def @cur seq)`. Reading the mutation off `cur` would hold `seq`'s whole chain for
+the life of the frame, while `seq`'s own slot stays untouched.
 
 **Four sites record a route, and no others.** `Define`, `Let` and `Letrec` are the
 three the mirror carries (`binder_init_sites`, recorded at the same three walk arms
@@ -262,9 +264,9 @@ it* rather than by a blanket refusal:
   second region.
 - a **`Loop` parameter** and a **pattern name** poison nothing at all. No site
   records a slot for either, so no value-routed release can load the slot their
-  `assign` repoints. That is what a `def` with a mutable destructuring pattern —
-  `(def (@a @b) …)` — was refusing: reassigning one name held the whole scrutinee,
-  whose release routes through the temp that produced it.
+  `assign` repoints. So a `def` with a mutable destructuring pattern —
+  `(def (@a @b) …)` — refuses nothing: a refusal there would hold the whole
+  scrutinee, whose release routes through the temp that produced it.
 - a binding **two different binders** introduce keeps the whole-holder reading. Both
   binders record a route, and nothing says which one the release loads; that is a
   genuine ambiguity rather than a gap in the mirror.
@@ -275,7 +277,7 @@ rather than over-frees. The references are the tests:
 `a_reassigned_destructured_name_refuses_nothing` for the pattern name,
 `a_reassigned_parameter_has_no_route_but_its_box` for the parameter,
 `a_reassigned_allocating_binder_refuses_its_own_release` for the refusal the reading
-keeps, and `tests/elle/region-destructured-cursor.lisp` for the measured shape.
+keeps, and [tests/elle/region-destructured-cursor.lisp](../../../tests/elle/region-destructured-cursor.lisp) for the measured shape.
 
 An **env cell**'s release is a different instruction against a different object.
 `LoadCaptureRaw` + `DecrefCellRegion` names the cell **box**, and the box is
@@ -330,7 +332,7 @@ live-in region a loop nested in one arm READS. The loop-node extension ([the
 binder's scope](anchors.md)) anchors every such read at the loop node, so the
 closed interval would place the branch's only release under the arm holding that
 loop. The rows are `arm-loop-read` and `arm-loop-read-local` in
-`tests/elle/region-branch-arm-window.lisp`, beside the `bound-loop` boundary
+[tests/elle/region-branch-arm-window.lisp](../../../tests/elle/region-branch-arm-window.lisp), beside the `bound-loop` boundary
 whose value is born in the loop body and whose release must stay there.
 
 The region must also be **live-in** to the branch, so a value born inside an arm
@@ -348,8 +350,8 @@ sites is outside the branch. A region with none — an owned parameter's
 placeholder, whose slot the lambda prologue records — has only its holder
 definitions to offer, and every one of their sites must be outside. The rows that
 separate the two are `arm-alias-inside` and `bound-loop` in
-`tests/elle/region-branch-arm-window.lisp`; the born-in-an-arm soundness face is
-`w-born-in-arm` in `region-branch-arm-window-uaf.lisp`.
+[tests/elle/region-branch-arm-window.lisp](../../../tests/elle/region-branch-arm-window.lisp); the born-in-an-arm soundness face is
+`w-born-in-arm` in the UAF file.
 
 Regions whose release belongs to another mechanism are excluded as in
 compensation: merge children, co-owned-group members, the mutated-slot 1-slot
@@ -364,9 +366,10 @@ One arm shape does not reach the merge label at all: a tail call to a *closure*
 replaces the frame, so that arm leaves through the callee. Read as "the anchor
 must be a point every arm reaches", that shape would make the branch decline
 whole — and it would take the dominant polymorphic stdlib entry point with it.
-`append` and `concat` hand a list argument to `append-list` / `concat-seq` in one
-arm, so on **every other** arm the owned parameter's whole object graph is
-stranded, once per call.
+`append` hands a list argument to `append-list` in one arm, and `concat` hands
+its arguments to `concat-seq` in one arm per family. Declining the branch would
+strand the owned parameter's whole object graph on **every other** arm, once per
+call.
 
 The window needs a weaker premise than that reading states: the release must
 **run once on every path**, which one point covering every path is only one way
@@ -382,7 +385,7 @@ the ownership move the callee's owned-parameter release consumes.
 
 The exemption's two halves do not read alike here, and the window has to tell them
 apart. For an **argument**, the copy left in the dead block is exactly the
-ownership move — the callee's owned-parameter release runs in its place (rules.md
+ownership move — the callee's owned-parameter release runs in its place ([rules.md](rules.md)
 Rule 5) — so nothing is owed on that path and the anchor is free to take the
 release away. For the **callee's own** region there is no such release: what stands
 in for it is the deferred callee channel, and that channel is keyed on where the
@@ -425,26 +428,26 @@ compensation used to reach at its head, got nothing. This is `self_cancelling_ru
 restriction read one step earlier, at the admission it builds on, and it is the
 same value-route line compensation's `tail` route already draws.
 
-Pinned by `tests/elle/region-branch-arm-window.lisp` (the reclamation, with all
+Pinned by [tests/elle/region-branch-arm-window.lisp](../../../tests/elle/region-branch-arm-window.lisp) (the reclamation, with all
 three boundaries, the `If` face, the captured-holder face, the frame-replacing-arm
 faces and the returned-parameter faces driven as rows), the `param-used-arm` /
 `param-used-arm-if` / `branch-arm-tailcall-sibling` / `branch-arm-return-captured`
-probes in `tests/elle/oracle.lisp` (the per-op
+probes in [tests/elle/probe/branch.lisp](../../../tests/elle/probe/branch.lisp), run by the oracle dashboard (the per-op
 rates), the placement pins in `lir::lower::tests::release`
 (`fallthrough_arm_releases_though_a_sibling_tail_call_exits`,
 `tail_call_argument_release_stays_the_ownership_move`,
 `moved_argument_takes_no_replica_in_the_arm_that_moves_it`), the value-route
 narrowing pins
-(`regions::tests::compensate::a_frame_replacing_arm_anchors_a_value_routed_release`,
+(`region::infer::tests::compensate::a_frame_replacing_arm_anchors_a_value_routed_release`,
 `a_frame_replacing_arm_anchors_a_binder_routed_release`,
 `a_callee_the_arm_tail_calls_keeps_its_in_arm_release`, and the mirror's own
 `a_binders_allocation_is_value_routed` /
 `a_celled_binders_allocation_is_not_value_routed`),
 the return-facet admission
-(`regions::tests::compensate::a_capturing_frame_exit_anchors_a_returned_param`,
+(`region::infer::tests::compensate::a_capturing_frame_exit_anchors_a_returned_param`,
 `a_returned_param_anchors_where_no_arm_leaves_the_frame`,
 `a_frame_exit_the_callee_cannot_reach_anchors_a_returned_param`),
-and `tests/elle/region-branch-arm-window-uaf.lisp` (the
+and [tests/elle/region-branch-arm-window-uaf.lisp](../../../tests/elle/region-branch-arm-window-uaf.lisp) (the
 soundness complement — a value read, stored, returned, carried across a yield,
 reached through a closure's environment, or moved into a sibling arm's tail callee
 after the branch must survive the moved release).

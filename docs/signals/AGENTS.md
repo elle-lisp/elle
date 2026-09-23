@@ -9,7 +9,7 @@ Up: [..](../AGENTS.md)
 - [authority.md](authority.md) — **Authority** What holds authority in a running program, and where the runtime asks whether a fiber may spend it.
 - [capabilities.md](capabilities.md) — **Capability enforcement** Capabilities flow down.
 - [design.md](design.md) — **Signal Design (more...)**
-- [emit.md](emit.md) — **emit** `emit` is the single mechanism for all signal emission in Elle.
+- [emit.md](emit.md) — **emit** `emit` raises a signal from Elle code: a yield, an error, or a signal the program declares.
 - [fibers.md](fibers.md) — **Fiber Architecture** Fibers are Elle's unified control-flow mechanism.
 - [index.md](index.md) — **Signals** Elle's unified signal and capability system.
 - [inference.md](inference.md) — **Signal Inference** How the compiler infers each function's signal, and the forms that bound, narrow or check it.
