@@ -1,16 +1,16 @@
 (elle/epoch 12)
-# audited: 2026-09-08
+# audited: 2026-09-23
 # The physical-id dimension no other gauge shows, and the remove/rebind half of the mutable-store funnel.
 #
 # docs/impl/region/diagnostics.md
 # ── The physical-id dimension ─────────────────────────────────────────
-# What a CALL costs in physical region ids, the dimension every probe above is
+# What a CALL costs in physical region ids, the dimension every other probe is
 # blind to. A native call mints a physical region for its result before the
 # callee runs, because the callee may allocate the result into it; a callee that
 # returns an immediate, or a value borrowed from an argument, allocates nothing
 # into that id. It never becomes a live region, so no teardown can return it, and
 # it holds no object, no page, no bytes and no reference count for any other
-# gauge to see (docs/impl/region/model.md § "Physical id recycling"). What it
+# gauge to see (docs/impl/region/model.md). What it
 # costs is resident: the region table is a `Vec` indexed by physical id, so the
 # largest id ever made live sets its length.
 #
@@ -25,7 +25,8 @@
 #
 # These are CLOSED controls (undeclared, like `rest-array-copy`), so a regression
 # to open trips the completeness gate loudly. Read them against the id
-# discriminator above: an id gauge that cannot move reads 0 for all five.
+# discriminator in tests/elle/oracle.lisp: an id gauge that cannot move reads 0
+# for all five.
 (def id-hold [1 2 3])
 (println "── folded suite: physical-id recycling ──")
 (pin (measure-core "id-const-compare" (stmt-run (fn [] (< 1 2))) ids-gauge 100 6
@@ -40,9 +41,10 @@
                    6 60 0.4 0.5) 0)
 
 # ── The mutable-store funnel — remove/rebind half ─────────────────────
-# The store half (push/put/add) is pinned above (push-churn/struct-put/set-array/…);
-# these pin the REMOVE and REBIND half of the same seam (docs/impl/region/ownership.md
-# § "The outgoing edge table"; src/value/arena/mutate.rs). The funnel SEAM is
+# The store half (push/put/add) is pinned in probe/direct.lisp and
+# probe/container.lisp (push-churn/struct-put/set-array/…); these pin the REMOVE and
+# REBIND half of the same seam (the outgoing edge table of
+# docs/impl/region/ownership.md; src/value/arena/mutate.rs). The funnel SEAM is
 # complete-by-construction — every remove co-locates its RC decref with the outgoing
 # un-record, the raw accessors are private (an uncounted store is a compile error), and
 # a debug equivalence oracle asserts the recorded table matches a content scan at every
@@ -59,20 +61,19 @@
 #   with its own `DecrefValueRegion`, which balances the `moves_out` retain
 #   (`pop_with_decref`) that hands the element back.
 #
-#   F1b remove-wrapper — the stdlib `pop`/`del` `(match (type-of coll)
-#   …)` dispatch wrapper strands the container arg + fresh result on the arms the
+#   remove-wrapper — the stdlib `pop`/`del` `(match (type-of coll) …)` dispatch
+#   wrapper leaves the container arg + fresh result stranded on the arms the
 #   textually-last arm does not reach, exactly as the STORE wrappers (put/push/set) do.
-#   `pop` leaks (3): the leak is the multi-arm wrapper. Closes by the SAME mechanism as
-#   the store half — per-arm compensation of the container+result, or dispatch prune on a
-#   statically-typed scrutinee.
+#   The SAME mechanism as the store half reclaims them: per-arm compensation of the
+#   container+result, or dispatch prune on a statically-typed scrutinee.
 #
 #   The RAW remove funnel reclaims too (`raw-del`/`raw-del-immediate` = 0): `%del`'s
 #   in-place @struct/@set remove decrefs the removed member and its `-mut` pass-through
 #   result carries exactly one return mint. These two are the CLOSED raw-funnel controls
 #   for the remove half, the peers of `raw-pop`/`put-slot-source`. Their probe shape is
 #   deliberately a two-statement body whose tail is the funnel call — the ANF-named tail
-#   call whose result a `Return` mint covers (docs/impl/region/mechanism.md § "The return
-#   mint is emitted exactly once") — so a second, unbalanced retain there reads here as a
+#   call whose result a `Return` mint covers, emitted exactly once
+#   (docs/impl/region/mechanism.md) — so a second, unbalanced retain there reads here as a
 #   whole stranded container plus the member it holds.
 (println "── folded suite: mutable-store funnel (remove/rebind half) ──")
 (pin (measure-core "box-rebind"
@@ -80,13 +81,14 @@
                                (let [b (box (list 1 2))]
                                  (rebox b (list 3 4))))) count-gauge 100 6 60
                    0.4 0.5) 0)
-# F1b — the stdlib `add` `(match (type-of coll) …)` dispatch
+# The stdlib `add` `(match (type-of coll) …)` dispatch
 # wrapper reclaims its owned @set container AND its stored heap member (rate 0): the
 # `:@set` arm's `%add-set-mut` returns the container pass-through, and the wrapper's
-# per-arm container release (`regions::compensate`, `funnel_container_sites`) frees
-# the stranded owned-param reference, cascading the stored list through the outgoing
-# edge table. A CLOSED control beside the reclaiming raw funnel `set-add-slot-source`
-# — RED if the container compensation regresses.
+# per-arm container release (`container_release_sites`,
+# src/hir/region/infer/compensate.rs) frees the stranded owned-param reference,
+# cascading the stored list through the outgoing edge table. A CLOSED control beside
+# the reclaiming raw funnel `set-add-slot-source`; it opens if the container
+# compensation regresses.
 (pin (measure-core "set-add"
                    (stmt-run (fn []
                                (let [s @||]
@@ -106,8 +108,8 @@
 # `%pop`/`%pop-string`/`%pop-bytes`; the container compensation frees the wrapper's
 # stranded owned-param container per-arm (recorded for a moves-out funnel even though
 # it returns the ELEMENT, not the container), and the moved-out @array element's
-# redundant tail ReturnValue retain is suppressed (`moves_out_release_sites`) — so
-# both halves of the earlier leak close.
+# redundant tail ReturnValue retain is suppressed (`moves_out_release_sites`). The
+# two together reclaim both the container and the element.
 (pin (measure-core "pop-wrapper"
                    (stmt-run (fn []
                                (let [a @[]]

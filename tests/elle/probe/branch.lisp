@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-08
+# audited: 2026-09-23
 # Discarded call results and break escapes, the branch-arm release window in each of its faces, and the frame-exit rows.
 #
 # docs/impl/region/diagnostics.md
@@ -20,11 +20,10 @@
                        (if (%lt (%rem j 2) 1) (t17-h) (t17-h2))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # The raw `%array-push`/`%put` into a fresh container, discarded: the CONTROL for
-# F1b — the dispatch-wrapper passthrough leak. The raw intrinsic
-# reclaims the container in BOTH intrinsics modes (rate 0), so the over-keep
-# `put-churn` shows below (2/op) rides the stdlib `put`/`push` type-dispatch WRAPPER,
-# not the store funnel. Direct while-statements (a thunk wrapper's return convention
-# would inflate the rate by 1).
+# the stdlib `put`/`push` type-dispatch WRAPPER. The raw intrinsic reclaims the
+# container in BOTH intrinsics modes (rate 0), so a rate `put-churn` shows below
+# rides the wrapper, not the store funnel. Direct while-statements (a thunk
+# wrapper's return convention would inflate the rate by 1).
 (pin (measure-core "push-slot-source"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -41,9 +40,9 @@
                        (let [s @{}]
                          (%put s :k (%pair 1 2)))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-# The raw `%add-set-mut` into a fresh @set, discarded — the set-family CONTROL
-# for F1b, the peer of push-slot-source/put-slot-source. The raw silent intrinsic
-# reclaims the container (rate 0), so the `set-add` over-keep (3/op) rides the
+# The raw `%add-set-mut` into a fresh @set, discarded — the set-family CONTROL,
+# the peer of push-slot-source/put-slot-source. The raw silent intrinsic reclaims
+# the container (rate 0), so a rate `set-add` (probe/store.lisp) shows rides the
 # stdlib `add` type-dispatch WRAPPER, not the set-add funnel (`set_add_with_incref`).
 (pin (measure-core "set-add-slot-source"
                    (fn [b]
@@ -55,10 +54,11 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # put-churn mints a FRESH @struct container per op and hands it through the stdlib
 # `put`; its `:@struct` arm's `%put-struct-mut` returns the container pass-through,
-# and the wrapper's per-arm container release (`regions::compensate`,
-# `funnel_container_sites`) frees the stranded owned-param reference, cascading the
-# stored struct — rate 0 in both intrinsics modes, every tier. A CLOSED control
-# beside `put-slot-source`; RED if the container compensation regresses.
+# and the wrapper's per-arm container release (`container_release_sites`,
+# src/hir/region/infer/compensate.rs) frees the stranded owned-param reference,
+# cascading the stored struct — rate 0 in both intrinsics modes, every tier. A
+# CLOSED control beside `put-slot-source`; it opens if the container compensation
+# regresses.
 (pin (measure-core "put-churn"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -69,16 +69,15 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # Per-arm compensation over a `Match`, both faces. `match-dead-arm` is a CLOSED
 # control: the taken arm has no use of the pre-allocated local, so the head release
-# frees it (docs/impl/region/mechanism.md § "The return frontier is per-path" — the
-# premises are stated over arms, so the branch's arity and kind are not read).
-# `match-used-arm` is the USED face, also CLOSED: the taken arm uses the local but
-# does not hold its `decref_point`, and no retain on its last-use node funds a
-# per-arm release — so instead of adding one, the region's single release is
-# anchored where every arm reaches it (§ "A release inside one arm is not a
-# release on the other arms"). Widening `tail` to every arm-last-use node is a
-# measured over-free and is NOT what closed this: an arm that used the region may
-# hold an uncounted borrow the solver does not name, which is exactly why the
-# close is a placement argument and not a count one.
+# frees it (docs/impl/region/compensate.md — the premises are stated over arms, so
+# the branch's arity and kind are not read). `match-used-arm` is the USED face,
+# also CLOSED: the taken arm uses the local but does not hold its `decref_point`,
+# and no retain on its last-use node funds a per-arm release — so the region's
+# single release is anchored where every arm reaches it
+# (docs/impl/region/window.md). Widening `tail` to every arm-last-use node
+# over-frees: an arm that used the region may hold an uncounted borrow the solver
+# does not name, which is why the window is a placement argument and not a count
+# one.
 (pin (measure-core "match-dead-arm"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -98,13 +97,13 @@
 # region (3 cons cells) strands on every arm that is not the one naming it last,
 # unless the single release is anchored where every arm reaches it. Undeclared,
 # like `rest-array-copy`, so a regression trips the completeness gate loudly
-# rather than being absorbed as an F5 strand. Their counterfactual and the two
+# rather than being absorbed as a declared strand. Their counterfactual and the two
 # window boundaries are `tests/elle/region-branch-arm-window.lisp`; the soundness
 # complement is `region-branch-arm-window-uaf.lisp`.
 # `branch-arm-tailcall-sibling` is the third: the same window over a branch whose
 # OTHER arm leaves through a frame-replacing closure tail call. Declining such a
-# branch whole strands the argument on the arm driven here, which is what the
-# `concat`/`append` family paid per call.
+# branch whole strands the argument on the arm driven here, once per call of the
+# `concat`/`append` family.
 # `arm-alias-inside` is the fourth: the same window over a branch one of whose
 # arms binds an ALIAS of the argument. The live-in premise is about the
 # allocation, so a binding the arm introduces is not a birth in the arm; reading
@@ -172,9 +171,9 @@
 # what places a whole fresh struct's release. A pattern whose scope goes
 # unrecorded reads as bound outside this loop, hoisting that release past the loop
 # and stranding every iteration's scrutinee but the last
-# (docs/impl/region/mechanism.md § "Every binder records its scope"). CLOSED
-# control — undeclared, like `param-used-arm`, so a regression trips the
-# completeness gate loudly rather than being absorbed as an F5 strand. The
+# (docs/impl/region/anchors.md). CLOSED control — undeclared, like
+# `param-used-arm`, so a regression trips the completeness gate loudly rather
+# than being absorbed as a declared strand. The
 # per-shape rows and the arm-not-taken / guard / nested-loop faces are
 # `tests/elle/region-match-bind-loop.lisp`; the soundness complement is
 # `region-match-bind-loop-uaf.lisp`.
@@ -189,11 +188,10 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # The frame-exit release, thirteen CLOSED controls. A frame-replacing tail call means
 # everything the lowerer emits after it runs only on the NATIVE fall-through, so a
-# release landing there is emitted where control may never arrive; the close moves
-# that one release ahead of the `TailCall` — admitted where escape proves the frame
-# holds the region alone, since on the closure path it fires where none fired
-# before (docs/impl/region/mechanism.md § "A release past a frame-replacing tail
-# call is not a release"). `tail-frame-exit-unused` is the unused-parameter
+# release landing there is emitted where control may never arrive; the relocation
+# moves that one release ahead of the `TailCall` — admitted where escape proves the
+# frame holds the region alone, since on the closure path it adds a release the
+# dead block never ran (docs/impl/region/relocate.md). `tail-frame-exit-unused` is the unused-parameter
 # fallback through that dead block; `tail-frame-exit-arms` is the same strand one
 # block further out, where the tail calls sit in the arms of a branch and the
 # release lands past the merge; `tail-frame-exit-captured` is the holder the tail
@@ -223,14 +221,14 @@
 # `tail-frame-exit-arms`: an `and`/`or` done block is a merge the lowerer builds
 # out of operands the source spells as one expression, so the arms are found by a
 # different route and only the last operand can carry the tail call
-# (docs/impl/region/replicate.md § "A short-circuit operand is an arm").
-# `tail-frame-exit-arms` drives an `if`, so it read 0 throughout this defect and
-# would read 0 through its regression. The pair must stay together: `and`'s branch
+# (docs/impl/region/replicate.md). `tail-frame-exit-arms` drives an `if`, so it
+# reads 0 whether or not the short-circuit face strands. The pair must stay
+# together: `and`'s branch
 # is `or`'s mirror — the first operand settles on FALSE rather than on true — so
 # the two reach the same arm through opposite conditions and a reading that
 # recovered one polarity alone would close one of them.
 # Undeclared, like `param-used-arm`, so a regression trips the
-# completeness gate loudly rather than being absorbed as F1a scratch. The
+# completeness gate loudly rather than being absorbed as declared scratch. The
 # counterfactual and the boundary rows live in
 # `tests/elle/region-tail-frame-exit.lisp`; the soundness complement is
 # `region-tail-frame-exit-uaf.lisp`.
@@ -326,12 +324,12 @@
                        (t23-and-arm (list 1 2 3) true)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # The three `break-value*` probes are CLOSED controls for the break TRANSFER
-# (docs/impl/region/mechanism.md § "`break` transfers its value"): the value a
+# (docs/impl/region/anchors.md): the value a
 # `break` carries out is the BLOCK's value, so its release is anchored where the
 # block's value is consumed — for a discarded block that is the block node
 # itself, emitted after the exit label and reached on both paths — instead of
 # inside the body the break jumps out of. Discarded, consumed, and heap-literal
-# placements all reclaim; RED if the transfer regresses.
+# placements all reclaim; they open if the transfer regresses.
 (pin (measure-core "break-value"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -361,10 +359,9 @@
 # the one broken out, but whose `decref_point` sits between the break site and
 # the block's exit label. The transfer does not reach it — the release is simply
 # jumped over — so it is re-anchored to the block by the same pin
-# (docs/impl/region/mechanism.md § "A release the break jumps over is not a
-# release"). Its control `break-skipped-nobreak` runs the same body with the
-# break unreachable, isolating the skip from the shape; RED if the window pin
-# regresses. Both boundaries the window stops at — a loop or a lambda nested
+# (docs/impl/region/anchors.md). Its control `break-skipped-nobreak` runs the same
+# body with the break unreachable, isolating the skip from the shape; it opens if
+# the window pin regresses. Both boundaries the window stops at — a loop or a lambda nested
 # inside it — are gauged by tests/elle/region-break-skip.lisp, not here.
 (pin (measure-core "break-skipped"
                    (fn [b]

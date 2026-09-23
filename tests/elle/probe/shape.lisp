@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-08
+# audited: 2026-09-23
 # The shapes the direct-loop rows drive: values, error payloads, parked primitives, propagate depth, env and module cells, branch arms.
 #
 # docs/impl/region/diagnostics.md
@@ -19,13 +19,13 @@
 #   - byte-gauge: the same drivers under arena/bytes;
 #   - value-survival: plain asserts (correctness, not a rate).
 #
-# Each pin is the TRUE CURRENT rate the estimator measures, exact (or a
-# [lo hi] range) and shrink-only: a fix LOWERS it, never raises it.
+# Each pin is the rate the estimator measures today, exact (or a [lo hi] range)
+# and shrink-only: a change may lower it, never raise it.
 
 (defn make-struct [i]
   # `i` reaches the value position (:iter i), which disables call-site param
   # joins, so the %add operand is proven by a local coerce-guard instead
-  # (docs/intrinsics.md § The contract). The coerce rebinds i to an int without a
+  # (the contract in docs/intrinsics.md). The coerce rebinds i to an int without a
   # branch-compensation retain, so the success path stays at 0/op.
   (let [i (if (%int? i) i 0)]
     {:iter i :val (%add i 1)}))
@@ -42,8 +42,7 @@
   (error v))
 # The `primitive-resume-*` bodies park at a suspending PRIMITIVE call, whose
 # resume value stands in for a result no `Return` mint ever funded, so the
-# delivery mints it instead (docs/impl/region/owner.md § "A delivery into a
-# replayed frame carries one owning reference"). What the rate gauges is the
+# delivery mints it instead (docs/impl/region/owner.md). What the rate gauges is the
 # mint's ARITY: one reference per delivery, consumed by the continuation's own
 # result release, so a second mint no release answers strands the resume value
 # per park. `ora-dyn-sig` is what makes the park a primitive one — a non-literal
@@ -79,8 +78,7 @@
 # The `propagate-*` raisers. `fiber/propagate` installs the child's parked
 # payload as the propagating fiber's own `signal`, which is a FRESH park and owes
 # its own delivery reference — the one the propagating fiber's resumer consumes
-# when it releases its resume result (docs/impl/region/owner.md § "Park/unpark
-# symmetry"). `defer` is that propagate in production form: it resumes a body
+# when it releases its resume result (docs/impl/region/owner.md). `defer` is that propagate in production form: it resumes a body
 # fiber, runs cleanup, then propagates when the body did not complete. So the
 # rate is read across propagate DEPTH: a mint no release answers strands one
 # region per park, which makes growth scale with the number of `defer`s the raise
@@ -136,8 +134,7 @@
 # frame-held admission refuses it for want of a holder and its release stays
 # behind the call, while the cell is admitted on its binding's verdict and moves
 # ahead. A move that crosses a read through the cell it frees is declined
-# (docs/impl/region/mechanism.md § "A move that crosses a read through the cell it
-# frees is declined"), and declining leaves the box release on the closure path —
+# (docs/impl/region/relocate.md), and declining leaves the box release on the closure path —
 # the bounded fallback whose cost this gauges. `ptr/from-int` is the `Immediate`
 # init that splits the pair; `module-cell-heap-init` is the same module with a
 # HEAP init, where the value region has a holder and both releases are admitted
@@ -156,8 +153,7 @@
 # ends in a closure tail call, which puts the box's `DecrefCellRegion` in the dead
 # post-`TailCall` block. Relocating it there is the frame-held admission's
 # business, and the holder's mutation does not refuse it: the release names the
-# BOX, which no `assign` repoints (docs/impl/region/mechanism.md § "A mutated
-# holder poisons its value route, not its cell box"). `shared-env-cell`'s cell is
+# BOX, which no `assign` repoints (docs/impl/region/window.md). `shared-env-cell`'s cell is
 # module-level, minted once for the file, so it measures the same closure call with
 # no per-op box at all.
 (defn t20-make-cell []
@@ -170,8 +166,7 @@
 # cell's binding. The capture-use of `c` resolves through `f`'s last use, so the
 # box's `decref_point` follows the call into the arm that makes it, and the reading
 # arm takes compensation's TAIL release — after its own read, where the head release
-# would free the box under that read (docs/impl/region/mechanism.md § "A
-# compensating release of an env cell names the box, not the holder's slot"). Driven
+# would free the box under that read (docs/impl/region/compensate.md). Driven
 # through the reading arm, the only one whose release is new.
 (defn t20-read-arm [t]
   (def @c 0)
@@ -181,10 +176,11 @@
 # caller picks. `v` is allocated before the dispatch, so it is live-in on every arm
 # and its lone `decref_point` lands in the arm that uses it last.
 #   DEAD arm  — the taken arm has no use of `v` at all, so it creates no reference
-#               and takes the head release (`regions::compensate`).
+#               and takes the head release (src/hir/region/infer/compensate.rs).
 #   USED arm  — the taken arm uses `v` but is not the one holding the `decref_point`,
-#               and no retain on its last-use node funds a per-arm release, so it
-#               keeps the conservative baseline and strands `v` (F5).
+#               and no retain on its last-use node funds a per-arm release, so the
+#               branch-arm window anchors `v`'s one release where every arm reaches
+#               it (docs/impl/region/window.md).
 (defn t21-dead-arm [t]
   (let [v (list 1 2 3)]
     (match t
@@ -201,8 +197,7 @@
 # polymorphic stdlib entry point's shape, whose caller moved the argument in. The
 # region's one release is anchored where every arm reaches it, so the arm the
 # caller happens to pick does not decide whether the argument is freed
-# (docs/impl/region/mechanism.md § "A release inside one arm is not a release on
-# the other arms"). `t22-param-if` is the `If` face of the identical premise:
+# (docs/impl/region/window.md). `t22-param-if` is the `If` face of the identical premise:
 # the window reads arm structure, never the branch's kind or arity.
 (defn t22-param-arm [v t]
   (match t
@@ -221,21 +216,22 @@
     :a (length v)
     _ (let [w v]
         (length w))))
-# The window's iterative boundary is the loop's BODY, not the loop's own node. A
-# read of a loop-external binding is anchored at the loop NODE, and the lowerer
-# emits a node's releases after it, so that release already runs once per execution
-# of the loop — the count the merge label is reached with. Driven through the arm
-# that does NOT loop, the one whose release is new.
 # The sequence reads are read-only trait dispatchers and declare `Opaque`, so
-# they seed nothing on escape's store facet (docs/impl/region/effects.md
-# § `Opaque`). A `Mixed` declaration would, and every mechanism gated on
-# `frame_held_regions` refuses a region escaping by a facet other than
-# return — the branch-arm window among them, which is what this drives.
+# they seed nothing on escape's store facet (docs/impl/region/effects.md). A
+# `Mixed` declaration would, and every mechanism gated on `frame_held_regions`
+# refuses a region escaping by a facet other than return — the branch-arm window
+# among them, which is what this drives.
 (defn t22-arm-seq-read [v t]
   (match t
     :a (first v)
     :b (length v)
     _ (length v)))
+
+# The window's iterative boundary is the loop's BODY, not the loop's own node. A
+# read of a loop-external binding is anchored at the loop NODE, and the lowerer
+# emits a node's releases after it, so that release already runs once per execution
+# of the loop — the count the merge label is reached with. Driven through the arm
+# that does NOT loop, the one whose release is new.
 (defn t22-arm-loop-read [v t]
   (match t
     :a (length v)
@@ -250,8 +246,7 @@
 # CLOSURE tail call naming the same parameter — the `append`/`concat` dispatch
 # shape. Anchoring is what covers the arm driven here; the frame-exiting arm is
 # covered by the relocation's exemption, since its call took the argument over
-# (docs/impl/region/mechanism.md § "An arm that leaves through a callee takes a
-# replica, not the anchor").
+# (docs/impl/region/window.md).
 (defn t22-tc-callee [v]
   (length v))
 (defn t22-tailcall-sibling [v t]
@@ -265,7 +260,7 @@
 # only through its captured environment. The merge follows this arm's own mint, and
 # the sibling's replica runs ahead of a callee whose captured edge holds the region
 # off zero until its own mint, so the branch is admitted for the class
-# (docs/impl/region/mechanism.md § "The return facet costs the merge nothing").
+# (docs/impl/region/window.md).
 # Refusing the facet outright strands one whole accumulator per call on the arm
 # driven here.
 (defn t22-returned-captured [dst src]
