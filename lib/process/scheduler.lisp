@@ -12,14 +12,13 @@
 (def make-waits (import "std/process/waits"))
 (def make-commands (import "std/process/commands"))
 
-(defn make-scheduler [&named fuel backend]
+(defn make-scheduler [&named fuel]
   "A process scheduler whose processes run :fuel instructions a turn (1000 by
    default). It builds no I/O backend: it forwards each I/O request to the
    parent scheduler, the one that runs the code which calls run or start."
   (let* [core (make-core (or fuel 1000))
          waits (make-waits core)
          handle-cmd (make-commands core)
-         backend (or backend (io/backend :async))
          quantum core:quantum
          ready core:ready
          waiting core:waiting
@@ -257,8 +256,7 @@
     {:run sched-run
      :spawn core:spawn
      :inject sched-inject
-     :process-info sched-process-info
-     :backend backend}))
+     :process-info sched-process-info}))
 
 (defn run [sched init]
   "Run init-closure on an existing scheduler. Use this when you need to
@@ -266,14 +264,14 @@
    See also: start (which creates a scheduler for you)."
   ((get sched :run) init))
 
-(defn start [init &named fuel backend]
+(defn start [init &named fuel]
   "Create a fresh scheduler and run init-closure as the first process.
    Blocks until no process can run again. Returns the scheduler, or raises
    {:error :process-error} when the first process dies of an error, a link,
    or an exit another process sent it.
    This is the primary entry point for most programs. Use `run` instead
    when you need to pre-configure or reuse a scheduler."
-  (let [sched (make-scheduler :fuel fuel :backend backend)]
+  (let [sched (make-scheduler :fuel fuel)]
     ((get sched :run) init)
     sched))
 
