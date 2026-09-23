@@ -1,8 +1,9 @@
-// audited: 2026-09-16
-// Every registered migration, ordered by epoch: the data one epoch bump adds.
-// docs/epochs.md
+// audited: 2026-09-23
+//! Every registered migration, ordered by epoch: the data one epoch bump adds.
+//!
+//! docs/epochs.md
 
-use super::{Migration, MigrationRule};
+use super::{LexicalChange, Migration, MigrationRule};
 
 /// All registered migrations, ordered by epoch.
 ///
@@ -196,22 +197,9 @@ pub(super) static MIGRATIONS: &[Migration] = &[
         epoch: 11,
         summary: "sys/spawn→sys/spawn-vm, os/spawn→os/spawn-vm (sys/spawn is now the \
                   heavy, stdlib-backed worker; the old light worker is sys/spawn-vm)",
-        // Pre-epoch code spawned a primitives-only worker. `sys/spawn`/`os/spawn`
-        // now load the standard library (so eval/read resolve stdlib in the
-        // worker) and are correspondingly heavier; the cheap primitives-only
-        // worker is `sys/spawn-vm`/`os/spawn-vm`. Renaming the old qualified
-        // names to their `-vm` form preserves the original (light) behavior of
-        // existing code, here and in the wild. New code (this epoch) gets the
-        // heavy default via `sys/spawn`.
-        //
-        // We deliberately do NOT rename the bare `spawn` symbol: `Rename`
-        // rewrites every matching symbol (it isn't binding-aware), and `spawn`
-        // is also used as a local — the `(ev/scope (fn [spawn] …))` nursery
-        // param — so a global rename would clobber it. Only the qualified
-        // `sys/spawn`/`os/spawn` (unambiguously the primitive) are renamed.
-        // (Bare `spawn` is no longer registered as a primitive alias at all —
-        // an ambiguous global was an accident waiting to happen — so it is
-        // purely a local now; top-level code must use sys/spawn[-vm].)
+        // The bare `spawn` is not renamed: `Rename` is not binding-aware, and
+        // `spawn` is also the `(ev/scope (fn [spawn] …))` nursery parameter
+        // (docs/epochs.md).
         rules: &[
             MigrationRule::Rename { old: "sys/spawn", new: "sys/spawn-vm" },
             MigrationRule::Rename { old: "os/spawn", new: "os/spawn-vm" },
@@ -263,5 +251,17 @@ pub(super) static MIGRATIONS: &[Migration] = &[
             },
         ],
         lexical: &[],
+    },
+    Migration {
+        epoch: 13,
+        summary: "string escapes: \\0, \\xHH and \\u{…} read as characters, and any other \
+                  escape is a read error",
+        rules: &[],
+        lexical: &[LexicalChange {
+            name: "string-escapes",
+            summary: "a string reads \\0, \\xHH from 00 to 7f, and \\u{…}, and refuses any \
+                      other escape; each escape whose meaning moved becomes the text epoch 12 \
+                      read from it",
+        }],
     },
 ];

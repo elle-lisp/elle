@@ -1,4 +1,12 @@
+// audited: 2026-09-23
+//! The reader's entry points: prescan a source's epoch, lex it under that
+//! epoch's lexicon, and parse the tokens into syntax trees or values.
+//!
+//! docs/impl/reader.md
+//! docs/impl/lexicon.md
+
 pub mod cursor;
+pub(crate) mod escape;
 mod js_lexer;
 mod js_parser;
 mod lexer;
@@ -258,8 +266,6 @@ pub fn read_syntax_all_for(
         read_syntax_all(arena, &sexp_text(input, source_name), source_name)
     }
 }
-
-// Tests migrated to tests/elle/reader.lisp
 
 #[cfg(test)]
 mod tests;

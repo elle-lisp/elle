@@ -1,6 +1,11 @@
-//! Display implementations for Syntax
+// audited: 2026-09-23
+//! Display for syntax nodes: text the reader reads back to the same tree.
+//!
+//! docs/impl/syntax.md
+//! docs/impl/lexicon.md
 
 use super::{Syntax, SyntaxKind};
+use crate::reader::escape::StringLiteral;
 use std::fmt;
 
 impl fmt::Display for Syntax {
@@ -38,8 +43,8 @@ impl fmt::Display for SyntaxKind {
             SyntaxKind::Float(n) => write!(f, "{:?}", n),
             SyntaxKind::Symbol(s) => write!(f, "{}", s),
             SyntaxKind::Keyword(s) => write!(f, ":{}", s),
-            SyntaxKind::String(s) => write!(f, "\"{}\"", s.escape_default()),
-            SyntaxKind::StringMut(s) => write!(f, "@\"{}\"", s.escape_default()),
+            SyntaxKind::String(s) => write!(f, "{}", StringLiteral(s)),
+            SyntaxKind::StringMut(s) => write!(f, "@{}", StringLiteral(s)),
             SyntaxKind::List(items) => delimited(f, "(", items, ")"),
             SyntaxKind::Array(items) => delimited(f, "[", items, "]"),
             SyntaxKind::ArrayMut(items) => delimited(f, "@[", items, "]"),

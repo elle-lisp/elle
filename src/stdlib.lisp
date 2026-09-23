@@ -1,4 +1,4 @@
-(elle/epoch 12)
+(elle/epoch 13)
 ## Elle standard library
 ##
 ## Loaded at startup after primitives are registered.

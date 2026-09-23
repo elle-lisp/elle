@@ -20,6 +20,7 @@
 use super::config::FormatterConfig;
 use super::doc::Doc;
 use super::trivia::{AnnotatedSyntax, Trivia};
+use crate::reader::escape::StringLiteral;
 use crate::syntax::SyntaxKind;
 
 // ── Public entry point ─────────────────────────────────────────
@@ -267,10 +268,10 @@ fn format_syntax(node: &AnnotatedSyntax, source: &str, config: &FormatterConfig)
             if start < source.len() && end <= source.len() {
                 Doc::text(&source[start..end])
             } else {
-                // Synthetic or detached span — fall back to escaped display
+                // Synthetic or detached span — print the string itself.
                 match &node.syntax.kind {
-                    SyntaxKind::String(s) => Doc::text(format!("\"{}\"", s.escape_default())),
-                    SyntaxKind::StringMut(s) => Doc::text(format!("@\"{}\"", s.escape_default())),
+                    SyntaxKind::String(s) => Doc::text(StringLiteral(s).to_string()),
+                    SyntaxKind::StringMut(s) => Doc::text(format!("@{}", StringLiteral(s))),
                     _ => Doc::text("#<bad-string>"),
                 }
             }
