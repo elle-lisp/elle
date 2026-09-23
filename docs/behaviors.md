@@ -1,13 +1,14 @@
 # Process behaviors
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-23 -->
 
-The callback-driven roles `lib/process.lisp` builds on the bare process:
-GenServer, Actor, Task, Supervisor and EventManager.
+The callback-driven roles [lib/process.lisp](../lib/process.lisp) builds on the bare process:
+GenServer, Actor, Task and EventManager.
 
 Each one is a process. [processes.md](processes.md) owns the model underneath
 them — mailboxes, links, monitors, registration and preemption — and this
-document owns what each role adds.
+document owns what each role adds. The supervisor that starts and restarts
+them has its own document, [supervisor.md](supervisor.md).
 
 ```lisp
 (def process ((import "std/process")))
@@ -31,7 +32,8 @@ and info messages (raw mailbox messages).
 
 `handle-call` can also return `[:noreply state]` for deferred replies
 (use `gen-server-reply` later) or `[:stop reason reply state]` to shut
-down after replying.
+down after replying. `handle-cast` and `handle-info` stop the server by
+returning `[:stop reason state]`.
 
 ## Key-value store example
 
@@ -56,24 +58,98 @@ down after replying.
 ## Stopping a server
 
 `gen-server-stop` requests graceful shutdown. The server's `:terminate`
-callback runs before it exits.
+callback runs, and then the server exits with the reason that `:reason` names,
+`:normal` by default.
+
+`gen-server-start-link` links the server to the process that starts it, so the
+server's exit reaches that process. A reason other than `:normal` kills it,
+unless it traps exits.
 
 ```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let [me (process:self)]
-    (process:gen-server-start-link
-      {:init        (fn [_] :running)
-       :handle-call (fn [req _from state] [:reply state state])
-       :terminate   (fn [reason state]
-         (process:send me [:terminated reason]))}
-      nil :name :stoppable)
+  (process:trap-exit true)
+  (let [me (process:self)
+        server (process:gen-server-start-link
+                 {:init        (fn [_] :running)
+                  :handle-call (fn [req _from state] [:reply state state])
+                  :terminate   (fn [reason state]
+                    (process:send me [:terminated reason]))}
+                 nil :name :stoppable)]
     (process:gen-server-stop :stoppable :reason :shutdown)
+    (assert (= (process:recv) [:terminated :shutdown]) ":terminate ran")
+    (assert (= (process:recv) [:EXIT server :shutdown]) "the exit reached the starter"))))
+```
+
+## Timeouts
+
+`gen-server-call` and `gen-server-stop` take `:timeout`, in scheduler ticks.
+When no reply arrives in time, they raise `{:error :gen-server-timeout}`.
+Without `:timeout`, they wait until the server replies or exits.
+
+```lisp
+(def process ((import "std/process")))
+
+(process:start (fn []
+  (process:gen-server-start-link
+    {:init        (fn [_] nil)
+     :handle-call (fn [_req _from state] [:noreply state])}
+    nil :name :silent)
+  (let [[ok? err] (protect (process:gen-server-call :silent :ping :timeout 5))]
+    (assert (not ok?) "the call timed out")
+    (assert (= (get err :error) :gen-server-timeout) "with :gen-server-timeout"))))
+```
+
+A call that has timed out leaves nothing in the caller's mailbox, even when the
+server replies later. The call's ref works as an alias for the caller, and the
+call turns the alias off when it ends. The scheduler drops a reply sent to an
+alias that is off, and removes one that arrived before the call turned it off.
+
+```lisp
+(def process ((import "std/process")))
+
+(process:start (fn []
+  (process:gen-server-start-link
+    {:init        (fn [_] nil)
+     :handle-call (fn [_req _from state]
+       (process:recv-timeout 10)
+       [:reply :late state])}
+    nil :name :slow)
+  (let [[ok? _] (protect (process:gen-server-call :slow :ping :timeout 2))]
+    (assert (not ok?) "the call timed out"))
+  (assert (= (process:recv-timeout 30) :timeout) "the late reply never arrives")))
+```
+
+## A server that exits during a call
+
+`gen-server-call` and `gen-server-stop` monitor the server while they wait.
+When the server exits before it replies, they raise `{:error :gen-server-down
+:reason r}`, where `r` is the server's exit reason. A call to a server that has
+already exited raises at once, with the reason `:noproc`.
+
+When the reply comes first, the call removes its monitor, and no `:DOWN` from
+that monitor stays in the caller's mailbox. A link is separate from the call.
+A caller that traps exits and is linked to the server still receives `[:EXIT
+server reason]`.
+
+```lisp
+(def process ((import "std/process")))
+
+(process:start (fn []
+  (process:trap-exit true)
+  (let* [server (process:gen-server-start-link
+                  {:init        (fn [_] nil)
+                   :handle-call (fn [_req _from _state]
+                     (error {:error :boom :message "crash in call"}))}
+                  nil :name :fragile)
+         [ok? err] (protect (process:gen-server-call :fragile :ping))]
+    (assert (not ok?) "the call raises")
+    (assert (= (get err :error) :gen-server-down) "with :gen-server-down")
+    (assert (= (first (get err :reason)) :error) "carrying the server's exit reason")
     (match (process:recv)
-      [:terminated reason]
-        (assert (= reason :shutdown) "clean shutdown")
-      _ nil))))
+      [:EXIT pid [:error _]] (assert (= pid server) "the link delivers the exit as well")
+      _ (assert false "expected [:EXIT server [:error ...]]")))))
 ```
 
 ## Deferred replies
@@ -89,6 +165,9 @@ from `handle-call` and use `gen-server-reply` later:
   (process:gen-server-reply (get state :pending) msg)
   [:noreply nil])}
 ```
+
+A deferred reply goes through the same alias as any other. When the call has
+already ended, because it timed out or raised, the reply goes nowhere.
 
 
 # Actor
@@ -111,8 +190,16 @@ get/update operations on state.
 
 # Task
 
-Task runs a one-shot function as a supervised process and returns the
-result. Like `ev/spawn` but the work has a PID and can be monitored.
+Task runs a one-shot function as a process and returns its value to the caller.
+It is like `ev/spawn`, except that the work has a PID.
+
+`task-async` spawns the process and monitors it, and returns `[pid ref]`,
+where `ref` is the monitor's ref. The task is not linked, so its crash does
+not kill the caller. `task-await` returns the function's value. It
+raises `{:error :task-error}` when the task crashed, and `{:error
+:task-timeout}` when `:timeout` ticks pass first; a task that times out keeps
+running. Once `task-await` returns or raises, no message from the task is left
+in the caller's mailbox.
 
 ```lisp
 (def process ((import "std/process")))
@@ -126,180 +213,14 @@ result. Like `ev/spawn` but the work has a PID and can be monitored.
     (assert (= r2 30) "task 2"))))
 ```
 
-
-# Supervisor
-
-Supervisors manage child processes and restart them according to a
-policy when they crash.
-
-## Child specs
-
-Each child is a struct with:
-
-```text
-{:id      :worker-name        # unique identifier
- :start   (fn [] ...)         # closure to run as a process
- :restart :permanent}         # :permanent | :transient | :temporary
-```
-
-- **`:permanent`** — always restart (even on normal exit)
-- **`:transient`** — restart only on abnormal exit (crash)
-- **`:temporary`** — never restart
-
-## Strategies
-
-| Strategy | Behavior |
-|----------|----------|
-| `:one-for-one` | Restart only the crashed child |
-| `:one-for-all` | Restart all children when one crashes |
-| `:rest-for-one` | Restart crashed child and all children started after it |
-
-## Basic supervisor
-
 ```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let [me (process:self)]
-    (process:supervisor-start-link
-      [{:id :worker :restart :permanent
-        :start (fn []
-          (process:send me [:started (process:self)])
-          (forever
-            (match (process:recv)
-              :crash (error {:error :boom :message "crash"})
-              :ping  (process:send me :pong)
-              _ nil)))}]
-      :name :sup)
-
-    # Wait for initial start
-    (match (process:recv)
-      [:started pid1]
-        (begin
-          (process:send pid1 :ping)
-          (assert (= :pong (process:recv)) "child responds")
-          # Crash it
-          (process:send pid1 :crash)
-          # Supervisor restarts it
-          (match (process:recv)
-            [:started pid2]
-              (begin
-                (assert (not (= pid1 pid2)) "new pid")
-                (process:send pid2 :ping)
-                (assert (= :pong (process:recv)) "restarted child responds"))
-            _ nil))
-      _ nil))))
-```
-
-## Restart intensity limits
-
-Without limits, a child that crashes immediately on startup causes an
-infinite restart loop. The `:max-restarts` and `:max-ticks` options
-set a sliding window: if a child restarts more than N times within M
-scheduler ticks, the supervisor stops restarting it.
-
-```text
-(process:supervisor-start-link children
-  :max-restarts 3    # at most 3 restarts...
-  :max-ticks 5)      # ...within 5 scheduler ticks
-```
-
-## Supervisor logging
-
-Pass a `:logger` callback to receive structured lifecycle events:
-
-```text
-(process:supervisor-start-link children
-  :logger (fn [event]
-    (println "supervisor:" (get event :event) (get event :id))))
-```
-
-Events emitted:
-
-| Event | Fields |
-|-------|--------|
-| `:child-started` | `:id`, `:pid` |
-| `:child-exited` | `:id`, `:pid`, `:reason` |
-| `:child-restarting` | `:id`, `:attempt` |
-| `:max-restarts-reached` | `:id`, `:shutting-down` |
-
-## Startup ordering with readiness signals
-
-By default, children start concurrently. When a child spec includes
-`:ready true`, the supervisor waits for that child to call
-`supervisor-notify-ready` before starting the next child. This ensures
-startup ordering — for example, a ZMQ bridge must bind its endpoints
-before clients connect.
-
-```text
-(process:supervisor-start-link
-  [{:id :bridge :restart :permanent :ready true
-    :start (fn []
-      (bind-zmq-endpoints)
-      (process:supervisor-notify-ready)  # supervisor proceeds
-      (forever (process:recv)))}
-   {:id :client :restart :permanent
-    :start (fn []
-      # bridge is guaranteed ready at this point
-      (connect-to-bridge)
-      (forever (process:recv)))}])
-```
-
-If a child crashes before signaling readiness, the supervisor detects
-the death and proceeds without deadlocking.
-
-## Dynamic children
-
-Add and remove children at runtime:
-
-```text
-(process:supervisor-start-child :sup
-  {:id :dynamic-1 :restart :temporary
-   :start (fn [] (forever (process:recv))})
-
-(process:supervisor-stop-child :sup :dynamic-1)
-(process:supervisor-which-children :sup)  # => [{:id ... :pid ...} ...]
-```
-
-
-# Supervised subprocesses
-
-`make-subprocess-child` creates a child spec that manages an OS
-subprocess under a supervisor. The child process spawns the subprocess,
-blocks on `subprocess/wait`, then crashes on non-zero exit to trigger
-supervisor restart.
-
-```text
-(process:supervisor-start-link
-  [(process:make-subprocess-child :nginx "/usr/sbin/nginx" ["-g" "daemon off;"])
-   (process:make-subprocess-child :redis "/usr/bin/redis-server" ["--port" "6380"]
-     :restart :transient)]
-  :name :daemon-sup
-  :max-restarts 5
-  :max-ticks 10
-  :logger (fn [event] (println "daemon-sup:" event)))
-```
-
-This replaces the manual bridge pattern:
-
-```text
-# Before: every user writes this glue
-{:id :my-daemon :restart :permanent
- :start (fn []
-   (let [proc (subprocess/exec "/usr/bin/my-daemon" [])]
-     (let [code (subprocess/wait proc)]
-       (error {:error :subprocess-exit :code code}))))}
-
-# After: one-liner
-(process:make-subprocess-child :my-daemon "/usr/bin/my-daemon" [])
-```
-
-Options passed to `subprocess/exec` (environment, working directory)
-go in the `:opts` named argument:
-
-```text
-(process:make-subprocess-child :worker "/usr/bin/worker" []
-  :opts {:cwd "/var/lib/worker" :env {:PORT "8080"}})
+  (let* [t (process:task-async (fn [] (error {:error :boom :message "crash"})))
+         [ok? err] (protect (process:task-await t))]
+    (assert (not ok?) "awaiting a crashed task raises")
+    (assert (= (get err :error) :task-error) "with :task-error"))))
 ```
 
 
@@ -348,19 +269,8 @@ with `:init`, `:handle-event`, and optional `:terminate` callbacks.
 
 | Function | Description |
 |----------|-------------|
-| `task-async fn` | Spawn linked task, returns `[pid ref]` |
+| `task-async fn` | Spawn monitored task, returns `[pid ref]` |
 | `task-await task` | Wait for result (`:timeout`) |
-
-## Supervisor
-
-| Function | Description |
-|----------|-------------|
-| `supervisor-start-link children` | Start supervisor (`:name`, `:strategy`, `:max-restarts`, `:max-ticks`, `:logger`) |
-| `supervisor-start-child sup spec` | Add child at runtime |
-| `supervisor-stop-child sup id` | Remove and stop child |
-| `supervisor-which-children sup` | List active children |
-| `supervisor-notify-ready` | Signal readiness (child calls this) |
-| `make-subprocess-child id bin args` | Create child spec for OS subprocess (`:opts`, `:restart`) |
 
 ## EventManager
 
@@ -379,5 +289,5 @@ with `:init`, `:handle-event`, and optional `:terminate` callbacks.
 ## See also
 
 - [processes.md](processes.md) — the process model these roles are built on
-- [subprocess.md](subprocess.md) — the subprocess `make-subprocess-child` spawns
+- [supervisor.md](supervisor.md) — the supervisor that starts and restarts them
 - [concurrency.md](concurrency.md) — lower-level ev/spawn, ev/join

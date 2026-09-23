@@ -1,6 +1,6 @@
 # Elle Documentation
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-23 -->
 
 This directory contains language references, design documents, and contributor
 guides. See [QUICKSTART.md](../QUICKSTART.md) for the full table of contents.
@@ -27,7 +27,8 @@ This means these files serve three roles at once:
   generated site.
 - **Demos and examples** — every code sample is real code that was executed
   the last time the tests ran; there are no stale snippets that "used to work".
-- **Tests** — `make doctest` runs every `.md` file under `docs/` and fails
+- **Tests** — `make doctest` runs every `.md` file in `docs/` and in each
+  directory directly under it, and fails
   loudly if anything stops working. When you change an interface, the doc
   for that interface either updates or breaks the build.
 
@@ -57,7 +58,9 @@ Focused files covering one topic each, all runnable via `elle docs/<file>.md`.
 | Directory | Content |
 |-----------|---------|
 | [processes.md](processes.md) | Erlang-style processes: mailboxes, links, monitors |
-| [behaviors.md](behaviors.md) | GenServer, Actor, Task, Supervisor, EventManager |
+| [process-scheduler.md](process-scheduler.md) | Sub-fibers, forwarded I/O and nested schedulers inside processes |
+| [behaviors.md](behaviors.md) | GenServer, Actor, Task, EventManager |
+| [supervisor.md](supervisor.md) | Supervisors: child specs, restart strategies, supervised subprocesses |
 | [signals/](signals/) | Signal system design, protocol, inference, JIT |
 | [signals/fibers.md](signals/fibers.md) | Fiber architecture |
 

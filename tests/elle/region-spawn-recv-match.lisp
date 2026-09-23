@@ -1,31 +1,26 @@
 (elle/epoch 12)
-## Reproducer: spawn child + send + recv-match with array? predicate.
-##
-## Crashes (segfault / "Cannot call <closure>" with type=ffi-signature) at
-## stdlib:1884 in ev/run when calling ((get sched :pump)). The pump closure
-## was allocated inside make-async-scheduler's let body and gets freed
-## before the implicit top-level ev/run pumps the spawned fiber.
-##
-## Minimal shape — three things matter:
-##   - process:spawn (spawns a child fiber that yields)
-##   - process:send  (yields a message to the scheduler)
-##   - process:recv-match with a CLOSURE predicate (yields the closure to
-##     the scheduler; the scheduler retains it across pump iterations and
-##     re-invokes it as new messages arrive)
+# audited: 2026-09-23
+# A process that spawns a child and waits in recv-match on a closure predicate runs to the end.
+# docs/regions.md
+#
+# The trap: the scheduler holds the recv-match predicate across rounds and
+# calls it again as each message arrives, and the async scheduler's pump
+# closure must outlive the whole process run. A region that frees either
+# closure early turns the next call into a call on a freed value.
+#
+# The shape needs all three: a spawned child that yields, a send, and a
+# recv-match whose predicate is a closure. Each primitive is fetched with
+# get, so every call site calls a closure read out of the module struct.
 
 (def process ((import-file "lib/process.lisp")))
-(def backend (*io-backend*))
 
-(defn process:start [init &named fuel]
-  ((get process :start) init :fuel fuel :backend backend))
-
-(process:start (fn []
-                 (let [me ((get process :self))]
-                   ((get process :send) ((get process :spawn) (fn []
-                                          (let [m ((get process :recv))]
-                                            ((get process :send) (get m 0)
-                                            [:reply :tag :pong])))) [me])
-                   ((get process :recv-match) (fn [m]
-                     (and (array? m) (= (get m 0) :reply)))))))
+((get process :start) (fn []
+                        (let [me ((get process :self))]
+                          ((get process :send) ((get process :spawn) (fn []
+                            (let [m ((get process :recv))]
+                              ((get process :send) (get m 0) [:reply :tag :pong]))))
+                          [me])
+                          ((get process :recv-match) (fn [m]
+                            (and (array? m) (= (get m 0) :reply)))))))
 
 (println "region-spawn-recv-match: PASS")

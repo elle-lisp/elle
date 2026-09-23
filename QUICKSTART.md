@@ -1,6 +1,6 @@
 # Elle Quickstart
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-23 -->
 
 Elle is a Lisp with lexical scope, closures, and a signal system.
 
@@ -28,7 +28,7 @@ elle script.lisp          # run a file
 elle script.md            # run literate markdown
 echo '(+ 1 2)' | elle     # one-liner
 elle                       # REPL
-make smoke                 # run all tests (~30s)
+make smoke                 # run all tests (~30 min on the release binary)
 ```
 
 ## Language topics
@@ -78,7 +78,9 @@ make smoke                 # run all tests (~30s)
 | [embedding](docs/embedding.md) | Using Elle as a library |
 | [regions](docs/regions.md) | Region-based memory: per-region RC, `IncrefRegion`/`DecrefRegion`, merging |
 | [processes](docs/processes.md) | Erlang-style processes: mailboxes, links, monitors |
-| [behaviors](docs/behaviors.md) | GenServer, Actor, Task, Supervisor, EventManager |
+| [process scheduler](docs/process-scheduler.md) | Sub-fibers, forwarded I/O and nested schedulers inside processes |
+| [behaviors](docs/behaviors.md) | GenServer, Actor, Task, EventManager |
+| [supervisor](docs/supervisor.md) | Supervisors: child specs, restart strategies, supervised subprocesses |
 
 ## Implementation
 

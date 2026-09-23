@@ -1,16 +1,9 @@
 (elle/epoch 12)
-## tests/elle/genserver.lisp — Tests for GenServer, Agent, and Supervisor
-##
-## Run: ./target/debug/elle tests/elle/genserver.lisp
+# audited: 2026-09-23
+# GenServer and Actor: calls, casts, info messages, stops and deferred replies.
+# docs/behaviors.md
 
-(def process ((import-file "lib/process.lisp")))
-(def backend (*io-backend*))
-
-(defn process:start [init &named fuel]
-  (process:start-raw init :fuel fuel :backend backend))
-(def process:start-raw process:start)
-(defn process:start [init &named fuel]
-  (process:start-raw init :fuel fuel :backend backend))
+(def process ((import "std/process")))
 
 
 # ============================================================================
@@ -75,15 +68,20 @@
 
 
 # ── 4. Stop with terminate callback ──────────────────────────────────
+# The server exits with :shutdown, which kills a starter that does not trap
+# exits. The counter-factual: that starter used to die without a trace, so
+# every assert after the stop went unrun and the test passed anyway.
 
 (process:start (fn []
-                 (let [me (process:self)]
-                   (process:gen-server-start-link {:init (fn [_] :running)
-                   :handle-call (fn [request _from state] [:reply state state])
-                   :terminate (fn [reason state]
-                                (process:send me [:terminated reason state]))}
-                   nil :name :stoppable)
-
+                 (process:trap-exit true)
+                 (let [me (process:self)
+                       server (process:gen-server-start-link {:init (fn [_]
+                         :running)
+                       :handle-call (fn [request _from state]
+                                      [:reply state state])
+                       :terminate (fn [reason state]
+                                    (process:send me [:terminated reason state]))}
+                       nil :name :stoppable)]
                    (assert (= :running (process:gen-server-call :stoppable
                               :status)) "stop: server running")
                    (process:gen-server-stop :stoppable :reason :shutdown)
@@ -95,7 +93,9 @@
                                    "stop: reason is :shutdown")
                            (assert (= state :running)
                                    "stop: state passed to terminate"))
-                       _ (assert false "stop: expected terminated message"))))))
+                       _ (assert false "stop: expected terminated message")))
+                   (assert (= (process:recv) [:EXIT server :shutdown])
+                           "stop: the server's exit reaches its trapping starter"))))
 (println "  4. stop + terminate: ok")
 
 
@@ -131,15 +131,19 @@
 
 
 # ── 7. Deferred reply via gen-server-reply ────────────────────────────
+# The server sends the answer to itself from handle-call, so the answer
+# always follows the call. The trap: an answer from a separate process
+# can reach the server before the call does, and handle-info then runs on
+# the nil state and crashes the server.
 
 (process:start (fn []
                  (let [pid (process:gen-server-start-link {:init (fn [_] nil)
                        :handle-call (fn [request from state]  # Stash the caller, reply later from handle-info
-                                     [:noreply from])
+                                      (process:send (process:self) :the-answer)
+                                      [:noreply from])
                        :handle-info (fn [msg state]  # state is the stashed [pid ref] from the call
                                       (process:gen-server-reply state msg)
                                       [:noreply nil])} nil)]
-                   (process:spawn (fn [] (process:send pid :the-answer)))
                    (let [result (process:gen-server-call pid :anything)]
                      (assert (= result :the-answer)
                              "deferred reply: got :the-answer")))))
@@ -224,436 +228,4 @@
 (println "  12. actor derived read: ok")
 
 
-# ============================================================================
-# Supervisor
-# ============================================================================
-
-# ── 13. Supervisor starts children ───────────────────────────────────
-
-(process:start (fn []
-                 (let [me (process:self)]
-                   (process:supervisor-start-link [{:id :worker-a
-                   :start (fn []
-                            (process:register :worker-a)
-                            (process:send me [:started :a])
-                            (process:recv))}
-                   {:id :worker-b
-                    :start (fn []
-                             (process:register :worker-b)
-                             (process:send me [:started :b])
-                             (process:recv))}] :name :sup)
-
-                   (def @started @||)
-                   (match (process:recv)
-                     [:started id] (put started id)
-                     _ nil)
-                   (match (process:recv)
-                     [:started id] (put started id)
-                     _ nil)
-                   (assert (has? started :a) "supervisor: worker-a started")
-                   (assert (has? started :b) "supervisor: worker-b started"))))
-(println "  13. supervisor starts children: ok")
-
-
-# ── 14. Supervisor restarts permanent child ──────────────────────────
-
-(process:start (fn []
-                 (let [me (process:self)]
-                   (def @crash-count 0)
-                   (process:supervisor-start-link [{:id :fragile
-                   :restart :permanent
-                   :start (fn []
-                            (process:send me [:started (process:self)])
-                            (forever
-                              (match (process:recv)
-                                :crash (error {:error :boom :message "crash"})
-                                :ping (process:send me :pong)
-                                _ nil)))}] :name :sup3)
-
-                   # Wait for first start
-                   (match (process:recv)
-                     [:started child-pid]
-                       (begin  # Verify child is alive
-                         (process:send child-pid :ping)
-                         (assert (= :pong (process:recv))
-                                 "restart: child responds")
-
-                         # Crash it
-                         (process:send child-pid :crash)
-
-                         # Supervisor should restart — wait for new start
-                         (match (process:recv)
-                           [:started new-pid]
-                             (begin
-                               (assert (not (= new-pid child-pid))
-                                       "restart: new pid differs")
-                               (process:send new-pid :ping)
-                               (assert (= :pong (process:recv))
-                                       "restart: restarted child responds"))
-                           _ (assert false
-                                     "restart: expected [:started new-pid]")))
-                     _ (assert false "restart: expected [:started child-pid]")))))
-(println "  14. supervisor restart permanent: ok")
-
-
-# ── 15. Supervisor does not restart temporary child ──────────────────
-
-(process:start (fn []
-                 (let [me (process:self)]
-                   (process:supervisor-start-link [{:id :temp
-                   :restart :temporary
-                   :start (fn []
-                            (process:send me [:started (process:self)])
-                            (process:recv))}] :name :sup4)
-
-                   (match (process:recv)
-                     [:started child-pid]
-                       (begin  # Kill the temporary child
-                         (process:exit child-pid :kill)
-
-                         # Give supervisor a tick to process the DOWN
-                         (process:send me :sync)
-                         (process:recv)
-                         (process:send me :sync)
-                         (process:recv)
-
-                         # No restart expected — send ourselves proof
-                         (process:send me :no-restart)
-                         (let [msg (process:recv)]
-                           (assert (= msg :no-restart)
-                                   "temporary: not restarted")))
-                     _ (assert false "temporary: expected [:started pid]")))))
-(println "  15. supervisor temporary child: ok")
-
-
-# ── 16. Supervisor transient child — normal exit not restarted ───────
-
-(process:start (fn []
-                 (let [me (process:self)]
-                   (process:supervisor-start-link [{:id :trans
-                   :restart :transient
-                   :start (fn []
-                            (process:send me [:started (process:self)])  # Exit normally after receiving :go
-                            (process:recv)
-                            :done)}] :name :sup5)
-
-                   (match (process:recv)
-                     [:started child-pid]
-                       (begin
-                         (process:send child-pid :go)
-
-                         # Give supervisor time to process
-                         (process:send me :sync)
-                         (process:recv)
-                         (process:send me :sync)
-                         (process:recv)
-
-                         (process:send me :no-restart)
-                         (let [msg (process:recv)]
-                           (assert (= msg :no-restart)
-                                   "transient-normal: not restarted")))
-                     _ (assert false "transient: expected [:started pid]")))))
-(println "  16. supervisor transient normal exit: ok")
-
-
-# ── 17. GenServer as supervised child ─────────────────────────────────
-
-(process:start (fn []
-                 (let [me (process:self)]
-                   (process:supervisor-start-link [{:id :kv
-                   :restart :permanent
-                   :start (fn []
-                            (process:send me :kv-ready)  # Run a genserver loop inline
-                            (process:register :kv-sup)
-                            (def @state @{})
-                            (forever
-                              (let [msg (process:recv)]
-                                (match msg
-                                  [:$call caller ref request]
-                                    (match request
-                                      [:get key]
-                                        (process:send caller
-                                        [:$reply ref (get state key nil)])
-                                      [:put key val]
-                                        (begin
-                                          (put state key val)
-                                          (process:send caller [:$reply ref :ok]))
-                                      _ nil)
-                                  _ nil))))}])
-
-                   (process:recv)  # :kv-ready
-
-                   (process:gen-server-call :kv-sup [:put :lang "elle"])
-                   (let [val (process:gen-server-call :kv-sup [:get :lang])]
-                     (assert (= val "elle") "supervised genserver: got elle")))))
-(println "  17. genserver under supervisor: ok")
-
-
-# ============================================================================
-# Task
-# ============================================================================
-
-# ── 18. Task async/await ──────────────────────────────────────────────
-
-(process:start (fn []
-                 (let* [task (process:task-async (fn [] (* 6 7)))
-                        result (process:task-await task)]
-                   (assert (= result 42) "task: 6*7 = 42"))))
-(println "  18. task async/await: ok")
-
-
-# ── 19. Multiple tasks ───────────────────────────────────────────────
-
-(process:start (fn []
-                 (let* [t1 (process:task-async (fn [] (+ 10 20)))
-                        t2 (process:task-async (fn [] (+ 30 40)))
-                        r1 (process:task-await t1)
-                        r2 (process:task-await t2)]
-                   (assert (= r1 30) "multi-task: t1 = 30")
-                   (assert (= r2 70) "multi-task: t2 = 70"))))
-(println "  19. multiple tasks: ok")
-
-
-# ============================================================================
-# Supervisor strategies
-# ============================================================================
-
-# ── 20. one-for-all strategy ─────────────────────────────────────────
-
-(process:start (fn []
-                 (let [me (process:self)]
-                   (def @starts @[])
-                   (process:supervisor-start-link [{:id :a
-                   :restart :permanent
-                   :start (fn []
-                            (process:send me [:started :a (process:self)])
-                            (forever
-                              (match (process:recv)
-                                :crash (error {:error :boom :message "a"})
-                                _ nil)))}
-                   {:id :b
-                    :restart :permanent
-                    :start (fn []
-                             (process:send me [:started :b (process:self)])
-                             (forever
-                               (match (process:recv)
-                                 _ nil)))}] :name :ofa-sup :strategy
-                   :one-for-all)
-
-                   # Wait for both to start
-                   (match (process:recv)
-                     [:started id pid] (push starts [id pid])
-                     _ nil)
-                   (match (process:recv)
-                     [:started id pid] (push starts [id pid])
-                     _ nil)
-                   (assert (= (length starts) 2) "one-for-all: both started")
-
-                   # Crash child :a — both should restart
-                   (let [a-pid (get (get starts 0) 1)]
-                     (when (= (get (get starts 0) 0) :a)
-                       (process:send a-pid :crash))
-                     (when (= (get (get starts 1) 0) :a)
-                       (process:send (get (get starts 1) 1) :crash)))
-
-                   # Wait for both restarts
-                   (def @restarts @[])
-                   (match (process:recv)
-                     [:started id pid] (push restarts id)
-                     _ nil)
-                   (match (process:recv)
-                     [:started id pid] (push restarts id)
-                     _ nil)
-                   (assert (= (length restarts) 2) "one-for-all: both restarted"))))
-(println "  20. one-for-all strategy: ok")
-
-
-# ── 21. rest-for-one strategy ────────────────────────────────────────
-
-(process:start (fn []
-                 (let [me (process:self)]
-                   (process:supervisor-start-link [{:id :x
-                   :restart :permanent
-                   :start (fn []
-                            (process:send me [:started :x (process:self)])
-                            (forever
-                              (match (process:recv)
-                                :crash (error {:error :b :message "x"})
-                                _ nil)))}
-                   {:id :y
-                    :restart :permanent
-                    :start (fn []
-                             (process:send me [:started :y (process:self)])
-                             (forever
-                               (match (process:recv)
-                                 _ nil)))}
-                   {:id :z
-                    :restart :permanent
-                    :start (fn []
-                             (process:send me [:started :z (process:self)])
-                             (forever
-                               (match (process:recv)
-                                 _ nil)))}] :name :rfo-sup :strategy
-                   :rest-for-one)
-
-                   # Wait for all 3 to start
-                   (def @pids @{})
-                   (repeat 3
-                           (match (process:recv)
-                             [:started id pid] (put pids id pid)
-                             _ nil))
-
-                   # Crash :x — :x, :y, :z should all restart (x is first, rest-for-one restarts everything after)
-                   (process:send (get pids :x) :crash)
-
-                   # Wait for 3 restarts
-                   (def @restarts @||)
-                   (repeat 3
-                           (match (process:recv)
-                             [:started id _pid] (put restarts id)
-                             _ nil))
-                   (assert (has? restarts :x) "rest-for-one: x restarted")
-                   (assert (has? restarts :y) "rest-for-one: y restarted")
-                   (assert (has? restarts :z) "rest-for-one: z restarted"))))
-(println "  21. rest-for-one strategy: ok")
-
-
-# ============================================================================
-# DynamicSupervisor
-# ============================================================================
-
-# ── 22. Add/remove children at runtime ───────────────────────────────
-
-(process:start (fn []
-                 (let [me (process:self)]
-                   (process:supervisor-start-link [] :name :dyn-sup)
-
-                   # Start with no children
-                   (let [kids (process:supervisor-which-children :dyn-sup)]
-                     (assert (= (length kids) 0) "dynamic: starts empty"))
-
-                   # Add a child
-                   (let [pid (process:supervisor-start-child :dyn-sup {:id :dyn-worker
-                         :restart :temporary
-                         :start (fn []
-                                  (process:send me [:started (process:self)])
-                                  (forever
-                                    (match (process:recv)
-                                      _ nil)))})]
-                     (match (process:recv)
-                       [:started _pid] nil
-                       _ nil)
-
-                     (let [kids (process:supervisor-which-children :dyn-sup)]
-                       (assert (= (length kids) 1) "dynamic: one child"))
-
-                     # Remove it
-                     (process:supervisor-stop-child :dyn-sup :dyn-worker)
-
-                     # Give time to process
-                     (process:send me :sync)
-                     (process:recv)
-
-                     (let [kids (process:supervisor-which-children :dyn-sup)]
-                       (assert (= (length kids) 0) "dynamic: back to empty"))))))
-(println "  22. dynamic supervisor: ok")
-
-
-# ============================================================================
-# EventManager
-# ============================================================================
-
-# ── 23. Add handler, notify, check state ─────────────────────────────
-
-(process:start (fn []
-                 (let [me (process:self)]
-                   (process:event-manager-start-link :name :events)
-
-                   # A handler that collects events
-                   (def @collector-mod
-                     {:init (fn [_] @[])
-                      :handle-event (fn [event state]
-                                      (push state event)
-                                      [:ok state])})
-
-                   (let [ref (process:event-manager-add-handler :events collector-mod
-                         nil)]
-                     (process:event-manager-sync-notify :events :hello)
-                     (process:event-manager-sync-notify :events :world)
-
-                     # Check handlers list
-                     (let [handlers (process:event-manager-which-handlers :events)]
-                       (assert (= (length handlers) 1) "event: one handler"))
-
-                     # Remove handler
-                     (process:event-manager-remove-handler :events ref)
-                     (let [handlers (process:event-manager-which-handlers :events)]
-                       (assert (= (length handlers) 0) "event: handler removed"))))))
-(println "  23. event manager: ok")
-
-
-# ── 24. Multiple handlers receive same event ─────────────────────────
-
-(process:start (fn []
-                 (let [me (process:self)]
-                   (process:event-manager-start-link :name :multi-events)
-
-                   # Two handlers that forward events to us
-                   (def @forwarder
-                     (fn [tag]
-                       {:init (fn [_] nil)
-                        :handle-event (fn [event _state]
-                                        (process:send me [tag event])
-                                        [:ok nil])}))
-
-                   (process:event-manager-add-handler :multi-events (forwarder :h1)
-                   nil)
-                   (process:event-manager-add-handler :multi-events (forwarder :h2)
-                   nil)
-
-                   (process:event-manager-sync-notify :multi-events :ping)
-
-                   (def @got @||)
-                   (match (process:recv)
-                     [tag _event] (put got tag)
-                     _ nil)
-                   (match (process:recv)
-                     [tag _event] (put got tag)
-                     _ nil)
-                   (assert (has? got :h1) "multi-event: h1 received")
-                   (assert (has? got :h2) "multi-event: h2 received"))))
-(println "  24. multiple event handlers: ok")
-
-
-# ── 25. Handler self-removal via [:remove state] ─────────────────────
-
-(process:start (fn []
-                 (process:event-manager-start-link :name :remove-events)
-
-                 # Handler that removes itself after seeing :done
-                 (def @once-mod
-                   {:init (fn [_] nil)
-                    :handle-event (fn [event state]
-                                    (if (= event :done)
-                                      [:remove state]
-                                      [:ok state]))})
-
-                 (process:event-manager-add-handler :remove-events once-mod nil)
-                 (assert (= 1
-                            (length (process:event-manager-which-handlers :remove-events)))
-                         "self-remove: handler present")
-
-                 (process:event-manager-sync-notify :remove-events :keep)
-                 (assert (= 1
-                            (length (process:event-manager-which-handlers :remove-events)))
-                         "self-remove: still present after :keep")
-
-                 (process:event-manager-sync-notify :remove-events :done)
-                 (assert (= 0
-                            (length (process:event-manager-which-handlers :remove-events)))
-                         "self-remove: removed after :done")))
-(println "  25. handler self-removal: ok")
-
-
-(println "")
-(println "all genserver tests passed.")
+(println "genserver: ok")

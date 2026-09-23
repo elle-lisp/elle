@@ -1,22 +1,16 @@
 (elle/epoch 12)
-# A whole-value binding read out of a REASSIGNED CAPTURED CELL must take a
-# counted reference (docs/impl/region/cells.md "Captured reassigned cells").
+# audited: 2026-09-23
+# A whole-value read out of a reassigned captured cell takes a counted reference.
+# docs/impl/region/cells.md
 #
-# A captured, reassigned mutable binding is a 1-slot container whose overwrite
-# (`UpdateCapture` / `capture_store_with_rebind`) decrefs the displaced prior
-# UNCONDITIONALLY. A local that binds the cell's WHOLE value is an alias of that
-# prior; without a counted reference of its own the overwrite frees the value out
-# from under it — the captured-alias use-after-free. The reader takes Rule 5's
-# "new reference" pass-through (an `IncrefValueRegion` at the read, the balancing
-# `DecrefValueRegion` at the reader's last use).
+# The trap: the cell's overwrite (`capture_store_with_rebind`) decrefs the
+# displaced value unconditionally, so a local bound to the cell's whole value
+# is freed under the reader unless the read took a counted reference.
 #
-# The obligation holds for BOTH binding scopes, and neither was pinned before:
-#   - fn-local: the cell lives in an enclosing fn and is read through an UPVALUE
-#     by a nested closure. This is the std/process scheduler's `ready`
-#     double-buffer — `sched-run`'s
-#       (let [batch ready] (assign ready @[]) (each pid in batch (run-one pid)))
-#     where `ready` is a `make-scheduler` local; a regression there SIGSEGVs the
-#     whole tests/elle/process-io.lisp suite.
+# Two binding scopes owe it:
+#   - fn-local: the cell lives in an enclosing fn and a nested closure reads it
+#     through an upvalue, as in
+#       (let [batch ready] (assign ready @[]) (each x in batch …))
 #   - module-scope: a top-level `def @cell` read into a local.
 #
 # The over-freed array is the one the PRIOR call's overwrite left in the cell
@@ -25,7 +19,7 @@
 # page is stale-but-intact (the length is still 0, so the asserts below hold);
 # under `--trace=guardfree` the freed page is `PROT_NONE` and the read faults
 # (SIGSEGV), the robust oracle. Pinned there by
-# `region_reassign_captured_cell_reader` (tests/integration/elle_scripts.rs).
+# `region_reassign_captured_cell_reader` (tests/integration/elle_scripts/frames.rs).
 
 # ── (a) fn-local: reassigned cell read through an upvalue ──────────────
 (defn make-fn-local []

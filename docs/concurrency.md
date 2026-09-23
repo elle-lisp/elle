@@ -1,6 +1,6 @@
 # Concurrency
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-23 -->
 
 User code runs inside the async scheduler automatically. Fibers are
 single-threaded cooperative tasks — concurrent but not parallel. Because
@@ -104,6 +104,7 @@ scheduler — waiting fibers yield rather than blocking the thread.
 
 | Primitive | Description |
 |-----------|-------------|
+| `make-futex initial` | The box with park and wake that the others are built on |
 | `make-lock` | Mutual exclusion lock |
 | `make-semaphore n` | Counting semaphore with `n` permits |
 | `make-condvar` | Condition variable (`:wait`, `:notify`, `:broadcast`) |
@@ -112,6 +113,7 @@ scheduler — waiting fibers yield rather than blocking the thread.
 | `make-latch` | One-shot gate — once opened, stays open |
 | `make-once thunk` | Lazy one-time initialization; all callers get the cached result |
 | `make-queue capacity` | Bounded blocking FIFO queue |
+| `make-monitor` | A lock and a condition variable together (`:with`, `:wait`, `:notify`, `:broadcast`) |
 
 
 ## Processes (lib/process)
@@ -179,17 +181,19 @@ On top of the core process API, the module provides:
       _ nil))))
 ```
 
-See [processes.md](processes.md) for the core API — mailboxes, links, monitors,
-registration, and structured concurrency inside processes — and
-[behaviors.md](behaviors.md) for the roles above: deferred replies, restart
-strategies, supervisor logging, and supervised subprocesses.
+See [processes.md](processes.md) for the core API — mailboxes, links, monitors
+and registration — and [process-scheduler.md](process-scheduler.md) for
+structured concurrency inside processes. See [behaviors.md](behaviors.md) for
+GenServer, Actor, Task and EventManager, and [supervisor.md](supervisor.md) for
+restart strategies, supervisor logging, and supervised subprocesses.
 
 ---
 
 ## See also
 
 - [processes.md](processes.md) — full process API
-- [behaviors.md](behaviors.md) — GenServer, Actor, Task, Supervisor, EventManager
+- [behaviors.md](behaviors.md) — GenServer, Actor, Task, EventManager
+- [supervisor.md](supervisor.md) — Supervisor
 - [fibers](signals/fibers.md) — fiber architecture
 - [io.md](io.md) — port I/O
 - [subprocess.md](subprocess.md) — spawning and waiting on child processes

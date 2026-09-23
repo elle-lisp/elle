@@ -10,7 +10,7 @@ Up: [..](../AGENTS.md)
 - [http2.md](http2.md) — **http2** HTTP/2 client and server (RFC 9113 + RFC 7541), over TLS with ALPN or as cleartext h2c.
 - [irc.md](irc.md) — **irc** IRCv3 client with capability negotiation, SASL PLAIN and message tags, over plain TCP or TLS.
 - [overview.md](overview.md) — **lib** Reusable Elle modules, one closure each: `(import "std/name")` gives you the closure, and calling it returns the struct of exports.
-- [process.md](process.md) — **process** Erlang-style processes on fibers: message passing, links, monitors, timers, named registration, and OTP-shaped behaviours above them.
+- [process.md](process.md) — **process** Erlang-style processes on fibers: message passing, links, monitors, timers, named registration, and OTP-shaped behaviors above them.
 - [redis.md](redis.md) — **redis** Redis client speaking RESP2 over TCP, in one file of pure Elle with no plugin behind it.
 - [tls.md](tls.md) — **tls** TLS 1.2 and 1.3 client and server: the `elle-tls` plugin runs the state machine, and Elle code moves every byte.
 
@@ -19,4 +19,5 @@ Up: [..](../AGENTS.md)
 - [aws/](aws/AGENTS.md) — Elle AWS Client
 - [gtk4/](gtk4/AGENTS.md) — (empty)
 - [http2/](http2/AGENTS.md) — The submodules behind [http2.lisp](../http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
+- [process/](process/AGENTS.md) — The submodules behind [process.lisp](../process.lisp): the scheduler in four parts, the primitives, and one file per behavior.
 - [rdf/](rdf/AGENTS.md) — (empty)

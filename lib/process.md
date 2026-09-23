@@ -1,11 +1,12 @@
 # process
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-23 -->
 
-Erlang-style processes on fibers: message passing, links, monitors, timers, named registration, and OTP-shaped behaviours above them.
+Erlang-style processes on fibers: message passing, links, monitors, timers, named registration, and OTP-shaped behaviors above them.
 
-The export struct at the bottom of [process.lisp](process.lisp) lists
-every function, and `(doc name)` carries its arguments. Four behaviours
+Each submodule in [process/](process/overview.md) ends in the struct of what
+it exports, [process.lisp](process.lisp) merges those structs, and
+`(doc name)` carries a function's arguments. Four behaviors
 are layered on the primitives — GenServer, Actor, Task and Supervisor —
 plus an EventManager. This file holds the callback shapes, because a
 caller writes those rather than calls them.
@@ -22,7 +23,7 @@ on fuel, so no process can starve its siblings.
 
 ```lisp
 # GenServer. `server` is a pid or a registered name; `from` is [pid ref].
-{:init        (fn [arg] state)
+{:init        (fn [arg] state | [:ok state] | [:stop reason])
  :handle-call (fn [request from state]
                 [:reply reply state] | [:noreply state]
                 | [:stop reason reply state])
@@ -35,18 +36,23 @@ on fuel, so no process can starve its siblings.
  :handle-event (fn [event state] [:ok state] | [:remove state])
  :terminate    (fn [reason state] ...)}
 
-# Supervisor child
-{:id keyword
- :start (fn [] ...)
- :restart :permanent | :transient | :temporary}
+# Supervisor child: exactly one of :start and :start-link
+{:id         keyword
+ :start      (fn [] ...)     # the child's body, run as a new process
+ :start-link (fn [] pid)     # spawns the child and returns its pid
+ :restart    :permanent | :transient | :temporary
+ :ready      true | false}   # with :start only
 ```
 
 A supervisor restarts under `:one-for-one` unless you name
-`:one-for-all` or `:rest-for-one`.
+`:one-for-all` or `:rest-for-one`. [supervisor.md](../docs/supervisor.md)
+says what each field and strategy does, and [behaviors.md](../docs/behaviors.md)
+says what each callback does.
 
 ## Running tests
 
 ```bash
 elle tests/elle/process.lisp
 elle tests/elle/genserver.lisp
+elle tests/elle/supervisor.lisp
 ```
