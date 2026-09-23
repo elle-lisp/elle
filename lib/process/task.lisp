@@ -18,10 +18,7 @@
     "Return the value of a task from task-async. Raises {:error :task-error}
      when the task crashed and {:error :task-timeout} once :timeout ticks pass."
     (let [[_ ref] task]
-      (match (gs:await-reply ref timeout
-                             (fn [m]
-                               (and (array? m) (= (length m) 4)
-                                    (= (get m 0) :DOWN) (= (get m 1) ref))))
+      (match (gs:await-reply ref timeout (gs:down-for? ref))
         :timeout
           (begin
             (demonitor ref :flush true)

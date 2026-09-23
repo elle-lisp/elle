@@ -16,6 +16,8 @@
         :recv-match recv-match
         :self self
         :spawn-link spawn-link
+        :monitor monitor
+        :demonitor demonitor
         :exit exit
         :register register
         :whereis whereis
@@ -49,6 +51,11 @@
     (fn [m]
       (and (array? m) (= (length m) 3) (= (get m 0) :$reply) (= (get m 1) ref))))
 
+  (defn down-for? [mref]
+    "A predicate for the [:DOWN mref pid reason] message the monitor mref sends."
+    (fn [m]
+      (and (array? m) (= (length m) 4) (= (get m 0) :DOWN) (= (get m 1) mref))))
+
   (defn await-reply [ref timeout reply?]
     "The first message reply? matches, or :timeout once timeout ticks pass.
      No timeout waits for good. Either way, the deadline leaves no message."
@@ -65,16 +72,28 @@
         msg)))
 
   (defn gen-call [server tag payload timeout]
-    "Send [tag self ref payload] to server, and return the value it replies."
+    "Send [tag self ref payload] to server, and return the value it replies.
+     The call monitors server while it waits, so an exit ends the wait."
     (let* [pid (gen-resolve server)
-           ref (gen-make-ref)]
+           mref (monitor pid)
+           ref (gen-make-ref)
+           reply? (reply-to? ref)
+           down? (down-for? mref)]
       (send pid [tag (self) ref payload])
-      (match (await-reply ref timeout (reply-to? ref))
-        :timeout
-          (error {:error :gen-server-timeout
-                  :message (string "no reply from " server " within " timeout
-                                   " ticks")})
-        reply (get reply 2))))
+      (let [msg (await-reply ref timeout (fn [m] (or (reply? m) (down? m))))]
+        (cond
+          (down? msg)
+            (error {:error :gen-server-down
+                    :reason (get msg 3)
+                    :message (string server " exited before it replied: "
+                                     (get msg 3))})
+          (begin
+            (demonitor mref :flush true)
+            (when (= msg :timeout)
+              (error {:error :gen-server-timeout
+                      :message (string "no reply from " server " within "
+                                       timeout " ticks")}))
+            (get msg 2))))))
 
   # ── client API ──────────────────────────────────────────────────────
 
@@ -191,6 +210,7 @@
    :gen-resolve gen-resolve
    :gen-call gen-call
    :await-reply await-reply
+   :down-for? down-for?
    :gen-server-start-link gen-server-start-link
    :gen-server-call gen-server-call
    :gen-server-cast gen-server-cast
