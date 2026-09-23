@@ -56,6 +56,7 @@
               :links @||
               :monitors @{}
               :monitored-by @{}
+              :aliases @||
               :trapping false
               :name nil
               :dict @{}
@@ -210,13 +211,31 @@
       (process-exit pid :shutdown))
     (refill waiting []))
 
-  (defn flush-down [pid ref]
-    "Remove a [:DOWN ref ...] message from the mailbox of pid."
+  (defn flush-tagged [pid tag ref]
+    "Remove every [tag ref ...] message from the mailbox of pid."
     (let [p (proc-get pid)
           keep? (fn [m]
-                  (not (and (array? m) (= (get m 0) :DOWN) (= (get m 1) ref))))]
+                  (not (and (array? m) (= (get m 0) tag) (= (get m 1) ref))))]
       (refill (get p :mbox) (filter keep? (->list (get p :mbox))))
       (refill (get p :save-queue) (filter keep? (->list (get p :save-queue))))))
+
+  # ---- aliases ----
+
+  (defn add-alias [pid]
+    "A fresh ref that reply delivers to pid until remove-alias turns it off."
+    (let [ref (fresh-ref)]
+      (put (get (proc-get pid) :aliases) ref)
+      ref))
+
+  (defn remove-alias [pid ref]
+    "Turn off the alias ref of pid, and drop a reply to it already delivered."
+    (del (get (proc-get pid) :aliases) ref)
+    (flush-tagged pid :$reply ref))
+
+  (defn reply [pid ref value]
+    "Deliver [:$reply ref value] to pid while ref is one of its aliases."
+    (when (and (alive? pid) (has? (get (proc-get pid) :aliases) ref))
+      (deliver pid [:$reply ref value])))
 
   # ---- timers ----
 
@@ -328,7 +347,10 @@
    :link link
    :remove-link remove-link
    :shutdown-idle shutdown-idle
-   :flush-down flush-down
+   :flush-tagged flush-tagged
+   :add-alias add-alias
+   :remove-alias remove-alias
+   :reply reply
    :add-monitor add-monitor
    :remove-monitor remove-monitor
    :process-exit process-exit

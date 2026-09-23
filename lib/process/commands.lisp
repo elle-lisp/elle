@@ -65,9 +65,18 @@
       :demonitor
         (let [ref (get cmd 1)]
           (core:remove-monitor ref pid)
-          (when (get cmd 2) (core:flush-down pid ref))
+          (when (get cmd 2) (core:flush-tagged pid :DOWN ref))
           (resume pid :ok))
       :make-ref (resume pid (core:fresh-ref))
+      :alias (resume pid (core:add-alias pid))
+      :unalias
+        (begin
+          (core:remove-alias pid (get cmd 1))
+          (resume pid :ok))
+      :reply
+        (begin
+          (core:reply (get cmd 1) (get cmd 2) (get cmd 3))
+          (resume pid :ok))
       :now (resume pid (core:now))
       :trap-exit
         (begin

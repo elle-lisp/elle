@@ -7,7 +7,7 @@
 #   [:$call caller-pid ref request]   client → server
 #   [:$cast request]                  client → server
 #   [:$stop caller-pid ref reason]    client → server
-#   [:$reply ref value]               server → client
+#   [:$reply ref value]               server → client, while ref is an alias
 #   [:$call-timeout ref]              timer  → client (self)
 
 (fn [p]
@@ -29,6 +29,14 @@
   (defn gen-make-ref []
     "A ref that no other ref from this scheduler equals."
     (yield [:make-ref]))
+
+  (defn alias []
+    "A fresh ref that the scheduler delivers replies to until unalias."
+    (yield [:alias]))
+
+  (defn unalias [ref]
+    "Turn off the alias ref, and drop a reply to it already in the mailbox."
+    (yield [:unalias ref]))
 
   (defn gen-resolve [server]
     "Resolve server — pid passes through, keyword does whereis."
@@ -73,14 +81,16 @@
 
   (defn gen-call [server tag payload timeout]
     "Send [tag self ref payload] to server, and return the value it replies.
-     The call monitors server while it waits, so an exit ends the wait."
+     The call monitors server while it waits, so an exit ends the wait. ref is
+     an alias the call turns off when it ends, so a late reply goes nowhere."
     (let* [pid (gen-resolve server)
            mref (monitor pid)
-           ref (gen-make-ref)
+           ref (alias)
            reply? (reply-to? ref)
            down? (down-for? mref)]
       (send pid [tag (self) ref payload])
       (let [msg (await-reply ref timeout (fn [m] (or (reply? m) (down? m))))]
+        (unalias ref)
         (cond
           (down? msg)
             (error {:error :gen-server-down
@@ -100,7 +110,7 @@
   (defn gen-server-reply [from reply]
     "Send a reply to a pending call. from is the [pid ref] pair from handle-call.
      A call that has already ended, by a timeout or a raise, never receives it."
-    (send (get from 0) [:$reply (get from 1) reply]))
+    (yield [:reply (get from 0) (get from 1) reply]))
 
   (defn gen-server-call [server request &named timeout]
     "Synchronous request-response. Blocks until the server replies. Raises
@@ -152,12 +162,12 @@
                             (match (handle-call request [caller ref] state)
                               [:reply reply new-state]
                                 (begin
-                                  (send caller [:$reply ref reply])
+                                  (gen-server-reply [caller ref] reply)
                                   (assign state new-state))
                               [:noreply new-state] (assign state new-state)
                               [:stop reason reply new-state]
                                 (begin
-                                  (send caller [:$reply ref reply])
+                                  (gen-server-reply [caller ref] reply)
                                   (stop reason new-state))
                               _ (error {:error :gen-server-error
                                         :message "handle-call returned invalid result"}))
@@ -169,7 +179,7 @@
                                         :message "handle-cast returned invalid result"}))
                           [:$stop caller ref reason]
                             (begin
-                              (send caller [:$reply ref :ok])
+                              (gen-server-reply [caller ref] :ok)
                               (stop reason state))
                           _
                             (match (handle-info msg state)

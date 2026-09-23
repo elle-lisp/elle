@@ -13,7 +13,7 @@
 #   [:$sup-start-child caller ref spec]   client → supervisor
 #   [:$sup-stop-child caller ref id]      client → supervisor
 #   [:$sup-which-children caller ref nil] client → supervisor
-#   [:$reply ref value]                   supervisor → client
+#   [:$reply ref value]                   supervisor → client, while ref is an alias
 
 (fn [p gs]
   (def {:send send
@@ -200,14 +200,14 @@
         [:EXIT from reason] (if (= from parent)
                               (shutdown)
                               (child-exited from reason))
-        [:$sup-start-child caller ref spec]
-          (send caller [:$reply ref (add-child spec)])
+        [:$sup-start-child caller ref spec] (gs:gen-server-reply [caller ref]
+        (add-child spec))
         [:$sup-stop-child caller ref id]
           (begin
             (forget id)
-            (send caller [:$reply ref :ok]))
-        [:$sup-which-children caller ref _]
-          (send caller [:$reply ref (which-children)])
+            (gs:gen-server-reply [caller ref] :ok))
+        [:$sup-which-children caller ref _] (gs:gen-server-reply [caller ref]
+        (which-children))
         _ nil)))
 
   (defn
