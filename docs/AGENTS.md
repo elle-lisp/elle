@@ -34,7 +34,7 @@ Up: [..](../AGENTS.md)
 - [macros.md](macros.md) — **Macros** Elle's macros run as ordinary Elle code at expansion time, and are hygienic by sets of scopes; `datum->syntax` breaks hygiene on purpose.
 - [match.md](match.md) — **Pattern Matching** `match` dispatches on the structure and value of data.
 - [mcp-eval.md](mcp-eval.md) — **MCP `eval` tool** The `eval` tool collapses the MCP surface to a single verb: a monadic bind over a persistent Elle image held in the server.
-- [mcp.md](mcp.md) — **MCP Server (more...)**
+- [mcp.md](mcp.md) — **MCP Server** The Elle MCP server gives a coding assistant structured access to an Elle codebase over the Model Context Protocol.
 - [modules.md](modules.md) — **Modules** Elle's module system is built from Elle, plus one primitive: `import-file`.
 - [named-args.md](named-args.md) — **Named Arguments** Elle supports optional positional parameters, named keyword parameters, and collected keyword arguments.
 - [parameters.md](parameters.md) — **Dynamic Parameters** Dynamic parameters are fiber-local variables with scoped rebinding.

@@ -2,9 +2,9 @@
 
 <!-- audited: 2026-09-23 -->
 
-Elle ships with an [MCP](https://modelcontextprotocol.io) (Model Context
-Protocol) server that gives AI coding assistants deep, structured access
-to an Elle codebase. The server is written in Elle and maintained in a
+The Elle MCP server gives a coding assistant structured access to an Elle codebase over the Model Context Protocol.
+
+The [MCP](https://modelcontextprotocol.io) server is written in Elle and maintained in a
 [separate repository](https://github.com/elle-lisp/mcp), included as a
 git submodule under `mcp/`. It communicates via JSON-RPC 2.0 on stdio.
 
