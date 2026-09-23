@@ -46,6 +46,17 @@ A process waiter is queued and runs in the next round. A sub-fiber waiter runs
 at once, inside the wake, and is routed by `after-resume` like any sub-fiber
 that has just run.
 
+## Relayed I/O
+
+A process scheduler forwards its I/O with the wait ops `:io-forward` and
+`:io-forward-cancel`. When a process runs a process scheduler of its own, those
+ops reach the outer scheduler like any other wait op, and waits.lisp relays
+them. It forwards the request to its own parent and records the inner
+scheduler's completion queue and wake-box in `io-pending`, under the id the
+parent returned. When that completion comes back, scheduler.lisp pushes it into
+the inner queue and bumps the inner wake-box, which wakes the inner scheduler's
+futex park.
+
 ## Behaviors
 
 [process.lisp](../process.lisp) imports the primitives once and passes them to

@@ -386,6 +386,32 @@ gets to finish sending it would wait forever.
     (ev/abort sleeper))))
 ```
 
+## Nested schedulers
+
+Schedulers nest. A process can call `process:start` itself, and the outer
+process scheduler is then the parent of the one it starts. The outer scheduler
+relays each I/O request up to its own parent and each completion back down.
+A request therefore crosses every scheduler between the process that made it
+and the one that submits it. Each process scheduler keeps its own clock, so a
+timer in the inner scheduler counts the inner scheduler's ticks.
+
+When a process that runs a nested scheduler exits, its relayed I/O is cancelled
+like any other I/O it had in flight.
+
+```lisp
+(def process ((import "std/process")))
+
+(process:start (fn []
+  (let [me (process:self)]
+    (process:spawn (fn []
+      (process:start (fn []
+        (ev/sleep 0.001)
+        (process:recv-timeout 5)))
+      (process:send me :inner-done)))
+    (assert (= (process:recv) :inner-done)
+            "a scheduler inside a process does its I/O and finishes"))))
+```
+
 
 # Process API reference
 
