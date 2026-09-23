@@ -15,7 +15,7 @@
 (defn make-scheduler [&named fuel backend]
   "A process scheduler whose processes run :fuel instructions a turn (1000 by
    default). It builds no I/O backend: it forwards each I/O request to the
-   root scheduler."
+   parent scheduler, the one that runs the code which calls run or start."
   (let* [core (make-core (or fuel 1000))
          waits (make-waits core)
          handle-cmd (make-commands core)
@@ -51,7 +51,7 @@
             (push ready pid)
             (push fuel-preempted pid))
 
-          # I/O — forward to root scheduler, park process
+          # I/O — forward to the parent scheduler, park process
           (not (= 0 (bit/and bits 512)))
             (let [id (waits:forward-io (fiber/value f))]
               (if (and (array? id) (= (first id) :error))
@@ -112,7 +112,7 @@
                     (dispatch-signal pid f)))))))))
 
     (defn reap-io []
-      "Handle the completions the root scheduler has forwarded so far."
+      "Handle the completions the parent scheduler has forwarded so far."
       (when (> (length io-completions) 0)
         (let [batch (->list io-completions)]
           (core:refill io-completions [])
@@ -158,7 +158,7 @@
       (cond
         (not (has-work?)) nil
 
-        # I/O in flight — park until root delivers completions
+        # I/O in flight — park until the parent delivers completions
         (> (length io-pending) 0)
           (begin
             (let [expected (unbox io-wakeup-box)]
@@ -216,8 +216,8 @@
             (each pid in batch
               (run-one pid)))
 
-          # Give the root scheduler a turn when forwarded I/O is pending
-          # and every ready process is merely refueling. The root can only
+          # Give the parent scheduler a turn when forwarded I/O is pending
+          # and every ready process is merely refueling. The parent can only
           # deliver a completion while this scheduler is suspended, and a
           # process that computes without pause keeps `ready` non-empty
           # forever, so the idle handler above never runs.
@@ -229,7 +229,7 @@
           # not finished sending, so a park here waits on work only the
           # parked scheduler can do (tests/elle/process-io-park.lisp,
           # tests/elle/h2-headers-in-process.lisp). The sleep suspends
-          # long enough for the root to pump, then returns whether a
+          # long enough for the parent to pump, then returns whether a
           # completion arrived or not.
           (when (and (> (length io-pending) 0) (= (length io-completions) 0)
                      (not (empty? ready))

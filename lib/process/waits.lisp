@@ -15,8 +15,8 @@
   (def sub-completed @{})  # fiber → :ok | :error
   (def join-waiting @{})  # target fiber → @[waiter ...]
   (def select-sets @{})  # wait key → @{:candidates :woken :waiter}
-  (def io-completions @[])  # completions forwarded by the root scheduler
-  (def io-wakeup-box (box 0))  # futex box the root reboxes to wake us
+  (def io-completions @[])  # completions forwarded by the parent scheduler
+  (def io-wakeup-box (box 0))  # futex box the parent reboxes to wake us
   (def spawning-pid (box 0))  # the process whose code is running now
 
   (defn spawn-fn [fiber]
@@ -36,7 +36,7 @@
         (after-resume w:fiber w:pid))))
 
   (defn forward-io [request]
-    "Hand an I/O request to the root scheduler. Returns its id or [:error e]."
+    "Hand an I/O request to the parent scheduler. Returns its id or [:error e]."
     (emit :wait {:op :io-forward
                  :request request
                  :queue io-completions

@@ -63,8 +63,8 @@ scheduler stops, where `r` is the exit reason as a string.
 
 `make-scheduler` and `start` take `:fuel`, the instructions a process runs
 before it is preempted, 1000 by default. Neither builds an I/O backend, because
-a process scheduler forwards its I/O to the root scheduler (see "Forwarded I/O
-and the root scheduler" below).
+a process scheduler forwards its I/O to its parent scheduler (see "Forwarded
+I/O and the parent scheduler" below).
 
 Use `process:run` when you need a pre-configured or shared scheduler:
 
@@ -355,18 +355,20 @@ scheduler (see [concurrency.md](concurrency.md)).
 A sub-fiber the body **joins** (`ev/join`) is not an orphan: the process
 stays alive until the join returns, so the sub-fiber completes first.
 
-## Forwarded I/O and the root scheduler
+## Forwarded I/O and the parent scheduler
 
-A process scheduler owns no I/O backend. It runs inside one fiber of the
-root scheduler, so an I/O request from a process — or from one of its
-sub-fibers — is *forwarded*: the process scheduler hands the request up,
-the root scheduler submits it, and the completion comes back down.
+A process scheduler owns no I/O backend. It runs inside one fiber of its
+parent scheduler, the scheduler that runs the code which called
+`process:start` or `process:run`. The parent need not be the root. An I/O
+request from a process — or from one of its sub-fibers — is *forwarded*: the
+process scheduler hands the request up, the parent submits it, and the
+completion comes back down.
 
-The root scheduler can only deliver a completion while the process
-scheduler is suspended. So the process scheduler yields to the root
-whenever every ready process is merely refueling after fuel preemption.
-Without that yield, a process that computes without pause holds the root
-off and no completion ever arrives.
+The parent can only deliver a completion while the process scheduler is
+suspended. So the process scheduler yields to its parent whenever every ready
+process is merely refueling after fuel preemption. Without that yield, a
+process that computes without pause holds the parent off and no completion
+ever arrives.
 
 The yield is bounded, and a ready process always gets to run again. The
 scheduler never blocks until a forwarded completion arrives while a
