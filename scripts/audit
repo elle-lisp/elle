@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# audited: 2026-09-09
+# audited: 2026-09-23
 # Names the files whose stale documentation costs the most, and gates a commit
 # on the files it stages carrying today's stamp.
 # docs/impl/audit.md
@@ -67,10 +67,13 @@ eligible() {
             ;;
     esac
     if vendored "$(dirname "$1")"; then return 1; fi
-    # A makefile is absent from this list on purpose. Every file here is read
-    # whole by somebody; a makefile is read through `make help`, one `##` line
-    # at a time. See docs/impl/audit.md § "What carries a stamp".
+    # Every file queued here is read whole by somebody. A makefile is read
+    # through `make help`, one `##` line at a time, and the standard library
+    # through `(doc name)`, one docstring at a time, so neither is queued.
+    # The standard library is named by path so every other Lisp file stays.
+    # See docs/impl/audit.md § "What carries a stamp".
     case "$1" in
+        src/stdlib.lisp) return 1 ;;
         scripts/* | *.rs | *.lisp | *.md) return 0 ;;
         *) return 1 ;;
     esac
