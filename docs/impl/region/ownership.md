@@ -1,6 +1,6 @@
 # Adoption and subtree drop (the ownership forest)
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-23 -->
 
 Adoption links regions into a parent→child tree, so a whole subtree frees as a
 unit when its root frees.
@@ -14,15 +14,15 @@ retaining container and the values funnelled into it, a closure and its captures
 and the interior reference cycles that the per-region RC cascade cannot collect
 ([rules.md](rules.md) Rule 8). The compile-time analysis that classifies a region
 **Owned** (adopted, freed by subtree drop) vs **Shared** (the per-region RC
-baseline) is `regions::ownership`; the lowerer emits `AdoptRegion{parent, child}`
+baseline) is `region::infer::ownership`; the lowerer emits `AdoptRegion{parent, child}`
 for each interior edge (and `FreeRegionGroup` for a rootless co-owned cycle).
 Both ops are realized on the **interpreter and the
 JIT** — the `elle_jit_adopt_region` / `elle_jit_free_region_group` helpers
 ([src/jit/dispatch/region.rs](../../../src/jit/dispatch/region.rs)) mirror the
 interpreter's `handle_adopt_region` /
 `handle_free_region_group` line-for-line, so the same program reclaims identically
-on either tier; only the MLIR/WASM realization trails (region instructions are
-structural no-ops there until their structural-arena handling lands). This document is the **runtime
+on either tier. The MLIR tier compiles no function that carries them, and the WASM tier
+treats them as no-ops, since its arena boundary reclaims. This document is the **runtime
 substrate** those emit modes drive — the `RegionStore` primitives, pinned by
 `regionstore::tests::adopt` and the cross-tier `runtime::tests::ownership`
 `*_under_jit` pins.
@@ -127,10 +127,11 @@ incoming count is the RC-zero trigger; the two are different sizes by design (th
   sole path a `Value` enters or leaves a live container on every tier — interpreter, JIT,
   WASM) records the edge co-located with the RC incref/decref: push / insert / extend / add
   record, pop / remove / drain / del un-record, a replace
-  (`set_at`/`struct_put`/`lbox_store`/`capture_store`) un-records the old target and records
+  (`set_at_with_rebind`/`struct_put_with_rebind`/`lbox_store_with_rebind`/`capture_store_with_rebind`)
+  un-records the old target and records
   the new — exactly mirroring the RC rebind.
 - **At a fiber's terminal completion**, `incref_signal_region`
-  ([fiber.rs](../../../src/vm/fiber.rs)) pins the result
+  ([refcount.rs](../../../src/vm/fiber/refcount.rs)) pins the result
   held in `fiber.signal`; that result is a content edge the scan's Fiber arm reads, so the
   same site records `outgoing[fiber-region] → result-region`. It is removed by the free-time
   walk when the fiber frees (a terminal fiber is read, never resumed, so there is no
@@ -169,7 +170,7 @@ lazy free-time discovery.
 
 Adoption's soundness condition is **external uniqueness**: an `Owned` member is
 referenced only through its owning subtree, so the root's demise strands no live
-reference. The compile-time walk (`regions::ownership::compute_owned_subtrees`)
+reference. The compile-time walk (`region::infer::ownership::compute_owned_subtrees`)
 proves that condition over the edges the solver can name; the runtime holds the
 ground truth — every recorded content edge — and enforces the same condition **at
 the drop itself**:
@@ -206,7 +207,7 @@ being freed under a live reference. It fires only when a live external edge exis
 at the drop; the externally-unique common case pays one empty-map check per
 member. Pinned by `regionstore::tests::rescue` and, end
 to end, by the guardfree fixture pin `region_capture_cell_member_cascade_uaf`
-([elle_scripts.rs](../../../tests/integration/elle_scripts.rs)): a struct member
+([captures.rs](../../../tests/integration/elle_scripts/captures.rs)): a struct member
 stored into a module-level capture cell survives its parent's subtree drop and
 frees at the cell's release.
 

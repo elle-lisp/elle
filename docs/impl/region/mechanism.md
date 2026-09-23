@@ -1,6 +1,6 @@
 # The mechanism
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-23 -->
 
 The RC-instruction machinery the [rules](rules.md) constrain: how each
 instruction names its region, and when a static slot may stand in. Two nets keep
@@ -15,7 +15,9 @@ references raise it above 1.
   mutable container at runtime.
 - `DecrefRegion` lowers RC. At 0 the region's pages return to the pool **and**
   every region its contents reference is decremented (the cascade), recursively.
-- `DecrefRegion` is the only demise instruction. There is no `FreeRegion`.
+- A region frees only when a decref takes its count to 0 — `DecrefRegion` or its
+  value- and cell-resolved variants — or when `FreeRegionGroup` drops a co-owned
+  group whole ([ownership.md](ownership.md)). There is no `FreeRegion`.
 
 If a value escapes — into a container, a closure, a yielded signal — its region's
 RC was already raised at the escape site, so the `DecrefRegion` at its `decref_point`
@@ -49,7 +51,7 @@ turns out to live in" — and its release is the value-resolved route above, so 
 static region of the callee is never named in the caller.
 
 That holds however much of the callee this compilation can see. The walk **inlines**
-a resolvable lambda callee's body (`regions::walk::inline`) so the intrinsics buried
+a resolvable lambda callee's body (`region::infer::walk::inline`) so the intrinsics buried
 inside it record their cross-region edges at *this* call site — the whole reason the
 inline exists. The regions that walk yields are the callee's, minted against the
 callee's own nodes and remapped to fresh physical regions per activation, so they are
@@ -67,7 +69,7 @@ allocates, and the `decref_point` machinery reads that fiction as fact:
   emits none at all. The value route loads a slot holding `nil` there, so the release
   is inert as well as misplaced and the region is held to fiber teardown;
 - the region gains a **second holder binding**, which disqualifies it from the
-  single-holder value route `regions::compensate` needs, so the per-arm compensation
+  single-holder value route `region::infer::compensate` needs, so the per-arm compensation
   that would otherwise cover the allocating arm declines as well.
 
 This is the result-side half of one rule. The argument-side half is
@@ -76,9 +78,9 @@ extending a **caller** region's `decref_point` onto a callee node. Both say the 
 thing: an inline is a device for collecting edges, not a splice, and the two
 activations' namings must not mix.
 
-Pinned by `regions::tests::inline::*`, the leak face
-`tests/elle/region-inline-result-naming.lisp`, and the soundness complement
-`region-inline-result-naming-uaf.lisp` — the caller holds exactly one release for the
+Pinned by `region::infer::tests::inline::*`, the leak face
+[region-inline-result-naming.lisp](../../../tests/elle/region-inline-result-naming.lisp), and the soundness complement
+[region-inline-result-naming-uaf.lisp](../../../tests/elle/region-inline-result-naming-uaf.lisp) — the caller holds exactly one release for the
 result, so everything the callee hands back that is not freshly its own must ride a
 counted edge.
 
@@ -125,8 +127,9 @@ argument as a moved operand instead strands one region per call for each source 
 splice read, and leaves the freed element still named by a source the frame never
 released.
 
-Pinned by `tests/elle/region-splice-args.lisp` — one bounded rate per callee kind and
-call position — and by the soundness complement `region-splice-args-uaf.lisp` under
+Pinned by [region-splice-args.lisp](../../../tests/elle/region-splice-args.lisp) — one bounded rate per callee kind and
+call position — and by the soundness complement
+[region-splice-args-uaf.lisp](../../../tests/elle/region-splice-args-uaf.lisp) under
 `--trace=guardfree`, where the release the array's reclaim adds must not reach a value
 the callee still reads.
 
@@ -139,7 +142,7 @@ sites can supply it, and which one applies is decided by whether the result is
 *named*:
 
 - **the `Return` mint** (`lower_return`, marked on the HIR by
-  `hir/return_incref.rs`) — the named path. ANF binds the tail value to a
+  [return_incref.rs](../../../src/hir/return_incref.rs)) — the named path. ANF binds the tail value to a
   synthetic slot, so the frame holds its own reference; the mint raises RC and
   the binding's `decref_point` — extended past the mint by `return_sites` — drops
   the frame's reference, leaving net one for the caller.
@@ -168,10 +171,12 @@ reference here (`container_release_sites`), and a moves-out ∩ `PassThrough`
 native whose in-body escape retain is already the caller's reference
 (`moves_out_release_sites`).
 
-The pinning tests are `tests/elle/region-native-tail-compound-leak.lisp` (the
+The pinning tests are
+[region-native-tail-compound-leak.lisp](../../../tests/elle/region-native-tail-compound-leak.lisp) (the
 per-shape region-count deltas: bare, `let`-body, `begin`-nested, `if`-nested,
-over Fresh / Funnel / pass-through natives) and `region-native-tail-return-uaf.lisp`
-/ `region-hof-tail-return-uaf.lisp` (the soundness complement — the anonymous
+over Fresh / Funnel / pass-through natives) and
+[region-native-tail-return-uaf.lisp](../../../tests/elle/region-native-tail-return-uaf.lisp) /
+[region-hof-tail-return-uaf.lisp](../../../tests/elle/region-hof-tail-return-uaf.lisp) (the soundness complement — the anonymous
 path must keep its retain).
 
 ## Where the rest of the argument lives
@@ -268,8 +273,9 @@ the candidate sites, plus the self-edges eliminated below — is *measured, not
 asserted*: the lowerer records each decision in the thread-local instrument
 `lir::lower::rcstats` (the choice is not recoverable from the final LIR — a
 coalesced mint's `IncrefRegion` is indistinguishable from a store-edge's, and an
-eliminated self-edge leaves no instruction), and `benches/regionrc.rs` reports the
-totals across the stdlib load and the `tests/elle` corpus.
+eliminated self-edge leaves no instruction), and
+[benches/regionrc.rs](../../../benches/regionrc.rs) reports the
+totals across the stdlib load and the [tests/elle](../../../tests/elle/) corpus.
 
 ## The dynamic boundary (stays value-resolved)
 
@@ -296,7 +302,8 @@ is not knowable at compile time:
 `emit_increfs_for` emits one `IncrefRegion(source)` per cross-region store edge
 `(site, source, target)` — a value in `source` stored into a structure in
 `target` — balanced by `target`'s free-time cascade at `DecrefRegion(target)`.
-The cascade **skips self-references** (`regionpool/introspect.rs` decrefs a
+The cascade **skips self-references**
+([introspect.rs](../../../src/value/fiberheap/regionpool/introspect.rs) decrefs a
 referenced region only when `rid != own_id`). So a `source == target` self-edge
 `R→R` has no balancing decref: keeping its `IncrefRegion(R)` **leaks** `R`.
 Eliminating a self-edge is therefore the sound transform — the compiler-side
@@ -331,13 +338,13 @@ decref-dominance assertion (exactly one `DecrefRegion` per merged slot,
 `record_merged_slots`) together with `--trace=guardfree` over the builder corpus
 (an over-collapse surfaces as a UAF; a self-edge left in place grows the live
 region count). The pinning test is the canonical reference
-(`tests/elle/region-merge-builder-loop.lisp`).
+([region-merge-builder-loop.lisp](../../../tests/elle/region-merge-builder-loop.lisp)).
 
 ## The equivalence oracle
 
 A mis-coalesce is a use-after-free: a slot resolved to the wrong physical region
 makes its cascade free a live region. The net for a coalesced *mint* (the
-value→slot substitution, [region selection](mechanism.md)) is the debug-only
+value→slot substitution, the region selection above) is the debug-only
 `AssertRegionMatches { region_id, src }`, emitted immediately before every
 coalesced `IncrefRegion`. (Self-edge *elimination* carries no coalesced incref
 to guard — its net is the decref-dominance assertion and guardfree, above.) In

@@ -1,6 +1,6 @@
 # The region roadmap
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-23 -->
 
 The region system's plan of work: the state gauges, the fix-selection
 discipline, the measured dead ends, and the open work in order.
@@ -37,7 +37,8 @@ rather than about thirty minutes — pass `ELLE`/`CARGO_PROFILE` as above.
 - **Guardfree** is the soundness axis, orthogonal to the leak burndown.
   `--trace=guardfree` under the full stdlib is the only trustworthy UAF
   oracle — plain-VM green is not evidence, and neither is a tight leak rate.
-  The `region_*_uaf` family in `tests/integration/elle_scripts.rs` is the
+  The `region_*_uaf` family in
+  [tests/integration/elle_scripts/](../../tests/integration/elle_scripts.rs) is the
   pinned corpus; the full `cargo test` suite OOMs, so run it filtered.
 - **The corpus smoke is a real third gauge, not a formality.** Oracle-green
   and guardfree-green together still admit a corpus over-free no pin covers.
@@ -51,8 +52,8 @@ lowered — or its probe block deleted — in the same change.
 
 ### The resting state
 
-**Every declared probe is closed.** Both dashboards — `oracle.lisp` and the
-io `plumb.lisp` — read zero open defects, so the ledgers' own burndown is
+**Every declared probe is closed.** Both dashboards — [oracle.lisp](../../tests/elle/oracle.lisp)
+and the io [plumb.lisp](../../tests/elle/plumb.lisp) — read zero open defects, so the ledgers' own burndown is
 empty and every probe in them is a closed control: regression insurance for a
 settled mechanism, not work. That is not "leaks are gone": the ratchet
 asserts nothing regressed, over the shapes somebody wrote a probe for. The
@@ -67,20 +68,21 @@ closed voids every closed verdict of that run), and the sub-integer estimator
 self-test. A block-local accumulator is not genuine growth — it frees at the
 block's return; only a module-level sink is.
 
-**The h2 per-request rate reads zero.** `tests/elle/h2-stress-scoped.lisp`
-holds the ceiling, shrink-only, at two request counts, and it fell 16 → 9 →
-2 → 0 across the merge-inherits-its-entry and break-relocation closes
+**The h2 per-request rate reads zero.**
+[h2-stress-scoped.lisp](../../tests/elle/h2-stress-scoped.lisp) holds the ceiling,
+shrink-only, at two request counts; the merge-inherits-its-entry and
+break-relocation mechanisms keep it there
 ([region/replicate.md](region/replicate.md)). The subject stays live even at
 zero, and without a dashboard probe: it is where the last measured defects on
 this mechanism came from, and its own gauge-live sink is what says a green
 ceiling is the loop reclaiming rather than the gauge dying.
 
 **Direct gauges live outside the dashboards**, all of the ledger's own kind:
-`tests/elle/region-error-unwind.lisp` (the error exit's release tables),
-`region-squelch-unwind.lisp` (the same tables at a squelch/attune boundary),
-`region-boundary-park.lisp` (what the park itself owes there),
-`region-tail-deferred-exits.lisp` (the deferred tail-call set across all four
-exits), and `region-break-loop-replica.lisp` (the release the breaking
+[region-error-unwind.lisp](../../tests/elle/region-error-unwind.lisp) (the error exit's release tables),
+[region-squelch-unwind.lisp](../../tests/elle/region-squelch-unwind.lisp) (the same tables at a squelch/attune boundary),
+[region-boundary-park.lisp](../../tests/elle/region-boundary-park.lisp) (what the park itself owes there),
+[region-tail-deferred-exits.lisp](../../tests/elle/region-tail-deferred-exits.lisp) (the deferred tail-call set across all four
+exits), and [region-break-loop-replica.lisp](../../tests/elle/region-break-loop-replica.lisp) (the release the breaking
 iteration owes). A shape with a direct gauge needs no dashboard probe; what
 it needs is to be run, which the corpus smoke does.
 
@@ -101,7 +103,7 @@ shape? Prefer the invariant; a shape-patch needs an explicit reason the
 invariant form is infeasible.
 
 **The one shape-enumerating locus to watch:** the compensation family
-(`src/hir/regions/compensate.rs` and the gates it drives, including the four
+([compensate.rs](../../src/hir/region/infer/compensate.rs) and the gates it drives, including the four
 funnel site-lists). Each gate answers a pinned over-free, so none may be
 removed casually — and the family only grows. The class-scale close for the
 dispatch-wrapper family is dissolving the dispatch shape itself, so a fifth
@@ -202,7 +204,7 @@ at 0 forever. The ledger shrinks as classes close.
   the guardfree family per landing. Budget for the other face too, which no
   region gauge sees: a leaked region can be the only thing holding an OS
   resource open, so freeing it hands a descriptor number back
-  (`tests/elle/io.lisp`). Run the io, fiber, and posix corpus files, not only
+  ([io.lisp](../../tests/elle/io.lisp)). Run the io, fiber, and posix corpus files, not only
   the region ones.
 - **Do not chase the may-store clique further; it is discharged — but a
   `Mixed` declaration is never free.** The `Unknown` census over the
@@ -229,11 +231,11 @@ first when one appears again — it is always the cheapest close on the board.
 
 **Dissolution** (the mission's third leg) is realized by HOF-chain loop
 fusion; [dissolution.md](dissolution.md) is the spec, and the seams to read
-before widening are under `src/hir/typeinfer/fuse/`: the pipeline builder
+before widening are under [src/hir/typeinfer/fuse/](../../src/hir/typeinfer/fuse.rs): the pipeline builder
 (`build.rs`), the legality gate (`chain.rs`), and the clone whitelist
 (`collect.rs`), each with its decline pins in `fuse::tests`.
 
-The pipeline now carries every array arm the stdlib has — `map`,
+The pipeline carries every array arm the stdlib has — `map`,
 `map-indexed`, `filter`, `take-while`, `drop-while`, `mapcat`, under the
 scalar terminals — with the capture gate closed (a call-site lambda literal
 may capture; only a cloned template must be non-capturing). Dissolution is a
@@ -244,11 +246,9 @@ it is gauged by a new allocation-count subject per op admitted, never by an
 oracle re-pin.
 
 **When a new stage reads as a wash, weigh the scaffold before the stage.**
-Admitting `mapcat` exposed the fused loops re-minting per element the closure
-the pass exists to dissolve, through the variadic `+`; every counter now
-advances by the raw `%add` opcode
-([dissolution.md](dissolution.md) § "The scaffold's own counters advance by
-opcode"). The loop the pass emits is code like any other and can carry the
+A counter the fused loop advances through the variadic `+` re-mints per
+element the closure the pass exists to dissolve, so every counter advances by
+the raw `%add` opcode ([dissolution.md](dissolution.md)). The loop the pass emits is code like any other and can carry the
 very cost it was written to remove.
 
 **Hand-dissolution of F1a is exhausted for the probed corpus.** What was left

@@ -13,7 +13,7 @@ Up: [..](../AGENTS.md)
 - [bytecode.md](bytecode.md) — **Bytecode** The bytecode instruction set is a `repr(u8)` enum.
 - [differential.md](differential.md) — **Differential Tier Testing** A correct closure returns the same value on every execution tier that accepts it, and `compile/run-on` is how a test asks each tier.
 - [dissolution.md](dissolution.md) — **Dissolution — HOF loop fusion (more...)**
-- [escape.md](escape.md) — **Escape analysis — the authoritative true-escape pass (more...)**
+- [escape.md](escape.md) — **Escape analysis — the authoritative true-escape pass** Escape analysis decides, once for every consumer, whether a value outlives the activation it was born in.
 - [fleet.md](fleet.md) — **Fleet — adhoc distributed execution over images (more...)**
 - [gpu.md](gpu.md) — **GPU Compute** How a plain Elle closure becomes a dispatched compute kernel, across the MLIR backend and the Vulkan plugin.
 - [hir.md](hir.md) — **HIR — High-level IR** The HIR pass converts expanded syntax trees into a typed intermediate representation.
