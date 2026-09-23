@@ -316,5 +316,26 @@
 (println "  16. ev/select inside process: ok")
 
 
+# ============================================================================
+# 17. A process scheduler builds no I/O backend
+# ============================================================================
+# It forwards its I/O to its parent scheduler. The counter-factual:
+# make-scheduler built a backend on every process:start and returned it
+# under :backend, where nothing read it.
+
+(assert (not (has? (process:make-scheduler) :backend))
+        "make-scheduler builds no I/O backend")
+(assert (not (has? (process:start (fn () nil)) :backend))
+        "start returns a scheduler without one")
+(let [[ok? err] (protect (process:make-scheduler :backend (*io-backend*)))]
+  (assert (not ok?) "make-scheduler takes no :backend")
+  (assert (= (get err :error) :argument-error)
+          "make-scheduler: as :argument-error"))
+(let [[ok? err] (protect (process:start (fn () nil) :backend (*io-backend*)))]
+  (assert (not ok?) "start takes no :backend")
+  (assert (= (get err :error) :argument-error) "start: as :argument-error"))
+(println "  17. no I/O backend: ok")
+
+
 (println "")
 (println "all process tests passed.")
