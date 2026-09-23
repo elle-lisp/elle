@@ -1,6 +1,6 @@
 # Traits
 
-<!-- audited: 2026-09-20 -->
+<!-- audited: 2026-09-23 -->
 
 Every heap-allocated value carries a `traits` field — a pointer to a
 trait table (struct or @struct). Collection and sequence types get a
@@ -9,26 +9,35 @@ start with `nil` traits.
 
 ## Reading traits
 
-```
-(traits [1 2 3])           # => @{:Sequence {...} :Collection {...}}
-(traits {:a 1})            # => @{:Collection {...}}
-(traits 42)                # => nil (immediate, no traits)
+```lisp
+(assert (= (sort (keys (traits [1 2 3]))) (list :Collection :Sequence)))
+(assert (= (keys (traits {:a 1})) (list :Collection)))
+(assert (nil? (traits 42)))           # an immediate has no traits
+(assert (nil? (traits (fn [] 1))))    # a closure starts with nil traits
 ```
 
-All arrays share the same traitset pointer. All lists share the same
-traitset pointer. This is identity-equal:
+Every array, list, string and bytes value shares one traitset object, and
+every set and struct shares another. `identical?` compares contents, so it
+cannot show the sharing; a write to the shared table can:
 
-```
-(identical? (traits [1 2]) (traits [3 4]))  # => true
+```lisp
+(def shared (traits [1 2]))
+(put shared :Probe 1)
+(assert (= (get (traits [3 4]) :Probe) 1))
+(assert (= (get (traits "text") :Probe) 1))
+(del shared :Probe)
+(assert (nil? (get (traits [5]) :Probe)))
 ```
 
 ## Attaching per-instance traits
 
 `with-traits` creates a new value with a custom trait table:
 
-```
-(def v (with-traits [1 2 3] {:type :point}))
-(traits v)                 # => {:type :point}
+```lisp
+(def point (with-traits [1 2 3] {:type :point}))
+(assert (= (traits point) {:type :point}))
+(assert (= (length point) 3))
+(assert (= (get point 1) 2))
 ```
 
 The trait table can be an immutable struct or a mutable @struct.
@@ -39,8 +48,8 @@ operate on the underlying data, not the trait table.
 
 Traits do not affect structural equality, ordering, or hashing:
 
-```
-(= [1 2 3] (with-traits [1 2 3] {:type :point}))  # => true
+```lisp
+(assert (= [1 2 3] (with-traits [1 2 3] {:type :point})))
 ```
 
 ## Protocol dispatch
@@ -228,35 +237,37 @@ The dispatch is five functions, and a collection can call them:
 | `(trait/elements coll)` | `coll`'s elements as an immutable array |
 | `(trait/rebuild coll items)` | a collection like `coll` holding `items` |
 
+
 ## Iterator protocol
 
 `:iter` returns a **fiber**. Each `(yield item)` produces one element.
 When the fiber completes (status `:dead`), iteration is done.
 
-```
+```lisp
 (def arr [10 20 30])
-(def iter-fn (((traits arr) :Sequence) :iter))
-(def fib (iter-fn arr))
-(fiber/resume fib)   # => 10
-(fiber/resume fib)   # => 20
-(fiber/resume fib)   # => 30
-(fiber/status fib)   # => :paused (one more resume needed to drain)
-(fiber/resume fib)   # completes the fiber
-(fiber/status fib)   # => :dead
+(def iter-fn (get (get (traits arr) :Sequence) :iter))
+(def walker (iter-fn arr))
+(assert (= (fiber/resume walker) 10))
+(assert (= (fiber/resume walker) 20))
+(assert (= (fiber/resume walker) 30))
+(assert (= (fiber/status walker) :paused))   # one more resume drains it
+(fiber/resume walker)
+(assert (= (fiber/status walker) :dead))
 ```
 
 ## Sharing and mutability
 
 Default traitsets are **shared by reference**. All arrays point to the
-same @struct. Mutating the shared @struct is visible to all instances.
+same @struct. Mutating the shared @struct is visible to all instances,
+as § Reading traits shows.
 
 Per-instance override via `with-traits`:
 
-```
-(def v (with-traits [1 2 3]
-         @{:Sequence {:first (fn [self] :custom)}}))
-(first v)        # => :custom
-(first [1 2 3])  # => 1 (default, unaffected)
+```lisp
+(def custom (with-traits [1 2 3]
+              @{:Sequence {:first (fn [self] :custom)}}))
+(assert (= (first custom) :custom))
+(assert (= (first [1 2 3]) 1))   # the default, unaffected
 ```
 
 ### `with-traits` returns an independent value
@@ -265,12 +276,12 @@ For a mutable collection — `@array`, `@struct`, `@string`, `@bytes`, `@set`,
 a box — the store is **copied**, not shared. A later write to the original is
 not visible through the traited value:
 
-```
-(def a @[1 2])
-(def b (with-traits a {:tag :x}))
-(push a 99)
-a                # => @[1 2 99]
-b                # => @[1 2]
+```lisp
+(def original @[1 2])
+(def traited (with-traits original {:tag :x}))
+(push original 99)
+(assert (= original @[1 2 99]))
+(assert (= traited @[1 2]))
 ```
 
 The exceptions are fibers, thread handles, and plugin externals. Those wrap a
@@ -281,7 +292,7 @@ and stays `identical?` to it — a traited fiber is that fiber, not a copy of it
 
 Any value can implement `:Sequence` via `with-traits`:
 
-```
+```lisp
 (defn make-range [start end]
   (with-traits {:start start :end end}
     @{:Sequence
@@ -297,14 +308,16 @@ Any value can implement `:Sequence` via `with-traits`:
                     (yield i)
                     (assign i (+ i 1)))) |:yield|))}}))
 
-(first (make-range 0 10))        # => 0
-(first (rest (make-range 0 10))) # => 1
+(assert (= (first (make-range 0 10)) 0))
+(assert (= (first (rest (make-range 0 10))) 1))
+(assert (= (fold + 0 (make-range 0 5)) 10))   # fold drains :iter
 ```
 
 ## Cross-thread behavior
 
-Default traitsets are thread-local: each thread's VM builds its own via
-`init_default_traits`. When sending a value to another thread:
+Default traitsets belong to one runtime instance: each heap builds its own
+through `init_default_traits`, so each worker thread's VM has its own. When
+sending a value to another thread:
 
 - Default traits are skipped (sent as NIL). The receiving thread's
   constructors stamp its own registry defaults.
@@ -315,15 +328,18 @@ not a type heuristic. User-attached @struct traits are preserved.
 
 ## Allocation
 
-Default traitsets are built once per VM into the **root region**
-(`alloc_root`) and held by the trait registry, pinned alive by reference
-count for the lifetime of that VM/run. They are not reclaimed by
-scope-based arena operations, but they are *not* immortal: process
-teardown releases the root region by RC, and `reset_default_traits`
-drops the registry's cached pointers so a fresh VM on the same thread
-rebuilds them. The method handles a traitset carries *are* native-fns:
-immediate `prim_id` values that occupy no region. The traitset pointer in
-a heap object is just a pointer — no arena bookkeeping overhead.
+Default traitsets are built once per heap into its pinned **root region**
+(`alloc_root`), and the per-tag table is stored on the heap itself. They are
+not reclaimed by scope-based arena operations, but they are *not* immortal:
+the teardown sweep releases the root region, and `reset_default_traits`
+clears the heap's table so a read after teardown returns `nil` rather than a
+freed pointer. The next instance builds its own. The method handles a
+traitset carries *are* native-fns: immediate `prim_id` values that occupy no
+region. The traitset pointer in a heap object is just a pointer — no arena
+bookkeeping overhead.
+
+The traitset @structs themselves carry `nil` traits, so a protocol primitive
+such as `has?` cannot take one: read a traitset with `get` and `keys`.
 
 The `traits` side-field is a cross-region edge enumerated for every
 traitable heap variant during region cross-ref accounting

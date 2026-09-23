@@ -1,5 +1,7 @@
 # Pattern Matching
 
+<!-- audited: 2026-09-23 -->
+
 `match` dispatches on the structure and value of data. Arms are tried
 top to bottom; the first pattern that matches (and whose guard, if any,
 passes) selects the body. If no arm matches, a runtime `:match-error`
@@ -23,9 +25,9 @@ Literal values (numbers, keywords, strings, booleans) match by equality:
     1      "one"
     _      "other"))
 
-(describe 0)               # => "zero"
-(describe 1)               # => "one"
-(describe 42)              # => "other"
+(assert (= (describe 0) "zero"))
+(assert (= (describe 1) "one"))
+(assert (= (describe 42) "other"))
 ```
 
 ## Binding patterns
@@ -41,16 +43,17 @@ expressions.
     (x & _) x
     _       fallback))
 
-(first-or-default (list 10 20) :none)  # => 10
-(first-or-default (list) :none)        # => :none
+(assert (= (first-or-default (list 10 20) :none) 10))
+(assert (= (first-or-default (list) :none) :none))
 ```
 
 **Important:** a bare symbol always binds, never compares:
 
 ```lisp
 (def x 42)
-(match 99
-  x x)      # x binds to 99, body returns 99 — NOT a comparison with 42
+(assert (= (match 99
+             x x)       # x binds to 99 — NOT a comparison with 42
+           99))
 ```
 
 A bare symbol is a catch-all, so no arm may follow it — the compiler
@@ -58,34 +61,22 @@ rejects unreachable arms.
 
 To dispatch against a variable's value, use `case` or a guard:
 
-```
+```lisp
 (def quit-code 0x100)
 
-# case — evaluates keys, compares with =
-(case etype
-  quit-code :quit
-  :other)
+(defn by-case [etype]
+  (case etype               # case evaluates its keys and compares with =
+    quit-code :quit
+    :other))
 
-# match — guard compares explicitly
-(match etype
-  t when (= t quit-code) :quit
-  _ :other)
-```
+(defn by-guard [etype]
+  (match etype
+    t when (= t quit-code) :quit   # a guard compares explicitly
+    _ :other))
 
-## Or-patterns
-
-`(or ...)` in a pattern matches any of the listed alternatives:
-
-```lisp
-(defn parity [n]
-  (match n
-    (or 1 3 5 7 9) :odd
-    (or 0 2 4 6 8) :even
-    _              :out-of-range))
-
-(parity 3)                 # => :odd
-(parity 4)                 # => :even
-(parity 42)                # => :out-of-range
+(assert (= (by-case 256) :quit))
+(assert (= (by-guard 256) :quit))
+(assert (= (by-guard 1) :other))
 ```
 
 ## Array and struct patterns
@@ -99,9 +90,9 @@ To dispatch against a variable's value, use `case` or a guard:
     [x y]    :general
     _        :unknown))
 
-(point-type [0 0])         # => :origin
-(point-type [5 0])         # => :x-axis
-(point-type [3 4])         # => :general
+(assert (= (point-type [0 0]) :origin))
+(assert (= (point-type [5 0]) :x-axis))
+(assert (= (point-type [3 4]) :general))
 ```
 
 Struct patterns match by key, with literal values for dispatch:
@@ -113,8 +104,8 @@ Struct patterns match by key, with literal values for dispatch:
     {:type :square :side s}    (* s s)
     _                          0))
 
-(area {:type :circle :radius 5})   # => 78.53975
-(area {:type :square :side 7})     # => 49
+(assert (= (area {:type :circle :radius 5}) 78.53975))
+(assert (= (area {:type :square :side 7}) 49))
 ```
 
 ## Nested patterns
@@ -127,8 +118,8 @@ Patterns compose to any depth:
     {:db {:host h}} h
     _               "unknown"))
 
-(db-host {:db {:host "pg.local"}})   # => "pg.local"
-(db-host {:nodb true})               # => "unknown"
+(assert (= (db-host {:db {:host "pg.local"}}) "pg.local"))
+(assert (= (db-host {:nodb true}) "unknown"))
 ```
 
 ## Or-patterns
@@ -137,14 +128,24 @@ Patterns compose to any depth:
 must bind the same set of variables (or none at all).
 
 ```lisp
+(defn parity [n]
+  (match n
+    (or 1 3 5 7 9) :odd
+    (or 0 2 4 6 8) :even
+    _              :out-of-range))
+
+(assert (= (parity 3) :odd))
+(assert (= (parity 4) :even))
+(assert (= (parity 42) :out-of-range))
+
 (defn classify-suit [suit]
   (match suit
     (or :hearts :diamonds) :red
     (or :clubs :spades)    :black
     _                      :unknown))
 
-(classify-suit :hearts)    # => :red
-(classify-suit :spades)    # => :black
+(assert (= (classify-suit :hearts) :red))
+(assert (= (classify-suit :spades) :black))
 ```
 
 Or-patterns work with binding patterns — each alternative must bind
@@ -156,8 +157,8 @@ the same names:
     (or [x & _] (x & _))  x
     _                      nil))
 
-(first-element [10 20])        # => 10
-(first-element (list 30 40))   # => 30
+(assert (= (first-element [10 20]) 10))
+(assert (= (first-element (list 30 40)) 30))
 ```
 
 ## Guards
@@ -173,9 +174,9 @@ between the pattern and the body, **not** wrapped in parentheses:
     0               :zero
     x               :negative))
 
-(classify 5)               # => :positive
-(classify 0)               # => :zero
-(classify -3)              # => :negative
+(assert (= (classify 5) :positive))
+(assert (= (classify 0) :zero))
+(assert (= (classify -3) :negative))
 ```
 
 Guards can reference bindings from the pattern:
@@ -187,6 +188,10 @@ Guards can reference bindings from the pattern:
     [a b] when (= a b) "equal"
     [a b]              "ascending"
     _                  "not a pair"))
+
+(assert (= (describe-pair [2 1]) "descending"))
+(assert (= (describe-pair [1 1]) "equal"))
+(assert (= (describe-pair :x) "not a pair"))
 ```
 
 When a guarded arm's pattern is an or-pattern, a failed guard retries
@@ -219,9 +224,11 @@ other error:
 
 A guard that fails on the final arm falls through the same way:
 
-```
-(match -1
-  x when (> x 0) :positive)   # raises :match-error — guard rejected -1
+```lisp
+(def [positive? rejected] (protect (match -1
+                                     x when (> x 0) :positive)))
+(assert (not positive?))
+(assert (= (get rejected :error) :match-error))
 ```
 
 A match that can fail this way is typed as possibly erroring: signal
@@ -230,20 +237,22 @@ irrefutable (a wildcard or variable). Inside a `(silent!)` function,
 use a catch-all arm — a match without one is a compile-time signal
 violation.
 
+```lisp
+(defn compiles? [src]
+  (first (protect (compile/whole-module src "<doc>"))))
+
+(assert (not (compiles? "(defn f [n] (silent!) (match n 1 :one 2 :two))")))
+(assert (compiles? "(defn f [n] (silent!) (match n 1 :one _ :two))"))
+```
+
 ## Unreachable arms
 
 An arm that earlier arms already cover can never match — the compiler
-rejects it:
+rejects it with "unreachable match arm 2":
 
-```
-(match n
-  _ :anything
-  1 :one)        # compile error: unreachable match arm 2
-
-(match n
-  1 :one
-  1 :uno         # compile error: unreachable match arm 2
-  _ :other)
+```lisp
+(assert (not (compiles? "(defn f [n] (match n _ :anything 1 :one))")))
+(assert (not (compiles? "(defn f [n] (match n 1 :one 1 :uno _ :other))")))
 ```
 
 Guarded arms never make later arms unreachable — the guard may fail at
@@ -257,17 +266,13 @@ runtime, so the compiler assumes both outcomes are possible:
 
 The same analysis applies *inside* or-patterns, at any nesting depth:
 each alternative must match something that earlier arms and earlier
-alternatives do not. A dead alternative is a compile error:
+alternatives do not. A dead alternative is a compile error. Below, arm 1
+already matches `1`, and in the second source every pair matches the first
+alternative, so the second is dead:
 
-```
-(match n
-  1        :one
-  (or 1 2) :other)   # compile error: alternative 1 of the or-pattern
-                     # is unreachable — arm 1 already matches 1
-
-(match p
-  (or (x . _) (_ . x)) x)   # compile error: every pair matches the
-                            # first alternative, so the second is dead
+```lisp
+(assert (not (compiles? "(defn f [n] (match n 1 :one (or 1 2) :other))")))
+(assert (not (compiles? "(defn f [p] (match p (or (x . _) (_ . x)) x))")))
 ```
 
 On a **guarded** arm, earlier alternatives of the same or-pattern never
@@ -282,28 +287,36 @@ by earlier *arms* still applies to guarded arms as usual.
 |---|---------|--------|--------|
 | **Dispatch** | structural patterns | equality (`=`) against evaluated expressions | arbitrary test expressions |
 | **Variables** | bare symbols **bind** | keys are **evaluated** and compared | full expressions |
-| **No match** | runtime `:match-error`; unreachable arms are compile errors | falls through to default | falls through |
+| **No match** | runtime `:match-error`; unreachable arms are compile errors | the default, else `nil` | the default, else `nil` |
 | **Use when** | dispatching on shape, type, or literal values | dispatching against runtime values | multi-branch boolean logic |
 
-```
-# match: literal keyword patterns
-(match event-type
-  :quit      (handle-quit)
-  :key-down  (handle-key ev)
-  _          nil)
+```lisp
+(def event-quit 12)
+(def event-key-down 768)
 
-# case: dispatch against variables holding event codes
-(case raw-event-code
-  event-quit      (handle-quit)
-  event-key-down  (handle-key ev)
-  (handle-unknown))
+(defn by-type [event-type]
+  (match event-type          # match: literal keyword patterns
+    :quit      :bye
+    :key-down  :typed
+    _          nil))
 
-# cond: arbitrary boolean conditions
-(cond
-  (> x 10) :large
-  (> x 0)  :small
-  (= x 0)  :zero
-  :negative)
+(defn by-code [raw-event-code]
+  (case raw-event-code       # case: keys are variables holding event codes
+    event-quit      :bye
+    event-key-down  :typed
+    :unknown))
+
+(defn size [x]
+  (cond                      # cond: arbitrary boolean conditions
+    (> x 10) :large
+    (> x 0)  :small
+    (= x 0)  :zero
+    :negative))
+
+(assert (= (by-type :quit) :bye))
+(assert (= (by-code 768) :typed))
+(assert (= (size -4) :negative))
+(assert (nil? (case 5 1 :a 2 :b)))
 ```
 
 When `cond` branches are all testing the same expression against literal

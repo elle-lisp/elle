@@ -1,15 +1,16 @@
 # Standard Library
 
-Elle's standard library has three layers: VM primitives (Rust), stdlib
-functions (Elle), and prelude macros (Elle).
+<!-- audited: 2026-09-23 -->
+
+Elle's standard library has four layers: Rust primitives, core operators,
+prelude macros, and stdlib functions.
 
 ## Libraries (`lib/`)
 
-Higher-level modules loaded with `import-file`. Each wraps its code in
-a closure returning a struct.
+Higher-level modules, loaded with `import`. Each module is a closure:
+`(import "std/NAME")` returns it, and calling it returns a struct of the
+module's exports. Some of them:
 
-| Module | Import | Description |
-|--------|--------|-------------|
 | Module | Import | Description |
 |--------|--------|-------------|
 | aws | `(import "std/aws")` | AWS API client (S3, etc.) |
@@ -33,54 +34,76 @@ a closure returning a struct.
 | watch | `(import "std/watch")` | File watching wrapper |
 | zmq | `(import "std/zmq")` | ZeroMQ messaging |
 
+[libraries.md](libraries.md) describes the libraries and how to load them.
+
+## Core operators (`core.lisp`)
+
+Compiled and run before the prelude, from special forms and `%` intrinsics
+alone, because prelude macros call them while they expand. They are the
+sequence operators and the trait layer those operators dispatch through
+([traits.md](traits.md)):
+
+```text
+fold reduce reverse append concat last butlast
+trait/elements trait/rebuild
+```
+
 ## Prelude (`prelude.lisp`)
 
-Macros loaded before user code. These define fundamental control flow:
+Macros loaded before user code:
 
 ```text
 defn        function definition sugar
 let*        alias for let (sequential bindings)
-->          thread-first
-->>         thread-last
+->  ->>     thread-first, thread-last
+as-> some-> some->>   threading variants
 when        one-armed conditional
 unless      negated one-armed conditional
-cond        multi-branch conditional
 case        equality dispatch
 if-let      conditional binding (two arms)
 when-let    conditional binding (one arm)
-while-let   conditional loop
-match       pattern matching
+when-ok     run a body when an expression does not error
 each        iteration
+repeat      run N times
+forever     infinite loop
 try/catch   error recovery
 protect     error capture
 defer       guaranteed cleanup
 with        resource management
-repeat      run N times
-forever     infinite loop
+with-temp-dir   a scratch directory, removed afterwards
 error       raise an error
+assert      check a condition
+gate!       run a body, or raise :gated
+yield yield*    emit :yield
+apply       call with a spread argument list
+default     a default for a &named parameter left nil
 ```
+
+`cond` and `match` are special forms, not macros.
 
 ## stdlib (`stdlib.lisp`)
 
-Functions loaded after the prelude:
+Functions loaded after the prelude, among them:
 
 ```text
-map filter fold apply sum product
-append reverse take drop butlast last
-sort sort-by sort-with
+map filter sum product take drop
+sort-by sort-with
 compose partial identity
-->array ->list
-freeze thaw deep-freeze
 ```
+
+`sort`, `->array`, `->list`, `freeze`, `thaw` and `deep-freeze` are VM
+primitives.
 
 ## VM primitives
 
 Native functions implemented in Rust. Use `(vm/list-primitives)` to
-enumerate, or `(doc fn-name)` for documentation.
+enumerate, `(doc fn-name)` for documentation, and `(vm/primitive-meta "name")`
+for the full metadata struct:
 
-```text
-(doc +)                    # shows arity, params, examples
-(vm/primitive-meta "+")    # returns full metadata struct
+```lisp
+(assert (> (length (vm/list-primitives)) 500))
+(assert (= (get (vm/primitive-meta "length") :arity) "1"))
+(assert (nil? (vm/primitive-meta "+")))   # + is a stdlib function, not a primitive
 ```
 
 ### IEEE 754 bitcast
@@ -89,6 +112,11 @@ enumerate, or `(doc fn-name)` for documentation.
 |-----------|-------|-------------|
 | `math/f32-bits` | 1 | Return the IEEE 754 f32 bit pattern of a number as an integer |
 | `math/f32-from-bits` | 1 | Reinterpret an integer as an IEEE 754 f32 bit pattern |
+
+```lisp
+(assert (= (math/f32-bits 1.0) 1065353216))
+(assert (= (math/f32-from-bits 1065353216) 1.0))
+```
 
 ---
 

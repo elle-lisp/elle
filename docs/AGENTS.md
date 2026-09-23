@@ -12,7 +12,7 @@ Up: [..](../AGENTS.md)
 - [bindings.md](bindings.md) — **Bindings** Bindings associate names with values.
 - [bytes.md](bytes.md) — **Bytes** Bytes are sequences of raw byte values (0–255).
 - [coming-from.md](coming-from.md) — **Coming from Other Languages** Quick orientation for programmers arriving from specific languages.
-- [compile-time.md](compile-time.md) — **Compile-Time Operations (more...)**
+- [compile-time.md](compile-time.md) — **Compile-Time Operations** The forms that act at compile time, and the `compile/*` API that reads the compiler's model from running code.
 - [concurrency.md](concurrency.md) — **Concurrency** User code runs inside the async scheduler automatically.
 - [config.md](config.md) — **Runtime Configuration (`vm/config`)** Elle exposes a runtime configuration system reachable from both CLI flags and Elle code.
 - [control.md](control.md) — **Control Flow** Elle control flow forms are expressions — they return values.
@@ -48,7 +48,7 @@ Up: [..](../AGENTS.md)
 - [runtime.md](runtime.md) — **Runtime Signals** The runtime uses fiber signals for internal coordination.
 - [scheduler.md](scheduler.md) — **Scheduler** The async scheduler is the only supported execution backend, and user code runs inside it automatically.
 - [sets.md](sets.md) — **Sets** Sets are unordered collections of unique values.
-- [stdlib.md](stdlib.md) — **Standard Library** Elle's standard library has three layers: VM primitives (Rust), stdlib functions (Elle), and prelude macros (Elle).
+- [stdlib.md](stdlib.md) — **Standard Library** Elle's standard library has four layers: Rust primitives, core operators, prelude macros, and stdlib functions.
 - [strings.md](strings.md) — **Strings** Strings are immutable sequences of grapheme clusters.
 - [structs.md](structs.md) — **Structs** Structs are key-value maps with keyword keys.
 - [subprocess.md](subprocess.md) — **Subprocesses** Elle spawns a child process as a `subprocess` value: one thing to read streams from, to signal, and to wait on.
