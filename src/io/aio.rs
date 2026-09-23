@@ -242,8 +242,10 @@ impl AsyncBackend {
         PlatformBackend::ThreadPool
     }
 
-    /// Bring this backend to rest: drain every in-flight io_uring operation so
-    /// no kernel-owned buffer outlives it, then let go of every region it still
+    /// Bring this backend to rest: drain every in-flight io_uring operation, and
+    /// stop and wait for every pool operation that may address a region, so no
+    /// kernel or worker writes into memory the heap frees; then let go of every
+    /// region it still
     /// holds — its filed entries' operands, and what its unreaped completions
     /// built. Idempotent once nothing is pending and nothing is queued. Called
     /// from `Drop` and from `FiberHeap::quiesce_io_backends`; see docs/io.md
@@ -251,6 +253,7 @@ impl AsyncBackend {
     pub(crate) fn quiesce(&self) {
         if let Ok(mut inner) = self.inner.try_borrow_mut() {
             inner.quiesce_pending();
+            inner.quiesce_workers();
             // Whatever the drain could not finish will never complete, so
             // nothing else will dispose of its entry and let go of the regions
             // it holds. This is the last moment the store is reachable: a heap

@@ -55,15 +55,24 @@ pub(crate) enum PendingOp {
         /// them.
         #[allow(dead_code)] // kept alive for its Drop side effect
         descriptor: Option<Rc<OwnedFd>>,
-        /// BufferPool handle for non-read operations. `None` for Read/ReadLine
-        /// (which use pre-allocated fiber-heap buffers instead).
+        /// A pooled buffer on the ring: a `read-all`'s accumulation, a copy of
+        /// a payload that cannot be written where it lies, a socket
+        /// operation's scratch, and the placeholder a flush takes. `None` for
+        /// the three reads, which land in the caller's own buffer, for a write
+        /// handed the kernel by address, and for every stream operation a pool
+        /// worker runs, which owns the buffers it needs.
         buffer_handle: Option<BufferHandle>,
         /// For Accept: which kind of listener (TcpListener or UnixListener).
         listener_kind: Option<PortKind>,
-        /// Bytes of this operation's payload already transferred: read into
-        /// the fiber's pre-allocated buffer, or written out to the fd. Both
-        /// directions resubmit the remainder from this offset, and the
-        /// completion reports `filled + result_code`. Zero for ops that move
+        /// The remainder the port handed this read, already copied into the
+        /// front of the caller's buffer. Given back if the read ends without
+        /// answering (docs/impl/io-bytes.md § "The port hands its remainder
+        /// to the read").
+        lent: Vec<u8>,
+        /// Bytes of this operation's payload already in place: in the caller's
+        /// buffer for a read (a borrowed remainder included), or written out
+        /// to the fd. Both directions resubmit from this offset, and the
+        /// completion counts `filled + result_code`. Zero for ops that move
         /// no payload.
         filled: usize,
         /// The request's timeout, carried so a resubmission can re-arm the
@@ -105,10 +114,9 @@ pub(crate) enum PendingOp {
     },
     /// Open a file path. Creates a new port on completion.
     ///
-    /// For io_uring: the null-terminated path bytes are stored in the buffer
-    /// pool slot (via buffer_handle) so they stay pinned until the CQE arrives.
-    /// For thread pool: path is owned by the PoolOp::Open; buffer_handle is a
-    /// dummy allocation (0 bytes).
+    /// An open runs on the thread pool on every platform (src/io/AGENTS.md,
+    /// invariant 14), so `PoolOp::Open` owns the path the syscall reads, and
+    /// `buffer_handle` is an empty placeholder.
     Open {
         /// The file path (for error messages).
         path: String,
@@ -163,9 +171,25 @@ impl PendingOp {
             descriptor,
             buffer_handle,
             listener_kind: None,
+            lent: Vec::new(),
             filled: 0,
             timeout,
         }
+    }
+
+    /// The same entry, for a read that borrowed `lent` from its port and copied
+    /// it into the front of the caller's buffer, so the read starts that far in.
+    pub(crate) fn lending(mut self, bytes: Vec<u8>) -> PendingOp {
+        if let PendingOp::Port {
+            ref mut lent,
+            ref mut filled,
+            ..
+        } = self
+        {
+            *filled = bytes.len();
+            *lent = bytes;
+        }
+        self
     }
 
     /// The same entry, for an accept on a listener of `kind`. The completion
@@ -182,9 +206,9 @@ impl PendingOp {
         self
     }
 
-    /// Get the BufferHandle, if any. Returns `None` for read operations
-    /// (which use pre-allocated fiber-heap buffers) and `Some(handle)` for
-    /// all other operations.
+    /// Get the BufferHandle, if any. `None` for a port operation that holds
+    /// no pooled buffer: the three reads, and a write handed the kernel by
+    /// address. `Some(handle)` for every other operation.
     pub(crate) fn buffer_handle(&self) -> Option<BufferHandle> {
         match self {
             PendingOp::Port { buffer_handle, .. } => *buffer_handle,
@@ -236,6 +260,39 @@ impl PendingOp {
             | PendingOp::ChanSelectPark { .. } => {}
         }
         out
+    }
+
+    /// The one operand the kernel or a pool worker reaches by address rather
+    /// than through the completion: a read's buffer, a write's payload, a
+    /// `recv-from` result whose `:data` the ring receives into. A cancel keeps
+    /// this one held until the completion arrives (docs/impl/io-bytes.md § "The
+    /// kernel's operand is held until the completion arrives"). `Value::NIL`,
+    /// which retains nothing, for every operation that addresses none.
+    pub(crate) fn addressed(&self) -> Value {
+        match self {
+            PendingOp::Port { op, .. } => match op {
+                PortOp::ReadLine { buffer }
+                | PortOp::Read { buffer, .. }
+                | PortOp::ReadExact { buffer, .. } => *buffer,
+                PortOp::Write { data } => *data,
+                PortOp::RecvFrom { result, .. } => *result,
+                PortOp::ReadAll
+                | PortOp::Flush
+                | PortOp::Accept { .. }
+                | PortOp::SendTo { .. }
+                | PortOp::Shutdown { .. } => Value::NIL,
+            },
+            PendingOp::Connect { .. }
+            | PendingOp::Sleep { .. }
+            | PendingOp::ProcessWait { .. }
+            | PendingOp::Open { .. }
+            | PendingOp::Task { .. }
+            | PendingOp::Resolve { .. }
+            | PendingOp::WatchNext { .. }
+            | PendingOp::SigNext { .. }
+            | PendingOp::PollFd { .. }
+            | PendingOp::ChanSelectPark { .. } => Value::NIL,
+        }
     }
 
     /// Could an operation of kind `kind` have filed this entry? A "no" is the

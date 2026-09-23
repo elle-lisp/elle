@@ -1,8 +1,9 @@
-//! audited: 2026-09-20
-//! Draining what is ready: the ring's CQEs, the shared hub, and the teardown
-//! pass that brings the ring to rest before its buffers are freed.
+//! audited: 2026-09-23
+//! Draining what is ready — the ring's CQEs and the shared hub — and the
+//! teardown passes that bring both platforms to rest.
 //!
 //! docs/io.md
+//! docs/impl/io-bytes.md
 
 use super::*;
 
@@ -97,6 +98,58 @@ impl AsyncBackendInner {
 
     #[cfg(not(target_os = "linux"))]
     pub(super) fn quiesce_pending(&mut self) {}
+
+    /// Stop every pool operation that carries a stop pipe, and wait for its
+    /// completion before returning.
+    ///
+    /// A pool worker reads into the caller's buffer and writes from the
+    /// payload's pages as the kernel does on the ring, and the heap frees those
+    /// regions right after this returns (docs/impl/io-bytes.md § "A worker that
+    /// addresses a region is waited for at teardown"). Only an operation with a
+    /// stop pipe addresses a region, and a stop ends it at once, so the wait is
+    /// short; it is bounded anyway, as the ring's drain is. Every entry is
+    /// marked cancelled first, so each completion retires its entry rather than
+    /// building a result from it.
+    pub(super) fn quiesce_workers(&mut self) {
+        let stoppable: Vec<SubmissionId> = self
+            .hub
+            .stoppable()
+            .into_iter()
+            .filter(|id| self.pending.contains(*id))
+            .collect();
+        if stoppable.is_empty() {
+            return;
+        }
+        self.pending.cancel_all();
+        for id in &stoppable {
+            self.hub.stop(*id);
+        }
+        let origin_heap = self.origin_heap;
+        let gen = self.unicode_generation;
+        let mut waits = 0u32;
+        while waits < 64 && stoppable.iter().any(|id| self.pending.contains(*id)) {
+            waits += 1;
+            let Some(rc) = self.hub.recv_blocking(Some(Duration::from_millis(50))) else {
+                continue;
+            };
+            let id = SubmissionId::from_raw(match &rc {
+                RawCompletion::Pool(pc) => pc.id,
+                RawCompletion::Stdin(sc) => sc.id,
+            });
+            let cooked = cook_raw(
+                rc,
+                &mut self.pending,
+                &mut self.fd_states,
+                &mut self.buffer_pool,
+                origin_heap,
+                gen,
+            );
+            if let Some(c) = cooked {
+                c.discard();
+            }
+            self.hub.forget_stop(id);
+        }
+    }
 
     /// Drain everything ready now into self.completions: the ring's CQEs (uring
     /// platform) and the shared hub (pool + stdin workers), on both platforms.

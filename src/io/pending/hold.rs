@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-23
 //! Who a submission is for, and the reference it holds on its operands until
 //! its completion has been read.
 //!
@@ -80,6 +80,12 @@ impl Submitter {
 /// (docs/impl/io-inflight.md § "A submitted operation holds the values its
 /// completion reads").
 ///
+/// It retains in two parts, because a cancel lets go of one and keeps the
+/// other: `regions` for what the completion reads, and `addressed` for the one
+/// operand the kernel or a pool worker reaches by address
+/// (docs/impl/io-bytes.md § "The kernel's operand is held until the completion
+/// arrives").
+///
 /// [`release`](Self::release) is idempotent and `Drop` runs it, so an entry
 /// disposed of by any route lets go exactly once.
 pub(super) struct OperandHold {
@@ -90,6 +96,9 @@ pub(super) struct OperandHold {
     /// value sits in, which for an adopted operand has no count to hold. See
     /// [`take`](Self::take).
     regions: [Option<crate::hir::region::RuntimeRegion>; HELD_VALUES],
+    /// A second retain on the root of [`PendingOp::addressed`], let go only
+    /// when the whole hold is.
+    addressed: Option<crate::hir::region::RuntimeRegion>,
 }
 
 impl OperandHold {
@@ -110,28 +119,13 @@ impl OperandHold {
         let mut held = [Value::NIL; HELD_VALUES];
         held[..MAX_OPERANDS].copy_from_slice(&op.operands());
         held[MAX_OPERANDS] = submitter.fiber;
-        let regions = held.map(|v| {
-            if !h.value_in_region_store(v) {
-                return None;
-            }
-            // The region retained is the one reclamation listens to, not the one
-            // the value sits in (docs/impl/io-inflight.md § "A hold retains what
-            // reclamation listens to"). `release` gives back the same root, so
-            // the two are one region by construction.
-            let root = crate::value::arena::region_of(h, v).map(|r| h.reclaim_root(r));
-            debug_assert!(
-                root.is_none_or(|r| !h.region_is_owned(r)),
-                "a reclamation root is Counted by definition — an Owned one means \
-                 the owner walk stopped short of the region that reclaims",
-            );
-            crate::value::arena::incref_for_escape(
-                h,
-                root,
-                crate::value::arena::EscapeSite::IoSubmit,
-            );
-            root
-        });
-        OperandHold { heap, regions }
+        let regions = held.map(|v| retain_root(h, v));
+        let addressed = retain_root(h, op.addressed());
+        OperandHold {
+            heap,
+            regions,
+            addressed,
+        }
     }
 
     /// A hold on nothing.
@@ -139,6 +133,21 @@ impl OperandHold {
         OperandHold {
             heap: std::ptr::null_mut(),
             regions: [None; HELD_VALUES],
+            addressed: None,
+        }
+    }
+
+    /// Let go of what the completion reads, and keep the operand the kernel or
+    /// a worker addresses: the cancel's half. Idempotent, like
+    /// [`release`](Self::release).
+    pub(super) fn release_read(&mut self) {
+        if self.heap.is_null() {
+            return;
+        }
+        // SAFETY: as in `release`.
+        let h = unsafe { &mut *self.heap };
+        for region in self.regions.iter_mut() {
+            crate::value::arena::decref_region(h, region.take());
         }
     }
 
@@ -148,16 +157,39 @@ impl OperandHold {
         if self.heap.is_null() {
             return;
         }
+        self.release_read();
         // SAFETY: the store this hold named at the retain. Every route that
         // disposes of an entry runs while that store is live — a completion is
         // resolved on it, and the teardown release runs before the store tears
         // its regions down (`FiberHeap::quiesce_io_backends`).
         let h = unsafe { &mut *self.heap };
-        for region in self.regions.iter_mut() {
-            crate::value::arena::decref_region(h, region.take());
-        }
+        crate::value::arena::decref_region(h, self.addressed.take());
         self.heap = std::ptr::null_mut();
     }
+}
+
+/// Retain the reclamation root of `v`'s region, and answer it, or `None` for a
+/// value this store does not own.
+///
+/// The region retained is the one reclamation listens to, not the one the
+/// value sits in (docs/impl/io-inflight.md § "A hold retains what reclamation
+/// listens to"). `release` gives back the same root, so the two are one region
+/// by construction.
+fn retain_root(
+    h: &mut crate::value::fiberheap::FiberHeap,
+    v: Value,
+) -> Option<crate::hir::region::RuntimeRegion> {
+    if !h.value_in_region_store(v) {
+        return None;
+    }
+    let root = crate::value::arena::region_of(h, v).map(|r| h.reclaim_root(r));
+    debug_assert!(
+        root.is_none_or(|r| !h.region_is_owned(r)),
+        "a reclamation root is Counted by definition — an Owned one means \
+         the owner walk stopped short of the region that reclaims",
+    );
+    crate::value::arena::incref_for_escape(h, root, crate::value::arena::EscapeSite::IoSubmit);
+    root
 }
 
 impl Drop for OperandHold {

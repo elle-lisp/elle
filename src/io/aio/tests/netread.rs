@@ -32,8 +32,9 @@ fn a_pool_read_exact_counts_the_remainder_the_port_already_holds() {
         let (ours, peer) = stream_socket_pair();
 
         // Header, body, terminator — one burst, so the header's read
-        // over-reaches into the body. The body is past one 4096-byte
-        // `read_until` chunk, so the `ReadExact` still has to reach the wire.
+        // over-reaches into the body. The body is past the 4096-byte page a
+        // line's read takes at a time, so the `ReadExact` still has to reach
+        // the wire.
         let body_len = 40_000usize;
         let mut payload = format!("${}\r\n", body_len).into_bytes();
         payload.extend(std::iter::repeat_n(b'x', body_len));

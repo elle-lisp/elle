@@ -56,7 +56,7 @@ impl AsyncBackend {
                     port_num,
                     ref data,
                 } => {
-                    let bytes = Self::extract_write_bytes(data);
+                    let bytes = crate::io::landing::payload_copy(data);
                     match platform {
                         #[cfg(target_os = "linux")]
                         PlatformBackend::Uring(ring) => {

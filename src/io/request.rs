@@ -1,4 +1,4 @@
-//! audited: 2026-09-21
+//! audited: 2026-09-23
 //! IoRequest — typed I/O request descriptors.
 //!
 //! Stream primitives build IoRequest values and yield them via SIG_IO.
@@ -101,11 +101,14 @@ pub enum PortOp {
     /// The buffer is pre-allocated on the fiber's heap.
     ReadExact {
         count: usize,
-        /// Pre-allocated LBytes buffer on the fiber's heap (`count` bytes).
+        /// Pre-allocated LBytes buffer on the fiber's heap: `count` bytes on a
+        /// binary port, four per cluster on a text one.
         buffer: Value,
     },
     /// Read everything remaining. Returns bytes.
-    /// No pre-allocated buffer — unbounded, uses fd_states.buffer accumulation.
+    /// No pre-allocated buffer: the length is unknown until the stream ends,
+    /// so the bytes accumulate in a buffer the operation owns and are copied
+    /// once into the answer (docs/impl/io-bytes.md).
     ReadAll,
     /// Write data to port. Returns bytes written (int).
     Write { data: Value },

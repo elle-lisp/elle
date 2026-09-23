@@ -1,4 +1,4 @@
-//! audited: 2026-09-20
+//! audited: 2026-09-23
 //! The operations a backend has in flight, and which of them no fiber will
 //! receive a result for.
 //!
@@ -10,7 +10,9 @@ mod op;
 pub(crate) use hold::{Submitter, TakenOp};
 pub(crate) use op::{OpKind, PendingOp};
 
+use crate::io::types::PortKey;
 use crate::io::SubmissionId;
+use crate::value::Value;
 use hold::{Entry, OperandHold};
 use std::collections::{HashMap, HashSet};
 
@@ -43,9 +45,9 @@ pub(crate) enum Taken {
 /// A cancelled operation KEEPS its entry until its own completion arrives. The
 /// worker it runs on and the descriptor it names come back with that
 /// completion; dropping the entry at the cancel would strand both. What it does
-/// let go of is its hold: a cancelled completion is retired rather than cooked,
-/// so no operand is read again (docs/impl/io-inflight.md § "A cancelled
-/// operation reads nothing again").
+/// let go of is the part of its hold the completion reads: a cancelled
+/// completion is retired rather than cooked, so no operand is read again
+/// (docs/impl/io-inflight.md § "A cancelled operation reads nothing again").
 #[derive(Default)]
 pub(crate) struct PendingTable {
     ops: HashMap<SubmissionId, Entry>,
@@ -183,35 +185,56 @@ impl PendingTable {
     /// asked, so there is nothing left to withhold and a mark would sit in the
     /// set with no completion coming to clear it.
     ///
-    /// The entry also lets go of its operands here, which is the one thing a
-    /// cancel takes away from it. A cancelled completion is retired rather than
-    /// cooked, so nothing reads an operand again — and a cancel is the ordinary
-    /// path, not the rare one, so a hold kept until the completion arrives is a
-    /// per-call cost on every `ev/timeout` a program makes
+    /// The entry also lets go of what its completion reads here, which is the
+    /// one thing a cancel takes away from it. A cancelled completion is retired
+    /// rather than cooked, so nothing reads an operand again — and a cancel is
+    /// the ordinary path, not the rare one, so a hold kept until the completion
+    /// arrives is a per-call cost on every `ev/timeout` a program makes
     /// (docs/impl/io-inflight.md § "A cancelled operation reads nothing again").
+    /// The operand the kernel or a worker addresses stays held until the
+    /// completion arrives, because the operation may still write into it or
+    /// send from it (docs/impl/io-bytes.md).
     pub(crate) fn mark_cancelled(&mut self, id: SubmissionId) {
         if let Some(e) = self.ops.get_mut(&id) {
-            e.hold.release();
+            e.hold.release_read();
             self.cancelled.insert(id);
         }
     }
 
     /// Mark every operation still in flight as having no reader, and let go of
-    /// what each was holding. Backend teardown: the fibers are gone and the heap
-    /// that carried their values may be too, so the drain that follows must
-    /// retire rather than cook, and must read no operand on the way.
-    ///
-    /// Only `quiesce_pending` calls this, and only the ring has a teardown
-    /// drain, so the allow is narrowed to the platforms that compile that path
-    /// out rather than a blanket `dead_code`. The three below are the same
-    /// story: `restore` is the ring's resubmission, `len` and `ids` are what the
-    /// teardown loop reads.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    /// what each completion would read. Backend teardown: the fibers are gone and
+    /// the heap that carried their values may be too, so the drain that follows
+    /// must retire rather than cook, and must read no operand on the way. What
+    /// the kernel or a worker addresses stays held until that drain retires the
+    /// entry, or until `release_holds` gives up on it.
     pub(crate) fn cancel_all(&mut self) {
         for e in self.ops.values_mut() {
-            e.hold.release();
+            e.hold.release_read();
         }
         self.cancelled.extend(self.ops.keys().copied());
+    }
+
+    /// Take back the remainder the read filed under `id` borrowed from its
+    /// port, with the port's key and value, so a cancel can give it back at
+    /// once. `None` when the entry borrowed nothing.
+    ///
+    /// The cancel calls this before it marks the id, while the entry still
+    /// holds the port the give-back reads.
+    pub(crate) fn take_lent(&mut self, id: SubmissionId) -> Option<(PortKey, Value, Vec<u8>)> {
+        match &mut self.ops.get_mut(&id)?.op {
+            PendingOp::Port {
+                port_key,
+                port,
+                lent,
+                ..
+            } if !lent.is_empty() => Some((port_key.clone(), *port, std::mem::take(lent))),
+            _ => None,
+        }
+    }
+
+    /// Whether an entry is still filed under `id`.
+    pub(crate) fn contains(&self, id: SubmissionId) -> bool {
+        self.ops.contains_key(&id)
     }
 
     /// Put a resubmitted operation's entry back. The operation is the same one
@@ -221,6 +244,10 @@ impl PendingTable {
     /// Its hold moves with it rather than being released and taken again: the
     /// operands do not change, and letting go in between would free them
     /// between two syscalls of one operation.
+    ///
+    /// Only the ring resubmits, so this and the two below — `len` and `ids`,
+    /// which the ring's teardown loop reads — allow dead code on the
+    /// platforms without a ring rather than everywhere.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn restore(&mut self, id: SubmissionId, taken: TakenOp) {
         self.ops.insert(

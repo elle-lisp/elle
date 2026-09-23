@@ -1,3 +1,9 @@
+//! audited: 2026-09-23
+//! `CompletionHub::submit`, and the runner each pool operation dispatches to
+//! on the worker that takes it.
+//!
+//! src/io/AGENTS.md
+
 use super::*;
 
 impl CompletionHub {
@@ -7,7 +13,7 @@ impl CompletionHub {
     /// `bounds` is how long the operation may wait and how `io/cancel` ends it.
     /// Every submission states one, so an operation that can wait for something
     /// that may never happen cannot be submitted without saying so — see
-    /// `src/io/AGENTS.md` § "The stop pipe" for the two conditions that decide
+    /// docs/impl/io-inflight.md § "The stop pipe" for the two conditions that decide
     /// which kind an operation needs.
     ///
     /// How many operations may run at once is the OS's to say: the pool hands
@@ -66,17 +72,28 @@ impl CompletionHub {
 /// here is what disposes of them.
 pub(super) fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
     match op {
-        PoolOp::Read { fd, size } => stream::read(OpBound::new(fd, bounds), fd, size),
+        PoolOp::Read { fd, landing } => stream::read(OpBound::new(fd, bounds), fd, landing),
         PoolOp::ReadExact {
             fd,
-            size,
+            landing,
+            count,
             graphemes,
             gen,
             held,
-        } => stream::read_exact(OpBound::new(fd, bounds), fd, size, graphemes, gen, &held),
-        PoolOp::ReadLine { fd } => stream::read_until(OpBound::new(fd, bounds), fd, true),
-        PoolOp::ReadAll { fd } => stream::read_until(OpBound::new(fd, bounds), fd, false),
-        PoolOp::Write { fd, data } => stream::write(OpBound::new(fd, bounds), fd, data),
+        } => stream::read_exact(
+            OpBound::new(fd, bounds),
+            fd,
+            landing,
+            count,
+            graphemes,
+            gen,
+            &held,
+        ),
+        PoolOp::ReadLine { fd, landing } => {
+            stream::read_line(OpBound::new(fd, bounds), fd, landing)
+        }
+        PoolOp::ReadAll { fd } => stream::read_all(OpBound::new(fd, bounds), fd),
+        PoolOp::Write { fd, payload } => stream::write(OpBound::new(fd, bounds), fd, payload),
         PoolOp::Flush { fd } => stream::flush(fd),
 
         PoolOp::Accept { fd } => net::accept(OpBound::new(fd, bounds), fd),

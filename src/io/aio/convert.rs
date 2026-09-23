@@ -1,4 +1,4 @@
-//! audited: 2026-09-18
+//! audited: 2026-09-23
 //! Cooking a raw worker completion into one a fiber can be handed.
 //!
 //! src/io/AGENTS.md
@@ -75,7 +75,8 @@ pub(super) fn stdin_to_completion(
         }
         // Nobody is left to read a result from, but the scheduler still holds
         // this id against the fiber that asked; answer so it can let go.
-        Taken::Orphaned(op) => {
+        Taken::Orphaned(mut op) => {
+            crate::io::landing::give_back_lent(&mut op, fd_states);
             op.retire(0, buffer_pool);
             return Some(PendingTable::orphaned_asker_error(id, origin_heap));
         }
@@ -96,20 +97,16 @@ pub(super) fn stdin_to_completion(
         Ok(data) if data.is_empty() => {
             Completion::ok(id, crate::io::Birthplace::on(origin_heap), Value::NIL)
         }
-        // The worker's bytes are cooked where the pool's are, and for the same
-        // reason: a line has no upper bound, so staging them into the fiber's
-        // pre-allocated buffer first would clamp them to its size. `read_result`
-        // answers from the buffer when the bytes fit and from the requesting
-        // instance's heap when they do not, instead of dropping the excess —
-        // bytes the port has already taken from the kernel, which nothing is
-        // left to read again.
-        //
-        // The pool worker reports its byte count as the result code, and this
-        // worker reports its bytes; `data.len()` is the same number. The buffer
-        // handle is released above, so none is passed here.
+        // This worker reads into a buffer of its own and hands every byte over
+        // in `data`, so it put nothing in the caller's buffer: the result code
+        // is zero. A line has no upper bound, and the completion answers from
+        // the caller's buffer when the bytes fit and from the requesting
+        // instance's heap when they do not, instead of dropping the excess
+        // (docs/impl/io-bytes.md). The buffer handle is released above, so
+        // none is passed here.
         Ok(data) => completion::process_raw_completion(
             id,
-            data.len() as i32,
+            0,
             data,
             &pending_op,
             fd_states,
@@ -141,9 +138,11 @@ pub(super) fn pool_to_completion(
             op.retire(pc.result_code, buffer_pool);
             return None;
         }
-        // As above: retire the entry unread, and answer so the scheduler can
-        // retire the pairing it still holds under this id.
-        Taken::Orphaned(op) => {
+        // As above: give back a borrowed remainder, retire the entry unread,
+        // and answer so the scheduler can retire the pairing it still holds
+        // under this id.
+        Taken::Orphaned(mut op) => {
+            crate::io::landing::give_back_lent(&mut op, fd_states);
             op.retire(pc.result_code, buffer_pool);
             return Some(PendingTable::orphaned_asker_error(id, origin_heap));
         }
@@ -170,13 +169,9 @@ pub(super) fn pool_to_completion(
         }
     }
 
-    // A pool worker's bytes stay in `pc.data`, and `assemble_read` reads them
-    // there. Staging them into the fiber's buffer first would clamp them to its
-    // size, and that size is not a bound on what the worker read: `read_until`
-    // runs to the newline and `read_exact` to its cluster count, each returning
-    // however many bytes that took. Bytes dropped by such a clamp are bytes the
-    // port has already taken from the kernel, so nothing is left to read them
-    // again.
+    // A read's result code counts the bytes its worker put in the caller's
+    // buffer, and `pc.data` holds whatever it read anywhere else — past a full
+    // buffer, or into a buffer of its own (docs/impl/io-bytes.md).
     let bh = pending_op.buffer_handle();
     Some(completion::process_raw_completion(
         id,

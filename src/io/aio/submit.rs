@@ -240,19 +240,7 @@ impl AsyncBackend {
             return inner.submit_stdin(id, op);
         }
 
-        // Determine fd
         let fd = port_key.raw_fd();
-
-        // The operation's own share of that descriptor, held until its entry is
-        // retired. `fd` is resolved again when the worker runs, so the number
-        // must stay this port's for as long as the operation names it — see
-        // docs/impl/io-descriptor.md § "Descriptor retirement".
-        let descriptor = port.fd_share();
-
-        let buf_handle = match op {
-            PortOp::ReadLine { .. } | PortOp::Read { .. } | PortOp::ReadExact { .. } => None,
-            _ => Some(inner.buffer_pool.alloc(4096)),
-        };
 
         // Flush on socket/pipe/stdio ports is a no-op: fsync(2) returns EINVAL on
         // non-file fds (sockets, pipes, and stdio when redirected to pipes in subprocesses).
@@ -268,9 +256,6 @@ impl AsyncBackend {
                     | PortKind::Stderr
             )
         {
-            if let Some(bh) = buf_handle {
-                inner.buffer_pool.release(bh);
-            }
             let birth = crate::io::Birthplace::on(inner.origin_heap);
             inner
                 .completions
@@ -281,8 +266,9 @@ impl AsyncBackend {
         // Answer from the remainder a previous read on this port left behind,
         // whenever it covers the request in full — `frame::line_end` and
         // `frame::exact_end` are the same cuts the completion makes. A remainder
-        // that falls short stays where it is, for the completion to join
-        // (docs/impl/io-inflight.md § "Assembling a read's answer").
+        // that falls short goes with the read, for the completion to answer
+        // from (docs/impl/io-bytes.md § "The port hands its remainder to the
+        // read").
         let port_encoding = port.encoding();
         let gen = inner.unicode_generation;
         {
@@ -304,19 +290,21 @@ impl AsyncBackend {
                 _ => None,
             };
             if let Some((buffer, take, encoding)) = held {
-                let chunk: Vec<u8> = state.buffer.drain(..take).collect();
                 // A line's terminator is not part of it; the other two answer
                 // with every byte they took.
-                let answer = if matches!(op, PortOp::ReadLine { .. }) {
-                    chunk[..crate::io::frame::line_end(&chunk).0].to_vec()
+                let end = if matches!(op, PortOp::ReadLine { .. }) {
+                    crate::io::frame::line_end(&state.buffer[..take]).0
                 } else {
-                    chunk
+                    take
                 };
                 let mut birth = crate::io::Birthplace::on(origin_heap);
-                let result = crate::io::frame::read_result(buffer, answer, encoding, &mut birth);
-                if let Some(bh) = buf_handle {
-                    inner.buffer_pool.release(bh);
-                }
+                let result = crate::io::frame::answer_from(
+                    buffer,
+                    &state.buffer[..end],
+                    encoding,
+                    &mut birth,
+                );
+                state.buffer.drain(..take);
                 inner
                     .completions
                     .push_back(Completion::new(id, birth, result));
@@ -324,12 +312,12 @@ impl AsyncBackend {
             }
         }
 
-        // Dispatch by operation type
         match op {
             PortOp::Accept { .. }
             | PortOp::SendTo { .. }
             | PortOp::RecvFrom { .. }
             | PortOp::Shutdown { .. } => {
+                let buf_handle = Some(inner.buffer_pool.alloc(4096));
                 Self::submit_socket(&mut inner, request, op, id, fd, port_key, port, buf_handle)
             }
             PortOp::ReadLine { .. }
@@ -337,102 +325,10 @@ impl AsyncBackend {
             | PortOp::ReadExact { .. }
             | PortOp::ReadAll
             | PortOp::Write { .. }
-            | PortOp::Flush => {
-                let submitter = inner.submitter;
-                let AsyncBackendInner {
-                    ref mut platform,
-                    ref mut hub,
-                    ref mut buffer_pool,
-                    ref mut pending,
-                    ref fd_states,
-                    ..
-                } = *inner;
-
-                match platform {
-                    #[cfg(target_os = "linux")]
-                    PlatformBackend::Uring(ring) => {
-                        crate::io::uring::submit_uring_stream(
-                            ring,
-                            id,
-                            fd,
-                            op,
-                            request.timeout,
-                            buffer_pool,
-                            buf_handle,
-                        )?;
-                    }
-                    PlatformBackend::ThreadPool => {
-                        let _ = buffer_pool;
-                        // A read takes a stop pipe: `io/cancel` must end it
-                        // rather than abandon it, or the abandoned read goes on
-                        // consuming bytes meant for whoever reads the port next.
-                        //
-                        // A write takes one for the peer it waits on. The
-                        // full-write invariant runs it to the end of its
-                        // payload, and a payload past the send buffer only gets
-                        // there as the peer takes what is already in it — so a
-                        // peer that stops reading parks the write with nothing
-                        // else able to end it.
-                        //
-                        // `Flush` waits on nobody: `fsync(2)` transfers what
-                        // this process already handed the kernel.
-                        let bounds = match op {
-                            PortOp::Read { .. }
-                            | PortOp::ReadExact { .. }
-                            | PortOp::ReadLine { .. }
-                            | PortOp::ReadAll
-                            | PortOp::Write { .. } => hub.bounds(id, request.timeout),
-                            _ => Bounds::prompt(),
-                        };
-                        // `ReadExact` is the one op whose `held` carries the
-                        // port's remainder to the worker, so the worker reads
-                        // only the shortfall; every other read leaves it for the
-                        // completion to join (docs/impl/io-inflight.md §
-                        // "Assembling a read's answer").
-                        let pool_op = match op {
-                            PortOp::ReadLine { .. } => PoolOp::ReadLine { fd },
-                            PortOp::ReadAll => PoolOp::ReadAll { fd },
-                            PortOp::Read { count, .. } => PoolOp::read(fd, *count),
-                            PortOp::ReadExact { count, .. } => PoolOp::ReadExact {
-                                fd,
-                                size: *count,
-                                graphemes: matches!(port.encoding(), Encoding::Text),
-                                gen,
-                                held: fd_states
-                                    .get(&port_key)
-                                    .map(|s| s.buffer.clone())
-                                    .unwrap_or_default(),
-                            },
-                            PortOp::Write { data } => {
-                                PoolOp::write(fd, Self::extract_write_bytes(data))
-                            }
-                            PortOp::Flush => PoolOp::Flush { fd },
-                            // The socket arm above claims these.
-                            PortOp::Accept { .. }
-                            | PortOp::SendTo { .. }
-                            | PortOp::RecvFrom { .. }
-                            | PortOp::Shutdown { .. } => unreachable!(),
-                        };
-                        hub.submit(id, pool_op, bounds)?;
-                    }
-                }
-
-                pending.insert(
-                    id,
-                    PendingOp::port(
-                        op.clone(),
-                        port_key,
-                        request.port,
-                        descriptor,
-                        buf_handle,
-                        request.timeout,
-                    ),
-                    submitter,
-                );
-                Ok(id)
-            }
+            | PortOp::Flush => Self::submit_stream(&mut inner, request, op, id, fd, port_key, port),
         }
     }
 }
 
 mod socket;
+mod stream;
