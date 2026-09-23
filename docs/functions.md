@@ -1,5 +1,9 @@
 # Functions
 
+<!-- audited: 2026-09-22 -->
+
+How to define, call and compose functions, and how deep a chain of calls may go.
+
 ## fn — anonymous functions
 
 `fn` creates a closure. Brackets delimit the parameter list. Parameters
@@ -122,6 +126,28 @@ Tail calls are guaranteed to run in constant stack space.
 
 (sum-to 10000 0)           # => 50005000 — no stack overflow
 ```
+
+## Recursion depth
+
+A non-tail call waits in the fiber, not on the thread's native stack. A
+recursion can therefore go as deep as memory allows, up to the depth cap.
+
+```lisp
+(defn count-down [n]
+  (if (= n 0) 0 (+ n (count-down (- n 1)))))
+
+(assert (= (count-down 100000) 5000050000) "non-tail recursion 100,000 deep")
+```
+
+The cap is 10,000,000 calls in progress on one fiber, and
+`(vm/config-set :max-depth n)` changes it ([config.md](config.md)). A call past
+the cap halts the program with `:stack-overflow`. The halt is not an error, so
+`protect` does not catch it.
+
+A recursion that passes through a primitive still uses the native stack at
+each level: a trait method that calls the primitive it implements, or `eval`
+of a form that calls `eval`. When that stack runs low, the program halts with
+`:stack-overflow` too.
 
 ---
 

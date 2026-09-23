@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-23
 // docs/impl/values.md
 //! Value representation and tagged-union architecture
 //!
@@ -62,7 +62,7 @@ pub use closure::{
 };
 pub use code::Code;
 pub use fiber::{
-    BytecodeFrame, CallFrame, Fiber, FiberHandle, FiberStatus, Frame, SignalBits, SuspendedFrame,
+    BytecodeFrame, CallFrame, Fiber, FiberHandle, FiberStatus, SignalBits, SuspendedFrame,
     WeakFiberHandle, SIG_ABORT, SIG_DEBUG, SIG_ERROR, SIG_FUEL, SIG_HALT, SIG_IO, SIG_OK,
     SIG_PROPAGATE, SIG_QUERY, SIG_RESUME, SIG_SWITCH, SIG_TERMINAL, SIG_YIELD,
 };

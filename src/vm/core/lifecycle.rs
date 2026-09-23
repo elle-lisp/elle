@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-23
 // docs/impl/vm.md
 //! Building a VM over a heap it owns or shares, and resetting one for reuse.
 
@@ -105,6 +105,7 @@ impl VM {
             tail_call_env_cache: Vec::with_capacity(256),
             env_cache: Vec::with_capacity(256),
             pending_tail_call: None,
+            pending_call: None,
             pending_tail_deferrals: Vec::new(),
             pending_fiber_resume: None,
             pending_entry_closure: crate::value::Value::NIL,
@@ -147,7 +148,7 @@ impl VM {
     /// Reset the VM's fiber and transient state for reuse.
     ///
     /// Preserves: docs, ffi, jit_cache, eval_expander, env_cache,
-    /// tail_call_env_cache, fiber heap Box (reused for pointer stability).
+    /// tail_call_env_cache, and the heap, which the VM points at but never owns.
     /// Resets: fiber, call state, location map,
     /// loaded modules, closure call counts.
     pub fn reset_fiber(&mut self) {
@@ -158,6 +159,7 @@ impl VM {
         self.current_fiber_handle = None;
         self.current_fiber_value = None;
         self.pending_tail_call = None;
+        self.pending_call = None;
         self.pending_tail_deferrals.clear();
         self.pending_entry_closure = crate::value::Value::NIL;
         self.pending_error_park = false;

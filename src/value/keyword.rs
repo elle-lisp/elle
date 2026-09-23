@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-23
 //! Keyword identity and the static keyword vocabulary.
 //!
 //! A keyword's payload is the 64-bit FNV-1a hash of its name — the same
@@ -300,6 +300,7 @@ static VOCABULARY: &[&str] = &[
     "vm/config-set",
     "trace",
     "unicode",
+    "max-depth",
     "adaptive",
     "custom",
     "eager",

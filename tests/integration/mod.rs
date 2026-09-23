@@ -17,6 +17,9 @@ mod diagnostics {
 mod repl_exit_codes {
     include!("repl_exit_codes.rs");
 }
+mod deep_recursion {
+    include!("deep_recursion.rs");
+}
 mod repl {
     include!("repl.rs");
 }

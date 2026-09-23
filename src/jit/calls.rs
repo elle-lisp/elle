@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-23
 // docs/impl/jit.md
 // docs/impl/region/owner.md
 //! Function call dispatch helpers for JIT-compiled code.
@@ -11,7 +11,7 @@
 use crate::jit::value::{JitValue, TAIL_CALL_SENTINEL_JV, YIELD_SENTINEL_JV};
 use crate::jit::TailDeferrals;
 use crate::signals::dispatch::{classify, SignalAction};
-use crate::value::fiber::{SignalBits, MAX_CALL_DEPTH, SIG_ERROR, SIG_HALT};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT};
 use crate::value::Value;
 
 mod callops;

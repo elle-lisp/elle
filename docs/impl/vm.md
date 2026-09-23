@@ -1,6 +1,6 @@
 # VM
 
-<!-- audited: 2026-09-06 -->
+<!-- audited: 2026-09-22 -->
 
 The VM is a stack-machine interpreter that executes bytecode.
 
@@ -19,18 +19,22 @@ The VM is a stack-machine interpreter that executes bytecode.
 
 ## Key types
 
-- **`VM`** — owns the current fiber, primitive table, compiler, and
-  JIT compiler
-- **`Fiber`** — execution context: operand stack, call frames, locals,
-  signal state, arena
-- **`CallFrame`** — return address, local variable base, function
-  metadata
-- **`BytecodeFrame`** — points into a `CompiledFunction`'s bytecode
-  stream
+- **`VM`** — owns the current fiber, the JIT cache, and the runtime
+  configuration. It points at the heap, the compile context, and the symbol
+  table that its `RuntimeCore` owns.
+- **`Fiber`** — execution context: operand stack, paused callers, trace
+  frames, region-remap frames, signal state
+- **`CallFrame`** — a stack-trace entry: the entered and calling code
+  objects, the offset of the call, and the frame base
+- **`PausedCaller`** — a caller activation that waits in the fiber while its
+  callee runs (see "Non-tail calls" below)
+- **`BytecodeFrame`** — a parked execution point in a suspended fiber's replay
+  chain
 
 ## Dispatch loop
 
-The main loop in `execute.rs`:
+The main loop is `execute_bytecode_inner_impl` in
+[interp.rs](../../src/vm/dispatch/interp.rs):
 
 1. Read opcode byte
 2. Decode operands
@@ -56,8 +60,8 @@ the compiler proved both operands are integers — see
   fiber or scheduler
 - **Signal emission** — checks the fiber's signal mask to decide
   whether to propagate or catch
-- **Fuel** — decrements a counter per instruction; when zero, emits
-  `:fuel` signal
+- **Fuel** — decrements a counter at each backward jump and each call; when
+  zero, emits the `:fuel` signal
 
 ## Where a reported error's location comes from
 
@@ -69,7 +73,8 @@ raising form itself, not any call above it.
 The dispatch loop records it. Every path that leaves
 `execute_bytecode_inner_impl` carrying `SIG_ERROR` or `SIG_HALT` calls
 `VM::record_error_loc`, which maps the current instruction offset through
-the frame's `LocationMap`. Recording is first-writer-wins: the raising frame
+the frame's `LocationMap`. A paused caller that the error leaves records the
+offset of its call instruction the same way. Recording is first-writer-wins: the raising frame
 reaches its exit path first, and each frame the error then unwinds through
 finds the slot already taken, so the innermost location is the one that
 survives to the root. A frame whose `LocationMap` has no entry for the
@@ -95,8 +100,79 @@ use `(fiber/propagate f)`; raising the payload afresh with `(error
 ## Tail calls
 
 `TailCall` reuses the current call frame rather than pushing a new one.
-The VM validates tail position at compile time. This guarantees constant
-stack space for tail-recursive functions.
+The compiler decides which calls are in tail position. A tail call therefore
+runs in constant space, in the interpreter and in compiled code.
+
+## Non-tail calls
+
+A non-tail call to an interpreted closure does not grow the Rust stack. The
+caller's activation waits in the fiber, and the same dispatch loop runs the
+callee. Recursion depth is therefore bounded by memory and by the depth cap
+below, not by the thread's stack.
+
+### How a call enters its callee
+
+`call_inner` checks the callee, builds its environment, and pushes the
+stack-trace frame. It then hands the callee to the loop as `VM::pending_call`
+and exits dispatch, the way a tail call exits with `pending_tail_call`.
+
+`VM::run_dispatch` takes the pending call. It moves the caller's operand stack,
+resume offset and executing-closure register into a `PausedCaller` on
+`Fiber::callers`. Then it opens the callee's activation — a region-remap frame
+and a dues slot — and dispatches the callee from offset 0. A tail call inside
+the callee replaces the callee's activation in place, as it does anywhere else.
+
+A spliced call (`CallArrayMut`) releases its argument array as soon as the
+callee's environment holds every argument, before the callee runs. Nothing
+reads the array after that point.
+
+### How a callee returns
+
+When the callee's activation ends, `run_dispatch` pops its `PausedCaller`,
+restores the caller's stack and register, and completes the call:
+
+- **Return** — the result goes on the caller's stack, and the caller continues
+  at its resume offset.
+- **Suspend** — the caller parks behind the callee, and the caller's own
+  activation leaves by the same signal. Every paused caller parks in turn, so
+  `Fiber::suspended` holds the innermost frame first, as `resume_suspended`
+  expects.
+- **Error or halt** — the caller leaves by the same signal from the call
+  instruction. The abandoned-frame walk runs for each frame on the way out.
+
+`execute_code` (the root) and `trampoline_loop` (every other entry) call
+`run_dispatch` where they would call the dispatch loop itself. The callers that
+one `run_dispatch` pauses sit above the ones it found on `Fiber::callers`, and
+all of them are gone when it returns. A suspended fiber therefore holds no
+paused callers, only its parked chain, and a parked chain has the same shape
+whatever depth it was built at.
+
+### What still uses the Rust stack
+
+Two kinds of call still nest on the Rust stack:
+
+- **Re-entry** — a primitive that calls a closure: a trait method, `eval`,
+  `arena/allocs`, a macro transformer, an FFI callback. Each one enters through
+  `execute_bytecode_saving_stack`.
+- **Compiled code** — the interpreter calls a JIT, WASM or MLIR callee as a
+  native function, and a compiled caller calls a compiled callee the same way.
+
+[native_stack.rs](../../src/vm/native_stack.rs) measures what is left of the
+thread's stack. While less than 512 KiB remains, a call does not enter
+compiled code: the interpreter runs the callee on fiber frames instead, so a
+deep recursion that started compiled continues interpreted
+([jit.md](jit.md)). While less than 256 KiB remains,
+`execute_bytecode_saving_stack` refuses the re-entry and halts with
+`:stack-overflow`, rather than letting the thread overflow.
+
+### The depth cap
+
+`Fiber::call_depth` counts the non-tail closure calls in progress, on every
+tier. A call past `(vm/config :max-depth)` — 10,000,000 by default — halts
+with `:stack-overflow`. A halt passes every signal mask, so `protect` does not
+catch it. The cap stops a runaway recursion before it takes the machine's
+memory: each paused caller costs a few hundred bytes
+([config.md](../config.md)).
 
 ## The executing-closure register
 
@@ -113,12 +189,15 @@ the recursion (the tail-call deferred release releases it on the recursion's com
 It is per-activation and threaded across every control-flow boundary, mirroring
 `activation_region_map` exactly:
 
-- **Nested call.** `execute_bytecode_saving_stack` saves the caller's register,
+- **Nested call.** An interpreted non-tail call parks the caller's register in
+  its `PausedCaller`, installs the callee named by `VM::pending_call`, and
+  restores the caller's register when the callee returns.
+- **Re-entry.** `execute_bytecode_saving_stack` saves the caller's register,
   installs the callee's, runs the body, and restores the caller's on return. The
   callee value crosses the entry through the one-shot `VM::pending_entry_closure`
-  (the raw root entry `execute_bytecode` consumes the same one-shot). **Every
+  (the raw root entry `execute_code` consumes the same one-shot). **Every
   entrant that runs a closure body sets it** immediately before entering: the
-  interpreter call path, the JIT helpers' interpreter fallback and tail-call
+  JIT helpers' interpreter fallback and tail-call
   resolution, the forced-tier entries (`compile/run-on`), the fiber's first
   resume, the measured-thunk entry (`arena/allocs`), the macro-transformer call,
   the FFI callback trampoline, the WASM host's bytecode fallback, and the spawned
@@ -127,7 +206,7 @@ It is per-activation and threaded across every control-flow boundary, mirroring
   bytecode can contain no self-reference. `LoadSelf` debug-asserts the register
   is populated, so an unthreaded entrant fails loudly at the read instead of
   resolving a self-reference to `NIL`.
-- **Tail call.** `trampoline_loop` reuses the frame in place but installs the
+- **Tail call.** The trampoline reuses the frame in place but installs the
   tail callee as the register on each replacement (a self-recursive `loop`
   re-installs itself; a tail call to a sibling installs the sibling).
 - **Suspend/resume.** A yield parks the register in the `BytecodeFrame`
@@ -161,22 +240,26 @@ The one op serves every tier: the interpreter reads `current_closure`; the JIT
 reads the `self_tag_payload` compiled-body parameter, and its self-tail-call
 optimization re-enters the same compiled body directly when the callee is itself;
 the WASM backend reads a reserved linear-memory self slot the host installs at
-every closure entry and carries across suspend/resume (impl/wasm.md).
+every closure entry and carries across suspend/resume ([wasm.md](wasm.md)).
 
 ## JIT fallback
 
 When a function is JIT-compiled, `Call` dispatches to the native code
-pointer instead of interpreting bytecode. If the JIT rejects a function
-(e.g., due to yields), the VM falls back to bytecode interpretation.
+pointer instead of interpreting bytecode. The VM interprets a function the
+JIT rejected — a polymorphic one, or one that uses an instruction the
+translator lacks — and any call made while the native stack is low.
 
 ## Files
 
 ```text
-src/vm/core.rs        VM struct and initialization
-src/vm/execute.rs     Main dispatch loop
-src/vm/dispatch.rs    Opcode handlers
-src/vm/call.rs        Call/return mechanics
-src/vm/fiber.rs       Fiber state management
+src/vm/core.rs              VM struct and accessors
+src/vm/execute.rs           entry points and the tail-call trampoline
+src/vm/execute/nested.rs    run_dispatch: paused callers and their returns
+src/vm/native_stack.rs      what is left of the thread's stack
+src/vm/dispatch/interp.rs   the dispatch loop
+src/vm/call/inner.rs        Call-position dispatch by callee kind
+src/vm/core/resume.rs       replaying a suspended frame chain
+src/value/fiber.rs          the Fiber and its frame types
 ```
 
 ---

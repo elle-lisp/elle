@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-23
 // The VM's execution entries: a blueprint, a code object at the root, and a
 // program under the async scheduler. The module list sits above them.
 // docs/impl/vm.md
@@ -23,6 +23,7 @@ mod jit_entry;
 pub mod literals;
 #[cfg(feature = "mlir")]
 mod mlir_entry;
+pub(crate) mod native_stack;
 pub mod parameters;
 pub mod run_on;
 pub mod signal;
@@ -201,15 +202,12 @@ impl VM {
         // completion release — they must not be touched here.
         let at_root = self.fiber.activation_dues.len() == 1;
 
-        // Initial execution with tail-call loop.
-        // Scope-mark rotation: when a tail call is rotation-safe,
-        // release the previous iteration's temporaries via release().
-        // The tail call's env (arguments) was built before release, so
-        // referenced values survive. Only unreferenced temporaries are freed.
+        // Initial execution with tail-call loop: a top-level tail call replaces
+        // the body in place.
         let mut bits;
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
         loop {
-            let (b, _ip) = self.execute_bytecode_inner_impl(&current_code, &current_env, 0);
+            let (b, _ip) = self.run_dispatch(&current_code, &current_env, 0);
             bits = b;
             if let Some(tail) = self.pending_tail_call.take() {
                 accumulated_squelch_mask |= tail.squelch_mask;
@@ -439,11 +437,9 @@ impl VM {
 /// If `err_value` is a loud-gate signal `{:error :gated :reason …}`, return its
 /// reason (empty string when the `:reason` field is absent). Any other value —
 /// including ordinary errors — returns `None`, so only intentional gates are
-/// ever treated as skips. See `VM::gated_exit_reason`.
-/// The reason string of a `(gate! …)` skip signal, or `None` for any other
-/// value. A `:gated` error is an intentional SKIP (an unbuilt plugin/feature),
-/// not a failure — both the VM driver and the WASM tier's `run_module` treat it
-/// as a clean exit rather than a runtime error.
+/// ever treated as skips. A `:gated` error is an intentional SKIP (an unbuilt
+/// plugin or feature), not a failure: both the VM driver and the WASM tier's
+/// `run_module` treat it as a clean exit. See `VM::gated_exit_reason`.
 pub(crate) fn gated_reason(err_value: Value) -> Option<String> {
     let entries = err_value.as_struct()?;
     let mut is_gated = false;

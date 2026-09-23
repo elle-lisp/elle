@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-23 -->
 
 Elle exposes a runtime configuration system reachable from both CLI flags and
 Elle code. All debug/trace flags, JIT policies, and WASM policies are
@@ -21,7 +21,7 @@ elle walk.lisp data.lisp   # data.lisp is an argument, not a second program
 
 So a shell glob does not run every match: the first match is the program
 and the rest are its arguments. The pinning test is
-`tests/integration/argv_cli.rs`.
+[argv_cli.rs](../tests/integration/argv_cli.rs).
 
 ### Where elle's flags stop
 
@@ -201,7 +201,23 @@ milestones the default waits on.
 (vm/config :jit)               # returns the JIT policy keyword
 (vm/config :wasm)              # returns the WASM policy keyword
 (vm/config :mlir)              # returns the MLIR policy keyword
+(vm/config :max-depth)         # returns the non-tail call depth cap
 ```
+
+### The depth cap
+
+`:max-depth` caps how many non-tail closure calls may be in progress on one
+fiber. The default is 10,000,000. A call past the cap halts the program with
+`:stack-overflow`, and no signal mask catches the halt. A tail call does not
+count toward the cap.
+
+```lisp
+(assert (= (vm/config :max-depth) 10000000) "the default depth cap")
+```
+
+A non-tail call costs memory, not native stack, so the cap is what stops a
+runaway recursion before it takes the machine's memory. Each call in progress
+holds a few hundred bytes. [impl/vm.md](impl/vm.md) owns the mechanism.
 
 ### Setting configuration
 
@@ -217,13 +233,6 @@ milestones the default waits on.
 (vm/config-set :jit :off)
 (vm/config-set :jit :adaptive)
 
-# Custom JIT policy via closure
-(vm/config-set :jit
-  (fn [info]
-    (if (and (get info :silent) (> (get info :calls) 5))
-      :jit
-      :skip)))
-
 # Change WASM policy
 (vm/config-set :wasm :full)
 (vm/config-set :wasm :off)
@@ -231,26 +240,25 @@ milestones the default waits on.
 # Change MLIR policy
 (vm/config-set :mlir :eager)
 (vm/config-set :mlir :off)
+
+# Change the depth cap (a positive integer)
+(vm/config-set :max-depth 1000000)
 ```
 
 ### Custom JIT policy
 
-When a closure is provided as the JIT policy, the VM calls it before
-compiling each hot function. The closure receives a struct:
+`vm/config-set` accepts a closure as the JIT policy and reports the policy
+as `:custom`. The VM does not call the closure yet
+([#1242](https://github.com/elle-lisp/elle/issues/1242)): a `:custom` policy
+compiles every function on its first call, as `:eager` does.
 
 ```lisp
-{:name "map"
- :calls 15
- :silent true
- :captures 0
- :bytecode-size 48
- :arity 2}
+(vm/config-set :jit (fn [info] :skip))
+(assert (= (vm/config :jit) :custom) "a closure policy reads back as :custom")
+(vm/config-set :jit :adaptive)
 ```
 
-It must return one of:
-- `:jit` — compile with Cranelift
-- `:wasm` — compile with WASM backend
-- `:skip` — keep in interpreter
+The issue records the contract the closure is meant to meet.
 
 ### Future feature flags
 
@@ -263,11 +271,12 @@ forward compatibility:
 
 ## Implementation
 
-`RuntimeConfig` is stored on the VM struct (not in a global static).
-This allows per-fiber or per-test configuration without global state.
+`RuntimeConfig` is stored on the VM struct (not in a global static), so each
+VM — each test worker, each embedded instance — has its own.
 
 `vm/config` reads that struct through SIG_QUERY and `vm/config-set` writes it.
 A write takes effect immediately — no restart needed.
 
-For hot paths (VM dispatch loop), trace keywords are mirrored in a
-`trace_bits: u32` bitfield to avoid HashSet lookups on every instruction.
+For hot paths (VM dispatch loop), trace keywords are mirrored in a shared
+atomic bitfield, the instance's `TraceCell`, to avoid set lookups on every
+instruction.

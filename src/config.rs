@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-09-23
 //! Two configurations: `Config` is set once at startup and read anywhere,
 //! `RuntimeConfig` rides on one VM and a running program may change it.
 //!
@@ -80,8 +80,8 @@ pub type TraceCell = Arc<AtomicU32>;
 /// Mutable runtime configuration stored on the VM.
 ///
 /// Accessible from Elle via `(vm/config)`. Changes take effect immediately.
-/// Separate from `Config` (which is static/global) so that per-fiber or
-/// per-test configuration is possible.
+/// Separate from `Config` (which is static/global) so that each VM — a test
+/// worker, an embedded instance — carries its own.
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     /// Active trace keywords. The human-readable set behind `(vm/config :trace)`;
@@ -102,7 +102,15 @@ pub struct RuntimeConfig {
     pub debug_bytecode: bool,
     /// Print compilation stats on exit.
     pub stats: bool,
+    /// How many non-tail closure calls may be in progress on one fiber before
+    /// the next halts with `:stack-overflow` (`(vm/config :max-depth)`).
+    pub max_depth: usize,
 }
+
+/// The depth cap a VM starts with: deep enough for any recursion a program
+/// means, shallow enough that a runaway one stops after a few gigabytes
+/// (docs/impl/vm.md § "The depth cap").
+pub const DEFAULT_MAX_DEPTH: usize = 10_000_000;
 
 impl RuntimeConfig {
     /// Build a RuntimeConfig from the static global Config, threading in the
@@ -123,6 +131,7 @@ impl RuntimeConfig {
             mlir: config.mlir.clone(),
             debug_bytecode: bits & trace_bits::BYTECODE != 0,
             stats: config.stats,
+            max_depth: DEFAULT_MAX_DEPTH,
         };
         rc.trace_cell.store(bits, Ordering::Relaxed);
         rc
@@ -155,6 +164,7 @@ impl Default for RuntimeConfig {
             mlir: MlirPolicy::Adaptive { threshold: 10 },
             debug_bytecode: false,
             stats: false,
+            max_depth: DEFAULT_MAX_DEPTH,
         }
     }
 }
