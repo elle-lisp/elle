@@ -1,6 +1,6 @@
 # POSIX signals
 
-<!-- audited: 2026-09-17 -->
+<!-- audited: 2026-09-23 -->
 
 Elle programs can send POSIX signals to other processes and observe
 signals delivered to themselves. The surface lives under `os/sig-*`.
@@ -9,7 +9,7 @@ The word "signal" is overloaded:
 
 - **Elle signals** (`:yield`, `:io`, `:error`, …) — the runtime's
   unified control-flow mechanism documented in
-  [`signals/`](signals/). They are *compile-time inferred* and flow
+  [signals/](signals/index.md). They are *compile-time inferred* and flow
   up the fiber chain.
 - **POSIX signals** (`SIGTERM`, `SIGINT`, `SIGUSR1`, …) — kernel
   notifications delivered to the process. Documented here. Use the
@@ -17,26 +17,41 @@ The word "signal" is overloaded:
 
 ## Quick start
 
-Watch for `SIGTERM` and `SIGINT`, log each delivery, exit on first:
+Watch `SIGUSR1` and `SIGUSR2`, send each to this process, and read the
+deliveries. `os/sig-raise` signals the calling process; `os/sig-send` takes
+any pid:
 
-```text
-(def r (os/sig-watch |:sigterm :sigint|))
-(each ev (os/sig-next r)
-  (println :received (get ev :signal) :from (get ev :sender-pid)))
-(os/sig-close r)
-(sys/exit 0)
-```
+```lisp
+(def usr (os/sig-watch |:sigusr1 :sigusr2|))
 
-Send `SIGUSR1` to another process:
-
-```text
-(os/sig-send 4242 :sigusr1)
-```
-
-Send a signal to yourself:
-
-```text
 (os/sig-raise :sigusr1)
+(let [[ev] (os/sig-next usr)]
+  (assert (= (get ev :signal) :sigusr1) "the watcher reads the raised signal")
+  (assert (or (nil? (get ev :sender-pid)) (= (get ev :sender-pid) (sys/pid)))
+          "sent by this process (macOS reports no sender)"))
+
+(os/sig-send (sys/pid) :sigusr2)
+(let [[ev] (os/sig-next usr)]
+  (assert (= (get ev :signal) :sigusr2) "a send to our own pid arrives too"))
+
+(assert (= |:sigusr1 :sigusr2| (os/sig-watching)))
+(os/sig-close usr)
+(os/sig-close usr)                     # idempotent
+(assert (empty? (os/sig-watching)) "the last close releases the lease")
+```
+
+A program that logs `SIGTERM` and `SIGINT` and exits on the first one watches
+them the same way. The document never calls this, because a `SIGTERM` is
+what it waits for:
+
+```lisp
+(defn exit-on-terminate []
+  "Log each SIGTERM or SIGINT delivery, then exit."
+  (let [r (os/sig-watch |:sigterm :sigint|)]
+    (each ev (os/sig-next r)
+      (println :received (get ev :signal) :from (get ev :sender-pid)))
+    (os/sig-close r)
+    (sys/exit 0)))
 ```
 
 ## Surface
@@ -45,11 +60,11 @@ Send a signal to yourself:
 |-----------|-----------|-------|
 | `(os/sig-send pid sig)` | `:os-signal` | `kill(2)`. `sig` is a keyword (`:sigterm`) or a named integer (`15`). |
 | `(os/sig-raise sig)` | `:os-signal` | `raise(3)`. Equivalent to `(os/sig-send (sys/pid) sig)`. |
-| `(os/sig-watch sig-set)` | — | Blocks the signals on the calling thread and returns a `SignalReceiver`. Yields `:io` only on `os/sig-next`. |
-| `(os/sig-next receiver)` | — | Yields `SIG_YIELD\|SIG_IO`. Resumes with an array of delivered-signal structs. |
-| `(os/sig-close receiver)` | — | Closes the receiver. When the last receiver for a signal closes, the signal is unblocked. Idempotent. |
+| `(os/sig-watch sig-set)` | — | Blocks the signals on the calling thread and returns a `SignalReceiver`. Does not suspend. |
+| `(os/sig-next receiver)` | — | Raises `:io`, so the fiber suspends. Resumes with an array of delivered-signal structs. |
+| `(os/sig-close receiver)` | — | Closes the receiver. When the last receiver for a signal closes, the signal is unblocked, unless it is in the absorb set (see "Mask policy"). Idempotent. |
 | `(os/sig-pending)` | — | Returns a set of keywords for signals currently pending delivery on this thread (`sigpending(2)`). |
-| `(os/sig-mask)` | — | Returns a set of keywords for signals currently blocked on this thread (`pthread_sigmask`). |
+| `(os/sig-mask)` | — | Returns a set of keywords for signals currently blocked on this thread (`pthread_sigmask`). A blocked signal with no keyword, such as `SIGURG`, is left out. |
 | `(os/sig-watching)` | — | Returns a set of keywords for signals currently being watched by at least one live receiver. |
 | `(os/sig-name n)` | — | Names a signum, or `nil` when this build knows no name for it. |
 
@@ -103,7 +118,7 @@ several):
 ## Disposition table (eager trap at startup)
 
 `elle::io::init_process_signals` runs from `main()` immediately after
-`elle::config::init` and before `VM::new` (`src/main.rs`). It installs
+`elle::config::init` and before `VM::new` ([main.rs](../src/main.rs)). It installs
 process-wide POSIX traps before any worker thread spawns:
 
 | Set | Signals | What we do |
@@ -139,7 +154,7 @@ process killer.
 
 1. **Worker threads block every asynchronous signal.** Every thread
    Elle spawns internally (the I/O thread pool, the stdin reader, the
-   JIT worker, the user `(spawn closure)` worker) masks the full set,
+   JIT worker, the `sys/spawn` worker) masks the full set,
    minus the fault set, as its first action. Workers are never the
    kernel's chosen delivery target for an asynchronous signal. The
    fault set stays deliverable because a synchronous fault is bound to
@@ -226,7 +241,7 @@ Without this reset the bug is observable two ways: a direct
 `elle script.lisp` run leaks the main thread's *absorb set* (`USR1`,
 `USR2`, `CHLD`, `URG`, `WINCH`, `ALRM`) into every child, and a child
 spawned under the `elle test` runner (whose whole-file thunk runs in an
-`os/spawn` worker that masks **everything**) inherits a fully-blocked
+`sys/spawn` worker that masks **everything**) inherits a fully-blocked
 mask, so `subprocess/kill … 15` hangs `subprocess/wait` forever.
 
 ## Backend dispatch
@@ -259,7 +274,7 @@ recover it. Linux signalfd populates both fields.
 ### Library-spawned threads inherit the startup mask, not later watches
 
 Elle masks every asynchronous signal on every thread it spawns
-directly (threadpool, stdin reader, JIT worker, user `(spawn closure)`
+directly (threadpool, stdin reader, JIT worker, `sys/spawn`
 worker); the fault set stays deliverable. Threads
 spawned by C dependencies (Cranelift codegen auxiliary threads,
 libffi callbacks, future plugin cdylibs, anything called via FFI)
@@ -320,46 +335,61 @@ receiver; nothing needs re-creating on a timeout.
 
 ## Patterns
 
+The document defines these without calling them: each waits for a signal
+from outside the process.
+
 ### Graceful shutdown
 
-```text
-(def r (os/sig-watch |:sigterm :sigint|))
-(ev/spawn (fn []
-  (each ev (os/sig-next r)
-    (eprintln "shutting down on " (get ev :signal))
-    (cleanup!)
-    (sys/exit 0))))
+```lisp
+(defn shut-down-on-terminate [cleanup]
+  "Run cleanup and exit on the first SIGTERM or SIGINT, from a fiber of its own."
+  (let [r (os/sig-watch |:sigterm :sigint|)]
+    (ev/spawn (fn []
+      (each ev (os/sig-next r)
+        (eprintln "shutting down on " (get ev :signal))
+        (cleanup)
+        (sys/exit 0))))))
 ```
 
 ### Reload-on-SIGHUP
 
-```text
-(def r (os/sig-watch |:sighup|))
-(forever
-  (each _ (os/sig-next r) (reload-config!)))
+```lisp
+(defn reload-on-hangup [reload-config]
+  "Call reload-config once per SIGHUP, forever."
+  (let [r (os/sig-watch |:sighup|)]
+    (forever
+      (each _ (os/sig-next r) (reload-config)))))
 ```
 
-### Conditional disposition
-
-```text
-# Block SIGPIPE for the duration of a write loop so a closed peer
-# manifests as a write error instead of process termination.
-(def r (os/sig-watch |:sigpipe|))
-(defer (os/sig-close r)
-  (write-loop!))
-```
+`SIGPIPE` needs no watcher. Elle ignores it process-wide (see the disposition
+table), so a write to a closed peer fails with `EPIPE` rather than ending the
+process.
 
 ## Capabilities
 
 `os/sig-send` and `os/sig-raise` carry the `:os-signal` capability
-bit. A fiber created with `(fiber/new body :deny |:os-signal|)`
-cannot send signals — the call emits a `:capability-denied` signal
-that the parent fiber catches.
+bit. A fiber whose parent withholds `:os-signal` cannot send signals: the
+call does not run, the child suspends with a `:capability-denied` request,
+and the parent decides. Here it refuses, and the child sees an ordinary
+error at its call site:
+
+```lisp
+(def sender (fiber/new (fn [] (protect (os/sig-raise :sigusr1)))
+                       |:os-signal :error|
+                       :deny |:os-signal|))
+(fiber/resume sender)
+(assert (= (get (fiber/value sender) :error) :capability-denied)
+        "the parent sees the denied call")
+(fiber/refuse sender :not-permitted)
+(assert (= (fiber/value sender) [false :not-permitted])
+        "the child sees the refusal as an error")
+```
 
 `:os-signal` is distinct from `:exec`. Denying `:exec` blocks
-`subprocess/exec` and `subprocess/kill` (since the latter is sending a
-signal to *spawned* children); denying `:os-signal` blocks generic
-signal sends to arbitrary pids. Either may be denied independently.
+`subprocess/exec`; denying `:os-signal` blocks generic signal sends to
+arbitrary pids. Either may be denied independently. `subprocess/kill` carries
+neither bit today, so a fiber denied both can still signal a child it holds a
+`subprocess` for.
 
 `os/sig-watch`, `os/sig-next`, `os/sig-close`, `os/sig-pending`,
 `os/sig-mask`, and `os/sig-watching` do not carry a capability bit —
@@ -367,9 +397,9 @@ they observe process state without sending.
 
 ## See also
 
-- [`signals/`](signals/) — Elle's runtime signal system (different
+- [signals/](signals/index.md) — Elle's runtime signal system (different
   concept, different word).
-- [`io.md`](io.md) — async scheduler that `os/sig-next` integrates
+- [io.md](io.md) — async scheduler that `os/sig-next` integrates
   with.
 - [subprocess.md](subprocess.md) — `subprocess/kill` for sending a
   signal to a child.

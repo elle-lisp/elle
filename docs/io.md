@@ -80,16 +80,18 @@ the edges. Two things come back when it does, on either backend:
   away. `(ev/report):workers` counts the operations out right now.
 - **The descriptor.** A cancelled read stops rather than going on
   reading, and so does a cancelled write whose peer stopped taking bytes.
-  Whatever arrives next belongs to whoever reads the port next:
+  Whatever arrives next belongs to whoever reads the port next. Here the
+  peer is a shell that waits 0.3 s before it writes:
 
-  ```text
-  (ev/timeout 0.1 (fn [] (port/read p 64)))   # the deadline wins
-  (port/read p 64)                            # still sees the peer's bytes
+  ```lisp
+  (let* [peer (subprocess/exec "/bin/sh" ["-c" "sleep 0.3; printf late"])
+         out (get peer :stdout)]
+    (assert (nil? (ev/timeout 0.1 (fn [] (port/read out 64))))
+            "the deadline wins, and ev/timeout answers nil")
+    (assert (= (bytes "late") (port/read out 64))
+            "the next read still sees the peer's bytes")
+    (subprocess/wait peer))
   ```
-
-  That sketch needs a peer slow enough for the deadline to win, so it is
-  written out rather than run here; [io-cancel-releases.lisp](../tests/elle/io-cancel-releases.lisp)
-  builds the peer and asserts both lines.
 
   And a port that goes away while an operation still runs — closed, or
   released with the regions of the fiber that opened it — keeps its
@@ -122,8 +124,9 @@ govern; `0` turns reuse off, and every operation then starts and ends a
 thread of its own.
 
 ```lisp
-# (parameterize ((*io-keepalive* 0))
-#   (ev/run (fn [] ...)))    # a thread per operation, nothing kept
+(assert (= :done (parameterize ((*io-keepalive* 0))
+                    (ev/run (fn [] (ev/sleep 0) :done))))
+        "bind *io-keepalive* around the ev/run whose backend it governs")
 ```
 
 `(io/workers backend)` reports how many operations a backend has out —
@@ -135,27 +138,37 @@ the workers busy right now, not the ones waiting for work — and
 Ports are bidirectional file descriptors. Open with `port/open`, close
 with `port/close`.
 
-```lisp
-(with-temp-dir dir
-  (let [path (path/join dir "doc-test.txt")]
-    (file/write path "hello from elle")
-    (def p (port/open path :read))
-    (defer (port/close p)
-      (port/read-all p))))    # => "hello from elle"
-```
-
 ### Port operations
 
+| Call | Does |
+|------|------|
+| `(port/open path mode)` | open a file; `mode` is `:read`, `:write`, `:append` or `:read-write` |
+| `(port/read p n)` | read up to `n` bytes; `nil` at EOF |
+| `(port/read-exact p n)` | read exactly `n` units; `nil` if EOF comes first |
+| `(port/read-line p)` | read to the next newline, without it; `nil` at EOF |
+| `(port/read-all p)` | read everything that remains |
+| `(port/write p data)` | write all of a string or bytes |
+| `(port/flush p)` | flush buffers |
+| `(port/seek p offset)` | seek to a byte offset, from the start unless `:from :current` or `:from :end` |
+| `(port/tell p)` | the current logical byte position |
+| `(port/close p)` | close the port; idempotent |
+
 ```lisp
-# (port/open path mode)        — mode: :read, :write, :append, :read-write
-# (port/read p n)              — read n bytes
-# (port/read-line p)           — read until \n, nil on EOF
-# (port/read-all p)            — read everything
-# (port/write p data)          — write bytes or string
-# (port/flush p)               — flush buffers
-# (port/seek p offset)         — seek to byte offset (default: from start)
-# (port/tell p)                — current byte position
-# (port/close p)               — close port
+(with-temp-dir dir
+  (let [path (path/join dir "lines.txt")]
+    (let [w (port/open path :write)]
+      (port/write w "one\ntwo\n")
+      (port/close w))
+    (let [r (port/open path :read)]
+      (assert (= "one" (port/read-line r)) "read-line drops the newline")
+      (assert (= 4 (port/tell r)) "tell counts what was consumed, not the kernel offset")
+      (assert (= "two" (port/read-line r)))
+      (assert (nil? (port/read-line r)) "nil at EOF")
+      (assert (= 0 (port/seek r 0)) "seek answers the new position")
+      (assert (= "one" (port/read-line r)) "and reads from there")
+      (assert (= "two\n" (port/read-all r)) "read-all takes the rest")
+      (port/close r)
+      (port/close r))))                  # closing twice is harmless
 ```
 
 ### `port/write` writes every byte
@@ -384,10 +397,22 @@ what a cancelled operation gives back, and in [park.rs](../src/io/aio/tests/park
 
 ### Streams from ports
 
+A stream is a fiber. Each of these closes the port when the stream ends.
+
+| Call | Stream |
+|------|--------|
+| `(port/lines p)` | yields each line, without its newline |
+| `(port/chunks p n)` | yields reads of up to `n` units |
+| `(port/writer p)` | writes each value it is resumed with; resume with `nil` to close |
+
 ```lisp
-# (port/lines p)               — lazy stream of lines
-# (port/chunks p n)            — lazy stream of byte chunks
-# (port/writer p)              — writable stream
+(with-temp-dir dir
+  (let [path (path/join dir "stream.txt")
+        w (port/writer (port/open path :write))]
+    (fiber/resume w)                     # run it to its first wait
+    (each s ["one\n" "two\n" nil] (fiber/resume w s))   # nil closes the port
+    (assert (= (list "one" "two") (stream/collect (port/lines (port/open path :read))))
+            "the lines come back without their newlines")))
 ```
 
 ### Closing `*stdin*`
@@ -406,8 +431,6 @@ what a cancelled operation gives back, and in [park.rs](../src/io/aio/tests/park
 - The OS file descriptor for stdin is *not* itself closed (the
   stdio ports never owned it). This matches the existing
   `*stdout*` / `*stderr*` close semantics.
-
-`port/close` on `*stdin*` is idempotent.
 
 ## Output
 
@@ -471,7 +494,7 @@ recursive delete (`file/delete-dir` only removes empty directories).
 ## See also
 
 - [subprocess.md](subprocess.md) — the subprocess type, its reads, kill and wait
-- [processes.md](processes.md) — supervised subprocesses, GenServer, actors
+- [behaviors.md](behaviors.md) — supervised subprocesses, GenServer, actors
 - [concurrency.md](concurrency.md) — ev/spawn, ev/join, parallel I/O
 - [fibers](signals/fibers.md) — fiber-based async model
 - [strings.md](strings.md) — string operations

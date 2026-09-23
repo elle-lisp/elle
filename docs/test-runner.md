@@ -1,6 +1,6 @@
 # Agent-First Test Runner
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-23 -->
 
 How a run executes: each file compiled, isolated, gated, run on every tier,
 its output captured, and its end recorded honestly.
@@ -190,66 +190,53 @@ the coverage-hiding failure the loud gate exists to prevent. The binary prints
 reads that line, so a self-gated file under `--isolate` is counted the way it
 is counted everywhere else.
 
-## Gating: compile-time enable/disable (replaces skip-lists)
+## Gating: a test declares where it applies
 
-Backend- and platform-specific tests should not live in a `Makefile` grep — they
-gate themselves. The right tool is general, not test-specific: a **compile-time
-conditional-compilation macro** usable anywhere in the language (Elle's `#[cfg]`),
-in two variants. Bang marks compile-time, per convention.
+Backend- and platform-specific tests gate themselves rather than living in a
+`Makefile` grep. The mechanism is a prelude macro, `(gate! COND REASON BODY…)`:
+it runs `BODY` when `COND` is truthy, and otherwise raises
+`{:error :gated :reason REASON}`.
 
-**Silent — `(when! COND BODY…)` / `(unless! COND BODY…)`.** `COND` resolves at
-expansion/analysis time against compile-time facts: the active tier
-(`(backend? :jit)` under the runner's forced policies), features
-(`(feature? :ffi)`), OS, epoch. When it excludes the block, the block is *not
-compiled* — no runtime cost, no dead code, and the excluded text may even
-reference bindings that don't exist in the other configuration. General-purpose;
-no tests involved.
-
-**Loud — `(gate! COND REASON BODY…)`.** The same gate, but an unmet `COND` does
-not vanish silently — the site emits `(emit :gated {:reason REASON})`, a signal a
-harness can catch and account for. This is what tests use:
-
-```
-(gate! (backend? :jit) "needs JIT" <body>)          # compile-time: the VM tier emits :gated
-(gate! (ffi-available? "libsqlite3.so")             # runtime condition: lowers to a
-       "libsqlite3 not installed" <body>)           #   runtime guard that emits :gated
+```lisp
+(assert (= 3 (gate! true "never gated" (+ 1 2))) "an open gate runs its body")
+(let [[ok? err] (protect (gate! false "needs a GPU" :unreachable))]
+  (assert (not ok?) "a shut gate raises")
+  (assert (= err {:error :gated :reason "needs a GPU"}) "and names its reason"))
 ```
 
-When `COND` is compile-time-constant the macro decides at compile time (dead
-branch uncompiled); when it isn't (library presence, `$DISPLAY`, …) it lowers to
-a runtime guard that emits `:gated` on the unmet path. Either way the runner
-catches `:gated` and records `status=skip, reason=REASON`.
+`COND` is evaluated at run time. The canonical condition is
+`(backend? :jit)`: the runner compiles a test closure once and dispatches it to
+every tier through `compile/run-on`, so which tier is active is known only
+while the closure runs. The runner catches `:gated` and records
+`status=skip, reason=REASON`. A direct `elle FILE` run prints
+`SKIP (gated): REASON` and exits 0, and `--isolate` reads that line back.
+Compile-time elision is not built: no silent `when!` exists, and a gate always
+compiles its body.
 
-**Gating shared setup gates the whole file.** A file's `def`/`var` forms run
-*eagerly*, once, during the barrier-module compile to establish the shared
-environment — they are not per-form thunks. When an optional dependency is
-acquired there (an FFI module-load that `dlopen`s `libzmq.so`, a connection
-opened at top level), a `:gated` raised during that eager phase aborts the
-compile *before any test thunk is built* — the test forms never become runnable
-units. The runner records this exactly parallel to a file-level compile error,
-but as a skip rather than a fail: a single file-level row (`form_index = -1`)
-with `status=skip, reason=REASON` (counted in `n_skip`; exit unaffected — a skip
-is not a failure). This is distinct from a genuine setup error (a real exception,
-a syntax error in an imported library), which remains the file-level **fail**. So
-a file whose shared dependency is absent self-skips *with a reason*; a file whose
-setup is *broken* still fails loudly. Idiomatically the dependency is acquired
-through a gate at its import site — attempt the load and re-raise a
-missing-library `:ffi-error` as `:gated` — never `(sys/exit 0)`, which under the
-runner would terminate the whole process mid-run and silently drop every later
-form.
+**Gating shared setup gates the whole file.** Under the per-form barrier a
+file's `def`/`var` forms run *eagerly*, once, during the barrier-module compile
+to establish the shared environment — they are not per-form thunks. When an
+optional dependency is acquired there (an FFI module-load that `dlopen`s
+`libzmq.so`, a connection opened at top level), a `:gated` raised during that
+eager phase aborts the compile *before any test thunk is built*. The runner
+records this exactly parallel to a file-level compile error, but as a skip: a
+single file-level row (`form_index = -1`) with `status=skip, reason=REASON`
+(counted in `n_skip`; exit unaffected — a skip is not a failure). A genuine
+setup error (a real exception, a syntax error in an imported library) remains
+the file-level **fail**. So a file whose shared dependency is absent
+self-skips *with a reason*; a file whose setup is *broken* still fails loudly.
+Idiomatically the dependency is acquired through a gate at its import site —
+attempt the load and re-raise a missing-library `:ffi-error` as `:gated` —
+never `(sys/exit 0)`, which under the runner would terminate the whole
+process mid-run and silently drop every later form.
 
-**Why loud matters for tests — and silent is wrong for them.** A silently elided
-test looks like a form that ran zero assertions: a vacuous pass. That is the same
-coverage-hiding footgun as a tiers dial. The `:gated` signal makes the skip
-*visible, reasoned, and counted* in the DB, so dropped coverage is never
-invisible. Code that genuinely wants a block to disappear uses silent `when!`;
-anything whose absence must be accounted for uses `gate!`.
+**Why loud matters for tests.** A silently elided test looks like a form that
+ran zero assertions: a vacuous pass. That is the same coverage-hiding footgun
+as a tiers dial. The `:gated` error makes the skip *visible, reasoned, and
+counted* in the DB, so dropped coverage is never invisible.
 
-This is one general mechanism, not two test primitives (it subsumes the earlier
-`skip-if`/`skip-unless`), and it deletes the `ELLE_SKIP_VM` / `WASM_SKIP` /
-`ELLE_SKIP_FFI` Makefile lists: each test declares its own applicability where it
-lives, introspectably. It shares the compile-time gating/elision machinery with
-`%assert` (§ `assert` becomes a macro).
+`elle test` needs no skip list. The per-file smoke passes in the `Makefile`
+still carry `ELLE_SKIP_VM`, `ELLE_SKIP_FFI` and `WASM_SKIP`.
 
 ## Tiers are intrinsic and exhaustive — never a dial
 
@@ -405,46 +392,37 @@ is not loaded by default).
   [timeout_capture.rs](../tests/integration/timeout_capture.rs) pins the asset,
   the reason, and the cleanup.
 
-  **The prerequisite this rests on, now in the runtime.** A test thunk that
-  calls `println` closes over the `*stdout*` **parameter**; `os/spawn`'s
-  serializer (`src/value/send.rs`) used to reject parameters (and the stdio ports
-  they default to) outright, so a printing closure couldn't even be *shipped* to
-  a worker. A `Parameter` is now sendable when its default+traits are (the global
-  id is preserved — resolution is by id), and the `Stdout`/`Stderr`/`Stdin` ports
-  are reconstructed fresh in the worker (file/socket ports stay unsendable). This
-  is a snapshot-send, consistent with the per-fiber parameter snapshot, and it
-  also fixes the latent "can't spawn a printing closure" bug.
+  **Parameters cross to the worker.** A test thunk that calls `println`
+  closes over the `*stdout*` **parameter**. The serializer
+  ([src/value/send](../src/value/send/mod.rs)) sends a `Parameter` when its
+  default and traits are sendable, keeping its global id, since resolution is
+  by id. The `Stdout`/`Stderr`/`Stdin` ports are rebuilt fresh in the worker,
+  and file and socket ports stay unsendable. This is a snapshot-send,
+  consistent with the per-fiber parameter snapshot.
 
-### `assert` becomes a macro that carries its predicate
+### `assert` is a macro that carries its predicate
 
-This is not a new test form — it is a strict improvement to the one idiom every
-test already uses. Today `assert` is a primitive that emits a bare
-`{:error :failed-assertion :message …}`; the predicate's structure is lost by
-the time it fails. Promoted to a **macro** in [prelude.lisp](../src/prelude.lisp)
-alongside the other macros, `assert` captures the predicate's syntax and result
-into the payload (the error keyword stays `:failed-assertion`):
+`assert` is a macro in [prelude.lisp](../src/prelude.lisp). On failure it raises
+`:failed-assertion` with the message, the predicate's unevaluated `:syntax` and
+its falsy `:value`. When the predicate is a comparison (`=`, `not=`, `<`, `>`,
+`<=`, `>=`), it also records the left operand as `:actual` and the right as
+`:expected`:
 
-```
-(assert (= x 10) "x invalid")
-# on failure emits:
-(error {:error   :failed-assertion
-        :message "x invalid"
-        :value   false            # the predicate's evaluated result
-        :syntax  '(= x 10)})      # the predicate, unevaluated, as data
+```lisp
+(def answer 11)
+(let [[ok? err] (protect (assert (= answer 10) "answer invalid"))]
+  (assert (not ok?))
+  (assert (= (get err :error) :failed-assertion))
+  (assert (= (get err :message) "answer invalid"))
+  (assert (= (get err :syntax) '(= answer 10)) "the predicate, as data")
+  (assert (= (get err :actual) 11) "the left operand's value")
+  (assert (= (get err :expected) 10) "the right operand's value"))
 ```
 
 The runner records `:syntax` in the result row and `:message` as the form's
-derived label — exact, structured, free, with no re-evaluation guesswork.
-(`:value` is always `false` for a failed assert, so it is not a column.) When
-`:syntax` is a recognized comparison (`(= a b)`, `(< a b)`, …), the macro
-additionally embeds each operand's value so `actual` (the LHS) and `expected`
-(the RHS) are populated without the runner re-running anything. Existing `(assert cond "msg")` call
-sites are untouched; they just start failing *informatively*.
-
-The macro likely bottoms out in an `%assert` intrinsic carrying the captured
-syntax, so the analyzer can recognize it and **elide it in circumstances where
-it provably cannot fail** (or where assertions are disabled for a build),
-keeping the syntax-capture from costing anything at runtime when it isn't needed.
+derived label — exact, structured, with no re-evaluation. `:actual` and
+`:expected` come from the payload too, so the runner re-runs nothing. No
+`%assert` intrinsic exists, so every assert runs; none is elided.
 
 ### Run honesty: a killed run must read as killed
 

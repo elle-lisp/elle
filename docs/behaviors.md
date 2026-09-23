@@ -14,32 +14,31 @@ them has its own document, [supervisor.md](supervisor.md).
 (def process ((import "std/process")))
 ```
 
-# GenServer
+## GenServer
 
 GenServer is a callback-based generic server. You provide an `init`
 function and handlers for calls (synchronous), casts (asynchronous),
 and info messages (raw mailbox messages).
 
-## Callbacks
+### Callbacks
 
-```text
-{:init        (fn [arg] state)
- :handle-call (fn [request from state] [:reply reply new-state])
- :handle-cast (fn [request state]      [:noreply new-state])
- :handle-info (fn [msg state]          [:noreply new-state])
- :terminate   (fn [reason state]       ...)}
-```
+The callbacks are a struct. `from` is `[pid ref]`.
 
-`handle-call` can also return `[:noreply state]` for deferred replies
-(use `gen-server-reply` later) or `[:stop reason reply state]` to shut
-down after replying. `handle-cast` and `handle-info` stop the server by
-returning `[:stop reason state]`.
+| Callback | Arguments | Returns |
+|----------|-----------|---------|
+| `:init` (required) | `arg` | the state, `[:ok state]`, or `[:stop reason]` |
+| `:handle-call` | `request from state` | `[:reply reply state]`, `[:noreply state]`, or `[:stop reason reply state]` |
+| `:handle-cast` | `request state` | `[:noreply state]` or `[:stop reason state]` |
+| `:handle-info` (optional) | `msg state` | `[:noreply state]` or `[:stop reason state]` |
+| `:terminate` (optional) | `reason state` | ignored |
 
-## Key-value store example
+`handle-call` returns `[:noreply state]` to defer its reply (use
+`gen-server-reply` later), and `[:stop reason reply state]` to shut down
+after replying.
+
+### Key-value store example
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (let [pid (process:gen-server-start-link
                {:init        (fn [_] @{})
@@ -55,7 +54,7 @@ returning `[:stop reason state]`.
             "kv store works"))))
 ```
 
-## Stopping a server
+### Stopping a server
 
 `gen-server-stop` requests graceful shutdown. The server's `:terminate`
 callback runs, and then the server exits with the reason that `:reason` names,
@@ -66,8 +65,6 @@ server's exit reaches that process. A reason other than `:normal` kills it,
 unless it traps exits.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (process:trap-exit true)
   (let [me (process:self)
@@ -82,15 +79,13 @@ unless it traps exits.
     (assert (= (process:recv) [:EXIT server :shutdown]) "the exit reached the starter"))))
 ```
 
-## Timeouts
+### Timeouts
 
 `gen-server-call` and `gen-server-stop` take `:timeout`, in scheduler ticks.
 When no reply arrives in time, they raise `{:error :gen-server-timeout}`.
 Without `:timeout`, they wait until the server replies or exits.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (process:gen-server-start-link
     {:init        (fn [_] nil)
@@ -107,8 +102,6 @@ call turns the alias off when it ends. The scheduler drops a reply sent to an
 alias that is off, and removes one that arrived before the call turned it off.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (process:gen-server-start-link
     {:init        (fn [_] nil)
@@ -121,7 +114,7 @@ alias that is off, and removes one that arrived before the call turned it off.
   (assert (= (process:recv-timeout 30) :timeout) "the late reply never arrives")))
 ```
 
-## A server that exits during a call
+### A server that exits during a call
 
 `gen-server-call` and `gen-server-stop` monitor the server while they wait.
 When the server exits before it replies, they raise `{:error :gen-server-down
@@ -134,8 +127,6 @@ A caller that traps exits and is linked to the server still receives `[:EXIT
 server reason]`.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (process:trap-exit true)
   (let* [server (process:gen-server-start-link
@@ -152,32 +143,38 @@ server reason]`.
       _ (assert false "expected [:EXIT server [:error ...]]")))))
 ```
 
-## Deferred replies
+### Deferred replies
 
 Sometimes the server can't reply immediately. Return `[:noreply state]`
-from `handle-call` and use `gen-server-reply` later:
+from `handle-call` and use `gen-server-reply` later. Here the call stashes
+`from` and the reply leaves from `handle-info`:
 
-```text
-{:handle-call (fn [request from state]
-  # Stash `from` — reply later from handle-info
-  [:noreply {:pending from}])
- :handle-info (fn [msg state]
-  (process:gen-server-reply (get state :pending) msg)
-  [:noreply nil])}
+```lisp
+(process:start (fn []
+  (process:gen-server-start-link
+    {:init        (fn [_] nil)
+     :handle-call (fn [request from _state]
+                    # Finish the work later, when this message comes back.
+                    (process:send (process:self) [:answer request])
+                    [:noreply {:pending from}])
+     :handle-info (fn [[_ request] state]
+                    (process:gen-server-reply (get state :pending)
+                                              [:answered request])
+                    [:noreply nil])}
+    nil :name :deferred)
+  (assert (= [:answered :question] (process:gen-server-call :deferred :question))
+          "the caller blocks until the deferred reply")))
 ```
 
 A deferred reply goes through the same alias as any other. When the call has
 already ended, because it timed out or raised, the reply goes nowhere.
 
-
-# Actor
+## Actor
 
 Actor wraps GenServer with a simpler API: just an init function and
 get/update operations on state.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (process:actor-start-link (fn [] 0) :name :counter)
   (process:actor-update :counter (fn [n] (+ n 1)))
@@ -187,8 +184,7 @@ get/update operations on state.
           "counter is 3")))
 ```
 
-
-# Task
+## Task
 
 Task runs a one-shot function as a process and returns its value to the caller.
 It is like `ev/spawn`, except that the work has a PID.
@@ -202,8 +198,6 @@ running. Once `task-await` returns or raises, no message from the task is left
 in the caller's mailbox.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (let* [t1 (process:task-async (fn [] (* 6 7)))
          t2 (process:task-async (fn [] (+ 10 20)))
@@ -214,8 +208,6 @@ in the caller's mailbox.
 ```
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (let* [t (process:task-async (fn [] (error {:error :boom :message "crash"})))
          [ok? err] (protect (process:task-await t))]
@@ -223,40 +215,43 @@ in the caller's mailbox.
     (assert (= (get err :error) :task-error) "with :task-error"))))
 ```
 
-
-# EventManager
+## EventManager
 
 EventManager provides pub/sub event dispatching. Handlers are modules
-with `:init`, `:handle-event`, and optional `:terminate` callbacks.
+with `:init`, `:handle-event`, and optional `:terminate` callbacks. A
+handler that answers `[:remove state]` leaves, and its `:terminate` runs
+with the reason `:remove`, as it does when the handler is removed.
 
-```text
-(def handler-mod
-  {:init         (fn [_] @[])
-   :handle-event (fn [event state]
-     (push state event)
-     [:ok state])
-   :terminate    (fn [reason state] nil)})
-
-(process:event-manager-start-link :name :events)
-(def ref (process:event-manager-add-handler :events handler-mod nil))
-(process:event-manager-sync-notify :events :something-happened)
-(process:event-manager-remove-handler :events ref)
+```lisp
+(process:start (fn []
+  (let [me (process:self)
+        recorder {:init         (fn [_] @[])
+                  :handle-event (fn [event state]
+                                  (push state event)
+                                  [:ok state])
+                  :terminate    (fn [reason state]
+                                  (process:send me [reason (freeze state)]))}]
+    (process:event-manager-start-link :name :events)
+    (let [ref (process:event-manager-add-handler :events recorder nil)]
+      (process:event-manager-sync-notify :events :something-happened)
+      (process:event-manager-remove-handler :events ref)
+      (assert (= [:remove [:something-happened]] (process:recv))
+              "the handler saw the event and was told why it left")))))
 ```
-
 
 ## API reference
 
-## GenServer
+### GenServer
 
 | Function | Description |
 |----------|-------------|
-| `gen-server-start-link callbacks init-arg` | Start linked server |
+| `gen-server-start-link callbacks init-arg` | Start linked server (`:name`) |
 | `gen-server-call server request` | Synchronous call (`:timeout`) |
-| `gen-server-cast server request` | Asynchronous cast |
+| `gen-server-cast server request` | Asynchronous cast; returns `:ok` |
 | `gen-server-stop server` | Graceful shutdown (`:reason`, `:timeout`) |
 | `gen-server-reply from reply` | Deferred reply |
 
-## Actor
+### Actor
 
 | Function | Description |
 |----------|-------------|
@@ -265,14 +260,14 @@ with `:init`, `:handle-event`, and optional `:terminate` callbacks.
 | `actor-update actor fn` | Transform state (sync) |
 | `actor-cast actor fn` | Transform state (async) |
 
-## Task
+### Task
 
 | Function | Description |
 |----------|-------------|
-| `task-async fn` | Spawn monitored task, returns `[pid ref]` |
+| `task-async fn` | Spawn a monitored task, returns `[pid ref]` |
 | `task-await task` | Wait for result (`:timeout`) |
 
-## EventManager
+### EventManager
 
 | Function | Description |
 |----------|-------------|
@@ -281,10 +276,7 @@ with `:init`, `:handle-event`, and optional `:terminate` callbacks.
 | `event-manager-remove-handler mgr ref` | Remove handler |
 | `event-manager-notify mgr event` | Async broadcast |
 | `event-manager-sync-notify mgr event` | Sync broadcast |
-| `event-manager-which-handlers mgr` | List handlers |
-
-
----
+| `event-manager-which-handlers mgr` | List handlers as `{:id :mod}` structs |
 
 ## See also
 
