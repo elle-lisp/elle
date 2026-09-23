@@ -1,6 +1,6 @@
 # Dissolution — HOF loop fusion
 
-Dissolution is the third leg of the region system (see `memory.md` § "The three
+Dissolution is the third leg of the region system (see [memory.md](memory.md) § "The three
 legs"): a closure is a first-class *value* but the *unit of nothing* at runtime,
 and — guided by the escape/ownership facts legs 1 and 2 infer — the compiler
 realizes a higher-order call as its most efficient form. `(map f xs)` over an
@@ -23,17 +23,35 @@ rewrites the call to the index-walk loop `map`'s own array arm runs
 (`src/stdlib.lisp`, the `(array? coll)` arm) — but with **`f`'s body spliced
 directly into the loop body** instead of called through a closure value:
 
-```
-(map (fn [x] BODY) [ … ])
-⇒
-(let [coll [ … ]]
-  (let [len (length coll)]
-    (let [acc (@array)]
-      (define i 0)
-      (while (< i len)
-        (push acc (let [x (get coll i)] BODY))
-        (assign i (%add i 1)))
-      (freeze acc))))
+```lisp
+# (map (fn [x] BODY) [ … ]) becomes this surface HIR:
+#
+#   (let [coll [ … ]]
+#     (let [len (length coll)]
+#       (let [acc (@array)]
+#         (define i 0)
+#         (while (< i len)
+#           (push acc (let [x (get coll i)] BODY))
+#           (assign i (%add i 1)))
+#         (freeze acc))))
+#
+# The examples in this document read the HIR the compiler emits after
+# functionalization, where the `while` is a `loop`.
+
+(defn fused [expr]
+  "The functionalized HIR of a function whose body is expr, as text."
+  (get (compile/dumps (string "(defn f [] " expr ") (f)") "<doc>") :fhir))
+
+(defn occurrences [text part]
+  "How many times part occurs in text."
+  (- (length (string/split text part)) 1))
+
+(def map-hir (fused "(map (fn [x] (* x 10)) [1 2 3])"))
+(assert (= 0 (occurrences map-hir "map#")) "the map call is gone")
+(assert (= 1 (occurrences map-hir "(loop ")))
+(assert (= 1 (occurrences map-hir "%push-array-mut")) "BODY is pushed inline")
+(assert (= 1 (occurrences map-hir "freeze#")))
+(assert (= (map (fn [x] (* x 10)) [1 2 3]) [10 20 30]))
 ```
 
 The closure `f` is gone: no closure value is allocated and no indirect call
@@ -52,8 +70,14 @@ chain down to its base array `xs`, collecting the per-element transforms
 `[f, g]` in application order, and emits one accumulator loop whose element
 expression is the transforms nested innermost-first:
 
-```
-(push acc (let [gp (let [fp (get coll i)] F-BODY)] G-BODY))
+```lisp
+# (push acc (let [gp (let [fp (get coll i)] F-BODY)] G-BODY))
+
+(def map-map-hir (fused "(map (fn [y] (+ y 1)) (map (fn [x] (* x 10)) [1 2 3]))"))
+(assert (= 0 (occurrences map-map-hir "map#")))
+(assert (= 1 (occurrences map-map-hir "(@array#")) "one accumulator, no intermediate")
+(assert (= 1 (occurrences map-map-hir "(loop ")))
+(assert (= (map (fn [y] (+ y 1)) (map (fn [x] (* x 10)) [1 2 3])) [11 21 31]))
 ```
 
 The intermediate array that the inner `map` would have allocated, frozen, and
@@ -69,23 +93,32 @@ over the base's array arm — and differs only in the per-element loop body. Whe
 `map` pushes `f`'s *result*, `filter` pushes the *element itself*, gated by the
 predicate (mirroring `filter`'s own array arm, `src/stdlib.lisp`):
 
-```
-(filter (fn [x] PRED) [ … ])
-⇒
-  (while (< i len)
-    (push acc … )   ⟶   (let [item (get coll i)]
-                          (if (let [x item] PRED) (push acc item) nil))
-    …)
+```lisp
+# (filter (fn [x] PRED) [ … ]) replaces map's (push acc …) with:
+#
+#   (let [item (get coll i)]
+#     (if (let [x item] PRED) (push acc item) nil))
+
+(def filter-hir (fused "(filter (fn [x] (odd? x)) [1 2 3])"))
+(assert (= 0 (occurrences filter-hir "filter#")))
+(assert (= 1 (occurrences filter-hir "(loop ")))
+(assert (= (filter (fn [x] (odd? x)) [1 2 3]) [1 3]))
 ```
 
 A `filter`-of-`filter` chain nests the guards innermost-first — the element is
 bound once and pushed only when every predicate passes:
 
-```
-(let [item (get coll i)]
-  (if (let [p item] P-BODY)
-    (if (let [q item] Q-BODY) (push acc item) nil)
-    nil))
+```lisp
+# (let [item (get coll i)]
+#   (if (let [p item] P-BODY)
+#     (if (let [q item] Q-BODY) (push acc item) nil)
+#     nil))
+
+(def filter-filter-hir
+  (fused "(filter (fn [y] (= y 3)) (filter (fn [x] (odd? x)) [1 2 3]))"))
+(assert (= 0 (occurrences filter-filter-hir "filter#")))
+(assert (= 1 (occurrences filter-filter-hir "(@array#")))
+(assert (= (filter (fn [y] (= y 3)) (filter (fn [x] (odd? x)) [1 2 3])) [3]))
 ```
 
 The predicate closures dissolve exactly as `map`'s transform closures do, and the
@@ -102,19 +135,33 @@ chain is a *stage*: a `map` stage transforms the threaded element value; a
 its predicate passes. The stages nest in application order (innermost op first),
 bottoming out at the push. For `(map f (filter p xs))`:
 
-```
-(let [item (get coll i)]
-  (if (let [p item] P-BODY)              ; filter p — does it survive?
-    (push acc (let [x item] F-BODY))     ; map f — push the transform of the survivor
-    nil))
+```lisp
+# (let [item (get coll i)]
+#   (if (let [p item] P-BODY)              # filter p — does it survive?
+#     (push acc (let [x item] F-BODY))     # map f — push the transform of the survivor
+#     nil))
+
+(def map-filter-hir
+  (fused "(map (fn [x] (* x 10)) (filter (fn [x] (odd? x)) [1 2 3]))"))
+(assert (= 0 (occurrences map-filter-hir "map#")))
+(assert (= 0 (occurrences map-filter-hir "filter#")))
+(assert (= 1 (occurrences map-filter-hir "(@array#")))
+(assert (= (map (fn [x] (* x 10)) (filter (fn [x] (odd? x)) [1 2 3])) [10 30]))
 ```
 
 and for `(filter q (map g xs))` the map stage transforms first and the guard
 tests the transformed value:
 
-```
-(let [v (let [x (get coll i)] G-BODY)]   ; map g — the transformed value
-  (if (let [q v] Q-BODY) (push acc v) nil))
+```lisp
+# (let [v (let [x (get coll i)] G-BODY)]   # map g — the transformed value
+#   (if (let [q v] Q-BODY) (push acc v) nil))
+
+(def filter-map-hir
+  (fused "(filter (fn [v] (odd? v)) (map (fn [x] (+ x 1)) [1 2 3]))"))
+(assert (= 0 (occurrences filter-map-hir "filter#")))
+(assert (= 0 (occurrences filter-map-hir "map#")))
+(assert (= 1 (occurrences filter-map-hir "(@array#")))
+(assert (= (filter (fn [v] (odd? v)) (map (fn [x] (+ x 1)) [1 2 3])) [3]))
 ```
 
 The intermediate array the inner op would have allocated — the survivors between
@@ -133,18 +180,24 @@ called `(f acc element)`, the same left-fold `src/core.lisp`'s `fold` runs
 (`reduce` is `(def reduce fold)`, the identical op recognized by either name) —
 dissolves to:
 
-```
-(fold (fn [acc x] STEP) INIT [ … ])
-⇒
-(let [seed INIT]
-  (let [coll [ … ]]
-    (let [len (length coll)]
-      (define acc seed)
-      (define i 0)
-      (while (< i len)
-        (assign acc (let [acc-p acc] (let [x (get coll i)] STEP)))
-        (assign i (%add i 1)))
-      acc)))
+```lisp
+# (fold (fn [acc x] STEP) INIT [ … ]) becomes:
+#
+#   (let [seed INIT]
+#     (let [coll [ … ]]
+#       (let [len (length coll)]
+#         (define acc seed)
+#         (define i 0)
+#         (while (< i len)
+#           (assign acc (let [acc-p acc] (let [x (get coll i)] STEP)))
+#           (assign i (%add i 1)))
+#         acc)))
+
+(def fold-hir (fused "(fold (fn [acc x] (+ acc x)) 0 [1 2 3])"))
+(assert (= 0 (occurrences fold-hir "fold#")))
+(assert (= 0 (occurrences fold-hir "(@array#")) "no accumulator array")
+(assert (= 0 (occurrences fold-hir "freeze#")))
+(assert (= (fold (fn [acc x] (+ acc x)) 0 [1 2 3]) 6))
 ```
 
 No `@array`, no `push`, no `freeze`: the accumulator is a reassigned scalar
@@ -174,19 +227,24 @@ base case is the terminal — a `push` (Collect), a fold `assign` (Fold), or a t
 a terminal exactly as `fold` is: nothing chains over it. Its fused form is the one
 already built — a `filter` **stage** whose base case counts instead of pushing:
 
-```
-(count (fn [x] PRED) [ … ])
-⇒
-(let [seed 0]
-  (let [coll [ … ]]
-    (let [len (length coll)]
-      (define n seed)
-      (define i 0)
-      (while (< i len)
-        (let [item (get coll i)]
-          (if (let [x item] PRED) (assign n (%add n 1)) nil))
-        (assign i (%add i 1)))
-      n)))
+```lisp
+# (count (fn [x] PRED) [ … ]) becomes:
+#
+#   (let [seed 0]
+#     (let [coll [ … ]]
+#       (let [len (length coll)]
+#         (define n seed)
+#         (define i 0)
+#         (while (< i len)
+#           (let [item (get coll i)]
+#             (if (let [x item] PRED) (assign n (%add n 1)) nil))
+#           (assign i (%add i 1)))
+#         n)))
+
+(def count-hir (fused "(count (fn [x] (odd? x)) [1 2 3])"))
+(assert (= 0 (occurrences count-hir "count#")))
+(assert (= 0 (occurrences count-hir "(@array#")))
+(assert (= (count (fn [x] (odd? x)) [1 2 3]) 2))
 ```
 
 The predicate is appended as the **last** stage of the pipeline (it is the
@@ -220,22 +278,27 @@ decided it", and — where the search is the chain's only op — the loop leaves
 through a **sentinel the condition reads**: a `more` flag the deciding element
 clears.
 
-```
-(any? (fn [x] PRED) [ … ])
-⇒
-(let [seed false]
-  (let [coll [ … ]]
-    (let [len (length coll)]
-      (define ans seed)
-      (define i 0)
-      (define more true)
-      (while (and (< i len) more)
-        (let [item (get coll i)]
-          (if (let [x item] PRED)
-            (begin (assign ans true) (assign more false))
-            nil))
-        (assign i (%add i 1)))
-      ans)))
+```lisp
+# (any? (fn [x] PRED) [ … ]) becomes:
+#
+#   (let [seed false]
+#     (let [coll [ … ]]
+#       (let [len (length coll)]
+#         (define ans seed)
+#         (define i 0)
+#         (define more true)
+#         (while (and (< i len) more)
+#           (let [item (get coll i)]
+#             (if (let [x item] PRED)
+#               (begin (assign ans true) (assign more false))
+#               nil))
+#           (assign i (%add i 1)))
+#         ans)))
+
+(def any-hir (fused "(any? (fn [x] (odd? x)) [2 3 4])"))
+(assert (= 0 (occurrences any-hir "any?#")))
+(assert (= 1 (occurrences any-hir "(and ")) "the loop condition reads the sentinel")
+(assert (any? (fn [x] (odd? x)) [2 3 4]))
 ```
 
 The four differ in three values, and in nothing else:
@@ -263,17 +326,24 @@ the fused loop must make exactly those calls: the walk stays exhaustive (the loo
 condition is the bare range test) and the sentinel gates the **search's own guard
 stage** instead.
 
-```
-(any? (fn [y] PRED) (map (fn [x] F-BODY) [ … ]))
-⇒
-  (while (< i len)
-    (let [v (let [x (get coll i)] F-BODY)]        ; runs on EVERY element
-      (if more
-        (if (let [y v] PRED)
-          (begin (assign ans true) (assign more false))
-          nil)
-        nil))
-    (assign i (%add i 1)))
+```lisp
+# (any? (fn [y] PRED) (map (fn [x] F-BODY) [ … ])) walks with:
+#
+#   (while (< i len)
+#     (let [v (let [x (get coll i)] F-BODY)]        # runs on EVERY element
+#       (if more
+#         (if (let [y v] PRED)
+#           (begin (assign ans true) (assign more false))
+#           nil)
+#         nil))
+#     (assign i (%add i 1)))
+
+(def any-map-hir (fused "(any? (fn [y] (odd? y)) (map (fn [x] (+ x 1)) [1 2 3]))"))
+(assert (= 0 (occurrences any-map-hir "any?#")))
+(assert (= 0 (occurrences any-map-hir "map#")))
+(assert (= 0 (occurrences any-map-hir "(and ")) "the loop condition is the bare range test")
+(assert (= 0 (occurrences any-map-hir "(@array#")) "no intermediate array")
+(assert (any? (fn [y] (odd? y)) (map (fn [x] (+ x 1)) [1 2 3])))
 ```
 
 Stopping the whole walk instead would leave the prefix's per-element work unrun,
@@ -315,23 +385,31 @@ chain over its result. Its fused form is a `filter`'s guard with the search's ea
 exit hung off the other side, the rejecting element ending the run instead of
 merely being skipped:
 
-```
-(take-while (fn [x] PRED) [ … ])
-⇒
-(let [coll [ … ]]
-  (let [len (length coll)]
-    (if (< 0 len)
-      (let [acc (@array)]
-        (define i 0)
-        (define more true)
-        (while (and (< i len) more)
-          (let [item (get coll i)]
-            (if (let [x item] PRED)
-              (push acc item)
-              (assign more false)))
-          (assign i (%add i 1)))
-        acc)
-      ())))
+```lisp
+# (take-while (fn [x] PRED) [ … ]) becomes:
+#
+#   (let [coll [ … ]]
+#     (let [len (length coll)]
+#       (if (< 0 len)
+#         (let [acc (@array)]
+#           (define i 0)
+#           (define more true)
+#           (while (and (< i len) more)
+#             (let [item (get coll i)]
+#               (if (let [x item] PRED)
+#                 (push acc item)
+#                 (assign more false)))
+#             (assign i (%add i 1)))
+#           acc)
+#         ())))
+
+(def take-while-hir (fused "(take-while (fn [x] (odd? x)) [1 3 4 5])"))
+(assert (= 0 (occurrences take-while-hir "take-while#")))
+(assert (= 1 (occurrences take-while-hir "(and ")))
+(assert (= 0 (occurrences take-while-hir "freeze#")) "the accumulator stays mutable")
+(assert (= (take-while (fn [x] (odd? x)) [1 3 4 5]) [1 3]))
+(assert (= :@array (type-of (take-while (fn [x] (odd? x)) [1 3 4 5]))))
+(assert (= () (take-while (fn [x] (odd? x)) [])) "an empty base answers ()")
 ```
 
 ### Which early exit may end the walk
@@ -348,15 +426,22 @@ So a `take-while` with a **prefix** — a stage inner to it — keeps
 the exhaustive walk (the loop condition is the bare range test) and rides its own
 sentinel instead, as a prefixed search's guard does:
 
-```
-(take-while (fn [y] PRED) (map (fn [x] F-BODY) [ … ]))
-⇒
-  (while (< i len)
-    (let [v (let [x (get coll i)] F-BODY)]      ; runs on EVERY element
-      (if more
-        (if (let [y v] PRED) (push acc v) (assign more false))
-        nil))
-    (assign i (%add i 1)))
+```lisp
+# (take-while (fn [y] PRED) (map (fn [x] F-BODY) [ … ])) walks with:
+#
+#   (while (< i len)
+#     (let [v (let [x (get coll i)] F-BODY)]      # runs on EVERY element
+#       (if more
+#         (if (let [y v] PRED) (push acc v) (assign more false))
+#         nil))
+#     (assign i (%add i 1)))
+
+(def take-while-map-hir
+  (fused "(take-while (fn [y] (odd? y)) (map (fn [x] (+ x 1)) [0 2 3 4]))"))
+(assert (= 0 (occurrences take-while-map-hir "take-while#")))
+(assert (= 0 (occurrences take-while-map-hir "map#")))
+(assert (= 0 (occurrences take-while-map-hir "(and ")))
+(assert (= (take-while (fn [y] (odd? y)) (map (fn [x] (+ x 1)) [0 2 3 4])) [1 3]))
 ```
 
 Where a lone search and a walk-ending `take-while` both want the loop condition,
@@ -381,25 +466,30 @@ is a pipeline **stage** too. Its fused form is a guard with the sides swapped an
 the sentinel latched the other way round — a `dropping` flag the rejecting element
 clears, after which every element passes:
 
-```
-(drop-while (fn [x] PRED) [ … ])
-⇒
-(let [coll [ … ]]
-  (let [len (length coll)]
-    (if (< 0 len)
-      (let [acc (@array)]
-        (define i 0)
-        (define dropping true)
-        (while (< i len)
-          (let [item (get coll i)]
-            (begin
-              (if dropping
-                (if (let [x item] PRED) nil (assign dropping false))
-                nil)
-              (if dropping nil (push acc item))))
-          (assign i (%add i 1)))
-        acc)
-      ())))
+```lisp
+# (drop-while (fn [x] PRED) [ … ]) becomes:
+#
+#   (let [coll [ … ]]
+#     (let [len (length coll)]
+#       (if (< 0 len)
+#         (let [acc (@array)]
+#           (define i 0)
+#           (define dropping true)
+#           (while (< i len)
+#             (let [item (get coll i)]
+#               (begin
+#                 (if dropping
+#                   (if (let [x item] PRED) nil (assign dropping false))
+#                   nil)
+#                 (if dropping nil (push acc item))))
+#             (assign i (%add i 1)))
+#           acc)
+#         ())))
+
+(def drop-while-hir (fused "(drop-while (fn [x] (odd? x)) [1 3 4 5])"))
+(assert (= 0 (occurrences drop-while-hir "drop-while#")))
+(assert (= 0 (occurrences drop-while-hir "(and ")) "no early exit")
+(assert (= (drop-while (fn [x] (odd? x)) [1 3 4 5]) [4 5]))
 ```
 
 The predicate runs on exactly the elements the stdlib op gives it — the leading run,
@@ -438,12 +528,16 @@ element's **position** beside it — `(f i elem)`, index first, the order
 pipeline **stage**. Its fused form is a `map`'s with one extra binding: the loop's
 own induction variable, bound to the function's first parameter.
 
-```
-(map-indexed (fn [i x] BODY) [ … ])
-⇒
-  (while (< i len)
-    (push acc (let [ip i] (let [xp (get coll i)] BODY)))
-    (assign i (%add i 1)))
+```lisp
+# (map-indexed (fn [i x] BODY) [ … ]) walks with:
+#
+#   (while (< i len)
+#     (push acc (let [ip i] (let [xp (get coll i)] BODY)))
+#     (assign i (%add i 1)))
+
+(def map-indexed-hir (fused "(map-indexed (fn [i x] (+ i x)) [10 20 30])"))
+(assert (= 0 (occurrences map-indexed-hir "map-indexed#")))
+(assert (= (map-indexed (fn [i x] (+ i x)) [10 20 30]) [10 21 32]))
 ```
 
 The position the function reads is an index into `map-indexed`'s **own** input, and
@@ -476,26 +570,31 @@ collection, so it is a pipeline **stage**. Every other stage threads exactly one
 value on per element; this one threads a whole run of them, so its fused form is
 the first to put a **second walk** inside the element statement:
 
-```
-(mapcat (fn [x] BODY) [ … ])
-⇒
-(let [coll [ … ]]
-  (let [len (length coll)]
-    (if (< 0 len)
-      (let [acc (@array)]
-        (define j 0)
-        (define i 0)
-        (while (< i len)
-          (let [inner (let [x (get coll i)] BODY)]
-            (let [ilen (length inner)]
-              (begin
-                (assign j 0)
-                (while (< j ilen)
-                  (push acc (get inner j))
-                  (assign j (%add j 1))))))
-          (assign i (%add i 1)))
-        acc)
-      ())))
+```lisp
+# (mapcat (fn [x] BODY) [ … ]) becomes:
+#
+#   (let [coll [ … ]]
+#     (let [len (length coll)]
+#       (if (< 0 len)
+#         (let [acc (@array)]
+#           (define j 0)
+#           (define i 0)
+#           (while (< i len)
+#             (let [inner (let [x (get coll i)] BODY)]
+#               (let [ilen (length inner)]
+#                 (begin
+#                   (assign j 0)
+#                   (while (< j ilen)
+#                     (push acc (get inner j))
+#                     (assign j (%add j 1))))))
+#             (assign i (%add i 1)))
+#           acc)
+#         ())))
+
+(def mapcat-hir (fused "(mapcat (fn [x] [x x]) [1 2])"))
+(assert (= 0 (occurrences mapcat-hir "mapcat#")))
+(assert (= 2 (occurrences mapcat-hir "(loop ")) "a second walk inside the first")
+(assert (= (mapcat (fn [x] [x x]) [1 2]) [1 1 2 2]))
 ```
 
 The rest of the pipeline is spliced **inside** the inner `while`, so every stage
@@ -698,7 +797,8 @@ a capture of the base's own binding (§ "Captures"). A `mapcat`'s
 inner walk reads its function's result the same way, so it matches there too. The
 three excluded shapes break the match:
 
-- **`fold`** first snapshots its input (`(->array coll)` copies a mutable array)
+- **`fold`** first snapshots its input (`trait/elements` converts it with
+  `->array`, which copies a mutable array)
   and walks the copy; a fused fold would walk the live base, so a mutating
   combinator would observe a divergence. A `fold` over a mutable base stays a
   plain call.
@@ -744,9 +844,10 @@ enclosing frame holds, and fusion removes the closure it would name.
 
 The two **template** paths cannot have this fact, which is why the refusal belongs to
 the clone rather than to the splice. A named function's body names the scope it was
-*defined* in, and the call site need not sit inside that scope. So `fn_template`
-refuses a capture outright, and the cross-unit collector admits only free variables
-that are genuine globals (§ "Cross-unit named functions").
+*defined* in, and the call site need not sit inside that scope. So `fn_fragment`
+refuses a body that names an enclosing runtime local, and the cross-unit
+collector admits only free variables that are genuine globals
+(§ "Cross-unit named functions").
 
 ### A capture is a second cross-element channel
 
@@ -931,7 +1032,7 @@ call's declared `RetType`.
 Dissolution is a **realization** goal, not a leak goal — it is proven at the
 codegen and execution levels, not on the leak oracle. Three pins:
 
-- **Codegen (structure).** `src/hir/typeinfer/fuse.rs` `mod tests` compile a `map`
+- **Codegen (structure).** the tests under `src/hir/typeinfer/fuse/tests/` compile a `map`
   / `map`-of-`map` / `filter` / `filter`-of-`filter` / mixed `map`-of-`filter` /
   mixed `filter`-of-`map` / `fold` / `fold`-of-`map` / `fold`-of-`filter` form and
   assert on the lowered HIR: the HOF callee is gone, the body op appears inline in
@@ -1045,7 +1146,7 @@ codegen and execution levels, not on the leak oracle. Three pins:
   minted by both forms, so a lone `mapcat` has no closure to dissolve and saves
   nothing measurable. What fusion removes is the **flat collection** between the
   `mapcat` and whatever consumes it, which is the whole of its saving and the
-  strictly larger one. The
+  strictly larger one.
   A **capturing** lambda (`dissolution-capture-fuse.lisp`) is weighed against the
   same declining oracle and pinned equal to the global-only form's count — the
   capture buys nothing back, which is the claim. That file also carries the
