@@ -58,6 +58,7 @@ Focused files covering one topic each, all runnable via `elle docs/<file>.md`.
 | Directory | Content |
 |-----------|---------|
 | [processes.md](processes.md) | Erlang-style processes: mailboxes, links, monitors |
+| [process-scheduler.md](process-scheduler.md) | Sub-fibers, forwarded I/O and nested schedulers inside processes |
 | [behaviors.md](behaviors.md) | GenServer, Actor, Task, EventManager |
 | [supervisor.md](supervisor.md) | Supervisors: child specs, restart strategies, supervised subprocesses |
 | [signals/](signals/) | Signal system design, protocol, inference, JIT |

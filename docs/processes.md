@@ -63,8 +63,8 @@ scheduler stops, where `r` is the exit reason as a string.
 
 `make-scheduler` and `start` take `:fuel`, the instructions a process runs
 before it is preempted, 1000 by default. Neither builds an I/O backend, because
-a process scheduler forwards its I/O to its parent scheduler (see "Forwarded
-I/O and the parent scheduler" below).
+a process scheduler forwards its I/O to its parent scheduler (see
+[process-scheduler.md](process-scheduler.md)).
 
 Use `process:run` when you need a pre-configured or shared scheduler:
 
@@ -137,9 +137,15 @@ given number of scheduler ticks.
 ```
 
 The scheduler keeps time in ticks. Each round of the scheduler, which runs
-every ready process once, adds one tick. When every process waits on a timer,
-the clock jumps to the earliest one. `now` returns the current tick, and
+every ready process once, adds one tick. `now` returns the current tick, and
 `recv-timeout`, `send-after` and a supervisor's `:max-ticks` all count it.
+When no process is ready, the scheduler waits, and the clock counts the wait:
+
+- With no I/O in flight, only a timer can end the wait. The clock jumps to the
+  earliest timer.
+- With I/O in flight, the wait ends when a completion arrives or when the
+  earliest timer falls due, whichever comes first. The clock advances one tick
+  for each whole millisecond of the wait.
 
 ```lisp
 (def process ((import "std/process")))
@@ -148,6 +154,19 @@ the clock jumps to the earliest one. `now` returns the current tick, and
   (let [before (process:now)]
     (process:recv-timeout 10)
     (assert (>= (- (process:now) before) 10) "recv-timeout waited 10 ticks"))))
+```
+
+A timer therefore fires while another process waits on long I/O:
+
+```lisp
+(def process ((import "std/process")))
+
+(process:start (fn []
+  (let [sleeper (process:spawn (fn [] (ev/sleep 30)))
+        started (clock/monotonic)]
+    (assert (= (process:recv-timeout 5) :timeout) "the timer fires")
+    (assert (< (- (clock/monotonic) started) 10) "long before the sleep ends")
+    (process:exit sleeper :kill))))
 ```
 
 ## Links and crash propagation
@@ -297,125 +316,9 @@ processes to run.
   :fuel 100)
 ```
 
+## API reference
 
-
-# Structured concurrency inside processes
-
-`ev/spawn` and `ev/join` work inside processes. Sub-fibers are
-tracked by the scheduler and participate in I/O completion.
-
-```lisp
-(def process ((import "std/process")))
-
-(process:start (fn []
-  (let* [f1 (ev/spawn (fn [] (+ 10 20)))
-         f2 (ev/spawn (fn [] (+ 30 40)))
-         r1 (ev/join f1)
-         r2 (ev/join f2)]
-    (assert (= r1 30) "f1 = 30")
-    (assert (= r2 70) "f2 = 70"))))
-```
-
-`ev/select` — and everything built on it: `ev/timeout`, `ev/race`,
-`ev/scope`, `ev/as-completed` — works from the process fiber and from
-sub-fibers alike. The scheduler serves a process fiber's wait and a
-sub-fiber's through the same code, so both have the full wait vocabulary.
-A wait op the scheduler does not know is a protocol error, raised in the
-fiber that emitted it rather than swallowed.
-
-One rule keeps those waits honest: the scheduler never resumes a parked
-fiber except with the result it parked for. A join or select on a
-hand-built `:new` fiber gives that fiber a first run; a `:paused` fiber
-is already parked on I/O, a futex, or a wait the scheduler tracks, and
-is woken only by its own completion. Resuming it out of turn would hand
-its park a nil — a timer parked in `ev/sleep` would "complete"
-instantly, and every `ev/timeout` in a process would report its
-deadline at once. Pinned by [process-select.lisp](../tests/elle/process-select.lisp).
-
-## Orphan sub-fibers and teardown
-
-A sub-fiber outlives the code that spawned it only as long as some
-process is alive to observe it. Once **every** process has terminated,
-any sub-fiber still running — a fire-and-forget `ev/spawn` that parked on
-a futex, a background server blocked in `accept`, an un-joined worker
-waiting on I/O — is an *orphan*: no live process can ever wake it or read
-its result. `process:start` tears these orphans down (aborting them so
-their `defer`/`protect` cleanup runs and cancelling their in-flight I/O)
-rather than blocking forever waiting on work that can never complete.
-This mirrors `ev/run`'s program-completion teardown for the root
-scheduler (see [concurrency.md](concurrency.md)).
-
-```text
-(process:start (fn []
-  ## fire-and-forget background server; the body never joins or stops it
-  (ev/spawn (fn [] (protect (http2:serve listener handler))))
-  nil))   ## body returns → server sub-fiber is orphaned and torn down
-```
-
-A sub-fiber the body **joins** (`ev/join`) is not an orphan: the process
-stays alive until the join returns, so the sub-fiber completes first.
-
-## Forwarded I/O and the parent scheduler
-
-A process scheduler owns no I/O backend. It runs inside one fiber of its
-parent scheduler, the scheduler that runs the code which called
-`process:start` or `process:run`. The parent need not be the root. An I/O
-request from a process — or from one of its sub-fibers — is *forwarded*: the
-process scheduler hands the request up, the parent submits it, and the
-completion comes back down.
-
-The parent can only deliver a completion while the process scheduler is
-suspended. So the process scheduler yields to its parent whenever every ready
-process is merely refueling after fuel preemption. Without that yield, a
-process that computes without pause holds the parent off and no completion
-ever arrives.
-
-The yield is bounded, and a ready process always gets to run again. The
-scheduler never blocks until a forwarded completion arrives while a
-process can still make progress, because the completion can *depend* on
-that progress: an h2 client sub-fiber parked in `read` is waiting for the
-request its own process has not finished sending. A process that never
-gets to finish sending it would wait forever.
-
-```text
-(process:start (fn []
-  ## The sleeper's completion is 30 s away; the loop below must not wait
-  ## for it. Both finish, and the process ends as soon as the loop does.
-  (let [sleeper (ev/spawn (fn [] (ev/sleep 30)))]
-    (each i in (range 0 20000) (compute i))
-    (ev/abort sleeper))))
-```
-
-## Nested schedulers
-
-Schedulers nest. A process can call `process:start` itself, and the outer
-process scheduler is then the parent of the one it starts. The outer scheduler
-relays each I/O request up to its own parent and each completion back down.
-A request therefore crosses every scheduler between the process that made it
-and the one that submits it. Each process scheduler keeps its own clock, so a
-timer in the inner scheduler counts the inner scheduler's ticks.
-
-When a process that runs a nested scheduler exits, its relayed I/O is cancelled
-like any other I/O it had in flight.
-
-```lisp
-(def process ((import "std/process")))
-
-(process:start (fn []
-  (let [me (process:self)]
-    (process:spawn (fn []
-      (process:start (fn []
-        (ev/sleep 0.001)
-        (process:recv-timeout 5)))
-      (process:send me :inner-done)))
-    (assert (= (process:recv) :inner-done)
-            "a scheduler inside a process does its I/O and finishes"))))
-```
-
-
-# Process API reference
-
-## Core
+### Core
 
 | Function | Description |
 |----------|-------------|
@@ -431,7 +334,7 @@ like any other I/O it had in flight.
 | `recv-match pred` | Receive first matching message |
 | `recv-timeout ticks` | Receive with timeout |
 
-## Links and monitors
+### Links and monitors
 
 | Function | Description |
 |----------|-------------|
@@ -442,7 +345,7 @@ like any other I/O it had in flight.
 | `trap-exit flag` | Catch linked exits as messages |
 | `exit pid reason` | Send an exit signal to a process |
 
-## Registration
+### Registration
 
 | Function | Description |
 |----------|-------------|
@@ -451,7 +354,7 @@ like any other I/O it had in flight.
 | `whereis name` | Look up PID by name |
 | `send-named name msg` | Send to registered name |
 
-## Timers
+### Timers
 
 | Function | Description |
 |----------|-------------|
@@ -459,7 +362,7 @@ like any other I/O it had in flight.
 | `send-after ticks pid msg` | Delayed message delivery |
 | `cancel-timer ref` | Cancel a pending timer |
 
-## Process dictionary
+### Process dictionary
 
 | Function | Description |
 |----------|-------------|
@@ -467,18 +370,16 @@ like any other I/O it had in flight.
 | `get-dict key` | Retrieve value |
 | `erase-dict key` | Remove key, returns old |
 
-## External API
+### External API
 
 | Function | Description |
 |----------|-------------|
 | `process-info sched pid` | Query process state from outside |
 | `inject sched pid msg` | Send message from outside scheduler |
 
-
----
-
 ## See also
 
+- [process-scheduler.md](process-scheduler.md) — sub-fibers, forwarded I/O and nested schedulers
 - [behaviors.md](behaviors.md) — GenServer, Actor, Task, EventManager
 - [supervisor.md](supervisor.md) — Supervisor
 - [concurrency.md](concurrency.md) — lower-level ev/spawn, ev/join

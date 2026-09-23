@@ -230,6 +230,10 @@ subprocess under a supervisor. The child process spawns the subprocess and
 blocks on `subprocess/wait`. A non-zero exit code crashes the child, so the
 supervisor restarts it.
 
+While every process waits on I/O, the clock advances one tick per millisecond
+(see [processes.md](processes.md)). For children that spend their lives in
+`subprocess/wait`, `:max-ticks` is therefore close to a window in milliseconds.
+
 ```text
 (process:supervisor-start-link
   [(process:make-subprocess-child :nginx "/usr/sbin/nginx" ["-g" "daemon off;"])
@@ -237,7 +241,7 @@ supervisor restarts it.
      :restart :transient)]
   :name :daemon-sup
   :max-restarts 5
-  :max-ticks 10
+  :max-ticks 60000
   :logger (fn [event] (println "daemon-sup:" event)))
 ```
 

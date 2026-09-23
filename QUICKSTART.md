@@ -78,6 +78,7 @@ make smoke                 # run all tests (~30 min on the release binary)
 | [embedding](docs/embedding.md) | Using Elle as a library |
 | [regions](docs/regions.md) | Region-based memory: per-region RC, `IncrefRegion`/`DecrefRegion`, merging |
 | [processes](docs/processes.md) | Erlang-style processes: mailboxes, links, monitors |
+| [process scheduler](docs/process-scheduler.md) | Sub-fibers, forwarded I/O and nested schedulers inside processes |
 | [behaviors](docs/behaviors.md) | GenServer, Actor, Task, EventManager |
 | [supervisor](docs/supervisor.md) | Supervisors: child specs, restart strategies, supervised subprocesses |
 

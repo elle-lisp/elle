@@ -181,11 +181,11 @@ On top of the core process API, the module provides:
       _ nil))))
 ```
 
-See [processes.md](processes.md) for the core API — mailboxes, links, monitors,
-registration, and structured concurrency inside processes. See
-[behaviors.md](behaviors.md) for GenServer, Actor, Task and EventManager, and
-[supervisor.md](supervisor.md) for restart strategies, supervisor logging, and
-supervised subprocesses.
+See [processes.md](processes.md) for the core API — mailboxes, links, monitors
+and registration — and [process-scheduler.md](process-scheduler.md) for
+structured concurrency inside processes. See [behaviors.md](behaviors.md) for
+GenServer, Actor, Task and EventManager, and [supervisor.md](supervisor.md) for
+restart strategies, supervisor logging, and supervised subprocesses.
 
 ---
 
