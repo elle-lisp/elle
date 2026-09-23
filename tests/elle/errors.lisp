@@ -1,7 +1,6 @@
 (elle/epoch 12)
-# tests/elle/errors.lisp
-# Smoke-tests that specific error keywords are produced.
-# Each assert-err-kind call verifies the :error field keyword.
+# audited: 2026-09-22
+# Each error kind a primitive raises arrives in the :error field protect returns.
 
 
 # ── argument-error ───────────────────────────────────────────────────────────
@@ -59,9 +58,8 @@
 # error (SIG_ERROR).  It cannot be intercepted by protect, silence, or signal
 # masks.  The script simply terminates with exit code 1 and an error message.
 #
-# Testing this requires running a separate elle process (see Rust integration
-# tests).  The deeply-recursive stdlib functions (filter, map, etc.) are tested
-# with large lists in functional.lisp — those tests pass because the functions
-# are now tail-recursive and stay within the call-depth limit.
+# Testing this requires running a separate elle process: the recursions that
+# reach the depth cap and the native-stack reserve are in
+# tests/integration/deep_recursion.rs.
 # ── internal-error (gensym without symbol table) — not easily testable in Elle
 # Skip: requires running without symbol table context.
