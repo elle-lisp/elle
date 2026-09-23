@@ -1,6 +1,6 @@
 # The audit queue
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-23 -->
 
 Every file carries the day it last met the documentation policy, and the queue
 names what to read next by what a stale file costs.
@@ -109,18 +109,27 @@ A generated file is exempt because nobody audits its content — its generator i
 the thing that gets audited. An `AGENTS.md` is exempt when it carries the
 marker [the generator](agents-index.md) writes, and queued when it does not.
 
-[The Makefile](../../Makefile) is exempt, and it is the only file exempted by
-name. Everything else in the queue is read whole by somebody: a document off an
-index, a source file off a call site. Nobody reads the Makefile that way. `make
-help` is how a reader finds an action, and the `##` line beside a target is what
-they read, so a reading budget over hundreds of lines of recipe measures a
-distance no reader travels.
+[The Makefile](../../Makefile) and [the standard library](../../src/stdlib.lisp)
+are exempt, and they are the only repository files exempted by name. Everything
+else in the queue is read whole by somebody: a document off an index, a source
+file off a call site. Nobody reads these two that way:
 
-Leaving it queued also deadlocks it. The gate demands today's stamp on a staged
-file; the policy forbids a stamp over a standing violation; and the Makefile is
-past the 500-line cap with no way under it. So every change to it fails the
-gate, and stamping it fails the budget check in `tests/integration/prose.rs`
-instead.
+- `make help` is how a reader finds an action, and the `##` line beside a
+  target is what they read.
+- `(doc name)` is how a reader finds a standard-library function, and the
+  docstring is what they read.
+
+A reading budget over hundreds of lines of recipe, or thousands of lines of
+definitions, measures a distance no reader travels.
+
+Leaving either one queued also deadlocks it. The gate demands today's stamp on
+a staged file, and the policy forbids a stamp over a standing violation. Both
+files are past the 500-line cap. So every change to one of them fails the gate,
+and stamping it fails the budget check in `tests/integration/prose.rs` instead.
+
+The exemption names the standard library's path, never its extension. Every
+other `.lisp` file stays queued: [the core](../../src/core.lisp), [the
+prelude](../../src/prelude.lisp), and every module under `lib/`.
 
 Exempting the name rather than the marker would drop every hand-written index
 out of the queue, including the root one, which is the most-read document in
