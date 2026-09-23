@@ -1,38 +1,34 @@
 (elle/epoch 12)
-## audited: 2026-09-21
+## audited: 2026-09-23
 ## tests/elle/region-capture-cell-loop-uaf.lisp
 ##
-## Regression: a `@`-mutable captured local DEFINED INSIDE a loop and
-## captured by a closure built in that loop must survive every iteration.
+## A `@`-mutable captured local DEFINED INSIDE a loop, and captured by a
+## closure built in that loop, must survive every iteration.
 ##
-## Root cause (closed): such a binding is materialized as a `populate_env`
-## env cell — a `StoreCapture` into a cell pre-allocated from
-## `capture_locals_mask`, NOT a compiled `MakeCaptureCell`. The cell box is
-## minted EXACTLY ONCE per activation (populate_env runs once), regardless of
-## the loop the `def` sits in; re-executing the `def` each iteration only
-## re-stores the cell's content. But the cell box's `DecrefCellRegion` was
-## placed at the binding's last use, which — the only use being the in-loop
-## capture — sits inside the loop body, so it fired every iteration. For a
-## closure called in place and dying within the iteration, each iteration nets
-## the box region -1 (closure capture-incref +1, closure free cascade -1,
-## per-iteration DecrefCellRegion -1). The box, allocated once, was freed at
-## the end of iteration 1; iteration 2 read the freed-and-recycled cell — a
-## use-after-free (`as_capture_cell` tag/object mismatch under the plain VM, a
-## cascade free under `--trace=guardfree`).
+## The trap: such a binding is a `populate_env` env cell — a `StoreCapture`
+## into a cell pre-allocated from `capture_locals_mask`, not a compiled
+## `MakeCaptureCell`. The box is minted once per activation, whatever loop the
+## `def` sits in; re-running the `def` only re-stores the box's content. The
+## binding's last use is the in-loop capture, so a release anchored there fires
+## on every iteration. For a closure called in place, each iteration then nets
+## the box -1 (the capture's incref +1, the closure's free cascade -1, the
+## release -1): the box is freed at the end of iteration 1, and iteration 2
+## reads a freed and recycled cell (an `as_capture_cell` tag mismatch under the
+## plain VM, a cascade free under `--trace=guardfree`).
 ##
-## The fix hoists a cell-release region's `decref_point` to the OUTERMOST
-## enclosing While/Loop node (`hoist_cell_release_past_loops`), which the
-## lowerer emits AFTER the loop — once per activation, matching the once-per-
-## activation populate_env allocation. See docs/impl/region/cells.md "Env
-## cells in loops: release once per activation, not per iteration".
+## So a cell release's `decref_point` moves to the OUTERMOST enclosing
+## While/Loop node (`post_loop_placement`, src/hir/region/infer/analyze/decref.rs),
+## which the lowerer emits AFTER the loop — once per activation, matching the
+## once-per-activation `populate_env` allocation. See docs/impl/region/cells.md
+## "Env cells in loops: release once per activation, not per iteration".
 ##
 ## The capture analogue NOTE in tests/elle/nested-loop-inner-invariant.lisp
 ## points here. Both single-loop and nested-loop shapes are covered.
 
 ## ── 1. single loop: mutable captured local, closure called in place ──────
 ## Minimal repro. `s` is `def @s` (mutable → env cell), captured by `cl`,
-## `cl` called and dropped within the iteration. With the bug the box was
-## freed after iteration 1 and iteration 2 faulted.
+## `cl` called and dropped within the iteration. A per-iteration release
+## frees the box after iteration 1, and iteration 2 faults.
 (defn single []
   (def @acc 0)
   (def @i 0)
@@ -46,10 +42,10 @@
         (concat "single-loop capture cell: expected 30, got " (string (single))))
 (println "  1. single-loop mutable captured local survived: ok")
 
-## ── 2. nested loops: binding bound BETWEEN the two loops (cap2.lisp) ─────
+## ── 2. nested loops: binding bound BETWEEN the two loops ──────────────────
 ## `s` is bound inside the OUTER loop, captured by a lambda built in the
 ## INNER loop. The box is alloc'd once per activation but `s` is re-bound
-## each outer iteration; the in-inner-loop release fired (outer×inner) times.
+## each outer iteration; an in-inner-loop release would fire (outer×inner) times.
 (defn nested []
   (def @oi 0)
   (def @acc 0)
@@ -64,7 +60,7 @@
   acc)  ## 2 outer × 3 inner × (get s 0)=10  =  60
 (assert (= (nested) 60)
         (concat "nested-loop capture cell: expected 60, got " (string (nested))))
-(println "  2. nested-loop capture cell (cap2 shape) survived: ok")
+(println "  2. nested-loop capture cell survived: ok")
 
 ## ── 3. closure reads the CURRENT iteration's content ────────────────────
 ## The box is reused across iterations (one env cell), so the closure must

@@ -1,6 +1,6 @@
 # fiberheap
 
-<!-- audited: 2026-09-10 -->
+<!-- audited: 2026-09-22 -->
 
 The per-VM heap: the physical region allocator (docs/impl/region/model.md). One
 `FiberHeap` per VM, shared by all of that VM's fibers; every allocation names its
@@ -39,7 +39,8 @@ heap and region explicitly through `arena`.
 | `regionpool.rs` | `RegionPool`: dual-ended pages, object and data cursors, page claim and release |
 | `regionpool/header.rs` | The 16-byte page header: region id, `(generation, store)` stamp, self-validating size tag, and the masked walk that finds a base from any pointer inside the page |
 | `regionpool/introspect.rs` | `find_object_cross_refs` content scan (cascade + diagnostics) |
-| `pagepool.rs` | `PagePool`: per-thread mmap page cache by size class; the `PageDirty` release-time body reset; live traffic counters (`arena/page-claims`); guardfree leak hook; file-backed (hydrated image) pages bypass the cache — their release is `munmap` |
+| `pagepool.rs` | `PagePool`: per-thread mmap page cache by size class; the `PageDirty` spans a `--trace=scrub` release blanks; live traffic counters (`arena/page-claims`); guardfree leak hook; file-backed (hydrated image) pages bypass the cache — their release is `munmap` |
+| `pagepool/page.rs` | `MmapPage`: a self-aligned anonymous or file-backed mapping, and the process-wide `mapped_bytes` gauge |
 | `regionstore/hydrate.rs` | Install a hydrated image region: adopt mapped pages, rebuild object bookkeeping from the image's index (docs/impl/image.md § Hydration) |
 | `freelog.rs` | `--trace=free`/`freebt` free-log; guardfree arming |
 | `census.rs` | `--trace=census` post-boot heap census: per-tag histogram, sealing classification, relocation-slot counts (docs/impl/image/sealing.md) |
@@ -89,8 +90,9 @@ bypasses the check via the generation-blind `region_of_page_ptr`.
    reserved (never minted). Minting starts at 2, so every live region is mortal
    and RC-reclaimable.
 6. **The page body belongs to the region, the header to the pool.**
-   `PagePool::claim` hands out a page whose body is zero and does nothing to
-   make it so — `release` blanked the spans the dying region wrote, and left
-   offset 0 alone. So a claim is a free-list pop, and a page waiting in the
-   cache still carries the stamp invariant 4 depends on. See
+   `PagePool::claim` hands out a recycled page untouched: its body holds what
+   the last region wrote, and the claimant writes every slot before anything
+   reads it. Only `--trace=scrub` blanks the spans a dying region wrote, and it
+   leaves offset 0 alone. So a claim is a free-list pop, and a page waiting in
+   the cache still carries the stamp invariant 4 depends on. See
    docs/impl/region/model.md § "Page recycling".

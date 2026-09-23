@@ -1,32 +1,25 @@
 (elle/epoch 12)
-## tests/elle/region-fiber-capture-cell-resume-uaf.lisp
-##
-## docs/impl/region/model.md Rule 4/5 + "Two id-spaces": a captured, mutated local held by
-## a generator fiber across a `yield` is materialized as a per-value CaptureCell
-## (`populate_env`), released ONCE by a `DecrefCellRegion` at the binding's last
-## use. The region solver must give such a binding EXACTLY ONE cell-release
-## region — one `DecrefCellRegion`. Two would double-free the cell's region.
-##
-## Root cause (closed): `try_inline_call` (src/hir/regions.rs) re-walks an
-## inlined callee's body to discover cross-region edges. When the callee returns
-## a fiber whose body has a captured mutable local, that re-walk reached the
-## nested fiber-body lambda's `(var …)` Define a SECOND time and
-## `env_cell_placeholder` minted a SECOND cell-release region for the SAME
-## binding. Two cell-release regions sharing one `decref_point` lowered to TWO
-## `DecrefCellRegion` for one cell — a double-free of the CaptureCell's region on
-## resume. It surfaces as a `DecrefRegion(N) but region was never
-## alloc_in_region'd (or already freed)` phantom/double-free abort, or a torn
-## CaptureCell read under `--trace=guardfree`.
-##
-## This is the minimized, harness-free witness of the `elle test` corpus abort:
-## the runner's scheduled per-file thunks are generators with captured mutable
-## state, and `concat`/array churn between suspend and resume recycled the
-## double-freed region id, turning the latent double-free into a SIGSEGV.
-##
-## RED before the fix: `(make-counter …)` is inlined at its call site, the fiber
-## body's captured `count` gets two `DecrefCellRegion`s, and the SECOND resume
-## double-frees `count`'s region → abort. GREEN once `env_cell_placeholder` is
-## idempotent per binding (one cell-release region, one `DecrefCellRegion`).
+# audited: 2026-09-23
+# A captured mutable local a generator holds across yields is released exactly once.
+# docs/impl/region/cells.md
+#
+# A captured, mutated local held by a generator fiber across a `yield` is a
+# per-value CaptureCell (`populate_env`), released ONCE by a `DecrefCellRegion`
+# at the binding's last use. The region solver gives such a binding EXACTLY ONE
+# cell-release region.
+#
+# THE TRAP. `try_inline_call` (src/hir/region/infer/walk/inline.rs) re-walks an
+# inlined callee's body to collect cross-region edges. When the callee returns a
+# fiber whose body has a captured mutable local, the re-walk reaches the nested
+# fiber-body lambda's `(var …)` Define a SECOND time. `env_cell_placeholder`
+# (src/hir/region/infer/placeholder.rs) is idempotent per binding for that
+# reason. Counterfactual: a second mint gives the binding two cell-release
+# regions sharing one `decref_point`, which lower to TWO `DecrefCellRegion` for
+# one cell. The SECOND resume then double-frees `count`'s region: an abort, or a
+# torn CaptureCell read under `--trace=guardfree`.
+#
+# The `elle test` runner's scheduled per-file thunks are generators with
+# captured mutable state, so the corpus runner itself has this shape.
 
 ## A generator defined INSIDE a function, so its call site inlines the body and
 ## re-walks the nested fiber-body lambda. `count` is a mutable local captured AND

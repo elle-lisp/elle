@@ -2,9 +2,9 @@
 
 <!-- audited: 2026-09-23 -->
 
-[lib/process.lisp](../lib/process.lisp) provides Erlang-style concurrent processes built on
-Elle's fiber scheduler. Processes have mailboxes, links, monitors, named
-registration, and fuel-based preemption.
+[lib/process.lisp](../lib/process.lisp) provides Erlang-style concurrent
+processes built on Elle's fiber scheduler. Processes have mailboxes, links,
+monitors, named registration, and fuel-based preemption.
 
 The callback-driven roles built on that model — GenServer, Actor, Task and
 EventManager — are in [behaviors.md](behaviors.md), and the supervisor that
@@ -23,8 +23,6 @@ process, PID 0. It blocks until no process can run again and returns the
 scheduler.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (println "hello from process 0")))
 ```
@@ -38,8 +36,6 @@ returns. While PID 0 itself is one of them, nothing can end the program, and
 `process:start` raises `{:error :deadlock}`.
 
 ```lisp
-(def process ((import "std/process")))
-
 ## PID 0 returns while the process it linked waits in recv.
 (process:start (fn []
   (process:spawn-link (fn [] (process:recv)))
@@ -58,8 +54,6 @@ these, `process:start` raises `{:error :process-error :reason r}` once the
 scheduler stops, where `r` is the exit reason as a string.
 
 ```lisp
-(def process ((import "std/process")))
-
 (let [[ok? err] (protect (process:start (fn []
                   (process:spawn-link (fn [] (error {:error :boom :message "crash"})))
                   (process:recv))))]
@@ -74,9 +68,11 @@ a process scheduler forwards its I/O to its parent scheduler (see
 
 Use `process:run` when you need a pre-configured or shared scheduler:
 
-```text
+```lisp
+(def @ran-on-sched false)
 (def sched (process:make-scheduler :fuel 500))
-(process:run sched (fn [] (println "on existing scheduler")))
+(process:run sched (fn [] (assign ran-on-sched true)))
+(assert ran-on-sched "the closure ran as a process on the existing scheduler")
 ```
 
 ## Sending and receiving messages
@@ -85,8 +81,6 @@ Every process has a mailbox. `send` delivers a message; `recv` blocks
 until one arrives.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (let [me (process:self)]
     (process:send me :hello)
@@ -100,8 +94,6 @@ parent (crash propagation). `spawn-monitor` monitors without linking
 (death notification without crashing the parent).
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (let* [me (process:self)
          peer (process:spawn (fn []
@@ -118,8 +110,6 @@ parent (crash propagation). `spawn-monitor` monitors without linking
 matches, leaving non-matching messages in the mailbox in order.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (let [me (process:self)]
     (process:send me :a)
@@ -136,8 +126,6 @@ matches, leaving non-matching messages in the mailbox in order.
 given number of scheduler ticks.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (assert (= (process:recv-timeout 1) :timeout) "timed out")))
 ```
@@ -154,8 +142,6 @@ When no process is ready, the scheduler waits, and the clock counts the wait:
   for each whole millisecond of the wait.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (let [before (process:now)]
     (process:recv-timeout 10)
@@ -165,8 +151,6 @@ When no process is ready, the scheduler waits, and the clock counts the wait:
 A timer therefore fires while another process waits on long I/O:
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (let [sleeper (process:spawn (fn [] (ev/sleep 30)))
         started (clock/monotonic)]
@@ -191,8 +175,6 @@ released, its monitors receive `:DOWN`, and its own links receive the signal
 in turn.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (process:trap-exit true)
   (let [child (process:spawn-link (fn []
@@ -206,8 +188,6 @@ A normal exit leaves a linked process running when that process does not trap
 exits:
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (let* [me (process:self)
          peer (process:spawn (fn []
@@ -231,11 +211,10 @@ exits receives `[:EXIT sender reason]`; any other target dies with the reason
 ## Monitors
 
 Monitors deliver a `[:DOWN ref pid reason]` message when the monitored
-process dies, without affecting the monitoring process.
+process dies, without affecting the monitoring process. A normal exit's
+reason is `[:normal value]`.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (let [[child-pid ref] (process:spawn-monitor (fn [] :done))]
     (match (process:recv)
@@ -251,8 +230,6 @@ process dies, without affecting the monitoring process.
 :noproc]` at once, so a monitor always ends in exactly one `:DOWN`.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (let [[pid _] (process:spawn-monitor (fn [] :done))]
     (process:recv)
@@ -269,8 +246,6 @@ Processes can register under a keyword name. `whereis` looks up PIDs
 by name; `send-named` sends to a registered name.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (let [me (process:self)]
     (process:spawn (fn []
@@ -292,13 +267,11 @@ Each process has a private key-value store. Useful for per-process
 configuration that doesn't belong in the main state.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (process:put-dict :counter 0)
-  (process:put-dict :counter 42)
+  (assert (= (process:put-dict :counter 42) 0) "put-dict answers the old value")
   (assert (= (process:get-dict :counter) 42) "dict works")
-  (process:erase-dict :counter)
+  (assert (= (process:erase-dict :counter) 42) "erase-dict answers the old value")
   (assert (nil? (process:get-dict :counter)) "erased")))
 ```
 
@@ -309,8 +282,6 @@ process gets preempted after exhausting its fuel, allowing other
 processes to run.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (let [me (process:self)]
     # Busy-looper gets preempted
@@ -322,19 +293,19 @@ processes to run.
   :fuel 100)
 ```
 
-## API reference
+## Process API reference
 
 ### Core
 
 | Function | Description |
 |----------|-------------|
-| `start init` | Create scheduler, run init as first process |
+| `start init` | Create scheduler, run init as first process (`:fuel`) |
 | `run sched init` | Run init on existing scheduler |
 | `make-scheduler` | Create scheduler (`:fuel`) |
 | `self` | Current process PID |
 | `spawn fn` | Start new process |
 | `spawn-link fn` | Start linked (crash propagation) |
-| `spawn-monitor fn` | Start monitored (death notification) |
+| `spawn-monitor fn` | Start monitored; returns `[pid ref]` |
 | `send pid msg` | Send message |
 | `recv` | Block until message arrives |
 | `recv-match pred` | Receive first matching message |
@@ -365,7 +336,7 @@ processes to run.
 | Function | Description |
 |----------|-------------|
 | `now` | The scheduler's clock, in ticks |
-| `send-after ticks pid msg` | Delayed message delivery |
+| `send-after ticks pid msg` | Delayed message delivery; returns a ref |
 | `cancel-timer ref` | Cancel a pending timer |
 
 ### Process dictionary

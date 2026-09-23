@@ -1,5 +1,6 @@
 (elle/epoch 12)
-# The return frontier is PER-PATH (docs/impl/region/mechanism.md § "The return
+# audited: 2026-09-23
+# The return frontier is PER-PATH (docs/impl/region/compensate.md § "The return
 # frontier is per-path").
 #
 # A region a function returns is the caller's to free — the return mint hands over
@@ -12,9 +13,10 @@
 # The value's single `decref_point` is its textually-last use, which lands in the
 # returning arm — so without a per-path compensating release on the sibling arm
 # nothing frees the region at all, and the free cascade that never runs strands
-# every member with it (a 3-element list costs 3 objects per call, a struct 1).
+# every member with it.
 #
-# Both faces are pinned here, because the fix must not become an over-free:
+# Both faces are pinned here, because the compensating release must not become an
+# over-free:
 #   LEAK face   — call each subject so the arm that does NOT carry the value out
 #                 is the one taken; the object count must stay bounded.
 #   UAF face    — call it so the value IS returned, then USE the result; the

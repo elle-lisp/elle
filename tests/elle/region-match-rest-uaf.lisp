@@ -1,34 +1,26 @@
 (elle/epoch 12)
-# Counterfactual: a `match` pattern binding that ALIASES into the scrutinee's
-# region — `(a & rest)` binds `rest` to a sublist sharing the subject list's
-# cells; `(h . t)`, an immutable-array element `[a b]`, an immutable-struct value
-# `{:k v}` likewise hand back a pointer co-located in the subject's region pages
-# (docs/impl/region/model.md § "RegionSlice contents share their object's region"). The
-# region solver's `Match` arm (src/hir/regions.rs) DISCARDED the scrutinee's
-# regions (`let _ = self.walk(value)`) and recorded every pattern binding with an
-# EMPTY `binding_regions`, so the subject region's `decref_point` was NOT extended
-# over uses of the bound alias. The subject region is then freed at the match's
-# own `decref_point` while the bound sublist/element is still live — use-after-free.
+# audited: 2026-09-23
+# A match pattern binding that aliases into the scrutinee keeps the scrutinee's region alive through its uses.
+# docs/impl/region/model.md
 #
-# This is the `match` sibling of the `Destructure` HIR node (`(def (a & r) …)`),
-# which DOES propagate the source's regions to its pattern bindings (regions.rs,
-# the `HirKind::Destructure` arm: "Destructured bindings may hold values that live
-# in the source's region(s) … Conservatively propagate the source's regions").
-# The fix makes the `Match` arm mirror `Destructure` exactly: union the
-# scrutinee's regions into each arm binding's `binding_regions`, so the subject
-# region's `decref_point` extends through every use of the bound alias and the
-# normal cross-region increfs fire on escape.
+# `(a & rest)` binds `rest` to a sublist sharing the subject list's cells;
+# `(h . t)`, an immutable-array element `[a b]` and an immutable-struct value
+# `{:k v}` likewise hand back a pointer into the subject's region pages. The
+# region solver's `Match` arm (src/hir/region/infer/walk/walkrest.rs) unions the
+# scrutinee's regions into each pattern binding's `binding_regions`, as its
+# `Destructure` arm does, so the subject region's `decref_point` extends through
+# every use of the bound alias.
 #
-# Mechanism (witnessed under `--trace=guardfree`, bisected to the match binding):
-#   free site: `DecrefValueRegion of list (runtime region N) @ <the match>`,
-#   the consumer then reads the freed sublist/element.
+# Counterfactual: a `Match` arm that records the bindings with EMPTY
+# `binding_regions` frees the subject region at the match's own `decref_point`
+# while the bound sublist or element is still live. Under `--trace=guardfree`
+# the consumer's read then faults.
 #
 # `length` is the consumer: it borrows the bound alias and returns an IMMEDIATE,
-# so the only region that can be freed under the borrow is the subject's — exactly
-# isolating the missing decref_point extension (mirrors region-array-element-uaf).
-# A fresh heap subject is built each iteration so an over-early free faults on the
-# next read. RED (SIGSEGV under guardfree) before the fix; GREEN once the solver
-# extends the subject region's lifetime over the bound alias.
+# so the only region that can be freed under the borrow is the subject's. That
+# isolates the `decref_point` extension, as region-array-element-uaf does. A
+# fresh heap subject is built each iteration so an over-early free faults on
+# the next read.
 
 # ── witnesses: aliasing pattern bindings consumed AFTER the match ──────────────
 # Each binds an alias into the scrutinee region, then `length`s it post-match.
@@ -65,7 +57,7 @@
             {:k v} v
             _ :fail)))
 
-# (f) the original advanced.lisp shape: a GUARD arm that returns `& rest`.
+# (f) a GUARD arm that returns `& rest`.
 (defn w_guard_rest ()
   (length (match (list 1 2 3)
             (a & rest) when
@@ -73,8 +65,8 @@
             _ :fail)))
 
 # ── controls: the SAME extraction via native `rest`/`first`/`get`, which DO the
-# pass-through retain (docs/impl/region/rules.md Rule 5). Correct NOW — bisection that the
-# defect is the match binding, not aliasing access in general.
+# pass-through retain (docs/impl/region/rules.md Rule 5). They separate the match
+# binding from aliasing access in general: a broken harness fails them too.
 (defn c_rest ()
   (length (rest (list 1 2 3))))
 (defn c_first ()
@@ -105,7 +97,7 @@
   (assign k (c_get))
   (assign i (%add i 1)))
 
-# Controls: native pass-through retains, correct now (harness sanity).
+# Controls: native pass-through retains (harness sanity).
 (assert (= g 2) "control: (rest list) tail mis-read (harness broken)")
 (assert (= h 2) "control: (first list) heap element mis-read (harness broken)")
 (assert (= k 2) "control: (get arr 0) element mis-read (harness broken)")
@@ -122,6 +114,6 @@
 (assert (= e 2)
         "imm-struct value alias over-released — subject region freed under the borrow")
 (assert (= f 2)
-        "guard-arm `& rest` alias over-released — the advanced.lisp UAF")
+        "guard-arm `& rest` alias over-released — subject region freed under the borrow")
 
 (println "region-match-rest-uaf: ok")

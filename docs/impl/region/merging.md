@@ -1,16 +1,18 @@
 # Merging
 
-Merging collapses two solver `Region`s onto **one** physical region: both
-allocations land in the same pages, and a single `DecrefRegion` frees them
-together. It is the one mechanism allowed to break "one region per value"
-(rules.md § "There are exactly two measures") — sound only when the merged
-values share a lifetime, which the predicate below pins.
+<!-- audited: 2026-09-23 -->
+
+Merging puts two solver regions in one physical region, freed by one `DecrefRegion`, when the two values share a lifetime.
+
+Both allocations land in the same pages. Merging is the one mechanism allowed
+to break "one region per value" ([rules.md](rules.md)) — sound only when the
+merged values share a lifetime, which the predicate below pins.
 
 The first merge is the **builder-idiom seed**: a freshly-built child aggregate
 merged into the **parent aggregate it is stored into**. The canonical shape is a
 nested `%pair` — `(%pair (%pair 1 2) 3)` — where the inner pair is the car of the
 outer. It is a down-payment on the forest's owned-subtree drop
-(ownership.md § "Adoption and subtree drop"): a fully-fresh nested literal collapses to one
+([ownership.md](ownership.md)): a fully-fresh nested literal collapses to one
 region, every car/cdr edge becomes intra-region, and the whole structure frees as
 a unit. This is **not** sibling page-amortization (two values with no edge between
 them) — that is a separate, later rider.
@@ -51,10 +53,13 @@ aggregate-store edge `(site, c, p)` in `cross_region_refs` satisfies all of:
    discarded / together-consumed nested literal) and widens cut by cut, the way the
    ownership inference does.
 6. **`p`'s free post-dominates `c`'s last use.** The merged region's single
-   `DecrefRegion`, at `region_data[p].decref_point`, must not precede `c`'s own last
-   *direct* use. Decided **structurally** over the scope tree
-   (`regions::postdom::drop_post_dominates`, `EmitMode::Merge`), not by `compute_order`
-   magnitude (adopt.md § "The lifetime obligation the root carries").
+   `DecrefRegion` must not precede `c`'s own last *direct* use. Decided
+   **structurally** over the scope tree
+   (`region::infer::postdom::drop_post_dominates`, `EmitMode::Merge`), not by
+   `compute_order` magnitude ([adopt.md](adopt.md)). The test reads each region's
+   `lifetime_point`, not its `decref_point`: where
+   [the branch-arm window](window.md) moved a release, the moved point says where
+   the release is emitted, not how long the value lives.
    Because `c` is `p`'s car/cdr stored *only* into it (conditions 1+4), containment pins
    `c`'s lifetime to `p`'s, so the loop-enclosure clause is **waived** — an in-loop nested
    literal still merges. ANF binds the parent's own value to a temp, so `p`'s
@@ -62,8 +67,8 @@ aggregate-store edge `(site, c, p)` in `cross_region_refs` satisfies all of:
    predicate's straight-line case admits that (`c` sequenced before `p` with no control
    node between them). A child *read after* the parent's death (an alias read past the
    build; the mutable-accumulator `(assign acc (%pair i acc))` lifetime in miniature) is
-   sequenced after `p`'s free and is refused. The old `ord(c) <= ord(p)` compare survives
-   only as a `#[cfg(debug_assertions)]` shadow.
+   sequenced after `p`'s free and is refused. The numeric compare `ord(c) <= ord(p)` is
+   only a `#[cfg(debug_assertions)]` echo of the structural verdict.
 
 The merge is recorded as a `child → parent` forest (`RegionInfo::merged_parent`;
 `merged_root` follows the chain, so a three-deep nest `(%pair (%pair (%pair …)))`
@@ -89,7 +94,7 @@ construction:
 - **The merged `child → parent` store edge is dropped.** Once both endpoints
   resolve to one slot the edge is an intra-region `R → R` self-edge whose
   `IncrefRegion(R)` the free-time cascade never balances (it skips self-references;
-  mechanism.md § "Self-edge elimination"). `emit_increfs_for` drops it. A merge
+  [mechanism.md](mechanism.md)). `emit_increfs_for` drops it. A merge
   *without* this drop leaks `R`; a child drop *without* the merge frees early —
   the two move together, which is why allocation-canonicalization, child-decref
   suppression, and self-edge elimination are one mechanism, not three.
@@ -102,7 +107,8 @@ stream is byte-identical to the one-region-per-value baseline.
 
 ## Runtime: the per-execution slot model and mint-or-reuse
 
-The hazard merging must resolve is the **per-execution slot model** (model.md § "The per-execution region model"): two alloc instructions (child, then parent) stamped
+The hazard merging must resolve is the **per-execution slot model**
+([model.md](model.md)): two alloc instructions (child, then parent) stamped
 with one shared static slot would each `runtime_region_for_alloc_slot`-mint a
 fresh physical region and overwrite the activation mapping — orphaning the child's
 region (the shared-slot leak class). The seed resolves it exactly as the model's
@@ -125,10 +131,8 @@ note anticipates:
 
 Per-iteration uniqueness in loops is preserved because that single `DecrefRegion`
 clears the slot (`take_runtime_region_for_drop_slot`) each iteration, so the next
-iteration's child mints fresh. The lowerer asserts, per merged slot, that exactly
-one `DecrefRegion` names it (`record_merged_slots`'s decref-dominance check) — a
-merge it cannot prove single-demised is never recorded, so the unmerged baseline
-(always legal) stands.
+iteration's child mints fresh. In a debug build, `record_merged_slots` asserts
+that exactly one `DecrefRegion` names each merged slot.
 
 Mint-or-reuse is what keeps the merge tree in **one** physical region; it is not
 what makes it leak-free. Even a tier that minted fresh for every member (a child

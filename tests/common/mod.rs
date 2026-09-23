@@ -1,8 +1,9 @@
-// audited: 2026-09-22
+// audited: 2026-09-23
 //! Shared test helpers: the canonical evals, the cached ones property tests
 //! use, and the scratch directory a test writes files under.
 //! It also holds the readers the repository's own tests share: the corpus, the
-//! Makefile, and the workflow files.
+//! Makefile, and the workflow files, and in `documents` the list of documents
+//! `make doctest` runs.
 //!
 //! tests/AGENTS.md
 //!
@@ -16,6 +17,8 @@
 
 use elle::runtime::{Runtime, RuntimeCore};
 use elle::{compile_file, eval_all, Value};
+
+pub mod documents;
 
 // ── Result inspection must outlive nothing ───────────────────────────────────
 //

@@ -1,6 +1,6 @@
 # Where a release is anchored
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-23 -->
 
 Where the solver anchors a release: what each binding form pins, and what a
 `break` does to the releases its jump passes over.
@@ -20,8 +20,8 @@ A release lands there only when the initializer is *itself* the region's
 `decref_point`, which is the unused-binding narrowing: nothing reads the bound name,
 so the value's last use is pulled back to where the value was made. `Let` and
 `Letrec` therefore route the init node through `deferred_decref_points` and emit its
-releases themselves, after the store (`tests/elle/region-unused-let-binding.lisp` is
-the pin).
+releases themselves, after the store
+([region-unused-let-binding.lisp](../../../tests/elle/region-unused-let-binding.lisp) is the pin).
 
 `Define` is the binder that must not be narrowed there in the first place, because
 **a `def` evaluates to what it bound**. Every other binding form's value is its
@@ -29,12 +29,13 @@ the pin).
 init, so it is live wherever the `def` is — handed to a callee, returned, bound to a
 second name, propagated out of a `begin` or a branch arm. The narrowing's floor for a
 `Define` is therefore the point the walk gave the `def` itself
-(`propagated_inits`, `hir/liveness/lastuse`): the enclosing consumer when there is
+(`propagated_inits`, [lastuse.rs](../../../src/hir/liveness/lastuse.rs)): the enclosing consumer when there is
 one, and the `Define` node when the `def`'s value is discarded — whose releases
 `lower_expr` emits after `lower_define` has stored. Narrowing below that frees the
 value under the expression it was handed to
-(`tests/elle/region-define-init-release-uaf.lisp`); leaving it at the init frees
-nothing (`tests/elle/region-define-init-release.lisp`).
+([region-define-init-release-uaf.lisp](../../../tests/elle/region-define-init-release-uaf.lisp));
+leaving it at the init frees nothing
+([region-define-init-release.lisp](../../../tests/elle/region-define-init-release.lisp)).
 
 So a `def`'s initializer region is released by the ordinary last-use mechanism,
 whatever it holds. This is what a cell-free self-recursive `def` rides — its closure
@@ -46,7 +47,7 @@ completed ([selfrec.md](../selfrec.md)).
 
 A `Var` read inside a `While`/`Loop` is extended to the loop node when the binding
 it names is bound **outside** that loop: the body re-reads it on every iteration,
-so its region has to outlive the loop (`hir/liveness/lastuse`). The premise is a
+so its region has to outlive the loop ([lastuse.rs](../../../src/hir/liveness/lastuse.rs)). The premise is a
 containment test — is the binding's **scope node** a descendant of the loop? — and
 it is only as good as the scope map is complete. A binder the walk does not record
 has no scope node at all, and an absent scope is read as *bound outside*.
@@ -81,10 +82,12 @@ the unused-binding narrowing (`compute_last_use`'s first phase pulls an init's l
 use back to the init itself when no bound name is read), shrinking a lifetime the
 `Match` node already states correctly.
 
-Pinned by `tests/elle/region-match-bind-loop.lisp` (the reclamation, with the
-arm-taken, arm-not-taken, nested-loop and guard faces driven as rows) and the
-`struct-match` probe in `tests/elle/oracle.lisp` (the per-op rate), with
-`tests/elle/region-match-bind-loop-uaf.lisp` as the soundness complement — a
+Pinned by [region-match-bind-loop.lisp](../../../tests/elle/region-match-bind-loop.lisp) (the
+reclamation, with the arm-taken, arm-not-taken, nested-loop and guard faces driven
+as rows) and the `struct-match` probe in [the branch probes](../../../tests/elle/probe/branch.lisp)
+(the per-op rate), with
+[region-match-bind-loop-uaf.lisp](../../../tests/elle/region-match-bind-loop-uaf.lisp) as the
+soundness complement — a
 pattern-bound projection stored, returned, broken out of the loop, captured, or
 carried across a yield must survive the per-iteration release.
 
@@ -130,7 +133,7 @@ rather than anything this shape adds:
   its own site.
 - **The destructure node**, as the base. A rest name nothing reads has no uses
   for the chain to extend over, and a region with no pin at all gets no release
-  emitted — which is the whole defect for the shape that provokes it most,
+  emitted — which is what strands the shape that provokes it most,
   `(let [[x y & r] a] x)`. Each placeholder is therefore pinned to the
   `Destructure` or `Match` node whose pattern binds it, the same base a
   pre-allocated capture cell takes from its `Begin`. Every pin is a max, so a
@@ -151,10 +154,10 @@ build, and the lowerer parks the n-th collection against it. A name is what the
 release is then carried OVER, and never what the region is found by — which is
 what gives a build no name reaches a route like any other.
 
-Pinned by `tests/elle/region-rest-pattern-slice.lisp` (the reclamation, with the
-flat pattern and the list rest as the discriminators that must already read
-zero), `regions::tests::patterns` (the placement, structurally), and
-`tests/elle/region-rest-pattern-slice-uaf.lisp` (the soundness complement — a
+Pinned by [region-rest-pattern-slice.lisp](../../../tests/elle/region-rest-pattern-slice.lisp) (the
+reclamation, with the flat pattern and the list rest as the discriminators that must
+already read zero), `region::infer::tests::patterns` (the placement, structurally), and
+[region-rest-pattern-slice-uaf.lisp](../../../tests/elle/region-rest-pattern-slice-uaf.lisp) (the soundness complement — a
 rest collection returned, stored, captured, carried across a yield, or read
 after the loop iteration that built it must survive the release). The pure
 pattern queries the two sides read are `hir::pattern::rest_tests`.
@@ -194,8 +197,8 @@ the pattern's. Where a holder is an operand of the body's frame-replacing tail
 call, the collection's release keeps its exemption and strands on the closure
 path, because the caller holds no counted reference on an element to move
 ([relocate.md](relocate.md)). The destructure keeps its release on every other
-path, so `(let [[x & [p q]] a] (f p q))` is the one nested shape still paying
-the old rate.
+path, so `(let [[x & [p q]] a] (f p q))` is the one nested shape that keeps the
+baseline rate.
 
 ### A wildcard rest builds nothing
 
@@ -218,18 +221,19 @@ lowering of a rest reads it — `lower_destructure`, and the sequential `match`
 fallback a suspending guard forces — so `[a & _]` builds nothing wherever it is
 written.
 
-The language-level half is `tests/elle/destructuring-rest-wildcard.lisp`: the
+The language-level half is
+[destructuring-rest-wildcard.lisp](../../../tests/elle/destructuring-rest-wildcard.lisp): the
 fixed names a `& _` pattern still binds, and the type error the skipped opcode
 must not take with it.
 
 Pinned by the `q`–`v`, `x` and `y` rows of
-`tests/elle/region-rest-pattern-slice.lisp` (the reclamation), its `u` and `w`
+[region-rest-pattern-slice.lisp](../../../tests/elle/region-rest-pattern-slice.lisp) (the reclamation), its `u` and `w`
 rows (the two baselines, each of which must read the FULL rate),
-`regions::tests::patterns` (what the solver records against the node),
+`region::infer::tests::patterns` (what the solver records against the node),
 `hir::pattern::rest_tests` (the three predicates both sides read),
 `lir::lower::tests::release::restpattern` (the parked slot and the tail-call
 placement, per slot), and rows 13 to 15 of
-`tests/elle/region-rest-pattern-slice-uaf.lisp` (the soundness complement — a
+[region-rest-pattern-slice-uaf.lisp](../../../tests/elle/region-rest-pattern-slice-uaf.lisp) (the soundness complement — a
 name the inner pattern binds, read after the destructure and handed to a tail
 call, must survive the release).
 
@@ -258,13 +262,13 @@ two compounding facts, neither of which the ordinary consuming-node treatment
 So the transfer is stated as two facts, both over structures the solver already
 holds:
 
-- **Region flow** (`hir/region/infer/walk`, the `Block`/`Break` arms): a `Block`'s
+- **Region flow** ([walk.rs](../../../src/hir/region/infer/walk.rs), the `Block`/`Break` arms): a `Block`'s
   result region set is the union of its fall-through value's regions and every
   targeting `break`'s value regions. A binding that names the block's value
   therefore names those regions, and the ordinary binding-chain `decref_point`
   extension carries the release past the binding's own last use — which is what
   keeps `(let [r (block … (break v) …)] (use r))` from freeing `v` under `use`.
-- **The break pin** (`regions/analyze/decref.rs`, the dual of `return_sites`):
+- **The break pin** ([decref.rs](../../../src/hir/region/infer/analyze/decref.rs), the dual of `return_sites`):
   each broken region's `decref_point` is extended to `last_use[block]` — the
   node that consumes the block's value, or the `Block` itself when nothing does.
   The lowerer emits a node's decrefs *after* it, and for the `Block` that is
@@ -277,11 +281,11 @@ site. On a path that did not run the break, the value-route reloads a slot that
 still holds `nil` and the release no-ops — the same nil-stamp discipline the
 branch-union release relies on.
 
-Pinned here: `tests/elle/region-break-transfer.lisp` (the reclamation), the
-`break-value*` probes in `tests/elle/oracle.lisp` (the rates),
-`regions::tests::blocks` (the placement, structurally), and
-`region-break-transfer-uaf.lisp` (the soundness complement — a value broken out
-and read afterwards, stored, or returned must survive).
+Pinned here: [region-break-transfer.lisp](../../../tests/elle/region-break-transfer.lisp) (the
+reclamation), the `break-value*` probes in [the branch probes](../../../tests/elle/probe/branch.lisp)
+(the rates), `region::infer::tests::blocks` (the placement, structurally), and
+[region-break-transfer-uaf.lisp](../../../tests/elle/region-break-transfer-uaf.lisp) (the soundness
+complement — a value broken out and read afterwards, stored, or returned must survive).
 
 ### A break out of a TAIL block carries the return mint
 
@@ -293,8 +297,9 @@ caller's own `DecrefValueRegion` consumes another. Only the return mint balances
 that — the same mint any other returned value gets.
 
 Both passes that decide "tail position" must therefore agree that a `break`
-targeting a tail block is in it. `mark_tail_calls` and `wrap_tail_returns`
-(`hir/return_incref.rs`) each thread a `tail_blocks` set: a `Block` in tail
+targeting a tail block is in it. `mark_tail_calls`
+([tailcall.rs](../../../src/hir/tailcall.rs)) and `wrap_tail_returns`
+([return_incref.rs](../../../src/hir/return_incref.rs)) each thread a `tail_blocks` set: a `Block` in tail
 position adds its own id, and a `Break` whose target is in that set walks its
 value as a tail value — marking a call there `is_tail` (whose callee-side retain
 propagates) or, for anything else, wrapping it in `Return` (which mints).
@@ -405,10 +410,10 @@ is a point every path **reaches**:
 All three leave the conservative baseline (the release stays where it is,
 skipped on the break path), never a mis-free.
 
-Pinned by `tests/elle/region-break-skip.lisp` (the reclamation, with all three
-boundaries driven as rows that must stay bounded on their own releases),
-`regions::tests::blocks` (the placement and the boundaries, structurally), and
-`tests/elle/region-break-skip-uaf.lisp` (the soundness complement — a value in
+Pinned by [region-break-skip.lisp](../../../tests/elle/region-break-skip.lisp) (the reclamation,
+with all three boundaries driven as rows that must stay bounded on their own
+releases), `region::infer::tests::blocks` (the placement and the boundaries,
+structurally), and [region-break-skip-uaf.lisp](../../../tests/elle/region-break-skip-uaf.lisp) (the soundness complement — a value in
 the window that is read, stored, or returned after the block must survive the
 moved release).
 

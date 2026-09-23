@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-23 -->
 
 Elle is a Lisp. Source text becomes bytecode; bytecode runs on a VM.
 
@@ -14,7 +14,7 @@ You are an LLM. You will make mistakes. The test suite will catch them. Run the
 tests. Read the error messages. They are designed to be helpful.
 
 **`origin/main` is always green.** Every commit on main passes every test —
-Elle scripts, Rust tests, examples, documentation. This is enforced by CI
+Elle scripts, Rust tests, documentation examples. This is enforced by CI
 and a merge queue. If a test fails on your branch, your branch caused it.
 "Pre-existing defect" is not a valid explanation when main is green. Fix
 every failure before merging — no skip lists, no expected failures, no
@@ -69,7 +69,7 @@ bytecode. Error messages include file:line:col information.
   19 user-facing heap variants
 - **`primitives`** — Built-in functions. Run `(help)` in the REPL for a
   full list grouped by category. See [`docs/stdlib.md`](docs/stdlib.md).
-- **`stdlib`** — Standard library functions (`stdlib.lisp`, loaded at startup).
+- **`stdlib`** — Standard library functions ([src/stdlib.lisp](src/stdlib.lisp), loaded at startup).
   See [`docs/stdlib.md`](docs/stdlib.md).
 - **`arithmetic`** — Unified arithmetic operations (shared by VM and primitives)
 - **`signals`** — Signal type (`{ bits: SignalBits, propagates: u32 }`),
@@ -93,8 +93,9 @@ bytecode. Error messages include file:line:col information.
 - **`config`** — Global CLI configuration (parsed once at startup)
 
 **Backends:**
-- **`jit`** — JIT compilation via Cranelift; compiles silent and yielding
-  functions (rejects polymorphic); `JitRejectionInfo` tracks rejections
+- **`jit`** — JIT compilation via Cranelift; a function's signal does not
+  decide admission, and the JIT refuses `MakeClosure` and keyword collectors;
+  `JitRejectionInfo` tracks rejections
 - **`wasm`** — WASM backend via Wasmtime; full-module compilation
   (`--wasm=full`) or per-closure tiered compilation (`--wasm=N`).
   See [`docs/impl/wasm.md`](docs/impl/wasm.md).
@@ -118,11 +119,14 @@ bytecode. Error messages include file:line:col information.
 
 `Value` is a 16-byte tagged union `(tag: u64, payload: u64)`. See
 [`docs/impl/values.md`](docs/impl/values.md) for details. Key points:
-- Create via `Value::int()`, `Value::cons()`, etc. — not enum variants
-- Heap values use `Rc`; mutable values use `RefCell`
+- Create an immediate with `Value::int()`, `Value::float()` and the like. Build
+  a heap value through [src/value/build.rs](src/value/build.rs) or a
+  primitive's `ctx`, never from an enum variant
+- Heap values live in regions; a mutable container keeps its growable store
+  behind `Rc<RefCell>`
 - 19 user-facing heap variants carry a `traits: Value` field
-- 5 infrastructure types (`Float`, `NativeFn`, `LibHandle`, `FFISignature`,
-  `FFIType`) do not carry traits
+- 5 infrastructure variants (`Float`, `LibHandle`, `FFISignature`, `FFIType`,
+  `ClosureTemplate`) do not carry traits
 
 ## Signals and capabilities
 
@@ -162,7 +166,6 @@ Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabiliti
 | lib/http2.lisp | `lib/` | HTTP/2 client and server (h2 + h2c) |
 | lib/aws.lisp | `lib/` | Elle-native AWS client (SigV4, HTTPS) |
 | lib/gtk4.lisp | `lib/` | GTK4 declarative UI (widgets, events, CSS, WebKit) |
-| lib/sdl.lisp | `lib/` | SDL3 bindings for games/graphics |
 | embedding | `demos/embedding/` | Elle as a shared library (Rust + C hosts) |
 | myplugin | `demos/myplugin/` | The cookbook's worked plugin, built for the literate docs that load it |
 
@@ -174,14 +177,14 @@ Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabiliti
 | `src/io/` | I/O request types and backends |
 | `src/lsp/` | Language server protocol implementation |
 | `lib/` | Reusable Elle modules (SDL, HTTP, TLS, Redis, DNS, AWS, etc.) |
-| `stdlib.lisp` | Standard library (loaded at startup) |
+| `src/stdlib.lisp` | Standard library (loaded at startup) |
 | `tests/` | Unit, integration, property tests |
 | `benches/` | Criterion and IAI benchmarks |
 | `docs/` | Design documents and guides |
 | `demos/` | Demo applications (conway, docgen, mandelbrot, etc.) |
 | `plugins/` | Dynamically-loaded plugin crates (cdylib) |
-| `tools/` | MCP server, graph extractor, codemod scripts |
-| `site/` | Generated documentation site |
+| `tools/` | The AWS client generator and a codemod script |
+| `site/` | Generated documentation site (ignored by git) |
 
 ## Testing
 
@@ -273,8 +276,10 @@ Full list: [`docs/warts.md`](docs/warts.md).
 
 - [DOCUMENTATION.md](DOCUMENTATION.md) holds the naming and size rules. The
   exception it defers to: dispatch tables run to 800 lines.
-- `make doctest` runs every `.md` under `docs/` as a program, so a claim inside
-  a ` ```lisp ` fence is executed on every build.
+- `make doctest` runs README.md, QUICKSTART.md, INSTALL.md and every `.md`
+  under `lib/` and `docs/` as a program, so a claim inside a ` ```lisp ` fence
+  is executed on every build. No other fence holds Elle code
+  ([docs/README.md](docs/README.md)).
 - Write a Rust file's call-out as a `//!` module doc, under the `// audited:`
   stamp. `make qa` builds rustdoc, so `//!` is the one header form a reader
   meets both in the source and in the rendered documentation.
@@ -299,9 +304,10 @@ When you change a module's interface, update its AGENTS.md in the same change.
 
 1. Read [`QUICKSTART.md`](QUICKSTART.md) — the gotchas, and the index of the
    document that owns each language topic.
-2. Read `pipeline.rs` — it shows the full compilation flow in 50 lines.
-3. Read an example in `examples/` to understand the surface syntax.
-4. Read `value.rs` to understand runtime representation.
+2. Read [src/pipeline/mod.rs](src/pipeline/mod.rs) — it shows the full compilation flow
+   in 50 lines.
+3. Read a test under `tests/elle/` to see the surface syntax at work.
+4. Read [src/value/mod.rs](src/value/mod.rs) to understand runtime representation.
 5. Read a failing test to understand what's expected.
 6. Read [`docs/cookbook/index.md`](docs/cookbook/index.md) for step-by-step
    recipes for common cross-cutting changes.

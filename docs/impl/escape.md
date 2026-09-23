@@ -1,15 +1,18 @@
 # Escape analysis — the authoritative true-escape pass
 
+<!-- audited: 2026-09-23 -->
+
+Escape analysis decides, once for every consumer, whether a value outlives the activation it was born in.
+
 Escape is **one** analysis, computed over the canonical (functionalized + ANF)
-HIR, and it is authoritative: every consumer that needs to know whether a value
-outlives the activation it was born in reads it, rather than recomputing a proxy.
-It lives in [`src/hir/escape.rs`](../../src/hir/escape.rs) as `analyze_escape`,
+HIR, and it is authoritative: every consumer that needs the answer reads it,
+rather than recomputing a proxy. It lives in [`src/hir/escape.rs`](../../src/hir/escape.rs) as `analyze_escape`,
 producing an `EscapeInfo` fact-set.
 
 This is the keystone of the region forest: the property the forest classifies
 regions by — Owned (reclaimed by subtree drop) vs Shared (reference-counted) —
 *is* true escape, so computing it once, over the regularized IR, is building the
-forest's substrate at the front edge. The historical alternative — a **syntactic
+forest's substrate at the front edge. The alternative — a **syntactic
 proxy** (`is_captured`: "a free variable
 crosses a lexical function boundary"), computed early as a side-effect of name
 resolution — diverges from true escape exactly at the interesting cases (a
@@ -43,9 +46,7 @@ reason for the verdict:
   fiber frontiers answers `true` to both of the queries above. Read by the
   frame-held admission, whose whole question is whether the return facet is the sole
   refusal — in which case it is no refusal, since a tail callee either counts the
-  region or cannot mint against it
-  ([region/mechanism.md](region/mechanism.md) § "The callee's return mint, and why
-  the point owes it nothing").
+  region or cannot mint against it ([region/relocate.md](region/relocate.md)).
 
 ## The four facets
 
@@ -63,7 +64,7 @@ A value escapes its activation through any of four facets:
   seeded, and that value crosses to the joiner.
 - **store** — its value is stored into a longer-lived region, exactly the region
   solver's `cross_region_refs` edge `src=value-region → dst`. Two store sources,
-  both mirroring `regions/walk/walkrest.rs`: the allocating **intrinsics**
+  both mirroring [walkrest.rs](../../src/hir/region/infer/walk/walkrest.rs): the allocating **intrinsics**
   (`(%pair v …)` every arg, `(%array-push coll v)` arg 1, `(%put obj k v)` arg 2 —
   the value embeds in the fresh aggregate), and **native calls that declare a
   store** via their `RegionEffect` (read from the `CallClassification` the lowerer
@@ -80,7 +81,7 @@ A value escapes its activation through any of four facets:
   frontier facets above). Each escaping closure then propagates escape to every
   binding it captures, transitively. A closure that is captured but never crosses a
   frontier is called in place and escapes nothing, so the lexical proxy
-  `is_captured` seeds escape nowhere (precision-point-3, below).
+  `is_captured` seeds escape nowhere (precision point 4, below).
 - **fiber boundary** — a value handed across a fiber boundary escapes:
   - *yield/emit* — an `Emit` node's value is delivered to the resumer.
   - *terminal value* — the return facet (above).
@@ -114,8 +115,7 @@ store facet and capture by a closure that itself escapes. It exists because a
 consumer may care *who counts the second holder* rather than *whether one exists*:
 a containment escape hands the value to a holder the frame cannot see, while every
 fiber crossing counts a reference at its seam. The frame-held admission is that
-consumer ([region/mechanism.md](region/mechanism.md) § "A fiber crossing is a
-counted holder too").
+consumer ([region/window.md](region/window.md)).
 
 ## Interprocedural return transparency
 
@@ -123,7 +123,7 @@ The return facet is **interprocedural** for an *arg-returning* callee. A tail ca
 `(id y)` to a function that returns its parameter is region-transparent in that
 argument: the call yields whatever flowed into the arg, so `y` escapes when the
 call's result does. This mirrors the region solver's `try_inline_call`
-(`regions/walk.rs`), which re-walks an inlinable callee's body with its params
+([walk.rs](../../src/hir/region/infer/walk.rs)), which re-walks an inlinable callee's body with its params
 bound to the caller's arg regions.
 
 It is realized as an **arg-return summary** (`compute_arg_return`): per inlinable
@@ -141,7 +141,7 @@ corpus; bound the propagation depth if a real-corpus golden ever surfaces it.
 
 Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
 
-- **The region solver** projects the verdict onto regions in `regions::escape`
+- **The region solver** projects the verdict onto regions in `region::infer::escape`
   (`return_frontier_regions` / `shared_seed_regions`), through its own
   `alloc_region` / `binding_source_regions` maps — escape never sees a region.
   Four consumers read the projection or the atom facets directly:
@@ -150,8 +150,8 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
     which cannot be Owned);
   - the builder-idiom **merge** gate's not-returned check (`returned_regions` = the
     return frontier, together with the region capture-graph
-    (`regions::escape::captured_bindings`) for gate 5's sole-held reachability refusal
-    — [region/merging.md](region/merging.md) § Merging; storing the child into the parent
+    (`region::infer::escape::captured_bindings`) for gate 5's sole-held reachability refusal
+    — [region/merging.md](region/merging.md); storing the child into the parent
     is the *allowed* escape, so the seed reads the return facet, not the full set). The
     capture refusal is a *reachability* question the region forest answers from its own
     capture-graph, never the lexical proxy `is_captured` the solver is locked out of;
@@ -160,8 +160,7 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
     exclusion is **per-path**: escape marks the whole region returnable as soon as
     one path returns it, but on a sibling arm that never uses the value no mint
     fires and the caller receives nothing, so that arm still owes the release
-    ([region/mechanism.md](region/mechanism.md) § "The return frontier is
-    per-path");
+    ([region/compensate.md](region/compensate.md));
   - the reassign 1-slot-container gate's *not-returned* check
     (`binding_escapes_via_return`, per binding —
     [region/bindings.md](region/bindings.md); read per binding, never by projecting
@@ -170,7 +169,7 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
     that cell adopts the producer's reference, which the return also transfers,
     while a fn-local cell takes a counted reference of its own and so claims
     nothing the return needs;
-  - the **frame-held admission** (`regions::escape::frame_held_regions`) the
+  - the **frame-held admission** (`region::infer::escape::frame_held_regions`) the
     branch-arm release window and the lowerer's frame-exit release share: both make
     a release fire on a path where none fired before, so both must know this frame
     holds the region's one reference. What it needs is narrower than "escapes" — an
@@ -181,26 +180,24 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
     above, it does **not** consult the structural capture-graph, because a closure's
     hold on what it captures is a counted (or owning) edge rather than an uncounted
     borrow; capture by a closure escaping *beyond the return facet* is already an
-    escape facet ([region/mechanism.md](region/mechanism.md) § "Lexical capture is
-    not a second holder to fear"). The **fiber** facet rides along for the same
-    reason: the park's `EmitEscape` retain going out, the resume value's own mint
-    coming back, and `chan/send`'s send-site incref each count a reference before
-    this frame runs on ([region/mechanism.md](region/mechanism.md) § "A fiber
-    crossing is a counted holder too"). The **return** facet rides along rather than refusing: the
+    escape facet ([region/window.md](region/window.md)). The **fiber** facet rides
+    along for the same reason: the park's `EmitEscape` retain going out, the resume
+    value's own mint coming back, and `chan/send`'s send-site incref each count a
+    reference before this frame runs on ([region/window.md](region/window.md)). The
+    **return** facet rides along rather than refusing: the
     caller does read such a region afterwards, through the tail callee's return
     mint, but that callee reaches a value this frame owns as an operand or through
     its captured environment and by no other route, so it either counts the region
-    or cannot mint against it ([region/mechanism.md](region/mechanism.md) § "The
-    callee's return mint, and why the point owes it nothing"). It also refuses a
+    or cannot mint against it ([region/relocate.md](region/relocate.md)). It also refuses a
     **mutated** route, which is not an escape fact at all but the release-route one
     compensation makes — so it is asked of the one binding whose slot the release
     loads (the binding whose init allocated the region, or the parameter the
     prologue recorded), never of every holder, and an env cell's
     `DecrefCellRegion`, which names the box no `assign` repoints, is exempt
-    ([region/mechanism.md](region/mechanism.md) § "A mutated holder poisons its
-    value route, not its cell box");
-- **The lowerer** (`lir/lower`) reads `lambda_escapes_definition` /
-  `binding_escapes_activation` in `control/call.rs::tail_callee_defers_release`, the
+    ([region/window.md](region/window.md));
+- **The lowerer** ([src/lir/lower/](../../src/lir/lower/AGENTS.md)) reads
+  `lambda_escapes_definition` / `binding_escapes_activation` in
+  `tail_callee_defers_release` ([defer.rs](../../src/lir/lower/control/call/defer.rs)), the
   escape half of the per-call adopt decision (a per-call callee closure that dies
   at the call → the runtime supplies the stranded decref). Region-locality — does
   the callee have a per-call region demising here, vs a program-root/primitive —
@@ -214,15 +211,14 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
   return facet is admitted too, and for a reason of its own rather than the frame-exit
   release's: this release runs at the recursion's completion, *after* the callee's
   return mint, so there is no gap to span
-  ([selfrec.md](selfrec.md) § "The deferral's escape gate is the fiber frontier
-  alone"). Only the fiber facet hands the closure to a holder the compiler did not
+  ([selfrec.md](selfrec.md)). Only the fiber facet hands the closure to a holder the compiler did not
   place, so only it refuses.
 
 Two lowerer/HIR decisions deliberately **do not** read this analysis, because the
 question they answer is *ownership-location / mutation-sharing*, which is
 structural lexical capture, not true-escape:
 
-- `tail_arg_is_borrowed` (`lir/lower/control.rs`): a tail-arg is borrowed iff its
+- `tail_arg_is_borrowed` ([control.rs](../../src/lir/lower/control.rs)): a tail-arg is borrowed iff its
   binding is a captured upvalue (the env owns the capture-incref). This is an
   ownership-location question, and escape over-approximates it — a born-here value
   that flows to a tail *escapes* but is *owned* — so escape is the wrong input. It
@@ -241,14 +237,16 @@ A same-binding self-reference — a binding's own initializer lambda referencing
 binding across the lambda boundary, in the enclosing `letrec` SCC — is recorded by the
 analyzer as a first-class **`CaptureKind::Recursive`** (carrying the SCC-binding identity),
 distinct from a sibling/foreign capture's `Local`/`Capture`. Unlike a sibling capture, a
-self-edge does **not** mark the binding captured (`hir/arena.rs::mark_captured` is skipped
+self-edge does **not** mark the binding captured (`mark_captured` in
+[arena.rs](../../src/hir/arena.rs) is skipped
 for it), so a binding captured *only* by itself has `needs_capture() == false` — no cell —
 and its self-reference resolves to the currently-executing closure (`LoadSelf` in value
 position, a self-call re-dispatch in call position), never a cell load, making a
 self-recursive local `loop` RC-identical to a top-level recursive `defn`. It carries **no**
 escape authority either (the self-edge is inert in the escape fixpoint: a self-recursive
 binding's escape rides its binding-definition edge to its own lambda, so the self-capture
-edge only ever self-loops, contributing nothing — `analyze_escape`/`flow.rs` build
+edge only ever self-loops, contributing nothing — `analyze_escape` and
+[flow.rs](../../src/hir/escape/flow.rs) build
 `lambda_captures` by binding, never by kind). Its purpose is to let the lowerer resolve the
 self-reference to the executing closure from the classified fact instead of re-deriving the
 self-edge from a `current_function_binding` heuristic. A mutual member's *sibling* capture
@@ -260,9 +258,9 @@ These are the *structural-only* role of lexical capture, and the **only** roles
 left to `is_captured`: it feeds NO escape facet (the capture facet is flow-true —
 transitive `lambda_captures` propagation from genuine frontier seeds), and it is
 module-private with no getter, so no consumer can read it as escape-authority — the
-escape-authority defect is closed by construction, not by promise. The region pins
-under `tests/elle/region-*.lisp` are the canonical reference for what each of these
-decisions must preserve.
+escape-authority gap is closed by construction, not by promise. The `region-*.lisp`
+pins in [tests/elle](../../tests/elle/) are the canonical reference for what each of
+these decisions must preserve.
 
 ## Precision characteristics
 
@@ -291,30 +289,30 @@ unit test asserting escape's own spec.
    facet through the ordinary fixpoint. It is PRECISE, not "every read escapes": the
    contents are marked ONLY when the read result itself reaches a facet, so a container
    merely read/indexed with the result consumed locally keeps its Owned reclamation.
-3. **Lexical capture is not escape.** A value captured by a closure that is *called
+4. **Lexical capture is not escape.** A value captured by a closure that is *called
    in place* (never escapes) does not escape via capture — the capture facet marks it
    only when its capturing closure escapes, where `is_captured` marks every captured
    binding unconditionally. (A value the closure *returns* still return-escapes
    through the closure's own tail — a separate facet.)
-4. **Fiber boundary.** An emitted/sent value crosses to the resumer/receiver, so the
+5. **Fiber boundary.** An emitted/sent value crosses to the resumer/receiver, so the
    fiber facet marks it (and `fiber_frontier_sites` catches an atomless
    `(yield (%pair …))`). There is no compile-time RC edge at an `Emit` (the runtime
    incref in `handle_emit` keeps it alive) — the fiber crossing is purely escape's.
-5. **Native `Mixed`/`Unknown` clique is conservative.** A native declared `Mixed`
+6. **Native `Mixed`/`Unknown` clique is conservative.** A native declared `Mixed`
    (uncounted store, examined) or `Unknown` (unexamined — the default) marks every
    heap argument escaping. As imprecise as the declarations are honest; examining a
    primitive and declaring a tighter `RegionEffect` narrows it. The seed is the
    whole cost for a single-argument native, whose clique is empty in any case, so
    a `Mixed` declaration is read here as a store claim and nowhere else — which is
    why a native that stores nothing declares `Opaque`
-   ([region/effects.md](region/effects.md) § `Opaque`).
+   ([region/effects.md](region/effects.md)).
 
 ## Verification
 
 Escape is the authority, so it is pinned by its **own** spec, not by agreement with
 another analysis. Three layers:
 
-- **The unit tests** (`src/hir/escape/tests/`) assert each facet's discriminating
+- **The unit tests** ([src/hir/escape/tests/](../../src/hir/escape/tests/mod.rs)) assert each facet's discriminating
   behaviour directly: a returned value return-escapes; a stored value escapes its
   activation but is not returned; a value captured by a non-escaping closure does
   not escape; an emitted/sent value crosses the fiber frontier; an arg-returning
@@ -329,8 +327,9 @@ another analysis. Three layers:
   as a snapshot diff to review (the emitted RC may *tighten* as escape's precision
   lands; it must never coarsen or introduce a UAF/leak). The corpus is bounded
   because `compile/dumps` compiles each source twice and leaks regions (it OOMs a
-  full make-smoke run — [test-runner.md](../test-runner.md) § CAS asset capture).
-- **The region suite + `oracle.lisp`** prove the projection reclaims soundly: no UAF
+  full make-smoke run — [test-runner.md](../test-runner.md)).
+- **The region suite and the probes in
+  [tests/elle/probe/](../../tests/elle/probe/)** prove the projection reclaims soundly: no UAF
   (`--trace=guardfree` under the full stdlib) and no leak regression (every closed
   leak class stays closed).
 
@@ -348,6 +347,6 @@ cell layout, with no escape-authority. The capture *kind* has no ownership
 authority either: the forest's capture-adopt emit reloads an adopted captured
 value through whichever access path the kind implies (a binding slot for a direct
 local, the constructing function's environment for an upvalue or transitive
-capture — region/adopt.md § "The capture adopt"), so admission of a capture
+capture — [region/adopt.md](region/adopt.md)), so admission of a capture
 owner-edge is bounded by the subtree admission filters (decisively, the lifetime
 obligation), never by how the capture happens to be loaded.

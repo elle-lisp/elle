@@ -1,9 +1,10 @@
 (elle/epoch 12)
+# audited: 2026-09-23
 # Soundness complement of region-branch-arm-window.lisp: re-anchoring a release
 # out of a branch arm must not free anything early.
 #
 # The close moves a region's single release from inside one arm to the branch's
-# consuming node (docs/impl/region/mechanism.md § "A release inside one arm is
+# consuming node (docs/impl/region/window.md § "A release inside one arm is
 # not a release on the other arms"). Moving a release LATER can only over-keep —
 # but only while the frame holds the region alone when it runs, and only
 # while the anchor is a point the arm actually reaches. The ways that fails all
@@ -12,15 +13,14 @@
 # a closure / its caller, so a second holder exists the moved release must leave
 # standing — and where that holder crosses a frontier no counted edge covers, the
 # admission refuses the window outright; the arm re-allocates per iteration of a
-# nested loop, so
-# one release cannot cover N; the arm's releases belong to another frame; and the
-# arm parked a fiber that resolves the region through its own activation map after
-# the branch. A wrongly-admitted window frees a live region and the read below
-# faults.
+# nested loop, so one release cannot cover N; the arm's releases belong to another
+# frame; and the arm parked a fiber that resolves the region through its own
+# activation map after the branch. A wrongly-admitted window frees a live region
+# and the read below faults.
 #
 # One binding owns a region's release ROUTE — the one whose init allocated it — so
 # an arm that walks the subject with a reassigned CURSOR leaves that route alone and
-# the window admits the subject (docs/impl/region/mechanism.md § "A mutated holder
+# the window admits the subject (docs/impl/region/window.md § "A mutated holder
 # poisons its value route, not its cell box"). The cursor hands back values living
 # inside the subject's own region, so the moved release must still follow every read
 # of them; that pair is driven below on both arms, and beside the store shape the
@@ -29,7 +29,7 @@
 # A branch one of whose arms leaves through a frame-replacing callee is admitted
 # like any other — the relocation replicates the anchored release ahead of that
 # arm's call, or the exemption leaves it to the callee that took the argument over
-# (docs/impl/region/mechanism.md § "An arm that leaves through a callee takes a
+# (docs/impl/region/window.md § "An arm that leaves through a callee takes a
 # replica, not the anchor"). So the escape refusals are driven over that branch
 # shape too, since it reaches the admission by a path the others do not. That
 # narrowing asks which regions a value route can NAME, not which class they belong
@@ -44,7 +44,7 @@
 # funds nothing and therefore keeps the baseline route.
 #
 # An arm is a conditional POSITION, so a `cond`'s clause tests and an `and`/`or`
-# tail are arms too (docs/impl/region/mechanism.md § "An arm is a conditional
+# tail are arms too (docs/impl/region/window.md § "An arm is a conditional
 # position, not a syntactic arm body"). The `w-cond` / `w-or-short` witnesses drive
 # both sides of that decomposition with the subject read after the form, and
 # `w-cond-store` drives the escape refusal the same reading must still make.
@@ -138,7 +138,7 @@
 # the boundary is the loop's body, not the loop itself. The subject is read again
 # after the branch, so a release moved to the merge must still land behind that
 # read. Driven on both arms: the looping one, whose release moved, and the sibling
-# one, which now runs a release it never ran before.
+# one, which runs the moved release on a path the in-arm release never reached.
 (defn w-loop-read (v t)
   (%add (match t
           :a (length (first v))
@@ -168,9 +168,8 @@
 # (e4) a value BORN inside an arm, with the branch driven through a DIFFERENT arm.
 # The window must decline it: the allocation is what puts the value in a slot, so
 # on a path that skips the arm that slot was never stored and a release at the
-# merge would load whatever it holds and free that. The two rows either side —
-# `w-loop-read` above, whose arm only ALIASES a live-in value — are what the
-# distinction has to keep apart.
+# merge would load whatever it holds and free that. `w-loop-read` above, whose arm
+# only ALIASES a live-in value, is the row this distinction keeps apart from it.
 (defn w-born-in-arm (i t)
   (match t
     :a
@@ -183,7 +182,8 @@
 # which no `assign` repoints, so the window admits it — and the cursor's walk hands
 # back values living inside the subject's region, so a release moved to the merge
 # must still land behind the post-branch read. Driven on both arms: the walking one,
-# whose release moved, and the sibling one, which now runs a release it never ran.
+# whose release moved, and the sibling one, which runs the moved release on a path
+# the in-arm release never reached.
 (defn w-cursor (v t)
   (%add (match t
           :a (length (first v))
@@ -280,9 +280,9 @@
 # (h6) the same frame-exiting branch over a subject the BINDER allocated with an
 # inline `%`-opcode rather than a call result. The lowerer's default release names
 # such a region by id, and the window admits it on the route the binder recorded —
-# so the merge release now fires where a class reading emitted nothing, and what
-# must stand is the counted env edge the allocation funnel took when the closure was
-# built: that closure reads the subject AFTER the branch.
+# so the merge release fires where reading the region's class alone would emit
+# nothing, and what must stand is the counted env edge the allocation funnel took
+# when the closure was built: that closure reads the subject AFTER the branch.
 (defn w-binder-capture (v t)
   (let [w (%pair v nil)
         f (fn () (length (first (first w))))]
@@ -331,9 +331,9 @@
       acc
       (w-acc-walk (%sub i 1) (pair (string "w" i) acc)))))
 
-# (h6) the `cond` face: a clause TEST is a conditional position, so the subject's
+# (h8) the `cond` face: a clause TEST is a conditional position, so the subject's
 # release can sit in a test no path but the later clauses' reaches
-# (docs/impl/region/mechanism.md § "An arm is a conditional position, not a
+# (docs/impl/region/window.md § "An arm is a conditional position, not a
 # syntactic arm body"). The window anchors it on the form's merge, which must land
 # behind the post-`cond` read. The second test is always false, so driving t=0 takes
 # the first body and skips that test while any other t evaluates it and falls to the
@@ -344,7 +344,7 @@
           (%lt (length (first v)) 0) 2
           3) (length (first v))))
 
-# (h7) the escape refusal over the same form: the first clause's body stores the
+# (h9) the escape refusal over the same form: the first clause's body stores the
 # subject into a container outliving the frame, so the admission refuses the region
 # and the in-arm release stands. The read back out must find it.
 (defn w-cond-store (v t)
@@ -354,7 +354,7 @@
     3)
   (length (get sink (%sub (length sink) 1))))
 
-# (h8) the short-circuit face: `(or a b)` evaluates `b` only where `a` is falsy, so
+# (h10) the short-circuit face: `(or a b)` evaluates `b` only where `a` is falsy, so
 # the subject's release can sit in a position the truthy path never runs. Driven on
 # both paths, with the subject read after the form.
 (defn w-or-short (v t)
@@ -365,7 +365,7 @@
   (let [r (if c (first v) (last v))]
     (length r)))
 
-# ── controls: the same reads through a single arm — correct now ───────────────
+# ── controls: the same reads through a single arm ─────────────────────────────
 (defn c-plain (v)
   (length (first v)))
 

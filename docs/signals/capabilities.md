@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-22 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -10,15 +10,15 @@ parent can catch.
 
 `fiber/new` accepts `:deny` after the mask argument:
 
-```text
-# Deny IO — child can't call IO primitives
-(fiber/new body |:io :error| :deny |:io|)
+```lisp
+(def body (fn [] :done))
 
-# Deny IO and FFI
-(fiber/new body |:io :ffi :error| :deny |:io :ffi|)
+(def no-io (fiber/new body |:io :error| :deny |:io|))            # deny IO
+(def no-io-ffi (fiber/new body |:io :ffi :error| :deny |:io :ffi|))
+(def open (fiber/new body |:error|))                             # no restriction
 
-# No restrictions (default — unchanged existing API)
-(fiber/new body |:error|)
+(assert (not (contains? (fiber/caps no-io) :io)))
+(assert (contains? (fiber/caps open) :io))
 ```
 
 The mask (second argument) controls signal routing — what the parent
@@ -69,14 +69,14 @@ out to the scheduler. See [protocol.md](protocol.md).
 
 | Keyword | Bit | Effect when denied | Dispatch |
 |---------|-----|--------------------|----------|
-| `:error` | 0 | Blocks primitives that may error (~66% of all) | yes |
+| `:error` | 0 | Blocks every primitive that may error | yes |
 | `:yield` | 1 | Blocks cooperative suspension | yes |
 | `:debug` | 2 | Blocks breakpoints/tracing | yes |
 | `:ffi` | 4 | Blocks foreign function calls | no |
 | `:halt` | 8 | Blocks VM termination | yes |
 | `:io` | 9 | Blocks operations that reach the I/O scheduler | yes |
 | `:exec` | 11 | Blocks subprocess execution | no |
-| `:gpu` | 15 | Blocks compiling a closure to SPIR-V (`git`) | no |
+| `:gpu` | 15 | Blocks `git`, which compiles a closure to SPIR-V, and calls to a closure it compiled | no |
 | `:os-signal` | 16 | Blocks POSIX signal send/raise | no |
 | `:fs` | 17 | Blocks filesystem access | no |
 
@@ -94,8 +94,9 @@ reach the scheduler, so they carry no `:io`, and denying `:io` never
 stopped them. `:fs` is the bit that means "resolves a filesystem path",
 and it is the one to deny to close the disk off:
 
-```text
-(fiber/new body |:error| :deny |:fs|)
+```lisp
+(let [f (fiber/new (fn [] (file/read "/etc/hostname")) |:fs :error| :deny |:fs|)]
+  (assert (= (get (fiber/resume f) :denied) |:fs|)))
 ```
 
 The two bits are independent on purpose. A worker can keep `:io` — so it
@@ -122,12 +123,13 @@ Instead, the fiber emits a signal with:
 - **Bits**: the blocked capability bits, for example `:io`
 - **Payload**: a struct describing the denial
 
-```text
-{:error :capability-denied
- :denied |:io|
- :primitive "port/read-line"
- :func <native-fn>
- :args ["arg1" "arg2"]}
+```lisp
+(let [f (fiber/new (fn [] (length "hello")) |:error| :deny |:error|)
+      denial (fiber/resume f)]
+  (assert (= (get denial :error) :capability-denied))
+  (assert (= (get denial :denied) |:error|))
+  (assert (= (get denial :primitive) "length"))
+  (assert (= (get denial :args) ["hello"])))   # :func holds the primitive itself
 ```
 
 The parent catches this signal through the normal mask routing.
@@ -150,15 +152,17 @@ Three primitives work this way, each in its own domain:
 - dynamic `emit` raises the bits its first argument names, so it needs those
   bits.
 
-```text
-# `minter` is allowed to build the request; `f` is not allowed to spend it.
+```lisp
+# The first fiber may build the request; `f` may not spend it.
 (let [req (fiber/resume
             (fiber/new (fn [] (subprocess/exec "/bin/sh" ["-c" "echo hi"]))
                        |:error :io :exec|))
       f (fiber/new (fn [r] (io/submit (io/backend :async) r))
                    |:error :io :exec| :deny |:exec|)]
   (fiber/resume f req)
-  (fiber/status f))          # => :paused, denied :exec at io/submit
+  (assert (= (fiber/status f) :paused))
+  (assert (= (get (fiber/value f) :primitive) "io/submit"))
+  (assert (= (get (fiber/value f) :denied) |:exec|)))
 ```
 
 Three edges the gate does not reach. `io/submit` tests the fiber that submits, so
@@ -172,12 +176,8 @@ one. [authority.md](authority.md) states the model these follow from, and
 
 ## Introspection
 
-```text
-(fiber/caps)      # current fiber's capabilities
-(fiber/caps f)    # specific fiber's capabilities
-```
-
-Returns a keyword set of active capabilities — everything in the
+`(fiber/caps)` answers for the current fiber, and `(fiber/caps f)` for the
+fiber `f`. Each returns a keyword set of active capabilities — everything in the
 capability space that is NOT withheld:
 
 ```lisp
@@ -218,11 +218,15 @@ root fiber starts with the spawning fiber's withheld set. A worker
 cannot reach what the fiber that spawned it could not.
 
 A worker has no parent to suspend into, so a denial there cannot be
-mediated. The thread ends instead, and the join reports it:
+mediated. The thread ends instead, and the join raises `:thread-error`:
 
-```text
-(sys/join (sys/spawn-vm (fn [] (file/write path "x"))))
-# from a fiber denying :fs => [:failed "..."], and nothing is written
+```lisp
+(with-temp-dir dir
+  (let [target (path/join dir "x")
+        f (fiber/new (fn [] (sys/join (sys/spawn-vm (fn [] (file/write target "x")))))
+                     |:error| :deny |:fs|)]
+    (assert (= (get (fiber/resume f) :error) :thread-error))
+    (assert (not (path/exists? target)))))   # nothing is written
 ```
 
 Mediate on the fiber side of the boundary, before the work is handed to
@@ -284,12 +288,21 @@ An uncaught refusal is an ordinary uncaught error: it unwinds the child
 through any `defer` blocks and the fiber ends `:error`. To end a fiber
 outright rather than refuse one call, use `fiber/abort`.
 
-## Specialized instructions
+## Intrinsics are not checked
 
-Arithmetic operations (`+`, `-`, `*`, `/`, comparisons) are compiled
-to specialized bytecode instructions that bypass the primitive dispatch
-path. These are not subject to capability checks. `:deny |:error|`
-blocks `length` but not `+`.
+The `%` [intrinsics](../intrinsics.md) compile to bytecode instructions that
+bypass primitive dispatch, so no capability check reaches them. The generic
+`+` is a stdlib function, and a denial reaches it through a primitive it
+calls — the internal-helper seam #930 describes:
+
+```lisp
+(def a 1)
+(def b 2)
+(let [f (fiber/new (fn [] (%add a b)) |:error| :deny |:error|)]
+  (assert (= (fiber/resume f) 3)))                      # %add runs
+(let [f (fiber/new (fn [] (+ a b)) |:error| :deny |:error|)]
+  (assert (= (get (fiber/resume f) :primitive) "empty?")))  # + is denied inside
+```
 
 ## Examples
 
@@ -298,38 +311,42 @@ capability-bearing value handed in from outside is confined only where a crossin
 checks it: a submitted request is, and loading a native library is; a module
 already loaded and handed in is not — see the spend section above.
 
-```text
+```lisp
+(defn compute [] (* 6 7))
+(defn worker [] (file/read "/etc/hostname"))
+(defn plugin-init [] (subprocess/system "true" []))
+
 # Pure computation sandbox — no IO, no filesystem, no FFI, no subprocess
 (let [f (fiber/new compute |:io :fs :ffi :exec :error|
                     :deny |:io :fs :ffi :exec|)]
-  (fiber/resume f))
+  (assert (= (fiber/resume f) 42)))
 
-# Mediated worker — keeps stdout and the network, mediates the disk
+# Mediated worker — keeps stdout and the network; the parent sees each disk access
 (let [f (fiber/new worker |:fs :error| :deny |:fs|)]
-  (fiber/resume f))
+  (assert (= (get (fiber/resume f) :primitive) "file/read")))
 
 # Watch what a plugin's init tries to do
-(let [f (fiber/new plugin-init |:error| :deny |:exec :ffi|)]
-  (let [result (fiber/resume f)]
-    (if (= (fiber/status f) :dead)
-      result
-      (do (println "plugin tried:" ((fiber/value f) :primitive))
-          (fiber/cancel f)))))
+(let [f (fiber/new plugin-init |:error :exec :ffi| :deny |:exec :ffi|)]
+  (fiber/resume f)
+  (assert (not (= (fiber/status f) :dead)))
+  (assert (= (get (fiber/value f) :primitive) "subprocess/exec"))
+  (fiber/cancel f))
 ```
 
 Denying `:ffi` stops the fiber loading a native module: a `.so` spec requires
 `:ffi` for the foreign code its load runs. A `.lisp` module needs only the `:fs`
 that `import` declares.
 
-```text
-
+```lisp
 # Nested sandbox: outer denies IO, inner denies errors
 (let [outer (fiber/new
                (fn []
-                 (let [inner (fiber/new worker |:error| :deny |:error|)]
-                   (fiber/resume inner)))
+                 (let [inner (fiber/new (fn [] :done) |:error| :deny |:error|)]
+                   (fiber/resume inner)
+                   (fiber/caps inner)))   # read from outside: fiber/caps itself declares :error
                |:io :error|
-               :deny |:io|)]
-  (fiber/resume outer))
-# inner has neither IO (from outer) nor error (from own deny)
+               :deny |:io|)
+      caps (fiber/resume outer)]
+  (assert (not (contains? caps :io)))      # from outer
+  (assert (not (contains? caps :error))))  # from its own deny
 ```

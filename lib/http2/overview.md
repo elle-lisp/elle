@@ -1,6 +1,6 @@
 # http2
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-23 -->
 
 The submodules behind [http2.lisp](../http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
 
@@ -11,14 +11,25 @@ decisions that shape them, and the invariants that cross files.
 
 | File | Purpose |
 |------|---------|
-| `huffman.lisp` | HPACK Huffman codec (RFC 7541 Appendix B) |
-| `hpack.lisp` | Header compression: static and dynamic tables, varint, string codec |
-| `frame.lisp` | Frame codec: 9-byte header, ten frame types, builders, CONTINUATION |
-| `stream.lisp` | Stream state machine, per-stream flow control, the channel |
-| `transport.lisp` | Transport abstraction over TCP and TLS |
-| `session.lisp` | Session state, the writer loop and its shutdown, the send side |
-| `reader.lisp` | The frame reader both roles run |
-| `server.lisp` | Server connection handler and the accept loop |
+| [huffman.lisp](huffman.lisp) | HPACK Huffman codec (RFC 7541 Appendix B) |
+| [hpack.lisp](hpack.lisp) | Header compression: static and dynamic tables, varint, string codec |
+| [frame.lisp](frame.lisp) | Frame codec: 9-byte header, ten frame types, builders, CONTINUATION |
+| [stream.lisp](stream.lisp) | Stream state machine, per-stream flow control, the channel |
+| [transport.lisp](transport.lisp) | Transport abstraction over TCP and TLS |
+| [session.lisp](session.lisp) | Session state, the writer loop and its shutdown, the send side |
+| [reader.lisp](reader.lisp) | The frame reader both roles run |
+| [server.lisp](server.lisp) | Server connection handler and the accept loop |
+
+A submodule takes the submodules it needs as arguments, so loading one
+by hand follows the order [http2.lisp](../http2.lisp) uses:
+
+```lisp
+(def huffman ((import "std/http2/huffman")))
+(def frame ((import "std/http2/frame")))
+(def hpack ((import "std/http2/hpack") :huffman huffman))
+(def stream ((import "std/http2/stream") :frame frame))
+(def session ((import "std/http2/session") :frame frame :stream stream :hpack hpack))
+```
 
 ## How a connection divides
 
@@ -35,11 +46,13 @@ handshake.
   frame type the same way for a client and a server. Two callbacks
   differ: `on-headers` enqueues on the client and spawns a handler on
   the server, and `on-goaway` records the state on the client and stops
-  the loop on the server. The reader imports the session and never the
-  other way round, so the send side knows nothing about who reads.
+  the loop on the server. The reader takes the session module as an
+  argument, and the session never names the reader, so the send side
+  knows nothing about who reads.
 
-- **One transport definition.** `transport.lisp` builds the TCP and TLS
-  transports once, and both the client and the server import it.
+- **One transport definition.** [transport.lisp](transport.lisp) builds
+  the TCP and TLS transports. [http2.lisp](../http2.lisp) loads it once,
+  uses it for the client, and hands it to the server.
 
 - **HPACK encode and send are atomic.** `encode-and-send-headers`
   encodes and enqueues HEADERS plus every CONTINUATION without yielding.
@@ -51,7 +64,8 @@ handshake.
   deadline. So the close races the writer against a timer and aborts the
   writer when the timer wins. Joining the writer outright hands the peer
   control over when the close returns, which is the wedge
-  `tests/elle/h2-close-on-dead-peer.lisp` holds shut.
+  [h2-close-on-dead-peer.lisp](../../tests/elle/h2-close-on-dead-peer.lisp)
+  holds shut.
 
 ## Invariants
 
@@ -73,6 +87,25 @@ handshake.
 12. `local-settings` and `remote-settings` are mutable structs.
 13. Closing a session returns in bounded time, whatever the peer does.
     The server's connection handler waits under the same bound.
+
+Invariants 4 and 9, run against the session module:
+
+```lisp
+(def C frame:constants)
+(def no-transport {:read nil :write nil :flush nil :close nil})
+(assert (= 1 (get (session:make-session no-transport "h" false) :next-stream-id)))
+(assert (= 2 (get (session:make-session no-transport "h" true) :next-stream-id)))
+
+(def sess (session:make-session no-transport "h" false))
+(defn setting [id value] (concat (frame:u16->bytes id) (frame:u32->bytes value)))
+(defn refused? [id value]
+  (not (first (protect (session:apply-remote-settings sess (setting id value))))))
+(assert (refused? C:settings-enable-push 2))
+(assert (refused? C:settings-initial-window-size 2147483648))
+(assert (refused? C:settings-max-frame-size 16383))
+(assert (refused? C:settings-max-frame-size 16777216))
+(assert (not (refused? C:settings-max-frame-size 16384)))
+```
 
 ## Running tests
 

@@ -1,23 +1,25 @@
 (elle/epoch 12)
-# tests/elle/region-io-effect-pass.lisp — runtime guard for the io / fiber
-# region-effect pass (docs/impl/region/effects.md "Native region effects").
+# audited: 2026-09-23
+# The value each yielding io primitive resumes with has the region kind its declared effect claims.
+# docs/impl/region/effects.md
 #
 # These primitives YIELD (SIG_YIELD | SIG_IO), so the declaration oracle in
 # `dispatch_native_call` is EXEMPT on their result — an over-claim is silent,
 # not a panic. The solver-side guard (no Mixed hard-edge; Fresh ⇒
-# fresh_result_regions) lives in src/hir/regions/tests/effects.rs
-# `io_yield_pass_tightenings_drop_the_mixed_hard_edge`. THIS file is the
-# RUNTIME half: it asserts the resumed value's region kind — the invariant each
-# declaration depends on — so a future change to a completion path that made an
-# `Immediate` op return a heap value (or a `Fresh` op return an immediate) goes
-# RED here, flagging the declaration as newly unsound.
+# fresh_result_regions) is `io_yield_pass_tightenings_drop_the_mixed_hard_edge`
+# in src/hir/region/infer/tests/declared.rs. THIS file is the RUNTIME half: it
+# asserts the resumed value's region kind, the invariant each declaration
+# depends on. A completion path that makes an `Immediate` op return a heap value
+# (or a `Fresh` op return an immediate) fails here, and the declaration is then
+# unsound.
 #
 # `arena/region-of` is 0 for an immediate (int / nil / keyword) and a real
 # (>= 2) heap region otherwise. So:
 #   Immediate ⇒ region-of result = 0
 #   Fresh     ⇒ region-of (heap) result ≠ 0
 #   Opaque    ⇒ heap result (≠ 0); region identity unconstrained, type pinned
-# The region COUNT cannot be used (the ambient io-yield leak swamps it); region KIND can.
+# The file reads region KIND, which is what each declaration claims. Leak rates
+# belong to the probes under tests/elle/probe.
 
 (defn heap? [x]
   (not (= (arena/region-of x) 0)))

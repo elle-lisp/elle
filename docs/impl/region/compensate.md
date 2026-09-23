@@ -1,6 +1,6 @@
 # Per-arm compensation
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-23 -->
 
 The releases a branch adds one per arm, each funded by a retain on its own node.
 The head route takes an arm that never names the region, the tail route one that
@@ -9,8 +9,7 @@ does.
 ## The premises are read per route, never per holder
 
 A value-routed release loads ONE slot — the allocating binder's
-([mechanism.md](mechanism.md) § "A region's release route belongs to ONE
-binding") — so every refusal and premise about that release is a claim about
+([the branch-arm window](window.md)) — so every refusal and premise about that release is a claim about
 that binder, and asking it of every holder refuses the ordinary shapes:
 
 - The **mutated taint** poisons the regions `mutated_route_regions` names
@@ -32,9 +31,10 @@ that binder, and asking it of every holder refuses the ordinary shapes:
 The shape that demanded all three at once is the conditional accumulate — a
 loop that names each element, then stores it into an outer 1-slot container in
 one arm of a `when` — whose element release sat in the storing arm and leaked
-on every other path (`tests/elle/region-cell-aliased-store.lisp`;
-[bindings.md](bindings.md) § "An aliased stored value takes the counted
-store").
+on every other path
+([region-cell-aliased-store.lisp](../../../tests/elle/region-cell-aliased-store.lisp)).
+An aliased stored value takes the counted store of
+[the 1-slot container](bindings.md).
 
 ## The return frontier is per-path
 
@@ -53,8 +53,9 @@ teardown, and with it every member its free cascade would have reclaimed, so the
 per-call cost is the whole subtree.
 
 A return-escaping region is therefore admitted to **head** compensation
-(`regions/compensate.rs`) on a sibling arm that has no use of it. The premises
-ordinary compensation already establishes carry the soundness whole:
+([compensate.rs](../../../src/hir/region/infer/compensate.rs)) on a sibling arm
+that has no use of it. The premises ordinary compensation already establishes
+carry the soundness whole:
 
 - the region's `decref_point` is inside another arm, so its last use is inside the
   branch — nothing uses it afterwards, hence no mint for it fires after the branch
@@ -88,15 +89,17 @@ a sibling of the arm holding the return: an inner branch whose own arms straddle
 hand-over keeps the conservative baseline. That residual is a leak, never an
 over-free.
 
-Both routes are what a branch falls back to. Where the **window** below admits
+Both routes are what a branch falls back to. Where the **window** admits
 the region instead — a returned one included ([the branch-arm
 window](window.md)) — the single anchored release covers every path and neither
 route fires, since neither finds a `decref_point` inside an arm any more.
 
-Pinned by `tests/elle/region-return-arm-escape-leak.lisp` (both faces: the
-non-returning arm is bounded, and the returned value survives its caller's use), and
-for the `Match` arm by `tests/elle/region-match-dead-arm-leak.lisp` (both faces
-again, plus the return-escaping value whose dead `Match` arm hands the caller
+Pinned by
+[region-return-arm-escape-leak.lisp](../../../tests/elle/region-return-arm-escape-leak.lisp)
+(both faces: the non-returning arm is bounded, and the returned value survives its
+caller's use), and for the `Match` arm by
+[region-match-dead-arm-leak.lisp](../../../tests/elle/region-match-dead-arm-leak.lisp)
+(both faces again, plus the return-escaping value whose dead `Match` arm hands the caller
 nothing).
 
 The **used** sibling arm is the residual, and its guard is not negotiable. A release
@@ -112,8 +115,10 @@ the solver does not name, and the reachable one is an uncounted borrow in a
 suspended frame's activation region map: a release that reaches zero frees a region
 a parked fiber still resolves through its slot, and the generation stamp detonates
 it at the resume ([generations.md](generations.md)). So an unfunded used
-sibling arm keeps the conservative baseline — an over-keep, gauged by the
-`match-used-arm` probe in `tests/elle/oracle.lisp`.
+sibling arm takes no per-arm release. [The branch-arm window](window.md) closes
+that shape instead: it anchors the region's single release where every arm
+reaches it. The `match-used-arm` probe in
+[the branch probes](../../../tests/elle/probe/branch.lisp) gauges it at zero.
 
 ### A compensating release of an env cell names the box, not the holder's slot
 
@@ -125,7 +130,7 @@ went into the sibling — and strands one box per call. The everyday shape is a
 captured local read through a closure the branch calls in one arm only: `(fn (n
 t) (def @c n) (let [g (fn () c)] (if t (g) 0)))`.
 
-The branch-arm release window below cannot carry it. Anchoring at the merge takes the
+The branch-arm release window cannot carry it. Anchoring at the merge takes the
 box back out of the arm the relocation moved it into, and the merge's replica
 placement needs a **self-cancelling** run — load, release by value, nil-stamp — which
 `LoadCaptureRaw` + `DecrefCellRegion` is not: it leaves the holder as it was, so a
@@ -187,19 +192,22 @@ that candidate came from. Otherwise the arms stay mutually exclusive, so exactly
 release runs per path; no merge point and no nil-stamp is involved, which is what a
 cell release cannot supply.
 
-Pinned by `tests/elle/region-tail-frame-exit.lisp` (the `arm-cell` / `arm-cell-ro` /
-`arm-cell-read` rows, both arms of each), the `env-cell-read-arm` probe in
-`tests/elle/oracle.lisp` (the per-op rate), the analysis pins in
-`regions::tests::compensate`
+Pinned by [region-tail-frame-exit.lisp](../../../tests/elle/region-tail-frame-exit.lisp)
+(the `arm-cell` / `arm-cell-ro` / `arm-cell-read` rows, both arms of each), the
+`env-cell-read-arm` probe in [the direct probes](../../../tests/elle/probe/direct.lisp)
+(the per-op rate), the analysis pins in
+[region::infer::tests::compensate](../../../src/hir/region/infer/tests/compensate.rs)
 (`a_falling_through_arm_compensates_the_env_cell_its_sibling_relocated`,
 `a_reassigned_holder_does_not_withdraw_its_env_cell_compensation`,
 `an_env_cell_takes_the_tail_route_on_the_arm_that_reads_it`, and the counterfactual
 `an_unfunded_used_sibling_arm_takes_no_tail_route` that keeps the retain requirement
-on every other region), the placement pins in `lir::lower::tests::release`
+on every other region), the placement pins in
+[lir::lower::tests::release](../../../src/lir/lower/tests/release/frameexit.rs)
 (`a_falling_through_arm_head_releases_the_env_cell_its_sibling_relocated` and
 `a_reading_arm_tail_releases_the_env_cell_its_sibling_relocated`, beside the decline
 `escaping_holder_env_cell_release_stays_after_the_tail_call`), and
-`tests/elle/region-tail-frame-exit-uaf.lisp` (the soundness complement — a closure
+[region-tail-frame-exit-uaf.lisp](../../../tests/elle/region-tail-frame-exit-uaf.lisp)
+(the soundness complement — a closure
 handed out through the compensated arm must still rewrite and read its cell, the
 content a reading arm returns must outlive the box, and the box must outlive the
 reading arm through a capturer that escaped with it).

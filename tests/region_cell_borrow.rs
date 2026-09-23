@@ -1,13 +1,14 @@
-//! audited: 2026-09-21
+//! audited: 2026-09-23
 //! A value read out of an env cell must outlive the reader that consumes it.
 //!
 //! A `def` inside a function body that a nested lambda captures is materialized
 //! as a per-value env cell, and the enclosing function then reads the value back
 //! through a `DerefCell` wrapper rather than out of a local slot. That read is an
 //! uncounted borrow — the value stays the cell's content and the load raises no
-//! count on it — so the cell's own lifetime is what keeps the borrow alive, and
-//! the cell owns the content outright (`AdoptCellRegion`), so releasing the cell
-//! reclaims exactly what was borrowed out of it
+//! count on it — so the cell's own lifetime is what keeps the borrow alive. The
+//! cell holds its content by the counted reference `StoreCapture` took when it
+//! stored the value (`capture_store_with_rebind`), so releasing the cell drops
+//! that reference and can reclaim exactly what was borrowed out of it
 //! (docs/impl/region/cells.md § "A read through an env cell is an uncounted
 //! borrow").
 //!

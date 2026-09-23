@@ -1,4 +1,8 @@
-//! Call analysis and signal tracking
+// audited: 2026-09-23
+//! Call analysis: the compile-time arity check, and the signal each call raises
+//! across function boundaries.
+//!
+//! docs/signals/inference.md
 
 use super::*;
 use crate::hir::expr::CallArg;
@@ -42,13 +46,13 @@ impl<'a> Analyzer<'a> {
         // First, get the raw callee signal (before polymorphic resolution)
         let raw_callee_signal = self.get_raw_callee_signal(&func);
 
-        // Refine emit's signal when first arg is known at compile time.
-        // emit's registered signal is yields_errors() (conservative), but:
-        // - When the signal bits are a constant integer, use them directly.
-        // - When the signal is a keyword registered in the signal registry,
-        //   look up its bit position and use that.
-        // This enables accurate signal inference for (emit :kw value) forms
-        // where the signal keyword was declared with (signal :kw) earlier.
+        // Refine a call to `emit` when its first argument is known at compile
+        // time. A literal keyword or set never reaches this call: `(emit :kw v)`
+        // is the special form (forms/expr.rs), and a keyword with any other
+        // argument count fails the arity check above. So this is a dynamic emit,
+        // and an integer literal is the one first argument that still names its
+        // bits statically; it replaces the registered, conservative signal. The
+        // keyword arm below is unreachable for the same reason.
         let raw_callee_signal = if self.is_emit(&func) {
             if let Some(first_arg_kind) = args.first().map(|a| &a.expr.kind) {
                 match first_arg_kind {
@@ -130,7 +134,7 @@ impl<'a> Analyzer<'a> {
 
         // ── Compile-time squelch/attune detection ─────────────────────
         // Pattern: (squelch f :keyword) or (squelch f |:kw1 :kw2|)
-        //          (attune f :keyword) or (attune f |:kw1 :kw2|)
+        //          (attune :keyword f) or (attune |:kw1 :kw2| f)
         // Compute the resulting closure's signal statically and stash it
         // for binding analysis to seed the binding's signal_env entry.
         self.last_squelch_signal = None;
@@ -190,10 +194,10 @@ impl<'a> Analyzer<'a> {
                 params.len(),
             )),
             HirKind::Var(binding) => {
-                // Check arity env (covers both user-defined and primitive bindings).
-                // bind_primitives populates this for primitive bindings; user
-                // shadows create new bindings that won't be in arity_env,
-                // correctly disabling the primitive arity check.
+                // The arity env covers primitives (`bind_primitives`) and
+                // bindings initialized with a lambda (binding.rs). A user shadow
+                // is a new binding, so it carries its own arity or none — never
+                // the primitive's.
                 self.arity_env.get(binding).copied()
             }
             _ => None,
@@ -234,9 +238,10 @@ impl<'a> Analyzer<'a> {
         self.is_primitive_named(func, "import")
     }
 
-    /// Check if a callee HIR node refers to a named primitive — one hash
+    /// Check if a callee HIR node is a binding spelled `name` — one hash
     /// compare, no memo (docs/impl/symbol.md § "Reading a name, and not
-    /// reading one").
+    /// reading one"). It reads the name alone, so a user binding of the same
+    /// spelling answers true as well.
     fn is_primitive_named(&self, func: &Hir, name: &str) -> bool {
         if let HirKind::Var(binding) = &func.kind {
             self.arena.get(*binding).name == crate::value::SymbolId::of(name)
@@ -245,20 +250,17 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// The signal of a genuine primitive/global binding, looked up by name.
+    /// The signal of a genuine primitive binding, looked up by name.
     ///
-    /// `primitive_signals` is keyed by `SymbolId`, but its keys come from the
-    /// `CompileCtx`'s throwaway setup `SymbolTable`, NOT the table this analyzer
-    /// resolves user code against. The two agree only on the primitive prefix
-    /// they both intern first; any later symbol (core/prelude/user) can land on
-    /// a colliding id. So a by-name lookup is sound ONLY for a binding that is
-    /// actually a primitive — `bind_primitives` sets `is_primitive` and always
-    /// seeds `signal_env` for those, so this by-name path never even fires for a
-    /// real primitive (that hits `signal_env` first). Gating on `is_primitive`
-    /// therefore keeps a same-named — or id-aliased — *user* binding (e.g. a
-    /// `var` shadowing `length`, or one reassigned via `assign`, which clears its
-    /// `signal_env` entry) from inheriting an unrelated global's signal instead
-    /// of the sound conservative `unknown`.
+    /// `primitive_signals` is keyed by `SymbolId`, the name's hash, so a by-name
+    /// lookup finds a primitive's signal for ANY binding that shares its
+    /// spelling. It is sound only for a binding that is the primitive itself.
+    /// `bind_primitives` sets `is_primitive` and always seeds `signal_env` for
+    /// those, so this path does not fire for a real primitive either (that hits
+    /// `signal_env` first). Gating on `is_primitive` therefore keeps a same-named
+    /// *user* binding (a `var` shadowing `length`, or one reassigned via
+    /// `assign`, which clears its `signal_env` entry) from inheriting the
+    /// primitive's signal instead of the sound conservative `unknown`.
     fn primitive_signal_of(&self, binding: Binding) -> Option<Signal> {
         let b = self.arena.get(binding);
         if !b.is_primitive {

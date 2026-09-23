@@ -1,6 +1,6 @@
 # tests/common
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-23 -->
 
 Shared test helpers for the Elle test suite.
 
@@ -11,6 +11,7 @@ Provide canonical eval and setup functions so test files don't need to copy-past
 - Cached `RuntimeCore` reuse for property tests (eliminates per-case bootstrap cost)
 - Proptest configuration respecting `PROPTEST_CASES` env var
 - A scratch directory under the platform temp root, removed on drop
+- The documents `make doctest` runs, and the documents it must run
 - Readers of the corpus, of the Makefile and of the workflow files, for the
   tests that check how CI dimensions a run and what it keeps
 
@@ -110,6 +111,7 @@ This is safe because:
 | File | Content |
 |------|---------|
 | `mod.rs` | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, the Makefile readers (`make_var`, `make_dry_run`, `make_expand`, `makefile`), the corpus readers (`repo_root`, `corpus_files`, `declared_deadline`, `wide_patterns`, `budget_seconds`), the workflow readers (`workflow_files`, `workflow_jobs`), `paint_stack`, and `ScratchDir` |
+| `documents.rs` | the documents `make doctest` runs (`doctest_documents`) and the documents it must run (`covered_documents`), for `doctest.rs` and `doctest_scope.rs` |
 
 ### Reading the Makefile
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-09-23
 //! Branch-compensation decref placement: free a region on the arms where it dies.
 //!
 //! The region solver gives every region ONE `decref_point` — the textually-last
@@ -51,7 +51,7 @@
 //! caller now holds a reference to, and what a return hands over is the content;
 //! the same-node RETAIN buys the knowledge that the arm's use named every
 //! reference, which the box's holders supply outright, no use of the binding ever
-//! yielding the box (docs/impl/region/mechanism.md § "A compensating release of an
+//! yielding the box (docs/impl/region/compensate.md § "A compensating release of an
 //! env cell names the box, not the holder's slot"). What the `tail` route still owes
 //! is placement, so the box's per-arm release is read off the same pins the global
 //! `decref_point` is: the arm's uses, AND the arm's uncounted opcode-read borrows
@@ -75,7 +75,7 @@
 //! `decref_point`, never both.
 //!
 //! This pass sees only the regions the **branch-arm release window** declined
-//! (`analyze/decref.rs`, docs/impl/region/mechanism.md § "A release inside one arm
+//! (`analyze/decref.rs`, docs/impl/region/window.md § "A release inside one arm
 //! is not a release on the other arms"). Where that window applies it moves the
 //! region's single `decref_point` out of the arms entirely, so `arm_of_d` below
 //! finds nothing and neither route fires — one anchored release replaces the
@@ -129,9 +129,13 @@ struct IterScope {
 /// loops: release once per activation, not per iteration").
 ///
 /// The loop must lie INSIDE the arm — a loop enclosing the whole branch is not a
-/// point this arm can host, and the loop-invariant guard has already refused the
-/// region if one encloses the branch but not the cell's allocation. `None` when
-/// `at` is in no such loop, or is already at or past the loop's own node.
+/// point this arm can host, and no such loop reaches here. One that encloses the
+/// branch but not the cell's allocation is refused by the loop-invariant guard.
+/// One that encloses both is kept out by the env-cell loop hoist
+/// (`post_loop_placement`, `analyze/decref.rs`): the cell's global `decref_point`
+/// already sits at the outermost enclosing loop, outside every arm of a branch
+/// inside it, so `arm_of_d` finds nothing. `None` when `at` is in no such loop,
+/// or is already at or past the loop's own node.
 fn arm_post_loop_placement(
     at: HirId,
     loops: &[IterScope],

@@ -1,7 +1,7 @@
 .PHONY: all elle docs docgen smoke test qa crosscheck clean space help \
        smoke-elle smoke-boot-image smoke-vm smoke-noffi smoke-jit smoke-nouring \
        smoke-wasm smoke-mlir \
-       doctest myplugin elle-wasm check-wasm elle-mlir elle-noffi plugins plugins-all \
+       doctest doctest-list myplugin elle-wasm check-wasm elle-mlir elle-noffi plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding \
        fmt fmt-check audit agents agents-check
 
@@ -543,12 +543,22 @@ DOCTEST_TIMEOUT ?= 180s
 myplugin:  ## Build the plugin the literate documents load
 	cargo build $(CARGO_PROFILE) -p elle-myplugin -q
 
+
+# The documents `doctest` runs: the three root guides, and every document under
+# lib/ and docs/ at any depth (docs/README.md). `find` walks the directories so a
+# subdirectory added later is covered without an edit here, and `make` expands
+# the list itself so tests/integration/doctest_scope.rs reads what runs.
+DOCTEST_DOCS := README.md QUICKSTART.md INSTALL.md $(shell find lib docs -name '*.md' | sort)
+
 doctest: myplugin  ## Test code examples in documentation (literate mode)
 	@echo "=== doctest ==="
-	@printf '%s\n' docs/*.md docs/regions/*.md docs/impl/*.md docs/cookbook/*.md docs/signals/*.md docs/analysis/*.md | \
+	@printf '%s\n' $(DOCTEST_DOCS) | \
 		parallel -j $(JOBS) --tag \
 			'timeout $(DOCTEST_TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: doctest"; exit 1; }
+
+doctest-list:  ## List the documents doctest runs
+	@printf '%s\n' $(DOCTEST_DOCS)
 
 # A plugin test drives a whole library through one long program — the oxigraph
 # file loads an RDF store, the tree-sitter file parses a grammar — so the corpus

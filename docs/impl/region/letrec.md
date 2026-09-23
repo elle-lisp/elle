@@ -1,6 +1,6 @@
 # The letrec closure-cycle merge
 
-<!-- audited: 2026-09-10 -->
+<!-- audited: 2026-09-23 -->
 
 Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
 
@@ -10,8 +10,8 @@ collapse-to-one-region mechanism reclaims a shape per-region RC cannot: the
 capture-cell↔closure structure: the forward-reference **cell** holds the closure
 (`StoreCaptureCell`) and a *sibling* closure **captures** the cell, both at the binding
 scope, never mutated. The cells and closures reference each other around the SCC, so
-per-region RC never reaches zero (rules.md Rule 8) — the cycle leaks. Unlike a *mutable*
-`@array` cycle (the deliberate boundary, adopt.md § "Why this is hybrid"), an immutable one
+per-region RC never reaches zero ([rules.md](rules.md) Rule 8) — the cycle leaks. Unlike a
+*mutable* `@array` cycle (the deliberate boundary, [adopt.md](adopt.md)), an immutable one
 is reclaimable, and a fiber that builds one per loop iteration would otherwise leak
 unboundedly.
 
@@ -25,14 +25,14 @@ or the `Begin` the `defn` run sits in. Its **body** is the `Letrec`'s body, or t
 one of a `Begin`'s expressions a tail call can sit in. Where a claim is about the
 letrec form alone, it says `letrec`.
 
-Reading the `defn` run as a different shape is what left the closure-as-module
-idiom — a constructor that defines a set of mutually recursive helpers over its own
-mutable state and returns a struct of them — leaking its whole cycle on every
-construction, which is the async scheduler's own shape (elle-lisp/elle#1081).
+Reading the `defn` run as a different shape leaks the whole cycle of the
+closure-as-module idiom on every construction: a constructor that defines a set of
+mutually recursive helpers over its own mutable state and returns a struct of them.
+The async scheduler has that shape.
 
 **Self-recursion is not this shape.** A purely self-recursive local fn (`loop` references
 only itself) is **cell-free**: its self-edge does not mark it captured
-(`hir/analyze/scopes.rs`), so it has no forward cell and no cell↔closure cycle — its
+([scopes.rs](../../../src/hir/analyze/scopes.rs)), so it has no forward cell and no cell↔closure cycle — its
 self-reference resolves to the currently-executing closure ([selfrec.md](../selfrec.md)),
 reclaimed by ordinary RC / the tail-call deferred release, RC-identical to a top-level recursive
 `defn`. So the merge is the **mutual**-recursion instrument; a pure self-recursive letrec
@@ -42,8 +42,9 @@ The merge collapses the whole cycle — the closure SCC **and** its cells — on
 region. Every interior reference then becomes intra-region, and all three
 ref-counting paths self-skip a same-region reference (`rid != own_id`): the
 alloc-scan incref over the closure env (`incref_cross_region_refs`), the
-capture-cell store incref (`value/arena/mutate.rs::capture_store_with_rebind`), and
-the free-time cascade (`regionpool/introspect.rs`). So the merged arena carries
+capture-cell store incref (`capture_store_with_rebind` in
+[mutate.rs](../../../src/value/arena/mutate.rs)), and the free-time cascade
+([introspect.rs](../../../src/value/fiberheap/regionpool/introspect.rs)). So the merged arena carries
 RC 1 and one `DecrefRegion` frees the cycle wholesale — no edge accounting, no
 member list. This is why the merge, not a group-free, is the right instrument: a
 group-free would wholesale-free the closure SCC while the *cells* — in their own
@@ -52,7 +53,7 @@ regions, outside the freed set — still referenced it, and each cell's own
 `--trace=guardfree` detonates under the full stdlib). Collapsing the cells *into*
 the closures' region removes the dangling reference by construction.
 
-**Two-layer detection** (`regions::merge::compute_closure_cycle_merges`), because
+**Two-layer detection** (`region::infer::merge::compute_closure_cycle_merges`), because
 the cell↔closure structure is not one SCC in the graphs the other passes build:
 
 - The **closures** carry the cycle. A `closure ⊇ closure` capture graph is
@@ -121,8 +122,7 @@ something else still reads the arena.
   neither does whether the compiler can classify the callee: the merge wires both
   channels rather than choose between them, and both are late enough. This is the same
   ordering argument as the cell-free self-recursive deferral's return admission
-  ([selfrec.md](../selfrec.md) § "The deferral's escape gate is the fiber frontier
-  alone") — the release runs *after* the mint, so unlike the frame-exit relocation
+  ([selfrec.md](../selfrec.md)) — the release runs *after* the mint, so unlike the frame-exit relocation
   there is nothing to bridge.
 
   A body that falls out to a bare value hands the letrec's value to an *enclosing*
@@ -150,8 +150,7 @@ lowerer emits after the letrec body — dead code when that body ends in a
 frame-replacing tail call, exactly as any other of the frame's releases is. It is
 carried back ahead of the `TailCall` by the frame-exit release, whose count
 argument reads the cell under its binding's own escape verdict
-([mechanism.md](mechanism.md) § "A compiled capture cell is frame-held exactly as
-its binding is"). Both faces apply: the one where nothing leaves the frame, and the
+([relocate.md](relocate.md)). Both faces apply: the one where nothing leaves the frame, and the
 one where the capturing member is handed to the caller.
 
 The static-slot cell requirement is met in **every position**, top level and inside a
@@ -182,8 +181,7 @@ unlike the builder idiom), so the merge sets the canonical root region's `decref
 to the cycle's **binding scope**: the single node that prebinds every member's capture
 cell — a `Letrec`, or the `Begin` a `defn` run sits in (the `begin_cell_regions` key).
 This is decided by
-structural ancestry, never a numeric `compute_order` compare (adopt.md § "The lifetime
-obligation the root carries"). The root is the SCC closure of least program order
+structural ancestry, never a numeric `compute_order` compare ([adopt.md](adopt.md)). The root is the SCC closure of least program order
 (region ids order nothing); any member mints the shared physical region at runtime
 (mint-or-reuse), so the root only names the merged slot and carries the single decref.
 
@@ -228,7 +226,7 @@ Two consequences, and one fact discharges both. The handed-out member's region a
 carries a `decref_point`: the ordinary last-use rule extended it through the outer
 binding, and where the value is returned, pinned it at the enclosing `Return` — the node
 whose `IncrefValueRegion` mints the caller's reference *before* its own
-`emit_decrefs_for` runs (mechanism.md § the `return_sites` extension). That point is
+`emit_decrefs_for` runs (the `return_sites` extension, [mechanism.md](mechanism.md)). That point is
 therefore where the compiler already emits this member's release in the unmerged
 compilation, and adopting it as the **arena's** drop site adds no release the program did
 not have; it only widens what the one release covers, to members whose uses are all
@@ -272,7 +270,7 @@ nothing and gives every callee one shape.
   That consumer refuses a callee crossing the **fiber** frontier, and admits the return
   facet — the same reading, for the same reason, as the merge's own frontier gate above,
   and the return half of the argument the cell-free self-recursive deferral makes
-  ([selfrec.md](../selfrec.md) § "The deferral needs no escape gate"): this deferral runs at the
+  ([selfrec.md](../selfrec.md)): this deferral runs at the
   recursion's normal completion, after the `Return` mint that funds the caller's
   reference. The marking is keyed on `closure_cycle_members`, so only a member of an
   **admitted** merge reaches it and the gate never has to re-argue admission; it is kept
@@ -284,8 +282,7 @@ nothing and gives every callee one shape.
 
 - **A tail call to a NON-member** (a native `%add`, a redefined operator `+`, a
   foreign closure `g`) rides an explicit slot instead. The arena is therefore
-  exempt from the frame-exit hoist (mechanism.md § "A release past a
-  frame-replacing tail call is not a release"): its binding-scope `DecrefRegion`
+  exempt from the frame-exit hoist ([relocate.md](relocate.md)): its binding-scope `DecrefRegion`
   is dead past the frame replacement *by design*, and hoisting it ahead of the
   `TailCall` would make both channels fire. The analysis records the tail
   site in `RegionInfo::cycle_tail_release` (site HirId → the merged root region), the
@@ -295,7 +292,7 @@ nothing and gives every callee one shape.
   was minted during the letrec setup and its scope-exit drop is dead. If the callee
   turns out a **closure**, the frame is replaced and the activation's own deferred set
   frees the resolved arena once (deduped) at whichever end that activation reaches
-  ([owner.md](owner.md) § "A deferred tail-call release has the node's life");
+  ([owner.md](owner.md));
   if it turns out a **native**, the frame is not replaced, the slot is
   never consumed, and the live scope-exit `DecrefRegion` frees the arena — mutually
   exclusive, exactly one release, the compiler having classified nothing.
@@ -315,9 +312,12 @@ onto one arena and the body tail-calls `outer`. The two channels never name the 
 region: a merge MEMBER callee is absent from `cycle_tail_release`, and
 `tail_callee_defers_release` refuses every `closure_cycle_members` region. Order
 between them is immaterial — each is a decref of a `Counted` region, so the cascade
-and the direct decref commute. Pinned by `region-tail-frame-exit.lisp`'s
-`fwd-cell-sib` row, the oracle's `tail-frame-exit-fwd-cell-sib` probe, and
-`region-tail-frame-exit-uaf.lisp` witness (s) on the soundness side.
+and the direct decref commute. Pinned by the `fwd-cell-sib` row of
+[region-tail-frame-exit.lisp](../../../tests/elle/region-tail-frame-exit.lisp), the
+`tail-frame-exit-fwd-cell-sib` probe in
+[the branch probes](../../../tests/elle/probe/branch.lisp), and witness (s) of
+[region-tail-frame-exit-uaf.lisp](../../../tests/elle/region-tail-frame-exit-uaf.lisp)
+on the soundness side.
 
 Both member and non-member releases run at the recursion's completion / the
 scope-exit, so the same channel the cell-free self-recursive deferred release rides
@@ -360,19 +360,16 @@ operator, an expression — keeps the refusal.
 builder seed populates and rides the same `merged_root` canonicalization and
 `merged_slots` mint-or-reuse every tier already resolves — so it adds no opcode and no
 JIT helper: it lands on the `compute_merges` path every compile runs. Pinned by
-`regions::tests::merge`
+`region::infer::tests::merge`
 (`merge_collapses_mutual_recursion_letrec_closure_cycle` — the mutual SCC + cells collapse
 onto one `merged_root`; `merge_collapses_in_lambda_mutual_recursion_letrec_closure_cycle`
 — the same collapse and binding-scope drop for a letrec that is a lambda body;
 `merge_admits_in_lambda_cycle_with_foreign_tail_callee` and
 `merge_admits_native_tail` — a non-member (foreign closure / native) body
-tail now MERGES and records `cycle_tail_release`;
+tail MERGES and records `cycle_tail_release`;
 `merge_refuses_member_passed_by_move_to_foreign_tail` — the by-move boundary (`(g od)`
 double-free) still refuses, while `merge_admits_member_passed_by_move_to_native_tail`
-takes the factory whose tail is a struct literal over its own members, and
-`merge_refuses_member_passed_by_move_to_shadowed_native_tail` — a user `def` of
-`struct` over the native, which the literal then calls — holds the reading to the
-callee's compile-time VALUE rather than its spelling;
+takes the factory whose tail is a struct literal over its own members;
 `merge_mutual_recursion_cycle_drops_at_binding_scope_not_enclosing`;
 `self_recursive_letrec_is_cell_free_not_merged` — a pure self-recursive letrec has no cell
 and is never a member; `merge_collapses_self_and_sibling_captured_member_cell` — the mixed
@@ -434,8 +431,7 @@ the JIT must agree on. `region_ownership_reclaims_defn_module_factory_per_call`
 gauges both drivers on the VM, and
 `region_ownership_defn_module_member_call_under_jit` gauges the member call with
 the CALLER compiled — the tier where the tail call into the member hands its
-deferral forward to the callee's activation ([relocate.md](relocate.md) § "A
-channel built in compiled code hands its release forward"). The `defn` run's own
+deferral forward to the callee's activation ([relocate.md](relocate.md)). The `defn` run's own
 guardfree fixture is
 `region_defn_cycle_uaf`, which re-enters a member of a returned factory after the
 arena's drop site has passed and drives the factory across churn that recycles a

@@ -10,6 +10,8 @@ it exports, [process.lisp](process.lisp) merges those structs, and
 are layered on the primitives — GenServer, Actor, Task and Supervisor —
 plus an EventManager. This file holds the callback shapes, because a
 caller writes those rather than calls them.
+[docs/processes.md](../docs/processes.md), [docs/supervisor.md](../docs/supervisor.md) and
+[docs/behaviors.md](../docs/behaviors.md) run each of them.
 
 ## Two worlds
 
@@ -21,28 +23,35 @@ on fuel, so no process can starve its siblings.
 
 ## Callback shapes
 
-```lisp
-# GenServer. `server` is a pid or a registered name; `from` is [pid ref].
-{:init        (fn [arg] state | [:ok state] | [:stop reason])
- :handle-call (fn [request from state]
-                [:reply reply state] | [:noreply state]
-                | [:stop reason reply state])
- :handle-cast (fn [request state] [:noreply state] | [:stop reason state])
- :handle-info (fn [msg state]     [:noreply state] | [:stop reason state])
- :terminate   (fn [reason state] ...)}
+A GenServer is a struct of callbacks. `from` is `[pid ref]`, and a
+server is named by its pid or by a registered keyword.
 
-# EventManager handler
-{:init         (fn [arg] state)
- :handle-event (fn [event state] [:ok state] | [:remove state])
- :terminate    (fn [reason state] ...)}
+| Callback | Arguments | Returns |
+|----------|-----------|---------|
+| `:init` (required) | `arg` | the state, `[:ok state]`, or `[:stop reason]` |
+| `:handle-call` | `request from state` | `[:reply reply state]`, `[:noreply state]`, or `[:stop reason reply state]` |
+| `:handle-cast` | `request state` | `[:noreply state]` or `[:stop reason state]` |
+| `:handle-info` (optional) | `msg state` | `[:noreply state]` or `[:stop reason state]` |
+| `:terminate` (optional) | `reason state` | ignored |
 
-# Supervisor child: exactly one of :start and :start-link
-{:id         keyword
- :start      (fn [] ...)     # the child's body, run as a new process
- :start-link (fn [] pid)     # spawns the child and returns its pid
- :restart    :permanent | :transient | :temporary
- :ready      true | false}   # with :start only
-```
+An EventManager handler is a struct of callbacks too.
+
+| Callback | Arguments | Returns |
+|----------|-----------|---------|
+| `:init` (required) | `arg` | the handler's state |
+| `:handle-event` | `event state` | `[:ok state]`, or `[:remove state]` to leave |
+| `:terminate` (optional) | `reason state` | ignored |
+
+A supervisor child is a struct. It carries exactly one of `:start` and
+`:start-link`.
+
+| Key | Value |
+|-----|-------|
+| `:id` | a keyword naming the child |
+| `:start` | a closure the supervisor runs as the child process |
+| `:start-link` | a closure that spawns the child and returns its pid |
+| `:restart` | `:permanent` (the default), `:transient` or `:temporary` |
+| `:ready` | with `:start` only: `true` to hold the next child until this one calls `supervisor-notify-ready` |
 
 A supervisor restarts under `:one-for-one` unless you name
 `:one-for-all` or `:rest-for-one`. [supervisor.md](../docs/supervisor.md)

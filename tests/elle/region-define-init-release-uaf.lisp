@@ -1,7 +1,8 @@
 (elle/epoch 12)
+# audited: 2026-09-23
 # Soundness complement of region-define-init-release.lisp: a `def` evaluates to
 # what it bound, so its initializer's demise must not be placed at the
-# initializer (docs/impl/region/mechanism.md § "A binder's init release lands
+# initializer (docs/impl/region/anchors.md § "A binder's init release lands
 # after the slot store").
 #
 # The binding is UNREAD in every row below, which is exactly the condition the
@@ -58,14 +59,14 @@
   (push sink (def x (list (string "f" i) i)))
   (length (first (get sink 0))))
 
-# (g) the `def`'s value is CAPTURED by a closure the frame hands back, so the
-# read happens through the environment after the frame is gone.
+# (g) the `def` sits inside a closure's body, so the value is consumed in the
+# closure's own activation rather than the frame that built the closure.
 (defn def-captured (i)
   (let [g (fn () (length (first (def x (list (string "g" i) i)))))]
     (g)))
 
-# (h) the value crosses the FIBER frontier: the parked frame resolves it on the
-# resume, after any release placed at the initializer would have run.
+# (h) the `def` sits inside a fiber's body, so the value is consumed in the
+# fiber's own frame, ahead of the yield that parks it.
 (defn def-yielded (i)
   (let [fb (fiber/new (fn ()
                         (emit :yield (takes-list (def x (list (string "h" i) i)))))

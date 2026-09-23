@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-23
 // Guardfree pins for container reads, native effects and the store funnel.
 //
 // docs/analysis/testing.md
@@ -24,9 +24,10 @@ fn region_array_element_uaf_guardfree() {
 // decref — the same RC double-count captures avoid by recording no edge). This
 // reads a deep chain of escaping conses' heap contents back after region-id churn:
 // an under-incref of any element frees it under the reader (SIGSEGV under
-// guardfree). Pairs with the oracle's `arg-result`/`cons-store` leak pins (the
-// over-keep face of the same edge). docs/impl/region/ownership.md § "The outgoing
-// edge table"; walk/intrinsic.rs (the %pair contents).
+// guardfree). The `call-chain` and `arg-result` rows of tests/elle/probe/direct.lisp
+// pin the over-keep face of the same edge. docs/impl/region/ownership.md holds the
+// outgoing edge table; src/hir/region/infer/walk/intrinsic.rs walks the %pair
+// contents.
 #[test]
 fn region_pair_heap_content_uaf() {
     run_elle_script_with_args(
@@ -37,10 +38,10 @@ fn region_pair_heap_content_uaf() {
 
 // Guard — the sequence reads and conversions declare `Opaque`, which says two
 // things: the result may live anywhere, and no argument is stored uncounted
-// (docs/impl/region/effects.md § `Opaque`). The second withdraws a store-facet
-// escape seed, and with it the refusal that seed forced on every mechanism gated
-// on `frame_held_regions`. So this drives what the refusal used to mask: a
-// read's result consumed after the branch that produced it, the subject read
+// (docs/impl/region/effects.md). The second withdraws a store-facet escape seed,
+// and with it the refusal that seed forces on every mechanism gated on
+// `frame_held_regions`. So this drives the shapes such a refusal masks: a read's
+// result consumed after the branch that produced it, the subject read
 // again, the result returned to a caller or yielded to a resumer, and a genuine
 // store escape that must still refuse the window. Freeing the container under any
 // of those faults — SIGSEGV under guardfree. The leak face is
@@ -54,8 +55,7 @@ fn region_sequence_read_effect_uaf() {
 }
 
 // Guard — a resume value delivered into a frame parked at a suspending PRIMITIVE
-// call carries one owning reference (docs/impl/region/owner.md § "A delivery into
-// a replayed frame carries one owning reference"). The replayed frame re-enters at
+// call carries one owning reference (docs/impl/region/owner.md). The replayed frame re-enters at
 // that call's continuation and runs the call's compiler-emitted result release; a
 // bytecode callee funds that release with its `Return` mint, but a primitive that
 // suspends never returns, so the delivery owes it. This drives both parks that
@@ -64,8 +64,8 @@ fn region_sequence_read_effect_uaf() {
 // the literal `Emit`, whose resume block mints the reference in bytecode and is
 // therefore correct without the delivery's. Freeing the delivered value early
 // faults on the read below — SIGSEGV under guardfree. The leak face is the
-// `primitive-resume-*` closed-control family in `tests/elle/oracle.lisp`, which
-// refuses a delivery that mints more than one.
+// `primitive-resume-*` rows of tests/elle/probe/concurrent.lisp, which refuse a
+// delivery that mints more than one.
 #[test]
 fn region_primitive_resume_uaf() {
     run_elle_script_with_args(
@@ -74,18 +74,17 @@ fn region_primitive_resume_uaf() {
     );
 }
 
-// GREEN (live guard) — `with-traits` attaches a trait-table struct to a value;
+// Guard — `with-traits` attaches a trait-table struct to a value;
 // the table lives in its OWN region (not inline), so it is a cross-region edge
 // like any content field. `find_object_cross_refs` must enumerate the `traits`
 // side-field, not just the inline content fields: otherwise the table keeps
 // RC 1 and its constructor's DecrefValueRegion DIRECT-frees it while the host
 // still references it — `(get (traits x) :tag)` then binary-searches the freed
-// struct → SIGSEGV in TableKey::cmp (types.rs). `find_object_cross_refs`
+// struct → SIGSEGV in `TableKey::cmp` (src/value/types/key.rs). `find_object_cross_refs`
 // enumerates `obj.traits()` for all variants, so the alloc-scan increfs and the
 // free-cascade decrefs symmetrically (Rule 5/7). Quarantined as a subprocess
 // because a regression is an uncatchable SIGSEGV that would crash the shared
-// smoke harness; armed under guardfree so the fault is deterministic if it
-// returns.
+// smoke harness; armed under guardfree so a regression faults deterministically.
 #[test]
 fn region_traits_table_uaf() {
     run_elle_file_with_args(
@@ -94,11 +93,11 @@ fn region_traits_table_uaf() {
     );
 }
 
-// GREEN guard — the stdlib `pop` wrapper (`%pop`/`%pop-string`/`%pop-bytes`) stays
+// Guard — the stdlib `pop` wrapper (`%pop`/`%pop-string`/`%pop-bytes`) stays
 // balanced across all three mutable container types. The @array arm suppresses its
 // moved-out element's redundant tail retain (and extracts an Owned element); the
 // @string/@bytes arms return a FRESH grapheme / immediate that must KEEP their tail
-// retain — over-suppressing them over-frees the returned grapheme (the Q1 hazard).
+// retain — over-suppressing them over-frees the returned grapheme.
 // The wrapper's owned-param container also strands across the match arms and is freed
 // per-arm by the container compensation. Runs clean; a regression that unbalances any
 // arm SIGSEGVs here. Full detail in the fixture header.
@@ -119,8 +118,8 @@ fn region_pop_wrapper_types() {
 // read-result → container-contents edge): an escaping element-read marks the
 // container's stored contents escaping, so the ownership forest refuses to adopt them
 // and the ordinary RC path keeps them live across the caller's read. DISTINCT from the
-// pop case (a read BORROWS — the element stays in the container — so the fix is escape
-// marking, not pop's extract). Runs clean; a regression that re-admits the adopt
+// pop case: a read BORROWS, so the element stays in the container and escape marking
+// covers it where pop extracts. Runs clean; a regression that re-admits the adopt
 // SIGSEGVs here. Full repro + trace in the fixture header.
 #[test]
 fn region_container_read_escape_uaf() {
@@ -152,8 +151,7 @@ fn region_container_read_borrow_uaf() {
 }
 
 // Guard — the counted container read is retained by every BINDER FORM that records
-// it (docs/impl/region/reads.md § "Every binder form that records the read must
-// emit the retain"). A name bound to a whole-value read of a re-storing container
+// it (docs/impl/region/reads.md). A name bound to a whole-value read of a re-storing container
 // borrows a reference the next overwrite releases, so the reader takes one of its
 // own — and the container is handed its donation on the strength of that. The
 // analysis records the read from both binder arms of the walk, so a module-scope
@@ -213,14 +211,15 @@ fn region_set_del_heap_member_uaf() {
     );
 }
 
-// Guard — the F1b container compensation must release ONLY the store wrapper's
+// Guard — the per-arm container compensation must release ONLY the store wrapper's
 // stranded owned-param reference, never a live container. A polymorphic
 // `push`/`put`/`add` reached as a value runs its `(match (type-of coll) …)` body,
 // whose mutable arm tail-calls a `-mut` funnel returning the container arg0
-// pass-through; the wrapper leaks its owned-param reference to that return-escaping
-// container (1/op). The close balances it with a per-arm release in the wrapper
-// body (`regions::compensate`, `funnel_container_sites`) plus suppressing the
-// redundant tail ReturnValue retain (`lir::lower::control::call`). Because the
+// pass-through. Unbalanced, the wrapper leaks its owned-param reference to that
+// return-escaping container (1/op). A per-arm release in the wrapper body
+// (`container_release_sites`, src/hir/region/infer/compensate.rs) balances it, and
+// the lowerer suppresses the redundant tail ReturnValue retain there
+// (src/lir/lower/control/call/tail.rs). Because the
 // funnel's `pass_through_retain` already handed the caller one owning reference,
 // releasing the owned-param reference can never drop the live container to zero —
 // but an over-aggressive release would free a container the caller still holds. The
@@ -243,9 +242,9 @@ fn region_mut_container_compensation_uaf() {
 // does for a struct VALUE. The key value is built in the caller's region and
 // pointed at from the struct's region — a cross-region reference the alloc-time
 // scan (`find_object_cross_refs`) must enumerate so the free-time cascade
-// balances it. Enumerating only the values (the old struct arms) left the key's
-// region reclaimed at its constructor's decref_point while the struct still
-// pointed into it: a stale key comparison on the next `get`/`put` (binary search)
+// balances it. A scan that enumerates only the values leaves the key's region
+// reclaimed at its constructor's decref_point while the struct still points into
+// it: a stale key comparison on the next `get`/`put` (binary search)
 // derefs the freed page, and — because the drifted region gets reused — reads
 // live-but-wrong data, silently collapsing distinct compound keys onto one slot.
 // Quarantined as a subprocess because a regression ABORTS (guardfree fault /
@@ -264,8 +263,8 @@ fn region_struct_heap_key_uaf() {
 // key, and a `del` un-records + decrefs it (`struct_put_with_rebind` /
 // `struct_remove_with_decref`). The alloc-scan handles keys present at
 // construction, but an in-place put adds a key AFTER allocation, so the store
-// funnel must record it — enumerating only the value left the free-time content
-// scan (which walks keys) disagreeing with the recorded edge table, a missed
+// funnel must record it. A funnel that enumerates only the value leaves the
+// free-time content scan (which walks keys) disagreeing with the recorded edge table, a missed
 // store-funnel edge the equivalence oracle detonates on. Quarantined as a
 // subprocess because a regression ABORTS. Full repro + invariant in the fixture.
 #[test]
@@ -277,8 +276,7 @@ fn region_struct_mut_put_heap_key_uaf() {
 }
 
 // Guard — the counted store's pin never runs ahead of a second name's read
-// (docs/impl/region/bindings.md § "An aliased stored value takes the counted
-// store"). The pin rule is a maximum over the alias's own binding-chain
+// (docs/impl/region/bindings.md). The pin rule is a maximum over the alias's own binding-chain
 // extension, so an alias read after the store, a forwarding chain's kept link,
 // a phi-carried returned value, and the post-branch content drop each read a
 // live value — a pin that landed early is a deterministic fault under the

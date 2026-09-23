@@ -28,7 +28,13 @@ elle script.lisp          # run a file
 elle script.md            # run literate markdown
 echo '(+ 1 2)' | elle     # one-liner
 elle                       # REPL
-make smoke                 # run all tests (~30 min on the release binary)
+```
+
+The whole test corpus takes about 30 minutes on a release build. Give
+`make smoke-elle` the release binary; the debug default takes hours:
+
+```bash
+make smoke-elle ELLE=./target/release/elle CARGO_PROFILE=--release
 ```
 
 ## Language topics
@@ -51,7 +57,7 @@ make smoke                 # run all tests (~30 min on the release binary)
 | [loops](docs/loops.md) | while, forever, each, repeat |
 | [match](docs/match.md) | Pattern matching with guards |
 | [errors](docs/errors.md) | error, try/catch, protect, defer, with |
-| [signals](docs/signals/) | Signal system, silence, squelch |
+| [signals](docs/signals/index.md) | Signal system, silence, squelch |
 | [fibers](docs/signals/fibers.md) | Fiber basics, signal masks, status |
 | [concurrency](docs/concurrency.md) | ev/spawn, ev/join, ev/race, ev/scope, processes |
 | [threads](docs/threads.md) | OS threads, channels |
@@ -74,7 +80,7 @@ make smoke                 # run all tests (~30 min on the release binary)
 |------|---------|
 | [runtime](docs/runtime.md) | Runtime signals, fuel budgets |
 | [scheduler](docs/scheduler.md) | Async scheduler, io_uring |
-| [debugger](docs/debugger.md) | Breakpoints, stepping, frame inspection, record/replay |
+| [debugger](docs/debugger.md) | Design, not yet built: breakpoints, stepping, frame inspection, record/replay |
 | [embedding](docs/embedding.md) | Using Elle as a library |
 | [regions](docs/regions.md) | Region-based memory: per-region RC, `IncrefRegion`/`DecrefRegion`, merging |
 | [processes](docs/processes.md) | Erlang-style processes: mailboxes, links, monitors |

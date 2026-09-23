@@ -1,69 +1,66 @@
 # Fibonacci Benchmark
 
-## What This Demo Does
+<!-- audited: 2026-09-22 -->
 
-This demo computes the 30th Fibonacci number using a naive recursive algorithm. It's a classic benchmark that measures raw function call overhead — the recursive definition makes ~2.7 million function calls to compute a single result.
+Naive recursive `fib(30)`: about 2.7 million calls, which measure the cost of a
+function call and of generic arithmetic.
 
-**Key features demonstrated:**
-- Recursive function definition with `defn`
-- Conditional branching with `if`
-- Arithmetic operations
-- Timing with `clock/monotonic`
-
-## How It Works
+## What it computes
 
 The Fibonacci sequence is defined recursively:
+
 - `fib(0) = 0`
 - `fib(1) = 1`
 - `fib(n) = fib(n-1) + fib(n-2)` for n ≥ 2
 
-```janet
-(defn fib (n)
-  (if (< n 2) n
+```lisp
+(defn fib [n]
+  (if (< n 2)
+    n
     (+ (fib (- n 1)) (fib (- n 2)))))
 ```
 
-This is the simplest possible implementation — no memoization, no optimization. Each call to `fib(n)` recursively calls `fib(n-1)` and `fib(n-2)`, leading to exponential time complexity O(2^n).
+No memoization and no optimization: each call makes two more, so the time
+grows as O(2^n). Computing `fib(30)` makes 2,692,537 calls.
+[fib.lisp](fib.lisp) times the computation with `clock/monotonic`, which
+returns seconds as a float, and prints the result and the elapsed
+milliseconds. The same program in Janet, JavaScript, Lua, Python and Scheme
+sits beside it for comparison.
 
-The demo then:
-1. Records the start time with `clock/monotonic`
-2. Computes `fib(30)`
-3. Records the end time
-4. Displays the result and elapsed time in milliseconds
+## What it measures today
 
-## Sample Output
+On a release build, with the default adaptive JIT:
 
 ```
 fib(30) = 832040
-elapsed: 17.292599 ms
+elapsed: 15597.389312 ms
 ```
 
-The result 832040 is correct. The elapsed time (~17ms on modern hardware) reflects the cost of ~2.7 million function calls in Elle's interpreter.
+That is about 6 µs a call. Most of the time goes to generic arithmetic.
+`+`, `-` and `<` are standard-library functions that take a variable number of
+arguments and check each one's type, so each use is a full call. `-` builds a
+closure to loop over its rest arguments, and the JIT refuses a function that
+makes a closure, so every subtraction runs in the interpreter.
 
-## Elle Idioms Used
+The `%` intrinsics are single instructions on proven numbers; see
+[docs/intrinsics.md](../../docs/intrinsics.md). The same function written
+with them runs in about 63 ms on the same machine:
 
-- **`defn`** — Prelude macro for function definition. Expands to `(def name (fn params body...))`
-- **`if`** — Conditional expression. Returns the value of the taken branch
-- **`let`** — Local binding (used implicitly in the timing code)
-- **`clock/monotonic`** — Primitive that returns elapsed time since an arbitrary epoch in seconds (as a float)
+```lisp
+(defn fib [n]
+  (if (%lt n 2)
+    n
+    (%add (fib (%sub n 1)) (fib (%sub n 2)))))
+```
 
-## Why This Benchmark?
+Performance is not the current focus. The planned path lowers generic
+arithmetic to the intrinsics wherever type inference proves the operands are
+numbers.
 
-Fibonacci is a standard benchmark because:
-1. It's simple to understand and implement
-2. It exercises function call overhead heavily
-3. It's deterministic and reproducible
-4. It's used across many languages for comparison
-
-This demo is useful for:
-- Measuring interpreter performance
-- Comparing Elle against other Lisps (Janet, Scheme, etc.)
-- Understanding the cost of recursive function calls
-
-## Running the Demo
+## Running the demo
 
 ```bash
 cargo run --release -- demos/fib/fib.lisp
 ```
 
-Use `--release` for optimized performance. Debug builds will be significantly slower.
+A debug build is many times slower.

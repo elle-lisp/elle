@@ -1,4 +1,4 @@
-// audited: 2026-09-15
+// audited: 2026-09-23
 //! Per-value region inference: the types, and the walk that assigns them.
 //!
 //! Every allocation site gets its own unique region, assigned by a single
@@ -27,7 +27,7 @@ mod stats;
 // rather than whichever submodule happens to define it, and so the test
 // module's `use super::*;` sees them.
 pub use classify::{CallClassification, EMIT_PAYLOAD_ARG};
-pub use data::{OutlivesConstraint, Region, RegionData};
+pub use data::{Region, RegionData};
 pub use id::{MappedRegion, RuntimeRegion, StaticRegion};
 pub use info::{CellContainer, CellStore, CellStores, RegionInfo, RestCollection, TailCalleeFacts};
 pub use order::{PinDecref, ProgramOrder};

@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-22
 //! Per-region storage with dual-ended page layout.
 //!
 //! docs/impl/region/model.md
@@ -11,7 +11,7 @@
 //! low addr                                          high addr
 //! ┌──────────────────────────────────────────────────────┐
 //! │ header │ HeapObj │ HeapObj │ ... │ free │ ... │ data │
-//! │ (16B)  │  (48B)  │  (48B)  │     │      │     │bytes │
+//! │ (16B)  │ (128B)  │ (128B)  │     │      │     │bytes │
 //! └──────────────────────────────────────────────────────┘
 //!          ↑ obj_cursor bumps →          ← data_cursor ↑
 //! ```
@@ -40,14 +40,12 @@ pub(crate) use header::{header_if_valid, region_of_page_ptr, PageStamp, HEADER_S
 ///
 /// A region doubles its next page size each time it claims one, so a
 /// region that keeps allocating amortises page-claim cost. Left uncapped
-/// the doubling races into hundreds of MB / multi-GB pages: a region
-/// accumulating garbage (the s11 region model frees little until the
-/// region dies) then claims a page double the last for the next handful
-/// of bytes, turning a linear byte total into a geometric memory blowup —
-/// `(apply concat …)` of small chunks reached a >1GB page and tripped the
-/// `region_of_page_ptr` lookup. Saturating the growth here bounds the
-/// over-allocation per region to one page. A single allocation larger
-/// than this still gets a one-off page sized to fit (see `alloc_data`).
+/// the doubling races into hundreds of MB or multi-GB pages: a region that
+/// holds its garbage until it dies claims a page double the last for the
+/// next handful of bytes, turning a linear byte total into a geometric
+/// memory total. Saturating the growth here bounds the over-allocation per
+/// region to one page. A single allocation larger than this still gets a
+/// one-off page sized to fit (see `alloc_data`).
 const MAX_PAGE_SIZE: usize = 1 << 22; // 4 MiB
 
 /// A single page owned by a region.

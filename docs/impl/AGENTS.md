@@ -11,9 +11,9 @@ Up: [..](../AGENTS.md)
 - [assessment.md](assessment.md) — **The region roadmap** The region system's plan of work: the state gauges, the fix-selection discipline, the measured dead ends, and the open work in order.
 - [audit.md](audit.md) — **The audit queue** Every file carries the day it last met the documentation policy, and the queue names what to read next by what a stale file costs.
 - [bytecode.md](bytecode.md) — **Bytecode** The bytecode instruction set is a `repr(u8)` enum.
-- [differential.md](differential.md) — **Differential Tier Testing** Elle compiles closures through up to five execution tiers:
+- [differential.md](differential.md) — **Differential Tier Testing** A correct closure returns the same value on every execution tier that accepts it, and `compile/run-on` is how a test asks each tier.
 - [dissolution.md](dissolution.md) — **Dissolution — HOF loop fusion (more...)**
-- [escape.md](escape.md) — **Escape analysis — the authoritative true-escape pass (more...)**
+- [escape.md](escape.md) — **Escape analysis — the authoritative true-escape pass** Escape analysis decides, once for every consumer, whether a value outlives the activation it was born in.
 - [fleet.md](fleet.md) — **Fleet — adhoc distributed execution over images (more...)**
 - [gpu.md](gpu.md) — **GPU Compute** How a plain Elle closure becomes a dispatched compute kernel, across the MLIR backend and the Vulkan plugin.
 - [hir.md](hir.md) — **HIR — High-level IR** The HIR pass converts expanded syntax trees into a typed intermediate representation.
@@ -28,7 +28,7 @@ Up: [..](../AGENTS.md)
 - [mlir.md](mlir.md) — **MLIR Backend (more...)**
 - [reader.md](reader.md) — **Reader** The reader transforms source text into syntax trees.
 - [selfrec.md](selfrec.md) — **Self-recursion: the executing-closure mechanism (no cell)** How a self-recursive closure refers to itself without a forward cell, and is reclaimed by ordinary region RC.
-- [spirv.md](spirv.md) — **SPIR-V Backend (more...)**
+- [spirv.md](spirv.md) — **SPIR-V Backend** Two paths turn Elle into SPIR-V compute kernels for Vulkan: the MLIR compiler path, and a hand-written emitter in pure Elle.
 - [stdlib-cache.md](stdlib-cache.md) — **Standard Library Disk Cache** `stdlib.lisp` (~2900 lines) is recompiled on every process start.
 - [symbol.md](symbol.md) — **Symbols and keywords — identity is the name hash** A `SymbolId` is the 64-bit FNV-1a hash of the symbol's name.
 - [syntax.md](syntax.md) — **Syntax — a region-native immutable tree** The pre-analysis tree the reader produces, the expander rewrites, and the analyzer consumes.

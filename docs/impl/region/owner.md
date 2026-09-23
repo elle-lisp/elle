@@ -1,6 +1,6 @@
 # Owner nodes — an activation as a forest root
 
-<!-- audited: 2026-09-19 -->
+<!-- audited: 2026-09-23 -->
 
 The pages-less region that realizes an activation or a fiber as a forest root, the two cuts that fill it, and what frees it.
 
@@ -54,7 +54,7 @@ owner-aware lifetime obligation refuses the subtree (the refusal
 `adopt_edges_refuses_captured_store_member_on_lifetime` pins) — and the co-owned group free
 cannot either (`c` is a closure region, whose cell⊇closure containment the
 external-uniqueness scan cannot see). The activation owns it instead
-(`regions::ownership::compute_activation_adopts` → `RegionInfo::activation_adopt_sites`):
+(`region::infer::ownership::compute_activation_adopts` → `RegionInfo::activation_adopt_sites`):
 the SCC's members are adopted into the executing activation's owner node and freed by its
 completion release, which post-dominates every in-activation use by construction. Admission
 gates, each refusing to Shared (the always-legal baseline):
@@ -125,7 +125,7 @@ node's set-drop walks like any other. A shape the spine cannot order — a park 
 members' allocations, or a park and an allocation inside one non-sequential constituent (a
 branch, a call) — refuses at admission (the park-split gate above).
 
-Pinned by `regions::tests::adopt::activation_adopts_capture_back_edge_scc`
+Pinned by `region::infer::tests::adopt::activation_adopts_capture_back_edge_scc`
 (rooted and bare shapes, funnel-recovered stores),
 `…::activation_adopt_sites_ahead_of_park` (the park split: two sites, the early key
 ordered after every member allocation and before the park),
@@ -133,9 +133,10 @@ ordered after every member allocation and before the park),
 `…::activation_adopt_excludes_other_mechanisms` (merge/group disjointness), at runtime
 by `runtime::tests::ownership::region_ownership_capture_back_edge_cycle_reclaims`
 (bounded flag-on beside the leaking flag-off counterfactual, panic-clean, on the
-interpreter and under the JIT), and end-to-end by the `adopt-park-*` oracle family
-(`tests/elle/oracle.lisp`: a park inside the adopt scope reclaims on the handle-drop,
-abort, and cancel routes alike; the `ap-*` controls attribute each ingredient).
+interpreter and under the JIT), and end-to-end by the `adopt-park-*` probe family in
+[the concurrent probes](../../../tests/elle/probe/concurrent.lisp): a park inside the
+adopt scope reclaims on the handle-drop, abort, and cancel routes alike, and the `ap-*`
+controls attribute each ingredient.
 
 **The transferred returned subtree — owner = the consuming activation.** The second
 containment shape no region root can own is the **returned cycle**: a callee builds an
@@ -148,7 +149,7 @@ so the cycle survives every release and leaks per call. The owner that reclaims 
 **consuming activation**: its owner node's release post-dominates every use of the result,
 on either side of the frontier (every producer-side use precedes the return; every
 consumer-side use precedes the completion). The cut
-(`regions::ownership::compute_transfer_adopts` → `RegionInfo::transfer_adopt_regions` plus
+(`region::infer::ownership::compute_transfer_adopts` → `RegionInfo::transfer_adopt_regions` plus
 interior edges merged into the adopt maps) has a producer half and a consumer half, admitted
 only together — the interior adopts freeze member counts, so an unadopted consumer would
 hold uncounted borrows; one inadmissible consumer site refuses the whole callee:
@@ -206,7 +207,7 @@ only for a discarded returned *cycle*, which the baseline never frees at all. Th
 tier** of the owner lattice is reached structurally, not by a distinct opcode: a consumer
 that parks moves its node into the suspended frame like any activation state, and the
 terminal-fiber teardown gathers parked nodes under the fiber node for one set-drop — the
-transfer runtime below. Pinned by `regions::tests::adopt::transfer_adopts_*` (admission,
+transfer runtime below. Pinned by `region::infer::tests::adopt::transfer_adopts_*` (admission,
 the funnel-recovered face; the refusal family) and at runtime by
 `runtime::tests::ownership::region_ownership_reclaims_returned_cycle_across_calls`,
 `…_reclaims_fiber_terminal_cycle`, and `…_transfer_adopt_rides_parks_and_fiber_teardown`
@@ -228,8 +229,8 @@ recursion's completion.
 **A deferred tail-call release has the node's life, so it rides the node's slot.** A
 frame-replacing tail call strands the releases the lowerer emitted past the `TailCall`: the
 callee closure's own per-call region, and the merged closure-cycle arena a letrec body
-tail-calls out of ([letrec.md](letrec.md) § "The arena channel and the callee channel are
-independent"). The new activation takes each over and owes it one decref. That obligation
+tail-calls out of ([letrec.md](letrec.md)). The new activation takes each over and owes
+it one decref. That obligation
 answers to the same three moments the node's does — it must reach the activation's normal
 completion across however many parks the activation takes on the way, and it must be
 discharged where the activation is abandoned instead — so the two are **one** per-activation
@@ -240,10 +241,10 @@ unit at the discard chokepoint and the terminal teardown. Splitting them into tw
 would let a park move one and drop the other, which is a leak on one side and a strand on the
 other, and nothing would fail on it.
 
-Held in the trampoline loop's own Rust local instead — where it was — the set is lost at
-every exit that is not the clean break, and the ordinary case is not the error exit but the
-**park**: the loop returns, the local dies, and the resumed body re-enters through a *fresh*
-loop with an empty set. So a fiber that yields once inside a tail-called closure stranded the
+Held in the trampoline loop's own Rust local instead, the set would be lost at every exit
+that is not the clean break, and the ordinary case is not the error exit but the **park**:
+the loop returns, the local dies, and the resumed body re-enters through a *fresh* loop with
+an empty set. A fiber that yields once inside a tail-called closure would then strand the
 callee's region even when it was resumed to completion. The record on the activation slot is
 also what carries the deferral to a tail call the interpreter trampoline never sees — the JIT
 sentinel arms and the top-level driver each consume the pending tail call themselves — so the
@@ -253,11 +254,9 @@ happens to be consumed.
 **What an abandoned frame owes, it owes the deferred set too.** The exit no resume can
 reach runs the set rather than parking it: an **error** exit whose frame the entrant does
 not park — the same `walk_abandoned` question the release table's walk asks
-([mechanism.md](mechanism.md) § "An abandoned frame runs the releases it still owes"). A
-**squelch** boundary is that exit rather than a second one: it turns the signal into an
-error the abandoned activation never catches, and the trampoline writes the two as one arm
-([mechanism.md](mechanism.md) § "A squelch boundary abandons frames the same way, so it
-runs the same walk"). The exit stands exactly where the clean break stands: nothing replays
+([unwind.md](unwind.md)). A **squelch** boundary is that exit rather than a second one: it
+turns the signal into an error the abandoned activation never catches, and the trampoline
+writes the two as one arm ([unwind.md](unwind.md)). The exit stands exactly where the clean break stands: nothing replays
 the frame, so the decref the activation took over is at its last chance to run.
 
 The signal's payload needs no exemption here, unlike the release table's own routes. A
@@ -265,8 +264,8 @@ deferred region is a per-call closure region or a merged arena; a raise's payloa
 value the native built into its own fresh call region — nobody's argument, so it is in
 neither — or one of the call's arguments, whose delivery the raise mints
 (`mint_raised_argument_delivery`), which is precisely what lets the frame's own references
-go. The shape that looks like a counterexample is the one the defect was filed on: a payload
-the raiser reaches through the tail-called closure's **captured environment**, where the
+go. The shape that looks like a counterexample is a payload the raiser reaches through the
+tail-called closure's **captured environment**, where the
 env's counted edge is the value's last holder once the frame-exit relocation has run the
 binding's own release ahead of the `TailCall`. Releasing the closure region cascades that
 edge away — and the value survives on the raise's mint, which is a reference no frame holds.
@@ -286,8 +285,7 @@ the same way (`ParkedDues::of`). Three readings:
 - each release the frame's activation took over from its own **frame-replacing tail
   calls**, the plain decref its emitting instruction never ran;
 - the releases the frame still owed off its **two release tables**, read against its
-  saved locals and its saved activation map ([mechanism.md](mechanism.md) § "An abandoned
-  frame runs the releases it still owes").
+  saved locals and its saved activation map ([unwind.md](unwind.md)).
 
 A fourth reading answers for the **park itself** rather than for the frames, and it is
 the ledger's rather than any frame's: a boundary ends a park with no reader and no
@@ -307,7 +305,7 @@ state no live frame shares.
 
 What stays refused is the rest of the parked `activation_region_map`: a blanket per-slot
 release of it carries no receipt, and the regions it names may be an outer, non-discarded
-frame's or the catching activation's — the historical squelch double-free. A frame
+frame's or the catching activation's, and releasing one double-frees it. A frame
 dropped *outside* the chokepoint (an abandoned error park) still abandons its dues — a
 bounded leak, never a double-free (the members have no count for any other release route
 to reach). Pinned by
@@ -315,9 +313,9 @@ to reach). Pinned by
 multi-frame chains; the member's generation bumps at the discard, bounded across repeated
 park-discard cycles), `…::discard_runs_the_abandoned_frames_release_tables` (both routes,
 against a frame whose slot the emitter never recorded), and the leak gauge
-`tests/elle/region-squelch-unwind.lisp`, with
-`tests/elle/region-squelch-unwind-uaf.lisp` and the full-stdlib squelch corpus under
-`--trace=guardfree` as the panic-clean gate.
+[region-squelch-unwind.lisp](../../../tests/elle/region-squelch-unwind.lisp), with
+[region-squelch-unwind-uaf.lisp](../../../tests/elle/region-squelch-unwind-uaf.lisp)
+and the full-stdlib squelch corpus under `--trace=guardfree` as the panic-clean gate.
 
 **Exactly one reclamation path (the double-free invariant, positively).** A node member is
 `Owned`: it has no count for any other release route to reach, the inference that emits its
@@ -327,8 +325,9 @@ for a region proven externally unique. The node's completion free is therefore t
 sole demise.
 
 **All-tier.** The interpreter arm (`handle_adopt_into_activation`,
-`src/vm/dispatch/region.rs`) and the JIT helper (`elle_jit_adopt_into_activation`,
-`src/jit/dispatch/region.rs`) share the VM's lazy-mint + adopt body; the WASM backend
+[src/vm/dispatch/region.rs](../../../src/vm/dispatch/region.rs)) and the JIT helper
+(`elle_jit_adopt_into_activation`,
+[src/jit/dispatch/region.rs](../../../src/jit/dispatch/region.rs)) share the VM's lazy-mint + adopt body; the WASM backend
 handles the op structurally (a no-op arm — the arena boundary reclaims); a function carrying
 it is GPU-ineligible (`is_gpu_instruction`). Pinned end-to-end by
 `runtime::tests::ownership::activation_owner_node_frees_adopted_member_on_normal_completion`
@@ -349,7 +348,7 @@ the teardown below gathers every parked node under the fiber node for one set-dr
 
 **Fiber teardown frees everything the fiber owns.** The members a fiber owns are released
 at its **terminal** transitions, through one take-then-release pair
-(`take_fiber_owned` / `release_fiber_owned`, `src/vm/fiber.rs`): the taking empties the
+(`take_fiber_owned` / `release_fiber_owned`, [owned.rs](../../../src/vm/fiber/owned.rs)): the taking empties the
 fiber's owned slots (each still-parked `BytecodeFrame`'s activation owner node and deferred
 tail-call releases, the fiber node, and — via `Fiber::take_parked_state` — the parked
 non-terminal signal whose park escape retain the resume path can no longer consume) under
@@ -376,7 +375,7 @@ never left to be freed under the consumer's read. Pinned by
 `…_survives_parks_and_frees_at_completion` (a multi-frame chain: every parked frame's
 node and the fiber node reclaim), and `fiber_kill_frees_parked_and_fiber_owned`
 (cancel of a parked fiber; abort of a new one), with
-`tests/elle/region-fiber-cancel.lisp` under `--trace=guardfree` as the
+[region-fiber-cancel.lisp](../../../tests/elle/region-fiber-cancel.lisp) under `--trace=guardfree` as the
 frees-nothing-live gate.
 
 **The free-path fiber discharge — the dropped-handle case.** A fiber abandoned **outside**
@@ -389,33 +388,35 @@ nodes and deferred tail-call releases, the fiber owner node, the parked non-term
 signal's escape retain, and each
 parked frame's own owed releases — read off its two release tables, with the signal
 payload's region exempted only where the raise did not mint the delivery itself,
-[mechanism.md](mechanism.md) § "An abandoned frame runs the releases it still owes") and feeds
+[unwind.md](unwind.md)) and feeds
 the regions into the free's iterative cascade — after the debug equivalence oracle, since
 these are not recorded content edges. The take empties the fiber's slots, so a fiber that
 already tore down discharges nothing, and an executing (borrowed) fiber is skipped — its
 region cannot be dying while it runs. Pinned by
 `runtime::tests::ownership::dropped_parked_fiber_discharges_owned_state` and the
-`yield-discard`/`denied-discard`/`abort-discard` oracle probes.
+`yield-discard`/`denied-discard`/`abort-discard` probes in
+[the concurrent probes](../../../tests/elle/probe/concurrent.lisp).
 
 **The bounded residual: a dead continuation's pending value releases.** A discarded fiber's
 parked frames still hold values whose releases live only in the continuation that will
 never run. Most of them run at the discharge instead, off the compiler's own release
 tables — the frame's value-route slots and its slot-route static regions, each carrying a
-receipt that says whether the release already ran ([mechanism.md](mechanism.md) § "An
-abandoned frame runs the releases it still owes"). That is what a blanket release of the
+receipt that says whether the release already ran ([unwind.md](unwind.md)). That is what a blanket release of the
 parked stack or the parked activation map could not be: a mapped slot can be stale where
 its value's release was emitted value-based or died past a tail call, so it double-frees.
 What is left is what neither table can NAME — a value with no binding of its own, and so
 no route and no receipt: a literal materialized straight into a denied call's argument,
-the rest list the calling convention built for a variadic callee, and a parameter released
-through an env slot, which carries no nil stamp. This class is bounded per discarded
-fiber, measured by the `denied-discard` oracle rate.
+and a parameter released through an env slot, which carries no nil stamp. This class is
+bounded per discarded fiber and has no gauge of its own: the `denied-discard` probe reads
+closed ([assessment.md](../assessment.md)). A variadic callee's rest list is not in it: the
+rest parameter's slot is a value route with a receipt, so the discharge releases the list
+([region-discard-variadic-rest.lisp](../../../tests/elle/region-discard-variadic-rest.lisp)).
 
-One member of it is closed and is no longer part of the residual: a **borrowed tail
-argument's** retain, which the frame mints so a callee has a reference to release. That
-retain has one consumer per path, and a native tail call's SIGNAL exit — an error, a
-suspend, a fiber carrier, a capability denial — reaches neither of them, so the exit
-consumes it itself ([mechanism.md](mechanism.md) § "What the fall-through owes, a signal
-exit owes too"). Its first stranded reference was often the fiber value the abort carried,
-which pinned the body closure and everything the parked frame held behind it.
+A **borrowed tail argument's** retain is not part of the residual. The frame mints it so
+a callee has a reference to release. That retain has one consumer per path, and a native
+tail call's SIGNAL exit — an error, a suspend, a fiber carrier, a capability denial —
+reaches neither of them, so the exit consumes it itself
+([signalexit.md](signalexit.md)). Left unconsumed, the stranded reference is often the
+fiber value the abort carried, which pins the body closure and everything the parked
+frame holds behind it.
 

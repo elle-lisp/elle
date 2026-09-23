@@ -1,5 +1,8 @@
-// A literate document that `make doctest` runs must be able to reach the end of
-// itself.
+// audited: 2026-09-23
+// A literate document that `make doctest` runs must be able to reach the end of itself.
+//
+// docs/README.md
+// docs/testing.md
 //
 // A document is a program, so a plugin it cannot load is a runtime condition,
 // and the sanctioned answer to an unloadable optional dependency is to gate
@@ -10,15 +13,16 @@
 //
 // These tests are the standing check on the two ways that happens: the plugin
 // is never built, or it is named by a path that only one build profile has.
-// Both cost a read of the Makefile and a walk of docs/.
+// Both cost a read of the Makefile and of each document. doctest_scope.rs
+// checks the other half: that the recipe lists every document, and that each
+// keeps its Elle where the reader runs it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
+use crate::common::documents::doctest_documents;
+use crate::common::repo_root;
 
 /// One Makefile rule: what it needs first, and what it runs.
 struct Rule {
@@ -108,39 +112,6 @@ fn packages_built_by(target: &str) -> BTreeSet<String> {
     packages
 }
 
-/// The documents `make doctest` executes, expanded from the recipe's globs.
-///
-/// Reading them off the recipe rather than listing them here is the point: a
-/// directory added to the gate joins these tests in the same commit, and one
-/// dropped from it leaves them.
-fn doctest_documents() -> Vec<PathBuf> {
-    let rules = makefile_rules();
-    let doctest = rules.get("doctest").expect("the Makefile defines `doctest`");
-    let listing = doctest
-        .recipe
-        .iter()
-        .find(|line| line.contains("printf") && line.contains("docs/"))
-        .expect("the doctest recipe lists its documents through printf");
-
-    let root = repo_root();
-    let mut documents = Vec::new();
-    for glob in listing.split_whitespace() {
-        let Some(directory) = glob.strip_suffix("/*.md") else {
-            continue;
-        };
-        let entries = fs::read_dir(root.join(directory))
-            .unwrap_or_else(|e| panic!("the doctest recipe globs {directory}, which {e}"));
-        for entry in entries {
-            let path = entry.expect("directory entry").path();
-            if path.extension().and_then(|e| e.to_str()) == Some("md") {
-                documents.push(path);
-            }
-        }
-    }
-    documents.sort();
-    documents
-}
-
 /// The Elle a document actually executes: its `lisp`/`elle` fences, with the
 /// `#` comments dropped so a commented-out example is not read as a live one.
 fn executable_elle(document: &PathBuf) -> String {
@@ -180,18 +151,9 @@ fn literals_starting_with(code: &str, opening: &str) -> Vec<String> {
         .collect()
 }
 
-/// The documents, paired with the Elle they run. Asserts the walk found the
-/// corpus it expects, so a rewrite that matches nothing fails here instead of
-/// passing vacuously.
+/// The documents, paired with the Elle they run.
 fn documents_and_code() -> Vec<(PathBuf, String)> {
-    let documents = doctest_documents();
-    assert!(
-        documents.len() > 50,
-        "expanded only {} documents from the doctest recipe; the walk is broken, \
-         not the gate",
-        documents.len()
-    );
-    documents
+    doctest_documents()
         .into_iter()
         .map(|document| {
             let code = executable_elle(&document);
@@ -200,7 +162,7 @@ fn documents_and_code() -> Vec<(PathBuf, String)> {
         .collect()
 }
 
-// `make doctest` gates four PR jobs on four platforms, and a document whose
+// `make doctest` gates four PR jobs on three platforms, and a document whose
 // plugin was never built passes all four having run nothing below its import.
 // The counter-factual: drop the `myplugin` prerequisite from the `doctest`
 // target and `make doctest` still exits 0 — with docs/cookbook/plugins.md
@@ -221,7 +183,9 @@ fn every_plugin_a_literate_document_imports_is_built_by_the_doctest_target() {
                 built.contains(&package),
                 "{} imports `plugin/{plugin}`, so it needs {package} in \
                  target/<profile>/. Nothing `make doctest` runs builds it, so the \
-                 import fails and every form below it in that document is dead.",
+                 import fails and every form below it in that document is dead. \
+                 A document that shows a plugin the build does not make takes it \
+                 as a parameter instead (docs/README.md).",
                 document.display()
             );
             assert!(

@@ -1,20 +1,21 @@
 # GPU Compute
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-23 -->
 
 How a plain Elle closure becomes a dispatched compute kernel, across the
 MLIR backend and the Vulkan plugin.
 
-> **Feature-gated:** End-to-end GPU compute requires `--features mlir`
-> (for compiler-generated SPIR-V) and the `vulkan` plugin built and
-> loadable. Tested on AMD RADV; any Vulkan 1.0 + `Int64` driver should
-> work.
+> **Feature-gated:** compiler-generated kernels need an Elle built with
+> `--features mlir`, the `mlir-translate` binary ([impl/spirv.md](spirv.md)),
+> and the `vulkan` plugin from the `plugins` submodule. The plugin needs a
+> driver with the `VK_KHR_external_fence_fd` extension. No CI job builds this
+> combination, so nothing below runs on every build.
 
 Three layers cooperate:
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
-│  Elle: (gpu:map (fn [x] (* x x)) [1 2 3 4])                  │  lib/gpu.lisp
+│  Elle: gpu:map over a (numeric!) closure                     │  lib/gpu.lisp
 ├──────────────────────────────────────────────────────────────┤
 │  MLIR backend:  closure → LIR → SPIR-V bytes                 │  src/mlir/spirv.rs
 ├──────────────────────────────────────────────────────────────┤
@@ -23,14 +24,52 @@ Three layers cooperate:
 ```
 
 The compiler (LIR → SPIR-V) and the runtime (Vulkan dispatch) are
-independent — you can also write SPIR-V by hand with `lib/spirv.lisp`,
-or load a pre-compiled `.spv` file. The `gpu:map` convenience layer
-wires them together.
+independent — you can also write SPIR-V by hand with
+[lib/spirv.lisp](../../lib/spirv.lisp), or load a pre-compiled `.spv` file.
+The `gpu:map` convenience layer wires them together.
+
+`std/gpu` takes the plugin as its `:vulkan` argument. Every example here is a
+function this document defines and never calls, because the build that runs
+it carries neither MLIR nor the plugin.
+
+## Current state
+
+The GPU path has defects that keep it from working end to end:
+
+- **Only the first workgroup is right.** The generated kernel indexes its
+  buffers with `gpu.thread_id x`, the index inside one workgroup, and has no
+  bounds check. `gpu:map` dispatches `ceil(n / wg-size)` workgroups, so every
+  workgroup computes the first `wg-size` elements again.
+- **Only `:i64` matches the kernel.** The generated kernel reads and writes
+  `i64` elements. `gpu:map` accepts `:dtype :i32`, `:u32` and `:f32`, and
+  uploads 4-byte elements the kernel reads as 8-byte ones.
+- **The workgroup size is not part of the SPIR-V cache key**
+  ([impl/spirv.md](spirv.md)), so a second compile of one closure at a new
+  size returns the first kernel.
+- **Teardown crashes.** `VulkanState::drop` destroys the device, and the
+  allocator field drops after it and frees its memory through the destroyed
+  device.
+- **The kernels declare the `Int64` capability,** and `init_vulkan` enables no
+  device features.
 
 ## End-to-end: `gpu:map`
 
-```text
-(gpu:map f & input-arrays &named ctx dtype wg-size)
+`(gpu:map f & input-arrays)` takes the named options `:ctx`, `:dtype` and
+`:wg-size` after the input arrays. It returns an array of the results.
+
+The closure must be GPU-eligible, and the stdlib arithmetic wrappers are not:
+`*` is a call. Write the kernel with `%` intrinsics and prove their operands
+with `(numeric!)`:
+
+```lisp
+(assert (fn/gpu-eligible? (fn [x] (numeric!) (%mul x x))))
+(assert (not (fn/gpu-eligible? (fn [x] (* x x))))
+        "a call to the stdlib * is not GPU-eligible")
+
+(defn gpu-squares [vulkan xs]
+  "Square each integer of xs on the GPU."
+  (let [gpu ((import "std/gpu") :vulkan vulkan)]
+    (gpu:map (fn [x] (numeric!) (%mul x x)) xs)))
 ```
 
 What happens:
@@ -50,41 +89,48 @@ What happens:
    an Elle array.
 
 Workgroup count is `ceil(n / wg-size)` with `wg-size` defaulting to
-256. `dtype` defaults to `:i64`; `:i32`, `:u32`, and `:f32` are also
-recognized.
+256. `dtype` defaults to `:i64`.
 
-The closure must be GPU-eligible — see
-[impl/mlir.md](mlir.md) for the predicate. In short: pure arithmetic,
-fixed arity, no mutable cells, no calls, no signals other than
-`:error`. Immutable numeric captures are allowed for the MLIR-CPU
-tier but **not** for SPIR-V — the SPIR-V path rejects closures with
-captures (they would need extra uniform buffers, which is separate
-work).
+GPU eligibility is the predicate in [impl/mlir.md](mlir.md). In short: numeric
+constants, arithmetic, comparisons and local access; fixed arity; no mutable
+cells, no calls, and no signal other than `:error`. Immutable numeric captures
+are allowed for the MLIR-CPU tier but **not** for SPIR-V — the SPIR-V path
+rejects closures with captures (they would need extra uniform buffers, which
+is separate work).
 
 ## End-to-end: `gpu:compile` + `gpu:run`
 
 For shaders the compiler can't generate (multi-buffer fused kernels,
-custom layouts), use the hand-written DSL:
+custom layouts), use the hand-written DSL.
+`(gpu:compile ctx local-size-x num-buffers body-fn)` returns a shader, and
+`(gpu:run shader [x y z] buffers)` dispatches `x × y × z` workgroups and
+returns the decoded `f32` results of the output buffers:
 
-```text
-(gpu:compile ctx local-size-x num-buffers body-fn)
-  → shader
-
-(gpu:run shader [x y z] [(gpu:input ...) (gpu:output n) ...])
-  → array of decoded f32 results
+```lisp
+(defn gpu-add [vulkan a b]
+  "Add two f32 arrays element by element on the GPU."
+  (let [gpu ((import "std/gpu") :vulkan vulkan)
+        ctx (gpu:init)
+        shader (gpu:compile ctx 64 3
+                 (fn [s]
+                   (let [id (s:global-id)]
+                     (s:store 2 id (s:fadd (s:load 0 id) (s:load 1 id))))))]
+    (gpu:run shader [(/ (+ (length a) 63) 64) 1 1]
+             [(gpu:input a) (gpu:input b) (gpu:output (length a))])))
 ```
 
-`body-fn` is a closure that receives the SPIR-V builder context `s`
-and emits opcodes via `s:load`, `s:store`, `s:fadd`, `s:global-id`,
-etc. See `lib/spirv.lisp` for the full opcode surface and
+`body-fn` receives the SPIR-V builder context `s` and emits opcodes via
+`s:load`, `s:store`, `s:fadd`, `s:global-id`, and the rest. The DSL's kernel
+reads `s:global-id`, so each workgroup handles its own slice. See
+[lib/spirv.lisp](../../lib/spirv.lisp) for the full opcode surface and
 [impl/spirv.md](spirv.md) for the wire format.
 
 ## The vulkan plugin
 
 `vulkan/init` creates `VkInstance` + `VkDevice` + queue (one of each;
-no multi-device support). The state is wrapped in
-`Arc<Mutex<VulkanState>>`, which is what lets a shader hold the context
-it was built against and lock it again at dispatch.
+no multi-device support), on the first physical device with a compute queue.
+The state is wrapped in `Arc<Mutex<VulkanState>>`, which is what lets a shader
+hold the context it was built against and lock it again at dispatch.
 
 `vulkan/shader` accepts SPIR-V either as bytes (compiler-generated or
 loaded into Elle) or as a string path to a `.spv` file, then builds
@@ -99,45 +145,52 @@ carrying the fence FD, and it does not wait.
 fiber suspends until the GPU signals the fence and no thread-pool thread
 is held.
 
-`vulkan/collect` reads the result bytes once the fence has signalled.
+`vulkan/collect` reads the output and in-out buffers back once the fence has
+signalled.
 
 `vulkan/submit` does all three in one call. It blocks the calling thread
 on `wait_for_fences` rather than suspending the fiber, because the stable
 ABI exposes no `IoRequest::task` for a plugin to return.
 
-`vulkan/decode` parses the result-bytes envelope:
+`vulkan/decode` parses the envelope `collect` returns. The element count is
+always the buffer's size in bytes divided by four, whatever the element type;
+the `:i64` decode reads pairs of those words:
 
 ```text
-4 bytes      buffer count (u32 LE)
+4 bytes        buffer count (u32 LE)
 per buffer:
-  4 bytes    element count (u32 LE)
-  N*size bytes  data
+  4 bytes      byte size / 4 (u32 LE)
+  4 × count    bytes of data
 ```
+
+It answers one array for a single buffer, and an array of arrays for several.
+`:raw` answers each buffer as `bytes`.
 
 ## Buffer specs
 
 `gpu:input`, `gpu:output`, `gpu:inout` are convenience wrappers; the
-underlying spec is a struct:
+underlying spec is a struct. A persistent buffer from `vulkan/persist` can
+stand in the list in place of a spec.
 
 | Key | Value | Effect |
 |-----|-------|--------|
 | `:data` | array | Upload to GPU |
-| `:size` | int (bytes) | Allocate output |
+| `:size` | int (bytes) | Allocate an output buffer |
 | `:usage` | `:input` / `:output` / `:inout` | Direction |
-| `:dtype` | `:i64` / `:i32` / `:u32` / `:f32` | Element type for upload + decode |
+| `:dtype` | `:f32` (default) / `:i64` / `:i32` / `:u32` | Element type of the upload |
 
 ## Eligibility, errors, and skipping
 
 GPU eligibility (`fn/gpu-eligible?`) is a compile-time property of
 the closure's LIR — it does not depend on runtime arguments. If a
-closure isn't eligible, `mlir/compile-spirv` and `git` both fail with
-`mlir-error :reason :not-gpu-eligible` and the call site has to fall
-back to CPU.
+closure isn't eligible, `mlir/compile-spirv` and `git` both signal a
+`:mlir-error` whose message says the closure is not GPU-eligible, and the call
+site has to fall back to the CPU.
 
-`gpu:map` does not auto-fallback: if the closure is ineligible or the
-GPU is missing, the error propagates. Tests use `(protect ...)` to
-detect missing prerequisites and `(exit 0)` with a SKIP message —
-see `tests/elle/gpu-map.lisp` for the canonical pattern.
+`gpu:map` does not fall back on its own: if the closure is ineligible or the
+GPU is missing, the error propagates. A test gates itself out with a
+`:gated` error when a prerequisite is missing — see
+[gpu-map.lisp](../../tests/elle/gpu-map.lisp).
 
 ## Files
 
@@ -147,11 +200,12 @@ lib/spirv.lisp                   Hand-written SPIR-V DSL
 src/mlir/spirv.rs                Compiler-generated SPIR-V
 src/primitives/meta.rs           git / fn/git? / disgit
 src/primitives/introspection.rs  fn/gpu-eligible? / mlir/compile-spirv
-src/lir/types.rs                 is_gpu_eligible / is_gpu_instruction
-plugins/vulkan/src/lib.rs        Plugin entry, primitive table
+src/lir/types/func.rs            is_gpu_eligible / is_mlir_cpu_eligible
+src/lir/types/mod.rs             is_gpu_instruction
+plugins/vulkan/src/lib.rs        Plugin entry, primitive table, buffer specs
 plugins/vulkan/src/context.rs    VulkanState init + Drop
 plugins/vulkan/src/shader.rs     SPIR-V → VkComputePipeline
-plugins/vulkan/src/dispatch.rs   Buffer setup, command recording, fence wait
+plugins/vulkan/src/dispatch.rs   Buffer setup, command recording, fence export, readback
 plugins/vulkan/src/decode.rs     Result bytes → Elle array
 ```
 
@@ -164,7 +218,7 @@ plugins/vulkan/src/decode.rs     Result bytes → Elle array
 | `vulkan/dispatch` | errors | Submit a compute dispatch (returns handle) |
 | `vulkan/wait` | yields+io+errors | Suspend on the GPU fence fd |
 | `vulkan/collect` | errors | Read result bytes |
-| `vulkan/decode` | errors | Bytes → Elle array (per dtype) |
+| `vulkan/decode` | errors | Bytes → Elle array (`:f32`, `:u32`, `:i32`, `:i64`, or `:raw`) |
 | `vulkan/submit` | errors | One-shot dispatch + wait, blocking the thread |
 | `vulkan/f32-bits` | errors | IEEE 754 f32 bit pattern of a number |
 | `vulkan/persist` | errors | Create a persistent GPU buffer |
@@ -178,16 +232,18 @@ would have to ask instead is in
 
 ## Configuration
 
-The runtime config (`vm/config`) recognizes the following GPU-related
-trace keywords (currently silent forward-compat — they have no
-dedicated bit yet):
+The runtime config (`vm/config`) accepts the GPU trace keywords `:mlir`,
+`:spirv` and `:gpu` from Elle, and none has a trace bit yet, so asking for
+them turns nothing on:
 
-- `:mlir` — MLIR compilation events
-- `:spirv` — SPIR-V emission events
-- `:gpu` — GPU dispatch events
+```lisp
+(def trace-before (get (vm/config) :trace))
+(put (vm/config) :trace |:gpu :spirv|)
+(assert (empty? (get (vm/config) :trace)) "the GPU keywords carry no bit")
+(put (vm/config) :trace trace-before)
+```
 
-Set with `--trace=gpu,spirv` on the CLI or
-`(put (vm/config) :trace |:gpu :spirv|)` from Elle.
+`--trace=gpu,spirv` on the command line is accepted too, and traces nothing.
 
 ## See also
 

@@ -1,7 +1,7 @@
 (elle/epoch 12)
+# audited: 2026-09-23
 # Branch compensation reads the ARM STRUCTURE, not the branch's arity
-# (docs/impl/region/mechanism.md § "The return frontier is per-path";
-# src/hir/regions/compensate.rs).
+# (docs/impl/region/compensate.md; src/hir/region/infer/compensate.rs).
 #
 # A region gets ONE `decref_point` — the textually-last of its uses. When that point
 # lands inside a branch arm, every path through a DIFFERENT arm reaches the merge
@@ -10,23 +10,24 @@
 # callee's own is the only one in existence, and arms are mutually exclusive so the
 # head release and the `decref_point` release can never both run.
 #
-# Nothing in that argument counts arms or names a branch kind. Keying the admission
-# on the branch KIND instead — `if` yes, `match` no — refused the dominant family: a
+# Nothing in that argument counts arms or names a branch kind. A rule keyed on the
+# branch KIND instead — `if` yes, `match` no — refuses the dominant family: a
 # polymorphic `(match (type-of x) …)` routinely reaches an arm that ignores a value
 # whose `decref_point` the solver left in a sibling, so the region — and every member
-# its free cascade would have reclaimed — was held to fiber teardown, once per call.
+# its free cascade would have reclaimed — is held to fiber teardown, once per call.
 # `dead-arm-struct` below is the discriminator between the two readings: it is a
 # TWO-armed `match`, so it is bounded under an arity rule and stranded under a kind
 # rule.
 #
-# Both faces are pinned, because the fix must not become an over-free:
+# Both faces are pinned, because the compensating release must not become an
+# over-free:
 #   LEAK face — drive the arm that does NOT use the value; object count bounded.
 #   UAF face  — drive the arm that DOES use it (and, for a returned value, the arm
 #               that hands it over) and READ the result; the reference must still be
 #               live. Run under `--trace=guardfree` by `region_match_dead_arm_uaf`.
 #
-# Controls bracket the diagnosis: the same shape written with `if` was already
-# compensated, and the arm that owns the `decref_point` was never the leaking one.
+# Controls bracket the diagnosis: the same shape written with `if`, and the arm that
+# owns the `decref_point`, stay bounded under either reading.
 
 (defn measure (thunk warm window)
   (var i 0)

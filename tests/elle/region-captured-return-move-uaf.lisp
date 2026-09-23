@@ -1,9 +1,7 @@
 (elle/epoch 12)
-# tests/elle/region-captured-return-move-uaf.lisp
-#
-# Regression guard for the `http.lisp` returned-captured-value over-free
-# (hand-off.md "Open bug 1"): a return of a captured upvalue must hand the
-# caller its own owning reference, never the closure env's.
+# audited: 2026-09-23
+# A return of a captured upvalue hands the caller its own owning reference, never the closure env's.
+# docs/impl/region/mechanism.md
 #
 # THE SHAPE. A closure-as-module captures a struct at init; an accessor returns
 # that captured struct; the module's methods consume it
@@ -16,15 +14,14 @@
 # mint, each consumption would drop the captured struct's rc with nothing
 # balancing it: a sequence of consumptions drains the rc to 0 while the capture
 # still references the struct, and the next read is a use-after-free. See
-# src/lir/lower/expr.rs `lower_return` and src/hir/regions/analyze.rs (the
-# return-as-escape post-pass).
+# `lower_return` in src/lir/lower/expr/boundary.rs and the return frontier in
+# src/hir/region/infer/escape.rs.
 #
-# WHY CROSS-UNIT. The bug fires only when the accessor has no statically-
-# resolved call site in its compilation unit: a direct named call lets the
-# region solver inline (`try_inline_call`) and re-walk the accessor in the
-# caller's context, recognising the result as captured and emitting no decref.
-# `import-file` puts the module in its own unit, defeating that — exactly the
-# `(import "std/http")` dispatch of the real bug.
+# WHY CROSS-UNIT. `import-file` puts the module in its own compilation unit, so
+# the accessor has no statically resolved call site and the region solver cannot
+# inline it (`try_inline_call`). The call is opaque, and the caller's release
+# rests on the callee's return mint alone — the `(import "std/http")` dispatch
+# shape.
 #
 # WHY MULTIPLE CALLS. A single consumption only drops rc 2 -> 1 (the module's
 # capture cell plus this read both hold it), so the struct stays live and a

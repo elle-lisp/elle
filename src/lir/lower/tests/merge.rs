@@ -1,20 +1,21 @@
+// audited: 2026-09-23
+//! Pins the lowerer's slot-resolved RC instructions: coalesced mints, the merge's shared slot, and their counters.
+//!
+//! docs/impl/region/mechanism.md
+//! docs/impl/region/merging.md
+
 use super::*;
 
-// ── Transform 1 at lower_return: the coalesced return mint ───────────────────
+// ── Coalescing at lower_return: the return mint ──────────────────────────────
 //
-// `lower_return` selects the return mint's encoding by the staticness predicate:
-// a coalescible return — a fresh local allocation whose region is a known slot —
-// lowers its mint to the slot-resolved `IncrefRegion` (guarded under
-// `debug_assertions` by the equivalence oracle `AssertRegionMatches` on the same
-// slot), instead of the value-resolved `IncrefValueRegion`. A refused return (the
-// dynamic boundary — a parameter, an immediate, a pass-through) keeps
-// `IncrefValueRegion`. Spec: docs/impl/region/mechanism.md § "Compile-time region
-// selection (coalescing)".
+// A coalescible return, a fresh local allocation whose region is a known slot,
+// lowers its mint to the slot-resolved `IncrefRegion`. A debug build guards it
+// with `AssertRegionMatches` on the same slot. A refused return (a parameter, an
+// immediate, a pass-through) keeps the value-resolved `IncrefValueRegion`.
 //
-// These pins are counterfactual against a value-resolved-at-every-tail lowerer:
-// the fresh-allocation pins (RED before the substitution) assert it happened; the
-// param pin guards the refusal half against over-coalescing (a slot resolving to
-// the wrong physical region is a UAF).
+// A lowerer that value-resolves every tail fails the fresh-allocation pins. The
+// param pin guards the refusal half: a slot that resolves to the wrong physical
+// region is a use-after-free.
 
 #[test]
 fn coalesced_fresh_pair_return_is_slot_resolved() {
@@ -66,9 +67,9 @@ fn coalesced_string_literal_return_is_slot_resolved() {
     assert_coalesced_oracle_precedes(str_fn);
 }
 
-// ── Transform 1 at the two narrow reassign sites ─────────────────────────────
+// ── Coalescing at the two reassign sites ─────────────────────────────────────
 //
-// The two remaining transform-1 sites are both reassigned-binding traffic over a
+// The two other coalescing sites both carry reassigned-binding traffic over a
 // value the lowerer just allocated locally:
 //   - the reassign incref-on-store (`lower_assign`'s drop-on-overwrite): a fn-local
 //     1-slot container's fresh new content coalesces its pin to `IncrefRegion`;
@@ -79,8 +80,7 @@ fn coalesced_string_literal_return_is_slot_resolved() {
 // Both gate on `coalescible_region` and guard the slot-resolved instruction under
 // `debug_assertions` with `AssertRegionMatches`. A module-scope container's value
 // stays value-resolved (it is in `mutated_binding_value_regions`, the runtime fact
-// the container tracks), as does the drop-old of the displaced content. Spec:
-// docs/impl/region/mechanism.md § "Compile-time region selection (coalescing)".
+// the container tracks), as does the drop-old of the displaced content.
 
 #[test]
 fn captured_reassign_init_drop_is_slot_resolved() {
@@ -89,7 +89,7 @@ fn captured_reassign_init_drop_is_slot_resolved() {
     // `store_captured_cell_init` runs with reassigned=true and drops the producer's
     // reference to the fresh init `(%pair 1 2)`. That init is a fresh local
     // allocation whose region is a known slot, so the drop coalesces to a
-    // slot-resolved `DecrefRegion` (the decref side of transform 1), guarded under
+    // slot-resolved `DecrefRegion` (the decref side of coalescing), guarded under
     // debug by `AssertRegionMatches` on the same slot. Counterfactual: value-resolved,
     // the init's StoreCaptureCell is immediately followed by a value-resolved
     // `DecrefValueRegion` — this test then panics.
@@ -125,8 +125,8 @@ fn captured_reassign_init_drop_is_slot_resolved() {
             }
             Some(LirInstr::DecrefValueRegion { .. }) => panic!(
                 "the captured-reassign init-drop is still value-resolved \
-                 (DecrefValueRegion after StoreCaptureCell) — transform 1's decref \
-                 side did not coalesce",
+                 (DecrefValueRegion after StoreCaptureCell) — the decref side \
+                 did not coalesce",
             ),
             _ => {}
         }
@@ -146,7 +146,7 @@ fn param_return_stays_value_resolved() {
     // user closure (returns its param) nor the letrec stub closures (return
     // nil/rest-args) allocate, so NO non-allocating closure may slot-resolve its
     // return mint — that would be an over-coalesce (a UAF in waiting). This guards
-    // the refusal half of the predicate at the emission site (stable across C2).
+    // the refusal half of the predicate at the emission site.
     let module = compile_to_lir("(fn (x) x)");
     let mut saw_passthrough = false;
     for f in &module.closures {
@@ -169,33 +169,32 @@ fn param_return_stays_value_resolved() {
     );
 }
 
-// ── The builder-idiom merge flip ─────────────────────────────────────────────
+// ── The builder-idiom merge ──────────────────────────────────────────────────
 //
-// The merge flip (docs/impl/region/merging.md § "Emission: one slot per merge tree,
-// one demise at the root"): a builder-idiom merge collapses a fresh child
-// aggregate into the parent `%pair` it is stored into, so child and parent
+// A builder-idiom merge collapses a fresh child aggregate into the parent `%pair`
+// it is stored into, so child and parent
 //   (1) allocate against ONE static slot — the root's; `static_slot` canonicalizes
 //       every region through `merged_root`;
 //   (2) carry ONE `DecrefRegion` — the root's; the non-root child's own demise is
 //       suppressed (only the root's drop frees the shared region);
 //   (3) drop the now-intra-region `child→parent` store edge's `IncrefRegion`
-//       (transform 2 — the cascade skips self-references, so keeping it leaks);
+//       (self-edge elimination: the cascade skips self-references, so keeping
+//       it leaks);
 //   (4) record the shared slot in `merged_slots` for runtime mint-or-reuse.
 //
 // The canonical shape is the discarded nested literal `(begin (%pair (%pair 1 2) 3)
-// nil)` — exactly the source the merge-seed pins in `hir/regions/tests.rs` fire on.
-// `%pair` compiles as the `Pair` intrinsic (lowered to `LirInstr::List`) on every
-// compile, so the seed always has sites to merge.
+// nil)`, the source the merge-seed pins in src/hir/region/infer/tests/merge/seed.rs
+// fire on. `%pair` compiles as the `Pair` intrinsic (lowered to `LirInstr::List`)
+// on every compile, so the seed always has sites to merge.
 //
-// Each pin is counterfactual against the pre-flip emission, which allocates child
-// and parent on DISTINCT slots, emits TWO `DecrefRegion`s, KEEPS the self-edge
-// `IncrefRegion`, and records NO `merged_slots`. Written from the spec, not from
-// emission output (CLAUDE.md).
+// Each pin fails against a lowerer that ignores the merge: it allocates child and
+// parent on DISTINCT slots, emits TWO `DecrefRegion`s, KEEPS the self-edge
+// `IncrefRegion`, and records NO `merged_slots`.
 
 #[test]
 fn merge_flip_child_and_parent_share_one_slot() {
     // (1) Both `%pair` allocations resolve to ONE static slot — the merged root's.
-    // Counterfactual: pre-flip `static_slot` mints a distinct slot per region, so
+    // Counterfactual: unmerged, `static_slot` mints a distinct slot per region, so
     // the child and parent pair carry two distinct slots → the distinct count is 2.
     let module = compile_to_lir(BUILDER_IDIOM);
     let slots = builder_pair_slots(&module);
@@ -216,7 +215,7 @@ fn merge_flip_child_and_parent_share_one_slot() {
 #[test]
 fn merge_flip_emits_one_decref_for_the_merged_pair() {
     // (2) The merged region has exactly ONE `DecrefRegion` (the root's), naming the
-    // shared slot. Counterfactual: pre-flip child and parent each carry their own
+    // shared slot. Counterfactual: unmerged, child and parent each carry their own
     // `DecrefRegion` on distinct slots → two decrefs over the pair-slot set.
     let module = compile_to_lir(BUILDER_IDIOM);
     let slots: std::collections::HashSet<StaticRegion> =
@@ -235,7 +234,7 @@ fn merge_flip_emits_one_decref_for_the_merged_pair() {
 #[test]
 fn merge_flip_drops_the_self_edge_incref() {
     // (3) The `child→parent` store edge is intra-region post-merge, so its
-    // `IncrefRegion` is dropped (transform 2). Counterfactual: pre-flip the edge
+    // `IncrefRegion` is dropped (self-edge elimination). Counterfactual: unmerged, the edge
     // emits one `IncrefRegion` on the child slot → one incref over the pair-slot set.
     let module = compile_to_lir(BUILDER_IDIOM);
     let slots: std::collections::HashSet<StaticRegion> =
@@ -255,7 +254,7 @@ fn merge_flip_drops_the_self_edge_incref() {
 fn merge_flip_records_merged_slot_metadata() {
     // (4) The shared slot is recorded in the function's `merged_slots` so the
     // runtime mint-or-reuses it (child mints, parent reuses → one physical region).
-    // Counterfactual: pre-flip `record_merged_slots` finds the child and parent on
+    // Counterfactual: unmerged, `record_merged_slots` finds the child and parent on
     // distinct slots, records nothing → `merged_slots` is empty.
     let module = compile_to_lir(BUILDER_IDIOM);
     let pair_slots: std::collections::HashSet<StaticRegion> =
@@ -308,20 +307,19 @@ fn merge_flip_inert_without_a_merge() {
     );
 }
 
-// ── C7: the RC-coalescing measurement instrument ─────────────────────────────
+// ── The RC-coalescing measurement instrument ─────────────────────────────────
 //
 // `rcstats` (src/lir/lower/rcstats.rs) records, per coalescing-candidate site,
 // whether the mint resolved to a static slot or stayed value-resolved, plus the
-// transform-2 self-edges eliminated — the data `benches/regionrc.rs` reports as
-// "the measured win" (verona Stage 5 § Tests-first). The decision is NOT
-// recoverable from the final LIR (a coalesced mint's `IncrefRegion` is
-// indistinguishable from a store-edge's, and an eliminated edge leaves no
-// instruction), so the lowerer records it at the decision site; these pins prove
-// it observes the same decisions the C2/C3/C6 emission pins above assert.
+// self-edges eliminated. benches/regionrc.rs reports the totals. The final LIR
+// cannot recover the decision (a coalesced mint's `IncrefRegion` looks like a
+// store-edge's, and an eliminated edge leaves no instruction), so the lowerer
+// records it where it decides. These pins prove the instrument sees the same
+// decisions the emission pins above assert.
 //
-// Counterfactual: before the `rcstats::record_*` calls were wired into the
-// lowerer the counters stayed zero on every compile, so each `>= 1` assertion
-// below was RED. `reset`+`snapshot` bracket one compile on this thread.
+// Counterfactual: a lowerer that never calls `rcstats::record_*` leaves every
+// counter at zero, so each `>= 1` assertion below fails. `reset`+`snapshot`
+// bracket one compile on this thread.
 
 #[test]
 fn rcstats_counts_coalesced_return_mint() {
@@ -369,7 +367,7 @@ fn rcstats_counts_self_edge_eliminated() {
 #[test]
 fn rcstats_slot_fraction_tracks_coalesced_over_candidates() {
     // The derived `slot_fraction` is coalesced / (coalesced + value-resolved)
-    // over the three transform-1 sites — `None` only when there were no candidate
+    // over the three coalescing sites — `None` only when there were no candidate
     // mints at all. A compile with at least one return mint always has candidates.
     rcstats::reset();
     let _ = compile_to_lir("(fn () (%pair 1 2))");
@@ -389,6 +387,6 @@ fn rcstats_slot_fraction_tracks_coalesced_over_candidates() {
             + s.reassign_store_value
             + s.captured_init_slot
             + s.captured_init_value,
-        "coalesced + value_resolved must total every transform-1 candidate site",
+        "coalesced + value_resolved must total every coalescing candidate site",
     );
 }

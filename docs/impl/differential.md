@@ -1,14 +1,18 @@
 # Differential Tier Testing
 
-Elle compiles closures through up to five execution tiers:
+<!-- audited: 2026-09-23 -->
 
-```text
-1. bytecode   — interpreter, always available
-2. jit        — Cranelift native code, requires LIR + non-polymorphic
-3. wasm       — Wasmtime tiered, requires --features wasm + no tail calls
-4. mlir-cpu   — MLIR/LLVM tier-2, requires --features mlir + GPU eligibility
-5. gpu        — SPIR-V on Vulkan, via gpu:map (--features mlir + vulkan plugin)
-```
+A correct closure returns the same value on every execution tier that accepts it, and `compile/run-on` is how a test asks each tier.
+
+Elle can run a closure on up to four tiers, and a fifth runs GPU kernels:
+
+| Tier | Engine | Needs |
+|------|--------|-------|
+| bytecode | the interpreter | always available |
+| jit | Cranelift native code | `--features jit` (default), and a closure the JIT can lower: it refuses `MakeClosure`, `eval`, and struct or named varargs |
+| wasm | Wasmtime, one module per closure | `--features wasm`, and a closure with no tail call, signal emission, suspending call or module-less `MakeClosure` |
+| mlir-cpu | MLIR and LLVM | `--features mlir`, and a closure `is_mlir_cpu_eligible` admits |
+| gpu | SPIR-V on Vulkan, through `gpu:map` | `--features mlir` and the vulkan plugin; not a `compile/run-on` tier |
 
 Each tier is a separate code path with its own value representation,
 calling convention, and lowering pass. **A correct closure must produce
@@ -18,33 +22,44 @@ underlying engine.
 
 ## Primitive
 
-```text
-(compile/run-on tier f & args)
+`(compile/run-on tier f & args)` force-runs `f` on the named tier with the
+given arguments and returns the result. `tier` is one of:
+
+- `:bytecode` — the interpreter. The JIT is off for this call, but a nested
+  call still goes through ordinary tier dispatch.
+- `:jit` — force-compiles through Cranelift, then calls the native code. A
+  tail call out of the native code runs its callee once under the bytecode
+  interpreter.
+- `:wasm` — force-compiles through the tiered Wasmtime backend.
+- `:mlir-cpu` — force-compiles through MLIR and LLVM, then calls through the
+  `MlirCache`. The result comes back as an integer, a float or a boolean.
+
+```lisp
+(assert (= (compile/run-on :bytecode (fn [a b] (+ a b)) 3 4) 7))
+(assert (= (compile/run-on :jit (fn [a b] (+ a b)) 3 4) 7))
 ```
 
-Force-runs `f` on the named tier with the given arguments and returns
-the result. `tier` is one of:
+A tier that does not accept the closure signals a structured
+`:tier-rejected` error instead of running it. The `:reason` says why:
 
-- `:bytecode` — pure interpreter (JIT temporarily disabled for the call)
-- `:jit` — force-compiles via Cranelift, then dispatches to native code;
-  supports tail calls via a trampoline loop
-- `:wasm` — force-compiles via Wasmtime tiered backend (only available
-  with `--features wasm`; rejects closures with tail calls)
-- `:mlir-cpu` — force-compiles via MLIR + LLVM, then invokes via the
-  `MlirCache` (only available with `--features mlir`)
+- `:ineligible` — the tier cannot compile this closure. MLIR-CPU also answers
+  this for an argument or a capture that is not an integer or a float.
+- `:feature-disabled` — the build does not carry the tier's feature.
+- `:unknown-tier` — the keyword names no tier.
 
-If the tier doesn't accept this closure (e.g. polymorphic closure on
-JIT, non-int-returning closure on MLIR-CPU), the primitive signals a
-structured error:
+```lisp
+(def [jit-ok? jit-err]
+  (protect (compile/run-on :jit (fn [x] (fn [] x)) 1)))
+(assert (not jit-ok?))                        # the JIT refuses MakeClosure
+(assert (= (get jit-err :error) :tier-rejected))
+(assert (= (get jit-err :reason) :ineligible))
 
-```text
-{:error :tier-rejected :message "..." :tier :mlir-cpu :reason :ineligible}
+(def [gpu-ok? gpu-err] (protect (compile/run-on :gpu (fn [] 1))))
+(assert (= (get gpu-err :reason) :unknown-tier))
 ```
 
-Tier eligibility is independent of arguments — it's a property of the
-closure's compiled form. Argument-shape mismatches surface as ordinary
-arity or type errors. A tier whose *feature* is absent from the build
-answers `:reason :feature-disabled` instead of `:ineligible`.
+Arity and type errors in the arguments surface as ordinary errors, not as
+rejections.
 
 ## The harness is the test runner
 

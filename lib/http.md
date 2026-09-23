@@ -1,6 +1,6 @@
 # http
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-23 -->
 
 HTTP/1.1 client and server over TCP, in one file of pure Elle, with HTTPS and compression as opt-in module arguments.
 
@@ -11,22 +11,30 @@ wire and the invariants a caller has to respect.
 
 ## Loading
 
+Called with no argument, the module speaks plain HTTP. HTTPS takes the
+`std/tls` module built from the plugin, `(import "plugin/tls")`, as
+`:tls`, and `:compress true` loads the codecs, which need `libz` and
+`libzstd`:
+
 ```lisp
 (def http ((import "std/http")))                          # http only
-(def http ((import "std/http") :tls (import "plugin/tls")))
-(def http ((import "std/http") :compress true))           # gzip, zlib, deflate, zstd
-```
 
-`:compress` exposes the codecs as `http:gzip` and friends. Nothing is
-negotiated for you — a caller applies them to a body or to one chunk.
+(defn https-module [tls-plugin]
+  "The http module, able to fetch https:// URLs."
+  ((import "std/http") :tls ((import "std/tls") tls-plugin)))
+
+(defn http-with-codecs []
+  "The http module with gzip, zlib, deflate and zstd."
+  ((import "std/http") :compress true))
+```
 
 ## Data flow
 
 ```
-client:  request → parse-url → tcp/connect → request line → headers
+client:  request → parse-url → open transport → request line → headers
                  → flush → status line → headers → body → close
 
-server:  serve → tcp/listen → forever:
+server:  tcp/listen → serve → forever:
            accept → ev/spawn → defer(close): read → handler → write
 ```
 
@@ -39,22 +47,32 @@ and serve both schemes. A session from `http:connect` carries
 
 ## Struct shapes
 
-```lisp
-# request, handed to a handler
+A handler receives a request. `:body` is nil when the request carries
+neither `Content-Length` nor chunked framing:
+
+```text
 {:method "GET" :path "/foo" :version "HTTP/1.1"
  :headers {:host "example.com"} :body "..."}
+```
 
-# response, returned by a handler or by http:respond
-{:status 200 :headers {:content-type "text/plain"} :body "hello"}
+A handler returns a response, and `http:respond` builds one with
+`Content-Type` and `Content-Length` set. `http:parse-url` answers the
+URL shape:
 
-# url, from parse-url
-{:scheme "http" :host "example.com" :port 80 :path "/foo" :query "page=1"}
+```lisp
+(assert (= (http:respond 200 "hello")
+           {:status 200
+            :headers {:content-type "text/plain" :content-length "5"}
+            :body "hello"}))
+(assert (= (http:parse-url "http://example.com/foo?page=1")
+           {:scheme "http" :host "example.com" :port 80 :path "/foo"
+            :query "page=1"}))
 ```
 
 Server-sent events ride the chunked path: `sse-response` sets
-`text/event-stream`, and each `send-event` call becomes one chunk.
-`sse-get` answers with a `|:yield|` fiber of `{:event :data :id :retry}`
-structs that reconnects on its own.
+`text/event-stream`, and each call to the `send-event` function it hands
+the body becomes one chunk. `sse-get` answers with a `|:yield|` fiber of
+`{:event :data :id :retry}` structs that reconnects on its own.
 
 ## Invariants
 
@@ -64,9 +82,8 @@ structs that reconnects on its own.
 4. `http:serve` answers a handler error with 500 and keeps serving.
 5. `https://` needs `:tls` at module init, and signals
    `:http-error :tls-not-configured` without it.
-6. `http:serve` speaks plain HTTP. For HTTPS, wrap an accepted
-   connection with `tls:accept` and feed `tls-transport` to
-   `connection-loop`.
+6. `http:serve` speaks plain HTTP, and the module exports no HTTPS
+   server: the loop that serves one transport is private.
 7. `Transfer-Encoding: chunked` wins over `Content-Length`.
 8. No connection pooling. Each one-shot call opens and closes a transport.
 

@@ -4,9 +4,10 @@
 ## Plain HTTP only:
 ##   (def http ((import "std/http")))
 ##
-## HTTPS client support requires a TLS plugin passed as :tls:
-##   (def tls-plug (import "plugin/tls"))
-##   (def http ((import "std/http") :tls tls-plug))
+## HTTPS client support requires the std/tls module, built from the tls
+## plugin, passed as :tls:
+##   (def tls ((import "std/tls") (import "plugin/tls")))
+##   (def http ((import "std/http") :tls tls))
 ##
 ## Usage: (http:get "http://example.com/")   (http:get "https://...")
 ##
@@ -217,7 +218,7 @@
       s))
 
   (defn tls-transport [conn]
-    "Wrap a TLS connection (from the configured tls plugin) as a transport.
+    "Wrap a TLS connection (from the configured tls module) as a transport.
      Only available when :tls was passed to the module initializer.
 
      Note: port/read-line strips trailing newlines; tls:read-line does
@@ -233,9 +234,9 @@
 
   (defn open-transport [url-parsed]
     "Open a transport to the URL's host:port. Uses TLS when the scheme is
-     https and a tls plugin was supplied to the module initializer.
+     https and a tls module was supplied to the module initializer.
      Signals :http-error :tls-not-configured if an https URL is used
-     without a tls plugin."
+     without one."
     (cond
       (= url-parsed:scheme "https")
         (begin
@@ -243,7 +244,7 @@
             (error {:error :http-error
                     :reason :tls-not-configured
                     :url url-parsed
-                    :message "https URL requires the tls plugin; pass :tls to (import \"std/http\")"}))
+                    :message "https URL requires the std/tls module; pass it as :tls to (import \"std/http\")"}))
           (tls-transport (tls:connect url-parsed:host url-parsed:port)))
       true (tcp-transport (tcp/connect url-parsed:host url-parsed:port))))
 

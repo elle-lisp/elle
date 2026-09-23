@@ -1,33 +1,30 @@
 (elle/epoch 12)
+## audited: 2026-09-23
 ## tests/elle/nested-loop-inner-invariant.lisp
 ##
-## Regression: a binding bound BETWEEN two nested loops — INSIDE the outer
-## loop body but OUTSIDE the inner loop — and read inside the inner loop
-## must survive every inner iteration.
+## A binding bound BETWEEN two nested loops — INSIDE the outer loop body but
+## OUTSIDE the inner loop — and read inside the inner loop must survive every
+## inner iteration.
 ##
-## Root cause (closed): the liveness iter-scope last-use extension consulted
-## only the OUTERMOST enclosing loop (`iter_scope_stack.first()`). A binding
-## bound inside the outer loop is bound-INSIDE that outermost loop, so the
-## extension found `bound_outside=false` and never extended its last-use.
-## Its decref_point then landed inside the INNER loop body, so the lowerer
-## freed the value (decref + nil-stamp the slot) right after its read on the
-## inner loop's FIRST iteration. The next inner iteration read nil.
+## The trap: the binding is bound inside the OUTERMOST loop, so an extension
+## that asks only about that loop finds it bound inside and never extends its
+## last use. Its `decref_point` then lands inside the INNER loop body, the
+## lowerer frees the value (decref + nil-stamp the slot) right after its read on
+## the inner loop's first iteration, and the next inner iteration reads nil.
+## So the liveness pass extends a read's last use to the OUTERMOST loop the
+## binding is bound OUTSIDE of — here, the inner loop
+## (src/hir/liveness/lastuse/builder.rs).
 ##
-## This is exactly how `(each x in row ...)` nested inside `(each row in ...)`
-## breaks for INDEXED sequences (arrays/strings/structs): the inner `each`
-## expands to `(def @len (length seq)) (while (%lt idx len) ...)`, with `len`
-## bound between the two loops. After iteration 0 `len` became nil and the
-## bound check `(%lt idx nil)` raised `%lt: ... integer and nil`. The
-## list-iterating `each` (which walks `cur`/`pair?`, no `len`) was unaffected,
-## which is why list×list nesting worked but array×array did not.
-## (Surfaced via lib/portrait.lisp module-portrait, tests/elle/portrait.lisp.)
-##
-## The fix extends last-use to the OUTERMOST loop the binding is bound
-## OUTSIDE of (here: the inner loop), not only the absolute-outermost loop.
+## `(each x in row ...)` nested inside `(each row in ...)` meets this for
+## INDEXED sequences (arrays, strings, structs): the inner `each` expands to
+## `(def @len (length seq)) (while (%lt idx len) ...)`, with `len` bound between
+## the two loops, so a freed `len` makes the bound check raise
+## `%lt: ... integer and nil`. The list-walking `each` binds no `len`, which is
+## why list×list nesting never met it.
 
-## ── 1. nested `each` over arrays (the portrait trigger shape) ────────────
-## The inner each's `len` is bound between the two loops. With the bug the
-## inner loop raised on the 2nd element of the first row.
+## ── 1. nested `each` over arrays ─────────────────────────────────────────
+## The inner each's `len` is bound between the two loops. Freed after its first
+## read, it makes the inner loop raise on the 2nd element of the first row.
 (def @flat @[])
 (each row in @[@["a" "b"] @["c"] @["d" "e" "f"]]
   (each x in row
@@ -41,8 +38,8 @@
 (println "  1. nested each over arrays collected every element: ok")
 
 ## ── 2. list (outer) × array (inner): inner `len` still bound between ─────
-## Outer list-walk has no `len`; the failing `%lt` was the inner array loop's
-## own bound check, proving the clobber is the inner binding, not the outer.
+## The outer list walk binds no `len`, so a failing `%lt` here is the inner
+## array loop's own bound check: the freed binding is the inner one.
 (def @flat2 @[])
 (each row in (list @["a" "b"] @["c" "d" "e"])
   (each x in row
@@ -84,16 +81,15 @@
 (println "  4. triple-nested each over arrays: ok")
 
 ## NOTE: the capture analogue — a `@`-mutable binding captured by a lambda built
-## inside a loop — is a DISTINCT defect with a DISTINCT fix, now CLOSED. Its env
-## cell (a populate_env cell, not a compiled MakeCaptureCell) is minted once per
-## activation, but its DecrefCellRegion was placed at the binding's in-loop last
-## use and fired per iteration, freeing the once-allocated cell on iteration 1.
-## The fix hoists a cell-release region's decref_point past all enclosing loops
-## (regions/analyze.rs `hoist_cell_release_past_loops`); it is NOT this last-use
-## extension. It is covered — single-loop AND the bound-between-nested-loops
-## (cap2) shape — by tests/elle/region-capture-cell-loop-uaf.lisp, and pinned at
-## the solver layer by `env_cell_release_in_loop_hoisted_past_loop`. See
-## docs/impl/region/cells.md "Env cells in loops: release once per
-## activation, not per iteration".
+## inside a loop — is a different trap with a different answer. Its env cell (a
+## `populate_env` cell, not a compiled MakeCaptureCell) is minted once per
+## activation, so a release at the binding's in-loop last use would free the
+## once-allocated cell on iteration 1. The cell release's `decref_point` moves
+## past every enclosing loop instead (`post_loop_placement`,
+## src/hir/region/infer/analyze/decref.rs); it is NOT this last-use extension.
+## tests/elle/region-capture-cell-loop-uaf.lisp covers it, single-loop and
+## bound-between-nested-loops alike, and the solver pins it with
+## `env_cell_release_in_loop_hoisted_past_loop`. See docs/impl/region/cells.md
+## "Env cells in loops: release once per activation, not per iteration".
 
 (println "nested-loop-inner-invariant: all tests passed")

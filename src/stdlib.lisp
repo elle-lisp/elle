@@ -1392,9 +1392,8 @@
    :paused — what a fiber waiting to resume answers — and only the SIG_ERROR
    bit tells the two apart. Whether that fiber is finished is the resumer's
    decision (docs/signals/primitives.md): a parent can resume it with a
-   recovery value, which is how the stream generators surface a read error as
-   an element. This answers the narrower question a scheduler asks about its
-   own program: did this fiber stop because it failed?"
+   recovery value. This answers the narrower question a scheduler asks about
+   its own program: did this fiber stop because it failed?"
   (let [s (fiber/status f)]
     (or (= s :error) (not (= 0 (bit/and (fiber/bits f) 1))))))
 
@@ -2464,8 +2463,9 @@
     (shutdown-fn timeout-ms)))
 
 (defn ev/report []
-  "What the running scheduler is waiting for: {:runnable :io :joins
-   :selects :forwarded :parks}. See docs/scheduler.md."
+  "What the running scheduler is waiting for and still remembers:
+   {:runnable :io :workers :joins :selects :forwarded :records :marks
+   :parks}. See docs/scheduler.md."
   ((get (*scheduler*) :report)))
 
 (defn ev/step [& args]

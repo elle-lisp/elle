@@ -1,17 +1,20 @@
 # Ownership adopts and the root's lifetime obligation
 
-The interior owner-edges that build an [ownership forest](ownership.md)
-subtree where no single store site names them: the **capture adopt** (a
-closure ⊇ its captures), the **funnel adopt** (the opaque-store face of a
-container ⊇ its member), the post-dominance + emit-order
-**obligation** the root's single demise must satisfy for a subtree drop to be
-sound, and where the hybrid still keeps per-region RC.
+<!-- audited: 2026-09-23 -->
+
+The owner edges no store site names, the capture and funnel adopts, and the lifetime obligation a root's single demise must meet.
+
+These edges build an [ownership forest](ownership.md) subtree: the **capture
+adopt** (a closure ⊇ its captures) and the **funnel adopt** (the opaque-store
+face of a container ⊇ its member). The post-dominance + emit-order
+**obligation** is what the root's single demise must satisfy for a subtree drop
+to be sound. The last section says where the hybrid still keeps per-region RC.
 
 ## The capture adopt — emitted at the closure, for every capture kind
 
 A capture containment edge (`closure ⊇ captured`) has no store site — capture records no
-`cross_region_refs` edge (the RC double-count fix: the runtime auto-incref over the
-`Closure` env stands in for a static `IncrefRegion`) — so its adopt is keyed by the
+`cross_region_refs` edge (the runtime auto-incref over the `Closure` env stands in
+for a static `IncrefRegion`, so a static edge would count it twice) — so its adopt is keyed by the
 closure's **construction**: at `MakeClosure`, `lower_lambda_expr` reloads each adopted
 captured value and emits a value-resolved adopt in place of the capture's baseline
 `IncrefRegion`, and `analyze_regions_with` suppresses the member's own compiler decref (the
@@ -35,11 +38,11 @@ captured binding is materialized (`ownership::capture`):
   content) so a cell's OWN region is named. A second `AdoptCellRegion` at the cell store links
   the content into the cell (`cell ⊇ content`, `maybe_emit_cell_content_adopt`) where the
   lifetime obligation admits; elsewhere the content reclaims by the cell's free-time RC
-  cascade. Pinned by `regions::tests::cells::{walk_records_cell_contains_content_for_compiled_letrec_cell,
+  cascade. Pinned by `region::infer::tests::cells::{walk_records_cell_contains_content_for_compiled_letrec_cell,
   capture_edge_points_at_cell_region_not_content}`,
-  `regions::tests::adopt::owned_subtrees_admits_local_capture_cell_clique` (with its escaping /
+  `region::infer::tests::adopt::owned_subtrees_admits_local_capture_cell_clique` (with its escaping /
   two-sibling refusals), and the emit by
-  `lir::lower::tests::preallocated_capture_cells_get_distinct_regions_each_released`.
+  `lir::lower::tests::release::preallocated_capture_cells_get_distinct_regions_each_released`.
 - **Re-storable cell** (`is_restorable_capture_cell` — an `@`-mutable captured local or a
   mutated captured parameter): a **borrow**, no owner edge. Its content lifetime is
   per-rebind — the rebind funnel decrefs each displaced prior — and SHORTER than the cell's,
@@ -49,22 +52,23 @@ captured binding is materialized (`ownership::capture`):
   refuses its `cell ⊇ content` edge — which the walk still records (the cell holds *a*
   content) for external-uniqueness counting — and the content reclaims on the per-region-RC
   baseline. Pinned by `region_capture_cell_loop_uaf_ownership` (the guardfree witness) and
-  `regions::tests::adopt::{capture_edge_skips_restorable_cell_admits_immutable_in_one_clique,
+  `region::infer::tests::adopt::{capture_edge_skips_restorable_cell_admits_immutable_in_one_clique,
   restorable_compiled_cell_records_content_edge_but_is_not_adopted}`.
 
 A mutually-recursive `letrec` closure **cycle** (each closure holds the other's forward
 cell) is a *cyclic* clique, not a rooted subtree, so it is reclaimed by the closure-cycle
-**MERGE** ([letrec.md](letrec.md) § "The letrec closure-cycle merge"), which collapses the SCC ∪ its cells onto one
-arena before this pass — never by this capture-adopt path (`recur-local-mutual` /
-`recur-local-self` read closed in `oracle.lisp`). The capture-adopt path serves the *acyclic*
+**MERGE** ([letrec.md](letrec.md)), which collapses the SCC ∪ its cells onto one
+arena before this pass — never by this capture-adopt path (the `recur-local-mutual` and
+`recur-local-self` probes in [the tail-call probes](../../../tests/elle/probe/tailcall.lisp)
+read closed). The capture-adopt path serves the *acyclic*
 rooted clique above.
 
 The capture-adopt contract — every suppressed member is adopted — is discharged by **emit
 capability**, not by refusing shapes the emit cannot reach: `lower_lambda_expr`'s reload
 covers every capture kind, and the `debug_assert` at the emit is the backstop that every
 adopt edge matches a real capture of the constructed closure. Pinned by
-`lir::lower::tests::capture_adopt_reloads_upvalue_via_load_capture` (the env-reloaded
-emission) and `regions::tests::adopt::capture_adopt_edges_are_emittable`.
+`lir::lower::tests::basics::capture_adopt_reloads_upvalue_via_load_capture` (the env-reloaded
+emission) and `region::infer::tests::adopt::capture_adopt_edges_are_emittable`.
 
 What bounds the *admission* of a capture owner-edge is the general subtree filters — no
 lowerability filter exists — and the **cross-activation (upvalue) owner-edge is refused at the
@@ -81,7 +85,7 @@ member dies before the root and refuses. A member reachable through an upvalue c
 therefore Owned only by an owner that outlives **every** capturer — the activation/fiber owner
 node of the owner = activation cut — never by a region root; until that owner exists the shape
 stays Shared (the always-legal baseline). Pinned by
-`regions::tests::adopt::owned_subtree_upvalue_capture_owner_refused_on_lifetime` and
+`region::infer::tests::adopt::owned_subtree_upvalue_capture_owner_refused_on_lifetime` and
 `closure_web_capture_not_yet_claimed`, and at runtime by
 `runtime::tests::ownership::upvalue_capture_family_runs_sound`.
 
@@ -90,7 +94,7 @@ stays Shared (the always-legal baseline). Pinned by
 A compiled mutable store — every storing/removing/copying `%`-op lowers as a
 native funnel `Call` (`IntrinsicOp::routes_native_funnel()`) — is an opaque
 `Funnel` native call that records **no** `cross_region_refs` edge (the runtime funnel
-counts the store; a compile-time edge would double-count — effects.md § `Funnel`),
+counts the store; a compile-time edge would double-count — [effects.md](effects.md)),
 so the store-keyed adopt would find no emittable interior edge and every funnel-built
 subtree would refuse to Shared. The containment is recovered instead from the container
 argument's `RetType` (`RegionInfo::containment_edges`, recorded **site-keyed** —
@@ -119,9 +123,9 @@ refuses the subtree to Shared, the always-legal baseline.
 What the funnel face does **not** cover: the builder-idiom MERGE, which is the
 constructor emit's mechanism, not the store's. `%pair` lowers as the inline
 `Intrinsic` opcode whose `emit_alloc` seeds the `merged_slots` mint-or-reuse
-(merging.md § Merging), so the merge rides the `%pair` emit on every compile where a
+([merging.md](merging.md)), so the merge rides the `%pair` emit on every compile where a
 builder idiom appears — no funnel edge is involved. Pinned by
-`regions::tests::adopt::adopt_edges_claims_interior_cycle_member_by_root` (the
+`region::infer::tests::adopt::adopt_edges_claims_interior_cycle_member_by_root` (the
 funnel-site adopt edges), `…::adopt_edges_refuses_loop_enclosed_member` (the
 obligation holds on the funnel face), and at runtime by
 `runtime::tests::ownership::region_ownership_reclaims_interior_cycle_subtree`,
@@ -153,13 +157,14 @@ the dynamic-lifetime refusals, so any candidate component containing a fiber's
 region stays Shared (the always-legal baseline). A refused fiber region reclaims on
 ordinary RC — its holders' counted references (bindings, container stores, the
 embedding closure/fiber alloc-scan) release as they die, and a parked fiber's chain
-state discharges on the free path (owner.md § "The free-path fiber discharge"). The
+state discharges on the free path ([owner.md](owner.md)). The
 runtime backstop is a debug assert at `RegionStore::adopt_region`: an adopted
 region's pool holds no live `Fiber` object. Pinned by
-`regions::tests::adopt::owned_subtree_refuses_fiber_member` (beside its admitting
+`region::infer::tests::adopt::owned_subtree_refuses_fiber_member` (beside its admitting
 `@array` twin) and the guardfree fixture pin `region_fiber_exhume_uaf`
-(`tests/integration/fixtures/region-fiber-exhume-uaf.lisp`); `tests/elle/fibers.lisp` (the propagate
-child-chain reads) and `tests/elle/grpc.lisp` exercise the class under the full
+([region-fiber-exhume-uaf.lisp](../../../tests/integration/fixtures/region-fiber-exhume-uaf.lisp));
+[fibers.lisp](../../../tests/elle/fibers.lisp) (the propagate child-chain reads) and
+[grpc.lisp](../../../tests/elle/grpc.lisp) exercise the class under the full
 scheduler.
 
 ## The lifetime obligation the root carries
@@ -168,15 +173,16 @@ Subtree drop fires at the **root's** single `DecrefRegion`, at the root's
 `decref_point`. For that to be sound the root's demise must **post-dominate every
 member's last use** — a child read after the root's `decref_point` would be freed
 out from under the read. Adoption and merging discharge this through **one** structural
-post-dominance predicate (`regions::postdom::drop_post_dominates`, decided over the scope
+post-dominance predicate (`region::infer::postdom::drop_post_dominates`, decided over the scope
 tree's post-order subtree intervals, *not* by `compute_order` magnitude):
 `compute_adopt_edges` **refuses** a component with an un-post-dominated member (it stays
-Shared, the always-legal baseline) and gate 6 refuses such a merge (merging.md § Merging,
-condition 6). The two differ only by `EmitMode` — ADOPT's store-member keeps its own
+Shared, the always-legal baseline) and gate 6 refuses such a merge ([merging.md](merging.md),
+condition 6). Both read each region's `lifetime_point`, the last use before
+[the branch-arm window](window.md) moved any release. The two differ only by `EmitMode` — ADOPT's store-member keeps its own
 decref, so a loop enclosing the root's free is the cross-iteration UAF the predicate
 refuses; MERGE's child is reachable solely through the parent (conditions 1+4), so the
 loop clause is waived. The external-uniqueness walk
-(`regions::ownership::compute_owned_subtrees`) proves the *frontier* is unique but
+(`region::infer::ownership::compute_owned_subtrees`) proves the *frontier* is unique but
 does not by itself order lifetimes, so this obligation is the emit's, not the
 walk's. (The pinning test is the e2e reclamation tier; an interior-outlives-root
 shape must stay Shared, never adopt.)
@@ -200,7 +206,8 @@ facts make "before" non-trivial for a container root:
   one of them.
 - A store-adopted member's own `DecrefRegion` is a structural no-op **only while the
   member is `Owned`**; once the subtree drop has reclaimed it, that slot-resolved
-  decref faults (`regionstore/refcount.rs`, the phantom/double-free assert).
+  decref faults ([refcount.rs](../../../src/value/fiberheap/regionstore/refcount.rs),
+  the phantom/double-free assert).
 
 So the emit orders every adopted member's release **before its owner's** at each shared
 `decref_point`, by topologically sorting the adopt edges (`owned_adopt_edges` ∪
@@ -210,9 +217,9 @@ orders *nested* subtrees innermost-first (member ⊂ mid ⊂ root), which a flat
 members-first bucket class could not. A member's release reads and frees nothing while
 `Owned`, so it no-ops; whichever root-freeing release fires afterward subtree-drops the
 member exactly once. Regions no adopt edge relates fall back to the page-read-depth
-tie-break (rules.md Rule 4).
-The invariant this restores is stated positively in ownership.md § "The runtime: a reclamation
-typestate and `owned_children`": a store-adopted member's decref hits the still-frozen
+tie-break ([rules.md](rules.md) Rule 4).
+The invariant this restores is stated positively in [ownership.md](ownership.md): a
+store-adopted member's decref hits the still-frozen
 `Owned` region — a no-op — because it is emitted before the root's drop. The reference
 for the inverted-order double-free it prevents is a test, never this prose:
 `lir::lower::tests::release::store_adopted_member_release_precedes_owner_in_shared_bucket`
@@ -246,8 +253,8 @@ then faults resolving a freed page. So the walk records `(read site, alias, cont
   read's result and the container lands the two releases on one node — where the intra-node
   order decides: the alias's `DecrefValueRegion` resolves its runtime region by reading the
   value's own page, so it must be emitted before the release that can tear it.
-  `order_releases` sorts each `alias → source` edge alongside the adopt edges (rules.md
-  Rule 4), over all three alias relations — the read edges and the two result relations
+  `order_releases` sorts each `alias → source` edge alongside the adopt edges
+  ([rules.md](rules.md) Rule 4), over all three alias relations — the read edges and the two result relations
   below — so the ordering composes transitively where a call stands between the read and
   the container that frees the page.
 
@@ -259,7 +266,7 @@ read out of one (`last`), and either way the caller's call-result placeholder na
 region *inside* an argument's subtree while relating to no member statically. Only a
 declaration that the heap result lives in the call's **own** minted region rules that out —
 `Fresh`, `Stores` and `Sends`, whose result claim the effects oracle checks on every debug
-run ([effects.md](effects.md) § "The declaration oracle") — plus `Immediate`, which returns
+run ([effects.md](effects.md)) — plus `Immediate`, which returns
 no region at all. So the walk records `(call site, result, argument)` for every other
 callee (`RegionInfo::opaque_result_aliases`), and the closure above treats such a result as
 reachable whenever the argument is. Two obligations follow from the one edge: the result's
@@ -272,7 +279,7 @@ conservatism the may-store clique applies to what a callee *stores*, applied to 
 *returns*.
 
 **Reachability is not boundedness, and a `Funnel` needs only the first.** A `Funnel`
-declares its result to be arg0 in place or a fresh copy of arg0 (effects.md § `Funnel`) —
+declares its result to be arg0 in place or a fresh copy of arg0 ([effects.md](effects.md)) —
 the container either way, never an element interior to it. So its result owes no bound: on
 the in-place path it resolves to arg0 and carries arg0's own counted pass-through
 reference (it *is* the discarded store result that co-owns a mutable-store subtree's root,
@@ -287,7 +294,7 @@ container READS are excluded from both result relations at the recording site �
 declare `Funnel` too, yet their result is precisely the element the exemption would be
 wrong about — and the read edge carries them instead, with the tighter container.
 
-Pinned by `regions::tests::borrow::{opaque_call_result_refuses_the_adopt,
+Pinned by `region::infer::tests::borrow::{opaque_call_result_refuses_the_adopt,
 read_out_of_an_opaque_call_result_refuses_the_adopt,
 read_out_of_a_funnel_result_refuses_the_adopt, container_read_is_not_recorded_as_a_result_alias,
 fresh_call_result_records_no_alias}` with their admitting twin, and by the guardfree
@@ -295,14 +302,14 @@ witness `region_call_result_alias_uaf`.
 
 An **opcode** read (`%get`/`%first`/`%rest`) is a different problem, not this one: it takes
 no retain at all, so the borrow has no RC protection with or without adoption, and what
-covers it is the container's own lifetime (rules.md Rule 4, the borrowing node) — no
+covers it is the container's own lifetime ([rules.md](rules.md) Rule 4, the borrowing node) — no
 ownership decision is involved. A `%pop`-style REMOVE is excluded from both faces at the
 source: it *extracts* the element from the subtree (`extract_owned_region`), so the element
 is no longer interior and the container is not borrowed from. Pinned by
-`regions::tests::borrow` (the refusal and its admitting twin),
+`region::infer::tests::borrow` (the refusal and its admitting twin),
 `lir::lower::tests::release::container_read_alias_release_precedes_container_in_shared_bucket`,
 and the guardfree witness `region_container_read_borrow_uaf`; the sibling face — a read
-result that *escapes* — is escape's, not this pass's (docs/impl/escape.md, pinned by
+result that *escapes* — is escape's, not this pass's ([escape.md](../escape.md), pinned by
 `region_container_read_escape_uaf`).
 
 ## Why this is hybrid, and where RC remains

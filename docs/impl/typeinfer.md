@@ -1,6 +1,6 @@
 # Type inference: the ascent, and what a call proves
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-23 -->
 
 Where the types come from: an ascent from below whose limit is the least
 fixpoint, and what each kind of call contributes to it.
@@ -38,8 +38,10 @@ estimate rises, and the limit of the ascent is the least fixpoint.
 |---|---|
 | a lambda binding this unit writes | Top (§ "A written binding's result is Top") |
 | a lambda binding this unit defines and never writes | that lambda's body type, as the previous pass left it |
+| `thaw` or `freeze`, or its `%` twin | the argument's mutable or immutable twin container type |
 | a registered primitive | its declared `RetType`, read from the primitive tables |
-| a stdlib arithmetic wrapper (`+`, `abs`, `min`, …) | Number — the wrapper raises on everything else |
+| the stdlib `push` or `put` | the first argument's type, which it returns |
+| a stdlib arithmetic wrapper (`+`, `abs`, `min`, `floor`, …) | Number — the wrapper raises on everything else |
 | anything else | Top |
 
 **A self-recursive call is a call.** It reads the body-type map that every
@@ -86,8 +88,7 @@ entry and the widening terminates.
 
 Widening costs precision, and only for a program that outran the budget: a
 `%`-intrinsic whose operand a widened entry feeds no longer proves, and
-prove-or-reject rejects that site. The whole corpus converges in six passes or
-fewer — the deepest is `demos/nqueens` at six — so no program in it widens.
+prove-or-reject rejects that site.
 
 ## Bottom is not a proof
 
@@ -111,27 +112,31 @@ Top, which is above the fixpoint and proves nothing.
 That one rule covers every consumer, because they all read that one map — the
 operand contracts (`contract.rs`), the signal narrowing (`narrow.rs`), the
 wrapper monomorphization (`monomorphize.rs`), and the LIR operand proof
-(`src/lir/lower/expr/intrinsic.rs`). The last two ask with equality and never
-read a proof out of Bottom. The first two ask with `subtype`, and did.
+(`src/lir/lower/expr/intrinsic.rs`). The last two ask with equality, so a
+Bottom proves nothing there. The first two ask with `subtype`, where a Bottom
+would prove every row.
 
-A definition is therefore checked where it is written:
+A definition is therefore checked where it is written. `f` below is a compile
+error whether or not a later form calls it, and whether or not any form follows
+it:
 
-```text
-(defn f [x] (%mul x x))
+```lisp
+(defn compiles? [src]
+  "Whether src compiles through the file front end."
+  (first (protect (compile/whole-module src "<doc>"))))
+
+(assert (not (compiles? "(defn f [x] (%mul x x))")))
+(assert (not (compiles? "(defn f [x] (%mul x x)) 1")))
+(assert (compiles? "(defn f [x] (%mul x x)) (f 3)")
+        "a call site with an int proves x")
 ```
-
-That is a compile error whether or not a later form calls `f`. Bottom used to
-exempt it, and only in the spelling with a form after it: the same definition
-alone in a file is the file's result, so `f` reads in value position, its
-parameters read as Top, and the site was rejected already.
 
 ### A fact refines the start
 
 A guard and a `(numeric!)` declaration are both proofs about a binding that owe
 nothing to a call site. Both reach the environment by meeting with the type the
-ascent has accumulated, and `meet(⊥, fact)` is ⊥, so the start erases them.
-While Bottom discharged every row that erasure cost nothing, and nothing found
-it.
+ascent has accumulated, and `meet(⊥, fact)` is ⊥, so a plain meet with the
+start would erase them.
 
 A fact meeting the start **is** the fact. Nothing has contributed to the
 binding, so the guard or the declaration is the whole of what is known:
@@ -185,15 +190,19 @@ the first branch it meets — `(if c (f 0) 1)` joins it with Int and hands the
 site an Int proof. `settle` never sees it, because the join has already
 replaced it (§ "Bottom is not a proof").
 
-```text
-(var f (fn [x] 1))
-(%bit-and (f 0) 1)
-(assign f (fn [x] "s"))
-(%bit-and (f 0) 1)
-```
+A call to a written binding is a compile error on either side of the write.
+The pass has no flow, so it cannot order the write against a call:
 
-That is a compile error at both call sites, the one above the write included.
-The pass has no flow, so it cannot order the write against a call.
+```lisp
+(assert (not (compiles? "(var f (fn [x] 1))
+                         (%bit-and (f 0) 1)
+                         (assign f (fn [x] \"s\"))")))
+(assert (not (compiles? "(var f (fn [x] 1))
+                         (assign f (fn [x] \"s\"))
+                         (%bit-and (f 0) 1)")))
+(assert (compiles? "(def f (fn [x] 1)) (%bit-and (f 0) 1)")
+        "the unwritten binding proves its result")
+```
 
 ## What still does not prove
 
@@ -215,9 +224,9 @@ The pass has no flow, so it cannot order the write against a call.
 - `…::a_self_recursive_result_proves_a_callee_parameter` — the same result
   carried one call further, into the parameters of a helper that adds it.
 - `…::a_float_base_case_does_not_prove_an_int_recursive_result` — the
-  over-narrowing guard, and the soundness half: while a self-call was pinned at
-  Bottom, a body whose base case is a float typed its `%add` Int and let a
-  bitwise op read a float's payload.
+  over-narrowing guard, and the soundness half: a self-call read as Bottom on
+  every pass would type the `%add` of a float base case Int, and let a bitwise
+  op read a float's payload.
 - `…::a_three_member_recursion_proves_through_the_cycle` and
   `…::a_cycle_whose_members_disagree_proves_nothing` — mutual recursion, which
   converges by the same iteration and must keep doing so.

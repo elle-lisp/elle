@@ -1,32 +1,21 @@
-//! The small value types region inference emits alongside the big
-//! `RegionInfo`: the [`Region`] id itself, an outlives constraint, and the
-//! per-region metadata carried in `RegionInfo::region_data`.
+// audited: 2026-09-23
+//! The [`Region`] id region inference assigns, and the per-region release data in `RegionInfo::region_data`.
+//!
+//! docs/impl/region/window.md
 
 use crate::hir::expr::HirId;
 
 /// A region identifier assigned by the solver.
 ///
 /// Every allocation site gets a unique Region from region inference.
-/// Region IDs start at 1. Region(0) is invalid — it means "no region
-/// assigned" and must panic if encountered in an allocation path.
+/// Region IDs start at 1. Region(0) is the sentinel parent of the outermost
+/// region, and no allocation is ever assigned it.
 ///
 /// There are no special-cased region constants. The outermost region
 /// of a compilation unit is just the first region inference creates.
 /// All regions are treated uniformly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Region(pub u32);
-
-/// An outlives constraint: `shorter` must be widened to at least
-/// `longer` in the region tree.
-#[derive(Debug)]
-pub struct OutlivesConstraint {
-    /// Region variable that must live at least as long
-    pub longer: u32,
-    /// Region variable that may need widening
-    pub shorter: u32,
-    /// HIR node that generated this constraint (for diagnostics)
-    pub source: HirId,
-}
 
 /// Per-region metadata produced by region inference.
 ///
@@ -40,11 +29,10 @@ pub struct RegionData {
     pub decref_point: HirId,
     /// Where the region's release sits by the structural last-use rule alone —
     /// i.e. before the branch-arm release window re-anchored it onto a branch
-    /// (`region::infer::analyze::decref`, docs/impl/region/mechanism.md § "A release
-    /// inside one arm is not a release on the other arms").
+    /// (`region::infer::analyze::decref`).
     ///
-    /// The two differ only for a region that window moved, and the distinction is
-    /// load-bearing. The anchor is a **placement** fact — where the one release is
+    /// The two differ only for a region that window moved, and reading the wrong
+    /// one frees a live member. The anchor is a **placement** fact — where the one release is
     /// emitted so that every arm reaches it — never a claim that the value is
     /// still live there. The ownership and merge cuts admit a subtree when the
     /// root's drop **post-dominates** a member's last use, which is a *lifetime*

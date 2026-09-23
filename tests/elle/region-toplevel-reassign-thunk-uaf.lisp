@@ -1,30 +1,26 @@
 (elle/epoch 12)
-# Counterfactual: a TOP-LEVEL mutable binding (`def @x …`) reassigned to a value
-# that references its OLD content (`(assign x (pair v x))`) is freed too early
-# when the file's forms run as the body of the `%file-body` whole-module THUNK —
-# the shape the `elle test` runner ships to a worker (compile/whole-module-syntax,
-# src/pipeline/compile.rs). A direct `elle FILE` run is the OUTERMOST code object
-# (`in_lambda = false`) and is correct (region-mutable-reassign-selfref.lisp); the
-# same source wrapped in `(fn () (%file-body …))` runs `in_lambda = true`.
+# audited: 2026-09-23
+# A self-referential reassignment of a top-level mutable survives when the file runs as a whole-module thunk.
+# docs/impl/region/bindings.md
 #
-# Root cause (dumped LIR + --trace=rc/guardfree, not a guess): in the solver
-# (`record_top_level_reassign`, src/hir/regions.rs) a reassigned top-level mutable
-# was classified by the raw `in_lambda` flag, so inside the thunk it landed in
-# `local_reassigns` (fn-local) instead of `top_level_reassigns` (module-scope).
-# The file-letrec lifts each statement into a dead `__file_expr_N` wrapper; the
-# fn-local path keeps the assign-value decref, which the wrapper routes through
-# the binding slot and fires at the assign — freeing the just-stored value while
-# the cell still holds it:
-#   [guardfree] free site: DecrefValueRegion of <list> @ <the (assign …)>
-#   (plain build: arena.rs tag/object mismatch — capture-cell read as a freed slot)
+# A TOP-LEVEL mutable binding (`def @x …`) is reassigned to a value that
+# references its OLD content (`(assign x (pair v x))`). The `elle test` runner
+# ships a file to a worker as the body of the `%file-body` whole-module THUNK
+# (`compile/whole-module-syntax`, src/pipeline/compile.rs). A direct `elle FILE`
+# run is the OUTERMOST code object (`in_lambda = false`,
+# region-mutable-reassign-selfref.lisp); the thunk runs `in_lambda = true`.
 #
-# The fix marks file-letrec bindings `is_file_scope` so the solver classifies them
-# module-scope regardless of the synthetic thunk wrapper — the final value is freed
-# by the file-letrec scope-region teardown, identical to a direct run.
+# THE TRAP. `record_top_level_reassign` (src/hir/region/infer/container.rs)
+# classifies a file-letrec binding by `is_file_scope`, not by the raw
+# `in_lambda` flag. Classified by `in_lambda`, the binding lands in
+# `local_reassigns` inside the thunk. The fn-local path then keeps the
+# assign-value release, which fires at the assign and frees the just-stored
+# value while the cell still holds it. Under guardfree the free site is the
+# `DecrefValueRegion` at the `(assign …)`.
 #
-# Driven here through `compile/whole-module-syntax` so the failing `%file-body`
-# thunk shape is exercised on the MAIN thread (where --trace works), not only via
-# the `elle test` worker. RED before the fix; GREEN after.
+# Driven here through `compile/whole-module-syntax` so the `%file-body` thunk
+# shape runs on the MAIN thread (where --trace works), not only via the
+# `elle test` worker.
 
 (defn run-thunk [src]
   (let [forms (compile/read-forms src "<m>")
@@ -36,8 +32,8 @@
 (assert (= (run-thunk src-single) (list 1))
         "thunk: single self-ref reassign of a top-level mutable, read after")
 
-# (b) the advanced.lisp shape: accumulate across a loop into a top-level mutable,
-# reverse and read after — the exact `decision tree match in loop` form.
+# (b) accumulate across an `each` loop into a top-level mutable, reverse and
+# read after.
 (def src-each
   (concat "(def @acc (list)) "
           "(each i (list 1 2 3) (assign acc (pair i acc))) " "(reverse acc)"))

@@ -1,17 +1,19 @@
 (elle/epoch 12)
+# audited: 2026-09-22
 ## lib/portrait.lisp — semantic portraits from compile/analyze
 ##
 ## Builds structured descriptions of functions and modules from analysis
-## handles, surfacing non-obvious properties: effect phases, failure
+## handles, showing non-obvious properties: effect phases, failure
 ## modes, composition properties, and observations about implicit
 ## decisions.
 ##
 ## Usage:
-##   (def portrait (import "std/portrait"))
+##   (def portrait ((import "std/portrait")))
 ##   (def a (compile/analyze (file/read "myfile.lisp") {:file "myfile.lisp"}))
-##   (println (portrait:function a :my-fn))
-##   (println (portrait:module a))
 ##   (println (portrait:render (portrait:function a :my-fn)))
+##   (println (portrait:render-module (portrait:module a)))
+##
+## docs/analysis/portrait.md
 
 (fn []
 
@@ -130,7 +132,7 @@
         (let [io-callee (first io-callees)]
           (push obs
                 {:kind :almost-pure
-                 :message (string/format "Only I/O source is {} at line {}. Factoring it out makes the rest JIT-eligible."
+                 :message (string/format "Only I/O source is {} at line {}. Factoring it out leaves the rest free of I/O."
                  (get io-callee :name) (get io-callee :line))}))))
 
     # 2. Mutable capture shared across closures

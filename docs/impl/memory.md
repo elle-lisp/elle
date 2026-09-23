@@ -1,6 +1,6 @@
 # The region memory model
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-23 -->
 
 The mission of the region system, the map of its documents, the settled
 invariants, and the leak classes that name the open frontier.
@@ -13,7 +13,7 @@ current state, the fix-selection discipline, and the open work in order — is
 do next.
 
 State is read from the instruments, never from prose. A class is closed when
-`tests/elle/oracle.lisp` measures its representative shape bounded and
+[the oracle](../../tests/elle/oracle.lisp) measures its representative shape bounded and
 `--trace=guardfree` is clean — not when a sentence claims it. Git holds the
 history; this document describes the system as it stands.
 
@@ -61,7 +61,7 @@ when the dispatch completes. This is the design's reason to exist: inference →
 ownership → dissolution into SIMD and heterogeneous execution. Dissolution's
 win is **fewer allocations… which the leak oracle does not observe** — its
 gauges count allocation events instead
-([dissolution.md](dissolution.md) § "The gauge").
+([dissolution.md](dissolution.md)).
 
 ### The three legs
 
@@ -166,7 +166,7 @@ Reference altitude only; the cited specs carry the full detail.
 ### Escape — the single authority
 
 The forest needs **true escape**: does this value outlive the activation or
-fiber it was born in. It is one analysis (`src/hir/escape.rs`) over the
+fiber it was born in. It is one analysis ([escape.rs](../../src/hir/escape.rs)) over the
 canonical IR, and the sole authority — the region solver holds no escape facts
 of its own; it projects escape's verdict onto regions. Lexical capture is
 demoted to a structural hint with no escape-authority. A value escapes through
@@ -281,7 +281,7 @@ sub-mechanisms:
 - **F1b — dispatch-wrapper passthrough. Closed.** Container compensation
   covers the mutable case, and cross-unit dispatch-wrapper monomorphization
   collapses `(put c k v)` to the direct intrinsic at a proven container type
-  (`src/hir/typeinfer/monomorphize.rs`).
+  ([monomorphize.rs](../../src/hir/typeinfer/monomorphize.rs)).
 
 **F2. Fiber suspend/resume park residue.** Park/unpark symmetry holds by
 construction ([region/park.md](region/park.md),
@@ -343,7 +343,7 @@ F-classes above), and a region freed before its true last use (a UAF). The
 forest runs unconditionally, so `--trace=guardfree` under the full stdlib is
 the soundness gate; any over-free is a first-class defect pinned by a
 guardfree fixture (the `region_*_uaf` family in
-`tests/integration/elle_scripts.rs`). This axis is orthogonal to the leak
+[tests/integration/elle_scripts/](../../tests/integration/elle_scripts.rs)). This axis is orthogonal to the leak
 burndown — closing a leak class does not close it, and it does not close a
 leak class.
 
@@ -374,7 +374,7 @@ beside a live-growth discriminator that proves the gauge is not dead; and
 `--trace=guardfree` under the full stdlib for UAF. A fix is proven by measured
 slope → 0 plus guardfree-clean.
 
-`tests/elle/oracle.lisp` is the single leak-state dashboard: representative
+[The oracle](../../tests/elle/oracle.lisp) is the single leak-state dashboard: representative
 shapes per class, an adaptive sequential rate estimator that catches
 sub-integer leaks, and shrink-only pins. `oracle: ok` is a ratchet, not a
 certificate — it asserts no leak got worse and no closed class regressed,
@@ -384,26 +384,45 @@ so the split cannot drift. How to run all three gauges is
 
 ## Critical files
 
-- **Escape:** `src/hir/escape.rs` (`analyze_escape` → `EscapeInfo`).
-- **Region analysis:** `src/hir/region.rs`; `src/hir/regions/` — `ownership/`,
-  `merge.rs`, `analyze.rs`, `compensate.rs`, `arms.rs`, `postdom.rs`.
-- **Type-dispatch prune and fusion:** `src/hir/typeinfer/prune.rs`,
-  `src/hir/typeinfer/monomorphize.rs`, `src/hir/typeinfer/fuse/`.
-- **Emit:** `src/lir/lower/` — `emitops.rs`, `regionemit.rs`,
-  `regiondecref.rs`, `binding.rs`, `lambda.rs`, `control/call.rs`;
-  `src/lir/types/instr.rs`; `src/compiler/bytecode.rs`.
-- **Runtime:** `src/vm/core/region.rs`; `src/value/fiberheap/regionstore.rs`
-  and `regionstore/refcount.rs`; `src/value/arena/mutate.rs`;
-  `src/vm/fiber.rs` and `src/vm/fiber/refcount.rs`;
-  `src/value/fiber/delivery.rs`; `src/vm/dispatch/region.rs`.
-- **Backends:** `src/jit/dispatch/region.rs` and
-  `src/jit/translate/instr/`; `src/wasm/instruction/dispatch.rs` and
-  `src/wasm/regalloc.rs`; `src/mlir/`.
-- **Native effects:** `src/primitives/` (the `RegionEffect` declarations,
-  oracle-checked).
-- **The stdlib the F1 class lives in:** `src/core.lisp`, `src/stdlib.lisp`,
-  `src/prelude.lisp`.
-- **Tests and oracle:** `tests/elle/oracle.lisp`;
-  `src/runtime/tests/ownership/`; the `region-*`/`fiber-*` corpus under
-  `tests/elle/`; `tests/integration/elle_scripts.rs`;
-  `tests/region_process_teardown.rs`.
+- **Escape:** [src/hir/escape.rs](../../src/hir/escape.rs) (`analyze_escape` → `EscapeInfo`).
+- **Region analysis:** [src/hir/region.rs](../../src/hir/region.rs);
+  [src/hir/region/infer/](../../src/hir/region/infer.rs) —
+  [ownership/](../../src/hir/region/infer/ownership/mod.rs),
+  [merge.rs](../../src/hir/region/infer/merge.rs),
+  [analyze.rs](../../src/hir/region/infer/analyze.rs),
+  [compensate.rs](../../src/hir/region/infer/compensate.rs),
+  [arms.rs](../../src/hir/region/infer/arms.rs),
+  [postdom.rs](../../src/hir/region/infer/postdom.rs).
+- **Type-dispatch prune and fusion:** [prune.rs](../../src/hir/typeinfer/prune.rs),
+  [monomorphize.rs](../../src/hir/typeinfer/monomorphize.rs),
+  [fuse.rs](../../src/hir/typeinfer/fuse.rs).
+- **Emit:** [src/lir/lower/](../../src/lir/lower/AGENTS.md) —
+  [emitops.rs](../../src/lir/lower/emitops.rs),
+  [regionemit.rs](../../src/lir/lower/regionemit.rs),
+  [regiondecref.rs](../../src/lir/lower/regiondecref.rs),
+  [binding.rs](../../src/lir/lower/binding.rs),
+  [lambda.rs](../../src/lir/lower/lambda.rs),
+  [control/call.rs](../../src/lir/lower/control/call.rs);
+  [src/lir/types/instr.rs](../../src/lir/types/instr.rs);
+  [src/compiler/bytecode.rs](../../src/compiler/bytecode.rs).
+- **Runtime:** [src/vm/core/region.rs](../../src/vm/core/region.rs);
+  [regionstore.rs](../../src/value/fiberheap/regionstore.rs) and
+  [regionstore/refcount.rs](../../src/value/fiberheap/regionstore/refcount.rs);
+  [src/value/arena/mutate.rs](../../src/value/arena/mutate.rs);
+  [src/vm/fiber.rs](../../src/vm/fiber.rs) and
+  [src/vm/fiber/refcount.rs](../../src/vm/fiber/refcount.rs);
+  [src/value/fiber/delivery.rs](../../src/value/fiber/delivery.rs);
+  [src/vm/dispatch/region.rs](../../src/vm/dispatch/region.rs).
+- **Backends:** [src/jit/dispatch/region.rs](../../src/jit/dispatch/region.rs) and
+  [src/jit/translate/instr/](../../src/jit/translate/instr.rs);
+  [src/wasm/instruction/dispatch.rs](../../src/wasm/instruction/dispatch.rs) and
+  [src/wasm/regalloc.rs](../../src/wasm/regalloc.rs); [src/mlir/](../../src/mlir/mod.rs).
+- **Native effects:** [src/primitives/](../../src/primitives/AGENTS.md) (the
+  `RegionEffect` declarations, oracle-checked).
+- **The stdlib the F1 class lives in:** [src/core.lisp](../../src/core.lisp),
+  [src/stdlib.lisp](../../src/stdlib.lisp), [src/prelude.lisp](../../src/prelude.lisp).
+- **Tests and oracle:** [the oracle](../../tests/elle/oracle.lisp) and
+  [its probes](../../tests/elle/probe/); [src/runtime/tests/ownership/](../../src/runtime/tests/ownership/);
+  the `region-*`/`fiber-*` corpus under [tests/elle/](../../tests/elle/);
+  [tests/integration/elle_scripts/](../../tests/integration/elle_scripts.rs);
+  [tests/region_process_teardown.rs](../../tests/region_process_teardown.rs).

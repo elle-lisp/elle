@@ -2,80 +2,111 @@
   b0(small?) local mutated=false immutable=true needs_capture=false
   b1(drive-pair) local mutated=false immutable=true needs_capture=false
   b2(drive-struct) local mutated=false immutable=true needs_capture=false
-  b3(__file_expr_#0) local mutated=false immutable=false needs_capture=false
-  b4(__file_expr_#1) local mutated=false immutable=false needs_capture=false
-  b5(__file_expr_#2) local mutated=false immutable=false needs_capture=false
-  b6(__file_expr_#3) local mutated=false immutable=false needs_capture=false
-  b7(__file_expr_#4) local mutated=false immutable=false needs_capture=false
-  b8(d#0) param mutated=false immutable=true needs_capture=false
-  b9(d10k) param mutated=false immutable=true needs_capture=false
-  b10(n) param mutated=false immutable=true needs_capture=false
-  b11(before) local mutated=false immutable=true needs_capture=false
-  b12(i) local mutated=true immutable=false needs_capture=true
-  b13(g) local mutated=false immutable=true needs_capture=false
-  b14(~) local mutated=false immutable=true needs_capture=false
-  b15(~) local mutated=false immutable=true needs_capture=false
-  b16(n) param mutated=false immutable=true needs_capture=false
-  b17(before) local mutated=false immutable=true needs_capture=false
-  b18(i) local mutated=true immutable=false needs_capture=true
-  b19(g) local mutated=false immutable=true needs_capture=false
-  b20(~) local mutated=false immutable=true needs_capture=false
-  b21(~) local mutated=false immutable=true needs_capture=false
-  b22(d#0) local mutated=false immutable=true needs_capture=false
-  b23(d10k) local mutated=false immutable=true needs_capture=false
-  b24(G#0) local mutated=false immutable=true needs_capture=false
-  b25(~) local mutated=false immutable=true needs_capture=false
-  b26(~) local mutated=false immutable=true needs_capture=false
-  b27(d#0) local mutated=false immutable=true needs_capture=false
-  b28(d10k) local mutated=false immutable=true needs_capture=false
-  b29(G#1) local mutated=false immutable=true needs_capture=false
-  b30(~) local mutated=false immutable=true needs_capture=false
-  b31(~) local mutated=false immutable=true needs_capture=false
+  b3(drive-read) local mutated=false immutable=true needs_capture=false
+  b4(__file_expr_#0) local mutated=false immutable=false needs_capture=false
+  b5(__file_expr_#1) local mutated=false immutable=false needs_capture=false
+  b6(__file_expr_#2) local mutated=false immutable=false needs_capture=false
+  b7(__file_expr_#3) local mutated=false immutable=false needs_capture=false
+  b8(__file_expr_#4) local mutated=false immutable=false needs_capture=false
+  b9(__file_expr_#5) local mutated=false immutable=false needs_capture=false
+  b10(__file_expr_#6) local mutated=false immutable=false needs_capture=false
+  b11(d#0) param mutated=false immutable=true needs_capture=false
+  b12(d10k) param mutated=false immutable=true needs_capture=false
+  b13(n) param mutated=false immutable=true needs_capture=false
+  b14(before) local mutated=false immutable=true needs_capture=false
+  b15(i) local mutated=true immutable=false needs_capture=true
+  b16(g) local mutated=false immutable=true needs_capture=false
+  b17(~) local mutated=false immutable=true needs_capture=false
+  b18(~) local mutated=false immutable=true needs_capture=false
+  b19(n) param mutated=false immutable=true needs_capture=false
+  b20(before) local mutated=false immutable=true needs_capture=false
+  b21(i) local mutated=true immutable=false needs_capture=true
+  b22(g) local mutated=false immutable=true needs_capture=false
+  b23(~) local mutated=false immutable=true needs_capture=false
+  b24(~) local mutated=false immutable=true needs_capture=false
+  b25(n) param mutated=false immutable=true needs_capture=false
+  b26(before) local mutated=false immutable=true needs_capture=false
+  b27(i) local mutated=true immutable=false needs_capture=true
+  b28(g) local mutated=false immutable=true needs_capture=false
+  b29(r) local mutated=false immutable=true needs_capture=false
+  b30(G#0) local mutated=false immutable=true needs_capture=false
+  b31(G#1) local mutated=false immutable=true needs_capture=false
+  b32(~) local mutated=false immutable=true needs_capture=false
+  b33(~) local mutated=false immutable=true needs_capture=false
+  b34(~) local mutated=false immutable=true needs_capture=false
+  b35(d#0) local mutated=false immutable=true needs_capture=false
+  b36(d10k) local mutated=false immutable=true needs_capture=false
+  b37(G#2) local mutated=false immutable=true needs_capture=false
+  b38(~) local mutated=false immutable=true needs_capture=false
+  b39(~) local mutated=false immutable=true needs_capture=false
+  b40(d#0) local mutated=false immutable=true needs_capture=false
+  b41(d10k) local mutated=false immutable=true needs_capture=false
+  b42(G#3) local mutated=false immutable=true needs_capture=false
+  b43(~) local mutated=false immutable=true needs_capture=false
+  b44(~) local mutated=false immutable=true needs_capture=false
+  b45(d#0) local mutated=false immutable=true needs_capture=false
+  b46(d10k) local mutated=false immutable=true needs_capture=false
+  b47(G#4) local mutated=false immutable=true needs_capture=false
+  b48(~) local mutated=false immutable=true needs_capture=false
+  b49(~) local mutated=false immutable=true needs_capture=false
 [lambda_captures]
-  #1 params=[b8(d#0), b9(d10k)] captures=[]
-  #10 params=[b10(n)] captures=[]
-  #29 params=[] captures=[b12(i)<Local>]
-  #55 params=[b16(n)] captures=[]
-  #74 params=[] captures=[b18(i)<Local>]
+  #1 params=[b11(d#0), b12(d10k)] captures=[]
+  #10 params=[b13(n)] captures=[]
+  #29 params=[] captures=[b15(i)<Local>]
+  #55 params=[b19(n)] captures=[]
+  #74 params=[] captures=[b21(i)<Local>]
+  #99 params=[b25(n)] captures=[]
+  #118 params=[] captures=[b27(i)<Local>]
 [return_frontier]
-  [r10, r33, r4]
+  [r10, r16, r4, r56]
 [suppressed_decref_regions]
   []
 [region_instrs]
   ; entry <anon>
-    block0: DecrefValueRegion v22
-    block0: DecrefValueRegion v27
+    block0: DecrefValueRegion v29
+    block0: DecrefValueRegion v34
+    block0: DecrefValueRegion v39
     block0: DecrefRegion s0
-    block2: DecrefValueRegion v56
-    block2: DecrefValueRegion v58
+    block2: DecrefValueRegion v68
+    block2: DecrefValueRegion v70
     block2: DecrefRegion s1
     block2: DecrefRegion s2
-    block2: DecrefValueRegion v67
+    block2: DecrefValueRegion v79
     block2: DecrefRegion s3
-    block4: IncrefValueRegion v70
-    block4: DecrefValueRegion v71
+    block4: IncrefValueRegion v82
+    block4: DecrefValueRegion v83
     block3: DecrefRegion s4
-    block3: DecrefRegion s5
-    block6: DecrefValueRegion v100
-    block6: DecrefValueRegion v102
+    block6: DecrefValueRegion v112
+    block6: DecrefValueRegion v114
+    block6: DecrefRegion s5
     block6: DecrefRegion s6
+    block6: DecrefValueRegion v123
     block6: DecrefRegion s7
-    block6: DecrefValueRegion v111
-    block6: DecrefRegion s8
-    block8: IncrefValueRegion v114
-    block8: DecrefValueRegion v115
+    block8: IncrefValueRegion v126
+    block8: DecrefValueRegion v127
+    block7: DecrefRegion s8
     block7: DecrefRegion s9
-    block7: IncrefValueRegion v120
-    block7: DecrefValueRegion v121
-    block7: DecrefValueRegion v123
-    block7: DecrefValueRegion v125
+    block10: DecrefValueRegion v156
+    block10: DecrefValueRegion v158
+    block10: DecrefRegion s10
+    block10: DecrefRegion s11
+    block10: DecrefValueRegion v167
+    block10: DecrefRegion s12
+    block12: IncrefValueRegion v170
+    block12: DecrefValueRegion v171
+    block11: DecrefRegion s13
+    block11: IncrefValueRegion v176
+    block11: DecrefValueRegion v177
+    block11: DecrefValueRegion v179
+    block11: DecrefValueRegion v181
+    block11: DecrefValueRegion v183
   ; closure[0] <anon>
     block0: DecrefValueRegion v5
     block1: IncrefValueRegion v11
     block1: DecrefValueRegion v12
   ; closure[1] <anon>
-    block4: IncrefRegion s10
-    block4: DecrefRegion s11
+    block4: IncrefRegion s14
+    block4: DecrefRegion s15
     block4: DecrefValueRegion v20
     block3: DecrefValueRegion v28
     block3: DecrefCellRegion v30
@@ -83,11 +114,11 @@
     block1: DecrefValueRegion v39
     block1: IncrefValueRegion v36
   ; closure[2] <anon>
-    block0: IncrefRegion s12
-    block0: DecrefRegion s12
+    block0: IncrefRegion s16
+    block0: DecrefRegion s16
   ; closure[3] <anon>
-    block4: IncrefRegion s13
-    block4: DecrefRegion s14
+    block4: IncrefRegion s17
+    block4: DecrefRegion s18
     block4: DecrefValueRegion v20
     block3: DecrefValueRegion v28
     block3: DecrefCellRegion v30
@@ -95,6 +126,30 @@
     block1: DecrefValueRegion v39
     block1: IncrefValueRegion v36
   ; closure[4] <anon>
+    block0: IncrefValueRegion v1
+    block0: TailCall defer_callee_release=false
+    block0: IncrefValueRegion v4
+    block0: DecrefValueRegion v5
+    block0: DecrefValueRegion v6
+  ; closure[5] <anon>
+    block4: IncrefRegion s19
+    block4: DecrefRegion s20
+    block4: DecrefValueRegion v24
+    block4: IncrefValueRegion v27
+    block8: DecrefRegion s21
+    block8: DecrefRegion s22
+    block10: IncrefValueRegion v52
+    block10: DecrefValueRegion v53
+    block10: DecrefValueRegion v55
+    block9: DecrefValueRegion v56
+    block9: DecrefValueRegion v58
+    block9: DecrefValueRegion v60
+    block3: DecrefValueRegion v68
+    block3: DecrefCellRegion v70
+    block1: DecrefValueRegion v77
+    block1: DecrefValueRegion v79
+    block1: IncrefValueRegion v76
+  ; closure[6] <anon>
     block0: IncrefValueRegion v1
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v4

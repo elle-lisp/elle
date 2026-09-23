@@ -1,5 +1,7 @@
 # Plugins
 
+<!-- audited: 2026-09-23 -->
+
 Elle ships with Rust plugins and pure Elle standard library modules.
 Plugins are cdylib crates loaded at runtime via `import`. Standard modules
 use `import` with the `std/` prefix and require no compilation.
@@ -15,7 +17,7 @@ the names it was written against.
 
 Plugins live in a [separate repository](https://github.com/elle-lisp/plugins),
 available as a git submodule at `plugins/`.
-See [`docs/cookbook/plugins.md`](cookbook/plugins.md) for a step-by-step
+See [the plugin recipe](cookbook/plugins.md) for a step-by-step
 guide to writing a plugin.
 
 ### The ABI version
@@ -103,18 +105,21 @@ produced no `.so`. That assertion is not decoration. Every test file imports its
 `.so` under `protect` and exits 0 when the import fails, so a plugin that did
 not build makes its own test report success. The reasoning, and the CI job that
 runs these targets, are in
-[`docs/analysis/ci.md`](analysis/ci.md) § "The plugins job".
+[docs/analysis/ci.md](analysis/ci.md), in "The plugins job".
 
 ## Usage pattern
 
-```text
-## Plugin (Rust cdylib)
-(def crypto (import "plugin/crypto"))
-(seq->hex (crypto:sha256 "hello"))
+A plugin's `import` returns the struct of its primitives. A standard module's
+`import` returns a closure; calling it returns the struct of exports. The
+example plugin is the one `make doctest` builds.
 
-## Standard module (pure Elle or FFI)
+```lisp
+(def my (import "plugin/myplugin"))
+(assert (= "hello" (my:hello)))
+(assert (identical? my (import "plugin/myplugin")) "a second import reuses the first")
+
 (def b64 ((import "std/base64")))
-(b64:encode "hello")
+(assert (= "aGVsbG8=" (b64:encode "hello")))
 ```
 
 ## Module search path
@@ -176,13 +181,16 @@ elle --path=/opt/elle-plugins/target/release my-script.lisp
 | `elle-syn` | `"plugin/syn"` | Rust source parsing |
 | `elle-tls` | `"plugin/tls"` | TLS client/server (rustls) |
 | `elle-toml` | `"plugin/toml"` | TOML parsing |
-| `elle-tree-sitter` | `"plugin/tree-sitter"` | Multi-language parsing |
+| `elle-tree-sitter` | `"plugin/tree_sitter"` | Multi-language parsing |
 | `elle-vulkan` | `"plugin/vulkan"` | Vulkan compute dispatch |
 | `elle-wayland` | `"plugin/wayland"` | Wayland compositor interaction |
 | `elle-xml` | `"plugin/xml"` | XML parsing |
 | `elle-yaml` | `"plugin/yaml"` | YAML parsing |
 
 ## Standard library modules (pure Elle / FFI)
+
+A few of the modules in `lib/`; [lib/overview.md](../lib/overview.md) covers
+them all.
 
 | Module | Import | Description |
 |--------|--------|-------------|
@@ -203,12 +211,13 @@ elle --path=/opt/elle-plugins/target/release my-script.lisp
   accessor syntax (`crypto:sha256`)
 - Plugins are **never unloaded** — the library handle is leaked
 - The analyzer has no static knowledge of plugin functions
-- Bind once at top level to avoid redundant loads
+- A second `import` of a plugin returns the struct the first one built
 
 ## Writing plugins
 
-See [`docs/cookbook/plugins.md`](cookbook/plugins.md) for the recipe and
-[`plugins/AGENTS.md`](../plugins/AGENTS.md) for technical reference.
+See [the plugin recipe](cookbook/plugins.md) for the recipe and
+[the plugins repository's AGENTS.md](https://github.com/elle-lisp/plugins/blob/main/AGENTS.md)
+for technical reference.
 
 ---
 
@@ -216,4 +225,4 @@ See [`docs/cookbook/plugins.md`](cookbook/plugins.md) for the recipe and
 
 - [modules.md](modules.md) — import system
 - [stdlib.md](stdlib.md) — standard library modules
-- [cookbook.md](cookbook.md) — adding a new plugin
+- [cookbook/plugins.md](cookbook/plugins.md) — adding a new plugin

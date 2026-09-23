@@ -1,5 +1,7 @@
 # Region semantics — the model you write against
 
+<!-- audited: 2026-09-22 -->
+
 This is the consumer's view of *what* the memory system guarantees, so you can
 write Elle that is sympathetic to it. For the implementor's correctness
 obligations see [docs/impl/region/rules.md](../impl/region/rules.md).
@@ -10,15 +12,9 @@ value is born in a *region*; the region is freed at a point the compiler named,
 and the regions that value referenced are decremented in turn. You never call
 `free`, and there is no GC pause.
 
-## Tofte–Talpin for immutable values, reference counting for mutation
+## Three mechanisms: Tofte–Talpin, reference counts, ownership
 
-The model is the Tofte–Talpin region calculus completed with reference counting
-for exactly the case TT cannot express. Knowing which half you are in tells you
-where the guarantees come from.
-
-If you're familiar with Project Verona's region model, we're on our way there
-but the first step is correct region sharing; the ownership model that replaces
-our use of RC will come only after we have correct and leak-free sharing.
+Knowing which mechanism frees a value tells you where its guarantees come from.
 
 **Immutable values are pure TT.** In TT, `letregion ρ in e` binds a region whose
 lifetime encloses `e`; an effect/escape analysis proves every value's lifetime is
@@ -26,35 +22,62 @@ bounded by some region, and regions are freed when their `letregion` exits. For
 immutable data this is statically sound and complete: the compiler sees every
 cross-region reference because immutable contents never change after construction.
 
-**Mutation is what TT omits, so mutation is what reference counting covers.** TT
-has no mutable reference. A mutable cell can be made to point at a value created
-later or elsewhere *after the cell exists* — there is no static effect for "a
-store that happens at runtime," so no static analysis can bound the pointed-to
-value's lifetime. Elle closes exactly this gap with per-region RC: a store into a
-mutable container increments the stored value's region at runtime; a removal
-decrements it. The dividing line is precisely mutability. RC is not a competing
-design — it is the dynamic completion of TT for the one construct TT leaves out.
+**Mutation is what TT omits, so reference counting covers it.** TT has no
+mutable reference. A mutable cell can be made to point at a value created later
+or elsewhere *after the cell exists* — there is no static effect for "a store
+that happens at runtime," so no static analysis can bound the pointed-to value's
+lifetime. Elle closes this gap with per-region counts: a store into a mutable
+container counts a reference to the stored value's region at runtime, and a
+removal releases it.
+
+**Ownership frees whole groups.** Where the compiler proves that a group of
+regions is reachable only through one owner — a parent region, an activation,
+or a fiber — it links them into an ownership forest
+([impl/region/ownership.md](../impl/region/ownership.md)). An owned region
+carries no count. It frees when its owner frees, with everything beneath it.
+This is the direction of Project Verona's regions, reached by inference instead
+of annotation. A region the compiler cannot prove owned keeps a count; that is
+always legal, and never frees a value early.
 
 ## What escapes stays alive; what doesn't is freed at its last use
 
 The practical consequence: a value is kept alive exactly as long as something
 references it. If a value **escapes** — into a container, a closure, a yielded
-signal, a returned result — the escape is counted, so the value outlives the
-scope that created it. If it does **not** escape, it is freed at its last use.
-You do not arrange this; writing ordinary code gets it for free. The mental model
-to write against is simply: *a value lives as long as it is reachable, and not a
-step longer.*
+signal, a returned result — the escape is counted or owned, so the value
+outlives the scope that created it. If it does **not** escape, it is freed at
+its last use. You do not arrange this; writing ordinary code gets it for free.
+The mental model to write against is simply: *a value lives as long as it is
+reachable, and not a step longer.*
 
-## The one thing that leaks: mutable cross-region cycles
+## Cycles
 
-RC is *safe* (it never frees a region with live references) but *incomplete* in
-one way: it cannot reclaim a cycle of cross-region references built through
-mutation. `(push a b)(push b a)` with `a`, `b` in distinct regions makes the two
-regions mutually reference each other, so neither RC reaches zero. This **leaks**;
-it does not crash. Purely immutable code cannot construct such a cycle, so the
-incompleteness is confined to mutable back-edges. This is the single known gap,
-named here so no one rediscovers it as a "bug" — if you build mutable cyclic
-structures across regions, break the cycle yourself before dropping them.
+A count alone never frees a cycle. `(push a b) (push b a)` leaves each of the two
+regions counted by the other, so neither count reaches zero.
+
+The ownership forest frees a cycle whose regions all sit in one owned subtree,
+mutable or immutable. A subtree drop walks owners, not references, so the cycle
+frees with its owner:
+
+```lisp
+(defn knot []
+  (def a @[])
+  (def b @[])
+  (push a b)
+  (push b a)
+  (length a))
+
+(def before (arena/region-count))
+(var i 0)
+(while (< i 200) (knot) (assign i (+ i 1)))
+(assert (<= (- (arena/region-count) before) 1) "200 knots strand no regions")
+```
+
+A cycle leaks when the compiler cannot place all of its regions under one owner,
+for example when part of the cycle is also referenced from outside the subtree.
+Those regions keep their counts; the leak does not crash. Widening what the
+forest can own is optimization work, tracked as leak class F4 in
+[impl/memory.md](../impl/memory.md). A container stored into itself also leaks
+today (#1228).
 
 A related, narrower edge (true of every mutable container): a read consumed
 *within the same expression* that also removes or overwrites the value
@@ -62,16 +85,18 @@ A related, narrower edge (true of every mutable container): a read consumed
 analysis does not order intra-expression reads against runtime removals; don't
 mutate a value in the same expression that reads it.
 
-## Regions are not fibers, not scopes, and are flat
+## Regions are not scopes, fibers do not own them by birth, and ids are flat
 
-- **Not fibers.** A region is not owned by a fiber. A value a child allocates and
-  yields lives in its own region with RC > 0 and outlives the child with no copy;
-  the parent holds a 16-byte `Value` into those pages. A fiber's "own"
-  allocations are simply the regions that happen to reach RC 0 when it dies. This
-  is why long-running fiber schedulers don't accumulate garbage.
+- **Not born to a fiber.** A value a child fiber allocates and yields lives in
+  its own region and outlives the child with no copy; the parent holds a 16-byte
+  `Value` into those pages. A fiber can *become* an owner: the forest roots owned
+  regions at activation and fiber owner nodes
+  ([impl/region/owner.md](../impl/region/owner.md)), and a region that must
+  outlive its fiber is counted or handed to a new owner. This is why long-running
+  fiber schedulers don't accumulate garbage.
 - **Not scopes.** A scope may hold values from many regions, and a value's region
   is set by where it dies, not by the scope it is written in. A scope exit can be
   the demise point for a region, but the scope does not own the region.
-- **Flat.** Region ids are flat and opaque — no nesting, no parent/child, no tree
-  at runtime. The solver may use trees to *compute* assignments; the output is a
-  flat set of ids related only by the cross-region references RC tracks.
+- **Flat ids, one forest.** Region ids are flat and opaque; they do not nest.
+  The runtime relates them in two ways only: the ownership forest's parent-child
+  links, and the recorded references from one region's contents into another.

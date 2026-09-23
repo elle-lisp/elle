@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-21
+# audited: 2026-09-23
 # The direct-loop rows for scope reclamation, branch compensation, collections, strings and cells — one per-op thunk each.
 #
 # docs/impl/region/diagnostics.md
@@ -20,13 +20,14 @@
     (fn [j]
       (when (%not (%int? j)) (error :j))
       (let [f (fn [x] (%add x j))]
-        (f 1))) 0]  # Per-path branch compensation (src/hir/regions/compensate.rs). A value
+        (f 1))) 0]  # Per-path branch compensation (src/hir/region/infer/compensate.rs). A value
    # live-in to a branch but used in only ONE arm is freed on the used path by its
    # in-arm decref AND on every other path by a compensating release at the dead
    # arm's head, so it reclaims on every path — not only the one reaching its last
    # use. Without it, a value whose sole use sits in a never-taken arm leaks 1/op.
    # Each probe forces the NO-USE arm to be the taken one (its `if` cond always
-   # falls to the arm that does not reference the value), so the pre-fix rate is 1.
+   # falls to the arm that does not reference the value), so a missing
+   # compensation reads 1.
    ["branch-one-arm"
     (fn [j]
       (let [op (string "v" j)]
@@ -53,10 +54,10 @@
       (let [f (fiber/new (fn [] 7) 2)]
         (fiber/resume f))) 0]  # The fiber value installers (`fiber/resume`/`abort`/`cancel`/`emit`) declare
    # `Delivers`: the install into another fiber's signal slot counts its own
-   # reference at runtime, so no arg clique. `Mixed` charged one never-balancing
-   # `IncrefRegion` per heap-argument pair, which a HEAP payload is what arms —
-   # an immediate one leaves the pair unformed and measures nothing either way.
-   # The control for the class (docs/impl/region/effects.md § `Delivers`); the
+   # reference at runtime, so no arg clique. A `Mixed` declaration charges one
+   # never-balancing `IncrefRegion` per heap-argument pair, which only a HEAP
+   # payload arms — an immediate one leaves the pair unformed and measures nothing
+   # either way. The control for the class (docs/impl/region/effects.md); the
    # four installers' inline faces are pinned by
    # tests/elle/region-fiber-install-clique-leak.lisp.
    ["fiber-deliver"
@@ -72,8 +73,8 @@
       (let [a @[]]
         (push a j)
         a)) 0] ["mut-struct" (fn [j] @{:x j}) 0]
-   ## The stdlib `push` wrapper's `:@string` arm reclaims (rate 0). Two strands close:
-   ## the `-mut` CONTAINER via `%string-push-mut` (a `MutableString` pass-through — per-arm
+   ## The stdlib `push` wrapper's `:@string` arm reclaims (rate 0). Two releases
+   ## make it so: the `-mut` CONTAINER via `%string-push-mut` (a `MutableString` pass-through — per-arm
    ## container release + tail-retain suppression, like the `@array`/`@struct`/`@set` arms),
    ## and the byte-copy pushed-VALUE (`@string` copies the value's bytes rather than
    ## retaining its region, so `val` strands across the wrapper's arms; the compensation
@@ -92,61 +93,59 @@
         (assign k (%add k 1)))) 0]  # collection ops
     ["reduce" (fn [j] (reduce + 0 [1 2 3])) 0]
    ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [1 2 3])) 0]
-   # zip's F1a copy-scratch is dissolved: its column walks are cell-free top-level
-   # drivers threading `arrs`/`out` and their accumulators as params
-   # (`zip-tuple-at`/`zip-build-array`/`zip-build-list`), so the walks allocate no
-   # closure and no capture cell. What remained was the per-path return frontier
-   # (docs/impl/region/mechanism.md § "The return frontier is per-path"): every one
-   # of those drivers is a walk whose base case
-   # returns a heap argument while the recursive arm holds the `decref_point`, so
-   # each call stranded the argument it handed back. A CLOSED control now,
-   # undeclared like `rest-array-copy` so a regression trips the completeness gate.
+   # zip's column walks are cell-free top-level drivers threading `arrs`/`out` and
+   # their accumulators as params (`zip-tuple-at`/`zip-build-array`/`zip-build-list`),
+   # so the walks allocate no closure and no capture cell. Each driver is a walk
+   # whose base case returns a heap argument while the recursive arm holds the
+   # `decref_point`, so it rests on the per-path return frontier
+   # (docs/impl/region/compensate.md); without it each call strands the argument it
+   # hands back. A CLOSED control, undeclared like `rest-array-copy` so a regression
+   # trips the completeness gate.
    ["zip" (fn [j] (zip [1 2] [3 4])) 0] ["sort" (fn [j] (sort [3 1 2])) 0]
    # `reverse` is a CLOSED control for the branch-arm release window
-   # (docs/impl/region/mechanism.md § "A release inside one arm is not a release
-   # on the other arms"): its accumulator is named by every arm of the trailing
-   # `(match t :array (freeze r) … _ r)`, so the one release landed in the last
-   # arm and every earlier one stranded the whole accumulator. Undeclared, like
-   # `rest-array-copy`, so a regression trips the completeness gate loudly rather
-   # than being absorbed as F1a transform-scratch.
+   # (docs/impl/region/window.md): its accumulator is named by every arm of the
+   # trailing `(match t :array (freeze r) … _ r)`. Without the window the one
+   # release lands in the last arm and every earlier one strands the whole
+   # accumulator. Undeclared, like `rest-array-copy`, so a regression trips the
+   # completeness gate loudly rather than being absorbed as declared scratch.
    ["reverse" (fn [j] (reverse [1 2 3])) 0]  # `(rest array)` copies the tail into a fresh immutable array; its call-result
    # region reclaims on discard (rate 0). The trait-dispatched `Sequence:rest`
    # native allocates the slice into the outer `rest` call's OWN region (the
    # `dispatch_native_call` fresh-result invariant — a fresh native result lives
    # in the call's `alloc_region`, so the consumer's `DecrefValueRegion` frees
-   # it), where minting a separate boundary region stranded it. A CLOSED control
-   # beside `slice`/`to-array`, shrink-only: RED if a boundary region strands the
-   # slice again (runtime::tests::ownership::
+   # it). A separate boundary region would strand it. A CLOSED control beside
+   # `slice`/`to-array`, shrink-only: it opens if a boundary region strands the
+   # slice (runtime::tests::ownership::
    # region_native_trait_dispatch_fresh_result_reclaims). `(rest list)` shares its
    # tail (also 0).
    ["rest-array-copy" (fn [j] (rest [1 2 3 4 5])) 0]
    # `distinct` is a CLOSED control for the arm reading (undeclared, like
    # `rest-array-copy`), so a regression to open trips the completeness gate loudly
-   # rather than being absorbed as F1a scratch. Its dispatch is a `cond` naming
-   # `coll` in every clause TEST, and a clause test is a conditional position
-   # exactly as a clause body is (docs/impl/region/mechanism.md § "An arm is a
-   # conditional position, not a syntactic arm body"), so the argument's one
-   # release sat in the LAST test and every call taking an earlier body stranded
-   # the whole input.
+   # rather than being absorbed as declared scratch. Its dispatch is a `cond`
+   # naming `coll` in every clause TEST, and a clause test is a conditional
+   # position exactly as a clause body is (docs/impl/region/window.md). Read as
+   # an unconditional position, the argument's one release sits in the LAST test
+   # and every call taking an earlier body strands the whole input.
    ["distinct" (fn [j] (distinct [1 2 1 3])) 0]
    # `take`/`drop` are CLOSED controls for the PER-PATH return frontier
-   # (docs/impl/region/mechanism.md § "The return frontier is per-path";
+   # (docs/impl/region/compensate.md;
    # tests/elle/region-return-arm-escape-leak.lisp). Both are `letrec` walks whose
    # base case returns a heap value while the recursive arm holds its
-   # `decref_point`, so the returning arm carried a return mint and no release and
-   # each call stranded what it handed back — `drop` its whole input list even at
-   # n=0, `take` its reverse-scratch. Undeclared, like `rest-array-copy`: a
-   # regression to open must trip the completeness gate loudly.
+   # `decref_point`. Without the per-path frontier the returning arm carries a
+   # return mint and no release, and each call strands what it hands back —
+   # `drop` its whole input list even at n=0, `take` its reverse-scratch.
+   # Undeclared, like `rest-array-copy`: a regression to open must trip the
+   # completeness gate loudly.
    ["take" (fn [j] (take 2 (list 1 2 3))) 0]
    ["drop" (fn [j] (drop 1 (list 1 2 3))) 0]
    # `group-by`/`frequencies`/`merge`/`each-list` are CLOSED controls for the
    # release ROUTE reading (undeclared, like `rest-array-copy`): one binding owns a
    # region's route — the one whose init allocated it — so a second name bound from
-   # the value refuses nothing (docs/impl/region/mechanism.md § "A mutated holder
-   # poisons its value route, not its cell box"). Each of these walks its input with
-   # a reassigned cursor bound inside a type-dispatch arm, and reading the mutation
-   # off the cursor held the whole input per call. A regression to open must trip the
-   # completeness gate loudly rather than be absorbed back into F1a.
+   # the value refuses nothing (docs/impl/region/window.md). Each of these walks its
+   # input with a reassigned cursor bound inside a type-dispatch arm; reading the
+   # mutation off the cursor holds the whole input per call. A regression to open
+   # must trip the completeness gate loudly rather than be absorbed as declared
+   # scratch.
    ["group-by" (fn [j] (group-by odd? [1 2 3 4])) 0]
    ["frequencies" (fn [j] (frequencies [1 2 1 3])) 0]
    ["to-array" (fn [j] (->array (list 1 2 3))) 0]
@@ -174,14 +173,14 @@
         (push items {:k j}))) 0]  # The capture-back-edge cycle: a container captured by a closure it holds
    # (`m ⊇ c` store, `c ⊇ m` capture). Per-region RC cannot collect the m↔c
    # cycle, and no region root can own it (the captured member's live decref
-   # over-extends past the closure), so it leaks per op. The activation-owner cut
-   # reclaims the INTRINSIC form of this shape (runtime::tests::ownership::
+   # over-extends past the closure). The activation-owner cut reclaims the
+   # INTRINSIC form of this shape (runtime::tests::ownership::
    # region_ownership_capture_back_edge_cycle_reclaims, without_stdlib /
    # %array-push). CLOSED for the full-stdlib form too: the `(push m c)` that
-   # records the `m` contains `c` edge now monomorphizes to `%push-array-mut`
-   # cross-unit (mutable @array is a self-reclaiming op, `monomorphize.rs`), so the
-   # containment reaches the cut exactly as the intrinsic form does — no surviving
-   # wrapper to hide it. A collateral close of the store-family monomorphization.
+   # records the `m` contains `c` edge monomorphizes to `%push-array-mut`
+   # cross-unit (mutable @array is a self-reclaiming op,
+   # src/hir/typeinfer/monomorphize.rs), so the containment reaches the cut exactly
+   # as the intrinsic form does — no wrapper to hide it.
    ["capture-backedge"
     (fn [j]
       (let [root @[]
@@ -208,8 +207,7 @@
    # is a returned parameter the recursive arm hands its callee only through the
    # combiner's RESULT. That point cannot reach the accumulator, so it owes no
    # funding edge and each displaced one is freed per step
-   # (docs/impl/region/mechanism.md § "The callee's return mint, and why the point
-   # owes it nothing"). The 2-argument shape is `stdlib-concat` below; this is the
+   # (docs/impl/region/relocate.md). The 2-argument shape is `stdlib-concat` below; this is the
    # 3-argument one, where the fold actually recurses.
    ["concat" (fn [j] (concat "a" "b" "c")) 0]
    ["split" (fn [j] (string/split "a,b,c" ",")) 0]
@@ -219,21 +217,20 @@
    ["num-to-str" (fn [j] (number->string j)) 0] ["read" (fn [j] (read "42")) 0]
    ["call-chain" (fn [j] (helper-f (helper-g (helper-h j)))) 0]  # A fresh heap
    # value (`helper-g` result) stored into a cons via `(pair … …)` — a CLOSED
-   # control for the cons-store containment accounting. The `%pair`/`list` opcode
-   # (`handle_list`) once increfed each cross-region member by hand AND let the
-   # alloc funnel (`alloc_in_region` → `incref_cross_region_refs`) incref+record it
-   # again, so each stored heap element was double-counted against the single
-   # free-time cascade decref — 1/op per heap member. Now the alloc funnel is the
-   # sole containment incref, exactly as `args_to_list` and every native
-   # list/array constructor do it (`vm/data.rs handle_list`). Soundness pinned by
-   # region-pair-heap-content-uaf.lisp; shrink-only.
+   # control for the cons-store containment accounting. The alloc funnel
+   # (`alloc_in_region` → `incref_cross_region_refs`) is the sole containment
+   # incref for the `%pair`/`list` opcode (`handle_list`, src/vm/data.rs), exactly
+   # as for `args_to_list` and every native list/array constructor. A second,
+   # hand-written incref in `handle_list` double-counts each stored heap element
+   # against the single free-time cascade decref — 1/op per heap member.
+   # Soundness pinned by region-pair-heap-content-uaf.lisp; shrink-only.
    ["arg-result" (fn [j] (pair j (helper-g j))) 0]
    ["let-chain"
     (fn [j]
       (let [a (helper-h j)]
         (let [b (helper-g a)]
           b))) 0]  # `each` over a statically-typed collection reclaims: the literal array's
-   # `(match (type-of seq) …)` off-array arms are pruned (typeinfer/prune.rs), so
+   # `(match (type-of seq) …)` off-array arms are pruned (src/hir/typeinfer/prune.rs), so
    # seq lives only in the live arm. `each-manual` is the equivalent indexed loop.
    ["each-array"
     (fn [j]
@@ -249,8 +246,7 @@
    # name: `xs` holds the chain head for the whole call. A cell donates its init
    # only where it is that value's sole holder, so the alias costs the donation —
    # and the cell counts the init instead, keeping the container model and the
-   # STORE-SITE PIN it carries (docs/impl/region/bindings.md § "What the cell
-   # donates it must hold alone; what it counts it need not"). Refusing the model
+   # STORE-SITE PIN it carries (docs/impl/region/bindings.md). Refusing the model
    # instead rides each step's release out to the cell's last use, so one release
    # covers the whole walk and every cons the cursor passed stays live.
    #
@@ -267,8 +263,7 @@
           (assign r (rest r)))
         n)) 0]  # The same walk with the alias taken AFTER the cell binding: `keep` is a
    # whole-value read of the container, so it takes a counted reference of its
-   # own and the cell keeps its donation (docs/impl/region/reads.md § "A
-   # whole-value read of a 1-slot container takes a counted reference").
+   # own and the cell keeps its donation (docs/impl/region/reads.md).
    # `list-cursor` directly above is the same walk with the alias taken BEFORE,
    # where the counted-INIT route runs instead, so the gap between the two
    # isolates the route rather than the model.
@@ -284,8 +279,7 @@
    # A branch inside a loop stores into ONE cell from both arms, so the cell has
    # two store sites and each arm allocates the value it stores. Each stored
    # value's producer release is discharged at the store that took THAT value
-   # (docs/impl/region/bindings.md § "The store site is the store that took THAT
-   # value"). Pinning both values at the cell's LAST store puts the first arm's
+   # (docs/impl/region/bindings.md). Pinning both values at the cell's LAST store puts the first arm's
    # release inside the second arm, which that arm's path does not reach, so an
    # iteration repeating the first arm displaces the previous value from its own
    # ANF slot with nothing left to release it. `list-cursor` above is the
@@ -300,11 +294,11 @@
             (assign last (array i 9)))
           (assign i (%add i 1)))
         (get last 1))) 0] ["format" (fn [j] (string "iter " j " of " 100)) 0]
-   # The four-stage `split`/`map`/`filter`/`join` chain — a CLOSED control now
+   # The four-stage `split`/`map`/`filter`/`join` chain — a CLOSED control
    # (undeclared, like `rest-array-copy`), so a regression to open trips the
-   # completeness gate rather than being absorbed as F1a scratch. Every stage
-   # dispatches through a `cond` over its argument's type, so each call stranded
-   # its whole input on the clause-test reading above.
+   # completeness gate rather than being absorbed as declared scratch. Every stage
+   # dispatches through a `cond` over its argument's type, so each call rests on
+   # the clause-test reading `distinct` pins above.
    ["pipeline"
     (fn [j]
       (string/join (filter (fn [x] (not= x ""))
@@ -318,9 +312,9 @@
    # non-capturing kernel
    # over a proven immutable array fuses to an inlined index-walk loop
    # (docs/impl/dissolution.md), so the stdlib op — and every per-call strand it
-   # carried (the closure `map` mints for `f`, the `freeze` copy, the map-body
-   # over-keep) — ceases to exist and the rate is 0. The residual F1a scratch of
-   # the UN-fused op is gauged by `wrap-map` below, whose lambda captures.
+   # carries (the closure `map` mints for `f`, the `freeze` copy) — ceases to exist
+   # and the rate is 0. The UN-fused op is gauged by `wrap-map` below, whose lambda
+   # captures.
    ["map-while"
     (fn [j]
       (map (fn [x]
@@ -339,13 +333,12 @@
    ["mapcat-while" (fn [j] (mapcat (fn [x] [x x]) [1 2 3])) 0]
    # A CLOSED control for the call-result naming rule (undeclared, like
    # `rest-array-copy`), so a regression to open trips the completeness gate
-   # loudly instead of being absorbed as F1a scratch. The walk inlines `f`'s
+   # loudly instead of being absorbed as declared scratch. The walk inlines `f`'s
    # body, and the regions that walk yields — here the one the inner lambda's
    # closure+env live in — name the CALLEE's activation; the caller's temp holds
-   # the call's own region instead (docs/impl/region/mechanism.md § "A call's
-   # result is named by the call's own region"). Adopting them made the caller a
-   # second, nominal holder and dragged the region's one release onto a node the
-   # allocating path never reaches.
+   # the call's own region instead (docs/impl/region/mechanism.md). Adopting them
+   # makes the caller a second, nominal holder and drags the region's one release
+   # onto a node the allocating path never reaches.
    ["nested-closure"
     (fn [j]
       (let [f (fn [] (fn [] j))]
@@ -353,13 +346,13 @@
    ["user-string" (fn [j] (make-label j)) 0] ["chain" (fn [j] (process j)) 0]
    # The gauge for the UN-fused stdlib `map`: the kernel CAPTURES `k`, a shape loop
    # fusion declines (splicing a capture at the call site is out of scope), so the
-   # real `map` runs and its per-call strands are measured. A CLOSED control now
+   # real `map` runs and its per-call strands are measured. A CLOSED control
    # (undeclared, like `rest-array-copy`), so a regression to open trips the
-   # completeness gate rather than being absorbed as F1a scratch: `map` dispatches
-   # on its collection's type through a `cond`, whose later clause TESTS held the
-   # argument's one release (docs/impl/region/mechanism.md § "An arm is a
-   # conditional position, not a syntactic arm body"). Its `push-accum` face is the
-   # same op driven into a block-local accumulator.
+   # completeness gate rather than being absorbed as declared scratch: `map`
+   # dispatches on its collection's type through a `cond`, whose later clause TESTS
+   # are conditional positions for the argument's one release
+   # (docs/impl/region/window.md). Its `push-accum` face is the same op driven into
+   # a block-local accumulator.
    ["wrap-map"
     (fn [j]
       (let [k 1]

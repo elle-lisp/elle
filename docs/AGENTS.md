@@ -12,11 +12,11 @@ Up: [..](../AGENTS.md)
 - [bindings.md](bindings.md) — **Bindings** Bindings associate names with values.
 - [bytes.md](bytes.md) — **Bytes** Bytes are sequences of raw byte values (0–255).
 - [coming-from.md](coming-from.md) — **Coming from Other Languages** Quick orientation for programmers arriving from specific languages.
-- [compile-time.md](compile-time.md) — **Compile-Time Operations (more...)**
+- [compile-time.md](compile-time.md) — **Compile-Time Operations** The forms that act at compile time, and the `compile/*` API that reads the compiler's model from running code.
 - [concurrency.md](concurrency.md) — **Concurrency** User code runs inside the async scheduler automatically.
 - [config.md](config.md) — **Runtime Configuration (`vm/config`)** Elle exposes a runtime configuration system reachable from both CLI flags and Elle code.
 - [control.md](control.md) — **Control Flow** Elle control flow forms are expressions — they return values.
-- [debugger.md](debugger.md) — **Debugger** The debugger pauses a program, exposes its state as structured values, and resumes it.
+- [debugger.md](debugger.md) — **Debugger** A design for a debugger that pauses a program, shows its state as structured values, and resumes it; none of its six phases is built yet.
 - [destructuring-advanced.md](destructuring-advanced.md) — **Destructuring — Advanced** Advanced destructuring patterns: rest, wildcard in depth, nesting, and match integration.
 - [destructuring.md](destructuring.md) — **Destructuring** Destructuring unpacks collections into bindings.
 - [embedding.md](embedding.md) — **Embedding** Elle can be embedded as a scripting engine in Rust or C programs.
@@ -25,20 +25,20 @@ Up: [..](../AGENTS.md)
 - [errors.md](errors.md) — **Error Handling** Errors in Elle are values signaled via fibers.
 - [ffi.md](ffi.md) — **FFI: Architecture Reference** Elle's FFI enables calling C functions from Elle code.
 - [fmt.md](fmt.md) — **elle fmt** Opinionated code formatter for Elle.
-- [functions.md](functions.md) — **Functions** How to define, call and compose functions, and how deep a chain of calls may go.
+- [functions.md](functions.md) — **Functions** How to make a function with `fn` and `defn`, collect arguments, close over state, pass functions around, and how deep recursion may go.
 - [intrinsics.md](intrinsics.md) — **Intrinsics** Intrinsics are silent bytecode operations prefixed with `%`.
 - [io.md](io.md) — **I/O** All I/O in Elle is async — reads and writes yield to the scheduler.
 - [libraries.md](libraries.md) — **Libraries** Elle ships with libraries in `lib/`.
 - [loops.md](loops.md) — **Loops** Elle's loop forms are `while`, `forever`, `repeat`, and `each`.
 - [lua.md](lua.md) — **Lua Syntax Mode** Elle supports a Lua surface syntax for `.lua` files.
-- [macros.md](macros.md) — **Macros** Elle's macro system: VM-evaluated, fully hygienic via sets-of-scopes, with `datum->syntax` escape hatch for anaphoric macros.
+- [macros.md](macros.md) — **Macros** Elle's macros run as ordinary Elle code at expansion time, and are hygienic by sets of scopes; `datum->syntax` breaks hygiene on purpose.
 - [match.md](match.md) — **Pattern Matching** `match` dispatches on the structure and value of data.
 - [mcp-eval.md](mcp-eval.md) — **MCP `eval` tool** The `eval` tool collapses the MCP surface to a single verb: a monadic bind over a persistent Elle image held in the server.
-- [mcp.md](mcp.md) — **MCP Server (more...)**
+- [mcp.md](mcp.md) — **MCP Server** The Elle MCP server gives a coding assistant structured access to an Elle codebase over the Model Context Protocol.
 - [modules.md](modules.md) — **Modules** Elle's module system is built from Elle, plus one primitive: `import-file`.
 - [named-args.md](named-args.md) — **Named Arguments** Elle supports optional positional parameters, named keyword parameters, and collected keyword arguments.
 - [parameters.md](parameters.md) — **Dynamic Parameters** Dynamic parameters are fiber-local variables with scoped rebinding.
-- [philosophy.md](philosophy.md) — **Design Philosophy** This document explains the reasoning behind Elle's core architectural decisions.
+- [philosophy.md](philosophy.md) — **Design Philosophy** Why Elle infers signals instead of asking for them, and the gap that leaves between what the compiler knows and what a reader sees.
 - [pipeline.md](pipeline.md) — **Compilation Pipeline** Compilation entry points.
 - [plugins.md](plugins.md) — **Plugins** Elle ships with Rust plugins and pure Elle standard library modules.
 - [posix-signals.md](posix-signals.md) — **POSIX signals** Elle programs can send POSIX signals to other processes and observe signals delivered to themselves.
@@ -48,7 +48,7 @@ Up: [..](../AGENTS.md)
 - [runtime.md](runtime.md) — **Runtime Signals** The runtime uses fiber signals for internal coordination.
 - [scheduler.md](scheduler.md) — **Scheduler** The async scheduler is the only supported execution backend, and user code runs inside it automatically.
 - [sets.md](sets.md) — **Sets** Sets are unordered collections of unique values.
-- [stdlib.md](stdlib.md) — **Standard Library** Elle's standard library has three layers: VM primitives (Rust), stdlib functions (Elle), and prelude macros (Elle).
+- [stdlib.md](stdlib.md) — **Standard Library** Elle's standard library has four layers: Rust primitives, core operators, prelude macros, and stdlib functions.
 - [strings.md](strings.md) — **Strings** Strings are immutable sequences of grapheme clusters.
 - [structs.md](structs.md) — **Structs** Structs are key-value maps with keyword keys.
 - [subprocess.md](subprocess.md) — **Subprocesses** Elle spawns a child process as a `subprocess` value: one thing to read streams from, to signal, and to wait on.
@@ -62,7 +62,7 @@ Up: [..](../AGENTS.md)
 - [threads.md](threads.md) — **Threads** OS threads for CPU-bound work.
 - [traits.md](traits.md) — **Traits** Every heap-allocated value carries a `traits` field — a pointer to a trait table (struct or @struct).
 - [types.md](types.md) — **Types** Elle values are 16-byte tagged unions.
-- [warts.md](warts.md) — **Warts (more...)**
+- [warts.md](warts.md) — **Warts** Where Elle surprises a programmer from another Lisp: the intentional differences, then the known limitations.
 
 ## Directories
 

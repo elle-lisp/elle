@@ -1,26 +1,31 @@
 # Types
 
+<!-- audited: 2026-09-23 -->
+
 Elle values are 16-byte tagged unions. Every value carries a type keyword
 returned by `type` (alias: `type-of`).
 
 ## Type keywords
 
 ```lisp
-(type-of 42)          # => :integer
-(type-of 3.14)        # => :float
-(type-of "hello")     # => :string
-(type-of :foo)        # => :keyword
-(type-of 'foo)        # => :symbol
-(type-of true)        # => :boolean
-(type-of nil)         # => :nil
-(type-of [1 2])       # => :array
-(type-of @[1 2])      # => :@array
-(type-of {:a 1})      # => :struct
-(type-of @{:a 1})     # => :@struct
-(type-of @"hi")       # => :@string
-(type-of |1 2|)       # => :set
-(type-of (fn [] 1))   # => :closure
-(type-of +)           # => :native-fn
+(assert (= (type-of 42) :integer))
+(assert (= (type-of 3.14) :float))
+(assert (= (type-of "hello") :string))
+(assert (= (type-of :foo) :keyword))
+(assert (= (type-of 'foo) :symbol))
+(assert (= (type-of true) :boolean))
+(assert (= (type-of nil) :nil))
+(assert (= (type-of ()) :list))
+(assert (= (type-of [1 2]) :array))
+(assert (= (type-of @[1 2]) :@array))
+(assert (= (type-of {:a 1}) :struct))
+(assert (= (type-of @{:a 1}) :@struct))
+(assert (= (type-of @"hi") :@string))
+(assert (= (type-of |1 2|) :set))
+(assert (= (type-of (fn [] 1)) :closure))
+(assert (= (type-of length) :native-fn))   # a Rust primitive
+(assert (= (type-of +) :closure))          # + is a stdlib function
+(assert (= (type 42) :integer))
 ```
 
 The full set:
@@ -53,22 +58,26 @@ and likewise for `string?`, `struct?`, `bytes?`, and `set?`.
 `fn?` and `callable?` match any callable (closures and native functions).
 Use `closure?` or `native-fn?` to distinguish.
 
+```lisp
+(assert (and (array? [1]) (array? @[1])))
+(assert (and (fn? length) (callable? length) (native-fn? length) (not (closure? length))))
+(assert (and (fn? +) (closure? +) (not (native-fn? +))))
+```
+
 ### List predicates and nil
 
-`nil` and `()` are distinct. This table is authoritative:
-See [empty-list.md](empty-list.md) for the rationale.
+`nil` and `()` are distinct. These assertions are authoritative; see
+[empty-list.md](empty-list.md) for the rationale.
 
-```text
-Expression       Result    Notes
-─────────────────────────────────────
-(nil? nil)       true      only nil is nil
-(nil? ())        false     empty list is NOT nil
-(empty? ())      true      empty list is empty
-(empty? nil)     error     nil is not a container
-(list? ())       true      empty list is a list
-(list? nil)      false     nil is not a list
-(pair? ())       false     empty list has no car/cdr
-(pair? nil)      false
+```lisp
+(assert (nil? nil))                  # only nil is nil
+(assert (not (nil? ())))             # the empty list is NOT nil
+(assert (empty? ()))                 # the empty list is empty
+(assert (not (first (protect (empty? nil)))))   # nil is not a container
+(assert (list? ()))                  # the empty list is a list
+(assert (not (list? nil)))           # nil is not a list
+(assert (not (pair? ())))            # the empty list has no car/cdr
+(assert (not (pair? nil)))
 ```
 
 ## Truthiness
@@ -77,10 +86,10 @@ Only `nil` and `false` are falsy. Everything else is truthy —
 including `0`, `""`, `()`, `[]`, and `@[]`.
 
 ```lisp
-(if 0   :yes :no)    # => :yes  — unlike C/Python
-(if ""  :yes :no)    # => :yes
-(if ()  :yes :no)    # => :yes  — empty list is truthy
-(if nil :yes :no)    # => :no
+(assert (= (if 0   :yes :no) :yes))    # unlike C/Python
+(assert (= (if ""  :yes :no) :yes))
+(assert (= (if ()  :yes :no) :yes))    # the empty list is truthy
+(assert (= (if nil :yes :no) :no))
 ```
 
 ## Conversions
@@ -88,21 +97,21 @@ including `0`, `""`, `()`, `[]`, and `@[]`.
 ### String ↔ number
 
 ```lisp
-(parse-int "42")           # => 42
-(parse-int "ff" 16)        # => 255 (radix 2-36)
-(parse-int "1010" 2)       # => 10
-(parse-float "3.14")       # => 3.14
+(assert (= (parse-int "42") 42))
+(assert (= (parse-int "ff" 16) 255))      # radix 2-36
+(assert (= (parse-int "1010" 2) 10))
+(assert (= (parse-float "3.14") 3.14))
 
-(number->string 42)        # => "42"
-(number->string 255 16)    # => "ff"
-(number->string 255 2)     # => "11111111"
+(assert (= (number->string 42) "42"))
+(assert (= (number->string 255 16) "ff"))
+(assert (= (number->string 255 2) "11111111"))
 ```
 
 ### Numeric coercion
 
 ```lisp
-(integer 3.7)              # => 3 (truncates)
-(float 42)                 # => 42.0
+(assert (= (integer 3.7) 3))              # truncates
+(assert (identical? (float 42) 42.0))
 ```
 
 ### To string
@@ -110,10 +119,10 @@ including `0`, `""`, `()`, `[]`, and `@[]`.
 `string` converts any value to its string representation:
 
 ```lisp
-(string 42)                # => "42"
-(string :hello)            # => "hello" (no colon)
-(string 'hello)            # => "hello"
-(string @"hello")          # => "hello" (@string → string)
+(assert (= (string 42) "42"))
+(assert (= (string :hello) "hello"))      # no colon
+(assert (= (string 'hello) "hello"))
+(assert (= (type-of (string @"hello")) :string))   # @string → string
 ```
 
 ## Equality
@@ -121,9 +130,9 @@ including `0`, `""`, `()`, `[]`, and `@[]`.
 `=` is structural equality. It works across mutability boundaries.
 
 ```lisp
-(= [1 2 3] @[1 2 3])      # => true  — same contents
-(= {:a 1} {:a 1})          # => true
-(= 1 1.0)                  # => true  — numeric coercion
+(assert (= [1 2 3] @[1 2 3]))             # same contents
+(assert (= {:a 1} {:a 1}))
+(assert (= 1 1.0))                        # numeric coercion
 ```
 
 `=` is **compositional**: two collections are equal exactly when their
@@ -132,12 +141,12 @@ elements are pairwise equal under `=`. For all `a`, `b`:
 semantics therefore apply at every depth, not just at the top level:
 
 ```lisp
-(= [1] [1.0])              # => true  — coercion reaches elements
-(= {:a [1]} {:a [1.0]})    # => true
+(assert (= [1] [1.0]))                    # coercion reaches elements
+(assert (= {:a [1]} {:a [1.0]}))
 (def nan (/ 0.0 0.0))
-(= nan nan)                # => false — IEEE 754: NaN ≠ NaN
-(= [nan] [nan])            # => false — NaN poisons any value containing it
-(= -0.0 0.0)               # => true  — IEEE 754: zeros are equal
+(assert (not (= nan nan)))                # IEEE 754: NaN ≠ NaN
+(assert (not (= [nan] [nan])))            # NaN poisons any value containing it
+(assert (= -0.0 0.0))                     # IEEE 754: zeros are equal
 ```
 
 A consequence of IEEE NaN semantics is that a value containing NaN is
@@ -145,17 +154,20 @@ not `=` to anything — including itself. There is no identity shortcut:
 `(= v v)` is `false` when `v` holds a NaN anywhere inside.
 
 **Precision caveat:** mixed int/float comparisons coerce through f64.
-Integers beyond 2^53 may compare equal when they shouldn't:
-`(= 9007199254740992 9007199254740993.0)` returns `true`. This too
+Integers beyond 2^53 may compare equal when they shouldn't. This too
 applies at every depth. Int/int comparison is always exact.
+
+```lisp
+(assert (= 9007199254740992 9007199254740993.0))
+```
 
 Closures compare by reference:
 
 ```lisp
 (def f (fn [x] x))
 (def g (fn [x] x))
-(= f f)                    # => true
-(= f g)                    # => false — different objects
+(assert (= f f))
+(assert (not (= f g)))                    # different objects
 ```
 
 ### identical?
@@ -166,8 +178,8 @@ still compare by contents (under `identical?` recursively); reference
 types (closures, fibers) compare by identity.
 
 ```lisp
-(identical? 1 1.0)         # => false — no coercion
-(identical? [nan] [nan])   # => true  — bit-pattern floats
+(assert (not (identical? 1 1.0)))         # no coercion
+(assert (identical? [nan] [nan]))         # bit-pattern floats
 ```
 
 ### Keys and membership
@@ -179,11 +191,17 @@ distinguishes `-0.0` from `0.0`, so that a collection holding a NaN
 remains findable in a set that contains it:
 
 ```lisp
-(length (set 1 1.0))       # => 1    — coercion dedups
-(has? (set nan) nan)       # => true — keys are NaN-reflexive
+(assert (= (length (set 1 1.0)) 1))       # coercion dedups
+(assert (has? (set nan) nan))             # keys are NaN-reflexive
 ```
 
-Floats are not permitted as struct keys.
+Floats are not permitted as struct keys:
+
+```lisp
+(def [float-key? err] (protect {1.5 :x}))
+(assert (not float-key?))
+(assert (= (get err :error) :type-error))
+```
 
 ## Mutability
 
@@ -191,14 +209,21 @@ Collections come in immutable/mutable pairs. Bare syntax is immutable;
 `@` makes it mutable. `put` on immutable returns a new copy; `put` on
 mutable mutates in place.
 
-```text
-immutable    mutable      syntax
-───────────────────────────────────
-array        @array       [...]  / @[...]
-struct       @struct      {...}  / @{...}
-string       @string      "..."  / @"..."
-bytes        @bytes       (bytes ...)  / (@bytes ...)
-set          @set         |...|  / @|...|
+| immutable | mutable | syntax |
+|-----------|---------|--------|
+| array | @array | `[...]` / `@[...]` |
+| struct | @struct | `{...}` / `@{...}` |
+| string | @string | `"..."` / `@"..."` |
+| bytes | @bytes | `b[...]` / `@b[...]`, or `(bytes ...)` / `(@bytes ...)` |
+| set | @set | `\|...\|` / `@\|...\|` |
+
+```lisp
+(def fixed [1 2])
+(assert (= (put fixed 0 9) [9 2]))
+(assert (= fixed [1 2]))                  # the original is unchanged
+(def growable @[1 2])
+(put growable 0 9)
+(assert (= growable @[9 2]))
 ```
 
 ### freeze and thaw
@@ -207,17 +232,17 @@ set          @set         |...|  / @|...|
 Both are shallow.
 
 ```lisp
-(type-of (freeze @[1 2]))     # => :array
-(type-of (thaw [1 2]))        # => :@array
-(type-of (freeze @"hi"))      # => :string
+(assert (= (type-of (freeze @[1 2])) :array))
+(assert (= (type-of (thaw [1 2])) :@array))
+(assert (= (type-of (freeze @"hi")) :string))
 ```
 
 `deep-freeze` recursively freezes nested mutable collections:
 
 ```lisp
 (def frozen (deep-freeze @[1 @[2 3]]))
-(type-of frozen)               # => :array
-(type-of (get frozen 1))       # => :array (inner was also frozen)
+(assert (= (type-of frozen) :array))
+(assert (= (type-of (get frozen 1)) :array))   # the inner one froze too
 ```
 
 ---

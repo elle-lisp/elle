@@ -1,5 +1,8 @@
-// audited: 2026-09-19
-//! Closure environment building.
+// audited: 2026-09-23
+//! Closure environment building: captures, arguments, the rest collection and local cells, each env value in its own region.
+//!
+//! docs/impl/region/rules.md
+//! docs/impl/region/mechanism.md
 //!
 //! Constructs the `Vec<Value>` environment a closure receives at call time:
 //! captured variables, positional arguments (celled when the capture mask
@@ -21,13 +24,12 @@ mod rest;
 /// Mint the runtime region for one closure-env value — a capture cell, a
 /// rest-arg cons, the `&keys`/`&named` struct, or a captured-local cell.
 ///
-/// docs/regions/semantics.md Rule 6 (no commingling) and the core principle "every value
-/// its own region": each env value gets its OWN fresh runtime region instead of
-/// sharing one per-call "env region". A value-based release of any one (the
-/// owned-params calling convention) then frees only that value, never a
-/// co-located live neighbour — so an owned-param `DecrefValueRegion` cannot free
-/// a whole env region out from under a still-live `CaptureCell`. Each env value
-/// gets its own fresh `RuntimeRegion`.
+/// Rule 6 (no commingling) and the principle "every value its own region": each
+/// env value gets its OWN fresh runtime region, never one shared per-call "env
+/// region". A value-based release of any one (the owned-params calling
+/// convention) then frees only that value, never a co-located live neighbour —
+/// so an owned-param `DecrefValueRegion` cannot free a shared region out from
+/// under a still-live `CaptureCell`.
 #[inline]
 fn env_value_region(heap: &mut crate::value::fiberheap::FiberHeap) -> RuntimeRegion {
     heap.new_runtime_region()
@@ -45,7 +47,7 @@ impl VM {
     ) -> Option<Rc<Vec<Value>>> {
         // A regular (NON-tail) closure call: each non-captured fixed param is an
         // OWNED binding the callee releases at its `decref_point` (see the
-        // Lambda arm of `src/hir/regions.rs` + `lower_lambda_body`). Hand the
+        // Lambda arm of src/hir/region/infer/walk.rs + `lower_lambda_body`). Hand the
         // callee one owning reference per such arg here (`own_params = true`),
         // balanced by that release. A tail call (`tail_call_inner`) is a pure
         // move and passes `false`.
@@ -68,7 +70,7 @@ impl VM {
     }
 
     /// Build a closure environment for a JIT TAIL call, mirroring
-    /// `tail_call_inner`'s closure path (`src/vm/call.rs`). Uses
+    /// `tail_call_inner`'s closure path (src/vm/call/inner/tail.rs). Uses
     /// `tail_call_env_cache` (it must not alias `env_cache`). Returns `None`
     /// (error set on fiber) on bad keyword args.
     ///
@@ -77,8 +79,7 @@ impl VM {
     /// each arg transfers to the callee, which releases it at the param's last
     /// use, so no `CallArgument` incref here), while a SPLICED tail call has no
     /// reference of the frame's to move and the callee mints one of its own
-    /// (`true`; docs/impl/region/mechanism.md § "A spliced call's arguments come
-    /// out of an array the convention owns").
+    /// (`true`; docs/impl/region/mechanism.md, the spliced call).
     #[cfg(feature = "jit")]
     pub(crate) fn build_tail_call_env(
         &mut self,
@@ -119,8 +120,8 @@ impl VM {
     ///
     /// The env values `populate_env` itself constructs (capture cells, rest-list
     /// conses, captured-local cells, `&keys`/`&named` structs) each get their
-    /// OWN fresh per-execution region via `env_value_region` (docs/impl/region/rules.md
-    /// Rule 6, no commingling). `populate_env` allocates every env value through
+    /// OWN fresh per-execution region via `env_value_region` (Rule 6, no
+    /// commingling). `populate_env` allocates every env value through
     /// an explicit region (`env_value_region`/`alloc_in_region`), so no region is
     /// established here.
     ///
@@ -161,7 +162,7 @@ impl VM {
     ///
     /// `symbols` is the calling instance's display memo, carried only so that
     /// a rejected `&named` key is named rather than hashed in the error
-    /// message (docs/impl/symbol.md § "The display memo").
+    /// message (docs/impl/symbol.md).
     pub(super) fn populate_env(
         buf: &mut Vec<Value>,
         heap: &mut crate::value::fiberheap::FiberHeap,
@@ -250,14 +251,13 @@ impl VM {
                 // collected arg lands in `collected` — which took its own reference
                 // when it stored the value — rather than in an env slot. So the
                 // moved reference is surplus and is released here, whichever
-                // collector took the value over (docs/impl/region/mechanism.md
-                // § "A collector parameter takes the moved reference over itself").
+                // collector took the value over (docs/impl/region/relocate.md).
                 // Released after `collected` is built, so the collection's own
                 // reference already stands.
                 if !own_params {
                     Self::release_moved_rest_args(rest_args, args, heap);
                 }
-                // The rest-param's collected list/struct is built into the env
+                // The rest-param's collected list/struct is built into its own
                 // region here, not moved in by the caller — it is a borrow, not
                 // an owned param, so no caller incref balances it: `false`.
                 Self::push_param(buf, heap, closure, fixed_slots, collected, false);

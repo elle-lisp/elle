@@ -1,13 +1,15 @@
 # Intrinsics
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-22 -->
 
 Intrinsics are silent bytecode operations prefixed with `%`. A `%`-intrinsic
 in **call position** is a compile-time type-checked request for the fast
 instruction: the compiler either **proves** the call satisfies the op's
 soundness contract and lowers it, or **rejects** the program with a compile
-error carrying the call's span. Misuse is unrepresentable in compiled code —
-there is no runtime validation in call position and no unchecked dialect.
+error carrying the call's span. There is no runtime validation in call
+position and no unchecked dialect. Two gaps let misuse through today: code
+compiled by `eval` skips the proof (#1240), and a `(numeric!)` parameter is
+never checked against its callers (#1238).
 
 ## When to use intrinsics
 
@@ -35,12 +37,26 @@ contract at that site:
 - **proven** → the call lowers (see Lowering) and the site is silent;
 - **provably wrong** or **unprovable** → compile error.
 
-So both of these are rejected at compile time:
+So both of these are rejected at compile time. The helper compiles source
+through the file front end and returns the error it reports:
 
-```text
-(%add "a" 3)      ; provably wrong: a string is never a Number
-(%add x y)        ; unprovable: x and y have no inferred type here
+```lisp
+(defn rejects [src]
+  "The compile error the file front end reports for src."
+  (let [[ok? err] (protect (compile/whole-module src "<doc>"))]
+    (assert (not ok?) "the source compiles")
+    (get err :message)))
+
+# Provably wrong: a string is never a Number.
+(assert (string/contains? (rejects "(%add \"a\" 3)")
+                          "%add: operand 1 is not a proven number (inferred: string)"))
+# Unprovable: x and y have no inferred type here.
+(assert (string/contains? (rejects "(defn f [x y] (%add x y))")
+                          "%add: operand 1 is not a proven number (inferred: unknown)"))
 ```
+
+Code that `eval` compiles skips this check today, so misuse there runs
+(#1240).
 
 The contract is the op's **full soundness condition** — everything the raw
 instruction trusts its operands to satisfy — not only a type:
@@ -48,10 +64,10 @@ instruction trusts its operands to satisfy — not only a type:
 | Ops | Proof obligation |
 |-----|------------------|
 | `%add` `%sub` `%mul` · `%lt` `%gt` `%le` `%ge` · `%int` `%float` | operands ⊑ Number |
-| `%div` `%rem` `%mod` | operands ⊑ Number **and** the divisor provably nonzero |
+| `%div` `%rem` `%mod` | operands ⊑ Number **and** the divisor provably nonzero, unless it is a proven Float |
 | `%bit-and` `%bit-or` `%bit-xor` `%bit-not` `%shl` `%shr` | operands ⊑ Int |
 | `%first` `%rest` | operand is a pair |
-| `%length` `%get` `%has?` `%put` `%put-struct[-mut]` `%put-array[-mut]` `%del` `%pop` `%array-push` `%push-array[-mut]` `%string-push` `%bytes-push` `%freeze` `%thaw` | container of the op's family (with an index/key the family accepts) |
+| `%length` `%get` `%has?` `%put` `%put-struct[-mut]` `%put-array[-mut]` `%del` `%del-struct[-mut]` `%add-set[-mut]` `%del-set[-mut]` `%pop` `%pop-string` `%pop-bytes` `%array-push` `%push-array[-mut]` `%string-push` `%string-push-mut` `%bytes-push` `%freeze` `%thaw` | container of the op's family (with an index/key the family accepts) |
 | `%eq` `%ne` `%identical?` `%not` `%pair` `%type-of` and the type predicates | none — total on every value |
 
 The authoritative per-op table is `check_intrinsic_operand_proofs`
@@ -82,9 +98,10 @@ Inference discharges contracts from:
   chain of them;
 - **a `(numeric!)` declaration** — it floors *every parameter of the
   enclosing function* at Number, so a whole numeric kernel proves at once
-  without a per-parameter guard. A caller that contradicts the declaration
-  does not discharge it: pass a string to a declared-numeric parameter and
-  the declaring body's `%`-sites are rejected.
+  without a per-parameter guard. The same declaration asserts that the
+  function is GPU-eligible, so a function that makes a call cannot carry it
+  (#1239). Nothing checks that a caller passes a number: a string argument
+  reaches the `%` sites unchecked (#1238).
 
 ```lisp
 (def half
@@ -102,17 +119,30 @@ Inference discharges contracts from:
 (assert (= (map sq [1 2 3]) [1 4 9]) "and dissolves into a fused loop")
 ```
 
-A lambda parameter with no guard, no `(numeric!)`, and no proven call sites
-stays unknown, so `(fn [x] (%mul x x))` does not compile — write
-`(fn [x] (* x x))` (the wrapper), guard the parameter, or declare
-`(numeric!)`. This is the point of the design: the programmer states the
-fact once, visibly, and the compiler holds it.
+A parameter takes the join of what its callers in the unit pass. When every
+caller passes a proven number, the parameter is proven; one caller passing
+anything else makes it unknown again. A lambda parameter with no guard, no
+`(numeric!)`, and no proven call sites stays unknown, so
+`(fn [x] (%mul x x))` does not compile. Write `(fn [x] (* x x))` (the
+wrapper), guard the parameter, or declare `(numeric!)`. The programmer states
+the fact once, visibly, and the compiler holds it.
 
 **A definition is checked where it is written.** A function nobody calls has
-no proven call sites, so `(defn f [x] (%mul x x))` is the same compile error
-whether or not the rest of the file calls `f`. "Nothing reaches this
-parameter" is a claim about reachability, and no contract row asks that
-question (see [impl/typeinfer.md](impl/typeinfer.md)).
+no proven call sites, so `(defn f [x] (%mul x x))` alone is a compile error,
+whatever other forms follow it. "Nothing reaches this parameter" is a claim
+about reachability, and no contract row asks that question (see
+[impl/typeinfer.md](impl/typeinfer.md)).
+
+```lisp
+(assert (string/contains? (rejects "(defn f [x] (%mul x x))") "not a proven number"))
+(assert (string/contains? (rejects "(defn f [x] (%mul x x))\n(println :other)")
+                          "not a proven number"))
+(let [module (compile/whole-module "(defn f [x] (%mul x x))\n(f 2)" "<doc>")
+      run (get (get module 0) 1)]
+  (assert (= 4 (run)) "a caller passing 2 proves x"))
+(assert (string/contains? (rejects "(defn f [x] (%mul x x))\n(f 2)\n(f \"s\")")
+                          "not a proven number"))
+```
 
 The declaration is recorded on the parameter **bindings** it constrains, not
 on the function node, so it survives a rewrite that dissolves the function:
@@ -143,8 +173,8 @@ type as its proof and the chain needs no second guard:
 | `%pair` | a pair |
 | `%push-array[-mut]` `%put-struct[-mut]` `%put-array[-mut]` | the variant's own container type, whatever the operand's mutability |
 | `%freeze` `%thaw` | the operand's immutable / mutable twin |
-| `%put` `%del` `%array-push` `%string-push` `%bytes-push` | their first operand's type — the container they store into |
-| `%first` `%rest` `%get` `%has?` `%pop` | nothing: element types are untracked |
+| `%put` `%del` `%del-struct[-mut]` `%add-set[-mut]` `%del-set[-mut]` `%array-push` `%string-push` `%string-push-mut` `%bytes-push` | their first operand's type — the container they store into |
+| `%first` `%rest` `%get` `%has?` `%pop` `%pop-string` `%pop-bytes` | nothing: element types are untracked |
 
 The join is what makes the div family usable in an integer kernel. A
 remainder over two proven ints is an Int, so it feeds a bitwise op; a
@@ -169,11 +199,13 @@ One lowering per op; which one is a fixed property of the op, not a mode:
 - **Non-storing ops** — arithmetic, comparison, logic, bitwise, conversion,
   predicates, `%pair`, `%first`, `%rest`, `%get`, `%length`, `%has?`,
   `%type-of`, `%identical?` — lower to **one VM instruction**
-  (BinOp/CmpOp/UnaryOp/…). These are escape-neutral and GPU/WASM-eligible;
-  this is the path that matches `I64Add`/`OpIAdd` semantics.
+  (BinOp/CmpOp/UnaryOp/…). These are escape-neutral. The arithmetic,
+  comparison, bitwise and conversion ops among them are the ones a GPU kernel
+  may hold; they match `I64Add`/`OpIAdd` semantics.
 - **Storing and copying ops** — `%put`, `%put-struct[-mut]`,
-  `%put-array[-mut]`, `%array-push`, `%push-array[-mut]`, `%string-push`,
-  `%bytes-push`, `%del`, `%pop`, `%freeze`, `%thaw` — lower to the
+  `%put-array[-mut]`, `%array-push`, `%push-array[-mut]`, `%string-push[-mut]`,
+  `%bytes-push`, `%del`, `%del-struct[-mut]`, `%add-set[-mut]`,
+  `%del-set[-mut]`, `%pop`, `%pop-string`, `%pop-bytes`, `%freeze`, `%thaw` — lower to the
   **escape-correct native funnel call** (see
   [the funnel adopt](impl/region/adopt.md)): the same prove-or-reject gate
   for type legality, but
@@ -181,10 +213,29 @@ One lowering per op; which one is a fixed property of the op, not a mode:
   cross-region edges and gives the result its call-result region. `%pop`
   rides here so its moved-out element carries that call-result accounting.
 
-A **wrapper** call is never rewritten to the instruction: `(+ a b)` is the
-programmer's explicit request for the validating, signaling, polymorphic
-surface, and it keeps that meaning at every site. The fast path is spelled
-`%add` — and proven.
+A **wrapper** call lowers to its intrinsic where inference proves the
+operands. Elsewhere it keeps its validating, signaling, polymorphic meaning.
+The container wrappers do this today:
+[monomorphize.rs](../src/hir/typeinfer/monomorphize.rs) rewrites
+`(put s :x 1)` on a proven `@struct` to `%put-struct-mut`. The arithmetic and
+comparison wrappers do not yet, so `(+ a b)` stays a call even over proven
+ints (#1237).
+
+```lisp
+(defn fhir [src] (get (compile/dumps src "<doc>") :fhir))
+
+(assert (string/contains? (fhir "(defn g [] (let [s @{}] (put s :x 1) s))\n(g)")
+                          "%put-struct-mut"))
+
+# #1237: this assertion flips when + lowers on proven operands.
+(assert (not (string/contains?
+               (fhir "(defn h [a b]
+                        (when (%not (%int? a)) (error :x))
+                        (when (%not (%int? b)) (error :y))
+                        (+ a b))
+                      (h 1 2)")
+               "%add")))
+```
 
 ## Intrinsics as callable values
 
@@ -214,13 +265,13 @@ tier:
 (assert (= (+ 9223372036854775807 1) -9223372036854775808) "wraps")
 ```
 
-This is a consequence of the intrinsic design, not an accident. `%add` is
-signal-free, and the compiler emits it for `+` whenever both operands are
-proven ints — but a type proof cannot exclude overflow, so if overflow were
-an error the specialization would change observable behavior. Wrapping is
+Wrapping follows from the intrinsic design. `%add` is signal-free, and the
+design lowers `+` to `%add` wherever both operands are proven ints (#1237). A
+type proof cannot exclude overflow, so if overflow were an error the lowering
+would change observable behavior. Wrapping is
 the one semantics the VM instruction, the JIT, and the GPU tiers all agree
 on. Code that needs overflow detection should check its own ranges (see
-`abs` in stdlib.lisp for the pattern).
+`abs` in [src/stdlib.lisp](../src/stdlib.lisp) for the pattern).
 
 Integer division and remainder by zero are errors in the stdlib wrappers;
 `(/ i64-min -1)` and `(rem i64-min -1)` wrap (to `i64-min` and `0`).
@@ -310,12 +361,21 @@ Integer division and remainder by zero are errors in the stdlib wrappers;
 | `%put-array` | 3 | Monomorphic put, array: fresh immutable twin |
 | `%put-array-mut` | 3 | Monomorphic put, @array: in place, returns arg0 |
 | `%del`    | 2    | Struct dissoc / @struct del / set del |
+| `%del-struct` | 2 | Monomorphic del, struct: fresh immutable twin |
+| `%del-struct-mut` | 2 | Monomorphic del, @struct: in place, returns arg0 |
+| `%add-set` | 2 | Monomorphic add, set: fresh immutable twin |
+| `%add-set-mut` | 2 | Monomorphic add, @set: in place, returns arg0 |
+| `%del-set` | 2 | Monomorphic del, set: fresh immutable twin |
+| `%del-set-mut` | 2 | Monomorphic del, @set: in place, returns arg0 |
 | `%has?`   | 2    | Key/element existence (struct, set, string) |
 | `%array-push` | 2 | Polymorphic append (returns new array/@array) |
 | `%push-array` | 2 | Monomorphic append, array: fresh immutable twin |
 | `%push-array-mut` | 2 | Monomorphic append, @array: in place, returns arg0 |
 | `%pop`    | 1    | Remove and return last element of @array |
+| `%pop-string` | 1 | Remove and return the last grapheme of an @string |
+| `%pop-bytes` | 1 | Remove and return the last byte of an @bytes, as an int |
 | `%string-push` | 2 | Append a string's bytes (or a char) to string/@string |
+| `%string-push-mut` | 2 | Monomorphic append, @string: in place, returns arg0 |
 | `%bytes-push` | 2 | Append an integer byte, or all bytes of a bytes value, to bytes/@bytes |
 
 ### Mutability
@@ -334,8 +394,8 @@ Integer division and remainder by zero are errors in the stdlib wrappers;
 ## Relationship to stdlib
 
 The stdlib wrappers (`+`, `-`, `*`, `/`, `rem`, `mod`, `<`, `>`, `<=`,
-`>=`, `not`, `pair`, `push`, `put`, `get`, …) are Elle functions defined in
-`stdlib.lisp`/`core.lisp`. They:
+`>=`, `not`, `pair`, `push`, `put`, …) are Elle functions defined in
+[src/stdlib.lisp](../src/stdlib.lisp). They:
 
 1. Validate argument types at runtime and accept polymorphic inputs
 2. Handle variadic arguments (e.g. `(+ 1 2 3)`)

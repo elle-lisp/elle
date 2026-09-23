@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-09-23
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -228,6 +228,9 @@ mod boot_image_gate {
 }
 mod doctest {
     include!("doctest.rs");
+}
+mod doctest_scope {
+    include!("doctest_scope.rs");
 }
 
 // `allocator.rs` is absent from the list above and does not compile. It calls

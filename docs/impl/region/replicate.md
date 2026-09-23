@@ -1,6 +1,6 @@
 # The relocation point and its replicas
 
-<!-- audited: 2026-09-08 -->
+<!-- audited: 2026-09-23 -->
 
 How a relocation point outlives its own block, so one release covers a merge and
 every path that leaves the frame before it.
@@ -107,16 +107,17 @@ so the path through it reaches the merge no more than any other arm's does. The
 everyday shape is a two-test predicate whose second test calls out:
 
 ```lisp
-(defn fiber-failed? [f]
+(defn stopped-on-error? [f]
   (let [s (fiber/status f)]
     (or (= s :error) (not (= 0 (bit/and (fiber/bits f) 1))))))
 ```
 
-`not` is a closure, so the `or`'s last operand replaces the frame and `f`'s
-owned-parameter release, emitted at the merge, is skipped on every call the first
-test does not settle. The caller's `CallArgument` reference is stranded once per
-such call, and everything the argument's region holds strands behind it — which
-is what pins a scheduler's fiber for the life of the process.
+`not` is a closure, so the `or`'s last operand replaces the frame. Without a
+replica, `f`'s owned-parameter release, emitted at the merge, would be skipped on
+every call the first test does not settle. The caller's `CallArgument` reference
+would strand once per such call, and everything the argument's region holds would
+strand behind it — enough to pin a scheduler's fiber for the life of the process.
+The stdlib's `fiber-failed?` has this body.
 
 **A merge inherits what covered the branch's ENTRY as well.** The arms are one of
 the two sources, not the whole of it. A branch is entered from one position, and
@@ -151,7 +152,7 @@ between the two having cleared it.
 The residual is unchanged in kind: a holder escape marks by a facet no edge at
 the point replaces.
 
-Pinned by `tests/elle/region-tail-frame-exit.lisp` (the reclamation, with the
+Pinned by [tests/elle/region-tail-frame-exit.lisp](../../../tests/elle/region-tail-frame-exit.lisp) (the reclamation, with the
 argument-move and callee exemptions, the per-arm faces, the captured-holder faces,
 the non-self-cancelling boundary, the env-cell faces, the
 handed-back-through-the-callee faces, the forward-cell faces, the
@@ -163,13 +164,15 @@ the `tail-frame-exit-unused` /
 `tail-frame-exit-moved` / `tail-frame-exit-arms` / `tail-frame-exit-captured` /
 `tail-frame-exit-handback` / `tail-frame-exit-fold-driver` /
 `tail-frame-exit-fwd-cell` / `tail-frame-exit-fwd-cell-ret` / `fresh-env-cell`
-probes in `tests/elle/oracle.lisp` (the per-op rates), the analysis-level
-projection pins in `regions::tests::cells`
+probes the [tests/elle/oracle.lisp](../../../tests/elle/oracle.lisp) dashboard runs
+(the per-op rates, defined in [tests/elle/probe/branch.lisp](../../../tests/elle/probe/branch.lisp)
+and [tests/elle/probe/direct.lisp](../../../tests/elle/probe/direct.lisp)), the analysis-level
+projection pins in `hir::region::infer::tests::cells`
 (`frame_held_names_a_sibling_captured_forward_cell`,
 `frame_held_names_a_returned_capturers_forward_cell`, and their
 escaping-holder counterfactual), the placement pins in
 `lir::lower::tests::release`, and
-`tests/elle/region-tail-frame-exit-uaf.lisp` (the soundness complement — a value
+[tests/elle/region-tail-frame-exit-uaf.lisp](../../../tests/elle/region-tail-frame-exit-uaf.lisp) (the soundness complement — a value
 moved into the tail callee, reached through its captured environment, filled in
 place by it, handed back out through it, handed back when the frame holds the only
 other reference, held in an env cell the callee rewrites, held in a sibling's
@@ -177,13 +180,13 @@ forward cell the callee reads on every recursion, captured by a closure
 that escapes, or read after the call must survive the moved release).
 
 The short-circuit face rides the same three instruments. Its per-op rates are the
-`tail-frame-exit-or-arm` and `tail-frame-exit-and-arm` rows of
-`tests/elle/oracle.lisp`, one per operator, each driven through the arm its own
+`tail-frame-exit-or-arm` and `tail-frame-exit-and-arm` rows of the same
+dashboard, one per operator, each driven through the arm its own
 polarity reaches. Its placement pins are
 `lir::lower::tests::release::shortcircuit`, which read WHICH release lands ahead
 of the arm's `TailCall` and which stays behind as the ownership move — a position
-no rate can see. Its soundness rows are the `sc-*` witnesses of
-`tests/elle/region-tail-frame-exit-uaf.lisp`: a value the arm's callee moves,
+no rate can see. Its soundness rows are the `sc-*` witnesses of the same
+UAF file: a value the arm's callee moves,
 captures, hands back, stores into a longer-lived container, or lets escape must
 survive the replica, and a native callee's fall-through must run the replica and
 the merge's own copy exactly once between them.
@@ -206,16 +209,20 @@ release reaches it.
 So the break opens a relocation point of its own, at the end of the block it
 leaves. A release emitted afterwards is emitted where the solver placed it AND
 replicated there. The breaking path runs the replica; every other path runs the
-placed release. The everyday shape is a drain loop whose clause body breaks:
+placed release. The everyday shape is a drain loop whose clause body breaks,
+the h2 server's DATA-frame drain ([lib/http2/server.lisp](../../../lib/http2/server.lisp)).
+The function below compiles with the document and is never called, because it
+needs a live stream:
 
 ```lisp
-(forever
-  (let [msg (s:data-queue:take)]
-    (cond
-      (= msg:type :data) (begin (push body-parts msg:data)
-                                (when msg:end-stream (break nil)))
-      (= msg:type :error) (error msg:error)
-      true (break nil))))
+(defn drain-body [s body-parts]
+  (forever
+    (let [msg (s:data-queue:take)]
+      (cond
+        (= msg:type :data) (begin (push body-parts msg:data)
+                                  (when msg:end-stream (break nil)))
+        (= msg:type :error) (error msg:error)
+        true (break nil)))))
 ```
 
 `msg`'s last use is the second clause's TEST, so [the branch-arm
@@ -242,16 +249,14 @@ A frame-replacing tail call in the block clears the points it dominates, the
 break's among them, so a release emitted after one keeps the conservative
 baseline. Dropping a licence to replicate can only over-keep.
 
-What this closes is the h2 server's remaining per-request residue: a request with
-a body read 2 objects and 2 regions where the same request as a `GET` read 0, and
-the difference was the DATA-frame drain above.
-
-Pinned by `tests/elle/region-break-loop-replica.lisp` (the reclamation — the
-`cond` clause body, the release past the branch's merge, the `if` and bare-break
-controls, and the three boundaries driven as rows), the per-request ceilings in
-`tests/elle/h2-stress-scoped.lisp`, the placement pins in
-`lir::lower::tests::release::breakexit`, and
-`tests/elle/region-break-loop-replica-uaf.lisp` (the soundness complement — a
+Pinned by [tests/elle/region-break-loop-replica.lisp](../../../tests/elle/region-break-loop-replica.lisp)
+(the reclamation — the `cond` clause body, the release past the branch's merge,
+the `if` and bare-break controls, and the three boundaries driven as rows), the
+per-request ceilings in [tests/elle/h2-stress-scoped.lisp](../../../tests/elle/h2-stress-scoped.lisp),
+for requests that carry a body, the
+placement pins in `lir::lower::tests::release::breakexit`, and
+[tests/elle/region-break-loop-replica-uaf.lisp](../../../tests/elle/region-break-loop-replica-uaf.lisp)
+(the soundness complement — a
 value the break carries out, one it carries a borrow out of, one a container
 outside the loop still holds, and one a closure captured must all survive the
 replica).

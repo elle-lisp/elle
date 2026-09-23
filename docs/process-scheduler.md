@@ -46,8 +46,6 @@ or from one of its sub-fibers. An `ev/futex-wake` after that exit counts and
 wakes only the waiters that are still alive.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (let* [me (process:self)
          bx (box 0)
@@ -74,11 +72,15 @@ rather than blocking forever waiting on work that can never complete.
 This mirrors `ev/run`'s program-completion teardown for the root
 scheduler (see [concurrency.md](concurrency.md)).
 
-```text
+```lisp
+(def @orphan-cleaned false)
 (process:start (fn []
-  ## fire-and-forget background server; the body never joins or stops it
-  (ev/spawn (fn [] (protect (http2:serve listener handler))))
-  nil))   ## body returns → server sub-fiber is orphaned and torn down
+  # A fire-and-forget sleeper; the body returns without joining it.
+  (ev/spawn (fn []
+    (defer (assign orphan-cleaned true)
+      (ev/sleep 3600))))
+  nil))
+(assert orphan-cleaned "the orphan was aborted and its defer ran")
 ```
 
 A sub-fiber the body **joins** (`ev/join`) is not an orphan: the process
@@ -106,13 +108,17 @@ that progress: an h2 client sub-fiber parked in `read` is waiting for the
 request its own process has not finished sending. A process that never
 gets to finish sending it would wait forever.
 
-```text
+```lisp
+(def loop-started (clock/monotonic))
+(def @loop-total 0)
 (process:start (fn []
-  ## The sleeper's completion is 30 s away; the loop below must not wait
-  ## for it. Both finish, and the process ends as soon as the loop does.
+  # The sleeper's completion is 30 s away; the loop below must not wait
+  # for it. Both finish, and the process ends as soon as the loop does.
   (let [sleeper (ev/spawn (fn [] (ev/sleep 30)))]
-    (each i in (range 0 20000) (compute i))
+    (each i in (range 0 20000) (assign loop-total (+ loop-total i)))
     (ev/abort sleeper))))
+(assert (= loop-total 199990000) "the loop ran to the end")
+(assert (< (- (clock/monotonic) loop-started) 10) "and did not wait for the sleeper")
 ```
 
 When no process is ready, the scheduler blocks until a completion arrives.
@@ -133,8 +139,6 @@ When a process that runs a nested scheduler exits, its relayed I/O is cancelled
 like any other I/O it had in flight.
 
 ```lisp
-(def process ((import "std/process")))
-
 (process:start (fn []
   (let [me (process:self)]
     (process:spawn (fn []

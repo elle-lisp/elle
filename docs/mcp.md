@@ -1,12 +1,14 @@
 # MCP Server
 
-Elle ships with an [MCP](https://modelcontextprotocol.io) (Model Context
-Protocol) server that gives AI coding assistants deep, structured access
-to an Elle codebase. The server is written in Elle and maintained in a
+<!-- audited: 2026-09-23 -->
+
+The Elle MCP server gives a coding assistant structured access to an Elle codebase over the Model Context Protocol.
+
+The [MCP](https://modelcontextprotocol.io) server is written in Elle and maintained in a
 [separate repository](https://github.com/elle-lisp/mcp), included as a
 git submodule under `mcp/`. It communicates via JSON-RPC 2.0 on stdio.
 
-**See also:** [Agent Reasoning in Elle](analysis/agent-reasoning.md) for how to use MCP + portrait together. [Portrait](analysis/portrait.md) for local file analysis. [Analysis directory](analysis/) for an overview of code understanding tools.
+**See also:** [Agent Reasoning in Elle](analysis/agent-reasoning.md) for how to use MCP + portrait together. [Portrait](analysis/portrait.md) for local file analysis. [Analysis directory](analysis/) for an overview of code understanding tools. [The eval tool](mcp-eval.md) for its contract.
 
 ## What it does
 
@@ -32,10 +34,10 @@ tracking.
 
 | Tool | Description |
 |------|-------------|
-| `analyze_file` | Analyze an Elle source file — extracts symbols, signals, diagnostics, and observations. Populates the RDF graph with function definitions, arities, parameters, and docstrings. |
+| `analyze_file` | Analyze an Elle source file — reports symbols, signals, diagnostics, and observations. Loads the file's functions, signals, captures, composition properties and call edges into the graph. |
 | `portrait` | Semantic portrait of a function or module. Shows the effect profile (silent/yields/errors), failure modes, composition properties, and human-readable observations. Omit the function name for a module-level portrait. |
 | `signal_query` | Find functions matching a signal property: `silent`, `io`, `yields`, `jit-eligible`, `errors`, or any registered signal keyword. |
-| `impact` | Assess the impact of changing a function. Shows callers, downstream signal implications, and JIT eligibility changes. |
+| `impact` | Assess the impact of changing a function. Shows its signal, each caller with a warning when the caller is silent or JIT-eligible, its callees, and its captures. |
 
 ### Refactoring
 
@@ -49,38 +51,40 @@ tracking.
 
 | Tool | Description |
 |------|-------------|
-| `eval` | Evaluate an Elle lambda against the persistent image. Returns a handle (UUID) naming the result — large values stay in the image. Compose by passing prior handles as `inputs`. stdout/stderr are captured and returned. Optional `timeout_ms` (default 10000). |
+| `eval` | Evaluate an Elle lambda against the persistent image. Returns a handle (UUID) naming the result — large values stay in the image. Compose by passing prior handles as `inputs`. stdout/stderr are captured and returned. Optional `timeout_ms` (default 10000). [mcp-eval.md](mcp-eval.md) is its contract. |
 
-### Cross-language tracing
+### Cross-language tracing and invariants
 
 | Tool | Description |
 |------|-------------|
-| `trace` | Trace an Elle function through primitives into the Rust implementation. For each Elle function call, shows exactly which Rust primitive it maps to (with file/line), and what Rust functions that primitive calls. Complete end-to-end call chain with source locations. Configurable depth. |
+| `trace` | Trace an Elle function's calls into the Rust implementation of each primitive it calls, with file and line, and into that function's own Rust callees to a configurable depth. Needs the `syn` plugin. |
 | `verify_invariants` | Check project invariants encoded as SPARQL ASK queries (from `.elle-invariants.lisp`). |
 
 ## Knowledge graph schema
 
-The graph is populated by `analyze_file` (Elle sources) and the
-supporting [`mcp/elle-graph.lisp`](../mcp/elle-graph.lisp) and [`mcp/rust-graph.lisp`](../mcp/rust-graph.lisp) scripts.
+Three sources fill the graph. At startup the server loads every primitive, and
+the Rust sources when the `syn` plugin is present. `analyze_file` adds an Elle
+file. The server writes Elle triples through
+[lib/rdf/elle.lisp](../lib/rdf/elle.lisp) and Rust triples through
+[lib/rdf/rust.lisp](../lib/rdf/rust.lisp); both modules are the schema's
+definition. A flag is a string literal, `"true"` or `"false"`, so a query
+matches it as `"true"`, never as the boolean `true`.
 
 ### Elle function analysis (`urn:elle:Fn`)
 
-Each function is represented with complete signal and composition metadata:
-
-| Predicate | Type | Description |
-|-----------|------|-------------|
-| `elle:name` | string | Function name |
-| `elle:file` | string | Source file path |
-| `elle:arity` | integer | Number of parameters |
-| `elle:param` | string | Parameter name (repeated) |
-| `elle:doc` | string | Docstring if present |
-| `elle:signal-yields` | boolean | True if function may yield |
-| `elle:signal-io` | boolean | True if function does I/O |
-| `elle:signal-error` | boolean | True if function may error |
-| `elle:jit-eligible` | boolean | True if JIT-compilable (silent, no I/O) |
-| `elle:calls` | IRI | Function this calls (repeated) |
-| `elle:capture` | string | Variable this captures (repeated) |
-| `elle:capture-mutated` | string | Captured variable that is mutated (repeated) |
+| Predicate | Description |
+|-----------|-------------|
+| `urn:elle:name` | Function name |
+| `urn:elle:file` | Source file path |
+| `urn:elle:line` | Line of the definition |
+| `urn:elle:signal-silent`, `signal-yields`, `signal-io` | The flags `compile/signal` reports |
+| `urn:elle:jit-eligible` | `compile/signal`'s `:jit-eligible` |
+| `urn:elle:signal-bit` | One signal the function can raise (repeated) |
+| `urn:elle:signal-propagates` | The index of a parameter whose signal the function raises (repeated) |
+| `urn:elle:calls` | IRI of a function this calls (repeated) |
+| `urn:elle:capture` | Name of a captured binding (repeated) |
+| `urn:elle:capture-kind` | `value`, `lbox` or `transitive` (repeated; not paired with its capture) |
+| `urn:elle:stateless`, `retry-safe`, `parallelizable`, `memoizable`, `timeout-safe` | Composition properties from `std/portrait` |
 
 **Example query: Find all I/O functions**
 ```sparql
@@ -88,7 +92,7 @@ SELECT ?name ?file WHERE {
   ?fn a <urn:elle:Fn> ;
       <urn:elle:name> ?name ;
       <urn:elle:file> ?file ;
-      <urn:elle:signal-io> true .
+      <urn:elle:signal-io> "true" .
 }
 ```
 
@@ -102,38 +106,33 @@ SELECT ?caller ?file WHERE {
 }
 ```
 
-**Example query: Potentially shared mutable state (race condition risk)**
-```sparql
-SELECT ?var (COUNT(?fn) as ?captures)
-WHERE {
-  ?fn a <urn:elle:Fn> ;
-      <urn:elle:capture-mutated> ?var .
-}
-GROUP BY ?var
-HAVING (?captures > 1)
-```
+The graph does not record which capture a function mutates. `impact` and
+`compile_parallelize` read that from the analysis itself.
 
 ### Other Elle entities
 
 | Type | Predicates |
 |------|-----------|
-| `elle:Def` | `elle:name`, `elle:file` |
-| `elle:Macro` | `elle:name`, `elle:file` |
-| `elle:Import` | `elle:name`, `elle:path`, `elle:file` |
-| `elle:Primitive` | `elle:name`, `elle:arity`, `elle:doc`, `elle:signal-*` (same as Fn) |
+| `urn:elle:Def` | `name`, `file` |
+| `urn:elle:Macro` | `name`, `file` |
+| `urn:elle:Primitive` | `name`, `category`, `arity`, `doc`, `param`, `alias`, and the signal predicates of a function |
+| `urn:elle:Import` | `name`, `path`, `file` — written by the bulk scripts only |
 
 ### Rust entities (`urn:rust:` namespace)
 
 | Type | Predicates |
 |------|-----------|
-| `rust:Fn` | `rust:name`, `rust:file`, `rust:param`, `rust:param-type`, `rust:return-type`, `rust:async`, `rust:unsafe`, `rust:visibility`, `rust:attribute` |
-| `rust:Struct` | `rust:name`, `rust:file`, `rust:kind`, `rust:field`, `rust:field-type`, `rust:visibility`, `rust:attribute` |
-| `rust:Enum` | `rust:name`, `rust:file`, `rust:variant`, `rust:visibility`, `rust:attribute` |
-| `rust:Trait` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
-| `rust:Const` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
-| `rust:Static` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
-| `rust:Type` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
-| `rust:Mod` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
+| `rust:Fn` | `name`, `file`, `line`, `param`, `param-type`, `return-type`, `async`, `unsafe`, `visibility`, `attribute`, `calls` |
+| `rust:Struct` | `name`, `file`, `line`, `kind`, `field`, `field-type`, `visibility`, `attribute` |
+| `rust:Enum` | `name`, `file`, `line`, `variant`, `visibility`, `attribute` |
+| `rust:Trait`, `rust:Const`, `rust:Static`, `rust:Type`, `rust:Mod` | `name`, `file`, `line`, `visibility`, `attribute` |
+| `rust:Use` | `path`, `file`, `visibility` |
+
+A primitive links to its Rust function through `urn:elle:implemented-by`, and
+the function back through `urn:rust:implements`. lib/rdf/rust.lisp writes these
+links from a `const PRIMITIVES` table in each Rust file. The primitives are now
+declared with the `primitive!` macro and no such table exists, so today the
+graph holds no link, and `trace` stops at the Elle calls.
 
 ## Building and running
 
@@ -159,7 +158,7 @@ ELLE_MCP_STORE=/path/to/store elle mcp/mcp-server.lisp
 ```
 
 The store is persistent — graph data survives across server restarts.
-The `.elle-mcp/` directory is gitignored by default.
+The `.elle-mcp/` directory is gitignored.
 
 ## Startup behavior
 
@@ -168,10 +167,11 @@ Rust function triples load in a background fiber so the server can
 handle requests while the graph loads. This keeps MCP client connection
 timeouts from firing on large codebases.
 
-SPARQL queries sent via `sparql_query` have a 30-second timeout.
-Lines longer than 10 MB on stdin are rejected with a `-32600` error.
+SPARQL queries sent via `sparql_query` have a 30-second timeout. A request
+line longer than 10,000,000 characters is rejected with a `-32600` error.
 
-When population completes, the server emits a JSON-RPC notification:
+When population completes, the server emits a JSON-RPC notification whose
+`rust` field counts the Rust files it loaded:
 
 ```json
 {"jsonrpc":"2.0","method":"notifications/model/populated","params":{"primitives":true,"rust":406}}
@@ -183,12 +183,15 @@ notification arrives. Tools that don't depend on the graph
 (`initialize`, `ping`, `tools/list`, `analyze_file`, `portrait`, etc.)
 work immediately.
 
-The Rust file scan excludes `target/` to avoid parsing build artifacts.
+The Rust scan reads `src/`, `plugins/*/src/`, `tests/`, `benches/` and
+`patches/`, so build artifacts under `target/` are never parsed.
 
 ## Populating the graph
 
 The server populates the graph incrementally via `analyze_file`. For
-bulk loading, use the supporting scripts:
+bulk loading, use the supporting scripts. They read each file's forms rather
+than analyzing it, so they write names, files, parameters, docstrings and
+imports, and no signals:
 
 ```bash
 # Extract Elle source graph + Rust source graph, load into store
@@ -203,41 +206,31 @@ elle mcp/rust-graph.lisp
 
 ## What can an AI agent do with it?
 
-**Understand code across language boundaries.** Trace a function from Elle through Rust implementations:
+**Understand code across language boundaries.** Trace a function from Elle
+into Rust:
 
-```
+```text
 trace(path: "lib/portrait.lisp", function: "classify-phase", depth: 2)
 ```
 
-Returns the complete call chain with source locations:
+Each Elle call becomes an `[elle]` line. Under a primitive, a `-> [rust]` line
+names its Rust function with file and line, followed by that function's Rust
+callees. The primitive links described above, under Rust entities, are what
+this step reads.
 
-```
-[elle] get (line 31, tail=false)
-  -> [rust] prim_get src/primitives/access.rs:44
-       [rust] resolve_index src/primitives/access.rs:11
-       [rust] error_val src/value/error.rs:10
+**Assess cascading refactoring impact.** Before changing a function:
 
-[elle] empty? (line 32, tail=false)
-  -> [rust] prim_empty src/primitives/list/mod.rs:590
-```
-
-Every Elle operation maps to Rust implementations with exact file/line information. Agents can:
-- Find performance bottlenecks by seeing which primitives are called
-- Understand the cost of operations (e.g., every struct access goes through error handling)
-- Read Rust source code for specific operations
-- Identify optimization opportunities (repeated patterns, unnecessary layers, etc.)
-
-**Assess cascading refactoring impact.** Before changing a primitive:
-
-```
-impact(path: "src/primitives/list/mod.rs", function: "prim_first")
+```text
+impact(path: "lib/http.lisp", function: "parse-url")
 ```
 
-Returns every Elle function that calls `first`, their signals, whether they're JIT-compiled, and what would change if you modified `prim_first`.
+Returns the function's signal, every function in the file that calls it with
+a warning where that caller is silent or JIT-eligible, what it calls, and what
+it captures.
 
 **Find functions by behavior.** Which functions do I/O?
 
-```
+```text
 signal_query(path: "lib/http.lisp", query: "io")
 ```
 
@@ -245,7 +238,7 @@ Returns all I/O-performing functions, ready for optimization or scrutiny.
 
 **Refactor safely across the codebase.** Rename a function and all references:
 
-```
+```text
 compile_rename(path: "lib/process.lisp", old_name: "helper", new_name: "dispatch")
 ```
 
@@ -254,13 +247,13 @@ The tool respects lexical scope — shadowed bindings are left alone.
 **Query the semantic graph directly.** Any SPARQL query works:
 
 ```sparql
-# Which functions are JIT-eligible? (performance candidates)
+# Which functions are JIT-eligible, and how often are they called?
 SELECT ?name ?file (COUNT(?caller) as ?calls)
 WHERE {
   ?fn a <urn:elle:Fn> ;
       <urn:elle:name> ?name ;
       <urn:elle:file> ?file ;
-      <urn:elle:jit-eligible> true .
+      <urn:elle:jit-eligible> "true" .
   OPTIONAL {
     ?caller a <urn:elle:Fn> ;
             <urn:elle:calls> ?fn .
@@ -271,16 +264,6 @@ ORDER BY DESC(?calls)
 ```
 
 ## Example SPARQL queries for agents
-
-**Find all JIT-eligible functions (performance hotspots to optimize)**
-```sparql
-SELECT ?name ?file WHERE {
-  ?fn a <urn:elle:Fn> ;
-      <urn:elle:name> ?name ;
-      <urn:elle:file> ?file ;
-      <urn:elle:jit-eligible> true .
-}
-```
 
 **Find entry points (functions with no callers — dead code or API boundaries)**
 ```sparql
@@ -310,15 +293,17 @@ ORDER BY DESC(?calls_count)
 LIMIT 20
 ```
 
-**Find functions that capture mutable state (potential correctness issues)**
+**Find functions that close over a boxed binding (a mutable local, or a
+file-level binding)**
 ```sparql
-SELECT ?name ?var
+SELECT DISTINCT ?name ?file
 WHERE {
   ?fn a <urn:elle:Fn> ;
       <urn:elle:name> ?name ;
-      <urn:elle:capture-mutated> ?var .
+      <urn:elle:file> ?file ;
+      <urn:elle:capture-kind> "lbox" .
 }
-ORDER BY ?var ?name
+ORDER BY ?file ?name
 ```
 
 **Check cross-language dependencies (Elle calling Rust primitives)**
@@ -326,9 +311,8 @@ ORDER BY ?var ?name
 SELECT ?elle_fn ?rust_fn
 WHERE {
   ?elle_fn a <urn:elle:Fn> ;
-           <urn:elle:calls> ?calls_iri .
-  ?prim a <urn:elle:Primitive> .
-  # Match by name conversion (elle-style to rust style)
+           <urn:elle:calls> ?prim .
+  ?prim <urn:elle:implemented-by> ?rust_fn .
 }
 ```
 
@@ -346,109 +330,86 @@ WHERE {
 ORDER BY ?name
 ```
 
-See [`mcp/demo-queries.lisp`](../mcp/demo-queries.lisp) for more examples.
+See [demo-queries.lisp](https://github.com/elle-lisp/mcp/blob/main/demo-queries.lisp)
+in the submodule for more examples.
 
 ## Test orchestration
 
-The MCP server provides tools for running tests, tracking results, and
-gating pushes on test status. These eliminate the pattern where agents
-push branches that fail CI.
-
-### Tools
+The MCP server provides tools for running tests, recording results, and
+gating pushes on test status.
 
 | Tool | Description |
 |------|-------------|
-| `test_run` | Run tests and record results. Captures exit code, duration, stdout/stderr. Records result keyed by `(sha, test-path, mode)` in the RDF store. |
-| `test_status` | Query test results for a commit. Returns a structured, agent-ready summary — NOT raw output. Agents never need to re-run tests with `\| tail` to read failures. |
-| `test_history` | Test results across recent commits for a specific test or all tests. |
-| `test_gate` | Check if a SHA is clear to push. Verifies a full `make test` pass exists for the SHA on a clean worktree. |
-| `push_ready` | Push with test gate. Checks `test_gate` for HEAD, pushes if passing, returns what's needed if not. |
-| `push_wip` | Push without gate. Pushes unconditionally for saving work or requesting review. |
+| `test_run` | Run tests and record the result, keyed by `(sha, mode)`, in the RDF store. Answers pass or fail, the failure lines, the duration, and whether the worktree was clean. |
+| `test_status` | The stored results for a commit, one row per mode. |
+| `test_history` | Stored results across recent runs, newest first. |
+| `test_gate` | Check if a SHA is clear to push: a passing `test` run recorded for it on a clean worktree. |
+| `push_ready` | Push after `test_gate` passes for HEAD; refuse with the reason otherwise. |
+| `push_wip` | Push unconditionally, for saving work or requesting review. |
 
 ### `test_run`
 
 ```json
-{"path": "tests/elle/core.lisp", "mode": "smoke", "jit": "off"}
+{"path": "tests/elle/core.lisp", "mode": "single", "jit": "off"}
 ```
 
 Parameters:
-- `path` (optional) — specific test file
-- `mode` — `"smoke"`, `"test"`, or `"single"`
-- `jit` (optional) — override JIT policy: `"off"`, `"eager"`, `"adaptive"`
+- `mode` (required) — `"smoke"` runs `make smoke`, `"test"` runs `make test`,
+  and `"single"` runs one file with `$ELLE`, else `./target/debug/elle`
+- `path` — the file, required for `"single"`
+- `jit` (optional) — `"off"`, `"eager"` or `"adaptive"`. A single file gets it
+  as a command-line flag; a make target gets it as `ELLE_JIT` in the
+  environment, which the binary does not read
 
-### `test_status`
-
+The answer:
 ```json
-{"sha": "abc123", "mode": "smoke"}
+{"passed": false, "failed-count": 1,
+ "failures": [{"message": "✗ Runtime error: …"}],
+ "duration": …, "clean": true, "sha": "abc123"}
 ```
 
-Returns structured result:
-```lisp
-{:passed true
- :failed-count 0
- :failures ()
- :duration 32
- :clean true
- :sha "abc123"}
-```
+A failure is one stderr line that holds `✗`. The stored record keeps the
+count and the first 10,000 characters of stderr, not the failure lines.
 
-When tests fail, each failure includes:
-```lisp
-{:test "tests/elle/fibers.lisp"
- :message "assertion failed: fiber cancel propagates"
- :location "fibers.lisp:42"
- :context "  (assert (= status :cancelled) \"fiber cancel propagates\")\n           ^"}
-```
+### `test_status`, `test_gate`, `push_ready` / `push_wip`
 
-### `test_gate`
-
-```json
-{"sha": "abc123"}
-```
-
-Checks:
-1. HEAD SHA has a passing `make test` record
-2. Worktree was clean when the test ran
-3. No new commits since the test (SHA matches HEAD)
-
-Returns `{:ready true}` or `{:ready false :reason "..."}`.
-
-### `push_ready` / `push_wip`
-
-```json
-{"remote": "origin", "branch": "feature-x"}
-```
-
-`push_ready` verifies test gate before pushing. `push_wip` pushes
-unconditionally.
+`test_status` takes an optional `sha` (default HEAD) and `mode`, and answers
+`{"sha": …, "results": [ … ]}` with one stored row per mode. `test_gate` takes
+an optional `sha` (default HEAD) and answers `{"ready": true, "sha": …}` or
+`{"ready": false, "reason": …}`. `push_ready` and `push_wip` take a required
+`branch` and an optional `remote` (default `origin`).
 
 ### Test result storage
 
 Results are stored as RDF triples:
 
 ```turtle
-<urn:test:abc123:smoke> a elle:TestRun ;
-    elle:sha "abc123" ;
-    elle:mode "smoke" ;
-    elle:clean true ;
-    elle:passed true ;
-    elle:duration 32 ;
-    elle:timestamp "2026-04-15T..." ;
-    elle:failed-count 0 ;
-    elle:stderr "" .
+<urn:test:abc123:smoke> a <urn:elle:TestRun> ;
+    <urn:elle:sha> "abc123" ;
+    <urn:elle:mode> "smoke" ;
+    <urn:elle:clean> true ;
+    <urn:elle:passed> true ;
+    <urn:elle:duration> … ;
+    <urn:elle:timestamp> "…" ;
+    <urn:elle:failed-count> 0 ;
+    <urn:elle:stderr> "" .
 ```
 
 ## Design rationale
 
 The MCP server exposes what the compiler already computes. Elle's compilation pipeline performs signal inference, capture analysis, and binding resolution for every file. This information exists whether or not anyone queries it — the MCP server just makes it accessible over JSON-RPC.
 
-**Everything the MCP server provides is available to normal Elle code at runtime.** `compile/analyze`, `compile/signal`, `compile/captures`, `compile/callees` — these are regular Elle functions. The MCP server is just an Elle program (`mcp/mcp-server.lisp`) that wraps these primitives in the Model Context Protocol. You can write your own analysis tools using the same functions:
+**Everything the analysis tools report is available to normal Elle code at runtime.** `compile/analyze`, `compile/signal`, `compile/captures`, `compile/callees` — these are regular Elle functions. The MCP server is just an Elle program (`mcp/mcp-server.lisp`) that wraps these primitives in the Model Context Protocol. You can write your own analysis tools using the same functions:
 
-```text
-(def a (compile/analyze (file/read "my-code.lisp") {:file "my-code.lisp"}))
-(compile/signal a :my-function)    # => signal profile
-(compile/captures a :my-function)  # => captured variables
-(compile/callees a :my-function)   # => call graph
+```lisp
+(def my-code "(defn my-function [n] (def @total 0)
+                (each i in (range n) (assign total (+ total i)))
+                (println total))")
+(def a (compile/analyze my-code {:file "my-code.lisp"}))
+
+(assert (get (compile/signal a :my-function) :io))            # it prints
+(assert (empty? (compile/captures a :my-function)))           # it closes over nothing
+(assert (not (empty? (compile/callees a :my-function))))      # it calls range, println, ...
 ```
 
 See [Design Philosophy](philosophy.md) for why Elle is designed this way, and [Agent Reasoning](analysis/agent-reasoning.md) for how agents use the MCP server in practice.
@@ -457,20 +418,17 @@ See [Design Philosophy](philosophy.md) for why Elle is designed this way, and [A
 
 The knowledge graph is a snapshot of compiler analysis at the time each file was analyzed. It can become stale.
 
-**Source code is ground truth.** If the graph contradicts the source, the source wins. Re-analyze the file:
+**Source code is ground truth.** If the graph contradicts the source, the source wins.
 
-```text
-analyze_file(path: "lib/http.lisp")
-```
+The server watches the tree and re-analyzes a `.lisp` file when it is created
+or written: it drops the cached analysis, clears the file's old triples, and
+loads fresh ones. It also sends a `notifications/model/updated` notification
+naming the functions whose signal changed. `analyze_file` on a file the server
+has already analyzed answers from that cache.
 
-**When to re-analyze:**
-- After editing a file
-- When `portrait` or `signal_query` results seem wrong
-- Before trusting impact analysis for a refactoring decision
-
-**After refactoring:** Any change made via `compile_rename`, `compile_extract`, or manual editing should be followed by re-analysis of the affected files and a test run. The refactoring tools produce correct transformations, but the graph won't reflect the new state until those files are re-analyzed.
-
-The MCP server's `analyze_file` tool handles this — it clears old triples for the file and replaces them with fresh analysis.
+**After refactoring:** a change made via `compile_rename` or `compile_extract`
+comes back as new source text. Write it to the file, and the watcher
+re-analyzes it; then run the tests.
 
 ## IDE integration
 
@@ -487,18 +445,19 @@ and code understanding.
 
 | File | Purpose |
 |------|---------|
-| [`mcp/elle-graph.lisp`](../mcp/elle-graph.lisp) | Extract RDF triples from Elle source files |
-| [`mcp/rust-graph.lisp`](../mcp/rust-graph.lisp) | Extract RDF triples from Rust source files via syn plugin |
-| [`lib/rdf/elle.lisp`](../lib/rdf/elle.lisp) | Elle→RDF triple generation (`std/rdf/elle`) |
-| [`lib/rdf/rust.lisp`](../lib/rdf/rust.lisp) | Rust→RDF triple generation (`std/rdf/rust`) |
-| [`mcp/load-all.lisp`](../mcp/load-all.lisp) | Extract both graphs and load into the store |
-| [`mcp/demo-queries.lisp`](../mcp/demo-queries.lisp) | Example SPARQL queries |
-| [`mcp/test-mcp.lisp`](../mcp/test-mcp.lisp) | Smoke test: spawns server, exercises all tools |
-| [`mcp/semantic-graph.lisp`](../mcp/semantic-graph.lisp) | Semantic graph analysis utilities |
+| [elle-graph.lisp](https://github.com/elle-lisp/mcp/blob/main/elle-graph.lisp) | Extract RDF triples from Elle source files |
+| [rust-graph.lisp](https://github.com/elle-lisp/mcp/blob/main/rust-graph.lisp) | Extract RDF triples from Rust source files via syn plugin |
+| [lib/rdf/elle.lisp](../lib/rdf/elle.lisp) | Elle→RDF triple generation (`std/rdf/elle`) |
+| [lib/rdf/rust.lisp](../lib/rdf/rust.lisp) | Rust→RDF triple generation (`std/rdf/rust`) |
+| [load-all.lisp](https://github.com/elle-lisp/mcp/blob/main/load-all.lisp) | Extract both graphs and load into the store |
+| [demo-queries.lisp](https://github.com/elle-lisp/mcp/blob/main/demo-queries.lisp) | Example SPARQL queries |
+| [test-mcp.lisp](https://github.com/elle-lisp/mcp/blob/main/test-mcp.lisp) | Smoke test: spawns server, exercises the tools |
+| [semantic-graph.lisp](https://github.com/elle-lisp/mcp/blob/main/semantic-graph.lisp) | Semantic graph analysis utilities |
 
 ## Dependencies
 
 The MCP server requires:
 - `oxigraph` plugin — RDF triple store with SPARQL
-- `syn` plugin — Rust source parsing (for `trace` and Rust graph extraction)
-- `glob` module — file discovery (for `load-all.lisp`)
+- `syn` plugin, optional — Rust source parsing, for `trace` and the Rust graph
+- the `glob`, `watch` and `uuid` modules — file discovery, the file watcher,
+  and eval handles
