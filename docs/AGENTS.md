@@ -16,7 +16,7 @@ Up: [..](../AGENTS.md)
 - [concurrency.md](concurrency.md) — **Concurrency** User code runs inside the async scheduler automatically.
 - [config.md](config.md) — **Runtime Configuration (`vm/config`)** Elle exposes a runtime configuration system reachable from both CLI flags and Elle code.
 - [control.md](control.md) — **Control Flow** Elle control flow forms are expressions — they return values.
-- [debugger.md](debugger.md) — **Debugger** The debugger pauses a program, exposes its state as structured values, and resumes it.
+- [debugger.md](debugger.md) — **Debugger** A design for a debugger that pauses a program, shows its state as structured values, and resumes it; none of its six phases is built yet.
 - [destructuring-advanced.md](destructuring-advanced.md) — **Destructuring — Advanced** Advanced destructuring patterns: rest, wildcard in depth, nesting, and match integration.
 - [destructuring.md](destructuring.md) — **Destructuring** Destructuring unpacks collections into bindings.
 - [embedding.md](embedding.md) — **Embedding** Elle can be embedded as a scripting engine in Rust or C programs.

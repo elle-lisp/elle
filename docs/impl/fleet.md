@@ -52,7 +52,7 @@ A **task** names three things:
 
 1. an **environment image** — the session's bindings, dumped as a delta
    over the boot image (the `environment` milestone of
-   [image.md](image.md)),
+   [image/plan.md](image/plan.md)),
 2. an **entry** — which binding in that image to call,
 3. **argument references** — content-addressed values.
 
@@ -65,14 +65,11 @@ deploy step; the code you just typed into a REPL ships as a few pages
 of bytes. Workers are wherever the `elle` binary runs: hosts you own,
 containers, or function invocations (§ Worker substrates).
 
-```text
-(def fleet ((import "std/fleet")))
-(fleet:connect "redis://coordinator:6379")
-
-(defn embed [chunk] (model:encode chunk))     # ordinary code
-
-(fleet:map embed chunks)                       # runs fleet-wide
-```
+A session would load the module with `(def fleet ((import "std/fleet")))`,
+bind it to a coordinator with `(fleet:connect "redis://coordinator:6379")`,
+define ordinary code such as `(defn embed [chunk] (model:encode chunk))`, and
+run it fleet-wide with `(fleet:map embed chunks)`. None of `std/fleet` exists
+yet.
 
 `fleet:map` dumps the session's environment image once, stores it under
 its content hash, records a job, enqueues one task per chunk, and
@@ -96,7 +93,7 @@ immutable struct naming content by hash.
   already use ([threads.md](../threads.md)). The default for arguments
   and results.
 - **`:image`** — image-format bytes: an environment image for code, or a
-  data-only image (the store-spike format) for large value graphs that
+  data-only image (the store milestone's format) for large value graphs that
   deserve page-speed hydration. A later milestone; `:send` covers v1.
 
 Small payloads (< 1 KiB) ride inline in the reference itself. Everything
@@ -396,8 +393,8 @@ worker's scheduler. The task lifecycle is load, run, unload:
 
 1. **Load** the environment image from the cached file: a private
    mapping and one relocation pass. The census bounds the cost — a
-   graph the size of the whole stdlib carries ~2,100 relocations
-   ([image.md](image.md) risk item 2), and an environment delta is
+   graph the size of the whole stdlib carries about 2,300 relocation
+   entries ([image/measurements.md](image/measurements.md)), and an environment delta is
    smaller — so load is microseconds, not a boot.
 2. **Run** the entry under the task's policy: a fuel budget bounds
    runaway computation ([runtime.md](../runtime.md)), the deadline
@@ -469,33 +466,30 @@ burst limit. Policy is code in the invoker, not protocol.
 
 ## Client API
 
-```text
-(fleet:connect url)                  # bind the module to a coordinator
+The proposed calls:
 
-(fleet:run f & args)                 # execute remotely, block, return
-(fleet:run-later f & args)           # fire and forget, returns task-key
-(fleet:map f items)                  # parallel map, results in order
-(fleet:map-limited f items n)        # bounded parallelism
-(fleet:map-later f items)            # returns job-id immediately
-(fleet:attach job-id)                # resume collecting a job's results
-
-(fleet:push queue f & args)          # durable work queue
-(fleet:results queue)                # iterator over completions
-(fleet:errors queue-or-job)          # iterator over error records
-(fleet:pause q) (fleet:resume q)     # flow control on a queue
-(fleet:purge q)                      # drop pending and delayed work
-(fleet:pipeline name :width n)       # ordered FIFO lanes, striped
-
-(fleet:scatter items)                # → scattered collection of refs
-(fleet:gather sc)                    # realize: ordered values
-
-(fleet:put value)                    # → reference: upload once
-
-(fleet:freeze f)                     # → fn-ref: pin f's environment now
-(fleet:status key-or-job)            # :pending | :running | :done | :failed
-(fleet:fetch ref-or-task-key)        # value behind a reference or result
-(fleet:redrive task-key)             # resubmit a dead task, fresh budget
-```
+| Call | Does |
+|------|------|
+| `(fleet:connect url)` | bind the module to a coordinator |
+| `(fleet:run f & args)` | execute remotely, block, return |
+| `(fleet:run-later f & args)` | fire and forget; returns the task-key |
+| `(fleet:map f items)` | parallel map, results in order |
+| `(fleet:map-limited f items n)` | bounded parallelism |
+| `(fleet:map-later f items)` | returns the job-id immediately |
+| `(fleet:attach job-id)` | resume collecting a job's results |
+| `(fleet:push queue f & args)` | durable work queue |
+| `(fleet:results queue)` | iterator over completions |
+| `(fleet:errors queue-or-job)` | iterator over error records |
+| `(fleet:pause q)`, `(fleet:resume q)` | flow control on a queue |
+| `(fleet:purge q)` | drop pending and delayed work |
+| `(fleet:pipeline name :width n)` | ordered FIFO lanes, striped |
+| `(fleet:scatter items)` | a scattered collection of references |
+| `(fleet:gather sc)` | realize: the ordered values |
+| `(fleet:put value)` | a reference: upload once |
+| `(fleet:freeze f)` | a fn-ref: pin `f`'s environment now |
+| `(fleet:status key-or-job)` | `:pending`, `:running`, `:done` or `:failed` |
+| `(fleet:fetch ref-or-task-key)` | the value behind a reference or result |
+| `(fleet:redrive task-key)` | resubmit a dead task with a fresh budget |
 
 `f` is an ordinary value — a named function or a lambda. The client
 dumps the environment image with `f` as a distinguished root, so
@@ -579,12 +573,12 @@ running locally. The two compose instead of competing: a fleet task
 is ordinary code, so it may call `gpu:map` — scatter across machines,
 SPIR-V within one. And the tier system proper still applies inside
 the worker, where the hydrated closure JITs exactly as a source-boot
-closure would (image.md's tier-parity gate).
+closure would (the tier-parity gate of [image/plan.md](image/plan.md)).
 
 ## Routing: fingerprints and pools
 
 An image is valid only for a binary whose layout fingerprint matches
-([image.md § Fingerprint](image.md)); that lock is the price of
+([image/format.md](image/format.md) § Fingerprint); that lock is the price of
 page-speed code transport, and fleet does not try to relitigate it.
 What fleet refuses to inherit is "one fleet, one binary". The
 fingerprint is a **routing key, not a gate**:
@@ -654,14 +648,12 @@ primitives. The contract on the image work:
    independent double hydration); the delta is the scoped API.
 3. **Deterministic dumps** (already specified) — task identity depends
    on byte-identical dumps of identical sessions.
-4. **Trait dispatch in the sequence functions** (elle-lisp/elle#1005).
-   `map`, `filter`, `reduce`, `each`, and the rest of the cascade
-   family end today in hardcoded type cascades and raise a type error
-   on unknown collections. Each needs a trait-consulting arm before
-   that error, as `first`, `rest`, and `length` already have. This is
-   independently useful — user-defined collections stop being
-   second-class — and the scattered collection (§ Dispatch on data)
-   is just its first heavy consumer.
+4. **Trait dispatch in the sequence functions** — landed. `map`,
+   `filter`, `fold` and the rest of the collection operators consult a
+   collection's own `:map`-style method, or its `:iter`, before their
+   type checks ([traits.md](../traits.md) § Collection operators). The
+   scattered collection (§ Dispatch on data) is its first heavy
+   consumer.
 
 ## Rejected alternatives
 
@@ -749,7 +741,7 @@ came. Here each has a numbered home.
    memoization and `fleet:cache-only`, ordered pipelines (the
    striper), `fleet:rate-limit`, `fleet:semaphore`; the scattered
    collection (`fleet:scatter`/`fleet:gather`, plain-`map` dispatch
-   over it, lazy realization), gated on the stdlib trait arm.
+   over it, lazy realization), riding the stdlib trait arm.
 5. **observe** — per-task output capture as store blobs, error records
    with traces; causality: every task records the task that submitted
    it, so a recursive fan-out reads as one tree (slay's linked request
@@ -862,8 +854,8 @@ came. Here each has a numbered home.
   the intermediate stage's results. Plain `map` over an ordinary
   collection in a connected session touches neither store nor queue —
   the counter-factual for any ambient-dispatch design. The stdlib
-  trait arm itself is pinned in core tests by a custom collection
-  whose `:map` method returns a sentinel.
+  trait arm itself is already pinned, in [traits.md](../traits.md), by a
+  collection whose `:map` method returns a sentinel.
 - Local backend: the whole suite above, minus reclaim and routing, runs
   against `:local` with no Redis present.
 
@@ -874,11 +866,10 @@ came. Here each has a numbered home.
    if it taxes hot call sites, `fleet:freeze` is the escape hatch and a
    dirty-tracking cache is the fix.
 2. **Cross-machine `SendValue`.** The codec crosses threads today, not
-   builds. The symbol foundation makes symbol payloads stable;
-   [image.md](image.md) risk item 4 already records two cross-table id
-   holes with regression tests owed. Audit primitive references in
-   argument data the same way before milestone 1 trusts the codec on
-   the wire.
+   builds. A symbol's identity is its name hash, so symbol payloads are
+   stable across builds ([image/foundations.md](image/foundations.md)).
+   Audit primitive references in argument data before milestone 1
+   trusts the codec on the wire.
 3. **Blocking foreign calls.** A task pinned in FFI that never yields
    defeats cooperative cancellation; the crash-only fallback (worker
    suicide + reclaim) works but is blunt. Measure how often real

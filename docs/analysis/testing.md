@@ -1,6 +1,6 @@
 # Testing Strategy
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-09-23 -->
 
 Which *kind* of test to write, and where it belongs.
 
@@ -19,8 +19,8 @@ Which *kind* of test to write, and where it belongs.
 |------|------|---------|
 | 1 | `make smoke` | The Elle corpus across the vm and jit policies, then the doctests and the embedding demo |
 | 2 | `make smoke-nouring` | The corpus again on the thread-pool I/O backend |
-| 3 | `make qa` | rustfmt, clippy, the macOS cross-check, rustdoc, and the workspace doctests |
-| 4 | `cargo test --workspace --lib` | The unit tests, inline beside the code they test |
+| 3 | `make qa` | rustfmt, clippy, the macOS and Android cross-checks, rustdoc, and the Rust doctests |
+| 4 | `cargo test --workspace --lib --all-features` | The unit tests, inline beside the code they test |
 | 5 | `cargo test --test '*'` | The integration tests and the standalone test binaries |
 
 The Elle corpus is the cheapest full-pipeline check: reader, expander, analyzer,
@@ -54,49 +54,47 @@ Code that should be rejected by the analyzer or lowerer before the VM ever
 runs — undefined variables, break across function boundaries, invalid
 destructuring syntax, arity mismatches at known call sites.
 
-→ **Rust integration test.** The code cannot be run as an Elle script because
-it does not compile. Call `eval_source(input, |r| ...)` and inspect the error
-message inside the closure, while the runtime that produced it is still alive.
+→ **Elle test script**, when the rejection and its message are all the test
+needs. Compile the source text inside `protect` and assert that it fails:
 
-The same rule covers Unicode generation tests: corpus files compile on the
+```lisp
+(def [ok? err] (protect (compile/whole-module "(def x 1) (assign x 2)" "<doc>")))
+(assert (not ok?) "assigning an immutable binding does not compile")
+(assert (= (get err :error) :compile-error))
+(assert (string/contains? (get err :message) "cannot assign immutable binding"))
+```
+
+→ **Rust integration test**, when the assertion needs a Rust type the error
+carries, or a runtime Elle cannot build. Call `eval_source(input, |r| ...)`
+and inspect the error inside the closure, while the runtime that produced it
+is still alive.
+
+A Unicode generation test is the second case: corpus files compile on the
 shared runner VM, which uses the default generation, so a file that selects
 another generation with `(unicode! N)` cannot join the corpus. Build a
 `Runtime::with_unicode(...)` in a Rust integration test instead.
 
-**3. Does the test assert that something fails at runtime and need to inspect
-the error message for specific content?**
+**3. Does the test evaluate Elle source and check the resulting value?**
 
-Example: checking that a division-by-zero error message contains
-"division by zero", or that an undefined variable error includes the
-variable name.
-
-→ **Rust integration test IF** the assertion requires substring matching on
-the error message that `try`/`catch` in Elle cannot express. If the test only
-needs to confirm that an error occurs (not inspect its message), it can be
-Elle — use `protect` and check the error kind keyword.
-
-**4. Does the test evaluate Elle source and check the resulting value?**
-
-This is the vast majority of tests. The pattern is:
+This is the vast majority of tests. In Rust the pattern is
 `eval_source("(some-expr)", |r| assert_eq!(r.unwrap(), Value::int(42)))`.
 
-→ **Elle test script** in [tests/elle/](../../tests/elle/). Translate to:
-`(assert-eq (some-expr) 42 "description")`.
+→ **Elle test script** in [tests/elle/](../../tests/elle/). Translate to
+`(assert (= (some-expr) 42) "description")`.
 
-**5. Does the test verify a runtime error occurs (not a compile error)
-and only needs to check the error kind, not the full message?**
+**4. Does the test verify a runtime error?**
 
-Example: confirming division by zero signals an error with kind
-`:division-by-zero`.
+→ **Elle test script.** `protect` answers the error as a value, so the script
+checks its kind, and its message with `string/contains?`:
 
-→ **Elle test script.** Use `protect`:
-```
+```lisp
 (def [ok? err] (protect (/ 1 0)))
-(assert-false ok? "division by zero should error")
-(assert-eq (get err :error) :division-by-zero "error kind")
+(assert (not ok?) "division by zero should error")
+(assert (= (get err :error) :division-by-zero) "error kind")
+(assert (string/contains? (get err :message) "division by zero"))
 ```
 
-**6. Does the test use random input generation to find bugs?**
+**5. Does the test use random input generation to find bugs?**
 
 Property tests use proptest to generate random inputs and verify that an
 invariant holds across all of them. This is valuable when randomness genuinely
@@ -121,8 +119,7 @@ generation genuinely adds value. Otherwise, write Elle test scripts.
 | Access to private items (`pub(crate)` or less) | Inline `#[cfg(test)]` in the source file | Testing implementation details of a single module |
 | Access to public Rust APIs, no pipeline | [tests/unittests/](../../tests/unittests/) | Testing `Value`, `SymbolTable`, primitives via Rust calls |
 | Access to intermediate pipeline stages | [tests/integration/](../../tests/integration/) | Testing `analyze()`, `compile()`, HIR/LIR structure, signals |
-| Compile-time rejection | [tests/integration/](../../tests/integration/) | Code that must not compile |
-| Runtime error message inspection | [tests/integration/](../../tests/integration/) | Substring matching on error strings |
+| Compile-time rejection that needs a Rust type | [tests/integration/](../../tests/integration/) | An error field, a span, or a runtime Elle cannot build |
 | Invariants across generated inputs | [tests/property/](../../tests/property/) | Property-based tests with proptest |
 | Reads or perturbs process-global state | A file of its own directly under [tests/](../../tests/) | A process-wide counter, an rlimit, a signal disposition, a re-exec, or a fault the harness must survive |
 

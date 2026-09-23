@@ -1,11 +1,13 @@
 # Debugger
 
-The debugger pauses a program, exposes its state as structured values,
-and resumes it. It is designed for AI agents first: every operation is
-one call that returns data, never a prompt that waits for a keystroke.
+A design for a debugger that pauses a program, shows its state as structured
+values, and resumes it; none of its six phases is built yet. It is designed for
+AI agents first: every operation is one call that returns data, never a prompt
+that waits for a keystroke.
 
-This document is the specification. The [status table](#implementation-status)
-at the end records which phases exist.
+This document is the specification. The status table at the end records which
+phases exist. Every primitive, flag and library function it introduces below is
+proposed; a name this document marks as existing is one the tree has today.
 
 ## Design principles
 
@@ -89,8 +91,8 @@ inert.
 by excluding the VM-internal bits (`src/signals/mod.rs`), and bit 2
 is not excluded. There is no `fiber/deny` primitive: denial is the
 `:deny` argument to `fiber/new`, inherited by descendants, and every
-primitive call checks `signal.bits ∩ withheld ∩ CAP_MASK` at four
-sites (interpreter call and tail call, JIT call and array call;
+primitive call checks `signal.bits ∩ withheld ∩ CAP_MASK` at every native
+dispatch (interpreter call and tail call, JIT call and array call, the WASM host;
 `tests/elle/caps.lisp` pins the payload). So
 `(fiber/new f mask :deny |:debug|)` denies `debug/break` through the
 standard check, and a supervisor can forbid debugging of untrusted
@@ -105,7 +107,7 @@ exempt tooling pauses:
 
 - Squelch/attune enforcement asks one predicate,
   `signals::squelched_bits` (`src/signals/mod.rs`), at all ten sites:
-  the interpreter's `enforce_squelch` (`src/vm/core.rs`) serves six,
+  the interpreter's `enforce_squelch` (`src/vm/core/discard.rs`) serves six,
   and four more are inlined in the JIT paths — two in
   `src/vm/run_on/jit.rs` and two in `src/jit/calls/callops.rs`. One
   predicate is what keeps the exemptions from drifting apart between
@@ -148,50 +150,47 @@ JIT. Single-function JIT compiles suspending functions and side-exits
 at the suspension, deoptimizing the native frame into a
 `BytecodeFrame` (`src/jit/suspend.rs`). A compiled-in breakpoint
 therefore pauses with inspectable frames even in JIT'd code, and
-resumes interpreted. Batch (SCC) compilation rejects suspending
-members outright (`src/jit/compiler.rs`), so a function containing
-`debug/break` is never in a batch group, and the direct SCC peer
-calls that bypass the VM never contain a breakpoint. Stepping and
-dynamic breakpoints exist only in the interpreter and need the debug
-flag (see [Tier interactions](#tier-interactions)).
+resumes interpreted. Stepping and dynamic breakpoints exist only in the
+interpreter and need the debug flag (see Tier interactions below).
 
 ## Debug information
 
-The runtime carries part of what inspection needs:
+A parked frame reaches everything its function's code object holds. `Code`
+wraps the function's `ClosureTemplate` (`src/value/code.rs`), and
+`BytecodeFrame.code` is always live, so inspection reads the template
+through the frame. The frame's parked closure register is a possibly-dead
+borrow that inspection must never dereference (see the register
+invariants in [impl/vm.md](impl/vm.md)).
 
-| Table | Where | Maps |
-|-------|-------|------|
-| `location_map` | `Code`, `CallFrame` | bytecode offset → file, line, column |
-| `syntax` | `ClosureTemplate` | the lambda's full surface AST |
-| `lir_function` | `ClosureTemplate` | SSA, CFG, yield points, call sites |
+| Template field | Maps |
+|----------------|------|
+| location table | bytecode offset → file, line, column |
+| `origin` | the lambda's source span |
+| `lir_function` | SSA, CFG, yield points, call sites; present on a nested lambda's template, absent on one built from bare `Bytecode` |
+| `name` | the binding the lambda was defined under |
 
-Two facts qualify the table. First, `location_map` is a sparse,
-unordered `HashMap`: one entry per LIR instruction and one per block
-terminator, not one per bytecode offset (`src/lir/emit/mod.rs`), and
-all-zero synthetic spans are dropped (`record_location`,
-`src/compiler/bytecode.rs`), so macro-generated code is unmappable.
-Every consumer today does a point lookup; inspection adds the sorted
-index that resolves an ip to the nearest preceding entry. Second, `Code` holds no back-pointer to its template, so
-`syntax` and `lir_function` are reachable from a closure *value* but
-not from a parked frame. The frame's parked closure register is a
-possibly-dead borrow that inspection must never dereference (see the
-register invariants in [impl/vm.md](impl/vm.md)). Everything frames
-expose must ride `Code`; `BytecodeFrame.code` is always live.
+Two facts qualify the table. First, the location table is sparse: the
+emitter records one entry per LIR instruction and one per block terminator,
+not one per bytecode offset (`src/lir/emit/mod.rs`), and drops all-zero
+synthetic spans (`record_location`, `src/compiler/bytecode.rs`), so
+macro-generated code is unmappable. The template stores the entries sorted
+by offset (`LocationTable`, `src/value/closure/payload.rs`), and its lookup
+answers an exact offset; inspection adds the lookup that resolves an ip to
+the nearest preceding entry. Second, `name` is `None` for all compiled code:
+nothing assigns `LirFunction.name`, which is why stack traces print
+`<anonymous>` today.
 
-Three additions, all on `Code` (`src/value/code.rs`), flowing the same
-path as `location_map`:
+Three additions, all on the template, flowing the same path as the
+location table:
 
-- **`name: Option<Rc<str>>`** — copied from `ClosureTemplate.name`.
-  That field exists but is `None` for all compiled code: nothing
-  assigns `LirFunction.name`, which is why stack traces print
-  `<anonymous>` today. The real work is plumbing the enclosing
-  `define`/`letrec` binding name from HIR through `lower_lambda` into
-  `LirFunction.name`; the emitter already copies it from there
-  (`src/lir/emit/instr.rs`). Landing this names stack traces too.
+- **name plumbing** — the enclosing `define`/`letrec` binding name, carried
+  from HIR through `lower_lambda` into `LirFunction.name`. The template
+  already copies it from there (`TemplateProto::nested_lambda`,
+  `src/value/closure/proto.rs`). Landing this names stack traces too.
 - **`local_names`** — `(name, place, index)` entries for everything a
   frame binds. The lowerer's `binding_to_slot` map (declared in
-  `src/lir/lower/mod.rs`, filled in `emitops.rs`) has the data and
-  dies before emit; it moves onto `LirFunction`. The place is
+  `src/lir/lower/mod.rs`, filled in `src/lir/lower/emitops.rs`) has the data
+  and dies before emit; it moves onto `LirFunction`. The place is
   required because bindings live in two address spaces whose indices
   overlap, and in three shapes. A plain local lives in its stack
   slot. An in-lambda mutated-or-captured local is env-celled: its
@@ -210,19 +209,15 @@ path as `location_map`:
   recycled, so one name per index is exact — no ip-ranged table is
   needed. Bindings the lowerer constant-folds away have no slot and
   do not appear.
-- **the `Bytecode` → `Code` repair** — `reserved_locals` is copied
-  from `ClosureTemplate.num_locals`, but the top-level, `eval`, and
-  module-import paths build `Code` straight from `Bytecode`, which
-  does not carry the count. Those code objects claim zero locals
-  while their prologue reserves slots. `Bytecode` gains `num_locals`
-  so every `Code` is correct; without it, top-level locals render as
-  operand-stack junk. The same paths are uneven about locations:
-  `VM::execute_bytecode` (`src/vm/mod.rs`) attaches an *empty*
-  `location_map` although `Bytecode` carries a real one, so top-level
-  frames resolve to no source at all today. The repair copies both
-  fields. Copying `num_locals` also arms the debug-build
-  locals-integrity assertion for these frames — it is vacuous while
-  `reserved_locals` is 0 — which may surface latent violations; the
+- **the `Bytecode` local count** — the top-level, `eval`, and module-import
+  paths build their template from bare `Bytecode` through
+  `Bytecode::into_proto` (`src/compiler/bytecode.rs`). That copies the
+  location map but no local count, and `TemplateProto::new` sets
+  `num_locals` to 0, so those code objects claim zero locals while their
+  prologue reserves slots. `Bytecode` gains `num_locals`; without it,
+  top-level locals render as operand-stack junk. Copying it also arms the
+  debug-build locals-integrity assertion for these frames — it is vacuous
+  while `reserved_locals` is 0 — which may surface latent violations; the
   phase's tests cover top-level pauses for exactly this reason.
 
 ## Inspection primitives
@@ -246,7 +241,7 @@ A frame struct:
 
 ```text
 {:kind     :bytecode
- :name     "worker"          # Code.name, or "<toplevel>"
+ :name     "worker"          # the template name, or "<toplevel>"
  :file     "src/thing.lisp"  # nearest location_map entry at or before :ip
  :line     42
  :col      7
@@ -315,11 +310,8 @@ opcode must not silently desync every following offset.
 
 ### Compiled-in: `debug/break`
 
-```text
-(debug/break payload)   # suspend with SIG_DEBUG; parent sees payload
-```
-
-The parent reads `(fiber/value f)` to get
+`(debug/break payload)` suspends the fiber with `SIG_DEBUG`, and the
+parent sees the payload. The parent reads `(fiber/value f)` to get
 `{:kind :break :value payload}`. The value passed to the resuming
 `fiber/resume` becomes `debug/break`'s return value — the standard
 resume-value flow. With no debugger attached, `debug/break` returns
@@ -360,7 +352,7 @@ payload and exits the loop at the *unexecuted* opcode's ip.
 park sites that can park a re-execute pause compute
 `push_resume_value = !bits.intersects(SIG_FUEL)`
 (`src/vm/fiber/resume.rs`, `src/vm/core/resume.rs`,
-`src/vm/call/inner.rs`); the other suspend sites park emit/yield
+`src/vm/call/inner/park.rs`); the other suspend sites park emit/yield
 frames and hardcode the push. The `:fuel` bit therefore selects
 re-execute semantics — the paused instruction has not run and runs on resume —
 with no edits to those sites. The `:debug` bit routes the pause to
@@ -374,7 +366,7 @@ into the debuggee's regions; the driver synthesizes
 frame instead.
 
 **Empty-stack parks.** `park_suspended_callee_frame`
-(`src/vm/call/inner.rs`) parks the interrupted callee only when it is
+(`src/vm/call/inner/park.rs`) parks the interrupted callee only when it is
 the innermost pause (no deeper frame already parked) *and* its
 operand stack is non-empty; a re-execute pause that loses its frame
 resumes by injecting `nil` into the caller. Fuel's seven charge sites
@@ -410,12 +402,9 @@ the four call opcodes, and the two array-call opcodes
 charge, and no native tier charges at all. When a fiber's debug flag
 is set, the loop charges fuel on **every** instruction, at the same
 loop-top site as the breakpoint check. Instruction-granular stepping
-is then:
-
-```text
-(fiber/set-fuel f n)      # existing primitive
-(fiber/resume f nil)      # runs exactly n instructions, pauses with :fuel
-```
+is then `(fiber/set-fuel f n)`, an existing primitive, followed by
+`(fiber/resume f nil)`, which runs exactly `n` instructions and pauses
+with `:fuel`.
 
 Fuel is not refilled on resume — a zero-fuel resume re-pauses at the
 same ip — so the driver sets fuel before every step, as
@@ -608,9 +597,8 @@ schemas mirror the driver functions one to one.
 A fiber whose debug flag is set never enters native code. `call_inner`
 skips the WASM, MLIR, and JIT entries for a flagged fiber, and the
 forced-tier entries (`compile/run-on`, `src/vm/run_on/`) fall back to
-the interpreter for it. The other native dispatch paths — the
-JIT-to-JIT fast path in `elle_jit_call` and direct calls between
-batch-compiled SCC peers — run only *inside* native frames, and a
+the interpreter for it. The other native dispatch path, the JIT-to-JIT
+fast path in `elle_jit_call`, runs only *inside* native frames, and a
 flagged fiber acquires none: the flag can change only while the fiber
 is not running (a running fiber's handle slot is empty, and fibers
 are single-threaded), and a suspended native frame has already
@@ -634,7 +622,7 @@ before its implementation.
 
 | Phase | Contents | Status |
 |-------|----------|--------|
-| 1 | name plumbing (HIR → `LirFunction.name` → `Code.name`), `Code.local_names` with three-shape places and parameter entries, the `Bytecode` → `Code` repair (`num_locals` + `location_map`), `fiber/frames`, `fiber/trace`, `fiber/disasm`, `Fresh` region rule, disasm exhaustiveness | not started |
+| 1 | name plumbing (HIR → `LirFunction.name` → the template name), `local_names` with three-shape places and parameter entries, the `Bytecode` local count, `fiber/frames`, `fiber/trace`, `fiber/disasm`, `Fresh` region rule, disasm exhaustiveness | not started |
 | 2 | `debug/break`, attached flag, hygiene exemptions (`:debug` joins `SIG_PAUSE`; silence; silence bounds), denial semantics, JIT side-exit inspectability | not started |
 | 3 | fiber debug + skip-once fields, owning-key breakpoint table, `debug/break-at`, composed-bit pauses, per-instruction fuel, always-park re-execute frames, tier gate, error-path frame preservation | not started |
 | 4 | `lib/debug.lisp` driver, snapshot/outcome schemas | not started |
@@ -648,8 +636,8 @@ before its implementation.
    value through its env cell; a compiled-cell binding reads through
    the cell in its slot; a parameter appears in `:locals`; the
    scratch slot never appears; a top-level pause shows top-level
-   locals and resolves file and line (the `Bytecode` → `Code`
-   repair); a tail-call run renders one frame; a `FiberResume` entry
+   locals and resolves file and line (the `Bytecode` local
+   count); a tail-call run renders one frame; a `FiberResume` entry
    renders and recurses; inspect → drop fiber → use value does not
    crash; `:alive` inspection errors without panicking; every
    operand-bearing opcode round-trips through the disassembler at the
