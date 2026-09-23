@@ -6,4 +6,4 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [README.md](README.md) — **Fibonacci Benchmark (more...)**
+- [README.md](README.md) — **Fibonacci Benchmark** Naive recursive `fib(30)`: about 2.7 million calls, which measure the cost of a function call and of generic arithmetic.

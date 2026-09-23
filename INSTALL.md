@@ -1,5 +1,9 @@
 # Installing Elle
 
+<!-- audited: 2026-09-22 -->
+
+What to install, how to build Elle and its plugins, and how to run the tests.
+
 ## Requirements
 
 **Rust:** stable toolchain, edition 2021. Install via [rustup](https://rustup.rs/):
@@ -8,11 +12,14 @@
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-**System libraries** (used by FFI-based standard library modules):
+**A C compiler and `make`.** The default `ffi` feature builds its own copy of
+libffi from source.
+
+**System libraries**, opened at run time by the standard modules that name
+them:
 
 | Library | Debian/Ubuntu | Gentoo | Used by |
 |---------|--------------|--------|---------|
-| libffi | `libffi-dev` | `dev-libs/libffi` | C FFI (`ffi/` module) |
 | libsqlite3 | `libsqlite3-dev` | `dev-db/sqlite` | `std/sqlite` |
 | libz | `libz-dev` | `sys-libs/zlib` | `std/compress` |
 | libzstd | `libzstd-dev` | `app-arch/zstd` | `std/compress` |
@@ -28,19 +35,19 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ### Debian/Ubuntu one-liner
 
 ```sh
-sudo apt-get install -y libffi-dev libsqlite3-dev libz-dev libzstd-dev libgit2-dev parallel
+sudo apt-get install -y build-essential libsqlite3-dev libz-dev libzstd-dev libgit2-dev parallel
 ```
 
 ### Gentoo one-liner
 
 ```sh
-emerge dev-libs/libffi dev-db/sqlite sys-libs/zlib app-arch/zstd dev-libs/libgit2 sys-process/parallel
+emerge dev-db/sqlite sys-libs/zlib app-arch/zstd dev-libs/libgit2 sys-process/parallel
 ```
 
 ## Building
 
 ```sh
-# Debug build (fast compile, used by make smoke)
+# Debug build (fast to compile, slow to run)
 cargo build -p elle
 
 # Release build
@@ -54,8 +61,10 @@ The binary is at `target/debug/elle` or `target/release/elle`.
 
 ## Optional: WASM backend
 
-The WASM backend compiles Elle code to WebAssembly via Wasmtime. Enable
-with `--features wasm`:
+The WASM backend compiles Elle code to WebAssembly and runs it under Wasmtime.
+It was set aside during the memory rewrite: it frees no memory and fails
+about half of the test corpus ([docs/impl/wasm.md](docs/impl/wasm.md)).
+Enable it with `--features wasm`:
 
 ```sh
 cargo build --release -p elle --features wasm
@@ -96,44 +105,46 @@ cargo build --release -p elle --features mlir
 
 ## Plugins
 
-Plugins live in a [separate repository](https://github.com/elle-lisp/plugins)
-and use a stable ABI — they can be compiled independently from elle.
+Plugins live in a [separate repository](https://github.com/elle-lisp/plugins),
+checked out here as the `plugins` submodule. Each plugin depends on the
+`elle-plugin` crate by the path `../../elle-plugin`, so build plugins inside an
+Elle checkout:
 
 ```sh
-git clone https://github.com/elle-lisp/plugins elle-plugins
-cd elle-plugins
-cargo build --release
+git submodule update --init plugins
+make plugins        # the portable plugins
+make plugins-all    # every plugin in the workspace
 ```
 
-The `.so` files appear in `target/release/`. Elle discovers them
-automatically when loaded via `(import "plugin/name")`.
-
-For local development against a checkout of elle, add a cargo config
-override so plugins resolve `elle-plugin` from your local tree:
-
-```toml
-# elle-plugins/.cargo/config.toml
-[patch."https://github.com/elle-lisp/elle"]
-elle-plugin = { path = "../elle/elle-plugin" }
-```
+The `.so` files land in `target/release/`, where `(import "plugin/name")`
+looks for them. A plugin built anywhere else needs `--path` or `ELLE_PATH`.
+[docs/plugins.md](docs/plugins.md) gives the search order and the list of
+plugins.
 
 ## Testing
 
+| Command | Runtime | What it does |
+|---------|---------|-------------|
+| `cargo test -p elle --lib` | ~1.5 min | Rust unit tests |
+| `make smoke` | ~30 min, release | The Elle corpus under the VM and the JIT, the doctests and the embedding demos |
+| `make test` | smoke + ~5 min | smoke, the corpus on the thread-pool backend, QA, and the Rust unit and integration tests |
+
+Give the corpus the release binary; the debug default takes hours:
+
 ```sh
-make smoke    # ~30s — Elle scripts (VM + JIT + WASM) + doctests
-make test     # ~3min — smoke + MCP integration + clippy + fmt + unit tests
+make smoke-elle ELLE=./target/release/elle CARGO_PROFILE=--release
 ```
+
+[CONTRIBUTING.md](CONTRIBUTING.md) holds the full table.
 
 ## Submodule checkout
 
-The elle repository includes plugins as a git submodule for convenience.
-To populate it after cloning:
+The repository carries two submodules: `plugins` and `mcp`, the
+[MCP server](https://github.com/elle-lisp/mcp). Neither is needed to build
+Elle. To populate them:
 
 ```sh
 git clone --recurse-submodules https://github.com/elle-lisp/elle
 # or, if already cloned:
 git submodule update --init
 ```
-
-The submodule is not required for building elle — it's there for
-browsing and local plugin development.

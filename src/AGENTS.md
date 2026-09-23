@@ -1,6 +1,6 @@
 # src
 
-<!-- audited: 2026-09-08 -->
+<!-- audited: 2026-09-22 -->
 
 Core interpreter and compiler crate. Implements the full Elle pipeline from source to bytecode execution.
 
@@ -42,7 +42,7 @@ Provide the complete Elle implementation:
 | `error` | Error types and source location mapping |
 | `formatter` | Code formatting for Elle source |
 | `ffi` | C interop via libloading/bindgen |
-| `jit` | JIT compilation via Cranelift for non-suspending functions |
+| `jit` | JIT compilation via Cranelift; refuses `MakeClosure` and keyword collectors, whatever the signal |
 | `lsp` | Language server protocol implementation |
 | `rewrite` | Source-to-source rewriting |
 | `primitives` | Built-in functions (arithmetic, list, string, I/O, concurrency, etc.) |
@@ -50,6 +50,16 @@ Provide the complete Elle implementation:
 | `repl` | Interactive REPL |
 | `symbol` | Symbol identity (name hash) and the per-instance display memo |
 | `port` | I/O port abstraction |
+| `io` | I/O request types and backends |
+| `runtime` | The process runtime: one compile/evaluate lifecycle for every entry path |
+| `config` | The startup `Config` and the per-VM `RuntimeConfig` |
+| `epoch` | Epoch-based migration for breaking changes |
+| `segment` | Unicode grapheme segmentation seam |
+| `plugin_api` | The stable plugin ABI |
+| `dump` | In-process rendering of the `--dump` artifacts |
+| `wasm` | WASM backend: LIR to WebAssembly, run under Wasmtime |
+| `mlir` | MLIR backend |
+| `test` | The `elle test` runner, written in Elle |
 
 ## Compilation pipeline
 
@@ -62,7 +72,7 @@ Source locations flow through the entire pipeline: Syntax spans → HIR spans �
 ## Where to start
 
 1. Read `pipeline/mod.rs` — shows the full compilation flow in ~50 lines
-2. Read an example in `examples/` to understand the surface syntax
+2. Read a test under `tests/elle/` to see the surface syntax at work
 3. Read `value/mod.rs` to understand runtime representation
 4. Read a failing test to understand what's expected
 5. Read the AGENTS.md in the specific module you're working on
@@ -71,7 +81,7 @@ Source locations flow through the entire pipeline: Syntax spans → HIR spans �
 
 1. **Bindings are resolved at analysis time.** HIR contains `Binding` (a `u32` index into a `BindingArena`), not symbols.
 2. **Closures capture by value into their environment.** Mutable captures use `CaptureCell`.
-3. **Signals are inferred, not declared.** The `Signal` struct propagates from leaves to root during analysis.
+3. **Signals are inferred.** The `Signal` struct propagates from leaves to root during analysis. A declaration such as `(silence)` bounds the inference; it does not replace it.
 4. **The VM is stack-based for operands, register-addressed for locals.** Instructions reference registers by index.
 5. **Errors propagate.** Functions return `LResult<T>`. Silent failure is forbidden.
 
@@ -80,5 +90,4 @@ Source locations flow through the entire pipeline: Syntax spans → HIR spans �
 - `main.rs` — CLI entry point
 - `repl.rs` — Interactive REPL
 - `tests/` — Comprehensive test suite
-- `examples/` — Executable semantics documentation
 - `plugins/` — Dynamically-loaded plugin crates
