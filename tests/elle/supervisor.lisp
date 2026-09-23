@@ -1,17 +1,9 @@
 (elle/epoch 12)
-## tests/elle/supervisor.lisp — Tests for supervisor improvements
-##
-## Tests for: max-restarts, logger, make-subprocess-child,
-## and edge cases from process-criticisms.md.
-##
-## Run: ./target/debug/elle tests/elle/supervisor.lisp
+# audited: 2026-09-23
+# Supervisor logging, restart limits, restart policies and readiness.
+# docs/behaviors.md
 
-(def process ((import-file "lib/process.lisp")))
-(def backend (*io-backend*))
-
-(def process:start-raw process:start)
-(defn process:start [init &named fuel]
-  (process:start-raw init :fuel fuel :backend backend))
+(def process ((import "std/process")))
 
 
 # ============================================================================
@@ -95,8 +87,10 @@
 # ============================================================================
 
 (process:start (fn []
+                 # The supervisor exits once the limit trips, and its exit would
+                 # kill a starter that does not trap exits.
+                 (process:trap-exit true)
                  (let [me (process:self)]
-                   (def @start-count 0)
 
                    (process:supervisor-start-link [{:id :fragile
                    :restart :permanent
@@ -124,7 +118,8 @@
 
                    (assert max-reached
                            "max-restarts: intensity limit was reached")
-                   (assert (<= starts 5) "max-restarts: did not spin forever"))))
+                   (assert (= starts 4)
+                           "max-restarts: the first start and 3 restarts"))))
 (println "  3. max-restarts limit: ok")
 
 
@@ -190,8 +185,8 @@
 # ============================================================================
 
 (process:start (fn []
+                 (process:trap-exit true)
                  (let [me (process:self)]
-                   (def @attempts 0)
                    (process:supervisor-start-link [{:id :bad-start
                    :restart :permanent
                    :start (fn []
@@ -216,7 +211,8 @@
                        _ nil))
 
                    (assert got-max "bad-start: max-restarts triggered")
-                   (assert (<= attempt-count 4) "bad-start: bounded attempts"))))
+                   (assert (= attempt-count 3)
+                           "bad-start: the first start and 2 restarts"))))
 (println "  6. child start failure + max-restarts: ok")
 
 
