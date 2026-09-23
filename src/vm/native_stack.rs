@@ -7,6 +7,7 @@
 use std::cell::Cell;
 
 /// Below this much native stack, a call does not enter compiled code.
+#[cfg(any(feature = "jit", feature = "wasm", feature = "mlir"))]
 pub(crate) const COMPILED_CALL_RESERVE: usize = 512 * 1024;
 
 /// Below this much native stack, a re-entry into the interpreter halts.
