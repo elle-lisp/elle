@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-23
 //! The releases a `break` jumps over, re-anchored onto the block it leaves.
 //!
 //! docs/impl/region/anchors.md
@@ -7,15 +7,16 @@ use super::super::super::*;
 
 /// Re-anchor every release a `break` jumps over onto the block it leaves.
 ///
-/// The pin above covers the value the break CARRIES. Every other region whose
-/// release sits in the same window — inside the block's body, at or after the
-/// break site, before the exit label — is passed over by the identical jump, and
-/// has no consumer to be handed to: the release is emitted into unreachable code
-/// and the region is held to fiber teardown. Re-anchoring to `last_use[block]` —
-/// the first point both the break path and the fall-through path reach, the same
-/// anchor the broken value takes — is enough, and needs no release at the break
-/// site: moving a release LATER can only over-keep (docs/impl/region/mechanism.md
-/// § "A release the break jumps over is not a release").
+/// The break pin in `populate_decref_points` covers the value the break CARRIES.
+/// Every other region whose release sits in the same window — inside the
+/// block's body, at or after the break site, before the exit label — is passed
+/// over by the identical jump, and has no consumer to be handed to: the release
+/// is emitted into unreachable code and the region is held to fiber teardown.
+/// Re-anchoring to `last_use[block]` — the first point both the break path and
+/// the fall-through path reach, the same anchor the broken value takes — is
+/// enough, and needs no release at the break site: moving a release LATER can
+/// only over-keep (docs/impl/region/anchors.md § "A release the break jumps over
+/// is not a release").
 ///
 /// The window is read off the structural order: a node's releases are skipped
 /// exactly when its post-order index is at or above the break's. That covers the
@@ -32,11 +33,13 @@ use super::super::super::*;
 /// iteration / one call, never a mis-free.
 ///
 /// A third condition guards the anchor itself: the exit label has to be a point
-/// every path actually **reaches**. A frame-replacing exit inside the body — a
-/// `Return`, or a `Call` in tail position, which the lowerer emits as `TailCall`
-/// — leaves through the callee instead of arriving there, so a release moved to
-/// the anchor would be dead on exactly the path that used to run it (trading one
-/// leak for another). Such a block declines the window whole.
+/// every path actually **reaches**. A frame-replacing exit on the block's
+/// fall-through — a `Call` in tail position, which the lowerer emits as
+/// `TailCall` — leaves through the callee instead of arriving there, so a release
+/// moved to the anchor would be dead on exactly the path that used to run it
+/// (trading one leak for another). Such a block declines the window whole. A
+/// `Return` is not such an exit, and neither is a tail call inside a targeting
+/// break's own value (see `BreakWindowScopes::frame_exits` and the check below).
 pub(super) fn pin_break_skipped_releases(
     info: &mut RegionInfo,
     hir: &Hir,
@@ -54,8 +57,8 @@ pub(super) fn pin_break_skipped_releases(
     // Where each region is allocated, as post-order indices — what the loop
     // barrier below is read off. A region absent here is allocated by a caller
     // (a parameter), so no loop in this unit re-allocates it. Capture cells
-    // count as allocated at their `Begin`, which is where `populate_env` mints
-    // them.
+    // count as allocated at their `Begin`, whose pre-pass mints them
+    // (`begin_cell_regions`).
     let mut alloc_sites: HashMap<Region, Vec<u32>> = HashMap::new();
     for (alloc_id, &region) in &info.alloc_region {
         alloc_sites.entry(region).or_default().push(ord(*alloc_id));
@@ -97,7 +100,7 @@ pub(super) fn pin_break_skipped_releases(
         // A frame exit inside a targeting break's own VALUE does not refuse the
         // window: that break already jumps over every release in it, so on that
         // path there is nothing left for the exit to strand
-        // (docs/impl/region/mechanism.md § "A release the break jumps over is not
+        // (docs/impl/region/anchors.md § "A release the break jumps over is not
         // a release", third boundary). Only an exit on a path that would
         // otherwise ARRIVE at the release — the block's fall-through — does.
         let break_values: Vec<(u32, u32)> = sites
@@ -166,7 +169,7 @@ struct BreakWindowScopes {
     /// block's window means the block's exit label is not a point every path
     /// reaches.
     ///
-    /// A `Return` node is deliberately NOT one (docs/impl/region/mechanism.md
+    /// A `Return` node is deliberately NOT one (docs/impl/region/anchors.md
     /// § "A release the break jumps over is not a release", third boundary):
     /// `lower_return` emits the return mint and no control flow, so control falls
     /// through it to the exit label like any other value.

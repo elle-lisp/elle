@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-09-23
 //! `decref_point` population: the ordered passes that decide, for each region,
 //! the program point its release is emitted at.
 //!
@@ -33,7 +33,7 @@ use cells::{
 };
 
 /// Populate and extend `region_data[*].decref_point` across the several passes
-/// that ran inline after `build_info`.
+/// that run after `build_info`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn populate_decref_points(
     info: &mut RegionInfo,
@@ -75,9 +75,8 @@ pub(super) fn populate_decref_points(
     // is one region per HirId). The base is the node itself: a rest name
     // nothing reads leaves the binding chain below with no use to extend a
     // release over, and a region with no `region_data` entry gets no release
-    // emitted at all — the shape that provokes the defect most often
-    // (docs/impl/region/anchors.md § "A rest pattern's collection is built, not
-    // read out").
+    // emitted at all (docs/impl/region/anchors.md § "A rest pattern's collection
+    // is built, not read out").
     //
     // The node, not its last use. A `Match` node's own last use is wherever the
     // match's VALUE goes, which is a different value from the collection an arm
@@ -204,7 +203,7 @@ pub(super) fn populate_decref_points(
         // outside it) must outlive the loop: its capture-use's last_use sits
         // inside the body, but the region demise must be hoisted to the loop
         // node, else it fires per iteration and frees the binding mid-loop
-        // (region-loop-capture-squelch.lisp / supervisor-style UAF).
+        // (pinned by tests/elle/region-loop-capture-squelch.lisp).
         if let Some(&ext) = last_use_info.capture_loop_ext.get(b) {
             if max_use.is_none_or(|cur| ord(ext) > ord(cur)) {
                 max_use = Some(ext);
@@ -259,8 +258,8 @@ pub(super) fn populate_decref_points(
     // called in place and dying within the iteration, each iteration nets the box
     // region -1 (capture-incref +1, closure free-cascade -1, DecrefCellRegion -1)
     // — so the once-allocated box is freed at the end of iteration 1 and the next
-    // iteration reads the recycled cell (the env-cell-in-loop UAF;
-    // tests/elle/region-capture-cell-loop-uaf.lisp, cap2.lisp). Hoist each
+    // iteration reads the recycled cell (pinned by
+    // tests/elle/region-capture-cell-loop-uaf.lisp). Hoist each
     // cell-release region's `decref_point` to the OUTERMOST enclosing While/Loop,
     // which the lowerer emits AFTER the loop (the proven post-loop emission point
     // the bound-outside `capture_loop_ext` extension already targets) — once per
@@ -391,7 +390,7 @@ pub(super) fn populate_decref_points(
     // read frees the source under the extraction. Bites exactly when no
     // destructured binding is used afterwards — the `&named`-param
     // prologue with unused params (docs/impl/region/rules.md Rule 4;
-    // tests/elle/region-named-param-uaf.lisp, the lib/http2 import segv).
+    // pinned by tests/elle/region-named-param-uaf.lisp).
     for (destructure_id, regions) in destructure_sites {
         info.region_data
             .pin_all_to(regions.iter().copied(), *destructure_id, porder);
@@ -406,7 +405,8 @@ pub(super) fn populate_decref_points(
     //  - `break` lowers to a jump to the block's exit label, so a release
     //    anchored anywhere inside the body is emitted into the break's
     //    unreachable fall-through and never runs at all — the value is held to
-    //    fiber teardown (the `break-value*` probes' former rate).
+    //    fiber teardown (the `break-value*` probes in tests/elle/probe/ measure
+    //    it).
     //  - the block's own exit label is not late enough on its own: the block's
     //    value may flow straight into a consumer (`(f (block … (break v)))`),
     //    and releasing at the exit would free it under that consumer.
@@ -416,7 +416,7 @@ pub(super) fn populate_decref_points(
     // after it — after the exit label for the block itself. A binding that names
     // the block's value extends further through the ordinary binding chain,
     // and every extension is a max, so the latest wins
-    // (docs/impl/region/mechanism.md § "`break` transfers its value; it does not
+    // (docs/impl/region/anchors.md § "`break` transfers its value; it does not
     // consume it"; tests/elle/region-break-transfer.lisp).
     for (block_id, regions) in break_sites {
         let lu = last_use.get(block_id).copied().unwrap_or(*block_id);

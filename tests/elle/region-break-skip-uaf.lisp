@@ -1,9 +1,10 @@
 (elle/epoch 12)
+# audited: 2026-09-23
 # Soundness complement of region-break-skip.lisp: re-anchoring a release the
 # `break` jumps over must not free anything early.
 #
 # The close moves a release from inside a block's body to `last_use[block]`
-# (docs/impl/region/mechanism.md § "A release the break jumps over is not a
+# (docs/impl/region/anchors.md § "A release the break jumps over is not a
 # release"). Moving a release LATER can only over-keep — but only while it still
 # names the same value when it runs. Three ways that fails, and all of them fault
 # here: the value-route reloads a slot a later store has repointed (freeing the
@@ -79,7 +80,8 @@
       (%add (f 1) (f 2)))))
 
 # (g) the break DOES fire, and a window value escaped before it: the release the
-# jump used to skip now runs, and it must drop only the producer's reference.
+# jump passes over runs at the anchor instead, and it must drop only the
+# producer's reference.
 (defn w-break-taken (i)
   (block (let [x (string "t" i)]
            (push sink x)
@@ -88,8 +90,10 @@
   (length (get sink (%sub (length sink) 1))))
 
 # (h) an OUTER reassigned binding written inside the window: its slot no longer
-# names the window value by the block's exit, so the value route must stay off it
-# (the mutated-slot backstop, docs/impl/region/bindings.md).
+# names the window value by the block's exit, so the value route must stay off it.
+# `cur` is a fn-local 1-slot container (docs/impl/region/bindings.md): its slot
+# holds whatever the last store put there, so a release routed through the slot
+# would free the live occupant.
 (defn w-reassign (i)
   (def @cur (string "u" i))
   (block (when (%lt i 0) (break nil))

@@ -1,8 +1,9 @@
 (elle/epoch 12)
+# audited: 2026-09-23
 # Soundness complement of region-break-transfer.lisp: a value carried out of a
 # `block` by `break` must SURVIVE every later read of the block's result.
 #
-# `break` transfers its value to the block (docs/impl/region/mechanism.md §
+# `break` transfers its value to the block (docs/impl/region/anchors.md §
 # "`break` transfers its value; it does not consume it"). The transfer moves the
 # broken value's release OUT of the block body — where the break jumps over it —
 # and onto the node that consumes the BLOCK's value. Two ways that can go wrong
@@ -72,10 +73,9 @@
 # position and the break buried in the loop body — so the value the break
 # carries is the function's return value, and the callee's release and the
 # caller's must not both consume the one owning reference it holds. The broken
-# binding is reassigned per iteration and its value is a slice ALIASING the
-# argument, so an over-early release faults on the caller's read of a page the
-# argument's region already returned. This is `lib/http.lisp`'s
-# `sse-drain-buffered-lines`, whose regression takes the whole SSE suite down.
+# binding is reassigned per iteration, so the value the break carries is the
+# fresh `slice` the last store left, and an over-early release frees it under the
+# caller's read. `lib/http.lisp`'s `sse-drain-buffered-lines` has this shape.
 (defn w-tail-loop-break (i)
   (def @rest (string "p" i "\nq" i "\nz" i))
   (block :drain
@@ -97,15 +97,14 @@
 # mint the caller reads a freed value. `mark_tail_calls` and `wrap_tail_returns`
 # must therefore agree that a break targeting a tail block is in tail position
 # even with a LOOP in between — the break jumps past the loop to the block's exit
-# label (docs/impl/region/mechanism.md § "A break out of a TAIL block carries the
+# label (docs/impl/region/anchors.md § "A break out of a TAIL block carries the
 # return mint").
 #
-# The arrangement is load-bearing for the FAULT, not for the defect: the loop body
-# both reads `b` through a suspending call and suspends again before looping, which
-# is what leaves the exit-label release value-resolved against a live slot, so a
-# missing mint frees the returned value instead of merely stranding it. This is
-# `lib/tls.lisp`'s `tls/read` — a plaintext-buffer drain that breaks out of an
-# I/O loop — whose regression takes the whole TLS suite down.
+# The arrangement decides whether a missing mint FAULTS or merely strands: the
+# loop body both reads `b` through a suspending call and suspends again before
+# looping, which leaves the exit-label release value-resolved against a live
+# slot, so a missing mint frees the returned value. `lib/tls.lisp`'s `tls/read`
+# — a plaintext-buffer drain that breaks out of an I/O loop — has this shape.
 (def mk-bytes bytes)
 (def @drip "")
 (defn w-tail-loop-opaque-break (i)

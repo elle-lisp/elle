@@ -1,9 +1,10 @@
 (elle/epoch 12)
+# audited: 2026-09-23
 # Soundness complement of region-match-bind-loop.lisp: placing a match
 # scrutinee's release inside the loop that allocates it must not free anything
 # early.
 #
-# Recording a `match` arm's pattern scope (docs/impl/region/mechanism.md § "Every
+# Recording a `match` arm's pattern scope (docs/impl/region/anchors.md § "Every
 # binder records its scope") takes the scrutinee's release OUT of the hoisted
 # position after the loop and back into the loop body, where it fires once per
 # iteration. That is the direction that can over-free: a projection bound by the
