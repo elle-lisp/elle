@@ -1,11 +1,16 @@
 # hir
 
-High-level Intermediate Representation. Fully-analyzed form with resolved
-bindings, inferred signals, and computed captures.
+<!-- audited: 2026-09-23 -->
+
+High-level Intermediate Representation: the analyzed program, with bindings
+resolved, captures computed and signals inferred, and the passes over it.
 
 ## Responsibility
 
-Transform expanded Syntax into a representation suitable for lowering.
+Analyze expanded Syntax into HIR, then transform HIR for lowering:
+dead-binding elimination, tail marking, functionalization, ANF, type
+inference, and region and escape analysis.
+
 - Resolve all variable references to `Binding` (arena indices)
 - Compute closure captures
 - Infer signals
@@ -16,19 +21,22 @@ Does NOT:
 - Execute anything (that's `vm`)
 - Parse source (that's `reader` and `syntax`)
 
+[analyze/AGENTS.md](analyze/AGENTS.md) owns how the analyzer builds HIR.
+[docs/impl/hir.md](../../docs/impl/hir.md) owns the design of the passes.
+
 ## Interface
 
 | Type | Purpose |
 |------|---------|
-| `Hir` | Expression node with kind, span, signal |
+| `Hir` | Expression node with kind, span, signal, and a unique `HirId` |
 | `HirKind` | Expression variants (literals, control flow, etc.) |
 | `Binding` | `u32` index into `BindingArena` — 4 bytes, Copy, identity by integer equality |
-| `BindingArena` | Owns all `BindingInner` values for a compilation unit; `&mut` in analysis, `&` in lowering |
-| `BindingInner` | Binding metadata: name, scope, mutation/capture/immutability flags |
+| `BindingArena` | Owns all `BindingInner` values for a compilation unit |
+| `BindingInner` | Binding metadata: name, scope, and the analysis flags in [arena.rs](arena.rs) |
 | `BindingScope` | `Parameter` or `Local` (in `hir::arena`) |
 | `HirFragment` | An HIR body closed over its own binding table — portable across arenas, units, and processes (in `hir::fragment`) |
 | `CaptureInfo` | What a closure captures and how |
-| `CaptureKind` | `Local` or `Capture` (transitive) |
+| `CaptureKind` | `Local`, `Capture { index }` (transitive), or `Recursive { binding }` (a self-reference to the enclosing letrec or def binding) |
 | `BlockId` | Unique identifier for a block, used by `break` to target the correct block |
 | `Analyzer` | Transforms Syntax → HIR; takes `&mut BindingArena` |
 | `AnalysisResult` | HIR produced by the analyzer |
@@ -40,8 +48,8 @@ Does NOT:
 | Method | Purpose |
 |--------|---------|
 | `analyze(&mut self, syntax: &Syntax) -> Result<AnalysisResult, String>` | Analyze a single Syntax tree into HIR |
-| `analyze_file_letrec(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String>` | Analyze a list of top-level forms as a synthetic letrec. Classifies each form as `Def` (immutable), `Var` (mutable), or `Expr` (gensym-named dummy binding). Two-pass analysis: Pass 1 pre-binds all names, Pass 2 analyzes initializers sequentially. Returns a single `HirKind::Letrec` node. |
-| `bind_primitives(&mut self, hir: Hir) -> Hir` | Wrap a file's letrec in an outer scope that binds all registered primitives as immutable Global bindings. Primitives are visible to all file-level code but can be shadowed by file-level `def` bindings. |
+| `analyze_file_letrec(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String>` | Analyze a file's top-level forms, already classified as `Def`, `Var`, `Signal` or `Expr`, as one letrec. Pass 1 pre-binds all names. Pass 2 analyzes initializers in order. Pass 3 re-analyzes lambdas until their signals stop changing. Returns a single `HirKind::Letrec` node. |
+| `bind_primitives(&mut self, meta: &PrimitiveMeta)` | Bind every registered primitive as an immutable `Local` binding in the analyzer's initial scope. Call it before analysis. A file-level `def` shadows a primitive. |
 
 ## Data flow
 
@@ -52,11 +60,11 @@ Syntax (expanded)
 Analyzer (&mut BindingArena)
     ├─► resolve variables → Binding (u32 index into BindingArena)
     ├─► track mutations → arena.get_mut(b).is_mutated = true
-    ├─► track captures → arena.get_mut(b).mark_captured() + CaptureInfo
+    ├─► track captures → marked by scope lookup + CaptureInfo
     └─► infer signals → Signal
     │
     ▼
-HIR (binding indices are inline — metadata lives in BindingArena)
+HIR passes in regularize (&mut BindingArena)
     │
     ▼
 Lowerer (&BindingArena) — read-only access to binding metadata
@@ -65,9 +73,11 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 ## Dependents
 
 - `lir/lower/` - consumes HIR, reads `arena.get(b).needs_capture()` via `&BindingArena`
-- `pipeline.rs` - orchestrates Syntax → HIR → LIR → Bytecode
+- `pipeline/` - orchestrates Syntax → HIR → LIR → Bytecode
 - `lint/cli.rs` - uses `HirLinter` for static analysis
 - `lsp/state.rs` - uses `extract_symbols_from_hir` and `HirLinter` for IDE features
+- `primitives/compile/query/analysis.rs` - uses `HirLinter` and `extract_symbols_from_hir` for `compile/analyze`
+- `vm/eval.rs` - runs the `Analyzer` for `eval`
 
 ## Invariants
 
@@ -78,158 +88,145 @@ Lowerer (&BindingArena) — read-only access to binding metadata
    binding site have the same `u32` index. `Binding` implements `Hash`/`Eq`
    via the derived `u32` comparison.
 
-3. **`needs_capture()` determines lbox boxing.** A local binding needs an lbox if
-   captured AND mutable. A parameter needs an lbox if mutated. Globals never need
-   lboxes. Immutable captured locals are captured by value directly.
+3. **`needs_capture()` decides whether a binding gets a capture cell.** A
+   local needs one when it is captured and either mutable or prebound. A
+   parameter needs one when it is mutated. An immutable, non-prebound
+   captured local is captured by value.
 
 4. **Signals combine upward.** A `begin` has the combined signal of its
-   children. A `fn` body's signal is stored but the fn itself is Silent.
-   Signal emission uses `HirKind::Emit { signal: SignalBits, value: Box<Hir> }`
-   (replaces the old `HirKind::Yield`). `yield` is now a macro that expands
-   to `(emit :yield val)`.
+   children. A `fn` body's signal is stored, but the `fn` node itself is
+   Silent. Signal emission uses `HirKind::Emit { signal: SignalBits, value:
+   Box<Hir> }`. `yield` is a prelude macro that expands to
+   `(emit :yield val)`.
 
 5. **Captures are computed per-fn.** Each `HirKind::Lambda` carries its
    own `Vec<CaptureInfo>` listing what it captures and how.
 
-6. **Empty lists become `HirKind::EmptyList`, not `HirKind::Nil`.** The analyzer
-   distinguishes between `nil` (absence) and `()` (empty list). Conflating them
-   breaks truthiness semantics.
+6. **Empty lists become `HirKind::EmptyList`, not `HirKind::Nil`.** The
+   analyzer distinguishes between `nil` (absence) and `()` (empty list).
+   Conflating them breaks truthiness semantics.
 
-7. **Binding resolution is scope-aware (hygienic).** `bind()` stores a
-   `Vec<ScopeId>` alongside each binding. `lookup()` uses subset matching:
-   a binding is visible to a reference if the binding's scope set is a subset
-   of the reference's scope set. When multiple bindings match, the one with
-   the largest scope set wins (most specific). Empty scopes `[]` is a subset
-   of everything, so pre-expansion code works identically.
+7. **Binding resolution is scope-aware (hygienic).** See
+   [analyze/AGENTS.md](analyze/AGENTS.md) for the subset rule and
+   referential transparency.
 
-8. **`Define` and `LocalDefine` are unified.** There is a single
-   `HirKind::Define { binding, value }`. The lowerer checks
-   `binding.is_global()` to decide between global and local define semantics.
+8. **`HirKind::Define { binding, value }` binds a local.** The lowerer
+   allocates its slot before lowering the value, so the value can refer to
+   the binding.
 
-9. **Binding metadata is mutable during analysis, read-only after.** The
-   analyzer mutates bindings via `arena.get_mut(b).is_mutated = true` etc.
-   The lowerer only reads via `arena.get(b).needs_capture()`, `arena.get(b).name`,
-   etc. The type system enforces this: the analyzer holds `&mut BindingArena`,
-   the lowerer holds `&BindingArena`.
+9. **The analyzer and the passes in `regularize` write binding metadata;
+   the lowerer only reads it.** Both hold `&mut BindingArena`; the lowerer
+   holds `&BindingArena`.
 
 10. **`Destructure` decomposes values into pattern bindings.**
-    `HirKind::Destructure { pattern: HirPattern, value: Box<Hir> }` is
-    produced by the analyzer for `def`, `var`, `let`, and `fn` parameter
-    destructuring. The pattern's leaf `Var` bindings are created in the
-    current scope. `let` is sequential (Clojure-style): multi-binding lets
-    are desugared to nested single-binding lets by the analyzer.
-    `let*` is a prelude macro alias that also desugars to nested `let`.
+    `HirKind::Destructure { pattern, value, strict }` is produced for
+    `def`, `var`, `let`, `letrec` and `fn` parameter destructuring. The
+    pattern's leaf `Var` bindings are created in the current scope. `let` is
+    sequential: a multi-binding `let` becomes nested single-binding lets.
+    `let*` is a prelude macro that expands to nested `let`.
 
-11. **Destructured bindings use silent nil semantics.** Missing list/@array/@struct
-     elements produce `nil`, not errors. Wrong-type values produce `nil`
-     for all bindings. No runtime type checks.
+11. **Binding forms destructure strictly.** `def`, `var`, `let`, `letrec`,
+    required parameters and `&keys` patterns signal `:type-error` on a
+    missing element, a missing key, or a wrong type. `&opt` and `&named`
+    parameters bind `nil` instead.
 
-12. **`HirPattern::Table` and `HirPattern::Struct` support struct destructuring with optional rest.**
-     Both `Struct { entries: Vec<(PatternKey, HirPattern)>, rest: Option<Box<HirPattern>> }`
-     and `Table { entries, rest }` map keyword or symbol keys to sub-patterns.
-     `PatternKey::Keyword(String)` for `:foo` keys, `PatternKey::Symbol(SymbolId)` for `'foo` keys.
-     When `rest` is `Some(pat)`, the rest pattern binds a new immutable struct of all keys
-     NOT explicitly named. Rest is `None` at all construction sites by default.
-     In binding forms (`def`, `var`, `let`, `fn` params), uses `TableGetDestructure`
-     (strict: error on missing key) for entries, `StructRest` for the rest.
-     In `match` patterns, emits an `IsStruct`/`IsTable` type guard first so wrong-type
-     values fall through to the next arm.
+12. **Binding forms build `HirPattern::Struct` for `{}` and `@{}`.** The
+    lowerer reads entries with `StructGetDestructure` (strict) or
+    `StructGetOrNil` (non-strict), and the rest with `StructRest`. `rest` is
+    `Some` when the pattern writes `& pat` after its key-pattern pairs. In
+    `match`, `{}` builds `Struct` guarded by `IsStruct`, and `@{}` builds
+    `Table` guarded by `IsStructMut`; a missing key binds `nil`.
 
 13. **`Block` and `Break` are compile-time control flow.** `HirKind::Block`
     has a `BlockId` and optional name. `HirKind::Break` targets a `BlockId`.
     The analyzer validates: break outside block → error, unknown block name
-    → error, break across function boundary → error. The lowerer compiles
-    break to `Move` + `Jump` — no new bytecode instructions needed.
-    `while` wraps its `While` node in an implicit `Block` named `"while"`,
-    so `(break :while val)` or unnamed `(break)` can exit a while loop.
+    → error, break across function boundary → error. The lowerer stores the
+    break value into the block's result slot with `StoreLocal`, then jumps to
+    the block's exit label. `while` wraps its `While` node in an implicit
+    `Block` named `"while"`, so `(break :while val)` or unnamed `(break)` can
+    exit a while loop.
 
 14. **`Eval` compiles and executes a datum at runtime.**
-    `HirKind::Eval { expr: Box<Hir>, env: Box<Hir> }` is produced by the
-    analyzer for `(eval expr)` or `(eval expr env)`. The signal is always
-    `Yields` (conservative — eval'd code can do anything). Not in tail
-    position. The VM handler reaches the symbol table per-instance via the
-    driving VM (`vm.symbols()`) and caches the Expander on the VM for reuse.
+    `HirKind::Eval { expr: Box<Hir>, env: Box<Hir> }` is produced for
+    `(eval expr)` or `(eval expr env)`. The node's signal is `Yields`. The
+    enclosing function's inferred signal does not include it (#1243). Not in
+    tail position. The VM handler reaches the symbol table through the
+    driving VM's `symbols_ptr` and caches the Expander on the VM.
 
-15. **Docstrings are extracted from leading string literals.**
-       `HirKind::Lambda` has a `doc: Option<Value>` field. The analyzer
-       extracts the first string literal in a function body and stores it
-       in `doc`. This field is threaded through LIR into `Closure.doc` and
-       used by the `(doc name)` primitive and LSP hover.
+15. **A docstring is a leading string literal.** `HirKind::Lambda` has a
+    `doc: Option<Rc<str>>` field. The analyzer takes a leading string literal
+    as the docstring only when the body has two or more forms. The lowerer
+    copies it to `LirFunction.doc`, then `TemplateProto.doc`, which
+    `ClosureTemplate::doc()` reads for `(doc name)` and LSP hover.
 
-16. **Signal bounds are declared via `silence` preambles.**
-        `HirKind::Lambda` has signal-related fields (see `signals/AGENTS.md`):
-        - `inferred_signals: Signal` — the minimum guaranteed signal set
-        - `param_bounds: Vec<(Binding, Signal)>` (from `(silence param)`)
-        `(silence)` declares total silence; `(silence param)` bounds a parameter.
-        `squelch` is a runtime primitive, not a preamble.
-        When a parameter has a `squelch` bound, it remains polymorphic — the bound only restricts what signals are forbidden.
+16. **Signal bounds come from `silence`, anywhere in a function body.** Each
+    form applies to the innermost enclosing function. `HirKind::Lambda`
+    carries `inferred_signals`, the signals a call to the lambda may emit,
+    and `param_bounds: Vec<ParamBound>` from `(silence param)`. A call to a
+    bounded parameter adds the bound's bits, not a polymorphic dependency.
+    The function checks the argument against the bound on entry
+    (`CheckSignalBound`). `squelch` is a runtime primitive.
+    [docs/signals/inference.md](../../docs/signals/inference.md) owns the
+    forms.
 
-17. **Set literals are desugared to constructor calls.**
-      `SyntaxKind::Set` (immutable set `|1 2 3|`) desugars to `(set ;elems)`.
-      `SyntaxKind::SetMut` (mutable set `@|1 2 3|`) desugars to `(mutable-set ;elems)`.
-      The `set` and `mutable-set` bindings resolve to global primitives.
-      All synthesized nodes carry the original set literal's span.
+17. **Set literals become constructor calls.** `|a b|` becomes `(set a b)`
+    and `@|a b|` becomes `(@set a b)`. A splice inside a set literal is a
+    compile error. All synthesized nodes carry the literal's span.
 
 18. **A lambda's source location is captured for `meta/origin`.**
-       `HirKind::Lambda` has an `origin: Option<Span>` field, set in
-       `analyze_lambda` from the form's span. It is threaded through LIR and
-       set on `ClosureTemplate.origin` by the emitter, and `(meta/origin f)`
-       reads the file, line, and column from it.
+    `HirKind::Lambda` has an `origin: Option<Span>` field, set in
+    `analyze_lambda` from the form's span. The lowerer copies it to
+    `LirFunction.origin`, and `TemplateProto::nested_lambda` copies it to
+    `TemplateProto.origin`. `(meta/origin f)` reads it through
+    `ClosureTemplate::origin()`.
 
 19. **Qualified symbols are desugared to nested `get` calls.**
-      `a:b:c` in `SyntaxKind::Symbol` is desugared during analysis to
-      `(get (get a :b) :c)`. The first segment is resolved as a variable
-      (local or global). Subsequent segments become keyword arguments to
-      `get`. This produces standard `HirKind::Call` nodes — no special
-      HIR variant. The `get` binding always resolves to the global
-       primitive, matching the pattern used for array/@array/struct/@struct
-       literal desugaring. All synthesized nodes carry the original
-      symbol's span.
+    `a:b:c` in `SyntaxKind::Symbol` is desugared during analysis to
+    `(get (get a :b) :c)`. The first segment is resolved as a variable.
+    Subsequent segments become keyword arguments to `get`. This produces
+    standard `HirKind::Call` nodes — no special HIR variant. The `get`
+    binding always resolves to the primitive. All synthesized nodes carry the
+    original symbol's span.
 
-19. **`Parameterize` creates dynamic binding frames.**
-       `HirKind::Parameterize { bindings: Vec<(Hir, Hir)>, body: Box<Hir> }`
-       is produced by the analyzer for `(parameterize ((p1 v1) (p2 v2) ...) body ...)`.
-       Each binding is a (parameter, value) pair. The analyzer validates that
-       each parameter expression is a parameter (or will be at runtime). The
-       lowerer emits `PushParamFrame` before evaluating bindings, stores them
-       in the frame, then emits `PopParamFrame` after the body.
- 
- 20. **Files compile to a single synthetic letrec.** `analyze_file_letrec`
-     transforms a list of top-level forms into a single `HirKind::Letrec`.
-     Each form is classified: `def` → immutable binding, `var` → mutable
-     binding, bare expression → gensym-named dummy binding. Two-pass analysis
-     pre-binds all names (enabling mutual recursion), then analyzes initializers
-     sequentially. The letrec body is the last binding's name (or a gensym if
-     the last form was a bare expression). This replaces the old model of
-     independent top-level forms connected by mutable globals.
+20. **`Parameterize` creates dynamic binding frames.**
+    `HirKind::Parameterize { bindings: Vec<(Hir, Hir)>, body: Box<Hir> }`
+    is produced for `(parameterize ((p1 v1) (p2 v2) ...) body ...)`. The
+    analyzer does not check that each parameter expression is a parameter;
+    the VM checks at run time. The lowerer evaluates each pair, emits
+    `PushParamFrame` with them, lowers the body, then emits `PopParamFrame`.
 
- 21. **Primitives are pre-bound as immutable Local bindings.** `bind_primitives`
-     wraps the file's letrec in an outer scope containing all registered
-     primitives. Primitives are `BindingScope::Local` with `is_immutable = true`
-     set via the arena. File-level `def` bindings shadow primitives. The lowerer
-     emits upvalue loads for both — compile-time checks (e.g., `(set + 42)` is
-     an error) use the `Binding` identity.
+21. **Files compile to a single synthetic letrec.** `analyze_file_letrec`
+    turns a file's top-level forms into one `HirKind::Letrec`: `def` is an
+    immutable binding, `var` a mutable one, `(signal :kw)` and a bare
+    expression each a synthetic binding. Pass 1 pre-binds every name, which
+    allows mutual recursion. The letrec body is the last binding's name.
 
- 22. **Tail calls are marked on every `AnalyzeResult`.** `pipeline::analyze` and
-     `analyze_file` run `mark_tail_calls` before returning, so `is_tail` is a
-     fact on the analyzed tree rather than a default. The linter's
-     non-tail-self-recursion rule and the `compile/callees` call graph both read
-     it there. `regularize` marks again, because map fusion mints call nodes
-     after that point.
+22. **Primitives are pre-bound as immutable Local bindings.**
+    `bind_primitives` binds every registered primitive in the analyzer's
+    initial scope. A file-level `def` shadows a primitive. The lowerer emits
+    `LoadConst` for a primitive. Compile-time checks use the `Binding`
+    identity: `(assign + 42)` is a compile error.
 
- 23. **A dead binding takes its initializer with it.** `hir::dead` removes a
-     `let`/`letrec` binding with zero uses whose initializer is provably
-     effect-free, which deletes the initializer's call. It runs inside
-     `regularize`, before `functionalize`, so the region solver never sees the
-     deleted call. A silent callee is not enough: silence means no signal bits,
-     and `%push-array-mut` is silent and mutates. See
-     [docs/impl/hir.md](../../docs/impl/hir.md) § "Dead binding elimination".
+23. **Tail calls are marked on every `AnalyzeResult`.** `pipeline::analyze`
+    and `analyze_file` run `mark_tail_calls` before returning, so `is_tail`
+    is a fact on the analyzed tree rather than a default. The linter's
+    non-tail-self-recursion rule and the `compile/callees` call graph both
+    read it there. `regularize` marks again, because map fusion mints call
+    nodes after that point.
 
- 24. **A body that leaves its unit travels as an `HirFragment`.** A `Binding` is
-     an index into one arena, so an HIR body alone is meaningless elsewhere.
-     `HirFragment::close` renumbers a body's bindings against its own table —
-     a `BindingInner` per binding the body introduces, a `SymbolId` per free
-     global — and `graft` re-hosts it in any arena. Nothing may hoist selected
-     `BindingInner` fields beside a body instead. See
-     [docs/impl/hir.md](../../docs/impl/hir.md) § "A fragment is closed over its
-     bindings".
+24. **A dead binding takes its initializer with it.** `hir::dead` removes a
+    `let`/`letrec` binding with zero uses whose initializer is provably
+    effect-free, which deletes the initializer's call. It runs inside
+    `regularize`, before `functionalize`, so the region solver never sees the
+    deleted call. A silent callee is not enough: silence means no signal
+    bits, and `%push-array-mut` is silent and mutates. See
+    [docs/impl/hir.md](../../docs/impl/hir.md) § "Dead binding elimination".
+
+25. **A body that leaves its unit travels as an `HirFragment`.** A `Binding`
+    is an index into one arena, so an HIR body alone is meaningless
+    elsewhere. `HirFragment::close` renumbers a body's bindings against its
+    own table — a `BindingInner` per binding the body introduces, a
+    `SymbolId` per free global — and `graft` re-hosts it in any arena.
+    Nothing may hoist selected `BindingInner` fields beside a body instead.
+    See [docs/impl/hir.md](../../docs/impl/hir.md) § "A fragment is closed
+    over its bindings".
