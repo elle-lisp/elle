@@ -44,26 +44,29 @@ case is what separates this section from the next.
 A named function need not live in the unit that calls it. A **stdlib** `defn` —
 `inc`, `dec`, and any lambda whose body closes — is defined in the `<stdlib>`
 compile unit, so a later user unit that writes `(map inc xs)` has no body for
-`inc` in its own tree and its by-binding map holds nothing for it. The
-by-name registry carries the body across the compile-unit boundary, mirroring
-the dispatch-wrapper registry
-(`monomorphize.rs`): a per-instance registry keyed by function **name**
-(`SymbolId`, stable across arenas where a `Binding` is not) is populated as each
-unit compiles — the `<stdlib>` compile records `inc` — and consulted by every later
-unit, gated on the callee being `is_primitive` (a `bind_primitives` stdlib export;
-a user redefinition shadows it with a non-primitive binding and is left alone).
+`inc` in its own tree and its by-binding map holds nothing for it.
 
-The registry entry is the same `HirFragment` the same-unit map holds. Nothing of
+The function value carries the body across the unit boundary. Each closure's
+template holds the fragment of its own body, closed before functionalization in
+the unit that defined it and stored when the lambda lowers
+([grafting a call](../graft.md)). In a later unit a callee that is
+`is_primitive` maps to its compile-time value, and fusion reads the fragment off
+that value. A user redefinition shadows the export with a binding that is not
+`is_primitive` and holds a different value, so it never reaches the stdlib's
+body.
+
+The fragment on the template is the one the same-unit map holds. Nothing of
 the defining unit is consulted at the call site: the fragment's own table carries
 the metadata of every binding its body introduces, and the graft's `Global`
 resolution — the arithmetic op in `(+ x 1)`, say — is the by-name re-resolution
 the boundary needs. If a free global does not resolve in the consuming unit, the
 graft **declines** (the HOF stays a plain call) — correct-by-construction, never
-a mis-resolved reference. A fragment is plain data, so the registry also crosses
-the stdlib disk cache whole: a cache hit inlines the set a stdlib compile
-records, not a subset of it ([src/compiler/stdlib_cache.rs](../../../src/compiler/stdlib_cache.rs)).
+a mis-resolved reference. A fragment is plain data, so it crosses the stdlib disk
+cache with its template ([the stdlib cache](../stdlib-cache.md)). A cache hit
+inlines the same bodies a stdlib compile does.
 
-One gate fills both maps, and what separates the two paths is **where a
+One close produces both the same-unit entry and the fragment on the template,
+and what separates the two paths is **where a
 fragment's free globals resolve**. When the stdlib compiles, its own exports are
 not yet `is_primitive` — `+` is a file-scope (`is_file_scope`) letrec sibling —
 so `inc`'s fragment records `+` as a global that the defining unit cannot itself
@@ -87,8 +90,9 @@ is the pass's own thesis: `+` is a variadic function that collects a rest-list a
 folds it with a `letrec` walker, so reaching it once per element would mint that
 list, the walker's closure and its cell — re-creating per element exactly the closure
 fusion exists to dissolve, and swamping the intermediate collection the fusion
-removed. The comparison `(< i len)` stays a call: it lowers to an opcode already, so
-it mints nothing.
+removed. The comparison `(< i len)` is written as a call to the stdlib `<`, and
+the graft treats it like any other call. The index and the length are both proven
+ints, so after the fold the comparison is one `%lt`.
 
 The intrinsic carries a prove-or-reject operand contract ([docs/intrinsics.md](../../intrinsics.md)),
 discharged here by the counter's own type rather than by any declaration: the

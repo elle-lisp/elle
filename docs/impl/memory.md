@@ -9,7 +9,7 @@ This document sits at the top of the region documentation. The mechanism detail
 lives in the per-mechanism specs under [region/](region/AGENTS.md); the code
 cites those specs, never this document. The plan of work — how to read the
 current state, the fix-selection discipline, and the open work in order — is
-[assessment.md](assessment.md). Read this for the model, then that for what to
+[the roadmap](assessment.md). Read this for the model, then that for what to
 do next.
 
 State is read from the instruments, never from prose. A class is closed when
@@ -26,7 +26,7 @@ charge:
 - **no runtime cost** — no tracing or scanning collector and, by construction,
   no heap walk to reclaim: reclamation is driven by a per-region recorded
   outgoing-edge table (O(edges)), never by walking heap contents
-  ([region/ownership.md](region/ownership.md));
+  ([the ownership forest](region/ownership.md));
 - **no annotation cost** — no `iso`/`mut`/region annotations, no hand-written
   lifetimes or borrows.
 
@@ -36,7 +36,7 @@ promptly. The bar is exact:
 
 > If the programmer can look at the code and see a value is dead, the compiler
 > frees it there — silently. A gap between what the programmer sees and what
-> the compiler proves is a compiler defect, not a nuance to paper over.
+> the compiler proves is a compiler defect, never a detail to paper over.
 
 So **over-keep is a defect**: holding a value past its true last use. Bounded
 by a small scope it is a promptness nit; bounded by a loop or the program it is
@@ -61,21 +61,22 @@ when the dispatch completes. This is the design's reason to exist: inference →
 ownership → dissolution into SIMD and heterogeneous execution. Dissolution's
 win is **fewer allocations… which the leak oracle does not observe** — its
 gauges count allocation events instead
-([dissolution.md](dissolution.md)).
+([loop fusion](dissolution.md)).
 
 ### The three legs
 
 1. **Inference, not annotation.** Every value gets an inferred region; escape
    is computed over the canonical (functionalized + ANF) IR
-   ([escape.md](escape.md)). The programmer writes nothing.
+   ([escape analysis](escape.md)). The programmer writes nothing.
 2. **Ownership, not tracing.** Regions form a single-owner forest rooted at
    fibers; a non-escaping subtree is freed wholesale by subtree drop, interior
-   reference cycles included ([region/ownership.md](region/ownership.md)).
+   reference cycles included ([the ownership forest](region/ownership.md)).
    Reference counting is scoped to the genuine cross-fiber residual.
 3. **Dissolution.** A closure is a first-class value but the unit of nothing at
-   runtime; guided by escape and ownership the compiler dissolves it — loop-ify,
-   monomorphize, JIT-group, GPU-dispatch — so one program runs sympathetically
-   on every backend ([dissolution.md](dissolution.md)).
+   runtime; guided by escape and ownership the compiler dissolves it — graft a
+   call into its caller, loop-ify, JIT-group, GPU-dispatch — so one program runs
+   sympathetically on every backend ([grafting a call](graft.md),
+   [loop fusion](dissolution.md)).
 
 The keystone binding the three: escape is the single authority (below).
 
@@ -92,7 +93,8 @@ else.
 - **Closures dissolve.** Every role a closure plays at runtime — sent across a
   thread, JIT-compiled, scheduled, spread across a GPU — is a developmental
   accident. Sending crosses fibers, not closures; compilation units are
-  continuations; higher-order calls monomorphize. What creates cross-region
+  continuations; a call to a known function becomes that function's body in its
+  caller ([grafting a call](graft.md)). What creates cross-region
   edges and cycles is shared mutable capture; once the only sharing unit is the
   fiber, all intra-fiber capture is intra-subtree and dies on drop.
 
@@ -102,7 +104,7 @@ Each directory's `AGENTS.md` is the generated index; the roles and reading
 order are here. Read whole files — the why is in the prose around the code —
 and treat the pinning test as the reference for every correctness claim.
 
-**The roadmap** — [assessment.md](assessment.md): the gauges and how to read
+**The roadmap** — [the roadmap](assessment.md): the gauges and how to read
 them, the fix-selection discipline, the measured dead ends, and the open work
 in order. It uses this document's leak-class names and never redefines them.
 
@@ -113,14 +115,14 @@ in order. It uses this document's leak-class names and never redefines them.
 
 **The implementor's contract** — read before touching region code:
 
-- [region/rules.md](region/rules.md) — the exhaustive correctness obligations
+- [The region rules](region/rules.md) — the exhaustive correctness obligations
   (Rules 1–8), teardown, and the macro allocation scope. Start here.
-- [region/mechanism.md](region/mechanism.md) — the RC-instruction machinery:
+- [The mechanism](region/mechanism.md) — the RC-instruction machinery:
   value/slot resolution, coalescing, self-edge elimination, the equivalence
   oracle. It also maps each older placement argument to the document that now
   holds it, so a pointer written against the old single file resolves in one
   step.
-- [region/settled.md](region/settled.md) — the settled invariants, one line
+- [The settled invariants](region/settled.md) — one line
   each, with the spec that owns each argument.
 - Where a release is **placed**, one document per argument:
   [anchors](region/anchors.md) (binder pins, and what a `break` does),
@@ -153,9 +155,9 @@ in order. It uses this document's leak-class names and never redefines them.
   [generations](region/generations.md) (stale derefs detonate in debug
   builds).
 - Cross-cutting analyses: [escape.md](escape.md) (the one authoritative
-  true-escape pass), [dissolution.md](dissolution.md) (HOF-chain loop fusion,
-  the third leg), and [selfrec.md](selfrec.md) (why a self-recursive closure is
-  cell-free).
+  true-escape pass), [dissolution.md](dissolution.md) (HOF-chain loop fusion)
+  and [graft.md](graft.md) (grafting a call, the third leg), and
+  [selfrec.md](selfrec.md) (why a self-recursive closure is cell-free).
 - [region/template.md](region/template.md) — code objects: a closure
   template's payload and header, and the code region a compile unit owns.
 
@@ -166,7 +168,7 @@ Reference altitude only; the cited specs carry the full detail.
 ### Escape — the single authority
 
 The forest needs **true escape**: does this value outlive the activation or
-fiber it was born in. It is one analysis ([escape.rs](../../src/hir/escape.rs)) over the
+fiber it was born in. It is one analysis ([the escape pass](../../src/hir/escape.rs)) over the
 canonical IR, and the sole authority — the region solver holds no escape facts
 of its own; it projects escape's verdict onto regions. Lexical capture is
 demoted to a structural hint with no escape-authority. A value escapes through
@@ -175,12 +177,12 @@ any of four facets, seeded onto atoms and propagated backward to a fixpoint:
 **fiber boundary**. Building it once at the front edge builds the forest's
 substrate — and makes GPU offload decidable: a kernel is dissolvable exactly
 when its per-element work does not escape. The full spec is
-[escape.md](escape.md).
+[escape analysis](escape.md).
 
 ### The ownership cut — Owned vs Shared
 
 Every region is classified once, from escape facts
-([region/ownership.md](region/ownership.md)):
+([the ownership forest](region/ownership.md)):
 
 - **Owned** — exactly one owner: a parent region, or an activation/fiber node.
   Freed by subtree drop; interior reference cycles reclaim with it. Owned ⇒ RC
@@ -200,39 +202,39 @@ that:
 
 - **MERGE** (primary — O(1)): collapse static-slot, coincident-lifetime,
   sole-held, non-escaping regions onto one physical region, freed by one
-  `DecrefRegion` — the builder-idiom seed ([region/merging.md](region/merging.md))
-  and the letrec closure-cycle merge ([region/letrec.md](region/letrec.md)).
+  `DecrefRegion` — the builder-idiom seed ([merging](region/merging.md))
+  and the letrec closure-cycle merge ([the letrec merge](region/letrec.md)).
 - **ADOPT / owner nodes** (fallback — O(members)): where membership is
   runtime-determined, link distinct runtime regions with the adopt ops; every
   path bottoms out in one `free_region_set` primitive
-  ([region/adopt.md](region/adopt.md), [region/owner.md](region/owner.md)).
+  ([adoption](region/adopt.md), [owner nodes](region/owner.md)).
 - **edge-RC** for the genuinely-Shared residual.
 - **Dissolution**, which removes whole classes from existence
-  ([dissolution.md](dissolution.md)).
+  ([loop fusion](dissolution.md)).
 
 Domination is structural, never numeric: post-domination is decided over the
 scope tree, never by comparing a `compute_order` index or a region id
-([region/adopt.md](region/adopt.md)).
+([adoption](region/adopt.md)).
 
 ### The runtime substrate
 
 - **Two id-spaces, two newtypes.** `StaticRegion` is a compile-time
   per-function slot, remapped per activation; `RuntimeRegion` is a physical,
   pages-owning region minted per allocation execution. The types make the
-  confusion a compile error ([region/model.md](region/model.md)).
+  confusion a compile error ([the region model](region/model.md)).
 - **A reclamation typestate.** A region is `Counted(u32)` xor `Owned{owner}`,
   so owned-and-RC'd is unrepresentable; adoption moves `Counted → Owned`,
-  consuming the count ([region/ownership.md](region/ownership.md)).
+  consuming the count ([the ownership forest](region/ownership.md)).
 - **The outgoing edge table.** Every cross-region reference is recorded at
   creation through the store/capture/aggregate funnel. Reclamation walks the
   table, never the contents — what makes "no heap walk" literally true. The
   content scan survives only as a debug equivalence oracle.
 - **Owner nodes.** A pages-less region used purely as a forest root, realizing
   an activation or fiber owner; parks move the node into the suspended frame,
-  and teardown or discard subtree-drops it ([region/owner.md](region/owner.md)).
+  and teardown or discard subtree-drops it ([owner nodes](region/owner.md)).
 - **The borrow check.** Deliberately uncounted borrows are stamped with a
   generation-checked handle; a violation panics at the boundary instead of
-  corrupting the heap ([region/generations.md](region/generations.md)).
+  corrupting the heap ([generations](region/generations.md)).
 
 ### One semantics, every backend
 
@@ -256,7 +258,7 @@ unconditionally.
 The invariants the system upholds — every cycle-and-transfer class of the
 ownership forest, where each release lands, who owns a value at a boundary,
 and the 1-slot container model — are listed one line each in
-[region/settled.md](region/settled.md), with the spec that owns each
+[the settled invariants](region/settled.md), with the spec that owns each
 argument. They read closed in the oracle and are regression-pinned on the
 interpreter and the JIT; build on them, do not re-litigate them.
 
@@ -264,7 +266,7 @@ interpreter and the JIT; build on them, do not re-litigate them.
 
 Ordered by production-path weight. Each open root is a tracked defect — the
 bar is measured bounded plus guardfree-clean. The shapes, probes, and
-acceptance bars are the roadmap's ([assessment.md](assessment.md)); a closed
+acceptance bars are the roadmap's ([the roadmap](assessment.md)); a closed
 root keeps a one-line entry so the name in an old probe or commit still
 resolves.
 
@@ -278,15 +280,22 @@ sub-mechanisms:
   slot names it, it is not a cycle, and it is not RC-released promptly on
   discard. Its close is dissolution — index-walk instead of minting a slice —
   and the residue that is not copy-scratch decomposes into F5 strands.
-- **F1b — dispatch-wrapper passthrough. Closed.** Container compensation
-  covers the mutable case, and cross-unit dispatch-wrapper monomorphization
-  collapses `(put c k v)` to the direct intrinsic at a proven container type
-  ([monomorphize.rs](../../src/hir/typeinfer/monomorphize.rs)).
+- **F1b — dispatch-wrapper passthrough. Closed.** A container wrapper's
+  `(match (type-of coll) …)` referenced its container argument in every arm,
+  so the release of that argument landed in an arm the executed path never
+  reached. A call to `push`, `put`, `add` or `del` is grafted: the wrapper's
+  body replaces the call, and after inference the fold keeps the one arm the
+  proven container type selects, so the direct `%`-op is what remains
+  ([grafting a call](graft.md)). Where the container type is not proven, the
+  whole dispatch is grafted into the caller, and the per-arm compensation
+  ([compensate](region/compensate.md)) places the argument's release on each
+  arm. The oracle's [store probes](../../tests/impl/probe/store.lisp) are the
+  gauge for that site.
 
 **F2. Fiber suspend/resume park residue.** Park/unpark symmetry holds by
-construction ([region/park.md](region/park.md),
-[region/owner.md](region/owner.md)), abandoned and parked frames run their
-owed releases off the emitter's tables ([region/unwind.md](region/unwind.md)),
+construction ([the park](region/park.md),
+[owner nodes](region/owner.md)), abandoned and parked frames run their
+owed releases off the emitter's tables ([the unwind walk](region/unwind.md)),
 and the squelch boundary runs the same walk. What remains open is two shapes
 the tables cannot name, each a value with no binding of its own and neither
 with a gauge: a literal the raising call materialized straight into an
@@ -295,7 +304,7 @@ carries no nil stamp.
 
 **F3. Escape imprecision — closed, with no member ever confirmed.** The one
 probe ever filed here measured no escape at all; its residual closed with the
-native-result rule ([region/ctx.md](region/ctx.md)).
+native-result rule ([the native-result rule](region/ctx.md)).
 
 **F4. Cyclic refusal-to-Shared.** A recorded cycle the forest cannot own stays
 Shared — UAF-safe but leaking. What stays open has no probe: the
@@ -310,15 +319,15 @@ mechanism:
   escape proves the frame holds the region alone; a region escaping by a
   containment facet keeps the conservative baseline, and a used sibling arm's
   tail release still needs a retain on its own node
-  ([region/window.md](region/window.md),
-  [region/compensate.md](region/compensate.md)).
+  ([the release window](region/window.md),
+  [compensation](region/compensate.md)).
 - **The poisoned value route** — a release routed through a reassigned
   binding's slot is skipped; what remains is an alias the counted read does
   not claim, which keeps the counted-init route and its over-keep
-  ([region/bindings.md](region/bindings.md), [region/reads.md](region/reads.md)).
+  ([1-slot containers](region/bindings.md), [reads](region/reads.md)).
 - **`decref_point` over-extension** and **env-cell release at loop exit** —
   granularity nits kept to stay UAF-safe under ANF
-  ([region/bindings.md](region/bindings.md), [region/cells.md](region/cells.md)).
+  ([1-slot containers](region/bindings.md), [cells](region/cells.md)).
 
 **F6. Retired.** The cursor-walk probe filed under this name measured the
 aliased-init donation, not a displaced-value cascade. No probe.
@@ -396,9 +405,10 @@ coverage cannot drift. How to run all three gauges is
   [compensate.rs](../../src/hir/region/infer/compensate.rs),
   [arms.rs](../../src/hir/region/infer/arms.rs),
   [postdom.rs](../../src/hir/region/infer/postdom.rs).
-- **Type-dispatch prune and fusion:** [prune.rs](../../src/hir/typeinfer/prune.rs),
-  [monomorphize.rs](../../src/hir/typeinfer/monomorphize.rs),
-  [fuse.rs](../../src/hir/typeinfer/fuse.rs).
+- **Type-dispatch prune, fusion and grafting:**
+  [prune.rs](../../src/hir/typeinfer/prune.rs),
+  [fuse.rs](../../src/hir/typeinfer/fuse.rs), and the graft and fold passes
+  [grafting a call](graft.md) specifies.
 - **Emit:** [src/lir/lower/](../../src/lir/lower/AGENTS.md) —
   [emitops.rs](../../src/lir/lower/emitops.rs),
   [regionemit.rs](../../src/lir/lower/regionemit.rs),

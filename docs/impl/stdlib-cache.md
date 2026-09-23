@@ -27,7 +27,7 @@ compile_file(STDLIB)         try_load (cache hit)
 
 The cache is a speedup, not a correctness dependency: any failure (no directory
 permission, corrupt file, format-version mismatch) falls back to a full
-recompile, and store failures are silently ignored.
+recompile, and a store failure is reported on stderr and ignored.
 
 ## Cache key and invalidation
 
@@ -147,15 +147,12 @@ struct StoredBytecode {
     intern_table: Vec<SendableClosure>,   // intern table of entry-reachable closure constants
     names: Vec<(u64, Box<str>)>,          // spellings, replayed into the loading display memo
     signal_projection: Option<HashMap<String, Signal>>,
-    dispatch_wrappers: StoredDispatchRegistry,  // cross-unit monomorphization
-    fn_inline: StoredFnInlineRegistry,          // cross-unit HOF-argument inlining
 }
 ```
 
-The two registries ride along because a hit skips the stdlib compile that
-populates them. They drive an HIR rewrite in every later compile, so a snapshot
-that dropped entries would make the cached path compile user code differently
-from the compiled path.
+Nothing a later compile reads rides beside the templates. Each template carries
+the fragment of its own body, and the cache stores it with the template
+(§ "The body fragment must be preserved").
 
 ### Why serialize the unit's entry header?
 
@@ -180,8 +177,8 @@ code object:
 A load rebuilds the entry and every nested payload straight into a fresh code
 region, and the result is a code unit like the one a compile hands out.
 
-`format_version`, `signal_projection` and the two registries have no
-payload field to travel in, so they ride alongside.
+`format_version` and `signal_projection` have no payload field to travel in, so
+they ride alongside.
 
 ### LIR must be preserved
 
@@ -198,6 +195,22 @@ the payload carries it, and the JIT reads neither it nor the origin.
 The stored LIR is part of the file's layout, so a change to the frozen form
 changes `FORMAT_VERSION`. A file written in the old form is then a miss, and
 the start that meets it compiles and stores a new one.
+
+### The body fragment must be preserved
+
+A later compile grafts a call to a stdlib function from that function's body
+([graft.md](graft.md)), and fusion inlines a named stdlib function from the
+same body ([dissolution/functions.md](dissolution/functions.md)). The body is
+an `HirFragment` on the function's template, closed before functionalization
+while the stdlib compiles and stored when the lambda lowers. A cache hit skips
+that compile, so the fragment must arrive with the template, or the cached path
+would compile user code differently from the compiled path.
+
+`SendableClosure` therefore carries the fragment. A fragment is an HIR body
+closed over its own binding table ([hir.md](hir.md)), so it is plain data and
+needs no conversion. The cache path fills the field. A send to another thread
+leaves it empty, because a `sys/spawn` worker loads a stdlib of its own and
+grafts from those templates.
 
 ### Symbols across processes
 

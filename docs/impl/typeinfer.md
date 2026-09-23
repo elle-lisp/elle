@@ -5,9 +5,10 @@
 Where the types come from: an ascent from below whose limit is the least
 fixpoint, and what each kind of call contributes to it.
 
-[intrinsics.md](../intrinsics.md) says what each `%`-intrinsic contract needs.
+[The intrinsics reference](../intrinsics.md) says what each `%`-intrinsic contract needs.
 This file says where the types that discharge it are computed, and what happens
-when the computation does not settle. The pass is [typeinfer/](../../src/hir/typeinfer).
+when the computation does not settle. The pass is
+[type inference](../../src/hir/typeinfer.rs).
 
 ## The ascent
 
@@ -41,8 +42,8 @@ estimate rises, and the limit of the ascent is the least fixpoint.
 | `thaw` or `freeze`, or its `%` twin | the argument's mutable or immutable twin container type |
 | a registered primitive | its declared `RetType`, read from the primitive tables |
 | the stdlib `push` or `put` | the first argument's type, which it returns |
-| the stdlib `+`, `-` or `*`, every operand a proven number | the join of the operand types, as the matching op's result; Int for `(+)` and `(*)` |
-| any other stdlib arithmetic wrapper call (`abs`, `min`, `floor`, …, or `+` over an unproven operand) | Number — the wrapper raises on everything else |
+| a function the graft replaced with its body | no call is left: the body is typed where it stands ([grafting a call](graft.md)) |
+| a stdlib arithmetic wrapper that stays a call, such as `(+ a b c)` | Number — the wrapper raises on everything else |
 | anything else | Top |
 
 **A self-recursive call is a call.** It reads the body-type map that every
@@ -67,17 +68,18 @@ body is Int again. Nothing moves, and the ascent is over.
 
 The proof the second pass adds is what the backends spend: an `%add` of two
 proven ints carries `:int` into LIR, which is `AddInt` on the bytecode tier and
-a tag-check-free fast path on the JIT ([lir.md](lir.md)).
+a tag-check-free fast path on the JIT ([LIR](lir.md)).
 
-The wrapper spelling settles the same way. `(- n 1)` over an int `n` is an int,
-so the recursive call passes an int and `n` stays one. Every wrapper call then
-has two proven operands and lowers to its op
-([intrinsics.md](../intrinsics.md)):
+The wrapper spelling settles the same way. Every wrapper call in `fib-w` is
+grafted, so `(- n 1)` is the body of `-`, whose `%sub` over an int `n` and a
+literal is an int. The recursive call passes an int and `n` stays one. The fold
+then deletes every guard over the proven operands, and each wrapper call ends
+as its op ([grafting a call](graft.md)):
 
 ```lisp
 (defn fib-w [n]
   (if (< n 2) n (+ (fib-w (- n 1)) (fib-w (- n 2)))))
-(assert (= (fib-w 10) 55) "the lowered wrappers compute the recursion")
+(assert (= (fib-w 10) 55) "the dissolved wrappers compute the recursion")
 ```
 
 The example compiles `fib-w` again from source to read its LIR. Handing
@@ -92,7 +94,7 @@ a value proves nothing about its parameters (§ "What still does not prove"):
 (assert (any? (fn [line] (and (string/contains? line " + ")
                               (string/contains? line ":int")))
               (string/split fib-w-lir "\n"))
-        "the lowered + adds two proven ints")
+        "the dissolved + adds two proven ints")
 ```
 
 ## An exhausted budget widens
@@ -137,13 +139,12 @@ no Bottom: at the ascent's limit, every Bottom left in the node map settles to
 Top, which is above the fixpoint and proves nothing.
 
 That one rule covers every consumer, because they all read that one map — the
-operand contracts ([contract.rs](../../src/hir/typeinfer/contract.rs)), the signal narrowing
-([narrow.rs](../../src/hir/narrow.rs)), the arithmetic wrapper lowering
-(`wrapper.rs`), the container wrapper monomorphization
-([monomorphize.rs](../../src/hir/typeinfer/monomorphize.rs)), and the LIR operand proof
-([intrinsic.rs](../../src/lir/lower/expr/intrinsic.rs)). The last two ask with equality, so a
-Bottom proves nothing there. The first three ask with `subtype`, where a Bottom
-would prove every row.
+operand contracts ([the contract check](../../src/hir/typeinfer/contract.rs)),
+the signal narrowing ([narrowing](../../src/hir/narrow.rs)), the fold
+([grafting a call](graft.md)), and the LIR operand proof
+([intrinsic lowering](../../src/lir/lower/expr/intrinsic.rs)). The last asks
+with equality, so a Bottom proves nothing there. The first three ask with
+`subtype`, where a Bottom would prove every row and decide every type test.
 
 A definition is therefore checked where it is written. `f` below is a compile
 error whether or not a later form calls it, and whether or not any form follows
@@ -183,11 +184,23 @@ meeting with it, and a floor that returns something below itself is not a
 floor.
 
 A Bottom the meet **produces** is the opposite fact — the accumulated type and
-the fact are disjoint, so no value reaches the site the fact governs.
-`meet(String, Number)` is ⊥ for a caller passing a string to a declared-numeric
-parameter, and `meet(String, Int)` is ⊥ inside the `(%int? x)` branch of a
-function only ever called with a string. Both are left alone, so those sites
-reject rather than compute.
+the fact are disjoint, so no value reaches the site the fact governs. The two
+producers end differently:
+
+- `meet(String, Number)` is ⊥ for a caller passing a string to a
+  declared-numeric parameter. The Bottom is left alone, so the sites that read
+  the parameter reject rather than compute.
+- `meet(String, Int)` is ⊥ inside the `(%int? x)` branch of a function only
+  ever called with a string. The fold decides that test false and deletes the
+  branch before the contract is checked, so the site is gone rather than
+  rejected ([grafting a call](graft.md)).
+
+```lisp
+(assert (not (compiles? "(defn sq [x] (numeric!) (%bit-and x 1)) (sq \"str\")"))
+        "a caller contradicts the declaration")
+(assert (compiles? "(defn g [b] (if (%int? b) (%bit-and b 1) 0)) (g \"str\")")
+        "the branch no value reaches is deleted")
+```
 
 ## A written binding's result is Top
 
@@ -273,13 +286,11 @@ The pass has no flow, so it cannot order the write against a call:
   loop that rewrites its own callee between two turns, the branch a Bottom would
   have joined away, and two controls — the unwritten binding, and the
   SSA-renamed function-local write that still proves.
-- `hir::typeinfer::tests::wrapper::*` — the arithmetic wrapper lowering: each
-  of the eight wrappers over two proven numbers becomes its op, and the
-  wrapper-spelled `fib` holds no wrapper call. The counter-factuals keep the
-  call: an unproven operand, two strings, three operands, and a user binding
-  named `+`.
-- [typed-int-ops.lisp](../../tests/impl/typed-int-ops.lisp) — the
-  implementation-suite peer: a self-recursive integer `fib` emits `AddInt` and
-  computes with it, in the intrinsic spelling and in the wrapper spelling. A
-  float base case is refused at compile time, and a reassigned local lambda
-  binding is refused where its unreassigned twin emits `AddInt`.
+- `hir::typeinfer::tests::graft::*` and `hir::typeinfer::tests::fold::*` —
+  what the graft replaces and what the fold decides, pinned in
+  [grafting a call](graft.md).
+- [typed-int-ops.lisp](../../tests/impl/typed-int-ops.lisp) — the implementation-suite peer: a
+  self-recursive integer `fib` emits `AddInt` and computes with it, in the
+  intrinsic spelling and in the wrapper spelling. A float base case is refused
+  at compile time, and a reassigned local lambda binding is refused where its
+  unreassigned twin emits `AddInt`.

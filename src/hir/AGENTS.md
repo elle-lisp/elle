@@ -7,9 +7,9 @@ resolved, captures computed and signals inferred, and the passes over it.
 
 ## Responsibility
 
-Analyze expanded Syntax into HIR, then transform HIR for lowering:
-dead-binding elimination, tail marking, functionalization, ANF, type
-inference, and region and escape analysis.
+Analyze expanded Syntax into HIR, then transform HIR for lowering: loop
+fusion, the graft, dead-binding elimination, tail marking, functionalization,
+ANF, type inference and the fold, and region and escape analysis.
 
 - Resolve all variable references to `Binding` (arena indices)
 - Compute closure captures
@@ -218,8 +218,8 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     and `analyze_file` run `mark_tail_calls` before returning, so `is_tail`
     is a fact on the analyzed tree rather than a default. The linter's
     non-tail-self-recursion rule and the `compile/callees` call graph both
-    read it there. `regularize` marks again, because map fusion mints call
-    nodes after that point.
+    read it there. `regularize` marks again, because map fusion and the graft
+    mint call nodes after that point.
 
 24. **A dead binding takes its initializer with it.** `hir::dead` removes a
     `let`/`letrec` binding with zero uses whose initializer is provably
@@ -235,4 +235,19 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     own table — a `BindingInner` per binding the body introduces, a
     `SymbolId` per free global — and `graft` re-hosts it in any arena.
     Nothing may hoist selected `BindingInner` fields beside a body instead.
-    See [docs/impl/hir.md](../../docs/impl/hir.md).
+    A function's own template carries the fragment of its body, so a later
+    unit reaches the body through the function value. See
+    [docs/impl/hir.md](../../docs/impl/hir.md).
+
+26. **A call to a known function becomes its body.** The graft replaces a
+    call whose callee is an immutable function binding with the callee's
+    fragment, at the call's arity, unless the function is recursive. It runs
+    in `regularize` after map fusion and before dead-binding elimination. It
+    reads no name: a stdlib wrapper and a user function graft alike. See
+    [grafting a call](../../docs/impl/graft.md).
+
+27. **After inference, the fold deletes what the types decide.** A condition
+    or a `(type-of x)` dispatch whose answer the recorded types settle loses
+    its dead side, and a guard certain to raise cuts the statements after it.
+    The fold and the inference ascent alternate until a fold changes nothing,
+    and the operand contracts run on what the last fold left.
