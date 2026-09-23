@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-23
 //! What the walk records about a reassigned binding: the 1-slot-container
 //! class it falls in, where its binder stores, and who reads it whole.
 //!
@@ -53,9 +53,11 @@ impl RegionInference {
         // classifies such a binding fn-local, leaves the cell-slot routing in place,
         // and frees the reassigned value under the frame that hands it back
         // (region-capture-cell-closure-reassign-uaf.lisp). A genuinely fn-local
-        // captured binding — defined inside a lambda — is unaffected by the wider
-        // recording: its cell is a `populate_env` env cell reached by `StoreCapture`,
-        // a path that never consults this set.
+        // captured binding — defined inside a lambda, its cell a `populate_env` env
+        // cell — is recorded too, and needs to be for the same reason: its binder
+        // routes the init's release through the cell's slot unless this set names it
+        // (`lower_define`, `lower_let`), and the env cell's release clamp skips a
+        // binding the set names (`pin_cell_release_after_routed_releases`).
         if self.arena().get(b).needs_capture() {
             self.captured_reassigns.insert(b);
             return;

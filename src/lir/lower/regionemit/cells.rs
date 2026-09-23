@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-23
 //! What a 1-slot container's binder emits for the init it stores.
 //!
 //! The retains a read and an aliased init take, and the cell store that ends a
@@ -113,10 +113,11 @@ impl<'a> Lowerer<'a> {
         });
         // `cell ⊇ content`: adopt the just-stored content into the cell's OWN region when
         // the ownership forest admitted this cell's `closure ⊇ cell ⊇ content` clique. The
-        // `StoreCaptureCell` above already increfed the content via the alloc-scan, so the
-        // adopt consumes that count (the funnel-adopt discipline). No-op for a
-        // re-storable cell (never in `cell_content_adopt_bindings`), so it is emitted here
-        // BEFORE the reassigned drop below without disturbing it.
+        // `StoreCaptureCell` above already increfed the content (`handle_update_capture`
+        // → `capture_store_with_rebind`), so the adopt consumes that count (the
+        // funnel-adopt discipline). No-op for a re-storable cell (never in
+        // `cell_content_adopt_bindings`), so it is emitted here BEFORE the reassigned
+        // drop below without disturbing it.
         self.maybe_emit_cell_content_adopt(binding, cell_reg, value_reg);
         if reassigned {
             let coalesced = self.coalescible_region(value);

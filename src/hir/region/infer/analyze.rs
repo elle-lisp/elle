@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-23
 //! The region-inference pipeline: the walk, then every post-pass that decides
 //! where a release lands. The order is the point — each pass reads answers the
 //! ones before it settled.
@@ -90,14 +90,14 @@ pub fn analyze_regions_with(
     // `AssertRegionMatches` mis-coalesce on a `(deref-cell x)` tail read of a
     // mutated `(var x …)`). Poison exactly the cell regions so
     // `coalescible_solver_region` refuses and such reads stay value-resolved.
-    // Keyed on `is_restorable_capture_cell` (the re-store predicate), NOT on
-    // `captured_reassigned_bindings` — the latter only sees module-scope
-    // reassigns, and a `(begin (var x …) …)` single-form file reassigned from
-    // inside a sibling closure is neither module-scope-classified nor
-    // fn-local. Deliberately NOT the binding's full source-region set: the
-    // init value's own alloc region stays coalescible — its init-drop in
-    // `store_captured_cell_init` fires while the cell still holds the init
-    // (pinned by `captured_reassign_init_drop_is_slot_resolved`).
+    // Keyed on `is_restorable_capture_cell`, the re-store predicate, which the
+    // binding's declaration decides; `captured_reassigned_bindings` holds only
+    // the bindings the walk saw written, so a declared-mutable cell with no
+    // write the walk reaches would escape it. Deliberately NOT the binding's
+    // full source-region set: the init value's own alloc region stays
+    // coalescible — its init-drop in `store_captured_cell_init` fires while the
+    // cell still holds the init (pinned by
+    // `captured_reassign_init_drop_is_slot_resolved`).
     for cells in info.begin_cell_regions.values() {
         for (b, cell_region) in cells {
             if arena.get(*b).is_restorable_capture_cell() {
@@ -144,9 +144,9 @@ pub fn analyze_regions_with(
     // this frame holds alone for as long as it lives. Recorded once here because two
     // mechanisms owe exactly this admission — the branch-arm release window below
     // and the lowerer's frame-exit release at a tail call — and both of them make
-    // a release fire on a path where none fired before (region/mechanism.md).
-    // Computed before the decref passes so it reads the escape facts, not any
-    // placement they go on to change.
+    // a release fire on a path where none fired before (region/window.md,
+    // region/relocate.md). Computed before the decref passes so it reads the
+    // escape facts, not any placement they go on to change.
     info.frame_held_regions = super::escape::frame_held_regions(
         &escape_info,
         arena,
@@ -162,7 +162,7 @@ pub fn analyze_regions_with(
     // Which regions a value-routed release can NAME — the releases the frame-exit
     // relocation is able to replicate into a branch arm, and so the regions the
     // branch-arm window may anchor when an arm leaves through a frame-replacing
-    // callee (region/mechanism.md § "An arm that leaves through a callee takes a
+    // callee (region/window.md § "An arm that leaves through a callee takes a
     // replica, not the anchor"). Recorded here, beside the other admission the
     // window owes, because the mirror of the lowerer's `region_to_slot` reads
     // `binder_init_sites` — which the walk holds and the decref passes do not.
@@ -211,9 +211,9 @@ pub fn analyze_regions_with(
     info.branch_arm_decrefs = branch_comp.tail;
     info.container_release_sites = branch_comp.container_release_sites.into_iter().collect();
 
-    // The builder-idiom merge seed (docs/impl/region/merging.md § Merging). Runs
-    // LAST: its coincident-decref_point gate reads the final `region_data`, so it
-    // must follow every decref_point post-pass above. The lowerer consumes the
+    // The builder-idiom merge seed (docs/impl/region/merging.md § Merging). Its
+    // coincident-decref_point gate reads the final `region_data`, so it follows
+    // every decref_point post-pass above. The lowerer consumes the
     // resulting `merged_parent` forest through `static_slot`'s `merged_root`
     // canonicalization (one slot per merge tree); an empty forest leaves it the
     // identity, i.e. the unmerged baseline.
