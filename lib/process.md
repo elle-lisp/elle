@@ -1,11 +1,12 @@
 # process
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-23 -->
 
-Erlang-style processes on fibers: message passing, links, monitors, timers, named registration, and OTP-shaped behaviours above them.
+Erlang-style processes on fibers: message passing, links, monitors, timers, named registration, and OTP-shaped behaviors above them.
 
-The export struct at the bottom of [process.lisp](process.lisp) lists
-every function, and `(doc name)` carries its arguments. Four behaviours
+Each submodule in [process/](process/overview.md) ends in the struct of what
+it exports, [process.lisp](process.lisp) merges those structs, and
+`(doc name)` carries a function's arguments. Four behaviors
 are layered on the primitives — GenServer, Actor, Task and Supervisor —
 plus an EventManager. This file holds the callback shapes, because a
 caller writes those rather than calls them.
@@ -49,4 +50,5 @@ A supervisor restarts under `:one-for-one` unless you name
 ```bash
 elle tests/elle/process.lisp
 elle tests/elle/genserver.lisp
+elle tests/elle/supervisor.lisp
 ```
