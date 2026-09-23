@@ -1,6 +1,6 @@
 (elle/epoch 12)
 # audited: 2026-09-23
-# The :timeout of gen-server-call, gen-server-stop and task-await: a deadline raises, a reply in time wins.
+# The :timeout of gen-server-call, gen-server-stop and task-await: a deadline raises, and a reply after it goes nowhere.
 # docs/behaviors.md
 
 (def process ((import "std/process")))
@@ -75,7 +75,9 @@
                        (begin
                          (assign timeouts (+ timeouts 1))
                          (assert (= (get got :error) :gen-server-timeout)
-                                 "a late reply is a :gen-server-timeout")))))))
+                                 "a late reply is a :gen-server-timeout")
+                         (assert (= (process:recv-timeout 20) :timeout)
+                                 "a call that timed out leaves no message behind, whenever the reply lands")))))))
 (assert (> replies 0) "some calls in the sweep beat the deadline")
 (assert (> timeouts 0) "some calls in the sweep missed it")
 
@@ -107,5 +109,58 @@
                  (start-slow-server :stoppable 0)
                  (assert (= (process:gen-server-stop :stoppable :timeout 50) :ok)
                          "a stop inside the deadline returns :ok")))
+
+# ── a reply after the deadline goes nowhere ──────────────────────────
+# The server answers every call it takes, however late. The counter-factual:
+# nothing on the caller's side remembered that the call had ended, so the
+# late [:$reply ref value] landed in the mailbox and the caller's next plain
+# recv took it.
+
+(defn nap [ticks]
+  "Wait ticks inside a server. The trap: recv-timeout would take the next
+   call or stop from the server's mailbox, and the server would never answer it."
+  (process:send-after ticks (process:self) :nap-over)
+  (process:recv-match (fn [m] (= m :nap-over))))
+
+(process:start (fn []
+                 (process:gen-server-start-link {:init (fn [_] nil)
+                 :handle-cast (fn [_req state]
+                                (nap 10)
+                                [:noreply state])} nil :name :napping)
+                 (process:gen-server-cast :napping :nap)
+                 (let [[ok? err] (protect (process:gen-server-stop :napping
+                       :timeout 2))]
+                   (assert (not ok?) "the stop times out while the server naps")
+                   (assert (= (get err :error) :gen-server-timeout)
+                           "with :gen-server-timeout"))
+                 (assert (= (process:recv-timeout 30) :timeout)
+                         "the server's late acknowledgement never arrives")))
+
+(process:start (fn []
+                 (let [server (process:gen-server-start-link {:init (fn [_] nil)
+                       :handle-call (fn [_req from _state] [:noreply from])
+                       :handle-info (fn [msg from]
+                                      (process:gen-server-reply from msg)
+                                      [:noreply nil])} nil)]
+                   (let [[ok? _] (protect (process:gen-server-call server :ping
+                         :timeout 2))]
+                     (assert (not ok?) "the deferred call times out"))
+                   (process:send server :too-late)
+                   (assert (= (process:recv-timeout 20) :timeout)
+                           "a deferred reply after the deadline never arrives"))))
+
+# The late reply to one call does not reach the next call to the same server.
+(process:start (fn []
+                 (process:gen-server-start-link {:init (fn [_] nil)
+                 :handle-call (fn [req _from state]
+                                (nap 10)
+                                [:reply req state])} nil :name :echo)
+                 (let [[ok? _] (protect (process:gen-server-call :echo :first
+                                        :timeout 2))]
+                   (assert (not ok?) "the first call times out"))
+                 (assert (= (process:gen-server-call :echo :second) :second)
+                         "the next call returns its own reply")
+                 (assert (= (process:recv-timeout 30) :timeout)
+                         "and nothing is left behind")))
 
 (println "process-timeouts: ok")
