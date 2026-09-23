@@ -1,6 +1,7 @@
-// audited: 2026-09-16
+// audited: 2026-09-22
 // What the naming rule does with a propagating tail — the body a `let`,
-// `letrec`, `loop` or `parameterize` hands its own value up from.
+// `letrec`, `loop` or `parameterize` hands its own value up from — and with the
+// returning positions such tails lead out of.
 //
 // src/hir/anf.rs
 
@@ -78,5 +79,114 @@ fn a_lambda_body_tail_is_not_named() {
     assert!(
         !named_node_ids(&hir).contains(&f_call),
         "a lambda body's tail value leaves by the return mint, unnamed"
+    );
+}
+
+// ── 8c. a returning position names what the frame must release ──
+
+/// The single `Eval` node in the tree.
+fn only_eval<'a>(hir: &'a Hir) -> &'a Hir {
+    let mut found = Vec::new();
+    let mut visit = |node: &'a Hir| {
+        if matches!(node.kind, HirKind::Eval { .. }) {
+            found.push(node);
+        }
+    };
+    walk_pre(hir, &mut visit);
+    assert_eq!(found.len(), 1, "expected exactly one eval");
+    found[0]
+}
+
+#[test]
+fn a_call_at_the_root_is_named() {
+    // The fixture's root is `(letrec [stubs] (f 1))`, so `(f 1)` is the value
+    // the unit returns. `mark_tail_calls` marks no call at the top level, so it
+    // comes back as an owned result AND takes the `Return` mint.
+    //
+    // Counter-factual: unnamed, the call's reference has no slot to leave
+    // through, and each run of the unit strands the result's region. That is
+    // every `(eval '(f …))`, once per eval.
+    let (hir, arena, symbols) = analyze_anf("(f 1)");
+    let f_call = only_call_to(&hir, "f", &arena, &symbols);
+    assert!(
+        matches!(f_call.kind, HirKind::Call { is_tail: false, .. }),
+        "a call at the root is never a tail call"
+    );
+    assert!(
+        named_node_ids(&hir).contains(&f_call.id),
+        "the root's call result must carry a name"
+    );
+}
+
+#[test]
+fn a_call_in_a_let_body_at_the_root_is_named() {
+    // The root descends its propagating tails exactly as a consumer does, so
+    // the name lands on the call, not on the `let` that hands its value up.
+    let (hir, arena, symbols) = analyze_anf("(let [a 1] (f a))");
+    let f_call = only_call_to(&hir, "f", &arena, &symbols).id;
+    assert!(
+        named_node_ids(&hir).contains(&f_call),
+        "the root's let-body call must carry the name"
+    );
+}
+
+#[test]
+fn an_eval_at_a_lambda_tail_is_named() {
+    // An `Eval` is never a tail call, so at a lambda tail its owned result
+    // takes the `Return` mint on top of the reference the eval handed back.
+    //
+    // Counter-factual: the lambda-body tail was left unnamed as a whole, which
+    // is right for a tail call and wrong here — `(fn () (eval x))` then strands
+    // one region per call.
+    let (hir, _arena, _symbols) = analyze_anf("(g (fn () (eval 1)))");
+    let eval = only_eval(&hir).id;
+    assert!(
+        named_node_ids(&hir).contains(&eval),
+        "an eval at a lambda tail must carry a name"
+    );
+}
+
+#[test]
+fn an_eval_in_a_let_body_at_a_lambda_tail_is_named() {
+    let (hir, _arena, _symbols) = analyze_anf("(g (fn () (let [a 1] (eval a))))");
+    let eval = only_eval(&hir).id;
+    assert!(
+        named_node_ids(&hir).contains(&eval),
+        "a lambda tail descends its let body to the eval"
+    );
+}
+
+#[test]
+fn a_call_in_a_parameterize_body_at_a_lambda_tail_is_named() {
+    // A `parameterize` body is never a tail position — its frame pops after
+    // the body — so the call there is not a tail call, and its value still
+    // leaves through the lambda's `Return` mint.
+    let (hir, arena, symbols) = analyze_anf("(g (fn () (parameterize ((h 1)) (f 2))))");
+    let f_call = only_call_to(&hir, "f", &arena, &symbols);
+    assert!(
+        matches!(f_call.kind, HirKind::Call { is_tail: false, .. }),
+        "a parameterize body is never a tail position"
+    );
+    assert!(
+        named_node_ids(&hir).contains(&f_call.id),
+        "the parameterize body's call must carry a name"
+    );
+}
+
+#[test]
+fn a_fresh_allocation_at_a_lambda_tail_is_not_named() {
+    // The rule names only what hands this frame an owning reference. A fresh
+    // allocation's region already has its own release, so it keeps the shape
+    // it had.
+    let (hir, _arena, _symbols) = analyze_anf("(g (fn () (%pair 1 2)))");
+    let mut named_intrinsic = false;
+    for id in named_node_ids(&hir) {
+        if let Some(node) = find_node(&hir, id) {
+            named_intrinsic |= matches!(node.kind, HirKind::Intrinsic { .. });
+        }
+    }
+    assert!(
+        !named_intrinsic,
+        "a fresh allocation at a lambda tail stays unnamed"
     );
 }

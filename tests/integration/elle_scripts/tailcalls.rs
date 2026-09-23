@@ -1,5 +1,5 @@
-// audited: 2026-09-09
-// Guardfree pins for the frame-exit relocation and the deferred channels a tail call rides.
+// audited: 2026-09-22
+// Guardfree pins for the return convention, the frame-exit relocation, and the deferred channels a tail call rides.
 //
 // docs/analysis/testing.md
 
@@ -104,7 +104,7 @@ fn region_native_tail_mutual_cycle_uaf() {
 // GREEN (live guard) — a closure that tail-passes a TOP-LEVEL binding as an
 // owned-param argument must not over-free that binding's region
 // (phantom/double-free; SIGSEGV under guardfree). The hazard the witness
-// describes does NOT reproduce on HEAD: `tail_arg_is_borrowed`
+// describes does not occur: `tail_arg_is_borrowed`
 // (src/lir/lower/control.rs) still flags ONLY captured upvalues, so a top-level
 // reference is indeed pure-moved into the owned-param callee — yet the 500-iter
 // loop is guardfree-clean. The over-free the witness hypothesized is balanced
@@ -218,6 +218,22 @@ fn region_or_tail_move_borrow_uaf() {
 fn region_const_tail_move_borrow_uaf() {
     run_elle_script_with_args(
         "region-const-tail-move-borrow-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
+// Guard — a returning position names the owned result it must release
+// (src/hir/anf.rs § "A returning position names only what it must release"). An
+// eval's result at a function tail, a call at an eval'd unit's root, and a call
+// in a `parameterize` body each leave through a slot release placed after the
+// `Return` mint. A release that ran ahead of the mint, or twice, frees the value
+// the caller then reads. The file reads every such result after it came back,
+// including fifty kept past later evals, so an over-free faults on that read —
+// SIGSEGV under guardfree. The same file carries the leak face.
+#[test]
+fn region_eval_return_leak_uaf() {
+    run_elle_script_with_args(
+        "region-eval-return-leak",
         &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
     );
 }
