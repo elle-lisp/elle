@@ -30,10 +30,11 @@ scheduler.
 ```
 
 A process that outlives PID 0 keeps the scheduler running while it has work.
-When PID 0 has ended and every process left waits in a receive that no
-message, timer or I/O can satisfy, those processes are idle for good.
-`process:start` then exits each of them with reason `:shutdown` and returns.
-While PID 0 itself waits that way, nothing can end the program, and
+A process can block in a receive, on a futex, or in a join or select on a
+sub-fiber. When no process or sub-fiber can run, and no timer or I/O is
+pending, nothing can wake a blocked process, and every live process is idle
+for good. `process:start` then exits each of them with reason `:shutdown` and
+returns. While PID 0 itself is one of them, nothing can end the program, and
 `process:start` raises `{:error :deadlock}`.
 
 ```lisp
@@ -43,6 +44,11 @@ While PID 0 itself waits that way, nothing can end the program, and
 (process:start (fn []
   (process:spawn-link (fn [] (process:recv)))
   :done))
+
+## PID 0 parks on a futex that no other process can wake.
+(let [[ok? err] (protect (process:start (fn [] (ev/futex-wait :k (box 0) 0))))]
+  (assert (not ok?) "a park that nothing can wake ends the scheduler")
+  (assert (= (get err :error) :deadlock) "as a deadlock"))
 ```
 
 PID 0 can end with an exit reason it did not choose: `[:error e]` when it
