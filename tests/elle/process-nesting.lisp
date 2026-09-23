@@ -85,9 +85,13 @@
 
 # ── a process that exits with relayed I/O in flight ──────────────────
 # The inner scheduler sleeps for a minute. Killing the process that runs it
-# cancels the relayed sleep, so the outer process:start returns at once.
-# The counter-factual for the cancel: the relayed entry outlived its
-# process, and the outer scheduler waited out the whole minute.
+# cancels the relayed sleep. The counter-factual for the cancel: the relayed
+# entry outlived its process, and the outer scheduler waited out the whole
+# minute before PID 0's next timer could fire.
+#
+# The trap: while I/O is in flight and no process is ready, the scheduler
+# waits for the I/O and its clock stands still. So PID 0 waits for the
+# sleep to start by yielding with self, not with a timer.
 
 (let [done (ev/timeout 20
                        (fn []
@@ -99,12 +103,14 @@
                                                 (ev/sleep 60)))))
                                             ref (process:monitor runner)]
                                             (while (not (unbox asleep))
-                                              (process:recv-timeout 1))
-                                            (process:recv-timeout 2)
+                                              (process:self))
                                             (process:exit runner :kill)
-                                            (assert (= (process:recv-timeout 100)
+                                            (assert (= (process:recv)
                                             [:DOWN ref runner [:killed :kill]])
-                                            "the runner dies of the kill, in its sleep"))))
+                                            "the runner dies of the kill, in its sleep")
+                                            (assert (= (process:recv-timeout 5)
+                                            :timeout)
+                                            "PID 0's timer fires once the relayed sleep is cancelled"))))
                          :returned))]
   (assert (= done :returned)
           "the outer scheduler returns without waiting out the relayed sleep"))
