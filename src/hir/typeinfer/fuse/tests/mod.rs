@@ -93,6 +93,75 @@ fn count_intrinsic(h: &Hir, want: &str) -> usize {
     n
 }
 
+/// How many sites run a stage body's arithmetic or comparison op: a call to the
+/// stdlib `wrapper`, or the `%`-op the call lowers to where inference proves both
+/// operands numbers (docs/intrinsics.md). A fusion test asks whether the op runs
+/// inline, not which of the two spellings it ends in.
+///
+/// The loop scaffold advances each counter with `(assign i (%add i 1))`, and an
+/// `%add` an `assign` stores is not counted, so a `+` assertion cannot pass on the
+/// scaffold alone. The scaffold's range test is a call to `<`, which does count:
+/// a test that needs an inline predicate uses another comparison.
+fn count_op(
+    h: &Hir,
+    arena: &BindingArena,
+    rt: &mut crate::runtime::Runtime,
+    wrapper: &str,
+) -> usize {
+    const LOWERED: [(&str, &str); 8] = [
+        ("+", "%add"),
+        ("-", "%sub"),
+        ("*", "%mul"),
+        ("<", "%lt"),
+        (">", "%gt"),
+        ("<=", "%le"),
+        (">=", "%ge"),
+        ("=", "%eq"),
+    ];
+    let (_, op) = LOWERED
+        .iter()
+        .find(|(w, _)| *w == wrapper)
+        .expect("an arithmetic or comparison wrapper");
+    count_callee(h, arena, rt, wrapper) + count_intrinsic(h, op) - count_advances(h, op)
+}
+
+/// The scaffold's counter advances, `(assign c (%add c 1))`, when `op` is `%add`.
+fn count_advances(h: &Hir, op: &str) -> usize {
+    let advance = match &h.kind {
+        HirKind::Assign { target, value } => match &value.kind {
+            HirKind::Intrinsic { op: this, args } => {
+                this.name() == op
+                    && matches!(args.as_slice(),
+                        [c, one] if matches!(c.kind, HirKind::Var(b) if b == *target)
+                            && matches!(one.kind, HirKind::Int(1)))
+            }
+            _ => false,
+        },
+        _ => false,
+    };
+    let mut n = usize::from(advance);
+    h.for_each_child(|c| n += count_advances(c, op));
+    n
+}
+
+/// `count_op` counts a stage's op and not the scaffold's. The counter-factual:
+/// were the counter advance counted, every fused loop would hold a `+` and every
+/// `+` assertion would pass on the scaffold alone.
+#[test]
+fn count_op_skips_the_scaffold() {
+    let (hir, arena, mut rt) = compile("(map (fn [x] (* x 2)) [1 2 3])");
+    assert!(
+        count_intrinsic(&hir, "%add") > 0,
+        "the fused loop advances its index with %add"
+    );
+    assert_eq!(
+        count_op(&hir, &arena, &mut rt, "+"),
+        0,
+        "no stage holds a +"
+    );
+    assert_eq!(count_op(&hir, &arena, &mut rt, "*"), 1, "the stage's one *");
+}
+
 /// Chains whose lambda literal captures an enclosing local — where the capture
 /// reaches from, and the composition it declines.
 mod capture;

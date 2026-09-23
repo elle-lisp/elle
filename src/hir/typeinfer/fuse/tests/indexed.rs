@@ -26,7 +26,7 @@ fn single_map_indexed_dissolves_to_an_indexed_push() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "*") > 0,
         "the function's body op must run inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -69,7 +69,7 @@ fn map_over_map_indexed_fuses_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "*") > 0,
         "the indexed body must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -245,7 +245,8 @@ fn wrong_arity_map_indexed_fn_is_not_fused() {
 
 /// A `map-indexed` whose function is a `Var` naming a same-unit `defn` inlines its
 /// body by cloning, exactly as a two-parameter `fold` combinator does — the stage puts
-/// no new requirement on how the function is resolved.
+/// no new requirement on how the function is resolved. The definition survives the
+/// clone, so its `*` and the inlined copy's are two sites.
 #[test]
 fn named_map_indexed_fn_inlines() {
     let (hir, arena, mut rt) = compile("(defn scale [i x] (* i x)) (map-indexed scale [10 20 30])");
@@ -254,8 +255,9 @@ fn named_map_indexed_fn_inlines() {
         !cs.iter().any(|n| n == "map-indexed"),
         "the dispatch must be gone for a named function; callees were {cs:?}",
     );
-    assert!(
-        cs.iter().any(|n| n == "*"),
-        "the named function's body must run inline; callees were {cs:?}",
+    assert_eq!(
+        count_op(&hir, &arena, &mut rt, "*"),
+        2,
+        "the definition's * plus the inlined copy; callees were {cs:?}",
     );
 }

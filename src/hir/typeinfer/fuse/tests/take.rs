@@ -62,7 +62,7 @@ fn map_over_take_while_fuses_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "even?") && cs.iter().any(|n| n == "*"),
+        cs.iter().any(|n| n == "even?") && count_op(&hir, &arena, &mut rt, "*") > 0,
         "both the predicate and the transform must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -242,17 +242,20 @@ fn capturing_take_while_predicate_fuses() {
 
 /// A `take-while` whose predicate is a `Var` naming a same-unit `defn` inlines its
 /// body, exactly as a `map`/`filter` argument does — the stage puts no new
-/// requirement on how the function is resolved.
+/// requirement on how the function is resolved. The predicate compares with `>`,
+/// which the loop scaffold never emits, so its two sites are the surviving
+/// definition and the inlined copy.
 #[test]
 fn named_take_while_predicate_inlines() {
-    let (hir, arena, mut rt) = compile("(defn small? [x] (< x 3)) (take-while small? [1 2 5])");
+    let (hir, arena, mut rt) = compile("(defn big? [x] (> x 3)) (take-while big? [5 4 1])");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "take-while"),
         "the dispatch must be gone for a named predicate; callees were {cs:?}",
     );
-    assert!(
-        cs.iter().any(|n| n == "<"),
-        "the named predicate's body must run inline; callees were {cs:?}",
+    assert_eq!(
+        count_op(&hir, &arena, &mut rt, ">"),
+        2,
+        "the definition's > plus the inlined copy; callees were {cs:?}",
     );
 }

@@ -140,7 +140,7 @@ fn search_over_a_map_prefix_fuses_to_one_loop() {
              callees were {cs:?}",
         );
         assert!(
-            cs.iter().any(|n| n == "even?") && cs.iter().any(|n| n == "*"),
+            cs.iter().any(|n| n == "even?") && count_op(&hir, &arena, &mut rt, "*") > 0,
             "both the predicate and the map transform must inline for {src}; \
              callees were {cs:?}",
         );
@@ -307,7 +307,8 @@ fn capturing_search_predicate_fuses() {
 
 /// A search whose predicate is a `Var` naming a same-unit `defn` inlines its body,
 /// and a `Var`-bound immutable array base fuses — the search terminal adds no new
-/// requirement to either proof.
+/// requirement to either proof. The definition survives, so its `>` and the
+/// inlined copy's are two sites.
 #[test]
 fn named_search_predicate_and_var_base_fuse() {
     let (hir, arena, mut rt) = compile("(defn pos? [x] (> x 0)) (let [xs [1 2 3]] (all? pos? xs))");
@@ -316,9 +317,10 @@ fn named_search_predicate_and_var_base_fuse() {
         !cs.iter().any(|n| n == "all?"),
         "a named predicate over a Var-bound base must fuse; callees were {cs:?}",
     );
-    assert!(
-        cs.iter().any(|n| n == ">"),
-        "the named predicate's body must run inline; callees were {cs:?}",
+    assert_eq!(
+        count_op(&hir, &arena, &mut rt, ">"),
+        2,
+        "the definition's > plus the inlined copy; callees were {cs:?}",
     );
     assert_eq!(
         count_callee(&hir, &arena, &mut rt, "@array"),

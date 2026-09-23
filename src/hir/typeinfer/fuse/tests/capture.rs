@@ -1,10 +1,12 @@
+// audited: 2026-09-23
 //! Chains whose lambda literal CAPTURES an enclosing local.
 //!
 //! The per-op modules pin that each op fuses a capturing literal (the splice is the
 //! call site, so the free variables are in scope). What is cross-cutting lives here:
 //! where the capture reaches from, and the one gate it costs — a composition, whose
-//! reorder argument a capture's silent cross-element channel does not survive
-//! (docs/impl/dissolution.md § "Captures").
+//! reorder argument a capture's silent cross-element channel does not survive.
+//!
+//! docs/impl/dissolution.md
 
 use super::*;
 
@@ -22,7 +24,7 @@ fn a_capture_from_two_function_levels_out_fuses() {
         "the `map` dispatch must be gone; callees were {cs:?}",
     );
     assert!(
-        cs.iter().any(|n| n == "+"),
+        count_op(&hir, &arena, &mut rt, "+") > 0,
         "the capturing body must run inline in the loop; callees were {cs:?}",
     );
     assert_eq!(

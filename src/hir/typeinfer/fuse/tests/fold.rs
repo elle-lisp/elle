@@ -1,3 +1,8 @@
+// audited: 2026-09-23
+//! Fold and reduce terminals.
+//!
+//! docs/impl/dissolution/terminals.md
+
 use super::*;
 
 /// A single `(fold f init xs)` dissolves to a **scalar** accumulator loop: the
@@ -6,7 +11,6 @@ use super::*;
 /// (the accumulator is a reassigned scalar, the result is its final value).
 /// Fails before fold fusion lands: the `fold` call and the `(fn [a x] …)`
 /// closure are both present.
-
 #[test]
 fn single_fold_dissolves_to_scalar_accumulator() {
     let (hir, arena, mut rt) = compile("(fold (fn [a x] (+ a x)) 0 [1 2 3])");
@@ -17,7 +21,7 @@ fn single_fold_dissolves_to_scalar_accumulator() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "+"),
+        count_op(&hir, &arena, &mut rt, "+") > 0,
         "the fold body op `+` must run inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -49,7 +53,7 @@ fn fold_of_map_fuses_to_one_scalar_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "+") && cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "+") > 0 && count_op(&hir, &arena, &mut rt, "*") > 0,
         "both the fold step and the map transform must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -78,7 +82,7 @@ fn fold_of_filter_fuses_to_one_scalar_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "+") && cs.iter().any(|n| n == "even?"),
+        count_op(&hir, &arena, &mut rt, "+") > 0 && cs.iter().any(|n| n == "even?"),
         "both the fold step and the predicate must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -127,7 +131,7 @@ fn single_fold_with_non_reorder_safe_body_still_fuses() {
 /// fusing only the inner reorder-safe run: the inner `filter` fuses on the
 /// recursion, and the outer `fold` stays a plain call over the fused loop. (The
 /// fused loop lands beside the fold's surviving lambda argument; `lower_call`'s
-/// argument spill keeps that sound — `call-arg-across-loop.lisp`.)
+/// argument spill keeps that sound — tests/impl/call-arg-across-loop.lisp.)
 #[test]
 fn fold_over_non_reorder_safe_prefix_fuses_inner_only() {
     let (hir, arena, mut rt) =
@@ -157,10 +161,10 @@ fn user_shadowed_fold_is_not_fused() {
 }
 
 /// A capturing combinator fuses: the splice is the call site, so `k` is in scope
-/// where the fold step lands (docs/impl/dissolution.md § "Captures"). A lone fold
-/// threads its accumulator in element order exactly as the stdlib one does, so the
-/// capture reaches the same state at each step. Fails while the gate refuses a
-/// capture: the `fold` call and the closure both survive.
+/// where the fold step lands. A lone fold threads its accumulator in element order
+/// exactly as the stdlib one does, so the capture reaches the same state at each
+/// step. Fails while the gate refuses a capture: the `fold` call and the closure
+/// both survive.
 #[test]
 fn capturing_fold_lambda_fuses() {
     let (hir, arena, mut rt) = compile("(let [k 10] (fold (fn [a x] (+ a (+ x k))) 0 [1 2 3]))");

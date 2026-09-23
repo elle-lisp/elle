@@ -23,7 +23,7 @@ fn single_map_over_mutable_array_fuses_unfrozen() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "*") > 0,
         "the transform op must inline; callees were {cs:?}",
     );
     assert!(
@@ -104,7 +104,7 @@ fn composition_over_mutable_array_fuses_inner_only() {
     );
     assert_eq!(count_lambdas(&hir), 1, "only the outer closure survives");
     assert!(
-        cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "*") > 0,
         "the inner transform still inlines on the recursion; callees were {cs:?}",
     );
 }

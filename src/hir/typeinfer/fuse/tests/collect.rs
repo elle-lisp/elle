@@ -25,7 +25,7 @@ fn single_map_dissolves_the_closure_and_dispatch() {
         "no closure may survive — `f`'s body is spliced inline",
     );
     assert!(
-        cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "*") > 0,
         "`f`'s body op `*` must run inline in the loop; callees were {cs:?}",
     );
     // The loop `map`'s array arm runs: one fresh accumulator, filled and frozen.
@@ -54,7 +54,7 @@ fn composed_maps_fuse_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*") && cs.iter().any(|n| n == "+"),
+        count_op(&hir, &arena, &mut rt, "*") > 0 && count_op(&hir, &arena, &mut rt, "+") > 0,
         "both transforms must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -135,7 +135,7 @@ fn capturing_lambda_fuses() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "+"),
+        count_op(&hir, &arena, &mut rt, "+") > 0,
         "the capturing body must run inline in the loop; callees were {cs:?}",
     );
 }
@@ -168,7 +168,7 @@ fn single_filter_dissolves_to_guarded_push() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == ">"),
+        count_op(&hir, &arena, &mut rt, ">") > 0,
         "the predicate op `>` must run inline; callees were {cs:?}",
     );
     assert!(
@@ -254,7 +254,7 @@ fn mixed_chain_with_non_reorder_safe_stage_fuses_inner_only() {
         "the inner `filter` must still fuse on the recursion; callees were {cs:?}",
     );
     assert!(
-        cs.iter().any(|n| n == ">"),
+        count_op(&hir, &arena, &mut rt, ">") > 0,
         "the inner predicate must inline; callees were {cs:?}",
     );
 }
@@ -277,7 +277,7 @@ fn mixed_map_of_filter_reorder_safe_fuses_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*") && cs.iter().any(|n| n == "even?"),
+        count_op(&hir, &arena, &mut rt, "*") > 0 && cs.iter().any(|n| n == "even?"),
         "both the transform and the predicate must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -307,7 +307,7 @@ fn mixed_filter_of_map_reorder_safe_fuses_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*") && cs.iter().any(|n| n == "even?"),
+        count_op(&hir, &arena, &mut rt, "*") > 0 && cs.iter().any(|n| n == "even?"),
         "both the transform and the predicate must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -338,9 +338,9 @@ fn mixed_three_stage_tower_fuses_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "+")
+        count_op(&hir, &arena, &mut rt, "+") > 0
             && cs.iter().any(|n| n == "even?")
-            && cs.iter().any(|n| n == "*"),
+            && count_op(&hir, &arena, &mut rt, "*") > 0,
         "all three stage bodies must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -384,7 +384,7 @@ fn map_over_var_bound_immutable_array_fuses() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "*") > 0,
         "`f`'s body op must inline; callees were {cs:?}",
     );
 }

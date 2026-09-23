@@ -21,7 +21,7 @@ fn named_map_fn_inlines() {
         "the `map` dispatch must be gone when the fn is a named defn; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "*"),
+        count_op(&hir, &arena, &mut rt, "*"),
         2,
         "`dbl`'s body op appears twice — the surviving definition plus the \
              inlined copy; callees were {cs:?}",
@@ -50,7 +50,7 @@ fn named_fold_fn_inlines() {
         "the `fold` dispatch must be gone for a named combinator; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "*"),
+        count_op(&hir, &arena, &mut rt, "*"),
         2,
         "`mul`'s body op appears twice (definition + inlined); callees were {cs:?}",
     );
@@ -74,7 +74,7 @@ fn named_fn_composition_fuses_to_one_loop() {
         "both `map` dispatches must be gone; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "*"),
+        count_op(&hir, &arena, &mut rt, "*"),
         3,
         "definition + two inlined copies of `dbl`; callees were {cs:?}",
     );
@@ -99,7 +99,7 @@ fn named_fn_with_let_body_inlines() {
         "a named fn with a `let` body must inline; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "*"),
+        count_op(&hir, &arena, &mut rt, "*"),
         2,
         "`g`'s `*` appears twice — the surviving definition plus the inlined \
              copy; callees were {cs:?}",
@@ -143,7 +143,7 @@ fn named_let_body_fn_composition_fuses_to_one_loop() {
         "both `map` dispatches must be gone; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "*"),
+        count_op(&hir, &arena, &mut rt, "*"),
         3,
         "definition + two inlined copies of `g`'s `*`; callees were {cs:?}",
     );
@@ -202,7 +202,7 @@ fn named_map_cross_unit_stdlib_fn_inlines() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "-"),
+        count_op(&hir, &arena, &mut rt, "-"),
         1,
         "`dec`'s body op `-` is spliced in exactly once — the definition stays in \
              the stdlib unit, so there is no surviving copy; callees were {cs:?}",

@@ -34,7 +34,7 @@ fn single_mapcat_dissolves_to_a_nested_walk() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "*") > 0,
         "the function's body op must run inline; callees were {cs:?}",
     );
     assert_eq!(count_loops(&hir), 2, "the base walk, and the fan-out's own");
@@ -74,7 +74,7 @@ fn map_over_mapcat_fuses_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*") && cs.iter().any(|n| n == "+"),
+        count_op(&hir, &arena, &mut rt, "*") > 0 && count_op(&hir, &arena, &mut rt, "+") > 0,
         "both bodies must inline; callees were {cs:?}",
     );
     assert_eq!(count_loops(&hir), 2, "one pair of loops, not two pairs");
