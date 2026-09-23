@@ -1,6 +1,6 @@
 # tests/integration
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-23 -->
 
 Full-pipeline integration tests: end-to-end behavior verification.
 
@@ -27,7 +27,7 @@ check the repository rather than the language:
 
 | Group | Files |
 |-------|-------|
-| The documents and their policy | `agents.rs`, `audit.rs`, `prose.rs`, `paths.rs`, `bytecode_doc.rs`, `doctest.rs`, `rustsource.rs` |
+| The documents and their policy | `agents.rs`, `audit.rs`, `prose.rs`, `paths.rs`, `bytecode_doc.rs`, `doctest.rs`, `doctest_scope.rs`, `rustsource.rs` |
 | CI and the corpus runner | `workflows.rs`, `run_artifacts.rs`, `plugins.rs`, `budget.rs`, `runner_budget.rs`, `capacity.rs`, `profiles.rs`, `truncation.rs`, `runner_exit_trap.rs`, `timeout_capture.rs`, `runner_gauges.rs`, `measurements.rs`, `isolation.rs`, `state_dir.rs`, `run_identity.rs`, `import.rs`, `form_profile.rs`, `boot_fingerprint.rs` |
 | CLI surfaces | `argv_cli.rs`, `dump_cli.rs`, `flip_cli.rs`, `tier_cli.rs`, `version.rs`, `dispatch.rs`, `repl_exit_codes.rs` |
 
