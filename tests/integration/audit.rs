@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-23
 // The audit queue and its commit gate, specified in docs/impl/audit.md.
 //
 // scripts/audit answers two questions: did the files this commit stages carry
@@ -282,6 +282,46 @@ fn the_makefile_is_exempt_from_the_queue_and_from_the_gate() {
     assert!(
         q.iter().any(|p| p.ends_with("ours.md")),
         "the exemption is the Makefile alone; the tree stays queued: {q:?}"
+    );
+}
+
+#[test]
+fn the_standard_library_is_exempt_from_the_queue_and_from_the_gate() {
+    // The trap: src/stdlib.lisp is past the 500-line reading budget, so a
+    // stamp on it fails prose.rs while no stamp on it fails the gate. Queued,
+    // it is a file no commit can touch.
+    //
+    // The counter-factual: exempt `*.lisp` or `src/*` and the other preludes
+    // leave the queue with it, silently. They sit beside it and each fits the
+    // budget, so each is read whole and is audited like any other source.
+    let t = Tree::new("stdlib");
+    t.write("src/stdlib.lisp", &doc(None, 400))
+        .write("src/prelude.lisp", &doc(None, 400))
+        .write("lib/http.lisp", &doc(None, 400));
+
+    let out = Command::new(script())
+        .args([
+            "--root",
+            t.0.to_str().expect("utf-8 path"),
+            "--staged",
+            "src/stdlib.lisp",
+        ])
+        .output()
+        .expect("run scripts/audit");
+    let q = t.queue();
+    assert!(
+        out.status.success(),
+        "the standard library must pass the gate unstamped: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !q.iter().any(|p| p.ends_with("stdlib.lisp")),
+        "`(doc name)` is how the standard library is read, so it is not queued: {q:?}"
+    );
+    assert!(
+        q.iter().any(|p| p.ends_with("src/prelude.lisp"))
+            && q.iter().any(|p| p.ends_with("lib/http.lisp")),
+        "the exemption is the one path; every other Lisp file stays queued: {q:?}"
     );
 }
 
