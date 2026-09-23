@@ -122,7 +122,7 @@ pub fn anf_lift(hir: &mut Hir, arena: &mut BindingArena) {
         return;
     }
     let mut ctx = AnfCtx { arena };
-    *hir = ctx.transform(hir);
+    *hir = ctx.r(hir);
     // After ANF, tail positions are settled. Mark each function's tail
     // value with a `Return` ownership boundary (the callee side of the
     // prediction-free calling convention).
@@ -198,10 +198,38 @@ impl<'a> AnfCtx<'a> {
 
     /// Transform a child in a NON-WRAP position: recurse into its
     /// own children but do not wrap the resulting node at this level.
-    /// Used for MakeCell/DerefCell pass-through children, a lambda body, and
-    /// propagating tail bodies (their own consumer descends into them).
+    /// Used for MakeCell/DerefCell pass-through children and propagating
+    /// tail bodies (their own consumer descends into them).
     fn t(&mut self, hir: &Hir) -> Hir {
         self.transform(hir)
+    }
+
+    /// Transform a RETURNING position — a lambda body, or the root of the
+    /// unit. Its value leaves by the `Return` mint, so the one node named is
+    /// a producer whose owned result this frame must still release.
+    fn r(&mut self, hir: &Hir) -> Hir {
+        let mut inner = self.transform(hir);
+        self.name_owed_release(&mut inner);
+        inner
+    }
+
+    /// Descend a returning position's propagating tails, and name the node
+    /// found there if it hands this frame an owned result that is not a tail
+    /// call's.
+    fn name_owed_release(&mut self, hir: &mut Hir) {
+        if let Some(tail) = hir.propagating_tail_mut() {
+            self.name_owed_release(tail);
+            return;
+        }
+        if !matches!(
+            hir.kind,
+            HirKind::Eval { .. } | HirKind::Call { is_tail: false, .. }
+        ) {
+            return;
+        }
+        let span = hir.span;
+        let inner = std::mem::replace(hir, Hir::silent(HirKind::Nil, span));
+        *hir = self.name_if_alloc(inner);
     }
 
     /// Transform a child in a BINDER position — a `let`/`letrec`/`loop`
@@ -268,7 +296,7 @@ impl<'a> AnfCtx<'a> {
                 value: Box::new(self.b(value)),
             },
 
-            // ── Lambda body: propagating tail; do not wrap ──
+            // ── Lambda body: a returning position ──
             HirKind::Lambda {
                 params,
                 num_required,
@@ -288,7 +316,7 @@ impl<'a> AnfCtx<'a> {
                 rest_param: *rest_param,
                 vararg_kind: vararg_kind.clone(),
                 captures: captures.clone(),
-                body: Box::new(self.t(body)),
+                body: Box::new(self.r(body)),
                 num_locals: *num_locals,
                 inferred_signals: *inferred_signals,
                 param_bounds: param_bounds.clone(),
