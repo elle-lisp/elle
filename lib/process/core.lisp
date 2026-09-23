@@ -3,6 +3,7 @@
 # The process table of one scheduler: mailboxes, links, monitors, exits, timers.
 # lib/process/overview.md
 # docs/processes.md
+# docs/process-scheduler.md
 
 (defn make-ref-gen []
   (def @counter 0)
@@ -39,7 +40,7 @@
   (def names @{})  # registered name → pid
   (def timers @[])  # @{:ref :fire-at :pid :msg}
   (def clock (box 0))  # the logical tick
-  (def io-pending @{})  # submission id → {:pid pid} or a sub-waiter
+  (def io-pending @{})  # submission id → a process, a sub-waiter, a relay or the alarm
   (def futex-parked @{})  # futex key → @[@{:waiter :val :expected}]
   (def fresh-ref (make-ref-gen))
 
@@ -164,25 +165,28 @@
         (del names n)
         (put p :name nil))))
 
+  (defn cancel-io [id]
+    "Cancel the forwarded I/O submission id, when it is still pending."
+    (when (has? io-pending id)
+      (del io-pending id)
+      (emit :wait {:op :io-forward-cancel :id id})))
+
   (defn cancel-io-where [owned?]
     "Cancel every forwarded I/O submission whose entry satisfies owned?."
     (def @to-cancel @[])
     (each [id entry] in (pairs io-pending)
       (when (owned? entry) (push to-cancel id)))
     (each id in to-cancel
-      (del io-pending id)
-      (emit :wait {:op :io-forward-cancel :id id})))
+      (cancel-io id)))
 
   (defn cancel-process-io [pid]
     "Cancel the in-flight I/O of process pid and of its sub-fibers."
     (cancel-io-where (fn [entry] (= (get entry :pid) pid))))
 
   (defn cancel-process-futex [pid]
-    "Drop the futex parks of the sub-fibers of process pid."
+    "Drop the futex parks of process pid and of its sub-fibers."
     (each [key parked] in (pairs futex-parked)
-      (let [keep (filter (fn [e]
-                           (or (integer? e:waiter)
-                               (not (= (owner e:waiter) pid)))) (->list parked))]
+      (let [keep (filter (fn [e] (not (= (owner e:waiter) pid))) (->list parked))]
         (cond
           (empty? keep) (del futex-parked key)
           (< (length keep) (length parked)) (put futex-parked key (->array keep))))))
@@ -354,6 +358,7 @@
    :add-monitor add-monitor
    :remove-monitor remove-monitor
    :process-exit process-exit
+   :cancel-io cancel-io
    :cancel-io-where cancel-io-where
    :now now
    :tick (fn [] (rebox clock (+ (now) 1)))

@@ -2,7 +2,7 @@
 # audited: 2026-09-23
 # Structured concurrency inside processes: sub-fibers, the join, select, abort and futex waits, and relayed I/O.
 # lib/process/overview.md
-# docs/processes.md
+# docs/process-scheduler.md
 
 (fn [core]
   (def io-pending core:io-pending)
@@ -129,9 +129,7 @@
 
   (defn cancel-relayed-io [w id]
     "Cancel I/O relayed for a nested scheduler, and wake waiter w."
-    (when (has? io-pending id)
-      (del io-pending id)
-      (emit :wait {:op :io-forward-cancel :id id}))
+    (core:cancel-io id)
     (wake w nil))
 
   (defn unknown-op [op]
@@ -234,10 +232,9 @@
 
   # Every sub-fiber the scheduler still tracks, as sub-waiters. At teardown
   # (no process alive) each is an orphan to abort. Sources, in order: waiting
-  # on forwarded I/O; parked on a futex (only sub-fiber parks remain — a
-  # parked process is alive, so none exist once no process is); queued but
-  # not yet run; awaited join targets and their sub-fiber joiners; select
-  # waiters and their candidates.
+  # on forwarded I/O; parked on a futex (sub-fiber parks alone, because an
+  # exit drops the parks of its process); queued but not yet run; awaited join
+  # targets and their sub-fiber joiners; select waiters and their candidates.
   (defn collect-orphan-subs []
     (def vs @[])
     (each [_id e] in (pairs io-pending)
@@ -263,9 +260,8 @@
 
   (defn clear-sub-state []
     "Cancel every forwarded submission and forget every tracked sub-fiber."
-    (each [id _entry] in (pairs io-pending)
-      (emit :wait {:op :io-forward-cancel :id id}))
-    (clear-map io-pending)
+    (each id in (keys io-pending)
+      (core:cancel-io id))
     (core:refill sub-runnable [])
     (clear-map futex-parked)
     (clear-map join-waiting)

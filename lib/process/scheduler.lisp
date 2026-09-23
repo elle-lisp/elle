@@ -3,6 +3,7 @@
 # The process scheduler: runs process fibers in rounds, forwards their I/O, and tears down orphans.
 # lib/process/overview.md
 # docs/processes.md
+# docs/process-scheduler.md
 #
 # Signal mask: |:yield :error :fuel :io :exec :wait| — the scheduler catches
 # all six. :exec is a capability bit for subprocess operations. :wait carries
@@ -11,6 +12,15 @@
 (def make-core (import "std/process/core"))
 (def make-waits (import "std/process/waits"))
 (def make-commands (import "std/process/commands"))
+
+# The clock advances this many ticks per second the scheduler waits on I/O.
+(def io-ticks-per-second 1000.0)
+
+(defn sleep-request [seconds]
+  "The I/O request that (ev/sleep seconds) yields, taken without yielding it."
+  (let [f (fiber/new (fn [] (ev/sleep seconds)) |:io|)]
+    (fiber/resume f)
+    (fiber/value f)))
 
 (defn make-scheduler [&named fuel]
   "A process scheduler whose processes run :fuel instructions a turn (1000 by
@@ -99,6 +109,8 @@
                   sub-fiber (get entry :fiber)
                   queue (get entry :queue)]
               (cond
+                # The alarm's completion only ends the wait in wait-for-io.
+                (get entry :alarm) nil
                 (not (nil? queue))
                   (begin
                     (push queue completion)
@@ -160,22 +172,51 @@
                 :message "all processes waiting, no messages pending"})
         (core:shutdown-idle)))
 
+    (defn arm-alarm [due]
+      "Forward a sleep that ends when the clock reaches tick due, and return
+       its id. Raises when the parent refuses it."
+      (let* [seconds (/ (max 0 (- due (core:now))) io-ticks-per-second)
+             id (waits:forward-io (sleep-request seconds))]
+        (when (and (array? id) (= (first id) :error)) (error (get id 1)))
+        (put io-pending id @{:alarm true})
+        id))
+
+    (defn completed? [id]
+      "Whether the parent has delivered the completion of submission id."
+      (not (nil? (find (fn [c] (= (get c :id) id)) (->list io-completions)))))
+
+    (defn wait-for-io [expected]
+      "Park until the parent delivers a completion or the earliest timer falls
+       due. The clock advances one tick per whole millisecond of the park, and
+       at least to that timer when the park ran to it. It advances before any
+       process runs, so a process resumed by the completion reads the new tick."
+      (let* [started (clock/monotonic)
+             due (when (not (empty? core:timers)) (core:earliest-timer))
+             alarm (when due (arm-alarm due))]
+        (ev/futex-wait :io-forward-wakeup io-wakeup-box expected)
+        (core:advance-to (+ (core:now)
+                            (floor (* (- (clock/monotonic) started)
+                                      io-ticks-per-second))))
+        (when (and alarm (completed? alarm))
+          (core:advance-to (max (core:now) due)))
+        (reap-io)
+        (when alarm (core:cancel-io alarm))))
+
     (defn idle []
-      "No process is ready: wait for I/O, jump to the next timer, or stall."
+      "No process is ready: wait for I/O or the next timer, jump to the next
+       timer, or stall."
       (cond
         (not (has-work?)) nil
 
-        # I/O in flight — park until the parent delivers completions
+        # I/O in flight — park until a completion or the next timer
         (> (length io-pending) 0)
           (begin
             (let [expected (unbox io-wakeup-box)]
               (reap-io)
-              (when (empty? ready)
-                (ev/futex-wait :io-forward-wakeup io-wakeup-box expected)
-                (reap-io)))
+              (when (empty? ready) (wait-for-io expected)))
             (waits:drain-sub-runnable))
 
-        # Waiting with timers — fast-forward the clock
+        # Waiting with timers and no I/O — fast-forward the clock
         (not (empty? core:timers))
           (begin
             (core:advance-to (core:earliest-timer))
