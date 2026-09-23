@@ -1,63 +1,56 @@
 # Signals and JIT
 
-## The Problem
+<!-- audited: 2026-09-22 -->
 
-The JIT can only compile silent functions naively because it can't handle
-yields or errors — it would need to save and restore the native stack.
+A function's signal decides nothing about whether the JIT compiles it. It
+decides the checks around each call and how a yield leaves compiled code.
 
-## The Solution
+## What the JIT refuses
 
-In the fiber model, a JIT-compiled function is just another frame on the
-fiber's stack. When it calls a function that signals:
+The JIT compiles silent, failing, yielding and polymorphic functions alike.
+It refuses two shapes, whatever their signal:
 
-1. The callee returns `signal_bits` — the value is on the fiber
-2. The JIT code checks `signal_bits == 0`
-3. If zero: continue with the value from the fiber's stack
-4. If non-zero: propagate the signal to the caller
+- a function that contains `MakeClosure`, that is, one that creates a closure;
+- a function with a `&keys` or `&named` collector.
 
-The JIT doesn't need to capture continuations or switch stacks. It just
-checks a return code and propagates. The JIT compiles silent, yielding,
-and error-producing functions. Only polymorphic functions (where the
-signal depends on arguments) and functions containing `Eval` are
-rejected. The overhead for non-silent functions is one branch per call.
+A refused function runs in the interpreter, and the VM never submits it again.
+`(jit/rejections)` lists each refusal with its reason, for example
+`"JIT: unsupported instruction: MakeClosure"`.
+[src/jit/AGENTS.md](../../src/jit/AGENTS.md) lists the supported instructions.
 
-## Signal-guided optimization
+## Signals at a call
 
-The compiler's signal information guides JIT decisions:
+A compiled function in a fiber is one more frame on that fiber. Every call it
+makes leaves through a runtime dispatch helper; compiled functions never call
+each other directly. After the call returns:
 
-- **No signals**: inline aggressively, no signal checks needed
-- **Errors only**: signal checks needed, but no yield overhead
-- **Yields**: full signal protocol, but still compiled — includes the
-  propagation path
-- **Known silent callback**: specialize inner loop to skip signal checks
+1. The compiled code checks for a pending error, and on one it returns to its
+   caller through the error exit.
+2. In a function that is not silent, it also checks whether the callee yielded.
+   On a yield it builds its own suspended frame and returns to the interpreter.
 
-## Silence bounds
+A silent function skips the second check. The emitter records resume metadata
+only for the calls of a function that is not silent. An error-only function
+counts as not silent here.
 
-Signal bounds enable further JIT optimizations:
+## Yielding from compiled code
 
-1. **Loop specialization**: provably-silent callback → skip signal checks
-2. **Inlining**: silent callbacks can be inlined more aggressively
-3. **Elimination of polymorphism**: silence bounds simplify compilation
+A `yield` inside a compiled function leaves by side-exit. The code spills its
+live registers, a runtime helper builds a suspended frame at the matching
+bytecode offset, and the function returns a sentinel. When the fiber resumes,
+the interpreter continues from that frame. The compiled code never saves or
+switches a native stack.
 
-```text
-# Without bounds: JIT cannot specialize
-(defn map-any [f xs]
-  (map f xs))
+## Bounds and squelch
 
-# With bounds: JIT can specialize for silent f
-(defn map-silent [f xs]
-  (silence f)
-  (map f xs))
-```
-
-**Squelch and JIT:** Squelch is a runtime transform. The JIT uses the
-underlying template signal (not the effective signal) for code generation.
-Squelch enforcement happens at the call boundary in `call_inner`, not
-inside JIT'd code.
-
----
+A `(silence p)` bound is checked at function entry in compiled code as in the
+interpreter; see [inference.md](inference.md). A squelched closure is checked
+on the JIT's call, tail-call and sentinel paths. Every one of them asks the
+same predicate, `signals::squelched_bits`, that the interpreter asks.
 
 ## See also
 
 - [Signal index](index.md)
-- [Inference](inference.md) — compile-time signal verification
+- [Inference](inference.md) — the signal each function carries
+- [JIT implementation](../impl/jit.md) — the caches, the worker and rejection
+  tracking

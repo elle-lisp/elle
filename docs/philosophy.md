@@ -1,83 +1,121 @@
 # Design Philosophy
 
-This document explains the reasoning behind Elle's core architectural decisions.
+<!-- audited: 2026-09-22 -->
 
-## Design Goal: Frictionless Async, Explicit Performance
+Why Elle infers signals instead of asking for them, and the gap that leaves
+between what the compiler knows and what a reader sees.
 
-Elle's default is **polymorphic** — functions may yield, spawn fibers, or do I/O unless explicitly marked `(silence)`. This is not a shortcoming; it's a deliberate choice reflecting Elle's primary use case: building concurrent systems with fibers, signals, and async I/O.
+## Signals are inferred
 
-### Why Polymorphic-by-Default?
+The compiler infers a signal for every function. A function whose body cannot
+signal is silent with no annotation. A function that uses generic arithmetic
+may raise `:error`, because `+` rejects a non-number. A function that calls a
+parameter takes its signal from the argument: it is polymorphic.
 
-The alternative—defaulting to `(silence)` and requiring explicit opt-in for async code—would be aggressively friction-full:
+```lisp
+(def a (compile/analyze "
+(defn pick [b x y] (if b x y))
+(defn add [x y] (+ x y))
+(defn call [f x] (f x))"))
 
-```text
-# Silent by default: every higher-order function requires explicit opt-in
-(defn filter [predicate items]
-  (allow-yield predicate)                    # <- required boilerplate
-  (each items (fn [x] (allow-yield x) ...))) # <- required everywhere
-
-# Every callback, spawn, I/O operation: explicitly allowed to yield
-(ev/spawn (allow-yield (fn [] ...)))
-(map/call (allow-yield transform) data)
+(assert (get (compile/signal a :pick) :silent) "pick is silent, unannotated")
+(assert (= |:error| (get (compile/signal a :add) :bits)) "add may raise :error")
+(assert (= |0| (get (compile/signal a :call) :propagates))
+        "call takes its signal from parameter 0")
 ```
 
-In Elle's actual use case—concurrent systems, fiber-based concurrency, signal-driven I/O—this would mean marking 90% of user code as explicitly allowing async. Frictionless development is more important than compile-time performance defaults for the systems Elle is designed to build.
+The signal decides the calling convention. A call whose callee may yield, do
+I/O or wait compiles to a suspending call, which keeps a continuation frame so
+that the fiber can resume it. Any other call is a plain call.
 
-Polymorphic-by-default keeps the path of least resistance aligned with Elle's semantics: "this is async code that may yield."
+## Higher-order functions are polymorphic by default
 
-### Shifting Performance to the 10% Case
+A parameter that is called carries no bound unless the function declares one.
+This is a deliberate choice for Elle's main use: concurrent programs built
+from fibers and asynchronous I/O, where most callbacks do I/O.
 
-The minority case—tight numerical loops, performance-critical inner functions—explicitly uses `(silence)`:
+The alternative bounds every callback to silent and asks for an opt-in
+wherever a callback may yield. In a concurrent program that opt-in lands on
+most callbacks, at every `map`, every `ev/spawn` and every handler. Elle
+charges the annotation to the minority case instead: the code that must not
+suspend.
+
+`(silence f)` bounds the parameter `f`. The function is then silent with
+respect to `f`, and a closure that may signal fails a check at entry:
+
+```lisp
+(defn apply-silent [f x]
+  (silence f)
+  (f x))
+
+(assert (= 42 (apply-silent (fn [x] x) 42)) "a silent closure passes")
+
+(def [ok? err] (protect (apply-silent (fn [x] (yield x)) 42)))
+(assert (not ok?) "a yielding closure fails the entry check")
+(assert (= :signal-violation (get err :error)))
+```
+
+## Silence means no signal at all
+
+`(silence)` with no argument declares that the function emits nothing,
+`:error` included. It fits a body that cannot fail: branching, locals, and
+the `%` intrinsics on values already known to be numbers. The compiler
+rejects a `(silence)` body that may signal.
 
 ```lisp
 (defn select [flag a b]
   (silence)
   (if flag a b))
 
-(select true 1 2)
+(assert (= 1 (select true 1 2)))
+
+(def [ok? err] (protect (eval '(fn [x y] (silence) (+ x y)))))
+(assert (not ok?) "generic + may raise :error, so (silence) rejects it")
+(assert (string/contains? (get err :message) "body may emit {:error}"))
 ```
 
-This is similar to how Rust puts `unsafe` on unsafe code, or how Python puts `@jit` on hot code. The burden of intent is acceptable when applied to the minority case, not the majority.
+A function that may fail but must not suspend declares `(attune! :error)`,
+which sets the ceiling to `:error` alone. See
+[signals/inference.md](signals/inference.md) for every declaration form.
 
-## The Semantic Gap: Visibility, Not Design
+## The gap is visibility
 
-The challenge is not that polymorphic-by-default is wrong—it's that **signal implications are invisible in source code**. While the signal system is mathematically elegant, it creates a gap between the developer's expectations and the runtime behavior.
+The compiler knows every signal, and a reader sees none of them.
+Nothing in the source text shows whether a function is silent, may fail, or
+may suspend.
 
-### 1. The Hidden Performance Cliff
-Because the default is polymorphic, a developer may write code that appears synchronous and tight but silently yields. A single data-dependent branch triggering `SIG_YIELD` can transform an $O(N)$ loop into expensive context switches, without visual indication.
+1. **Hidden cost.** A function that reads as a tight loop can call something
+   that may yield. Each such call then compiles to a suspending call, and
+   nothing in the text says so.
+2. **No marker.** No syntax, gutter icon or highlight shows a function's
+   signal. A developer finds out from a compile error, or from a profile.
+3. **Late hardening.** Making code silent after it grew flexible is slow
+   work. The developer finds out late which callees widened the signal, much
+   like adding type annotations to Python code after the fact.
 
-### 2. The Visibility Problem
-There is no syntax highlighting, gutter icon, or visual marker showing that a function yields. The polymorphic signal is invisible until you learn it at runtime through performance testing.
+The compiler already computes every signal. `compile/signal` returns it for
+one function, as the examples above show. The [portrait](analysis/portrait.md)
+system and the [MCP server](mcp.md) present it as data a tool or an agent can
+query. See [Agent Reasoning in Elle](analysis/agent-reasoning.md).
 
-### 3. The Hardening Friction
-When performance becomes critical, converting a flexible system to hardened-with-silence is labor-intensive. You discover late which code actually needs to be silent. This is analogous to retrofitting type annotations in Python or satisfying the borrow checker in Rust—it's the cost of changing constraints after the fact.
+## Reasoning about a call
 
----
+- A function that calls a parameter is polymorphic, unless it bounds that
+  parameter with `(silence f)`.
+- A function that does I/O, or uses fibers through `ev/spawn` or `ev/join`,
+  may yield.
+- A function's signal is at least the union of its callees' signals.
+- Generic arithmetic, `get` and `assert` may raise `:error`.
 
-## Reasoning About Signals
-
-A function is polymorphic unless marked `(silence)`. When you call a function, consider:
-
-- Does it take higher-order functions (callbacks, predicates)? Then it's polymorphic unless those parameters are bounded by `(silence)`.
-- Does it use I/O (ports, subprocesses)? Then it yields.
-- Does it use fibers (`ev/spawn`, `ev/join`)? Then it yields.
-- Does it call other functions? It's at least as broad as they are.
-
-Mark a function `(silence)` when:
-
-1. **Performance is critical** — tight loops, hot paths, algorithms where yield overhead matters
-2. **You're confident it won't yield** — you've read the callees, you know they're silent
-3. **The contract is important** — you want to guarantee to callers that this function won't suspend
-
-Don't mark silence on everything. It's an explicit performance contract, not a default.
-
-The compiler already knows all of this — signal inference is computed at compile time. The [portrait](analysis/portrait.md) system exposes it as queryable data, and the [MCP server](mcp.md) makes the entire codebase's signal structure available as an RDF knowledge graph. These tools don't fix a broken design; they surface what the compiler already computes. See [Agent Reasoning in Elle](analysis/agent-reasoning.md) for how AI agents use this.
-
----
+Declare `(silence)` where the contract matters to callers, or where a hot path
+must not suspend. It is a contract, not a default.
 
 ## See also
 
-- [Module system](modules.md) — Architectural constraints of the module system and their rationale
-- [Signal inference](signals/inference.md) — How signals are inferred, bounded, and enforced
-- [Agent Reasoning](analysis/agent-reasoning.md) — How AI agents analyze and refactor Elle code
-- [MCP Server](mcp.md) — Semantic knowledge graph and querying interface
+- [Module system](modules.md) — the constraints of the module system and
+  their reasons
+- [Signal inference](signals/inference.md) — how signals are inferred,
+  bounded and checked
+- [Agent Reasoning](analysis/agent-reasoning.md) — how agents analyze and
+  refactor Elle code
+- [MCP Server](mcp.md) — the semantic knowledge graph and its query interface

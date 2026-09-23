@@ -1,60 +1,90 @@
 # Portrait
 
-The portrait system exposes everything the compiler knows about your code:
-signal profiles, capture analysis, composition properties, and the call graph.
-It analyzes source without executing it.
+<!-- audited: 2026-09-22 -->
 
-**See also:** [Agent Reasoning in Elle](agent-reasoning.md) for how to use portrait + MCP together for codebase-wide analysis. For global codebase queries, see [MCP server](../mcp.md).
+A portrait reports what the compiler knows about code without running it:
+signals, captures, calls and lint advisories.
 
-## Compile-time analysis
+See [Agent Reasoning in Elle](agent-reasoning.md) for portraits and the MCP
+server used together, and the [MCP server](../mcp.md) for queries across a
+whole codebase.
 
-```text
+## Analyze
+
+`compile/analyze` expands, analyzes and lints source text, and returns a
+handle. Nothing in the source runs.
+
+```lisp
 (def src "(defn validate [data]
   (when (nil? (get data :name))
     (error {:error :validation-error :message \"missing name\"}))
-  data)")
+  data)
+
+(defn process [items]
+  (let [@count 0 @unused 1]
+    (validate items)
+    (fn [] (assign count (+ count 1)) count)))
+
+(defn pick [b x y] (if b x y))
+
+(defn count-down [n]
+  (if (= n 0) 0 (+ 1 (count-down (- n 1)))))")
 
 (def a (compile/analyze src {:file "example.lisp"}))
 ```
 
-## Signal queries
+## Query
 
-```text
-# Query a function's inferred signal profile
-(compile/signal a :validate)
-# => {:silent false :jit-eligible true :propagates ... }
+Each query takes the handle and, where it asks about one function, the
+function's name as a keyword.
 
-# Query what a closure captures
-(compile/captures a :process)
-# => (:count :config)
+```lisp
+# The inferred signal: its bits, and the parameters it takes a signal from.
+(assert (contains? (get (compile/signal a :validate) :bits) :error))
+(assert (get (compile/signal a :pick) :silent))
 
-# Query what a function calls
-(compile/callees a :process)
-# => (:validate :transform ...)
+# Who calls a function, and what it calls.
+(assert (= ["process"] (map (fn [c] (get c :name)) (compile/callers a :validate))))
+(assert (= ["validate"]
+           (filter (fn [n] (= n "validate"))
+                   (map (fn [c] (get c :name)) (compile/callees a :process)))))
 
-# Full call graph
-(compile/call-graph a)
+# The call graph: a node for each function that makes a call, and the
+# leaves, which make none.
+(def graph (compile/call-graph a))
+(assert (= 3 (length (get graph :nodes))))
+(assert (= ["pick"] (get graph :leaves)))
 ```
+
+`compile/signal` also returns `:yields` and `:jit-eligible`. Both are derived
+from a predicate that counts `:error`, so an error-only function reports
+`:yields true` (#1234). Read `:bits` and `:propagates` instead.
+
+The queries see the expanded program. A function that uses a macro such as
+`each` reports the calls and bindings of the expansion as its own (#1235).
 
 ## Portrait library
 
-The `lib/portrait.lisp` library wraps the raw analysis APIs into
-structured reports.
+[lib/portrait.lisp](../../lib/portrait.lisp) builds structured reports from
+the queries. `portrait:function` describes one function; `portrait:module`
+describes them all. `portrait:render` and `portrait:render-module` turn each
+into text.
 
-```text
-(def portrait ((import "std/portrait.lisp")))
+```lisp
+(def portrait ((import "std/portrait")))
 
-# Function portrait — signal profile, captures, callees
-(println (portrait:render (portrait:function a :validate)))
+(def f (portrait:function a :validate))
+(assert (= "validate" (get f :name)))
+(assert (string/contains? (portrait:render f) "Effects:       error"))
 
-# Module portrait — signal topology across all functions
-(println (portrait:render (portrait:module a)))
+(def m (portrait:module a))
+(assert (string/contains? (portrait:render-module m) "Roots:"))
 ```
 
 ## Advisories
 
-A portrait reflects the compiler's lint diagnostics as advisories — it does not
-re-derive them. Three rules reach a portrait:
+A portrait reports the linter's diagnostics as advisories. It never derives
+them itself. Three rules reach a portrait:
 
 | Rule | Advisory | What it says |
 |---|---|---|
@@ -62,37 +92,38 @@ re-derive them. Three rules reach a portrait:
 | `unused-binding` | `:unused-binding` | A `def`/`let`/`letrec` binding nothing reads. |
 | `non-tail-self-recursion` | `:non-tail-recursion` | A function whose self-call sits outside tail position. |
 
-The false-mutable advisory surfaces the common conflation of a mutable
-**binding** with a mutable **value**: `(let [buf @""] (push buf x))` mutates the
-*value* but the *binding* never changes, so `buf` should stay immutable. Because
-every advisory is read from `compile/diagnostics`, portrait and `elle lint`
-always agree.
+The false-mutable advisory catches a common mix-up of a mutable **binding**
+with a mutable **value**. `(let [buf @""] (push buf x))` mutates the value,
+but the binding never changes, so `buf` needs no `@`. Every advisory is read
+from `compile/diagnostics`, so a portrait and `elle lint` always agree.
 
 Each advisory appears at two granularities:
 
-- **Module** — `(get (portrait:module a) :false-mutable)` lists every flagged
-  binding across the module (including top-level ones). `:unused-binding` and
+- **Module**: `(get (portrait:module a) :false-mutable)` lists every flagged
+  binding in the module, top-level ones included. `:unused-binding` and
   `:non-tail-recursion` list theirs the same way.
-- **Function** — `(portrait:function a :f)` includes one observation for each
-  flag *inside* `f`. Per-function attribution is exact, not by line range: the
-  linter tags each diagnostic with its nearest enclosing named function (the
-  `:function` field on a diagnostic), and the observation filters on it. A flag
-  in a nested closure is attributed to the inner function.
+- **Function**: `(portrait:function a :f)` holds one observation for each flag
+  inside `f`. The linter tags each diagnostic with its nearest enclosing named
+  function, and the observation filters on that tag. A flag in a nested
+  closure belongs to the inner function.
 
-Adding a rule to a portrait is one row in `lint-kinds` (`lib/portrait.lisp`),
-which both granularities read.
+```lisp
+(defn flags? [advisories message]
+  (any? (fn [d] (= message (get d :message))) advisories))
 
-## Phases
+(assert (flags? (get m :false-mutable)
+                "mutable binding 'unused' is never reassigned"))
+(assert (flags? (get m :non-tail-recursion)
+                "'count-down' calls itself outside tail position, so the stack grows with the recursion depth"))
+(assert (flags? (get (portrait:function a :process) :observations)
+                "binding 'unused' is never used"))
+```
 
-1. **Analyze** — `compile/analyze` parses and type-checks without executing
-2. **Query** — `compile/signal`, `compile/captures`, `compile/callees`
-3. **Compose** — `portrait:function`, `portrait:module` build structured data
-4. **Render** — `portrait:render` formats for display
-
----
+A new rule reaches a portrait as one row in `lint-kinds`
+([lib/portrait.lisp](../../lib/portrait.lisp)), which both granularities read.
 
 ## See also
 
-- [signals](../signals/index.md) — signal system that portraits analyze
+- [signals](../signals/index.md) — the signal system a portrait reports on
 - [modules](../modules.md) — module structure
-- [macros](../macros.md) — macro expansion before analysis
+- [macros](../macros.md) — macro expansion, which runs before analysis

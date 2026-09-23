@@ -11,6 +11,6 @@ Up: [..](../AGENTS.md)
 - [ci.md](ci.md) — **CI and Triage** CI structure, local workflow, and failure diagnosis.
 - [debugging.md](debugging.md) — **Elle Debugging Toolkit (more...)**
 - [index.md](index.md) — **Analysis** Meta-analysis tools: testing, debugging, and semantic portraits.
-- [portrait.md](portrait.md) — **Portrait (more...)**
+- [portrait.md](portrait.md) — **Portrait** A portrait reports what the compiler knows about code without running it: signals, captures, calls and lint advisories.
 - [scripts.md](scripts.md) — **Test Scripts** Writing and organizing Elle test scripts.
 - [testing.md](testing.md) — **Testing Strategy** Which *kind* of test to write, and where it belongs.

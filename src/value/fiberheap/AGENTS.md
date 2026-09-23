@@ -39,7 +39,8 @@ heap and region explicitly through `arena`.
 | `regionpool.rs` | `RegionPool`: dual-ended pages, object and data cursors, page claim and release |
 | `regionpool/header.rs` | The 16-byte page header: region id, `(generation, store)` stamp, self-validating size tag, and the masked walk that finds a base from any pointer inside the page |
 | `regionpool/introspect.rs` | `find_object_cross_refs` content scan (cascade + diagnostics) |
-| `pagepool.rs` | `PagePool`: per-thread mmap page cache by size class; the `PageDirty` release-time body reset; live traffic counters (`arena/page-claims`); guardfree leak hook; file-backed (hydrated image) pages bypass the cache — their release is `munmap` |
+| `pagepool.rs` | `PagePool`: per-thread mmap page cache by size class; the `PageDirty` spans a `--trace=scrub` release blanks; live traffic counters (`arena/page-claims`); guardfree leak hook; file-backed (hydrated image) pages bypass the cache — their release is `munmap` |
+| `pagepool/page.rs` | `MmapPage`: a self-aligned anonymous or file-backed mapping, and the process-wide `mapped_bytes` gauge |
 | `regionstore/hydrate.rs` | Install a hydrated image region: adopt mapped pages, rebuild object bookkeeping from the image's index (docs/impl/image.md § Hydration) |
 | `freelog.rs` | `--trace=free`/`freebt` free-log; guardfree arming |
 | `census.rs` | `--trace=census` post-boot heap census: per-tag histogram, sealing classification, relocation-slot counts (docs/impl/image/sealing.md) |
