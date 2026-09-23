@@ -14,8 +14,10 @@ never checked against its callers (#1238).
 ## When to use intrinsics
 
 Use intrinsics when:
-- Writing **hot loops** where rest-arg allocation from variadic stdlib
-  wrappers would inflate arena counts or slow execution.
+- Writing **hot loops** that must never fall back to a call. A wrapper over
+  proven numbers lowers to its op (see Lowering), but a wrapper whose proof
+  is missing stays a call with no warning. An intrinsic whose proof is
+  missing is a compile error.
 - Writing code that must be **GPU-eligible** (`%`-intrinsics lower to
   SPIR-V/MLIR; stdlib wrappers do not).
 - Writing a **`(silent!)`** function, whose ceiling rejects the `:error` the
@@ -97,6 +99,8 @@ Inference discharges contracts from:
 - **the result of a proven `%`-intrinsic** — each op's result type is a
   function of its operand types (see below), so one guard proves a whole
   chain of them;
+- **the result of `+`, `-` or `*` over proven numbers** — it carries the
+  matching op's result type, so `(- n 1)` over an int `n` is an int;
 - **a `(numeric!)` declaration** — it floors *every parameter of the
   enclosing function* at Number, so a whole numeric kernel proves at once
   without a per-parameter guard. The same declaration asserts that the
@@ -225,27 +229,45 @@ One lowering per op; which one is a fixed property of the op, not a mode:
 
 A **wrapper** call lowers to its intrinsic where inference proves the
 operands. Elsewhere it keeps its validating, signaling, polymorphic meaning.
-The container wrappers do this today:
-[monomorphize.rs](../src/hir/typeinfer/monomorphize.rs) rewrites
-`(put s :x 1)` on a proven `@struct` to `%put-struct-mut`. The arithmetic and
-comparison wrappers do not yet, so `(+ a b)` stays a call even over proven
-ints (#1237).
+Two rewrites do this. Both run after inference and before the operand proofs,
+so the operand proofs check each rewritten op like one the programmer wrote:
+
+- [monomorphize.rs](../src/hir/typeinfer/monomorphize.rs) rewrites a container
+  wrapper on a proven container: `(put s :x 1)` on a proven `@struct` becomes
+  `%put-struct-mut`.
+- [wrapper.rs](../src/hir/typeinfer/wrapper.rs) rewrites a call to `+`, `-`,
+  `*`, `<`, `>`, `<=`, `>=` or `=` with exactly two operands, both proven
+  numbers, to `%add`, `%sub`, `%mul`, `%lt`, `%gt`, `%le`, `%ge` or `%eq`.
 
 ```lisp
 (defn fhir [src] (get (compile/dumps src "<doc>") :fhir))
 
 (assert (string/contains? (fhir "(defn g [] (let [s @{}] (put s :x 1) s))\n(g)")
                           "%put-struct-mut"))
-
-# #1237: this assertion flips when + lowers on proven operands.
-(assert (not (string/contains?
-               (fhir "(defn h [a b]
-                        (when (%not (%int? a)) (error :x))
-                        (when (%not (%int? b)) (error :y))
-                        (+ a b))
-                      (h 1 2)")
-               "%add")))
+# Every caller passes an int, so both operands are proven and + lowers.
+(assert (string/contains? (fhir "(defn h [a b] (+ a b))\n(h 1 2)") "%add"))
+# One caller passes a string, so nothing proves a, and + stays a call.
+(assert (not (string/contains? (fhir "(defn h [a b] (+ a b))\n(h 1 2)\n(h \"s\" 2)")
+                               "%add")))
 ```
+
+The lowering changes no result. On two numbers the wrapper cannot raise, and
+it computes what the op computes: the `+` wrapper sums from its first operand
+rather than from `0`, so `-0.0` survives both spellings. The site's signal
+narrows to silent, because the operand check was the only error the wrapper
+could raise, and the proof has discharged it.
+
+```lisp
+(defn plus [a b] (+ a b))
+(assert (= (string (+ -0.0 -0.0)) "-0.0") "the lowered +")
+(assert (= (string (apply plus [-0.0 -0.0])) "-0.0")
+        "the wrapper call: plus is used as a value, so nothing proves a or b")
+```
+
+Only a pair of numbers lowers. `%eq` also compares two strings, and `%lt`
+orders them, but the WASM tier compares their payload words instead of their
+contents (#1268), so a string comparison stays a wrapper call. A call with one
+operand or with three stays a call too.
 
 ## Intrinsics as callable values
 
@@ -275,8 +297,8 @@ tier:
 (assert (= (+ 9223372036854775807 1) -9223372036854775808) "wraps")
 ```
 
-Wrapping follows from the intrinsic design. `%add` is signal-free, and the
-design lowers `+` to `%add` wherever both operands are proven ints (#1237). A
+Wrapping follows from the intrinsic design. `%add` is signal-free, and `+`
+lowers to `%add` wherever both operands are proven numbers (see Lowering). A
 type proof cannot exclude overflow, so if overflow were an error the lowering
 would change observable behavior. Wrapping is
 the one semantics the VM instruction, the JIT, and the GPU tiers all agree

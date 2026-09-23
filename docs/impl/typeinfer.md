@@ -41,7 +41,8 @@ estimate rises, and the limit of the ascent is the least fixpoint.
 | `thaw` or `freeze`, or its `%` twin | the argument's mutable or immutable twin container type |
 | a registered primitive | its declared `RetType`, read from the primitive tables |
 | the stdlib `push` or `put` | the first argument's type, which it returns |
-| a stdlib arithmetic wrapper (`+`, `abs`, `min`, `floor`, …) | Number — the wrapper raises on everything else |
+| the stdlib `+`, `-` or `*`, every operand a proven number | the join of the operand types, as the matching op's result; Int for `(+)` and `(*)` |
+| any other stdlib arithmetic wrapper call (`abs`, `min`, `floor`, …, or `+` over an unproven operand) | Number — the wrapper raises on everything else |
 | anything else | Top |
 
 **A self-recursive call is a call.** It reads the body-type map that every
@@ -67,6 +68,19 @@ body is Int again. Nothing moves, and the ascent is over.
 The proof the second pass adds is what the backends spend: an `%add` of two
 proven ints carries `:int` into LIR, which is `AddInt` on the bytecode tier and
 a tag-check-free fast path on the JIT ([lir.md](lir.md)).
+
+The wrapper spelling settles the same way. `(- n 1)` over an int `n` is an int,
+so the recursive call passes an int and `n` stays one. Every wrapper call then
+has two proven operands and lowers to its op
+([intrinsics.md](../intrinsics.md)):
+
+```lisp
+(defn fib-w [n]
+  (if (< n 2) n (+ (fib-w (- n 1)) (fib-w (- n 2)))))
+(assert (= (fib-w 10) 55) "the lowered wrappers compute the recursion")
+(assert (string/contains? (string/join (fn/disasm fib-w) " ") "AddInt")
+        "the lowered + adds two proven ints")
+```
 
 ## An exhausted budget widens
 
@@ -111,10 +125,11 @@ Top, which is above the fixpoint and proves nothing.
 
 That one rule covers every consumer, because they all read that one map — the
 operand contracts ([contract.rs](../../src/hir/typeinfer/contract.rs)), the signal narrowing
-([narrow.rs](../../src/hir/narrow.rs)), the wrapper monomorphization
+([narrow.rs](../../src/hir/narrow.rs)), the arithmetic wrapper lowering
+(`wrapper.rs`), the container wrapper monomorphization
 ([monomorphize.rs](../../src/hir/typeinfer/monomorphize.rs)), and the LIR operand proof
 ([intrinsic.rs](../../src/lir/lower/expr/intrinsic.rs)). The last two ask with equality, so a
-Bottom proves nothing there. The first two ask with `subtype`, where a Bottom
+Bottom proves nothing there. The first three ask with `subtype`, where a Bottom
 would prove every row.
 
 A definition is therefore checked where it is written. `f` below is a compile
@@ -245,7 +260,13 @@ The pass has no flow, so it cannot order the write against a call:
   loop that rewrites its own callee between two turns, the branch a Bottom would
   have joined away, and two controls — the unwritten binding, and the
   SSA-renamed function-local write that still proves.
-- [typed-int-ops.lisp](../../tests/impl/typed-int-ops.lisp) — the implementation-suite peer: a
-  self-recursive integer `fib` emits `AddInt` and computes with it, a float
-  base case is refused at compile time, and a reassigned local lambda binding
-  is refused where its unreassigned twin emits `AddInt`.
+- `hir::typeinfer::tests::wrapper::*` — the arithmetic wrapper lowering: each
+  of the eight wrappers over two proven numbers becomes its op, and the
+  wrapper-spelled `fib` holds no wrapper call. The counter-factuals keep the
+  call: an unproven operand, two strings, three operands, and a user binding
+  named `+`.
+- [typed-int-ops.lisp](../../tests/impl/typed-int-ops.lisp) — the
+  implementation-suite peer: a self-recursive integer `fib` emits `AddInt` and
+  computes with it, in the intrinsic spelling and in the wrapper spelling. A
+  float base case is refused at compile time, and a reassigned local lambda
+  binding is refused where its unreassigned twin emits `AddInt`.
