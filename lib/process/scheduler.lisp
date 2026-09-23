@@ -86,7 +86,9 @@
     # ---- I/O completion handling ----
 
     (defn complete-io [completions]
-      "Resume or abort the process or sub-fiber behind each completion."
+      "Resume or abort the process or sub-fiber behind each completion. A
+       completion relayed for a nested scheduler goes to its queue, and the
+       bump to its wake-box wakes it."
       (each completion in completions
         (let* [id (get completion :id)
                entry (get io-pending id)
@@ -94,13 +96,19 @@
           (del io-pending id)
           (when (not (nil? entry))
             (let [pid (get entry :pid)
-                  sub-fiber (get entry :fiber)]
-              (if (not (nil? sub-fiber))
-                (when (= (fiber/status sub-fiber) :paused)
-                  (if (nil? err)
-                    (fiber/resume sub-fiber (get completion :value))
-                    (fiber/abort sub-fiber err))
-                  (waits:after-resume sub-fiber pid))
+                  sub-fiber (get entry :fiber)
+                  queue (get entry :queue)]
+              (cond
+                (not (nil? queue))
+                  (begin
+                    (push queue completion)
+                    (rebox entry:wake-box (+ (unbox entry:wake-box) 1)))
+                (not (nil? sub-fiber))
+                  (when (= (fiber/status sub-fiber) :paused)
+                    (if (nil? err)
+                      (fiber/resume sub-fiber (get completion :value))
+                      (fiber/abort sub-fiber err))
+                    (waits:after-resume sub-fiber pid))
                 (when (core:alive? pid)
                   (let [f (get (core:proc-get pid) :fiber)]
                     (set-running pid)

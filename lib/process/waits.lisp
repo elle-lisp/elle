@@ -1,6 +1,6 @@
 (elle/epoch 12)
 # audited: 2026-09-23
-# Structured concurrency inside processes: sub-fibers, and the join, select, abort and futex waits.
+# Structured concurrency inside processes: sub-fibers, the join, select, abort and futex waits, and relayed I/O.
 # lib/process/overview.md
 # docs/processes.md
 
@@ -113,7 +113,26 @@
   # ---- wait ops ----
 
   (defn known-op? [op]
-    (has? |:join :select :abort :park :notify| op))
+    (has? |:join :select :abort :park :notify :io-forward :io-forward-cancel| op))
+
+  (defn relay-io [w request]
+    "Forward the I/O of a scheduler nested in waiter w to our parent, and
+     remember where its completion goes. Wakes w with the id or [:error e]."
+    (let [id (forward-io (get request :request))]
+      (when (not (and (array? id) (= (first id) :error)))
+        (put io-pending id
+             @{:pid (owner w)
+               :relay-fiber (when (not (integer? w)) w:fiber)
+               :queue (get request :queue)
+               :wake-box (get request :wake-box)}))
+      (wake w id)))
+
+  (defn cancel-relayed-io [w id]
+    "Cancel I/O relayed for a nested scheduler, and wake waiter w."
+    (when (has? io-pending id)
+      (del io-pending id)
+      (emit :wait {:op :io-forward-cancel :id id}))
+    (wake w nil))
 
   (defn unknown-op [op]
     {:error :protocol-error :message (string "unknown :wait op: " op)})
@@ -142,7 +161,9 @@
         :abort
           (let [target (get request :fiber)]
             (when (nil? (get sub-completed target))
-              (core:cancel-io-where (fn [entry] (= (get entry :fiber) target)))
+              (core:cancel-io-where (fn [entry]
+                                      (or (= (get entry :fiber) target)
+                                      (= (get entry :relay-fiber) target))))
               (protect (fiber/abort target {:error :aborted}))
               (after-resume target pid))
             (wake w nil))
@@ -156,6 +177,8 @@
         :notify
           (let [count (get request :count)]
             (wake w (wake-parked (get request :key) (fn [_ n] (< n count)))))
+        :io-forward (relay-io w request)
+        :io-forward-cancel (cancel-relayed-io w (get request :id))
 
         ## Unknown wait op — fail loudly, in the fiber that emitted it. A
         ## silent re-queue resumes the emitting fiber with nil, which it reads
