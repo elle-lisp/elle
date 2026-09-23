@@ -59,6 +59,7 @@ pub mod read;
 pub mod registration;
 pub mod seq;
 pub mod sets;
+pub mod signature;
 pub mod sort;
 pub mod stream;
 pub mod string;

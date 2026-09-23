@@ -1,4 +1,5 @@
 (elle/epoch 12)
+# audited: 2026-09-21
 
 ## ════════════════════════════════════════════════════════════════════════════
 ## fn/flow and fn/cfg integration tests
@@ -46,7 +47,9 @@
 
 (defn my-add (x y)
   (+ x y))
-(assert (nil? (get (fn/flow my-add) :name)) "fn/flow named function")
+# The binder's name reaches the closure payload (docs/functions.md
+# § fn/signature), so a defn'd function reports it here.
+(assert (= (get (fn/flow my-add) :name) "my-add") "fn/flow named function")
 
 (assert (nil? (get (fn/flow (fn (x) x)) :name))
         "fn/flow anonymous function name is nil")
@@ -83,18 +86,24 @@
 (defn my-fn-1 (x)
   (+ x 1))
 (def r6 (fn/cfg my-fn-1 :dot))
-(assert (string/contains? r6 "anonymous")
-        "fn/cfg dot unnamed defn shows anonymous")
+(assert (string/contains? r6 "my-fn-1") "fn/cfg dot shows the defn's name")
 
 (def r7 (fn/cfg (fn (e) (if e 1 2)) :dot))
 (assert (string/contains? r7 "->") "fn/cfg dot branching has edges")
 
+# A named function labels by its name; the docstring labels only an
+# anonymous one, and fn/flow's :doc answers either way (see above).
+(def r8
+  (fn/cfg (fn (x)
+            "Does stuff."
+            (+ x 1)) :dot))
+(assert (string/contains? r8 "Does stuff.")
+        "fn/cfg dot shows an anonymous fn's docstring in the label")
 (defn my-fn-2 (x)
   "Does stuff."
   (+ x 1))
-(def r8 (fn/cfg my-fn-2 :dot))
-(assert (string/contains? r8 "Does stuff.")
-        "fn/cfg dot shows docstring in label")
+(assert (string/contains? (fn/cfg my-fn-2 :dot) "my-fn-2")
+        "fn/cfg dot labels a documented defn by its name")
 
 ## ── fn/cfg: Error handling ──────────────────────────────────────────────────
 

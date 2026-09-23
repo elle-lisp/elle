@@ -136,7 +136,7 @@
     block32: DecrefRegion s26
     block32: IncrefValueRegion v309
     block32: DecrefValueRegion v310
-  ; closure[0] <anon>
+  ; closure[0] ctl_map
     block0: DecrefValueRegion v8
     block0: DecrefRegion s27
     block0: TailCall defer_callee_release=false
@@ -146,7 +146,7 @@
   ; closure[1] <anon>
     block0: IncrefValueRegion v1
     block0: DecrefValueRegion v2
-  ; closure[2] <anon>
+  ; closure[2] ctl_filter
     block0: DecrefValueRegion v8
     block0: DecrefRegion s28
     block0: TailCall defer_callee_release=false
@@ -156,7 +156,7 @@
   ; closure[3] <anon>
     block0: IncrefValueRegion v1
     block0: DecrefValueRegion v2
-  ; closure[4] <anon>
+  ; closure[4] ret_map
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v6
     block0: DecrefValueRegion v7
@@ -165,7 +165,7 @@
   ; closure[5] <anon>
     block0: IncrefValueRegion v1
     block0: DecrefValueRegion v2
-  ; closure[6] <anon>
+  ; closure[6] ret_filter
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v6
     block0: DecrefValueRegion v7

@@ -254,6 +254,9 @@ fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
 	@# so bumping CURRENT_EPOCH must not flag every older-epoch file here.
 	@printf '%s\n' $(LISP_FILES) | parallel -j $(JOBS) '$(ELLE) fmt --check --no-epoch {}'
 
+semver-check: elle  ## Verify every versioned library surface against its committed .surface
+	$(ELLE) semver
+
 # ── Test ────────────────────────────────────────────────────────────
 
 # Approximate runtimes (for guidance — vary by machine):
@@ -598,7 +601,7 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 # wall-clock-sensitive are only reachable the second way, which is why the PR
 # workflow's "VM+JIT Tests" job gates on those two targets. A `make smoke` that
 # skipped them was weaker than the gate it exists to predict.
-smoke: smoke-elle smoke-vm smoke-jit doctest embedding  ## Run the elle test corpus (runner + per-file VM and JIT passes) + docs + embedding
+smoke: smoke-elle smoke-vm smoke-jit doctest embedding semver-check  ## Run the elle test corpus (runner + per-file VM and JIT passes) + docs + embedding + surface gate
 	@echo "=== all smoke tests passed ==="
 
 MLIR_PREFIX ?= $(HOME)/git/tmp/mlir-install

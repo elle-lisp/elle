@@ -1,3 +1,4 @@
+// audited: 2026-09-21
 //! `compile/analyze` and the simple accessors that read straight off a handle
 //! (diagnostics, symbols). These build or unpack the `AnalysisHandle`.
 use std::collections::HashMap;
@@ -153,12 +154,17 @@ pub(in crate::primitives::compile) fn prim_compile_symbols(
     };
     // Only real in-file definitions (those with a source location). Usage-only
     // placeholder entries for primitives carry no location and are not symbols
-    // the user defined here.
-    let values: Vec<Value> = handle
+    // the user defined here. Sorted by name: the index is a hash map, and a
+    // consumer that diffs two analyses needs one order.
+    let mut defs: Vec<_> = handle
         .symbol_index
         .definitions
         .values()
         .filter(|d| d.location.is_some())
+        .collect();
+    defs.sort_by(|a, b| a.name.cmp(&b.name));
+    let values: Vec<Value> = defs
+        .into_iter()
         .map(|x| symbol_def_to_value(x, ctx))
         .collect();
     (SIG_OK, ctx.array(values))

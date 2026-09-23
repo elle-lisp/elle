@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+//! audited: 2026-09-21
 //! CLI entry point for `elle rewrite`.
 //!
 //! docs/epochs.md
@@ -367,7 +367,7 @@ pub(crate) fn rewrite_file(
     Ok(Some((result, edit_count)))
 }
 
-mod edits;
+pub(crate) mod edits;
 use edits::*;
 
 fn print_help() {

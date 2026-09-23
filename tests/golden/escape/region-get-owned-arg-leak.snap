@@ -160,7 +160,7 @@
     block19: DecrefRegion s28
     block19: DecrefRegion s29
     block19: DecrefRegion s30
-  ; closure[0] <anon>
+  ; closure[0] measure
     block4: DecrefValueRegion v20
     block4: IncrefValueRegion v24
     block4: DecrefValueRegion v25
@@ -175,7 +175,7 @@
     block8: DecrefValueRegion v73
     block8: DecrefValueRegion v75
     block8: IncrefValueRegion v72
-  ; closure[1] <anon>
+  ; closure[1] two-get
     block0: DecrefValueRegion v7
     block0: DecrefValueRegion v15
     block0: TailCall defer_callee_release=false
@@ -183,19 +183,19 @@
     block0: DecrefValueRegion v20
     block0: DecrefValueRegion v21
     block0: DecrefValueRegion v23
-  ; closure[2] <anon>
+  ; closure[2] one-get
     block0: DecrefValueRegion v9
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v5
     block0: DecrefValueRegion v6
     block0: DecrefValueRegion v7
-  ; closure[3] <anon>
+  ; closure[3] discard-get
     block0: DecrefValueRegion v7
     block0: DecrefValueRegion v10
     block0: DecrefValueRegion v17
     block0: DecrefValueRegion v20
     block0: IncrefValueRegion v22
-  ; closure[4] <anon>
+  ; closure[4] two-len
     block0: DecrefValueRegion v6
     block0: DecrefValueRegion v13
     block0: TailCall defer_callee_release=false

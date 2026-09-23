@@ -228,6 +228,7 @@ impl<'a> Lowerer<'a> {
             if let HirKind::Lambda { params, .. } = &init.kind {
                 self.current_function_binding = Some(*binding);
                 self.current_function_params = Some(params.clone());
+                self.pending_lambda_name = self.binder_name(*binding);
             }
             let slot = self.binding_to_slot[binding];
             // Record the slot BEFORE lowering the init so

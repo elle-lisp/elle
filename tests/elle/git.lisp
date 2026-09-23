@@ -1,4 +1,5 @@
 (elle/epoch 12)
+# audited: 2026-09-21
 ## Git module tests (FFI to libgit2)
 
 # Gate the whole file on libgit2: if it can't load, re-raise as a loud :gated so
@@ -91,6 +92,26 @@
 (let [ts (git:tags tmp)]
   (assert (find (fn [t] (= t "v1.0")) ts) "tag created"))
 (git:tag-delete tmp "v1.0")
+
+## A second commit adds a nested file, so the two trees differ
+(file/mkdir-all (string tmp-path "/tests"))
+(file/write (string tmp-path "/tests/t.lisp") "(assert true \"ok\")\n")
+(git:add tmp "tests/t.lisp")
+(def oid2 (git:commit tmp "add a test"))
+
+## ls-tree walks recursively and answers full paths at a rev
+(let [paths (git:ls-tree tmp "HEAD")]
+  (assert (find (fn [p] (= p "README.md")) paths) "root file listed")
+  (assert (find (fn [p] (= p "tests/t.lisp")) paths) "nested path listed"))
+(assert (not (find (fn [p] (= p "tests/t.lisp")) (git:ls-tree tmp oid)))
+        "the older tree lacks the later file")
+
+## show reads a blob's content at a rev
+(assert (= (git:show tmp "HEAD:README.md") "hello") "content at HEAD")
+(assert (= (git:show tmp (string oid ":README.md")) "hello")
+        "content at a bare oid")
+(assert (not (first (protect (git:show tmp "HEAD:absent"))))
+        "a missing path refuses")
 
 (git:close tmp)
 (file/delete-dir-all scratch)

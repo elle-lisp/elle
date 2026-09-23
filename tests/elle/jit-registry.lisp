@@ -1,4 +1,5 @@
 (elle/epoch 12)
+# audited: 2026-09-21
 # The JIT code-address registry (docs/impl/jit.md, "The code-address
 # registry").
 #
@@ -11,9 +12,9 @@
 # misses its deadline.
 #
 # A compiled function's registry label is its declared name when one exists,
-# else its source location — and lowering names almost nothing, so the
-# location, which carries this FILE's name, is what identifies the probe
-# below. Under `--jit=off` nothing compiles here and the map may even be
+# else its source location — and binder names reach closure payloads
+# (docs/functions.md § fn/signature), so the probe's defn name identifies
+# it below. Under `--jit=off` nothing compiles here and the map may even be
 # empty; the render is a string either way.
 
 (defn registry-probe [x]
@@ -32,8 +33,8 @@
 (let [m (vm/query "jit/map" nil)]
   (assert (string? m) "jit/map: renders as a string")
   (when (vm/query "jit?" registry-probe)
-    (assert (string/contains? m "jit-registry")
-            "jit/map: a compiled function's source label appears in the registry")))
+    (assert (string/contains? m "registry-probe")
+            "jit/map: a compiled function's name appears in the registry")))
 
 # The peek beside the map (docs/impl/jit.md): the map names the function a
 # sampled frame belongs to, and the peek shows a window of instruction words

@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-09-23
 //! The `elle` binary: dispatch a subcommand, or set up one `Runtime` and drive
 //! it from a file, `-e`, stdin or the REPL.
 //!
@@ -21,6 +21,8 @@ mod help;
 use help::print_help;
 mod errors;
 use errors::{format_error_json, format_runtime_error, parse_compilation_error};
+mod semver_cli;
+use semver_cli::run_semver_subcommand;
 
 fn run_stdin(vm: &mut VM, symbols: &mut SymbolTable, cctx: &mut CompileCtx) -> Result<(), String> {
     let mut contents = String::new();
@@ -281,6 +283,13 @@ fn main() {
             // A boot image is written by a full source boot, so this needs a
             // `Runtime` like `test` does rather than answering before VM init.
             let exit_code = run_image(&args[2..]);
+            std::process::exit(exit_code);
+        }
+        Some("semver") => {
+            // The gate is an Elle program (src/semver) and needs a full VM,
+            // like `elle test`.
+            let sub_args: Vec<String> = args[2..].to_vec();
+            let exit_code = run_semver_subcommand(sub_args);
             std::process::exit(exit_code);
         }
         Some("test") => {

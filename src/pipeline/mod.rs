@@ -13,6 +13,7 @@ mod analyze;
 mod bootstrap;
 mod cache;
 mod compile;
+pub mod directives;
 mod eval;
 pub mod sources;
 

@@ -1,3 +1,6 @@
+// audited: 2026-09-21
+//! Primitive registration: the canonical table list, the name and id indexes
+//! over it, and the startup pass that installs every def into a VM.
 use crate::symbol::SymbolTable;
 use crate::value::Value;
 use crate::vm::VM;
@@ -7,8 +10,8 @@ use super::{
     allocator, arena, arithmetic, array, bitwise, bytes, chan, comparison, compile, concurrency,
     config, convert, debug, disassembly, display, fiber_introspect, fibers, fileio, format,
     intrinsics, introspection, io, json, list, loading, logic, lstruct, math, memory, meta,
-    modules, net, package, parameters, path, ports, posix, r#box, read, sets, sort, stream, string,
-    structs, subprocess, time, traits, types, unix, watch,
+    modules, net, package, parameters, path, ports, posix, r#box, read, sets, signature, sort,
+    stream, string, structs, subprocess, time, traits, types, unix, watch,
 };
 
 /// All primitive tables. Each module exports a `static PRIMITIVES`
@@ -60,6 +63,7 @@ pub(crate) static ALL_TABLES: &[&[PrimitiveDef]] = &[
     subprocess::PRIMITIVES,
     read::PRIMITIVES,
     sets::PRIMITIVES,
+    signature::PRIMITIVES,
     sort::PRIMITIVES,
     stream::PRIMITIVES,
     string::PRIMITIVES,

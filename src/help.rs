@@ -56,6 +56,9 @@ pub(super) fn print_help() {
     println!("       elle lint [options] <file|dir>... Static analysis");
     println!("       elle lsp                          Start language server");
     println!("       elle rewrite [options] <file...>  Source-to-source rewriting");
+    println!("       elle test [options] <file...>     Run the test corpus");
+    println!("       elle semver [CMD] [PATH...]       Surface diffs and version gates");
+    println!("                                         (CMD: check, release, migrate)");
     println!("       elle image dump-boot <file>       Write a boot image\n");
     println!("Options:");
     println!("  -h, --help            Show this help");

@@ -19,7 +19,7 @@ Provide the complete Elle implementation:
 | File | Purpose |
 |------|---------|
 | `lib.rs` | Public API exports, crate documentation |
-| `main.rs` | CLI entry point (REPL, file execution, lint, LSP, rewrite) |
+| `main.rs` | CLI entry point (REPL, file execution, and the fmt, lint, lsp, rewrite, test, and semver subcommands) |
 | `arithmetic.rs` | Unified arithmetic operations (shared by VM and primitives) |
 | `plugin.rs` | Dynamic plugin loading for `.so` cdylib crates |
 | `path.rs` | UTF-8 path operations (wraps camino, path-clean, pathdiff) |

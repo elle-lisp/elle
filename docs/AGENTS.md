@@ -25,7 +25,7 @@ Up: [..](../AGENTS.md)
 - [errors.md](errors.md) — **Error Handling** Errors in Elle are values signaled via fibers.
 - [ffi.md](ffi.md) — **FFI: Architecture Reference** Elle's FFI enables calling C functions from Elle code.
 - [fmt.md](fmt.md) — **elle fmt** Opinionated code formatter for Elle.
-- [functions.md](functions.md) — **Functions** How to make a function with `fn` and `defn`, collect arguments, close over state, pass functions around, and how deep recursion may go.
+- [functions.md](functions.md) — **Functions** How to make, call, compose and inspect functions, and how deep recursion may go.
 - [intrinsics.md](intrinsics.md) — **Intrinsics** Intrinsics are silent bytecode operations prefixed with `%`.
 - [io.md](io.md) — **I/O** All I/O in Elle is async — reads and writes yield to the scheduler.
 - [libraries.md](libraries.md) — **Libraries** Elle ships with libraries in `lib/`.
@@ -47,6 +47,7 @@ Up: [..](../AGENTS.md)
 - [regions.md](regions.md) — **Region-Based Memory Management** Elle frees memory at compile-time-known program points: no tracing collector, no liveness scan, and no GC pause.
 - [runtime.md](runtime.md) — **Runtime Signals** The runtime uses fiber signals for internal coordination.
 - [scheduler.md](scheduler.md) — **Scheduler** The async scheduler is the only supported execution backend, and user code runs inside it automatically.
+- [semver.md](semver.md) — **elle semver** `elle semver` computes and verifies the version bump a library's surface change requires.
 - [sets.md](sets.md) — **Sets** Sets are unordered collections of unique values.
 - [stdlib.md](stdlib.md) — **Standard Library** Elle's standard library has four layers: Rust primitives, core operators, prelude macros, and stdlib functions.
 - [strings.md](strings.md) — **Strings** Strings are immutable sequences of grapheme clusters.
@@ -62,6 +63,7 @@ Up: [..](../AGENTS.md)
 - [threads.md](threads.md) — **Threads** OS threads for CPU-bound work.
 - [traits.md](traits.md) — **Traits** Every heap-allocated value carries a `traits` field — a pointer to a trait table (struct or @struct).
 - [types.md](types.md) — **Types** Elle values are 16-byte tagged unions.
+- [versioning.md](versioning.md) — **Versioning** How an Elle library declares its version and ships migration rules.
 - [warts.md](warts.md) — **Warts** Where Elle surprises a programmer from another Lisp: the intentional differences, then the known limitations.
 
 ## Directories

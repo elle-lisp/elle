@@ -2,8 +2,7 @@
 
 <!-- audited: 2026-09-23 -->
 
-How to make a function with `fn` and `defn`, collect arguments, close over
-state, pass functions around, and how deep recursion may go.
+How to make, call, compose and inspect functions, and how deep recursion may go.
 
 ## fn — anonymous functions
 
@@ -117,6 +116,44 @@ list gives a list.
              (filter odd?)
              (map (fn [x] (* x x))))))
 ```
+
+## fn/signature — the declared shape of a function
+
+`(fn/signature f)` returns a struct describing how `f` is called:
+parameter counts, the rest-collector kind, the `&named` key set, the
+inferred signal profile, the docstring, and where the function was
+written.
+
+```lisp
+(defn greet [name &opt greeting]
+  "Greet name, with an optional greeting."
+  (or greeting "Hello"))
+
+(def sig (fn/signature greet))
+(assert (= (get sig :name) "greet") "declared name")
+(assert (= (get sig :required) 1) "one required parameter")
+(assert (= (get sig :optional) 1) "one optional parameter")
+(assert (= (get sig :rest) :none) "no rest collector")
+(assert (= (get sig :doc) "Greet name, with an optional greeting.")
+        "docstring")
+
+# The &named key set is part of the signature.
+(defn connect [host &named port tls?] [host port tls?])
+(def csig (fn/signature connect))
+(assert (= (get csig :rest) :named) "&named collector")
+(assert (= (get csig :named-keys) [:port :tls?]) "sorted key set")
+
+# The signal profile has the shape compile/signal returns.
+(def id-sig (fn/signature (fn [x] x)))
+(assert (get (get id-sig :signals) :silent) "identity is silent")
+```
+
+`:rest` is `:none`, `:list` (`&`), `:keys` (`&keys`), or `:named`
+(`&named`). `:named-keys` is a sorted array of keywords, empty unless
+`:rest` is `:named`. `:name`, `:doc`, and `:origin` (a
+`{:file :line :col}` struct) are absent when the function does not carry
+them. A native primitive answers from its declared metadata. Any other
+value is a `type-error`.
 
 ## Tail call optimization
 

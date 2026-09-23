@@ -1,4 +1,4 @@
-// audited: 2026-09-17
+// audited: 2026-09-21
 //! Compiler-as-library primitives: analyze Elle source and query the results.
 //!
 //! The `compile/analyze` primitive runs the full analysis pipeline (reader →
@@ -33,11 +33,13 @@ use query::prim_compile_callers;
 use query::prim_compile_captured_by;
 use query::prim_compile_captures;
 use query::prim_compile_diagnostics;
+use query::prim_compile_exports;
 use query::prim_compile_primitives;
 use query::prim_compile_query_signal;
 use query::prim_compile_signal;
 use query::prim_compile_symbols;
 use transform::prim_compile_add_handler;
+use transform::prim_compile_apply_rules;
 use transform::prim_compile_barrier_module;
 use transform::prim_compile_dumps;
 use transform::prim_compile_extract;
@@ -269,6 +271,16 @@ primitive! {
         example: r#"(compile/callees analysis :main)"#,
         effect: RegionEffect::Fresh,
     }
+    "compile/exports" => prim_compile_exports {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Return the module surface of an analysis: {:constructor :exports}, or nil \
+              when the file's return expression is not an export struct.",
+        params: &["analysis"],
+        category: "compile",
+        example: r#"(compile/exports (compile/analyze src))"#,
+        effect: RegionEffect::Fresh,
+    }
     "compile/call-graph" => prim_compile_call_graph {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
@@ -321,6 +333,17 @@ primitive! {
         params: &["analysis", "fn-name", "signal-kind"],
         category: "compile",
         example: r#"(compile/add-handler analysis :fetch-page :error)"#,
+        effect: RegionEffect::Fresh,
+    }
+    "compile/apply-rules" => prim_compile_apply_rules {
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Apply rename/replace/report migration rules, supplied as data, to SOURCE \
+              text via the rewrite edit engine, reapplied to a fixpoint. Returns \
+              {:source :count :reports}. The consumer-migration engine of `elle semver`.",
+        params: &["source", "rules"],
+        category: "compile",
+        example: r#"(compile/apply-rules "(old 1)" [{:kind :rename :from "old" :to "new"}])"#,
         effect: RegionEffect::Fresh,
     }
     "compile/run-on" => prim_compile_run_on {

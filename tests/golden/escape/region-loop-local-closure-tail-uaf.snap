@@ -100,11 +100,11 @@
     block11: DecrefValueRegion v179
     block11: DecrefValueRegion v181
     block11: DecrefValueRegion v183
-  ; closure[0] <anon>
+  ; closure[0] small?
     block0: DecrefValueRegion v5
     block1: IncrefValueRegion v11
     block1: DecrefValueRegion v12
-  ; closure[1] <anon>
+  ; closure[1] drive-pair
     block4: IncrefRegion s14
     block4: DecrefRegion s15
     block4: DecrefValueRegion v20
@@ -116,7 +116,7 @@
   ; closure[2] <anon>
     block0: IncrefRegion s16
     block0: DecrefRegion s16
-  ; closure[3] <anon>
+  ; closure[3] drive-struct
     block4: IncrefRegion s17
     block4: DecrefRegion s18
     block4: DecrefValueRegion v20
@@ -131,7 +131,7 @@
     block0: IncrefValueRegion v4
     block0: DecrefValueRegion v5
     block0: DecrefValueRegion v6
-  ; closure[5] <anon>
+  ; closure[5] drive-read
     block4: IncrefRegion s19
     block4: DecrefRegion s20
     block4: DecrefValueRegion v24

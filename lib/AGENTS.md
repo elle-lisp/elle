@@ -17,7 +17,9 @@ Up: [..](../AGENTS.md)
 ## Directories
 
 - [aws/](aws/AGENTS.md) — Elle AWS Client
+- [git/](git/AGENTS.md) — (empty)
 - [gtk4/](gtk4/AGENTS.md) — (empty)
 - [http2/](http2/AGENTS.md) — The submodules behind [http2.lisp](../http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
 - [process/](process/AGENTS.md) — The submodules behind [process.lisp](../process.lisp): the scheduler in four parts, the primitives, and one file per behavior.
 - [rdf/](rdf/AGENTS.md) — (empty)
+- [semver/](semver/AGENTS.md) — (empty)

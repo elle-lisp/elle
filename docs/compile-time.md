@@ -232,6 +232,7 @@ same semantic model the compiler builds. Full guide:
 | `compile/callers analysis :fn` | call-graph in-edges |
 | `compile/callees analysis :fn` | call-graph out-edges |
 | `compile/call-graph analysis` | `{:nodes :roots :leaves}` |
+| `compile/exports analysis` | the module surface: `{:constructor :exports}`, or nil |
 | `compile/parallelize analysis [:f1 :f2 …]` | whether functions may run in parallel |
 | `compile/primitives` | metadata for all Rust-defined primitives |
 
@@ -242,6 +243,12 @@ same semantic model the compiler builds. Full guide:
 | `compile/rename analysis :old :new` | binding-aware rename |
 | `compile/extract analysis {:from :fn :lines [s e] :name :new}` | extract a range into a new function |
 | `compile/add-handler analysis :fn :signal` | wrap call sites with signal handling |
+
+**Rule-driven rewriting (textual, no handle):**
+`(compile/apply-rules source rules)` returns `{:source :count :reports}`. It
+drives the `elle rewrite` edit engine with rename, replace and report rules
+supplied as data, and it is the consumer-migration half of `elle semver`
+([semver](semver.md)). In depth: [`analysis/portrait.md`](analysis/portrait.md).
 
 **Execution:** `(compile/run-on tier closure & args)` runs the closure on one
 tier: `:bytecode`, `:jit`, `:mlir-cpu` (built with MLIR) or `:wasm` (built with

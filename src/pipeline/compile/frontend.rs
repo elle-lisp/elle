@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-21
 // src/pipeline/AGENTS.md
 //! Shared file/syntax compilation front end: parse → epoch-migrate → macro
 //! expand (with include splicing) → classify → analyze → regularize. Every
@@ -114,6 +114,9 @@ fn compile_syntaxes_frontend_xform_inner(
     let t = std::time::Instant::now();
 
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
+    // Version and migration declarations vanish before migration, so an
+    // epoch rewrite never reaches inside one (docs/versioning.md).
+    crate::pipeline::directives::extract_semver_directives(&mut syntaxes)?;
     if let Some(epoch) = source_epoch {
         crate::epoch::migrate_forms(&arena, &mut syntaxes, epoch)?;
     }
