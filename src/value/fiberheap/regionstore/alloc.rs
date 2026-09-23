@@ -1,4 +1,7 @@
+//! audited: 2026-09-23
 //! Minting, lazy region creation, and allocation into a region.
+//!
+//! docs/impl/region/model.md
 //!
 //! Every allocation execution claims its own physical region id
 //! (`new_runtime_region`); the entry behind that id is materialized lazily
@@ -195,5 +198,27 @@ impl RegionStore {
         self.ensure_raw(id);
         let entry = self.regions[id as usize].as_mut().unwrap();
         entry.pool.alloc_region_slice(items, &mut self.pool)
+    }
+
+    /// Allocate `len` bytes in a mortal region and let `fill` write every one
+    /// of them before a value can see them. This is the form for bytes that do
+    /// not already sit in one Rust slice: a reservation that starts zeroed, or
+    /// an answer joined from several parts.
+    pub fn alloc_bytes_with(
+        &mut self,
+        id: RuntimeRegion,
+        len: usize,
+        fill: impl FnOnce(&mut [u8]),
+    ) -> RegionSlice<u8> {
+        if len == 0 {
+            return RegionSlice::empty();
+        }
+        self.ensure_raw(id.get());
+        let entry = self.regions[id.get() as usize].as_mut().unwrap();
+        let ptr = entry.pool.alloc_data(len, 1, &mut self.pool);
+        // SAFETY: `alloc_data` answered `len` writable bytes in this region,
+        // and nothing else holds them yet.
+        fill(unsafe { std::slice::from_raw_parts_mut(ptr, len) });
+        unsafe { RegionSlice::from_raw(ptr, len as u32) }
     }
 }

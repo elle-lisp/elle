@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+//! audited: 2026-09-23
 //! `AsyncBackend`'s cancel, poll and wait — what the scheduler drives the
 //! backend with, on either platform.
 //!
@@ -30,6 +30,14 @@ impl AsyncBackend {
                 crate::io::uring::submit_uring_cancel(ring, id)?;
             }
             PlatformBackend::ThreadPool => inner.hub.stop(id),
+        }
+        // A read that borrowed its port's remainder gives it back now rather
+        // than when its completion arrives: the next read on the port is often
+        // submitted first, and it must find those bytes where the stream has
+        // them (docs/impl/io-bytes.md). Before the mark, which lets go of the
+        // port the give-back reads.
+        if let Some((key, port, lent)) = inner.pending.take_lent(id) {
+            crate::io::landing::give_back(&mut inner.fd_states, &key, &port, lent);
         }
         inner.pending.mark_cancelled(id);
         Ok(())
@@ -132,20 +140,6 @@ impl AsyncBackend {
         // blocked.
         inner.drain_ready();
         Ok(inner.completions.drain(..).collect())
-    }
-
-    pub(crate) fn extract_write_bytes(data: &Value) -> Vec<u8> {
-        if let Some(s) = data.with_string(|s| s.as_bytes().to_vec()) {
-            s
-        } else if let Some(b) = data.as_bytes() {
-            b.to_vec()
-        } else if let Some(b) = data.as_bytes_mut() {
-            b.borrow().clone()
-        } else if let Some(b) = data.as_string_mut() {
-            b.borrow().clone()
-        } else {
-            format!("{}", data).into_bytes()
-        }
     }
 
     /// Check if there are pending operations.

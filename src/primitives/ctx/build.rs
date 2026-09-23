@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-23
 //! The ergonomic `ctx.*` allocation surface: one constructor per heap type,
 //! each born on the ctx's heap in the ctx's own region.
 //! docs/impl/region/ctx.md
@@ -67,6 +67,11 @@ ctx_ctors! {
     string_mut (bytes: Vec<u8>);
     /// Allocate immutable bytes into the call's region.
     bytes (data: Vec<u8>);
+    /// Allocate `len` zero bytes into the call's region, with no Rust buffer
+    /// built first.
+    zeroed_bytes (len: usize);
+    /// Allocate the concatenation of `parts` as bytes into the call's region.
+    joined_bytes (parts: &[&[u8]]);
     /// Allocate mutable `@bytes` into the call's region.
     bytes_mut (data: Vec<u8>);
     /// Allocate a syntax object into the call's region.

@@ -1,3 +1,4 @@
+//! audited: 2026-09-23
 //! The per-operation bound, on a descriptor that carries no socket options.
 //!
 //! A pipe is the case that separates a bound belonging to the operation from
@@ -63,10 +64,7 @@ fn write_to_a_pipe_nobody_reads_returns_at_its_deadline() {
     let started = Instant::now();
     hub.submit(
         SubmissionId::from_raw(1),
-        PoolOp::Write {
-            fd: pipe.write_fd,
-            data: payload,
-        },
+        PoolOp::write(pipe.write_fd, payload),
         Bounds::new(Some(Duration::from_millis(200)), None),
     )
     .unwrap();
@@ -99,10 +97,7 @@ fn read_from_a_pipe_nobody_writes_returns_at_its_deadline() {
     let started = Instant::now();
     hub.submit(
         SubmissionId::from_raw(2),
-        PoolOp::Read {
-            fd: pipe.read_fd,
-            size: 1024,
-        },
+        PoolOp::read(pipe.read_fd, 1024),
         Bounds::new(Some(Duration::from_millis(200)), None),
     )
     .unwrap();

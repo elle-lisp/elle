@@ -1,4 +1,4 @@
-//! audited: 2026-09-18
+//! audited: 2026-09-23
 //! Stream primitives — yield SIG_IO with IoRequest descriptors.
 //!
 //! These primitives do not perform I/O themselves. They build an
@@ -49,7 +49,7 @@ fn prim_stream_read_line(
         Ok(t) => t,
         Err(e) => return e,
     };
-    let buffer = ctx.bytes(vec![0u8; READ_LINE_BUF_SIZE]);
+    let buffer = ctx.zeroed_bytes(READ_LINE_BUF_SIZE);
     (
         SIG_IO,
         IoRequest::with_timeout(ctx, PortOp::ReadLine { buffer }.into(), port, timeout),
@@ -89,7 +89,7 @@ fn prim_stream_read(
         Ok(t) => t,
         Err(e) => return e,
     };
-    let buffer = ctx.bytes(vec![0u8; count]);
+    let buffer = ctx.zeroed_bytes(count);
     (
         SIG_IO,
         IoRequest::with_timeout(ctx, PortOp::Read { count, buffer }.into(), port, timeout),
@@ -142,7 +142,7 @@ fn prim_stream_read_exact(
     } else {
         count
     };
-    let buffer = ctx.bytes(vec![0u8; buf_len]);
+    let buffer = ctx.zeroed_bytes(buf_len);
     (
         SIG_IO,
         IoRequest::with_timeout(

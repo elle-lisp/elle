@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-23
 // src/io/AGENTS.md
 //! The per-operation bound a thread-pool worker runs its syscalls under.
 //!
@@ -102,6 +102,12 @@ impl Bounds {
             timeout: None,
             stop: None,
         }
+    }
+
+    /// Whether these bounds carry a stop pipe, so a stop ends the operation at
+    /// once rather than when its syscall returns.
+    pub(in crate::io) fn can_stop(&self) -> bool {
+        self.stop.is_some()
     }
 
     /// The read end of the stop pipe, for the wait that polls it.

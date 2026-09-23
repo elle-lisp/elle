@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-23
 //! Region-and-heap-explicit value construction, one constructor per heap type.
 //!
 //! The single source of `HeapObject` construction, shared by the `NativeCtx`
@@ -220,14 +220,41 @@ pub(crate) fn string_mut(heap: &mut FiberHeap, bytes: Vec<u8>, region: RuntimeRe
 #[inline]
 pub(crate) fn bytes(heap: &mut FiberHeap, data: Vec<u8>, region: RuntimeRegion) -> Value {
     let slice = heap.alloc_region_slice_in_region::<u8>(&data, region);
+    lbytes(heap, slice, region)
+}
+
+/// Allocate `len` zero bytes (inline in the arena) into `region` on `heap`,
+/// with no Rust buffer built first. A read reserves its answer this way.
+#[inline]
+pub(crate) fn zeroed_bytes(heap: &mut FiberHeap, len: usize, region: RuntimeRegion) -> Value {
+    let slice = heap.alloc_bytes_in_region_with(len, region, |b| b.fill(0));
+    lbytes(heap, slice, region)
+}
+
+/// Allocate the concatenation of `parts` as immutable bytes into `region` on
+/// `heap`, each part copied once and straight into the arena.
+#[inline]
+pub(crate) fn joined_bytes(heap: &mut FiberHeap, parts: &[&[u8]], region: RuntimeRegion) -> Value {
+    let len = parts.iter().map(|p| p.len()).sum();
+    let slice = heap.alloc_bytes_in_region_with(len, region, |b| {
+        let mut at = 0;
+        for part in parts {
+            b[at..at + part.len()].copy_from_slice(part);
+            at += part.len();
+        }
+    });
+    lbytes(heap, slice, region)
+}
+
+/// The `LBytes` object over a slice already allocated in `region`.
+#[inline]
+fn lbytes(
+    heap: &mut FiberHeap,
+    data: crate::value::region_slice::RegionSlice<u8>,
+    region: RuntimeRegion,
+) -> Value {
     let traits = default_traits_for(heap, HeapTag::LBytes);
-    heap.alloc_in_region(
-        HeapObject::LBytes {
-            data: slice,
-            traits,
-        },
-        region,
-    )
+    heap.alloc_in_region(HeapObject::LBytes { data, traits }, region)
 }
 
 /// Allocate mutable `@bytes` into `region` on `heap`.

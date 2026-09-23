@@ -1,4 +1,4 @@
-//! audited: 2026-09-20
+//! audited: 2026-09-23
 //! `AsyncBackend`: the state an in-flight operation is tracked through, and the
 //! platform that runs it.
 //!
@@ -242,8 +242,10 @@ impl AsyncBackend {
         PlatformBackend::ThreadPool
     }
 
-    /// Bring this backend to rest: drain every in-flight io_uring operation so
-    /// no kernel-owned buffer outlives it, then let go of every region it still
+    /// Bring this backend to rest: drain every in-flight io_uring operation, and
+    /// stop and wait for every pool operation that may address a region, so no
+    /// kernel or worker writes into memory the heap frees; then let go of every
+    /// region it still
     /// holds — its filed entries' operands, and what its unreaped completions
     /// built. Idempotent once nothing is pending and nothing is queued. Called
     /// from `Drop` and from `FiberHeap::quiesce_io_backends`; see docs/io.md
@@ -251,6 +253,7 @@ impl AsyncBackend {
     pub(crate) fn quiesce(&self) {
         if let Ok(mut inner) = self.inner.try_borrow_mut() {
             inner.quiesce_pending();
+            inner.quiesce_workers();
             // Whatever the drain could not finish will never complete, so
             // nothing else will dispose of its entry and let go of the regions
             // it holds. This is the last moment the store is reachable: a heap
@@ -388,21 +391,19 @@ impl AsyncBackendInner {
         let buf_handle = self.buffer_pool.alloc(0);
         self.pending.insert(
             id,
-            PendingOp::Port {
-                op: op.clone(),
-                port_key: PortKey::Stdin,
-                port: Value::NIL,
+            PendingOp::port(
+                op.clone(),
+                PortKey::Stdin,
+                Value::NIL,
                 // Descriptor 0 is process-wide: it outlives every `Port` that
                 // names it, so there is no number here to keep out of the OS's
                 // hands.
-                descriptor: None,
-                buffer_handle: Some(buf_handle),
-                listener_kind: None,
-                filled: 0,
+                None,
+                Some(buf_handle),
                 // The stdin worker owns its own blocking read; nothing here
                 // resubmits through the ring, so there is no link to re-arm.
-                timeout: None,
-            },
+                None,
+            ),
             self.submitter,
         );
         Ok(id)

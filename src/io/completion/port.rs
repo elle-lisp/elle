@@ -1,37 +1,20 @@
-//! audited: 2026-09-18
+//! audited: 2026-09-23
 //! Completion handling for the PendingOp::Port (stream/socket I/O) case.
 //!
 //! src/io/AGENTS.md
-//! docs/impl/io-inflight.md
+//! docs/impl/io-bytes.md
 
 use super::*;
-use crate::io::frame::{exact_end, line_end, read_result};
+use crate::io::frame::{answer_from, answer_in_buffer, span, Ask};
 
-/// Every byte a finishing read owns, in stream order: the remainder a previous
-/// read on this port left behind, then the bytes this read produced.
+/// Cook a port operation's completion.
 ///
-/// The two backends deliver those bytes differently, and `data` says which. A
-/// pool worker hands its bytes back there. io_uring writes them into the fiber's
-/// own buffer and leaves `data` empty, so `filled + result_code` of that buffer
-/// is what this operation added.
-fn assemble_read(
-    pending: &PendingOp,
-    buffer: &Value,
-    state: &mut FdState,
-    data: &[u8],
-    result_code: i32,
-) -> Vec<u8> {
-    let mut all: Vec<u8> = std::mem::take(&mut state.buffer);
-    if data.is_empty() {
-        let bytes = buffer.as_bytes().unwrap_or(&[]);
-        let end = (pending.filled() + result_code.max(0) as usize).min(bytes.len());
-        all.extend_from_slice(&bytes[..end]);
-    } else {
-        all.extend_from_slice(data);
-    }
-    all
-}
-
+/// For the three buffered reads, `filled + result_code` bytes of the caller's
+/// buffer are what the operation landed there — a borrowed remainder included —
+/// and `data` is whatever it produced anywhere else, which follows those bytes
+/// in the stream. The ring and a pool worker that reads into the caller's
+/// buffer leave `data` empty; a worker that read into a buffer of its own, and
+/// the stdin worker, hand everything over in `data`.
 pub(super) fn complete_port_op(
     id: SubmissionId,
     result_code: i32,
@@ -52,6 +35,7 @@ pub(super) fn complete_port_op(
             port_key,
             port,
             listener_kind,
+            lent,
             ..
         } => {
             let encoding = port
@@ -59,7 +43,11 @@ pub(super) fn complete_port_op(
                 .map(|p| p.encoding())
                 .unwrap_or(Encoding::Binary);
             if result_code < 0 {
-                // Error
+                // A read that failed took nothing from the stream, so the
+                // remainder it borrowed goes back to the port for the next one.
+                // A copy, because the entry is only lent here; the original
+                // goes with it.
+                crate::io::landing::give_back(fd_states, port_key, port, lent.clone());
                 let errno = -result_code;
                 let is_timeout = is_timeout_errno(errno);
                 let msg = if is_timeout {
@@ -71,77 +59,60 @@ pub(super) fn complete_port_op(
                 return Completion::failed(id, birth, error_type, msg);
             }
 
-            // The three buffer-backed reads answer the same way whether the
-            // stream ended (`result_code == 0`) or delivered bytes: assemble
-            // everything this operation owns, take the part that answers the
-            // request, and give the rest back to the port. Only `read-all`
-            // needs the end of the stream told apart, because that is what it
-            // waits for.
-            if matches!(
-                op,
-                PortOp::ReadLine { .. } | PortOp::Read { .. } | PortOp::ReadExact { .. }
-            ) {
-                let state = crate::io::types::fd_state_mut(fd_states, port_key);
+            // The three buffered reads answer the same way whether the stream
+            // ended or delivered bytes: take the part of what they own that
+            // answers the request, and give the rest back to the port. Only
+            // `read-all` needs the end of the stream told apart, because that is
+            // what it waits for.
+            if let Some(ask) = Ask::of(op) {
                 let buffer = match op {
                     PortOp::ReadLine { buffer }
                     | PortOp::Read { buffer, .. }
                     | PortOp::ReadExact { buffer, .. } => buffer,
                     _ => unreachable!(),
                 };
-                let mut all = assemble_read(pending, buffer, state, &data, result_code);
+                let as_text = ask.answer_encoding(encoding);
+                let state = crate::io::types::fd_state_mut(fd_states, port_key);
+                let landed = buffer.as_bytes().unwrap_or(&[]);
+                let landed = &landed[..(pending.filled() + result_code as usize).min(landed.len())];
 
-                // How much of `all` answers the request, in the port's own unit,
-                // and where the port's remainder starts. `None` is a request the
-                // stream cannot answer.
-                let split = match op {
-                    PortOp::ReadLine { .. } => {
-                        if all.is_empty() {
-                            None
-                        } else {
-                            Some(line_end(&all))
-                        }
+                // Everything the read owns lies in the buffer, so the answer is
+                // cut where it lies and nothing moves but the bytes past it.
+                if state.buffer.is_empty() && data.is_empty() {
+                    let Some((end, rest)) = span(ask, landed, encoding, gen) else {
+                        return Completion::ok(id, birth, Value::NIL);
+                    };
+                    if rest < landed.len() {
+                        state.buffer.extend_from_slice(&landed[rest..]);
                     }
-                    // `port/read` answers with up to `count` bytes — whatever
-                    // arrived — so only an empty stream leaves it nothing to say.
-                    PortOp::Read { count, .. } => {
-                        if all.is_empty() {
-                            None
-                        } else {
-                            let end = all.len().min(*count);
-                            Some((end, end))
-                        }
-                    }
-                    // `read-exact` is all-or-nothing: a stream that ended before
-                    // the count yields nil, and the partial goes with it, so a
-                    // caller can tell "got n" from "ended early".
-                    PortOp::ReadExact { count, .. } => {
-                        exact_end(&all, *count, encoding, gen).map(|end| (end, end))
-                    }
-                    _ => unreachable!(),
-                };
-                let Some((end, rest)) = split else {
+                    let result = answer_in_buffer(buffer, end, as_text, &mut birth);
+                    return Completion::new(id, birth, result);
+                }
+
+                // Some of what the read owns lies outside the buffer — a
+                // remainder too large to lend, bytes spilled from a full
+                // buffer, or everything a worker read into a buffer of its own
+                // — so the answer is cut from the join, in stream order.
+                let mut all = std::mem::take(&mut state.buffer);
+                all.extend_from_slice(landed);
+                all.extend_from_slice(&data);
+                let Some((end, rest)) = span(ask, &all, encoding, gen) else {
                     return Completion::ok(id, birth, Value::NIL);
                 };
                 if rest < all.len() {
                     state.buffer.extend_from_slice(&all[rest..]);
                 }
-                all.truncate(end);
-                // A line is text whatever the port is measured in.
-                let as_text = if matches!(op, PortOp::ReadLine { .. }) {
-                    Encoding::Text
-                } else {
-                    encoding
-                };
-                let result = read_result(buffer, all, as_text, &mut birth);
+                let result = answer_from(buffer, &all[..end], as_text, &mut birth);
                 return Completion::new(id, birth, result);
             }
 
-            if result_code == 0 && matches!(op, PortOp::ReadAll) {
-                // ReadAll returns its accumulated buffer at EOF — empty bytes for
-                // an empty file, not nil.
+            if matches!(op, PortOp::ReadAll) {
+                // The whole stream, the port's remainder first, copied once into
+                // the answer's region — empty bytes for an empty file, not nil
+                // (docs/impl/io-bytes.md § "`read-all` copies once").
                 let state = crate::io::types::fd_state_mut(fd_states, port_key);
-                let all: Vec<u8> = std::mem::take(&mut state.buffer);
-                let val = birth.alloc().bytes(all);
+                let held = std::mem::take(&mut state.buffer);
+                let val = birth.alloc().joined_bytes(&[&held, &data]);
                 let result = if encoding == Encoding::Text {
                     unsafe { crate::io::request::bytes_to_string_in_place(val, &mut birth) }
                 } else {
@@ -156,24 +127,12 @@ pub(super) fn complete_port_op(
             // end of stream. Only the reads answered above have an EOF to tell
             // apart, and each of them told it.
             let value = match op {
-                // Claimed by the assembled-read path above.
-                PortOp::ReadLine { .. } | PortOp::Read { .. } | PortOp::ReadExact { .. } => {
-                    unreachable!("buffer-backed reads complete through assemble_read")
-                }
-                PortOp::ReadAll => {
-                    // ReadAll still uses the existing fd_states.buffer accumulation.
-                    // Accumulated in fd_states.buffer by re-submission loop.
-                    let state = crate::io::types::fd_state_mut(fd_states, port_key);
-                    state.buffer.extend_from_slice(&data);
-                    let all: Vec<u8> = std::mem::take(&mut state.buffer);
-                    let val = birth.alloc().bytes(all);
-                    if encoding == Encoding::Text {
-                        let result = unsafe {
-                            crate::io::request::bytes_to_string_in_place(val, &mut birth)
-                        };
-                        return Completion::new(id, birth, result);
-                    }
-                    val
+                // Claimed by the two read paths above.
+                PortOp::ReadLine { .. }
+                | PortOp::Read { .. }
+                | PortOp::ReadExact { .. }
+                | PortOp::ReadAll => {
+                    unreachable!("the reads complete above")
                 }
                 // A write completes only when the whole payload is gone, so the
                 // count is everything transferred across every resubmission —

@@ -1,4 +1,4 @@
-//! audited: 2026-09-20
+//! audited: 2026-09-23
 //! I/O subsystem: request types and backends.
 //!
 //! `IoBackend` is the async submission-and-completion model: `submit`
@@ -13,6 +13,7 @@ pub(crate) mod completion;
 #[cfg(target_os = "linux")]
 pub(crate) mod eventfd;
 pub(crate) mod frame;
+pub(crate) mod landing;
 pub(crate) mod mock;
 pub(crate) mod pending;
 pub(crate) mod pool;

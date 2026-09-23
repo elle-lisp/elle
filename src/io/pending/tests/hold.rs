@@ -1,4 +1,4 @@
-//! audited: 2026-09-20
+//! audited: 2026-09-23
 //! What a hold retains while its operation is in flight, and when it lets go.
 
 use super::*;
@@ -153,8 +153,8 @@ fn a_held_fiber_survives_the_release_of_its_region() {
     );
 }
 
-/// A cancelled entry lets go of what it held, at the mark rather than at the
-/// completion that eventually arrives.
+/// A cancelled entry lets go of what its completion reads, at the mark rather
+/// than at the completion that eventually arrives.
 ///
 /// The trap: the entry stays in the table — the worker it runs on and the
 /// descriptor it names come back with that completion — so it looks like
@@ -166,7 +166,7 @@ fn a_held_fiber_survives_the_release_of_its_region() {
 /// above: the same release, the same assertion inverted, and the mark is the
 /// only difference between the two.
 #[test]
-fn a_cancelled_entry_holds_nothing() {
+fn a_cancelled_entry_lets_go_of_what_its_completion_reads() {
     let mut pool = BufferPool::new();
     let mut table = PendingTable::new();
     let heap = crate::value::arena::leaked_test_heap();
@@ -184,7 +184,7 @@ fn a_cancelled_entry_holds_nothing() {
         h.region_generation(region.get()),
         born,
         "a cancelled completion is retired rather than cooked, so the entry \
-         reads no operand again and must hold none",
+         must hold nothing only its completion would read",
     );
 
     // Both readings that dereference the fiber skip a cancelled entry, so
@@ -197,6 +197,57 @@ fn a_cancelled_entry_holds_nothing() {
         Taken::Cancelled(op) => op.retire(0, &mut pool),
         _ => panic!("a marked submission must be reported cancelled"),
     }
+}
+
+/// A cancelled read keeps the buffer the kernel writes into until its
+/// completion arrives, though it lets go of everything else at the mark.
+///
+/// The trap: a cancel asks the operation to stop, and the kernel or the worker
+/// says it has only with the completion. A read already under way writes into
+/// the buffer after the mark, so a buffer whose region went at the mark takes
+/// that write into memory another value may own by then.
+///
+/// The counter-factual is the test above: the same mark and the same release,
+/// on an entry whose kernel addresses nothing, and there the region goes.
+#[test]
+fn a_cancelled_entry_keeps_what_the_kernel_addresses() {
+    let mut pool = BufferPool::new();
+    let mut table = PendingTable::new();
+    let heap = crate::value::arena::leaked_test_heap();
+    // SAFETY: the heap is leaked for the process.
+    let h = unsafe { &mut *heap };
+    let region = h.new_runtime_region();
+    let buffer = crate::primitives::ctx::Alloc::with_region(region, h).bytes(vec![0u8; 16]);
+    let born = h.region_generation(region.get());
+
+    let read = PendingOp::port(
+        crate::io::request::PortOp::Read { count: 16, buffer },
+        crate::io::types::PortKey::Fd(-1, crate::port::PortId::fresh()),
+        Value::NIL,
+        None,
+        None,
+        None,
+    );
+    table.insert(id(1), read, Submitter::detached(heap));
+    table.mark_cancelled(id(1));
+    h.decref_region(region);
+
+    assert_eq!(
+        h.region_generation(region.get()),
+        born,
+        "a cancelled read's buffer went at the mark, while the kernel may \
+         still be writing into it",
+    );
+
+    match table.take(id(1)) {
+        Taken::Cancelled(op) => op.retire(-libc::ECANCELED, &mut pool),
+        _ => panic!("a marked submission must be reported cancelled"),
+    }
+    assert_ne!(
+        h.region_generation(region.get()),
+        born,
+        "retiring the cancelled read must let its buffer go",
+    );
 }
 
 /// A resubmission keeps its hold rather than dropping and retaking it.

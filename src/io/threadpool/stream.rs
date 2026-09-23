@@ -1,17 +1,38 @@
+//! audited: 2026-09-23
 //! The byte-stream operations a worker runs: the four reads, the write, and
-//! the flush. Each owns its `OpBound` for the operation's lifetime, so its
-//! syscalls are non-blocking and every wait is answerable.
+//! the flush.
+//!
+//! docs/impl/io-bytes.md
+//!
+//! Each owns its `OpBound` for the operation's lifetime, so its syscalls are
+//! non-blocking and every wait is answerable. The reads land in the room their
+//! `Landing` names, which is the caller's own buffer whenever the operation can
+//! be stopped, and the write reads its `Payload` where it lies.
 
 use super::*;
+use crate::io::landing::{rest_of_file, READ_ALL_CHUNK};
 
-/// Read up to `size` bytes once.
-pub(super) fn read(bound: OpBound, fd: RawFd, size: usize) -> (i32, Vec<u8>) {
-    let mut buf = vec![0u8; size];
+/// What one attempt to read into `dst` came to.
+enum Took {
+    /// This many bytes arrived.
+    Bytes(usize),
+    /// The stream ended.
+    End,
+    /// The operation ends with this completion instead: a stop, a timeout, or
+    /// an error.
+    Ends(i32),
+}
+
+/// Read once into the `len` bytes at `dst`, waiting under `bound` while the
+/// descriptor has nothing.
+fn take_into(bound: &OpBound, fd: RawFd, dst: *mut u8, len: usize) -> Took {
     loop {
-        let ret = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, size) };
-        if ret >= 0 {
-            buf.truncate(ret as usize);
-            return (ret as i32, buf);
+        let ret = unsafe { libc::read(fd, dst as *mut libc::c_void, len) };
+        if ret > 0 {
+            return Took::Bytes(ret as usize);
+        }
+        if ret == 0 {
+            return Took::End;
         }
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
         if errno == libc::EINTR {
@@ -20,142 +41,168 @@ pub(super) fn read(bound: OpBound, fd: RawFd, size: usize) -> (i32, Vec<u8>) {
         if is_would_block(errno) {
             match bound.wait(libc::POLLIN) {
                 Wake::Ready => continue,
-                Wake::Stopped => return (-libc::ECANCELED, Vec::new()),
-                Wake::TimedOut => return (-libc::ETIMEDOUT, Vec::new()),
+                Wake::Stopped => return Took::Ends(-libc::ECANCELED),
+                // The deadline passed with nothing more arriving. That is the
+                // caller's timeout, not the end of the stream: reporting a
+                // partial here would read as EOF, which a `read-exact` maps to
+                // nil and a `read-line` to a line.
+                Wake::TimedOut => return Took::Ends(-libc::ETIMEDOUT),
             }
         }
-        return (-errno, Vec::new());
+        return Took::Ends(-errno);
     }
 }
 
-/// Read exactly `size` units, looping until full or EOF/error. Units are bytes
-/// unless `graphemes`, in which case they are grapheme clusters counted under
-/// `gen`.
+/// Read once, into the room left in `landing`.
+pub(super) fn read(bound: OpBound, fd: RawFd, mut landing: Landing) -> (i32, Vec<u8>) {
+    let (dst, room) = landing.spare();
+    match take_into(&bound, fd, dst, room) {
+        Took::Bytes(n) => landing.advance(n),
+        Took::End => {}
+        Took::Ends(code) => return (code, Vec::new()),
+    }
+    landing.finish(Vec::new())
+}
+
+/// Read until the bytes hold `count` units, the stream ends, or an error
+/// fires. Units are bytes unless `graphemes`, in which case they are grapheme
+/// clusters counted under `gen`.
 ///
-/// `held` is what the port already has toward this read, and it counts toward
-/// `size` — see `PoolOp::ReadExact`. Only the shortfall is asked of the
-/// kernel, and only the shortfall comes back: the completion joins the two
-/// (`assemble_read`), so returning the remainder here would double it.
+/// `held` is a remainder the port kept, and it counts toward `count` — see
+/// `PoolOp::ReadExact`. The landing may start with a lent remainder too, which
+/// counts the same way. Only the shortfall is asked of the kernel, so a peer
+/// that has sent everything is never waited on for bytes the port already has.
 ///
-/// A `held` that already meets `size` never reaches a worker — `submit` answers
-/// that read from the port without a backend — so the shortfall is non-zero
-/// whenever this runs.
+/// A byte count fits the buffer by construction. A cluster count may not, and
+/// the bytes past a full buffer go to a `Vec` of the worker's own, which the
+/// completion joins (docs/impl/io-bytes.md § "When the answer outgrows the
+/// buffer").
 pub(super) fn read_exact(
     bound: OpBound,
     fd: RawFd,
-    size: usize,
+    mut landing: Landing,
+    count: usize,
     graphemes: bool,
     gen: crate::segment::Generation,
     held: &[u8],
 ) -> (i32, Vec<u8>) {
-    // Buffer grows as we go — graphemes mode can't preallocate because we
-    // don't know the byte count in advance.  In bytes mode the shortfall is
-    // exactly known, so the loop's tail-read writes into one buffer that size.
-    let mut buf: Vec<u8> = if graphemes {
-        Vec::with_capacity(size)
-    } else {
-        vec![0u8; size.saturating_sub(held.len())]
-    };
-    let mut total = 0usize;
-    // `want` is how many bytes we ask the kernel for on each iteration.  Bytes
-    // mode knows exactly (the shortfall, less what we have); graphemes mode
-    // estimates one byte per missing grapheme (ASCII best case) and loops on
-    // undershoot.
+    let lent = landing.filled().len();
+    let mut extra: Vec<u8> = Vec::new();
     loop {
-        let want = if graphemes {
-            // Re-evaluate progress every iteration, over the remainder AND
-            // what we have read: a cluster can straddle the two, so counting
-            // either alone would miscount the boundary one.
-            let mut combined = held.to_vec();
-            combined.extend_from_slice(&buf[..total]);
-            let g = grapheme_count_in_valid_prefix(&combined, gen);
-            if g >= size {
-                return (total as i32, buf[..total].to_vec());
-            }
-            (size - g).max(1)
+        let have = held.len() + landing.filled().len() + extra.len();
+        // What this operation itself took from the descriptor.
+        let taken = landing.filled().len() - lent + extra.len();
+        let shortfall = if graphemes {
+            // Counted over everything this read owns at once: a cluster can
+            // straddle any two of the parts, so none can be counted alone.
+            let clusters = if held.is_empty() && extra.is_empty() {
+                grapheme_count_in_valid_prefix(landing.filled(), gen)
+            } else {
+                let mut all = held.to_vec();
+                all.extend_from_slice(landing.filled());
+                all.extend_from_slice(&extra);
+                grapheme_count_in_valid_prefix(&all, gen)
+            };
+            count.saturating_sub(clusters)
         } else {
-            if total >= buf.len() {
-                return (total as i32, buf);
-            }
-            buf.len() - total
+            count.saturating_sub(have)
         };
-        // Make room for the next read if we're in graphemes mode (bytes mode
-        // preallocated).
-        if graphemes && buf.len() < total + want {
-            buf.resize(total + want, 0);
+        if shortfall == 0 {
+            break;
         }
-        let ret = unsafe { libc::read(fd, buf[total..].as_mut_ptr() as *mut libc::c_void, want) };
-        if ret < 0 {
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
-            if errno == libc::EINTR {
-                continue;
+        let took = if landing.is_full() {
+            // Past the buffer: one byte per missing cluster is the ASCII best
+            // case, and an undershoot loops.
+            let at = extra.len();
+            extra.resize(at + shortfall, 0);
+            let took = take_into(&bound, fd, extra[at..].as_mut_ptr(), shortfall);
+            extra.truncate(at + if let Took::Bytes(n) = took { n } else { 0 });
+            took
+        } else {
+            let (dst, room) = landing.spare();
+            // A byte count asks for exactly what is missing, so the port holds
+            // no remainder it would have to account for afterwards.
+            let want = if graphemes { room } else { room.min(shortfall) };
+            let took = take_into(&bound, fd, dst, want);
+            if let Took::Bytes(n) = took {
+                landing.advance(n);
             }
-            if is_would_block(errno) {
-                match bound.wait(libc::POLLIN) {
-                    Wake::Ready => continue,
-                    Wake::Stopped => return (-libc::ECANCELED, Vec::new()),
-                    // The deadline passed with nothing more arriving. That is
-                    // the caller's timeout, not the end of the stream —
-                    // surfacing the partial here would read as EOF and the
-                    // completion would map it to nil.
-                    Wake::TimedOut => return (-libc::ETIMEDOUT, Vec::new()),
-                }
+            took
+        };
+        match took {
+            Took::Bytes(_) => {}
+            // Short of the count: the completion answers nil.
+            Took::End => break,
+            // An error after this read took some bytes surfaces what arrived,
+            // which the completion also reads as a stream that ended short. A
+            // stop or a timeout discards it.
+            Took::Ends(code)
+                if code != -libc::ECANCELED && code != -libc::ETIMEDOUT && taken > 0 =>
+            {
+                break
             }
-            if total == 0 {
-                return (-errno, Vec::new());
-            }
-            // Partial read then error: surface what we got so the completion
-            // path treats it as short-then-EOF.
-            return (total as i32, buf[..total].to_vec());
+            Took::Ends(code) => return (code, Vec::new()),
         }
-        if ret == 0 {
-            // EOF before full count.  Return short; the completion handler
-            // maps short-on-ReadExact to nil.
-            return (total as i32, buf[..total].to_vec());
-        }
-        total += ret as usize;
     }
+    landing.finish(extra)
 }
 
-/// Read until a newline arrives (`until_newline`) or until EOF.
-pub(super) fn read_until(bound: OpBound, fd: RawFd, until_newline: bool) -> (i32, Vec<u8>) {
-    let mut accumulated = Vec::new();
-    let mut chunk = vec![0u8; 4096];
+/// Read until a newline arrives, the buffer is full, or the stream ends.
+///
+/// Each read asks for a page at most, so the bytes past the newline that go
+/// back to the port stay few. A full buffer with no newline answers as it is:
+/// a piece of a longer line, which the next read goes on from.
+pub(super) fn read_line(bound: OpBound, fd: RawFd, mut landing: Landing) -> (i32, Vec<u8>) {
+    let lent = landing.filled().len();
+    while !landing.is_full() {
+        let before = landing.filled().len();
+        let (dst, room) = landing.spare();
+        match take_into(&bound, fd, dst, room.min(4096)) {
+            Took::Bytes(n) => landing.advance(n),
+            Took::End => break,
+            Took::Ends(code)
+                if code != -libc::ECANCELED && code != -libc::ETIMEDOUT && before > lent =>
+            {
+                break
+            }
+            Took::Ends(code) => return (code, Vec::new()),
+        }
+        if landing.filled()[before..].contains(&b'\n') {
+            break;
+        }
+    }
+    landing.finish(Vec::new())
+}
+
+/// Read until EOF, into an accumulation this worker owns.
+///
+/// The kernel reads straight into the accumulation's spare room. A regular
+/// file's accumulation is sized to the rest of the file before the first read,
+/// so it does not grow; anything else grows a chunk at a time.
+pub(super) fn read_all(bound: OpBound, fd: RawFd) -> (i32, Vec<u8>) {
+    let mut all: Vec<u8> = Vec::with_capacity(rest_of_file(fd).unwrap_or(0) + READ_ALL_CHUNK);
     loop {
-        let ret = unsafe { libc::read(fd, chunk.as_mut_ptr() as *mut libc::c_void, chunk.len()) };
-        if ret < 0 {
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
-            if errno == libc::EINTR {
-                continue;
-            }
-            if is_would_block(errno) {
-                match bound.wait(libc::POLLIN) {
-                    Wake::Ready => continue,
-                    Wake::Stopped => return (-libc::ECANCELED, Vec::new()),
-                    // The deadline passed with nothing more arriving. Report
-                    // the timeout rather than the partial, which the completion
-                    // would treat as a line or a stream that ended.
-                    Wake::TimedOut => return (-libc::ETIMEDOUT, Vec::new()),
-                }
-            }
-            if accumulated.is_empty() {
-                return (-errno, Vec::new());
-            }
-            // Return whatever we accumulated before the error.
-            return (accumulated.len() as i32, accumulated);
+        if all.capacity() - all.len() < READ_ALL_CHUNK {
+            all.reserve(READ_ALL_CHUNK);
         }
-        if ret == 0 {
-            // EOF — return whatever we have.
-            return (accumulated.len() as i32, accumulated);
-        }
-        accumulated.extend_from_slice(&chunk[..ret as usize]);
-        if until_newline && accumulated.contains(&b'\n') {
-            return (accumulated.len() as i32, accumulated);
+        let room = all.capacity() - all.len();
+        // SAFETY: the room past `len` is allocated and this worker's alone.
+        let dst = unsafe { all.as_mut_ptr().add(all.len()) };
+        match take_into(&bound, fd, dst, room) {
+            // SAFETY: the kernel wrote `n` bytes into that room.
+            Took::Bytes(n) => unsafe { all.set_len(all.len() + n) },
+            Took::End => return (all.len() as i32, all),
+            Took::Ends(code)
+                if code != -libc::ECANCELED && code != -libc::ETIMEDOUT && !all.is_empty() =>
+            {
+                return (all.len() as i32, all)
+            }
+            Took::Ends(code) => return (code, Vec::new()),
         }
     }
 }
 
-/// Write every byte of `data`.
+/// Write every byte of `payload`.
 ///
 /// `port/write` writes every byte before it returns (docs/io.md), so this loops
 /// until the payload is gone. One `write(2)` transfers only what fits in the
@@ -167,7 +214,8 @@ pub(super) fn read_until(bound: OpBound, fd: RawFd, until_newline: bool) -> (i32
 /// keeps making progress and the transfer finishes however long it takes. That
 /// mirrors the io_uring path, which re-arms its LinkTimeout on each
 /// resubmission.
-pub(super) fn write(bound: OpBound, fd: RawFd, data: Vec<u8>) -> (i32, Vec<u8>) {
+pub(super) fn write(bound: OpBound, fd: RawFd, payload: Payload) -> (i32, Vec<u8>) {
+    let data = payload.bytes();
     let mut total = 0usize;
     loop {
         let ret = unsafe {
