@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-23
 //! What this build of Elle is: its version, its epoch, the cargo profile it
 //! was compiled under, and the fingerprint of the binary itself.
 //!
@@ -61,7 +61,7 @@ pub(crate) fn prim_build_profile(
 /// running, and nothing else in the process can: `(sys/argv)` carries the
 /// source it was pointed at, and a subcommand replaces even that. Resolving
 /// `elle` off `PATH` would answer with a different build, so the test runner
-/// spawns this (docs/test-cli.md § Substrate).
+/// spawns this (docs/test-cli.md).
 pub(crate) fn prim_executable(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     _args: &[Value],
@@ -184,7 +184,7 @@ primitive! {
         doc: "Return the current language epoch. With 1 arg, returns the arg (compile-time declaration form).",
         params: &["n"],
         category: "elle",
-        example: "(elle/epoch) #=> 3",
+        example: "(int? (elle/epoch))  # => true",
         effect: RegionEffect::PassThrough,
     }
     "elle/build-profile" => prim_build_profile {

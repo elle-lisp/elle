@@ -54,9 +54,9 @@ mutated array; `pop` returns the removed element.
 
 ```lisp
 (def buf @[1 2 3])
-(assert (identical? buf (push buf 4)) "push returns buf itself")
+(assert (%identical? buf (push buf 4)) "push returns buf itself")
 (assert (= 4 (pop buf)))
-(assert (identical? buf (put buf 0 99)))
+(assert (%identical? buf (put buf 0 99)))
 (assert (= @[99 2 3] buf))
 (assert (= 3 (length buf)))
 ```

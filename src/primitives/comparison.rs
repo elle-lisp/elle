@@ -1,4 +1,8 @@
-//! Comparison primitives
+// audited: 2026-09-23
+//! The equality primitives: numeric-aware `=`, coercion-free `identical?`, and `hash`.
+//!
+//! docs/types.md
+
 use crate::arithmetic::values_eq;
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
@@ -24,8 +28,10 @@ pub(crate) fn prim_eq(
     (SIG_OK, Value::TRUE)
 }
 
-/// Strict identity comparison — bitwise/structural equality with no coercion.
-/// No numeric coercion: (identical? 1 1.0) is false.
+/// Structural equality with no coercion: `Value`'s `PartialEq`, so two
+/// separately built collections with equal contents compare true, and floats
+/// compare by bit pattern. (identical? 1 1.0) is false. The `%identical?`
+/// intrinsic is the pointer-identity test.
 pub(crate) fn prim_identical(
     _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -65,15 +71,15 @@ primitive! {
     "identical?" => prim_identical {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Test strict identity. No numeric coercion: (identical? 1 1.0) is false.",
+        doc: "Test equality with no coercion. Values of the same type with equal contents are identical, even two separate allocations; floats compare by bit pattern, so NaN is identical to NaN. (identical? 1 1.0) is false. For pointer identity use %identical?.",
         params: &["a", "b"],
         category: "comparison",
-        example: "(identical? 1 1) #=> true\n(identical? 1 1.0) #=> false",
+        example: "(identical? 1 1) #=> true\n(identical? 1 1.0) #=> false\n(identical? @[1] @[1]) #=> true",
         effect: RegionEffect::Immediate,
     }
     "hash" => prim_hash {
         arity: Arity::Exact(1),
-        doc: "Hash any value to an integer. Equal values produce equal hashes. Uses the same structural hashing as hash-map/hash-set internals.",
+        doc: "Hash any value to an integer. Equal values produce equal hashes.",
         params: &["value"],
         category: "comparison",
         example: "(hash 42) #=> <integer>\n(= (hash :foo) (hash :foo)) #=> true",
