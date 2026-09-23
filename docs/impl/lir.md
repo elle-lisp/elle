@@ -1,6 +1,6 @@
 # LIR — Low-level IR
 
-<!-- audited: 2026-09-06 -->
+<!-- audited: 2026-09-23 -->
 
 LIR is an SSA-form intermediate representation with virtual registers,
 basic blocks, and explicit control flow.
@@ -17,12 +17,14 @@ basic blocks, and explicit control flow.
 - **`Terminator`** — block-ending instruction (return, jump,
   branch, emit, unreachable). Note: tail calls are `LirInstr`
   variants (`TailCall`/`TailCallArrayMut`), not terminators.
-- **`LirConst`** — compile-time **immediate** constants (int, float,
-  nil, true, false; plus interned keyword/symbol — all tag+payload, no
-  heap). `Const`/`ValueConst` are pure pool loads with no `region` field.
+- **`LirConst`** — compile-time **immediate** constants: nil, the empty
+  list, a bool, an int, a float, an interned symbol or keyword — all
+  tag+payload, no heap. Its `String` variant reaches no bytecode `Const`: a
+  string literal is a `MaterializeConst`. `Const`/`ValueConst` are pure pool
+  loads with no `region` field.
 - **`MaterializeConst`** — the allocation that builds a *heap* literal
   (a string, or quoted compound data: list / array / nested structure) from
-  a recursive immutable `ConstTemplate` (`src/value/template.rs`) into **its
+  a recursive immutable `ConstTemplate` ([template.rs](../../src/value/template.rs)) into **its
   own** solver-assigned region. It carries a mandatory `region: StaticRegion`
   and is an ordinary allocation site (see *Heap literals are allocations*
   below). The whole aggregate shares the one region (built bottom-up, so every
@@ -30,7 +32,8 @@ basic blocks, and explicit control flow.
 
 ## From HIR to LIR
 
-The lowerer (`src/lir/lower/`) transforms HIR trees into LIR:
+The lowerer ([src/lir/lower/](../../src/lir/lower/AGENTS.md)) transforms HIR
+trees into LIR:
 
 1. **Flatten** — nested expressions → linear instruction sequences
 2. **Register allocation** — each intermediate value gets a virtual
@@ -38,17 +41,16 @@ The lowerer (`src/lir/lower/`) transforms HIR trees into LIR:
 3. **Block construction** — control flow (if, loops, match) creates
    basic blocks connected by terminators
 4. **Region assignment** — every allocation is routed to a region
-   (see [regions](../regions.md)); the lowerer emits `DecrefRegion` at each
-   region's `free_at` HirId and `IncrefRegion` at cross-region edges
+   (see [regions](../regions.md)); the lowerer emits each region's release
+   after the HirId the solver names as its `decref_point`, and `IncrefRegion`
+   at cross-region edges
 
 ## The operand proof
 
 A `%`-intrinsic in call position compiles only when the front end discharges its
-operand contract ([intrinsics.md](../intrinsics.md)). That proof used to stop at
-this boundary, and every backend then re-derived at run time what the compiler
-had already decided.
-
-`BinOp`, `Compare` and `UnaryOp` carry it across instead. `OperandProof::Int`
+operand contract ([intrinsics.md](../intrinsics.md)). `BinOp`, `Compare` and
+`UnaryOp` carry that proof across the LIR boundary, so no backend re-derives at
+run time what the compiler already decided. `OperandProof::Int`
 says every operand of that instruction is an integer on every path reaching it.
 `OperandProof::Unproven` claims nothing. The lowerer reads each operand node's
 inferred type out of `TypeInfo` — the same map the contract check discharged
@@ -102,8 +104,8 @@ survive a `sys/spawn` boundary now that it is the name's hash
 self-describing; `materialize` interns it, which records the spelling for
 display and returns that same id.
 
-See [region/model.md](region/model.md) — *Constants lower as ordinary
-allocations* — for why a code-object-lifetime "constant-pool region" is forbidden.
+[region/model.md](region/model.md) says why a code-object-lifetime
+"constant-pool region" is forbidden.
 
 ## Self-reference: `LoadSelf`
 
@@ -111,29 +113,29 @@ A closure that references itself in **value** position — passed to a
 higher-order call, returned, or stored, then invoked later — lowers that
 reference to `LoadSelf { dst }`. The op takes no operand and pushes the
 **currently-executing closure**: the runtime holds the executing closure in a
-per-activation register (`current_closure`, `src/value/fiber.rs`), and the JIT
+per-activation register (`current_closure`, [fiber.rs](../../src/value/fiber.rs)), and the JIT
 receives that same closure value as a compiled-body parameter, so `LoadSelf`
 reads it directly rather than naming a capture slot. The value it yields is the
 closure itself, so an invocation of that value recurses correctly
-(`src/runtime/tests/selfrec.rs`, `tests/elle/recur-{as-value,after-tail-call}.lisp`).
+([selfrec.rs](../../src/runtime/tests/selfrec.rs),
+[recur-as-value.lisp](../../tests/elle/recur-as-value.lisp),
+[recur-after-tail-call.lisp](../../tests/elle/recur-after-tail-call.lisp)).
 
-A self-reference in **call** position (`(loop args)`) is not this op: the call
-lowers through the ordinary callee path. `LoadSelf` is the value path only.
-
-`LirFunction` collects yield-point (`yield_points`) and call-site
-(`call_sites`) information during bytecode emission. The JIT uses this
-for yield-through-call support — knowing which calls might suspend so
-it can generate proper save/restore sequences.
+A self-reference in **call** position (`(loop args)`) lowers its callee to
+`LoadSelf` too, so the call re-enters the same code and environment with new
+arguments.
 
 ## Files
 
-```text
-src/lir/types/            LirFunction (func.rs), LirInstr (instr.rs),
-                          BasicBlock, Reg, Terminator, LirConst (mod.rs)
-src/lir/display.rs        Debug printing of LIR
-src/lir/lower/            Lowering passes
-src/lir/emit/             Bytecode emission from LIR
-```
+| Path | Contents |
+|------|----------|
+| [src/lir/types/](../../src/lir/types/mod.rs) | `LirFunction` (func.rs), `LirInstr` (instr.rs), `BasicBlock`, `Reg`, `Terminator`, `LirConst` (mod.rs) |
+| [src/lir/display.rs](../../src/lir/display.rs) | Debug printing of LIR |
+| [src/lir/lower/](../../src/lir/lower/AGENTS.md) | Lowering from HIR |
+| [src/lir/emit/](../../src/lir/emit/mod.rs) | Bytecode emission from LIR |
+
+[src/lir/AGENTS.md](../../src/lir/AGENTS.md) describes the types and the
+emitter.
 
 ---
 

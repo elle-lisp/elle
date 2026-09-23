@@ -1,70 +1,70 @@
 # lir
 
-<!-- audited: 2026-09-19 -->
+<!-- audited: 2026-09-23 -->
 
-Low-level Intermediate Representation. SSA form with virtual registers
-and basic blocks. Architecture-independent but close to target.
+The LIR types, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
+
+LIR is SSA form over virtual registers and basic blocks.
+[lower/AGENTS.md](lower/AGENTS.md) owns how HIR becomes LIR: slots, capture
+cells, constants and the region instructions.
+[docs/impl/lir.md](../../docs/impl/lir.md) owns the design: the operand proof,
+heap literals and `LoadSelf`.
 
 ## Size
 
-`types/instr.rs` is past the 500-line reading budget and carries no audit stamp,
-so it sits in the queue. The file is one enum, and Rust gives no way to split
-one; bringing it inside the budget means nesting a group of variants into a
-sub-enum, which rewrites every exhaustive match in the crate. That is its own
-change, not a rider on whatever touches the file next.
+[types/instr.rs](types/instr.rs) is past the 500-line reading budget and
+carries no audit stamp, so it sits in the queue. The file is one enum, and Rust
+gives no way to split one; bringing it inside the budget means nesting a group
+of variants into a sub-enum, which rewrites every exhaustive match in the
+crate. That is its own change, not a rider on whatever touches the file next.
 
-A match over the instruction set splits where an enum cannot: `emit/instr/ops.rs`
-hands its tail to `ops/intrinsics.rs`, and every other file here takes the
-ordinary budget.
-
-## Responsibility
-
-- Lower HIR to explicit control flow (basic blocks, jumps)
-- Translate `Binding` references to concrete slot indices
-- Emit lbox operations for mutable captures
-- Produce bytecode via `Emitter`
-
-Does NOT:
-- Resolve bindings (that's HIR)
-- Execute code (that's VM)
-- Perform optimization (future work)
+A match over the instruction set splits where an enum cannot:
+[emit/instr/ops.rs](emit/instr/ops.rs) hands its tail to
+[ops/intrinsics.rs](emit/instr/ops/intrinsics.rs), and every other file here
+takes the ordinary budget.
 
 ## Interface
 
 | Type | Purpose |
 |------|---------|
-| `LirFunction` | Compilation unit: blocks, constants, metadata, docstring, syntax, yield/call-site info |
+| `LirFunction` | Compilation unit: blocks, constants, slot counts, capture masks, signal, docstring, origin, region tables, yield-point and call-site metadata ([types/func.rs](types/func.rs)) |
 | `BasicBlock` | Instructions + terminator |
-| `LirInstr` | Individual operation |
-| `OperandProof` | What the front end proved about an operation's operands: nothing, or that every one is an integer. See [lir.md](../../docs/impl/lir.md) |
+| `LirInstr` | Individual operation ([types/instr.rs](types/instr.rs)) |
+| `OperandProof` | What the front end proved about an operation's operands: nothing, or that every one is an integer |
 | `SpannedInstr` | `LirInstr` + `Span` for source tracking |
 | `SpannedTerminator` | `Terminator` + `Span` for source tracking |
-| `Terminator` | How block exits: `Return`, `Jump`, `Branch`, `Emit` |
+| `Terminator` | How a block exits: `Return`, `Jump`, `Branch`, `Emit`, `Unreachable` |
+| `LirConst` | An immediate constant: nil, the empty list, a bool, number, string, symbol or keyword |
 | `Reg` | Virtual register |
 | `Label` | Basic block identifier |
-| `YieldPointInfo` | Metadata for a yield point: resume IP and live registers |
-| `CallSiteInfo` | Metadata for a call site: resume IP and live registers (for yield-through-call) |
-| `Lowerer` | HIR → LIR |
-| `Emitter` | LIR → (Bytecode, yield_points, call_sites) |
+| `YieldPointInfo` | Metadata for a yield point: resume IP, live registers, local count |
+| `CallSiteInfo` | Metadata for a call site: resume IP, live registers, local count (for yield-through-call) |
+| `Lowerer` | HIR → LIR ([lower/AGENTS.md](lower/AGENTS.md)) |
+| `Emitter` | LIR → `ClosureCompiled`, that is `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)` ([emit/mod.rs](emit/mod.rs)) |
 | `for_each_def` / `for_each_use` / `for_each_terminator_use` | The registers an instruction or terminator writes and reads |
 | `testkit::LirFixture` | Builds a `LirFunction` by hand, for tests (`#[cfg(test)]`) |
 
+`LirConst::Nil` and `LirConst::EmptyList` are distinct constants. Nil is falsy
+and the empty list is truthy, and a list ends in the empty list, never in nil.
+
 ## Register defs and uses
 
-`for_each_def`, `for_each_use` and `for_each_terminator_use` (`types/regs.rs`)
-report the registers an instruction writes and reads. They are the single
-answer to that question for the whole crate: the WASM register allocator and
-its liveness analysis both walk them, and so does the test fixture below when
-it infers a register count. A new `LirInstr` variant must be added to all
-three — the matches are exhaustive, so the compiler names the omission.
+`for_each_def`, `for_each_use` and `for_each_terminator_use`
+([types/regs.rs](types/regs.rs)) report the registers an instruction writes and
+reads. They are the single answer to that question for the whole crate: the
+WASM register allocator and its liveness analysis both walk them, and so does
+the test fixture below when it infers a register count. A new `LirInstr`
+variant must be added to all three — the matches are exhaustive, so the
+compiler names the omission.
 
 ## Building LIR in tests
 
-`testkit::LirFixture` (`src/lir/testkit.rs`, `#[cfg(test)]`) assembles a
+`testkit::LirFixture` ([testkit.rs](testkit.rs), `#[cfg(test)]`) assembles a
 `LirFunction` directly, for the unit tests of every consumer of LIR: the
 emitter, the JIT, the WASM backend, the MLIR and SPIR-V tiers, and the
-cross-thread send path. It mirrors `hir::testkit` (`src/hir/testkit.rs`),
-which does the same job for the front-end passes.
+cross-thread send path. It mirrors `hir::testkit`
+([src/hir/testkit.rs](../hir/testkit.rs)), which does the same job for the
+front-end passes.
 
 ```rust
 let func = LirFixture::new(Arity::Exact(1))
@@ -91,132 +91,92 @@ The rules the fixture holds:
 
 The remaining setters — `name`, `signal`, `num_captures`, `num_locals`,
 `num_params`, `closure_id`, `yield_points`, `call_sites` — write the like-named
-field.
-Fields with no setter are public on the built `LirFunction`: set them on the
-result, as the JIT's arity and `vararg_kind` tests do.
+field. Fields with no setter are public on the built `LirFunction`: set them on
+the result, as the JIT's arity and `vararg_kind` tests do.
 
 ## Data flow
 
-```
+```text
 HIR + spans
     │
     ▼
-Lowerer (&BindingArena)
-    ├─► seed immutable_values for constant bindings (emit ValueConst instead of LoadLocal)
-    ├─► allocate slots for bindings (HashMap<Binding, u16>)
-    ├─► emit MakeCaptureCell for captured locals (arena.get(b).needs_capture();
-    │   top level, plus compiled-cell bindings in-lambda — invariant 6)
-    ├─► lower control flow to jumps
-    ├─► emit LoadCapture/StoreCapture for upvalues
-    └─► propagate HIR spans to SpannedInstr
+Lowerer (lower/AGENTS.md)
     │
     ▼
-LirFunction (basic blocks with SpannedInstr)
+LirFunction (basic blocks of SpannedInstr)
     │
     ▼
 Emitter
-    ├─► simulate stack for register→stack translation
-    ├─► patch jump offsets
-    ├─► emit Instruction bytes
-    ├─► build LocationMap from SpannedInstr spans
-    ├─► collect YieldPointInfo (resume IP + live registers at each yield)
-    └─► collect CallSiteInfo (resume IP + live registers at each call in may_suspend functions)
+    ├─► simulate the operand stack to place each register
+    ├─► emit instruction bytes, then patch jump offsets
+    ├─► build the LocationMap from SpannedInstr spans
+    ├─► collect YieldPointInfo at each Emit terminator
+    └─► collect CallSiteInfo at each call, in a function that may suspend
     │
     ▼
-(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)
+ClosureCompiled = (Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)
     │
-    ├─► Bytecode + LocationMap → VM execution
-    │
-    └─► YieldPointInfo + CallSiteInfo → LirFunction.yield_points/call_sites
-        → JIT compilation (for side-exit code generation)
+    ▼
+TemplateProto::nested_lambda
+    ├─► location_map ← Bytecode.location_map
+    └─► lir_function ← a copy of the LirFunction, with yield_points and
+        call_sites filled in, for the JIT's side exits
 ```
 
-The lowerer reads binding metadata via `&BindingArena` (passed to `Lowerer::new`):
-`arena.get(b).needs_capture()`, `arena.get(b).name`, etc.
-
-## Source location tracking
-
-`SpannedInstr` wraps `LirInstr` with a `Span` for source location tracking:
-
-```rust
-pub struct SpannedInstr {
-    pub instr: LirInstr,
-    pub span: Span,
-}
-```
-
-The lowerer propagates HIR spans to LIR instructions. The emitter builds a
-`LocationMap` that maps bytecode offsets to source locations. This map is
-stored in `Closure.location_map` and used by the VM for error reporting.
-
-## Dependents
-
-- `pipeline.rs` - uses `Lowerer` and `Emitter`
-- `vm/` - executes the emitted bytecode
+The emitter emits blocks in the order the lowerer appended them. A merge block
+is appended after every block that jumps to it, so the emitter meets each
+predecessor first; sorting by label number would break that, because labels
+are allocated in creation order.
 
 ## Invariants
 
-1. **Each register assigned exactly once.** SSA form. If you see a register
-    used before definition, lowering is broken.
+1. **Each register is assigned exactly once.** SSA form. A register used
+   before its definition means lowering is broken.
 
-2. **Every block ends with a terminator.** `Return`, `Jump`, `Branch`, `Emit`,
-    or `Unreachable`. No fall-through.
+2. **Every block ends with a terminator.** `Return`, `Jump`, `Branch`, `Emit`
+   or `Unreachable`. No fall-through. A tail call is an instruction
+   (`TailCall`, `TailCallArrayMut`), not a terminator.
 
-3. **`binding_to_slot` maps all accessed bindings.** If lowering fails with
-    "unknown binding," the HIR→LIR mapping is incomplete. The key is `Binding`
-    (hashed by `Value::to_bits()`), the value is `u16` slot index.
+3. **Emit is a block terminator, not an instruction.**
+   `Terminator::Emit { signal, value, resume_label }` ends the block, and the
+   resume block opens with `LoadResumeValue`, which takes the value passed to
+   `fiber/resume`. The emitter carries the stack simulation across the emit
+   through `yield_stack_state`, so a value computed before the emit, such as
+   the `1` in `(+ 1 (emit :yield 2) 3)`, survives into the resume block.
 
-4. **`upvalue_bindings` tracks what uses LoadCapture.** Inside fn bodies,
-    captures and parameters are upvalues; they use LoadCapture, not LoadLocal.
-    A binding whose forward cell is COMPILED (invariant 6) is not an upvalue:
-    its slot holds the cell, so it reads LoadLocal and unwraps.
+4. **Yield and call-site metadata come from emission.** The emitter records a
+   `YieldPointInfo` at each `Terminator::Emit` and a `CallSiteInfo` at each
+   call. `TemplateProto::nested_lambda`
+   ([src/value/closure/proto.rs](../value/closure/proto.rs)) writes both into
+   the template's copy of the `LirFunction`, which is what the JIT reads.
 
-5. **`capture_params_mask` is set for mutable parameters.** Bit i set means
-     parameter i needs lbox wrapping at call time. With immutable-by-default
-     params, only `@`-prefixed params can be mutated, so this mask is typically 0.
+5. **Call sites are recorded only where the function may suspend.**
+   `Emitter.current_func_may_suspend`, set from `signal.may_suspend()`, gates
+   the recording. A function that can never yield has no `call_sites`.
 
-6. **`capture_locals_mask` is set for locals that need lboxes.** Slot i set means
-     locally-defined variable i (0-indexed from the first local after params)
-     needs lbox wrapping because it's captured by a nested closure or mutated
-     via `assign`. With immutable-by-default let bindings, only `@`-prefixed
-     bindings can be mutated, so this mask is typically sparse. The VM env
-     builder, the JIT prologue, and the WASM env builders all consult it to skip
-     `CaptureCell` allocation for non-captured locals. It is a `CaptureMask`
-     (`src/value/capturemask.rs`), **unbounded in width**: a local at any index
-     is named precisely, so an uncaptured local beyond slot 63 gets a bare-NIL
-     env slot, never a dead, leaked cell. (`capture_params_mask` stays a `u64`;
-     its path has no `>=64` fallback and functions never approach 64 params.)
-     One captured shape is deliberately NOT mask-set: a binding whose
-     forward cell is COMPILED (`BindingInner::compiled_forward_cell` — immutable,
-     never mutated, lambda-initialized, in every position including inside a
-     lambda). Its `MakeCaptureCell` value lives in a plain stack slot
-     (`allocate_slot_routed`), giving the cell a static region slot the
-     closure-cycle merge can collapse; the env must not mint a shadow cell.
+6. **A block's first emitted predecessor fixes its operand depth.** Every
+   other edge into that block must arrive at the same depth. See "Merge
+   operand depth" below.
 
-7. **Emit is a block terminator, not an instruction.** `Terminator::Emit { signal: SignalBits, value: Reg, resume_label: Label }`
-    splits the block: the current block ends with emit, and a new resume block
-    begins. The resume block starts with `LoadResumeValue` to capture the value
-    passed to `fiber/resume`.
+## Yield and call-site metadata
 
-8. **Docstring and syntax are threaded from HIR.** `LirFunction.doc` and
-      `LirFunction.syntax` are copied from `HirKind::Lambda.doc` and
-      `HirKind::Lambda.syntax` during lowering. The emitter preserves both
-      into `Closure.doc` and `Closure.syntax` without encoding them in bytecode.
+`YieldPointInfo`:
+- `resume_ip` — the bytecode offset to resume at, after the emit opcode.
+- `stack_regs` — the registers on the operand stack at the emit, bottom to top.
+- `num_locals` — the local slots below them.
 
-9. **Emit point metadata is collected during emission.** `Emitter::emit()`
-     returns `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`. The caller
-     must attach these to `LirFunction.yield_points` and `LirFunction.call_sites`
-     before storing the function on a `Closure`. The JIT reads this metadata
-     to generate side-exit code.
+The JIT spills the locals, then these registers, and calls the emit runtime
+helper.
 
-10. **Call site metadata is only populated for may_suspend functions.**
-     `Emitter.current_func_may_suspend` gates call site recording. For
-     non-suspending functions, `call_sites` is empty. This avoids overhead
-     for silent functions that can never yield.
+`CallSiteInfo`:
+- `resume_ip` — the bytecode offset after the call instruction, where the
+  interpreter resumes if the callee yields.
+- `stack_regs` — the registers on the operand stack after the callee and
+  arguments are popped and before the result is pushed.
+- `num_locals` — the local slots below them.
 
-11. **A block's first emitted predecessor fixes its operand depth.** Every
-     other edge into that block must arrive at the same depth. See "Merge
-     operand depth" below.
+That is the interpreter's stack when a yield propagates through a call. The JIT
+builds the caller's `SuspendedFrame` from it when a callee yields.
 
 ## Merge operand depth
 
@@ -270,131 +230,39 @@ the orphan.
 
 ## Key instructions
 
-| Instruction | Stack effect | Notes |
-|-------------|--------------|-------|
-| `ValueConst` | → value | Compile-time constant from `immutable_values` (primitives + immutable literal bindings). GPU-safe for numeric/bool/nil values. |
-| `LoadLocal` | → value | Load from stack slot |
-| `StoreLocal` | value → value | Store to slot, keep on stack |
-| `LoadCapture` | → value | From closure env, auto-unwraps CaptureCell |
-| `LoadCaptureRaw` | → lbox | From closure env, preserves lbox (for forwarding) |
-| `StoreCapture` | value → | Into closure env, handles lboxes |
-| `MakeCaptureCell` | value → lbox | Wrap in CaptureCell |
-| `MakeClosure` | caps... → closure | Pops N captures, creates closure |
-| `EmptyList` | → empty_list | Push Value::EMPTY_LIST (truthy, unlike Nil) |
-| `LoadResumeValue` | → value | First instruction in yield resume block |
-| `CarOrNil` | value → car | Car of cons, or nil if not a cons |
-| `CdrOrNil` | value → cdr | Cdr of cons, or EMPTY_LIST if not a cons |
-| `ArrayRefOrNil` | array → elem | Array element by immediate u16 index, or nil if out of bounds |
-| `IsArray` | value → bool | Type check: is value an array (immutable)? (for pattern matching) |
-| `IsArrayMut` | value → bool | Type check: is value an @array (mutable)? (for pattern matching) |
-| `IsStruct` | value → bool | Type check: is value a struct (immutable)? (for pattern matching) |
-| `IsStructMut` | value → bool | Type check: is value an @struct (mutable)? (for pattern matching) |
-| `ArrayLen` | array → int | Get array length (for pattern matching) |
-| `TableGetOrNil` | table → value | Get key from table/struct, or nil if missing/wrong type (u16 const_idx operand) |
-| `PushParamFrame` | (none) | Push a new parameter binding frame (operand: count u8) |
-| `PopParamFrame` | (none) | Pop the current parameter binding frame |
-| `IncrefRegion` | (none) | Increment a region's reference count (cross-region reference taken) |
-| `DecrefRegion` | (none) | Decrement a region's reference count; free pages when RC hits 0 (sole region-demise opcode) |
+The enum in [types/instr.rs](types/instr.rs) is the full list, each variant
+with its doc comment. These are the ones a reader of lowered code meets most.
 
-## Emit and Call Site Metadata
+| Instruction | What it does |
+|-------------|--------------|
+| `Const` | Load a `LirConst` immediate |
+| `ValueConst` | Load a compile-time `Value`: a primitive, or an immutable binding with a literal initializer |
+| `MaterializeConst` | Allocate a heap literal from its template into its own region |
+| `LoadLocal` / `StoreLocal` | Read or write a stack slot |
+| `LoadCapture` | Read a closure-environment slot, unwrapping a capture cell |
+| `LoadCaptureRaw` | Read a closure-environment slot without unwrapping, to forward the cell to a nested closure |
+| `StoreCapture` | Write a closure-environment slot, through its cell when it holds one |
+| `MakeCaptureCell` / `LoadCaptureCell` / `StoreCaptureCell` | Build, read and write a capture cell held in a register |
+| `MakeClosure` | Build a closure from the lambda its `ClosureId` names, and its captures |
+| `LoadSelf` | Load the executing closure |
+| `Call` / `SuspendingCall` / `TailCall` | Call a function |
+| `LoadResumeValue` | First instruction of an emit's resume block |
+| `FirstOrNil` / `RestOrNil` | First or rest of a pair; nil or the empty list when the value is not a pair |
+| `ArrayMutRefOrNil` | Array element at an immediate index; nil when out of bounds or not an array |
+| `StructGetOrNil` | Struct field by constant key; nil when missing or not a struct |
+| `IsArray` / `IsArrayMut` / `IsStruct` / `IsStructMut` | Type checks for pattern matching |
+| `ArrayMutLen` | Array length, for pattern matching |
+| `PushParamFrame` / `PopParamFrame` | Push a frame of (parameter, value) register pairs for `parameterize`, and pop it |
+| `IncrefRegion` / `DecrefRegion` | Retain or release a region by its static slot |
+| `IncrefValueRegion` / `DecrefValueRegion` / `DecrefCellRegion` | Retain or release the region a value or a capture cell lives in |
 
-The emitter collects two types of metadata during bytecode emission:
+[lower/AGENTS.md](lower/AGENTS.md) says where the lowerer emits the region
+instructions, and [docs/regions.md](../../docs/regions.md) says what they
+count.
 
-### YieldPointInfo
+## Dependents
 
-Recorded when a `Terminator::Emit` is emitted:
-- `resume_ip: usize` — Bytecode offset to resume at (the instruction after the Emit opcode)
-- `stack_regs: Vec<Reg>` — Virtual registers on the operand stack at emit time, bottom-to-top
-
-The JIT uses this to spill live registers to a stack slot and call the emit runtime helper.
-
-### CallSiteInfo
-
-Recorded when a `LirInstr::Call` is emitted in a function where `signal.may_suspend()`:
-- `resume_ip: usize` — Bytecode offset after the Call instruction (where the interpreter resumes if the callee yields)
-- `stack_regs: Vec<Reg>` — Virtual registers on the operand stack after popping func/args but before pushing the result
-
-This matches the interpreter's stack state when yield propagates through a call. The JIT uses this to build the caller's `SuspendedFrame` when a callee yields (yield-through-call).
-
-## Allocation regions
-
-`IncrefRegion` and `DecrefRegion` are the only region-lifecycle
-bytecodes. The lowerer emits them based on output from the region
-solver (`src/hir/region/infer.rs`), not a local escape analysis pass.
-`DecrefRegion` is the sole region-demise opcode — there is no
-`FreeRegion`.
-
-The solver produces `RegionInfo` containing `alloc_region` (which
-region each allocation site is born into) and, per region,
-`RegionData { decref_point: HirId, ... }` — the program point at which
-the compiler emits the region's `DecrefRegion`. Plus `cross_region_refs`
-for the cross-region edges that drive `IncrefRegion` emission.
-
-At lowering time the lowerer reverse-indexes `region_data` to ask
-"which regions demise at this HirId?" and emits one `DecrefRegion(rid)`
-per region in that set after lowering the HIR node. Region demise is
-keyed per-`HirId` by the solver's `decref_point`, not by lexical scope.
-
-`break` emits no region instruction of its own, and neither does
-`Block`. The solver anchors every release the jump passes over on the
-`Block`, which the lowerer emits after the exit label, so it fires on
-the break path and the fall-through path alike
-([anchors.md](../../docs/impl/region/anchors.md)).
-
-## Emit as terminator
-
-`Terminator::Emit { signal, value, resume_label }` correctly models that emit
-suspends execution and resumes in a new block. The lowerer:
-
-1. Emits `Terminator::Emit` to end the current block
-2. Creates a new block at `resume_label`
-3. Emits `LoadResumeValue` as the first instruction of the resume block
-
-A suspending emit whose payload the body releases nowhere
-(`RegionInfo::borrowed_emit_payloads`) wraps that with the park's borrow mint: an
-`IncrefValueRegion` before the terminator and a `DecrefValueRegion` first in the
-resume block, with a copy parked in a local slot of its own since the value
-register is consumed by the `Emit`. That gives a fiber body one reference of every
-value it yields, which is what a discarded fiber's discharge releases
-(docs/impl/region/park.md).
-
-A **dynamic** emit has no `Emit` terminator to wrap — its first argument is not a
-literal keyword set, so it lowers as an ordinary call — and `lower_call` carries the
-same obligation there. In non-tail position it takes the mint at the payload
-argument and releases it after the call, which is where the resume lands; in tail
-position the borrowed-argument retain already is that reference
-(docs/impl/region/park.md § "What yields is the emit OPERATION, not the `Emit`
-node").
-
-The emitter preserves stack state across the emit boundary via
-`yield_stack_state`. This ensures intermediate values computed before emit
-(e.g., the `1` in `(+ 1 (emit :yield 2) 3)`) survive into the resume block.
-
-**Emit point metadata:** When the emitter encounters a `Terminator::Emit`,
-it records a `YieldPointInfo` containing:
-- `resume_ip`: Bytecode offset to resume at (the instruction after Emit)
-- `stack_regs`: Virtual registers on the operand stack at emit time
-
-This metadata is collected in `Emitter.yield_points` and returned alongside
-the bytecode. The JIT uses this to generate side-exit code that spills live
-registers and calls the yield runtime helper.
-
-## Block/Break lowering
-
-`HirKind::Block` lowers to a result register + exit label pattern:
-1. Allocate `result_reg` and `exit_label`
-2. Push `BlockLowerContext { block_id, result_reg, exit_label }`
-3. Lower body, move result to `result_reg`
-4. Pop context, jump to `exit_label`, start new block at `exit_label`
-
-`HirKind::Break` lowers to Move + Jump:
-1. Find target block's `result_reg` and `exit_label` via `block_lower_contexts`
-2. Lower value, move to `result_reg`, jump to `exit_label`
-3. Start unreachable dead-code block
-
-No new bytecode instructions — break compiles to existing Move + Jump.
-## Constants
-
-`LirConst` represents compile-time constants. Note: `LirConst::Nil` and
-`LirConst::EmptyList` are distinct. Nil is falsy, EmptyList is truthy. Lists
-terminate with EmptyList, not Nil.
+- [src/pipeline/](../pipeline/) — runs the `Lowerer` and the `Emitter`
+- [src/vm/](../vm/) — executes the emitted bytecode
+- [src/jit/](../jit/), [src/wasm/](../wasm/) and the MLIR tier — compile a
+  closure from the `LirFunction` its template keeps

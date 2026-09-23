@@ -1,77 +1,59 @@
 # Low-level Intermediate Representation (LIR)
 
-LIR sits between HIR and bytecode. It uses virtual registers and basic blocks
-to represent explicit control flow, making it straightforward to emit the
-final stack-based bytecode.
+<!-- audited: 2026-09-23 -->
 
-## Two-Phase Translation
+LIR sits between HIR and bytecode: virtual registers and basic blocks that make control flow explicit.
 
-**Lowering** (HIR → LIR): The `Lowerer` walks HIR and produces LIR instructions.
-This phase:
-- Allocates stack slots for local variables
-- Determines which bindings need lbox boxing
-- Translates control flow (if, while, etc.) into jumps and labels
-- Handles closure creation and capture loading
+## Two phases
 
-**Emission** (LIR → Bytecode): The `Emitter` converts register-based LIR to
-stack-based bytecode. It:
-- Simulates a stack to track register positions
-- Emits `DupN` when values aren't in expected positions
-- Patches jump offsets after all instructions are emitted
+**Lowering** (HIR → LIR): the `Lowerer` walks HIR and produces LIR. It gives
+each binding a slot, puts a captured mutable binding in a capture cell, turns
+`if`, `while`, `match` and the rest into jumps between blocks, and emits the
+region instructions the region solver placed.
+[lower/AGENTS.md](lower/AGENTS.md) describes it.
 
-## Register vs Stack
+**Emission** (LIR → bytecode): the `Emitter` turns register-based LIR into
+stack-based bytecode. It simulates the operand stack to find where each
+register sits, copies a value to the top with `DupN` when it is not already
+there, and patches jump offsets once every block is placed.
+[AGENTS.md](AGENTS.md) describes it.
 
-LIR uses virtual registers (`Reg(0)`, `Reg(1)`, ...) for clarity. Each register
-is assigned exactly once (SSA form). The emitter translates these to stack
-operations:
+## Registers and the stack
 
-```
-LIR:                          Bytecode:
-  Const { dst: Reg(0), 42 }     LoadConst 42    ; push 42
-  Const { dst: Reg(1), 10 }     LoadConst 10    ; push 10
-  BinOp { Add, Reg(0), Reg(1) } Add             ; pop 10, pop 42, push 52
+Each virtual register (`r0`, `r1`, ...) is assigned exactly once. The emitter
+places registers on the operand stack, so an addition of two constants becomes
+two loads and one `Add`. Run `elle --dump=lir FILE` to see the LIR of a
+program:
+
+```sh
+elle --dump=lir script.lisp
 ```
 
-## LBox Boxing
+## Capture cells
 
-When a variable is both captured by a closure AND mutated, it needs lbox
-boxing so mutations are visible across closure boundaries. With
-immutable-by-default bindings, this only applies to `@`-prefixed bindings:
+A binding that a closure captures and that `assign` also writes lives in a
+capture cell, so that each side sees the other's writes. Only an `@`-prefixed
+binding can be written, so an ordinary captured binding is copied into the
+closure by value. An immutable binding whose initializer is a literal goes
+further: the lowerer loads its value as a constant and reads no slot at all.
 
 ```lisp
 (let [@counter 0]
   (def inc (fn () (assign counter (+ counter 1))))
   (inc)
-  counter)  ; Should be 1, not 0
+  (assert (= counter 1) "the closure's write reaches the outer binding"))
 ```
 
-The lowerer:
-1. Detects that `counter` is captured and mutated (`needs_capture()` = true)
-2. Emits `MakeCaptureCell` to wrap the initial value
-3. Emits `LoadCaptureCell`/`StoreCaptureCell` for access in the outer scope
-4. Emits `LoadCapture`/`StoreCapture` for access in the closure
+## Lambdas
 
-Immutable bindings (no `@`) skip lbox boxing entirely — they are captured
-by value. Immutable bindings with constant initializers go further: the
-lowerer seeds them into `immutable_values`, and references emit `ValueConst`
-(LoadConst) instead of `LoadLocal` or `LoadCapture`.
+Each lambda lowers to its own `LirFunction`, held in the module's closure list.
+`MakeClosure` names it by `ClosureId` and takes the captured values from
+registers.
 
-## Lambda Lowering
+## See also
 
-Lambdas are lowered recursively into separate `LirFunction`s:
-
-1. Save current lowerer state
-2. Create new function with parameters as upvalues
-3. Lower body
-4. Restore state
-5. Emit `MakeClosure` with captured values
-
-The closure template goes into constants; captures are pushed on the stack
-and popped by `MakeClosure`.
-
-## See Also
-
-- [AGENTS.md](AGENTS.md) - technical reference for LLM agents
-- `src/hir/` - input to LIR lowering
-- `src/compiler/bytecode.rs` - instruction definitions
-- `src/vm/` - executes the bytecode
+- [AGENTS.md](AGENTS.md) — the LIR types, the emitter and its invariants
+- [docs/impl/lir.md](../../docs/impl/lir.md) — the design of LIR
+- [src/hir/](../hir/) — the input to lowering
+- [src/compiler/bytecode.rs](../compiler/bytecode.rs) — the bytecode instructions
+- [src/vm/](../vm/) — executes the bytecode

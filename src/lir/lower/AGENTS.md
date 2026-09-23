@@ -146,6 +146,13 @@ region obligations ride on it:
    [park.md](../../../docs/impl/region/park.md): "A resume
    value crosses counted, or not at all").
 
+A **dynamic** emit, whose first argument is not a literal keyword set, has no
+`Emit` terminator: it lowers as an ordinary call to the `emit` primitive. In
+non-tail position `lower_call` ([control/call.rs](control/call.rs)) takes the
+payload's retain at the argument and releases it after the call, where the
+resume lands. In tail position the borrowed-argument retain already is that
+reference ([park.md](../../../docs/impl/region/park.md)).
+
 ## Block/Break lowering
 
 `HirKind::Block` lowers to a result slot + exit label:
