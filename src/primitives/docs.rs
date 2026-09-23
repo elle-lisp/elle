@@ -297,3 +297,6 @@ pub fn help_text() -> String {
 
     out
 }
+
+#[cfg(test)]
+mod tests;
