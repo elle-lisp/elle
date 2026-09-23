@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-09-17 -->
+<!-- audited: 2026-09-22 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -101,6 +101,15 @@ environment, checks its arity, counts call depth, and carries the tail-call,
 yield and error protocol back to the caller; a direct call would have to
 reproduce all of it
 ([clif.rs](../../src/jit/compiler/tests/clif.rs) pins the self-recursive case).
+
+**A compiled call nests on the native stack until the stack runs low.**
+`elle_jit_call` enters a compiled callee as a native call, so a compiled
+recursion grows the thread's stack. When less than 512 KiB of that stack
+remains, the helper runs the callee in the interpreter instead. The
+interpreter keeps every deeper call on fiber frames and enters no compiled
+code while the stack stays low ([vm.md](vm.md)). A recursion 100,000 deep
+therefore completes under `--jit=eager`, with the frames past the watermark
+interpreted.
 
 ## Rejection tracking
 

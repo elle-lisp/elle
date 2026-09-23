@@ -25,7 +25,7 @@ Up: [..](../AGENTS.md)
 - [errors.md](errors.md) — **Error Handling** Errors in Elle are values signaled via fibers.
 - [ffi.md](ffi.md) — **FFI: Architecture Reference** Elle's FFI enables calling C functions from Elle code.
 - [fmt.md](fmt.md) — **elle fmt** Opinionated code formatter for Elle.
-- [functions.md](functions.md) — **Functions (more...)**
+- [functions.md](functions.md) — **Functions** How to define, call and compose functions, and how deep a chain of calls may go.
 - [intrinsics.md](intrinsics.md) — **Intrinsics** Intrinsics are silent bytecode operations prefixed with `%`.
 - [io.md](io.md) — **I/O** All I/O in Elle is async — reads and writes yield to the scheduler.
 - [libraries.md](libraries.md) — **Libraries** Elle ships with libraries in `lib/`.

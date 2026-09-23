@@ -1,6 +1,6 @@
 # vm
 
-<!-- audited: 2026-09-19 -->
+<!-- audited: 2026-09-22 -->
 
 Bytecode execution. Stack-based operand handling with register-addressed locals.
 
@@ -8,8 +8,7 @@ Bytecode execution. Stack-based operand handling with register-addressed locals.
 
 Execute bytecode instructions. Manage:
 - Operand stack
-- Global bindings
-- Call frames and stack traces
+- Call frames: paused callers, stack traces, region-remap frames
 - Closure environments
 - Fiber state and signals
 
@@ -25,6 +24,7 @@ Does NOT:
 | `VM` | Global state + root Fiber. Per-execution state lives on `vm.fiber` |
 | `SignalBits` | Internal return type (see [signals](../signals/AGENTS.md)) |
 | `CallFrame` | The entered and calling code objects, IP, frame base |
+| `PausedCaller` | A caller activation waiting in `Fiber::callers` for its callee |
 
 ## Data flow
 
@@ -33,6 +33,8 @@ A code-object blueprint (TemplateProto)
     │
     ▼
 execute_proto()  ← public API, materializes the code object, returns Result<Value, String>
+    │
+    ├─► run_dispatch() — runs non-tail callees on fiber frames
     │
     ├─► execute_bytecode_inner_impl() → (SignalBits, usize)
     │       │
@@ -61,9 +63,10 @@ bit definitions). The dispatch loop handles each signal:
 - `SIG_QUERY`: Primitive reads VM state (arena stats, introspection).
 - `SIG_HALT`: Graceful VM termination. Non-resumable.
 
-The public `execute_bytecode` method is the translation boundary — it converts
-`SignalBits` to `Result<Value, String>` for external callers. On `SIG_ERROR`,
-it extracts the error struct from `fiber.signal` and formats the error message.
+The public `execute_proto` method (through `execute_code`) is the translation
+boundary — it converts `SignalBits` to `Result<Value, String>` for external
+callers. On `SIG_ERROR`, it extracts the error struct from `fiber.signal` and
+formats the error message.
 
 Instruction handlers return `()`. VM bugs panic immediately. User errors set
 `fiber.signal` to `(SIG_ERROR, error_val(kind, msg))` and push `Value::NIL` to
@@ -75,8 +78,9 @@ Bytecode, constants and the location table are threaded through the dispatch
 loop as one `Code` — the code object itself, a payload slice plus a blueprint
 pointer (docs/impl/region/template.md). Individual instruction handlers take
 slices (`&[u8]`, `&[Value]`) read off it. Only the dispatch loop and its direct
-callees (`handle_yield`, `handle_call`) need the `Code` — they clone it cheaply
-(two words and one refcount) when creating `SuspendedFrame`s or `TailCallInfo`.
+callees (`handle_emit`, `handle_call`) need the `Code` — they clone it cheaply
+(two words and one refcount) when creating `SuspendedFrame`s, `TailCallInfo`, or
+`PendingCall`.
 
 - `execute_proto` materializes the code object once at the public boundary
 - `execute_bytecode_from_ip` / `execute_bytecode_saving_stack` take a `&Code`
@@ -87,13 +91,15 @@ callees (`handle_yield`, `handle_call`) need the `Code` — they clone it cheapl
   them on the activation's own `ActivationDues`, which outlives whoever consumes
   the pending call (docs/impl/region/owner.md § "A deferred tail-call release has
   the node's life")
+- `PendingCall` carries a non-tail callee's `Code`, env `Rc` and closure value
+  from `call_inner` to `run_dispatch`, which pauses the caller and runs the
+  callee on the same loop (docs/impl/vm.md § "Non-tail calls")
 - `closure_env` parameter is `&Rc<Vec<Value>>` (non-optional; empty Rc for no env)
-- `execute_closure_bytecode` takes `&Rc` params directly (no `.to_vec()` copy);
-  used by JIT trampolines where the closure already owns Rc'd data
 
 ## Primitive dispatch (NativeFn)
 
-All primitives are `NativeFn`: `fn(&[Value]) -> (SignalBits, Value)`. The VM
+A primitive is a `PrimitiveDef` whose `func` is a `PrimFn`:
+`fn(&mut NativeCtx, &[Value]) -> (SignalBits, Value)`. The VM
 dispatches the return signal in `handle_primitive_signal()` (`signal.rs`):
 - `SIG_OK` → push value to stack
 - `SIG_ERROR` → store `(SIG_ERROR, value)` in `fiber.signal`, push NIL
@@ -131,15 +137,21 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
    NOT auto-unwrap. This distinction matters.
 
 4. **Tail calls don't grow call_depth.** `TailCall` stores pending call info
-   and returns; the outer loop executes it. Stack overflow = tail call bug.
+   and returns; the outer loop executes it.
 
-5. **Yield uses `SuspendedFrame` chains.** On yield, a `SuspendedFrame`
-   captures bytecode (`Rc`), constants (`Rc`), env (`Rc`), IP, and operand
-   stack. When yield propagates through Call instructions, each caller's frame
-   is appended to `fiber.suspended`. `resume_suspended` replays frames from
-   innermost (index 0) to outermost (last index).
+5. **An interpreted non-tail call doesn't grow the Rust stack.** `call_inner`
+   stores a `PendingCall` and returns; `run_dispatch` pauses the caller in
+   `fiber.callers` and runs the callee on the same loop. Only re-entry (a
+   primitive calling a closure) and compiled code nest on the Rust stack, and
+   both check `native_stack` first (docs/impl/vm.md § "Non-tail calls").
 
-6. **VM bugs panic, user errors set `fiber.signal`.** Instruction handlers
+6. **Yield uses `SuspendedFrame` chains.** On yield, a `SuspendedFrame`
+   captures the code object, env (`Rc`), IP, and operand stack. When the yield
+   leaves a callee, `run_dispatch` appends each paused caller's frame to
+   `fiber.suspended`. `resume_suspended` replays frames from innermost (index
+   0) to outermost (last index).
+
+7. **VM bugs panic, user errors set `fiber.signal`.** Instruction handlers
    return `()` (not `Result`). VM bugs (stack underflow, bad bytecode) panic
    immediately. Primitives and stdlib wrappers produce catchable errors via
    `fiber.signal = (SIG_ERROR, error_val(kind, msg))`. Intrinsic bytecode
@@ -165,6 +177,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `jit_rejections` | `FxHashMap<*const u8, JitRejectionInfo>` | JIT rejection log: first rejection per closure template |
 | `closure_call_counts` | `FxHashMap<*const u8, usize>` | JIT hotness profiling (FxHash for pointer keys) |
 | `pending_tail_call` | `Option<TailCallInfo>` | Rc-based tail call info (transient) |
+| `pending_call` | `Option<PendingCall>` | The non-tail callee `call_inner` hands to `run_dispatch` (transient) |
 | `error_loc` | `Option<SourceLoc>` | Where the error now propagating was raised. Written by `record_error_loc` (first-writer-wins, so the innermost frame keeps it), taken by `absorbs` when a mask catches (docs/impl/vm.md § "Where a reported error's location comes from") |
 | `env_cache` | `Vec<Value>` | Reusable buffer for `build_closure_env` (avoids alloc per call) |
 | `tail_call_env_cache` | `Vec<Value>` | Reusable buffer for `handle_tail_call` env building |
@@ -176,8 +189,9 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | Field | Type | Purpose |
 |-------|------|---------|
 | `stack` | `SmallVec<[Value; 256]>` | Operand stack |
+| `callers` | `Vec<PausedCaller>` | Caller activations waiting for an interpreted callee |
 | `call_stack` | `Vec<CallFrame>` | For stack traces |
-| `call_depth` | `usize` | Stack overflow detection |
+| `call_depth` | `usize` | Non-tail closure calls in progress, checked against `(vm/config :max-depth)` |
 | `signal` | `Option<(SignalBits, Value)>` | Signal from execution (errors, yields) |
 | `error_loc` | `Option<(Value, SourceLoc)>` | The parked `SIG_ERROR` payload and where it was raised. Parked by `absorbs`, read back by `fiber/propagate` so a re-raised error keeps its raising form |
 | `suspended` | `Option<Vec<SuspendedFrame>>` | Suspended execution frames (for yield/signal resumption) |
@@ -194,17 +208,19 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 `execute_bytecode_saving_stack` makes the VM re-entrant. It saves the caller's
 operand stack, runs inner bytecode from IP 0, then restores it on return. The
 inner execution sees an empty stack and runs on the same fiber (same heap,
-parameter frames).
+parameter frames). Each re-entry nests on the Rust stack, so it halts with
+`:stack-overflow` when `native_stack` reports less than its reserve left.
 
 ### Callers
 
 | Caller | File | Context |
 |--------|------|---------|
 | `eval` primitive | `eval.rs` | Compiles and runs Elle source from within running code |
-| Non-yielding `fiber/resume` | `call.rs` | Runs a child fiber inline on the current thread |
-| `arena/allocs` SIG_QUERY handler | `signal.rs` | Runs a thunk to measure its allocations |
-| JIT trampolines | `call.rs` | Re-enters interpreter for uncompiled hot paths |
-| Fiber resume | `call.rs` | Resumes a suspended fiber |
+| A fiber's first resume | `fiber/resume.rs` | Runs a new fiber's body |
+| `arena/allocs` SIG_QUERY handler | `signal/config.rs` | Runs a thunk to measure its allocations |
+| `call_closure` | `call.rs` | Macro transformers and trait methods |
+| JIT helpers | `jit/calls/callops.rs` | Run an uncompiled callee, or any callee once the native stack is low |
+| FFI callback | `ffi/callback.rs` | Runs a closure a C function calls back |
 
 ### Yield hazard
 
@@ -221,11 +237,11 @@ overwritten, and how to add new callers.
 
 When a fiber suspends (via yield instruction or `emit`):
 
-1. **Yield instruction** (`handle_yield`): captures innermost frame as a
-   `SuspendedFrame` with bytecode (Rc clone), constants (Rc clone), env
-   (Rc clone), IP (after yield), and operand stack. Stored in `fiber.suspended`.
-2. **Call handler** (if yield propagates through a call): appends caller's
-   frame to `fiber.suspended` vec.
+1. **Emit instruction** (`handle_emit`): captures innermost frame as a
+   `SuspendedFrame` with the code object, env (Rc clone), IP (after the emit),
+   and operand stack. Stored in `fiber.suspended`.
+2. **Return into a paused caller** (if the yield leaves a callee):
+   `run_dispatch` appends the caller's frame to the `fiber.suspended` vec.
 3. **Signal suspension** (`emit`): single `SuspendedFrame` with empty
    stack, stored in `fiber.suspended` by the resume handler.
 4. **Frame ordering**: innermost (yielder/signaler) at index 0, outermost
@@ -258,6 +274,8 @@ consumer of the retain. See docs/impl/region/park.md § "A payload the RUNTIME
 built is released by the install that displaces it".
 
 Key methods:
+- `run_dispatch`: Runs one activation's dispatch loop, with every interpreted
+  non-tail callee it calls paused and resumed on `fiber.callers`
 - `execute_bytecode_from_ip`: Executes from a given IP with Rc bytecode/constants
 - `execute_bytecode_saving_stack`: Saves/restores caller's stack, handles tail calls
 - `run_thunk_to_completion`: `execute_bytecode_saving_stack` + the `SIG_SWITCH` drain loop — the safe entry for re-entrant callers running a thunk on the current fiber (`eval`, `arena/allocs`, test-setup module loader)
@@ -271,16 +289,12 @@ Key methods:
 
 The VM owns exactly one `FiberHeap`, reached via `vm.heap_ptr` / `vm.heap()`. It
 is owned by the instance's `RuntimeCore` (or privately leaked for a bare VM) and
-outlives the VM, so Values returned by `execute_bytecode` remain valid after the
+outlives the VM, so Values returned by `execute_proto` remain valid after the
 VM drops. ALL fibers — including the root — share this one heap, reached the
 same way (`vm.heap_ptr`) on every fiber; isolation is per-region, not per-fiber.
 
-`FiberHeap` uses a bump arena (`BumpArena`) wrapped in `SlabPool` for all
-allocations. Destructor tracking ensures `HeapObject` variants with inner heap
-allocations (`Vec`, `Rc`, `BTreeMap`) have their `Drop` impls called on
-`release()` and `clear()`. `release()` runs destructors, returns slab slots to
-the free list, and rewinds the arena to the region-entry position. Memory is
-reclaimed by region release (`DecrefRegion`), tail-call rotation, or fiber death.
+`FiberHeap` allocates every value into a region, and a region is freed when its
+reference count reaches zero ([memory.md](../../docs/impl/memory.md)).
 
 `reset_fiber()` in `core.rs` does not clear the heap — objects accumulate across
 resets, so Values returned across multiple invocations remain valid.
