@@ -15,6 +15,151 @@
 (defn down? [m]
   (and (array? m) (= (get m 0) :DOWN)))
 
+# ── links: the exit signal a trapping process receives ───────────────
+
+# A crash cascades along a chain of links to the trapping end.
+(process:start (fn ()
+                 (process:trap-exit true)
+                 (let [me (process:self)]
+                   (let [worker-a (process:spawn-link (fn ()
+                           (let [b (process:spawn-link (fn ()
+                                   (error {:error :boom
+                                   :message "worker-b crashed"})))]
+                             (process:recv))))]
+                     (let [msg (process:recv)]
+                       (match msg
+                         [:EXIT pid reason] (assert (= pid worker-a)
+                         "link-cascade: EXIT from worker-a")
+                         _ (assert false "link-cascade: expected EXIT message")))))))
+
+(process:start (fn ()
+                 (process:trap-exit true)
+                 (let* [me (process:self)
+                        child (process:spawn-link (fn ()
+                          (error {:error :intentional :message "test crash"})))]
+                   (let [msg (process:recv)]
+                     (match msg
+                       [:EXIT pid reason]
+                         (begin
+                           (assert (= pid child) "trap-exit: EXIT from child")
+                           (match reason
+                             [:error _] (assert true
+                             "trap-exit: got error reason")
+                             _ (assert false "trap-exit: unexpected reason")))
+                       _ (assert false "trap-exit: expected EXIT message"))))))
+
+(process:start (fn ()
+                 (process:trap-exit true)
+                 (let [child (process:spawn-link (fn () 42))]
+                   (let [msg (process:recv)]
+                     (match msg
+                       [:EXIT pid reason]
+                         (begin
+                           (assert (= pid child) "normal-exit: EXIT from child")
+                           (match reason
+                             [:normal val] (assert (= val 42)
+                             "normal-exit: value is 42")
+                             _ (assert false "normal-exit: unexpected reason")))
+                       _ (assert false "normal-exit: expected EXIT message"))))))
+
+(process:start (fn ()
+                 (process:trap-exit true)
+                 (let* [me (process:self)
+                        child (process:spawn-link (fn ()
+                          (process:recv)
+                          (error {:error :boom :message "crash"})))]
+                   (process:unlink child)
+                   (process:send child :go)
+                   (process:send me :still-alive)
+                   (let [msg (process:recv)]
+                     (assert (= msg :still-alive) "unlink: no EXIT after unlink")))))
+
+# ── monitors: the :DOWN a watcher receives ───────────────────────────
+
+(process:start (fn ()
+                 (let* [me (process:self)
+                        [child-pid ref] (process:spawn-monitor (fn ()
+                          (error {:error :monitored-crash :message "boom"})))]
+                   (let [msg (process:recv)]
+                     (match msg
+                       [:DOWN got-ref got-pid reason]
+                         (begin
+                           (assert (= got-ref ref) "monitor: correct ref")
+                           (assert (= got-pid child-pid) "monitor: correct pid")
+                           (match reason
+                             [:error _] (assert true "monitor: got error reason")
+                             _ (assert false "monitor: unexpected reason")))
+                       _ (assert false "monitor: expected DOWN message"))))))
+
+(process:start (fn ()
+                 (let* [me (process:self)
+                        [child-pid ref] (process:spawn-monitor (fn () :done))]
+                   (let [msg (process:recv)]
+                     (match msg
+                       [:DOWN got-ref got-pid reason]
+                         (begin
+                           (assert (= got-ref ref) "monitor-normal: correct ref")
+                           (match reason
+                             [:normal val] (assert (= val :done)
+                             "monitor-normal: value is :done")
+                             _ (assert false "monitor-normal: unexpected reason")))
+                       _ (assert false "monitor-normal: expected DOWN message"))))))
+
+(process:start (fn ()
+                 (let* [me (process:self)
+                        [child-pid ref] (process:spawn-monitor (fn ()
+                          (process:recv)
+                          (error {:error :crash :message "crash"})))]
+                   (process:demonitor ref)
+                   (process:send child-pid :go)
+                   (process:send me :still-alive)
+                   (let [msg (process:recv)]
+                     (assert (= msg :still-alive)
+                             "demonitor: no DOWN after demonitor")))))
+
+(process:start (fn ()
+                 (let* [me (process:self)
+                        [child ref] (process:spawn-monitor (fn ()
+                          (error {:error :crash :message "bang"})))]
+                   (let [msg (process:recv)]
+                     (match msg
+                       [:DOWN _ _ _]  # We're still running — send ourselves proof
+                        (process:send me :still-here)
+                       _ nil))
+                   (let [msg (process:recv)]
+                     (assert (= msg :still-here)
+                             "monitor-survives: watcher alive after monitored crash")))))
+
+# ── exit: a signal one process sends another, or itself ──────────────
+
+(process:start (fn ()
+                 (process:trap-exit true)
+                 (let* [me (process:self)
+                        victim (process:spawn-link (fn ()
+                          (process:recv)  # block forever
+                          ))]
+                   (process:exit victim :test-kill)
+                   (let [msg (process:recv)]
+                     (match msg
+                       [:EXIT pid reason]
+                         (begin
+                           (assert (= pid victim) "exit-kill: EXIT from victim")
+                           (match reason
+                             [:killed _] (assert true "exit-kill: killed reason")
+                             _ (assert false "exit-kill: unexpected reason")))
+                       _ (assert false "exit-kill: expected EXIT message"))))))
+
+(process:start (fn ()
+                 (process:trap-exit true)
+                 (let [child (process:spawn-link (fn ()
+                         (process:exit (process:self) [:normal :voluntary])  # Should not reach here
+                         (process:send 999 :unreachable)))]
+                   (let [msg (process:recv)]
+                     (match msg
+                       [:EXIT pid reason] (assert (= pid child)
+                       "self-exit: EXIT from child")
+                       _ (assert false "self-exit: expected EXIT message"))))))
+
 # ── a linked crash reaches process:start ─────────────────────────────
 # The counter-factual: a link marked a non-trapping PID 0 dead with no exit
 # reason, so process:start returned normally after the crash.

@@ -1,6 +1,9 @@
 (elle/epoch 12)
+# audited: 2026-09-23
+# A process that spins without end cannot starve a ring of processes that pass a message around it.
+# docs/processes.md
+
 (def process ((import-file "lib/process.lisp")))
-(def backend (*io-backend*))
 
 (defn run-ring []
   (let [me (process:self)]
@@ -14,10 +17,9 @@
                                 (letrec [spin (fn [n] (spin (+ n 1)))]
                                   (spin 0))))]
       (process:send n1 0)
-      (let [val (process:recv)]
-        (println (string "  ring: 0 → " val))
-        (process:exit hog :kill)))))
+      (assert (= (process:recv) 3)
+              "the message went once round the ring of three")
+      (process:exit hog :kill))))
 
-(println "starting ring test")
-(process:start run-ring :fuel 200 :backend backend)
-(println "ring done")
+(process:start run-ring :fuel 200)
+(println "process-smoke: ok")
