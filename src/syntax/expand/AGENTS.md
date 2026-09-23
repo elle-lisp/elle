@@ -1,13 +1,14 @@
 # syntax/expand
 
+<!-- audited: 2026-09-22 -->
+
 Hygienic macro expansion: macro definition, macro calls, quasiquote, and introspection.
 
 ## Responsibility
 
 - Expand macros with hygiene (scope sets prevent accidental capture)
 - Handle `defmacro` definitions
-- Expand `let*` (alias for `let`, defined in prelude)
-- Desugar `defn` to `(def name (fn ...))`
+- Expand `syntax-case` into pattern-matching code
 - Expand quasiquote to runtime list construction
 - Provide `macro?` and `expand-macro` introspection
 - Handle `begin-for-syntax` compile-time definitions
@@ -34,8 +35,6 @@ Syntax (from reader)
     ▼
 Expander
     ├─► load prelude macros (when, unless, try, protect, defer, with, etc.)
-    ├─► desugar defn to (def name (fn params body...))
-    ├─► expand let* (prelude alias for let)
     ├─► check for macro calls
     ├─► compile & eval macro body in VM via pipeline::eval_syntax()
     ├─► convert result Value back to Syntax via from_value()
@@ -52,13 +51,13 @@ Syntax (expanded)
 
 Each macro expansion creates a fresh `ScopeId`. Identifiers introduced by the macro carry this scope. Identifiers from the call site don't. The Analyzer uses scope-set subset matching to prevent accidental capture:
 
-```janet
+```lisp
 (defmacro swap (a b)
-  `(let [tmp ,a] (set ,a ,b) (set ,b tmp)))
+  `(let [tmp ,a] (assign ,a ,b) (assign ,b tmp)))
 
-(let [tmp 10 x 1 y 2]
+(let [@tmp 10 @x 1 @y 2]
   (swap x y)
-  tmp)  ; Still 10, not affected by macro's tmp
+  tmp)  # still 10, not affected by the macro's tmp
 ```
 
 The macro's `tmp` has the expansion scope. The outer `tmp` has the call-site scope. They don't match, so no capture.
@@ -82,10 +81,10 @@ Quasiquote is expanded to runtime list construction:
 - `'x` → `(quote x)` (not expanded)
 - `` `x `` → `(quote x)` (literal)
 - `` `,x `` → `x` (unquote — evaluate)
-- `` `,@x `` → `(splice x)` (unquote-splice — spread array/list)
+- `` `,;x `` → `(splice x)` (unquote-splice; inside a quasiquoted list, `x` must be a list)
 - Nested quasiquotes increase depth; nested unquotes decrease depth
 
-The `quasiquote_to_code()` function recursively converts quasiquote forms to `list`, `cons`, `quote`, and `splice` calls that construct the result at runtime.
+The `quasiquote_to_code()` function recursively converts quasiquote forms to `list`, `quote`, and `splice` calls that construct the result at runtime.
 
 ## Introspection
 
@@ -117,7 +116,7 @@ The `Expander` maintains:
 
 ## Prelude macros
 
-The standard prelude (`prelude.lisp`) defines:
+The standard prelude (`src/prelude.lisp`) defines:
 - `defn` — shorthand for `(def name (fn ...))`
 - `let*` — alias for `let` (retained for Scheme familiarity)
 - `->` — thread-first macro
@@ -152,7 +151,7 @@ The expander holds two: `arena` is the working arena of the unit under expansion
 
 `(datum->syntax context datum)` creates a syntax object with the context's scope set and `scope_exempt: true`. This prevents `add_scope_recursive` from adding the intro scope, so the datum resolves at the call site. Used for anaphoric macros:
 
-```janet
+```lisp
 (defmacro aif (test then else)
   `(let [,(datum->syntax test 'it) ,test]
      (if ,(datum->syntax test 'it) ,then ,else)))
@@ -173,12 +172,13 @@ The expander holds two: `arena` is the working arena of the unit under expansion
 
 6. **Macro bodies are VM-evaluated.** Macro arguments are quoted and passed to the macro body, which is compiled and executed in the real VM via `pipeline::eval_syntax()`. The result Value is converted back to Syntax via `from_value()`. Macros must use quasiquote to return code templates.
 
-7. **Cached transformer is populated on first use, per pipeline call.**
+7. **The cached transformer is filled once and shared.**
     `MacroDef.cached_transformer` holds the compiled `(fn (params...) template)`
-    closure after first expansion. Cloning `MacroDef` copies the `Value` (cheap;
-    it's `Copy` and the closure's heap data is `Rc`). The original in the
-    instance's `CompileCtx` does NOT see the update (different `RefCell`) — the
-    cache warms per pipeline call, not globally. This is by design.
+    closure after the first expansion. The cell is an `Rc<RefCell<…>>`, so every
+    per-compile clone of the compilation cache's master `MacroDef` aliases the
+    master's cell: the first compile that expands the macro fills it, and every
+    later compile reuses it. Teardown releases the transformer's region through
+    `release_cached_transformers`.
 
 8. **Qualified symbols pass through expansion unchanged.** `module:name` is recognized by the lexer as a single token. The Expander does not transform it. The Analyzer desugars it to nested `get` calls.
 
@@ -190,7 +190,7 @@ The expander holds two: `arena` is the working arena of the unit under expansion
 
 ## When to modify
 
-- **Adding a new prelude macro**: Add to `prelude.lisp` (project root), not here
+- **Adding a new prelude macro**: Add to `src/prelude.lisp`, not here
 - **Changing macro expansion algorithm**: Update `mod.rs::expand()`
 - **Changing quasiquote semantics**: Update `quasiquote.rs`
 - **Changing macro argument wrapping**: Update `macro_expand.rs::wrap_macro_arg()`
@@ -202,4 +202,4 @@ The expander holds two: `arena` is the working arena of the unit under expansion
 - **Forgetting to expand recursively**: After macro expansion, the result must be recursively expanded (with depth limit)
 - **Not preserving scope sets**: Arguments wrapped as `SyntaxLiteral` must preserve their scope sets through the Value round-trip
 - **Conflating `Quote` and `SyntaxLiteral`**: `Quote` is for atoms; `SyntaxLiteral` is for compounds that need scope preservation
-- **Not handling improper lists**: Macros cannot return improper lists (e.g., `(cons 1 2)`). The `from_value()` conversion requires proper lists.
+- **Not handling improper lists**: Macros cannot return improper lists (for example, `(pair 1 2)`). The `from_value()` conversion requires proper lists.

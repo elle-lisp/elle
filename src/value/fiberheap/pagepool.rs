@@ -1,4 +1,7 @@
+// audited: 2026-09-22
 //! Per-thread page cache for region allocation.
+//!
+//! docs/impl/region/model.md
 //!
 //! `PagePool` caches mmap'd pages organized by size class. When a region
 //! needs a new page, it claims one from the pool (or mmaps fresh). When a
@@ -467,15 +470,15 @@ impl PagePool {
         self.initial_page_size
     }
 
-    /// Claim a page of exactly `size` bytes, its body zero.
+    /// Claim a page of exactly `size` bytes.
     ///
-    /// Pops from the free list if available (O(1)), otherwise mmaps fresh.
-    /// Either way the body arrives blank, and this path does nothing to make it
-    /// so: a fresh mapping is zero already, and a cached page was reset when its
-    /// region released it (docs/impl/region/model.md § "Page recycling"). So a
-    /// claim is a free-list pop — no system call, no page byte touched, and no
-    /// fault on memory that is already resident. The caller stamps the header,
-    /// which until then still carries the dead region's stamp.
+    /// Pops from the free list if available (O(1)), otherwise mmaps fresh. A
+    /// fresh mapping is zero; a recycled page holds whatever its last region
+    /// wrote, because the claimant writes every slot before anything reads it
+    /// (docs/impl/region/model.md § "Page recycling"). So a claim is a
+    /// free-list pop — no system call, no page byte touched, and no fault on
+    /// memory that is already resident. The caller stamps the header, which
+    /// until then still carries the dead region's stamp.
     pub fn claim(&mut self, size: usize) -> MmapPage {
         let size = size.next_power_of_two().max(base_page());
         record_claim(size);

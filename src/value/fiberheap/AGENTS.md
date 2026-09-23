@@ -1,6 +1,6 @@
 # fiberheap
 
-<!-- audited: 2026-09-10 -->
+<!-- audited: 2026-09-22 -->
 
 The per-VM heap: the physical region allocator (docs/impl/region/model.md). One
 `FiberHeap` per VM, shared by all of that VM's fibers; every allocation names its
@@ -89,8 +89,9 @@ bypasses the check via the generation-blind `region_of_page_ptr`.
    reserved (never minted). Minting starts at 2, so every live region is mortal
    and RC-reclaimable.
 6. **The page body belongs to the region, the header to the pool.**
-   `PagePool::claim` hands out a page whose body is zero and does nothing to
-   make it so — `release` blanked the spans the dying region wrote, and left
-   offset 0 alone. So a claim is a free-list pop, and a page waiting in the
-   cache still carries the stamp invariant 4 depends on. See
+   `PagePool::claim` hands out a recycled page untouched: its body holds what
+   the last region wrote, and the claimant writes every slot before anything
+   reads it. Only `--trace=scrub` blanks the spans a dying region wrote, and it
+   leaves offset 0 alone. So a claim is a free-list pop, and a page waiting in
+   the cache still carries the stamp invariant 4 depends on. See
    docs/impl/region/model.md § "Page recycling".

@@ -31,7 +31,7 @@ Up: [..](../AGENTS.md)
 - [libraries.md](libraries.md) — **Libraries** Elle ships with libraries in `lib/`.
 - [loops.md](loops.md) — **Loops** Elle's loop forms are `while`, `forever`, `repeat`, and `each`.
 - [lua.md](lua.md) — **Lua Syntax Mode** Elle supports a Lua surface syntax for `.lua` files.
-- [macros.md](macros.md) — **Macros** Elle's macro system: VM-evaluated, fully hygienic via sets-of-scopes, with `datum->syntax` escape hatch for anaphoric macros.
+- [macros.md](macros.md) — **Macros** Elle's macros run as ordinary Elle code at expansion time, and are hygienic by sets of scopes; `datum->syntax` breaks hygiene on purpose.
 - [match.md](match.md) — **Pattern Matching** `match` dispatches on the structure and value of data.
 - [mcp-eval.md](mcp-eval.md) — **MCP `eval` tool** The `eval` tool collapses the MCP surface to a single verb: a monadic bind over a persistent Elle image held in the server.
 - [mcp.md](mcp.md) — **MCP Server (more...)**
@@ -62,7 +62,7 @@ Up: [..](../AGENTS.md)
 - [threads.md](threads.md) — **Threads** OS threads for CPU-bound work.
 - [traits.md](traits.md) — **Traits** Every heap-allocated value carries a `traits` field — a pointer to a trait table (struct or @struct).
 - [types.md](types.md) — **Types** Elle values are 16-byte tagged unions.
-- [warts.md](warts.md) — **Warts (more...)**
+- [warts.md](warts.md) — **Warts** Where Elle surprises a programmer from another Lisp: the intentional differences, then the known limitations.
 
 ## Directories
 

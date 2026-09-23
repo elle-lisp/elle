@@ -1,6 +1,6 @@
 # Region representation — id-spaces, per-execution model, layout
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-22 -->
 
 Implementation-facing. How the compiler and runtime represent regions: the two
 id-spaces, the per-activation physical-region model, the page layout, and how an
@@ -110,10 +110,12 @@ execution, is [template.md](template.md).
 ## Physical representation
 
 A per-thread page pool with size classes hands pages to regions on demand and
-reclaims them at RC 0; it can munmap excess pages under pressure. Regions never
-share pages (Rule 6). RC lives in `RegionStore`, one counter per physical region.
-One region per value, unmerged, is the baseline: it claims a page per allocation
-— correct but expensive. Two kinds of *merging* amortize that cost, both
+takes them back when their region frees, by a count reaching zero or by its
+owner's subtree drop. A page released past the pool's `max_cached` bound is
+`munmap`ed at once. Regions never share pages (Rule 6). `RegionStore` holds one
+`Reclaim` per physical region: a count for a `Counted` region, an owner for an
+`Owned` one ([ownership.md](ownership.md)). One region per value, unmerged, is
+the baseline: it claims a page per allocation — correct but expensive. Two kinds of *merging* amortize that cost, both
 collapsing several solver `Region`s onto one physical region (the
 consumer-facing performance account is in
 [regions/performance.md](../../regions/performance.md)):
@@ -198,7 +200,7 @@ zeroes the spans the dying region wrote — the object slots
 `[HEADER_SIZE, obj_cursor)` and the inline-data suffix `[data_cursor, len)`,
 together one `PageDirty` pair, sparing the header for the reason above. The gap
 between the two cursors was never written by that region, so it is not scrubbed
-either; a region holding one 48-byte cons costs 48 bytes of work.
+either; a region holding one pair costs one 128-byte `HeapObject` slot of work.
 
 The point is not hygiene. A read through a pointer that outlived its region
 normally finds the dead region's bytes — plausible, well-typed, and silently

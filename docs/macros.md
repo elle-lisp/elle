@@ -1,370 +1,149 @@
 # Macros
 
-Elle's macro system: VM-evaluated, fully hygienic via sets-of-scopes,
-with `datum->syntax` escape hatch for anaphoric macros.
+<!-- audited: 2026-09-22 -->
 
-## Overview
+Elle's macros run as ordinary Elle code at expansion time, and are hygienic by
+sets of scopes; `datum->syntax` breaks hygiene on purpose.
 
-Macros in Elle are VM-evaluated. A macro is a name, a parameter list,
-and a body. At expansion time, arguments are quoted and the body is
-compiled and executed in the real VM via `pipeline::eval_syntax()`.
-The full language is available in macro bodies: `if`, `let`, closures,
-list operations, recursion — everything.
+## Defining a macro
 
-```text
-(defmacro my-when (test body)
-  `(if ,test ,body nil))
+A macro is a name, a parameter list and a body. At expansion time the arguments
+arrive unevaluated, the body runs in the VM, and the syntax it returns replaces
+the call. The whole language is available in a macro body: `if`, `let`,
+closures, recursion. The body usually builds its result with quasiquote.
 
-(def x 5)
-(my-when (> x 0) (println "positive"))
-# Expands to: (if (> x 0) (println "positive") nil)
+```lisp
+(defmacro my-when (test & body)
+  `(if ,test (begin ,;body) nil))
+
+(assert (= (my-when true 1 2) 2))
+(assert (= (expand-macro '(my-when ok (f))) '(if ok (begin (f)) nil)))
 ```
 
-### Features
+- **`define-macro`** is an alias for `defmacro`.
+- **Parameters** take the same `&opt` and `&` rest markers as a function.
+- **A wrong argument count** is a compile error.
+- **Expansion recurses**, so a macro may expand to another macro call. The depth
+  is limited to 200, which stops an expansion that never ends.
+- **`(macro? name)`** answers whether `name` names a macro, at expansion time.
+- **`(expand-macro 'form)`** expands a quoted form and returns the result as
+  data. Write the argument with `'`: a written-out `(quote form)` comes back
+  unexpanded (#1229).
+- **A `defmacro` form expands to `nil`**, so a definition inside a `begin`
+  produces no code.
 
-- **VM-evaluated macros.** `defmacro` bodies are normal Elle code.
-  Arguments are quoted and bound via `let`. The body runs in the VM
-  and must return syntax (typically via quasiquote).
+Two limits, both listed in [warts.md](warts.md): a macro cannot return an
+improper list such as `(pair 1 2)`, and a macro cannot be exported from a
+module.
 
-- **Conditional expansion.** Macros can use `if`, `cond`, `let`, etc.
-  to generate different code based on their arguments.
+## Hygiene: sets of scopes
 
-- **Threading macros.** `->` and `->>` are built into the expander as
-  structural rewrites.
+A name a macro introduces cannot capture a name at its call site, and a call
+site cannot capture a name the macro's template uses. Elle implements Racket's
+sets-of-scopes model (Matthew Flatt, 2016): every identifier carries a set of
+scopes, and each expansion mints a fresh *intro* scope.
 
-- **Macro introspection.** `macro?` and `expand-macro` work at expansion
-  time (handled by the Expander in `expand/introspection.rs`).
+```lisp
+(defmacro my-swap (a b)
+  `(let [tmp ,a] (assign ,a ,b) (assign ,b tmp)))
 
-- **`define-macro` alias.** Both `defmacro` and `define-macro` are
-  accepted. They are identical.
-
-- **Macro definitions expand to nil.** `(defmacro ...)` returns
-  `SyntaxKind::Nil` — the definition itself produces no code. This
-  matters in `begin` forms where `defmacro` is mixed with expressions.
-
-- **Arity checking.** Wrong argument count produces a clear error.
-
-- **Recursion guard.** Expansion depth is limited to 200 (matching
-  Janet), preventing infinite macro expansion.
-
-- **Define shorthand.** `(def (f x) body)` desugars to
-  `(def f (fn (x) body))` during expansion.
-
-### Notes
-
-**`gensym` is rarely needed.** With automatic hygiene, most macros
-don't need `gensym`. It's still available for cases where you need a
-unique name that's not related to hygiene (e.g., generating unique
-global names).
-
-**Macros cannot return improper lists.** `from_value()` requires proper
-lists. A macro body that returns `(cons 1 2)` will error.
-
-**Macros are not yet exportable.** Macros defined in one module cannot
-be imported by another. A branch exists where macros are first-class
-values, which will resolve this. See [warts.md](warts.md).
-
-
-## Architecture
-
-### Pipeline position
-
-```
-Source → Reader → Syntax → Expander.expand() → Syntax → Analyzer → HIR
+(def @tmp 100)
+(def @x 1)
+(def @y 2)
+(my-swap x y)
+(assert (= [x y tmp] [2 1 100]))   # the macro's tmp is not the caller's
 ```
 
-Expansion happens between parsing and analysis. The Expander is a
-standalone struct with a `HashMap<String, MacroDef>` of registered macros
-and a monotonic `ScopeId` counter.
+The expansion stamps the intro scope on the arguments, then flips it on the
+result. Identifiers that came from the template gain the scope; identifiers that
+came from the arguments lose it again, and so keep their call-site scope sets.
 
-### MacroDef
+A binding is visible to a reference when the binding's scope set is a subset of
+the reference's. When several bindings match, the one with the largest set
+wins. In the swap above, with call-site scope `{0}` and intro scope `3`:
 
-```rust
-pub struct MacroDef {
-    pub name: String,
-    pub params: Vec<String>,
-    pub template: Syntax,
-}
+| Reference | Candidate binding | Subset? |
+|-----------|-------------------|---------|
+| template `tmp`, scopes `{0, 3}` | caller's `tmp`, `{0}` | yes |
+| template `tmp`, scopes `{0, 3}` | macro's `tmp`, `{0, 3}` | yes, and larger, so it wins |
+| caller's `tmp`, scopes `{0}` | macro's `tmp`, `{0, 3}` | no, so it is invisible |
+
+**Referential transparency.** A free name in a template resolves where the macro
+was defined, not where it is called. Inside a local frame, a binding is visible
+to a template reference only if it carries that reference's intro scope. A
+call-site `let` therefore cannot shadow a name the template uses:
+
+```lisp
+(defn helper [x] (* x 10))
+(defmacro scaled (e) `(helper ,e))
+
+(let [helper (fn [x] :shadowed)]
+  (assert (= (scaled 2) 20)))   # the template's helper is the top-level one
 ```
 
-A macro is a name, positional parameter names, and a Syntax template.
-No pattern matching, no ellipsis, no multiple clauses.
+`gensym` is still available for a unique name that has nothing to do with
+hygiene, such as a generated global.
 
-### Expansion algorithm (VM-based)
+## Breaking hygiene on purpose: `datum->syntax`
 
-1. Check arity: `args.len() == params.len()`
-2. Check recursion depth against `MAX_MACRO_EXPANSION_DEPTH` (200)
-3. Build a let-expression: `(let [p1 'a1 p2 'a2] body)` where
-   each argument is quoted so it becomes data, not code
-4. Compile and execute via `pipeline::eval_syntax()` — the full
-   pipeline (expand → analyze → lower → emit → execute) runs on the
-   let-expression, using the same Expander (so nested macros work)
-5. Convert the result `Value` back to `Syntax` via `from_value()`
-6. Mint a fresh intro `ScopeId`, pre-stamp it on the arguments, and
-   **flip** it on the transformer's result via `flip_scope_recursive()`:
-   template-origin nodes gain the scope, argument-origin nodes lose it
-   (recovering their use-site scope sets). See "Sets-of-Scopes Hygiene"
-   below.
-7. Recursively expand the result (handles macro-generated macro calls)
+`(datum->syntax context datum)` builds a syntax object that carries
+`context`'s scopes, and the intro scope is never stamped on it. It therefore
+binds and resolves at the call site, which is what an anaphoric macro needs:
 
-### Expander precedence
-
-The Expander checks forms in this order: `defmacro`/`define-macro` →
-threading macros → `macro?`/`expand-macro` → `define` shorthand →
-user-defined macros → recursive child expansion. A user-defined macro
-named `define` would never fire because the `define` shorthand is
-checked first.
-
-### The scope set mechanism
-
-Every `Syntax` node carries `scopes: Vec<ScopeId>`. The Expander creates
-a fresh scope per expansion and stamps it onto the result. This implements
-Racket's "sets of scopes" model: two identifiers match only if their
-scope sets are compatible.
-
-The Analyzer's `bind()` stores scope sets alongside bindings, and
-`lookup()` uses subset matching: a binding is visible to a reference if
-the binding's scope set is a subset of the reference's scope set. When
-multiple bindings match, the one with the largest scope set wins.
-
-### Syntax objects in the Value system
-
-`Value::syntax(Syntax)` preserves scope sets through the Value round-trip
-during macro expansion. Without this, nested macros lose call-site scopes
-when arguments pass through `to_value()` → VM execution → `from_value()`.
-
-Macro arguments use hybrid wrapping: atoms (nil, bool, int, float, string,
-keyword) are wrapped via `Quote` to preserve runtime semantics. Symbols
-and compound forms are wrapped via `SyntaxLiteral(Value::syntax(arg))` to
-preserve scope sets. This avoids the problem where wrapping `false` in a
-syntax object makes it truthy (syntax objects are heap-allocated).
-
-### Cross-form macro visibility
-
-`compile_file` shares a single `Expander` across all top-level forms,
-so macros defined in one form are visible in subsequent forms within the
-same compilation unit. The REPL compiles each form individually via
-`compile_file_repl`, which returns the Expander after expansion. New
-macro definitions are merged back into the compilation cache via
-`register_repl_macros`, so macros defined in one REPL input are
-visible in all subsequent inputs.
-
-
-## The Hygiene Problem
-
-Macro hygiene means two things:
-
-1. **No accidental capture.** A binding introduced by a macro doesn't
-   shadow bindings at the call site, and vice versa.
-
-2. **Referential transparency.** Free variables in a macro template
-   resolve in the macro's definition environment, not the call site.
-   Elle delivers this through the intro scope: a template-origin
-   reference carries its expansion's intro scope, and a use-site *local*
-   binding that lacks that scope is invisible to it — resolution falls
-   through to the definition environment (the file's top-level bindings
-   and primitives, whose frames are exempt from the rule). Pinned by
-   tests/elle/hygiene.lisp ("referential transparency") and
-   `hir::analyze` unit tests.
-
-Without hygiene, macro authors must manually avoid name collisions. The
-standard workaround is `gensym` — generating unique names that can't
-collide.
-
-### Prior art
-
-**Common Lisp** has `defmacro` with manual `gensym`. No automatic
-hygiene. Macro authors are responsible for avoiding capture. This works
-in practice because experienced Lispers know the patterns, but it's a
-source of subtle bugs.
-
-**Scheme R5RS** has `syntax-rules`, a pattern-based macro system with
-automatic hygiene. Patterns use ellipsis (`...`) for variadic matching.
-Hygiene is enforced by the expander — no escape hatch. Limited: you
-can't write procedural macros.
-
-**Scheme R6RS / Racket** has `syntax-case`, which combines pattern
-matching with procedural escape. Macros receive and return *syntax
-objects* — s-expressions annotated with lexical context. Hygiene is
-automatic but breakable via `datum->syntax`. This is the most powerful
-and most complex model.
-
-**Racket's "sets of scopes"** (Matthew Flatt, 2016). Each identifier
-carries a set of scope IDs. A binding is visible to a reference if the
-binding's scope set is a subset of the reference's scope set. Elle
-implements this model.
-
-
-## Sets-of-Scopes Hygiene
-
-Binding resolution respects scope marks. Macro-introduced bindings can't
-capture call-site names and vice versa. Automatic — no `gensym` needed
-for the common case.
-
-**Implementation:**
-
-- `Scope.bindings` stores `HashMap<String, Vec<ScopedBinding>>` — multiple
-  bindings per name with different scope sets
-- `bind()` records the binding's scope set from the `Syntax` node
-- `lookup()` uses scope-set subset matching with largest-scope-set-wins
-  tiebreaker
-- `Value::syntax(Syntax)` preserves scope sets through the Value round-trip
-- `SyntaxKind::SyntaxLiteral(Value)` injects syntax objects into the pipeline
-- `from_value()` unwraps syntax objects, preserving scopes
-- each expansion mints a fresh **intro scope**, pre-stamps it on the macro
-  arguments, and **flips** it on the transformer's result
-  (`flip_scope_recursive`): template-origin identifiers — which never saw
-  the scope — gain it, argument-origin identifiers lose it, recovering
-  their use-site scope sets exactly. A template binder therefore carries
-  the intro scope and cannot capture inbound identifiers.
-- `datum->syntax` results are exempt from the flip; they copy their
-  context's scopes with the intro scope stripped, which is what makes
-  deliberate capture (anaphoric macros) work.
-- intro scopes are a distinct id class (`ScopeId::is_intro`, a reserved
-  bit), so the Analyzer can recognize a template-origin reference without
-  threading expander state. `lookup()` applies the **referential
-  transparency rule**: in a non-definition-environment frame (anything
-  but the global frame and the file's top-level letrec frame), a binding
-  is visible to a reference only if every intro scope the reference
-  carries is on the binding or in the frame's expansion provenance (the
-  intro scopes of the form that opened the frame — the Analyzer's
-  stand-in for Racket's binding-form rib scope). A call-site `let`
-  shadow (user form, no intro anywhere) therefore cannot capture a
-  template's free variable — the reference resolves at top level
-  instead — while a template binder (same intro scope), a
-  `datum->syntax` binder inside a template-origin form (frame
-  provenance carries the intro), and `datum->syntax` references (no
-  intro scope, still see call-site bindings) all keep working.
-
-**How it works:**
-
-The rule: a binding is visible to a reference if the **binding's** scope
-set is a subset of the **reference's** scope set. When multiple bindings
-match, the one with the **largest** scope set wins (most specific).
-
-```
-Before expansion:
-  call-site `tmp` has scopes {0}       (user's let-binding)
-  call-site `x` has scopes {0}
-
-After expanding (swap x y) with intro scope 3:
-  macro's `tmp` has scopes {0, 3}      ← from result, gets intro scope
-  macro's `x` has scopes {0}           ← from call site, no intro scope
-```
-
-**Inside the macro body** — reference to `tmp` has scopes `{0, 3}`:
-- Call-site binding `tmp` scopes `{0}`: is `{0} ⊆ {0, 3}`? Yes.
-- Macro binding `tmp` scopes `{0, 3}`: is `{0, 3} ⊆ {0, 3}`? Yes.
-- Both match, but `{0, 3}` is larger → macro's `tmp` wins. Correct.
-
-**At the call site** — reference to `tmp` has scopes `{0}`:
-- Call-site binding `tmp` scopes `{0}`: is `{0} ⊆ {0}`? Yes. Matches.
-- Macro binding `tmp` scopes `{0, 3}`: is `{0, 3} ⊆ {0}`? No. Invisible.
-- Only the call-site `tmp` is visible. No capture.
-
-**Pre-expansion code**: empty scopes `[]` is a subset of everything,
-so code that hasn't been through macro expansion works identically.
-
-
-## Macros in the prelude
-
-The prelude defines all core control-flow macros using `defmacro`:
-
-| Macro | Purpose |
-|-------|---------|
-| `try`/`catch` | Error handling via fibers |
-| `protect` | Run body, return `[success? value]` |
-| `defer` | Unconditional cleanup after body |
-| `with` | Resource acquisition/release |
-| `when`, `unless` | One-armed conditionals |
-| `each` | Polymorphic iteration |
-| `match` | Pattern matching with destructuring |
-| `->`, `->>`, `as->`, `some->` | Threading macros |
-| `apply` | Spread args from final list |
-| `forever`, `repeat` | Loop forms |
-| `if-let`, `when-let`, `when-ok` | Conditional binding |
-| `ffi/defbind`, `ffi/with-stack` | FFI convenience |
-| Anaphoric macros | Via `datum->syntax` escape hatch |
-
-
-## Files
-
-| File | Role |
-|------|------|
-| `src/syntax/expand/mod.rs` | Expander struct, `defmacro` handling, scope stamping |
-| `src/syntax/expand/macro_expand.rs` | VM-based macro expansion via `eval_syntax` |
-| `src/syntax/expand/quasiquote.rs` | Quasiquote → `(list ...)` runtime calls |
-| `src/syntax/expand/threading.rs` | `->` and `->>` |
-| `src/syntax/expand/introspection.rs` | `macro?` and `expand-macro` |
-| `src/syntax/expand/qualified.rs` | `module:name` resolution |
-| `src/syntax/expand/tests.rs` | Expansion tests |
-| `src/syntax/mod.rs` | `Syntax`, `SyntaxKind`, `ScopeId`, `set_scopes_recursive` |
-| `src/syntax/convert.rs` | `Syntax` ↔ `Value` conversion |
-| `src/hir/analyze/mod.rs` | `Analyzer`, `Scope`, `lookup()`, `bind()` |
-| `src/pipeline.rs` | Compilation entry points, `eval_syntax` |
-
-
-## Design notes
-
-1. **Argument quoting.** `Quote(Box::new(arg.clone()))` works. The
-   Analyzer handles `quote` by converting to a Value via `to_value()`.
-   Symbols inside quotes are interned, not resolved.
-
-2. **Analysis-only paths.** Both `lsp/` and `lint/cli` already
-    create VMs. `analyze`/`analyze_all` take `&mut VM`.
-
-3. **Signal system interaction.** Signal inference happens after
-   expansion, so macros that expand to signalling code get correct
-   signal annotations. No changes needed.
-
-
-## Hygiene Escape Hatch: `datum->syntax`
-
-`(datum->syntax context datum)` creates a syntax object from `datum`
-with the lexical context of `context`. The result is marked
-`scope_exempt` so the expansion pipeline's intro scope stamping does
-not override the context's scopes. This enables anaphoric macros —
-macros that intentionally introduce bindings visible at the call site.
-
-```text
+```lisp
 (defmacro aif (test then else)
   `(let [,(datum->syntax test 'it) ,test]
      (if ,(datum->syntax test 'it) ,then ,else)))
 
-(aif (+ 1 2) (+ it 10) 0)  # → 13
+(assert (= (aif (+ 1 2) (+ it 10) 0) 13))
 ```
 
-If `context` is a syntax object, its scope set and span are copied.
-If `context` is a plain value (atom arguments are passed as plain
-values via hybrid wrapping), empty scopes and a synthetic span are
-used — normal lexical scoping still applies.
+When `context` is a plain value rather than a syntax object (an atom argument
+arrives as a plain value), the result gets empty scopes, and ordinary lexical
+scoping applies. `(syntax->datum stx)` strips the scopes and returns the plain
+value.
 
-`(syntax->datum stx)` strips scope information from a syntax object,
-returning the plain value. If the argument is not a syntax object, it
-is returned unchanged.
+## Pattern matching on syntax: `syntax-case`
 
-### Implementation
+`syntax-case` matches a syntax object against patterns: `_`, a pattern
+variable, a literal, `(literal sym)` for a symbol, or a list of patterns. A
+clause may carry a `when` guard.
 
-Both are runtime primitives in `src/primitives/meta.rs`. They reach the
-symbol table through their `NativeCtx` — `ctx.vm().symbols()` — to intern
-the names they build.
+```lisp
+(defmacro classify (stx)
+  (syntax-case stx
+    ((literal if) :an-if)
+    (42 :forty-two)
+    ((a b) :a-pair)
+    (_ :other)))
 
-The `scope_exempt: bool` field on `Syntax` is the mechanism that
-prevents intro scope stamping. `add_scope_recursive` checks this flag
-and skips exempt nodes. `set_scopes_recursive` (called by
-`datum->syntax`) sets both the scopes and the exempt flag recursively.
+(assert (= (classify if) :an-if))
+(assert (= (classify 42) :forty-two))
+(assert (= (classify (x y)) :a-pair))
+(assert (= (classify z) :other))
+```
 
+## Macros in the prelude
 
-## Performance
+[src/prelude.lisp](../src/prelude.lisp) defines the everyday forms as ordinary macros:
 
-Macro expansion compiles and executes bytecode per call. A macro cache
-stores compiled bytecode per `MacroDef`, so repeated expansions of the
-same macro (e.g., `when` used hundreds of times) reuse the cached
-bytecode — only the argument bindings change.
+| Macro | Purpose |
+|-------|---------|
+| `defn`, `let*` | Function definition; sequential `let` alias |
+| `when`, `unless`, `case` | Conditionals |
+| `if-let`, `when-let`, `when-ok` | Conditional binding |
+| `try`/`catch`, `protect`, `defer`, `with` | Errors and cleanup |
+| `each`, `forever`, `repeat` | Loops |
+| `->`, `->>`, `as->`, `some->` | Threading |
+| `apply` | Spread the final argument |
+| `yield*` | Delegate to a sub-fiber, yielding its values |
+| `ffi/defbind`, `ffi/with-stack` | FFI convenience |
 
-## `set` and scope-aware lookup
+`match`, `cond`, `if` and `while` are special forms, not macros.
 
-`set` goes through the Analyzer's `lookup()`. With scope-aware resolution,
-a macro that uses `set` on a call-site variable must have the right
-scope set for the reference to resolve. This works naturally because
-call-site arguments keep their original scopes via syntax objects.
+## Implementation
+
+[src/syntax/expand/AGENTS.md](../src/syntax/expand/AGENTS.md) documents the
+expander: its dispatch order, argument wrapping, the transformer cache, and its
+invariants. [impl/syntax.md](impl/syntax.md) documents the syntax tree the
+expander rewrites.
