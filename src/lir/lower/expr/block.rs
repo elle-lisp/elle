@@ -1,4 +1,8 @@
+// audited: 2026-09-23
 //! `If` and `Block` lowering — the branch/labeled-block result-slot pattern.
+//!
+//! docs/impl/region/replicate.md
+//! docs/impl/region/anchors.md
 //!
 //! Grouped because both allocate a result slot, drive control through fresh
 //! labels, store each arm's result into that slot, and reload it at the merge/
@@ -26,11 +30,10 @@ impl<'a> Lowerer<'a> {
 
         // Each arm seals whatever relocation point it ends on, so a release
         // emitted past the merge can be replicated back into the arms that leave
-        // through a frame-replacing tail call (docs/impl/region/mechanism.md
-        // § "The relocation point outlives the block"). Read BEFORE the condition
-        // block closes, because the merge's other source is the set of points
-        // already covering this position, and `finish_block` clears them
-        // (§ "A merge inherits what covered the branch's ENTRY as well"). `cond`
+        // through a frame-replacing tail call (docs/impl/region/replicate.md). Read BEFORE the
+        // condition block closes, because the merge's other source is the set of
+        // points already covering this position, and `finish_block` clears them:
+        // a merge inherits what covered the branch's entry as well. `cond`
         // is lowered above, so nothing of this branch's own is lost by reading
         // here; `lower_cond` and `lower_match` reach the same moment with their
         // entry block still open.
@@ -117,10 +120,9 @@ impl<'a> Lowerer<'a> {
 
         // Region-demise DecrefRegion is emitted by `lower_expr` at each region's
         // `decref_point` HirId — and every region a `break` affects has this
-        // Block node or later as that point: the value it carried out
-        // (docs/impl/region/mechanism.md § "`break` transfers its value") and
-        // every release its jump passed over (§ "A release the break jumps over
-        // is not a release"). Both therefore land after the exit label below and
+        // Block node or later as that point: the value it carried out and every
+        // release its jump passed over (docs/impl/region/anchors.md). Both therefore land after
+        // the exit label below and
         // fire on both paths, so this function emits no region instruction of
         // its own.
 
