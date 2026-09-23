@@ -1,6 +1,6 @@
 # Versioning
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-23 -->
 
 How an Elle library declares its version and ships migration rules.
 
@@ -14,16 +14,9 @@ it, and a major release carries its own migration rules. The
 ## Declaring a version
 
 Put `(elle/version "X.Y.Z")` at the top level of the module file, by
-convention right after the epoch declaration:
-
-```text
-(elle/epoch 12)
-(elle/version "2.1.0")
-
-(fn [dep]
-  ...
-  {:parse parse :compare compare})
-```
+convention right after the epoch declaration. A module at 2.1.0 therefore
+opens with `(elle/epoch 12)`, then `(elle/version "2.1.0")`, then the module
+closure that returns its export struct.
 
 The compiler consumes the declaration during compilation, exactly as it
 consumes `(elle/epoch N)`. The running program never sees it. The
@@ -83,18 +76,29 @@ and the working tree diffs against it without any git archaeology.
 
 The file is a sequence of Elle forms, one per line, fully sorted: header
 forms in fixed order, then one `export` form per export, sorted by name.
+`std/semver/file` reads and writes it, and a file it reads renders back to
+the same bytes:
 
-```text
-(elle-surface 1)
-(module "std/semver")
-(version "1.0.0")
-(mode :hybrid)
-(released :commit "4f2a9c1e" :date "2026-09-21")
-(tests "tests/elle/semver*.lisp")
-(constructor [])
-(export compare :fn [a b] :signals [:error] :doc "b0a1c2d3")
-(export parse :fn [version] :signals [:error] :doc "18293a4b")
-(export valid? :fn [version] :signals [] :doc "90a1b2c3")
+```lisp
+(def sfile ((import "std/semver/file")))
+(def surface-text
+  (string (string/join
+            ["(elle-surface 1)"
+             "(module \"std/semver\")"
+             "(version \"1.0.0\")"
+             "(mode :hybrid)"
+             "(released :commit \"4f2a9c1e\" :date \"2026-09-21\")"
+             "(tests \"tests/elle/semver*.lisp\")"
+             "(constructor [])"
+             "(export compare :fn [a b] :signals [:error] :doc \"b0a1c2d3\")"
+             "(export parse :fn [version] :signals [:error] :doc \"18293a4b\")"
+             "(export valid? :fn [version] :signals [] :doc \"90a1b2c3\")"]
+            "\n")
+          "\n"))
+(def surface (sfile:parse surface-text))
+(assert (= (surface :version) "1.0.0") "the version form")
+(assert (= ((get (surface :exports) :parse) :params) ["version"]) "an export's shape")
+(assert (= (sfile:render surface) surface-text) "the render is byte for byte")
 ```
 
 Vocabulary, per form:

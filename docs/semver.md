@@ -1,6 +1,6 @@
 # elle semver
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-23 -->
 
 `elle semver` computes and verifies the version bump a library's surface change requires.
 
@@ -15,8 +15,8 @@ A surface diff proves a lower bound — the floor — on the bump a release
 must claim. Behavioral equivalence is undecidable, so the floor is one
 leg of three: the diff computes the floor, the prior release's tests
 arbitrate compatibility claims, and a major release ships migration
-rules. This page covers the first two legs — the dev loop, `release`,
-and `check` — and grows when migrations land.
+rules. This page covers all three: the dev loop, `release`, `check`, and
+`migrate`.
 
 ## The dev loop
 
@@ -111,14 +111,15 @@ A major claim promises no compatibility, so arbitration is skipped.
 It is gated on migration coverage instead: every major-classified
 change must be named by a rule in the module's `(elle/migration N ...)`
 form for the claimed major — [versioning](versioning.md) owns the rule
-vocabulary. Missing coverage fails (exit 1) and prints the skeleton of
-the form to ship:
+vocabulary. Missing coverage fails (exit 1). It prints `hint: 2 major
+breaks have no migration rule; add to lib/x.lisp:` and then the skeleton
+of the form to ship, which is a declaration the compiler accepts as it
+stands:
 
-```text
-hint: 2 major breaks have no migration rule; add to lib/x.lisp:
-  (elle/migration 2
-    (rename satisfies? matches?)
-    (warn parse "describe the break"))
+```lisp
+(elle/migration 2
+  (rename satisfies? matches?)
+  (warn parse "describe the break"))
 ```
 
 A removed export whose shape an added export matches suggests a
