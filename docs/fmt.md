@@ -25,8 +25,8 @@ elle fmt < input.lisp            # format stdin to stdout
 ### The epoch tag
 
 Before it formats, `elle fmt` runs the same epoch migration as `elle rewrite`
-([epochs.md](epochs.md)). A file with no `(elle/epoch N)` form gains
-`(elle/epoch 12)`, the current epoch, as its first line, and a file tagged
+([epochs.md](epochs.md)). A file with no `(elle/epoch N)` form gains a
+declaration of the current epoch as its first line, and a file tagged
 with an older epoch is migrated and retagged. `--no-epoch` skips both, which
 is what a fragment pasted from a larger file needs.
 

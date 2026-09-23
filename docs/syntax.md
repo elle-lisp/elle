@@ -1,7 +1,11 @@
 # Syntax
 
+<!-- audited: 2026-09-23 -->
+
+The literals and reader-level constructs of Elle source, from numbers and
+string escapes to quoting and collections.
+
 Elle is a Lisp. Expressions are parenthesized, prefix-notation forms.
-This document covers literal syntax and reader-level constructs.
 
 ## Immediates
 
@@ -14,8 +18,52 @@ true  false          # booleans (not #t/#f)
 0xFF                 # hexadecimal (255)
 0o755                # octal (493)
 0b1010               # binary (10)
-1_000_000            # underscores are whitespace in numbers
+1_000_000            # underscores separate digits (1000000)
 ```
+
+## Strings
+
+A string literal is text between double quotes. It holds valid UTF-8, and
+its length counts grapheme clusters (see [strings.md](strings.md)). Every
+character inside the quotes stands for itself, a newline included, except `"`
+and `\`.
+
+A backslash starts an escape:
+
+| Escape | Character |
+|--------|-----------|
+| `\n` | line feed, U+000A |
+| `\t` | tab, U+0009 |
+| `\r` | carriage return, U+000D |
+| `\\` | backslash |
+| `\"` | double quote |
+| `\0` | NUL, U+0000 |
+| `\xHH` | U+00HH, for exactly two hex digits from `00` to `7f` |
+| `\u{H}` to `\u{HHHHHH}` | the Unicode scalar value, in one to six hex digits |
+
+```lisp
+(assert (= "\x41" "A") "a hex escape names an ASCII character")
+(assert (= "\u{e9}" "é") "a unicode escape names a scalar value")
+(assert (= (length "\0") 1) "NUL is one character")
+(assert (= (string/size-of "\u{1F600}") 4) "U+1F600 is four bytes of UTF-8")
+```
+
+Any other escape is a read error that names the escape. So is `\x80` and
+above: a string holds characters, and `\x80` does not name one byte and one
+character at the same time. Write `\u{80}` for the character U+0080, and use
+[bytes](bytes.md) for raw bytes. `\u{d800}` is an error too, because a
+surrogate is not a scalar value.
+
+```lisp
+(let [[ok? err] (protect (read "\"\\q\""))]
+  (assert (not ok?) "an unknown escape does not read")
+  (assert (has? (get err :message) "\\q") "the error names the escape"))
+```
+
+A file that declares epoch 12 or earlier reads only the first five escapes,
+and drops the backslash of any other: `"\x41"` is the string `x41` there.
+[epochs.md](epochs.md) describes the change, and how `elle rewrite` migrates
+such a file.
 
 ## Keywords and symbols
 
