@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-22
 //! Two configurations: `Config` is set once at startup and read anywhere,
 //! `RuntimeConfig` rides on one VM and a running program may change it.
 //!
@@ -241,9 +241,8 @@ pub struct Config {
     /// Enable the A-normal form lift pass (`src/hir/anf.rs`). Default: on.
     ///
     /// `--anf=off` short-circuits `anf_lift` to a no-op, so region inference
-    /// receives the HIR exactly as `functionalize` produced it: allocating
-    /// call results unnamed, and the lowerer falling back on the shadow
-    /// `call_region_slot` mechanism (`src/lir/lower/mod.rs`).
+    /// receives the HIR exactly as `functionalize` produced it, with its
+    /// allocating values unnamed.
     ///
     /// The flag exists so the pass can be switched off under a test that
     /// passes with it and fails without it.

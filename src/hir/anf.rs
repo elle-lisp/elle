@@ -1,95 +1,10 @@
-// audited: 2026-09-16
-//! A-normal form (ANF) lift: every heap-allocating value gets a binding whose
-//! slot the lowerer releases it through.
+// audited: 2026-09-22
+//! A-normal form (ANF) lift: each value a frame releases through a slot gets a
+//! binding naming that slot.
 //!
+//! docs/impl/anf.md
 //! docs/impl/hir.md
 //! docs/impl/region/rules.md
-//!
-//! Names every allocating expression by wrapping it in a synthetic
-//! `let` whose body is the bound variable. After this pass, every
-//! heap-allocating value has a `Binding` — meaning the lowerer can
-//! key slot ownership entirely off `binding_to_slot`, with no shadow
-//! mechanism for un-named call results.
-//!
-//! Example rewrite:
-//!
-//! ```text
-//! (g (f x))    =>    (g (let [t0 (f x)] t0))
-//! ```
-//!
-//! `t0` is a synthetic immutable binding. Region inference (which runs
-//! after ANF) sees `f`'s call result as bound to `t0`, so escape
-//! analysis owns its lifetime through a single mechanism.
-//!
-//! Pipeline placement: immediately after `functionalize`, before
-//! `typeinfer` and region analysis.
-//!
-//! ## The name has to land on the node that allocates
-//!
-//! A name is worth exactly what the lowerer can key off it, and what the lowerer
-//! keys off it is one map: `record_region_slot` records a binder's slot against
-//! `alloc_region[init.id]` — the region the init node **itself** allocates. A
-//! binder whose init allocates nothing at its own id therefore records nothing,
-//! its value gets no release route, and the release the solver placed for it
-//! emits no instruction at all.
-//!
-//! So "name the allocating value" is a claim about a node, not about a position.
-//! Every position below is read that way.
-//!
-//! ## What gets wrapped
-//!
-//! The traversal recurses through every child. After the recursive
-//! call returns, the parent decides whether to wrap based on the
-//! child's position:
-//!
-//! **Consumer positions (wrap allocating children):**
-//! `Call.func` and `Call.args[*].expr`; `Intrinsic.args[*]`;
-//! `Emit.value`; `Recur.args[*]`; `Eval.{expr, env}`;
-//! `Parameterize.bindings[*].{key, value}`; `If.{cond, then, else}`;
-//! `Cond` clauses (cond and body); `Match.value` and arm bodies;
-//! every `Begin` expression and every `Block.body` expression
-//! (both last and non-last — non-last positions discard the value,
-//! and the binding's slot is what `emit_decrefs_for` uses to release
-//! the call result region); `And`/`Or` elements; `Break.value`;
-//! `SetCell.{cell, value}`; `Assign.value`; `Destructure.value`;
-//! `While.{cond, body}`.
-//!
-//! **Binder positions (the binder's own slot is the name):**
-//! `Let` / `Letrec` / `Loop` binding RHS; `Define.value`. An init that allocates
-//! at its own id is recorded against that binder's slot, so wrapping it would
-//! chain a second name for one region.
-//!
-//! **Transparent in the lowerer (do NOT wrap — Finding 1):**
-//! `MakeCell.value`, `DerefCell.cell`. The lowerer is transparent for
-//! these and the implicit `MakeCaptureCell` happens at the binding
-//! site; wrapping their child manufactures a region with no matching
-//! allocation.
-//!
-//! ## A propagating tail is named through, never named
-//!
-//! A `Let`, `Letrec`, `Loop` or `Parameterize` hands its **body's** value up
-//! unchanged, and the lowerer stamps no allocation at the form's own id. The
-//! form is therefore the wrong node to name: a wrap around it binds a slot that
-//! `record_region_slot` leaves empty, and a binder that already holds it —
-//! `(let [a (let [x …] [x x])] …)` — holds a name with no route.
-//!
-//! So both naming positions descend the tail and name the node they find there.
-//! A consumer position wraps that node; a binder position names it too, because
-//! the binder's own slot cannot stand for a region the init node did not
-//! allocate. `(g (let [x 7] [x x]))` becomes `(g (let [x 7] (let [t [x x]] t)))`,
-//! and the inner walk a fused `mapcat` runs over its function's result reaches
-//! its per-element array the same way (docs/impl/dissolution.md).
-//!
-//! `Lambda.body` is the one tail that is not descended. Its value is the
-//! function's result, handed to the caller by the `Return` mint and released by
-//! the caller's own binding — this frame owes it no release to route.
-//!
-//! ## Idempotence
-//!
-//! If a child is already an ANF wrap `(let [t e] (var t))`, the
-//! parent does not re-wrap it. Re-wrapping would chain a redundant
-//! synthetic binding and confuse `region_to_slot` (which keys on the
-//! region) with two slots claiming the same region.
 
 use super::arena::BindingArena;
 use super::binding::Binding;
@@ -97,22 +12,16 @@ use super::expr::{CallArg, Hir, HirKind};
 
 /// Run the ANF lift on a HIR tree.
 ///
-/// When `--anf=off` is set on the CLI, this is a no-op — the
-/// counter-factual switch used by `tests/integration/anf_counterfactual.rs`
-/// to demonstrate that the transform is causally responsible for
-/// fixing the closure-binding-overwrite bug class (Family C). The
-/// switch should be removed in a follow-up once causality is
-/// reviewed.
+/// When `--anf=off` is set on the CLI, this is a no-op.
 pub fn anf_lift(hir: &mut Hir, arena: &mut BindingArena) {
     if !crate::config::get().anf {
         return;
     }
     let mut ctx = AnfCtx { arena };
-    *hir = ctx.transform(hir);
-    // After ANF, every call result is a let-bound value and tail
-    // positions are settled. Mark each function's tail value with a
-    // `Return` ownership boundary (the callee side of the
-    // prediction-free calling convention). See `super::retain`.
+    *hir = ctx.r(hir);
+    // After ANF, tail positions are settled. Mark each function's tail
+    // value with a `Return` ownership boundary (the callee side of the
+    // prediction-free calling convention).
     super::return_incref::wrap_tail_returns(hir);
 }
 
@@ -185,10 +94,38 @@ impl<'a> AnfCtx<'a> {
 
     /// Transform a child in a NON-WRAP position: recurse into its
     /// own children but do not wrap the resulting node at this level.
-    /// Used for MakeCell/DerefCell pass-through children, a lambda body, and
-    /// propagating tail bodies (their own consumer descends into them).
+    /// Used for MakeCell/DerefCell pass-through children and propagating
+    /// tail bodies (their own consumer descends into them).
     fn t(&mut self, hir: &Hir) -> Hir {
         self.transform(hir)
+    }
+
+    /// Transform a RETURNING position — a lambda body, or the root of the
+    /// unit. Its value leaves by the `Return` mint, so the one node named is
+    /// a producer whose owned result this frame must still release.
+    fn r(&mut self, hir: &Hir) -> Hir {
+        let mut inner = self.transform(hir);
+        self.name_owed_release(&mut inner);
+        inner
+    }
+
+    /// Descend a returning position's propagating tails, and name the node
+    /// found there if it hands this frame an owned result that is not a tail
+    /// call's.
+    fn name_owed_release(&mut self, hir: &mut Hir) {
+        if let Some(tail) = hir.propagating_tail_mut() {
+            self.name_owed_release(tail);
+            return;
+        }
+        if !matches!(
+            hir.kind,
+            HirKind::Eval { .. } | HirKind::Call { is_tail: false, .. }
+        ) {
+            return;
+        }
+        let span = hir.span;
+        let inner = std::mem::replace(hir, Hir::silent(HirKind::Nil, span));
+        *hir = self.name_if_alloc(inner);
     }
 
     /// Transform a child in a BINDER position — a `let`/`letrec`/`loop`
@@ -255,7 +192,7 @@ impl<'a> AnfCtx<'a> {
                 value: Box::new(self.b(value)),
             },
 
-            // ── Lambda body: propagating tail; do not wrap ──
+            // ── Lambda body: a returning position ──
             HirKind::Lambda {
                 params,
                 num_required,
@@ -275,7 +212,7 @@ impl<'a> AnfCtx<'a> {
                 rest_param: *rest_param,
                 vararg_kind: vararg_kind.clone(),
                 captures: captures.clone(),
-                body: Box::new(self.t(body)),
+                body: Box::new(self.r(body)),
                 num_locals: *num_locals,
                 inferred_signals: *inferred_signals,
                 param_bounds: param_bounds.clone(),
@@ -422,7 +359,7 @@ impl<'a> AnfCtx<'a> {
                 body: Box::new(self.w(body)),
             },
 
-            // ── MakeCell/DerefCell: transparent in lowerer; don't wrap (Finding 1) ──
+            // ── MakeCell/DerefCell: transparent in lowerer; don't wrap ──
             HirKind::MakeCell { value } => HirKind::MakeCell {
                 value: Box::new(self.t(value)),
             },
@@ -476,11 +413,6 @@ fn kind_label(k: &HirKind) -> &'static str {
 // Tests examine the HIR structure after running `anf_lift` to verify
 // it conforms to the ANF discipline: every allocating expression in
 // a consumer value position is wrapped in a synthetic Let.
-//
-// These tests are written against the *intended* behavior, not the
-// current no-op skeleton — they will fail until `anf_lift` is
-// implemented. That's deliberate: the failing test is the
-// counter-factual proof that the test catches the bug we're fixing.
 
 #[cfg(test)]
 mod tests;

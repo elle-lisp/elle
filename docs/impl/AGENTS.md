@@ -7,6 +7,7 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [agents-index.md](agents-index.md) — **The generated index** Every directory's `AGENTS.md` is built from the call-out of each document beneath it, so the index cannot rot or be posted to.
+- [anf.md](anf.md) — **The ANF lift** Which values the ANF lift names with a synthetic binding, and why each name lands on the node it does.
 - [assessment.md](assessment.md) — **The region roadmap** The region system's plan of work: the state gauges, the fix-selection discipline, the measured dead ends, and the open work in order.
 - [audit.md](audit.md) — **The audit queue** Every file carries the day it last met the documentation policy, and the queue names what to read next by what a stale file costs.
 - [bytecode.md](bytecode.md) — **Bytecode** The bytecode instruction set is a `repr(u8)` enum.
