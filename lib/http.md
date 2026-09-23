@@ -1,6 +1,6 @@
 # http
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-09-23 -->
 
 HTTP/1.1 client and server over TCP, in one file of pure Elle, with HTTPS and compression as opt-in module arguments.
 
@@ -13,7 +13,7 @@ wire and the invariants a caller has to respect.
 
 ```lisp
 (def http ((import "std/http")))                          # http only
-(def http ((import "std/http") :tls (import "plugin/tls")))
+(def http ((import "std/http") :tls ((import "std/tls") (import "plugin/tls"))))
 (def http ((import "std/http") :compress true))           # gzip, zlib, deflate, zstd
 ```
 

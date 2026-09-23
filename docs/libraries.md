@@ -1,5 +1,7 @@
 # Libraries
 
+<!-- audited: 2026-09-23 -->
+
 Elle ships with libraries in `lib/`. All follow the closure-as-module
 pattern and are imported via `(import "std/<name>")`.
 
@@ -16,6 +18,8 @@ pattern and are imported via `(import "std/<name>")`.
 | irc | `(import "std/irc")` | Coroutine-based IRCv3 client with SASL |
 | mqtt | `(import "std/mqtt")` | MQTT client (wraps mqtt plugin) |
 | zmq | `(import "std/zmq")` | ZeroMQ bindings via FFI |
+| websocket | `(import "std/websocket")` | WebSocket client and server (RFC 6455, ws:// and wss://) |
+| grpc | `(import "std/grpc")` | gRPC client over HTTP/2 |
 
 ## Concurrency
 
@@ -43,10 +47,12 @@ pattern and are imported via `(import "std/<name>")`.
 
 | Module | Import | Description |
 |--------|--------|-------------|
-| gpu | `(import "std/gpu")` | GPU compute via MLIR → SPIR-V → Vulkan (`gpu:map`) |
+| gpu | `(import "std/gpu")` | GPU compute via MLIR → SPIR-V → Vulkan (`gpu:map`); needs a build with `--features mlir` |
 | spirv | `(import "std/spirv")` | Hand-written SPIR-V compute shader DSL |
 | gtk4 | `(import "std/gtk4")` | GTK4 bindings via FFI (30 widget types, WebKit) |
 | sdl3 | `(import "std/sdl3")` | SDL3 bindings via FFI (events, textures, audio, TTF) |
+| raylib | `(import "std/raylib")` | raylib bindings via FFI |
+| cairo | `(import "std/cairo")` | Cairo 2D drawing via FFI |
 | wayland | `(import "std/wayland")` | Wayland compositor bindings via FFI |
 
 ## Utilities
@@ -57,7 +63,7 @@ pattern and are imported via `(import "std/<name>")`.
 | watch | `(import "std/watch")` | Event-driven filesystem watcher (inotify/kqueue) |
 | color | `(import "std/color")` | Color spaces, mixing, gradients, perceptual distance |
 | egui | `(import "std/egui")` | Immediate-mode GUI (wraps egui plugin) |
-| lua | `(import "std/lua")` | Lua compatibility prelude |
+| lua | `(import "std/lua")` | Lua compatibility prelude; fails to compile today (#1217) |
 | svg | `(import "std/svg")` | SVG construction and emission (pure Elle) |
 
 ### Utilities (pure Elle / FFI)
@@ -75,19 +81,22 @@ pattern and are imported via `(import "std/<name>")`.
 
 ## Usage
 
-Libraries are parametric modules. Import and call the closure:
+A library is a closure. Import it and call the closure for its exports:
 
-```text
+```lisp
 (def http ((import "std/http")))
-(http:get "https://example.com")
+(def [ok? err] (protect (http:get "https://example.com")))
+(assert (= :tls-not-configured (get err :reason)) "https needs :tls")
 ```
 
-Libraries that depend on native plugins take the plugin as a parameter:
+A library that depends on a native plugin takes the plugin as an argument.
+HTTPS takes the `std/tls` module, built from the `tls` plugin, as `:tls`:
 
-```text
-(def tls-plugin (import "plugin/tls"))
-(def tls ((import "std/tls") tls-plugin))
-(tls:connect "example.com" 443)
+```lisp
+(defn https-client []
+  "An HTTP module that can fetch https:// URLs."
+  (let [tls ((import "std/tls") (import "plugin/tls"))]
+    ((import "std/http") :tls tls)))
 ```
 
 See [modules.md](modules.md) for how the module system works and
