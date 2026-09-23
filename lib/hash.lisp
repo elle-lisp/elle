@@ -1,12 +1,10 @@
 (elle/epoch 12)
-## lib/hash.lisp — streaming hash convenience functions
+# audited: 2026-09-23
+## lib/hash.lisp — hash a port, a fiber stream or a file through a hash plugin's incremental API.
+## docs/libraries.md
 ##
-## Provides high-level helpers for hashing ports, fiber streams,
-## and files using the elle-hash plugin's incremental API.
-##
-## Dependencies:
-##   - elle-hash plugin loaded via (import "plugin/hash")
-##   - port/chunks, stream/fold from stdlib
+## The module takes the plugin as its argument and calls only its :new,
+## :update and :finalize, so any struct with those three fields can stand in.
 ##
 ## Usage:
 ##   (def hash-plugin (import "plugin/hash"))
@@ -29,16 +27,24 @@
   ## ── Convenience ─────────────────────────────────────────────────────
 
   (defn hash/digest [algorithm port &named @chunk-size]
-    "Hash an open port's remaining contents. Returns the digest bytes.
-     Does not close the port."
+    "Hash what remains to be read from port, and return the digest bytes.
+     Reads chunk-size bytes at a time, and leaves the port open.
+     A read error raises here. Open the port with port/open-bytes: a text
+     port decodes each read as UTF-8, and raises on any other bytes."
     (default chunk-size 8192)
-    (hash/stream algorithm (port/chunks port chunk-size)))
+    (def @ctx (plugin:new algorithm))
+    (def @chunk (port/read port chunk-size))
+    (while (not (nil? chunk))
+      (assign ctx (plugin:update ctx chunk))
+      (assign chunk (port/read port chunk-size)))
+    (plugin:finalize ctx))
 
   (defn hash/file [algorithm path &named @chunk-size]
-    "Hash a file by path. Opens, hashes, and closes the file.
+    "Hash the bytes of the file at path, whatever they hold.
+     Opens the file as a binary port, hashes it, and closes it.
      Returns the digest bytes (or integer for crc32/xxh32/xxh64)."
     (default chunk-size 8192)
-    (let [p (port/open path :read)]
+    (let [p (port/open-bytes path :read)]
       (defer
         (port/close p)
         (hash/digest algorithm p :chunk-size chunk-size))))
