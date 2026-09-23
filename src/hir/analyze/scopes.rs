@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-23
 //! Lexical scopes and name resolution over them.
 //!
 //! Binding, looking up, the capture a lookup across a function boundary records,
@@ -110,8 +110,7 @@ impl<'a> Analyzer<'a> {
     ///
     /// Used by `bind_primitives`, which holds ids from `PrimitiveMeta`. The id
     /// is the scope key, so this needs no spelling — and must not want one:
-    /// those ids were minted against the compile context's table, which is not
-    /// this analyzer's.
+    /// this analyzer's memo may never have learned the primitives' spellings.
     pub(super) fn bind_by_sym(&mut self, sym: SymbolId, scope: BindingScope) -> Binding {
         let binding = self.arena.alloc(sym, scope);
 
@@ -144,8 +143,8 @@ impl<'a> Analyzer<'a> {
                 // max_by_key returns the last one (the most recently bound),
                 // which gives correct file-level redefinition semantics.
                 //
-                // Referential transparency (docs/macros.md § The Hygiene
-                // Problem, point 2): outside a definition-environment frame,
+                // Referential transparency (docs/macros.md § "Hygiene: sets of
+                // scopes"): outside a definition-environment frame,
                 // a binding is visible to a reference only if every INTRO
                 // scope the reference carries is on the binding or in the
                 // frame's expansion provenance. A template-origin reference

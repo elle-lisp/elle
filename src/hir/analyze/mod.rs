@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-23
 //! Syntax to HIR analysis
 //!
 //! docs/impl/hir.md
@@ -15,7 +15,7 @@
 //! - When a binding is defined with a lambda, we record the lambda body's signal
 //! - When a call is analyzed, we look up the callee's signal and propagate it
 //! - Polymorphic signals (like `map`) are resolved by examining the argument's signal
-//! - `set!` invalidates signal tracking for the mutated binding
+//! - `assign` invalidates signal tracking for the mutated binding
 
 mod binding;
 mod call;
@@ -128,7 +128,8 @@ struct Scope {
     /// memo (docs/impl/symbol.md § "Reading a name, and not reading one"). A
     /// name-keyed map would make binding resolution depend on whichever memo
     /// happened to have learned the spelling — and `bind_primitives` receives
-    /// ids minted against the compile context's own table, not this one's.
+    /// the primitives as ids from the compile context, whose spellings this
+    /// analyzer's memo may never have learned.
     bindings: HashMap<SymbolId, Vec<ScopedBinding>>,
     /// Is this a function scope (creates new capture boundary)
     is_function: bool,
@@ -180,7 +181,7 @@ pub struct Analyzer<'a> {
     /// into the new frame's `intro_provenance`.
     current_form_intros: Vec<ScopeId>,
     /// The binding whose initializer is currently being analyzed — the analyzer
-    /// analogue of the lowerer's `current_function_binding` (lir/lower/binding.rs).
+    /// analogue of the lowerer's `current_function_binding` (lir/lower/mod.rs).
     /// When a lookup inside this initializer's lambda resolves back to this same
     /// binding (a self-edge across the lambda boundary), the capture is classified
     /// `CaptureKind::Recursive` rather than a sibling `Local` (scopes.rs::lookup).
@@ -202,13 +203,14 @@ pub struct Analyzer<'a> {
     /// This enables interprocedural signal tracking: when we call a function,
     /// we can look up its signal and propagate it to the call site.
     signal_env: HashMap<Binding, Signal>,
-    /// Maps SymbolId -> Signal for primitive functions
-    /// Built from `register_primitive_signals` and passed in at construction
+    /// Maps SymbolId -> Signal for primitive functions, from the
+    /// `PrimitiveMeta` the pipeline passes to `new_with_primitives`. Read only
+    /// for a binding that is the primitive itself (`primitive_signal_of`).
     primitive_signals: HashMap<SymbolId, Signal>,
-    /// Arity environment: maps local function bindings to their arity.
-    /// Populated by `bind_primitives` for primitive bindings; user
-    /// shadows create new bindings that won't be in this map,
-    /// correctly disabling the primitive arity check.
+    /// Arity environment: maps function bindings to their arity. Populated by
+    /// `bind_primitives` for primitives and by the binding forms for a binding
+    /// initialized with a lambda. A user shadow is a new binding, so it
+    /// carries its own arity or none — never the primitive's.
     arity_env: HashMap<Binding, Arity>,
 
     /// Signal projections for bindings initialized from imported modules.
@@ -243,9 +245,8 @@ pub struct Analyzer<'a> {
     pre_bindings: HashMap<String, Binding>,
     /// Compile-time constant values for primitive bindings.
     /// Populated by `bind_primitives`. The lowerer seeds its
-    /// `immutable_values` map from this so primitive references
-    /// emit `LoadConst` instead of `LoadGlobal`.
-    /// No slot allocation is needed.
+    /// `immutable_values` map from this, so a primitive reference emits
+    /// `LoadConst` and needs no slot.
     primitive_values: HashMap<Binding, Value>,
     /// Accumulated parameter bounds from silence forms in current lambda.
     /// Populated by `analyze_silence`, consumed by `analyze_lambda`.
@@ -311,7 +312,9 @@ impl<'a> Analyzer<'a> {
         Self::new_with_primitives(symbols, arena, primitive_signals, HashMap::new())
     }
 
-    /// Create a new analyzer with primitive signals and arities
+    /// Create a new analyzer with primitive signals. The arities argument is
+    /// unused: `bind_primitives` reads each primitive's arity from its
+    /// `PrimitiveMeta`.
     pub fn new_with_primitives(
         symbols: &'a mut SymbolTable,
         arena: &'a mut BindingArena,

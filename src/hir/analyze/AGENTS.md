@@ -62,12 +62,12 @@ The analyzer tracks signals across function boundaries (see
    locally-defined functions. Top-level defines are file-letrec bindings,
    tracked the same way.
 2. **Primitive signals**: Maps `SymbolId` → `Signal` for built-in functions.
-   Keyed by the `CompileCtx` setup table's ids, which agree with this
-   analyzer's table only on the shared primitive prefix — so a call only
-   consults this map when the callee binding `is_primitive`
+   A `SymbolId` is the name's hash, so a by-name lookup would find a
+   primitive's signal for any binding of the same spelling. A call therefore
+   consults this map only when the callee binding `is_primitive`
    (`primitive_signal_of`), which `bind_primitives` also seeds into
-   `signal_env`. A same-named *user* binding must never resolve through it
-   (a colliding id would hand it an unrelated global's signal).
+   `signal_env`. A same-named *user* binding must never resolve through it,
+   or it would inherit the primitive's signal.
 3. **Call analysis**: Looks up the callee's signal and propagates it.
 4. **Mutation invalidation**: `assign` clears the mutated binding's
    `signal_env` entry. This is sound only because the fallback in (2) is

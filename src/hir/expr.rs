@@ -1,4 +1,4 @@
-// audited: 2026-09-16
+// audited: 2026-09-23
 //! The HIR node — its kind, the span and signal it carries, and the identity
 //! every analysis side table keys on.
 //!
@@ -22,9 +22,8 @@ mod traverse;
 /// Deliberately NOT `Ord`/`PartialOrd`: a `HirId` is an identity, not a
 /// position. The global counter assigns ids monotonically, but the ANF
 /// lift appends synthetic nodes whose ids do not reflect structural or
-/// execution order, so comparing `HirId` magnitudes is meaningless and
-/// was the source of a phantom-region class. Code that needs program
-/// order must use the explicit index from
+/// execution order, so comparing `HirId` magnitudes is meaningless. Code
+/// that needs program order must use the explicit index from
 /// `crate::hir::liveness::compute_order` instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct HirId(pub u32);
@@ -171,8 +170,8 @@ pub enum HirKind {
         doc: Option<std::rc::Rc<str>>,
         /// Where this lambda was written, for `(meta/origin f)`. A span, not
         /// the lambda's syntax tree: `meta/origin` reads a file, a line, and a
-        /// column, and nothing has ever read the tree
-        /// (docs/impl/syntax.md § "What the migration deleted").
+        /// column, and nothing reads the tree (docs/impl/syntax.md § "Where a
+        /// lambda's source location lives").
         #[serde(skip)]
         origin: Option<crate::syntax::Span>,
         /// True if the function body contains `(numeric!)` assertion.
@@ -265,8 +264,9 @@ pub enum HirKind {
     // === Signal emission ===
     /// `(emit <signal> <value>)` — general signal emission.
     /// `signal` is compile-time signal bits (from a literal keyword or set).
-    /// `value` is the payload expression. Replaces the old `Yield` variant;
-    /// `(yield val)` is now a macro expanding to `(emit :yield val)`.
+    /// `value` is the payload expression. `(yield val)` is a macro expanding
+    /// to `(emit :yield val)`. An `emit` whose signal is not a literal is a
+    /// call to the `emit` primitive instead.
     Emit {
         signal: crate::value::fiber::SignalBits,
         value: Box<Hir>,
@@ -382,9 +382,8 @@ impl Hir {
     ///   is transparent for them (the implicit `MakeCaptureCell` for
     ///   `needs_capture` bindings happens at the binding site, not
     ///   the `MakeCell` node). Wrapping their child in a synthetic
-    ///   `Let` would manufacture a region with no matching alloc —
-    ///   exactly the phantom-region class the region-inference audit
-    ///   has been chasing.
+    ///   `Let` would manufacture a region with no matching alloc: a
+    ///   phantom region.
     /// - `Eval` allocates because its runtime region is opaque to
     ///   the caller (the callee chooses), so the result needs a name
     ///   so `emit_decrefs_for` can emit `DecrefValueRegion`.
