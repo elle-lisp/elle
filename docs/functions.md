@@ -1,8 +1,9 @@
 # Functions
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-23 -->
 
-How to define, call and compose functions, and how deep a chain of calls may go.
+How to make a function with `fn` and `defn`, collect arguments, close over
+state, pass functions around, and how deep recursion may go.
 
 ## fn — anonymous functions
 
@@ -11,11 +12,11 @@ are immutable by default; prefix with `@` to allow mutation via `assign`.
 
 ```lisp
 (def double (fn [x] (* x 2)))
-(double 21)                # => 42
+(assert (= 42 (double 21)))
 
-# mutable parameter
+# A mutable parameter.
 (def bump (fn [@n] (assign n (+ n 1)) n))
-(bump 10)                  # => 11
+(assert (= 11 (bump 10)))
 ```
 
 ## defn — named functions
@@ -33,9 +34,9 @@ docstring as the first body form.
     (>= score 60) "D"
     "F"))
 
-(letter-grade 95)          # => "A"
-(letter-grade 55)          # => "F"
-(doc letter-grade)         # => "Convert a numeric score to a letter grade."
+(assert (= "A" (letter-grade 95)))
+(assert (= "F" (letter-grade 55)))
+(assert (= "Convert a numeric score to a letter grade." (doc letter-grade)))
 ```
 
 ## Variadic functions
@@ -47,13 +48,14 @@ patterns, `match` patterns, `defmacro` parameter lists).
 ```lisp
 (defn sum [& nums]
   (fold + 0 nums))
-
-(sum 1 2 3 4)              # => 10
+(assert (= 10 (sum 1 2 3 4)))
 
 (defn product [&rest nums]
   (fold * 1 nums))
+(assert (= 24 (product 1 2 3 4)))
 
-(product 1 2 3 4)          # => 24
+(defn collected [& xs] xs)
+(assert (= :list (type-of (collected 1 2))))
 ```
 
 ## Closures
@@ -69,54 +71,56 @@ as long as the closure does.
     n))
 
 (def counter (make-counter))
-(counter)                  # => 1
-(counter)                  # => 2
-(counter)                  # => 3
+(assert (= 1 (counter)))
+(assert (= 2 (counter)))
+(assert (= 3 (counter)))
 ```
 
 ## Higher-order functions
 
+`map` and `filter` keep the collection's type: an array gives an array, a
+list gives a list.
+
 ```lisp
-(map letter-grade [95 82 71 55])
-# => ("A" "B" "C" "F")    — map always returns a list
+(assert (= ["A" "B" "C" "F"] (map letter-grade [95 82 71 55])))
+(assert (= :array (type-of (map letter-grade [95 82]))))
+(assert (= [95 88] (filter (fn [s] (>= s 80)) [95 72 88 61])))
 
-(filter (fn [s] (>= s 80)) [95 72 88 61])
-# => (95 88)               — filter always returns a list
-
-(fold + 0 [1 2 3 4 5])    # => 15
-(apply + [1 2 3])          # => 6 (spread args)
+(assert (= 15 (fold + 0 [1 2 3 4 5])))
+(assert (= 6 (apply + [1 2 3])) "apply spreads the arguments")
 ```
-
-`map` and `filter` return lists even when given arrays. Use
-`->array` or `stream/into-array` to get arrays back.
 
 ## Sorting
 
+`sort` and `sort-with` keep the collection's type. `sort-by` returns an
+`@array` for an immutable array (#1241).
+
 ```lisp
-(sort [3 1 4 1 5])                    # => (1 1 3 4 5)
-(sort-by length ["bb" "a" "ccc"])     # => ("a" "bb" "ccc")
-(sort-with (fn [a b] (compare b a)) [3 1 2])  # => (3 2 1)
+(assert (= [1 1 3 4 5] (sort [3 1 4 1 5])))
+(assert (= (list "a" "bb" "ccc") (sort-by length (list "bb" "a" "ccc"))))
+(assert (= [3 2 1] (sort-with (fn [a b] (compare b a)) [3 1 2])))
 ```
 
 ## Composition and threading
 
 ```lisp
-# compose chains functions right-to-left
+# compose chains functions right to left.
 (def shout (compose string/upcase (fn [s] (string s "!"))))
-(shout "hello")            # => "HELLO!"
+(assert (= "HELLO!" (shout "hello")))
 
-# -> threads as first argument
-(-> 5 (+ 10) (* 2))       # => 30
+# -> threads as the first argument.
+(assert (= 30 (-> 5 (+ 10) (* 2))))
 
-# ->> threads as last argument
-(->> [1 2 3 4 5]
-  (filter odd?)
-  (map (fn [x] (* x x))))  # => (1 9 25)
+# ->> threads as the last argument.
+(assert (= [1 9 25]
+           (->> [1 2 3 4 5]
+             (filter odd?)
+             (map (fn [x] (* x x))))))
 ```
 
 ## Tail call optimization
 
-Tail calls are guaranteed to run in constant stack space.
+Tail calls run in constant stack space.
 
 ```lisp
 (defn sum-to [n acc]
@@ -124,7 +128,7 @@ Tail calls are guaranteed to run in constant stack space.
     acc
     (sum-to (- n 1) (+ acc n))))
 
-(sum-to 10000 0)           # => 50005000 — no stack overflow
+(assert (= 5000050000 (sum-to 100000 0)) "no stack overflow")
 ```
 
 ## Recursion depth
