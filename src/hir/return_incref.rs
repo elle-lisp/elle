@@ -1,4 +1,7 @@
+// audited: 2026-09-22
 //! Return-ownership wrapping pass for HIR.
+//!
+//! docs/impl/region/mechanism.md
 //!
 //! Runs after `mark_tail_calls` (it reads the `is_tail` flag) and after
 //! `anf_lift` (it wraps the post-ANF tail value). For every function
@@ -37,13 +40,13 @@ pub(crate) fn wrap_tail_returns(hir: &mut Hir) {
     // The top level is a returning context too. `eval_syntax` compiles a
     // macro transformer `(fn …)` as a top-level expression and hands the
     // resulting closure to the Rust macro table, which stores the `Value`
-    // with no incref. With tail-region suppression gone, that closure's
-    // `decref_point` `DecrefRegion` would free it before the next expansion
-    // dereferences it (dangling-closure UAF in `populate_env`). Wrapping
-    // the top-level tail value in `Return` retains its region (+1, never
-    // released by Rust): that retain IS the transfer of ownership to the
-    // macro table. For a plain script the +1 is a benign leak of the final
-    // value, reclaimed at fiber teardown.
+    // with no incref. Unretained, that closure's `decref_point`
+    // `DecrefRegion` would free it before the next expansion dereferences
+    // it. Wrapping the top-level tail value in `Return` retains its region
+    // (+1, never released by Rust): that retain IS the transfer of
+    // ownership to the macro table. For a script, the +1 is the program
+    // value's reference, which the host gives back
+    // (docs/impl/region/rules.md).
     walk(hir, true, &HashSet::new());
 }
 
@@ -114,8 +117,8 @@ fn walk(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
         // the last operand (as the tail-transparent compounds do) leaves a
         // short-circuit-returned non-last operand with no `IncrefValueRegion`: its
         // owned-region decref then fires with no balancing mint, freeing the returned
-        // value under the caller (the `(or url …)` passthrough UAF). So walk every
-        // operand as NON-tail and let phase 3 wrap the WHOLE `and`/`or` in `Return`
+        // value under the caller. So walk every operand as NON-tail and let
+        // phase 3 wrap the WHOLE `and`/`or` in `Return`
         // (`is_wrappable` admits them): the mint lands on the result slot whichever
         // operand fills it, and `return_sites` extends every operand region's
         // `decref_point` past that mint. A tail call in the last operand keeps its

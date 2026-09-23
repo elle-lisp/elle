@@ -1,4 +1,4 @@
-// audited: 2026-09-16
+// audited: 2026-09-22
 //! A-normal form (ANF) lift: every heap-allocating value gets a binding whose
 //! slot the lowerer releases it through.
 //!
@@ -7,9 +7,9 @@
 //!
 //! Names every allocating expression by wrapping it in a synthetic
 //! `let` whose body is the bound variable. After this pass, every
-//! heap-allocating value has a `Binding` — meaning the lowerer can
-//! key slot ownership entirely off `binding_to_slot`, with no shadow
-//! mechanism for un-named call results.
+//! heap-allocating value this frame releases through a slot has a
+//! `Binding` — meaning the lowerer can key slot ownership entirely off
+//! `binding_to_slot`, with no shadow mechanism for un-named call results.
 //!
 //! Example rewrite:
 //!
@@ -59,11 +59,15 @@
 //! at its own id is recorded against that binder's slot, so wrapping it would
 //! chain a second name for one region.
 //!
-//! **Transparent in the lowerer (do NOT wrap — Finding 1):**
+//! **Transparent in the lowerer (do NOT wrap):**
 //! `MakeCell.value`, `DerefCell.cell`. The lowerer is transparent for
 //! these and the implicit `MakeCaptureCell` happens at the binding
 //! site; wrapping their child manufactures a region with no matching
 //! allocation.
+//!
+//! **Returning positions (name only an owed release):**
+//! `Lambda.body`, and the root of the compilation unit. See the section
+//! below.
 //!
 //! ## A propagating tail is named through, never named
 //!
@@ -80,9 +84,24 @@
 //! and the inner walk a fused `mapcat` runs over its function's result reaches
 //! its per-element array the same way (docs/impl/dissolution.md).
 //!
-//! `Lambda.body` is the one tail that is not descended. Its value is the
-//! function's result, handed to the caller by the `Return` mint and released by
-//! the caller's own binding — this frame owes it no release to route.
+//! ## A returning position names only what it must release
+//!
+//! A lambda body and the root of a compilation unit are returning positions.
+//! Their value leaves through the `Return` mint (`return_incref.rs`), which
+//! hands the caller one owning reference. Most values there need no name: a
+//! tail call hands its callee's reference straight through, and a fresh
+//! allocation's region has a release of its own.
+//!
+//! Two producers hand this frame an owning reference that only a slot can
+//! release: an `Eval`, which is never a tail call, and a `Call` that is not a
+//! tail call. The root makes the second kind, because `mark_tail_calls` marks
+//! no call at the top level. A `parameterize` body makes it too, because that
+//! body is never a tail position. Left unnamed, the frame's reference is never
+//! released, and the `Return` mint adds the caller's on top of it.
+//!
+//! So a returning position descends its propagating tails, as a consumer
+//! does, and names an `Eval` or a non-tail `Call` it finds there. It names
+//! nothing else, so a tail call stays where it is, unnamed.
 //!
 //! ## Idempotence
 //!
@@ -97,22 +116,16 @@ use super::expr::{CallArg, Hir, HirKind};
 
 /// Run the ANF lift on a HIR tree.
 ///
-/// When `--anf=off` is set on the CLI, this is a no-op — the
-/// counter-factual switch used by `tests/integration/anf_counterfactual.rs`
-/// to demonstrate that the transform is causally responsible for
-/// fixing the closure-binding-overwrite bug class (Family C). The
-/// switch should be removed in a follow-up once causality is
-/// reviewed.
+/// When `--anf=off` is set on the CLI, this is a no-op.
 pub fn anf_lift(hir: &mut Hir, arena: &mut BindingArena) {
     if !crate::config::get().anf {
         return;
     }
     let mut ctx = AnfCtx { arena };
     *hir = ctx.transform(hir);
-    // After ANF, every call result is a let-bound value and tail
-    // positions are settled. Mark each function's tail value with a
-    // `Return` ownership boundary (the callee side of the
-    // prediction-free calling convention). See `super::retain`.
+    // After ANF, tail positions are settled. Mark each function's tail
+    // value with a `Return` ownership boundary (the callee side of the
+    // prediction-free calling convention).
     super::return_incref::wrap_tail_returns(hir);
 }
 
@@ -422,7 +435,7 @@ impl<'a> AnfCtx<'a> {
                 body: Box::new(self.w(body)),
             },
 
-            // ── MakeCell/DerefCell: transparent in lowerer; don't wrap (Finding 1) ──
+            // ── MakeCell/DerefCell: transparent in lowerer; don't wrap ──
             HirKind::MakeCell { value } => HirKind::MakeCell {
                 value: Box::new(self.t(value)),
             },
@@ -476,11 +489,6 @@ fn kind_label(k: &HirKind) -> &'static str {
 // Tests examine the HIR structure after running `anf_lift` to verify
 // it conforms to the ANF discipline: every allocating expression in
 // a consumer value position is wrapped in a synthetic Let.
-//
-// These tests are written against the *intended* behavior, not the
-// current no-op skeleton — they will fail until `anf_lift` is
-// implemented. That's deliberate: the failing test is the
-// counter-factual proof that the test catches the bug we're fixing.
 
 #[cfg(test)]
 mod tests;
