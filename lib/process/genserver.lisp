@@ -83,7 +83,8 @@
     (send (get from 0) [:$reply (get from 1) reply]))
 
   (defn gen-server-call [server request &named timeout]
-    "Synchronous request-response. Blocks until the server replies, or raises
+    "Synchronous request-response. Blocks until the server replies. Raises
+     {:error :gen-server-down :reason r} when the server exits first, and
      {:error :gen-server-timeout} once :timeout ticks pass without a reply."
     (gen-call server :$call request timeout))
 
@@ -93,7 +94,8 @@
     :ok)
 
   (defn gen-server-stop [server &named reason timeout]
-    "Request graceful shutdown. Blocks until the server acknowledges, or raises
+    "Request graceful shutdown. Blocks until the server acknowledges. Raises
+     {:error :gen-server-down :reason r} when the server exits first, and
      {:error :gen-server-timeout} once :timeout ticks pass first."
     (gen-call server :$stop (or reason :normal) timeout))
 

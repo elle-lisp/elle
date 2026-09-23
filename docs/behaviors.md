@@ -86,7 +86,7 @@ unless it traps exits.
 
 `gen-server-call` and `gen-server-stop` take `:timeout`, in scheduler ticks.
 When no reply arrives in time, they raise `{:error :gen-server-timeout}`.
-Without `:timeout`, they wait for as long as the reply takes.
+Without `:timeout`, they wait until the server replies or exits.
 
 ```lisp
 (def process ((import "std/process")))
@@ -99,6 +99,37 @@ Without `:timeout`, they wait for as long as the reply takes.
   (let [[ok? err] (protect (process:gen-server-call :silent :ping :timeout 5))]
     (assert (not ok?) "the call timed out")
     (assert (= (get err :error) :gen-server-timeout) "with :gen-server-timeout"))))
+```
+
+## A server that exits during a call
+
+`gen-server-call` and `gen-server-stop` monitor the server while they wait.
+When the server exits before it replies, they raise `{:error :gen-server-down
+:reason r}`, where `r` is the server's exit reason. A call to a server that has
+already exited raises at once, with the reason `:noproc`.
+
+When the reply comes first, the call removes its monitor, and no `:DOWN` from
+that monitor stays in the caller's mailbox. A link is separate from the call.
+A caller that traps exits and is linked to the server still receives `[:EXIT
+server reason]`.
+
+```lisp
+(def process ((import "std/process")))
+
+(process:start (fn []
+  (process:trap-exit true)
+  (let* [server (process:gen-server-start-link
+                  {:init        (fn [_] nil)
+                   :handle-call (fn [_req _from _state]
+                     (error {:error :boom :message "crash in call"}))}
+                  nil :name :fragile)
+         [ok? err] (protect (process:gen-server-call :fragile :ping))]
+    (assert (not ok?) "the call raises")
+    (assert (= (get err :error) :gen-server-down) "with :gen-server-down")
+    (assert (= (first (get err :reason)) :error) "carrying the server's exit reason")
+    (match (process:recv)
+      [:EXIT pid [:error _]] (assert (= pid server) "the link delivers the exit as well")
+      _ (assert false "expected [:EXIT server [:error ...]]")))))
 ```
 
 ## Deferred replies

@@ -209,6 +209,11 @@ adds belongs to the supervisor like a static one, and every strategy restarts
 it. `supervisor-stop-child` stops a child and forgets its spec, so no strategy
 starts it again.
 
+`supervisor-start-child`, `supervisor-stop-child` and
+`supervisor-which-children` call the supervisor as `gen-server-call` calls a
+server. Each raises `{:error :gen-server-down}` when the supervisor exits
+before it answers (see [behaviors.md](behaviors.md)).
+
 ```text
 (process:supervisor-start-child :sup
   {:id :dynamic-1 :restart :temporary
