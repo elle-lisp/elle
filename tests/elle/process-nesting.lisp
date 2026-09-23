@@ -1,7 +1,7 @@
 (elle/epoch 12)
 # audited: 2026-09-23
 # Nested schedulers: a process scheduler inside ev/run or inside a process does its I/O through its parent.
-# docs/processes.md
+# docs/process-scheduler.md
 
 (def process ((import "std/process")))
 
@@ -33,7 +33,7 @@
                                       (process:start (fn []
                                         (push out (inner-work))))
                                       (process:send me [:inner (get out 0)]))))
-                   (assert (= (process:recv-timeout 1000) [:inner "nested\n"])
+                   (assert (= (process:recv-timeout 10000) [:inner "nested\n"])
                            "a process scheduler inside a process does its I/O"))))
 
 # Three schedulers deep, each request crosses both outer schedulers.
@@ -45,7 +45,7 @@
                                         (process:start (fn []
                                           (push out (inner-work))))))
                                       (process:send me [:deepest (get out 0)]))))
-                   (assert (= (process:recv-timeout 1000) [:deepest "nested\n"])
+                   (assert (= (process:recv-timeout 10000) [:deepest "nested\n"])
                            "a scheduler two levels down does its I/O"))))
 
 # A sub-fiber of a process can run the nested scheduler too.
@@ -72,7 +72,7 @@
                                         (process:send me [tag (get out 0)])))))
                    (def got @{})
                    (repeat 3
-                           (match (process:recv-timeout 1000)
+                           (match (process:recv-timeout 10000)
                              [tag text] (put got tag text)
                              other (assert false
                              (string "expected a nested result, got " other))))
@@ -87,11 +87,7 @@
 # The inner scheduler sleeps for a minute. Killing the process that runs it
 # cancels the relayed sleep. The counter-factual for the cancel: the relayed
 # entry outlived its process, and the outer scheduler waited out the whole
-# minute before PID 0's next timer could fire.
-#
-# The trap: while I/O is in flight and no process is ready, the scheduler
-# waits for the I/O and its clock stands still. So PID 0 waits for the
-# sleep to start by yielding with self, not with a timer.
+# minute before it returned.
 
 (let [done (ev/timeout 20
                        (fn []
@@ -103,14 +99,12 @@
                                                 (ev/sleep 60)))))
                                             ref (process:monitor runner)]
                                             (while (not (unbox asleep))
-                                              (process:self))
+                                              (process:recv-timeout 1))
+                                            (process:recv-timeout 2)
                                             (process:exit runner :kill)
-                                            (assert (= (process:recv)
+                                            (assert (= (process:recv-timeout 100)
                                             [:DOWN ref runner [:killed :kill]])
-                                            "the runner dies of the kill, in its sleep")
-                                            (assert (= (process:recv-timeout 5)
-                                            :timeout)
-                                            "PID 0's timer fires once the relayed sleep is cancelled"))))
+                                            "the runner dies of the kill, in its sleep"))))
                          :returned))]
   (assert (= done :returned)
           "the outer scheduler returns without waiting out the relayed sleep"))

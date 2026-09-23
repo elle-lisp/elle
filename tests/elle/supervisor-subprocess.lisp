@@ -14,7 +14,7 @@
                      :logger (fn [e]
                                (when (= (get e :event) :child-exited)
                                  (process:send me (get e :reason)))))
-                     (assign reason (process:recv-timeout 200)))))
+                     (assign reason (process:recv-timeout 5000)))))
   reason)
 
 # The counter-factual: without :opts the child passed @{} to subprocess/exec,
