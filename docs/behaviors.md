@@ -176,6 +176,11 @@ policy when they exit. A supervisor traps exits and links to each child, so
 it learns of every child's exit, even one that dies on its first
 instruction.
 
+`supervisor-start-link` returns the supervisor's pid once the supervisor has
+started every child in its list, and every `:ready` child has reported
+ready or exited. A GenServer that a `:start-link` child starts has registered
+its name by then, so the caller can call it at once.
+
 ## Child specs
 
 Each child is a struct with:
