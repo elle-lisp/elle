@@ -1,79 +1,81 @@
 # Elle AWS Client
 
-Elle-native AWS client with SigV4 signing, HTTPS via rustls, and
-auto-generated service modules from AWS Smithy models.
+<!-- audited: 2026-09-23 -->
 
-## Quick start
+An AWS client in Elle: SigV4 signing, HTTPS over the tls plugin, and service modules generated from AWS Smithy models.
+
+[AGENTS.md](AGENTS.md) holds the files, the generator and the invariants.
+This guide holds what a caller needs.
+
+## Loading
+
+The core client takes three plugins by name: `(import "plugin/crypto")`
+for SHA-256 and HMAC, `(import "plugin/jiff")` for the signing
+timestamp, and the `std/tls` module built from `(import "plugin/tls")`:
+
+```lisp
+(defn aws-client [crypto jiff tls-plugin]
+  "The core AWS client."
+  ((import "std/aws") :crypto crypto :jiff jiff
+                      :tls ((import "std/tls") tls-plugin)))
+```
+
+Importing `std/aws` reads the credentials from `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN`. The default region is
+`AWS_DEFAULT_REGION`, then `AWS_REGION`, then `us-east-1`.
+
+## A request
+
+The core client exports one function, `aws:request`. It takes a service
+name, a method, a path, and an optional struct of `:region`, `:query`,
+`:headers`, `:body` and `:raw`:
+
+```lisp
+(defn list-buckets [aws]
+  "S3's ListBuckets answer for us-east-1."
+  (aws:request "s3" "GET" "/" {:region "us-east-1"}))
+```
+
+Each request opens its own TLS connection and closes it. The answer is
+`{:status :headers :body}`. The body is parsed JSON when the content type
+names JSON, a string when it names text or XML, and bytes otherwise;
+`:raw true` keeps the bytes.
+
+## Generated service modules
+
+Generate a module with the tools, then pass it the core client:
 
 ```bash
-# Generate a service module (fetches model if needed)
-elle tools/aws/aws-gen.lisp -- s3
-
-# Or fetch and generate separately
-elle tools/aws/fetch-model.lisp -- s3 dynamodb sts
-elle tools/aws/aws-codegen.lisp -- s3 > lib/aws/s3.lisp
+elle tools/aws/aws-gen.lisp -- s3 dynamodb sts
 ```
 
 ```lisp
-# Load plugins + aws client
-(def crypto (import-file "target/debug/libelle_crypto.so"))
-(def jiff   (import-file "target/debug/libelle_jiff.so"))
-(def tls-p  (import-file "target/debug/libelle_tls.so"))
-(def tls    ((import-file "lib/tls.lisp") tls-p))
-(def aws    ((import-file "lib/aws.lisp") crypto jiff tls))
-
-# Load generated service module
-(def s3 ((import-file "lib/aws/s3.lisp") aws))
-
-# Use it
-(println s3:api-version)                     # "2006-03-01"
-(println (s3:list-buckets))                  # {:status 200 ...}
-(println (s3:get-object "bucket" "key"))     # {:status 200 ...}
-(s3:put-object "bucket" "key" :body "data") # keyword args
-(s3:list-objects-v2 "bucket" :prefix "dir/" :max-keys "10")
+(defn aws-services [aws]
+  "The generated S3, DynamoDB and STS modules."
+  {:s3       ((import "std/aws/s3") aws)
+   :dynamodb ((import "std/aws/dynamodb") aws)
+   :sts      ((import "std/aws/sts") aws)})
 ```
 
-## Architecture
-
-- `lib/aws.lisp` — Core HTTP client: SigV4 signing, TLS connection,
-  request/response wire format, chunked transfer decoding
-- `lib/aws/sigv4.lisp` — Pure Elle SigV4 signing (SHA-256 + HMAC via
-  elle-crypto plugin)
-- `lib/aws/*.lisp` — Generated service modules (gitignored)
-
-## Supported protocols
-
-The codegen handles all four AWS protocol families:
-
-| Protocol | Services | Mechanism |
-|----------|----------|-----------|
-| restXml | S3, CloudFront, Route53 | HTTP method + URI template |
-| restJson1 | Lambda, API Gateway | REST with JSON body |
-| awsJson1_0/1_1 | DynamoDB, SQS | POST `/` + `X-Amz-Target` header |
-| awsQuery | STS, IAM, SNS, EC2 | POST `/` + `Action=` form body |
-
-## Generated module API
-
-Each generated function takes required params as positional args and
-optional params as keyword args via `&keys`:
+A generated function takes its required members positionally, sorted by
+member name, and every other member as a keyword argument. For a REST
+service, the required members are the URI labels and the required query
+parameters. `:region` and the other keys `aws:request` reads pass through
+as keyword arguments too. Every module exports `:api-version`:
 
 ```lisp
-# Positional: bucket, key. Keywords: range, region, etc.
-(s3:get-object "my-bucket" "path/to/key" :range "bytes=0-99")
-
-# Positional: table-name. Keywords: key, etc.
-(dynamodb:get-item "my-table" :key {"id" {"S" "123"}})
-
-# Positional: role-arn, role-session-name. Keywords: duration, etc.
-(sts:assume-role "arn:aws:iam::123:role/foo" "session" :duration-seconds "3600")
+(defn aws-examples [services]
+  "One call to each generated module."
+  (let [s3 services:s3
+        dynamodb services:dynamodb
+        sts services:sts]
+    [(s3:get-object "my-bucket" "path/to/key" :range "bytes=0-99")
+     (dynamodb:get-item {"id" {"S" "123"}} "my-table")   # Key, then TableName
+     (sts:assume-role "arn:aws:iam::123:role/foo" "session"
+                      :duration-seconds "3600")
+     s3:api-version]))
 ```
 
-Every module exports `:api-version` with the AWS API version string.
-
-## Tools
-
-| File | Purpose |
-|------|---------|
-| `tools/aws/aws-gen.lisp` | Fetch + generate in one step |
-| `tools/aws/aws-codegen.lisp` | Generate Elle module from Smithy model JSON |
-| `tools/aws/fetch-model.lisp` | Download Smithy model from aws-sdk-rust repo |
+The REST generator (restXml and restJson1, so S3 and Lambda) writes a
+`let*` binding form that epoch 12 no longer reads, so those generated
+modules do not compile today.

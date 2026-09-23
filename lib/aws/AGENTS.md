@@ -1,73 +1,70 @@
 # AWS Module
 
-## Purpose
+<!-- audited: 2026-09-23 -->
 
-Elle-native AWS client. No Rust AWS SDK — pure Elle HTTP over TLS with
-SigV4 signing. Service modules are generated from AWS Smithy models.
+The implementor's guide to the AWS client: its files, the generator that
+writes the service modules, and the invariants they keep. A caller reads
+[README.md](README.md) instead.
 
 ## Files
 
 | File | Role |
 |------|------|
-| `lib/aws.lisp` | Core: HTTPS request lifecycle, chunked decoding, SigV4 integration |
-| `lib/aws/sigv4.lisp` | SigV4 signing: canonical request, string-to-sign, HMAC key derivation |
-| `lib/aws/*.lisp` | Generated service modules (gitignored, one per service) |
+| [aws.lisp](../aws.lisp) | Core: one HTTPS request per call, the response reader, chunked decoding, SigV4 through `sigv4.lisp` |
+| [sigv4.lisp](sigv4.lisp) | SigV4 signing: canonical request, string-to-sign, HMAC key derivation |
+| `lib/aws/<service>.lisp` | Generated service modules, one per service, ignored by git |
 
-## Generating service modules
+## The generator
 
-Generated `.lisp` files are gitignored. To create them:
+Three tools under `tools/aws/` write the service modules:
+
+| Tool | Input | Output |
+|------|-------|--------|
+| [aws-gen.lisp](../../tools/aws/aws-gen.lisp) | Service names | Fetches each missing model, then generates each module that is missing or older than its model |
+| [aws-codegen.lisp](../../tools/aws/aws-codegen.lisp) | `aws-models/<service>.json` | The Elle module, on stdout |
+| [fetch-model.lisp](../../tools/aws/fetch-model.lisp) | Service names | `aws-models/<service>.json`, over HTTPS |
 
 ```bash
-# One step: fetch model + generate
+# One step: fetch the models and generate the modules
 elle tools/aws/aws-gen.lisp -- s3 dynamodb sts
 
-# Manual: fetch then generate
+# By hand: fetch, then generate
 elle tools/aws/fetch-model.lisp -- s3
 elle tools/aws/aws-codegen.lisp -- s3 > lib/aws/s3.lisp
 ```
 
-Models are cached in `aws-models/` (also gitignored). Generation is
-skipped if the output is newer than the model.
+The models live in `aws-models/`, which git ignores. The fetch tools load
+the tls plugin from `target/debug/`, and `aws-gen.lisp` runs the
+generator with `ELLE_BIN`, by default `./target/debug/elle`. Both need a
+debug build.
 
-## Codegen tools
+## What the generator emits
 
-| Tool | Input | Output |
-|------|-------|--------|
-| `tools/aws/aws-gen.lisp` | Service names | Fetches models + generates modules |
-| `tools/aws/aws-codegen.lisp` | `aws-models/{svc}.json` | Elle module on stdout |
-| `tools/aws/fetch-model.lisp` | Service names | `aws-models/{svc}.json` via HTTPS |
+The generator reads the protocol off the model's service shape:
 
-## Protocol support
+- **restXml and restJson1**: the HTTP method and the URI template of each
+  operation, with its query and header bindings.
+- **awsJson1_0 and awsJson1_1**: `POST /` with an `X-Amz-Target` header and
+  a JSON body.
+- **awsQuery and ec2Query**: `POST /` with an `Action=` form body.
 
-The codegen reads `smithy.api#http` traits for REST services and
-protocol traits for JSON-RPC/Query services:
+A module is a function of the core client, `(fn [aws] ...)`, and each
+operation becomes one function,
+`(defn operation-name [required-arg1 required-arg2 &keys opts] ...)`, that
+calls `aws:request` with the service name. The required members are
+positional, in the order their names sort,
+because the generator walks the model's members through `pairs`. Every
+other member is a keyword argument. Every module exports `:api-version`,
+and its header comment names the same version.
 
-- **restXml / restJson1**: HTTP method + URI template + query/header bindings
-- **awsJson1_0 / awsJson1_1**: POST `/` with `X-Amz-Target` header + JSON body
-- **awsQuery / ec2Query**: POST `/` with `Action=` form-encoded body
-
-## Generated function signature
-
-```lisp
-(defn operation-name [required-arg1 required-arg2 &keys opts]
-  ...)
-```
-
-Required params (URI labels, required query params) are positional.
-Optional params (query params, headers, payload) come as keyword args.
-Every module exports `:api-version`.
-
-## Plugin dependencies
-
-The AWS client requires three plugins at load time:
-
-- `elle-crypto` — SHA-256 and HMAC-SHA-256 for SigV4
-- `elle-jiff` — Timestamps for SigV4 date headers
-- `elle-tls` — HTTPS connections via rustls
+The REST emitter writes `(let* [[opts (or opts {})] [path ...]] ...)`, a
+binding form that epoch 12 no longer reads. A restXml or restJson1 module
+therefore does not compile today; the awsJson and awsQuery emitters bind
+with `def` and do.
 
 ## Invariants
 
-1. Generated files are derived artifacts — never edit them directly.
-2. `lib/aws.lisp` and `lib/aws/sigv4.lisp` are hand-written and checked in.
-3. The codegen is deterministic: same model → same output.
-4. API version is embedded in both the file header and the module struct.
+1. A generated file is a derived artifact. Regenerate it; never edit it.
+2. [aws.lisp](../aws.lisp) and [sigv4.lisp](sigv4.lisp) are hand-written
+   and checked in.
+3. The generator is deterministic: the same model gives the same output.

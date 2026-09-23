@@ -49,11 +49,11 @@ pattern and are imported via `(import "std/<name>")`.
 |--------|--------|-------------|
 | gpu | `(import "std/gpu")` | GPU compute via MLIR → SPIR-V → Vulkan (`gpu:map`); needs a build with `--features mlir` |
 | spirv | `(import "std/spirv")` | Hand-written SPIR-V compute shader DSL |
-| gtk4 | `(import "std/gtk4")` | GTK4 bindings via FFI (30 widget types, WebKit) |
+| gtk4 | `(import "std/gtk4")` | GTK4 bindings via FFI (declarative widgets, WebKit) |
 | sdl3 | `(import "std/sdl3")` | SDL3 bindings via FFI (events, textures, audio, TTF) |
 | raylib | `(import "std/raylib")` | raylib bindings via FFI |
 | cairo | `(import "std/cairo")` | Cairo 2D drawing via FFI |
-| wayland | `(import "std/wayland")` | Wayland compositor bindings via FFI |
+| wayland | `(import "std/wayland")` | Wayland compositor interaction (wraps wayland plugin) |
 
 ## Utilities
 
@@ -90,12 +90,13 @@ A library is a closure. Import it and call the closure for its exports:
 ```
 
 A library that depends on a native plugin takes the plugin as an argument.
-HTTPS takes the `std/tls` module, built from the `tls` plugin, as `:tls`:
+HTTPS takes the `std/tls` module, built from the plugin that
+`(import "plugin/tls")` loads, as `:tls`:
 
 ```lisp
-(defn https-client []
+(defn https-client [tls-plugin]
   "An HTTP module that can fetch https:// URLs."
-  (let [tls ((import "std/tls") (import "plugin/tls"))]
+  (let [tls ((import "std/tls") tls-plugin)]
     ((import "std/http") :tls tls)))
 ```
 
