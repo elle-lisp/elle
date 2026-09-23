@@ -1,4 +1,9 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-09-23
+//! Tests for the epoch declaration: extracting it, the prescan's frozen
+//! grammar, and the check that the declaration chose the lexicon.
+//!
+//! docs/epochs.md
+//! docs/impl/lexicon.md
 
 use super::*;
 use crate::syntax::{thread_arena, Span, Syntax, SyntaxKind};
@@ -24,7 +29,7 @@ fn test_extract_epoch_present() {
 
     let epoch = extract_epoch(&mut forms).unwrap();
     assert_eq!(epoch, Some(0));
-    assert_eq!(forms.len(), 1); // (elle 0) removed
+    assert_eq!(forms.len(), 1); // (elle/epoch 0) removed
 }
 
 #[test]
@@ -161,13 +166,18 @@ fn test_prescan_malformed_is_not_a_match() {
 }
 
 #[test]
-fn test_lexicon_identical_across_all_registered_epochs() {
-    // The seam landed before any lexical epoch: every registered epoch
-    // shares one lexicon. The first lexical epoch deletes this test and
-    // replaces it with one pinning the divergence.
-    for epoch in 0..=CURRENT_EPOCH {
-        assert_eq!(rules::Lexicon::for_epoch(epoch), rules::Lexicon::current());
+fn epoch_13_is_the_first_epoch_whose_lexicon_moves() {
+    // Epochs 0 to 12 read string escapes one way and epoch 13 another
+    // (docs/epochs.md). A lexicon that moved at any other epoch would change
+    // how an existing file tokenizes, with no entry in the history to say so.
+    for epoch in 0..=12 {
+        assert_eq!(
+            rules::Lexicon::for_epoch(epoch),
+            rules::Lexicon::for_epoch(0),
+            "epoch {epoch}"
+        );
     }
+    assert_ne!(rules::Lexicon::for_epoch(13), rules::Lexicon::for_epoch(12));
 }
 
 // --- the mismatch check (docs/impl/lexicon.md) ---
@@ -178,14 +188,25 @@ fn forms_of(source: &str) -> Vec<Syntax> {
 }
 
 #[test]
-fn a_declaration_below_a_comment_is_allowed_when_the_lexicons_agree() {
-    // The prescan cannot see this declaration, so the two epochs differ:
-    // prescanned is CURRENT_EPOCH, declared is 3. Comparing the NUMBERS
-    // rejects this file, and with it every existing file that carries a
-    // comment above its epoch line. The rule compares lexicons.
-    let source = "# what this file is\n(elle/epoch 3)\n(def x 1)";
-    assert_eq!(prescan_epoch(source).unwrap(), CURRENT_EPOCH);
-    check_lexicon_agreement(&forms_of(source), source, "t.lisp").unwrap();
+fn a_declaration_below_a_comment_is_allowed_when_it_names_the_current_lexicon() {
+    // The prescan cannot see this declaration and answers CURRENT_EPOCH. The
+    // declaration selects the same lexicon, so the file was read the way its
+    // author meant.
+    let source = format!("# what this file is\n(elle/epoch {CURRENT_EPOCH})\n(def x 1)");
+    assert_eq!(prescan_epoch(&source).unwrap(), CURRENT_EPOCH);
+    check_lexicon_agreement(&forms_of(&source), &source, "t.lisp").unwrap();
+}
+
+#[test]
+fn a_declaration_below_a_comment_is_refused_when_its_epoch_lexes_differently() {
+    // The prescan cannot see this declaration, so the file was lexed under
+    // the current rules. Epoch 12 reads string escapes by other rules, so a
+    // `"\x41"` in this file would already hold a string its author never
+    // wrote. This is the refusal reached through two registered epochs.
+    let source = "# what this file is\n(elle/epoch 12)\n(def x 1)";
+    let err = check_lexicon_agreement(&forms_of(source), source, "t.lisp").unwrap_err();
+    assert!(err.contains("(elle/epoch 12)"), "{err}");
+    assert!(err.contains("shebang"), "{err}");
 }
 
 #[test]
@@ -205,20 +226,16 @@ fn a_declaration_this_compiler_cannot_act_on_is_left_to_extract_epoch() {
 }
 
 #[test]
-fn agreeing_lexicons_accept_any_pair_of_epochs() {
-    refuse_mismatch(
-        EpochLexicon::of(3),
-        EpochLexicon::of(CURRENT_EPOCH),
-        "t.lisp",
-    )
-    .unwrap();
+fn agreeing_lexicons_accept_a_pair_of_different_epochs() {
+    // Epochs 3 and 12 differ in number and share a lexicon. Comparing the
+    // numbers would refuse this pair; the rule compares lexicons.
+    refuse_mismatch(EpochLexicon::of(3), EpochLexicon::of(12), "t.lisp").unwrap();
 }
 
 #[test]
 fn differing_lexicons_refuse_the_file_and_name_the_fix() {
-    // Unreachable through for_epoch until a lexical epoch exists, so the
-    // pair is built directly. Without this the refusal would ship untested
-    // and first run on the epoch that needs it.
+    // `divergent` is a lexicon no registered epoch has, so this pins the
+    // refusal whichever epochs happen to lex differently.
     let err = refuse_mismatch(
         EpochLexicon::with_lexicon(3, rules::Lexicon::divergent()),
         EpochLexicon::of(CURRENT_EPOCH),

@@ -1,7 +1,9 @@
-// audited: 2026-09-16
-// Tests for `elle rewrite`: the edits each rule kind makes to real source text,
-// and the epoch tag the tool leaves behind.
-// docs/epochs.md
+// audited: 2026-09-23
+//! Tests for `elle rewrite`: the edits each rule kind makes to real source text,
+//! and the epoch tag the tool leaves behind.
+//!
+//! docs/epochs.md
+//! docs/impl/lexicon.md
 
 use super::*;
 
@@ -130,9 +132,9 @@ fn a_token_with_no_spelling_in_the_target_names_its_position() {
 
 #[test]
 fn a_file_under_one_lexicon_needs_no_lexical_edits() {
-    // Every registered epoch shares one lexicon, so this is the only case
-    // the tool can reach today: the pass must add nothing to the rewrite.
-    let source = "# note\n(def x 1)\n";
+    // Read and written under the same rules, no token has another spelling:
+    // the pass must add nothing to the rewrite.
+    let source = "# note\n(def x \"\\n\")\n";
     let edits = collect_lexical_edits(
         read_under(source, Lexicon::current()),
         Lexicon::current(),
@@ -140,6 +142,25 @@ fn a_file_under_one_lexicon_needs_no_lexical_edits() {
     )
     .unwrap();
     assert!(edits.is_empty());
+}
+
+#[test]
+fn a_file_at_epoch_12_has_each_escape_whose_meaning_moved_respelled() {
+    // Epoch 12 read `\x41` as `x41` and `\0` as `0`. The rewritten file must
+    // hold the same strings under the current rules, and keep the `\n` it
+    // already spelled the same way under both.
+    let source = "(elle/epoch 12)\n(def s \"\\x41\\n\\0\")\n";
+    let (new_source, _) = rewrite_file(source, "<test>").unwrap().unwrap();
+    assert_eq!(
+        new_source,
+        format!("(elle/epoch {CURRENT_EPOCH})\n(def s \"x41\\n0\")\n")
+    );
+}
+
+#[test]
+fn a_file_at_the_current_epoch_keeps_its_escapes() {
+    let source = format!("(elle/epoch {CURRENT_EPOCH})\n(def s \"\\x41\")\n");
+    assert!(rewrite_file(&source, "<test>").unwrap().is_none());
 }
 
 // --- the shorthand desugar pass (docs/impl/lexicon.md) ---
@@ -153,7 +174,8 @@ fn desugared(source: &str, shorthands: &[Token<'static>]) -> String {
     applied(source, edits)
 }
 
-/// The rule the first lexical epoch will carry: `;x` → `(splice x)`.
+/// The rule an epoch that takes `;` away from the splice would carry:
+/// `;x` → `(splice x)`.
 fn splice_only() -> Vec<Token<'static>> {
     vec![Token::Splice]
 }

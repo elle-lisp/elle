@@ -1,3 +1,10 @@
+// audited: 2026-09-23
+//! Tests for syntax nodes: construction, scopes, the printed form the reader
+//! reads back, and expansion.
+//!
+//! docs/impl/syntax.md
+//! docs/impl/lexicon.md
+
 use super::*;
 
 mod region;
@@ -155,6 +162,45 @@ fn test_display_string() {
     let (_home, a) = arena();
     let syntax = Syntax::string(&a, "hello", Span::new(0, 5, 1, 1));
     assert_eq!(syntax.to_string(), "\"hello\"");
+}
+
+/// A string holding each character a printer can get wrong: a non-ASCII
+/// character, both quotes, a backslash, and control characters with and
+/// without an escape of their own.
+const AWKWARD: &str = "é'\"\\\n\t\r\u{1}\0";
+
+#[test]
+fn test_display_string_reads_back_under_every_lexicon() {
+    // The printed text is read again, and not always under the lexicon that
+    // read the original (docs/impl/lexicon.md). Rust's `escape_default`
+    // wrote `\u{e9}` for `é` and `\'` for `'`: epoch 12 reads the first as
+    // the five characters `u{e9}`, and epoch 13 refuses the second.
+    let (_home, a) = arena();
+    let nodes = [
+        Syntax::string(&a, AWKWARD, Span::synthetic()),
+        Syntax::string_mut(&a, AWKWARD, Span::synthetic()),
+    ];
+    for node in nodes {
+        let text = node.to_string();
+        for epoch in [12, crate::epoch::CURRENT_EPOCH] {
+            let source = format!("(elle/epoch {epoch})\n{text}");
+            let forms = crate::reader::read_syntax_all(a, &source, "<round-trip>").unwrap();
+            let read = match &forms[1].kind {
+                SyntaxKind::String(s) | SyntaxKind::StringMut(s) => s.to_string(),
+                other => panic!("{text} read back as {other:?}"),
+            };
+            assert_eq!(read, AWKWARD, "epoch {epoch} read {text}");
+            assert_eq!(forms[1].kind_label(), node.kind_label(), "{text}");
+        }
+    }
+}
+
+#[test]
+fn test_display_string_writes_other_characters_as_themselves() {
+    // Only the five escapes every lexicon reads are written as escapes.
+    let (_home, a) = arena();
+    let syntax = Syntax::string(&a, "é'\u{1}", Span::synthetic());
+    assert_eq!(syntax.to_string(), "\"é'\u{1}\"");
 }
 
 #[test]

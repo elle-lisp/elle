@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+// audited: 2026-09-23
 //! Epoch migration rule definitions.
 //!
 //! docs/epochs.md
@@ -51,9 +51,9 @@ impl Lexicon {
         Lexicon::for_epoch(CURRENT_EPOCH)
     }
 
-    /// The text that spells `token` — read under `self` — with its meaning
-    /// intact under `target`. `None` when both lexicons spell it alike,
-    /// which is every token whose rules did not move.
+    /// The text that spells `token` — read under `self` from the source text
+    /// `lexeme` — with its meaning intact under `target`. `None` when both
+    /// lexicons spell it alike, which is every token whose rules did not move.
     ///
     /// This is the only place a token crosses between two lexicons, so
     /// `elle rewrite` and the lexer read the same fields and cannot drift
@@ -65,6 +65,7 @@ impl Lexicon {
     pub(crate) fn respell(
         &self,
         token: &Token<'_>,
+        _lexeme: &str,
         target: &Lexicon,
     ) -> Result<Option<String>, String> {
         match token {

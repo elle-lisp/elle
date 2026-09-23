@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+// audited: 2026-09-23
 //! Tests for the reader: the epoch prescan, the lexicon it selects, and the
 //! tokens it builds.
 //!
@@ -166,4 +166,38 @@ fn the_shebang_length_is_the_bytes_the_lexer_never_sees() {
     assert_eq!(shebang_len("#!/usr/bin/env elle\n(def x 1)"), 20);
     // A shebang with no newline is the whole file.
     assert_eq!(shebang_len("#!/usr/bin/env elle"), 19);
+}
+
+// --- string escapes follow the declared epoch (docs/epochs.md) ---
+
+/// The string the form at `index` of `source` reads as.
+fn string_form(source: &str, index: usize) -> String {
+    let forms = read_syntax_all(crate::syntax::thread_arena(), source, "t.lisp").unwrap();
+    match &forms[index].kind {
+        crate::syntax::SyntaxKind::String(s) => s.to_string(),
+        other => panic!("form {index} of {source:?} is {other:?}"),
+    }
+}
+
+#[test]
+fn a_file_that_declares_epoch_12_keeps_the_escapes_it_was_written_with() {
+    assert_eq!(string_form("(elle/epoch 12)\n\"\\x41\"", 1), "x41");
+}
+
+#[test]
+fn a_file_that_declares_epoch_13_reads_the_escapes_epoch_13_adds() {
+    assert_eq!(string_form("(elle/epoch 13)\n\"\\x41\"", 1), "A");
+}
+
+#[test]
+fn an_undeclared_file_reads_the_current_escapes() {
+    assert_eq!(string_form("\"\\x41\"", 0), "A");
+}
+
+#[test]
+fn an_undeclared_file_with_an_old_escape_names_the_declaration_that_reads_it() {
+    let err =
+        read_syntax_all(crate::syntax::thread_arena(), "(def s \"\\q\")", "t.lisp").unwrap_err();
+    assert!(err.contains("\\q"), "{err}");
+    assert!(err.contains("(elle/epoch 12)"), "{err}");
 }

@@ -1,3 +1,9 @@
+// audited: 2026-09-23
+//! Tests for the tree migration: renames, removals, and template
+//! replacements applied to syntax nodes.
+//!
+//! docs/epochs.md
+
 use super::*;
 use crate::syntax::{thread_arena, Span, Syntax, SyntaxKind};
 
@@ -184,6 +190,34 @@ fn test_replace_with_complex_args() {
     } else {
         panic!("expected list");
     }
+}
+
+#[test]
+fn a_template_replacement_keeps_every_character_of_a_string_argument() {
+    // A template reads its arguments back from their printed text. When the
+    // printer wrote `\u{e9}` for `é`, the reader took it as the five
+    // characters `u{e9}`, and the migrated program held another string.
+    let awkward = "é'\"\\\n\t\u{1}";
+    let rules = Rules {
+        replaces: vec![("old-fn", 1usize, "(new-fn $1)")],
+        ..Rules::none()
+    };
+
+    let mut form = list(vec![
+        sym("old-fn"),
+        Syntax::string(&thread_arena(), awkward, Span::synthetic()),
+    ]);
+    rewrite_node(&thread_arena(), &mut form, &rules).unwrap();
+
+    let SyntaxKind::List(items) = &form.kind else {
+        panic!("expected a list, got {:?}", form.kind);
+    };
+    assert_eq!(items[0].as_symbol(), Some("new-fn"));
+    assert!(
+        matches!(&items[1].kind, SyntaxKind::String(s) if *s == awkward),
+        "{:?}",
+        items[1].kind
+    );
 }
 
 #[test]

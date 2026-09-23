@@ -1,7 +1,9 @@
-//! audited: 2026-09-16
-//! Tests for the epoch rule tables and the collectors that read them.
+// audited: 2026-09-23
+//! Tests for the epoch rule tables, the collectors that read them, and the
+//! lexicon's respelling of a token.
 //!
 //! docs/epochs.md
+//! docs/impl/lexicon.md
 
 use super::*;
 
@@ -112,17 +114,30 @@ fn test_rename_chaining() {
 
 // --- token-level respelling (docs/impl/lexicon.md) ---
 
-/// The current lexicon's spelling of `token`, read under `from`.
-fn into_current(from: Lexicon, token: Token<'_>) -> Result<Option<String>, String> {
-    from.respell(&token, &Lexicon::current())
+use crate::reader::Lexer;
+
+/// `target`'s spelling of the one token in `lexeme`, lexed under `from`.
+///
+/// The token comes from lexing the text, so the two cannot disagree the way
+/// a hand-built pair could.
+fn respelled(from: Lexicon, lexeme: &str, target: Lexicon) -> Result<Option<String>, String> {
+    let token = Lexer::new(lexeme)
+        .in_lexicon(from)
+        .next_token()
+        .unwrap()
+        .unwrap();
+    from.respell(&token, lexeme, &target)
+}
+
+/// The current lexicon's spelling of the one token in `lexeme`, lexed under
+/// `from`.
+fn into_current(from: Lexicon, lexeme: &str) -> Result<Option<String>, String> {
+    respelled(from, lexeme, Lexicon::current())
 }
 
 #[test]
 fn a_comment_keeps_its_spelling_when_the_introducer_is_unchanged() {
-    assert_eq!(
-        into_current(Lexicon::current(), Token::Comment("# c\n".to_string())).unwrap(),
-        None
-    );
+    assert_eq!(into_current(Lexicon::current(), "# c\n").unwrap(), None);
 }
 
 #[test]
@@ -130,7 +145,7 @@ fn a_comment_takes_the_introducer_of_the_target_lexicon() {
     // `divergent` comments with `;`; the current lexicon comments with `#`.
     // Only the introducer moves — the rest of the line is the author's text.
     assert_eq!(
-        into_current(Lexicon::divergent(), Token::Comment("; c\n".to_string())).unwrap(),
+        into_current(Lexicon::divergent(), "; c\n").unwrap(),
         Some("# c\n".to_string())
     );
 }
@@ -140,18 +155,87 @@ fn a_token_the_target_cannot_spell_is_refused_not_left_alone() {
     // `;` splices under one lexicon and starts a comment under the other,
     // so there is no text to put in its place. Answering "unchanged" would
     // leave the byte where it is and silently change what the file means.
-    let err = Lexicon::current()
-        .respell(&Token::Splice, &Lexicon::divergent())
-        .unwrap_err();
+    let err = respelled(Lexicon::current(), ";", Lexicon::divergent()).unwrap_err();
     assert!(err.contains(';'), "{err}");
 }
 
 #[test]
 fn a_fused_unquote_splice_the_target_cannot_spell_is_refused() {
-    let err = Lexicon::current()
-        .respell(&Token::UnquoteSplicing, &Lexicon::no_semicolon())
-        .unwrap_err();
+    let err = respelled(Lexicon::current(), ",;", Lexicon::no_semicolon()).unwrap_err();
     assert!(err.contains(",;"), "{err}");
+}
+
+/// The newest lexicon that drops the backslash of an unknown escape.
+fn epoch_12() -> Lexicon {
+    Lexicon::for_epoch(12)
+}
+
+/// The string the literal `lexeme` reads as under `lexicon`.
+fn read_as(lexeme: &str, lexicon: Lexicon) -> String {
+    match Lexer::new(lexeme).in_lexicon(lexicon).next_token() {
+        Ok(Some(Token::String(s))) => s,
+        other => panic!("{lexeme} lexed as {other:?}"),
+    }
+}
+
+#[test]
+fn a_string_whose_escapes_read_alike_keeps_its_spelling() {
+    // The five shared escapes mean the same thing under every lexicon, so a
+    // string written with only those needs no edit.
+    assert_eq!(into_current(epoch_12(), r#""a\n\t\r\\\"b""#).unwrap(), None);
+    assert_eq!(into_current(Lexicon::current(), r#""\x41""#).unwrap(), None);
+}
+
+#[test]
+fn an_escape_whose_meaning_moved_becomes_the_text_epoch_12_read() {
+    let cases = [
+        (r#""\x41""#, r#""x41""#),
+        (r#""\0""#, r#""0""#),
+        (r#""\u{e9}""#, r#""u{e9}""#),
+        (r#""\q""#, r#""q""#),
+        (r#""\é""#, r#""é""#),
+        (r#""\x80""#, r#""x80""#),
+    ];
+    for (old, new) in cases {
+        assert_eq!(
+            into_current(epoch_12(), old).unwrap(),
+            Some(new.to_string()),
+            "{old}"
+        );
+        // The new spelling must read, under the current rules, as the string
+        // the old one read under epoch 12. Comparing text alone would pass a
+        // respelling that reads as something else.
+        assert_eq!(
+            read_as(new, Lexicon::current()),
+            read_as(old, epoch_12()),
+            "{old}"
+        );
+    }
+}
+
+#[test]
+fn a_respelled_string_keeps_its_shared_escapes_as_written() {
+    // Only the escape whose meaning moved changes. The author's `\"` and `\n`
+    // stay as written.
+    assert_eq!(
+        into_current(epoch_12(), r#""\"\x41\"\n""#).unwrap(),
+        Some(r#""\"x41\"\n""#.to_string())
+    );
+}
+
+#[test]
+fn an_escaped_line_break_becomes_the_newline_escape() {
+    // Epoch 12 reads a backslash before a line break as the line break, and
+    // the current lexicon refuses that escape. `\n` spells the same string.
+    let old = "\"a\\\nb\"";
+    assert_eq!(
+        into_current(epoch_12(), old).unwrap(),
+        Some(r#""a\nb""#.to_string())
+    );
+    assert_eq!(
+        read_as(r#""a\nb""#, Lexicon::current()),
+        read_as(old, epoch_12())
+    );
 }
 
 #[test]
