@@ -210,9 +210,9 @@
       (notify-monitors pid reason)))
 
   (defn shutdown-idle []
-    "Exit every process waiting in a receive, with :shutdown."
-    (each pid in (->list waiting)
-      (process-exit pid :shutdown))
+    "Exit every live process with :shutdown, when each is blocked for good."
+    (each p in (->list procs)
+      (process-exit (get p :pid) :shutdown))
     (refill waiting []))
 
   (defn flush-tagged [pid tag ref]

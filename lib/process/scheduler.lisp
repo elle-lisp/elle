@@ -165,11 +165,12 @@
       (waits:clear-sub-state))
 
     (defn stall []
-      "Every waiting process waits on nothing that can come. While PID 0 is
-       one of them the program cannot end; once PID 0 has, they are idle for good."
+      "No process or sub-fiber can run, and no timer or I/O is pending, so
+       nothing can wake a blocked process. While PID 0 is blocked the program
+       cannot end; once PID 0 has ended, every live process is idle for good."
       (if (core:alive? 0)
         (error {:error :deadlock
-                :message "all processes waiting, no messages pending"})
+                :message "every process is blocked, and nothing can wake one"})
         (core:shutdown-idle)))
 
     (defn arm-alarm [due]
@@ -204,7 +205,7 @@
 
     (defn idle []
       "No process is ready: wait for I/O or the next timer, jump to the next
-       timer, or stall."
+       timer, or stall when nothing can wake a blocked process."
       (cond
         (not (has-work?)) nil
 
@@ -221,13 +222,13 @@
           (begin
             (core:advance-to (core:earliest-timer))
             (core:fire-timers)
-            (core:wake-waiting)
-            (when (and (empty? ready) (not (empty? waiting))
-                       (empty? core:timers))
-              (stall)))
+            (core:wake-waiting))
 
-        # Waiting with no timers, no I/O
-        (not (empty? waiting)) (stall)))
+        # A sub-fiber or a futex wake still to run — the next round runs it
+        (waits:can-progress?) nil
+
+        # Blocked, with no timers and no I/O
+        (stall)))
 
     (defn sched-run [init]
       # Parameterize *spawn* so that ev/spawn inside any process or

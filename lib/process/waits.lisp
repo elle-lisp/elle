@@ -226,6 +226,15 @@
 
   # ---- teardown ----
 
+  (defn can-progress? []
+    "Whether a sub-fiber is queued to run, or a parked waiter's futex value
+     has changed since it parked."
+    (def @found (> (length sub-runnable) 0))
+    (each [_key parked] in (pairs futex-parked)
+      (each e in parked
+        (when (not (= (unbox e:val) e:expected)) (assign found true))))
+    found)
+
   (defn has-sub-work? []
     (or (> (length sub-runnable) 0) (> (length join-waiting) 0)
         (> (length select-sets) 0) (> (length futex-parked) 0)))
@@ -280,5 +289,6 @@
    :drain-sub-runnable drain-sub-runnable
    :wake-futex-ready wake-futex-ready
    :has-sub-work? has-sub-work?
+   :can-progress? can-progress?
    :collect-orphan-subs collect-orphan-subs
    :clear-sub-state clear-sub-state})
