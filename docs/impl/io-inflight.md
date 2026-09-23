@@ -1,8 +1,8 @@
 # An operation in flight
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-23 -->
 
-What a submitted I/O operation holds and owns, how it ends when the fiber that asked is gone, and how its answer is assembled.
+What a submitted I/O operation holds and owns, and how it ends when the fiber that asked is gone.
 
 Up: [io/](../../src/io/AGENTS.md)
 
@@ -40,14 +40,14 @@ This is what makes assembling a completion safe by construction. A variant that
 gains a value field and does not name it in `operands` still loses that, which
 is why the match there is exhaustive over both `PendingOp` and `PortOp`.
 
-A payload a write already copied at submit is listed too, though no completion
-reads it back: `operands` is one list, and holding a value nobody will read
-costs a reference until the operation ends.
+A write's payload is listed too, though no completion reads it back. The
+kernel reads it instead, which makes it the one operand a cancel may not let go
+of ([where a stream operation's bytes live](io-bytes.md)).
 
 Pinned by `a_submitted_operations_operands_outlive_the_fiber_that_asked`
-(`src/io/aio/tests/gone.rs`) and, for the fiber itself, by
+([gone.rs](../../src/io/aio/tests/gone.rs)) and, for the fiber itself, by
 `a_held_fiber_survives_the_release_of_its_region`
-(`src/io/pending/tests/hold.rs`).
+([hold.rs](../../src/io/pending/tests/hold.rs)).
 
 ## A hold retains what reclamation listens to
 
@@ -63,16 +63,15 @@ root it recorded, not of the region it started from.
 An operand really does arrive `Owned`. A connection accepted inside a process
 and handed to a per-connection `ev/spawn` is adopted into that activation's
 subtree, and `handle-io-forward` then submits a write on it for the child
-scheduler. `tests/elle/process-io.lisp` § 10 is that program, and the retain on
+scheduler. [process-io.lisp](../../tests/elle/process-io.lisp) § 10 is that program, and the retain on
 the port's own region there holds nothing at all.
 
 Retaining the root keeps the whole subtree for the operation's lifetime, which
-is more than the operand needs. That is the same trade the list of operands
-already makes for a write's copied payload: one seam, one rule, and a reference
-costs until the operation ends.
+is more than the operand needs. The list of operands makes the same trade: one
+seam, one rule, and a reference costs until the operation ends.
 
 Pinned by `an_owned_operand_is_held_through_its_reclamation_root`
-(`src/io/pending/tests/hold.rs`).
+([hold.rs](../../src/io/pending/tests/hold.rs)).
 
 ## A hold is let go while its store is still there
 
@@ -93,20 +92,28 @@ that destructor a hold that reaches nothing.
 
 The same order is what lets a drain assemble a completion at teardown: the
 values it reads are still allocated. That is why the WASM tier drained here
-before there was a hold to release, and the rule now covers both.
+before there was a hold to release, and the rule now covers both. A pool worker
+that reads into a buffer or writes from a payload is waited for in the same
+drain, because its bytes land in the regions the sweep frees
+([where a stream operation's bytes live](io-bytes.md)).
 
 Pinned by `a_stranded_backend_lets_go_before_its_heap_tears_down`
-(`src/io/aio/tests/backend.rs`).
+([backend.rs](../../src/io/aio/tests/backend.rs)).
 
 ## A cancelled operation reads nothing again
 
-A cancel keeps its entry and lets go of its operands, and the two halves
-answer different questions. The **entry** is what the arriving completion
-resolves through, and it is what gives the worker and the descriptor back;
-dropping it at the cancel would strand both. The **hold** exists so a
+A cancel keeps its entry and lets go of what its completion reads, and the two
+halves answer different questions. The **entry** is what the arriving
+completion resolves through, and it is what gives the worker and the descriptor
+back; dropping it at the cancel would strand both. The **hold** exists so a
 completion may read the operands it cooks from — and a cancelled completion
 is retired rather than cooked, so no operand is read again from the moment
 the mark goes in.
+
+One operand is kept past the mark: the buffer or payload the kernel or a worker
+addresses. No completion reads it, but the operation may still write into it or
+send from it until it reports that it stopped
+([where a stream operation's bytes live](io-bytes.md)).
 
 Keeping the hold until the completion arrives costs a reference per call on
 the path a program takes most. A cancel is asked for in one direction and
@@ -123,9 +130,10 @@ arises, and the answer would change nothing. `orphaned_to_stop` skips a
 cancelled entry for the same reason and for one of its own: the cancel has
 already asked that operation to stop.
 
-Pinned by `a_cancelled_entry_holds_nothing`
-(`src/io/pending/tests/hold.rs`), and measured as a rate by the `ev-abort`
-and `ev-timeout` probes in `tests/elle/plumb.lisp`.
+Pinned by `a_cancelled_entry_lets_go_of_what_its_completion_reads` and, for
+the operand kept past the mark, `a_cancelled_entry_keeps_what_the_kernel_addresses`
+(both in [hold.rs](../../src/io/pending/tests/hold.rs)). Measured as a rate by the `ev-abort`
+and `ev-timeout` probes in [plumb.lisp](../../tests/elle/plumb.lisp).
 
 ## A completion owns what it builds, and hands it over once
 
@@ -189,9 +197,9 @@ pipe, and neither hands over a region that carries a port, so
 Pinned by `a_run_that_spawns_a_child_leaves_no_residue`,
 `a_run_that_reads_a_whole_file_leaves_no_residue` and
 `a_run_that_captures_what_a_child_wrote_leaves_no_residue`
-(`tests/region_process_teardown/residue.rs`), and measured as a rate by the
+([census.rs](../../tests/region_process_teardown/census.rs)), and measured as a rate by the
 `subprocess-exec`, `port-read-all` and `subprocess-system` probes in
-`tests/elle/plumb.lisp` beside `io-yield ev/sleep`, whose answer is an immediate
+[plumb.lisp](../../tests/elle/plumb.lisp) beside `io-yield ev/sleep`, whose answer is an immediate
 the completion builds nothing for.
 
 ## An operation whose fiber is gone has no reader
@@ -205,7 +213,7 @@ after the completion has been assembled, because assembling happens inside
 
 So the reader-gone question is not asked of the canceller alone. Every entry
 records **the fiber that asked**, which `io/submit` is handed at the call site
-(`src/stdlib.lisp`), and a completion asks that fiber what became of it. A fiber
+([stdlib.lisp](../../src/stdlib.lisp)), and a completion asks that fiber what became of it. A fiber
 in a terminal state — `:dead` or `:error` — is one no result can reach, so the
 entry is retired unread, exactly as a cancelled one is.
 
@@ -235,10 +243,10 @@ than a fiber in this one, and `io/cancel` through `handle-io-forward-cancel` is
 how that reader lets go.
 
 Pinned by `a_completion_is_withheld_when_the_fiber_that_asked_is_gone`
-(`src/io/aio/tests/gone.rs`), which builds the state directly and asserts on the
+([gone.rs](../../src/io/aio/tests/gone.rs)), which builds the state directly and asserts on the
 answer. No corpus file pins it end to end: the answer goes to a fiber that is
 gone, so nothing in the program can observe it.
-`tests/elle/io-stale-operation-ends.lisp` reaches the same state and asserts on
+[io-stale-operation-ends.lisp](../../tests/elle/io-stale-operation-ends.lisp) reaches the same state and asserts on
 what a program CAN see, which is the operation ending.
 
 ## Ending an operation whose fiber is gone
@@ -282,8 +290,8 @@ descriptor, which is the platform's choice rather than a promise (§ "The stop
 pipe").
 
 Pinned by `an_operation_that_parks_ends_when_the_fiber_that_asked_is_gone`
-(`src/io/aio/tests/gone.rs`), which gives the operation no peer at all, and end
-to end by `tests/elle/io-stale-operation-ends.lisp`.
+([gone.rs](../../src/io/aio/tests/gone.rs)), which gives the operation no peer at all, and end
+to end by [io-stale-operation-ends.lisp](../../tests/elle/io-stale-operation-ends.lisp).
 
 ## The stop pipe
 
@@ -370,50 +378,10 @@ answer to `OpKind::Port`. io_uring has no such tag: a CQE's `user_data` is the
 
 Pinned by `a_completion_for_another_operation_is_withheld_from_the_entry_it_found`
 and `a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it`
-(`src/io/aio/tests/submit.rs`).
+([submit.rs](../../src/io/aio/tests/submit.rs)).
 
 ## Assembling a read's answer
 
-A finishing read owns two runs of bytes: the remainder a previous read on the
-port left behind, and the bytes this read produced. `assemble_read`
-(`src/io/completion/port.rs`) joins them into one `Vec` in stream order, the
-op decides how much of that join answers the request, and whatever is past that
-goes back to the port as its new remainder. One path serves `read`,
-`read-line`, and `read-exact`, and serves them the same whether the stream
-delivered bytes or ended.
-
-The join is built outside the fiber's buffer because what a read reserves is
-not a bound on what it answers with. A text `read-exact` counts grapheme
-clusters and a cluster is any number of joined codepoints; a `read-line`
-reserves 64 KiB and a line can be longer. So `read_result` writes the join back
-into that buffer when it fits — keeping the caller's region and the zero-copy
-`LBytes`→`LString` transmute — and builds the value on the requesting
-instance's heap when it does not, exactly as `read-all` does. What it never
-does is clamp: the bytes past a reservation are bytes the port has already
-taken from the kernel, and nothing is left to read them again.
-
-That is also why a pool worker's bytes stay in `pc.data` rather than being
-staged into the fiber's buffer first, and why a remainder the submission could
-not answer from stays in `fd_states` rather than being copied in ahead of the
-read. `assemble_read` is the one place the two meet.
-
-`read-exact` on the thread pool is the one exception, and it is one because
-that op will not answer short. A worker asked for the whole count would wait
-for the remainder a second time, from a peer that has already sent it once. So
-the submission hands the remainder to the worker (`PoolOp::ReadExact`'s `held`)
-and the worker reads only the shortfall. The ring reaches the same count
-through its resubmit test instead (`src/io/uring/drain.rs`), and either way
-`assemble_read` still joins what comes back.
-
-The submission answers from the remainder alone whenever it can, using
-`frame::line_end` and `frame::exact_end` — the same two the completion cuts
-with, so the submission and the completion cannot frame one stream two ways.
-Answering there is not merely a saved syscall: a read submitted for bytes the
-port is already holding would park until the peer sent more, and a peer that has
-said everything never will.
-
-Pinned by `tests/elle/port-text-framing.lisp` and
-`tests/elle/port-longline.lisp`, and on the other backend by
-`port_text_framing_threadpool` / `port_longline_threadpool`
-(`tests/integration/elle_scripts.rs`).
-
+A read's answer is cut from bytes that land in the caller's buffer, and a
+write's payload is read where it lies.
+[Where a stream operation's bytes live](io-bytes.md) holds both arguments.

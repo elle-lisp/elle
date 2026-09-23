@@ -1,6 +1,6 @@
 # I/O Module
 
-<!-- audited: 2026-09-20 -->
+<!-- audited: 2026-09-23 -->
 
 ## Purpose
 
@@ -28,6 +28,7 @@ to a backend for execution.
 | `request/{buffer,socket}.rs` | In-place buffer edits a completion makes, and the socket request shapes. |
 | `completion.rs` | `process_raw_completion` — converts raw CQE/thread results to `Completion` |
 | `frame.rs` | Where a read's answer ends in the bytes it owns, and how a port's remainder joins it |
+| `landing.rs` | Where a stream operation's bytes land: the remainder a read borrows, a write's payload by address, and what a pool worker is handed of both. See [where a stream operation's bytes live](../../docs/impl/io-bytes.md). |
 | `watch.rs` | `FsWatcher` — inotify (Linux) or kqueue (macOS), for `fs/watch` |
 | `mock.rs` | An in-memory backend for tests and benchmarks, with configurable latency |
 | `sigfd.rs` | `SignalReceiver` — POSIX signalfd (Linux) or kqueue+EVFILT_SIGNAL (macOS) external for `os/sig-watch`; also the worker-thread mask helper `mask_all_signals_on_this_thread` |
@@ -40,7 +41,6 @@ to a backend for execution.
 | `threadpool/{stream,net,event,child,open}.rs` | The runners, grouped by what they wait on: byte streams, sockets, event descriptors (inotify / kqueue / signalfd), a child's exit, a file open. |
 | `uring.rs` | io_uring SQE submission and CQE processing (Linux only). The standing `POLL_ADD` on the hub's bridge eventfd carries the `EVENTFD_USER_DATA` sentinel; `drain_cqes` reports it as `eventfd_fired` and the wait/poll path clears + re-arms it. |
 | `eventfd.rs` | Bridge eventfd helpers — `create`/`signal`/`drain` (Linux only). One definition of each eventfd syscall, shared by the io_uring bridge and `primitives::chan`'s wake fd. |
-
 
 ## Data Flow
 
@@ -101,20 +101,17 @@ A running subprocess — the value Elle sees as a `subprocess`, stored as an ext
 - `exit: ExitRecord` — where the child's exit status is kept once somebody reaps it. See § "A reap is never wasted"
 - `stdio: [Value; 3]` — the stdin, stdout and stderr ports, or `Value::NIL` where the disposition asked for no pipe
 
-Methods:
-- `new(pid, child) → ProcessHandle` — create from a spawned child, with no ports
-- `with_stdio([Value; 3]) → ProcessHandle` — the same handle carrying the ports the spawn created
-- `pid() → u32` — get process ID
-- `stdin()`/`stdout()`/`stderr() → Value` — a port, or nil
-- `exit() → &ExitRecord` — the record, for the waiters and the operations that clone it
-- `Display` — `#<subprocess 12345>`
-- `Drop` impl — calls `try_wait()` on a child nothing has reaped, to reap zombies
+`new(pid, child)` builds a handle with no ports, and `with_stdio([Value; 3])`
+adds the ports the spawn created. `pid()`, `stdin()`/`stdout()`/`stderr()` (a
+port, or nil) and `exit()` (the record the waiters read and clone) read it
+back. `Display` prints `#<subprocess 12345>`, and `Drop` calls `try_wait()` on a
+child nothing has reaped, to reap zombies.
 
-The ports are heap `Value`s an external holds, which no alloc-time scan and no free-time cascade enumerates (docs/impl/region/rules.md Rule 5). They need no count because `spawn_to_subprocess` builds them and the handle at one `Birthplace`, so they share a region and are freed together or not at all.
+The ports are heap `Value`s an external holds, which no alloc-time scan and no free-time cascade enumerates ([region rules](../../docs/impl/region/rules.md), Rule 5). They need no count because `spawn_to_subprocess` builds them and the handle at one `Birthplace`, so they share a region and are freed together or not at all.
 
 ### ExitRecord
 
-The one place a child's exit status is kept (`src/io/request/process.rs`).
+The one place a child's exit status is kept ([process.rs](../../src/io/request/process.rs)).
 `Arc<Mutex<Option<i32>>>` behind a newtype, so a pool worker on another thread
 and the scheduler thread write the same record.
 
@@ -136,7 +133,7 @@ shape. Every variant carries a `buffer_handle` — `Option<BufferHandle>` on
 `Port`, which has operations that reserve no buffer — and the rest of each
 variant is what that operation alone must remember:
 
-- `Port { op, port_key, port, descriptor, buffer_handle, listener_kind, filled, timeout }` — operation on an existing port (stream I/O, accept, datagram, shutdown). `descriptor` is this operation's share of the number it names — see [descriptors and workers](../../docs/impl/io-descriptor.md). `listener_kind` is `Some(PortKind)` for Accept only.
+- `Port { op, port_key, port, descriptor, buffer_handle, listener_kind, lent, filled, timeout }` — operation on an existing port (stream I/O, accept, datagram, shutdown). `descriptor` is this operation's share of the number it names — see [descriptors and workers](../../docs/impl/io-descriptor.md). `listener_kind` is `Some(PortKind)` for Accept only. `lent` is the remainder the port handed to a read — see [where a stream operation's bytes live](../../docs/impl/io-bytes.md).
 - `Connect { addr, buffer_handle, connect_fd, port }` — creates a new port on completion. `connect_fd` starts as `Some(fd)` for io_uring (pre-created socket) or `None` for thread pool (set on completion).
 - `Open { path, buffer_handle, port }` — creates a new port on completion; `path` is kept for the error message.
 - `Sleep { buffer_handle }` — portless timer.
@@ -254,7 +251,7 @@ Three things hold however the operation ends.
   pre-allocated read buffer — after the finished fiber's release freed the
   regions those live in. Pinned by
   `a_cancelled_operation_delivers_no_completion_on_either_backend`
-  (`src/io/aio/tests/park.rs`), which holds both backends to the one answer.
+  ([park.rs](../../src/io/aio/tests/park.rs)), which holds both backends to the one answer.
 - **The descriptor outlives the operation.** See
   [descriptors and workers](../../docs/impl/io-descriptor.md).
 
@@ -308,14 +305,14 @@ sends nothing rather than signalling whatever holds that number now. The two
 readings of the record are the same fact — the child is gone — asked by a
 waiter and by a killer. [subprocesses](../../docs/subprocess.md) carries the argument and the answers the primitive gives, and
 `a_kill_on_a_reaped_child_sends_no_signal`
-(`src/primitives/subprocess/tests.rs`) is the pin — a handle built over a pid
+([tests.rs](../../src/primitives/subprocess/tests.rs)) is the pin — a handle built over a pid
 that names somebody else, since a test cannot recycle a pid on demand.
 
 Each mechanism is pinned on its own, because each fails on its own.
 `a_stopped_wait_that_reaped_the_child_keeps_its_status` and
 `a_wait_on_an_already_reaped_child_answers_from_the_record`
-(`src/io/threadpool/tests/process.rs`) hold the worker to reaping through the
-record. In `src/io/aio/tests/process.rs`,
+([process.rs](../../src/io/threadpool/tests/process.rs)) hold the worker to reaping through the
+record. In [process.rs](../../src/io/aio/tests/process.rs),
 `a_cancelled_wait_that_reaped_the_child_answers_the_next_wait` runs the whole
 path on the pool and its `_uring_` twin runs it on the ring (where the retire is
 what keeps the status), `a_wait_on_a_held_status_files_no_operation` holds the
@@ -323,16 +320,17 @@ submit fast path to issuing nothing, and
 `a_wait_that_finds_no_child_answers_from_the_record` builds the loser's `ECHILD`
 at the entry, which no test can make two waits collide to produce.
 
-
-The rest of the cancellation story is two documents of its own:
+The rest of the cancellation story is three documents of its own:
 
 - [an operation in flight](../../docs/impl/io-inflight.md) — the values a
-  submitted operation holds, when it lets them go, how an operation whose fiber
-  is gone is ended, and how a completion's answer is assembled.
+  submitted operation holds, when it lets them go, and how an operation whose
+  fiber is gone is ended.
+- [where a stream operation's bytes live](../../docs/impl/io-bytes.md) — the
+  buffer a read lands in, the payload a write leaves from, and the operand a
+  cancel keeps.
 - [descriptors and workers](../../docs/impl/io-descriptor.md) — what a close
   retires, how it wakes the operations holding the descriptor, and how the pool
   reuses a worker.
-
 
 ## Buffer Drain Invariant
 
@@ -342,14 +340,14 @@ Buffered data is never lost on EOF or error. The backend drains buffered data be
 
 `PortOp::Write` completes only when the whole payload has left for the fd. One
 `write(2)` transfers at most what fits in the send buffer, so both backends
-loop: the io_uring path resubmits the unwritten tail from the same pooled
-buffer (`drain_cqes`, `PendingOp::Port.filled` counts the bytes already
-accepted), and the thread-pool worker loops inside `PoolOp::Write`. The
-completion reports `filled + result_code`, which equals the payload length.
+loop: the io_uring path resubmits the unwritten tail from the same payload
+address (`PendingOp::Port.filled` counts the bytes already accepted), and the
+thread-pool worker loops inside `PoolOp::Write`. The completion reports
+`filled + result_code`, which equals the payload length.
 
 A failure part-way through surfaces as an error, not as a short count — a
 count smaller than the payload would read as success to a caller that trusts
-the invariant. See [io](../../docs/io.md) and `tests/elle/port-shortwrite.lisp`.
+the invariant. See [io](../../docs/io.md) and [port-shortwrite.lisp](../../tests/elle/port-shortwrite.lisp).
 
 ## Operation timeouts
 
@@ -391,17 +389,17 @@ loop treats `EAGAIN` as a readiness wait whether or not it asked for a timeout,
 so an untimed operation that meets a descriptor another operation made
 non-blocking waits rather than failing.
 
-Pinned by `tests/elle/port-write-timeout.lisp` and
-`tests/elle/port-read-timeout.lisp`, both run on each backend, each covering a
-socket peer and a pipe peer. `tests/elle/net-wait-timeout.lisp` covers the
+Pinned by [port-write-timeout.lisp](../../tests/elle/port-write-timeout.lisp) and
+[port-read-timeout.lisp](../../tests/elle/port-read-timeout.lisp), both run on each backend, each covering a
+socket peer and a pipe peer. [net-wait-timeout.lisp](../../tests/elle/net-wait-timeout.lisp) covers the
 calls that wait for a peer, and `a_pool_connect_reports_its_own_deadline_as_a_timeout`
-(`src/io/aio/tests/netend.rs`) covers the connect, whose stall needs a listener
+([netend.rs](../../src/io/aio/tests/netend.rs)) covers the connect, whose stall needs a listener
 backlog an Elle script cannot set.
 
 ## The submission frame
 
 Every operation the async backend issues passes through
-`AsyncBackend::submit_op` (`src/io/aio/requests.rs`), which performs the four
+`AsyncBackend::submit_op` ([requests.rs](../../src/io/aio/requests.rs)), which performs the four
 steps each submission shares:
 
 | Step | What it decides |
@@ -458,9 +456,9 @@ The ports and the handle are built at the completion's `Birthplace` — one regi
 
 **`AsyncBackend::submit_process_wait()`** (in `aio/externals.rs`) — Submits subprocess wait via `IORING_OP_WAITID` (Linux 6.7+), or on the thread pool. Fast path: if the handle's `ExitRecord` already holds a status, returns an immediate completion. Otherwise, allocates a `siginfo_t` buffer, submits the SQE, and stores the pending operation — with a clone of the record in both the `PoolOp` and the `PendingOp`.
 
-**`child::process_wait()`** (in `src/io/threadpool/child.rs`) — the thread-pool half. `ExitRecord::reap` asks with `waitpid(pid, .., WNOHANG)` and returns either way, and `pace_retry` waits between asks with the stop pipe visible — starting at a millisecond and growing to fifty, so a child that exits at once is reported at once while a long-running one costs few wakeups. The blocking `waitpid` it replaces held the worker for the child's whole life, where neither `io/cancel` nor a deadline could reach it. Asking through the record is what keeps a reap this worker's cancellation discards — see § "A reap is never wasted". Pinned by `src/io/threadpool/tests/process.rs`.
+**`child::process_wait()`** (in [child.rs](../../src/io/threadpool/child.rs)) — the thread-pool half. `ExitRecord::reap` asks with `waitpid(pid, .., WNOHANG)` and returns either way, and `pace_retry` waits between asks with the stop pipe visible — starting at a millisecond and growing to fifty, so a child that exits at once is reported at once while a long-running one costs few wakeups. The blocking `waitpid` it replaces held the worker for the child's whole life, where neither `io/cancel` nor a deadline could reach it. Asking through the record is what keeps a reap this worker's cancellation discards — see § "A reap is never wasted". Pinned by [process.rs](../../src/io/threadpool/tests/process.rs).
 
-**`submit_uring_process_wait()`** (in `src/io/uring.rs`) — Low-level io_uring submission for `IORING_OP_WAITID`. Requires Linux 6.7+; older kernels return `-EINVAL` (errno 22) in the CQE. The kernel fills the `siginfo_t` buffer on child exit; completion processing extracts the exit code from `si_code` and `si_status`.
+**`submit_uring_process_wait()`** (in [uring.rs](../../src/io/uring.rs)) — Low-level io_uring submission for `IORING_OP_WAITID`. Requires Linux 6.7+; older kernels return `-EINVAL` (errno 22) in the CQE. The kernel fills the `siginfo_t` buffer on child exit; completion processing extracts the exit code from `si_code` and `si_status`.
 
 ## Invariants
 
@@ -470,7 +468,7 @@ The ports and the handle are built at the completion's `Birthplace` — one regi
 4. Stdio ports use `std::io::stdin()/stdout()/stderr()` handles directly.
 5. Per-fd state is keyed by `PortKey` (Stdin/Stdout/Stderr/Fd(raw_fd)).
 6. Buffer drain invariant: buffered data is never lost on EOF or error.
-7. Buffers passed to io_uring must not move while the kernel holds them.
+7. Memory handed to io_uring or a pool worker must not move while it is addressed, and its region stays held until the completion arrives.
 8. stdin reads in async mode go through a dedicated OS thread, not io_uring.
    That worker shares the single `CompletionHub` channel: its completions are
    `RawCompletion::Stdin` items like any other worker's. On the pool-only
@@ -489,11 +487,11 @@ The ports and the handle are built at the completion's `Birthplace` — one regi
 11. **Dispatch-before-port-guard:** `Spawn` and `ProcessWait` must be dispatched before the `as_external::<Port>()` guard. `Spawn` has `Value::NIL` as its port field; `ProcessWait` has a `ProcessHandle` in the port field (not a `Port`).
 12. **ProcessWait siginfo lifetime:** The `siginfo_t` buffer in `PendingOp::ProcessWait` is heap-allocated via `Box::into_raw` and must remain valid until the CQE arrives. Completion processing reclaims it via `Box::from_raw`, and so does `PendingOp::retire` — which reads the exit status out of it first, because a retired wait may be the one that reaped the child (§ "A reap is never wasted"). The fast path (a status already on the handle) never inserts a `PendingOp::ProcessWait`, so the buffer is only allocated for truly pending operations.
 13. **IORING_OP_WAITID requirement:** Linux 6.7+; older kernels return `-EINVAL` in the CQE. The thread-pool backend reaps the child itself, asking with `WNOHANG` and pacing the asks under the operation's bound.
-14. **Open runs on the thread pool, on every platform.** An `open(2)` of a fifo waits for the other end, and a wait is only answerable where the worker holds it: `IORING_OP_OPENAT` blocks an io-wq thread that a linked timeout marks cancelled but cannot retract. One implementation is also one answer — the fifo behavior in [io](../../docs/io.md) is the same whichever platform is underneath. Pinned by `src/io/threadpool/tests/openfile.rs`.
+14. **Open runs on the thread pool, on every platform.** An `open(2)` of a fifo waits for the other end, and a wait is only answerable where the worker holds it: `IORING_OP_OPENAT` blocks an io-wq thread that a linked timeout marks cancelled but cannot retract. One implementation is also one answer — the fifo behavior in [io](../../docs/io.md) is the same whichever platform is underneath. Pinned by [openfile.rs](../../src/io/threadpool/tests/openfile.rs).
 15. **Seek/Tell are immediate completions.** `IoOp::Seek` and `IoOp::Tell` are never submitted to io_uring or the thread pool. They call `libc::lseek(2)` synchronously in the backend's submit/execute path and return an immediate completion. `PoolOp` has no `Seek` or `Tell` variant.
 16. **Task dispatch:** `IoOp::Task` is dispatched before the port guard (it is portless). There is no io_uring equivalent for an arbitrary closure, so a `Task` always runs on the thread pool (feeding the `CompletionHub`) on every platform. The `TaskFn` closure is taken exactly once via `RefCell<Option<...>>`; double-take returns an error.
 17. **One submission, one pending entry, one id.** `submit_op` files the
     `PendingOp` under the same id it dispatched the operation with, so an
     arriving completion always finds its entry. A completion whose entry is
     missing is discarded, and the fiber waiting on it never wakes — a hang,
-    not an error. Pinned by `src/io/aio/tests/submit.rs`.
+    not an error. Pinned by [submit.rs](../../src/io/aio/tests/submit.rs).

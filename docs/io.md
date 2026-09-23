@@ -1,6 +1,6 @@
 # I/O
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-23 -->
 
 All I/O in Elle is async — reads and writes yield to the scheduler. User
 code runs inside the async scheduler automatically.
@@ -38,23 +38,27 @@ while the scheduler is asleep.
 
 ### Backend teardown
 
-An io_uring submission queue entry references a buffer the kernel writes
-into asynchronously — a `BufferPool` slot for `read-all`/`open`, or the
-fiber's own arena buffer for `read`/`read-line`. The kernel may complete
-the operation (and write that buffer) at any point up until its completion
-is reaped. So a backend must never be torn down while an operation is still
-in flight: freeing the buffer pool and the ring with the kernel still
-holding a write pointer lands the eventual write in freed heap (manifesting
-as a `malloc(): unsorted double linked list corrupted` abort).
+An io_uring submission queue entry references memory the kernel reaches
+asynchronously: a `BufferPool` slot for `read-all`, the fiber's own region
+buffer for `read`, `read-line` and `read-exact`, and the payload's region pages
+for `write`. The kernel may complete the operation, and write or read that
+memory, at any point up until its completion is reaped. So a backend must never
+be torn down while an operation is still in flight: freeing that memory with
+the kernel still holding a pointer lands the eventual write in freed heap
+(manifesting as a `malloc(): unsorted double linked list corrupted` abort).
 
 Dropping an async backend therefore first brings the ring to a quiescent
 state — it cancels every pending io_uring operation and drains the
 resulting completions, so no kernel-owned buffer outlives the backend. This
 matters when user code submits work it never waits for, e.g. `(io/submit
 backend req)` with no following `(io/wait backend …)`: the operation is
-in flight when the backend value goes out of scope. Thread-pool and stdin
-operations need no such handling — their workers copy results through
-channels and never write into a freed pooled buffer.
+in flight when the backend value goes out of scope.
+
+A thread-pool worker reads into the fiber's buffer and writes from the
+payload's pages the same way, so the drop also stops every pool operation that
+carries a stop pipe and waits for its completion. The stdin worker reads into a
+buffer of its own and hands it over through the channel, so it needs no wait.
+[Where a stream operation's bytes live](impl/io-bytes.md) holds the argument.
 
 A backend the program never lets go of — a top-level `(io/backend :async)`,
 or the scheduler's own — is still there when the heap that carries it is torn
@@ -84,7 +88,7 @@ the edges. Two things come back when it does, on either backend:
   ```
 
   That sketch needs a peer slow enough for the deadline to win, so it is
-  written out rather than run here; `tests/elle/io-cancel-releases.lisp`
+  written out rather than run here; [io-cancel-releases.lisp](../tests/elle/io-cancel-releases.lisp)
   builds the peer and asserts both lines.
 
   And a port that goes away while an operation still runs — closed, or
@@ -92,7 +96,7 @@ the edges. Two things come back when it does, on either backend:
   descriptor number until that operation ends, so the number cannot be
   handed to a new port while a worker holds it.
 
-`tests/elle/io-cancel-releases.lisp` pins both. See
+[io-cancel-releases.lisp](../tests/elle/io-cancel-releases.lisp) pins both. See
 [an operation in flight](impl/io-inflight.md) for how a cancelled operation is
 ended, and [descriptors and workers](impl/io-descriptor.md) for what it gives
 back.
@@ -172,8 +176,8 @@ If the fd fails part-way through, `port/write` raises the error rather than
 returning a short count. An unknown prefix of the payload reached the peer
 in that case, the same guarantee `write(2)`-loop helpers give elsewhere.
 
-The pinning tests are `tests/elle/port-shortwrite.lisp` and
-`tests/elle/port-shortread-framing.lisp` for the read direction.
+The pinning tests are [port-shortwrite.lisp](../tests/elle/port-shortwrite.lisp) and
+[port-shortread-framing.lisp](../tests/elle/port-shortread-framing.lisp) for the read direction.
 
 ### A read that overshoots keeps the rest for the same port
 
@@ -188,15 +192,15 @@ The remainder belongs to the port that produced it, not to its descriptor
 port dropped without `port/close` still closes its descriptor — so the next
 `port/open` can be handed that number. It starts with an empty remainder,
 whichever port held the number before it. The pinning test is
-`tests/elle/io.lisp` § "a recycled descriptor number carries no remainder".
+[io.lisp](../tests/elle/io.lisp) § "a recycled descriptor number carries no remainder".
 
 What a read reserves before it runs is not a bound on what it answers with.
 `port/read-line` reserves 64 KiB, which covers every real protocol line; a line
 longer than that is answered in pieces, and reading on gives the next piece
 until the newline arrives. No byte is dropped to make an answer fit — the
 backend has already taken those bytes from the kernel, so there would be
-nothing left to read them again. `tests/elle/port-longline.lisp` pins it, and
-`port_longline_threadpool` (`tests/integration/elle_scripts.rs`) pins it on the
+nothing left to read them again. [port-longline.lisp](../tests/elle/port-longline.lisp) pins it, and
+`port_longline_threadpool` ([elle_scripts.rs](../tests/integration/elle_scripts.rs)) pins it on the
 other backend.
 
 On a text port `port/read-exact` counts grapheme clusters, and a cluster has no
@@ -208,8 +212,8 @@ in clusters and says nothing about its bytes. A `read-exact` that follows an
 over-reading `read-line` is the same story: the held remainder joins the bytes
 this read produces, the first `n` clusters of the join are the answer, and the
 rest goes back to the remainder for the next read on that port.
-`tests/elle/port-text-framing.lisp` pins all three, and
-`port_text_framing_threadpool` (`tests/integration/elle_scripts.rs`) pins them
+[port-text-framing.lisp](../tests/elle/port-text-framing.lisp) pins all three, and
+`port_text_framing_threadpool` ([elle_scripts.rs](../tests/integration/elle_scripts.rs)) pins them
 on the other backend.
 
 ### `:timeout` bounds each operation
@@ -321,8 +325,8 @@ stall the same way, and `:timeout` returns from all three.
             (subprocess/wait child))))
 ```
 
-The pinning tests are `tests/elle/port-write-timeout.lisp` and
-`tests/elle/port-read-timeout.lisp`, both run on each backend, each covering a
+The pinning tests are [port-write-timeout.lisp](../tests/elle/port-write-timeout.lisp) and
+[port-read-timeout.lisp](../tests/elle/port-read-timeout.lisp), both run on each backend, each covering a
 socket peer and a pipe peer.
 
 ### The calls that wait for a peer
@@ -342,8 +346,8 @@ alike.
 ```
 
 `ev/timeout` and `io/cancel` end these calls too, on either backend. The
-pinning tests are `tests/elle/net-wait-timeout.lisp` for the deadline and
-the `a_cancelled_pool_*` tests in `src/io/aio/tests/net.rs` for the
+pinning tests are [net-wait-timeout.lisp](../tests/elle/net-wait-timeout.lisp) for the deadline and
+the `a_cancelled_pool_*` tests in [netcancel.rs](../src/io/aio/tests/netcancel.rs) for the
 cancellation.
 
 ### The calls that wait for something other than a peer
@@ -361,7 +365,7 @@ same two endings — its own `:timeout` where it has one, and `ev/timeout` or
 | `ev/poll-fd` | the descriptor becoming ready | its `timeout` argument, cancel |
 
 `ev/poll-fd` answers an expired wait with `0` rather than signalling, which is
-what lets a caller poll in a loop — `lib/wayland.lisp` polls with a 33 ms bound
+what lets a caller poll in a loop — [wayland.lisp](../lib/wayland.lisp) polls with a 33 ms bound
 on every iteration.
 
 A cancelled `subprocess/wait` is the one that gives something back besides the
@@ -375,8 +379,8 @@ open waits for a reader, and `:timeout` bounds the wait. On the read side the
 port comes back at once and the first `port/read` is what waits for a writer,
 which is where a reader's `:timeout` applies anyway.
 
-Each of these is pinned in `tests/elle/io-cancel-releases.lisp`, which measures
-what a cancelled operation gives back, and in `src/io/aio/tests/park.rs`.
+Each of these is pinned in [io-cancel-releases.lisp](../tests/elle/io-cancel-releases.lisp), which measures
+what a cancelled operation gives back, and in [park.rs](../src/io/aio/tests/park.rs).
 
 ### Streams from ports
 
