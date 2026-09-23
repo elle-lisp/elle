@@ -344,6 +344,51 @@
   (assert (not ok?) "a PID 0 waiting on nothing still deadlocks")
   (assert (= (get err :error) :deadlock) "with :deadlock"))
 
+# A process blocked on a futex or in a join is idle for good too. The
+# counter-factual: only a process in a receive counted, so the scheduler went
+# round and round while every process waited on a park nothing could wake.
+
+(defn park-forever []
+  (ev/futex-wait :never (box 0) 0))
+
+(let [[ok? err] (protect (process:start park-forever))]
+  (assert (not ok?) "a PID 0 parked on a futex nothing can wake deadlocks")
+  (assert (= (get err :error) :deadlock) "with :deadlock"))
+
+(let [[ok? err] (protect (process:start (fn [] (ev/join (ev/spawn park-forever)))))]
+  (assert (not ok?) "a PID 0 joined to a parked sub-fiber deadlocks")
+  (assert (= (get err :error) :deadlock) "with :deadlock"))
+
+(def @unwound false)
+(let [sched (process:make-scheduler)
+      idle @[]]
+  (process:run sched
+               (fn []
+                 (push idle (process:spawn park-forever))
+                 (push idle
+                       (process:spawn (fn []
+                                        (ev/join (ev/spawn (fn []
+                                          (defer
+                                            (assign unwound true)
+                                            (park-forever))))))))
+                 :done))
+  (each pid in idle
+    (assert (= (get (process:process-info sched pid) :status) :dead)
+            "a process blocked on a futex or a join is shut down once PID 0 has ended"))
+  (assert unwound "the sub-fiber it joined is torn down as an orphan"))
+
+# A park that a timer leads to a wake of is not idle.
+(def @woken false)
+(process:start (fn []
+                 (let [bx (box 0)]
+                   (process:spawn (fn []
+                                    (process:recv-timeout 5)
+                                    (rebox bx 1)
+                                    (ev/futex-wake :late 1)))
+                   (ev/futex-wait :late bx 0)
+                   (assign woken true))))
+(assert woken "a park that a later timer leads to a wake of is woken")
+
 # ── an unknown wait op ───────────────────────────────────────────────
 # The counter-factual: the scheduler raised it, ending every process at once.
 
