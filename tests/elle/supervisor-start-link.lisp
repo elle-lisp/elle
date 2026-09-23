@@ -128,6 +128,8 @@
 # The counter-factual: a malformed spec started, and failed later inside
 # the supervisor, far from the caller that wrote it.
 
+(def add-child process:supervisor-start-child)
+
 (defn rejects? [children]
   (let [[ok? err] (protect (process:supervisor-start-link children))]
     (and (not ok?) (= (get err :error) :invalid-child-spec))))
@@ -146,12 +148,12 @@
                          "ids are unique")
                  (process:supervisor-start-link [{:id :a :start body}] :name
                  :dup-sup)
-                 (let [[ok? err] (protect (process:supervisor-start-child :dup-sup {:id :a
+                 (let [[ok? err] (protect (add-child :dup-sup {:id :a
                        :start body}))]
                    (assert (not ok?) "a dynamic child may not reuse an id")
                    (assert (= (get err :error) :invalid-child-spec)
                            "as :invalid-child-spec"))
-                 (let [[ok? err] (protect (process:supervisor-start-child :dup-sup {:id :b}))]
+                 (let [[ok? err] (protect (add-child :dup-sup {:id :b}))]
                    (assert (not ok?)
                            "a dynamic child is checked like a static one")
                    (assert (= (get err :error) :invalid-child-spec)
