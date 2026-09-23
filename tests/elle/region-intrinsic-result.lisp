@@ -1,19 +1,23 @@
 (elle/epoch 12)
-# E2a: the allocating intrinsics %put / %del / %string-push give their result a
+# audited: 2026-09-23
+# The call-result region an allocating intrinsic gives its result is reclaimed on every tier.
+# docs/impl/region/effects.md
+#
+# The allocating intrinsics %put / %del / %string-push give their result a
 # call-result region (its OWN region, freed by a value-based DecrefValueRegion)
-# like a native call, instead of landing the immutable fresh-copy in the
-# ambient/enclosing region. This pins that the per-call region is RECLAIMED:
+# like a native call, never the ambient/enclosing region. This pins that the
+# per-call region is RECLAIMED:
 # over a fixed window the `arena/region-count` delta stays bounded for both the
 # immutable (fresh-copy) and mutable (in-place pass-through) cases, on every
 # tier. A broken pass-through-retain or a missing DecrefValueRegion would strand
 # one region per call -> an unbounded delta. Uses the raw %-intrinsics so the
-# IntrPut / IntrDel / IntrStringPush opcodes are exercised directly (the native
-# `put`/`del` would route through dispatch_native_call instead).
+# `Put` / `Del` / `IntrStringPush` instructions are exercised directly (the
+# stdlib `put`/`del` wrappers dispatch on type first).
 #
-# The static counterfactual lives in `src/hir/regions/tests.rs`
-# (`put_intrinsic_gets_a_call_result_region`): before E2a the walk made %put
-# region-transparent (no manufactured region); this run-time oracle guards that
-# the now-manufactured per-call region is actually freed.
+# The static pin is `put_intrinsic_gets_a_call_result_region` in
+# src/hir/region/infer/tests/realalloc.rs: a walk that treats %put as
+# region-transparent manufactures no region for it. This run-time check guards
+# that the manufactured per-call region is actually freed.
 
 (defn measure (thunk warm window)
   (var i 0)

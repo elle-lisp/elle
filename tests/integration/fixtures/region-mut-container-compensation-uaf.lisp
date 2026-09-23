@@ -1,28 +1,29 @@
 (elle/epoch 12)
-# tests/integration/fixtures/region-mut-container-compensation-uaf.lisp
+# audited: 2026-09-23
+# The per-arm container compensation releases only a store wrapper's owned-param reference, never a live container.
+# docs/impl/region/compensate.md
 #
 # Quarantined here — NOT under tests/elle/ — because a regression ABORTS the
 # process (the over-free faults under --trace=guardfree, and the debug edge-table
 # equivalence oracle panics), and `make smoke` globs tests/elle/*.lisp into one
 # shared process where an abort takes the whole harness down. Exercised by the
-# guardfree subprocess pin in tests/integration/elle_scripts.rs
-# (`region_mut_container_compensation_uaf`).
+# guardfree subprocess pin `region_mut_container_compensation_uaf` in
+# tests/integration/elle_scripts/containers.rs.
 #
-# THE INVARIANT — the F1b container compensation releases ONLY the wrapper's
-# stranded owned-param reference, never a live container.
+# THE INVARIANT
 #   A polymorphic store wrapper (`push`/`put`/`add`) reached through a value (not
 #   a statically-proven type) runs its `(match (type-of coll) …)` body; the
 #   mutable arm tail-calls a `-mut` funnel (`%push-array-mut`/`%put-struct-mut`/
 #   `%add-set-mut`) that returns the container arg0 pass-through. The wrapper holds
-#   an owned-param reference to that container which it never releases (the
-#   container is return-escaping), so the region leaks 1/op. The close balances it
-#   with a per-arm release in the wrapper body (`regions::compensate`,
-#   `funnel_container_sites`) plus suppressing the redundant tail ReturnValue retain
-#   (`lir::lower::control::call`). SAFETY: the funnel's `pass_through_retain` already
-#   handed the caller one owning reference to the returned container, so releasing
-#   the owned-param reference can NEVER drop the live container to zero. A misfire
-#   here would free a container the caller still holds — an over-free that faults
-#   under guardfree.
+#   an owned-param reference to that return-escaping container. Unreleased, the
+#   region leaks 1/op. A per-arm release in the wrapper body
+#   (`container_release_sites`, src/hir/region/infer/compensate.rs) balances it,
+#   and the lowerer suppresses the redundant tail ReturnValue retain
+#   (src/lir/lower/control/call/tail.rs). SAFETY: the funnel's `pass_through_retain`
+#   already handed the caller one owning reference to the returned container, so
+#   releasing the owned-param reference can NEVER drop the live container to zero.
+#   A misfire here would free a container the caller still holds — an over-free
+#   that faults under guardfree.
 #
 # THE CONTRAST driving the loop:
 #   - a block-local accumulator DISCARDED at return (must free wholesale, cleanly);
@@ -80,9 +81,9 @@
 
 # IMMUTABLE put + REASSIGN, measured through `arena/allocs` — the fresh put result
 # is stored into the reassigned slot `st`, whose move consumes the result's
-# ReturnValue retain. Locus B must NOT drop that retain for an immutable funnel
-# (only a `-mut` pass-through), or the result is freed under the reassign — the
-# `resource.lisp` struct-assoc UAF. Kept out of the churn loop above (each
+# ReturnValue retain. The lowerer's suppression must NOT drop that retain for an
+# immutable funnel (only a `-mut` pass-through), or the result is freed under the
+# reassign. Kept out of the churn loop above (each
 # `arena/allocs` measurement is heavy); its own loop drives id recycling.
 (defn reassign-churn [reps]
   (def @k 0)

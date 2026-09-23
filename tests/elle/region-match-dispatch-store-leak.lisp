@@ -1,22 +1,18 @@
 (elle/epoch 12)
-# Counterfactual (RED before per-arm decref compensation): a value used in EVERY
-# arm of a `(match (type-of x) ...)` and then stored into a persistent container
-# must be bounded per iteration. It leaks one object per call.
+# audited: 2026-09-23
+# A value stored into a persistent container in every arm of a type-dispatch match is released on every arm.
+# docs/impl/region/compensate.md
 #
-# ROOT CAUSE (decref placement, region analysis). The region solver gives a region
-# ONE `decref_point` — the textually-last of its uses. When `val` is used in every
-# arm of a match (each arm passes it to a different store intrinsic), that single
-# decref lands in the LAST arm. For any scrutinee that selects an EARLIER arm, the
-# taken arm uses `val` but never frees it (the decref sits on the unreached last
-# arm), so `val`'s region is stranded — a per-call leak that a loop makes unbounded
-# RSS. The dead-sibling-arm case (`val` used in only one arm) is already covered by
-# `src/hir/regions/compensate.rs`; this is the every-arm-uses-it case, closed by
-# per-arm decref placement (a release at `val`'s last use within each sibling arm,
-# routed through `emit_decrefs_for` so it fires AFTER the arm's store, never before).
+# The region solver gives a region ONE `decref_point`, the textually-last of its
+# uses. When `val` is used in every arm of a match (each arm passes it to a
+# different store intrinsic), that single release lands in the LAST arm. A
+# scrutinee that selects an EARLIER arm uses `val` and never frees it. Per-arm
+# compensation (src/hir/region/infer/compensate.rs) adds the missing release on
+# each used sibling arm, after the store whose retain funds it. Without it `val`'s
+# region strands once per call, and a loop makes that unbounded RSS.
 #
-# A LEAK, not a UAF — live-object growth (`arena/count`). This is exactly the path
-# stdlib `put`/`set` take: their `(match (type-of coll) ...)` stores the value in
-# every arm. GREEN once the per-call growth is bounded.
+# A LEAK, not a UAF — live-object growth (`arena/count`). Stdlib `put` takes this
+# path: its `(match (type-of coll) ...)` stores the value in every arm.
 
 (defn bounded? [d100 d10k limit]
   "True if both deltas are under limit and 10000 is not ~100x 100. A

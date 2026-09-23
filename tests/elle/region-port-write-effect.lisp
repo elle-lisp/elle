@@ -1,6 +1,9 @@
 (elle/epoch 12)
-# port/write declares RegionEffect::Immediate (docs/impl/region/effects.md
-# "Native region effects"): every non-error path yields an integer byte count
+# audited: 2026-09-23
+# The value port/write resumes with is an immediate, as its Immediate region effect declares.
+# docs/impl/region/effects.md
+#
+# Every non-error path of port/write yields an integer byte count
 # — the empty-write short-circuit returns (SIG_OK . 0) directly, and the io
 # completion returns (SIG_OK . result_code). The result is therefore always an
 # immediate, with no heap region for the solver to release.
@@ -12,12 +15,12 @@
 # completion path, which the oracle never sees. So this .lisp pin, not the
 # oracle, is what holds port/write to its Immediate declaration: were the result
 # ever a heap value, `Immediate` would be unsound (the solver records no
-# result region and would leak it), and this pin goes RED.
+# result region and would leak it), and this pin fails.
 #
 # (The solver-side consequence of Immediate — no opaque-call arg clique between
 # port/write's two heap args, hence no per-call data-region leak — is pinned
-# directly in src/hir/regions/tests/effects.rs
-# `port_write_declares_immediate_no_arg_clique`.)
+# directly by `port_write_declares_immediate_no_arg_clique` in
+# src/hir/region/infer/tests/declared.rs.)
 
 # Scratch file under the platform temp root (with-temp-dir honors TMPDIR and
 # cleans up after — no hardcoded paths, no litter).
