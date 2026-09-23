@@ -20,13 +20,18 @@
 (defn spawn-monitor [closure]
   (yield [:spawn-monitor closure]))
 (defn link [pid]
-  (yield [:link pid]))
+  "Link to pid. Raises {:error :noproc} when pid has exited and the caller
+   neither traps exits nor was linked to it."
+  (when (= (yield [:link pid]) :noproc)
+    (error {:error :noproc :message (string "link: process " pid " has exited")}))
+  :ok)
 (defn unlink [pid]
   (yield [:unlink pid]))
 (defn monitor [pid]
   (yield [:monitor pid]))
-(defn demonitor [ref]
-  (yield [:demonitor ref]))
+(defn demonitor [ref &named flush]
+  "Stop the monitor ref. With :flush true, also drop its :DOWN from the mailbox."
+  (yield [:demonitor ref flush]))
 (defn trap-exit [flag]
   (yield [:trap-exit flag]))
 (defn exit [pid reason]
@@ -41,6 +46,9 @@
   (yield [:send-named name msg]))
 (defn send-after [ticks pid msg]
   (yield [:send-after ticks pid msg]))
+(defn now []
+  "The scheduler's clock, in ticks."
+  (yield [:now]))
 (defn cancel-timer [ref]
   (yield [:cancel-timer ref]))
 (defn put-dict [key val]
@@ -70,6 +78,7 @@
    :whereis whereis
    :send-named send-named
    :send-after send-after
+   :now now
    :cancel-timer cancel-timer
    :put-dict put-dict
    :get-dict get-dict

@@ -112,6 +112,12 @@
 
   # ---- wait ops ----
 
+  (defn known-op? [op]
+    (has? |:join :select :abort :park :notify| op))
+
+  (defn unknown-op [op]
+    {:error :protocol-error :message (string "unknown :wait op: " op)})
+
   (defn handle-wait [w request]
     "Serve a :wait request from waiter w."
     (let [pid (owner w)]
@@ -151,11 +157,11 @@
           (let [count (get request :count)]
             (wake w (wake-parked (get request :key) (fn [_ n] (< n count)))))
 
-        ## Unknown wait op — fail loudly. A silent re-queue resumes the
-        ## emitting fiber with nil, which it reads as its wait's result; the
-        ## corruption then surfaces far from this dispatch, if at all.
-        (let [err {:error :protocol-error
-                   :message (string "unknown :wait op: " (get request :op))}]
+        ## Unknown wait op — fail loudly, in the fiber that emitted it. A
+        ## silent re-queue resumes the emitting fiber with nil, which it reads
+        ## as its wait's result. The scheduler checks a process fiber's op
+        ## with known-op? before it hands the wait here.
+        (let [err (unknown-op (get request :op))]
           (if (integer? w)
             (error err)
             (begin
@@ -248,6 +254,8 @@
    :io-wakeup-box io-wakeup-box
    :sub-runnable sub-runnable
    :forward-io forward-io
+   :known-op? known-op?
+   :unknown-op unknown-op
    :handle-wait handle-wait
    :after-resume after-resume
    :drain-sub-runnable drain-sub-runnable

@@ -69,7 +69,8 @@
     (get procs pid))
 
   (defn alive? [pid]
-    (= (get (proc-get pid) :status) :alive))
+    (let [p (proc-get pid)]
+      (and (not (nil? p)) (= (get p :status) :alive))))
 
   (defn deliver [pid msg]
     (when (alive? pid)
@@ -93,14 +94,35 @@
     (put (get (proc-get a) :links) b)
     (put (get (proc-get b) :links) a))
 
+  (defn link [pid target]
+    "Link pid to target. Returns :noproc when target has exited, pid was not
+     linked to it, and pid does not trap exits; :ok otherwise."
+    (let [t (proc-get target)]
+      (cond
+        (alive? target) (begin
+                          (add-link pid target)
+                          :ok)
+        (and (not (nil? t)) (has? (get t :links) pid)) :ok
+        (get (proc-get pid) :trapping)
+          (begin
+            (deliver pid [:EXIT target :noproc])
+            :ok)
+        :noproc)))
+
   (defn remove-link [a b]
     (del (get (proc-get a) :links) b)
-    (del (get (proc-get b) :links) a))
+    (when (not (nil? (proc-get b)))
+      (del (get (proc-get b) :links) a)))
 
   (defn add-monitor [watcher target]
+    "Monitor target. A target that has exited, or never existed, sends
+     [:DOWN ref target :noproc] at once."
     (let [ref (fresh-ref)]
-      (put (get (proc-get watcher) :monitors) ref target)
-      (put (get (proc-get target) :monitored-by) ref watcher)
+      (if (alive? target)
+        (begin
+          (put (get (proc-get watcher) :monitors) ref target)
+          (put (get (proc-get target) :monitored-by) ref watcher))
+        (deliver watcher [:DOWN ref target :noproc]))
       ref))
 
   (defn remove-monitor [ref watcher]
@@ -113,14 +135,18 @@
 
   # ---- exit ----
 
+  (defn normal? [reason]
+    "Whether an exit reason is normal: :normal, or [:normal value] from a return."
+    (or (= reason :normal) (and (array? reason) (= (first reason) :normal))))
+
   (defn notify-links [dead-pid reason]
     (each linked-pid in (get (proc-get dead-pid) :links)
       (when (alive? linked-pid)
-        (if (get (proc-get linked-pid) :trapping)
-          (deliver linked-pid [:EXIT dead-pid reason])
-          (begin
-            (put (proc-get linked-pid) :status :dead)
-            (notify-links linked-pid [:linked dead-pid reason]))))))
+        (cond
+          (get (proc-get linked-pid) :trapping) (deliver linked-pid
+          [:EXIT dead-pid reason])
+          (not (normal? reason)) (process-exit linked-pid
+          [:linked dead-pid reason])))))
 
   (defn notify-monitors [dead-pid reason]
     (let [monitored-by (get (proc-get dead-pid) :monitored-by)]
@@ -160,16 +186,37 @@
           (empty? keep) (del futex-parked key)
           (< (length keep) (length parked)) (put futex-parked key (->array keep))))))
 
+  (defn imposed? [reason]
+    "Whether an exit reason ends a process against its will: a raise, a link or a kill."
+    (and (array? reason) (has? |:error :linked :killed| (first reason))))
+
   (defn process-exit [pid reason]
-    (put (proc-get pid) :status :dead)
-    (when (and (array? reason) (= (first reason) :error))
-      (put (proc-get pid)
-           :exit-reason {:error :process-error :reason (string (get reason 1))}))
-    (cancel-process-io pid)
-    (cancel-process-futex pid)
-    (unregister-name pid)
-    (notify-links pid reason)
-    (notify-monitors pid reason))
+    (when (alive? pid)
+      (put (proc-get pid) :status :dead)
+      (when (imposed? reason)
+        (put (proc-get pid)
+             :exit-reason {:error :process-error
+                           :reason (string reason)
+                           :message (string "process " pid " exited: " reason)}))
+      (cancel-process-io pid)
+      (cancel-process-futex pid)
+      (unregister-name pid)
+      (notify-links pid reason)
+      (notify-monitors pid reason)))
+
+  (defn shutdown-idle []
+    "Exit every process waiting in a receive, with :shutdown."
+    (each pid in (->list waiting)
+      (process-exit pid :shutdown))
+    (refill waiting []))
+
+  (defn flush-down [pid ref]
+    "Remove a [:DOWN ref ...] message from the mailbox of pid."
+    (let [p (proc-get pid)
+          keep? (fn [m]
+                  (not (and (array? m) (= (get m 0) :DOWN) (= (get m 1) ref))))]
+      (refill (get p :mbox) (filter keep? (->list (get p :mbox))))
+      (refill (get p :save-queue) (filter keep? (->list (get p :save-queue))))))
 
   # ---- timers ----
 
@@ -278,7 +325,10 @@
    :resume resume
    :any-alive? any-alive?
    :add-link add-link
+   :link link
    :remove-link remove-link
+   :shutdown-idle shutdown-idle
+   :flush-down flush-down
    :add-monitor add-monitor
    :remove-monitor remove-monitor
    :process-exit process-exit

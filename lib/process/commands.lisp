@@ -55,9 +55,7 @@
                ref (core:add-monitor pid new-pid)]
           (resume pid [new-pid ref]))
       :link
-        (begin
-          (core:add-link pid (get cmd 1))
-          (resume pid :ok))
+        (resume pid (core:link pid (get cmd 1)))
       :unlink
         (begin
           (core:remove-link pid (get cmd 1))
@@ -65,9 +63,12 @@
       :monitor
         (resume pid (core:add-monitor pid (get cmd 1)))
       :demonitor
-        (begin
-          (core:remove-monitor (get cmd 1) pid)
+        (let [ref (get cmd 1)]
+          (core:remove-monitor ref pid)
+          (when (get cmd 2) (core:flush-down pid ref))
           (resume pid :ok))
+      :make-ref (resume pid (core:fresh-ref))
+      :now (resume pid (core:now))
       :trap-exit
         (begin
           (put (proc-get pid) :trapping (get cmd 1))

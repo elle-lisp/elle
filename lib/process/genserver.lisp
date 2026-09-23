@@ -20,17 +20,13 @@
         :register register
         :whereis whereis
         :send-after send-after
-        :cancel-timer cancel-timer
-        :put-dict put-dict
-        :get-dict get-dict} p)
+        :cancel-timer cancel-timer} p)
 
   # ── helpers ─────────────────────────────────────────────────────────
 
   (defn gen-make-ref []
-    "Per-process monotonic ref for call correlation."
-    (let [n (or (get-dict :$gen-call-ref) 0)]
-      (put-dict :$gen-call-ref (+ n 1))
-      n))
+    "A ref that no other ref from this scheduler equals."
+    (yield [:make-ref]))
 
   (defn gen-resolve [server]
     "Resolve server — pid passes through, keyword does whereis."
@@ -42,6 +38,44 @@
         pid)
       server))
 
+  (defn timeout-for? [ref]
+    "A predicate for the [:$call-timeout ref] message a deadline sends."
+    (fn [m]
+      (and (array? m) (= (length m) 2) (= (get m 0) :$call-timeout)
+           (= (get m 1) ref))))
+
+  (defn reply-to? [ref]
+    "A predicate for the [:$reply ref value] message that answers ref."
+    (fn [m]
+      (and (array? m) (= (length m) 3) (= (get m 0) :$reply) (= (get m 1) ref))))
+
+  (defn await-reply [ref timeout reply?]
+    "The first message reply? matches, or :timeout once timeout ticks pass.
+     No timeout waits for good. Either way, the deadline leaves no message."
+    (let* [timed-out? (timeout-for? ref)
+           timer (when (not (nil? timeout))
+                   (send-after timeout (self) [:$call-timeout ref]))
+           msg (recv-match (fn [m] (or (reply? m) (timed-out? m))))]
+      (cond
+        (timed-out? msg) :timeout
+        # A timer that already fired left its message behind the reply.
+        (and (not (nil? timer)) (= (cancel-timer timer) :not-found)) (begin
+          (recv-match timed-out?)
+          msg)
+        msg)))
+
+  (defn gen-call [server tag payload timeout]
+    "Send [tag self ref payload] to server, and return the value it replies."
+    (let* [pid (gen-resolve server)
+           ref (gen-make-ref)]
+      (send pid [tag (self) ref payload])
+      (match (await-reply ref timeout (reply-to? ref))
+        :timeout
+          (error {:error :gen-server-timeout
+                  :message (string "no reply from " server " within " timeout
+                                   " ticks")})
+        reply (get reply 2))))
+
   # ── client API ──────────────────────────────────────────────────────
 
   (defn gen-server-reply [from reply]
@@ -51,23 +85,7 @@
   (defn gen-server-call [server request &named timeout]
     "Synchronous request-response. Blocks until the server replies, or raises
      {:error :gen-server-timeout} once :timeout ticks pass without a reply."
-    (let* [pid (gen-resolve server)
-           ref (gen-make-ref)
-           me (self)
-           timer-ref (when (not (nil? timeout))
-                       (send-after timeout me [:$call-timeout ref]))]
-      (send pid [:$call me ref request])
-      (let [reply (recv-match (fn [m]
-                                (and (array? m) (>= (length m) 3)
-                                     (or (and (= (get m 0) :$reply)
-                                     (= (get m 1) ref))
-                                     (and (= (get m 0) :$call-timeout)
-                                     (= (get m 1) ref))))))]
-        (when (not (nil? timer-ref)) (cancel-timer timer-ref))
-        (when (= (get reply 0) :$call-timeout)
-          (error {:error :gen-server-timeout
-                  :message "gen-server call timed out"}))
-        (get reply 2))))
+    (gen-call server :$call request timeout))
 
   (defn gen-server-cast [server request]
     "Asynchronous one-way message. Returns :ok immediately."
@@ -77,24 +95,7 @@
   (defn gen-server-stop [server &named reason timeout]
     "Request graceful shutdown. Blocks until the server acknowledges, or raises
      {:error :gen-server-timeout} once :timeout ticks pass first."
-    (let* [pid (gen-resolve server)
-           ref (gen-make-ref)
-           me (self)
-           rsn (or reason :normal)
-           timer-ref (when (not (nil? timeout))
-                       (send-after timeout me [:$call-timeout ref]))]
-      (send pid [:$stop me ref rsn])
-      (let [reply (recv-match (fn [m]
-                                (and (array? m) (>= (length m) 3)
-                                     (or (and (= (get m 0) :$reply)
-                                     (= (get m 1) ref))
-                                     (and (= (get m 0) :$call-timeout)
-                                     (= (get m 1) ref))))))]
-        (when (not (nil? timer-ref)) (cancel-timer timer-ref))
-        (when (= (get reply 0) :$call-timeout)
-          (error {:error :gen-server-timeout
-                  :message "gen-server stop timed out"}))
-        (get reply 2))))
+    (gen-call server :$stop (or reason :normal) timeout))
 
   # ── server loop ─────────────────────────────────────────────────────
 
@@ -186,6 +187,8 @@
 
   {:gen-make-ref gen-make-ref
    :gen-resolve gen-resolve
+   :gen-call gen-call
+   :await-reply await-reply
    :gen-server-start-link gen-server-start-link
    :gen-server-call gen-server-call
    :gen-server-cast gen-server-cast

@@ -58,8 +58,13 @@
                 (put io-pending id @{:pid pid})))
 
           # Wait — structured concurrency (ev/join, ev/select, ev/abort)
-          (not (= 0 (bit/and bits 16384))) (waits:handle-wait pid
-          (fiber/value f))
+          (not (= 0 (bit/and bits 16384)))
+            (let [request (fiber/value f)]
+              (if (waits:known-op? (get request :op))
+                (waits:handle-wait pid request)
+                (begin
+                  (fiber/abort f (waits:unknown-op (get request :op)))
+                  (dispatch-signal pid f))))
 
           # Yield — scheduler command
           (not (= 0 (bit/and bits 2))) (handle-cmd pid (fiber/value f))
@@ -137,12 +142,16 @@
           (reap-io)))
       (waits:clear-sub-state))
 
-    (defn deadlock []
-      (error {:error :deadlock
-              :message "all processes waiting, no messages pending"}))
+    (defn stall []
+      "Every waiting process waits on nothing that can come. While PID 0 is
+       one of them the program cannot end; once PID 0 has, they are idle for good."
+      (if (core:alive? 0)
+        (error {:error :deadlock
+                :message "all processes waiting, no messages pending"})
+        (core:shutdown-idle)))
 
     (defn idle []
-      "No process is ready: wait for I/O, jump to the next timer, or fail."
+      "No process is ready: wait for I/O, jump to the next timer, or stall."
       (cond
         (not (has-work?)) nil
 
@@ -164,10 +173,10 @@
             (core:wake-waiting)
             (when (and (empty? ready) (not (empty? waiting))
                        (empty? core:timers))
-              (deadlock)))
+              (stall)))
 
         # Waiting with no timers, no I/O
-        (not (empty? waiting)) (deadlock)))
+        (not (empty? waiting)) (stall)))
 
     (defn sched-run [init]
       # Parameterize *spawn* so that ev/spawn inside any process or
