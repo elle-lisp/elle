@@ -1,9 +1,7 @@
 // audited: 2026-09-22
-// What the naming rule does with a propagating tail — the body a `let`,
-// `letrec`, `loop` or `parameterize` hands its own value up from — and with the
-// returning positions such tails lead out of.
+// What the naming rule does with a propagating tail, and with a returning position.
 //
-// src/hir/anf.rs
+// docs/impl/anf.md
 
 use super::*;
 use crate::hir::expr::HirKind;

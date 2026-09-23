@@ -3,7 +3,7 @@
 # An eval's result, and a value a returning position hands out, each carry one
 # reference: a loop that evaluates stays flat in regions and objects.
 #
-# src/hir/anf.rs (§ "A returning position names only what it must release")
+# docs/impl/anf.md (§ "A returning position names only what it must release")
 #
 # Two shapes owe a release that only a slot can route, and each is measured
 # here at every position that reaches it:

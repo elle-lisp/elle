@@ -223,7 +223,7 @@ fn region_const_tail_move_borrow_uaf() {
 }
 
 // Guard — a returning position names the owned result it must release
-// (src/hir/anf.rs § "A returning position names only what it must release"). An
+// (docs/impl/anf.md § "A returning position names only what it must release"). An
 // eval's result at a function tail, a call at an eval'd unit's root, and a call
 // in a `parameterize` body each leave through a slot release placed after the
 // `Return` mint. A release that ran ahead of the mint, or twice, frees the value
