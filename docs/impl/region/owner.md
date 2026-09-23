@@ -406,10 +406,11 @@ parked stack or the parked activation map could not be: a mapped slot can be sta
 its value's release was emitted value-based or died past a tail call, so it double-frees.
 What is left is what neither table can NAME — a value with no binding of its own, and so
 no route and no receipt: a literal materialized straight into a denied call's argument,
-the rest list the calling convention built for a variadic callee, and a parameter released
-through an env slot, which carries no nil stamp. This class is bounded per discarded
-fiber and has no gauge of its own: the `denied-discard` probe reads closed
-([assessment.md](../assessment.md)).
+and a parameter released through an env slot, which carries no nil stamp. This class is
+bounded per discarded fiber and has no gauge of its own: the `denied-discard` probe reads
+closed ([assessment.md](../assessment.md)). A variadic callee's rest list is not in it: the
+rest parameter's slot is a value route with a receipt, so the discharge releases the list
+([region-discard-variadic-rest.lisp](../../../tests/elle/region-discard-variadic-rest.lisp)).
 
 A **borrowed tail argument's** retain is not part of the residual. The frame mints it so
 a callee has a reference to release. That retain has one consumer per path, and a native
