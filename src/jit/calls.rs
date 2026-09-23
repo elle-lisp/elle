@@ -1,12 +1,14 @@
 // audited: 2026-09-23
-// docs/impl/jit.md
-// docs/impl/region/owner.md
 //! Function call dispatch helpers for JIT-compiled code.
 //!
-//! These `extern "C"` functions handle calling Elle closures, native functions,
-//! and parameters from JIT-compiled code. They also include the sentinels,
-//! yield/call-site metadata types, and the environment-building utility used
-//! by the interpreter fallback paths.
+//! docs/impl/jit.md
+//! docs/impl/region/owner.md
+//!
+//! The `extern "C"` call helpers themselves live in `callops`: calling Elle
+//! closures, native functions, and parameters from JIT-compiled code. This file
+//! holds what they share: the sentinels, the yield/call-site metadata types,
+//! primitive signal handling, the capability denial, and the owned-argument
+//! retain of a compiled call.
 
 use crate::jit::value::{JitValue, TAIL_CALL_SENTINEL_JV, YIELD_SENTINEL_JV};
 use crate::jit::TailDeferrals;
@@ -22,7 +24,7 @@ pub use callops::*;
 // =============================================================================
 
 /// Sentinel `JitValue` indicating a pending tail call.
-/// Uses a tag value that cannot be a valid Value tag (> TAG_THREAD = 33).
+/// Its tag, `0xDEAD_BEEF_DEAD_BEEF`, is no valid Value tag.
 pub const TAIL_CALL_SENTINEL: JitValue = TAIL_CALL_SENTINEL_JV;
 
 /// Sentinel `JitValue` indicating a JIT function yielded (side-exited).
@@ -114,8 +116,7 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
             // …and the same arm's park classification: this primitive never
             // returns, so the resume value stands in for its result and the
             // delivery owes the reference the missing `Return` mint would have
-            // carried (docs/impl/region/owner.md § "A delivery into a replayed
-            // frame carries one owning reference").
+            // carried (docs/impl/region/owner.md).
             vm.fiber.delivery.park_primitive(bits, value);
             vm.fiber.signal = Some((bits, value));
             YIELD_SENTINEL
@@ -157,8 +158,7 @@ pub(crate) fn jit_capability_denial(
     // the park classification, because the denied primitive never runs so the
     // mediating parent's resume value stands in for its result, and the payload,
     // because the RUNTIME built it and the install that displaces the park owes
-    // the reference the allocation left (docs/impl/region/owner.md § "Park/unpark
-    // symmetry").
+    // the reference the allocation left (docs/impl/region/owner.md).
     vm.fiber.delivery.park_denial(blocked, payload);
     vm.fiber.signal = Some((blocked, payload));
     YIELD_SENTINEL
@@ -204,7 +204,7 @@ pub(crate) fn args_ptr_to_value_slice(args_ptr: *const Value, nargs: u32) -> &'s
 /// Debug-build guard at the compiled-call boundary: classify the callee's env
 /// backing through the region-of funnel, whose generation check panics with
 /// free-log attribution when the backing page's region was freed
-/// (docs/impl/region/generations.md § "Region generations"). Compiled code
+/// (docs/impl/region/generations.md). Compiled code
 /// reads the env by raw pointer — no funnel, no check — so a stale env
 /// crosses this boundary silently and detonates later at an unattributed
 /// load in native code. Classifying here names the call boundary instead.
@@ -223,7 +223,7 @@ pub(crate) fn debug_check_env_backing(
     }
 }
 
-/// Hand a JIT-to-JIT (or SCC direct) callee one `CallArgument` owning reference
+/// Hand a JIT-to-JIT callee one `CallArgument` owning reference
 /// per non-captured FIXED param, mirroring `VM::populate_env`/`push_param`
 /// (own_params=true) for the path where no interpreter env is built (the callee
 /// runs as compiled code, reading args by pointer and releasing each owned param
