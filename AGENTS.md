@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-23 -->
 
 Elle is a Lisp. Source text becomes bytecode; bytecode runs on a VM.
 
@@ -276,8 +276,10 @@ Full list: [`docs/warts.md`](docs/warts.md).
 
 - [DOCUMENTATION.md](DOCUMENTATION.md) holds the naming and size rules. The
   exception it defers to: dispatch tables run to 800 lines.
-- `make doctest` runs every `.md` under `docs/` as a program, so a claim inside
-  a ` ```lisp ` fence is executed on every build.
+- `make doctest` runs README.md, QUICKSTART.md, INSTALL.md and every `.md`
+  under `lib/` and `docs/` as a program, so a claim inside a ` ```lisp ` fence
+  is executed on every build. No other fence holds Elle code
+  ([docs/README.md](docs/README.md)).
 - Write a Rust file's call-out as a `//!` module doc, under the `// audited:`
   stamp. `make qa` builds rustdoc, so `//!` is the one header form a reader
   meets both in the source and in the rendered documentation.
