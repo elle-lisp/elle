@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-23 -->
 
 Elle exposes a runtime configuration system reachable from both CLI flags and
 Elle code. All debug/trace flags, JIT policies, and WASM policies are
@@ -233,13 +233,6 @@ holds a few hundred bytes. [impl/vm.md](impl/vm.md) owns the mechanism.
 (vm/config-set :jit :off)
 (vm/config-set :jit :adaptive)
 
-# Custom JIT policy via closure
-(vm/config-set :jit
-  (fn [info]
-    (if (and (get info :silent) (> (get info :calls) 5))
-      :jit
-      :skip)))
-
 # Change WASM policy
 (vm/config-set :wasm :full)
 (vm/config-set :wasm :off)
@@ -254,22 +247,18 @@ holds a few hundred bytes. [impl/vm.md](impl/vm.md) owns the mechanism.
 
 ### Custom JIT policy
 
-When a closure is provided as the JIT policy, the VM calls it before
-compiling each hot function. The closure receives a struct:
+`vm/config-set` accepts a closure as the JIT policy and reports the policy
+as `:custom`. The VM does not call the closure yet
+([#1242](https://github.com/elle-lisp/elle/issues/1242)): a `:custom` policy
+compiles every function on its first call, as `:eager` does.
 
 ```lisp
-{:name "map"
- :calls 15
- :silent true
- :captures 0
- :bytecode-size 48
- :arity 2}
+(vm/config-set :jit (fn [info] :skip))
+(assert (= (vm/config :jit) :custom) "a closure policy reads back as :custom")
+(vm/config-set :jit :adaptive)
 ```
 
-It must return one of:
-- `:jit` — compile with Cranelift
-- `:wasm` — compile with WASM backend
-- `:skip` — keep in interpreter
+The issue records the contract the closure is meant to meet.
 
 ### Future feature flags
 
