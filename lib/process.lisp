@@ -2,8 +2,8 @@
 # audited: 2026-09-23
 # Erlang-style processes on fibers: the scheduler, its primitives, and the OTP-shaped behaviors.
 # lib/process.md
+# lib/process/overview.md
 # docs/processes.md
-# docs/behaviors.md
 #
 # Loaded via: (def process ((import "std/process")))
 # Usage:      (process:start (fn [] (process:send (process:self) :hello) (process:recv)))

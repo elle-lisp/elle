@@ -1,7 +1,7 @@
 (elle/epoch 12)
 # audited: 2026-09-23
 # Supervisor: a process that starts child processes and restarts them by policy.
-# docs/behaviors.md
+# docs/supervisor.md
 #
 # The supervisor traps exits and links to every child, so each child's exit
 # reaches it as [:EXIT pid reason], even from a child that dies before the

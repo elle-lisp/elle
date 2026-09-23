@@ -1,7 +1,7 @@
 (elle/epoch 12)
 # audited: 2026-09-23
 # Supervisor basics: starting children, restart policies, strategies, and children added at runtime.
-# docs/behaviors.md
+# docs/supervisor.md
 
 (def process ((import "std/process")))
 
@@ -93,7 +93,7 @@
                        (begin  # Kill the temporary child
                          (process:exit child-pid :kill)
 
-                         # Give supervisor a tick to process the DOWN
+                         # Give the supervisor a tick to handle the exit
                          (process:send me :sync)
                          (process:recv)
                          (process:send me :sync)

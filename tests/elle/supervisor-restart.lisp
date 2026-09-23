@@ -1,7 +1,7 @@
 (elle/epoch 12)
 # audited: 2026-09-23
 # When a supervisor restarts a child: early deaths, dynamic children, forgotten specs, and the intensity limit.
-# docs/behaviors.md
+# docs/supervisor.md
 
 (def process ((import "std/process")))
 

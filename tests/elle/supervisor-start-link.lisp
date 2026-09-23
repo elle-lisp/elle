@@ -1,7 +1,7 @@
 (elle/epoch 12)
 # audited: 2026-09-23
 # A :start-link child spec: a supervisor adopts the process a function spawns, such as a GenServer.
-# docs/behaviors.md
+# docs/supervisor.md
 
 (def process ((import "std/process")))
 

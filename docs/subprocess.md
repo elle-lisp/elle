@@ -1,6 +1,6 @@
 # Subprocesses
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-23 -->
 
 Elle spawns a child process as a `subprocess` value: one thing to read streams
 from, to signal, and to wait on.
@@ -241,14 +241,14 @@ supervisor restarts them on crash:
 #     :max-restarts 5)))
 ```
 
-See [behaviors.md](behaviors.md) for the full supervisor API.
+See [supervisor.md](supervisor.md) for the full supervisor API.
 
 ---
 
 ## See also
 
 - [io.md](io.md) — ports, the async backend, and what bounds each call
-- [behaviors.md](behaviors.md) — the supervisor that restarts a child on crash
+- [supervisor.md](supervisor.md) — the supervisor that restarts a child on crash
 - [processes.md](processes.md) — Erlang-style processes
 - [posix-signals.md](posix-signals.md) — sending and observing POSIX signals
 - [traits.md](traits.md) — trait tables, and why they are not identity

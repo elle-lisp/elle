@@ -1,7 +1,7 @@
 (elle/epoch 12)
 # audited: 2026-09-23
 # make-subprocess-child: a supervised OS subprocess, whose exit code decides how its child exits.
-# docs/behaviors.md
+# docs/supervisor.md
 
 (def process ((import "std/process")))
 

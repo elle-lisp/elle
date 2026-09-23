@@ -6,8 +6,9 @@
 Elle's fiber scheduler. Processes have mailboxes, links, monitors, named
 registration, and fuel-based preemption.
 
-The callback-driven roles built on that model — GenServer, Actor, Task,
-Supervisor and EventManager — are in [behaviors.md](behaviors.md).
+The callback-driven roles built on that model — GenServer, Actor, Task and
+EventManager — are in [behaviors.md](behaviors.md), and the supervisor that
+restarts them is in [supervisor.md](supervisor.md).
 
 ## Loading
 
@@ -445,7 +446,8 @@ gets to finish sending it would wait forever.
 
 ## See also
 
-- [behaviors.md](behaviors.md) — GenServer, Actor, Task, Supervisor, EventManager
+- [behaviors.md](behaviors.md) — GenServer, Actor, Task, EventManager
+- [supervisor.md](supervisor.md) — Supervisor
 - [concurrency.md](concurrency.md) — lower-level ev/spawn, ev/join
 - [fibers](signals/fibers.md) — fiber architecture underlying processes
 - [runtime.md](runtime.md) — fuel budgets

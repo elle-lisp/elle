@@ -8,7 +8,7 @@ Up: [..](../AGENTS.md)
 
 - [README.md](README.md) — **Elle Documentation** This directory contains language references, design documents, and contributor guides.
 - [arrays.md](arrays.md) — **Arrays** Arrays are indexed sequences.
-- [behaviors.md](behaviors.md) — **Process behaviors (more...)**
+- [behaviors.md](behaviors.md) — **Process behaviors** The callback-driven roles [lib/process.lisp](../lib/process.lisp) builds on the bare process: GenServer, Actor, Task and EventManager.
 - [bindings.md](bindings.md) — **Bindings** Bindings associate names with values.
 - [bytes.md](bytes.md) — **Bytes** Bytes are sequences of raw byte values (0–255).
 - [coming-from.md](coming-from.md) — **Coming from Other Languages** Quick orientation for programmers arriving from specific languages.
@@ -51,6 +51,7 @@ Up: [..](../AGENTS.md)
 - [strings.md](strings.md) — **Strings** Strings are immutable sequences of grapheme clusters.
 - [structs.md](structs.md) — **Structs** Structs are key-value maps with keyword keys.
 - [subprocess.md](subprocess.md) — **Subprocesses** Elle spawns a child process as a `subprocess` value: one thing to read streams from, to signal, and to wait on.
+- [supervisor.md](supervisor.md) — **Supervisors** A supervisor starts child processes, restarts each one by its policy, and gives up when they crash too often.
 - [syntax.md](syntax.md) — **Syntax** Elle is a Lisp.
 - [test-cli.md](test-cli.md) — **Driving the test runner** Why `elle test` exists, the command line it offers, what it refuses to offer, and what is still design.
 - [test-runner.md](test-runner.md) — **Agent-First Test Runner** How a run executes: each file compiled, isolated, gated, run on every tier, its output captured, and its end recorded honestly.

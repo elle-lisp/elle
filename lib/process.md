@@ -45,8 +45,9 @@ on fuel, so no process can starve its siblings.
 ```
 
 A supervisor restarts under `:one-for-one` unless you name
-`:one-for-all` or `:rest-for-one`. [behaviors.md](../docs/behaviors.md)
-says what each field and strategy does.
+`:one-for-all` or `:rest-for-one`. [supervisor.md](../docs/supervisor.md)
+says what each field and strategy does, and [behaviors.md](../docs/behaviors.md)
+says what each callback does.
 
 ## Running tests
 
