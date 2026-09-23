@@ -1,4 +1,4 @@
-// audited: 2026-09-16
+// audited: 2026-09-22
 // The fixture the ANF pins share: a compile to post-ANF HIR, and the walks that
 // ask whether a given node came out of the pass named.
 //
@@ -188,12 +188,18 @@ fn find_node<'a>(hir: &'a Hir, target: HirId) -> Option<&'a Hir> {
     found
 }
 
-/// True if `hir` is `(let [b e] (var b))` — the ANF wrap shape.
+/// True if `hir` is `(let [b e] (var b))` — the ANF wrap shape — or, at a
+/// returning position, `(let [b e] (return (var b)))`: `wrap_tail_returns`
+/// runs inside `anf_lift` and marks the wrap's body as the returned value.
 fn is_anf_wrap(hir: &Hir) -> bool {
     if let HirKind::Let { bindings, body } = &hir.kind {
         if bindings.len() == 1 {
             let (b, _) = &bindings[0];
-            if let HirKind::Var(bv) = &body.kind {
+            let returned = match &body.kind {
+                HirKind::Return { value } => value.as_ref(),
+                _ => body.as_ref(),
+            };
+            if let HirKind::Var(bv) = &returned.kind {
                 return bv == b;
             }
         }
