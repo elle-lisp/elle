@@ -106,6 +106,9 @@
                            "a server that dies inside the deadline raises :gen-server-down"))))
 
 # ── a call to a server that has already exited ───────────────────────
+# "At once" means far inside the deadline. Each primitive the call yields
+# costs a scheduler round, so a bound counted in rounds breaks whenever the
+# call yields once more; a tenth of the deadline does not.
 
 (process:start (fn []
                  (process:trap-exit true)
@@ -118,7 +121,7 @@
                                   (process:gen-server-call server :ping
                                   :timeout 1000))) :noproc)
                              "a call to an exited pid raises with :noproc")
-                     (assert (< (- (process:now) before) 10)
+                     (assert (< (- (process:now) before) 100)
                              "at once, not at the deadline"))
                    (assert (= (down-reason (fn []
                                 (process:gen-server-stop server))) :noproc)
