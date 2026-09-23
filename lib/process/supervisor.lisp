@@ -205,7 +205,7 @@
     (sup-call sup :$sup-start-child spec))
 
   (defn supervisor-stop-child [sup id]
-    "Remove and stop a child by id."
+    "Stop a child by id, and forget its spec so no strategy restarts it."
     (sup-call sup :$sup-stop-child id))
 
   (defn supervisor-which-children [sup]
@@ -228,7 +228,7 @@
      then crashes to trigger supervisor restart on unexpected exit.
 
      Options:
-       :opts     — options hash passed to subprocess/exec (env, cwd, etc.)
+       :opts     — options passed to subprocess/exec (env, cwd, etc.); default {}
        :restart  — :permanent (default), :transient, or :temporary"
     {:id id
      :restart (or restart :permanent)

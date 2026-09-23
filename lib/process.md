@@ -23,7 +23,7 @@ on fuel, so no process can starve its siblings.
 
 ```lisp
 # GenServer. `server` is a pid or a registered name; `from` is [pid ref].
-{:init        (fn [arg] state)
+{:init        (fn [arg] state | [:ok state] | [:stop reason])
  :handle-call (fn [request from state]
                 [:reply reply state] | [:noreply state]
                 | [:stop reason reply state])
@@ -36,14 +36,17 @@ on fuel, so no process can starve its siblings.
  :handle-event (fn [event state] [:ok state] | [:remove state])
  :terminate    (fn [reason state] ...)}
 
-# Supervisor child
-{:id keyword
- :start (fn [] ...)
- :restart :permanent | :transient | :temporary}
+# Supervisor child: exactly one of :start and :start-link
+{:id         keyword
+ :start      (fn [] ...)     # the child's body, run as a new process
+ :start-link (fn [] pid)     # spawns the child and returns its pid
+ :restart    :permanent | :transient | :temporary
+ :ready      true | false}   # with :start only
 ```
 
 A supervisor restarts under `:one-for-one` unless you name
-`:one-for-all` or `:rest-for-one`.
+`:one-for-all` or `:rest-for-one`. [behaviors.md](../docs/behaviors.md)
+says what each field and strategy does.
 
 ## Running tests
 

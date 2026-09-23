@@ -8,7 +8,7 @@ Up: [..](../AGENTS.md)
 
 - [README.md](README.md) — **Elle Documentation** This directory contains language references, design documents, and contributor guides.
 - [arrays.md](arrays.md) — **Arrays** Arrays are indexed sequences.
-- [behaviors.md](behaviors.md) — **Process behaviors** The callback-driven roles `lib/process.lisp` builds on the bare process: GenServer, Actor, Task, Supervisor and EventManager.
+- [behaviors.md](behaviors.md) — **Process behaviors (more...)**
 - [bindings.md](bindings.md) — **Bindings** Bindings associate names with values.
 - [bytes.md](bytes.md) — **Bytes** Bytes are sequences of raw byte values (0–255).
 - [coming-from.md](coming-from.md) — **Coming from Other Languages** Quick orientation for programmers arriving from specific languages.
@@ -42,7 +42,7 @@ Up: [..](../AGENTS.md)
 - [pipeline.md](pipeline.md) — **Compilation Pipeline** Compilation entry points.
 - [plugins.md](plugins.md) — **Plugins** Elle ships with Rust plugins and pure Elle standard library modules.
 - [posix-signals.md](posix-signals.md) — **POSIX signals** Elle programs can send POSIX signals to other processes and observe signals delivered to themselves.
-- [processes.md](processes.md) — **Processes** `lib/process.lisp` provides Erlang-style concurrent processes built on Elle's fiber scheduler.
+- [processes.md](processes.md) — **Processes** [lib/process.lisp](../lib/process.lisp) provides Erlang-style concurrent processes built on Elle's fiber scheduler.
 - [regions.md](regions.md) — **Region-Based Memory Management** Elle frees memory at compile-time-known program points: no tracing collector, no liveness scan, and no GC pause.
 - [runtime.md](runtime.md) — **Runtime Signals** The runtime uses fiber signals for internal coordination.
 - [scheduler.md](scheduler.md) — **Scheduler** The async scheduler is the only supported execution backend, and user code runs inside it automatically.

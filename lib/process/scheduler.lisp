@@ -256,7 +256,9 @@
 
 (defn start [init &named fuel backend]
   "Create a fresh scheduler and run init-closure as the first process.
-   Blocks until all processes complete. Returns the scheduler.
+   Blocks until no process can run again. Returns the scheduler, or raises
+   {:error :process-error} when the first process dies of an error, a link,
+   or an exit another process sent it.
    This is the primary entry point for most programs. Use `run` instead
    when you need to pre-configure or reuse a scheduler."
   (let [sched (make-scheduler :fuel fuel :backend backend)]

@@ -1,8 +1,8 @@
 # Processes
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-23 -->
 
-`lib/process.lisp` provides Erlang-style concurrent processes built on
+[lib/process.lisp](../lib/process.lisp) provides Erlang-style concurrent processes built on
 Elle's fiber scheduler. Processes have mailboxes, links, monitors, named
 registration, and fuel-based preemption.
 
@@ -18,13 +18,46 @@ Supervisor and EventManager — are in [behaviors.md](behaviors.md).
 ## Starting a process system
 
 `process:start` creates a scheduler and runs a closure as the first
-process. It blocks until all processes complete and returns the scheduler.
+process, PID 0. It blocks until no process can run again and returns the
+scheduler.
 
 ```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
   (println "hello from process 0")))
+```
+
+A process that outlives PID 0 keeps the scheduler running while it has work.
+When PID 0 has ended and every process left waits in a receive that no
+message, timer or I/O can satisfy, those processes are idle for good.
+`process:start` then exits each of them with reason `:shutdown` and returns.
+While PID 0 itself waits that way, nothing can end the program, and
+`process:start` raises `{:error :deadlock}`.
+
+```lisp
+(def process ((import "std/process")))
+
+## PID 0 returns while the process it linked waits in recv.
+(process:start (fn []
+  (process:spawn-link (fn [] (process:recv)))
+  :done))
+```
+
+PID 0 can end with an exit reason it did not choose: `[:error e]` when it
+raises, `[:linked pid reason]` when a linked process kills it, or
+`[:killed reason]` when another process calls `exit` on it. For each of
+these, `process:start` raises `{:error :process-error :reason r}` once the
+scheduler stops, where `r` is the exit reason as a string.
+
+```lisp
+(def process ((import "std/process")))
+
+(let [[ok? err] (protect (process:start (fn []
+                  (process:spawn-link (fn [] (error {:error :boom :message "crash"})))
+                  (process:recv))))]
+  (assert (not ok?) "a crash that kills PID 0 reaches the caller")
+  (assert (= (get err :error) :process-error) "as a process error"))
 ```
 
 Use `process:run` when you need a pre-configured or shared scheduler:
@@ -97,10 +130,34 @@ given number of scheduler ticks.
   (assert (= (process:recv-timeout 1) :timeout) "timed out")))
 ```
 
+The scheduler keeps time in ticks. Each round of the scheduler, which runs
+every ready process once, adds one tick. When every process waits on a timer,
+the clock jumps to the earliest one. `now` returns the current tick, and
+`recv-timeout`, `send-after` and a supervisor's `:max-ticks` all count it.
+
+```lisp
+(def process ((import "std/process")))
+
+(process:start (fn []
+  (let [before (process:now)]
+    (process:recv-timeout 10)
+    (assert (>= (- (process:now) before) 10) "recv-timeout waited 10 ticks"))))
+```
+
 ## Links and crash propagation
 
-Linked processes crash together. When a linked child crashes, the parent
-crashes too — unless the parent is trapping exits.
+A link ties two processes' exits together. When a process exits, every
+process linked to it receives an exit signal that carries the exit reason:
+
+- A process that traps exits receives the signal as the message
+  `[:EXIT pid reason]`.
+- A process that does not trap exits ignores a normal reason: `[:normal
+  value]`, which a process that returns exits with, or `:normal`. Any other
+  reason kills it, with the reason `[:linked pid reason]`.
+
+A process that a link kills exits like any other. Its registered name is
+released, its monitors receive `:DOWN`, and its own links receive the signal
+in turn.
 
 ```lisp
 (def process ((import "std/process")))
@@ -110,14 +167,35 @@ crashes too — unless the parent is trapping exits.
   (let [child (process:spawn-link (fn []
                  (error {:error :boom :message "crash"})))]
     (match (process:recv)
-      [:EXIT pid reason]
-        (begin
-          (assert (= pid child) "EXIT from child")
-          (match reason
-            [:error _] (assert true "got error reason")
-            _ nil))
-      _ nil))))
+      [:EXIT pid [:error _]] (assert (= pid child) "EXIT from child")
+      _ (assert false "expected [:EXIT child [:error ...]]")))))
 ```
+
+A normal exit leaves a linked process running when that process does not trap
+exits:
+
+```lisp
+(def process ((import "std/process")))
+
+(process:start (fn []
+  (let* [me (process:self)
+         peer (process:spawn (fn []
+                (process:recv)
+                (process:send me :peer-alive)))]
+    (process:spawn (fn [] (process:link peer) :done))
+    (process:recv-timeout 5)
+    (process:send peer :go)
+    (assert (= (process:recv) :peer-alive) "the peer outlived its partner"))))
+```
+
+`link` to a process that has already exited, and that the caller was not
+linked to, sends the caller the exit signal `noproc`. A caller that traps
+exits receives `[:EXIT pid :noproc]`. In any other caller, `link` raises
+`{:error :noproc}`.
+
+`exit pid reason` sends a process an exit signal directly. A target that traps
+exits receives `[:EXIT sender reason]`; any other target dies with the reason
+`[:killed reason]`. The reason `:kill` kills even a target that traps exits.
 
 ## Monitors
 
@@ -130,14 +208,29 @@ process dies, without affecting the monitoring process.
 (process:start (fn []
   (let [[child-pid ref] (process:spawn-monitor (fn [] :done))]
     (match (process:recv)
-      [:DOWN got-ref got-pid reason]
+      [:DOWN got-ref got-pid [:normal val]]
         (begin
           (assert (= got-ref ref) "correct ref")
-          (match reason
-            [:normal val] (assert (= val :done) "normal exit")
-            _ nil))
-      _ nil))))
+          (assert (= got-pid child-pid) "correct pid")
+          (assert (= val :done) "normal exit carries the return value"))
+      _ (assert false "expected [:DOWN ref pid [:normal :done]]")))))
 ```
+
+`monitor` on a process that has already exited delivers `[:DOWN ref pid
+:noproc]` at once, so a monitor always ends in exactly one `:DOWN`.
+
+```lisp
+(def process ((import "std/process")))
+
+(process:start (fn []
+  (let [[pid _] (process:spawn-monitor (fn [] :done))]
+    (process:recv)
+    (let [ref (process:monitor pid)]
+      (assert (= (process:recv) [:DOWN ref pid :noproc]) "late monitor gets :noproc")))))
+```
+
+`demonitor ref` stops a monitor. With `:flush true`, it also removes a
+`[:DOWN ref …]` message that already arrived for that monitor.
 
 ## Named processes
 
@@ -219,10 +312,10 @@ tracked by the scheduler and participate in I/O completion.
 
 `ev/select` — and everything built on it: `ev/timeout`, `ev/race`,
 `ev/scope`, `ev/as-completed` — works from the process fiber and from
-sub-fibers alike. The scheduler dispatches a process fiber's wait
-through one path and a sub-fiber's through another, and both implement
-the full wait vocabulary; a wait op neither knows is a protocol error,
-raised in the fiber that emitted it rather than swallowed.
+sub-fibers alike. The scheduler serves a process fiber's wait and a
+sub-fiber's through the same code, so both have the full wait vocabulary.
+A wait op the scheduler does not know is a protocol error, raised in the
+fiber that emitted it rather than swallowed.
 
 One rule keeps those waits honest: the scheduler never resumes a parked
 fiber except with the result it parked for. A join or select on a
@@ -231,7 +324,7 @@ is already parked on I/O, a futex, or a wait the scheduler tracks, and
 is woken only by its own completion. Resuming it out of turn would hand
 its park a nil — a timer parked in `ev/sleep` would "complete"
 instantly, and every `ev/timeout` in a process would report its
-deadline at once. Pinned by `tests/elle/process-select.lisp`.
+deadline at once. Pinned by [process-select.lisp](../tests/elle/process-select.lisp).
 
 ## Orphan sub-fibers and teardown
 
@@ -310,10 +403,10 @@ gets to finish sending it would wait forever.
 |----------|-------------|
 | `link pid` | Link to another process |
 | `unlink pid` | Remove link |
-| `monitor pid` | Monitor another process |
-| `demonitor ref` | Remove monitor |
+| `monitor pid` | Monitor another process, returns a ref |
+| `demonitor ref` | Remove monitor (`:flush`) |
 | `trap-exit flag` | Catch linked exits as messages |
-| `exit pid reason` | Terminate a process |
+| `exit pid reason` | Send an exit signal to a process |
 
 ## Registration
 
@@ -328,6 +421,7 @@ gets to finish sending it would wait forever.
 
 | Function | Description |
 |----------|-------------|
+| `now` | The scheduler's clock, in ticks |
 | `send-after ticks pid msg` | Delayed message delivery |
 | `cancel-timer ref` | Cancel a pending timer |
 

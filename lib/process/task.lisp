@@ -13,7 +13,8 @@
   (def gen-make-ref gs:gen-make-ref)
 
   (defn task-async [fun]
-    "Spawn a linked process that runs fun and sends the result back. Returns [pid ref]."
+    "Spawn a monitored process that runs fun. Returns [pid ref], where ref is
+     the monitor ref task-await matches."
     (let* [me (self)
            ref (gen-make-ref)
            [child-pid mon-ref] (spawn-monitor (fn []
@@ -22,7 +23,8 @@
       [child-pid ref]))
 
   (defn task-await [task &named timeout]
-    "Wait for a task's result. task is [pid ref] from task-async."
+    "Return the value of a task from task-async. Raises {:error :task-error}
+     when the task crashed and {:error :task-timeout} once :timeout ticks pass."
     (let* [ref (get task 1)
            timer-ref (when (not (nil? timeout))
                        (send-after timeout (self) [:$call-timeout ref]))]

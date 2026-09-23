@@ -49,7 +49,8 @@
     (send (get from 0) [:$reply (get from 1) reply]))
 
   (defn gen-server-call [server request &named timeout]
-    "Synchronous request-response. Blocks until the server replies."
+    "Synchronous request-response. Blocks until the server replies, or raises
+     {:error :gen-server-timeout} once :timeout ticks pass without a reply."
     (let* [pid (gen-resolve server)
            ref (gen-make-ref)
            me (self)
@@ -74,7 +75,8 @@
     :ok)
 
   (defn gen-server-stop [server &named reason timeout]
-    "Request graceful shutdown. Blocks until the server acknowledges."
+    "Request graceful shutdown. Blocks until the server acknowledges, or raises
+     {:error :gen-server-timeout} once :timeout ticks pass first."
     (let* [pid (gen-resolve server)
            ref (gen-make-ref)
            me (self)
