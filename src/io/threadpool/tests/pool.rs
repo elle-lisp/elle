@@ -1,3 +1,4 @@
+//! audited: 2026-09-23
 //! Worker reuse, and the two costs it must not bring with it.
 //!
 //! A finished operation gives its worker back to the crew rather than ending
@@ -189,15 +190,8 @@ fn parked_operations_do_not_delay_the_next_submission() {
         let id = SubmissionId::from_raw(id);
         // A stop pipe and no deadline: nothing but `stop` ends these.
         let bounds = hub.bounds(id, None);
-        hub.submit(
-            id,
-            PoolOp::Read {
-                fd: read_fd,
-                size: 16,
-            },
-            bounds,
-        )
-        .expect("the pool must accept a parking submission");
+        hub.submit(id, PoolOp::read(read_fd, 16), bounds)
+            .expect("the pool must accept a parking submission");
     }
 
     hub.submit(

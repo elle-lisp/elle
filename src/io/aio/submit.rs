@@ -1,4 +1,4 @@
-//! audited: 2026-09-18
+//! audited: 2026-09-23
 //! `AsyncBackend::submit` — the one entry point, and how it routes a request to
 //! a portless path, an immediate answer, or a backend.
 //!
@@ -392,7 +392,7 @@ impl AsyncBackend {
                         let pool_op = match op {
                             PortOp::ReadLine { .. } => PoolOp::ReadLine { fd },
                             PortOp::ReadAll => PoolOp::ReadAll { fd },
-                            PortOp::Read { count, .. } => PoolOp::Read { fd, size: *count },
+                            PortOp::Read { count, .. } => PoolOp::read(fd, *count),
                             PortOp::ReadExact { count, .. } => PoolOp::ReadExact {
                                 fd,
                                 size: *count,
@@ -403,10 +403,9 @@ impl AsyncBackend {
                                     .map(|s| s.buffer.clone())
                                     .unwrap_or_default(),
                             },
-                            PortOp::Write { data } => PoolOp::Write {
-                                fd,
-                                data: Self::extract_write_bytes(data),
-                            },
+                            PortOp::Write { data } => {
+                                PoolOp::write(fd, Self::extract_write_bytes(data))
+                            }
                             PortOp::Flush => PoolOp::Flush { fd },
                             // The socket arm above claims these.
                             PortOp::Accept { .. }
@@ -420,16 +419,14 @@ impl AsyncBackend {
 
                 pending.insert(
                     id,
-                    PendingOp::Port {
-                        op: op.clone(),
+                    PendingOp::port(
+                        op.clone(),
                         port_key,
-                        port: request.port,
+                        request.port,
                         descriptor,
-                        buffer_handle: buf_handle,
-                        listener_kind: None,
-                        filled: 0,
-                        timeout: request.timeout,
-                    },
+                        buf_handle,
+                        request.timeout,
+                    ),
                     submitter,
                 );
                 Ok(id)

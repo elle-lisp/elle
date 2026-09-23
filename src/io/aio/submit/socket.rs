@@ -1,5 +1,8 @@
-//! Socket and datagram submission paths (Accept / SendTo / RecvFrom / Shutdown),
-//! split out of `AsyncBackend::submit`.
+//! audited: 2026-09-23
+//! The socket and datagram submissions: accept, send-to, receive-from and
+//! shutdown.
+//!
+//! src/io/AGENTS.md
 
 use super::*;
 use crate::io::pool::BufferHandle;
@@ -146,20 +149,19 @@ impl AsyncBackend {
         let submitter = inner.submitter;
         inner.pending.insert(
             id,
-            PendingOp::Port {
-                op: op.clone(),
+            PendingOp::port(
+                op.clone(),
                 port_key,
-                port: request.port,
+                request.port,
                 // Held until the entry is retired: the worker resolves `fd`
                 // again when it runs, so the number must stay this port's for
                 // as long as the operation names it (src/io/AGENTS.md
                 // § "Descriptor retirement").
-                descriptor: port.fd_share(),
-                buffer_handle: buf_handle,
-                listener_kind,
-                filled: 0,
-                timeout: request.timeout,
-            },
+                port.fd_share(),
+                buf_handle,
+                request.timeout,
+            )
+            .accepting(listener_kind),
             submitter,
         );
         Ok(id)

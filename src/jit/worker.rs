@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-23
 // docs/impl/jit.md
 //! The background JIT worker: the thread Cranelift runs on, and the task and
 //! result that cross to it.
@@ -6,8 +6,6 @@
 //! Compilation moves off the event loop so the interpreter keeps running a hot
 //! function while its native code is generated. When compilation finishes, the
 //! next call picks the code up from the cache.
-//!
-//! Modeled on `StdinThread` in `src/io/threadpool.rs`.
 
 use crate::jit::{JitCode, JitCompiler, JitError};
 use crate::lir::LirFunction;
@@ -136,6 +134,6 @@ pub(crate) fn prepare_task(
 
 // A string literal lowers to `MaterializeConst` in every position (value:
 // `HirKind::String`; pattern: the materialize-compare-free in
-// `lir/lower/pattern.rs`), which the JIT translates via
+// `lir/lower/pattern/ctor.rs`), which the JIT translates via
 // `elle_jit_materialize_const` — so no raw `LirConst::String` reaches the
 // translator.

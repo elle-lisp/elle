@@ -1,4 +1,4 @@
-//! audited: 2026-09-20
+//! audited: 2026-09-23
 //! `AsyncBackend`: the state an in-flight operation is tracked through, and the
 //! platform that runs it.
 //!
@@ -388,21 +388,19 @@ impl AsyncBackendInner {
         let buf_handle = self.buffer_pool.alloc(0);
         self.pending.insert(
             id,
-            PendingOp::Port {
-                op: op.clone(),
-                port_key: PortKey::Stdin,
-                port: Value::NIL,
+            PendingOp::port(
+                op.clone(),
+                PortKey::Stdin,
+                Value::NIL,
                 // Descriptor 0 is process-wide: it outlives every `Port` that
                 // names it, so there is no number here to keep out of the OS's
                 // hands.
-                descriptor: None,
-                buffer_handle: Some(buf_handle),
-                listener_kind: None,
-                filled: 0,
+                None,
+                Some(buf_handle),
                 // The stdin worker owns its own blocking read; nothing here
                 // resubmits through the ring, so there is no link to re-arm.
-                timeout: None,
-            },
+                None,
+            ),
             self.submitter,
         );
         Ok(id)

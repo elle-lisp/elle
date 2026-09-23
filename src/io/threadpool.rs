@@ -1,4 +1,9 @@
-//! Thread-pool backend and stdin thread for async I/O.
+//! audited: 2026-09-23
+//! The thread-pool backend: the operations a worker runs, and the one channel
+//! every worker reports through.
+//!
+//! src/io/AGENTS.md
+//! docs/impl/io-descriptor.md
 
 use crate::io::grapheme_count_in_valid_prefix;
 use crate::io::pending::OpKind;
@@ -8,7 +13,7 @@ use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::time::Duration;
 
-/// Typed thread-pool operation (replaces `op_kind: u8` + overloaded `data`/`size`/`fd`).
+/// One operation a pool worker runs, typed by what its syscall needs.
 ///
 /// A variant carries only what its syscall needs. How long the operation may
 /// wait, and how `io/cancel` ends it, are not a variant's business: they arrive
@@ -165,6 +170,17 @@ pub(super) enum PoolOp {
 }
 
 impl PoolOp {
+    /// Read up to `size` bytes from `fd`, into a buffer the worker owns and
+    /// hands back with the completion.
+    pub(super) fn read(fd: RawFd, size: usize) -> PoolOp {
+        PoolOp::Read { fd, size }
+    }
+
+    /// Write every byte of `data` to `fd`, from a buffer the worker owns.
+    pub(super) fn write(fd: RawFd, data: Vec<u8>) -> PoolOp {
+        PoolOp::Write { fd, data }
+    }
+
     /// What this operation is, in the terms a completion reports it in.
     ///
     /// The worker knows what it ran; the submission table claims what is in
@@ -196,7 +212,8 @@ impl PoolOp {
     }
 }
 
-/// Typed thread-pool completion (replaces `(u64, i32, Vec<u8>)` tuples).
+/// What a pool worker reports: the id it ran, the kind of operation, the
+/// result code, and the bytes it produced.
 pub(super) struct PoolCompletion {
     pub(super) id: u64,
     /// What the worker ran, checked against the entry the id resolves through.
@@ -242,10 +259,9 @@ mod stream;
 
 /// The single completion channel every background worker feeds.
 ///
-/// Collapsing the former platform-pool, network-pool, and stdin channels into
-/// one means the scheduler's blocking wait reads exactly one source: a crossbeam
-/// `recv()` registers-before-sleeps on the sole channel, so there is nothing to
-/// exclude and no wakeup to miss (the lost-wakeup fix by construction).
+/// The pool workers and the stdin worker all send here, so the scheduler's
+/// blocking wait reads exactly one source: a crossbeam `recv()` registers
+/// before it sleeps on the sole channel, so there is no wakeup to miss.
 pub(super) struct CompletionHub {
     sender: crossbeam_channel::Sender<RawCompletion>,
     receiver: crossbeam_channel::Receiver<RawCompletion>,
@@ -443,7 +459,7 @@ impl CompletionHub {
 }
 
 /// Publish a worker completion: send it on the hub channel, then — on the
-/// Linux/uring bridge only — raise the eventfd edge. The order is load-bearing:
+/// Linux/uring bridge only — raise the eventfd edge. The order matters:
 /// publish the item *before* raising the edge, or a wake could drain-empty,
 /// re-arm, re-block, and miss the just-sent item.
 pub(super) fn publish_completion(
@@ -464,157 +480,8 @@ pub(super) fn publish_completion(
     let _ = eventfd;
 }
 
-// --- StdinThread ---
-
-/// Dedicated thread for blocking stdin reads.
-///
-/// stdin is blocking and cannot go through io_uring without blocking
-/// a kernel worker thread. This thread serializes stdin reads, reporting
-/// each result to the shared `CompletionHub` as a `RawCompletion::Stdin`
-/// (so the scheduler waits on one channel, not a per-source one).
-pub(super) struct StdinThread {
-    request_tx: crossbeam_channel::Sender<StdinRequest>,
-    /// Write end of the cancellation self-pipe. Writing any byte here
-    /// wakes the stdin thread out of `libc::poll` so it can either
-    /// (a) acknowledge a shutdown and exit, or (b) treat an in-flight
-    /// read as cancelled. Owned by us; closed in `Drop`.
-    shutdown_write_fd: RawFd,
-    /// Thread handle kept for join in tests and for `is_finished`
-    /// observation. In production, the runtime calls `shutdown()` and
-    /// then drops the thread; the thread exits within a few syscall
-    /// hops of the shutdown write.
-    handle: Option<std::thread::JoinHandle<()>>,
-}
-
-pub(super) struct StdinRequest {
-    id: u64,
-    op_kind: StdinOpKind,
-}
-
-pub(super) enum StdinOpKind {
-    ReadLine,
-    Read { count: usize },
-    ReadAll,
-}
-
-pub(super) struct StdinCompletion {
-    pub(super) id: u64,
-    pub(super) result: Result<Vec<u8>, String>,
-}
-
-/// Sentinel string used in the cancelled completion's error message.
-/// `(port/close *stdin*)` translates this into an `:io-error` whose
-/// `:message` field is exactly `"stdin closed"`, matching the contract
-/// documented in `docs/io.md`. Searched for by the threadpool tests.
-const STDIN_CLOSED_MSG: &str = "stdin closed";
-
-impl StdinThread {
-    /// Spawn the stdin worker. `sender` is a clone of the shared hub channel and
-    /// `eventfd` its Linux/uring bridge fd (`None` off uring); the worker reports
-    /// each completion via `publish_completion` so it lands on the one channel
-    /// the scheduler waits on.
-    pub(super) fn new(
-        sender: crossbeam_channel::Sender<RawCompletion>,
-        eventfd: Option<RawFd>,
-    ) -> Self {
-        let (request_tx, request_rx) = crossbeam_channel::unbounded::<StdinRequest>();
-
-        // Self-pipe for cancellation. The thread polls the read end
-        // alongside fd 0; writing any byte here wakes the poll(2).
-        // We set the read end to O_NONBLOCK so the thread's drain
-        // (after a shutdown wakeup) never blocks.
-        let mut pipe_fds: [libc::c_int; 2] = [0; 2];
-        let pipe_ret = unsafe { libc::pipe(pipe_fds.as_mut_ptr()) };
-        if pipe_ret != 0 {
-            panic!(
-                "StdinThread: pipe(2) failed: {}",
-                std::io::Error::last_os_error()
-            );
-        }
-        let shutdown_read_fd = pipe_fds[0];
-        let shutdown_write_fd = pipe_fds[1];
-        unsafe {
-            libc::fcntl(shutdown_read_fd, libc::F_SETFL, libc::O_NONBLOCK);
-            libc::fcntl(shutdown_read_fd, libc::F_SETFD, libc::FD_CLOEXEC);
-            libc::fcntl(shutdown_write_fd, libc::F_SETFD, libc::FD_CLOEXEC);
-        }
-
-        let handle = std::thread::Builder::new()
-            .name("elle-stdin".into())
-            .spawn(move || {
-                crate::io::sigfd::mask_all_signals_on_this_thread();
-                stdin_thread_loop(request_rx, sender, eventfd, shutdown_read_fd);
-                unsafe { libc::close(shutdown_read_fd) };
-            })
-            .expect("failed to spawn stdin thread");
-
-        StdinThread {
-            request_tx,
-            shutdown_write_fd,
-            handle: Some(handle),
-        }
-    }
-
-    pub(super) fn submit(&self, id: SubmissionId, op_kind: StdinOpKind) -> Result<(), String> {
-        let id = id.as_u64();
-        self.request_tx
-            .send(StdinRequest { id, op_kind })
-            .map_err(|_| "stdin thread channel disconnected".to_string())
-    }
-
-    /// Signal the stdin thread to shut down. The thread either:
-    ///   - if currently inside `poll(2)` waiting for input on fd 0,
-    ///     observes the shutdown pipe revents and sends a `stdin
-    ///     closed` error completion for the in-flight request before
-    ///     exiting;
-    ///   - if currently waiting in `request_rx.recv_timeout`, picks
-    ///     the shutdown up on its next 100 ms tick and exits.
-    ///
-    /// Idempotent: subsequent calls write extra bytes into the pipe
-    /// which the thread either drains on exit or never reads (already
-    /// gone). The write is bounded to 1 byte so it cannot ever
-    /// block on a full kernel pipe buffer.
-    pub(super) fn shutdown(&self) {
-        let byte: u8 = 1;
-        unsafe {
-            libc::write(
-                self.shutdown_write_fd,
-                &byte as *const u8 as *const libc::c_void,
-                1,
-            );
-        }
-    }
-
-    /// True once the worker thread has exited. Used by tests to assert
-    /// `shutdown()` actually wound the thread down; callers in the
-    /// runtime don't need this (the drop path waits for them).
-    #[allow(dead_code)]
-    pub(super) fn is_finished(&self) -> bool {
-        self.handle.as_ref().is_none_or(|h| h.is_finished())
-    }
-}
-
-impl Drop for StdinThread {
-    fn drop(&mut self) {
-        // Signal shutdown so the worker exits promptly. Closing the
-        // write end signals EOF on the pipe — the thread's poll picks
-        // it up too — but `shutdown()` writes a byte first to wake
-        // any current poll. Either is sufficient; both is robust.
-        self.shutdown();
-        unsafe { libc::close(self.shutdown_write_fd) };
-        if let Some(h) = self.handle.take() {
-            // Best-effort join. The thread is bounded by the next poll
-            // tick (~100 ms) plus the time to send any pending
-            // cancellation completion. In practice this returns
-            // quickly; we tolerate a brief blip on Drop rather than
-            // detaching and leaking a thread.
-            let _ = h.join();
-        }
-    }
-}
-
 mod stdin;
-use stdin::*;
+pub(super) use stdin::{StdinCompletion, StdinOpKind, StdinThread};
 
 #[cfg(test)]
 mod tests;

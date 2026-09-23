@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-23
 //! One in-flight operation: the shapes it can take, the heap values it holds,
 //! and what it gives back when nobody will read its result.
 //!
@@ -144,6 +144,44 @@ pub(crate) enum PendingOp {
 }
 
 impl PendingOp {
+    /// An operation on an existing port, filed with nothing transferred yet.
+    ///
+    /// `timeout` is the request's own, carried so a resubmission re-arms the
+    /// bound the first submission had.
+    pub(crate) fn port(
+        op: PortOp,
+        port_key: PortKey,
+        port: Value,
+        descriptor: Option<Rc<OwnedFd>>,
+        buffer_handle: Option<BufferHandle>,
+        timeout: Option<Duration>,
+    ) -> PendingOp {
+        PendingOp::Port {
+            op,
+            port_key,
+            port,
+            descriptor,
+            buffer_handle,
+            listener_kind: None,
+            filled: 0,
+            timeout,
+        }
+    }
+
+    /// The same entry, for an accept on a listener of `kind`. The completion
+    /// reads the kind to decide the socket options the connection takes, and
+    /// `retire` reads it to know that the entry owns a descriptor.
+    pub(crate) fn accepting(mut self, kind: Option<PortKind>) -> PendingOp {
+        if let PendingOp::Port {
+            ref mut listener_kind,
+            ..
+        } = self
+        {
+            *listener_kind = kind;
+        }
+        self
+    }
+
     /// Get the BufferHandle, if any. Returns `None` for read operations
     /// (which use pre-allocated fiber-heap buffers) and `Some(handle)` for
     /// all other operations.
