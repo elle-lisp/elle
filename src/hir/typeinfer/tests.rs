@@ -1,14 +1,15 @@
-// audited: 2026-09-09
+// audited: 2026-09-23
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
-//! The inference pass's unit tests, and the four helpers every one of them
-//! compiles through.
+//! The inference pass's unit tests, and the helpers they compile through and
+//! read the result with.
 //!
 //! One module per subject: `narrow` for what a guard or a dispatch arm proves,
 //! `rettype` for what an op's result proves, `recursion` for what a recursive
 //! call's result proves, `mutation` for what a written binding proves,
 //! `bottom` for what the lattice's start proves, `prune` for dead-arm removal,
-//! `contract` for prove-or-reject, `monomorphize` for wrapper collapse.
+//! `contract` for prove-or-reject, `monomorphize` for container wrapper
+//! collapse, `wrapper` for arithmetic wrapper lowering.
 
 use super::infer_and_rewrite;
 use crate::hir::types::TyId;
@@ -23,6 +24,7 @@ mod narrow;
 mod prune;
 mod recursion;
 mod rettype;
+mod wrapper;
 
 /// Compile a source file to canonical (functionalized) HIR, mirroring the
 /// escape-test harness. `infer_and_rewrite` runs unconditionally on every
@@ -79,6 +81,20 @@ fn intrinsic_result_type(src: &str, op: &str) -> TyId {
     let found = intrinsic_result_types(src, op);
     assert_eq!(found.len(), 1, "{src} holds more than one {op} node");
     found[0]
+}
+
+/// Count Call nodes whose callee resolves to a binding named `name`.
+fn count_calls_to(hir: &Hir, arena: &BindingArena, name: &str) -> usize {
+    let mut n = 0;
+    if let HirKind::Call { func, .. } = &hir.kind {
+        if let Some(b) = super::unwrap_callee_binding(func) {
+            if arena.get(b).name == crate::value::SymbolId::of(name) {
+                n += 1;
+            }
+        }
+    }
+    hir.for_each_child(|c| n += count_calls_to(c, arena, name));
+    n
 }
 
 /// Compile `src` through the file front end (which runs `infer_and_rewrite`),

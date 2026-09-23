@@ -1,34 +1,15 @@
-// audited: 2026-09-07
+// audited: 2026-09-23
 // src/hir/AGENTS.md
 // docs/impl/hir.md
-//! Container-dispatch wrapper monomorphization (F1b).
+//! Container-dispatch wrapper monomorphization.
 //!
 //! A `(match (type-of coll) …arms…)` wrapper (`push`/`put`/`del`/`add`/…) whose
-//! container argument has a statically-proven concrete container type collapses,
-//! at the call site, to the arm that type selects — a direct call to that arm's
-//! monomorphic `%`-op. This removes the multi-arm dispatch and, with it, the
-//! container-scrutinee over-keep the dispatch strands in the textually-last arm
-//! (the F1b leak: the owned container arg's release lands in an arm the executed
-//! path never reaches). An UNPROVEN container leaves the dispatch intact.
+//! container argument has a statically proven concrete container type collapses,
+//! at the call site, to the arm that type selects: a direct call to that arm's
+//! monomorphic `%`-op. An unproven container leaves the dispatch intact.
 
-use super::super::unwrap_callee_binding;
-use super::{compile_fhir, infer_and_rewrite};
-use crate::hir::{BindingArena, Hir, HirKind};
+use super::{compile_fhir, count_calls_to, infer_and_rewrite};
 use crate::symbol::SymbolTable;
-
-/// Count Call nodes whose callee resolves to a binding named `name`.
-fn count_calls_to(hir: &Hir, arena: &BindingArena, name: &str) -> usize {
-    let mut n = 0;
-    if let HirKind::Call { func, .. } = &hir.kind {
-        if let Some(b) = unwrap_callee_binding(func) {
-            if arena.get(b).name == crate::value::SymbolId::of(name) {
-                n += 1;
-            }
-        }
-    }
-    hir.for_each_child(|c| n += count_calls_to(c, arena, name));
-    n
-}
 
 /// Proven concrete container ⇒ the wrapper call is rewritten to the arm's
 /// monomorphic op; the multi-arm dispatch call ceases to exist.
