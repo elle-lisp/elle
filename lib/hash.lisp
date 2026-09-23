@@ -32,14 +32,19 @@
      A read error raises here. Open the port with port/open-bytes: a text
      port decodes each read as UTF-8, and raises on any other bytes."
     (default chunk-size 8192)
-    (hash/stream algorithm (port/chunks port chunk-size)))
+    (def @ctx (plugin:new algorithm))
+    (def @chunk (port/read port chunk-size))
+    (while (not (nil? chunk))
+      (assign ctx (plugin:update ctx chunk))
+      (assign chunk (port/read port chunk-size)))
+    (plugin:finalize ctx))
 
   (defn hash/file [algorithm path &named @chunk-size]
     "Hash the bytes of the file at path, whatever they hold.
      Opens the file as a binary port, hashes it, and closes it.
      Returns the digest bytes (or integer for crc32/xxh32/xxh64)."
     (default chunk-size 8192)
-    (let [p (port/open path :read)]
+    (let [p (port/open-bytes path :read)]
       (defer
         (port/close p)
         (hash/digest algorithm p :chunk-size chunk-size))))
