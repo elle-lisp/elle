@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-23
 //! The special-form registry: the single source of truth for the names the
 //! analyzer treats as special forms.
 //!
@@ -10,10 +10,6 @@
 //!   every name-based consumer sees them;
 //! - `primitives::docs` derives the `(doc "if")` entries from the metadata;
 //! - `lsp::rename` derives its reserved-word set from [`all_names`].
-//!
-//! Before this registry, those consumers each kept their own hand-written
-//! name list; the LSP's had rotted into Scheme-isms (`call/cc`, `delay`)
-//! while missing real forms (`match`, `while`, `emit`).
 
 use super::super::Analyzer;
 use crate::hir::expr::Hir;
@@ -231,7 +227,7 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
         handler: Some(sf_block),
         doc: "Sequence expressions in a new lexical scope. Supports optional keyword name for break targeting.",
         params: &[":name?", "body..."],
-        example: "(block :outer (if done (break :outer result)) (continue))",
+        example: "(block :outer (each x in [1 2 3] (when (= x 2) (break :outer x))) nil)  # => 2",
         ..SpecialForm::DEFAULT
     },
     SpecialForm {
@@ -264,7 +260,7 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
     SpecialForm {
         name: "assign",
         handler: Some(sf_assign),
-        doc: "Mutate a var binding. Only works on names defined with var.",
+        doc: "Mutate a mutable binding: one defined with var, or bound with an @ name.",
         params: &["name", "value"],
         arity: Arity::Exact(2),
         example: "(var x 0) (assign x 42)",
@@ -273,7 +269,7 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
     SpecialForm {
         name: "while",
         handler: Some(sf_while),
-        doc: "Loop while condition is true. Returns nil.",
+        doc: "Loop while condition is true. Returns nil, or the value a (break :while value) gives.",
         params: &["condition", "body..."],
         arity: Arity::AtLeast(1),
         example: "(var i 0) (while (< i 10) (assign i (+ i 1)))",
@@ -308,7 +304,7 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
         name: "match",
         handler: Some(sf_match),
         doc: "Pattern matching. Tests value against patterns in order, executing the first matching arm.",
-        params: &["value", "(pattern body)..."],
+        params: &["value", "pattern body..."],
         arity: Arity::AtLeast(2),
         example: "(match x 0 \"zero\" (a . b) (+ a b) _ \"other\")",
         ..SpecialForm::DEFAULT
@@ -317,7 +313,7 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
         name: "cond",
         handler: Some(sf_cond),
         doc: "Multi-branch conditional. Tests clauses in order, evaluating the body of the first true test.",
-        params: &["(test body)..."],
+        params: &["test body..."],
         arity: Arity::AtLeast(1),
         example: "(cond (< x 0) \"negative\" (= x 0) \"zero\" \"positive\")",
         ..SpecialForm::DEFAULT
@@ -345,63 +341,63 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
         name: "parameterize",
         handler: Some(sf_parameterize),
         doc: "Dynamically bind parameters for the extent of the body. Each parameter is restored to its previous value on exit.",
-        params: &["[param value ...]", "body..."],
+        params: &["((param value) ...)", "body..."],
         arity: Arity::AtLeast(1),
-        example: "(parameterize [*out* port] (println \"redirected\"))",
+        example: "(def depth (make-parameter 0))\n(parameterize ((depth 1)) (depth))  # => 1",
         ..SpecialForm::DEFAULT
     },
     SpecialForm {
         name: "silence",
         handler: Some(sf_silence),
-        doc: "Assert the body emits NO signals — not even errors. A signal at runtime is a programmer bug and aborts. Enables signal-free compilation of the body.",
-        params: &["body..."],
-        arity: Arity::AtLeast(1),
-        example: "(silence (+ 1 2))",
+        doc: "Declare, inside a function body, that the function emits no signal at all, :error included; a body that may signal is a compile error. With a parameter name, bound that parameter instead: a closure passed for it must be silent, checked at function entry.",
+        params: &["param?"],
+        arity: Arity::Range(0, 1),
+        example: "(defn pick [b x y] (silence) (if b x y))\n(defn apply-silent [f x] (silence f) (f x))",
         ..SpecialForm::DEFAULT
     },
     SpecialForm {
         name: "muffle",
         handler: Some(sf_muffle),
-        doc: "Suppress the given signals from the body at the boundary: a muffled signal becomes a :signal-violation error instead of propagating.",
-        params: &["|signals|", "body..."],
-        arity: Arity::AtLeast(1),
-        example: "(muffle |:yield| (f))",
+        doc: "Declare, inside a function body, signals to remove from the function's inferred signal; beside a (silence) or attune! ceiling, widen the ceiling by them instead. Compile-time only: nothing stops a muffled signal at run time.",
+        params: &[":signal or |signals|"],
+        arity: Arity::Exact(1),
+        example: "(defn f [x] (silence) (muffle :error) (+ x 1))",
         ..SpecialForm::DEFAULT
     },
     SpecialForm {
         name: "attune!",
         handler: Some(sf_attune_assert),
-        doc: "Assert the body's inferred signals are within the given signal set; a wider inference is a compile-time error.",
-        params: &["|signals|", "body..."],
-        arity: Arity::AtLeast(1),
-        example: "(attune! |:error| (parse s))",
+        doc: "Declare, inside a function body, the most the function may emit: a body whose inferred signal exceeds the given signals is a compile error.",
+        params: &[":signal or |signals|"],
+        arity: Arity::Exact(1),
+        example: "(defn add [x y] (attune! :error) (+ x y))",
         ..SpecialForm::DEFAULT
     },
     SpecialForm {
         name: "silent!",
         handler: Some(sf_silence_assert),
-        doc: "Assert the body is inferred signal-free; any inferred signal is a compile-time error.",
-        params: &["body..."],
-        arity: Arity::AtLeast(1),
-        example: "(silent! (+ a b))",
+        doc: "Assert, inside a function body, that the function's inferred signal is empty, before any ceiling or muffle applies; otherwise a compile error.",
+        params: &[],
+        arity: Arity::Exact(0),
+        example: "(defn pick [b x y] (silent!) (if b x y))",
         ..SpecialForm::DEFAULT
     },
     SpecialForm {
         name: "numeric!",
         handler: Some(sf_numeric_assert),
-        doc: "Assert the body's inferred type is numeric; anything else is a compile-time error.",
-        params: &["body..."],
-        arity: Arity::AtLeast(1),
-        example: "(numeric! (* x x))",
+        doc: "Declare, inside a function body, that every parameter is a number, which proves the operands of % intrinsics, and assert that the function is GPU-eligible: no call, no closure, no heap value, no emit. A non-eligible body is a compile error.",
+        params: &[],
+        arity: Arity::Exact(0),
+        example: "(defn square [x] (numeric!) (%mul x x))",
         ..SpecialForm::DEFAULT
     },
     SpecialForm {
         name: "immutable!",
         handler: Some(sf_immutable_assert),
-        doc: "Assert the body's inferred type is immutable; a mutable inference is a compile-time error.",
-        params: &["body..."],
-        arity: Arity::AtLeast(1),
-        example: "(immutable! [1 2 3])",
+        doc: "Assert, inside a function body, that the named binding is never assigned there; an assignment is a compile error.",
+        params: &["name"],
+        arity: Arity::Exact(1),
+        example: "(defn f [] (immutable! x) x)",
         ..SpecialForm::DEFAULT
     },
     SpecialForm {
@@ -425,7 +421,7 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
     SpecialForm {
         name: "splice",
         handler: Some(sf_splice),
-        doc: "Mark a value for spreading into a function call or data constructor. The short form is `;expr`. Only works on arrays and tuples. Inside quasiquote, `,;expr` is unquote-splicing.",
+        doc: "Mark a value for spreading into a function call or data constructor. The short form is `;expr`. Works on lists and arrays. Inside quasiquote, `,;expr` is unquote-splicing.",
         params: &["expr"],
         arity: Arity::Exact(1),
         example: "(defn f [a b c] (+ a b c))\n(def args @[1 2 3])\n(f ;args)  # => 6",
@@ -445,7 +441,7 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
     SpecialForm {
         name: "doc",
         handler: None,
-        doc: "Display documentation for a named function or special form. Accepts a symbol or string — bare symbols are rewritten to strings by the analyzer.",
+        doc: "Display documentation for a named function or special form. Accepts a symbol or string. A symbol that names a closure passes the closure through; the analyzer rewrites any other symbol to its name.",
         params: &["name"],
         arity: Arity::Exact(1),
         signal: Signal::yields(),
