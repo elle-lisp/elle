@@ -1,17 +1,13 @@
 # The ANF lift
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-23 -->
 
 Which values the ANF lift names with a synthetic binding, and why each name lands on the node it does.
 
 The pass is `anf_lift` in [src/hir/anf.rs](../../src/hir/anf.rs). It runs
 immediately after `functionalize`, before `typeinfer` and region analysis. It
 names every allocating expression by wrapping it in a synthetic `let` whose body
-is the bound variable:
-
-```text
-(g (f x))    =>    (g (let [t0 (f x)] t0))
-```
+is the bound variable: `(g (f x))` becomes `(g (let [t0 (f x)] t0))`.
 
 `t0` is a synthetic immutable binding. Region inference runs after ANF and sees
 `f`'s call result as bound to `t0`, so escape analysis owns its lifetime through
@@ -81,7 +77,7 @@ per-element array the same way ([dissolution](dissolution.md)).
 ## A returning position names only what it must release
 
 A lambda body and the root of a compilation unit are returning positions. Their
-value leaves through the `Return` mint (`hir/return_incref.rs`), which hands the
+value leaves through the `Return` mint ([return_incref.rs](../../src/hir/return_incref.rs)), which hands the
 caller one owning reference. Most values there need no name. A tail call hands
 its callee's reference straight through, and a fresh allocation's region has a
 release of its own.
@@ -91,8 +87,8 @@ an `Eval`, which is never a tail call, and a `Call` that is not a tail call. The
 root makes the second kind, because `mark_tail_calls` marks no call at the top
 level. A `parameterize` body makes it too, because that body is never a tail
 position. Left unnamed, the frame's reference is never released, and the
-`Return` mint adds the caller's on top of it. Every `(eval '(f …))` then held
-one region, and so did every function that returned an eval's result.
+`Return` mint adds the caller's on top of it. Every `(eval '(f …))` would then
+hold one region, and so would every function that returned an eval's result.
 
 So a returning position descends its propagating tails, as a consumer does, and
 names an `Eval` or a non-tail `Call` it finds there. It names nothing else, so a
