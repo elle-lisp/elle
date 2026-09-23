@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-09-23
 // The VM's execution entries: a blueprint, a code object at the root, and a
 // program under the async scheduler. The module list sits above them.
 // docs/impl/vm.md
@@ -207,7 +207,7 @@ impl VM {
         let mut bits;
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
         loop {
-            let (b, _ip) = self.execute_bytecode_inner_impl(&current_code, &current_env, 0);
+            let (b, _ip) = self.run_dispatch(&current_code, &current_env, 0);
             bits = b;
             if let Some(tail) = self.pending_tail_call.take() {
                 accumulated_squelch_mask |= tail.squelch_mask;

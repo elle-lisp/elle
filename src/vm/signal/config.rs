@@ -1,3 +1,9 @@
+// audited: 2026-09-23
+//! `vm/config` and `vm/config-set` over the VM's runtime configuration, and
+//! the `arena/allocs` measurement.
+//!
+//! docs/config.md
+
 use super::*;
 
 impl VM {
@@ -68,6 +74,10 @@ impl VM {
                 TableKey::from_value(&Value::keyword("unicode")).unwrap(),
                 self.unicode_version_value(ctx),
             );
+            map.insert(
+                TableKey::from_value(&Value::keyword("max-depth")).unwrap(),
+                Self::max_depth_value(rc.max_depth),
+            );
             (SIG_OK, ctx.struct_from(map))
         } else if let Some(kw) = self.keyword_spelling(arg) {
             match kw.as_str() {
@@ -78,6 +88,7 @@ impl VM {
                 "stats" => (SIG_OK, Value::bool(rc.stats)),
                 "flip" => (SIG_OK, Value::bool(crate::config::flip_enabled())),
                 "unicode" => (SIG_OK, self.unicode_version_value(ctx)),
+                "max-depth" => (SIG_OK, Self::max_depth_value(rc.max_depth)),
                 _ => (
                     SIG_ERROR,
                     ctx.error(
@@ -90,6 +101,13 @@ impl VM {
             type_error!(ctx, arg, "vm/config", "keyword or nil")
         }
     }
+
+    /// The depth cap as an Elle integer. The setter admits only positive
+    /// integers, so the cap always fits.
+    fn max_depth_value(max_depth: usize) -> Value {
+        Value::int(i64::try_from(max_depth).unwrap_or(i64::MAX))
+    }
+
     /// The VM's Unicode generation as a `[major minor patch]` array.
     fn unicode_version_value(&self, ctx: &mut crate::primitives::ctx::Alloc) -> Value {
         let (major, minor, patch) = self.unicode_generation.version();
@@ -231,6 +249,23 @@ impl VM {
                 self.runtime_config.stats = val.is_truthy();
                 Value::NIL
             }
+            "max-depth" => match val.as_int() {
+                Some(n) if n > 0 => {
+                    self.runtime_config.max_depth = usize::try_from(n).unwrap_or(usize::MAX);
+                    Value::NIL
+                }
+                Some(n) => ctx.error(
+                    "argument-error",
+                    format!("vm/config-set :max-depth: expected a positive integer, got {n}"),
+                ),
+                None => ctx.error(
+                    "type-error",
+                    format!(
+                        "vm/config-set :max-depth: expected integer, got {}",
+                        val.type_name()
+                    ),
+                ),
+            },
             // Legacy: flip is always off (no-op). Accept for compat.
             "flip" => Value::NIL,
             "unicode" => ctx.error(

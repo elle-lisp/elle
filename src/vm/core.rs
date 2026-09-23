@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-23
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
 //!
@@ -52,13 +52,27 @@ pub(crate) struct TailCallInfo {
     /// The callee CLOSURE this tail call re-enters the activation as. A
     /// frame-replacing tail call keeps the same Rust/activation frame but swaps
     /// which closure is executing (a self-recursive `loop` re-enters as itself; a
-    /// tail call to a sibling re-enters as the sibling). `trampoline_loop` installs
+    /// tail call to a sibling re-enters as the sibling). `replace_by_tail_call` installs
     /// it as `fiber.current_closure` on the replacement so the executing-closure
     /// register tracks the frame across TCO. `NIL` for a callee with no closure
     /// value (a native/parameter tail target sets no pending tail call, so this is
     /// always a real closure in practice).
     pub closure: Value,
     pub squelch_mask: SignalBits,
+}
+
+/// A non-tail call to an interpreted closure, handed from `call_inner` to
+/// `run_dispatch`, which pauses the caller in the fiber and runs the callee on
+/// the same dispatch loop (docs/impl/vm.md § "Non-tail calls").
+pub(crate) struct PendingCall {
+    pub code: crate::value::Code,
+    pub env: Rc<Vec<Value>>,
+    /// The callee closure value, which becomes the body's executing-closure
+    /// register.
+    pub closure: Value,
+    /// The offset of the call instruction in the caller.
+    pub call_ip: usize,
+    pub site: crate::value::fiber::CallSite,
 }
 
 /// Pending fiber resume for the trampoline.
@@ -141,12 +155,15 @@ pub struct VM {
     pub tail_call_env_cache: Vec<Value>,
     pub env_cache: Vec<Value>,
     pub(crate) pending_tail_call: Option<TailCallInfo>,
+    /// The non-tail call `call_inner` just made, set with the dispatch loop's
+    /// exit and taken by `run_dispatch` at once. `None` between calls.
+    pub(crate) pending_call: Option<PendingCall>,
     pub(crate) pending_fiber_resume: Option<PendingFiberResume>,
     /// One-shot "the closure whose body is about to run", set immediately before
     /// entering a body via `execute_bytecode_saving_stack` or the raw
     /// `execute_proto`, which take it (resetting to `NIL`) and install it as
     /// `fiber.current_closure` for that activation. **Every entrant that runs a
-    /// closure body must set it** — the interpreter call path, the JIT helpers'
+    /// closure body through a re-entry must set it** — the JIT helpers'
     /// interpreter fallback and tail-call resolution, the forced-tier entries,
     /// the fiber's first resume, the measured-thunk entry, the macro-transformer
     /// call, the FFI callback trampoline, the WASM host's bytecode fallback, and
@@ -154,7 +171,8 @@ pub struct VM {
     /// self-reference to `NIL` (docs/impl/vm.md § The executing-closure
     /// register; `handle_load_self` debug-asserts the register is populated). A
     /// `NIL` (untracked) entry is legal only for a body that is not a closure
-    /// instance — a top-level program, module body, or eval'd form. `NIL`
+    /// instance — a top-level program, module body, or eval'd form. An
+    /// interpreted non-tail call names its callee in `PendingCall` instead. `NIL`
     /// between calls; never read except by the immediately following entry.
     pub(crate) pending_entry_closure: Value,
     /// One-shot "the activation about to start takes these releases over", set by

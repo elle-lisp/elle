@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-23
 //! Host function registration for the Wasmtime linker, and the two call
 //! fallbacks both dispatch sites share.
 //!
@@ -53,7 +53,7 @@ pub(in crate::wasm) fn run_bytecode_closure(
     };
     // Hand the callee its executing-closure register via the one-shot (the
     // WASM→interp entry boundary), so a self-reference in the body resolves to
-    // the callee, not NIL — the same handoff the interpreter's `call_inner` and
+    // the callee, not NIL — the same handoff the JIT's interpreter fallback and
     // the tiered fallback perform.
     vm_ref.pending_entry_closure = func_val;
     let bits = vm_ref

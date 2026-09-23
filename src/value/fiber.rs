@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-23
 //! Fiber types for the Elle runtime.
 //!
 //! A fiber is an independent execution context: it owns its operand stack,
@@ -12,9 +12,11 @@ use std::rc::Rc;
 
 // The fiber's cohesive item groups live in submodules; re-exported here so
 // every `crate::value::fiber::<Item>` path resolves unchanged.
+mod caller;
 mod frame;
 mod handle;
 mod status;
+pub use caller::{Activation, CallSite, PausedCaller};
 pub use frame::*;
 pub use handle::*;
 pub use status::*;
@@ -39,25 +41,6 @@ pub use crate::signals::{
     SIG_PROPAGATE, SIG_QUERY, SIG_RESUME, SIG_SWITCH, SIG_TERMINAL, SIG_WAIT, SIG_YIELD,
 };
 
-/// Maximum non-tail call depth before emitting a stack-overflow halt
-/// (`SIG_HALT`).
-///
-/// Every non-tail Elle→Elle closure call recurses on the Rust stack
-/// (`call_inner` → `execute_bytecode_saving_stack`), costing ~25–30 KB per
-/// level (dominated by the `SmallVec<[Value; 256]>` stack-save buffer). With
-/// the default 8 MB thread stack the hard crash (SIGABRT) limit is ~280–310
-/// levels, so the guard sits well below that — leaving headroom for the call
-/// chain above user code (compilation, dispatch loop, primitives) and for
-/// platforms with smaller default stacks. A larger constant here is a lie:
-/// the process aborts on Rust stack exhaustion long before the counter trips
-/// (integration::repl_exit_codes::test_stack_overflow_exits_with_error).
-///
-/// Tail calls bypass this check entirely — they are trampolined in
-/// `execute_bytecode_saving_stack`'s loop and never grow the Rust stack.
-///
-/// Shared by the interpreter (`vm::call`) and JIT (`jit::calls`) paths.
-pub const MAX_CALL_DEPTH: usize = 200;
-
 /// The fiber: an independent execution context.
 ///
 /// Holds all per-execution state:
@@ -70,8 +53,12 @@ pub struct Fiber {
     /// Operand stack (temporaries). SmallVec avoids heap allocation for
     /// fibers with fewer than 256 stack entries.
     pub stack: SmallVec<[Value; 256]>,
-    /// Call frame stack (for fiber execution — closure + ip + base)
-    pub frames: Vec<Frame>,
+    /// The caller activations waiting for an interpreted callee, innermost
+    /// last. A non-tail call pauses its caller here and runs the callee on the
+    /// same dispatch loop, so call depth costs memory rather than native stack
+    /// (docs/impl/vm.md § "Non-tail calls"). Empty whenever the fiber is
+    /// parked: a suspend moves every paused caller into `suspended`.
+    pub callers: Vec<PausedCaller>,
     /// Current status
     pub status: FiberStatus,
     /// Signal mask: which of this fiber's signals are caught by its parent.
@@ -213,8 +200,8 @@ pub struct Fiber {
     /// value for a body that never reads it; it is live exactly where it is read
     /// (`LoadSelf` — a self-recursive body's closure region outlives the
     /// recursion, docs/impl/selfrec.md), and no other site dereferences it.
-    /// Snapshotted/restored like `activation_region_maps`: a nested call saves
-    /// and restores it around the callee (`execute_bytecode_saving_stack`), a
+    /// Snapshotted/restored like `activation_region_maps`: a nested call parks
+    /// the caller's in its `PausedCaller` or saves it around a re-entry, a
     /// tail call re-installs it on the frame replacement (`trampoline_loop`), and
     /// a yield parks it in the `BytecodeFrame` and restores it on resume — so it
     /// is per-activation and rides fiber swaps with the fiber, never a VM-global
@@ -223,7 +210,8 @@ pub struct Fiber {
     pub current_closure: Value,
 
     // --- Execution state migrated from VM ---
-    /// Call depth counter (for stack overflow detection)
+    /// The non-tail closure calls in progress, on every tier. A call past
+    /// `RuntimeConfig::max_depth` halts with `:stack-overflow`.
     pub call_depth: usize,
     /// Call stack for stack traces (name + ip + frame_base)
     pub call_stack: Vec<CallFrame>,
@@ -270,7 +258,7 @@ impl Fiber {
     pub fn new(closure: Rc<Closure>, mask: SignalBits) -> Self {
         Fiber {
             stack: SmallVec::new(),
-            frames: Vec::new(),
+            callers: Vec::new(),
             status: FiberStatus::New,
             mask,
             parent: None,
@@ -310,7 +298,7 @@ impl Fiber {
         let closure = noop_closure(heap);
         Fiber {
             stack: SmallVec::new(),
-            frames: Vec::new(),
+            callers: Vec::new(),
             status: FiberStatus::Paused,
             mask,
             parent: None,
@@ -370,7 +358,7 @@ impl std::fmt::Debug for Fiber {
             f,
             "<fiber:{} frames={} stack={}>",
             self.status.as_str(),
-            self.frames.len(),
+            self.callers.len(),
             self.stack.len()
         )
     }

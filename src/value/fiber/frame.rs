@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-23
 //! Suspension and call-frame types: a parked bytecode execution point, a step in
 //! a fiber's replay chain, and the frames a stack trace uses.
 //!
@@ -6,7 +6,6 @@
 //! docs/impl/region/owner.md
 
 use super::FiberHandle;
-use crate::value::closure::Closure;
 use crate::value::Value;
 use std::rc::Rc;
 
@@ -45,7 +44,7 @@ pub struct BytecodeFrame {
     pub push_resume_value: bool,
     /// This activation's static→physical region remap at the moment of
     /// suspension (docs/regions/semantics.md — every value its own region). A yield
-    /// unwinds the Rust call stack and pops each activation's region frame;
+    /// leaves every activation it passes and pops each one's region frame;
     /// without carrying it here, a region allocated before the yield and
     /// `DecrefRegion`'d after resume would resolve in the wrong frame (a leak,
     /// or — on a static-slot collision — a use-after-free). `resume_suspended`
@@ -65,7 +64,7 @@ pub struct BytecodeFrame {
     /// activation that neither adopted nor tail-called.
     pub activation_dues: crate::value::fiber::ActivationDues,
     /// The executing-closure register (`Fiber::current_closure`) at the moment this
-    /// activation suspended. A yield unwinds the Rust call stack and restores the
+    /// activation suspended. A yield leaves every activation it passes and restores the
     /// live register to the caller's value, so without parking it here a self-edge
     /// resolved after resume would name the wrong closure. `resume_suspended`
     /// re-installs it before re-entering the body. An uncounted borrow that may be
@@ -271,21 +270,7 @@ pub enum SuspendedFrame {
     },
 }
 
-/// A single call frame within a fiber (for execution dispatch).
-#[derive(Debug, Clone)]
-pub struct Frame {
-    /// The closure being executed
-    pub closure: Rc<Closure>,
-    /// Instruction pointer (byte offset into bytecode)
-    pub ip: usize,
-    /// Base index in the fiber's operand stack for this frame's temporaries
-    pub base: usize,
-}
-
 /// Call frame for stack traces (code object + ip + frame_base).
-/// Separate from Frame because stack traces need the function's name and the
-/// source location of its current instruction, while execution dispatch needs
-/// closure references.
 /// A trace line names the function that was entered and the place it was called
 /// from, so the frame holds both code objects. Holding them (rather than copying
 /// a name and a location table out at push time) is also what keeps their

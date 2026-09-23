@@ -1,6 +1,6 @@
-// audited: 2026-09-21
-// The interpreter's Call-position dispatch: native, parameter, closure and
-// collection callees, the capability gate, and yield-through-call.
+// audited: 2026-09-23
+// The interpreter's Call-position dispatch by callee kind: native, parameter,
+// closure and collection, behind the capability gate.
 // docs/impl/vm.md
 use super::*;
 
@@ -10,8 +10,9 @@ mod tail;
 impl VM {
     /// Shared Call/CallArrayMut logic after argument extraction.
     ///
-    /// Dispatches native functions, executes closures with environment setup,
-    /// handles yield-through-calls and JIT compilation.
+    /// Dispatches native functions, parameters and collections, and enters a
+    /// compiled closure. An interpreted closure gets its environment built here
+    /// and goes to `run_dispatch` as a `PendingCall`.
     #[allow(clippy::too_many_arguments)]
     ///
     /// When `checked` is true, the compiler verified arity at compile time
@@ -120,31 +121,23 @@ impl VM {
                 closure.template.name().unwrap_or("<anon>"),
                 args.len()
             );
-            self.fiber.call_depth += 1;
+            // Resource exhaustion, which the analyzer cannot predict: past the
+            // depth cap the call halts, and a halt passes every signal mask on
+            // its way to the top level.
+            if !self.enter_call_depth() {
+                self.fiber.stack.push(Value::NIL);
+                return None;
+            }
 
-            // Push call frame for stack traces
+            // Push call frame for stack traces. The callee's operand stack
+            // starts empty, its caller's waiting in a `PausedCaller`, so the
+            // frame base is 0.
             self.fiber.call_stack.push(CallFrame {
                 callee: closure.template.code(),
                 caller: code.clone(),
                 ip: instr_ip,
-                frame_base: 0, // Closures always execute with fresh stack via execute_bytecode_saving_stack
+                frame_base: 0,
             });
-
-            // Stack overflow guard: resource exhaustion (not a signal-theoretic
-            // error — the analyzer cannot predict this).  Uses SIG_HALT so the
-            // condition bypasses all signal masks and propagates to the top-level
-            // executor as a fatal error.
-            if self.fiber.call_depth > MAX_CALL_DEPTH {
-                self.fiber.call_depth -= 1;
-                self.fiber.call_stack.pop();
-                let err = self.escaping_error(
-                    "stack-overflow",
-                    format!("call depth exceeded maximum ({})", MAX_CALL_DEPTH),
-                );
-                self.fiber.signal = Some((SIG_HALT, err));
-                self.fiber.stack.push(Value::NIL);
-                return None;
-            }
 
             // Validate argument count (skip if compiler verified)
             if !checked && !self.check_arity(&closure.template.arity(), args.len()) {
@@ -178,10 +171,17 @@ impl VM {
                 }
             }
 
+            // A compiled callee runs as a native call nested on the Rust stack.
+            // While that stack is low, the callee runs here instead, on fiber
+            // frames (docs/impl/vm.md § "What still uses the Rust stack").
+            #[cfg(any(feature = "jit", feature = "wasm", feature = "mlir"))]
+            let compiled_room =
+                !crate::vm::native_stack::below(crate::vm::native_stack::COMPILED_CALL_RESERVE);
+
             // Tiered WASM compilation and dispatch.
             // Checked before JIT because WASM is the preferred fast path when enabled.
             #[cfg(feature = "wasm")]
-            if closure.template.lir_function().is_some() {
+            if compiled_room && closure.template.lir_function().is_some() {
                 if let Some(bits) = self.try_wasm_call(closure, &args, func) {
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();
@@ -193,7 +193,7 @@ impl VM {
             // Checked before Cranelift — MLIR produces better optimized code
             // for numeric functions (LLVM vectorization, LICM, GVN).
             #[cfg(feature = "mlir")]
-            if self.mlir_enabled && closure.template.lir_function().is_some() {
+            if compiled_room && self.mlir_enabled && closure.template.lir_function().is_some() {
                 if let Some(bits) = self.try_mlir_call(closure, &args) {
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();
@@ -205,7 +205,7 @@ impl VM {
             // Polymorphic closures are rejected by the JIT compiler itself.
             // Skip profiling for primitives (no LIR means not JIT-compilable).
             #[cfg(feature = "jit")]
-            if closure.template.lir_function().is_some() {
+            if compiled_room && closure.template.lir_function().is_some() {
                 if let Some(bits) = self.try_jit_call(closure, &args, func) {
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();
@@ -278,11 +278,6 @@ impl VM {
                 }
             };
 
-            // Extract squelch_mask before execute_bytecode_saving_stack to avoid
-            // borrow lifetime conflicts: `closure` borrows from `func`, and we
-            // need `closure_squelch_mask` after the call returns.
-            let closure_squelch_mask = closure.squelch_mask;
-
             // Guard: WASM-compiled closures have empty bytecode. They
             // cannot be executed by the bytecode VM.
             if closure.template.bytecode().is_empty() {
@@ -293,152 +288,25 @@ impl VM {
                 return Some(SIG_ERROR);
             }
 
-            // Execute the closure, saving/restoring the caller's stack.
-            // Essential for fiber/signal propagation and yield-through-nested-calls.
-            // The per-activation region frame is pushed/popped inside
-            // `execute_bytecode_saving_stack`.
-            // Hand the callee its executing-closure register via the one-shot:
-            // `execute_bytecode_saving_stack` installs it for the body and restores
-            // the caller's on return, so a self-edge in the body resolves to `func`.
-            self.pending_entry_closure = func;
-            let result = self.execute_bytecode_saving_stack(&closure.template.code(), &new_env_rc);
-
-            self.fiber.call_depth -= 1;
-
-            let bits = result.bits;
-
-            // Silence enforcement: if the closure declared (silence) and
-            // the body produced ANY signal, that's a purity violation.
-            // The programmer asserted purity — any signal (error, yield,
-            // I/O) is a programmer bug. Abort with a clear diagnostic.
-            if closure.template.signal().bits.is_empty()
-                && closure.template.signal().propagates == 0
-                && self
-                    .fiber
-                    .signal
-                    .as_ref()
-                    .is_some_and(|(b, _)| !b.is_empty())
-            {
-                let (sig_bits, sig_val) = self.fiber.signal.take().unwrap();
-                let name = closure.template.name().unwrap_or("<anonymous>");
-                eprintln!("panic: silence violation in '{}'", name);
-                eprintln!("  A (silence)'d function signaled at runtime.");
-                eprintln!("  silence asserts purity — any signal is a programmer bug.");
-                eprintln!(
-                    "  signal: {}",
-                    crate::signals::registry::format_bits(sig_bits)
-                );
-                eprintln!("  value:  {}", sig_val);
-                if let Some(loc) = self.error_loc.as_ref() {
-                    eprintln!("  at {}", loc);
-                }
-                std::process::abort();
-            }
-
-            // Squelch enforcement: if the closure has a squelch mask and the callee
-            // returned a non-OK, non-error, non-halt signal that matches the mask,
-            // convert to a signal-violation error.
-            //
-            // We do NOT intercept SIG_ERROR (already an error) or SIG_HALT (terminal).
-            // We DO intercept SIG_YIELD and user-defined signals.
-            //
-            // Note: do_fiber_first_resume is intentionally exempt — fiber root bodies
-            // execute outside any call_inner, so squelch enforcement does not apply
-            // to the initial fiber execution.
-            //
-            // Discard suspended frames: we're converting to error, not suspending.
-            if self.enforce_squelch(bits, closure_squelch_mask) {
-                self.fiber.call_stack.pop();
-                return Some(SIG_ERROR);
-            }
-            if bits.is_empty() {
-                let (_, value) = self.fiber.signal.take().unwrap();
-                self.fiber.stack.push(value);
-                self.fiber.call_stack.pop();
-            } else if !bits.intersects(SIG_ERROR) && !bits.intersects(SIG_HALT) {
-                // Suspending signal — any bits except SIG_ERROR/SIG_HALT
-                // cause the caller frame to be appended for resumption.
-                // Propagated from a nested call (interpreter or tail-call-to-native path).
-                // We must always build the caller frame, whether or not the callee
-                // already populated fiber.suspended. When the callee is a TailCall to
-                // a native yielding primitive, it does NOT create a SuspendedFrame
-                // (TCO), so fiber.suspended may be None here — use unwrap_or_default()
-                // to cover both cases.
-                {
-                    let (_, value) = self.fiber.signal.take().unwrap();
-
-                    let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-                    if self
-                        .runtime_config
-                        .has_trace_bit(crate::config::trace_bits::CALL)
-                        && caller_stack.len() <= 5
-                    {
-                        eprintln!(
-                            "[call_inner suspend] ip={} bc_len={} stack_depth={}",
-                            *ip,
-                            code.bytecode().len(),
-                            caller_stack.len(),
-                        );
-                        for (si, sv) in caller_stack.iter().enumerate() {
-                            eprintln!("  stack[{}] = {} {:?}", si, sv.type_name(), sv);
-                        }
-                    }
-                    // The callee's `saving_stack` already popped its frame, so
-                    // `activation_region_maps.last()` is now the caller's activation.
-                    let caller_region_frame = self
-                        .fiber
-                        .activation_region_maps
-                        .last()
-                        .cloned()
-                        .unwrap_or_default();
-                    // MOVE what the caller's activation owes into its park — this activation
-                    // unwinds with the suspending signal
-                    // (docs/impl/region/owner.md § "Owner nodes").
-                    let caller_dues = self.take_activation_dues();
-                    // `saving_stack` restored `current_closure` to this caller on the
-                    // callee's suspending return, so park the caller's value here; the
-                    // callee's value rode out in `result.current_closure` (below).
-                    let caller_closure = self.fiber.current_closure;
-                    let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame::suspend(
-                        code.clone(),
-                        closure_env.clone(),
-                        *ip,
-                        caller_stack,
-                        true,
-                        caller_region_frame,
-                        caller_dues,
-                        caller_closure,
-                        self.heap(),
-                    ));
-
-                    let mut frames = self.fiber.suspended.take().unwrap_or_default();
-
-                    // Preserve a non-yield-suspended (e.g. SIG_FUEL) callee's
-                    // inner frame — it lives in result.stack, not fiber.suspended
-                    // (see park_suspended_callee_frame).
-                    self.park_suspended_callee_frame(&mut frames, bits, result);
-
-                    if self
-                        .runtime_config
-                        .has_trace_bit(crate::config::trace_bits::FIBER)
-                    {
-                        eprintln!(
-                            "[call_inner] suspend: bits={} ip={} bc_len={} inner_frames={} env_len={}",
-                            bits, *ip, code.bytecode().len(), frames.len(), closure_env.len(),
-                        );
-                    }
-                    frames.push(caller_frame);
-                    self.fiber.signal = Some((bits, value));
-                    self.fiber.suspended = Some(frames);
-                }
-                self.fiber.call_stack.pop();
-                return Some(bits);
-            } else {
-                // Other signal (error, etc.) — propagate to caller.
-                // The call frame is preserved on error for stack traces.
-                return Some(bits);
-            }
-            return None;
+            // Hand the callee to the dispatch loop's driver, which pauses this
+            // caller in the fiber and runs the callee on the same loop; the
+            // callee's closure value becomes its executing-closure register
+            // (docs/impl/vm.md § "Non-tail calls"). What completing the call
+            // needs to know about the callee is read here, while `func` is
+            // certainly live.
+            let signal = closure.template.signal();
+            self.pending_call = Some(crate::vm::core::PendingCall {
+                code: closure.template.code(),
+                env: new_env_rc,
+                closure: func,
+                call_ip: instr_ip,
+                site: crate::value::fiber::CallSite {
+                    squelch_mask: closure.squelch_mask,
+                    silent: signal.bits.is_empty() && signal.propagates == 0,
+                    name: closure.template.name(),
+                },
+            });
+            return Some(SIG_OK);
         }
 
         // Callable collections: struct, array, set. Routed through

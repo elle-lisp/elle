@@ -1,3 +1,7 @@
+// audited: 2026-09-23
+//! A lowered function — its blocks, registers and constants — with the
+//! metadata the emitter records for the JIT and the region system.
+
 use super::*;
 
 /// A LIR function (compilation unit)
@@ -33,7 +37,7 @@ pub struct LirFunction {
     /// `CaptureMask`): a local at any index is named precisely, so an uncaptured
     /// high local is never conservatively (and leakily) celled.
     pub capture_locals_mask: crate::value::CaptureMask,
-    /// Signal of this function (Pure, Yields, or Polymorphic)
+    /// Signal of this function (Silent, Yields, or Polymorphic)
     pub signal: Signal,
     /// Optional docstring from the source lambda. Plain `Rc<str>` compile-time
     /// data, never a heap `Value` — materialized as a fresh ordinary
@@ -129,7 +133,7 @@ pub struct CallSiteInfo {
     /// Registers on the operand stack at the call site, after popping
     /// func and args but before pushing the result. This matches the
     /// interpreter's stack state when yield propagates through a call
-    /// (call_inner line 192: `self.fiber.stack.drain(..).collect()`).
+    /// (`complete_call` parks it with `self.fiber.stack.drain(..).collect()`).
     pub stack_regs: Vec<Reg>,
     /// Number of local variable slots (params + locally-defined).
     /// The interpreter stores locals at `[frame_base, frame_base + num_locals)`.

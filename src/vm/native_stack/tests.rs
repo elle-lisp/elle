@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-09-23
 //! The native-stack probe answers on this platform, and its answer tracks the
 //! frames a thread actually holds.
 
@@ -36,9 +36,15 @@ fn what_is_left_shrinks_as_frames_nest() {
     );
 }
 
+// The trap: a thread may get MORE stack than it asked for. glibc keeps the
+// stacks of exited threads and hands a new thread any cached one at least as
+// large as the request, so a 4 MiB request can come back 8 MiB and the probe
+// rightly reports that. Only the lower bound is a claim about the probe, and a
+// request far above the main thread's 8 MiB is one no cached stack satisfies —
+// a probe that read the main thread's bounds instead would fail it.
 #[test]
 fn a_spawned_thread_reports_the_stack_it_was_given() {
-    const SIZE: usize = 4 * 1024 * 1024;
+    const SIZE: usize = 100 * 1024 * 1024;
     let left = std::thread::Builder::new()
         .stack_size(SIZE)
         .spawn(remaining)
@@ -47,8 +53,8 @@ fn a_spawned_thread_reports_the_stack_it_was_given() {
         .expect("join")
         .expect("the probe answers on a spawned thread");
     assert!(
-        left <= SIZE + 64 * 1024 && left > SIZE - 512 * 1024,
-        "a thread given {SIZE} bytes of stack reports {left} bytes left at its start"
+        left > SIZE - 512 * 1024,
+        "a thread given {SIZE} bytes of stack reports only {left} bytes left at its start"
     );
 }
 

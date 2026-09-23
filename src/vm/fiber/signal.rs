@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-23
 //! The interpreter-level SIG_RESUME handlers, and the trampoline entry
 //! `do_fiber_resume`.
 //!
@@ -248,7 +248,7 @@ impl VM {
             self.seed_child_inheritance(&handle, fiber_value);
             // `suspended` is deliberately left untouched (None): the standard
             // interrupted-frame parks (`do_fiber_first_resume`,
-            // `resume_suspended`'s re-suspend, `call_inner`) then capture this
+            // `resume_suspended`'s re-suspend, `complete_call`) then capture this
             // frame's continuation at the post-`TailCall` ip, and the resume
             // replays it — running the compiler's owned-arg releases exactly as
             // a non-suspending native tail call falls through to them

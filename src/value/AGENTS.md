@@ -1,6 +1,6 @@
 # value
 
-<!-- audited: 2026-09-19 -->
+<!-- audited: 2026-09-23 -->
 
 Runtime value representation using a tagged union.
 
@@ -20,7 +20,7 @@ Runtime value representation using a tagged union.
 | `repr/traits.rs` | `Display`, `Debug`, `Clone` implementations |
 | `types.rs` | `Arity`, `SymbolId`, `NativeFn`, `TableKey`, sorted-struct helpers |
 | `closure.rs` | `Closure` (template + env + squelch mask) and the `TemplateRef` seam; submodules `proto` (the compile-time `TemplateProto` blueprint), `payload` (`CodePayload`, the region-inline code data), `header` (`ClosureTemplate`), `cache` (the heap's payload cache). docs/impl/region/template.md owns the argument |
-| `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `Frame`, `FiberStatus`; re-exports `SignalBits` (from `fiber/signalbits.rs`) and the `SIG_*` constants (from `crate::signals`) |
+| `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `FiberStatus`; re-exports `SignalBits` (from `fiber/signalbits.rs`) and the `SIG_*` constants (from `crate::signals`) |
 | `fiber/dues.rs` | `ActivationDues` — what one activation owes the region system when it ends: its owner node and the releases it took over from frame-replacing tail calls, carried as one record so a park moves both or neither (docs/impl/region/owner.md § "A deferred tail-call release has the node's life") |
 | `fiber/delivery.rs` | `Delivery` — the delivery ledger: how the current park's delivery references are funded, with a method-only surface ([what a park retains](../../docs/impl/region/park.md)) |
 | `fiber/parked.rs` | `ParkedDues`, `ParkedState` and `Fiber::take_parked_state` — what a fiber that can never run again strands: the releases its parked frames still owe, and the retain its parked signal took ([what a park retains](../../docs/impl/region/park.md)) |
@@ -39,7 +39,7 @@ Runtime value representation using a tagged union.
 |------|----------|---------|
 | `Value` | `repr/mod.rs` | 16-byte tagged-union value (Copy) |
 | `Closure` | `closure.rs` | `TemplateRef` + env (`RegionSlice<Value>`) + `squelch_mask`. Per-function code lives on the region-resident `ClosureTemplate` behind that seam. |
-| `Fiber` | `fiber.rs` | Independent execution context with stack, frames, signal mask |
+| `Fiber` | `fiber.rs` | Independent execution context with stack, paused callers, signal mask |
 | `FiberHandle` | `fiber.rs` | `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
 | `WeakFiberHandle` | `fiber.rs` | Weak reference for parent back-pointers (avoids Rc cycles) |
 | `FiberHeap` | `fiberheap/` | The VM's single heap over a `RegionStore` (region-based, RC-driven reclamation) plus a custom-allocator stack; reclamation is `FreeRegion(ρ)` when a region's RC reaches 0. Despite the name it is NOT per-fiber — all fibers share it and isolation is per-region (`value/fiber.rs`) |
@@ -49,7 +49,7 @@ Runtime value representation using a tagged union.
 | `TableKey` | `types.rs` | Struct key. `Copy`; string and array keys hold a `Value`, so a key owns no Rust heap memory (docs/impl/values.md § "Struct keys") |
 | `SendKey` | `send/mod.rs` | The owning key form `SendValue`'s maps are keyed on — the only key type that crosses a thread or reaches serde |
 | `SuspendedFrame` | `fiber/frame.rs` | Bytecode/constants/env/IP/stack for resuming a suspended fiber |
-| `Frame` | `fiber/frame.rs` | Single call frame (closure + ip + base) |
+| `PausedCaller` | `fiber/caller.rs` | A caller activation waiting in `Fiber::callers` while its interpreted callee runs on the same dispatch loop (docs/impl/vm.md § "Non-tail calls") |
 | `FiberStatus` | `fiber/status.rs` | Fiber lifecycle: New, Alive, Paused, Dead, Error |
 | `SignalBits` | `fiber/signalbits.rs` | Newtype over `u64` (re-exported from `fiber.rs`). The `SIG_*` constants are defined in `crate::signals`: SIG_OK(0), SIG_ERROR(1<<0), SIG_YIELD(1<<1), SIG_DEBUG(1<<2), SIG_RESUME(1<<3), SIG_FFI(1<<4), SIG_PROPAGATE(1<<5), SIG_HALT(1<<8) (among others) |
 | `Arity` | `types.rs` | Function arity (Exact, AtLeast, Range) |

@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-23
 // docs/impl/vm.md
 //! The interpreter's inner loop: decode one opcode, route it, and check what
 //! the handler left on the fiber.
@@ -66,7 +66,7 @@ impl VM {
     /// comes from"). `VM::absorbs` takes the record when a mask catches the
     /// error, so the slot an outer frame finds full always belongs to the
     /// error it is carrying.
-    fn record_error_loc(
+    pub(in crate::vm) fn record_error_loc(
         &mut self,
         locations: crate::value::closure::LocationTable<'_>,
         instr_ip: usize,

@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-09-23
 // A recursion 100,000 deep completes on each tier, and each limit on depth
 // halts the process with a message instead of killing it.
 // docs/impl/vm.md
@@ -76,7 +76,8 @@ fn non_tail_recursion_100000_deep_completes_interpreted() {
 
 // The compiled tier nests a native frame per call, so this passes only if a
 // compiled call hands its callee to the interpreter once the native stack runs
-// low. Without that hand-off the process dies of SIGSEGV part of the way down.
+// low. Without that hand-off the recursion runs the native stack out part of
+// the way down, and halts with `:stack-overflow` at the next re-entry.
 #[test]
 fn non_tail_recursion_100000_deep_completes_compiled() {
     assert_completes(COMPILED);

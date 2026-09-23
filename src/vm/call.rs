@@ -1,16 +1,20 @@
+// audited: 2026-09-23
 //! Call and TailCall instruction handlers.
 //!
 //! Handles:
 //! - Native function calls (routes to signal dispatch in signal.rs)
-//! - Closure calls with environment setup
-//! - Yield-through-calls (suspended frame chain building)
+//! - Closure calls: the environment is built here, then the callee goes to
+//!   `run_dispatch`, which runs it on the caller's dispatch loop
 //! - Tail call optimization
+//! - `call_closure`, the re-entry macro transformers and trait methods use
 //!
 //! Environment building (closure env population, parameter binding) lives in `env.rs`.
+//!
+//! docs/impl/vm.md
 
 use crate::hir::region::StaticRegion;
 use crate::primitives::access::resolve_index;
-use crate::value::fiber::{CallFrame, MAX_CALL_DEPTH};
+use crate::value::fiber::CallFrame;
 use crate::value::{
     sorted_struct_get, BytecodeFrame, SignalBits, SuspendedFrame, TableKey, Value, SIG_ERROR,
     SIG_FUEL, SIG_HALT, SIG_OK,
@@ -23,6 +27,7 @@ use std::rc::Rc;
 
 use super::core::VM;
 
+mod depth;
 mod inner;
 
 impl VM {

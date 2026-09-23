@@ -1,3 +1,7 @@
+// audited: 2026-09-23
+//! A fiber is built, wired to a parent, taken out of its handle and put back,
+//! and printed.
+
 use super::*;
 
 /// A fiber whose body never runs still names a code object; the instance's
@@ -14,7 +18,7 @@ fn test_fiber_new() {
     assert_eq!(fiber.status, FiberStatus::New);
     assert_eq!(fiber.mask, SIG_ERROR | SIG_YIELD);
     assert!(fiber.stack.is_empty());
-    assert!(fiber.frames.is_empty());
+    assert!(fiber.callers.is_empty());
     assert!(fiber.parent.is_none());
     assert!(fiber.child.is_none());
     assert!(fiber.param_frames.is_empty());
@@ -30,32 +34,6 @@ fn test_fiber_stack_operations() {
     assert_eq!(fiber.stack.len(), 3);
     assert_eq!(fiber.stack.pop(), Some(Value::int(3)));
     assert_eq!(fiber.stack.len(), 2);
-}
-
-#[test]
-fn test_fiber_frame_operations() {
-    let closure = test_closure();
-    let mut fiber = Fiber::new(closure.clone(), SIG_OK);
-
-    let frame = Frame {
-        closure: closure.clone(),
-        ip: 0,
-        base: 0,
-    };
-    fiber.frames.push(frame);
-    assert_eq!(fiber.frames.len(), 1);
-    assert_eq!(fiber.frames[0].ip, 0);
-    assert_eq!(fiber.frames[0].base, 0);
-
-    let frame2 = Frame {
-        closure,
-        ip: 10,
-        base: 3,
-    };
-    fiber.frames.push(frame2);
-    assert_eq!(fiber.frames.len(), 2);
-    assert_eq!(fiber.frames[1].ip, 10);
-    assert_eq!(fiber.frames[1].base, 3);
 }
 
 #[test]

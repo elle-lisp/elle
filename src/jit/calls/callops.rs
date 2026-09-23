@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-23
 // docs/impl/jit.md
 // docs/impl/region/owner.md
 //! The helpers a compiled call site enters: dispatch by callee kind, and the
@@ -9,9 +9,9 @@ use super::*;
 /// Call a function from JIT code.
 ///
 /// Dispatches to native functions or closures. When the callee has
-/// JIT-compiled code in the cache, calls it directly (JIT-to-JIT)
-/// without building an interpreter environment — zero heap allocations
-/// on the fast path.
+/// JIT-compiled code in the cache and the native stack has room, calls it
+/// directly (JIT-to-JIT) without building an interpreter environment — zero
+/// heap allocations on the fast path.
 ///
 /// Parameters: func_tag/func_payload (the callee Value), args_ptr (*const Value),
 /// nargs, vm.
@@ -99,22 +99,21 @@ pub extern "C" fn elle_jit_call(
         // all (docs/impl/jit.md § "Function selection"). The counter and the
         // worker poll are worth their cost exactly where the alternative is an
         // interpreter frame, which is the arm below.
+        //
+        // A compiled callee nests a native frame under this one. While the
+        // native stack is low, the callee takes the interpreter arm instead,
+        // whose calls wait on fiber frames (docs/impl/jit.md § "How a call
+        // leaves compiled code").
         let bytecode_ptr = closure.template.bytecode().as_ptr();
-        let compiled = vm
-            .jit_code_for(bytecode_ptr)
-            .or_else(|| vm.profile_jit_candidate(closure));
+        let compiled =
+            if crate::vm::native_stack::below(crate::vm::native_stack::COMPILED_CALL_RESERVE) {
+                None
+            } else {
+                vm.jit_code_for(bytecode_ptr)
+                    .or_else(|| vm.profile_jit_candidate(closure))
+            };
         if let Some(jit_code) = compiled {
-            vm.fiber.call_depth += 1;
-
-            // Stack overflow guard: resource exhaustion (not signal-theoretic).
-            // Uses SIG_HALT so the condition bypasses all signal masks.
-            if vm.fiber.call_depth > MAX_CALL_DEPTH {
-                vm.fiber.call_depth -= 1;
-                let err = vm.escaping_error(
-                    "stack-overflow",
-                    format!("call depth exceeded maximum ({})", MAX_CALL_DEPTH),
-                );
-                vm.fiber.signal = Some((SIG_HALT, err));
+            if !vm.enter_call_depth() {
                 return JitValue::nil();
             }
 
@@ -207,7 +206,9 @@ pub extern "C" fn elle_jit_call(
             return result;
         }
 
-        // Interpreter fallback — reconstruct args Vec for env building
+        // Interpreter fallback, for an uncompiled callee and for any callee
+        // while the native stack is low. Reconstruct the args Vec for env
+        // building.
         let args: Vec<Value> = (0..nargs as usize)
             .map(|i| unsafe { *args_ptr.add(i) })
             .collect();
@@ -224,22 +225,12 @@ pub extern "C" fn elle_jit_call(
             None => return JitValue::nil(), // bad keyword args — error on fiber
         };
 
-        vm.fiber.call_depth += 1;
-
-        // Stack overflow guard: resource exhaustion (not signal-theoretic).
-        // Uses SIG_HALT so the condition bypasses all signal masks.
-        if vm.fiber.call_depth > MAX_CALL_DEPTH {
-            vm.fiber.call_depth -= 1;
-            let err = vm.escaping_error(
-                "stack-overflow",
-                format!("call depth exceeded maximum ({})", MAX_CALL_DEPTH),
-            );
-            vm.fiber.signal = Some((SIG_HALT, err));
+        if !vm.enter_call_depth() {
             return JitValue::nil();
         }
 
         // Hand the callee its executing-closure register via the one-shot, the
-        // same handoff the interpreter's `call_inner` performs — a self-reference
+        // handoff every re-entry into the interpreter makes — a self-reference
         // in the fallback body resolves to `func`, not `NIL`.
         vm.pending_entry_closure = func;
         let result = vm.execute_bytecode_saving_stack(&closure.template.code(), &new_env);

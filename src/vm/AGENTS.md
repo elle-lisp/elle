@@ -1,6 +1,6 @@
 # vm
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-23 -->
 
 Bytecode execution. Stack-based operand handling with register-addressed locals.
 
@@ -296,7 +296,7 @@ same way (`vm.heap_ptr`) on every fiber; isolation is per-region, not per-fiber.
 `FiberHeap` allocates every value into a region, and a region is freed when its
 reference count reaches zero ([memory.md](../../docs/impl/memory.md)).
 
-`reset_fiber()` in `core.rs` does not clear the heap — objects accumulate across
+`reset_fiber()` in `core/lifecycle.rs` does not clear the heap — objects accumulate across
 resets, so Values returned across multiple invocations remain valid.
 
 ## Parameter resolution
