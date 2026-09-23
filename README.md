@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-23 -->
 
 A Lisp whose compiler infers what each function does and where each value dies,
 and runs on those facts.
@@ -167,6 +167,33 @@ calls `free`.
 - **Ownership reclaims whole subtrees.** A region the compiler proves has one
   owner joins an ownership forest rooted at an activation or a fiber. It frees
   with its owner, interior cycles included.
+
+A value's region lives exactly as long as the value, so nothing needs a copy to
+outlive its maker. Copies are absent by construction, not elided by an
+optimizer. A store, a return and a yield all pass the same 16-byte `Value`,
+and the bytes stay in the pages where they were born:
+
+```lisp
+(def blob (string/repeat "x" 100000))    # 100 KB, born in one region
+(def inbox @[])
+(def child (fiber/new (fn [] (emit :yield blob)) |:yield|))
+
+(def before (arena/bytes))
+(push inbox blob)                        # a store into a container
+(fiber/resume child)                     # a yield out of another fiber
+(assert (= (fiber/value child) blob))
+(assert (< (- (arena/bytes) before) 1024))   # neither one copied the blob
+
+(def copy (string blob "!"))             # a copy the program asks for
+(assert (> (- (arena/bytes) before) 100000))
+```
+
+I/O follows the same design: a read hands the kernel a buffer in the caller's
+region. Two paths still copy today. A stream read's completion copies its
+bytes through a Rust buffer and back, and a write copies its payload before the
+kernel sees it ([#1246](https://github.com/elle-lisp/elle/issues/1246)). A
+value that crosses to another thread is deep-copied, where it could move with
+its regions instead ([#1247](https://github.com/elle-lisp/elle/issues/1247)).
 
 Freed pages return to a small per-thread cache, and pages past that cache go
 back to the operating system at once. So a long-running program's resident
