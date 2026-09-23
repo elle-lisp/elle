@@ -239,11 +239,12 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     unit reaches the body through the function value. See
     [docs/impl/hir.md](../../docs/impl/hir.md).
 
-26. **A call to a known function becomes its body.** The graft replaces a
-    call whose callee is an immutable function binding with the callee's
-    fragment, at the call's arity, unless the function is recursive. It runs
-    in `regularize` after map fusion and before dead-binding elimination. It
-    reads no name: a stdlib wrapper and a user function graft alike. See
+26. **A call into an earlier unit becomes the callee's body.** The graft
+    replaces a call whose callee an earlier unit exports with the fragment
+    its value carries, at the call's arity, unless the function calls
+    itself. A function this unit defines is not grafted: its callers here are
+    what prove its parameters. The graft runs in `regularize` after map
+    fusion and before dead-binding elimination, and it reads no name. See
     [grafting a call](../../docs/impl/graft.md).
 
 27. **After inference, the fold deletes what the types decide.** A condition

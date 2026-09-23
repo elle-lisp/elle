@@ -2,14 +2,14 @@
 
 <!-- audited: 2026-09-23 -->
 
-A call to a known function becomes that function's body, and the proven types then delete every branch the call's operands cannot take.
+A call into another unit's function becomes that function's body, and the proven types delete every branch its operands cannot take.
 
 A closure is the unit of nothing at run time; the fiber is the unit a program
 controls ([dissolution](dissolution.md)). So the compiler does not keep a call
-to a function whose body it can see. It grafts the body in place of the call,
-and after type inference it folds away the guards and dispatch arms the
-operands' proven types decide. A stdlib wrapper over proven operands ends as
-the one `%`-op its body reaches:
+into a function an earlier unit defined when it can see that function's body.
+It grafts the body in place of the call, and after type inference it folds away
+the guards and dispatch arms the operands' proven types decide. A stdlib wrapper
+over proven operands ends as the one `%`-op its body reaches:
 
 ```lisp
 (defn fhir [src]
@@ -49,27 +49,29 @@ says, read from the body.
 
 A call grafts when all of these hold:
 
-- Its callee is a `Var` naming an immutable, unmutated binding whose body the
-  compiler holds (see "Where the body comes from").
+- Its callee is a `Var` naming a binding an earlier unit exports, whose value
+  carries its body (see "Where the body comes from").
 - No operand is spliced, so the count of operands is known.
 - The function takes fixed parameters and at most a `&` rest list; `&opt`,
   `&keys` and `&named` decline. No parameter is mutated in the body.
 - The call's operand count selects a body that closes as an `HirFragment`
   ([the HIR design](hir.md)). A body that holds a `lambda`, a `letrec`, a loop,
   an `assign` or a `define` does not close, and its calls stay calls.
-- The function is not recursive. A function that calls itself, directly or
-  through a cycle of functions this unit defines, never grafts. Nor does a
-  function grafted inside its own graft, which bounds a cycle that runs through
-  other units.
+- The function does not call itself. Nor does the graft graft a function
+  inside its own graft, which bounds a cycle that runs through several
+  functions.
 
 A call that fails any of these stays the call it was. Nothing else is asked:
-there is no declaration and no list of names. A stdlib function and a function
-the program defines graft alike.
+there is no declaration and no list of names.
+
+A function this unit defines is not grafted. Its parameters take their types
+from the calls this unit makes to it ([type inference](typeinfer.md)). Grafting
+those calls away would leave its definition with no call site to prove its
+parameters, and a `%`-op in its body that one of those calls proved would stop
+compiling. The calls a function's own body makes are grafted like any other,
+so `(+ a b)` inside a function whose callers pass ints still dissolves.
 
 ### Where the body comes from
-
-A function this unit defines is in the tree being compiled. The graft closes its
-initializer's body into a fragment in the same walk that grafts the calls.
 
 A function from another unit is reached through its value. When a unit is
 analyzed, each binding the earlier units export maps to its compile-time value,
@@ -235,7 +237,7 @@ optional value through the rest list.
   comparison wrapper over two proven operands leaves one op and no guard, an
   unproven pair keeps its guards, three operands and a spliced operand keep the
   call, a user binding named `+` keeps its call, a recursive function stays a
-  call, and a function the program defines grafts like a stdlib one.
+  call, and a call to a function this unit defines stays a call.
 - `hir::typeinfer::tests::fold::*` — what the fold decides: a guard over a
   proven operand, a `type-of` dispatch over a proven container, the certain
   divergence of `(+ "a" 1)`, and the fact a grafted predicate proves.
