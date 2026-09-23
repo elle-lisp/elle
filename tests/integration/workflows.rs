@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-22
 // What `.github/workflows/pr.yml` claims to gate must be what it gates, and
 // what each job builds must let its own checks run. A target a job
 // cross-compiles must also have a local gate.
@@ -19,6 +19,7 @@
 // Tests job per platform, never both in one — is in docs/analysis/ci.md
 // § "Why each platform has two test jobs".
 
+use crate::common::workflow_jobs as jobs;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
@@ -39,59 +40,6 @@ fn makefile_path() -> PathBuf {
 fn makefile_text() -> String {
     fs::read_to_string(makefile_path())
         .unwrap_or_else(|e| panic!("read {}: {e}", makefile_path().display()))
-}
-
-/// `  name:` at exactly two spaces of indent — a key in the `jobs` mapping.
-/// A comment at that indent has no bare identifier before the colon, so the
-/// character check rejects it.
-fn job_header(line: &str) -> Option<String> {
-    let rest = line.strip_prefix("  ")?;
-    if rest.starts_with(' ') {
-        return None;
-    }
-    let name = rest.strip_suffix(':')?;
-    let ident = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
-    if name.is_empty() || !name.chars().all(ident) {
-        return None;
-    }
-    Some(name.to_string())
-}
-
-/// Every job in the workflow, as (name, body). Comment lines are dropped from
-/// the body: the trap is that several jobs discuss commands they do not run —
-/// the WASM job's comment names `make smoke-wasm` while running `check-wasm` —
-/// so a body scan that kept comments would read those as steps.
-fn jobs(text: &str) -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = Vec::new();
-    let mut current: Option<(String, String)> = None;
-    let mut in_jobs = false;
-
-    for line in text.lines() {
-        if line == "jobs:" {
-            in_jobs = true;
-            continue;
-        }
-        if !in_jobs {
-            continue;
-        }
-        // Any other top-level key closes the `jobs` mapping.
-        if !line.starts_with(' ') && !line.trim().is_empty() {
-            break;
-        }
-        if let Some(name) = job_header(line) {
-            out.extend(current.take());
-            current = Some((name, String::new()));
-            continue;
-        }
-        if let Some((_, body)) = current.as_mut() {
-            if !line.trim_start().starts_with('#') {
-                body.push_str(line);
-                body.push('\n');
-            }
-        }
-    }
-    out.extend(current);
-    out
 }
 
 /// The gate job: the one whose result branch protection requires.

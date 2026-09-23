@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-21
+# audited: 2026-09-22
 ## elle test — turning an outcome into rows: the label a form is known by, what
 ## analysis finds in it, the status a payload classifies to, and one row per
 ## (form × tier).
@@ -163,7 +163,7 @@
                "INSERT INTO result (run_id, form_hash, tier, status, reason, signal, syntax, expected, actual) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"
                [run-id h tier-str (get c :status) (get c :reason) (get c :sig)
                 (get c :syn) (get c :exp) (get c :act)])
-  (get (get (sqlite:query conn "SELECT last_insert_rowid() AS id") 0) :id))
+  (last-rowid conn))
 
 # Run a form on every active tier, inserting one row per tier and attaching the
 # file's captured `dumps` (a list of [kind addr size codec]) as assets to each.
@@ -269,9 +269,7 @@
                  "INSERT INTO result (run_id, form_hash, tier, status, reason, signal) VALUES (?1,?2,?3,?4,?5,?6)"
                  [run-id h :vm :fail msg (sig-of payload)])  # Attach whatever artifacts compiled (a non-compiling file often still
     # parses to an `ast`), so even a file-level failure has a queryable record.
-    (insert-assets conn
-                   (get (get (sqlite:query conn
-                             "SELECT last_insert_rowid() AS id") 0) :id) dumps)
+    (insert-assets conn (last-rowid conn) dumps)
     [:fail]))
 
 # A file whose eager SHARED SETUP raised a loud `(gate! …)` (`:gated`) — e.g. an
@@ -289,9 +287,7 @@
     (sqlite:exec conn
                  "INSERT INTO result (run_id, form_hash, tier, status, reason, signal) VALUES (?1,?2,?3,?4,?5,?6)"
                  [run-id h :vm :skip reason ":gated"])
-    (insert-assets conn
-                   (get (get (sqlite:query conn
-                             "SELECT last_insert_rowid() AS id") 0) :id) dumps)
+    (insert-assets conn (last-rowid conn) dumps)
     [:skip]))
 
 # The (elle/epoch N) declaration is file metadata, not a test — drop it.

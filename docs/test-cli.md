@@ -1,6 +1,6 @@
 # Driving the test runner
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-22 -->
 
 Why `elle test` exists, the command line it offers, what it refuses to
 offer, and what is still design.
@@ -17,14 +17,16 @@ How a run executes is [test-runner](test-runner.md); where it is stored is
 > state (commit, tree hash, worktree, host, build, boot fingerprint), the
 > per-form analysis columns (`caps`, `touches`, `signal`), the on-disk CAS for
 > stdout/stderr, run honesty (a killed run reads `DID NOT COMPLETE`), `:gated`
-> skips, child-process isolation with the measurement channel it carries, and
-> the `--query`/`--summary`/`--reset`/`--promote`/`-e`/`--timeout`/`--wide`/
-> `--wide-timeout`/`--budget`/`--corpus`/`--db`/`--isolate` flags. Still design (not built): semantic selection
+> skips, child-process isolation with the measurement channel it carries, the
+> merge of another store's runs, and the
+> `--query`/`--summary`/`--reset`/`--promote`/`-e`/`--timeout`/`--wide`/
+> `--wide-timeout`/`--budget`/`--corpus`/`--db`/`--isolate`/`--import` flags.
+> Still design (not built): semantic selection
 > (`--touches`/`--caps`/`--impacted-by`/`--changed`/`--rerun-failed`/`-k`),
 > `--rust`/`--watch`/`--prune`/`-N`/`--format`, the per-run RSS/CPU capture,
-> `--dump`/`--trace` asset capture, `changed_file` population, and the
-> predicate-carrying `assert` macro. A section marked "(v1, implemented)" /
-> "(implemented)" / "**Resolved (v1)**" is built; the rest is the target.
+> `--dump`/`--trace` asset capture, and `changed_file` population. A section
+> marked "(v1, implemented)" / "(implemented)" / "**Resolved (v1)**" is built;
+> the rest is the target.
 
 ## The problem this solves
 
@@ -121,6 +123,7 @@ elle test [paths...]            # default: tests/elle, ALL tiers, write DB
   --query 'SQL'                 # convenience: run SQL against the DB and exit
   --summary                     # re-print the latest run's tally and problems; no re-run
   --db PATH                     # session DB path, overriding the state directory
+  --import PATH                 # merge another store's runs into this one; no run
   --isolate 'FLAGS'             # run each path as its own process: elle FLAGS PATH
   --timeout MS                  # per-form wall-clock budget (default 60000)
   --wide PATTERN                # a path substring whose forms take --wide-timeout (repeats)
@@ -160,6 +163,18 @@ added there widens in both.
 get, in milliseconds, one path per line, and exits zero without touching the
 session store. [budget.rs](../tests/integration/budget.rs) reads the runner's
 own selector through it rather than restating the rule in Rust.
+
+### A run recorded elsewhere reads like a local one
+
+A CI job's results are a file, and a file nothing merges is a database you
+point `--db` at, losing the join against every local run. `--import PATH` takes
+the foreign session DB, appends its runs to this store with their identity
+intact, and copies the CAS bytes its assets name
+([test-store](test-store.md)).
+
+The import records no run of its own and runs no test, so it exits zero on a
+store whose runs failed. What those runs say is then a query, exactly as for a
+run recorded here.
 
 ### Execution and completion
 

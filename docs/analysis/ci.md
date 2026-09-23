@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-22 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -233,6 +233,38 @@ proves the next start hydrates it, and runs the corpus through that instance.
 It sets `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` for the reason the two backend
 jobs do: a hydrated region is a region, and the region checks are compiled out
 of a release build without the flag.
+
+### A corpus job's results leave the runner
+
+A job that runs `elle test` records every form's verdict in a session DB, with
+stdout, stderr and the rest of each result's assets in the CAS beside it
+([test-store](../test-store.md)). The runner exists so that a failure is a
+query rather than a log. On a runner you cannot reach, the store has to be
+uploaded or that is exactly what it is not.
+
+So each job that records runs points `ELLE_STATE` at a directory in the
+workspace, and uploads the session DB and the CAS beside it as an artifact,
+pass or fail, under a retention window. The scratch directory stays behind: a
+worker's redirect files are disposable, and the two the artifact carries are
+what `--import` reads. The state directory is named rather than left to
+default because the default sits under `HOME`, which moves with the runner
+image. A fresh runner has no history to accumulate, so nothing is lost by
+moving it.
+
+Read one back by merging it into local history:
+
+```bash
+gh run download <run-id> --name <artifact> --dir far
+elle test --import far/elle-tests.db
+elle test --query "SELECT f.file, r.tier, r.reason FROM result r
+  JOIN form f ON f.hash = r.form_hash
+  WHERE r.run_id = (SELECT max(id) FROM run) AND r.status = 'fail'"
+```
+
+The imported run keeps the commit, the worktree, the host and the build it ran
+under, so it answers beside every local run rather than in a database of its
+own. `tests/integration/run_artifacts.rs` is the standing check that every job
+recording a run uploads its store.
 
 ### Adding a job
 

@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-21
+# audited: 2026-09-22
 ## elle test — the command line, the store it opens, and the run it drives.
 ## docs/test-cli.md
 ##
@@ -29,6 +29,7 @@
     "--isolate" [:isolate :value]
     "--corpus" [:corpus :value]
     "--reset" [:reset :flag]
+    "--import" [:import :value]
     "--query" [:query :value]
     "--summary" [:summary :flag]
     "-e" [:eval :append]
@@ -84,6 +85,7 @@
                 :eval []
                 :isolate nil
                 :promote nil
+                :import nil
                 :query nil
                 :summary false
                 :paths []}))
@@ -170,6 +172,15 @@
 
 (if (get opts :promote) (do-promote conn opts) nil)
 
+# --import merges another store's runs into this one and exits. It records no
+# run of its own: nothing ran here (docs/test-store.md).
+(if (get opts :import)
+  (begin
+    (do-import conn (get opts :import))
+    (sqlite:close conn)
+    (os/exit 0))
+  nil)
+
 # --query / --summary: inspect an existing session DB and exit (never re-run).
 (if (get opts :query)
   (begin
@@ -191,14 +202,14 @@
 # planned and which commit, worktree, and machine it was planned on.
 (def ident (run-identity))
 (sqlite:exec conn
-             "INSERT INTO run (tiers, n_selected, git_commit, git_dirty, tree_hash, worktree, boot_fingerprint, elle_version, build_profile, host, argv) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"
+             "INSERT INTO run (tiers, n_selected, git_commit, git_dirty, tree_hash, worktree, boot_fingerprint, elle_version, build_profile, host, argv, run_key) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"
              [(if isolate-flags "process" (tiers-str active-tiers))
               (+ (length (get opts :paths)) (length (get opts :eval)))
               (get ident :commit) (get ident :dirty) (get ident :tree)
               (get ident :worktree) (get ident :boot) (get ident :version)
-              (get ident :profile) (get ident :host) (get ident :argv)])
-(def run-id
-  (get (get (sqlite:query conn "SELECT last_insert_rowid() AS id") 0) :id))
+              (get ident :profile) (get ident :host) (get ident :argv)
+              (get ident :key)])
+(def run-id (last-rowid conn))
 
 # What the runner's own heap reads before the first file. Every later reading
 # is taken at a file boundary and charged to the file that boundary closes

@@ -1,6 +1,6 @@
 # The test runner store
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-22 -->
 
 Where `elle test` keeps a run, what every run and result records, and the
 queries that read them back.
@@ -54,6 +54,42 @@ The runner takes the first of these that names a directory:
 An empty variable counts as unset. The CAS and the scratch directory are
 siblings of the database file — `<db-dir>/cas` and `<db-dir>/scratch` — so
 `--db` moves the whole store, which is what an isolated test run wants.
+
+### A run from another store joins by import
+
+A run recorded on another box arrives as a file: the session DB, and the CAS
+beside it. `elle test --import PATH` merges that store into the local one, so a
+downloaded run answers the same queries a local run answers. How to fetch one
+from a CI job is [ci](analysis/ci.md).
+
+PATH names the foreign database, and its CAS is the `cas` directory beside it —
+the layout `--db` already makes. What merges follows what each table is keyed
+by:
+
+- `form` rows are keyed by syntax hash, so a form both stores hold is one row.
+- `run` rows append with their identity columns intact, so an imported row
+  still names the commit, worktree, host and build it ran against.
+- `result`, `asset`, `measurement`, `gauge` and `changed_file` rows follow
+  their run, and each result id is remapped as the row lands.
+- CAS files are copied by address, so bytes both stores hold are stored once.
+  An asset whose bytes the foreign CAS does not carry still imports: the row
+  says what was captured, and the address reads once the bytes arrive.
+
+One run is one transaction. An import that dies partway therefore leaves the
+runs it had finished and nothing half-written, which matters because the key
+below makes a second import skip the runs the first one landed.
+
+#### The run key
+
+A run's `id` is a row number, and every store mints the same numbers, so a
+second import of one artifact would append every run again. The runner gives
+each run a `run_key` at insert — the host, the process, the instant and the
+argv, hashed — and the key travels with the row. A unique index on it makes a
+repeated import a no-op, and makes importing a store into itself do nothing.
+
+A run recorded before the key existed carries none. The import derives one for
+that row from its id, its start, its host, its worktree and its argv, so
+repeating that import is a no-op as well.
 
 ### Ad-hoc tests: born at the prompt, promotable to the corpus
 
@@ -322,6 +358,7 @@ over `gauge`.
 ```sql
 CREATE TABLE run (                  -- one row per `elle test` invocation
   id INTEGER PRIMARY KEY, started_at TEXT,
+  run_key TEXT,                     -- the run's identity across stores; UNIQUE, so an import repeats safely
   finished_at TEXT,                 -- stamped at completion; NULL = the run was KILLED mid-flight
   git_commit TEXT, git_dirty INT, tree_hash TEXT, worktree TEXT,  -- the code state this run ran against
   boot_fingerprint INT,             -- the binary and the boot sources, hashed
@@ -384,8 +421,8 @@ The runner creates
   (`wall_ms`/`max_rss_kb`/`cpu_user_ms`/`cpu_sys_ms`), which are deferred. So a
   resource query is design-only until they land; a `SELECT` of a deferred
   column errors with `no such column`. A session DB written before the
-  code-state or fingerprint columns existed gains them by `ALTER TABLE`, with
-  NULL for every run recorded until then.
+  code-state, fingerprint or key columns existed gains them by `ALTER TABLE`,
+  with NULL for every run recorded until then.
 - `form` is written without `line`, `col` and `session`: a form's location and
   an ad-hoc form's session id are deferred, and each reads NULL. The three
   analysis columns are written at scan time (§ What analysis says about a

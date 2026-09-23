@@ -174,6 +174,10 @@ jobs:
       # #[cfg(debug_assertions)] — without this the corpus drives the image's
       # pages with every one of them compiled out.
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
+      # Where this job's session DB and CAS are written, so the upload step can
+      # name them (docs/analysis/ci.md § "A corpus job's results leave the
+      # runner").
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -187,6 +191,15 @@ jobs:
         run: make elle
       - name: make smoke-boot-image
         run: make smoke-boot-image
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-boot-image
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
 
   # The corpus against the thread-pool I/O backend. Every other Linux job runs
   # io_uring, and every non-Linux build runs the pool, so without this job the
@@ -247,6 +260,9 @@ jobs:
       MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
       TABLEGEN_220_PREFIX: /usr/lib/llvm-22
       LIBCLANG_PATH: /usr/lib/llvm-22/lib
+      # This job is the only one that records the mlir-cpu tier's verdicts, so
+      # its store is the only place they can be read from.
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -265,6 +281,15 @@ jobs:
         run: make doctest
       - name: make smoke-mlir
         run: make smoke-mlir
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-mlir
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
 
   wasm:
     name: WASM Build
@@ -361,6 +386,10 @@ jobs:
     needs: changes
     runs-on: ubuntu-24.04-arm
     if: needs.changes.outputs.source == 'true'
+    env:
+      # The one AArch64 corpus run, so its store is the only record of how the
+      # corpus behaves on this architecture.
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -377,6 +406,15 @@ jobs:
         run: make doctest
       - name: make smoke
         run: make smoke
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-aarch64
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
 
   # The Rust half of the AArch64 tier, mirroring the x86_64 `tests-combined`
   # job: `cargo test` builds and runs everything it needs, so this job installs
@@ -467,6 +505,10 @@ jobs:
       # and says nothing: a stale read faults near its site instead of naming
       # it. See docs/impl/region/diagnostics.md § `--trace=scrub`.
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
+      # This is the runner the corpus wedges on, and the one nobody can log in
+      # to. Its store carries what each form printed before it stalled, so the
+      # upload below is how that evidence leaves the box.
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -498,6 +540,15 @@ jobs:
       # The panic itself needs CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS, set above.
       - name: make smoke
         run: make smoke ELLE_TEST_FLAGS=--trace=scrub
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-macos
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
       # A batch killed by a signal leaves the batch number and nothing else. The
       # kernel's crash report has the faulting thread's stack, and the symbol
       # table is kept on this runner (CARGO_PROFILE_RELEASE_STRIP above), so the
