@@ -78,7 +78,20 @@ has two proven operands and lowers to its op
 (defn fib-w [n]
   (if (< n 2) n (+ (fib-w (- n 1)) (fib-w (- n 2)))))
 (assert (= (fib-w 10) 55) "the lowered wrappers compute the recursion")
-(assert (string/contains? (string/join (fn/disasm fib-w) " ") "AddInt")
+```
+
+The example compiles `fib-w` again from source to read its LIR. Handing
+`fib-w` itself to an inspector would use it as a value, and a binding used as
+a value proves nothing about its parameters (§ "What still does not prove"):
+
+```lisp
+(def fib-w-lir
+  (get (compile/dumps "(defn fib-w [n]
+                         (if (< n 2) n (+ (fib-w (- n 1)) (fib-w (- n 2)))))
+                       (fib-w 10)" "<doc>") :lir))
+(assert (any? (fn [line] (and (string/contains? line " + ")
+                              (string/contains? line ":int")))
+              (string/split fib-w-lir "\n"))
         "the lowered + adds two proven ints")
 ```
 
