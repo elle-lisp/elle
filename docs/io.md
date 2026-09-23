@@ -200,7 +200,7 @@ longer than that is answered in pieces, and reading on gives the next piece
 until the newline arrives. No byte is dropped to make an answer fit — the
 backend has already taken those bytes from the kernel, so there would be
 nothing left to read them again. [port-longline.lisp](../tests/elle/port-longline.lisp) pins it, and
-`port_longline_threadpool` ([elle_scripts.rs](../tests/integration/elle_scripts.rs)) pins it on the
+`port_longline_threadpool` ([modes.rs](../tests/integration/elle_scripts/modes.rs)) pins it on the
 other backend.
 
 On a text port `port/read-exact` counts grapheme clusters, and a cluster has no
@@ -213,7 +213,7 @@ over-reading `read-line` is the same story: the held remainder joins the bytes
 this read produces, the first `n` clusters of the join are the answer, and the
 rest goes back to the remainder for the next read on that port.
 [port-text-framing.lisp](../tests/elle/port-text-framing.lisp) pins all three, and
-`port_text_framing_threadpool` ([elle_scripts.rs](../tests/integration/elle_scripts.rs)) pins them
+`port_text_framing_threadpool` ([modes.rs](../tests/integration/elle_scripts/modes.rs)) pins them
 on the other backend.
 
 ### `:timeout` bounds each operation

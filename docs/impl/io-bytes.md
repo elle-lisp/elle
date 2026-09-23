@@ -159,4 +159,4 @@ the whole process shares, and its teardown is not a backend's.
   [port-text-framing.lisp](../../tests/elle/port-text-framing.lisp), on the
   other backend by `port_longline_threadpool` and
   `port_text_framing_threadpool`
-  ([elle_scripts.rs](../../tests/integration/elle_scripts.rs)).
+  ([modes.rs](../../tests/integration/elle_scripts/modes.rs)).

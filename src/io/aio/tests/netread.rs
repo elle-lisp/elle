@@ -1,39 +1,24 @@
-// audited: 2026-09-05
+// audited: 2026-09-23
 // src/io/AGENTS.md
 //! A pool read counts the remainder its port is already holding, in bytes and
 //! in grapheme clusters.
 
 use super::*;
 
-/// A connected stream pair. The returned descriptors are the test's to close;
-/// `Port` takes the first, the test writes the reply into the second.
-fn stream_socket_pair() -> (libc::c_int, libc::c_int) {
-    let mut fds = [0 as libc::c_int; 2];
-    assert_eq!(
-        unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) },
-        0,
-        "socketpair(2) failed"
-    );
-    (fds[0], fds[1])
-}
-
 /// A `ReadExact` must count the remainder the port is already holding.
 ///
 /// A length-prefixed reply arrives as one burst: the `ReadLine` that takes the
 /// header reads a whole chunk, so the body's first bytes come back with it and
-/// the completion stashes them as the port's remainder (`submit.rs` § "A
-/// previous read on this port took more from the kernel than it answered
-/// with"). The `ReadExact` that follows asks for the whole body, and the wire
-/// is short of that count by exactly what the port is holding.
+/// the port keeps them as its remainder. The `ReadExact` that follows asks for
+/// the whole body, and the wire is short of that count by exactly what the port
+/// is holding.
 ///
-/// The ring answers this in `uring/drain.rs`: its "enough yet?" test is
-/// `state.buffer.len() + filled + got < count`, so the held bytes count toward
-/// the total and it stops when the wire has delivered the rest. The pool's
-/// runner counts only what it read from the descriptor, so it waits for the
-/// full count from a peer that has already said everything it has to say — and
-/// a redis `GET` of a value past one chunk hangs forever
-/// (`tests/elle/redis-short-read.lisp`, which is gated on a live Redis and so
-/// never runs on the macOS CI box, the only one that uses this backend).
+/// The counter-factual: a runner that counts only what it read from the
+/// descriptor waits for the full count from a peer that has already said
+/// everything it has to say — and a redis `GET` of a value past one chunk
+/// hangs forever (`tests/elle/redis-short-read.lisp`, which is gated on a live
+/// Redis and so never runs on the macOS CI box, the only one that uses this
+/// backend).
 ///
 /// Built on `new_thread_pool` for the reason the rest of this family gives: the
 /// ring is the default on a Linux host, and this property would otherwise go
@@ -161,10 +146,8 @@ fn a_pool_read_exact_counts_the_remainder_the_port_already_holds() {
 /// only what it read — or counted the remainder in bytes — would ask the peer
 /// for clusters it has already sent.
 ///
-/// The ring decides this over `state.buffer` joined to the fiber's bytes
-/// (`uring/drain.rs`, the `text_exact` arm), for the reason this runner takes
-/// the remainder as bytes rather than as a length: a cluster can straddle the
-/// boundary between the two, so neither side can be counted alone.
+/// A cluster can straddle the boundary between the remainder and the bytes the
+/// read produces, so neither side can be counted alone.
 #[test]
 fn a_pool_text_read_exact_counts_the_remainder_in_clusters() {
     crate::value::arena::with_test_region(|| {

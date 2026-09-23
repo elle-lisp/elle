@@ -1,4 +1,4 @@
-//! audited: 2026-09-20
+//! audited: 2026-09-23
 //! Fixtures the async-backend tests share: sockets a peer never answers,
 //! scratch paths, and the assertion that a cancelled operation retires.
 //!
@@ -247,7 +247,19 @@ fn fill_tcp_backlog(port: u16) -> Vec<libc::c_int> {
     }
     queued
 }
-// ── Descriptor helpers, shared by park.rs, gone.rs and descriptor.rs ──
+// ── Descriptor helpers, shared by park.rs, gone.rs, descriptor.rs, bytes.rs ──
+
+/// A connected stream pair. The returned descriptors are the test's to close;
+/// `Port` takes the first, and the test plays the peer on the second.
+fn stream_socket_pair() -> (libc::c_int, libc::c_int) {
+    let mut fds = [0 as libc::c_int; 2];
+    assert_eq!(
+        unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) },
+        0,
+        "socketpair(2) failed"
+    );
+    (fds[0], fds[1])
+}
 
 /// A pipe whose ends close with it.
 struct Pipe {
@@ -292,6 +304,7 @@ fn file_identity(fd: RawFd) -> Option<(u64, u64)> {
 
 mod backend;
 mod bridge;
+mod bytes;
 mod descriptor;
 mod fileops;
 mod gone;
