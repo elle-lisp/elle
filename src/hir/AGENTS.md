@@ -244,13 +244,16 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     the callee's fragment, at the call's arity: a same-unit function's from
     the tree, another unit's from its value. It records the operand it bound
     to each parameter, and inference joins that record into the parameter
-    as it joins a call site, so the definition keeps its proofs. The graft
-    runs in `regularize` after map fusion and before dead-binding
-    elimination, and it reads no name. See
+    as it joins a call site, so the definition keeps its proofs. A call in
+    a function nothing live reaches stays a call. The graft runs in
+    `regularize` after map fusion and before dead-binding elimination, and
+    it reads no name. See
     [grafting a call](../../docs/impl/graft.md).
 
-27. **After inference, the fold deletes what the types decide.** A condition
-    or a `(type-of x)` dispatch whose answer the recorded types settle loses
-    its dead side, and a guard certain to raise cuts the statements after it.
-    The fold and the inference ascent alternate until a fold changes nothing,
-    and the operand contracts run on what the last fold left.
+27. **After inference, the fold deletes what the types decide.** A condition,
+    a `cond` clause, an `and` or `or` operand, or a `(type-of x)` dispatch
+    whose answer the recorded types settle loses its dead side. A raise keeps
+    the statements after it, because a resume reaches them, and the operand
+    contracts skip a site there. The fold and the inference ascent alternate
+    until a fold changes nothing, and the operand contracts run on what the
+    last fold left.
