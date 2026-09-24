@@ -217,6 +217,18 @@ truthy, the join of the types whose arms answer `true`. It proves that only when
 the join is exact in the lattice: `:integer` and `:float` join to Number, which
 is exact, while `:string` and `:@string` join to Top, which proves nothing.
 
+A guard also reads through the `let` a graft introduces. `(not (integer? x))`
+grafts to `%not` over a fresh local bound to the grafted `integer?`, and a
+condition that reads a `let`-bound local proves what the value it was bound to
+proves. Without that, the narrowing would stop at the first grafted wrapper: the
+stdlib's `even?` guards `%rem x 2` with exactly this condition.
+
+```lisp
+(assert (compiles? "(defn h [x] (when (not (integer? x)) (error :x)) (%bit-and x 1))
+                    (h 3) (h :k)")
+        "the guard proves x an int through the grafted not and integer?")
+```
+
 ## What a program sees
 
 - A guard that raises in a grafted body raises the same error value, from the
@@ -242,7 +254,10 @@ while `%add` keeps the negative zero. The comparison wrappers take a two-operand
 arm that tests for two numbers and reaches `%lt` and its peers, and otherwise
 validates with `check-comparable` and compares through the op as a value. `=`
 is a stdlib wrapper of the same shape over `%eq`. The number test stays in both
-until the WASM tier compares strings by content (#1268). The container wrappers
+until the WASM tier compares strings by content (#1268). A comparison's general
+arm grafts too, and compares the operands past the first pair through `apply`.
+`not` takes `%not` for one operand, so a guard written with it narrows as one
+written with `%not` does. The container wrappers
 `push`, `put`, `add` and `del` dispatch on `(type-of coll)`, and `put` takes its
 optional value through the rest list.
 

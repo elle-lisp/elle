@@ -274,8 +274,10 @@ A comparison dissolves to its op only over two numbers. `%eq` also compares
 two strings, and `%lt` orders them, but the WASM tier compares their payload
 words instead of their contents (#1268). So each comparison wrapper tests for
 two numbers before it reaches the op, and compares anything else through the
-op as a value. A call with three or more operands stays a call: the general arm
-of each variadic wrapper holds a `letrec` walker, which does not graft.
+op as a value. A call to `+`, `-` or `*` with three or more operands stays a
+call: the general arm of each holds a `letrec` walker, which does not graft. A
+comparison's general arm grafts, and compares the operands past the first pair
+through `apply`.
 
 ## Intrinsics as callable values
 
