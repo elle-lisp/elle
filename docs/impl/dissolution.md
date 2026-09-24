@@ -173,8 +173,8 @@ predecessor's survivors/mapped values, a `map` on its predecessor's survivors);
 only the *interleaving* of the two lambdas' calls differs, which the gate makes
 unobservable. This is why a mixed chain is gated identically to a homogeneous one:
 a mixed chain is always length ≥ 2, so it always carries the reorder requirement,
-and a non-reorder-safe stage (a variadic comparison like `>`, which routes through
-`apply`) declines the whole composition — the chain then falls back to fusing only
+and a non-reorder-safe stage (a predicate that prints, which signals `:io`)
+declines the whole composition — the chain then falls back to fusing only
 its inner reorder-safe run. A **capture** is a second cross-element channel and
 carries no signal at all, so a composition additionally requires every lambda to be
 non-capturing (§ "Captures"). Reordering is otherwise observable only through a

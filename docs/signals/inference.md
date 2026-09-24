@@ -38,9 +38,16 @@ The analyzer accumulates both from the body:
 5. A construct that checks something at run time, and raises `:error` when
    the check fails. The list is below.
 
+A binding in this file that names a primitive, as `(def eqv %eq)` does, has
+that primitive's signal and arity. A call through it signals what a call to the
+primitive does.
+
 ```lisp
 (def sig (signal-of "(defn gen [] (yield 1))" :gen))
 (assert (= |:yield| (get sig :bits)))
+
+(def sig (signal-of "(def eqv %eq) (defn same? [a b] (eqv a b))" :same?))
+(assert (get sig :silent) "a call through eqv signals what %eq does")
 
 (def sig (signal-of "(defn call [f x] (f x))" :call))
 (assert (= |0| (get sig :propagates)) "call passes on parameter 0's signal")

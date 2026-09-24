@@ -60,12 +60,21 @@ A call grafts when all of these hold:
   `&keys` and `&named` decline. No parameter is mutated in the body.
 - The call's operand count selects a body that closes as an `HirFragment`
   ([the HIR design](hir.md)). A body that holds a `lambda`, a `letrec`, a loop,
-  an `assign` or a `define` does not close, and its calls stay calls.
-- The function is not recursive. A function this unit defines that calls
-  itself, directly or through a cycle of this unit's functions, never grafts,
-  and neither does another unit's function whose body calls itself. Nor does
-  the graft graft a function inside its own graft, which bounds a cycle that
-  runs through several units.
+  a `block`, an `assign` or a `define` does not close, and its calls stay
+  calls.
+- The selected body does not recurse. Recursion is judged per arm. An arm of a
+  function this unit defines recurses when it calls the function again,
+  directly or through a cycle of this unit's functions. An arm of another
+  unit's function recurses when it calls the function's own name. Only a call
+  with no spliced operand counts, because only such a call could graft again.
+  Nor does the graft graft a function inside its own graft, which bounds a
+  cycle that runs through several units.
+- The selected body propagates no parameter's signal. Each node of a grafted
+  body keeps the signal inferred where the function was defined, and a
+  parameter's position means nothing at the call site.
+- Inside a lambda, every binding of this unit that a same-unit body names is
+  one the lambda captures or binds. The analyzer fixed the captures before the
+  graft runs, so a body that names another binding stays a call there.
 
 A call that fails any of these stays the call it was. Nothing else is asked:
 there is no declaration and no list of names. A stdlib function and a function
@@ -84,6 +93,12 @@ defined it and stored when the lambda lowers. The graft reads the fragment off
 the value the binding holds. A user binding that shadows `+` holds a different
 value, so it can never reach `+`'s body.
 
+Such a fragment names its free globals by name. The graft resolves each one
+among the bindings the runtime supplies to this unit: the primitives and the
+stdlib's exports. A global that does not resolve keeps the call a call, so the
+stdlib exports every helper a wrapper's body names, such as `dynamic-lt` and
+`check-comparable`.
+
 The stdlib disk cache stores each template's fragment with the template
 ([the stdlib cache](stdlib-cache.md)). A template hydrated from an image carries
 none yet, so a call to it stays a call ([booting from an image](image/boot.md)).
@@ -94,7 +109,7 @@ A function this unit defines keeps its definition, and its parameters take their
 types from the calls this unit makes to it ([type inference](typeinfer.md)).
 Grafting a call removes it from the tree, so the graft records what the call
 would have contributed. For each parameter it notes the operand it bound: the
-caller's binding when the operand was an immutable `Var`, the literal's type
+caller's binding when the operand was a `Var` nothing writes, the literal's type
 when it was an immediate literal, or the fresh local the `let` bound. The ascent joins those records into the parameter's type
 exactly as it joins a call site's operand. So a definition every caller passes
 ints to still proves `%mul x x`, even when no call to it is left:
@@ -108,9 +123,11 @@ ints to still proves `%mul x x`, even when no call to it is left:
 
 The graft binds each parameter to its operand in the order the operands are
 written, so the evaluation order of the call is kept. An operand that is an
-immediate literal, or a `Var` naming an immutable, unmutated binding, replaces
-the parameter directly in the body. Every other operand is bound by a `let` to a
-fresh local first. The direct replacement matters for the fold: a guard in the
+immediate literal, or a `Var` naming a binding nothing writes, replaces the
+parameter directly in the body. Such a binding holds one value for the whole
+body. The test is that nothing writes it, not that it is immutable, because a
+`match` pattern's variable is never marked immutable. Every other operand is
+bound by a `let` to a fresh local first. The direct replacement matters for the fold: a guard in the
 grafted body then tests the caller's own binding, and its fact narrows that
 binding.
 
@@ -254,8 +271,10 @@ while `%add` keeps the negative zero. The comparison wrappers take a two-operand
 arm that tests for two numbers and reaches `%lt` and its peers, and otherwise
 validates with `check-comparable` and compares through the op as a value. `=`
 is a stdlib wrapper of the same shape over `%eq`. The number test stays in both
-until the WASM tier compares strings by content (#1268). A comparison's general
-arm grafts too, and compares the operands past the first pair through `apply`.
+until the WASM tier compares strings by content (#1268). `apply` is a macro, so
+a comparison's general arm compares the operands past the first pair through
+the spliced call `(< b ;more)`. That call does not count as recursion, so the
+general arm grafts, and it leaves the one spliced call, which stays a call.
 `not` takes `%not` for one operand, so a guard written with it narrows as one
 written with `%not` does. The container wrappers
 `push`, `put`, `add` and `del` dispatch on `(type-of coll)`, and `put` takes its
@@ -266,7 +285,8 @@ optional value through the rest list.
 - `hir::typeinfer::tests::graft::*` — which calls graft. Each arithmetic and
   comparison wrapper over two proven operands leaves its op and no guard; an
   unproven pair grafts and keeps its runtime check. Three operands keep an
-  arithmetic call and graft a comparison to `apply`, and a spliced operand
+  arithmetic call and graft a comparison to one spliced call, and a spliced
+  operand
   keeps the call. A user binding named `+` never reaches the stdlib body, a
   recursive function stays a call, a `(numeric!)` parameter keeps its floor in
   the graft, and a function the program defines grafts while its definition
