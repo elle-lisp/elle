@@ -7,9 +7,11 @@ in **call position** is a compile-time type-checked request for the fast
 instruction: the compiler either **proves** the call satisfies the op's
 soundness contract and lowers it, or **rejects** the program with a compile
 error carrying the call's span. There is no runtime validation in call
-position and no unchecked dialect. Two gaps let misuse through today: code
-compiled by `eval` skips the proof (#1240), and a `(numeric!)` parameter is
-never checked against its callers (#1238).
+position and no unchecked dialect. Three gaps let misuse through today: code
+compiled by `eval` skips the proof (#1240), a `(numeric!)` parameter is never
+checked against its callers (#1238), and a site after a statement certain to
+raise is not checked. Only a resume of that raise reaches the site
+([grafting a call](impl/graft.md)).
 
 ## When to use intrinsics
 

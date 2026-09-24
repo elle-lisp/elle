@@ -76,10 +76,34 @@ A call grafts when all of these hold:
 - Inside a lambda, every binding of this unit that a same-unit body names is
   one the lambda captures or binds. The analyzer fixed the captures before the
   graft runs, so a body that names another binding stays a call there.
+- The call sits in live code (see "Code nothing reaches").
 
 A call that fails any of these stays the call it was. Nothing else is asked:
 there is no declaration and no list of names. A stdlib function and a function
 the program defines graft alike.
+
+### Code nothing reaches
+
+Code outside every lambda is live. A lambda written in live code is live,
+unless it initializes a binding: then it is live when live code names that
+binding, as a callee or as a value. A lambda that nothing live reaches holds
+no call the graft replaces.
+
+Such a function's parameters take no type from any call, so they prove nothing
+([type inference](typeinfer.md)). A body grafted there would put the callee's
+ops over operands that prove nothing. The same ops in the callee's own
+definition prove against the callers that do exist. Below, `go` calls `helper`
+and nothing calls `go`, so the program compiles only while that call stays a
+call:
+
+```lisp
+(assert (compiles? "(defn plain [n]
+                      (letrec [helper (fn [x] (%sub x 1))
+                               go (fn [m] (helper m))]
+                        (helper n)))
+                    (plain 5)")
+        "the call in go stays a call, and helper's x is proven by (helper n)")
+```
 
 ### Where the body comes from
 
@@ -185,6 +209,20 @@ Every form in that grammar is free of effects, so a decided condition is removed
 whole. An `if` becomes its taken branch. A `(match (type-of x) …)` whose live
 arm is decided becomes that arm's body.
 
+A `cond` loses each clause whose test decides false. A clause whose test
+decides true becomes the `cond`'s else, and the clauses after it go. An `and`
+or an `or` stops at an operand that decides it: an `and` at a false operand, an
+`or` at a true one. The operands after that one never run, so they go. An
+operand before the last that decides the other way goes too, because its value
+is never the result. So a literal operand the graft wrote in place of a
+parameter never reaches an op its type test rules out:
+
+```lisp
+(assert (not (inf? nil)) "the and stops at (float? nil)")
+(assert (compiles? "(defn f [x] (and (%int? x) (%bit-and x 1))) (f \"s\")")
+        "the %bit-and after the false operand goes")
+```
+
 The fold asks no question about where the code came from. A branch the
 programmer wrote is deleted exactly as a grafted one is, so a site inside a
 guard that contradicts its operand's type is gone before the contract check,
@@ -197,12 +235,38 @@ rather than rejected by it:
 
 ### Certain divergence
 
-A guard whose condition is decided true and whose branch diverges ends the
-sequence it sits in. The fold deletes the statements after it. Without this
-rule, `(+ "a" 1)` would stop compiling: the guard's fall-through fact meets a
-string with Number, the narrowing hands `%add` a Bottom operand, and the
-contract rejects the site. The fold and the narrowing read one lattice, so every
-Bottom the narrowing makes is a condition the fold decides first.
+A statement diverges when no path through it reaches the next statement: every
+path raises, leaves through a `break`, or loops back through a `recur`. A
+`block` diverges only when its tail diverges and no `break` inside it names
+the block. Such a `break` leaves the block for the statement after it:
+
+```lisp
+(defn after-inner []
+  "The value of the statement after a block its own break leaves."
+  (block :outer (block :inner (break :inner 1)) :after))
+(assert (= (after-inner) :after) "the inner block does not diverge")
+```
+
+The guard narrowing reads this: a statement after a guard whose branch
+diverges knows the guard's condition was false ([type inference](typeinfer.md)).
+
+The fold deletes no statement from a sequence. A raise does not end its
+sequence, because an `:error` signal is resumable. A parent fiber that catches
+the error can resume the child, and the child continues with the statement
+after the raise ([fiber primitives](../signals/primitives.md)):
+
+```lisp
+(def resumed (fiber/new (fn [] (emit :error :stop) :done) |:error|))
+(fiber/resume resumed)
+(assert (= (fiber/resume resumed :again) :done) "the statement after the raise runs")
+```
+
+That leaves a site no type proves. In `(+ "a" 1)` the fold decides the guard on
+`"a"` certain to raise, and the `%add` after it reads a string. So the contract
+check skips every site after a diverging statement in the same sequence. Only a
+resume reaches such a site, and it runs over the operand the guard rejected, as
+the op after an undecided guard does. It lowers without a proof: the LIR reads
+no operand as a type inference did not prove ([LIR](lir.md)).
 
 ```lisp
 (defn raises? [thunk]
@@ -291,13 +355,17 @@ optional value through the rest list.
   keeps the call. A user binding named `+` never reaches the stdlib body, a
   recursive function stays a call, a `(numeric!)` parameter keeps its floor in
   the graft, and a function the program defines grafts while its definition
-  still proves its parameters.
+  still proves its parameters. A call inside a function nothing calls stays a
+  call.
 - `hir::typeinfer::tests::fold::*` — what the fold decides: a guard over a
   proven operand, a `type-of` dispatch over a proven container in the program
-  and in the stdlib, a certain raise that cuts what follows it, a guard that
-  contradicts its operand, a deletion that narrows a join, a guard that proves
-  through a grafted predicate and through a graft's `let`, a dead arm that
-  binds a hoisted cell, and the error bit a dissolved body loses.
+  and in the stdlib, a certain raise that keeps what follows it, a resume that
+  runs the statement after a raise, a guard that contradicts its operand, a
+  deletion that narrows a join, a guard that proves through a grafted
+  predicate and through a graft's `let`, a dead arm that binds a hoisted cell,
+  and the error bit a dissolved body loses. It also pins a `cond` clause and
+  the `and` and `or` operands a decided test removes, and a block its own
+  `break` leaves, which proves nothing after it.
 - `compiler::stdlib_cache::tests::fragment` — a stdlib restored from the disk
   cache grafts as a compiled one does.
 - [the graft corpus test](../../tests/impl/graft.lisp) — every arity and every

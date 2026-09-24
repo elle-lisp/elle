@@ -131,6 +131,38 @@ a value proves nothing about its parameters (§ "What still does not prove"):
         "the dissolved + adds two proven ints")
 ```
 
+## What a branch and a block leave
+
+A guard's fact holds inside the branch it governs. When the branch ends, the
+binding takes back the type it had before the fact, unless the branch wrote the
+binding. Then the binding takes the join of that type and what the write left,
+because the write outlives the branch. A `(type-of x)` arm's override ends the
+same way. So the code after a loop reads what the loop body wrote:
+
+```lisp
+(defn walk [& xs]
+  "Whether a loop of at most ten turns walks xs to its end."
+  (def @cur xs)
+  (def @n 0)
+  (while (and (pair? cur) (< n 10))
+    (assign n (+ n 1))
+    (assign cur (rest cur)))
+  (if (pair? cur) :stopped :walked))
+(assert (= (walk 1 2 3) :walked) "cur is the empty list the body wrote")
+```
+
+A `block` evaluates to its tail, or to the value of a `break` that names it. So
+its type joins the tail's type with the type of every such `break` value. A
+`break` leaves no value where it stands, so its own type is Bottom:
+
+```lisp
+(defn pick [x]
+  "Which kind of value the block hands back."
+  (let [v (block :b (when (> x 0) (break :b "s")) 1)]
+    (if (int? v) :int :other)))
+(assert (= (pick 5) :other) "v joins the string the break carries")
+```
+
 ## An exhausted budget widens
 
 The budget is ten passes, and nothing guarantees the ascent fits in it.
@@ -336,6 +368,9 @@ The pass has no flow, so it cannot order the write against a call:
   SSA-renamed function-local write that still proves.
 - `hir::typeinfer::tests::destructure::*` — a read of a destructured binding,
   from a `def` and from a `var`, is never typed by its `nil` placeholder.
+- `hir::typeinfer::tests::branch::*` — a write inside a guarded branch or a
+  `(type-of x)` arm outlives the branch, and a block's type joins the values
+  of the `break`s that name it.
 - `hir::typeinfer::tests::graft::*` and `hir::typeinfer::tests::fold::*` —
   what the graft replaces and what the fold decides, pinned in
   [grafting a call](graft.md).
