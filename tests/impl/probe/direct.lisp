@@ -174,10 +174,10 @@
    # INTRINSIC form of this shape (runtime::tests::ownership::
    # region_ownership_capture_back_edge_cycle_reclaims, without_stdlib /
    # %array-push). CLOSED for the full-stdlib form too: the `(push m c)` that
-   # records the `m` contains `c` edge monomorphizes to `%push-array-mut`
-   # cross-unit (mutable @array is a self-reclaiming op,
-   # src/hir/typeinfer/monomorphize.rs), so the containment reaches the cut exactly
-   # as the intrinsic form does — no wrapper to hide it.
+   # records the `m` contains `c` edge grafts, and the fold leaves the one
+   # mutable-array arm the proven `@array` selects (docs/impl/graft.md), so the
+   # containment reaches the cut exactly as the intrinsic form does — no
+   # wrapper to hide it.
    ["capture-backedge"
     (fn [j]
       (let [root @[]

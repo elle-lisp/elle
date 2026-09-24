@@ -12,22 +12,25 @@
 # (a native fresh-result region whose contents are few). `r:stmt-run` drives a
 # thunk b times as a discarded STATEMENT (non-tail), the while-loop shape a
 # per-call leak needs to surface.
-# Native pass-through / closure tail-returns, for the discarded-tail-return class.
-(defn ora-ret-first [xs]
+#
+# The discarded-tail-return helpers take an unused `&opt` parameter. The graft
+# refuses such a function, so each call stays a call whose tail returns a value
+# (docs/impl/graft.md).
+(defn ora-ret-first [xs &opt o]
   (first xs))
-(defn ora-mk [x]
+(defn ora-mk [x &opt o]
   {:v x})
-(defn ora-ret-closure [x]
+(defn ora-ret-closure [x &opt o]
   (ora-mk x))
 
 (println "── folded suite: stdlib / native-tail / discarded-tail canaries ──")
 
-# Stdlib per-call leak (F1a — the transform-scratch retain). The leaked
-# objects are INTERMEDIATE scratch, NOT the recursive helper (which reclaims — the
-# `recur-local-*` probes read 0) and NOT, mostly, cons cells. `fold`/`reduce`
-# `(->array coll)` once and INDEX-walk through the shared self-recursive
-# `core-fold-step` driver (core.lisp), so neither the first/rest copy-scratch nor a
-# per-call `go` closure exists to leak.
+# The transform scratch. What a stdlib call can strand is INTERMEDIATE scratch,
+# not the recursive helper (which reclaims — the `recur-local-*` probes read 0)
+# and not, mostly, cons cells. `fold`/`reduce` `(->array coll)` once and
+# INDEX-walk through the shared self-recursive `core-fold-step` driver
+# (core.lisp), so neither a first/rest copy-scratch nor a per-call `go` closure
+# exists.
 #
 # `stdlib-concat` and `stdlib-fold` are controls at 0. Two readings of one
 # window close them. The accumulator
@@ -50,8 +53,8 @@
 # higher-order calls compounds the collection-builder over-keep — a rate that scales
 # with composition DEPTH rather than staying a per-call constant. A control at 0.
 #
-# The last mechanism it needed was a placement one. Each of the tower's helpers is a
-# cell-free self-recursive `letrec` closure whose demise the binder carries out to the
+# The trap is a placement one. Each of the tower's helpers is a cell-free
+# self-recursive `letrec` closure whose demise the binder carries out to the
 # `Letrec` node, and every stdlib entry point the tower calls dispatches through a
 # branch whose arms tail-call out — so that release was emitted at a merge label no arm
 # arrives at. The frame-exit relocation replicates it ahead of each arm's `TailCall`,
@@ -90,30 +93,22 @@
         (from-list result (first colls))))))
 (r:drive "zip-tower" (r:stmt-run (fn [] (zip-tower [1 2] [3 4]))))
 
-# Dispatch-wrapper IMMUTABLE-input residual — CLOSED by cross-unit monomorphization
-# (F1b; `hir/typeinfer/monomorphize.rs`). `put`/`del` on an immutable
-# aggregate used to route through the whole wrapper — a `(match (type-of coll) …)` that
-# used `coll` in EVERY arm with a single `decref_point` in one, stranding the owned-param
-# container reference on the other paths PLUS a redundant fresh-result retain. The
-# wrapper's definition lives in the stdlib unit, so the intra-unit monomorphize pass
-# never reached a user call and only the container half was recoverable (by compensation).
-# The cross-unit dispatch-wrapper registry now collapses `(put {…} …)` to the direct
-# `%put-struct` at the proven immutable type — the wrapper, and every strand it carried,
-# cease to exist, with no compensation gate. These are now CLOSED controls pinning that
-# collapse (the one arm the registry leaves alone is a MUTABLE in-place `del`, which stays
-# on its container compensation — `monomorphize.rs`, `is_mutable_container`).
+# The dispatch wrappers over an IMMUTABLE input. A call to `put` or `del` grafts,
+# and the fold keeps the one `(type-of coll)` arm the proven type selects, so
+# `(put {…} …)` is the direct `%put-struct` (docs/impl/graft.md). Controls at 0.
+# The counter-factual: the whole wrapper ran, and it used `coll` in EVERY arm
+# with one `decref_point` in one arm, so the other paths stranded the container
+# reference and a redundant fresh-result retain.
 (r:drive "native-tail-put-struct" (r:stmt-run (fn [] (put {:a 1} :b 2)))
          :on [r:regions])
 (r:drive "native-tail-put-array" (r:stmt-run (fn [] (put [10 20] 0 99)))
          :on [r:regions])
 (r:drive "native-tail-del-ctl" (r:stmt-run (fn [] (del {:a 1 :b 2} :a)))
          :on [r:regions])
-# The store family beyond `put`/`del`: `push`/`add` on an immutable container had the
-# SAME cross-unit wrapper strand, and leaked identically (measured 1/op for array/set,
-# 2/op for the byte-copy string push, with the cross-unit path disabled) — but the F1b
-# probe set never covered them, so the leak sat in the oracle's blind spot until the
-# same registry collapse closed it. These are CLOSED controls pinning that the store
-# family is handled generically, not just `put`.
+# The store family beyond `put`/`del`: `push` and `add` on an immutable container
+# take the same path. The counter-factual reads 1/op for an array or a set and
+# 2/op for the byte-copy string push. These controls pin that the store family
+# collapses as a whole, not just `put`.
 (r:drive "native-tail-push-array" (r:stmt-run (fn [] (push [1 2] 3)))
          :on [r:regions])
 (r:drive "native-tail-add-set" (r:stmt-run (fn [] (add (set 1 2) 3)))
@@ -122,12 +117,10 @@
          :on [r:regions])
 # The MUTABLE fresh-result funnels — `push` on a mutable @bytes (`%bytes-push`, no
 # in-place variant, returns fresh) and `pop` on a mutable @string (`%pop-string`,
-# returns a fresh grapheme). Their raw ops reclaim (0/op direct), but the polymorphic
-# wrapper stranded the mutable container: NOT a pass-through funnel, so the container
-# compensation (which closes `%push-array-mut`/`%put-struct-mut`) never covered them.
-# A matrix-coverage gap the whole-family sweep surfaced (push/pop on every type×
-# mutability). Closed by extending cross-unit monomorphization to every self-reclaiming
-# op on any mutability — only the mutable in-place `%del-*-mut` (open F5) is held back.
+# returns a fresh grapheme). Their raw ops reclaim (0/op direct). The trap: they
+# are not pass-through funnels, so the container compensation that closes
+# `%push-array-mut`/`%put-struct-mut` does not cover them, and a whole wrapper
+# around them strands the mutable container. The fold keeps the one arm here too.
 (r:drive "native-tail-push-mut-bytes" (r:stmt-run (fn [] (push (@bytes 1 2) 3)))
          :on [r:regions])
 (r:drive "native-tail-pop-mut-string" (r:stmt-run (fn [] (pop (@string "abc"))))
@@ -136,13 +129,11 @@
 # ── The read/copy class ───────────────────────────────────────────────
 # The container READ and single-value COPY primitives — `first`/`rest`/`get`/`has?`/
 # `length`/`last`/`->array`/`->list`/`keys`/`values`/`slice`. Every one RECLAIMS
-# (0/op): the F1a copy-scratch leak is COMPOSITIONAL — it lives in the HOF/transform
+# (0/op): transform scratch is COMPOSITIONAL — it lives in the HOF/transform
 # BODIES (`take`/`drop`/`reverse`/`concat`/`merge`/`distinct`/…, read in the
 # direct-loop rows), never in a standalone read of a discarded result, even the
-# tail-COPY `(rest arr)`. These are controls at 0, from the same whole-matrix sweep
-# (push/pop on every type × mutability) that found the push/add and
-# push-mut-bytes/pop-mut-string gaps. A regression that makes any read primitive
-# strand its result fails here loud.
+# tail-COPY `(rest arr)`. These are controls at 0: a read primitive that strands
+# its result fails here.
 (r:drive "read-first" (r:stmt-run (fn [] (first [1 2 3]))) :on [r:regions])
 (r:drive "read-rest" (r:stmt-run (fn [] (rest [1 2 3]))) :on [r:regions])
 (r:drive "read-last" (r:stmt-run (fn [] (last [1 2 3]))) :on [r:regions])

@@ -194,8 +194,8 @@ fn single_filter_dissolves_to_guarded_push() {
 /// A `filter`-of-`filter` fuses to a SINGLE loop with the guards nested: no
 /// `filter`, both predicate ops (`even?` and `integer?`) inline, one
 /// accumulator, and two `if`s (one per predicate). The trap: a length-2
-/// composition fuses only over reorder-safe predicates. A variadic `>` routes
-/// through `apply` and is not reorder-safe, so this pin uses `even?`/`integer?`,
+/// composition fuses only over reorder-safe predicates. A predicate that prints
+/// signals `:io` and is not reorder-safe, so this pin uses `even?`/`integer?`,
 /// which carry only `SIG_ERROR`.
 #[test]
 fn composed_filters_fuse_to_one_loop() {
@@ -238,7 +238,7 @@ fn filter_over_var_bound_immutable_array_fuses() {
 }
 
 /// Reorder gate on a MIXED chain: `(map f (filter p xs))` where the predicate
-/// is a variadic `>` (routes through `apply`, so NOT reorder-safe). A mixed
+/// prints (it signals `:io`, so it is NOT reorder-safe). A mixed
 /// chain is length ≥ 2, so it always carries the reorder requirement; the
 /// non-reorder-safe predicate declines the whole composition, and the chain
 /// falls back to fusing only its inner reorder-safe run — the `filter` fuses on
@@ -248,7 +248,7 @@ fn filter_over_var_bound_immutable_array_fuses() {
 #[test]
 fn mixed_chain_with_non_reorder_safe_stage_fuses_inner_only() {
     let (hir, arena, mut rt) =
-        compile("(map (fn [x] (* x 2)) (filter (fn [w] (> w 1)) [1 2 3 4]))");
+        compile("(map (fn [x] (* x 2)) (filter (fn [w] (println w) (> w 1)) [1 2 3 4]))");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map"),

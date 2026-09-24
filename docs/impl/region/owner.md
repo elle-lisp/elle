@@ -207,7 +207,7 @@ only for a discarded returned *cycle*, which the baseline never frees at all. Th
 tier** of the owner lattice is reached structurally, not by a distinct opcode: a consumer
 that parks moves its node into the suspended frame like any activation state, and the
 terminal-fiber teardown gathers parked nodes under the fiber node for one set-drop — the
-transfer runtime below. Pinned by `region::infer::tests::adopt::transfer_adopts_*` (admission,
+transfer runtime below. Pinned by `region::infer::tests::adopt::transfer::transfer_adopts_*` (admission,
 the funnel-recovered face; the refusal family) and at runtime by
 `runtime::tests::ownership::region_ownership_reclaims_returned_cycle_across_calls`,
 `…_reclaims_fiber_terminal_cycle`, and `…_transfer_adopt_rides_parks_and_fiber_teardown`

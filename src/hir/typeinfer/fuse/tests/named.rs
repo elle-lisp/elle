@@ -111,19 +111,18 @@ fn named_fn_with_let_body_inlines() {
     );
 }
 
-/// Decline: a named function whose body introduces a binding through a form a
-/// fragment cannot close over (a `match` pattern — `let` is admitted, but a
-/// `match` binding is not) stays a plain `map` call, so the definition's own
-/// pattern bindings are never duplicated. The admitted forms are a positive list
-/// of pure-expression forms plus `let`; anything else declines
-/// correct-by-construction.
+/// Decline: a named function whose body holds a form a fragment cannot close
+/// over (a `block` — `let` and `match` are admitted, but a `block` is not)
+/// stays a plain `map` call, so the definition's own body is never duplicated.
+/// The admitted forms are a positive list of pure-expression forms plus `let`
+/// and `match`; anything else declines correct-by-construction.
 #[test]
-fn named_fn_with_match_body_declines() {
-    let (hir, arena, mut rt) = compile("(defn g [x] (match x _ (* x 2))) (map g [1 2 3])");
+fn named_fn_with_block_body_declines() {
+    let (hir, arena, mut rt) = compile("(defn g [x] (block :g (* x 2))) (map g [1 2 3])");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map"),
-        "a named fn with a `match` body must not inline; callees were {cs:?}",
+        "a named fn with a `block` body must not inline; callees were {cs:?}",
     );
 }
 

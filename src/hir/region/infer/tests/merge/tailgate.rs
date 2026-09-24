@@ -1,17 +1,20 @@
-// audited: 2026-09-09
-// ── Which body tails the closure-cycle merge admits ──────────────────
-//
+// audited: 2026-09-23
 // docs/impl/region/letrec.md
-//
-// A `letrec` body's tail call replaces the frame, which strands the merged
-// arena's binding-scope `DecrefRegion` as dead code. Every such tail must
-// therefore supply a release channel: a MEMBER callee rides the existing
-// stranded-cycle deferral, a NON-member callee rides the explicit arena adopt
-// (`RegionInfo::cycle_tail_release`). What the non-member channel still refuses
-// is a cycle member carried into the call BY-MOVE, whose new activation's
-// owned-parameter release would decref the arena a second time — and that is a
-// claim about a callee which can REPLACE the frame, so a callee the compiler
-// reads as a native is admitted with the members riding in.
+//! Which body tails the closure-cycle merge admits, and which the by-move boundary refuses.
+//!
+//! A `letrec` body's tail call replaces the frame, which strands the merged
+//! arena's binding-scope `DecrefRegion` as dead code. Every such tail must
+//! therefore supply a release channel: a MEMBER callee rides the existing
+//! stranded-cycle deferral, a NON-member callee rides the explicit arena adopt
+//! (`RegionInfo::cycle_tail_release`). What the non-member channel still refuses
+//! is a cycle member carried into the call BY-MOVE, whose new activation's
+//! owned-parameter release would decref the arena a second time — and that is a
+//! claim about a callee which can REPLACE the frame, so a callee the compiler
+//! reads as a native is admitted with the members riding in.
+//!
+//! The foreign callee `g` takes an unused `&opt` parameter, because the graft
+//! refuses such a function. Without it, `(g …)` becomes its body, and the
+//! body's tail is no call at all (docs/impl/graft.md).
 
 use super::*;
 
@@ -28,7 +31,7 @@ fn merge_admits_in_lambda_cycle_with_foreign_tail_callee() {
     // so its `(g r)` tail is an ordinary `Call`.
     let mut symbols = SymbolTable::new();
     let (hir, arena) = compile_fhir(
-        "(def g (fn [x] x)) \
+        "(def g (fn [x &opt o] x)) \
          (def f (fn [k] (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
                                  od (fn [m] (if (%lt m 1) :odd (ev (%sub m 1))))] \
                           (g (ev k))))) \
@@ -125,7 +128,7 @@ fn merge_refuses_member_passed_by_move_to_foreign_tail() {
     // proven by forwarding from od's `(ev (%sub m 1))`).
     let mut symbols = SymbolTable::new();
     let (hir, arena) = compile_fhir(
-        "(def g (fn [x] x)) \
+        "(def g (fn [x &opt o] x)) \
          (def f (fn [k] (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
                                  od (fn [m] (when (%not (%int? m)) (error :m)) \
                                       (if (%lt m 1) :odd (ev (%sub m 1))))] \

@@ -1,3 +1,11 @@
+// audited: 2026-09-23
+// docs/impl/region/letrec.md
+//! Where the closure-cycle merge stops: a returned cycle, a handed-out member, and a fiber crossing.
+//!
+//! The foreign callee `g` takes an unused `&opt` parameter, because the graft
+//! refuses such a function. Without it, `(g …)` becomes its body, and the call
+//! each test places the cycle against is gone (docs/impl/graft.md).
+
 use super::*;
 
 #[test]
@@ -96,7 +104,7 @@ fn merge_admits_returned_cycle_on_non_member_tail() {
     // 6 objects per call it closes.
     let mut symbols = SymbolTable::new();
     let (hir, arena, info) = analyze_cycle_with_effects(
-        "(def g (fn [x] x)) \
+        "(def g (fn [x &opt o] x)) \
          (def f (fn [k] \
            (letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
                          (if (%lt m 1) ev (od (%sub m 1)))) \
@@ -195,7 +203,7 @@ fn merge_admits_returned_cycle_bound_out_of_tail_position() {
     // an enclosing node away.
     let mut symbols = SymbolTable::new();
     let (hir, arena, info) = analyze_cycle_with_effects(
-        "(def g (fn [x] x)) \
+        "(def g (fn [x &opt o] x)) \
          (def f (fn [k] \
            (let [c (letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
                                  (if (%lt m 1) ev (od (%sub m 1)))) \
@@ -306,7 +314,7 @@ fn merge_refuses_returned_cycle_whose_body_hands_out_nothing() {
     // body's tail naming the member itself.
     let mut symbols = SymbolTable::new();
     let (hir, arena, info) = analyze_cycle_with_effects(
-        "(def g (fn [x] x)) \
+        "(def g (fn [x &opt o] x)) \
          (def f (fn [k] \
            (let [c (letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
                                  (if (%lt m 1) ev (od (%sub m 1)))) \

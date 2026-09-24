@@ -114,11 +114,11 @@ fn reduce_dissolves_like_fold() {
 
 /// The reorder gate counts the fold as an op: a lone fold (length 1) threads
 /// its accumulator strictly in element order — exactly the stdlib fold — so it
-/// never reorders and fuses even with a NON-reorder-safe body (`>` routes
-/// through `apply`). The single-op path carries no reorder requirement.
+/// never reorders and fuses even with a NON-reorder-safe body (one that prints,
+/// and so signals `:io`). The single-op path carries no reorder requirement.
 #[test]
 fn single_fold_with_non_reorder_safe_body_still_fuses() {
-    let (hir, arena, mut rt) = compile("(fold (fn [a x] (if (> a x) a x)) 0 [3 1 2])");
+    let (hir, arena, mut rt) = compile("(fold (fn [a x] (println x) (if (> a x) a x)) 0 [3 1 2])");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !fold_stays_a_call(&cs),
@@ -136,7 +136,7 @@ fn single_fold_with_non_reorder_safe_body_still_fuses() {
 #[test]
 fn fold_over_non_reorder_safe_prefix_fuses_inner_only() {
     let (hir, arena, mut rt) =
-        compile("(fold (fn [a x] (+ a x)) 0 (filter (fn [w] (> w 1)) [1 2 3 4]))");
+        compile("(fold (fn [a x] (+ a x)) 0 (filter (fn [w] (println w) (> w 1)) [1 2 3 4]))");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
         fold_stays_a_call(&cs),

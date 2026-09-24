@@ -8,19 +8,19 @@
 # The codegen pins — both dispatches gone, both body ops inline, one accumulator,
 # one guard `if` — are in src/hir/typeinfer/fuse/tests/collect.rs.
 #
-# The un-fused oracles wrap their bodies in a `match`, a binding-introducing form
-# a fragment cannot close over, so they stay plain staged `map`/`filter` calls
+# The un-fused oracles wrap their bodies in a `block`, which a fragment cannot
+# close over, so they stay plain staged `map`/`filter` calls
 # that still mint the intermediate array the realization check weighs.
 
 (defn t10 [x]
-  (match x
-    _ (* x 10)))
+  (block :oracle
+    (* x 10)))
 (defn t3 [x]
-  (match x
-    _ (* x 3)))
+  (block :oracle
+    (* x 3)))
 (defn evp [x]
-  (match x
-    _ (even? x)))
+  (block :oracle
+    (even? x)))
 
 # ── map-of-filter: filter first, then transform the survivors ──────────
 (assert (= (map (fn [x] (* x 10)) (filter (fn [y] (even? y)) [1 2 3 4 5 6]))
@@ -63,12 +63,17 @@
         "fused mixed result is frozen")
 
 # ── the reorder gate governs a mixed chain exactly as a homogeneous one ─
-# `>` routes through `apply`, so it is not reorder-safe: the composition declines
-# and only the inner op fuses, leaving the outer one a plain call. The value is
-# unchanged either way.
-(assert (= (map (fn [x] (* x 10)) (filter (fn [x] (> x 2)) [1 2 3 4])) [30 40])
+# A predicate that prints signals `:io`, so it is not reorder-safe: the
+# composition declines and only the inner op fuses, leaving the outer one a plain
+# call. The value is unchanged either way.
+(assert (= (map (fn [x] (* x 10))
+                (filter (fn [x]
+                          (print "")
+                          (> x 2)) [1 2 3 4])) [30 40])
         "non-reorder-safe mixed chain (inner-only fused) still computes correctly")
-(assert (= (filter (fn [x] (> x 20)) (map (fn [x] (* x 10)) [1 2 3])) [30])
+(assert (= (filter (fn [x]
+                     (print "")
+                     (> x 20)) (map (fn [x] (* x 10)) [1 2 3])) [30])
         "non-reorder-safe mixed chain, other direction, still correct")
 
 # ── Realization: the intermediate array between the two ops is gone ────
@@ -113,8 +118,8 @@
                  (filter (fn [y] (even? y))
                          (map (fn [x] (* x 3)) [0 1 2 3 4 5 6 7 8 9]))))))
 (defn add1 [z]
-  (match z
-    _ (+ z 1)))
+  (block :oracle
+    (+ z 1)))
 (def tower-unfused
   (allocs (fn [] (map add1 (filter evp (map t3 [0 1 2 3 4 5 6 7 8 9]))))))
 (assert (= (map (fn [z] (+ z 1))

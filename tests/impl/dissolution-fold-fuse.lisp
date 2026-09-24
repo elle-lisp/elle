@@ -8,27 +8,27 @@
 # The codegen pins — the dispatch gone, body ops inline, a scalar accumulator,
 # one loop — are in src/hir/typeinfer/fuse/tests/fold.rs.
 #
-# The un-fused oracles wrap their bodies in a `match`, a binding-introducing form
-# a fragment cannot close over, so they stay plain staged `fold`/`map`/`filter`
+# The un-fused oracles wrap their bodies in a `block`, which a fragment cannot
+# close over, so they stay plain staged `fold`/`map`/`filter`
 # calls that still mint the intermediate array the realization check weighs. A
 # pure body or a `let` body inlines, so `addf-let` is the fusing let-body
 # counterpart, checked by value.
 
 (defn addf [a x]
-  (match a
-    _ (+ a x)))
+  (block :oracle
+    (+ a x)))
 (defn subf [a x]
-  (match a
-    _ (- a x)))
+  (block :oracle
+    (- a x)))
 (defn t2 [x]
-  (match x
-    _ (* x 2)))
+  (block :oracle
+    (* x 2)))
 (defn t3 [x]
-  (match x
-    _ (* x 3)))
+  (block :oracle
+    (* x 3)))
 (defn evp [x]
-  (match x
-    _ (even? x)))
+  (block :oracle
+    (even? x)))
 
 # A fusing let-body combinator (a fragment closes over `let` bindings); value-checked
 # against the un-fused `addf` below.
@@ -55,9 +55,9 @@
         "left-fold order is preserved (non-commutative combinator)")
 (assert (= (fold (fn [a x] (- a x)) 100 [1 2 3 4]) (fold subf 100 [1 2 3 4]))
         "fused subtraction fold agrees with the un-fused named-fn form")
-# A fusing let-body combinator agrees with the un-fused match-body one.
+# A fusing let-body combinator agrees with the un-fused block-body one.
 (assert (= (fold addf-let 0 [1 2 3 4]) (fold addf 0 [1 2 3 4]))
-        "fused let-body combinator agrees with the un-fused match-body form")
+        "fused let-body combinator agrees with the un-fused block-body form")
 
 # ── fold-of-map: map-reduce, one loop, no intermediate array ────────────
 (assert (= (fold (fn [a x] (+ a x)) 0 (map (fn [x] (* x 2)) [1 2 3 4])) 20)
@@ -88,13 +88,19 @@
         "no survivor folds to init")
 
 # ── the reorder gate governs a fold composition exactly as a mixed one ──
-# `>` routes through `apply`, so it is not reorder-safe: the composition declines
-# and only the inner `filter` fuses. The value is unchanged either way.
-(assert (= (fold (fn [a x] (+ a x)) 0 (filter (fn [x] (> x 2)) [1 2 3 4])) 7)
+# A predicate that prints signals `:io`, so it is not reorder-safe: the
+# composition declines and only the inner `filter` fuses. The value is unchanged
+# either way.
+(assert (= (fold (fn [a x] (+ a x)) 0
+                 (filter (fn [x]
+                           (print "")
+                           (> x 2)) [1 2 3 4])) 7)
         "non-reorder-safe fold composition (inner-only fused) still correct")
 # A LONE fold has no reorder gate — it threads the accumulator in order — so a
 # non-reorder-safe body still fuses and computes correctly.
-(assert (= (fold (fn [a x] (if (> a x) a x)) 0 [3 1 4 1 5]) 5)
+(assert (= (fold (fn [a x]
+                   (print "")
+                   (if (> a x) a x)) 0 [3 1 4 1 5]) 5)
         "a lone fold with a non-reorder-safe body fuses and still computes right")
 
 # ── Realization: the intermediate array between the prefix and the fold ─

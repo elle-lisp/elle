@@ -9,19 +9,18 @@
 # loop — are in src/hir/typeinfer/fuse/tests/count.rs.
 #
 # The cross-check reference applies the same ops through named functions with a
-# `match` body — a binding-introducing form a fragment cannot close over —
-# so they stay plain staged `count`/`map`/`filter` calls and mint what the fused
-# form does not. Same value.
+# `block` body. A fragment cannot close over a `block`, so those stay plain staged
+# `count`/`map`/`filter` calls and mint what the fused form does not. Same value.
 
 (defn evp [x]
-  (match x
-    _ (even? x)))
+  (block :oracle
+    (even? x)))
 (defn nump [x]
-  (match x
-    _ (number? x)))
+  (block :oracle
+    (number? x)))
 (defn t3 [x]
-  (match x
-    _ (* x 3)))
+  (block :oracle
+    (* x 3)))
 
 # ── single count: the scalar tally ─────────────────────────────────────
 (assert (= (count (fn [x] (even? x)) [1 2 3 4 5 6]) 3)
@@ -67,12 +66,18 @@
            2) "count over a filter-of-map tower fuses to the same value")
 
 # ── the reorder gate governs a count composition exactly as a fold's ───
-# `>` routes through `apply`, so it is not reorder-safe: the composition declines
-# and only the inner `filter` fuses. The value is unchanged either way.
-(assert (= (count (fn [y] (even? y)) (filter (fn [w] (> w 1)) [1 2 3 4])) 2)
+# A predicate that prints signals `:io`, so it is not reorder-safe: the
+# composition declines and only the inner `filter` fuses. The value is unchanged
+# either way.
+(assert (= (count (fn [y] (even? y))
+                  (filter (fn [w]
+                            (print "")
+                            (> w 1)) [1 2 3 4])) 2)
         "non-reorder-safe count composition (inner-only fused) still correct")
 # A LONE count has no reorder gate, so a non-reorder-safe predicate still fuses.
-(assert (= (count (fn [x] (> x 2)) [1 2 3 4 5]) 3)
+(assert (= (count (fn [x]
+                    (print "")
+                    (> x 2)) [1 2 3 4 5]) 3)
         "a lone count with a non-reorder-safe predicate fuses and still counts")
 
 # ── the mutable-array base declines ────────────────────────────────────

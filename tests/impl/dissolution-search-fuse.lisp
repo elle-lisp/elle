@@ -11,31 +11,30 @@
 # src/hir/typeinfer/fuse/tests/search.rs.
 #
 # The cross-check reference applies each op through a named function with a
-# `match` body — a binding-introducing form a fragment cannot close over —
-# so those calls stay plain stdlib dispatches and mint what the fused form does
-# not. Same value.
+# `block` body. A fragment cannot close over a `block`, so those calls stay plain
+# stdlib dispatches and mint what the fused form does not. Same value.
 
 (defn gt2 [x]
-  (match x
-    _ (> x 2)))
+  (block :oracle
+    (> x 2)))
 (defn pos? [x]
-  (match x
-    _ (> x 0)))
+  (block :oracle
+    (> x 0)))
 (defn nump [x]
-  (match x
-    _ (number? x)))
+  (block :oracle
+    (number? x)))
 (defn evp [x]
-  (match x
-    _ (even? x)))
+  (block :oracle
+    (even? x)))
 (defn oddp [x]
-  (match x
-    _ (odd? x)))
+  (block :oracle
+    (odd? x)))
 (defn t3 [x]
-  (match x
-    _ (* x 3)))
+  (block :oracle
+    (* x 3)))
 (defn inc1 [x]
-  (match x
-    _ (+ x 1)))
+  (block :oracle
+    (+ x 1)))
 
 # ── any? — decided by the first admitted element ───────────────────────
 (assert (= (any? (fn [x] (> x 2)) [1 2 3 4]) true)
@@ -177,9 +176,12 @@
            (find-index oddp (map inc1 (filter nump [1 "a" 3 4]))))
         "the three-op composition agrees with the fully un-fused form")
 
-# A NON-reorder-safe body declines the whole composition (`>` routes through
-# `apply`), and the pre-order recursion still fuses the inner `map`. Same value.
-(assert (= (any? (fn [y] (> y 9)) (map (fn [x] (* x 3)) [1 2 3 4]))
+# A NON-reorder-safe body declines the whole composition (it prints, which
+# signals `:io`), and the pre-order recursion still fuses the inner `map`. Same
+# value.
+(assert (= (any? (fn [y]
+                   (print "")
+                   (> y 9)) (map (fn [x] (* x 3)) [1 2 3 4]))
            (any? gt2 (map t3 [1 2 3 4])))
         "the declined composition agrees with the fully un-fused form")
 

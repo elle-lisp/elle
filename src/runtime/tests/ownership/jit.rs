@@ -3,6 +3,11 @@
 // docs/impl/region/relocate.md
 //! VM≡JIT parity for the ownership forest: what each cut still reclaims when the
 //! function that owes the release runs compiled.
+//!
+//! A driving function the program calls takes an unused `&opt` parameter,
+//! because the graft refuses such a function. A call to any other known
+//! function becomes its body, and the function whose compiled code a test
+//! reads would never run (docs/impl/graft.md).
 
 use super::*;
 
@@ -158,7 +163,7 @@ fn region_ownership_defn_module_member_call_under_jit() {
           (defn fb [m] (when (%not (%int? m)) (error :m)) \
                        (put t m true) (fa (%sub m 1))) \
           (let [s {:a fa :b fb}] s)))) \
-        (def caller (fn [] ((get (mk) :a) 2)))";
+        (def caller (fn [&opt o] ((get (mk) :a) 2)))";
 
     let live_chain_growth = mid_run_discriminator(Runtime::new(), "arena/region-count");
     assert!(

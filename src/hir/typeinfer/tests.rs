@@ -8,12 +8,12 @@
 //! `rettype` for what an op's result proves, `recursion` for what a recursive
 //! call's result proves, `mutation` for what a written binding proves,
 //! `bottom` for what the lattice's start proves, `callsite` for what a call
-//! contributes where its operands and parameters do not line up, `prune` for
-//! dead-arm removal,
-//! `contract` for prove-or-reject, `graft` for which calls become their
-//! callee's body, `fold` for what the recorded types then delete.
+//! contributes where its operands and parameters do not line up,
+//! `destructure` for what a destructuring write proves, `prune` for dead-arm
+//! removal, `contract` for prove-or-reject, `graft` for which calls become
+//! their callee's body, `fold` for what the recorded types then delete.
 
-use super::infer_and_rewrite;
+use super::TypeInfo;
 use crate::hir::types::TyId;
 use crate::hir::{BindingArena, Hir, HirId, HirKind};
 use crate::symbol::SymbolTable;
@@ -21,6 +21,7 @@ use crate::symbol::SymbolTable;
 mod bottom;
 mod callsite;
 mod contract;
+mod destructure;
 mod fold;
 mod graft;
 mod mutation;
@@ -39,11 +40,21 @@ fn compile_fhir(src: &str, symbols: &mut SymbolTable) -> (Hir, BindingArena) {
     (hir, arena)
 }
 
+/// Compile `src` as `compile_fhir` does, with the types the compile itself
+/// inferred. Running inference again over the result would lose what the graft
+/// handed the compile's inference, so a test reads these.
+fn compile_typed(src: &str) -> (Hir, BindingArena, TypeInfo) {
+    let mut symbols = SymbolTable::new();
+    let mut cctx = crate::pipeline::CompileCtx::new();
+    let (hir, arena, info) =
+        crate::pipeline::compile_file_to_typed_fhir(src, &mut symbols, &mut cctx, "<test>")
+            .expect("compile");
+    (hir, arena, info)
+}
+
 /// The set of inferred node types for `src`.
 fn inferred_types(src: &str) -> Vec<TyId> {
-    let mut symbols = SymbolTable::new();
-    let (mut hir, arena) = compile_fhir(src, &mut symbols);
-    let info = infer_and_rewrite(&mut hir, &arena, &mut Default::default()).expect("infer");
+    let (_hir, _arena, info) = compile_typed(src);
     info.hir_types.values().copied().collect()
 }
 
@@ -62,9 +73,7 @@ fn intrinsic_result_types(src: &str, op: &str) -> Vec<TyId> {
         }
         h.for_each_child(|c| find(c, op, found));
     }
-    let mut symbols = SymbolTable::new();
-    let (mut hir, arena) = compile_fhir(src, &mut symbols);
-    let info = infer_and_rewrite(&mut hir, &arena, &mut Default::default()).expect("infer");
+    let (hir, _arena, info) = compile_typed(src);
     let mut found = Vec::new();
     find(&hir, op, &mut found);
     assert!(!found.is_empty(), "{src} compiled to no {op} node");
@@ -102,7 +111,7 @@ fn count_calls_to(hir: &Hir, arena: &BindingArena, name: &str) -> usize {
 
 /// Compile `src` through the file front end (which runs `infer_and_rewrite`),
 /// discarding the result and surfacing only success/failure. `Err` is the
-/// monomorphization proof obligation firing (or any earlier compile error).
+/// intrinsic operand proof obligation firing (or any earlier compile error).
 fn compile_result(src: &str) -> Result<(), String> {
     let mut symbols = SymbolTable::new();
     let mut cctx = crate::pipeline::CompileCtx::new();

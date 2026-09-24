@@ -1,8 +1,8 @@
 (elle/epoch 12)
-# ── Signal analysis tests ─────────────────────────────────────────────
+# audited: 2026-09-23
+# Which signal bits each function carries, and how the bits compose across calls.
 #
-# Lock down expectations for compute_inferred_signal: which functions
-# have which signal bits, and how signals compose across calls.
+# docs/signals/inference.md
 
 # ── fn/errors?: error-only functions ─────────────────────────────────
 
@@ -62,6 +62,17 @@
   (arith-wrapper x x))
 (assert (fn/errors? double-wrap)
         "SIG_ERROR propagates through chains of arithmetic wrappers")
+
+# ── A binding that names a primitive ─────────────────────────────────
+#
+# (def x prim) takes the primitive's signal, so a call through x signals what a
+# call to the primitive does. The counter-factual: the analyzer read the alias
+# as an unknown callee, so every function that called it could do anything.
+
+(def eqv %eq)
+(defn same? [a b]
+  (eqv a b))
+(assert (silent? same?) "a call through an alias of %eq is silent")
 
 # ── Yield propagation ────────────────────────────────────────────────
 
@@ -151,8 +162,8 @@
 (assert (= (get (first jit-fns) :name) "pure") "pure is the jit-eligible one")
 
 # ── var/def signal propagation ──────────────────────────────────────
-# Define nodes must propagate their initializer's signal.
-# Before the fix, (var r (f)) was always silent, masking yields/errors.
+# A Define node carries its initializer's signal. The counter-factual: a Define
+# that dropped it made (var r (f)) silent, which hid a yield or an error.
 
 # var with polymorphic parameter call
 (defn var-poly [f]

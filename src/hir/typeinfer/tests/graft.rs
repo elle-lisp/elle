@@ -8,7 +8,7 @@
 //! stdlib closures: without the stdlib a source's `+` names nothing.
 
 use super::{compile_booted, count_calls_to, count_emits, count_intrinsics, count_ops};
-use crate::hir::{BindingArena, Hir};
+use crate::hir::{BindingArena, Hir, HirKind};
 
 /// The eight wrappers and the op each one's two-operand arm reaches.
 const WRAPPERS: [(&str, &str); 8] = [
@@ -112,23 +112,47 @@ fn three_operands_to_an_arithmetic_wrapper_keep_the_call() {
     }
 }
 
-/// A comparison's general arm closes, so three operands graft and the rest of
-/// the chain is compared through `apply`.
+/// A comparison's general arm closes, so three operands graft. `apply` is a
+/// macro, so the rest of the chain is compared through the spliced call
+/// `(< b ;more)`, which is the one call to the wrapper left.
+///
+/// The counter-factual: counting a call to `apply` passed on no tree at all,
+/// because no such call exists once the macro expands.
 #[test]
-fn three_operands_to_a_comparison_graft_to_apply() {
+fn three_operands_to_a_comparison_graft_to_one_spliced_call() {
     for wrapper in ["<", ">", "<=", ">=", "="] {
         let src = format!("(defn h [a b c] ({wrapper} a b c)) (h 1 2 3)");
         let (hir, arena) = compiled(&src);
-        assert_eq!(
-            count_calls_to(&hir, &arena, wrapper),
-            0,
-            "{src}: {wrapper} grafts"
-        );
+        let (spliced, whole) = calls_by_splice(&hir, &arena, wrapper);
+        assert_eq!(whole, 0, "{src}: the call {wrapper} a b c grafts");
         assert!(
-            count_calls_to(&hir, &arena, "apply") > 0,
-            "{src}: the tail is compared through apply"
+            spliced > 0,
+            "{src}: the tail is compared through a spliced call to {wrapper}"
         );
     }
+}
+
+/// How many calls to `name` the tree holds with a spliced operand, and how many
+/// without one.
+fn calls_by_splice(h: &Hir, arena: &BindingArena, name: &str) -> (usize, usize) {
+    let mut counts = (0, 0);
+    if let HirKind::Call { func, args, .. } = &h.kind {
+        if let Some(b) = crate::hir::typeinfer::unwrap_callee_binding(func) {
+            if arena.get(b).name == crate::value::SymbolId::of(name) {
+                if args.iter().any(|a| a.spliced) {
+                    counts.0 += 1;
+                } else {
+                    counts.1 += 1;
+                }
+            }
+        }
+    }
+    h.for_each_child(|c| {
+        let (s, w) = calls_by_splice(c, arena, name);
+        counts.0 += s;
+        counts.1 += w;
+    });
+    counts
 }
 
 #[test]
@@ -200,6 +224,18 @@ fn a_same_unit_function_grafts_and_its_definition_still_proves() {
 #[test]
 fn a_numeric_parameter_keeps_its_floor_in_the_graft() {
     let src = "(defn sq [x] (numeric!) (%mul x x)) (defn g [y] (sq y)) (def f g) (f 2)";
+    compile_booted(src).unwrap_or_else(|e| panic!("{src} must compile: {e}"));
+}
+
+/// The floor holds whatever the operand is, as it does for a caller of the
+/// function: the declaration, not the flow, types the parameter.
+///
+/// The counter-factual: the `let` the graft binds `x` with met the string's
+/// type with the floor at Bottom, which proves nothing, so the grafted `%mul`
+/// was rejected where the call it replaced compiled.
+#[test]
+fn a_numeric_parameter_keeps_its_floor_against_an_operand_it_contradicts() {
+    let src = "(defn sq [x] (numeric!) (%mul x x)) (sq \"a\")";
     compile_booted(src).unwrap_or_else(|e| panic!("{src} must compile: {e}"));
 }
 

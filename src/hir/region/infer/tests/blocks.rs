@@ -1,3 +1,15 @@
+// audited: 2026-09-23
+// docs/impl/region/mechanism.md
+//! `block`/`break`: where a release the break jumps over is anchored, and where that window stops.
+//!
+//! A branch tests `u`, a parameter of a function nothing calls, and not a
+//! literal. The fold decides a test over a proven operand at compile time and
+//! keeps only the branch it selects, so the `break` or the code after it would
+//! be gone. Nothing proves a parameter no call reaches. The block stays out of
+//! tail position, which `a_return_mint_in_the_body_does_not_refuse_the_window`
+//! covers. A helper takes an unused `&opt` parameter, because the graft refuses
+//! such a function and its call stays a call (docs/impl/graft.md).
+
 use super::*;
 
 // ── `block`/`break`: the broken value is the block's value ────────────
@@ -173,8 +185,11 @@ fn a_release_the_break_jumps_over_is_pinned_to_the_block() {
     // `x` is NOT the broken value — the break carries `1` — but its release sits
     // after the break site inside the body, so the jump to the exit label passes
     // over it and it never runs at all.
-    let (hir, _arena, info) =
-        pipeline("(block (let [x \"s\"] (if (%int? 1) (break 1) nil) (%string? x)))");
+    let (hir, _arena, info) = pipeline(
+        "(defn t [u] \
+           (block (let [x \"s\"] (if (%int? u) (break 1) nil) (%string? x))) \
+           nil)",
+    );
     let block = first_block(&hir).expect("a Block node");
     let dp = first_string_decref_point(&hir, &info);
     let order = compute_order(&hir);
@@ -195,8 +210,11 @@ fn a_release_before_the_break_site_stays_where_it_is() {
     // The window opens at the break site: a release the break path has ALREADY
     // run must not be deferred to the exit label. Promptness, not soundness —
     // but a pass that hoists the whole body has stopped being a window.
-    let (hir, _arena, info) =
-        pipeline("(block (let [x \"s\"] (%string? x)) (if (%int? 1) (break 1) nil) 0)");
+    let (hir, _arena, info) = pipeline(
+        "(defn t [u] \
+           (block (let [x \"s\"] (%string? x)) (if (%int? u) (break 1) nil) 0) \
+           nil)",
+    );
     let block = first_block(&hir).expect("a Block node");
     let dp = first_string_decref_point(&hir, &info);
     let order = compute_order(&hir);
@@ -238,8 +256,10 @@ fn a_loop_nested_in_the_block_keeps_its_per_iteration_release() {
     // block's exit label would leave ONE release for N allocations — a worse
     // leak than the skip. The window stops at the loop.
     let (hir, _arena, info) = pipeline(
-        "(block (if (%int? 1) (break 1) nil) \
-           (while (%int? 0) (let [x \"s\"] (%string? x))) 0)",
+        "(defn t [u] \
+           (block (if (%int? u) (break 1) nil) \
+             (while (%int? 0) (let [x \"s\"] (%string? x))) 0) \
+           nil)",
     );
     let loop_id = first_loop(&hir).expect("a While node");
     let dp = first_string_decref_point(&hir, &info);
@@ -262,8 +282,10 @@ fn a_lambda_nested_in_the_block_keeps_its_own_activations_release() {
     // different frame's slots; the enclosing block's exit label is not a point
     // that activation reaches.
     let (hir, _arena, info) = pipeline(
-        "(block (if (%int? 1) (break 1) nil) \
-           (let [f (fn [] (let [x \"s\"] (%string? x)))] (f)))",
+        "(defn t [u] \
+           (block (if (%int? u) (break 1) nil) \
+             (let [f (fn [&opt o] (let [x \"s\"] (%string? x)))] (f))) \
+           nil)",
     );
     let block = first_block(&hir).expect("a Block node");
     let dp = first_string_decref_point(&hir, &info);
@@ -287,8 +309,8 @@ fn a_frame_replacing_exit_in_the_body_refuses_the_window() {
     // path leaves through the callee instead of arriving at the exit label — a
     // release moved there would be dead on exactly the path that used to run it.
     let (hir, _arena, info) = pipeline(
-        "(defn g [n] n) \
-         (defn h [n] (block (if (%int? 1) (break 1) nil) \
+        "(defn g [n &opt o] n) \
+         (defn h [n] (block (if (%int? n) (break 1) nil) \
                         (let [x \"s\"] (%string? x)) \
                         (g n)))",
     );
@@ -343,7 +365,8 @@ fn break_through_a_branch_anchors_both_arms_at_the_block() {
     // The floor travels with the value through the tail-transparent forms: an
     // `if` in break position hands EITHER arm to the block, so neither arm may
     // be anchored inside the body.
-    let (hir, _arena, info) = pipeline("(block (break (if (%int? 1) \"a\" \"b\")))");
+    let (hir, _arena, info) =
+        pipeline("(defn t [u] (block (break (if (%int? u) \"a\" \"b\"))) nil)");
     let block = first_block(&hir).expect("a Block node");
     let order = compute_order(&hir);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);

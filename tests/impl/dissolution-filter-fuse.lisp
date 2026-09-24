@@ -8,26 +8,26 @@
 # The codegen pins — the closure and dispatch gone, the push guarded by an `if` —
 # are in src/hir/typeinfer/fuse/tests/collect.rs.
 #
-# The un-fused oracle `big?` has a `match` body — a binding-introducing form a
-# fragment cannot close over — so it stays a plain `filter` call. A pure body or a
+# The un-fused oracle `big?` has a `block` body, which a fragment cannot close
+# over, so it stays a plain `filter` call. A pure body or a
 # `let` body inlines, so `big-let?` is the fusing counterpart. The fused
 # inline predicate, the fused let-body one and the un-fused oracle must agree.
 
 (defn big? [x]
-  (match x
-    _ (> x 2)))
+  (block :oracle
+    (> x 2)))
 
 (defn big-let? [x]
   (let [y x]
     (> y 2)))
 
-# Single filter: fused inline predicate == un-fused match-body pred == literal expect.
+# Single filter: fused inline predicate == un-fused block-body pred == literal expect.
 (assert (= (filter (fn [x] (> x 2)) [1 2 3 4]) [3 4])
         "single filter fuses to the same value")
 (assert (= (filter (fn [x] (> x 2)) [1 2 3 4]) (filter big? [1 2 3 4]))
-        "fused inline-predicate agrees with the un-fused match-body pred")
+        "fused inline-predicate agrees with the un-fused block-body pred")
 (assert (= (filter big-let? [1 2 3 4]) (filter big? [1 2 3 4]))
-        "fused let-body predicate agrees with the un-fused match-body pred")
+        "fused let-body predicate agrees with the un-fused block-body pred")
 
 # Boundary sizes and the all/none-pass extremes.
 (assert (= (filter (fn [x] (> x 0)) []) []) "empty array filters to empty")
@@ -62,9 +62,9 @@
 
 # Composition fuses to ONE loop; the survivor set/order is unchanged and the
 # interleaving of the two reorder-safe predicates is unobservable. `integer?` and
-# `even?` are reorder-safe (they carry only SIG_ERROR); a variadic comparison like
-# `>` routes through `apply` and would decline the composition (still fuses as a
-# single filter).
+# `even?` are reorder-safe (they carry at most SIG_ERROR); a predicate that prints
+# signals `:io` and would decline the composition (it still fuses as a single
+# filter).
 (assert (= (filter (fn [x] (even? x))
                    (filter (fn [x] (integer? x)) [1 2 3 4 5 6])) [2 4 6])
         "filter-of-filter fuses to the same value")
@@ -83,20 +83,25 @@
              (filter (fn [x] (> x k)) [1 2 3 4])) [3 4])
         "a capturing predicate fuses to the stdlib value")
 
-# A mixed map/filter chain with a variadic `>` predicate: `>` routes through
-# `apply` and is not reorder-safe, so the length-2 composition declines and only
-# the inner `filter` fuses, leaving the outer `map` a plain call over the fused
-# loop. `lower_call`'s argument spill keeps that sound (call-arg-across-loop.lisp).
+# A mixed map/filter chain whose predicate prints: the print signals `:io`, which
+# is not reorder-safe, so the length-2 composition declines and only the inner
+# `filter` fuses, leaving the outer `map` a plain call over the fused loop.
+# `lower_call`'s argument spill keeps that sound (call-arg-across-loop.lisp).
 # The value is the same either way. dissolution-mixed-fuse.lisp weighs the
 # reorder-safe mixed chains.
-(assert (= (map (fn [x] (* x 10)) (filter (fn [x] (> x 2)) [1 2 3 4])) [30 40])
+(assert (= (map (fn [x] (* x 10))
+                (filter (fn [x]
+                          (print "")
+                          (> x 2)) [1 2 3 4])) [30 40])
         "mixed map-of-filter (inner-only fallback) computes the same value")
-(assert (= (filter (fn [x] (> x 20)) (map (fn [x] (* x 10)) [1 2 3])) [30])
+(assert (= (filter (fn [x]
+                     (print "")
+                     (> x 20)) (map (fn [x] (* x 10)) [1 2 3])) [30])
         "mixed filter-of-map (inner-only fallback) computes the same value")
 
 # ── Realization: the per-element call is gone ─────────────────────────
 # A single `filter` over an inline predicate splices the guard into the loop, so no
-# closure is called per element; the un-fused reference calls its `match`-body
+# closure is called per element; the un-fused reference calls its `block`-body
 # oracle once per element. Both compute the same survivors. `arena/total-allocs`
 # counts every object ever minted.
 (defn allocs [thunk]
@@ -126,7 +131,7 @@
 # (docs/impl/dissolution/inline.md): the declaration floors the parameter at
 # Number, which discharges `%gt`'s comparable-family obligation, and the floor is
 # carried onto the spliced binding — so the guard stage holds the opcode itself.
-# The un-fused oracle carries the same declaration and opcode behind a `match`
+# The un-fused oracle carries the same declaration and opcode behind a `block`
 # body, which cannot close into a fragment.
 (defn big? [x]
   (numeric!)
@@ -134,8 +139,8 @@
 
 (defn big-decl? [x]
   (numeric!)
-  (match x
-    _ (%gt x 2)))
+  (block :oracle
+    (%gt x 2)))
 
 (assert (= (filter big? [1 2 3 4]) [3 4])
         "a numeric!-declared intrinsic predicate fuses to the right survivors")

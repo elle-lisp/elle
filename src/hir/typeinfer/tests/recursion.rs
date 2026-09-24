@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-23
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
 //! What a recursive call's result proves, and what an ascent that never settled
@@ -30,7 +30,8 @@ fn self_recursive_call_result_is_the_body_type() {
 
 /// The result travels: hoisting the addition into a helper keeps the proof,
 /// because the helper's parameters are the join over its call sites and that
-/// join is now Int rather than Bottom.
+/// join is now Int rather than Bottom. The call to `combine` grafts, so one
+/// `%add` stands in `combine` and one in `fib`, and both must be Int.
 ///
 /// The counter-factual: Bottom flowed into the helper's parameters, so the
 /// helper's own `%add` was unproven too — no spelling of the same arithmetic
@@ -41,10 +42,10 @@ fn a_self_recursive_result_proves_a_callee_parameter() {
                (defn fib [n] \
                  (if (%lt n 2) n (combine (fib (%sub n 1)) (fib (%sub n 2))))) \
                (fib 6)";
-    assert_eq!(
-        intrinsic_result_type(src, "%add"),
-        TypeInterner::INT,
-        "the helper's %add over two forwarded recursive results must be Int"
+    let types = intrinsic_result_types(src, "%add");
+    assert!(
+        types.iter().all(|t| *t == TypeInterner::INT),
+        "every %add over two forwarded recursive results must be Int; got {types:?}"
     );
 }
 

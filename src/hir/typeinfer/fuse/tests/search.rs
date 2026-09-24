@@ -227,12 +227,13 @@ fn search_prefix_with_erroring_predicate_fuses() {
 }
 
 /// A search over a prefix is a composition, so it carries the reorder gate like
-/// every other terminal: a non-reorder-safe body (`>` routes through `apply`)
-/// declines the whole chain, and the pre-order recursion still fuses the inner
-/// `map`.
+/// every other terminal: a non-reorder-safe body (one that prints, and so
+/// signals `:io`) declines the whole chain, and the pre-order recursion still
+/// fuses the inner `map`.
 #[test]
 fn search_over_non_reorder_safe_prefix_fuses_inner_only() {
-    let (hir, arena, mut rt) = compile("(any? (fn [y] (> y 9)) (map (fn [x] (* x 3)) [1 2 3 4]))");
+    let (hir, arena, mut rt) =
+        compile("(any? (fn [y] (println y) (> y 9)) (map (fn [x] (* x 3)) [1 2 3 4]))");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "any?"),

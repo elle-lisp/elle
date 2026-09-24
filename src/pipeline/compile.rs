@@ -140,7 +140,7 @@ fn compile_inner(
 /// backend and the dumps).
 ///
 /// `epoch_skip` — number of leading forms to exclude from epoch migration
-/// (e.g. stdlib forms that are already in the current epoch). When 0,
+/// (for example, stdlib forms already in the current epoch). When 0,
 /// epoch migration applies to all forms.
 pub fn compile_file_to_lir(
     source: &str,
@@ -270,10 +270,8 @@ fn compile_file_to_lir_inner(
     lowerer.lower(&hir)
 }
 
-/// Compile a file as a single synthetic letrec.
-///
-/// Compile to functionalized HIR (for `--dump=fhir`). Returns the HIR tree
-/// and the binding arena.
+/// Compile a file to functionalized HIR (for `--dump=fhir`). Returns the HIR
+/// tree and the binding arena.
 pub fn compile_file_to_fhir(
     source: &str,
     symbols: &mut SymbolTable,
@@ -282,6 +280,20 @@ pub fn compile_file_to_fhir(
 ) -> Result<(crate::hir::Hir, BindingArena), String> {
     let f = compile_file_frontend(source, symbols, cctx, source_name)?;
     Ok((f.hir, f.arena))
+}
+
+/// [`compile_file_to_fhir`], with the types the compile inferred for that HIR.
+/// A test reads a node's type here instead of running inference again, which
+/// would lose the facts the graft handed the compile's own inference.
+#[cfg(test)]
+pub(crate) fn compile_file_to_typed_fhir(
+    source: &str,
+    symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
+    source_name: &str,
+) -> Result<(crate::hir::Hir, BindingArena, crate::hir::TypeInfo), String> {
+    let f = compile_file_frontend(source, symbols, cctx, source_name)?;
+    Ok((f.hir, f.arena, f.types))
 }
 
 /// All top-level forms are analyzed together, enabling mutual recursion.

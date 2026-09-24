@@ -4,7 +4,7 @@
 //!
 //! docs/impl/typeinfer.md
 
-use super::compile_fhir;
+use super::{compile_fhir, count_calls_to};
 use crate::hir::pattern::{HirPattern, PatternLiteral};
 use crate::hir::{Hir, HirKind};
 use crate::symbol::SymbolTable;
@@ -46,14 +46,15 @@ fn has_keyword_arm(hir: &Hir, kw: &str) -> bool {
 /// is a literal array has every off-array arm provably unreachable, so `prune.rs`
 /// removes them before region inference — otherwise `a` is referenced (and its
 /// release point computed) inside a dead arm, leaking its region (the
-/// `each`-over-collection over-keep the `each` macro otherwise hits per op, which
-/// the `each-array` probe measures end to end). The
-/// off-type arms (`:fiber`, `:set`, `:struct`) must be gone; the
-/// live `:array` arm kept.
+/// `each`-over-collection over-keep the `each` macro otherwise hits per op, pinned
+/// end-to-end by the oracle's `each-array` probe). The
+/// off-type arms (`:fiber`, `:set`, `:struct`) must be gone, and the live
+/// `:array` arm's body kept. The `match` itself may go too: once `a` is proven
+/// an array, the fold leaves the live arm's body in its place.
 #[test]
 fn typeof_match_prunes_dead_arms_for_a_literal_array_scrutinee() {
     let mut symbols = SymbolTable::new();
-    let (hir, _arena) = compile_fhir(
+    let (hir, arena) = compile_fhir(
         "(let [a [1 2 3]] \
            (match (type-of a) \
              :array (length a) \
@@ -75,9 +76,14 @@ fn typeof_match_prunes_dead_arms_for_a_literal_array_scrutinee() {
         !has_keyword_arm(&hir, "struct"),
         "the :struct arm is unreachable for a literal array and must be pruned"
     );
+    assert_eq!(
+        count_calls_to(&hir, &arena, "fiber/resume"),
+        0,
+        "the :fiber arm's body goes with its arm"
+    );
     assert!(
-        has_keyword_arm(&hir, "array"),
-        "the :array arm is the live dispatch arm and must be kept"
+        count_calls_to(&hir, &arena, "length") > 0,
+        "the :array arm is the live dispatch arm, and its body must be kept"
     );
 }
 
@@ -89,7 +95,7 @@ fn typeof_match_prunes_dead_arms_for_a_literal_array_scrutinee() {
 #[test]
 fn typeof_match_prunes_through_a_primitive_rettype_alias() {
     let mut symbols = SymbolTable::new();
-    let (hir, _arena) = compile_fhir(
+    let (hir, arena) = compile_fhir(
         "(let [a (->array (list 1 2 3))] \
            (match (type-of a) \
              :array (length a) \
@@ -101,9 +107,14 @@ fn typeof_match_prunes_through_a_primitive_rettype_alias() {
         !has_keyword_arm(&hir, "fiber"),
         "->array declares RetType::Array, so the :fiber arm must be pruned"
     );
+    assert_eq!(
+        count_calls_to(&hir, &arena, "fiber/resume"),
+        0,
+        "the :fiber arm's body goes with its arm"
+    );
     assert!(
-        has_keyword_arm(&hir, "array"),
-        "the live :array arm must be kept"
+        count_calls_to(&hir, &arena, "length") > 0,
+        "the live :array arm's body must be kept"
     );
 }
 
@@ -113,6 +124,10 @@ fn typeof_match_prunes_through_a_primitive_rettype_alias() {
 /// survives so a value of any runtime type reaches its correct arm. Over-pruning
 /// a live arm would be a use-after-free (its release computed as if dead) or a
 /// wrong/`:match-error` dispatch.
+///
+/// The trap: a direct call `(f [1 2 3])` proves `c` an array, because the graft
+/// records what it binds to `c`. So `f` is called only through `g`, which uses
+/// it as a value, and a value use proves nothing about a parameter.
 #[test]
 fn typeof_match_keeps_all_arms_for_an_unknown_scrutinee() {
     let mut symbols = SymbolTable::new();
@@ -123,7 +138,8 @@ fn typeof_match_keeps_all_arms_for_an_unknown_scrutinee() {
              :fiber (fiber/resume c) \
              (or :set :@set) (->array c) \
              _ nil)) \
-         (f [1 2 3])",
+         (def g f) \
+         (g [1 2 3])",
         &mut symbols,
     );
     assert!(

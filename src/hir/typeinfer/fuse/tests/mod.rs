@@ -105,7 +105,7 @@ fn predicate_inline(
     rt: &mut crate::runtime::Runtime,
     name: &str,
 ) -> bool {
-    const MARKS: [(&str, &str); 2] = [("even?", "%rem"), ("integer?", "type-of")];
+    const MARKS: [(&str, &str); 3] = [("even?", "%rem"), ("integer?", "type-of"), ("zero?", "%eq")];
     let (_, mark) = MARKS
         .iter()
         .find(|(p, _)| *p == name)

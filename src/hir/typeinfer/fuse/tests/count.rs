@@ -91,10 +91,10 @@ fn count_of_filter_fuses_to_one_scalar_loop() {
 /// The reorder gate counts the terminal as an op: a lone `count` (length 1)
 /// visits each element left to right and applies its predicate exactly as the
 /// stdlib op does, so it never reorders and fuses even with a NON-reorder-safe
-/// body (`>` routes through `apply`).
+/// body (one that prints, and so signals `:io`).
 #[test]
 fn single_count_with_non_reorder_safe_body_still_fuses() {
-    let (hir, arena, mut rt) = compile("(count (fn [x] (> x 2)) [1 2 3 4])");
+    let (hir, arena, mut rt) = compile("(count (fn [x] (println x) (> x 2)) [1 2 3 4])");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "count"),
@@ -110,7 +110,7 @@ fn single_count_with_non_reorder_safe_body_still_fuses() {
 #[test]
 fn count_over_non_reorder_safe_prefix_fuses_inner_only() {
     let (hir, arena, mut rt) =
-        compile("(count (fn [y] (even? y)) (filter (fn [w] (> w 1)) [1 2 3 4]))");
+        compile("(count (fn [y] (even? y)) (filter (fn [w] (println w) (> w 1)) [1 2 3 4]))");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "count"),

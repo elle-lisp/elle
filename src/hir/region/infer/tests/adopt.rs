@@ -30,8 +30,9 @@
 //!   meet in one.
 //! - `captures` — what a closure may adopt: the suppress ⊆ adopt contract, the
 //!   capture-cell clique, and the re-storable-cell gate.
-//! - `cuts` — where a subtree stops: the activation-owner cut and the
-//!   transferred-returned-subtree cut.
+//! - `cuts` — the activation-owner cut, where a capture-back-edge cycle stops.
+//! - `transfer` — the transferred-returned-subtree cut, where a returned cycle
+//!   stops.
 
 // Re-glob the parent's test imports so each submodule can `use super::*;` and
 // so `super::ownership` — the only `super::IDENT` a test body names — resolves
@@ -43,6 +44,7 @@ mod cuts;
 mod embed;
 mod structural;
 mod subtrees;
+mod transfer;
 
 /// The region of the first (outermost) `Lambda` node in `hir` — the closure region the
 /// combined-shape probes capture into. (Each probe has exactly one closure.)

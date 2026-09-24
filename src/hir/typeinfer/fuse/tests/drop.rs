@@ -198,8 +198,12 @@ fn drop_while_erroring_bodies_fuse() {
             !cs.iter().any(|n| n == "drop-while" || n == "map"),
             "an erroring body is reorder-safe and must fuse in {src}; callees were {cs:?}",
         );
+        let runs_inline = match inline {
+            "zero?" => predicate_inline(&hir, &arena, &mut rt, inline),
+            op => cs.iter().any(|n| n == op),
+        };
         assert!(
-            cs.iter().any(|n| n == inline),
+            runs_inline,
             "the erroring body must run inline in {src}; callees were {cs:?}",
         );
     }

@@ -14,14 +14,14 @@
 #   - THE CASCADE FACE (uncounted). `(length (%get c 0))` reads through the OPCODE,
 #     which borrows without raising any count. The container's lifetime is the
 #     borrow's only protection, so the container is in use for as long as the read's
-#     RESULT is (docs/impl/region/rules.md Rule 4, the borrowing node). Anchored at
+#     RESULT is (Rule 4, the borrowing node). Anchored at
 #     the read, the container's free-time cascade drops the element's last count and
 #     `length` derefs a freed page. Needs no ownership adoption at all: it bites with
 #     a PARAM container too, where no subtree is ever formed.
 #
 #   - THE SUBTREE-DROP FACE (counted, but frozen). `(get c 0)` as a NATIVE call takes
 #     the Rule 5 pass-through retain, so under RC the reader holds its own reference
-#     and the container may die. But `(push c r)` monomorphizes to the raw funnel and
+#     and the container may die. But `(push c r)` grafts to the raw funnel and
 #     ADOPTS `r` into `c`'s Owned subtree, which freezes `r`'s RC and makes that
 #     retain inert — the container's release then subtree-drops `r` under the live
 #     reader, and the reader's own value-resolved release faults resolving the freed
@@ -37,10 +37,16 @@
 # A `%pop` REMOVE is deliberately NOT this shape: it extracts the element out of the
 # container (and out of its subtree), so it is not a borrow —
 # region-pop-tail-moves-out-uaf.lisp covers that path.
+# container (and out of its subtree), so it is not a borrow — `region-pop-tail-
+# moves-out-uaf` covers that path.
+#
+# Each face runs in its own activation, so each helper takes an unused `&opt`
+# parameter. The graft refuses such a function, and a grafted helper would turn
+# `opcode-read-param`'s PARAM container into a local one (docs/impl/graft.md).
 
 # The cascade face, through the opcode, with the read's result consumed by an
 # enclosing call rather than a binding (so no binding chain covers the container).
-(defn opcode-read-arg [i]
+(defn opcode-read-arg [i &opt o]
   (let [c @[]
         r (string "s" i)]
     (%array-push c r)
@@ -48,14 +54,14 @@
 
 # The same, with the container arriving as a PARAM — no Fresh root, so the
 # ownership forest forms no subtree and only the RC cascade is in play.
-(defn opcode-read-param [c i]
+(defn opcode-read-param [c i &opt o]
   (let [r (string "s" i)]
     (%array-push c r)
     (length (%get c 0))))
 
 # The subtree-drop face: a native `get`, its result bound and read after the
 # container's last mention.
-(defn native-read-bound [i]
+(defn native-read-bound [i &opt o]
   (let [c @[]
         r (string "s" i)]
     (push c r)
@@ -63,7 +69,7 @@
       (length x))))
 
 # The same through `first`, in tail position.
-(defn native-first-tail [i]
+(defn native-first-tail [i &opt o]
   (let [c @[]
         r (string "s" i)]
     (push c r)
@@ -73,7 +79,7 @@
 # where the container does and the intra-node release order alone decides. The
 # container's release must come second — first, and its subtree drop reclaims the
 # element the alias's own value-resolved release then reads.
-(defn native-read-discarded [i]
+(defn native-read-discarded [i &opt o]
   (let [c @[]
         r (string "s" i)]
     (push c r)
@@ -84,7 +90,7 @@
 # outer read, so the container's own bound is satisfied — but the OUTER alias names a
 # value inside the inner member, which the container's drop reclaims just the same.
 # The alias obligation must follow the read chain, not stop at the first level.
-(defn native-read-nested [i]
+(defn native-read-nested [i &opt o]
   (let [inner @[]
         s (string "s" i)
         c @[]]
@@ -97,7 +103,7 @@
 # The CONTROL: the container is mentioned again after the read, so its release
 # already followed the borrow. Green before and after — it isolates the borrow from
 # the shape.
-(defn read-then-reuse [i]
+(defn read-then-reuse [i &opt o]
   (let [c @[]
         r (string "s" i)]
     (push c r)
