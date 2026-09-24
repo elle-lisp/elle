@@ -134,6 +134,15 @@ clears the slot (`take_runtime_region_for_drop_slot`) each iteration, so the nex
 iteration's child mints fresh. In a debug build, `record_merged_slots` asserts
 that exactly one `DecrefRegion` names each merged slot.
 
+A tail-recursive body clears nothing that way. Its `DecrefRegion` lands past the
+`TailCall`, where the closure path never arrives, and the interpreter reuses the
+frame for the callee. So a frame-replacing tail call hands the callee an empty
+slot map, as it hands it NIL locals ([rules.md](rules.md), Rule 5), and the
+callee's child mints fresh. A stale entry would put every activation's merge
+tree in the region the first activation minted. The call moves the outer pair
+into the callee as its argument, and the callee's release of that argument would
+then free the pairs the callee had just built there.
+
 Mint-or-reuse is what keeps the merge tree in **one** physical region; it is not
 what makes it leak-free. Even a tier that minted fresh for every member (a child
 `R_c`, a parent `R_p`) would not leak the child: the parent object references the

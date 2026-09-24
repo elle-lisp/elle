@@ -305,7 +305,11 @@ is a correctness defect, not a tuning knob.
    caller's locals are dead there: every owned value was released at its last
    use or moved into the callee. Any slot left un-truncated would surface as
    the callee's stale read. That turns a scope-end release into an over-free
-   of a region the frame owns no reference to. Pinned by
+   of a region the frame owns no reference to. The same replacement empties the
+   activation's region map, for the same reason: an entry left there is the
+   caller's, its release dead past the `TailCall`, and a slot-resolved release
+   or a merged allocation in the callee would reach it
+   ([merging.md](merging.md)). Pinned by
    `runtime::tests::ownership::frame`.
 
 6. **No commingling.** Objects from different regions never share a page —

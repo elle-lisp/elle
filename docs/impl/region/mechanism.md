@@ -62,12 +62,10 @@ Letting them through instead makes the caller a nominal holder of a region it ne
 allocates, and the `decref_point` machinery reads that fiction as fact:
 
 - the holder's uses **extend the region's `decref_point`** into the caller. Where the
-  caller's use sits in a branch arm mutually exclusive with the arm that does allocate
-  the region — the base case of `(if p (mk …) (go …))`, whose recursive call inlines
-  the same body and so yields the base arm's own result region — the region's one
-  release is emitted on the only path that never mints it, and the allocating path
-  emits none at all. The value route loads a slot holding `nil` there, so the release
-  is inert as well as misplaced and the region is held to fiber teardown;
+  caller's use sits on a path that never runs the allocation, the region's one
+  release is emitted on that path, and the allocating path emits none at all. The
+  value route loads a slot holding `nil` there, so the release is inert as well as
+  misplaced and the region is held to fiber teardown;
 - the region gains a **second holder binding**, which disqualifies it from the
   single-holder value route `region::infer::compensate` needs, so the per-arm compensation
   that would otherwise cover the allocating arm declines as well.
@@ -77,6 +75,17 @@ This is the result-side half of one rule. The argument-side half is
 extending a **caller** region's `decref_point` onto a callee node. Both say the same
 thing: an inline is a device for collecting edges, not a splice, and the two
 activations' namings must not mix.
+
+A call to a lambda whose body the walk is already inside is not inlined: a
+self call, or a call that closes a mutual recursion. The re-walk names each
+allocation by the region its site already has, and for such a callee that
+region is one the walk is using for the current activation. An edge from an
+argument into it reads as containment between two regions of one activation.
+In `(go (%rest lst) (%pair (%first lst) (%pair 0 acc)))` the argument is the
+outer pair, and the re-walk stores it into the inner pair's site. The graph
+then holds a cycle between the two pairs, and the co-owned group free
+([ownership.md](ownership.md)) frees both before the call that receives the
+outer one. Such a call takes the opaque path instead.
 
 Pinned by `region::infer::tests::inline::*`, the leak face
 [region-inline-result-naming.lisp](../../../tests/impl/region-inline-result-naming.lisp), and the soundness complement
