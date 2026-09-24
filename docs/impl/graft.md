@@ -263,17 +263,26 @@ optional value through the rest list.
 
 ## Pinning tests
 
-- `hir::typeinfer::tests::graft::*` — which calls graft: each arithmetic and
-  comparison wrapper over two proven operands leaves one op and no guard, an
-  unproven pair keeps its guards, three operands and a spliced operand keep the
-  call, a user binding named `+` keeps its call, a recursive function stays a
-  call, and a function the program defines grafts like a stdlib one while its
-  definition still proves its parameters.
+- `hir::typeinfer::tests::graft::*` — which calls graft. Each arithmetic and
+  comparison wrapper over two proven operands leaves its op and no guard; an
+  unproven pair grafts and keeps its runtime check. Three operands keep an
+  arithmetic call and graft a comparison to `apply`, and a spliced operand
+  keeps the call. A user binding named `+` never reaches the stdlib body, a
+  recursive function stays a call, a `(numeric!)` parameter keeps its floor in
+  the graft, and a function the program defines grafts while its definition
+  still proves its parameters.
 - `hir::typeinfer::tests::fold::*` — what the fold decides: a guard over a
-  proven operand, a `type-of` dispatch over a proven container, the certain
-  divergence of `(+ "a" 1)`, and the fact a grafted predicate proves.
-- [wrapper-lowering.lisp](../../tests/impl/wrapper-lowering.lisp) — each wrapper computes one value in its
-  grafted and its called spelling, over ints, floats, both zeros, NaN,
-  infinities and the overflow edge.
-- [typed-int-ops.lisp](../../tests/impl/typed-int-ops.lisp) — the wrapper-spelled `fib` emits `AddInt`
-  and `SubInt`.
+  proven operand, a `type-of` dispatch over a proven container in the program
+  and in the stdlib, a certain raise that cuts what follows it, a guard that
+  contradicts its operand, a deletion that narrows a join, a guard that proves
+  through a grafted predicate and through a graft's `let`, a dead arm that
+  binds a hoisted cell, and the error bit a dissolved body loses.
+- `compiler::stdlib_cache::tests::fragment` — a stdlib restored from the disk
+  cache grafts as a compiled one does.
+- [the graft corpus test](../../tests/impl/graft.lisp) — every arity and every
+  raise a grafted call keeps, on every tier.
+- [the wrapper corpus test](../../tests/impl/wrapper-lowering.lisp) — each
+  wrapper computes one value dissolved, grafted and called, over ints, floats,
+  both zeros, NaN, infinities and the overflow edge.
+- [the typed int ops](../../tests/impl/typed-int-ops.lisp) — the
+  wrapper-spelled `fib` emits `AddInt` and `SubInt`.
