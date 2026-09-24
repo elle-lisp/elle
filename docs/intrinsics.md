@@ -92,7 +92,9 @@ Inference discharges contracts from:
   `(when (%not (number? b)) (error …))`, `b` is a Number in everything
   that follows; predicate spellings (`(number? b)`) and intrinsic
   spellings (`(%int? b)`) both count, and the raise diverges wherever the
-  taken branch evaluates it, inside a `let` binding too;
+  taken branch evaluates it, inside a `let` binding too. A predicate
+  spelling counts only when it names the language's predicate: a parameter
+  named `number?` holds whatever the caller passed, and proves nothing;
 - **nonzero facts** for the div family — a nonzero literal divisor, or a
   diverging zero guard: after `(when (= d 0) (error …))`, `d` is provably
   nonzero;

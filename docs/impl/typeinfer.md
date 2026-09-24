@@ -39,6 +39,36 @@ estimate rises, and the limit of the ascent is the least fixpoint.
 
 ## What a call contributes
 
+A call contributes to its callee's parameters first. Each operand joins into
+the parameter in its position. A parameter the call gives no operand, an `&opt`
+one, receives nil. The rest parameter receives the list of the operands past the
+fixed ones, which is the empty list or a pair. A spliced operand spreads into
+positions nobody can count, so every parameter from its position on receives
+unknown.
+
+```lisp
+(defn rejected? [src]
+  "Whether the file front end rejects src."
+  (not (first (protect (compile/whole-module src "<doc>")))))
+
+(assert (rejected? "(defn f [a & more] (%bit-and more 1)) (f 1 2)")
+        "more is the list of the extra operands, not the int among them")
+(assert (rejected? "(defn f [a &opt b] (%bit-and b 1)) (f 1 2) (f 1)")
+        "the second call leaves b nil")
+(assert (rejected? "(defn f [a b] (%bit-and b 1)) (f ;[1 \"s\"] 2)")
+        "b is the string the splice spreads, not the 2 written after it")
+```
+
+A row below that names a primitive or a stdlib function reads the binding the
+runtime supplies under that name. A parameter or a local with the same name is
+an unknown function, and its call's type is Top:
+
+```lisp
+(assert (rejected? "(defn h [length s] (%bit-and (length s) 1))
+                    (h (fn [s] \"x\") \"abc\")")
+        "a parameter named length is not the primitive")
+```
+
 | Callee | The call's type |
 |---|---|
 | a lambda binding this unit writes | Top (§ "A written binding's result is Top") |
