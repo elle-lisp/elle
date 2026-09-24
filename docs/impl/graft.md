@@ -20,9 +20,13 @@ over proven operands ends as the one `%`-op its body reaches:
   "How many times part occurs in text."
   (- (length (string/split text part)) 1))
 
+(defn compiles? [src]
+  "Whether src compiles through the file front end."
+  (first (protect (compile/whole-module src "<doc>"))))
+
 # Every caller passes an int, so the operands are proven and only %add is left.
 (def proven (fhir "(defn h [a b] (+ a b))\n(h 1 2)"))
-(assert (= 1 (occurrences proven "(%add ")) "the op survives")
+(assert (< 0 (occurrences proven "(%add ")) "the op survives")
 (assert (= 0 (occurrences proven "+#")) "the call to + is gone")
 (assert (= 0 (occurrences proven "(emit ")) "and so are both guards")
 
@@ -30,7 +34,7 @@ over proven operands ends as the one `%`-op its body reaches:
 # and they are what prove the %add operands.
 (def unproven (fhir "(defn h [a b] (+ a b))\n(h 1 2)\n(h :k 2)"))
 (assert (= 0 (occurrences unproven "+#")) "the call to + is gone")
-(assert (= 1 (occurrences unproven "(%add ")))
+(assert (< 0 (occurrences unproven "(%add ")))
 (assert (< 0 (occurrences unproven "(emit ")) "the guards raise at run time")
 
 # A container wrapper takes the same path: push on a proven @string is one op.
@@ -49,29 +53,28 @@ says, read from the body.
 
 A call grafts when all of these hold:
 
-- Its callee is a `Var` naming a binding an earlier unit exports, whose value
-  carries its body (see "Where the body comes from").
+- Its callee is a `Var` naming an immutable, unmutated function binding whose
+  body the compiler holds (see "Where the body comes from").
 - No operand is spliced, so the count of operands is known.
 - The function takes fixed parameters and at most a `&` rest list; `&opt`,
   `&keys` and `&named` decline. No parameter is mutated in the body.
 - The call's operand count selects a body that closes as an `HirFragment`
   ([the HIR design](hir.md)). A body that holds a `lambda`, a `letrec`, a loop,
   an `assign` or a `define` does not close, and its calls stay calls.
-- The function does not call itself. Nor does the graft graft a function
-  inside its own graft, which bounds a cycle that runs through several
-  functions.
+- The function is not recursive. A function this unit defines that calls
+  itself, directly or through a cycle of this unit's functions, never grafts,
+  and neither does another unit's function whose body calls itself. Nor does
+  the graft graft a function inside its own graft, which bounds a cycle that
+  runs through several units.
 
 A call that fails any of these stays the call it was. Nothing else is asked:
-there is no declaration and no list of names.
-
-A function this unit defines is not grafted. Its parameters take their types
-from the calls this unit makes to it ([type inference](typeinfer.md)). Grafting
-those calls away would leave its definition with no call site to prove its
-parameters, and a `%`-op in its body that one of those calls proved would stop
-compiling. The calls a function's own body makes are grafted like any other,
-so `(+ a b)` inside a function whose callers pass ints still dissolves.
+there is no declaration and no list of names. A stdlib function and a function
+the program defines graft alike.
 
 ### Where the body comes from
+
+A function this unit defines is in the tree being compiled. The graft closes its
+initializer's body into a fragment before it grafts any call.
 
 A function from another unit is reached through its value. When a unit is
 analyzed, each binding the earlier units export maps to its compile-time value,
@@ -84,6 +87,22 @@ value, so it can never reach `+`'s body.
 The stdlib disk cache stores each template's fragment with the template
 ([the stdlib cache](stdlib-cache.md)). A template hydrated from an image carries
 none yet, so a call to it stays a call ([booting from an image](image/boot.md)).
+
+### A grafted call still proves the definition
+
+A function this unit defines keeps its definition, and its parameters take their
+types from the calls this unit makes to it ([type inference](typeinfer.md)).
+Grafting a call removes it from the tree, so the graft records what the call
+would have contributed. For each parameter it notes the operand it bound: the
+caller's binding when the operand was an immutable `Var`, the literal's type
+when it was an immediate literal, or the fresh local the `let` bound. The ascent joins those records into the parameter's type
+exactly as it joins a call site's operand. So a definition every caller passes
+ints to still proves `%mul x x`, even when no call to it is left:
+
+```lisp
+(assert (compiles? "(defn f [x] (%mul x x)) (f 3)")
+        "the grafted call still proves x in the definition")
+```
 
 ### Operands and parameters
 
@@ -154,10 +173,6 @@ guard that contradicts its operand's type is gone before the contract check,
 rather than rejected by it:
 
 ```lisp
-(defn compiles? [src]
-  "Whether src compiles through the file front end."
-  (first (protect (compile/whole-module src "<doc>"))))
-
 (assert (compiles? "(defn g [b] (if (%int? b) (%bit-and b 1) 0)) (g \"str\")")
         "no string reaches %bit-and, so the branch holding it goes")
 ```
@@ -237,7 +252,8 @@ optional value through the rest list.
   comparison wrapper over two proven operands leaves one op and no guard, an
   unproven pair keeps its guards, three operands and a spliced operand keep the
   call, a user binding named `+` keeps its call, a recursive function stays a
-  call, and a call to a function this unit defines stays a call.
+  call, and a function the program defines grafts like a stdlib one while its
+  definition still proves its parameters.
 - `hir::typeinfer::tests::fold::*` — what the fold decides: a guard over a
   proven operand, a `type-of` dispatch over a proven container, the certain
   divergence of `(+ "a" 1)`, and the fact a grafted predicate proves.

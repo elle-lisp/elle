@@ -74,8 +74,8 @@ instruction trusts its operands to satisfy — not only a type:
 
 The authoritative per-op table is `check_intrinsic_operand_proofs` in
 [the contract check](../src/hir/typeinfer/contract.rs), each row pinned by a
-test; this table is the consumer view. Note `%not` is truthiness negation, total on any value —
-it needs no proof, exactly like `%eq`.
+test; this table is the consumer view. Note `%not` is truthiness negation,
+total on any value — it needs no proof, exactly like `%eq`.
 
 ### What counts as proof
 
@@ -250,7 +250,7 @@ polymorphic meaning.
 (assert (= 0 (occurrences stored "put#")) "the call to put is gone")
 # Every caller passes an int, so both operands are proven and only %add is left.
 (def proven (fhir "(defn h [a b] (+ a b))\n(h 1 2)"))
-(assert (= 1 (occurrences proven "(%add ")))
+(assert (< 0 (occurrences proven "(%add ")))
 (assert (= 0 (occurrences proven "(emit ")) "no guard is left to raise")
 # One caller passes a string, so nothing proves a, and the guards stay.
 (def guarded (fhir "(defn h [a b] (+ a b))\n(h 1 2)\n(h \"s\" 2)"))

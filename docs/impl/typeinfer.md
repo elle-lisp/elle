@@ -24,6 +24,10 @@ through then contributes nothing on the way up, rather than pinning the
 parameter at Top. A parameter whose callers are not all visible is left absent,
 and an absent entry reads as Top.
 
+A call the graft replaced with the callee's body still counts as a call site.
+The graft records the operand it bound to each parameter, and the join reads
+that record as it reads a call's operand ([grafting a call](graft.md)).
+
 A pass re-derives; it never accumulates. Each parameter's type is **replaced**
 at pass end by that pass's complete join over the call sites, and each lambda's
 body type is replaced by what its body computed on that pass. A join that only
