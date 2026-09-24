@@ -117,6 +117,14 @@ exists*. A containment escape hands the value to a holder the frame cannot see,
 while every fiber crossing counts a reference at its seam. The frame-held
 admission is that consumer ([region/window.md](region/window.md)).
 
+For the same reason a `%pair` does not seed containment. The pair holds each
+operand by the counted edge its allocation takes, as a closure holds what it
+captures. So an operand is pulled into containment only when a binding that holds
+the pair escapes by containment, the way a capture follows its closure. The other
+cuts still read the pair's operands as stored. A recursion that threads
+`(%pair i acc)` into its own tail call therefore keeps `acc` frame-held, and the
+frame releases it before the call ([region/relocate.md](region/relocate.md)).
+
 ## Interprocedural return transparency
 
 The return facet is **interprocedural** for an *arg-returning* callee. A tail call

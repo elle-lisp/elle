@@ -84,7 +84,9 @@ The difference shows in a recursion that threads an accumulator. In
 `(step (%add i 1) n (%pair i acc))`, the call receives the new pair, and the pair
 holds `acc` by its own count. Descending the `%pair` would exempt `acc`'s release
 too, and nothing takes that release over, so each call would strand the
-accumulator it displaced.
+accumulator it displaced. The release reaches the recursive arm at all only
+because `acc` is frame-held there: escape reads the pair's counted hold as no
+containment ([escape analysis](../escape.md)).
 
 ```lisp
 (def step (fn [i n acc] (if (%lt i n) (step (%add i 1) n (%pair i acc)) acc)))
