@@ -7,7 +7,9 @@
 //! One module per subject: `narrow` for what a guard or a dispatch arm proves,
 //! `rettype` for what an op's result proves, `recursion` for what a recursive
 //! call's result proves, `mutation` for what a written binding proves,
-//! `bottom` for what the lattice's start proves, `prune` for dead-arm removal,
+//! `bottom` for what the lattice's start proves, `callsite` for what a call
+//! contributes where its operands and parameters do not line up, `prune` for
+//! dead-arm removal,
 //! `contract` for prove-or-reject, `graft` for which calls become their
 //! callee's body, `fold` for what the recorded types then delete.
 
@@ -17,6 +19,7 @@ use crate::hir::{BindingArena, Hir, HirId, HirKind};
 use crate::symbol::SymbolTable;
 
 mod bottom;
+mod callsite;
 mod contract;
 mod fold;
 mod graft;
