@@ -218,20 +218,24 @@ meeting with it, and a floor that returns something below itself is not a
 floor.
 
 A Bottom the meet **produces** is the opposite fact — the accumulated type and
-the fact are disjoint, so no value reaches the site the fact governs. The two
-producers end differently:
+the fact are disjoint. The two producers end differently:
 
 - `meet(String, Number)` is ⊥ for a caller passing a string to a
-  declared-numeric parameter. The Bottom is left alone, so the sites that read
-  the parameter reject rather than compute.
+  declared-numeric parameter. The declaration types the binding whatever it
+  receives, so the floor gives Number there rather than ⊥. That holds where the
+  function is entered and where a graft binds the parameter with a `let`. A
+  site that needs more than a Number, such as an int, rejects.
 - `meet(String, Int)` is ⊥ inside the `(%int? x)` branch of a function only
-  ever called with a string. The fold decides that test false and deletes the
-  branch before the contract is checked, so the site is gone rather than
-  rejected ([grafting a call](graft.md)).
+  ever called with a string. No value reaches the site the fact governs. The
+  fold decides that test false and deletes the branch before the contract is
+  checked, so the site is gone rather than rejected
+  ([grafting a call](graft.md)).
 
 ```lisp
 (assert (not (compiles? "(defn sq [x] (numeric!) (%bit-and x 1)) (sq \"str\")"))
-        "a caller contradicts the declaration")
+        "a string caller leaves x a Number, which proves no int")
+(assert (compiles? "(defn sq [x] (numeric!) (%mul x x)) (sq \"str\")")
+        "the declaration proves the grafted %mul, as it proves the call's")
 (assert (compiles? "(defn g [b] (if (%int? b) (%bit-and b 1) 0)) (g \"str\")")
         "the branch no value reaches is deleted")
 ```
@@ -292,6 +296,16 @@ The pass has no flow, so it cannot order the write against a call:
   passed to a higher-order function, returned, exported — means callers this
   unit cannot enumerate, so the call-site join over the visible ones proves
   nothing about the parameters.
+- **A destructured binding.** A file-level `(def [lo hi] …)` binds `lo` and
+  `hi` to a `nil` placeholder, and a `destructure` form writes them
+  afterwards. The pass does not follow the value into the pattern, so each
+  binding the pattern writes is unknown, never the placeholder's Nil. A Nil
+  there would let the fold decide `(+ lo hi)`'s number guard certain to raise.
+
+```lisp
+(def [lo hi] [1 2])
+(assert (= (+ lo hi) 3) "lo and hi are what the pattern wrote")
+```
 
 ## Pinning tests
 
@@ -320,6 +334,8 @@ The pass has no flow, so it cannot order the write against a call:
   loop that rewrites its own callee between two turns, the branch a Bottom would
   have joined away, and two controls — the unwritten binding, and the
   SSA-renamed function-local write that still proves.
+- `hir::typeinfer::tests::destructure::*` — a read of a destructured binding,
+  from a `def` and from a `var`, is never typed by its `nil` placeholder.
 - `hir::typeinfer::tests::graft::*` and `hir::typeinfer::tests::fold::*` —
   what the graft replaces and what the fold decides, pinned in
   [grafting a call](graft.md).
