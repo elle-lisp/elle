@@ -1,12 +1,13 @@
 # Lexicon: epoch-aware lexing
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-23 -->
 
 An epoch selects the lexer rules that tokenize a file, so a breaking change can
 reach below the syntax tree to the tokens themselves.
 
-Every registered epoch shares one lexicon, so no file lexes differently yet.
-The first client is the comment/splice swap proposed in issue #983.
+Epoch 13 is the first epoch whose lexicon differs from its predecessor's. It
+changes which escapes a string literal accepts (see
+[../epochs.md](../epochs.md)).
 
 Epochs rewrite parsed syntax trees (see [../epochs.md](../epochs.md)). This
 document extends the epoch system down one level, to the lexer, so that an
@@ -81,9 +82,10 @@ and rejects duplicates. The prescan only selects the lexicon. The two must
 agree where it matters:
 
 - If `Lexicon::for_epoch(declared) == Lexicon::for_epoch(prescanned)`, any
-  disagreement is harmless and allowed. Every registered epoch shares one
-  lexicon, so every existing file — including a file with comments above its
-  declaration — keeps working unchanged.
+  disagreement is harmless and allowed. A file that declares the current
+  epoch below a comment therefore still reads. Epochs 0 to 12 share one
+  lexicon, and epoch 13 has another, so a file that declares epoch 12 or
+  earlier must put the declaration first.
 - If the two lexicons differ, compilation fails with an error telling the
   author to move the declaration above everything except the shebang. A
   declaration the prescan cannot see cannot have selected the lexer that read
@@ -99,21 +101,36 @@ a comment above its declaration.
 
 `Lexicon` is a struct of the epoch-gated lexer rules — the comment
 introducer, whether `;` lexes as `Splice`, whether `,;` fuses into
-`UnquoteSplicing`, the dispatch table behind `#`, and whatever later epochs
-add. `Lexicon::for_epoch(n)` builds it, and it lives in `src/epoch/rules.rs`
-next to the `MigrationRule` tables, so one file describes everything an epoch
+`UnquoteSplicing`, and which escapes a string literal accepts.
+`Lexicon::for_epoch(n)` builds it, and it lives in `src/epoch/rules.rs` next
+to the `MigrationRule` tables, so one file describes everything an epoch
 changed.
 
+The string escapes are a `StringEscapes` value (`src/reader/escape.rs`).
+Its one decoder reads the escape that follows a backslash, so the lexer and
+the respelling below cannot disagree about what an escape means. `Lenient`
+is the rule of epochs 0 to 12: five escapes, and any other escape drops its
+backslash. `Strict` is the rule of epoch 13: the same five, `\0`, `\xHH` up
+to `7f` and `\u{…}`, and any other escape is a read error.
+
 The lexer (`src/reader/lexer.rs`) holds a `Lexicon` and consults it in the
-affected match arms instead of hard-coding the rules. A lexical change
-touches exactly two places: the `Lexicon` field that names the behavior, and
-the `for_epoch` table that flips it.
+affected match arms instead of hard-coding the rules. A lexical change adds
+the `Lexicon` field that names the behavior, and flips it in the `for_epoch`
+table. The lexer and `respell` read the field; neither compares epochs.
 
 `Lexicon::respell` reads the same fields in the other direction: given a
 token lexed under one lexicon, it returns the text that spells the same
 token under another, or nothing when the two spell it alike. That single
 method is what `elle rewrite` migrates tokens with, so the rules and the
 rewrite of the rules cannot drift apart.
+
+`respell` takes the token's source text as well as the token. A string token
+carries the decoded string, and the spelling of its escapes is gone from it.
+The respelling walks the source text escape by escape. It keeps each escape
+that both lexicons decode alike. It writes each other escape as the character
+the source lexicon read from it, spelled the way the printer spells a string
+(see "Printing a string" below). Under that rule `"\x41\n"`, read under epoch
+12, becomes `"x41\n"`.
 
 Each lexical change also gets a `LexicalChange` descriptor (a name and a
 summary) in the epoch's `Migration` entry, so `elle rewrite --list-rules` and
@@ -204,13 +221,28 @@ under a current tag. It lexes its input under the epoch that input declares,
 exactly as `elle rewrite` does. It emits comment text verbatim, so a file
 formatted with `--no-epoch` keeps the spelling it arrived with.
 
-**Diagnostics.** When lexing or parsing fails at a token whose rule differs
-in an older lexicon, the error should append: "if this file targets epoch ≤ N,
-add `(elle/epoch N)` as its first form, or run `elle rewrite`". This is the
-loud path for un-tagged old files; the declaration requirement exists for the
-silent ones. No token's rule differs yet, so the hint has nothing to fire on;
-it lands with the first lexical epoch, which is the first epoch that can test
-it.
+**Diagnostics.** When lexing fails at text that an older lexicon reads, the
+error names the newest such epoch N and appends: "if this file targets epoch
+N or earlier, declare `(elle/epoch N)` as its first form, then run `elle
+rewrite`". The declaration restores the old reading, and the rewrite then
+migrates the file to the current epoch. This is the loud path for untagged
+old files; the declaration requirement exists for the silent ones. A string
+escape is the one rule that differs today, so the escape error is the one
+error that carries the hint.
+
+## Printing a string
+
+`Syntax`'s `Display` prints a string node, and so does the formatter when a
+node has no source text to copy. The printed text is read again, and not
+always under the lexicon that read the original. An epoch migration template
+reads it under the current lexicon. The WASM backend's include splice reads
+an included file's forms under the lexicon of the file that included it.
+
+So the printer writes only the escapes every lexicon reads — `\n`, `\t`,
+`\r`, `\\` and `\"` — and writes every other character as itself. Inside a
+string, every lexicon takes any other character literally, so the printed
+text reads back to the same string under each of them. One function in
+`src/reader/escape.rs` does this for both printers.
 
 ## Alternatives considered
 
@@ -254,6 +286,7 @@ before the body, that selects the reader for the rest of the file.
 |-------|------|
 | The prescan | `src/epoch/mod.rs::prescan_epoch` |
 | The lexicon and its `respell` | `src/epoch/rules.rs` |
+| The string escapes, their respelling, and the printer's spelling | `src/reader/escape.rs` |
 | The lexer's consultation of it | `src/reader/lexer.rs::in_lexicon` |
 | Reader entry points that prescan | `src/reader/mod.rs` |
 | The REPL's current-epoch entry point | `src/reader/mod.rs::read_syntax_all_current` |
@@ -261,12 +294,13 @@ before the body, that selects the reader for the rest of the file.
 | The token-level rewrite pass | `src/rewrite/run.rs::collect_lexical_edits` |
 | The shorthand desugar pass | `src/rewrite/run/edits.rs::collect_desugar_edits` |
 
-Every registered epoch shares one lexicon, and no epoch declares a `Desugar`
-rule yet, so the paths that act on a difference cannot be reached through
-`Lexicon::for_epoch` or `MIGRATIONS`. Tests build the differing pair and the
-rule directly — `Lexicon::divergent`, `Lexicon::no_semicolon`, a rule slice
-passed to `collect_desugar_edits` — rather than leave those paths to run for
-the first time on the epoch that needs them.
-
-The first real lexical epoch (#983) exercises the mechanism end to end and
-lands with its own migration tests.
+Epoch 13 reaches the prescan, the mismatch check, the string respelling and
+the diagnostic through registered epochs, and its tests go through
+`Lexicon::for_epoch`. No registered epoch changes the comment character or
+the splice, and no epoch declares a `Desugar` rule yet, so those paths cannot
+be reached through `Lexicon::for_epoch` or `MIGRATIONS`. Tests build the
+differing pair and the rule directly — `Lexicon::divergent`,
+`Lexicon::no_semicolon`, a rule slice passed to `collect_desugar_edits` —
+rather than leave those paths to run for the first time on the epoch that
+needs them. The comment/splice swap proposed in #983 reaches them through a
+registered epoch, and lands with its own migration tests.

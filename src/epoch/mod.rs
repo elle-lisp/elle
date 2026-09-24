@@ -1,4 +1,8 @@
+// audited: 2026-09-23
 //! Epoch-based migration system.
+//!
+//! docs/epochs.md
+//! docs/impl/lexicon.md
 //!
 //! Each breaking change to Elle increments the epoch counter and adds
 //! migration rules. Source files can declare their epoch with `(elle/epoch N)`
@@ -8,7 +12,7 @@
 //! # File format
 //!
 //! ```lisp
-//! (elle/epoch 12)
+//! (elle/epoch 13)
 //! (def x 10)
 //! ```
 //!
@@ -134,9 +138,8 @@ pub fn prescan_epoch(source: &str) -> Result<u64, String> {
 /// An epoch paired with the lexicon it selects.
 ///
 /// The mismatch check compares two of these. Carrying the lexicon beside
-/// its epoch lets a test build a pair no registered epoch can produce:
-/// every registered epoch shares one lexicon today, so the refusal below
-/// is otherwise unreachable and would ship untested.
+/// its epoch lets a test build a pair no registered epoch produces, so the
+/// refusal is pinned whichever registered epochs happen to lex differently.
 #[derive(Clone, Copy)]
 struct EpochLexicon {
     epoch: u64,
@@ -279,9 +282,6 @@ pub fn migrate_forms(
     forms: &mut [Syntax],
     from_epoch: u64,
 ) -> Result<usize, String> {
-    // Allow: CURRENT_EPOCH is 0 today so this is always-true for u64,
-    // but it becomes meaningful once CURRENT_EPOCH is bumped.
-    #[allow(clippy::absurd_extreme_comparisons)]
     if from_epoch >= CURRENT_EPOCH {
         return Ok(0);
     }

@@ -1,4 +1,4 @@
-//! audited: 2026-09-21
+// audited: 2026-09-23
 //! CLI entry point for `elle rewrite`.
 //!
 //! docs/epochs.md
@@ -37,9 +37,10 @@ pub(crate) fn collect_lexical_edits(
         if desugared.contains(&token.token) {
             continue;
         }
+        let lexeme = &source.text[token.byte_offset..token.byte_offset + token.len];
         let replacement = source
             .lexicon
-            .respell(&token.token, &target)
+            .respell(&token.token, lexeme, &target)
             .map_err(|e| format!("{}: {}", token.loc.position(), e))?;
         if let Some(replacement) = replacement {
             edits.push(Edit {

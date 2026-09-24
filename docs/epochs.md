@@ -1,6 +1,6 @@
 # Epochs
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-23 -->
 
 Epochs are Elle's mechanism for making breaking changes to the language while
 preserving backwards compatibility. Each epoch is a numbered version of the
@@ -50,8 +50,9 @@ runs exactly as if it had been written using current-epoch syntax.
 Because migration operates on parsed trees, it cannot express changes to
 tokenization itself. The reader therefore reads the declaration before it
 lexes, with a frozen micro-grammar, and tokenizes under the lexer rules that
-epoch selects — see [`impl/lexicon.md`](impl/lexicon.md). Every epoch
-registered today shares one set of rules, so no file lexes differently yet.
+epoch selects — see [`impl/lexicon.md`](impl/lexicon.md). Epoch 13 is the
+first epoch whose lexer rules differ from its predecessor's: it changes what a
+string escape means.
 
 ## Migration rule types
 
@@ -176,7 +177,7 @@ To make a breaking change to Elle:
 3. Update `(elle/epoch N)` in `stdlib.lisp` to the new epoch. The WASM backend
    strips stdlib's epoch tag and concatenates the body as-is — it does not run
    migration on stdlib, so stdlib must already use current-epoch syntax.
-4. Add tests in `src/epoch/transform.rs` and `src/rewrite/run.rs`.
+4. Add tests in `src/epoch/transform/tests.rs` and `src/rewrite/run/tests.rs`.
 5. Run `make smoke` to verify the full test suite still passes.
 
 Example:
@@ -202,7 +203,7 @@ Migration {
 
 Files that declare `(elle/epoch 0)` will continue to compile — the compiler
 transparently applies the migration rules. Authors can run `elle rewrite`
-to update their source and remove the epoch tag.
+to update their source and move the epoch tag to the current epoch.
 
 ## Epoch history
 
@@ -248,7 +249,7 @@ Port I/O primitives moved from the `stream/` namespace to `port/`:
 These five operations act exclusively on ports, not on abstract streams.
 The `stream/` namespace now contains only stream combinators (`stream/map`,
 `stream/filter`, `stream/collect`, etc.) which operate on lazy sequences.
-The old `stream/` names remain as aliases.
+`stream/read`, `stream/write` and `stream/flush` remain as aliases.
 
 ### Epoch 5 — polymorphic `has?`/`put`, retire string-specific containment
 
@@ -373,3 +374,32 @@ forms are rewritten to their `fiber/*` equivalents.
 | `coro/>iterator` | — | Removed (fibers are natively iterable) |
 | `coroutine->iterator` | — | Removed |
 | `coroutine-next` | — | Removed (use `fiber/resume`) |
+
+### Epoch 13 — string escapes
+
+A string literal gains three escapes, and an escape the reader does not know
+becomes a read error. [syntax.md](syntax.md) lists the escapes epoch 13 reads.
+
+| Escape | Epoch ≤ 12 | Epoch 13 |
+|--------|------------|----------|
+| `\0` | the string `0` | NUL, U+0000 |
+| `\x41` | the string `x41` | `A`; `\x80` and above is an error |
+| `\u{e9}` | the string `u{e9}` | `é` |
+| `\q`, `\e`, `\'`, any other | the character after the backslash | read error |
+
+Up to epoch 12 the reader knows five escapes: `\n`, `\t`, `\r`, `\\` and
+`\"`. It drops the backslash of any other escape and reports nothing.
+
+```lisp
+# The same text, read under each epoch's rules.
+(assert (= (read-all "\"\\x41\"") (list "A")) "epoch 13 reads the escape")
+(assert (= (read-all "(elle/epoch 12) \"\\x41\"") (list '(elle/epoch 12) "x41"))
+        "epoch 12 drops the backslash")
+```
+
+The change is lexical, so a file that declares epoch 12 or earlier keeps its
+meaning. `elle rewrite` writes each escape whose meaning changed as the text
+epoch 12 read from it, so `"\x41"` becomes `"x41"`. A file with no
+declaration reads under epoch 13. When such a file holds an escape that only
+an older epoch reads, the read error names the declaration that restores the
+old reading.

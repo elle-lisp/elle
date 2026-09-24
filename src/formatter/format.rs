@@ -1,4 +1,7 @@
+// audited: 2026-09-23
 //! Doc generator: walks AnnotatedSyntax trees, produces Doc trees.
+//!
+//! docs/fmt.md
 //!
 //! This is the formatter's brain. It takes the annotated syntax tree
 //! (where trivia is pre-attached to every node) and produces a Wadler
@@ -17,6 +20,7 @@
 use super::config::FormatterConfig;
 use super::doc::Doc;
 use super::trivia::{AnnotatedSyntax, Trivia};
+use crate::reader::escape::StringLiteral;
 use crate::syntax::SyntaxKind;
 
 // ── Public entry point ─────────────────────────────────────────
@@ -34,9 +38,9 @@ pub fn format_forms(
 ) -> Doc {
     let mut all_docs: Vec<Doc> = Vec::new();
 
-    // Format all forms, separated by a HardBreak. Leading trivia no longer
-    // supplies its own preceding break (see `emit_leading`), so the separator
-    // is emitted unconditionally between siblings.
+    // Format all forms, separated by a HardBreak. Leading trivia supplies no
+    // preceding break of its own (see `emit_leading`), so the separator is
+    // emitted unconditionally between siblings.
     for (i, form) in forms.iter().enumerate() {
         if i > 0 {
             all_docs.push(Doc::hardbreak());
@@ -123,13 +127,8 @@ pub(super) fn format_annotated(
     parts.push(format_syntax(node, source, config));
 
     // Trailing trivia: inline comments and blank lines after this node.
-    //
-    // Comments extend to end-of-line, so they MUST be followed by a
-    // newline — otherwise the next token gets eaten by the comment.
-    //
-    // Trailing trivia: comments and blank lines after the form.
-    // Blank lines are preserved to maintain author-intended spacing
-    // between sibling forms (e.g. between defn blocks).
+    // Blank lines are preserved to keep the author's spacing between sibling
+    // forms (for example, between defn blocks).
     let mut seen_break = false;
     let mut inline_done = false;
     for t in &node.trailing {
@@ -269,10 +268,10 @@ fn format_syntax(node: &AnnotatedSyntax, source: &str, config: &FormatterConfig)
             if start < source.len() && end <= source.len() {
                 Doc::text(&source[start..end])
             } else {
-                // Synthetic or detached span — fall back to escaped display
+                // Synthetic or detached span — print the string itself.
                 match &node.syntax.kind {
-                    SyntaxKind::String(s) => Doc::text(format!("\"{}\"", s.escape_default())),
-                    SyntaxKind::StringMut(s) => Doc::text(format!("@\"{}\"", s.escape_default())),
+                    SyntaxKind::String(s) => Doc::text(StringLiteral(s).to_string()),
+                    SyntaxKind::StringMut(s) => Doc::text(format!("@{}", StringLiteral(s))),
                     _ => Doc::text("#<bad-string>"),
                 }
             }
@@ -436,3 +435,6 @@ fn format_reader_macro(
     let inner = format_annotated(&node.children[0], source, config);
     Doc::concat([Doc::text(prefix), inner])
 }
+
+#[cfg(test)]
+mod tests;

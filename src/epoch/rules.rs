@@ -1,4 +1,4 @@
-//! audited: 2026-09-16
+// audited: 2026-09-23
 //! Epoch migration rule definitions.
 //!
 //! docs/epochs.md
@@ -9,18 +9,19 @@
 
 mod migrations;
 
+use crate::reader::escape::StringEscapes;
 use crate::reader::Token;
 use migrations::MIGRATIONS;
 use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 12;
+pub const CURRENT_EPOCH: u64 = 13;
 
 /// The epoch-gated lexer rules (docs/impl/lexicon.md). The lexer consults
 /// a `Lexicon` instead of hard-coding these, so an epoch bump can change
-/// tokenization itself. All registered epochs currently share one lexicon;
-/// the first lexical epoch introduces the first divergence.
+/// tokenization itself. Epochs 0 to 12 share one lexicon; epoch 13 reads
+/// string escapes by stricter rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lexicon {
     /// The character that starts a comment running to end of line.
@@ -31,6 +32,8 @@ pub struct Lexicon {
     pub(crate) semicolon_splices: bool,
     /// Whether `,;` fuses into the unquote-splicing token.
     pub(crate) comma_semicolon_fuses: bool,
+    /// Which escapes a string literal accepts.
+    pub(crate) string_escapes: StringEscapes,
 }
 
 impl Lexicon {
@@ -43,7 +46,27 @@ impl Lexicon {
             comment_char: '#',
             semicolon_splices: true,
             comma_semicolon_fuses: true,
+            string_escapes: if epoch < 13 {
+                StringEscapes::Lenient
+            } else {
+                StringEscapes::Strict
+            },
         }
+    }
+
+    /// The hint a lex error appends when an older epoch reads the text this
+    /// lexicon refused: the declaration that restores that reading
+    /// (docs/impl/lexicon.md). `reads` answers whether a lexicon reads the
+    /// text. `None` when no older epoch reads it either.
+    pub(crate) fn older_reading_hint(&self, reads: impl Fn(&Lexicon) -> bool) -> Option<String> {
+        let epoch = (0..=CURRENT_EPOCH).rev().find(|&epoch| {
+            let older = Lexicon::for_epoch(epoch);
+            older != *self && reads(&older)
+        })?;
+        Some(format!(
+            "; if this file targets epoch {epoch} or earlier, declare \
+             (elle/epoch {epoch}) as its first form, then run `elle rewrite`"
+        ))
     }
 
     /// The current epoch's lexicon.
@@ -51,9 +74,9 @@ impl Lexicon {
         Lexicon::for_epoch(CURRENT_EPOCH)
     }
 
-    /// The text that spells `token` — read under `self` — with its meaning
-    /// intact under `target`. `None` when both lexicons spell it alike,
-    /// which is every token whose rules did not move.
+    /// The text that spells `token` — read under `self` from the source text
+    /// `lexeme` — with its meaning intact under `target`. `None` when both
+    /// lexicons spell it alike, which is every token whose rules did not move.
     ///
     /// This is the only place a token crosses between two lexicons, so
     /// `elle rewrite` and the lexer read the same fields and cannot drift
@@ -65,6 +88,7 @@ impl Lexicon {
     pub(crate) fn respell(
         &self,
         token: &Token<'_>,
+        lexeme: &str,
         target: &Lexicon,
     ) -> Result<Option<String>, String> {
         match token {
@@ -73,6 +97,11 @@ impl Lexicon {
             Token::Comment(text) if self.comment_char != target.comment_char => {
                 let body = text.strip_prefix(self.comment_char).unwrap_or(text);
                 Ok(Some(format!("{}{}", target.comment_char, body)))
+            }
+            // The token holds the decoded string, so the escapes are read
+            // from the source text.
+            Token::String(_) if self.string_escapes != target.string_escapes => {
+                self.string_escapes.respell(lexeme, target.string_escapes)
             }
             Token::Splice if self.semicolon_splices && !target.semicolon_splices => {
                 Err(no_spelling("`;` splice"))
@@ -107,6 +136,7 @@ impl Lexicon {
             comment_char: ';',
             semicolon_splices: false,
             comma_semicolon_fuses: false,
+            ..Lexicon::current()
         }
     }
 

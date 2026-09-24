@@ -1,8 +1,14 @@
+// audited: 2026-09-23
+//! The s-expression lexer: source text to tokens with spans, under the rules
+//! an epoch's lexicon selects.
+//!
+//! docs/impl/reader.md
+//! docs/impl/lexicon.md
+
 use super::token::{SourceLoc, Token, TokenWithLoc, UNKNOWN_FILE};
 use crate::epoch::rules::Lexicon;
 
-/// Fast delimiter check - O(1) instead of string contains O(n)
-/// Checks if a character is a Lisp delimiter
+/// Whether `c` is a Lisp delimiter: a character that ends a symbol.
 #[inline]
 fn is_delimiter(c: char) -> bool {
     matches!(
@@ -150,17 +156,22 @@ impl<'a> Lexer<'a> {
                     return Ok(s);
                 }
                 Some('\\') => {
+                    let loc = self.get_loc();
                     self.advance();
-                    match self.current() {
-                        Some('n') => s.push('\n'),
-                        Some('t') => s.push('\t'),
-                        Some('r') => s.push('\r'),
-                        Some('\\') => s.push('\\'),
-                        Some('"') => s.push('"'),
-                        Some(c) => s.push(c),
-                        None => return Err("Unterminated string escape".to_string()),
+                    let input = self.input;
+                    let after = &input[self.pos..];
+                    let escape = self
+                        .lexicon
+                        .string_escapes
+                        .decode(after)
+                        .map_err(|e| self.escape_error(e, &loc, after))?;
+                    s.push(escape.ch);
+                    // Step a char at a time, so an escaped line break still
+                    // counts a line.
+                    let end = self.pos + escape.len;
+                    while self.pos < end {
+                        self.advance();
                     }
-                    self.advance();
                 }
                 Some(c) => {
                     s.push(c);
@@ -170,12 +181,27 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// The error for a string escape at `loc` that the lexicon refused, where
+    /// `after` is the text after its backslash. When an older epoch reads the
+    /// escape, the message names the declaration that restores that reading
+    /// (docs/impl/lexicon.md).
+    fn escape_error(&self, error: String, loc: &SourceLoc, after: &str) -> String {
+        let hint = self
+            .lexicon
+            .older_reading_hint(|older| older.string_escapes.decode(after).is_ok());
+        format!(
+            "{} at {}{}",
+            error,
+            loc.position(),
+            hint.unwrap_or_default()
+        )
+    }
+
     /// Read a symbol and return a slice of the original input.
     /// Handles qualified names like `module:name` as a single symbol.
     fn read_symbol(&mut self) -> (usize, usize) {
         let start = self.pos;
         while let Some(c) = self.current() {
-            // Use fast delimiter check instead of string contains()
             if c.is_whitespace() || is_delimiter(c) {
                 // Check for qualified name: if we hit ':' and next char can start a symbol,
                 // continue reading as a qualified name

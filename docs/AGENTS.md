@@ -54,7 +54,7 @@ Up: [..](../AGENTS.md)
 - [structs.md](structs.md) — **Structs** Structs are key-value maps with keyword keys.
 - [subprocess.md](subprocess.md) — **Subprocesses** Elle spawns a child process as a `subprocess` value: one thing to read streams from, to signal, and to wait on.
 - [supervisor.md](supervisor.md) — **Supervisors** A supervisor starts child processes, restarts each one by its policy, and gives up when they crash too often.
-- [syntax.md](syntax.md) — **Syntax** Elle is a Lisp.
+- [syntax.md](syntax.md) — **Syntax** The literals and reader-level constructs of Elle source, from numbers and string escapes to quoting and collections.
 - [test-cli.md](test-cli.md) — **Driving the test runner** Why `elle test` exists, the command line it offers, what it refuses to offer, and what is still design.
 - [test-runner.md](test-runner.md) — **Agent-First Test Runner** How a run executes: each file compiled, isolated, gated, run on every tier, its output captured, and its end recorded honestly.
 - [test-store.md](test-store.md) — **The test runner store** Where `elle test` keeps a run, what every run and result records, and the queries that read them back.

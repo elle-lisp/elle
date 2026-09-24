@@ -24,7 +24,7 @@ topic docs; this catalog is the map. Its examples run as one program under
 | Operation(s) | When | Emits runtime code? |
 |---|---|---|
 | `defmacro`, quasiquote, `macro?`, `expand-macro` | macro expansion (reader → analyzer) | expands to code |
-| `(elle/epoch N)` | migration pass, before expansion | no (consumed) |
+| `(elle/epoch N)` | before lexing, then the migration pass before expansion | no (consumed) |
 | `(unicode! …)` | analysis | no (declaration → `nil`; 0-arg query folds to the version array) |
 | `silence`, `muffle`, `attune!` | signal inference | no (shapes the inferred signal) |
 | `silent!`, `numeric!`, `immutable!` | post-inference checks | no (evaluate to `nil`) |
@@ -156,10 +156,12 @@ an assertions-disabled build) is proposed alongside; see
 `(elle/epoch)` with no arguments returns the current epoch number.
 
 ```lisp
-(assert (= (elle/epoch) 12))
+(assert (= (elle/epoch) 13))
 ```
 
-The epoch migration pass runs **after parsing, before macro expansion**, applying
+The reader reads the declaration before it lexes, because an epoch can change
+how text tokenizes (see [impl/lexicon.md](impl/lexicon.md)). The epoch
+migration pass runs **after parsing, before macro expansion**, applying
 backward-compatible syntax rewrites; the declaration form itself is consumed.
 Migration rule types and the current epoch: [epochs.md](epochs.md).
 
