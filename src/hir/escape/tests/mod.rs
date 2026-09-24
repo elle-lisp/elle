@@ -1,4 +1,10 @@
-//! Tests for the escape analysis (`super` = `hir::escape`).
+// audited: 2026-09-23
+// docs/impl/escape.md
+//! The escape analysis tests (`super` = `hir::escape`), and the fixtures they compile through.
+//!
+//! One module per question: `capture` for the capture facet, `containment` for
+//! which stores hand a value to an uncounted holder, and `flow` for value flow
+//! through bindings and calls.
 
 use super::*;
 use crate::hir::{Hir, HirId, HirKind};
@@ -17,7 +23,7 @@ fn compile_fhir(
 
 /// Compile a source to canonical HIR *and* the real `CallClassification` the
 /// lowerer feeds the live analysis — built from the same interned symbol table
-/// via `cached_primitive_meta`, so the declared native effects (`chan/send`'s
+/// by `build_primitive_meta`, so the declared native effects (`chan/send`'s
 /// `Sends`, …) reach both `analyze_escape` and the solver. Tests run under this
 /// classification, never the empty default, so they exercise what actually runs.
 fn compile_with_cc(
@@ -109,4 +115,5 @@ fn bindings_named(hir: &Hir, arena: &BindingArena, wanted: &[&str]) -> Vec<Bindi
 }
 
 mod capture;
+mod containment;
 mod flow;
