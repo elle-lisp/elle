@@ -331,8 +331,11 @@ perform the call and resume the child with the result, or refuse it with
 
 The `%` [intrinsics](../intrinsics.md) compile to bytecode instructions that
 bypass primitive dispatch, so no capability check reaches them. The generic
-`+` is a stdlib function, and a denial reaches it through a primitive it
-calls — the internal-helper seam #930 describes:
+`+` is a stdlib function, and a call to it becomes its body
+([grafting a call](../impl/graft.md)). Over two proven numbers that body is
+one `%add`, so it runs under any denial. Over an operand nothing proves, the
+body keeps its number guard, and a denial reaches the primitive the guard
+calls. That is the internal-helper seam #930 describes:
 
 ```lisp
 (def a 1)
@@ -340,7 +343,12 @@ calls — the internal-helper seam #930 describes:
 (let [f (fiber/new (fn [] (%add a b)) |:error| :deny |:error|)]
   (assert (= (fiber/resume f) 3)))                      # %add runs
 (let [f (fiber/new (fn [] (+ a b)) |:error| :deny |:error|)]
-  (assert (= (get (fiber/resume f) :primitive) "empty?")))  # + is denied inside
+  (assert (= (fiber/resume f) 3)))                      # so does + over two ints
+
+(defn add [x y] (+ x y))
+(def add-value add)                    # a value use proves nothing about x or y
+(let [f (fiber/new (fn [] (add-value a b)) |:error| :deny |:error|)]
+  (assert (= (get (fiber/resume f) :primitive) "type-of")))  # the guard is denied
 ```
 
 ## Examples

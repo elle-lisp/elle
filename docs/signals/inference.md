@@ -299,18 +299,25 @@ that passed the value.
 
 `(numeric!)` asserts that the function is GPU-eligible. The lowered body may
 hold only numeric instructions and control flow: no call, no closure, no
-heap value and no `emit`. Generic `+` is a call, so the body uses the `%`
-intrinsics. The assertion also marks every parameter as a number, which is
-the proof an intrinsic demands of its operands; see
+heap value and no `emit`. The assertion also marks every parameter as a
+number, which is the proof an intrinsic demands of its operands; see
 [intrinsics.md](../intrinsics.md). Nothing checks the argument at run time,
 so a non-number gives an unchecked result.
+
+A call to a stdlib wrapper such as `+` becomes the wrapper's body
+([grafting a call](../impl/graft.md)). Over a parameter the assertion marks,
+the body's number guards fold away, and `(+ x 1)` leaves one `%add`. A call
+that stays a call, such as `(println x)`, fails the assertion.
 
 ```lisp
 (defn square [x] (numeric!) (%mul x x))
 (assert (= 2.25 (square 1.5)))
 (assert (get (protect (square "a")) 0) "a non-number argument raises nothing")
 
-(assert (string/contains? (compile-error '(fn [x] (numeric!) (+ x 1)))
+(defn inc1 [x] (numeric!) (+ x 1))
+(assert (= 2 (inc1 1)) "+ grafts to one %add")
+
+(assert (string/contains? (compile-error '(fn [x] (numeric!) (println x)))
                           "numeric! assertion failed: function is not GPU-eligible"))
 ```
 

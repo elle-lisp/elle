@@ -38,9 +38,10 @@ over proven operands ends as the one `%`-op its body reaches:
 (assert (< 0 (occurrences unproven "(emit ")) "the guards raise at run time")
 
 # A container wrapper takes the same path: push on a proven @string is one op.
+# g grafts at the call (g) as well, so the op stands in g and at the call.
 (def pushed (fhir "(defn g [] (let [s @\"\"] (push s \"x\") s))\n(g)"))
 (assert (= 0 (occurrences pushed "push#")))
-(assert (= 1 (occurrences pushed "%string-push-mut")))
+(assert (= 2 (occurrences pushed "%string-push-mut")))
 ```
 
 The two passes are the graft, before functionalization, and the fold, after the
