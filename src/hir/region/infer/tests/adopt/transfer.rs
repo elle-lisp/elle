@@ -11,16 +11,16 @@ use super::*;
 
 // ── ownership inference: the transferred-returned-subtree cut ───────────────
 //
-// A producer lambda builds an externally-unique cyclic subtree and returns its
-// root; the consumer discards it. No region root can own it (the root crosses
-// the return frontier) and per-region RC cannot collect the cycle, so
-// `compute_transfer_adopts` claims it for the CONSUMING activation's owner
-// node: the producer's interior owner edges merge into the ordinary adopt maps
-// and each consumer site's call-result region lands in
-// `RegionInfo::transfer_adopt_regions`, whose release the lowerer replaces
-// with `AdoptIntoActivation` (docs/impl/region/owner.md § "Owner nodes" — "The
-// transferred returned subtree"). These pins read the fully-analyzed `RegionInfo`
-// (the lowerer's view), so they pin the wiring — not just the walk.
+// A producer builds an externally-unique cyclic subtree and returns its root;
+// the consumer discards it. No region root can own it and per-region RC cannot
+// collect the cycle, so `compute_transfer_adopts` claims it for the CONSUMING
+// activation's owner node: the producer's interior owner edges merge into the
+// ordinary adopt maps, and each consumer's release lands in
+// `RegionInfo::transfer_adopt_regions`, which the lowerer replaces with
+// `AdoptIntoActivation`. The producer is a lambda on the call and fiber faces,
+// and a binding's initializer on the inline face. These pins read the
+// fully-analyzed `RegionInfo` (the lowerer's view), so they pin the wiring —
+// not just the walk.
 
 /// The two mutually-referencing cycle regions of a compiled shape — the
 /// endpoints of its funnel-recovered `containment_edges` (the `%`-stores are
@@ -178,6 +178,95 @@ fn transfer_adopt_refuses_unsafe_shapes() {
         assert!(
             adopts.is_empty(),
             "a refused transfer shape must emit no interior adopts; got {adopts:?} \
+             for src={src}",
+        );
+    }
+}
+
+/// The inline face: a grafted producer leaves its `let` in the caller as a
+/// binding's initializer, so no call site is left for the call face. The
+/// initializer is the producer and the binding is the consumer, and the root's
+/// own release is the one the lowerer replaces with `AdoptIntoActivation`.
+///
+/// The counter-factual: no face admitted the shape. The root has two holders,
+/// the `let`'s own binding and the consumer's, so the subtree and group cuts
+/// refuse it too, and the a↔b cycle leaked two regions per run.
+#[test]
+fn transfer_adopts_inline_returned_cycle() {
+    let (_, info) = analyze_full(
+        "(begin (let [x (let [a (@array) b (@array)] \
+                  (begin (%array-push a b) (%array-push b a) a))] \
+                  nil) \
+                nil)",
+    );
+    let pair = cycle_pair(&info);
+    assert_eq!(
+        info.transfer_adopt_regions.len(),
+        1,
+        "the inline root must be transfer-adopted; got {:?}",
+        info.transfer_adopt_regions,
+    );
+    let &root = info.transfer_adopt_regions.iter().next().unwrap();
+    assert!(
+        pair.contains(&root),
+        "the transfer-adopted region r{} is the cycle's root itself (pair {pair:?})",
+        root.0,
+    );
+    let adopts: Vec<(Region, Region)> =
+        info.owned_adopt_edges.values().flatten().copied().collect();
+    assert_eq!(
+        adopts,
+        pair.iter()
+            .copied()
+            .filter(|&m| m != root)
+            .map(|m| (m, root))
+            .collect::<Vec<_>>(),
+        "exactly one interior owner edge: the other cycle member, owned by the root",
+    );
+}
+
+/// The inline face's refusals, each to the always-legal baseline: no transfer
+/// region and no interior adopt.
+#[test]
+fn transfer_adopt_refuses_unsafe_inline_shapes() {
+    let shapes = [
+        // (a) a READ consumer: the holder feeds an opcode read, whose alias could
+        // outlive the node's horizon.
+        "(begin (let [x (let [a (@array) b (@array)] \
+           (begin (%array-push a b) (%array-push b a) a))] \
+           (match (%type-of x) :@array (if (%get x 0) 1 2) _ 2)) \
+         nil)",
+        // (b) a STORED consumer: the holder goes into an outer container, so an
+        // edge from outside names the root.
+        "(begin (let [keep (@array)] \
+           (let [x (let [a (@array) b (@array)] \
+             (begin (%array-push a b) (%array-push b a) a))] \
+             (begin (%array-push keep x) nil))) \
+         nil)",
+        // (c) an ESCAPING MEMBER: `b` is also stored into an outer container.
+        "(begin (let [keep (@array)] \
+           (let [x (let [a (@array) b (@array)] \
+             (begin (%array-push a b) (%array-push b a) (%array-push keep b) a))] \
+             nil)) \
+         nil)",
+        // (d) an ACYCLIC subtree: the RC cascade reclaims it promptly.
+        "(begin (let [x (let [a (@array) b (@array)] \
+           (begin (%array-push a b) a))] \
+           nil) \
+         nil)",
+    ];
+    for src in shapes {
+        let (_, info) = analyze_full(src);
+        assert!(
+            info.transfer_adopt_regions.is_empty(),
+            "an unsafe inline shape must refuse; got {:?} for src={src}",
+            info.transfer_adopt_regions,
+        );
+        let adopts: Vec<(Region, Region)> =
+            info.owned_adopt_edges.values().flatten().copied().collect();
+        assert!(
+            adopts.is_empty(),
+            "a refused inline shape must emit no interior adopts; got {adopts:?} \
              for src={src}",
         );
     }
