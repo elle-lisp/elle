@@ -71,12 +71,32 @@ holds by a **counted** (or owning) edge in each case. A call's result carries
 exactly one minted reference ([the return mint](mechanism.md)), and a closure's
 env took the funnel's count when it was built ([the branch-arm
 window](window.md)). So the frame's own release remains the only reference it
-drops. An inline `%`-opcode is not such a node: it mints no region, and its heap
-result (`%first`/`%rest`/`%get`) is an uncounted borrow living *in* its
-operand's region. So the operand is the value-producing leaf and the descent
-continues through it. This is the same reading the closure-cycle merge's by-move
-boundary makes of the same question ([letrec.md](letrec.md)), for the same
-reason.
+drops. An inline `%`-opcode that allocates — `%pair`, `%freeze`, `%thaw` — is
+such a node too: its result lives in the region it mints, and that result holds
+each operand by the counted edge the allocation takes. Every other inline
+`%`-opcode mints no region, and its heap result (`%first`/`%rest`/`%get`) is an
+uncounted borrow living *in* its operand's region. So the operand is the
+value-producing leaf and the descent continues through it. This is the same
+reading the closure-cycle merge's by-move boundary makes of the same question
+([letrec.md](letrec.md)), for the same reason.
+
+The difference shows in a recursion that threads an accumulator. In
+`(step (%add i 1) n (%pair i acc))`, the call receives the new pair, and the pair
+holds `acc` by its own count. Descending the `%pair` would exempt `acc`'s release
+too, and nothing takes that release over, so each call would strand the
+accumulator it displaced.
+
+```lisp
+(def step (fn [i n acc] (if (%lt i n) (step (%add i 1) n (%pair i acc)) acc)))
+(defn stranded-by [f]
+  "How many regions 200 runs of f leave live."
+  (def r0 (arena/region-count))
+  (def @j 0)
+  (while (%lt j 200) (f) (assign j (%add j 1)))
+  (- (arena/region-count) r0))
+(assert (< (stranded-by (fn [] (length (step 0 4 ())))) 50)
+        "each displaced accumulator is released before the tail call")
+```
 
 Producing a value is not the same as producing a *fresh* one. A callee may hand
 back an argument itself or a value it read out of one ([adopt.md](adopt.md)),
@@ -85,8 +105,8 @@ freshness. Whichever region the result turns out to live in, the callee raised
 **that** region's count by exactly one on the way out ([the return
 mint](mechanism.md)). So the frame's own release still drops only the frame's
 reference, and the moved value survives it. The one node with no such count is
-the inline `%`-opcode above, which is why the descent passes through it to the
-operand that owns the page.
+the non-allocating inline `%`-opcode above, which is why the descent passes
+through it to the operand that owns the page.
 
 **A leaf is a part, not the whole.** What the exemption withholds is the frame's
 own release, on the strength of the callee's owned-parameter release standing in
