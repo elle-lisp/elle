@@ -65,15 +65,17 @@ fn composed_maps_fuse_to_one_loop() {
 }
 
 /// Safety: a user redefinition of `map` shadows the stdlib binding with a
-/// non-primitive one, so it is never rewritten (`fusable_hof_parts` gates on
-/// `is_primitive`). The user's `map` call survives.
+/// non-primitive one, so fusion never rewrites it into a loop
+/// (`fusable_hof_parts` gates on `is_primitive`).
 #[test]
 fn user_shadowed_map_is_not_fused() {
-    let (hir, arena, mut rt) = compile("(defn map [f xs] xs) (map (fn [x] x) [1 2 3])");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        cs.iter().any(|n| n == "map"),
-        "a user `map` must not be rewritten; callees were {cs:?}",
+    let (hir, _arena, _rt) = compile("(defn map [f xs] xs) (map (fn [x] x) [1 2 3])");
+    // The user's call may graft, and what grafts is the user's body, which
+    // makes no loop.
+    assert_eq!(
+        count_loops(&hir),
+        0,
+        "a user `map` must not become a fused loop"
     );
 }
 
@@ -84,20 +86,20 @@ fn user_shadowed_map_is_not_fused() {
 /// marked `is_primitive`, every pass that keys on the flag would miss a core HOF.
 /// A user redefinition still shadows with a non-primitive binding.
 ///
-/// The trap: the probes fold over an UNPROVEN collection (a function parameter)
-/// so that the `fold`/`reduce` call survives. Over a proven array the call
-/// dissolves and leaves no callee to inspect.
+/// The trap: the probes read the binding from a value use, `(def ff fold)`. A
+/// call to a known function is grafted into its body, over a proven array and
+/// an unproven collection alike, and leaves no callee to inspect.
 #[test]
 fn core_lisp_hof_exports_are_primitive_like_stdlib() {
-    // The binding a `(name …)` call resolves to (the winning shadow).
+    // The binding a use of `name` resolves to (the winning shadow). The use is a
+    // value, `(def ff fold)`: a call to a known function is grafted away, and a
+    // value use is what stays to read the binding from.
     fn callee_is_primitive(src: &str, name: &str) -> bool {
         let (hir, arena, _rt) = compile(src);
         fn find(h: &Hir, arena: &BindingArena, want: &str) -> Option<bool> {
-            if let HirKind::Call { func, .. } = &h.kind {
-                if let Some(b) = super::super::unwrap_callee_binding(func) {
-                    if arena.get(b).name == crate::value::SymbolId::of(want) {
-                        return Some(arena.get(b).is_primitive);
-                    }
+            if let HirKind::Var(b) = &h.kind {
+                if arena.get(*b).name == crate::value::SymbolId::of(want) {
+                    return Some(arena.get(*b).is_primitive);
                 }
             }
             let mut found = None;
@@ -108,16 +110,19 @@ fn core_lisp_hof_exports_are_primitive_like_stdlib() {
     }
     // core.lisp exports — primitive, exactly like the stdlib map/filter.
     assert!(
-        callee_is_primitive("(defn ff [xs] (fold (fn [a x] (+ a x)) 0 xs))", "fold"),
+        callee_is_primitive("(def ff fold) (ff (fn [a x] (+ a x)) 0 [1])", "fold"),
         "core.lisp `fold` must resolve to a primitive binding (parity with map)",
     );
     assert!(
-        callee_is_primitive("(defn rr [xs] (reduce (fn [a x] (+ a x)) 0 xs))", "reduce"),
+        callee_is_primitive("(def rr reduce) (rr (fn [a x] (+ a x)) 0 [1])", "reduce"),
         "core.lisp `reduce` must resolve to a primitive binding",
     );
     // Safety complement: a user redefinition shadows with a non-primitive one.
     assert!(
-        !callee_is_primitive("(defn fold [f i c] i) (fold (fn [a x] a) 0 [1])", "fold"),
+        !callee_is_primitive(
+            "(defn fold [f i c] i) (def ff fold) (ff (fn [a x] a) 0 [1])",
+            "fold"
+        ),
         "a user `fold` redefinition must NOT be primitive",
     );
 }
@@ -203,7 +208,8 @@ fn composed_filters_fuse_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "even?") && cs.iter().any(|n| n == "integer?"),
+        predicate_inline(&hir, &arena, &mut rt, "even?")
+            && predicate_inline(&hir, &arena, &mut rt, "integer?"),
         "both predicates must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -277,7 +283,8 @@ fn mixed_map_of_filter_reorder_safe_fuses_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        count_op(&hir, &arena, &mut rt, "*") > 0 && cs.iter().any(|n| n == "even?"),
+        count_op(&hir, &arena, &mut rt, "*") > 0
+            && predicate_inline(&hir, &arena, &mut rt, "even?"),
         "both the transform and the predicate must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -307,7 +314,8 @@ fn mixed_filter_of_map_reorder_safe_fuses_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        count_op(&hir, &arena, &mut rt, "*") > 0 && cs.iter().any(|n| n == "even?"),
+        count_op(&hir, &arena, &mut rt, "*") > 0
+            && predicate_inline(&hir, &arena, &mut rt, "even?"),
         "both the transform and the predicate must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -339,7 +347,7 @@ fn mixed_three_stage_tower_fuses_to_one_loop() {
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
         count_op(&hir, &arena, &mut rt, "+") > 0
-            && cs.iter().any(|n| n == "even?")
+            && predicate_inline(&hir, &arena, &mut rt, "even?")
             && count_op(&hir, &arena, &mut rt, "*") > 0,
         "all three stage bodies must inline; callees were {cs:?}",
     );

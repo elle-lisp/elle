@@ -82,7 +82,7 @@ fn numeric_declared_intrinsic_fold_fuses() {
     let (hir, arena, mut rt) = compile("(fold (fn [a x] (numeric!) (%add a x)) 0 [1 2 3])");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
-        !cs.iter().any(|n| n == "fold"),
+        !fold_stays_a_call(&cs),
         "a `(numeric!)`-declared intrinsic combinator must fuse; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");

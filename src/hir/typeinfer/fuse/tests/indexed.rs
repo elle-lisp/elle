@@ -203,15 +203,17 @@ fn map_indexed_over_mutable_array_is_not_fused() {
 }
 
 /// Safety: a user redefinition shadows the stdlib binding with a non-primitive one,
-/// so it is never rewritten.
+/// so fusion never rewrites it into a loop.
 #[test]
 fn user_shadowed_map_indexed_is_not_fused() {
-    let (hir, arena, mut rt) =
+    let (hir, _arena, _rt) =
         compile("(defn map-indexed [f c] c) (map-indexed (fn [i x] x) [1 2 3])");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        cs.iter().any(|n| n == "map-indexed"),
-        "a user `map-indexed` must not be rewritten; callees were {cs:?}",
+    // The user's call may graft, and what grafts is the user's body, which
+    // makes no loop.
+    assert_eq!(
+        count_loops(&hir),
+        0,
+        "a user `map-indexed` must not become a fused loop"
     );
 }
 

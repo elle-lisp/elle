@@ -46,7 +46,7 @@ fn named_fold_fn_inlines() {
     let (hir, arena, mut rt) = compile("(defn mul [a b] (* a b)) (fold mul 1 [1 2 3])");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
-        !cs.iter().any(|n| n == "fold"),
+        !fold_stays_a_call(&cs),
         "the `fold` dispatch must be gone for a named combinator; callees were {cs:?}",
     );
     assert_eq!(

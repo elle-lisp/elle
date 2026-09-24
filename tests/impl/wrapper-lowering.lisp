@@ -1,47 +1,49 @@
 (elle/epoch 12)
 # audited: 2026-09-23
-# A wrapper call over two proven numbers lowers to its %-op, and computes what
-# the wrapper call computes.
+# A wrapper call over two proven numbers dissolves to its %-op, and computes what
+# the wrapper computes.
 #
-# Each wrapper is built twice. `guarded` proves both operands with a diverging
-# guard, so its tail call to the wrapper lowers to the op. `unproven` proves
-# nothing, so its call stays a call. The two are compared on every pair below.
-# Which code the compiler emits is part of the subject here, so the first
-# section reads the disassembly.
-# docs/intrinsics.md
+# Each wrapper is spelled three ways. `dissolved` tests both operands for numbers
+# without raising, so the grafted wrapper's own guards fold away and only the op
+# is left. `grafted` proves nothing, so the graft keeps the wrapper's guards. The
+# wrapper itself, handed to `apply` as a value, runs the stdlib closure. The three
+# are compared on every pair below. Which code the compiler emits is part of the
+# subject here, so the first section reads the disassembly.
+# docs/impl/graft.md
 
 (defn disasm-text [f]
   "The disassembly of f's bytecode, as one string."
   (string/join (fn/disasm f) " "))
 
-# A two-operand function whose guards prove both operands numbers.
-(defmacro guarded (op)
-  `(fn [a b]
-     (when (%not (number? a)) (error {:error :type-error :message "a"}))
-     (when (%not (number? b)) (error {:error :type-error :message "b"}))
-     (,op a b)))
+# A two-operand function that proves both operands numbers, and raises nothing.
+(defmacro dissolved (op)
+  `(fn [a b] (if (and (number? a) (number? b)) (,op a b) :not-numbers)))
 
 # A two-operand function that proves nothing about its operands.
-(defmacro unproven (op)
+(defmacro grafted (op)
   `(fn [a b] (,op a b)))
 
 (def wrappers
-  [[:+ (guarded +) (unproven +)] [:- (guarded -) (unproven -)]
-   [:* (guarded *) (unproven *)] [:< (guarded <) (unproven <)]
-   [:> (guarded >) (unproven >)] [:<= (guarded <=) (unproven <=)]
-   [:>= (guarded >=) (unproven >=)] [:= (guarded =) (unproven =)]])
+  [[:+ + (dissolved +) (grafted +)] [:- - (dissolved -) (grafted -)]
+   [:* * (dissolved *) (grafted *)] [:< < (dissolved <) (grafted <)]
+   [:> > (dissolved >) (grafted >)] [:<= <= (dissolved <=) (grafted <=)]
+   [:>= >= (dissolved >=) (grafted >=)] [:= = (dissolved =) (grafted =)]])
 
-# ── The guarded spelling lowers; the unproven one keeps the call ──
+# ── The proven spelling keeps no guard; the unproven one keeps them ──
 
-# The guards call number?, so both spellings hold a Call. Only a wrapper call
-# left in tail position is a TailCall, and a lowered op ends in Return.
-(each [name lowered wrapped] wrappers
-  (assert (not (string/contains? (disasm-text lowered) "TailCall"))
-          (string name " over two guarded numbers lowers to its op"))
-  (assert (string/contains? (disasm-text wrapped) "TailCall")
-          (string name " over unproven operands stays a wrapper call")))
+# Every guard a grafted wrapper brings raises through an Emit. `=` has no guard
+# to keep, so it is not in this section; its number test is pinned in
+# hir::typeinfer::tests::graft.
+#
+# The counter-factual: while a wrapper call stayed a call, its guards lived in
+# the wrapper's own body, so the unproven spelling held no Emit either.
+(each [name _ proven unproven] (filter (fn [w] (not= (first w) :=)) wrappers)
+  (assert (not (string/contains? (disasm-text proven) "Emit"))
+          (string name " over two proven numbers keeps no guard"))
+  (assert (string/contains? (disasm-text unproven) "Emit")
+          (string name " over unproven operands keeps its guards")))
 
-# ── Both spellings compute one value ──────────────────────────────
+# ── All three spellings compute one value ─────────────────────────
 
 (def nan (/ 0.0 0.0))
 (def inf (math/inf))
@@ -53,20 +55,23 @@
    [2 1.5] [1 1.0] [-0.0 -0.0] [-0.0 0.0] [0.0 -0.0] [0 -0.0] [-0.0 0] [nan 1.0]
    [1 nan] [nan nan] [inf (- inf)] [inf 1]])
 
-(each [name lowered wrapped] wrappers
+(each [name wrapper proven unproven] wrappers
   (each [a b] pairs
-    (let [low (lowered a b)
-          call (apply wrapped [a b])]
-      (assert (identical? low call)
-              (string "(" name " " a " " b "): lowered " low ", wrapper " call)))))
+    (let [low (proven a b)
+          graft (unproven a b)
+          call (apply wrapper [a b])]
+      (assert (identical? low graft)
+              (string "(" name " " a " " b "): dissolved " low ", grafted "
+                      graft))
+      (assert (identical? graft call)
+              (string "(" name " " a " " b "): grafted " graft ", called " call)))))
 
 # ── The sum keeps a negative zero ─────────────────────────────────
 
-# The counter-factual: while the + wrapper summed from the integer 0, the
-# wrapper call returned 0.0 here, and the op returned -0.0. Lowering + would
-# have changed the sign of a zero sum.
-(def unproven-add (get (get wrappers 0) 2))
-(assert (identical? (apply unproven-add [-0.0 -0.0]) -0.0)
+# The counter-factual: while the + wrapper summed from the integer 0, the called
+# wrapper returned 0.0 here, and the op returned -0.0. Dissolving + would have
+# changed the sign of a zero sum.
+(assert (identical? (apply + [-0.0 -0.0]) -0.0)
         "the + wrapper keeps a negative zero sum")
 (assert (identical? (+ -0.0) -0.0) "the + wrapper returns its one operand")
 (assert (identical? (+) 0) "the empty sum is the integer 0")

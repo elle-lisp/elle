@@ -55,10 +55,23 @@ fn count_lambdas(h: &Hir) -> usize {
     n
 }
 
-/// Count the `if` nodes — the loop's `while`→`loop` lowering emits one, and a
-/// fused `filter` adds one guarded push per predicate stage.
+/// Count the `if` nodes that branch the pipeline — a fused `filter` emits one
+/// guarded push per predicate stage; a fused `map` emits none.
+///
+/// A stage body's stdlib calls are grafted, and a wrapper over an element whose
+/// type is not proven keeps its raising guards: `(when (%not (number? b)) (error
+/// …))` is an `if` with an `emit` on one side. Those belong to the stage's op,
+/// not to the loop's shape, so they are not counted.
 fn count_ifs(h: &Hir) -> usize {
-    let mut n = usize::from(matches!(h.kind, HirKind::If { .. }));
+    let branches = match &h.kind {
+        HirKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } => !raises(then_branch) && !raises(else_branch),
+        _ => false,
+    };
+    let mut n = usize::from(branches);
     h.for_each_child(|c| n += count_ifs(c));
     n
 }
@@ -70,6 +83,52 @@ fn count_ifs(h: &Hir) -> usize {
 fn count_ands(h: &Hir) -> usize {
     let mut n = usize::from(matches!(h.kind, HirKind::And(_)));
     h.for_each_child(|c| n += count_ands(c));
+    n
+}
+
+/// Does every path through `h` end in an `emit`?
+fn raises(h: &Hir) -> bool {
+    match &h.kind {
+        HirKind::Emit { .. } => true,
+        HirKind::Begin(xs) => xs.last().is_some_and(raises),
+        HirKind::Let { body, .. } => raises(body),
+        _ => false,
+    }
+}
+
+/// Whether the stdlib predicate `name` runs inline: a call to it, or the body the
+/// graft puts in its place, which the op that body reaches marks. A fusion test
+/// asks whether the predicate runs in the loop, not which spelling it ends in.
+fn predicate_inline(
+    h: &Hir,
+    arena: &BindingArena,
+    rt: &mut crate::runtime::Runtime,
+    name: &str,
+) -> bool {
+    const MARKS: [(&str, &str); 2] = [("even?", "%rem"), ("integer?", "type-of")];
+    let (_, mark) = MARKS
+        .iter()
+        .find(|(p, _)| *p == name)
+        .expect("a predicate with a known mark");
+    count_callee(h, arena, rt, name) > 0
+        || count_callee(h, arena, rt, mark) > 0
+        || count_intrinsic(h, mark) > 0
+}
+
+/// Whether a `fold` runs as a call rather than a fused loop. `fold`'s body
+/// closes, so a `fold` fusion declines is grafted, and the call left is its
+/// self-recursive driver `core-fold-step`.
+fn fold_stays_a_call(cs: &[String]) -> bool {
+    cs.iter().any(|n| n == "fold" || n == "core-fold-step")
+}
+
+/// Count the loop nodes — a fused chain is one; a declined one is none.
+fn count_loops(h: &Hir) -> usize {
+    let mut n = usize::from(matches!(
+        h.kind,
+        HirKind::Loop { .. } | HirKind::While { .. }
+    ));
+    h.for_each_child(|c| n += count_loops(c));
     n
 }
 
@@ -94,14 +153,15 @@ fn count_intrinsic(h: &Hir, want: &str) -> usize {
 }
 
 /// How many sites run a stage body's arithmetic or comparison op: a call to the
-/// stdlib `wrapper`, or the `%`-op the call lowers to where inference proves both
-/// operands numbers (docs/intrinsics.md). A fusion test asks whether the op runs
-/// inline, not which of the two spellings it ends in.
+/// stdlib `wrapper`, or the `%`-op its grafted body reaches (docs/impl/graft.md).
+/// A fusion test asks whether the op runs inline, not which of the two spellings
+/// it ends in.
 ///
 /// The loop scaffold advances each counter with `(assign i (%add i 1))`, and an
 /// `%add` an `assign` stores is not counted, so a `+` assertion cannot pass on the
-/// scaffold alone. The scaffold's range test is a call to `<`, which does count:
-/// a test that needs an inline predicate uses another comparison.
+/// scaffold alone. The scaffold's range test is a call to `<`, or the `%lt` it
+/// dissolves to, which does count: a test that needs an inline predicate uses
+/// another comparison.
 fn count_op(
     h: &Hir,
     arena: &BindingArena,

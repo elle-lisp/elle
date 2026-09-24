@@ -25,7 +25,7 @@ fn single_drop_while_dissolves_to_a_flag_gated_push() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "even?"),
+        predicate_inline(&hir, &arena, &mut rt, "even?"),
         "the predicate must run inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -63,7 +63,8 @@ fn map_over_drop_while_fuses_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "even?") && count_op(&hir, &arena, &mut rt, "*") > 0,
+        predicate_inline(&hir, &arena, &mut rt, "even?")
+            && count_op(&hir, &arena, &mut rt, "*") > 0,
         "both the predicate and the transform must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -269,14 +270,16 @@ fn drop_while_over_mutable_array_is_not_fused() {
 }
 
 /// Safety: a user redefinition shadows the stdlib binding with a non-primitive one,
-/// so it is never rewritten.
+/// so fusion never rewrites it into a loop.
 #[test]
 fn user_shadowed_drop_while_is_not_fused() {
-    let (hir, arena, mut rt) = compile("(defn drop-while [p c] c) (drop-while (fn [x] x) [1 2 3])");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        cs.iter().any(|n| n == "drop-while"),
-        "a user `drop-while` must not be rewritten; callees were {cs:?}",
+    let (hir, _arena, _rt) = compile("(defn drop-while [p c] c) (drop-while (fn [x] x) [1 2 3])");
+    // The user's call may graft, and what grafts is the user's body, which
+    // makes no loop.
+    assert_eq!(
+        count_loops(&hir),
+        0,
+        "a user `drop-while` must not become a fused loop"
     );
 }
 

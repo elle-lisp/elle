@@ -21,7 +21,7 @@ fn single_any_dissolves_to_sentinel_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "even?"),
+        predicate_inline(&hir, &arena, &mut rt, "even?"),
         "the predicate must run inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -59,7 +59,7 @@ fn single_all_dissolves_to_sentinel_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "even?"),
+        predicate_inline(&hir, &arena, &mut rt, "even?"),
         "the predicate must run inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -140,7 +140,8 @@ fn search_over_a_map_prefix_fuses_to_one_loop() {
              callees were {cs:?}",
         );
         assert!(
-            cs.iter().any(|n| n == "even?") && count_op(&hir, &arena, &mut rt, "*") > 0,
+            predicate_inline(&hir, &arena, &mut rt, "even?")
+                && count_op(&hir, &arena, &mut rt, "*") > 0,
             "both the predicate and the map transform must inline for {src}; \
              callees were {cs:?}",
         );
@@ -280,14 +281,16 @@ fn search_over_mutable_array_is_not_fused() {
 }
 
 /// Safety: a user redefinition of a search name shadows the stdlib binding with a
-/// non-primitive one, so it is never rewritten.
+/// non-primitive one, so fusion never rewrites it into a loop.
 #[test]
 fn user_shadowed_search_is_not_fused() {
-    let (hir, arena, mut rt) = compile("(defn find [p c] nil) (find (fn [x] x) [1 2 3])");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        cs.iter().any(|n| n == "find"),
-        "a user `find` must not be rewritten; callees were {cs:?}",
+    let (hir, _arena, _rt) = compile("(defn find [p c] nil) (find (fn [x] x) [1 2 3])");
+    // The user's call may graft, and what grafts is the user's body, which
+    // makes no loop.
+    assert_eq!(
+        count_loops(&hir),
+        0,
+        "a user `find` must not become a fused loop"
     );
 }
 

@@ -21,7 +21,7 @@ fn single_count_dissolves_to_scalar_tally() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "even?"),
+        predicate_inline(&hir, &arena, &mut rt, "even?"),
         "the predicate must run inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -51,7 +51,8 @@ fn count_of_map_fuses_to_one_scalar_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "even?") && count_op(&hir, &arena, &mut rt, "*") > 0,
+        predicate_inline(&hir, &arena, &mut rt, "even?")
+            && count_op(&hir, &arena, &mut rt, "*") > 0,
         "both the predicate and the map transform must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -137,14 +138,16 @@ fn count_over_mutable_array_is_not_fused() {
 }
 
 /// Safety: a user redefinition of `count` shadows the stdlib binding with a
-/// non-primitive one, so it is never rewritten.
+/// non-primitive one, so fusion never rewrites it into a loop.
 #[test]
 fn user_shadowed_count_is_not_fused() {
-    let (hir, arena, mut rt) = compile("(defn count [p c] 0) (count (fn [x] x) [1 2 3])");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        cs.iter().any(|n| n == "count"),
-        "a user `count` must not be rewritten; callees were {cs:?}",
+    let (hir, _arena, _rt) = compile("(defn count [p c] 0) (count (fn [x] x) [1 2 3])");
+    // The user's call may graft, and what grafts is the user's body, which
+    // makes no loop.
+    assert_eq!(
+        count_loops(&hir),
+        0,
+        "a user `count` must not become a fused loop"
     );
 }
 

@@ -16,7 +16,7 @@ fn single_fold_dissolves_to_scalar_accumulator() {
     let (hir, arena, mut rt) = compile("(fold (fn [a x] (+ a x)) 0 [1 2 3])");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
-        !cs.iter().any(|n| n == "fold"),
+        !fold_stays_a_call(&cs),
         "the `fold` dispatch must be gone; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
@@ -48,7 +48,7 @@ fn fold_of_map_fuses_to_one_scalar_loop() {
         compile("(fold (fn [a x] (+ a x)) 0 (map (fn [x] (* x 2)) [1 2 3]))");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
-        !cs.iter().any(|n| n == "fold" || n == "map"),
+        !fold_stays_a_call(&cs) && !cs.iter().any(|n| n == "map"),
         "both the `fold` and `map` dispatches must be gone; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
@@ -77,12 +77,13 @@ fn fold_of_filter_fuses_to_one_scalar_loop() {
         compile("(fold (fn [a x] (+ a x)) 0 (filter (fn [y] (even? y)) [1 2 3 4]))");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
-        !cs.iter().any(|n| n == "fold" || n == "filter"),
+        !fold_stays_a_call(&cs) && !cs.iter().any(|n| n == "filter"),
         "both the `fold` and `filter` dispatches must be gone; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        count_op(&hir, &arena, &mut rt, "+") > 0 && cs.iter().any(|n| n == "even?"),
+        count_op(&hir, &arena, &mut rt, "+") > 0
+            && predicate_inline(&hir, &arena, &mut rt, "even?"),
         "both the fold step and the predicate must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -100,7 +101,7 @@ fn reduce_dissolves_like_fold() {
     let (hir, arena, mut rt) = compile("(reduce (fn [a x] (+ a x)) 0 [1 2 3])");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
-        !cs.iter().any(|n| n == "reduce" || n == "fold"),
+        !fold_stays_a_call(&cs) && !cs.iter().any(|n| n == "reduce"),
         "the `reduce` dispatch must be gone; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
@@ -120,7 +121,7 @@ fn single_fold_with_non_reorder_safe_body_still_fuses() {
     let (hir, arena, mut rt) = compile("(fold (fn [a x] (if (> a x) a x)) 0 [3 1 2])");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
-        !cs.iter().any(|n| n == "fold"),
+        !fold_stays_a_call(&cs),
         "a lone fold has no reorder gate and must fuse; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
@@ -138,7 +139,7 @@ fn fold_over_non_reorder_safe_prefix_fuses_inner_only() {
         compile("(fold (fn [a x] (+ a x)) 0 (filter (fn [w] (> w 1)) [1 2 3 4]))");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
-        cs.iter().any(|n| n == "fold"),
+        fold_stays_a_call(&cs),
         "the outer `fold` must not fuse a non-reorder-safe composition; \
              callees were {cs:?}",
     );
@@ -149,14 +150,15 @@ fn fold_over_non_reorder_safe_prefix_fuses_inner_only() {
 }
 
 /// Safety: a user redefinition of `fold` shadows the core binding with a
-/// non-primitive one, so it is never rewritten. The user's `fold` call survives.
+/// non-primitive one, so fusion never rewrites it into a loop. Its call may still
+/// graft, and what grafts is the user's body, which makes no loop.
 #[test]
 fn user_shadowed_fold_is_not_fused() {
-    let (hir, arena, mut rt) = compile("(defn fold [f i c] i) (fold (fn [a x] a) 0 [1 2 3])");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        cs.iter().any(|n| n == "fold"),
-        "a user `fold` must not be rewritten; callees were {cs:?}",
+    let (hir, _arena, _rt) = compile("(defn fold [f i c] i) (fold (fn [a x] a) 0 [1 2 3])");
+    assert_eq!(
+        count_loops(&hir),
+        0,
+        "a user `fold` must not become a fused loop"
     );
 }
 
@@ -170,7 +172,7 @@ fn capturing_fold_lambda_fuses() {
     let (hir, arena, mut rt) = compile("(let [k 10] (fold (fn [a x] (+ a (+ x k))) 0 [1 2 3]))");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
-        !cs.iter().any(|n| n == "fold"),
+        !fold_stays_a_call(&cs),
         "the `fold` dispatch must be gone; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
@@ -183,7 +185,7 @@ fn fold_over_var_bound_immutable_array_fuses() {
     let (hir, arena, mut rt) = compile("(let [xs [1 2 3 4]] (fold (fn [a x] (+ a x)) 0 xs))");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
-        !cs.iter().any(|n| n == "fold"),
+        !fold_stays_a_call(&cs),
         "a Var-bound base must fuse; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
