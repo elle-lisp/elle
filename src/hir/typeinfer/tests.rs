@@ -9,7 +9,8 @@
 //! call's result proves, `mutation` for what a written binding proves,
 //! `bottom` for what the lattice's start proves, `callsite` for what a call
 //! contributes where its operands and parameters do not line up,
-//! `destructure` for what a destructuring write proves, `prune` for dead-arm
+//! `destructure` for what a destructuring write proves, `branch` for what a
+//! branch's write and a block's `break` leave behind, `prune` for dead-arm
 //! removal, `contract` for prove-or-reject, `graft` for which calls become
 //! their callee's body, `fold` for what the recorded types then delete.
 
@@ -19,6 +20,7 @@ use crate::hir::{BindingArena, Hir, HirId, HirKind};
 use crate::symbol::SymbolTable;
 
 mod bottom;
+mod branch;
 mod callsite;
 mod contract;
 mod destructure;
@@ -125,6 +127,16 @@ fn compile_booted(src: &str) -> Result<(Hir, BindingArena), String> {
     let mut rt = crate::runtime::Runtime::new();
     let (_vm, symbols, cctx) = rt.parts();
     crate::pipeline::compile_file_to_fhir(src, symbols, cctx, "<test>")
+}
+
+/// Compile and run `src` on a runtime with the stdlib loaded, answering the
+/// value of its last form. A test that asks what a program computes, rather
+/// than what its tree holds, runs it here.
+fn run_booted(src: &str) -> crate::value::Value {
+    let mut rt = crate::runtime::Runtime::new();
+    let (vm, symbols, cctx) = rt.parts();
+    crate::pipeline::eval_all(src, symbols, vm, cctx, "<test>")
+        .unwrap_or_else(|e| panic!("{src} must run: {e}"))
 }
 
 /// How many `%`-intrinsic nodes named `op` the tree holds.

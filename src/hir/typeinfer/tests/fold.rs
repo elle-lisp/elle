@@ -1,11 +1,13 @@
 // audited: 2026-09-23
 // src/hir/AGENTS.md
 // docs/impl/graft.md
-//! What the fold deletes after inference: a guard or a dispatch arm the recorded
-//! types decide, and the statements after a guard certain to raise.
+//! What the fold deletes after inference: a guard, a `cond` clause, an `and` or
+//! `or` operand, or a dispatch arm the recorded types decide. What it keeps: the
+//! statements after a raise, which a resume reaches.
 
-use super::{compile_booted, count_calls_to, count_emits, count_ops};
+use super::{compile_booted, count_calls_to, count_emits, count_intrinsics, count_ops, run_booted};
 use crate::hir::{BindingArena, Hir, HirKind};
+use crate::value::Value;
 
 fn compiled(src: &str) -> (Hir, BindingArena) {
     compile_booted(src).unwrap_or_else(|e| panic!("{src} must compile: {e}"))
@@ -93,23 +95,97 @@ fn a_stdlib_container_wrapper_on_a_proven_container_is_one_op() {
     }
 }
 
-/// A guard certain to raise ends its sequence. The narrowing gives the `%add`
-/// after it an operand no value reaches, and the contract would reject that
-/// operand; the fold deletes the `%add` first, so the program still compiles
-/// and raises at run time.
+/// A guard certain to raise keeps the statements after it, because a parent
+/// may resume the raise. The op after it reads the operand the guard rejected,
+/// which no type proves, and the contract check skips it there.
+///
+/// The counter-factual: the fold deleted the op, so a resumed fiber returned
+/// the recovery value instead of running the rest of the body.
 #[test]
-fn a_certain_raise_cuts_what_follows_and_the_program_compiles() {
-    for src in ["(+ \"a\" 1)", "(< \"a\" 1)", "(- :k)"] {
+fn a_certain_raise_keeps_what_follows_and_the_program_compiles() {
+    for (src, op) in [("(+ \"a\" 1)", "%add"), ("(- :k)", "%sub")] {
         let (hir, arena) = compiled(src);
         assert!(count_emits(&hir) > 0, "{src}: the raise stays");
-        for op in ["%add", "%lt", "%sub"] {
-            assert_eq!(
-                count_ops(&hir, &arena, op),
-                0,
-                "{src}: no {op} survives the raise"
-            );
-        }
+        assert!(
+            count_ops(&hir, &arena, op) > 0,
+            "{src}: {op} stays for a resume"
+        );
     }
+    compiled("(< \"a\" 1)");
+}
+
+/// An `:error` is resumable, so the statement after a raise runs when the
+/// parent resumes the child. The counter-factual: the fold cut `:done`, and
+/// the resume answered with the value it passed in.
+#[test]
+fn a_resumed_raise_runs_the_statement_after_it() {
+    let src = "(def f (fiber/new (fn [] (emit :error :stop) :done) |:error|))
+               (fiber/resume f)
+               (fiber/resume f :again)";
+    assert_eq!(run_booted(src), Value::keyword("done"), "{src}");
+}
+
+/// The inner block's own `break` leaves it for the statement after it, so the
+/// guard's branch does not diverge and proves nothing after the guard. `f` is
+/// used as a value, so `x` is unknown.
+///
+/// The counter-factual: a block whose tail is a `break` read as diverging, so
+/// the guard proved `x` an int for the `%bit-and`, which then compiled over a
+/// string.
+#[test]
+fn a_block_its_own_break_leaves_proves_nothing_after_it() {
+    let src = "(defn f [x]
+                 (when (%not (%int? x)) (block :b (break :b nil)))
+                 (%bit-and x 1))
+               (def g f)
+               (g \"s\")";
+    let err = compile_booted(src).expect_err("x is not proven an int");
+    assert!(err.contains("%bit-and"), "{src}: {err}");
+}
+
+/// A `cond` clause whose test decides false goes, and so does its body. The
+/// counter-factual: the clause stayed, its `x` met a string with an int at
+/// Bottom, and the contract rejected a site no value reaches.
+#[test]
+fn a_cond_clause_that_decides_false_goes() {
+    let src = "(defn f [x] (cond (%int? x) (%bit-and x 1) true 0)) (f \"s\")";
+    let (hir, arena) = compiled(src);
+    assert_eq!(count_ops(&hir, &arena, "%bit-and"), 0, "{src}");
+}
+
+/// A clause whose test decides true is the last one that can run, so every
+/// clause after it goes. The counter-factual: the second clause stayed, and
+/// its `%bit-and` over a string was rejected.
+#[test]
+fn a_cond_clause_that_decides_true_ends_the_cond() {
+    let src = "(defn f [x y] (cond (%int? x) 1 (%bit-and y 1) 2 true 3)) (f 5 \"s\")";
+    let (hir, arena) = compiled(src);
+    assert_eq!(count_ops(&hir, &arena, "%bit-and"), 0, "{src}");
+}
+
+/// An `and` stops at an operand that decides it false, and an `or` at one that
+/// decides it true: nothing after it runs. The counter-factual: the operand
+/// after it stayed, and its `%bit-and` over a string was rejected.
+#[test]
+fn an_and_or_an_or_stops_at_the_operand_that_decides_it() {
+    for src in [
+        "(defn f [x] (and (%int? x) (%bit-and x 1))) (f \"s\")",
+        "(defn f [x] (or (%not (%int? x)) (%bit-and x 1))) (f \"s\")",
+        "(inf? nil)",
+        "(nan? :k)",
+    ] {
+        compiled(src);
+    }
+}
+
+/// An operand before the last that decides an `and` true is never its result,
+/// and running it has no effect, so it goes. The counter-factual: the proven
+/// test stayed in the tree.
+#[test]
+fn a_true_operand_before_the_last_leaves_an_and() {
+    let src = "(defn f [x] (and (%int? x) (%bit-and x 1))) (f 5)";
+    let (hir, _) = compiled(src);
+    assert_eq!(count_intrinsics(&hir, "%int?"), 0, "{src}");
 }
 
 /// `g` is only ever called with a string, so `(%int? b)` decides false and the

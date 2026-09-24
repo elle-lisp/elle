@@ -199,6 +199,25 @@ fn a_recursive_function_stays_a_call() {
     assert_eq!(count_calls_to(&hir, &arena, "f"), 2, "{src}");
 }
 
+/// Nothing calls `go`, so its parameter proves nothing, and the call to
+/// `helper` in it stays a call. `helper`'s `x` is proven by `(helper n)`.
+///
+/// The counter-factual: the call in `go` grafted, and put `helper`'s `%sub`
+/// over `go`'s unproven `m`, which the contract rejected.
+#[test]
+fn a_call_in_a_function_nothing_calls_stays_a_call() {
+    let src = "(defn plain [n]
+                 (letrec [helper (fn [x] (%sub x 1))
+                          go (fn [m] (helper m))]
+                   (helper n)))
+               (plain 5)";
+    let (hir, arena) = compiled(src);
+    assert!(
+        count_calls_to(&hir, &arena, "helper") > 0,
+        "{src}: the call in go stays"
+    );
+}
+
 /// A function this unit defines grafts like a stdlib one, and its definition
 /// keeps the proof its grafted callers gave it. The counter-factual: with the
 /// call grafted away and nothing recorded, `x` has no call site, and `%mul x x`
