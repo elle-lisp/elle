@@ -1,6 +1,6 @@
 # Settled invariants
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-13 -->
 
 The invariants the region system upholds, one line each, with the spec that
 owns the argument.
@@ -55,15 +55,15 @@ these invariants close are [the model](../memory.md).
   what it bound, so its floor is the `def` itself ([anchors.md](anchors.md)).
 - The branch-arm release window anchors a region's one release at the merge
   every path reaches, admitted only where escape proves the frame holds the
-  region alone (`frame_held_regions`); everything else keeps the counted
-  compensation routes ([window.md](window.md)).
+  region alone (`frame_held_regions`). Everything else keeps the counted
+  compensation routes ([window.md](window.md), [held.md](held.md)).
 - A region's release route belongs to one binding — the one whose init
   allocated it. Four sites record a route and no others; a `Loop` parameter
   and a pattern name poison nothing ([window.md](window.md)).
 - A returned region owes the relocation point no funding edge: a callee
   reaches a value this frame owns as an operand or through its captured
-  environment, and both ends of that enumeration are safe
-  ([relocate.md](relocate.md), [window.md](window.md)).
+  environment. Both ends of that enumeration are safe
+  ([relocate.md](relocate.md), [held.md](held.md)).
 - An env cell's compensating release names the box, which nothing repoints, so
   compensation's per-arm routes carry it where the window cannot
   ([compensate.md](compensate.md)).
@@ -117,7 +117,7 @@ these invariants close are [the model](../memory.md).
   a result allocates through the call's ctx ([ctx.md](ctx.md)).
 - A fiber crossing is a counted holder, so it refuses no placement: the park's
   escape retain going out, the resume value's own mint coming back
-  ([window.md](window.md), [park.md](park.md)).
+  ([held.md](held.md), [park.md](park.md)).
 - A fiber body owns one reference of every value it yields; the compiler mints
   the missing one for a borrowed payload ([park.md](park.md)).
 - What yields is the emit operation, not the `Emit` node: a dynamic `emit` is
@@ -142,7 +142,7 @@ these invariants close are [the model](../memory.md).
   return mint; the fiber half of the frontier refuses outright
   ([letrec.md](letrec.md)).
 - The arena channel and the callee channel are independent: one tail call can
-  carry both, and they never name the same region ([letrec.md](letrec.md)).
+  carry both, and they never name the same region ([cycletail.md](cycletail.md)).
 - A cycle that hands a member out is released where that member is released,
   which retires the sole-held proxy for exactly those members
   ([letrec.md](letrec.md)).

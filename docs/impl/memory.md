@@ -39,25 +39,24 @@ promptly. The bar is exact:
 > the compiler proves is a compiler defect, never a detail to paper over.
 
 So **over-keep is a defect**: holding a value past its true last use. Bounded
-by a small scope it is a promptness nit; bounded by a loop or the program it is
-unbounded RSS growth — the limiting factor that blocks long-running production
-workloads. "Never leaks, freed at teardown" is a leak in every way that matters
-for a process meant to stay up. The fix is never to extend a lifetime to dodge
-a use-after-free; it is tighter ownership (give the value a real owner that
-dies at the right time) or refusal (leave it Shared, the always-legal
-baseline).
+by a small scope it is a promptness nit. Bounded by a loop or the program, it is
+unbounded RSS growth, which blocks long-running production workloads. "Never
+leaks, freed at teardown" is a leak in every way that matters for a process
+meant to stay up. The fix is never to extend a lifetime to dodge a
+use-after-free. It is tighter ownership (give the value a real owner that dies
+at the right time) or refusal (leave it Shared, the always-legal baseline).
 
 ### The north star — ownership is the substrate for parallelism
 
-Leak-freedom is the floor, not the point. The two facts the compiler infers to
-free promptly — where each value lives, and whether it escapes — are exactly
-the facts needed to **dissolve** a computation into its most efficient
-realization on each target. A `(map f xs)` over an owned, non-escaping `xs`
-exposes no observable closure and no observable region layout, so the compiler
-may realize it as a plain loop, a JIT'd group, CPU SIMD, or a wide GPU
-dispatch: `xs`'s owned region becomes a device arena, `f` dissolves into the
-kernel, and the arena is safe both to ship to the device and to free wholesale
-when the dispatch completes. This is the design's reason to exist: inference →
+Leak-freedom is the floor, not the point. The compiler infers two facts to free
+promptly: where each value lives, and whether it escapes. Those are exactly the
+facts needed to **dissolve** a computation into its most efficient realization
+on each target. A `(map f xs)` over an owned, non-escaping `xs` exposes no
+observable closure and no observable region layout. So the compiler may realize
+it as a plain loop, a JIT'd group, CPU SIMD, or a wide GPU dispatch. `xs`'s
+owned region becomes a device arena, `f` dissolves into the kernel, and the
+arena is safe both to ship to the device and to free wholesale when the
+dispatch completes. This is the design's reason to exist: inference →
 ownership → dissolution into SIMD and heterogeneous execution. Dissolution's
 win is **fewer allocations… which the leak oracle does not observe** — its
 gauges count allocation events instead
@@ -73,10 +72,10 @@ gauges count allocation events instead
    reference cycles included ([the ownership forest](region/ownership.md)).
    Reference counting is scoped to the genuine cross-fiber residual.
 3. **Dissolution.** A closure is a first-class value but the unit of nothing at
-   runtime; guided by escape and ownership the compiler dissolves it — graft a
-   call into its caller, loop-ify, JIT-group, GPU-dispatch — so one program runs
-   sympathetically on every backend ([grafting a call](graft.md),
-   [loop fusion](dissolution.md)).
+   runtime. Guided by escape and ownership, the compiler dissolves it: it
+   grafts a call into its caller, loop-ifies, JIT-groups, or GPU-dispatches. One
+   program then runs sympathetically on every backend
+   ([grafting a call](graft.md), [loop fusion](dissolution.md)).
 
 The keystone binding the three: escape is the single authority (below).
 
@@ -125,22 +124,31 @@ in order. It uses this document's leak-class names and never redefines them.
 - [The settled invariants](region/settled.md) — one line
   each, with the spec that owns each argument.
 - Where a release is **placed**, one document per argument:
-  [anchors](region/anchors.md) (binder pins, and what a `break` does),
-  [window](region/window.md) (the branch-arm release window),
-  [compensate](region/compensate.md) (the counted per-arm routes),
-  [relocate](region/relocate.md) (a release past a frame-replacing tail call),
-  [replicate](region/replicate.md) (the relocation point and its replicas),
-  [signalexit](region/signalexit.md) (what a signal exit owes), and
-  [unwind](region/unwind.md) (the abandoned-frame walk).
-- The runtime substrate: [model](region/model.md) (id-spaces, the
-  per-execution physical-region model, page layout),
-  [merging](region/merging.md) (coincident-lifetime collapse; the builder
-  seed), [letrec](region/letrec.md) (the closure-cycle merge),
-  [ownership](region/ownership.md) (the forest: typestate, subtree drop, the
-  edge tables), [owner](region/owner.md) (activation and fiber owner nodes),
-  [adopt](region/adopt.md) (the capture and funnel adopts, the root's lifetime
-  obligation), and [park](region/park.md) (what a suspended fiber's park
-  retains, and who releases it).
+  - [anchors](region/anchors.md): binder pins, and what a `break` does.
+  - [window](region/window.md): the branch-arm release window.
+  - [held](region/held.md): the frame-held admission the window and the
+    relocation both read.
+  - [compensate](region/compensate.md): the counted per-arm routes.
+  - [relocate](region/relocate.md): a release past a frame-replacing tail
+    call.
+  - [replicate](region/replicate.md): the relocation point and its replicas.
+  - [signalexit](region/signalexit.md): what a signal exit owes.
+  - [unwind](region/unwind.md): the abandoned-frame walk.
+- The runtime substrate:
+  - [model](region/model.md): id-spaces, the per-execution physical-region
+    model, page layout.
+  - [merging](region/merging.md): coincident-lifetime collapse, and the
+    builder seed.
+  - [letrec](region/letrec.md): the closure-cycle merge.
+  - [cycletail](region/cycletail.md): the release channels a merged cycle
+    takes behind a tail call.
+  - [ownership](region/ownership.md): the forest's typestate, subtree drop,
+    and edge tables.
+  - [owner](region/owner.md): activation and fiber owner nodes.
+  - [adopt](region/adopt.md): the capture and funnel adopts, and the root's
+    lifetime obligation.
+  - [park](region/park.md): what a suspended fiber's park retains, and who
+    releases it.
 - Bindings and cells: [bindings](region/bindings.md) (reassigned mutable
   bindings as 1-slot containers), [reads](region/reads.md) (what a read of one
   takes), and [cells](region/cells.md) (how a captured binding's cell is
@@ -240,9 +248,9 @@ scope tree, never by comparing a `compute_order` index or a region id
 
 Region operations are runtime methods reached identically by every tier —
 never a per-backend allow/deny list. The whole forest runs unconditionally on
-VM and JIT; the WASM tier tolerates the ops structurally (every region
-instruction is a no-op there — the measured program-duration over-keep below),
-and the MLIR/SPIR-V tier is GPU-ineligible for a region op today. Adding a
+VM and JIT. The WASM tier tolerates the ops structurally: every region
+instruction is a no-op there, the measured program-duration over-keep below.
+The MLIR/SPIR-V tier is GPU-ineligible for a region op today. Adding a
 region instruction threads every tier coincidently, and several matches are
 exhaustive with no `_`, so an omission is a build break, not a silent gap.
 
@@ -255,11 +263,10 @@ unconditionally.
 
 ## Settled invariants
 
-The invariants the system upholds — every cycle-and-transfer class of the
-ownership forest, where each release lands, who owns a value at a boundary,
-and the 1-slot container model — are listed one line each in
-[the settled invariants](region/settled.md), with the spec that owns each
-argument. They read closed in the oracle and are regression-pinned on the
+[The settled invariants](region/settled.md) lists the invariants the system
+upholds, one line each, with the spec that owns each argument. They cover every
+cycle-and-transfer class of the ownership forest, where each release lands, who
+owns a value at a boundary, and the 1-slot container model. They read closed in the oracle and are regression-pinned on the
 interpreter and the JIT; build on them, do not re-litigate them.
 
 ## The leak roots
@@ -284,8 +291,8 @@ sub-mechanisms:
   `(match (type-of coll) …)` referenced its container argument in every arm,
   so the release of that argument landed in an arm the executed path never
   reached. A call to `push`, `put`, `add` or `del` is grafted: the wrapper's
-  body replaces the call, and after inference the fold keeps the one arm the
-  proven container type selects, so the direct `%`-op is what remains
+  body replaces the call. After inference the fold keeps the one arm the proven
+  container type selects, so the direct `%`-op is what remains
   ([grafting a call](graft.md)). Where the container type is not proven, the
   whole dispatch is grafted into the caller, and the per-arm compensation
   ([compensate](region/compensate.md)) places the argument's release on each
@@ -293,14 +300,13 @@ sub-mechanisms:
   gauge for that site.
 
 **F2. Fiber suspend/resume park residue.** Park/unpark symmetry holds by
-construction ([the park](region/park.md),
-[owner nodes](region/owner.md)), abandoned and parked frames run their
-owed releases off the emitter's tables ([the unwind walk](region/unwind.md)),
-and the squelch boundary runs the same walk. What remains open is two shapes
-the tables cannot name, each a value with no binding of its own and neither
-with a gauge: a literal the raising call materialized straight into an
-argument, and a parameter whose release routes through an env slot, which
-carries no nil stamp.
+construction ([the park](region/park.md), [owner nodes](region/owner.md)).
+Abandoned and parked frames run their owed releases off the emitter's tables
+([the unwind walk](region/unwind.md)), and the squelch boundary runs the same
+walk. Two shapes the tables cannot name stay open, each a value with no binding
+of its own, and neither has a gauge. One is a literal the raising call
+materialized straight into an argument. The other is a parameter whose release
+routes through an env slot, which carries no nil stamp.
 
 **F3. Escape imprecision — closed, with no member ever confirmed.** The one
 probe ever filed here measured no escape at all; its residual closed with the
@@ -316,13 +322,14 @@ nothing places the mint.
 mechanism:
 
 - **The used-sibling arm** — the branch-arm window is admitted only where
-  escape proves the frame holds the region alone; a region escaping by a
-  containment facet keeps the conservative baseline, and a used sibling arm's
-  tail release still needs a retain on its own node
+  escape proves the frame holds the region alone
+  ([the frame-held admission](region/held.md)). A region escaping by a
+  containment facet keeps the conservative baseline. A used sibling arm's tail
+  release still needs a retain on its own node
   ([the release window](region/window.md),
   [compensation](region/compensate.md)).
 - **The poisoned value route** — a release routed through a reassigned
-  binding's slot is skipped; what remains is an alias the counted read does
+  binding's slot is skipped. What remains is an alias the counted read does
   not claim, which keeps the counted-init route and its over-keep
   ([1-slot containers](region/bindings.md), [reads](region/reads.md)).
 - **`decref_point` over-extension** and **env-cell release at loop exit** —
@@ -333,9 +340,9 @@ mechanism:
 aliased-init donation, not a displaced-value cascade. No probe.
 
 **The one deliberate non-defect.** The mutable cross-fiber cycle with no
-bounded dominating activation is not a leak class — it is a genuine
-unbounded-lifetime decision the programmer made, the line Project Verona
-itself draws ([the theory](../regions/semantics.md)). A tracer to collect it
+bounded dominating activation is not a leak class. It is an
+unbounded-lifetime decision the programmer made, the line Project Verona itself
+draws ([the theory](../regions/semantics.md)). A tracer to collect it
 would forfeit the no-GC thesis; the design makes the shape near-unreachable
 and names the boundary.
 
@@ -378,10 +385,10 @@ probes port to each tier on a build that carries it
 ## Verification
 
 State is read from steady-state region growth and the oracle, never from
-emitted RC. The trustworthy measurements: live-region and RSS growth across
-repeated iterations (a reclaimed class is bounded — slope → 0), each probe
-beside a live-growth discriminator that proves the gauge is not dead; and
-`--trace=guardfree` under the full stdlib for UAF. A fix is proven by measured
+emitted RC. The trustworthy measurements are two. The first is live-region and
+RSS growth across repeated iterations: a reclaimed class is bounded, with slope
+→ 0. Each probe sits beside a live-growth discriminator that proves the gauge is
+not dead. The second is `--trace=guardfree` under the full stdlib for UAF. A fix is proven by measured
 slope → 0 plus guardfree-clean.
 
 [The oracle](../../tests/impl/oracle.lisp) is the leak-state dashboard:

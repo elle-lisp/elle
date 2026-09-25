@@ -13,10 +13,12 @@ Up: [..](../AGENTS.md)
 - [clique.md](clique.md) — **What a region-effect declaration buys** What the solver derives from a declared `RegionEffect`.
 - [compensate.md](compensate.md) — **Per-arm compensation** The releases a branch adds one per arm, each funded by a retain on its own node.
 - [ctx.md](ctx.md) — **NativeCtx — explicit allocation: every value names its region and heap** A native allocates only through a capability it is handed, which names its region.
+- [cycletail.md](cycletail.md) — **A merged cycle behind a tail call** The release channels a closure-cycle merge's arena takes when the binding scope's body ends in a tail call.
 - [diagnostics.md](diagnostics.md) — **Region diagnostics and validation** Implementation-facing: the instruments that tell correct from broken, and the test scaffolding that keeps the region rules honest.
 - [effects.md](effects.md) — **Native region effects: declared, not guessed** How each primitive declares its region behavior, and what each `RegionEffect` variant claims.
 - [errors.md](errors.md) — **Rich errors — one region-coherent struct routine + `rich_error!`** Implementation-facing.
 - [generations.md](generations.md) — **Region generations: stale derefs detonate in debug builds** The per-region generation counter and page stamps that turn a stale region deref into a debug-build panic at the deref site.
+- [held.md](held.md) — **The frame-held admission** Which regions a frame holds alone, so a release may fire on a path where none fired before without dropping another holder to zero.
 - [letrec.md](letrec.md) — **The letrec closure-cycle merge** Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
 - [mechanism.md](mechanism.md) — **The mechanism** The RC-instruction machinery the [rules](rules.md) constrain: how each instruction names its region, and when a static slot may stand in.
 - [merging.md](merging.md) — **Merging** Merging puts two solver regions in one physical region, freed by one `DecrefRegion`, when the two values share a lifetime.

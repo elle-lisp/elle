@@ -1,155 +1,69 @@
-# Compilation Pipeline
+# Compilation pipeline
 
 <!-- audited: 2026-10-13 -->
 
-Compilation entry points: source reaches bytecode through the reader, expander, analyzer, lowerer and emitter.
+Which VM each entry point expands macros on, and how signal inference settles over the mutual recursion of a letrec.
 
-Module: [src/pipeline](../src/pipeline/AGENTS.md).
+[The pipeline index](../src/pipeline/AGENTS.md) lists the entry points, the
+compile context and the stages in order. [The HIR index](../src/hir/AGENTS.md)
+owns the passes `regularize` runs.
 
-## Contents
+## Which VM expands
 
-- [Public API](#public-api)
-- [VM ownership patterns](#vm-ownership-patterns)
-- [Expander lifecycle](#expander-lifecycle)
-- [The fixpoint loop](#the-fixpoint-loop)
-- [Compilation phases (single-form)](#compilation-phases-single-form)
-- [Compile context](#compile-context)
-- [Known issues](#known-issues)
+Macro expansion runs Elle code, so it needs a VM. The entry points split on
+whose VM that is, and a macro's side effects land on that VM.
 
-| File | Purpose |
-|------|---------|
-| [mod.rs](../src/pipeline/mod.rs) | `AnalyzeResult`, re-exports |
-| [cache.rs](../src/pipeline/cache.rs) | `CompileCtx`: per-instance compile state (macro VM, Expander, PrimitiveMeta, projection cache) |
-| [bootstrap.rs](../src/pipeline/bootstrap.rs) | Compile and run core.lisp before any compile context exists |
-| [sources.rs](../src/pipeline/sources.rs) | The core, prelude and stdlib sources a boot compiles, embedded at build time |
-| [directives.rs](../src/pipeline/directives.rs) | Validate and strip `(elle/version …)` and `(elle/migration …)` |
-| [compile.rs](../src/pipeline/compile.rs) | `compile()`, `compile_file()`, `compile_file_repl()`, and the whole-module entry points |
-| [compile/frontend.rs](../src/pipeline/compile/frontend.rs) | Read, expand, and classify forms ahead of analysis |
-| [compile/transforms.rs](../src/pipeline/compile/transforms.rs) | Post-analysis HIR transforms |
-| [analyze.rs](../src/pipeline/analyze.rs) | `analyze()`, `analyze_file()` |
-| [eval.rs](../src/pipeline/eval.rs) | `eval()`, `eval_all()`, `eval_syntax()`, `eval_file()` |
+**The compile context's macro VM.** `compile`, the file front end behind
+`compile_file`, and `compile_file_to_lir` expand inside
+`CompileCtx::with_macro_expansion`. It resets the macro VM's fiber and hands
+the closure a clone of the expander and of the compile metadata. These entry
+points need no VM from the caller, and a macro's side effects stay on the
+macro VM.
 
-## Public API
+**The caller's VM.** `eval`, `analyze` and `analyze_file` expand on the VM the
+caller passes, with the clones `CompileCtx::expander_and_meta` answers. `eval`
+then runs the bytecode on that VM as well, so a macro's side effects and the
+program's share one VM.
 
-### Types
+**Compile on one, run on the other.** `eval_file` and `eval_all` compile
+through `compile_file` on the macro VM, then run the bytecode on the caller's
+VM. A macro's side effects therefore do not reach the caller's VM.
 
-A compile hands out a `CodeUnit`: the entry function's code object, and one
-counted reference to the code region every payload of the unit lives in
-([region/template.md](impl/region/template.md)). An analysis hands out an
-`AnalyzeResult`:
+**The expander mid expansion.** `eval_syntax` compiles and runs a macro
+transformer or a `begin-for-syntax` value. It takes the caller's expander as
+well as the caller's VM, because it runs inside an expansion: a macro call in
+the tree it compiles expands in the same context. Its compile metadata rides
+on the expander (`eval_meta`), so it needs no borrow of the compile context
+while the context is mid expansion.
 
-```rust
-pub struct AnalyzeResult {
-    pub hir: Hir,              // tail calls already marked
-    pub arena: BindingArena,
-    pub errors: Vec<LError>,   // non-fatal analysis errors
-}
+Each clone is independent, so a compile nested inside an expansion, such as a
+`begin-for-syntax` that imports a file, does not alias the compile context. A
+macro one compile defines reaches a later compile only when the REPL registers
+it with `register_repl_macros`.
+
+## Signal inference over a letrec
+
+A file compiles as one letrec, and a local `letrec` form is the same shape. A
+`def` or `var` whose lambda refers to itself is a letrec of one binding. So one
+mechanism, `converge_signals` in [fixpoint.rs](../src/hir/analyze/fixpoint.rs),
+infers the signals of mutually recursive definitions in all three. Its callers
+are `analyze_file_letrec` in
+[fileletrec/letrec.rs](../src/hir/analyze/fileletrec/letrec.rs) for a file,
+[letrec.rs](../src/hir/analyze/letrec.rs) for the form, and
+[binding.rs](../src/hir/analyze/binding.rs) for a `def` in a function body or
+in a form compiled alone.
+
+### The problem
+
+A single pass in order reads a sibling defined later before it is analyzed:
+
+```text
+(def foo (fn [] (bar)))              # analyzed first, reads bar's seed
+(def bar (fn [] (yield 1) (foo)))    # analyzed second, yields
 ```
 
-### Functions
-
-| Function | VM for macros | File fixpoint? | Callers |
-|----------|---------------|-----------|---------|
-| `compile` | Internal | No | Integration tests |
-| `compile_file` | Internal | Yes | `elle::program::run_source` (file, stdin, `-e`), `import-file`, the stdlib load |
-| `eval` | Borrowed | No | Tests |
-| `eval_all` | Internal (delegates to `compile_file`) | Yes | Tests |
-| `eval_file` | Borrowed | Yes | Tests |
-| `eval_syntax` | Borrowed | No | Macro body evaluation ([macro_expand.rs](../src/syntax/expand/macro_expand.rs)) |
-| `analyze` | Borrowed | No | Tests |
-| `analyze_file` | Borrowed | Yes | The LSP, the linter, `compile/analyze` |
-
-### Signatures
-
-The compile context (`cctx`) is the per-instance `CompileCtx` threaded
-explicitly as a parameter through every entry point. `compile`/`compile_file`
-expand macros on the context's own macro VM, so they need no caller VM; the
-`eval`/`analyze` family run expansion on the caller's borrowed VM.
-
-```rust
-pub fn compile(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<CodeUnit, String>
-pub fn compile_file(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<CodeUnit, String>
-pub fn eval(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
-pub fn eval_all(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
-pub fn eval_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
-pub fn eval_syntax(syntax: Syntax, expander: &mut Expander, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>
-pub fn analyze(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<AnalyzeResult, String>
-pub fn analyze_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<AnalyzeResult, String>
-```
-
-## VM ownership patterns
-
-The macro-expansion VM is owned by the per-instance `CompileCtx` (built once
-with primitives registered, core.lisp, and the prelude). Two distinct patterns
-use it, and confusing them causes bugs:
-
-**Context's macro VM** (`compile`, `compile_file`): These expand macros on the
-`CompileCtx`'s own macro VM (`with_macro_expansion`, fiber reset between uses)
-with a cloned `Expander`. They need no caller VM, so they take only
-`symbols` + `cctx`. This is the correct pattern for batch compilation where
-the caller doesn't need a running VM.
-
-**Borrowed VM** (`eval`, `eval_syntax`, `analyze`, `analyze_file`):
-These borrow the caller's `&mut VM`. The same VM is used for both macro
-expansion and (for `eval`) execution, so macro side effects persist in the
-caller's VM. This is the correct pattern for stdlib initialization and macro
-body evaluation where state must accumulate. They obtain a cloned `Expander`
-and `PrimitiveMeta` from the context via `cctx.expander_and_meta()`.
-
-**Hybrid** (`eval_all`): Delegates compilation to `compile_file` (which expands
-on the context's macro VM), then executes each compiled form on the caller's
-borrowed VM. Macro side effects do NOT persist in the caller's VM.
-
-**`eval_syntax` is special**: It also borrows the caller's `Expander`, not just
-the VM. This is because it's called from inside `Expander::expand_macro_call_inner`
-— the macro expansion engine needs to compile and run a macro body while
-preserving the current expansion context (macro registry, scope state). Nested
-macro calls work because the same Expander is threaded through. Its macro-body
-metadata rides on the expander (`eval_meta`), so no separate `CompileCtx`
-borrow is needed mid-expansion.
-
-## Expander lifecycle
-
-The prelude ([prelude.lisp](../src/prelude.lisp), embedded at build time) defines macros like
-`defn`, `let*`, `when`, `unless` and `try`/`catch`. It is loaded once, into the
-`CompileCtx`'s `Expander`, when the context is built ([cache.rs](../src/pipeline/cache.rs)). Every entry
-point expands with a clone of that `Expander`: `compile` and `compile_file`
-through `with_macro_expansion`, the `eval` and `analyze` families through
-`expander_and_meta`. A clone carries the loaded prelude, so no call parses it
-again.
-
-`eval_syntax` reuses the caller's `Expander` because it runs mid-expansion.
-
-## The fixpoint loop
-
-Signal inference for mutually recursive definitions, and for a function that
-refers to itself, converges by fixpoint. The loop is `converge_signals`
-([fixpoint.rs](../src/hir/analyze/fixpoint.rs)), in the analyzer rather than in
-the pipeline module. Three forms run it:
-
-- A file. `compile_file` and `analyze_file` both classify a file's forms and
-  hand them to `analyze_file_letrec`
-  ([fileletrec/letrec.rs](../src/hir/analyze/fileletrec/letrec.rs)), so the
-  file *is* a letrec.
-- A local `(letrec ...)` form ([letrec.rs](../src/hir/analyze/letrec.rs)).
-- A `def` or `var` whose lambda refers to itself, in a function body or in a
-  form compiled alone ([binding.rs](../src/hir/analyze/binding.rs)). It is a
-  letrec of one binding.
-
-The signal inference computed here is exposed to tools and agents via:
-- **`compile/signal`** — Get the inferred signal of a function
-- **`portrait`** — Semantic portrait showing signal profile, composition properties, and observations
-- **MCP server** — RDF knowledge graph with signal predicates (`elle:signal-yields`, `elle:signal-io`, etc.)
-
-See [MCP server documentation](mcp.md) and [Agent Reasoning](analysis/agent-reasoning.md) for how to query this information.
-
-### Problem
-
-In `(def f (fn (x) (g x)))` followed by `(def g (fn (x) (yield x)))`, a single
-sequential pass analyzes `f` while `g` is still unanalyzed. `f` therefore reads
-whatever `g`'s seed says rather than what `g` turns out to be, and a second
-name in the cycle can make the first one's answer wrong in either direction:
-too low if the seed is optimistic, too high if it is conservative.
+`foo` then carries whatever `bar`'s seed said, not what `bar` turned out to
+be.
 
 A function that refers to itself reads its own seed the same way. Below, the
 lambda inside `walk` calls `walk` while `walk` is still being analyzed. One
@@ -170,127 +84,62 @@ the proof at run time.
 (assert (= '(:back (:back (:back nil))) (fiber/value walker)))
 ```
 
-### Algorithm
+### The algorithm
 
-1. **Pre-bind** every name in the letrec, so each initializer can resolve its
-   siblings. Seed each one's signal with `Signal::silent()`. A `def` or `var`
-   of a lambda seeds its own name the same way, just before its initializer.
+1. **Pre-bind** every name, so each initializer resolves its siblings. A name
+   bound to `(fn …)` syntax is seeded as silent, with the arity its parameter
+   list gives. A `def` or `var` of a lambda seeds its own name the same way,
+   just before its initializer.
+2. **Analyze the initializers** in order. Each lambda records its
+   `inferred_signals` and its arity as the call signal of its binding.
+3. **Iterate** over the lambda bindings, at most 10 times. Re-analyze each one
+   against the current signals, and record any signal that changed. Stop at the
+   first iteration that changes nothing. A `def` iterates only when its lambda
+   refers to itself and its signal left the seed. The lambda of any other `def`
+   never read its own seed, so its first analysis stands.
+4. **Analyze the body** only after the loop settles, so a call into the cycle
+   reads the settled signals. For a `def`, the body is the forms after it. A
+   file-letrec has no separate body: step 2 analyzes its expression entries in
+   order, and the loop does not analyze them again.
 
-2. **Analyze initializers** in order. Record each lambda's `inferred_signals`
-   in `signal_env` and its arity in `arity_env` as it is analyzed. Bindings
-   analyzed early in this pass may have read stale sibling signals; the next
-   step is what repairs that.
+For a file, step 3 re-analyzes against the scope as it stood after step 1. An
+expression entry such as a `parameterize` body may define names in step 2, and
+a lambda re-analyzed with those visible would take a wrong capture set.
 
-3. **Iterate to a fixpoint** (bounded at 10 iterations). Re-analyze every
-   lambda binding against the current `signal_env`. If any lambda's
-   `inferred_signals` differs from what `signal_env` holds, record the new
-   value and iterate again. Stop on the first iteration that changes nothing.
-   A `def` iterates only when its lambda refers to itself and its signal left
-   the seed. The lambda of any other `def` never read its own seed, so its
-   first analysis stands.
+Re-analysis only adds binding flags, such as the ones `mark_captured` sets, and
+never clears one. An extra iteration can make the result more conservative,
+never wrong. Re-analysis reports again every error the first analysis
+reported. The loop keeps the errors of its last iteration alone, and drops each
+one that step 2 already reported, so a body that fails to analyze reports each
+error once.
 
-4. **Analyze the body** only after the loop has converged, so calls into the
-   cycle read settled signals. For a `def`, the body is the forms after it. A
-   file-letrec has no separate body: step 2 analyzes its expression entries
-   in order, and the loop does not analyze them again.
+### Why it ends
 
-5. **Combine** the aggregate signal from the post-fixpoint binding and body
-   HIR, not from the values step 2 produced.
+Signals form a lattice, and each iteration only moves a signal upward from its
+silent seed. A signal that stops moving is at its least fixed point, so the
+lattice height bounds the loop. The limit of 10 guards against a defect in the
+lattice; the argument does not need it.
 
-Re-analysis is safe to repeat: its side effects on bindings (`mark_captured`,
-`mark_mutated`) only ever add flags, so an extra iteration can make the result
-more conservative but never wrong. Re-analysis reports again every error the
-first analysis reported. The loop keeps the errors of its last iteration
-alone, and drops each one that step 2 already reported, so a body that fails
-to analyze reports each error once.
-
-### Convergence
-
-Signals form a lattice and the seed is the bottom element, so each iteration
-can only move a signal upward. A signal that stops moving is at its least
-fixed point. Termination is therefore guaranteed by the lattice height; the
-10-iteration bound is a safety net against a lattice bug, not part of the
-argument. In practice convergence takes 1–3 iterations.
-
-Because the seed is optimistic, a loop that stops early reports signals that
-are too *low* — it under-approximates. That is the dangerous direction: a
-function that can raise `:error` but is inferred silent will pass a
-compile-time `(silent!)` check and raise at runtime instead. That raise leaves
-a silent function, so its boundary reports it as the terminal `:broken-proof`
-error ([signals/inference.md](signals/inference.md)). The boundary is the
-backstop, not the guarantee.
+The seed is optimistic, so a loop cut short reports signals that are too low.
+That is the unsafe direction: a function that can raise `:error` but is
+inferred silent passes a `(silent!)` check at compile time, and raises at run
+time instead. That raise leaves a silent function, so its boundary reports it
+as the terminal `:broken-proof` error
+([signals/inference.md](signals/inference.md)). The boundary is the backstop,
+not the guarantee.
 
 ### Scope
 
-Convergence is per-file. Mutual recursion across a file boundary does not
-converge, because each import is a separate compilation — see
-[signals/inference.md](signals/inference.md) for the projection that carries a
-signal across a file boundary.
+The fixpoint is per file. A mutual recursion across a file boundary does not
+settle, because each import is a separate compilation. The
+[signal inference document](signals/inference.md) says why that is a design
+choice, and describes the projection that carries a signal across a file
+boundary.
 
 A function body seeds a `def` only as the `def` is reached. A lambda that
 calls a sibling defined later in the same body reads no seed for it. It takes
 the unknown-callee signal instead, which is sound and may be wider than the
 sibling's.
 
-## Compilation phases (single-form)
-
-Every compilation path follows the same phases:
-
-1. **Read**: `read_syntax(arena, source, source_name)` → `Syntax`
-2. **Expand**: `expander.expand(syntax, symbols, macro_vm)` → expanded `Syntax`
-3. **Analyze**: `Analyzer::new_with_primitives(...)` →
-   `analyzer.analyze(&expanded)` → `AnalysisResult { hir, .. }`
-4. **Regularize**: `crate::hir::regularize(&mut hir, ...)` prunes dead
-   `(type-of x)` arms, marks tail calls, functionalizes, lifts to ANF and
-   infers types, in place
-5. **Regions**: `analyze_regions_with(&hir, ...)` → `RegionInfo`
-6. **Lower**: `Lowerer::new(&arena).with_heap(heap)...lower(&hir)` →
-   `FrozenModule`, built in a working region on the compile's heap that
-   `lower` frees before it returns ([lir.md](impl/lir.md) § "Two forms of one
-   function")
-7. **Emit**: `Emitter::new(code).emit_module(&frozen)` → the entry's
-   `Bytecode`, each nested lambda's payload written into the code region
-   `code` names, and `CodeUnit::new(code, bytecode)` → the `CodeUnit`
-
-`analyze` and `analyze_file` stop after phase 3, then mark tail calls alone
-(no regularization, lowering or emission).
-
-## Compile context
-
-[cache.rs](../src/pipeline/cache.rs) holds it. `CompileCtx` is the per-instance compile-time state: a macro-expansion VM
-(primitives registered), the core.lisp/prelude `Expander`, the
-`PrimitiveMeta`, and the file→signal projection cache. It is built once when
-the instance's `RuntimeCore` is constructed and threaded explicitly through
-every pipeline call — two embedded Elle instances on one thread each own their
-own, so neither sees the other's exports or REPL definitions.
-
-### `with_macro_expansion()`
-
-Runs a closure with the macro-expansion VM (fiber reset), a clone of the
-`Expander` (independent expansion state), and a clone of the compile `meta`.
-The clones decouple it from `self`'s borrow so a nested compile does not alias.
-Used by `compile` and `compile_file`.
-
-### `expander_and_meta()`
-
-Returns a cloned `(Expander, PrimitiveMeta)` without borrowing the macro VM.
-Used by `eval`, `analyze`, and `analyze_file`, which run expansion on their
-own VM.
-
-### Invariants
-
-- Prelude must be 100% defmacro (no runtime definitions)
-- Primitives must be registered in the context's macro VM at construction
-- Pipeline functions are not re-entrant (no nested compile/compile_file)
-
-## Known issues
-
-Single-form functions
-(`compile`, `eval`, `analyze`) don't benefit from cross-form signal inference —
-a file compiled via `compile` instead of `compile_file` will treat all
-cross-form calls as unknown: such a call may emit any signal a user program
-can raise. The REPL compiles each form individually
-via `compile_file_repl` and registers def bindings in the compilation cache
-(`register_repl_binding`) so they are visible to subsequent compilations.
-However, cross-form signal inference within a single REPL input is limited
-to what `compile_file` can infer for each form in isolation.
+The inferred signals are data a program can query: `compile/signal`, the
+[portrait](analysis/portrait.md), and the [MCP server](mcp.md) read them.

@@ -222,7 +222,7 @@ different places: [`docs/spec.md`](docs/spec.md) says which is which.
 For test organization, helpers, and how to add tests:
 [`docs/testing.md`](docs/testing.md).
 For CI structure and failure triage:
-[`docs/analysis/ci.md`](docs/analysis/ci.md).
+[CI and triage](docs/analysis/ci.md).
 
 ## Invariants
 

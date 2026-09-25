@@ -40,9 +40,9 @@ cache_key = hash(stdlib source, build identity, FORMAT_VERSION,
   naturally invalidates it.
 - **build identity**: the running executable's length and modification time
   (`std::env::current_exe`). Not the version string: two builds of one version
-  compile stdlib differently the moment the emitter or a pass changes, and a
-  key blind to the rebuild hands every `Runtime::new()` — the one in each test
-  included — bytecode the previous binary produced, so a test failure stops
+  compile stdlib differently the moment the emitter or a pass changes. A key
+  blind to the rebuild hands every `Runtime::new()`, the one in each test
+  included, bytecode the previous binary produced. A test failure then stops
   implicating the branch that caused it. It also covers the ids `prim_id_of`
   appends outside the canonical tables (trait methods, FFI callbacks), which
   the table identity below cannot see. A binary that cannot identify itself
@@ -59,10 +59,10 @@ cache_key = hash(stdlib source, build identity, FORMAT_VERSION,
 
 The directory is a **construction parameter**, `StdlibCache`, passed to
 `Runtime::with_stdlib_cache` and threaded to `try_load`/`try_store`. It is not
-read from process-global state: the suite builds many runtimes across threads,
-and a directory that travels with the instance is what keeps one runtime's
-cache invisible to the runtime beside it — and what lets a test tell the
-instance that wrote a cache from the instance that read it.
+read from process-global state, because the suite builds many runtimes across
+threads. A directory that travels with the instance keeps one runtime's cache
+invisible to the runtime beside it. It also lets a test tell the instance that
+wrote a cache from the instance that read it.
 
 | Variant | Directory |
 |---------|-----------|
@@ -76,10 +76,9 @@ alone cannot distinguish the two; the tests assert on this instead.
 
 A `sys/spawn` worker builds its own runtime on a new thread and runs
 `init_stdlib` there, so it caches too. It reaches the spawning instance only
-through `ctx.vm()`, so the policy is recorded on the VM by
-`RuntimeCore::load_stdlib` and moved into the worker thread beside the Unicode
-generation — a worker caches where its parent was told to, never in the
-process-wide directory.
+through `ctx.vm()`. So `RuntimeCore::load_stdlib` records the policy on the VM,
+and it moves into the worker thread beside the Unicode generation. A worker
+caches where its parent was told to, never in the process-wide directory.
 
 ## File layout
 
@@ -111,9 +110,9 @@ directory evict each other, so alternating between them costs one stdlib
 compile per switch. Give them separate directories (`--cache=`) if that matters.
 
 A store never writes the final path. It writes a temporary file in the same
-directory and renames it over the target: two elle processes starting at once
-is ordinary, and writing the path directly lets one read the other's
-half-written file, or edits an inode a reader already holds open. Same
+directory and renames it over the target. Two elle processes starting at once
+is ordinary. Writing the path directly lets one read the other's half-written
+file, or edits an inode a reader already holds open. Same
 directory because a rename is atomic only within one filesystem.
 
 ## What the cached path does not restore
@@ -221,13 +220,12 @@ nothing from a compile it skipped, so every reloaded name would print as
 `#<symbol:hash>`. The `names` table carries the spellings the entry and its
 templates use, and a load replays them into that memo.
 
-### `frame_release_slots/regions` added to `SendableClosure`
+### `SendableClosure` carries `frame_release_slots/regions`
 
-The stdlib's templates carry thousands of release slots between them — the
-tables [an abandoned frame runs what it still owes off](region/unwind.md) — so
-dropping them was never an option. Both
-fields were missing from `SendableClosure`; adding them makes the send/spawn
-path and the cache path share one mechanism.
+The stdlib's templates carry thousands of release slots between them: the
+tables [an abandoned frame runs what it still owes off](region/unwind.md). So
+the cache cannot drop them. `SendableClosure` carries both fields, and the
+send/spawn path and the cache path share one mechanism.
 
 ### `SendValue` serializes through a symmetric mirror enum
 
@@ -235,10 +233,10 @@ Hand-written tuple serialization drifts from derived deserialization
 (bincode's enum-tag encoding differs), so both directions go through one
 derived mirror enum ([mirror.rs](../../src/value/send/mirror.rs)). Struct keys
 travel as `SendKey`, [the owning key form](values.md), which owns its bytes and
-derives serde directly; a symbol or keyword key travels as its name hash, which
+derives serde directly. A symbol or keyword key travels as its name hash, which
 names the same symbol in the loading process. An identity key has no `SendKey`
-form and is refused, which the cache layer turns into a miss. Heap `Value`s are rejected too —
-compound literals in the constant pool lower to `MaterializeConst` templates at
+form and is refused, which the cache layer turns into a miss. Heap `Value`s are
+rejected too: compound literals in the constant pool lower to `MaterializeConst` templates at
 compile time and never enter the pool.
 
 ## Integration point
@@ -284,7 +282,7 @@ they move with the machine and with every change to a front-end pass.
   asserted in the release-mode boot benchmark, since debug compile time masks
   the difference.
 - `a_cache_hit_leaves_no_unexplained_references`
-  (`tests/region_process_teardown`): a hit must leave the same post-teardown
+  ([tests/region_process_teardown](../../tests/region_process_teardown.rs)): a hit must leave the same post-teardown
   residue a compiled stdlib leaves, with nothing pinned from outside the region
   graph.
 
