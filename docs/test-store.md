@@ -137,7 +137,10 @@ with context at promotion.
 
 Directories can be added later as a thin, non-authoritative reading-aid for
 humans browsing the repo without the index handy — they never become the source
-of classification, and the runner never depends on them.
+of classification, and the runner never depends on them. The split between
+`tests/lang/` and `tests/impl/` is not a category in this sense: it says which
+suite owns a claim and which program runs it ([spec](spec.md) § Two suites),
+which no analysis of the form can derive.
 
 The runner compiles any file regardless of how many forms it holds (via the
 multi-form compilation mode, [test-runner](test-runner.md)), so today's multi-form
@@ -150,8 +153,9 @@ prerequisite.
 Per **run** (one `elle test` invocation): wall time, peak RSS, user/sys CPU
 (`getrusage`), the `HEAD` commit, whether the working tree is dirty, a tree hash,
 the worktree the run ran in, the elle build version/profile/host, the runner's
-process id, the boot fingerprint (§ The boot fingerprint), the full
-`argv`, the tier set, and the working-tree files that differ from `HEAD` with
+process id, the boot fingerprint (§ The boot fingerprint), the full `argv`,
+where its results ran (`tiers`: `worker` for the in-process runner, `process`
+for an isolated child), and the working-tree files that differ from `HEAD` with
 their content hashes (the "hash of changed files").
 
 The code-state columns are what makes a result belong to something. Without
@@ -170,9 +174,13 @@ sibling's. The runner reads them from `git` at insert:
 Outside a repository each of those is NULL, which is the honest answer: the run
 happened, and nothing names the code it ran against.
 
-Per **(form × tier)**: status, reason, expected/actual and predicate syntax
-(from the `assert` macro, [test-runner](test-runner.md)), the emitted signal on failure, wall time,
-and **CPU time** — the delta of `(clock/cpu)` read across the form's evaluation.
+Per **result**: status, reason, expected/actual and predicate syntax (from the
+`assert` macro, [test-runner](test-runner.md)), the emitted signal on failure,
+wall time, and **CPU time** — the delta of `(clock/cpu)` read across the
+form's evaluation. A result's `tier` names where it ran: `worker` for a form
+the in-process runner ran in a worker thread, `process` for an isolated child.
+The runner runs each file once and forces no backend, so the column never
+names one ([test-runner](test-runner.md) § A build is the tier set).
 
 > CPU delta, not fuel. Fuel (`SIG_FUEL`) is specific to the `std/process`
 > scheduler, is not consumed by Elle's default root scheduler, and essentially
@@ -181,18 +189,18 @@ and **CPU time** — the delta of `(clock/cpu)` read across the form's evaluatio
 > deterministic, so regression queries on it compare distributions/thresholds,
 > not exact equality; for that, prefer many runs (which we keep) over one.
 
-Per **asset**: for every (form × tier) the runner captures the full `--dump`
+Per **asset**: for every result the runner captures the full `--dump`
 artifact set (`ast, fhir, defuse, regions, escape, hir, lir, cfg, dfa, jit`),
-`--stats`, and stdout/stderr — written to the filesystem CAS
+`--dump=stats`, and stdout/stderr — written to the filesystem CAS
 ([test-runner](test-runner.md)), deduped by hash, so identical artifacts across
-runs and tiers cost one file.
-`--trace` is captured **only for failing/diverging forms** (too large for the
+runs cost one file.
+`--trace` is captured **only for failing forms** (too large for the
 always-set), likewise to the CAS. History is **kept indefinitely**; pruning is
 explicit only (`elle test --prune`), except ad-hoc forms (§ Ad-hoc tests).
 
 > **Temporarily**, the `--dump` artifact set is **not** captured
 > ([test-runner](test-runner.md) § CAS asset capture) — it OOMs the corpus run
-> and does not dedup. stdout/stderr are still captured per (form × tier);
+> and does not dedup. stdout/stderr are still captured per result;
 > `--dump` capture returns once the region leak it exposes is fixed.
 
 ## The boot fingerprint
@@ -334,7 +342,7 @@ holds, and the rows it writes.
 ### Why a table of its own
 
 A delta belongs to the window between two boundaries rather than to a
-(form × tier), so a `result` column would copy one number onto every row of the
+result, so a `result` column would copy one number onto every row of the
 file. A `measurement` row is the wrong home too: it carries a dashboard's
 verdict off the channel of an isolated child, and a per-file delta has no
 verdict to give.
@@ -362,11 +370,13 @@ CREATE TABLE run (                  -- one row per `elle test` invocation
   finished_at TEXT,                 -- stamped at completion; NULL = killed, or still running
   git_commit TEXT, git_dirty INT, tree_hash TEXT, worktree TEXT,  -- the code state this run ran against
   boot_fingerprint INT,             -- the binary and the boot sources, hashed
-  elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, tiers TEXT,
+  elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT,
+  tiers TEXT,                       -- where its results ran: worker or process
   pid INT,                          -- the runner's process on `host`; tells a live run from a killed one
   selection TEXT,                   -- the filter predicate; NULL = full run (the gate)
   n_selected INT,                   -- files + -e forms planned; written at insert
-  n_pass INT, n_fail INT, n_skip INT, n_diverge INT, n_timeout INT,  -- aggregated at completion only
+  n_pass INT, n_fail INT, n_skip INT, n_timeout INT,  -- aggregated at completion only
+  n_diverge INT,                    -- a run forces no tier, so nothing diverges: always 0
   wall_ms INT, max_rss_kb INT, cpu_user_ms INT, cpu_sys_ms INT);   -- resource usage (v1: deferred)
 
 CREATE TABLE changed_file (         -- working tree vs HEAD at run time
@@ -381,10 +391,11 @@ CREATE TABLE form (                 -- deduped across runs; the computer names i
   src TEXT,                         -- the form's syntax, rendered for display
   caps TEXT, touches TEXT, signal TEXT);   -- from compile/analyze (§ What analysis says about a form)
 
-CREATE TABLE result (               -- one row per (form × tier × run)
+CREATE TABLE result (               -- one row per (form × run)
   id INTEGER PRIMARY KEY, run_id INT REFERENCES run(id),
-  form_hash TEXT REFERENCES form(hash), tier TEXT,
-  status TEXT,                      -- pass|fail|skip|diverge|error
+  form_hash TEXT REFERENCES form(hash),
+  tier TEXT,                        -- where it ran: worker or process
+  status TEXT,                      -- pass|fail|skip|timeout
   reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT,
   wall_ms INT, cpu_us INT);       -- cpu_us = (clock/cpu) delta across the form
 
@@ -416,7 +427,7 @@ stays small and merge/diff concerns never arise (it is gitignored regardless).
 **v1 implemented subset ([store.lisp](../src/test/store.lisp) `ensure-schema`).**
 The runner creates
 `form`, `result`, `asset`, `measurement` and `gauge` with the columns above;
-`run`, `form` and `changed_file` are subsets:
+`run`, `result`, `form` and `changed_file` are subsets:
 
 - `run` carries every column above except the resource ones
   (`wall_ms`/`max_rss_kb`/`cpu_user_ms`/`cpu_sys_ms`), which are deferred. So a
@@ -424,6 +435,8 @@ The runner creates
   column errors with `no such column`. A session DB written before the
   code-state, fingerprint, key or pid columns existed gains them by `ALTER TABLE`,
   with NULL for every run recorded until then.
+- `result` is written without `wall_ms` and `cpu_us`: both read NULL until
+  per-form timing lands.
 - `form` is written without `line`, `col` and `session`: a form's location and
   an ad-hoc form's session id are deferred, and each reads NULL. The three
   analysis columns are written at scan time (§ What analysis says about a

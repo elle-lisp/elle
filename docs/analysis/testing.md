@@ -8,27 +8,30 @@ Which *kind* of test to write, and where it belongs.
 > (`elle test`), the session DB, `make smoke`/`make test`, reading results — see
 > [docs/testing.md](../testing.md). For the Rust suite's helpers and every
 > `cargo test` recipe, see [tests/AGENTS.md](../../tests/AGENTS.md). This
-> document is the **decision tree**: given a thing to test, is it an Elle
-> script or a Rust test, and which kind?
+> document is the **decision tree**: given a thing to test, which suite, and
+> which kind of test in it?
 
 ## Test execution order
 
 `make test` gates in this order; fail fast, cheapest first:
 
-| Tier | What | Purpose |
+| Step | What | Purpose |
 |------|------|---------|
 | 1 | `make qa` | rustfmt, clippy, the macOS and Android cross-checks, rustdoc, and the Rust doctests |
-| 2 | `make smoke` | The Elle corpus across the vm and jit policies, then the doctests, the embedding demo and the semver surface gate |
-| 3 | `make smoke-nouring` | The corpus again through `elle test`, on a build with the `no-uring` feature, whose I/O runs on the thread pool |
-| 4 | `cargo test --workspace --lib --all-features` | The unit tests, inline beside the code they test |
-| 5 | `cargo test --test '*'` | The integration tests and the standalone test binaries |
+| 2 | `make smoke` | The language suite, the implementation suite on the rig, the doctests, the embedding demo and the surface gate |
+| 3 | `cargo test --workspace --lib --all-features` | The unit tests, inline beside the code they test |
+| 4 | `cargo test --test '*'` | The integration tests and the standalone test binaries |
 
 `qa` takes about two minutes and `smoke` about thirty, so a formatting or
-clippy failure stops the gate before the corpus starts.
+clippy failure stops the gate before the suites start.
 
-The Elle corpus is the cheapest full-pipeline check: reader, expander, analyzer,
-lowerer, emitter, VM, JIT, and a broad swath of primitives. If it fails, the
-session DB names every failing form (`elle test --summary`).
+`make test` runs one build. The other builds that must pass the language suite
+are CI jobs ([ci](ci.md)); run one locally by building it and running `make
+smoke-lang` against it.
+
+The Elle suites are the cheapest full-pipeline check: reader, expander,
+analyzer, lowerer, emitter, VM, JIT, and a broad swath of primitives. If one
+fails, the session DB names every failing file (`elle test --summary`).
 
 Integration tests are slower because they require Rust-level setup (VM
 construction, symbol table initialization, error message inspection).
@@ -42,6 +45,30 @@ sets its own case count per job. Run them by hand with `cargo test property::`.
 
 
 For any test you need to write, answer these questions in order:
+
+**0. Would every correct implementation of Elle pass this test?**
+
+A correct implementation may run on other tiers, allocate differently, inline
+differently, and name its internals differently. So a test passes question 0
+only when it asserts what the language promises — values, errors, signals,
+fiber states, and whether a program compiles — and reads nothing else
+([spec](../spec.md) § Two suites).
+
+→ **Yes: a language test.** It goes in
+[tests/lang](../../tests/lang/overview.md), runs on every build with no flag,
+and calls no implementation extension. Continue at question 2 to decide its
+shape.
+
+→ **No: an implementation test.** It reads a gauge, observes or chooses a
+tier, reads a compiler artifact, needs a mode such as the JIT off or
+`--trace=guardfree`, or its subject is a mechanism — a calling convention, a
+tail move, an owned parameter, a region release. Write it as an Elle file in
+[tests/impl](../../tests/impl/overview.md), with a sidecar for the mode it
+needs ([rig](../../rig/overview.md)), or as a Rust test when it needs a Rust
+type or an input built beneath the compiler. Continue at question 1.
+
+A file that holds both kinds of assertion is two files. Split it: the language
+claims go to `tests/lang/`, the rest to `tests/impl/`.
 
 **1. Does the test need access to Rust types, APIs, or compiler internals?**
 
@@ -57,8 +84,10 @@ Code that should be rejected by the analyzer or lowerer before the VM ever
 runs — undefined variables, break across function boundaries, invalid
 destructuring syntax, arity mismatches at known call sites.
 
-→ **Elle test script**, when the rejection and its message are all the test
-needs. Compile the source text inside `protect` and assert that it fails:
+→ **Elle file**, when the rejection and its message are all the test needs.
+Whether a program compiles is a language claim, so the file goes in
+`tests/lang/`. Compile the source text inside `protect` and assert that it
+fails:
 
 ```lisp
 (def [ok? err] (protect (compile/whole-module "(def x 1) (assign x 2)" "<doc>")))
@@ -72,23 +101,25 @@ carries, or a runtime Elle cannot build. Call `eval_source(input, |r| ...)`
 and inspect the error inside the closure, while the runtime that produced it
 is still alive.
 
-A Unicode generation test is the second case: corpus files compile on the
-shared runner VM, which uses the default generation, so a file that selects
-another generation with `(unicode! N)` cannot join the corpus. Build a
-`Runtime::with_unicode(...)` in a Rust integration test instead.
+A Unicode generation test is the second case: the runner's in-process mode
+compiles every file on its own shared VM, which uses the default generation,
+so a file that selects another generation with `(unicode! N)` answers
+differently there than under `elle FILE`. Build a `Runtime::with_unicode(...)`
+in a Rust integration test instead.
 
 **3. Does the test evaluate Elle source and check the resulting value?**
 
 This is the vast majority of tests. In Rust the pattern is
 `eval_source("(some-expr)", |r| assert_eq!(r.unwrap(), Value::int(42)))`.
 
-→ **Elle test script** in [tests/elle/](../../tests/elle/). Translate to
-`(assert (= (some-expr) 42) "description")`.
+→ **Elle file** in [tests/lang](../../tests/lang/overview.md) for a language
+test, or [tests/impl](../../tests/impl/overview.md) for an implementation
+test. Translate to `(assert (= (some-expr) 42) "description")`.
 
 **4. Does the test verify a runtime error?**
 
-→ **Elle test script.** `protect` answers the error as a value, so the script
-checks its kind, and its message with `string/contains?`:
+→ **Elle file.** `protect` answers the error as a value, so the file checks its
+kind, and its message with `string/contains?`:
 
 ```lisp
 (def [ok? err] (protect (/ 1 0)))
@@ -107,11 +138,11 @@ roundtrip property holds for all possible values, or that a mathematical law
 
 However, if you're really just testing a fixed set of known-good examples
 ("yield 3 values, resume 3 times, get them back in order"), property
-testing is the wrong tool. Write Elle test scripts instead — they're faster
-and clearer.
+testing is the wrong tool. Write Elle files instead — they're faster and
+clearer.
 
 → **Property test** in [tests/property/](../../tests/property/) IF random
-generation genuinely adds value. Otherwise, write Elle test scripts.
+generation genuinely adds value. Otherwise, write Elle files.
 
 
 ## Which Rust test category?
@@ -194,8 +225,9 @@ answer.
 
 Once the tree above has named a category, the steps for it — the directory, the
 `include!` registration, the helper to import, the proptest configuration — are
-in [tests/AGENTS.md](../../tests/AGENTS.md). An Elle script gates itself in-file
-and reports through the runner; [docs/testing.md](../testing.md) covers that.
+in [tests/AGENTS.md](../../tests/AGENTS.md). An Elle file gates itself in-file
+and reports through the runner, and an implementation test names its mode in a
+sidecar; [docs/testing.md](../testing.md) covers both.
 
 An inline `#[cfg(test)]` module needs no registration. Add it at the bottom of
 the `src/` file it tests, where it reaches that file's private items.

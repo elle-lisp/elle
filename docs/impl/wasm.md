@@ -7,7 +7,9 @@ Wasmtime, over the same front end the bytecode VM uses.
 
 > **Feature-gated:** The WASM backend requires `--features wasm` at build
 > time. It is disabled by default to reduce binary size. Build with
-> `cargo build --features wasm` to enable it.
+> `cargo build --features wasm` to enable it. A `wasm` build carries
+> WebAssembly as its one optimizing tier: the JIT is off in it, and only such a
+> build accepts `--wasm=` ([config.md](../config.md) § Builds).
 
 It is an alternative to the bytecode VM, sharing that front end
 (reader → expander → analyzer → HIR → LIR) and replacing everything below it.
@@ -31,7 +33,7 @@ elle --wasm=full --wasm-dump script.lisp
 # Without stdlib (for testing the emitter in isolation)
 elle --wasm=full --wasm-no-stdlib script.lisp
 
-# Tiered mode: JIT individual hot closures to WASM during VM execution
+# Tiered mode: compile individual hot closures to WASM during VM execution
 elle --wasm=11 script.lisp
 ```
 
@@ -369,11 +371,9 @@ a newer fix, raise that floor in the same change as the pin.
 
 ## Full-module coverage and its two teardown/lowering invariants
 
-The full-module tier runs the whole corpus under `make smoke-wasm` except the
-three files `WASM_SKIP` in the Makefile names. `eval.lisp` and `eval-env.lisp`
-need dynamic compilation, which the WASM backend lacks, and
-`wasm-tier-error-signal.lisp` forces the tiered backend, which needs the bytecode
-VM underneath it. Two invariants that this tier — and only this tier —
+The full-module tier runs the language suite under `make smoke-wasm`, except the
+files the Makefile's `WASM_SKIP` names: dynamic compilation (`eval`) is not a
+WASM backend feature. Two invariants that this tier — and only this tier —
 must uphold are worth calling out, because each is invisible on the VM/JIT path
 and each is pinned by a specific corpus file run under `--wasm=full`.
 
@@ -389,7 +389,7 @@ and each is pinned by a specific corpus file run under `--wasm=full`.
   What handles them is not this tier's: `FiberHeap::quiesce_io_backends` drains
   each before the region sweep, on every tier, because the VM reaches the same
   state whenever a program ends without dropping its backend
-  ([src/io/AGENTS.md](../../src/io/AGENTS.md) § "A hold is let go while its
+  ([io-inflight.md](io-inflight.md) § "A hold is let go while its
   store is still there"). This tier is where it shows up on the widest range of
   programs, so it is the coverage that pins it. Canonical reference:
   [posix.lisp](../../tests/elle/posix.lisp).
@@ -413,16 +413,15 @@ and each is pinned by a specific corpus file run under `--wasm=full`.
 
 ## Testing
 
-CI gates on `make check-wasm` only: the feature compiles, and the full-module
-tier boots one module (the `[wasm]` marker proves the tier engaged — a
-non-wasm binary accepts `--wasm=full` and silently runs the VM). The corpus
+CI gates on `make check-wasm` only: the feature compiles, the full-module tier
+boots one module, and the `[wasm]` marker proves the tier engaged. The corpus
 passes below do not gate CI while the tier carries no production workloads.
 
 ```bash
 # Build gate: feature compiles, tier boots (the CI gate)
 make check-wasm
 
-# WASM smoke tests (all elle scripts except eval)
+# The language suite on a wasm build, under --wasm=full
 make smoke-wasm
 
 # Individual test
@@ -470,7 +469,6 @@ the fallback on both cached paths.
 | `--wasm-lir` | Print LIR before WASM emission |
 | `--wasm-no-stdlib` | Skip stdlib (for emitter testing) |
 | `--wasm-no-sparse-spill` | Spill every register at a suspend point, not the live ones |
-| `--jit=0` | Disable cranelift optimization in Wasmtime |
 
 ---
 

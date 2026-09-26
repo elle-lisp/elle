@@ -70,31 +70,35 @@ caller receives that error, as it would from an ordinary call.
 (assert (= (get raise-err :error) :boom))     # not :tier-rejected
 ```
 
-## The harness is the test runner
+## The harness is the set of builds
 
-Cross-tier agreement is enforced by `elle test`
-([docs/test-runner.md](../test-runner.md) § Tiers are intrinsic):
+Cross-tier agreement is enforced by running one language suite on several
+implementations ([spec](../spec.md) § A build is an implementation):
 
-- Every **single-form** corpus file is forced onto every tier the build
-  carries via `compile/run-on`; when tiers that returned a value
-  disagree, the runner records a synthetic `status=diverge` row
-  (`tier='*'`, the per-tier values in `reason`) and the run gates
-  non-zero. Divergence coverage is therefore the default for the whole
-  durable corpus, not a separate suite.
-- A **directed** tier-parity test — one that must pin a specific
-  tier-pair on a specific construct — lives in `tests/elle/` and calls
-  `compile/run-on` explicitly, asserting the tiers' results against
-  each other (e.g. `tests/elle/string-push-value.lisp`, which pins
+- **Every build runs the language suite.** The default build runs it on the
+  JIT, a build with no JIT runs it on the interpreter alone, and an MLIR build
+  runs it on MLIR, with the interpreter for every function MLIR does not admit.
+  A language test states the one answer every build must give,
+  so a tier that disagrees fails the build that carries it
+  ([ci](../analysis/ci.md)).
+- **The rig runs it eager.** The implementation suite runs the language suite
+  once more under the rig's `jit-eager.toml` profile, which compiles every
+  function on its first call ([rig](../../rig/overview.md) § Profiles). The
+  default build compiles only what runs ten times, so this pass is what drives
+  the JIT over code that a test calls once.
+- A **directed** tier-parity test — one that must pin a specific tier pair on
+  a specific construct — is an implementation test. It lives in `tests/impl/`
+  and calls `compile/run-on` explicitly, asserting the tiers' results against
+  each other (for example `tests/impl/string-push-value.lisp`, which pins
   JIT==VM agreement for `%string-push` on an `@string` value).
 
-There is no separate differential harness or corpus: the runner's
-divergence status subsumed it, and per-file gating (`gate!`/`:gated`)
-replaces its skip handling.
+The runner itself runs each file once and forces no tier
+([docs/test-runner.md](../test-runner.md) § A build is the tier set).
 
 ## See also
 
-- [docs/test-runner.md](../test-runner.md) — the runner: tier matrix,
-  divergence rows, gating
+- [docs/test-runner.md](../test-runner.md) — the runner: isolation, gating,
+  and why it has no tier dial
 - [impl/mlir.md](mlir.md) — MLIR tier-2 lowering
 - [impl/jit.md](jit.md) — Cranelift JIT
 - [impl/spirv.md](spirv.md) — SPIR-V emission for the GPU tier

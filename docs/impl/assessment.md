@@ -1,6 +1,6 @@
 # The region roadmap
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-26 -->
 
 The region system's plan of work: the state gauges, the fix-selection
 discipline, the measured dead ends, and the open work in order.
@@ -20,13 +20,15 @@ constraint that would otherwise be re-violated.
 
 ```sh
 cargo build -p elle && cargo build --release -p elle
-./target/debug/elle tests/elle/oracle.lisp                    # leaks: the dashboard + ratchet
-cargo test -p elle --test lib region_ -- --test-threads=1     # soundness: the guardfree UAF pins
-make smoke-elle ELLE=./target/release/elle CARGO_PROFILE=--release  # semantics: the whole corpus
+cargo build -p elle-rig
+./target/debug/elle-rig tests/impl/oracle.lisp                # leaks: the dashboard + ratchet
+make smoke-impl ELLE=./target/release/elle ELLE_RIG=./target/release/elle-rig CARGO_PROFILE=--release  # soundness: the guardfree UAF pins
+make smoke-lang ELLE=./target/release/elle CARGO_PROFILE=--release  # semantics: the language suite
 ```
 
-`make smoke-elle` defaults to the debug binary outside CI, which takes hours
-rather than about thirty minutes — pass `ELLE`/`CARGO_PROFILE` as above.
+`make smoke-impl` and `make smoke-lang` default to the debug binaries outside
+CI, which take hours rather than about thirty minutes — pass `ELLE`,
+`ELLE_RIG` and `CARGO_PROFILE` as above.
 
 - **The oracle** prints the split — `open defects: N across M roots;
   by-design: K` — and a completeness gate fails the run if any open probe is
@@ -37,12 +39,13 @@ rather than about thirty minutes — pass `ELLE`/`CARGO_PROFILE` as above.
 - **Guardfree** is the soundness axis, orthogonal to the leak burndown.
   `--trace=guardfree` under the full stdlib is the only trustworthy UAF
   oracle — plain-VM green is not evidence, and neither is a tight leak rate.
-  The `region_*_uaf` family in
-  [tests/integration/elle_scripts/](../../tests/integration/elle_scripts.rs) is the
-  pinned corpus; the full `cargo test` suite OOMs, so run it filtered.
+  The `region-*-uaf` files in
+  [tests/impl](../../tests/impl/overview.md) are the pinned corpus: each arms
+  the oracle in its sidecar, and `make smoke-impl` runs every one as its own
+  child.
 - **The corpus smoke is a real third gauge, not a formality.** Oracle-green
   and guardfree-green together still admit a corpus over-free no pin covers.
-  `make smoke-elle` batches the corpus so a killed batch fails loud. Never
+  `make smoke-lang` batches the language suite so a killed batch fails loud. Never
   read a batched suite's exit through a pipe (`| tail` reports the pipe's
   exit); use `elle test --summary` or the run DB.
 
@@ -84,7 +87,7 @@ ceiling is the loop reclaiming rather than the gauge dying.
 [region-tail-deferred-exits.lisp](../../tests/elle/region-tail-deferred-exits.lisp) (the deferred tail-call set across all four
 exits), and [region-break-loop-replica.lisp](../../tests/elle/region-break-loop-replica.lisp) (the release the breaking
 iteration owes). A shape with a direct gauge needs no dashboard probe; what
-it needs is to be run, which the corpus smoke does.
+it needs is to be run, which `make smoke-impl` does.
 
 ## The fix-selection discipline — invariants over shape-patches
 
@@ -162,8 +165,8 @@ at 0 forever. The ledger shrinks as classes close.
   an uncounted borrow the solver never named. The same-node retain
   requirement and the escape admission on the branch-arm window are required
   ([region/compensate.md](region/compensate.md)). Neither failure shows in
-  the guardfree pins — both surface only in the corpus, one under
-  `--jit=eager`.
+  the guardfree pins — both surface only in the corpus, one with the JIT
+  eager.
 - **Relocating an existing instruction does not waive the count argument.**
   On the path the release did not previously run, it is a new release at
   runtime and owes what any new release owes.
@@ -319,11 +322,12 @@ control at 0 ([selfrec.md](selfrec.md)).
 ### The backend gauge — SPIR-V remains
 
 The arena gauges are host-side and tier-transparent, so the interpreter's
-probes port under each tier's flag. MLIR-CPU is bounded by construction; WASM
-is the named program-duration over-keep, pinned shrink-only in `wasm::tests`,
-its close unscheduled until the tier carries production workloads. **SPIR-V
-device arenas remain unmeasured** — that needs a GPU runtime beside the
-corpus. Do not build GPU offload on the device-arena claim until it lands.
+probes port to each tier on a build that carries it. MLIR-CPU is bounded by
+construction; WASM is the named program-duration over-keep, pinned
+shrink-only in `wasm::tests`, its close unscheduled until the tier carries
+production workloads. **SPIR-V device arenas remain unmeasured** — that
+needs a GPU runtime beside the corpus. Do not build GPU offload on the
+device-arena claim until it lands.
 
 ## Costs and risks to budget
 

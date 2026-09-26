@@ -6,4 +6,4 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [README.md](README.md) — **Scope-Based Allocation Demo (more...)**
+- [README.md](README.md) — **Scope-Based Allocation Demo** A workload that allocates in tight loops inside child fibers and prints how many heap objects each loop leaves alive.

@@ -1,9 +1,17 @@
 # Region diagnostics and validation
 
-<!-- audited: 2026-09-08 -->
+<!-- audited: 2026-09-26 -->
 
 Implementation-facing: the instruments that tell correct from broken, and the
 test scaffolding that keeps the region rules honest.
+
+Every instrument here belongs to this implementation. A gauge such as
+`arena/count` is an implementation extension, and a mode such as
+`--trace=guardfree` is a runtime setting; neither is a language claim
+([spec](../../spec.md) § Three categories of surface). So a test that reads a
+gauge or needs a mode is an implementation test: it lives in
+[tests/impl](../../../tests/impl/overview.md), runs on the rig, and names its
+mode in a sidecar ([rig](../../../rig/overview.md)).
 
 ## Diagnostics — telling correct from broken
 
@@ -12,7 +20,9 @@ test scaffolding that keeps the region rules honest.
   deref; a handler attributes the address to the freeing region and site. Armed
   after stdlib init so benign init-time frees don't trip it. This is the only
   trustworthy UAF signal — plain free-site use checks have false positives, and
-  `--trace=rc` perturbs timing enough to mask timing-dependent frees.
+  `--trace=rc` perturbs timing enough to mask timing-dependent frees. An
+  implementation test arms it with `trace = ["guardfree"]` in its sidecar, so
+  a fault kills that file's child and lands as one recorded failure.
 - **Generation panic** (debug builds, always on): `region_of` on a value whose
   region was freed panics deterministically at the deref, naming the page's
   stamped generation and the id's current one
@@ -79,7 +89,8 @@ test scaffolding that keeps the region rules honest.
   wrong-typed value, which is an improvement but not a report. To get the report
   out of a release build, turn debug assertions on for it:
   `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`. The macOS CI job pairs the two
-  for exactly this reason.
+  for exactly this reason: its implementation suite runs the language suite
+  under the rig's `scrub.toml` profile, on a build with debug assertions on.
 - `(arena/dump)`: a Lisp-level leak localiser — prints every live mortal region
   (id, RC, object count, and the object *tags* it holds) to stderr. Where
   `arena/count` / `arena/region-count` say *that* memory grew across a loop, the
@@ -97,7 +108,7 @@ test scaffolding that keeps the region rules honest.
   the bit is set, so an untraced dump prints the same line it always did. The
   mints the **VM** owns are covered; a region minted by a native, by the io
   backend, or by the env builder prints no site.
-- `--trace=residue`: **the teardown leak dump.** Where `--stats` counts the
+- `--trace=residue`: **the teardown leak dump.** Where `--dump=stats` counts the
   regions the teardown sweep left alive, this prints them — the `arena/dump`
   line for each surviving region, then every cross-region reference edge among
   them as `[trace:residue] edge <referrer> -> <referent>`. The edges make the
@@ -115,7 +126,7 @@ test scaffolding that keeps the region rules honest.
   object each own three pages, so a shape can be leak-free by object count and
   still claim a page per call ([model.md](model.md) § "Page recycling",
   [regions/performance.md](../../regions/performance.md) § "A call into a
-  variadic stdlib operator allocates"). `tests/elle/region-page-recycle.lisp`
+  variadic stdlib operator allocates"). `tests/impl/region-page-recycle.lisp`
   reads it. Immediate, so sampling it allocates nothing and does not perturb
   the measurement.
 - `(arena/region-ids)` and `(arena/region-table)`: the *id* dimension, which no
@@ -135,7 +146,7 @@ test scaffolding that keeps the region rules honest.
     can leak ids at full rate and leave this gauge flat, which is why it is the
     wrong one to assert on.
 
-  The `id-*` probes of `tests/elle/oracle.lisp` read `region-ids`, beside a
+  The `id-*` probes of `tests/impl/oracle.lisp` read `region-ids`, beside a
   live-growth discriminator that proves it moves. They do not read
   `region-table`, and the reason is stronger than the lag: physical ids reach
   the store from two independent sources — the per-heap `next_physical` counter
@@ -152,7 +163,7 @@ test scaffolding that keeps the region rules honest.
 - `arena.rs` tag/object mismatch = a UAF surfacing as a wrong-tag deref;
   `regionstore/refcount.rs` phantom/double-free assert (`decref_reaches_zero`) =
   a `DecrefRegion` for a region never allocated or already freed.
-- `--stats`: prints exit-time statistics, including a **page-claim size
+- `--dump=stats`: prints exit-time statistics, including a **page-claim size
   histogram** — one `[stats] page-claim size=<bytes> claims=<n> bytes=<n>` line
   per size class (`size=0` = the oversized one-off bucket). It measures how often
   geometric page growth (the base page doubling up to 4 MiB) escalates past
@@ -161,7 +172,7 @@ test scaffolding that keeps the region rules honest.
   (`region_of_ptr`'s sub-alignment walk; the page-header magic and ownership
   validation make that search sound, so this is for *policy* analysis, not
   correctness). Off by default and zero-cost then. Each `elle test` worker
-  aggregates into the one process-wide histogram (`elle test --stats …`); sum the
+  aggregates into the one process-wide histogram (`elle test --dump=stats …`); sum the
   lines across batched runs for a corpus-wide distribution. The size classes
   scale with the host page, so compare distributions across hosts by class, not
   by byte count ([model.md](model.md) § "The base page is the OS page").
@@ -187,7 +198,7 @@ every variant is what makes the recorded-`outgoing`-vs-scan assertion at free a
 *complete* check, not a partial one — a content edge the scan can see but the
 recorder forgot is caught the moment that region frees.
 
-The **leak state** lives in one runnable dashboard, `tests/elle/oracle.lisp`. It runs
+The **leak state** lives in one runnable dashboard, `tests/impl/oracle.lisp`. It runs
 one representative shape per residual class in a loop with a heap gauge sampled *by
 the program* — `arena/count`, `arena/region-count`, `arena/bytes` or
 `arena/region-ids`, chosen for the dimension the class leaks in — and prints a
@@ -220,6 +231,7 @@ measured, but its *shape* — slope-based, shrink-only — is the rule.
 
 UAF is a separate axis, gated by `--trace=guardfree` under the full stdlib (the only
 trustworthy UAF oracle — plain-VM green is not evidence), not by the slope verdict.
+Each file that pins a UAF arms the oracle in its sidecar.
 One class of it does reach the dashboards: both pin `arena/over-frees` at 0 over the
 whole process (above), so a release that ran twice fails them. A page freed under a
 live reader still needs the oracle.
@@ -234,13 +246,14 @@ VM and JIT natively, the WASM host through `call_primitive` with a `NativeCtx`
 built on `vm.heap_ptr` (src/wasm/host.rs), and the MLIR tier admits no calls at
 all (below). So a program that samples the gauge measures the same `RegionStore`
 no matter which tier executes it, and an interpreter oracle probe ports to a
-backend tier by running the same shape under the tier's flag (`--wasm=full`,
-`--wasm=N`, `--mlir=eager`).
+backend tier by running the same shape on a build that carries the tier: under
+`--wasm=full` or `--wasm=N` on a `wasm` build, or under a rig sidecar that sets
+`mlir = "eager"` on an `mlir` build.
 
 Per-tier region-reclamation state, each with its pinning test:
 
 - **VM / JIT** — the region runtime proper; state is the oracle's closed/open
-  split (`tests/elle/oracle.lisp`).
+  split (`tests/impl/oracle.lisp`).
 - **MLIR CPU / GPU (SPIR-V)** — **allocation-free by construction.** The
   eligibility gate (`is_gpu_eligible`, src/lir/types/mod.rs `is_gpu_instruction`)
   whitelists numeric instructions only: every instruction that can put a heap
@@ -249,7 +262,7 @@ Per-tier region-reclamation state, each with its pinning test:
   can never unbalance a real region). No region-managed value ever lives on
   this tier; the program's heap stays with the VM, which reclaims as usual.
   Pinned by the `gpu_eligibility_*` tests in `lir::types::func::tests`;
-  measured bounded by the gauge probe under `--mlir=eager`.
+  measured bounded by the gauge probe with the MLIR tier eager.
 - **WASM full-module (`--wasm=full`)** — **a program-duration over-keep,
   pinned shrink-only.** Every region instruction is a structural no-op in the
   emitter (src/wasm/instruction/dispatch.rs), and the host mints a fresh region
@@ -298,9 +311,10 @@ receipt that says the release did not run. The pin is two-sided:
 discard (bounded, generation bump), and the squelch corpus
 (`region-squelch-unwind-uaf.lisp`, `region-squelch-nested.lisp`,
 `region-loop-capture-squelch.lisp`, and the redis-driven `redis.lisp` scheduler shape
-when a live Redis is present) under `--trace=guardfree` with the full stdlib proves the
-discard frees nothing more (panic-clean). The rate the tables carry is gauged by
-`tests/elle/region-squelch-unwind.lisp`.
+when a live Redis is present) with the full stdlib proves the discard frees nothing
+more (panic-clean). The three `region-` files run on the rig under a guardfree
+sidecar; `redis.lisp` is a language test, so it runs with no mode. The rate the tables carry is gauged by
+`tests/impl/region-squelch-unwind.lisp`.
 
 ## The terminal-fiber teardown
 
@@ -315,6 +329,6 @@ set-drop. An `:error` fiber is NOT torn down — it is resumable (restarts), so 
 state must survive the promotion. The pin is two-sided, exactly as the discard's:
 `runtime::tests::ownership::fiber_owner_node_*` prove the owned set IS freed at each
 terminal transition (generation bumps, bounded over repeated cycles), and
-`tests/elle/region-fiber-cancel.lisp` — cancel of parked fibers and abort of new ones in
-a loop — under `--trace=guardfree` with the full stdlib proves the teardown frees nothing
-a live frame counts on (panic-clean, bounded slope sampled by the program).
+`tests/impl/region-fiber-cancel.lisp` — cancel of parked fibers and abort of new ones in
+a loop — under a guardfree sidecar with the full stdlib proves the teardown frees
+nothing a live frame counts on (panic-clean, bounded slope sampled by the program).

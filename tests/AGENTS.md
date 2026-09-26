@@ -4,9 +4,10 @@
 
 Where each kind of test lives, the helpers they share, and how to add one.
 
-Which kind of test to write is the decision tree in
-[docs/analysis/testing.md](../docs/analysis/testing.md). How the Elle corpus
-and its runner work is [docs/testing.md](../docs/testing.md).
+Which suite a test belongs in is [docs/spec.md](../docs/spec.md), and which
+kind of test to write is the decision tree in
+[docs/analysis/testing.md](../docs/analysis/testing.md). How the Elle suites
+and their runner work is [docs/testing.md](../docs/testing.md).
 
 ## Directory structure
 
@@ -15,11 +16,14 @@ tests/
 ├── lib.rs              # The shared binary: includes unittests/, integration/, property/
 ├── common/mod.rs       # Shared helpers (eval_source, setup, the Makefile and workflow readers)
 ├── fixtures/           # Static files the Rust tests read
-├── elle/               # The Elle corpus, run by `elle test`
+├── lang/               # The language suite: what every implementation must do
+├── impl/               # The implementation suite's Elle half, run on the rig
+├── runner/             # The `elle test` runner's own acceptance tests and fixtures
+├── modules/            # Modules the integration tests import
 ├── property/           # Property-based tests (proptest)
 ├── integration/        # Full-pipeline and repository tests
 ├── unittests/          # Rust APIs tested directly
-├── io_copies/          # A helper module two standalone binaries share
+├── io_copies/          # The measuring helper `io_copies.rs` uses
 └── *.rs                # One standalone binary each — see below
 ```
 
@@ -36,19 +40,21 @@ beside the code it tests.
 
 ## The categories
 
-### Elle test scripts (`tests/elle/`)
+### The Elle suites (`tests/lang/`, `tests/impl/`)
 
-Behavioral tests that evaluate Elle source and check values, written with the
-`(assert COND "message")` idiom. The agent-first runner (`elle test`, through
-`make smoke` or `make smoke-elle`) compiles each file and runs it once per JIT
-policy (`:off`→`vm`, `:eager`→`jit`), with per-tier divergence for single-form
-files. `integration::elle_scripts` is *not* the driver: it keeps only the files
-that need a process-global runtime mode the runner cannot vary per file
-(`--trace=guardfree`, `--mlir=off`+adaptive).
+Tests that evaluate Elle source and check values, errors or signals, written
+with the `(assert COND "message")` idiom. They include a program that must not
+compile, checked through `compile/whole-module` under `protect`. Each `.lisp`
+file is a self-contained program that exits non-zero on failure.
 
-An Elle script answers "does this Elle expression produce the expected value?"
-Leave these to Rust: a test that needs a Rust type, a compile-time rejection
-that needs a Rust type, and a property test.
+A file in [tests/lang](lang/overview.md) answers: "Does every correct Elle
+produce this?" Every build runs it with no flag (`make smoke-lang`). A file in
+[tests/impl](impl/overview.md) answers: "Does this implementation produce this,
+at this cost, under this mode?" It runs on the rig with the mode its sidecar
+names (`make smoke-impl`). The agent-first runner (`elle test`) records both.
+
+Leave these to Rust: a test that needs a Rust type, a test that must build its
+input beneath the compiler as LIR or bytecode, and a property test.
 
 ### Property tests (`tests/property/`)
 
@@ -61,7 +67,7 @@ soundness, and a defect's regression across an input range.
 
 End-to-end behavior through the whole pipeline (Reader → Expander → Analyzer →
 Lowerer → Emitter → VM), plus the tests that check the repository itself: the
-documents, the CI workflow, and the corpus runner.
+documents, the CI workflow, and the suites' runner.
 [integration/AGENTS.md](integration/AGENTS.md) names the groups.
 
 ### Unit tests (`tests/unittests/`)
@@ -92,7 +98,8 @@ carries its own docstring. The ones a new test reaches for first:
 - **`ScratchDir::new(tag)`** — a unique directory under the platform temp
   root, removed when it drops.
 - **`make_var`, `make_dry_run`, `workflow_jobs`** — what the Makefile and the
-  workflows say, for the tests that check them.
+  workflows say, for the tests that check them (`common/repo.rs`,
+  `common/workflows.rs`).
 
 ```rust
 use crate::common::eval_source;
@@ -157,9 +164,14 @@ count. Pick `N` by the cost of one case:
 | `cargo test -p elle --lib` | ~1.5 min | The inline unit tests |
 | `cargo test --test lib integration::NAME` | seconds to minutes | One integration file |
 | `cargo test --test '*'` | ~10 min | Every integration test and standalone binary |
-| `make smoke` | ~30 min, release | The corpus, the doctests, and the embedding demo |
+| `make smoke` | ~30 min, release | Both Elle suites, the doctests, the embedding demo, and the surface gate |
 | `make test` | smoke + ~5 min | What the PR gate runs, locally |
 | `cargo test --workspace` | ~30 min | Everything — ask before running it |
+
+Pass the release binaries to anything that runs the Elle suites: `make smoke
+ELLE=./target/release/elle ELLE_RIG=./target/release/elle-rig
+CARGO_PROFILE=--release`. The debug default takes hours. One file runs as
+`elle tests/lang/NAME.lisp`, or `elle-rig tests/impl/NAME.lisp` with its sidecar.
 
 [CONTRIBUTING.md](../CONTRIBUTING.md) holds the full table and the policy
 around it.
