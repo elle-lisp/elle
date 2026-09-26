@@ -86,9 +86,9 @@ because the operands are integers.
 
 ## Function selection
 
-Functions become JIT candidates based on a hotness threshold, which `--jit`
-sets. The VM increments a counter on each call; when it crosses the threshold,
-the function is compiled.
+Functions become JIT candidates based on a hotness threshold, ten calls by
+default, which `(vm/config-set :jit N)` changes. The VM increments a counter on
+each call; when it crosses the threshold, the function is compiled.
 
 **A non-tail call is counted by whichever tier makes it.** The interpreter
 counts in `try_jit_call`; compiled code counts in `elle_jit_call`, on the arm
@@ -134,8 +134,8 @@ recursion grows the thread's stack. When less than 512 KiB of that stack
 remains, the helper runs the callee in the interpreter instead. The
 interpreter keeps every deeper call on fiber frames and enters no compiled
 code while the stack stays low ([vm.md](vm.md)). A recursion 100,000 deep
-therefore completes under `--jit=eager`, with the frames past the watermark
-interpreted.
+therefore completes with the JIT eager, as a rig sidecar sets it, with the
+frames past the watermark interpreted.
 
 ## Rejection tracking
 
@@ -152,7 +152,7 @@ function's bytecode pointer (see "Cache identity" for why that key is sound),
 so a re-submission could only ever reproduce the identical rejection — it is
 pure wasted work.
 
-Eager JIT is where this invariant pays. With `--jit=eager` the hotness
+Eager JIT is where this invariant pays. With the JIT eager the hotness
 threshold is 0, so *every* call is "hot"; absent the negative cache, each call
 to an un-jit'able function re-submits it to the background worker. A single
 un-jit'able function called in a hot loop (e.g. stdlib `-`/`/`, which build a
@@ -265,11 +265,15 @@ fall-through block starts, so the resume runs the releases the frame still owed
 call's and each tail call's, with the operand stack at that point, during LIR
 emission. These two helpers read them.
 
-## CLI flags
+## Configuration
 
-[config.md](../config.md) owns the `--jit` policy table and the policy the
-binary starts from. `--stats` prints this tier's compiled and rejected counts
-on exit, with the call count behind each rejection.
+[config.md](../config.md) owns the builds, the JIT threshold, and the policy the
+binary starts from. The JIT is the optimizing tier of the default build; a
+build with the `mlir` or `wasm` feature carries that tier instead and runs no
+JIT. No flag turns the JIT off or makes it eager: the rig does both, for one
+implementation test, through a sidecar ([rig](../../rig/overview.md)).
+`--dump=stats` prints this tier's compiled and rejected counts on exit, with
+the call count behind each rejection.
 
 ## Files
 
@@ -288,7 +292,7 @@ src/jit/dispatch.rs    JIT dispatch integration with VM
 - [impl/lir.md](lir.md) — LIR that the JIT translates
 - [impl/vm.md](vm.md) — VM fallback and dispatch
 - [impl/bytecode.md](bytecode.md) — bytecode alternative
-- [impl/mlir.md](mlir.md) — MLIR tier-2 path consulted before Cranelift
+- [impl/mlir.md](mlir.md) — MLIR, the tier an `mlir` build carries instead of this one
 - [impl/wasm.md](wasm.md) — WebAssembly backend
 - [impl/gpu.md](gpu.md) — GPU compute via SPIR-V + Vulkan
 - [impl/differential.md](differential.md) — cross-tier agreement testing

@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-09-20 -->
+<!-- audited: 2026-09-26 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -91,11 +91,11 @@ is a correctness defect, not a tuning knob.
    a `Break` is **not** a use of its operand's regions — the value becomes the
    enclosing block's value, and control leaves the body before any release
    placed inside it runs, so the release is anchored where the *block's* value
-   is consumed ([mechanism.md](mechanism.md) § "`break` transfers its value").
+   is consumed ([anchors.md](anchors.md) § "`break` transfers its value").
    When the target block is the function's **tail**, that anchor is the last
    point before the frame is handed back, so the broken value is also the
    *returned* value and takes the return mint — including through an enclosing
-   `Loop`/`While`, which a `break` jumps past ([mechanism.md](mechanism.md) § "A break out of a
+   `Loop`/`While`, which a `break` jumps past ([anchors.md](anchors.md) § "A break out of a
    TAIL block carries the return mint"). The jump moves the anchor of every
    *other* region in the same window too: a release the break passes over is
    emitted into unreachable code, so a `decref_point` at or after a break site
@@ -103,7 +103,7 @@ is a correctness defect, not a tuning knob.
    nested loop or lambda, where the release must keep running once per iteration
    / once per activation, and except where a frame-replacing exit in the body
    means the block's own exit label is not a point every path reaches
-   ([mechanism.md](mechanism.md) § "A release the break jumps over is not a release").
+   ([anchors.md](anchors.md) § "A release the break jumps over is not a release").
    A third class is a *borrowing node*: an **uncounted** container element read —
    the `%get`/`%first`/`%rest` opcodes — hands back a value that still lives
    **inside the container** (its own region for a pair's car, an interior member's
@@ -185,7 +185,7 @@ is a correctness defect, not a tuning knob.
      containers (`@array`, `@struct`, `@set`, box, capture cell) are visible
      only inside `value/` (`as_*_cell`, conversions.rs), so the only way code
      elsewhere can store into one is through the tracked funnels in
-     `value/arena.rs` (`push_with_incref` and friends) — an uncounted
+     `value/arena/mutate.rs` (`push_with_incref` and friends) — an uncounted
      container store is a compile error, not a review item. Read access goes
      through borrow-guard/copy-out accessors that cannot mutate.
      Membership-neutral mutation (in-place sort/reverse/shuffle — no value
@@ -208,7 +208,7 @@ is a correctness defect, not a tuning knob.
      **arguments only**: a
      release landing there for anything the call does not name has no such
      story and is carried back ahead of the `TailCall`
-     ([mechanism.md](mechanism.md) § "A release past a frame-replacing tail
+     ([relocate.md](relocate.md) § "A release past a frame-replacing tail
      call is not a release"). Two borrow
      routes: a captured upvalue (owned by the closure env's capture-incref)
      and a compile-time-constant heap value (`immutable_values` — a stdlib
@@ -248,7 +248,7 @@ is a correctness defect, not a tuning knob.
      (`EscapeSite::IoSubmit`); the backend's pending table is external to the
      region system in the same way a channel buffer is, so this retain is the
      operand's reference while the operation is in flight, and disposing of the
-     entry decrefs it (`OperandHold`, docs/impl/io-inflight.md § "A submitted operation
+     entry decrefs it (`OperandHold`, [io-inflight.md](../io-inflight.md) § "A submitted operation
      holds the values its completion reads");
    - *retained process root* — a value a host keeps reading past the run that
      produced it, registered as a process root while the host holds no owning
@@ -349,10 +349,10 @@ Three non-negotiable properties:
    succeeds only when the accounting is correct.
 
 2. **Observable, and zero.** The sweep reports the live region census afterward
-   (`Runtime::teardown` returns it; `--stats` prints it), and **zero** is the
+   (`Runtime::teardown` returns it; `--dump=stats` prints it), and **zero** is the
    claim `tests/region_process_teardown` gates — not a target the number is
    allowed to approach. A residue is the standing list of open leaks: the number
-   *is* the remaining work, not a tuning knob. `tests/elle/oracle.lisp` measures
+   *is* the remaining work, not a tuning knob. `tests/impl/oracle.lisp` measures
    the same property as a per-op leak rate while a program runs; this counts what
    survives the process, which is the axis that sees a leak whose rate is one per
    PROGRAM rather than one per op.

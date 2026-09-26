@@ -8,9 +8,9 @@ and what a change has to carry before we can take it.
 ## The not rocket science rule
 
 `origin/main` is green. Always. Every commit on main has passed every
-Elle test, every Rust test, every example, and every documentation file
-in CI. This is enforced by a multi-layered PR/merge-queue workflow that
-runs the full suite at least three times before a commit lands.
+Elle test, every Rust test, and every documentation file in CI. The pull
+request's jobs run the suites on every build and platform, and the merge
+queue runs `make smoke` again before a commit lands.
 
 This is the "not rocket science rule of software engineering": maintain
 a repository of code that always passes all tests. It is successfully
@@ -96,18 +96,18 @@ tests and zero assertions, the session was wasted.
 |---------|---------|-------------|
 | `cargo test -p elle --lib` | ~1.5min | Rust unit tests — the fast inner loop |
 | `make qa` | ~2min | The PR gate's QA job, locally: rustfmt, workspace clippy, the cross-checks, rustdoc. Run before every push |
-| `make smoke` | ~30min release | Elle corpus (VM, JIT) + doctests + embedding + the semver surface gate |
-| `make test` | smoke + ~5min | qa, then smoke and the corpus on a `no-uring` build, then the unit and integration tests |
+| `make smoke` | ~30min release | The language suite, the implementation suite on the rig, doctests, embedding, the semver surface gate |
+| `make test` | smoke + ~5min | qa, then smoke, then the unit and integration tests |
 | `make crosscheck` | ~2min | Clippy over the macOS arms and `cargo check` over the Android arms of `cfg(target_os)`, which a Linux build never compiles |
 
-Pass the release binary to anything that runs the corpus — the debug default
+Pass the release binaries to anything that runs a suite — the debug default
 takes hours rather than ~30 minutes:
 
 ```sh
-make smoke-elle ELLE=./target/release/elle CARGO_PROFILE=--release
+make smoke ELLE=./target/release/elle ELLE_RIG=./target/release/elle-rig CARGO_PROFILE=--release
 ```
 
-Never read a batched suite's exit status through a pipe: `make smoke-elle |
+Never read a batched suite's exit status through a pipe: `make smoke-lang |
 tail` reports `tail`'s exit, not the suite's.
 
 See [AGENTS.md](AGENTS.md) and [docs/testing.md](docs/testing.md) for
@@ -134,13 +134,12 @@ See [`docs/plugins.md`](docs/plugins.md) for the full list and
 
 ## Formatting
 
-All `.lisp` files are formatted with `elle fmt`. This is enforced by CI
-and by a pre-commit hook.
+All `.lisp` files are formatted with `elle fmt`.
 
 | Command | What it does |
 |---------|-------------|
 | `make fmt` | Format all Elle source in-place |
-| `make fmt-check` | Verify formatting (used in CI, exits 1 on diff) |
+| `make fmt-check` | Verify formatting (exits 1 on diff) |
 
 A pre-commit hook in `.githooks/` auto-formats staged `.lisp` files on
 commit. After cloning, enable it with:

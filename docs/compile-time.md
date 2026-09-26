@@ -1,6 +1,6 @@
 # Compile-Time Operations
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-26 -->
 
 The forms that act at compile time, and the `compile/*` API that reads the
 compiler's model from running code.
@@ -126,14 +126,14 @@ verifies, failing compilation if violated:
 ## Conditional compilation
 
 A general compile-time gate, in two variants, designed for the test runner but
-useful language-wide (Elle's `#[cfg]`). Specified in
-[test-runner.md](test-runner.md); recorded here so the compile-time catalog
-stays the single home.
+useful language-wide (Elle's `#[cfg]`). This catalog is its single home;
+[test-runner.md](test-runner.md) says how the runner records a gated file.
 
 The loud variant exists today as a prelude macro. `(gate! COND "reason" body…)`
 runs `body` when `COND` is truthy, and otherwise raises an error whose `:error`
 is `:gated` and whose `:reason` is the string, so a harness can account for the
-skip. `COND` runs at run time; `(backend? :jit)` is the canonical test.
+skip. `COND` runs at run time: a library that loads, a service that answers, a
+device that exists.
 
 ```lisp
 (assert (= (gate! true "always open" 1) 1))
@@ -147,8 +147,8 @@ skip. `COND` runs at run time; `(backend? :jit)` is the canonical test.
 `(unless! COND body…)`, which would leave an excluded body uncompiled, and the
 compile-time predicate `(feature? :ffi)`. A companion `%assert` intrinsic
 (carrying the asserted predicate's syntax, and elidable when provably true or in
-an assertions-disabled build) is proposed alongside; see
-[test-runner.md](test-runner.md).
+an assertions-disabled build) is proposed alongside; its open questions are in
+[test-cli.md](test-cli.md).
 
 ## Epoch selection
 
@@ -254,7 +254,10 @@ supplied as data, and it is the consumer-migration half of `elle semver`
 
 **Execution:** `(compile/run-on tier closure & args)` runs the closure on one
 tier: `:bytecode`, `:jit`, `:mlir-cpu` (built with MLIR) or `:wasm` (built with
-WASM). A tier that declines the closure raises `:tier-rejected`.
+WASM). A tier that declines the closure raises `:tier-rejected`. It is an
+implementation extension, not part of the language: a program that picks a
+tier tests this implementation ([spec.md](spec.md) § Three categories of
+surface, [impl/differential.md](impl/differential.md)).
 
 ```lisp
 (assert (= (compile/run-on :bytecode (fn [a b] (+ a b)) 3 4) 7))
@@ -288,5 +291,5 @@ the compile-time forms above:
 - [signals/](signals/) — signal inference, `silence`/`squelch`, capabilities
 - [analysis/portrait.md](analysis/portrait.md) — the `compile/*` API in depth
 - [analysis/agent-reasoning.md](analysis/agent-reasoning.md) — how agents query the model
-- [test-runner.md](test-runner.md) — where `when!`/`unless!`/`gate!`/`%assert` are specified
+- [test-runner.md](test-runner.md) — how the runner records a `gate!` skip
 - [pipeline.md](pipeline.md) — the full compile pipeline these operations hook into

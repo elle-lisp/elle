@@ -1,8 +1,9 @@
 # Images — regions hydrated at load
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-26 -->
 
-Design for image-style persistence: one mechanism, two shipped configurations.
+Design for image-style persistence: one mechanism, and the two configurations
+it serves.
 
 The two are the **boot** image (core, prelude, and stdlib pre-compiled into the
 binary) and **environment** images (user `save`/`load`) — the same format,
@@ -22,6 +23,11 @@ argument. Six companions carry the rest:
   must land with.
 - [measurements.md](image/measurements.md) — the seven experiments that
   answered the design's open questions, with their numbers.
+
+This document states the design, not its progress. [plan.md](image/plan.md)
+records what has landed: the warm-cache boot has, and the embedded blob,
+per-worker hydration, compiler-state persistence, the hydrated-region interval
+table and the environment configuration have not.
 
 ## The problem
 
@@ -96,12 +102,33 @@ policy**:
 - The **environment** configuration depends on a boot image: its roots are
   the session's bindings beyond that layer, its policy is user-facing
   (refuse mutables by default, `&allow-mutable` opt-in), and it is a file
-  the user saves and loads explicitly — binary-locked user data, not a
-  regenerable artifact.
+  the user saves and loads explicitly — user data, not a regenerable
+  artifact, and locked to the binary that dumped it (§ The binary lock is the
+  current configuration).
 
 Nothing limits the stack to two layers; an image may depend on any hydrated
 stack whose fingerprints it names. Boot-over-nothing and
 environment-over-boot are simply the two depths this design ships.
+
+## The binary lock is the current configuration
+
+An image is a region snapshot, and regions are in the language specification
+([spec](../spec.md) § Images). The fingerprint locks an image to the binary
+layout that dumped it ([format.md](image/format.md) § Fingerprint). That lock
+solves this implementation's portability problem, and it is the configuration
+the format ships today. It is not a property of an image.
+
+A snapshot becomes portable once the code layer is in the specification: a
+specified instruction set, a validator, and a rule for which compiled code
+keeps loading. Until then an image hydrates only into a binary whose layout
+agrees with the dumper's, and every other binary falls back as § Hydration
+describes.
+
+The HIR fragments an image carries (§ Compiler state is part of the
+environment) are optional data to any other implementation. One that ignores
+them loses cross-unit inlining, and every call stays a call. This
+implementation still requires them, because its two boot modes must compile
+user code identically.
 
 ## Rejected alternatives
 

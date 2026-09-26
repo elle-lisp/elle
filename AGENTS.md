@@ -14,8 +14,8 @@ You are an LLM. You will make mistakes. The test suite will catch them. Run the
 tests. Read the error messages. They are designed to be helpful.
 
 **`origin/main` is always green.** Every commit on main passes every test —
-Elle scripts, Rust tests, documentation examples. This is enforced by CI
-and a merge queue. If a test fails on your branch, your branch caused it.
+the Elle suites, the Rust tests, the documentation examples. CI and a merge
+queue enforce it. If a test fails on your branch, your branch caused it.
 "Pre-existing defect" is not a valid explanation when main is green. Fix
 every failure before merging — no skip lists, no expected failures, no
 excuses. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full policy.
@@ -88,16 +88,17 @@ bytecode. Error messages include file:line:col information.
 - **`error`** — `LocationMap` for bytecode offset → source location mapping
 - **`runtime`** — Per-instance `Runtime`/`RuntimeCore` owning the VM, symbol
   table, compile context, and heap; handed out via `rt.parts()`
-- **`symbol`** — Symbol identity (the name's FNV-1a hash) and the process-global
-  hash→name registry. See [`docs/impl/symbol.md`](docs/impl/symbol.md)
-- **`config`** — Global CLI configuration (parsed once at startup)
+- **`symbol`** — Symbol identity (the name's FNV-1a hash) and the per-instance
+  display memo that spells it. See [`docs/impl/symbol.md`](docs/impl/symbol.md)
+- **`config`** — The global configuration set once at startup, and the per-VM
+  runtime configuration `vm/config` reads
 
 **Backends:**
 - **`jit`** — JIT compilation via Cranelift; a function's signal does not
   decide admission, and the JIT refuses `MakeClosure` and keyword collectors;
   `JitRejectionInfo` tracks rejections
-- **`wasm`** — WASM backend via Wasmtime; full-module compilation
-  (`--wasm=full`) or per-closure tiered compilation (`--wasm=N`).
+- **`wasm`** — WASM backend via Wasmtime, in a `wasm` build; full-module
+  compilation (`--wasm=full`) or per-closure tiered compilation (`--wasm=N`).
   See [`docs/impl/wasm.md`](docs/impl/wasm.md).
 - **`ffi`** — C interop via libloading/bindgen
 
@@ -166,6 +167,7 @@ Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabiliti
 | lib/http2.lisp | `lib/` | HTTP/2 client and server (h2 + h2c) |
 | lib/aws.lisp | `lib/` | Elle-native AWS client (SigV4, HTTPS) |
 | lib/gtk4.lisp | `lib/` | GTK4 declarative UI (widgets, events, CSS, WebKit) |
+| elle-rig | `rig/` | Hosts the same compiler for the implementation suite, configured per file by a sidecar |
 | embedding | `demos/embedding/` | Elle as a shared library (Rust + C hosts) |
 | myplugin | `demos/myplugin/` | The cookbook's worked plugin, built for the literate docs that load it |
 
@@ -178,8 +180,9 @@ Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabiliti
 | `src/lsp/` | Language server protocol implementation |
 | `lib/` | Reusable Elle modules (SDL, HTTP, TLS, Redis, DNS, AWS, etc.) |
 | `src/stdlib.lisp` | Standard library (loaded at startup) |
-| `tests/` | Unit, integration, property tests |
-| `benches/` | Criterion and IAI benchmarks |
+| `tests/` | The language suite (`tests/lang/`), the implementation suite (`tests/impl/`), and the Rust unit, integration and property tests |
+| `rig/` | The rig: `elle-rig`, the executable the implementation suite runs on |
+| `benches/` | Criterion benchmarks and the `lirshape` harness |
 | `docs/` | Design documents and guides |
 | `demos/` | Demo applications (conway, docgen, mandelbrot, etc.) |
 | `plugins/` | Dynamically-loaded plugin crates (cdylib) |
@@ -194,28 +197,30 @@ It takes ~30 minutes.
 | Command | Runtime | What it does |
 |---------|---------|-------------|
 | `cargo test -p elle --lib` | ~1.5min | Rust unit tests — the fast inner loop |
-| `make smoke` | ~30min release | corpus + doctests + embedding + the semver surface gate |
+| `make smoke` | ~30min release | the language suite, the implementation suite on the rig, doctests, embedding, the semver surface gate |
 | `make qa` | ~2min | The PR gate's QA job, locally: rustfmt, workspace clippy, the cross-checks, rustdoc. Run before every push |
-| `make test` | smoke + ~5min | qa, then smoke and the corpus on a `no-uring` build, then unit and integration tests |
+| `make test` | smoke + ~5min | qa, then smoke, then unit and integration tests |
 | `make crosscheck` | ~2min | Clippy over the macOS arms and `cargo check` over the Android arms of `cfg(target_os)` — needs `rustup target add x86_64-apple-darwin aarch64-linux-android` |
 | `cargo test --workspace` | ~30min | full suite — **ask first** |
 
-**Pass the release binary to anything that runs the corpus.** `make smoke` and
-`make smoke-elle` default to the debug binary outside CI, which takes hours
-rather than ~30 minutes:
+**Pass the release binaries to anything that runs a suite.** `make smoke`,
+`make smoke-lang` and `make smoke-impl` default to the debug binaries outside
+CI, which take hours rather than ~30 minutes:
 
 ```sh
-make smoke-elle ELLE=./target/release/elle CARGO_PROFILE=--release
+make smoke ELLE=./target/release/elle ELLE_RIG=./target/release/elle-rig CARGO_PROFILE=--release
 ```
 
-**Never read a batched suite's exit status through a pipe.** `make smoke-elle |
+**Never read a batched suite's exit status through a pipe.** `make smoke-lang |
 tail` reports `tail`'s exit, not the suite's, so a failed batch looks green.
 Redirect to a file, or use `elle test --summary`.
 
+A test is a language test or an implementation test, and the two live in
+different places: [`docs/spec.md`](docs/spec.md) says which is which.
 For test organization, helpers, and how to add tests:
 [`docs/testing.md`](docs/testing.md).
 For CI structure and failure triage:
-[`docs/analysis/debugging.md`](docs/analysis/debugging.md).
+[`docs/analysis/ci.md`](docs/analysis/ci.md).
 
 ## Invariants
 
@@ -306,7 +311,7 @@ When you change a module's interface, update its AGENTS.md in the same change.
    document that owns each language topic.
 2. Read [src/pipeline/mod.rs](src/pipeline/mod.rs) — it shows the full compilation flow
    in 50 lines.
-3. Read a test under `tests/elle/` to see the surface syntax at work.
+3. Read a test under `tests/lang/` to see the surface syntax at work.
 4. Read [src/value/mod.rs](src/value/mod.rs) to understand runtime representation.
 5. Read a failing test to understand what's expected.
 6. Read [`docs/cookbook/index.md`](docs/cookbook/index.md) for step-by-step
