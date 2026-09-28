@@ -1,6 +1,6 @@
 # VM
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-28 -->
 
 The VM is a stack-machine interpreter that executes bytecode.
 
@@ -47,7 +47,7 @@ The loop dispatches one instruction at a time; no fused sequences exist.
 Specialization lives inside the handlers instead. The polymorphic
 arithmetic ops test their two operands for integers and take a wrapping
 integer path before falling back to the general one
-(`src/vm/arithmetic.rs`). The integer-only `AddInt`/`SubInt`/`MulInt`/
+([arithmetic.rs](../../src/vm/arithmetic.rs)). The integer-only `AddInt`/`SubInt`/`MulInt`/
 `DivInt` handlers skip even that test, and the emitter produces them where
 the compiler proved both operands are integers — see
 [impl/bytecode.md](bytecode.md).
@@ -173,6 +173,35 @@ with `:stack-overflow`. A halt passes every signal mask, so `protect` does not
 catch it. The cap stops a runaway recursion before it takes the machine's
 memory: each paused caller costs a few hundred bytes
 ([config.md](../config.md)).
+
+## Every body starts on an empty operand stack
+
+A body addresses its local `n` at operand-stack position `n`. The emitter opens
+each body with one `Nil` per local, so those positions hold the body's own
+locals only when the body starts on an empty stack. Every entry therefore runs
+a body on a stack of its own, and gives the caller's stack back when the body
+ends:
+
+- A non-tail call parks the caller's stack in its `PausedCaller`.
+- Re-entry, `execute_bytecode_saving_stack`, takes the caller's stack and
+  restores it on return.
+- A replayed suspended frame, in `resume_suspended`, installs the stack the
+  frame saved.
+- The root entry, `execute_code`, takes the stack it finds and restores it
+  when the program ends.
+
+A body that starts above values it does not own reads those values as its
+locals. Its `Nil` prologue lands above them, where no local reads it. A local
+that one branch never writes then holds a value that belongs to somebody else.
+The release at the branch's join frees that value's region while its holder
+still uses it.
+
+Before it restores the stack, the root entry records the depth the program
+left, as `VM::root_exit_depth`. A loop that leaves operands behind on each trip
+raises that depth, and the pins in
+[operandstack.rs](../../src/runtime/tests/operandstack.rs) read it.
+[rootentry.rs](../../src/runtime/tests/rootentry.rs) pins the root entry
+itself.
 
 ## The executing-closure register
 
