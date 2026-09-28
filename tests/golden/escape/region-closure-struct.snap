@@ -20,6 +20,7 @@
   b18(G#1) local mutated=false immutable=true needs_capture=false
   b19(~) local mutated=false immutable=true needs_capture=false
   b20(~) local mutated=false immutable=true needs_capture=false
+  b21(~) local mutated=false immutable=true needs_capture=false
 [lambda_captures]
   #1 params=[b3(x)] captures=[]
   #9 params=[] captures=[b4(box)<Local>]
@@ -37,13 +38,14 @@
     block0: DecrefValueRegion v33
     block2: DecrefRegion s1
     block2: DecrefRegion s2
-    block4: IncrefValueRegion v63
-    block4: DecrefValueRegion v64
-    block3: DecrefValueRegion v66
+    block4: IncrefValueRegion v64
+    block4: DecrefValueRegion v65
     block3: DecrefValueRegion v68
+    block3: DecrefValueRegion v70
     block3: DecrefRegion s3
-    block3: IncrefValueRegion v73
-    block3: DecrefValueRegion v74
+    block3: IncrefValueRegion v75
+    block3: DecrefValueRegion v76
+    block3: DecrefValueRegion v78
   ; closure[0] make-adder
     block0: DecrefValueRegion v5
     block0: IncrefRegion s4

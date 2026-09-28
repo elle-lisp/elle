@@ -56,13 +56,13 @@
   b54(~) local mutated=false immutable=true needs_capture=false
   b55(~) local mutated=false immutable=true needs_capture=false
   b56(~) local mutated=false immutable=true needs_capture=false
-  b57(G#1) local mutated=false immutable=true needs_capture=false
-  b58(~) local mutated=false immutable=true needs_capture=false
+  b57(~) local mutated=false immutable=true needs_capture=false
+  b58(G#1) local mutated=false immutable=true needs_capture=false
   b59(~) local mutated=false immutable=true needs_capture=false
   b60(~) local mutated=false immutable=true needs_capture=false
-  b61(G#2) local mutated=false immutable=true needs_capture=false
+  b61(~) local mutated=false immutable=true needs_capture=false
   b62(~) local mutated=false immutable=true needs_capture=false
-  b63(~) local mutated=false immutable=true needs_capture=false
+  b63(G#2) local mutated=false immutable=true needs_capture=false
   b64(~) local mutated=false immutable=true needs_capture=false
   b65(~) local mutated=false immutable=true needs_capture=false
   b66(~) local mutated=false immutable=true needs_capture=false
@@ -70,14 +70,19 @@
   b68(~) local mutated=false immutable=true needs_capture=false
   b69(~) local mutated=false immutable=true needs_capture=false
   b70(~) local mutated=false immutable=true needs_capture=false
-  b71(G#3) local mutated=false immutable=true needs_capture=false
+  b71(~) local mutated=false immutable=true needs_capture=false
   b72(~) local mutated=false immutable=true needs_capture=false
   b73(~) local mutated=false immutable=true needs_capture=false
-  b74(~) local mutated=false immutable=true needs_capture=false
-  b75(G#4) local mutated=false immutable=true needs_capture=false
+  b74(G#3) local mutated=false immutable=true needs_capture=false
+  b75(~) local mutated=false immutable=true needs_capture=false
   b76(~) local mutated=false immutable=true needs_capture=false
   b77(~) local mutated=false immutable=true needs_capture=false
   b78(~) local mutated=false immutable=true needs_capture=false
+  b79(G#4) local mutated=false immutable=true needs_capture=false
+  b80(~) local mutated=false immutable=true needs_capture=false
+  b81(~) local mutated=false immutable=true needs_capture=false
+  b82(~) local mutated=false immutable=true needs_capture=false
+  b83(~) local mutated=false immutable=true needs_capture=false
 [lambda_captures]
   #1 params=[b19(thunk), b20(warm), b21(window)] captures=[]
   #61 params=[b30(a), b31(b)] captures=[]
@@ -87,8 +92,8 @@
   #113 params=[] captures=[b2(one-get)<Local>]
   #135 params=[] captures=[b3(discard-get)<Local>]
   #157 params=[] captures=[b4(two-len)<Local>]
-  #266 params=[] captures=[b1(two-get)<Local>]
-  #288 params=[] captures=[b1(two-get)<Local>]
+  #272 params=[] captures=[b1(two-get)<Local>]
+  #294 params=[] captures=[b1(two-get)<Local>]
 [return_frontier]
   [r10, r15, r20, r25, r30, r53, r58, r6, r81]
 [suppressed_decref_regions]
@@ -104,58 +109,63 @@
     block0: IncrefRegion s0
     block0: DecrefRegion s5
     block0: DecrefRegion s6
-    block2: DecrefValueRegion v92
-    block2: DecrefValueRegion v97
+    block2: DecrefValueRegion v93
+    block2: DecrefValueRegion v98
     block2: DecrefRegion s7
-    block2: DecrefValueRegion v106
+    block2: DecrefValueRegion v107
     block2: DecrefRegion s8
-    block4: IncrefValueRegion v109
-    block4: DecrefValueRegion v110
-    block6: DecrefValueRegion v129
-    block6: DecrefValueRegion v134
+    block4: IncrefValueRegion v110
+    block4: DecrefValueRegion v111
+    block6: DecrefValueRegion v132
+    block6: DecrefValueRegion v137
     block6: DecrefRegion s9
-    block6: DecrefValueRegion v143
+    block6: DecrefValueRegion v146
     block6: DecrefRegion s10
-    block8: IncrefValueRegion v146
-    block8: DecrefValueRegion v147
-    block10: DecrefValueRegion v166
+    block8: IncrefValueRegion v149
+    block8: DecrefValueRegion v150
     block10: DecrefValueRegion v171
+    block10: DecrefValueRegion v176
     block10: DecrefRegion s11
-    block10: DecrefValueRegion v180
+    block10: DecrefValueRegion v185
     block10: DecrefRegion s12
-    block12: IncrefValueRegion v183
-    block12: DecrefValueRegion v184
+    block12: IncrefValueRegion v188
+    block12: DecrefValueRegion v189
     block11: IncrefRegion s0
     block11: DecrefRegion s13
     block11: IncrefRegion s0
     block11: DecrefRegion s14
     block11: DecrefRegion s15
     block11: DecrefRegion s16
-    block11: DecrefValueRegion v205
-    block11: DecrefRegion s17
     block11: DecrefValueRegion v211
-    block11: DecrefRegion s18
+    block11: DecrefRegion s17
     block11: DecrefValueRegion v217
+    block11: DecrefRegion s18
+    block11: DecrefValueRegion v223
     block11: DecrefRegion s19
-    block14: DecrefValueRegion v237
-    block14: DecrefValueRegion v242
+    block14: DecrefValueRegion v244
+    block14: DecrefValueRegion v249
     block14: DecrefRegion s20
     block14: DecrefRegion s21
-    block14: DecrefValueRegion v251
+    block14: DecrefValueRegion v258
     block14: DecrefRegion s22
-    block16: IncrefValueRegion v254
-    block16: DecrefValueRegion v255
-    block18: DecrefValueRegion v275
-    block18: DecrefValueRegion v280
+    block16: IncrefValueRegion v261
+    block16: DecrefValueRegion v262
+    block18: DecrefValueRegion v284
+    block18: DecrefValueRegion v289
     block18: DecrefRegion s23
     block18: DecrefRegion s24
-    block18: DecrefValueRegion v289
+    block18: DecrefValueRegion v298
     block18: DecrefRegion s25
-    block20: IncrefValueRegion v292
-    block20: DecrefValueRegion v293
+    block20: IncrefValueRegion v301
+    block20: DecrefValueRegion v302
     block19: DecrefRegion s26
-    block19: IncrefValueRegion v298
-    block19: DecrefValueRegion v299
+    block19: IncrefValueRegion v308
+    block19: DecrefValueRegion v309
+    block19: DecrefValueRegion v311
+    block19: DecrefValueRegion v313
+    block19: DecrefValueRegion v315
+    block19: DecrefValueRegion v317
+    block19: DecrefValueRegion v319
     block19: DecrefRegion s27
     block19: DecrefRegion s28
     block19: DecrefRegion s29
