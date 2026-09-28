@@ -143,8 +143,8 @@ suite owns a claim and which program runs it ([spec](spec.md) § Two suites),
 which no analysis of the form can derive.
 
 The runner compiles any file regardless of how many forms it holds (via the
-multi-form compilation mode, [test-runner](test-runner.md)), so today's multi-form
-`tests/elle/*.lisp` keep working unchanged; exploding them into the
+multi-form compilation mode, [test-runner](test-runner.md)), so the multi-form
+files in both suites run unchanged; exploding them into the
 one-form-per-file shape is a mechanical codemod for when it's convenient, not a
 prerequisite.
 
@@ -282,15 +282,15 @@ environment. The dashboard appends one JSON object per verdict:
 ```
 
 Unset, the channel is closed and the dashboard writes nothing — so a direct
-`elle tests/elle/oracle.lisp` run reads exactly as it read before, and the
-stdout rendering stays the human's copy. The runner names the file for each
+`elle-rig tests/impl/oracle.lisp` run prints its verdicts and records none, and
+the stdout rendering stays the human's copy. The runner names the file for each
 `--isolate` child ([test-runner](test-runner.md)), reads it once the child
 exits, and writes one `measurement` row per line against that child's result.
 The child process is what makes the variable safe to set: the environment is
 process-global, so a per-form value would race between workers sharing one.
 
 The axis is a property of the instrument rather than of the probe. A gauge in
-[estimator.lisp](../tests/elle/lib/estimator.lisp) names the dimension it reads
+[estimator.lisp](../tests/impl/lib/estimator.lisp) names the dimension it reads
 and the unit a rate on it carries, and every probe already hands the estimator
 its gauge — so no probe declares an axis and none can declare the wrong one.
 The subject is the probe's label with the `label@axis` display suffix removed,
@@ -305,7 +305,7 @@ neither `closed` nor `growth` — the two verdicts that are the expected answer:
 
 ```
 3 measurements · 1 open · 2 closed
-  open  tests/elle/oracle.lisp  reduce  objects  1.002 objects/op
+  open  tests/impl/oracle.lisp  reduce  objects  1.002 objects/op
 ```
 
 The rest is a query. The summary is a reading aid, and every number in it comes
@@ -354,8 +354,8 @@ regions:
 
 ```
 runner heap · objects +9021 · regions +28104 · pages +112
-  objects +4510  regions +14052  pages +56  tests/elle/a.lisp
-  objects +4511  regions +14052  pages +56  tests/elle/b.lisp
+  objects +4510  regions +14052  pages +56  tests/lang/a.lisp
+  objects +4511  regions +14052  pages +56  tests/lang/b.lisp
 ```
 
 The list is a reading aid. Which file, on which commit, in which run is a query

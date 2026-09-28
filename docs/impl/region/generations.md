@@ -1,6 +1,6 @@
 # Region generations: stale derefs detonate in debug builds
 
-<!-- audited: 2026-09-19 -->
+<!-- audited: 2026-09-28 -->
 
 The per-region generation counter and page stamps that turn a stale region deref
 into a debug-build panic at the deref site. Pairs with the `--trace=guardfree` oracle described in
@@ -171,7 +171,7 @@ it reads only the counter, never dereferencing the possibly-stale value. The
 region and its generation are read from the one explicit heap, so the comparison
 is within a single store. The check is debug-only — release builds record
 nothing and compile the comparisons out. The pinning tests are in
-`src/vm/fiber/borrow_tests.rs`.
+[borrow_tests.rs](../../../src/vm/fiber/borrow_tests.rs).
 
 ### Two borrow shapes: recorded handle vs `region_of`-sited
 
@@ -180,14 +180,15 @@ home** across a free, where the page can be reclaimed and re-stamped before the 
 deref. Two borrows have that shape, and both carry the handle: the cross-fiber **param
 snapshot** above, and the **suspended-frame** `activation_region_map` — the
 static-slot→physical-region remap a parked `BytecodeFrame` holds across park/resume
-(`src/value/fiber.rs`). The regions worth snapshotting are the suspended activation's
+([frame.rs](../../../src/value/fiber/frame.rs)). The regions worth snapshotting are the suspended activation's
 own **live** allocations, kept alive by its still-pending `DecrefRegion`s;
 `BytecodeFrame::suspend` snapshots each such `(slot, region, generation)` into the
 frame's `region_borrows` (`record_region_borrows`), and `resume_suspended` re-checks
 them with the shared `first_stale_borrow` just before `restore_activation_region_map`
 re-enters the body — so a region freed while the fiber was parked panics at the resume
 boundary instead of corrupting the resumed activation's allocs/decrefs. Pinned by
-`suspended_frame_region_borrow_detects_freed_region` (`src/vm/fiber/borrow_tests.rs`).
+`suspended_frame_region_borrow_detects_freed_region`
+([borrow_tests.rs](../../../src/vm/fiber/borrow_tests.rs)).
 
 The panic names the parked activation beside the slot and the physical region: the
 function, its position in the replay chain, and the source location of the resume
@@ -195,7 +196,9 @@ point. A slot number and a physical region id are per-run values that name no co
 a panic carrying only those says nothing about which program parked. The location
 falls back to the function's first recorded line where the resume point has no entry of
 its own, because naming the file is most of the answer. `ParkSite` builds the text
-(`src/value/fiber/frame.rs`), pinned by `stale_borrow_message_names_the_parked_site`.
+([frame.rs](../../../src/value/fiber/frame.rs)), pinned by
+`stale_borrow_message_names_the_parked_site`
+([borrow_tests.rs](../../../src/vm/fiber/borrow_tests.rs)).
 
 The map is not automatically dangling-free, which is what forces the snapshot to record
 the **establish-generation** (`MappedRegion::gen`, the region's generation when the slot
@@ -213,8 +216,11 @@ the establish-generation makes the two cases separable: `record_region_borrows` 
 entry whose `gen` no longer matches the region's current generation (a dead leftover),
 while an entry that still matches is a genuine live borrow whose free *while parked* still
 trips the check. Pinned by `stale_leftover_map_entry_is_not_snapshotted_as_a_borrow`
-(`src/vm/fiber/borrow_tests.rs`) and, at corpus scale, by
-`signals_no_stale_suspended_frame_region_borrow` (`tests/integration/elle_scripts.rs`).
+([borrow_tests.rs](../../../src/vm/fiber/borrow_tests.rs)) and, at corpus scale, by
+[signals.lisp](../../../tests/lang/signals.lisp), whose squelch, silence and yield
+churn recycles ids fast enough to leave such an entry. The check is debug-only, so
+it is armed in the CI jobs that compile debug assertions in
+([ci](../../analysis/ci.md)).
 
 The generation separates the two cases only once the region has been freed. A leftover
 whose region is still live reads exactly like a borrow, because the free that would move
@@ -228,7 +234,7 @@ frees the region without clearing the slot; the activation reads that map entry 
 release at all, so a free while parked corrupts nothing through it. What the activation
 still holds in its stack or its environment is covered where it is read, by `region_of`'s
 page stamp. Pinned by `a_slot_with_no_slot_routed_release_is_not_a_borrow`
-(`src/vm/fiber/borrow_tests.rs`).
+([borrow_tests.rs](../../../src/vm/fiber/borrow_tests.rs)).
 
 A **pass-through borrow** is the other shape and needs
 no handle. The `%first`/`%rest`/`%get` intrinsics (`LirInstr::First`/`Rest`/`Get`)
@@ -243,9 +249,11 @@ same `region_of`, never in a recorded handle.
 
 A *native* `first`/`rest`/`get` is a different case again: its result is **counted**
 by the pass-through retain in `dispatch_native_call`
-(`pass_through_retain` → `EscapeSite::NativeCallResult`, `src/value/arena.rs`), so it
-is no borrow at all and needs no check. Only the intrinsic form is uncounted. Pinned
-by `pass_through_borrow_detonates_at_region_of` (`src/value/fiberheap/tests.rs`).
+(`pass_through_retain` → `EscapeSite::NativeCallResult`,
+[arena.rs](../../../src/value/arena.rs)), so it is no borrow at all and needs no
+check. Only the intrinsic form is uncounted. Pinned by
+`pass_through_borrow_detonates_at_region_of`
+([tests.rs](../../../src/value/fiberheap/tests.rs)).
 
 Vocabulary: these are **generations**, never "epochs" — the word *epoch*
-belongs to the language migration system (docs/epochs.md).
+belongs to the language migration system ([epochs](../../epochs.md)).
