@@ -1,7 +1,8 @@
-(elle/epoch 12)
-# audited: 2026-09-17
-# subprocess/exec through wait, kill, pid and exit — the type, its reads, and
-# what every primitive refuses.
+(elle/epoch 13)
+# audited: 2026-09-28
+# subprocess/exec through wait, kill, pid and exit: the type, its reads, and what every primitive refuses.
+# tests/AGENTS.md
+# docs/subprocess.md
 
 
 # ── subprocess/exec ──────────────────────────────────────────────────────────────
@@ -138,7 +139,7 @@
           "get: and takes the default it was given")
   # Accessor syntax is its own form in the reader, desugared to a `get` call
   # rather than written as one, so it reaches this key set only if the
-  # desugaring does. `demos/h2cross.lisp` reads a subprocess this way.
+  # desugaring does.
   (assert (= proc:pid (get proc :pid)) "accessor syntax reads the same key set")
   (assert (port? proc:stdout) "and reaches the ports through it")
   (port/close (get proc :stdin))
@@ -366,10 +367,11 @@
 
 # sys/env contains PATH (always set on Linux)
 (assert (string? (get (sys/env) "PATH")) "sys/env: PATH is a string")
-# sys/env arity is enforced by the PrimitiveDef layer (Arity::Exact(0)),
-# not inside the function body — consistent with sys/args.
+
+# sys/env with a name looks up that one variable
+(assert (= (sys/env "PATH") (get (sys/env) "PATH"))
+        "sys/env: a name reads the same variable the struct holds")
 # ── sys/args ─────────────────────────────────────────────────────────────────
 #
-# sys/args integration tests require subprocess invocation (spawning elle with
-# -- separator), which cannot be done from within Elle. Those tests are in the
-# Rust test suite: tests/integration/sys_args.rs
+# The sys/args tests run elle with arguments on its command line, and live in
+# tests/integration/sys_args.rs.
