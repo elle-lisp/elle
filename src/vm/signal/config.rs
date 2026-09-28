@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-28
 //! `vm/config` and `vm/config-set` over the VM's runtime configuration, and
 //! the `arena/allocs` measurement.
 //!
@@ -7,23 +7,17 @@
 use super::*;
 
 impl VM {
-    /// The `--trace` keys as a keyword set.
+    /// The trace keys as a keyword set.
     ///
-    /// A learning site: a trace key is whatever the command line named, so its
-    /// spelling is not build-fixed and no vocabulary entry can cover it
-    /// (docs/impl/symbol.md § "The display memo").
+    /// Each key already has a spelling: `--trace` admits only
+    /// `TRACE_KEYWORDS`, which the vocabulary carries, and `vm/config-set`
+    /// keeps only a key that resolves (docs/impl/symbol.md).
     fn trace_keywords(&self, ctx: &mut crate::primitives::ctx::Alloc) -> Value {
-        let mut memo = self.symbols();
         let set: std::collections::BTreeSet<Value> = self
             .runtime_config
             .trace
             .iter()
-            .map(|k| {
-                if let Some(m) = memo.as_deref_mut() {
-                    m.keyword(k);
-                }
-                Value::keyword(k)
-            })
+            .map(|k| Value::keyword(k))
             .collect();
         ctx.set(set)
     }
@@ -147,7 +141,9 @@ impl VM {
         match kw.as_str() {
             "jit" => {
                 if let Some(closure) = val.as_closure() {
-                    let _ = closure; // TODO: store for actual dispatch
+                    // `Custom` records only that a closure was given;
+                    // nothing dispatches through the closure.
+                    let _ = closure;
                     self.runtime_config.jit = crate::config::JitPolicy::Custom;
                 } else if let Some(policy_kw) = self.keyword_spelling(val) {
                     match crate::config::JitPolicy::from_keyword(&policy_kw) {
@@ -284,8 +280,8 @@ impl VM {
     /// call that drives the `fiber/resume` `SIG_SWITCH` trampoline), so a thunk
     /// that spawns and resumes fibers is measured to completion — the resume's
     /// allocations fall between the two snapshots and `(result . net)` carries
-    /// the thunk's real result, not the resumed child's value (the
-    /// `fiber-spawn-10` regression, `tests/elle/arena.lisp` /
+    /// the thunk's real result, not the resumed child's value
+    /// (`tests/elle/arena.lisp`, the `fiber-spawn-10` scenario in
     /// `tests/elle/resource.lisp`). The thunk must still be non-*yielding* (it
     /// must not suspend its own caller). Returns `(SIG_OK, pair(result, net))`
     /// on success, or `(SIG_ERROR, err)` / the propagated signal on failure.

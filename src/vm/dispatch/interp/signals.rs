@@ -18,7 +18,11 @@ impl VM {
     #[inline]
     pub(super) fn handle_check_signal_bound(&mut self, bc: &[u8], ip: &mut usize) {
         let allowed_bits = self.read_signal_bits(bc, ip);
-        let val = self.fiber.stack.pop().unwrap_or(Value::NIL);
+        let val = self
+            .fiber
+            .stack
+            .pop()
+            .expect("VM bug: Stack underflow on CheckSignalBound");
         if let Some(closure) = val.as_closure() {
             let signal_bits = closure.signal().bits;
             let excess = signal_bits.subtract(allowed_bits);
