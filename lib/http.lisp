@@ -712,7 +712,7 @@
           (case parsed:field
             "event" (put state :event-type parsed:value)
             "data" (push state:data-lines parsed:value)
-            "id" (unless (string/contains? parsed:value "0")
+            "id" (unless (string/contains? parsed:value "\0")
                    (put state :last-id parsed:value))
             "retry"
               (let [[ok? n] (protect (parse-int parsed:value))]
