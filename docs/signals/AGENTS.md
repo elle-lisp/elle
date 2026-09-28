@@ -15,6 +15,6 @@ Up: [..](../AGENTS.md)
 - [inference.md](inference.md) — **Signal Inference** How the compiler infers each function's signal, and the forms that bound, narrow or check it.
 - [jit.md](jit.md) — **Signals and JIT** A function's signal decides nothing about whether the JIT compiles it.
 - [primitives.md](primitives.md) — **Fiber Primitives** User-facing fiber operations and patterns.
-- [protocol.md](protocol.md) — **Signal Protocol (more...)**
+- [protocol.md](protocol.md) — **Signal Protocol** How a signal is encoded, carried, caught and reported: the bits, the payload, propagation, I/O requests and the registry.
 - [questions.md](questions.md) — **Signal Questions** What the signal design has not settled, and what it has.
 - [recovery.md](recovery.md) — **Signal Recovery (more...)**

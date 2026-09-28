@@ -1,17 +1,19 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 13)
+# audited: 2026-09-28
 # Soundness complement of region-break-transfer.lisp: a value carried out of a
 # `block` by `break` must SURVIVE every later read of the block's result.
+# tests/AGENTS.md
+# docs/impl/region/anchors.md
 #
-# `break` transfers its value to the block (docs/impl/region/anchors.md §
-# "`break` transfers its value; it does not consume it"). The transfer moves the
-# broken value's release OUT of the block body — where the break jumps over it —
-# and onto the node that consumes the BLOCK's value. Two ways that can go wrong
-# and both fault here: pinning at the block's own exit label frees the value
-# under whatever the block's result flows into, and failing to carry the broken
-# value's regions out of the block leaves the binding that names the result
-# holding none, so the binding-chain `decref_point` extension never sees them
-# and every read below touches freed pages — SIGSEGV under `--trace=guardfree`.
+# `break` transfers its value to the block (docs/impl/region/anchors.md). The
+# transfer moves the broken value's release OUT of the block body — where the
+# break jumps over it — and onto the node that consumes the BLOCK's value. Two
+# ways that can go wrong both fault here. Pinning at the block's own exit label
+# frees the value under whatever the block's result flows into. Failing to
+# carry the broken value's regions out of the block leaves the binding that
+# names the result holding none, so the binding-chain `decref_point` extension
+# never sees them and every read below touches freed pages — SIGSEGV under
+# `--trace=guardfree`.
 #
 # Every witness reads the broken value's HEAP contents after the block, through
 # a chain long enough that an over-early free faults rather than reading stale
@@ -75,7 +77,7 @@
 # caller's must not both consume the one owning reference it holds. The broken
 # binding is reassigned per iteration, so the value the break carries is the
 # fresh `slice` the last store left, and an over-early release frees it under the
-# caller's read. `lib/http.lisp`'s `sse-drain-buffered-lines` has this shape.
+# caller's read. `lib/http/sse.lisp`'s `sse-drain-buffered-lines` has this shape.
 (defn w-tail-loop-break (i)
   (def @rest (string "p" i "\nq" i "\nz" i))
   (block :drain
@@ -97,8 +99,7 @@
 # mint the caller reads a freed value. `mark_tail_calls` and `wrap_tail_returns`
 # must therefore agree that a break targeting a tail block is in tail position
 # even with a LOOP in between — the break jumps past the loop to the block's exit
-# label (docs/impl/region/anchors.md § "A break out of a TAIL block carries the
-# return mint").
+# label (docs/impl/region/anchors.md).
 #
 # The arrangement decides whether a missing mint FAULTS or merely strands: the
 # loop body both reads `b` through a suspending call and suspends again before
@@ -141,7 +142,7 @@
   (let [r (w-tail-loop-stdlib-break i)]
     (length (first r))))
 
-# ── controls: the same reads with no break — correct now (harness sanity) ─────
+# ── controls: the same reads with no break (harness sanity) ─────────────────
 (defn c-block (i)
   (let [r (block (string "c" i))]
     (length r)))
@@ -189,7 +190,7 @@
   (assign n (w-tail-loop-opaque j))
   (assign j (%add j 1)))
 
-# Controls: no break involved, correct now.
+# Controls: no break involved.
 (assert (%gt h 0) "control: plain block result mis-read (harness broken)")
 (assert (%gt k 0) "control: plain let result mis-read (harness broken)")
 
@@ -203,16 +204,17 @@
 (assert (%gt f 0) "nested-block break value freed under the post-block read")
 (assert (%gt g 0) "break-carried value freed under a forwarding call")
 (assert (%gt m 0)
-        "tail-block break out of a loop returned a value with no owning \
-         reference — freed under the caller's read")
+        (string "tail-block break out of a loop returned a value with no "
+                "owning reference — freed under the caller's read"))
 (assert (%gt n 0)
-        "tail-block break out of a SUSPENDING loop returned an opaque call \
-         result with no return mint — freed under the caller's read")
+        (string "tail-block break out of a SUSPENDING loop returned an opaque "
+                "call result with no return mint — freed under the caller's "
+                "read"))
 (assert (%gt p 0)
-        "tail-block break out of NESTED loops returned a struct with no return \
-         mint — its field read freed pages")
+        (string "tail-block break out of NESTED loops returned a struct with "
+                "no return mint — its field read freed pages"))
 (assert (%gt q 0)
-        "tail-block break out of a loop returned a stdlib-built list with no \
-         return mint — freed under the caller's read")
+        (string "tail-block break out of a loop returned a stdlib-built list "
+                "with no return mint — freed under the caller's read"))
 
 (println "region-break-transfer-uaf: ok")

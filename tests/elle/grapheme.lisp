@@ -1,5 +1,8 @@
-(elle/epoch 12)
-## Grapheme cluster canaries
+(elle/epoch 13)
+# audited: 2026-09-28
+## Grapheme cluster canaries: the cluster counts the embedded Unicode segmentation tables produce.
+## tests/AGENTS.md
+## docs/strings.md
 ##
 ## length, get, slice, and reverse count UAX #29 extended grapheme
 ## clusters, so the Unicode segmentation tables are part of the language
@@ -14,7 +17,7 @@
 # CRLF (rule GB3: CR x LF never splits)
 # ============================================================================
 
-# lib/http.lisp and lib/irc.lisp strip a line terminator by dropping one
+# lib/http/transport.lisp and lib/irc.lisp strip a line terminator by dropping one
 # trailing grapheme; that is sound only while CRLF is a single cluster.
 (assert (= (length "\r\n") 1) "CRLF is one grapheme cluster")
 (assert (= (length "a\r\nb") 3) "embedded CRLF counts as one cluster")
