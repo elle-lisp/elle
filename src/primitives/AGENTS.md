@@ -1,6 +1,6 @@
 # primitives
 
-<!-- audited: 2026-09-19 -->
+<!-- audited: 2026-09-28 -->
 
 Built-in functions. Registered into the VM at startup.
 
@@ -16,7 +16,7 @@ Implement Elle's standard library of built-in functions:
 - Introspection and debugging
 
 Does NOT:
-- Define special forms (those are in `hir/analyze.rs`). Note: `emit` is a special
+- Define special forms (those are in `hir/analyze/`). Note: `emit` is a special
   form when the first argument is a literal keyword or keyword set; dynamic
   `(emit var val)` falls through to the primitive.
 - Execute bytecode (that's `vm`)
@@ -27,7 +27,7 @@ Does NOT:
 | Function | Purpose |
 |----------|---------|
 | `register_primitives(vm, symbols)` | Install all primitives |
-| `init_stdlib(vm, symbols)` | Load stdlib.lisp |
+| `init_stdlib(vm, symbols, cctx, cache)` | Load stdlib.lisp |
 
 ## Function type
 
@@ -40,57 +40,44 @@ through the ctx (`ctx.string(..)`, `ctx.pair(..)`, …) so each is born in the
 call's own region.
 Return values:
 - `(SIG_OK, value)` — success
-- `(SIG_ERROR, error_val(kind, msg))` — error
+- `(SIG_ERROR, ctx.error(kind, msg))` — error
 - `(SIG_RESUME, fiber_value)` — fiber context switch (see [vm/](../vm/AGENTS.md))
-- `(SIG_QUERY, cons(keyword, arg))` — VM state query (see [vm/](../vm/AGENTS.md))
+- `(SIG_QUERY, ctx.pair(keyword, arg))` — VM state query (see [vm/](../vm/AGENTS.md))
 
 ## Adding a primitive
 
-1. Create function in appropriate module
-2. Register in that module's `register_*` function
-3. That function is called by `registration.rs`
-4. Declare its `effect: RegionEffect::…` (def.rs; the spec is
-   [region effects](../../docs/impl/region/effects.md)). Every shipped table is fully declared —
-   do not leave a new primitive at the `Unknown` default. The claim is
-   checked forever by the declaration oracle (`dispatch_native_call`,
-   debug builds): Immediate = non-heap result; Fresh = heap result in
-   this call's own region; PassThrough = never fresh, no stores;
-   Stores{args} = uncounted store into a structure (containment), fresh
-   result; Sends{args} = the args cross a fiber boundary (`chan/send`'s
-   message), seam-counted at the send (`EscapeSite::ChanSend`) so no edges,
-   plus a fiber-frontier Shared seed
-   for the ownership forest; Funnel = every store rides the runtime-counted
-   mutable-store funnel; Delivers{args} = the args are installed in another
-   fiber's signal slot, counted by that seam; Opaque = stores nothing but the
-   result lives neither in this call's region nor in an argument's; Mixed =
-   examined, and the native (or the VM handler for the signal it returns)
-   stores an argument uncounted. The last two are the pair most often
-   confused: the arg clique and the store-facet escape seed are keyed on the
-   STORE, so a native that stores nothing declares Opaque however unbounded
-   its result.
-
-```rust
-// In arithmetic.rs
-pub fn prim_add(ctx: &mut NativeCtx, args: &[Value]) -> (SignalBits, Value) {
-    // Implementation — return (SIG_ERROR, ctx.error("type-error", "msg")) for errors
-}
-
-pub fn register_arithmetic(meta: &mut PrimitiveMeta, symbols: &mut SymbolTable) {
-    let sym = symbols.intern("+");
-    meta.functions.insert(sym, Value::native_fn(prim_add));
-}
-```
+[primitives.md](../../docs/cookbook/primitives.md) holds the recipe. Declare
+the new primitive's `effect: RegionEffect::…` (def.rs; the spec is
+[region effects](../../docs/impl/region/effects.md)). Every shipped table is fully declared —
+do not leave a new primitive at the `Unknown` default. The claim is
+checked forever by the declaration oracle (`dispatch_native_call`,
+debug builds): Immediate = non-heap result; Fresh = heap result in
+this call's own region; PassThrough = never fresh, no stores;
+Stores{args} = uncounted store into a structure (containment), fresh
+result; Sends{args} = the args cross a fiber boundary (`chan/send`'s
+message), seam-counted at the send (`EscapeSite::ChanSend`) so no edges,
+plus a fiber-frontier Shared seed
+for the ownership forest; Funnel = every store rides the runtime-counted
+mutable-store funnel; Delivers{args} = the args are installed in another
+fiber's signal slot, counted by that seam; Opaque = stores nothing but the
+result lives neither in this call's region nor in an argument's; Mixed =
+examined, and the native (or the VM handler for the signal it returns)
+stores an argument uncounted. The last two are the pair most often
+confused: the arg clique and the store-facet escape seed are keyed on the
+STORE, so a native that stores nothing declares Opaque however unbounded
+its result.
 
 ## Dependents
 
 - `vm/call.rs` - dispatches primitive calls, handles signal bits
 - `repl.rs` - REPL session (form-by-form eval, def persistence)
-- `main.rs` - registers primitives at startup
+- `runtime/` - registers primitives when an instance boots
 
 ## Invariants
 
-1. **Primitives validate arguments.** Return `(SIG_ERROR, error_val(kind, msg))`
-   for arity or type errors. Never panic.
+1. **Primitives validate arguments.** The VM checks the declared arity before
+   the call. Return `(SIG_ERROR, ctx.error(kind, msg))` for any other bad
+   argument. Never panic.
 
 2. **All primitives return `(SignalBits, Value)`.** No exceptions. Errors are
     signaled via SIG_ERROR with an error struct `{:error :keyword :message "message"}`.
@@ -102,8 +89,9 @@ pub fn register_arithmetic(meta: &mut PrimitiveMeta, symbols: &mut SymbolTable) 
    re-entry that the dispatch loop owns.
 
 4. **Symbol names resolve through the driving VM.** The `length` primitive
-   resolves symbol names via `ctx.vm().symbols()`. Keywords need no table —
-   they carry their name directly via interned strings.
+   resolves symbol names via `ctx.vm().symbols()`. A keyword's spelling
+   resolves through the same memo, then the static vocabulary
+   ([symbol.md](../../docs/impl/symbol.md)).
 
 ## Modules
 
@@ -135,7 +123,7 @@ name)` answers for either spelling.
 | `format.rs` | `string/format` — see [format/](format/AGENTS.md) |
 | `intrinsics.rs` | the `%`-intrinsics: `%add`, `%get`, `%put`, `%has?`, `%first`, `%pop` and the rest. See [intrinsics](../../docs/intrinsics.md) |
 | `introspection.rs` | `jit?`, `silent?`, `fiber?`, `fn/arity`, `fn/captures`, `fn/errors?`, `fn/bytecode-size`, `fn/gpu-eligible?`, `doc`, `vm/query`, `signals`, `jit/rejections`, `keyword` |
-| `io.rs` | `read`, `write`, `read-write`, `io-request?`, `io-backend?`, `io/backend`, `io/submit`, `io/workers`, `io/reap`, `io/wait`, `io/cancel`, `ev/sleep`, `ev/poll-fd` |
+| `io.rs` | `io-request?`, `io-backend?`, `io/backend`, `io/submit`, `io/workers`, `io/reap`, `io/wait`, `io/cancel`, `ev/sleep`, `ev/poll-fd` |
 | `json/` | `json/parse`, `json/serialize`, `json/pretty` |
 | `list/` | `first`, `second`, `rest`, `list`, `length`, `empty?`, `->array`, `->list` |
 | `loading.rs` | `ffi/native`, `ffi/lookup`, `ffi/on-unload`, `ffi/run-teardowns`, `ffi/signature`, `ffi/call`, `ffi/callback`, `ffi/callback-free` |
@@ -201,8 +189,8 @@ named substitution modes: [format/](format/AGENTS.md).
 
 | Condition | Error kind | Message |
 |-----------|-----------|---------|
-| Argument not string | `type-error` | `"string/size-of: expected string, got {type}"` |
-| Wrong arity | `arity-error` | `"string/size-of: expected 1 argument, got N"` |
+| Argument not string | `type-error` | `"string/size-of: expected string or @string, got {type}"` |
+| Wrong arity | `arity-error` | `"string/size-of: expected 1 argument(s), got N"` |
 
 **Invariants:**
 
@@ -215,9 +203,9 @@ named substitution modes: [format/](format/AGENTS.md).
 **Location:** `src/primitives/subprocess.rs`
 
 - `sys/args` — Returns user-provided command-line arguments as an immutable
-  list of strings. Arguments are those that follow the source file (or `-` for
-  stdin) in the process argv. Returns an empty list `()` if no args follow the
-  source file, or if running in REPL mode. Reads `ctx.vm().user_args`.
+  list of strings: the arguments that follow the source file, `-` or `--`, or
+  a subcommand's arguments. Returns an empty list `()` if none follow, or in
+  REPL mode. Reads `ctx.vm().user_args`.
   Signal: `Signal::silent()`. Arity: `Exact(0)`.
   - Example: `elle script.lisp foo bar` → `sys/args` returns `("foo" "bar")`
   - Flags after source: `elle script.lisp -v foo` → `sys/args` returns `("-v" "foo")`
@@ -240,7 +228,7 @@ and the one boundary that checks it: [subprocess/](subprocess/AGENTS.md).
 
 ## Network Primitives
 
-**Location:** `src/primitives/net.rs`
+**Location:** `src/primitives/net.rs`, and `src/primitives/unix.rs` for the Unix domain sockets
 
 **TCP primitives:**
 - `tcp/listen addr port` — synchronous, returns listener port. Binds to address:port with `SO_REUSEADDR`, listens with backlog 128.
@@ -273,7 +261,7 @@ Used by network primitives and stream primitives to parse optional timeout argum
 
 ## Port Options Primitive
 
-**Location:** `src/primitives/ports.rs`
+**Location:** `src/primitives/ports/query.rs`
 
 **Primitive:** `port/set-options port :timeout ms` (or `:timeout nil` to clear)
 
@@ -281,7 +269,7 @@ Sets port-level options. Currently supports `:timeout ms` (non-negative integer 
 
 ## port/seek and port/tell Primitives
 
-**Location:** `src/primitives/ports.rs`
+**Location:** `src/primitives/ports/query.rs`
 
 ### port/seek
 
@@ -290,17 +278,17 @@ Sets port-level options. Currently supports `:timeout ms` (non-negative integer 
 **Purpose:** Seek to a byte offset in a file port. Returns the new absolute byte offset as int. Discards the per-fd read buffer before seeking to prevent stale buffered data from diverging from the kernel position.
 
 **Behavior:**
-- Validates arity (2 or 4 args; 0, 1, 3, or 5+ are errors)
+- Takes 2 to 4 arguments; the VM refuses any other count, and 3 is an error
 - Validates port is a file port (`PortKind::File`); errors on stdio or network ports
 - Validates offset is an integer
 - Parses optional `:from :start|:current|:end` pair; default is `:start` (SEEK_SET)
-- Yields `SIG_YIELD | SIG_IO` with an `IoRequest` containing `IoOp::Seek { offset, whence }`
+- Returns `SIG_IO` with an `IoRequest` containing `IoOp::Seek { offset, whence }`
 
 **Error cases:**
 
 | Condition | Error kind | Message |
 |-----------|-----------|---------|
-| 0, 1, or 5+ args | `arity-error` | `"port/seek: expected 2 or 4 arguments, got N"` |
+| 0, 1, or 5+ args | `arity-error` | `"port/seek: expected 2-4 argument(s), got N"` |
 | 3 args (incomplete :from pair) | `arity-error` | `"port/seek: :from keyword requires a value"` |
 | First arg not a port | `type-error` | `"port/seek: expected port, got {type}"` |
 | Port is not a file port | `type-error` | `"port/seek: expected file port, got {kind}"` |
@@ -323,15 +311,15 @@ Sets port-level options. Currently supports `:timeout ms` (non-negative integer 
 **Purpose:** Return the current logical read position in a file port. Logical position = kernel file offset minus buffered-but-unconsumed bytes.
 
 **Behavior:**
-- Validates arity (exactly 1 arg)
+- Takes exactly 1 argument
 - Validates port is a file port; errors on other kinds
-- Yields `SIG_YIELD | SIG_IO` with an `IoRequest` containing `IoOp::Tell`
+- Returns `SIG_IO` with an `IoRequest` containing `IoOp::Tell`
 
 **Error cases:**
 
 | Condition | Error kind | Message |
 |-----------|-----------|---------|
-| Wrong arity | `arity-error` | `"port/tell: expected 1 argument, got N"` |
+| Wrong arity | `arity-error` | `"port/tell: expected 1 argument(s), got N"` |
 | Argument not a port | `type-error` | `"port/tell: expected port, got {type}"` |
 | Port is not a file port | `type-error` | `"port/tell: expected file port, got {kind}"` |
 
@@ -343,7 +331,7 @@ Sets port-level options. Currently supports `:timeout ms` (non-negative integer 
 
 ## squelch Primitive
 
-**Location:** `src/primitives/meta.rs`
+**Location:** `src/primitives/meta/syntaxops.rs`
 
 **Signature:** `(squelch closure :keyword)` or `(squelch closure |:kw1 :kw2|)`
 
@@ -352,27 +340,24 @@ Returns a new closure that, when called, intercepts the named signal(s) and
 converts them to `:error` with kind `"signal-violation"`.
 
 **Behavior:**
-- Takes a closure and a signal keyword or set of keywords
-- Returns a **new** closure (same template and environment, new squelch mask)
+- Takes a closure and a signal spec: a keyword, set, array, list, or integer
+  of signal bits, resolved by `resolve_signal_bits`
+- Returns a **new** closure (same template and environment), whose squelch
+  mask is the old mask OR the new bits
 - `(squelch f |:yield :io|)` squelches both yield and io
 
 **Signal:** `Signal::errors()`
 
 **Arity:** `Exact(2)`
 
-**Implementation details:**
-- Validates first argument is a closure via `as_closure()`
-- Validates remaining arguments are keywords via `as_keyword_name()`
-- Looks up each keyword in the global signal registry via `registry::global_registry().lock().unwrap().lookup()`
-- ORs bits into a combined mask
-- Creates new closure with `squelch_mask = closure.squelch_mask | new_bits`
-- Returns the new closure as a Value
-
-**Tail-call enforcement:** A squelch holds across a tail call. The `squelch_mask` rides the tail-call trampoline loop in `execute_bytecode_saving_stack` on the `TailCallInfo` struct, and is re-applied after each iteration, before the next callee runs.
+**Tail-call enforcement:** A squelch holds across a tail call. Each
+`TailCallInfo` carries its callee's `squelch_mask`; `trampoline_loop` ORs it
+into the activation's mask, and `end_activation` enforces the result when the
+activation ends.
 
 ## meta/origin Primitive
 
-**Location:** `src/primitives/meta.rs`
+**Location:** `src/primitives/meta/syntaxops.rs`
 
 **Signature:** `(meta/origin f)`
 
@@ -380,15 +365,15 @@ converts them to `:error` with kind `"signal-violation"`.
 
 **Behavior:**
 - If `f` is not a closure, returns `nil`
-- If the closure has no stored `syntax` field, returns `nil`
+- If the closure's template records no origin span, returns `nil`
 - If the syntax span has no `file`, returns `nil`
-- Otherwise returns `{:file "path" :line N :col N}` where `:file` is the path string, `:line` is 1-based line number, `:col` is 0-based column number
+- Otherwise returns `{:file "path" :line N :col N}` where `:file` is the path string, `:line` is the 1-based line number, `:col` is the 1-based column number
 
 **Examples:**
 ```lisp
 (defn foo () 42)
 (meta/origin foo)
-#=> {:col 0 :file "/path/to/script.lisp" :line 1}
+#=> {:col 1 :file "/path/to/script.lisp" :line 1}
 
 (meta/origin 42)
 #=> nil
@@ -405,12 +390,12 @@ converts them to `:error` with kind `"signal-violation"`.
 
 1. **Always returns or nil.** Never errors. Non-closures and closures without file info return `nil`.
 2. **File path is the canonical string from the span.** It matches the path passed to the compiler, which is set by the reader when parsing a named file.
-3. **Line and col are integers.** `:line` is the 1-based line number; `:col` is the 0-based column offset within the line.
+3. **Line and col are integers.** `:line` is the 1-based line number; `:col` is the 1-based column within the line.
 4. **Result is an immutable struct.** The returned value is a `{...}` struct, not a mutable `@{...}`.
 
 ## Channel select wake protocol
 
-**Location:** `src/primitives/chan.rs`, with the public wrapper in `stdlib.lisp`.
+**Location:** `src/primitives/chan.rs` and `src/primitives/chan/prims.rs`, with the public wrapper in `stdlib.lisp`.
 
 `chan/select` cannot use crossbeam's blocking `Select::select_timeout`: that
 parks the OS thread the fiber scheduler runs on, starving any `ev/spawn`'d
@@ -442,7 +427,7 @@ Three primitives back the Lisp `chan/select`:
   wake fd, registers, does a post-register `try_select` to close the
   cross-thread race between the wrapper's first `chan/try-select` and
   the register. Returns `[:ready i v]` (post-register fast hit, no
-  yield), `[:disconnected]`, or yields `SIG_YIELD|SIG_IO` carrying an
+  yield), `[:disconnected]`, or returns `SIG_IO` carrying an
   `IoOp::ChanSelectPark(ChanSelectGuardCell)`. The IoRequest's timeout
   flows through to a linked `LinkTimeout` SQE on uring or to the
   thread-pool `poll(2)` timeout.
@@ -472,4 +457,4 @@ Every stream primitive takes an optional `:timeout ms` keyword argument:
 - `port/write port data` or `port/write port data :timeout ms`
 - `port/flush port` or `port/flush port :timeout ms`
 
-Arity changed from `Exact(N)` to `AtLeast(N)` to allow keyword args. Timeout is extracted via `extract_keyword_timeout` and passed to `IoRequest::with_timeout()`.
+Each declares `AtLeast(N)` arity to admit the keyword arguments. Timeout is extracted via `extract_keyword_timeout` and passed to `IoRequest::with_timeout()`.

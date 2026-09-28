@@ -12,5 +12,5 @@ Up: [..](../AGENTS.md)
 - [lint-rules.md](lint-rules.md) — **Adding a New Lint Rule** Linting operates on HIR trees.
 - [plugins.md](plugins.md) — **Adding a New Plugin** A plugin is a Rust cdylib crate that depends on `elle-plugin` (not `elle`) and exports `elle_plugin_init`.
 - [prelude-macros.md](prelude-macros.md) — **Adding a New Prelude Macro** Prelude macros are defined in `prelude.lisp` and loaded by the Expander before user code.
-- [primitives.md](primitives.md) — **Adding a New Primitive Function** A primitive is a Rust function callable from Elle.
+- [primitives.md](primitives.md) — **Adding a New Primitive Function** A primitive is a Rust function callable from Elle, declared in its module's `primitive!` table.
 - [special-forms.md](special-forms.md) — **Adding a New Special Form** A special form is a syntactic construct recognized by the analyzer (not a function call).

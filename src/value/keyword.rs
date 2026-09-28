@@ -59,7 +59,7 @@ pub const fn is_vocabulary(name: &str) -> bool {
 pub const fn vocab(name: &'static str) -> &'static str {
     assert!(
         is_vocabulary(name),
-        "keyword spelling missing from VOCABULARY in src/value/keyword.rs"
+        "keyword spelling missing from VOCABULARY in src/value/keyword/vocabulary.rs"
     );
     name
 }

@@ -37,8 +37,9 @@
 #
 # The trap: a keyword carries a name hash, not a spelling, and an external type
 # name reaches a reader only if it is in the static vocabulary
-# (src/value/keyword.rs). A name that is missing there prints as its hash, so
-# this asserts the spelling rather than merely that type-of answered something.
+# (src/value/keyword/vocabulary.rs). A name that is missing there prints as its
+# hash, so this asserts the spelling rather than merely that type-of answered
+# something.
 (let [proc (subprocess/exec "true" [])]
   (assert (= (type-of proc) :subprocess) "type-of: names the type")
   (assert (= (string (type-of proc)) "subprocess")
