@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-28
 //! Which `Emit` sites yield a payload the emitting body owns no reference of.
 //!
 //! docs/impl/region/park.md
@@ -48,45 +48,42 @@ pub(super) fn compute_borrowed_emit_payloads(hir: &Hir, info: &RegionInfo) -> Fx
     out
 }
 
-/// The `Emit` sites of `hir` whose RESUME value nothing else counts
-/// (`RegionInfo::unfunded_resume_values`) — the other direction of the same
+/// The `Emit` sites of `hir` whose RESUME value this body must mint a reference
+/// for (`RegionInfo::unfunded_resume_values`) — the other direction of the same
 /// crossing.
 ///
 /// The resumer pushes the value onto the parked frame's stack and takes no
 /// reference for it, so the body reads it through the resumer's own reference
-/// unless one is minted here. What already funds a reference is the frame's own
-/// return transfer: an `Emit` the frame hands its value back from carries the
-/// `Return` marker's mint for the same region, and a second one would strand a
-/// reference per resume. So the answer is the emit sites whose result region is off
-/// the **return frontier**, read from escape's authoritative verdict rather than a
-/// syntactic tail test — a value bound and returned later is as funded as one
-/// returned in place.
-pub(super) fn compute_unfunded_resume_values(
-    hir: &Hir,
-    escape: &crate::hir::EscapeInfo,
-    info: &RegionInfo,
-) -> FxHashSet<HirId> {
-    let returned = super::escape::return_frontier_regions(
-        escape,
-        &info.alloc_region,
-        &info.binding_source_regions,
-    );
+/// unless one is minted here. The mint pairs with the release of the binding that
+/// names the `Emit`, so the answer is the emit sites a binder names. A returned
+/// value changes nothing: the binding is released all the same, and the `Return`
+/// marker mints the caller's reference on top. An unnamed `Emit` is a returning
+/// position's own tail, which no slot releases, so it takes no mint.
+pub(super) fn compute_unfunded_resume_values(hir: &Hir) -> FxHashSet<HirId> {
     let mut out = FxHashSet::default();
-    collect_emit_sites(hir, &mut out);
-    out.retain(|site| {
-        info.alloc_region
-            .get(site)
-            .is_none_or(|&r| !returned.contains(&info.merged_root(r)) && !returned.contains(&r))
-    });
+    collect_bound_emit_sites(hir, &mut out);
     out
 }
 
-/// Every `Emit` node id in `hir`.
-fn collect_emit_sites(hir: &Hir, out: &mut FxHashSet<HirId>) {
-    if matches!(&hir.kind, HirKind::Emit { .. }) {
-        out.insert(hir.id);
+/// Every `Emit` node id in `hir` that is the init of a binder whose slot is its
+/// release route — a `let`, `letrec` or `def`. A `Loop` parameter records no
+/// route, so it is left out.
+fn collect_bound_emit_sites(hir: &Hir, out: &mut FxHashSet<HirId>) {
+    let mut name = |init: &Hir| {
+        if matches!(&init.kind, HirKind::Emit { .. }) {
+            out.insert(init.id);
+        }
+    };
+    match &hir.kind {
+        HirKind::Let { bindings, .. } | HirKind::Letrec { bindings, .. } => {
+            for (_, init) in bindings {
+                name(init);
+            }
+        }
+        HirKind::Define { value, .. } => name(value),
+        _ => {}
     }
-    hir.for_each_child(|c| collect_emit_sites(c, out));
+    hir.for_each_child(|c| collect_bound_emit_sites(c, out));
 }
 
 /// Map every node to the innermost `Lambda` enclosing it (`None` at the

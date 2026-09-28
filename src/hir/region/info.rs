@@ -1,4 +1,4 @@
-// audited: 2026-09-15
+// audited: 2026-09-28
 //! `RegionInfo`: what region inference produces for a compilation unit — the
 //! per-allocation and per-scope assignments, and the lowerer's cuts.
 //!
@@ -85,21 +85,20 @@ pub struct RegionInfo {
     /// `Emit` site → the regions its payload may live in. Read by the
     /// borrowed-payload pass below.
     ///
-    /// docs/impl/region/owner.md
+    /// docs/impl/region/park.md
     pub emit_payload_regions: HashMap<HirId, Vec<Region>>,
     /// `Emit` sites whose payload the emitting body releases nowhere. The
     /// lowerer mints one reference at each SUSPENDING site here — an error or
     /// halt emit is excluded, both being terminal. A payload whose regions the
     /// pass cannot resolve is treated as borrowed.
     ///
-    /// docs/impl/region/owner.md
+    /// docs/impl/region/park.md
     pub borrowed_emit_payloads: FxHashSet<HirId>,
-    /// `Emit` sites whose RESUME VALUE reaches this body counted by nothing, so
-    /// the lowerer mints the reference the body holds it by. A site whose
-    /// result region is on the return frontier is excluded — the frame's return
-    /// transfer already funds one.
+    /// `Emit` sites whose RESUME VALUE a binding names, so the lowerer mints the
+    /// reference that binding's release gives back. An unnamed site is a
+    /// returning position's own tail, which no slot releases.
     ///
-    /// docs/impl/region/owner.md
+    /// docs/impl/region/park.md
     pub unfunded_resume_values: FxHashSet<HirId>,
     /// Binding-init HirIds that are a whole-value read of a reassigned captured
     /// cell. The lowerer emits an `IncrefValueRegion` here, and the read's own

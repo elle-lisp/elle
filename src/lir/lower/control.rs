@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-28
 //! Control flow lowering: the tail-argument ownership predicates, intrinsic
 //! specialization, `eval`, `emit`, and the call path. `and`/`or` and `match`
 //! lower in the submodules beside it.
@@ -314,10 +314,9 @@ impl<'a> Lowerer<'a> {
         // The resume value crosses from the resumer uncounted — `resume_suspended`
         // pushes it onto this frame's stack and takes no reference for it. Mint the
         // reference this body holds it by, so a later park cannot leave the resumer's
-        // release freeing a value this frame still reads; the `Emit`'s own
-        // call-result `DecrefValueRegion` gives it back. Skipped where the frame's
-        // return transfer already funds one for the same region
-        // (`unfunded_resume_values`).
+        // release freeing a value this frame still reads; the release of the binding
+        // that names the `Emit` gives it back. An unnamed `Emit` is a returning
+        // tail, which no slot releases, so it takes none (`unfunded_resume_values`).
         if self
             .current_hir_id
             .is_some_and(|id| self.region_info.unfunded_resume_values.contains(&id))

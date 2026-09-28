@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-28
 //! The region-inference pipeline: the walk, then every post-pass that decides
 //! where a release lands. The order is the point — each pass reads answers the
 //! ones before it settled.
@@ -281,11 +281,9 @@ pub fn analyze_regions_with(
     info.borrowed_emit_payloads = super::yieldborrow::compute_borrowed_emit_payloads(hir, &info);
 
     // The other half of the same symmetry: which `Emit` sites receive a resume value
-    // nothing else counts, so the lowerer can mint the reference this body holds it
-    // by. Reads the return frontier, so it runs beside the payload pass, after every
-    // decref_point post-pass.
-    info.unfunded_resume_values =
-        super::yieldborrow::compute_unfunded_resume_values(hir, &escape_info, &info);
+    // a binding's release will give back, so the lowerer can mint the reference this
+    // body holds it by.
+    info.unfunded_resume_values = super::yieldborrow::compute_unfunded_resume_values(hir);
 
     info
 }
