@@ -114,7 +114,7 @@ write as JSON objects; keywords write as JSON strings.
 
 6. **No external JSON library.** All parsing and serialization is hand-written to avoid dependencies.
 
-6. **All three primitives declare `Signal::errors()`.** The declaration matches the `SIG_ERROR` each returns, so effect inference propagates `:error` to callers and `try` reaches the failure at any call depth. `tests/elle/prim-json.lisp` pins this.
+6. **All three primitives declare `Signal::errors()`.** The declaration matches the `SIG_ERROR` each returns, so effect inference propagates `:error` to callers and `try` reaches the failure at any call depth. `tests/lang/prim-json.lisp` pins this.
 
 7. **A keyword writes as its spelling, or not at all.** A keyword IS a name
    hash; the spelling comes from the calling instance's memo or from the static
@@ -124,7 +124,7 @@ write as JSON objects; keywords write as JSON strings.
    neither source carries is a `serde-error` naming the hash it could not
    spell. That error is the module's canary for a missed learning site or a
    missing vocabulary entry elsewhere in the runtime — the value is fine, the
-   name is missing. `tests/elle/keyword-spelling.lisp` pins the round trip for
+   name is missing. `tests/lang/keyword-spelling.lisp` pins the round trip for
    the runtime's own keys.
 
 ## Dependents

@@ -7,3 +7,9 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [overview.md](overview.md) — **The implementation suite** Elle programs that check this implementation: its gauges, its tiers, its crashes and its mechanisms, each run on the rig.
+
+## Directories
+
+- [lib/](lib/AGENTS.md) — (empty)
+- [probe/](probe/AGENTS.md) — (empty)
+- [tailexit/](tailexit/AGENTS.md) — (empty)

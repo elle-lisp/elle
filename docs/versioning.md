@@ -1,6 +1,6 @@
 # Versioning
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-27 -->
 
 How an Elle library declares its version and ships migration rules.
 
@@ -15,7 +15,7 @@ it, and a major release carries its own migration rules. The
 
 Put `(elle/version "X.Y.Z")` at the top level of the module file, by
 convention right after the epoch declaration. A module at 2.1.0 therefore
-opens with `(elle/epoch 12)`, then `(elle/version "2.1.0")`, then the module
+opens with `(elle/epoch 13)`, then `(elle/version "2.1.0")`, then the module
 closure that returns its export struct.
 
 The compiler consumes the declaration during compilation, exactly as it
@@ -88,7 +88,7 @@ the same bytes:
              "(version \"1.0.0\")"
              "(mode :hybrid)"
              "(released :commit \"4f2a9c1e\" :date \"2026-09-21\")"
-             "(tests \"tests/elle/semver*.lisp\")"
+             "(tests \"tests/lang/semver*.lisp\")"
              "(constructor [])"
              "(export compare :fn [a b] :signals [:error] :doc \"b0a1c2d3\")"
              "(export parse :fn [version] :signals [:error] :doc \"18293a4b\")"

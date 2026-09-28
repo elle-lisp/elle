@@ -349,7 +349,7 @@ thread-pool worker loops inside `PoolOp::Write`. The completion reports
 
 A failure part-way through surfaces as an error, not as a short count — a
 count smaller than the payload would read as success to a caller that trusts
-the invariant. See [io](../../docs/io.md) and [port-shortwrite.lisp](../../tests/elle/port-shortwrite.lisp).
+the invariant. See [io](../../docs/io.md) and [port-shortwrite.lisp](../../tests/lang/port-shortwrite.lisp).
 
 ## Operation timeouts
 
@@ -391,9 +391,9 @@ loop treats `EAGAIN` as a readiness wait whether or not it asked for a timeout,
 so an untimed operation that meets a descriptor another operation made
 non-blocking waits rather than failing.
 
-Pinned by [port-write-timeout.lisp](../../tests/elle/port-write-timeout.lisp) and
-[port-read-timeout.lisp](../../tests/elle/port-read-timeout.lisp), both run on each backend, each covering a
-socket peer and a pipe peer. [net-wait-timeout.lisp](../../tests/elle/net-wait-timeout.lisp) covers the
+Pinned by [port-write-timeout.lisp](../../tests/lang/port-write-timeout.lisp) and
+[port-read-timeout.lisp](../../tests/lang/port-read-timeout.lisp), both run on each backend, each covering a
+socket peer and a pipe peer. [net-wait-timeout.lisp](../../tests/lang/net-wait-timeout.lisp) covers the
 calls that wait for a peer, and `a_pool_connect_reports_its_own_deadline_as_a_timeout`
 ([netend.rs](../../src/io/aio/tests/netend.rs)) covers the connect, whose stall needs a listener
 backlog an Elle script cannot set.
