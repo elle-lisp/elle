@@ -2,8 +2,9 @@
 
 <!-- audited: 2026-09-29 -->
 
-How a run executes: each file compiled, isolated, gated, run once on the
-runtime its build ships, its output captured, and its end recorded honestly.
+How a run executes: each file compiled, isolated, gated and run once, its output
+captured, and its end recorded honestly. A file runs on the runtime its build
+ships.
 
 Why the runner exists and how to drive it is [test-cli](test-cli.md); where
 a run is stored and what each row says is [test-store](test-store.md). The
@@ -283,7 +284,7 @@ to the CAS (compressed) and referenced by hash — bounded to exactly the cases
 where you'd want it, never inlined. The smaller `--dump` artifacts are still
 captured for all forms, but to the CAS, not as BLOBs.
 
-#### CAS asset capture (v1, implemented)
+#### CAS asset capture
 
 > **Status: `--dump` capture is OMITTED in the runner.** The
 > per-file `(compile/dumps …)` pass is the single largest contributor to the
@@ -293,12 +294,12 @@ captured for all forms, but to the CAS, not as BLOBs.
 > underlying per-compile region leak is root-caused and fixed, `capture-dumps`
 > is a no-op: no `compile/dumps` call, no dump `asset` rows, no CAS dump files.
 > stdout/stderr capture (below) is unaffected — it rides the per-form execution,
-> not the extra dump compile. Re-enabling is a one-line revert of `capture-dumps`.
+> not the extra dump compile.
 
-The v1 store is realized in [src/test](../src/test) plus one new compiler entry
+The store lives in [src/test](../src/test), and it reads one compiler entry
 point:
 
-- **In-process dumps.** A new primitive `(compile/dumps SRC NAME)` compiles a
+- **In-process dumps.** The primitive `(compile/dumps SRC NAME)` compiles a
   module **once** through the real file front-end and returns a struct
   `{:ast … :fhir … :defuse … :regions … :hir … :lir … :cfg … :dfa … :jit …
   :escape …}` of the rendered artifacts as strings — the same renderings
@@ -315,7 +316,7 @@ point:
   row. The address is over the uncompressed content, so the codec can change
   without moving the artifact.
 
-**v1 boundaries (intentional).** Dumps are **module-level** (one compile per
+**Boundaries (intentional).** Dumps are **module-level** (one compile per
 file) and attached to every result of that file — for the durable
 one-form-per-file corpus that is exact; for a legacy multi-form file each form's
 result points at the whole module's artifacts. `--trace` capture, the `stats`

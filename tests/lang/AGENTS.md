@@ -11,4 +11,3 @@ Up: [..](../AGENTS.md)
 ## Directories
 
 - [aws/](aws/AGENTS.md) — (empty)
-- [plugins/](plugins/AGENTS.md) — (empty)

@@ -12,7 +12,7 @@ Up: [..](../AGENTS.md)
 - [audit.md](audit.md) — **The audit queue** Every file carries the day it last met the documentation policy, and the queue names what to read next by what a stale file costs.
 - [bytecode.md](bytecode.md) — **Bytecode** The bytecode instruction set is a `repr(u8)` enum.
 - [differential.md](differential.md) — **Differential Tier Testing** A correct closure returns the same value on every execution tier that accepts it, and `compile/run-on` is how a test asks each tier.
-- [dissolution.md](dissolution.md) — **Dissolution — HOF loop fusion (more...)**
+- [dissolution.md](dissolution.md) — **Dissolution — HOF loop fusion** The pass that turns a higher-order call over a proven array into a loop with the function's body spliced in.
 - [escape.md](escape.md) — **Escape analysis — the authoritative true-escape pass** Escape analysis decides, once for every consumer, whether a value outlives the activation it was born in.
 - [fleet.md](fleet.md) — **Fleet — adhoc distributed execution over images (more...)**
 - [gpu.md](gpu.md) — **GPU Compute** How a plain Elle closure becomes a dispatched compute kernel, across the MLIR backend and the Vulkan plugin.
@@ -39,5 +39,6 @@ Up: [..](../AGENTS.md)
 
 ## Directories
 
+- [dissolution/](dissolution/AGENTS.md) — Dissolution: whose body the loop splices, Dissolution: the pipeline stages, Dissolution: the scalar terminals
 - [image/](image/AGENTS.md) — Booting from an image, The image file, Foundations, What the experiments measured, Landing order and test plan, Sealing
 - [region/](region/AGENTS.md) — Ownership adopts and the root's lifetime obligation, Where a release is anchored, Reassigned mutable bindings are 1-slot containers, Capture cells, What a region-effect declaration buys, Per-arm compensation, NativeCtx — explicit allocation: every value names its region and heap, Region diagnostics and validation, Native region effects: declared, not guessed, Rich errors — one region-coherent struct routine + `rich_error!`, Region generations: stale derefs detonate in debug builds, The letrec closure-cycle merge, The mechanism, Merging, Region representation — id-spaces, per-execution model, layout, Owner nodes — an activation as a forest root, Adoption and subtree drop (the ownership forest), What a park retains, and who releases it, Reads of a 1-slot container, A release past a frame-replacing tail call, The relocation point and its replicas, Region rules — the implementor's correctness obligations, Settled invariants, What a signal exit owes, Code objects — a blueprint, a payload, and a header, An abandoned frame runs the releases it still owes, The branch-arm release window
