@@ -1,6 +1,6 @@
 # Arrays
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Arrays are indexed sequences. Bare `[...]` is immutable; `@[...]` is mutable.
 
@@ -78,8 +78,8 @@ mutated array; `pop` returns the removed element.
 
 ## Sorting
 
-`sort` and `sort-with` keep the collection's type. `sort` on an `@array` sorts
-it in place.
+`sort`, `sort-with`, and `sort-by` keep the collection's type. `sort` on an
+`@array` sorts it in place.
 
 ```lisp
 (assert (= [1 1 3 4 5] (sort [3 1 4 1 5])))
@@ -88,9 +88,9 @@ it in place.
 (sort unsorted)
 (assert (= [1 2 3] unsorted) "sorted in place")
 (assert (= (list "a" "bb" "ccc") (sort-by length (list "bb" "a" "ccc"))))
+(assert (= :array (type-of (sort-by length ["bb" "a" "ccc"]))))
+(assert (= :@array (type-of (sort-by length @["bb" "a" "ccc"]))))
 ```
-
-`sort-by` returns an `@array` for an immutable array (#1241).
 
 ## Type conversion
 

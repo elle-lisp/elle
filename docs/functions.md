@@ -1,6 +1,6 @@
 # Functions
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 How to make, call, compose and inspect functions, and how deep recursion may go.
 
@@ -91,8 +91,8 @@ list gives a list.
 
 ## Sorting
 
-`sort` and `sort-with` keep the collection's type. `sort-by` returns an
-`@array` for an immutable array (#1241).
+`sort`, `sort-with`, and `sort-by` order collections. See [arrays.md](arrays.md)
+for their return types.
 
 ```lisp
 (assert (= [1 1 3 4 5] (sort [3 1 4 1 5])))

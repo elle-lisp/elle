@@ -1260,7 +1260,7 @@
            from-list (fn (lst orig)
                        (cond
                          (or (pair? orig) (empty? orig)) lst
-                         (array? orig)
+                         (mutable? orig)
                            (let [arr @[]]
                              (each x in lst
                                (push arr x))

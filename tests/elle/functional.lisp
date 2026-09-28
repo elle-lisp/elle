@@ -1,4 +1,7 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# Tests standard collection functions and sorting behavior.
+# tests/AGENTS.md
+# audited: 2026-09-28
 
 ## ── sort ────────────────────────────────────────────────────────────
 (assert (= (sort (list 3 1 2)) (list 1 2 3)) "sort: list")
@@ -327,11 +330,13 @@
 (assert (= (sort-by identity ()) ()) "sort-by: empty")
 (let [result (sort-by abs @[-3 1 -2])]
   (assert (array? result) "sort-by: array returns array")
+  (assert (= (type-of result) :@array) "sort-by: mutable array stays mutable")
   (assert (= (get result 0) 1) "sort-by: array first")
   (assert (= (get result 1) -2) "sort-by: array second")
   (assert (= (get result 2) -3) "sort-by: array third"))
 (let [result (sort-by abs [3 1 2])]
-  (assert (array? result) "sort-by: array returns array"))
+  # array? also accepts @array, so pin the immutable return type.
+  (assert (= (type-of result) :array) "sort-by: immutable array stays immutable"))
 
 ## ── sort-with ────────────────────────────────────────────────────────
 # Basic list sort using compare
@@ -370,12 +375,8 @@
         "sort-by-cmp: alias works")
 
 ## ── sort-by / sort-with on large lists ────────────────────────────────
-# These used to crash the VM with SIGABRT (stack overflow) because the
-# merge step in merge sort recursed O(N) deep.  The merge is now
-# tail-recursive with an accumulator + reverse.  1000 elements puts the
-# final merge far past the 200 call-depth limit, so a regression to
-# non-tail recursion faults; each sort runs once (a debug-build sort at
-# this size is seconds, and the runner budgets the whole file).
+# 1000 elements puts the final merge beyond the 200 call-depth limit.
+# A smaller input could fit within that limit and miss a linear-depth merge.
 (let [sorted (sort-by identity (reverse (range 1000)))]
   (assert (= (length sorted) 1000) "sort-by: 1000 elements reversed")
   (assert (= (first sorted) 0) "sort-by: first element is 0")
