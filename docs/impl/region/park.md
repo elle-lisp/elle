@@ -1,6 +1,6 @@
 # What a park retains, and who releases it
 
-<!-- audited: 2026-09-19 -->
+<!-- audited: 2026-09-28 -->
 
 The references a suspended fiber's park leaves standing, and the one seam that consumes each.
 
@@ -275,16 +275,21 @@ symmetric with its unpark; the node and the deferred set a park moves are
   call is still running, and a dangling read the moment the body parks again holding the
   value and the resumer moves on. So the `Emit` itself supplies the reference: its result
   is an ordinary call-result region (`walk`'s `Emit` arm), `lower_emit` mints one after
-  `LoadResumeValue`, and the node's own `decref_point` releases it. The mint is skipped
-  where the frame's **return transfer** already funds a reference for the same region —
-  an `Emit` whose value the frame hands back carries the `Return` marker's mint, and a
-  second would strand one per resume, so `RegionInfo::unfunded_resume_values` names the
-  sites whose result region is off the return frontier. What this buys beyond soundness is
+  `LoadResumeValue`, and the release of the binding that names the `Emit` gives it back.
+  The mint pairs with that release and with nothing else, so it is taken exactly where a
+  binding names the `Emit` — a `let` the program wrote, or the one the ANF lift gives an
+  operand ([the ANF lift](../anf.md)). A returned value changes neither half:
+  `(let [v (yield 0)] v)` still releases `v`, and the `Return` marker mints the caller's
+  reference on top. Skipping the mint there hands the release the resumer's own reference,
+  and the resumer's next read of its value is a use-after-free. The one `Emit` left
+  unnamed is a returning position's own tail, which no slot releases, so it takes no mint;
+  `RegionInfo::unfunded_resume_values` names the bound sites. What this buys beyond soundness is
   the frame-held admission: with both directions counted, a fiber crossing is a counted
   second holder rather than an uncounted borrow, so the branch-arm window and the
   frame-exit release stop refusing it ([mechanism.md](mechanism.md) § "A fiber crossing is
   a counted holder too"). Pinned by `tests/elle/region-fiber-frontier-window-uaf.lisp`,
-  with the leak face in `tests/elle/region-fiber-frontier-window.lisp`.
+  with the leak face in `tests/elle/region-fiber-frontier-window.lisp`; the bound and
+  returned faces are `tests/elle/region-resume-value-operand.lisp`.
 - **A child's inherited parameter baseline is a counted holder.** A new fiber snapshots
   its creator's dynamic-parameter bindings into one baseline frame — at creation
   (`prim_fiber_new`), or at the first-resume fallback for a fiber seeded by its resumer
