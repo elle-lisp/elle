@@ -1,3 +1,7 @@
+// audited: 2026-09-28
+//! Syntax parser tests for forms, spans, and parse errors.
+//! docs/impl/reader.md
+
 use super::*;
 
 // Atoms
@@ -298,10 +302,34 @@ fn test_unclosed_paren() {
 }
 
 #[test]
+fn test_unclosed_nested_lists_report_outermost_location_and_depth() {
+    let err = lex_and_parse("(a (b (c").unwrap_err();
+    assert!(
+        err.contains("<unknown>:1:1: unterminated list (3 closing parens needed)"),
+        "{err}"
+    );
+
+    let err = lex_and_parse("((+ 1 2)").unwrap_err();
+    assert!(
+        err.contains("<unknown>:1:1: unterminated list (1 closing paren needed)"),
+        "{err}"
+    );
+}
+
+#[test]
+fn test_unclosed_array_reports_array_type() {
+    let err = lex_and_parse("[1 2").unwrap_err();
+    assert!(
+        err.contains("<unknown>:1:1: unterminated array (missing closing bracket)"),
+        "{err}"
+    );
+}
+
+#[test]
 fn test_unclosed_bracket() {
     let result = lex_and_parse("[1 2 3");
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("unterminated tuple"));
+    assert!(result.unwrap_err().contains("unterminated array"));
 }
 
 #[test]

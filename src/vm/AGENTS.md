@@ -277,6 +277,8 @@ built is released by the install that displaces it".
 Key methods:
 - `run_dispatch`: Runs one activation's dispatch loop, with every interpreted
   non-tail callee it calls paused and resumed on `fiber.callers`
+- `execute_scheduled` and `handle_sig_switch` (`scheduled.rs`): scheduler-facing
+  entry points
 - `execute_bytecode_from_ip`: Executes from a given IP with Rc bytecode/constants
 - `execute_bytecode_saving_stack`: Saves/restores caller's stack, handles tail calls
 - `run_thunk_to_completion`: `execute_bytecode_saving_stack` + the `SIG_SWITCH` drain loop — the safe entry for re-entrant callers running a thunk on the current fiber (`eval`, `arena/allocs`, test-setup module loader)

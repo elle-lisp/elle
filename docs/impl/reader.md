@@ -1,5 +1,7 @@
 # Reader
 
+<!-- audited: 2026-09-28 -->
+
 The reader transforms source text into syntax trees. It supports three
 input formats: s-expressions (`.lisp`), Lua (`.lua`), and literate
 markdown (`.md`).
@@ -62,6 +64,10 @@ for `.md` files, where blank-line padding preserves line numbers.
 tokens. A `Syntax` node carries a `SyntaxKind` (symbol, keyword,
 integer, list, array, struct, set, etc.) plus a `Span` for error
 reporting.
+
+At end of input inside an unfinished collection, the error points to the
+outermost unclosed collection and reports its type. Nested open collections
+also report the number of missing closing delimiters.
 
 ## Dispatch
 
