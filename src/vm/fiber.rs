@@ -1,20 +1,25 @@
+// audited: 2026-09-28
 //! Fiber execution: resume, propagate, abort, cancel.
 //!
-//! All fiber operations follow the same swap protocol:
+//! docs/signals/fibers.md
+//! docs/signals/primitives.md
+//!
+//! Resume and abort follow the same swap protocol:
 //! 1. Take child fiber out of its handle
 //! 2. Wire parent/child chain (Janet semantics)
 //! 3. Swap parent out, child in
 //! 4. Execute the child
-//! 5. Set provisional status (Dead or Suspended)
+//! 5. Set provisional status (Dead or Paused)
 //! 6. Extract result
 //! 7. Swap back
 //! 8. Put child back into its handle
 //!
 //! Status finalization happens in the caller, not in `with_child_fiber`:
-//! - Resume: SIG_ERROR + uncaught by mask → Error (terminal)
-//! - Resume: SIG_ERROR + caught by mask → Suspended (resumable)
-//! - Abort: inject error + resume, result handled like resume (no stomp)
-//! - Cancel: hard kill — set status to Error, drop frames, no resume
+//! - Resume: SIG_ERROR + uncaught by mask → Error (restartable)
+//! - Resume: SIG_ERROR + caught by mask → Paused (restartable)
+//! - Abort: raise the error at the suspension point, handle the result like a
+//!   resume's, and leave the fiber Error where the result is an error
+//! - Cancel: kill — set status to Dead, drop frames, never run again
 //!
 //! SIG_TERMINAL signals are uncatchable — they pass through mask checks.
 

@@ -19,8 +19,8 @@ User-facing fiber operations and patterns.
 | `fiber/parent` | `(fiber) → fiber\|nil` | Parent fiber |
 | `fiber/child` | `(fiber) → fiber\|nil` | Most recently resumed child |
 | `fiber/propagate` | `(fiber) → (propagates)` | Propagate caught signal, preserve chain |
-| `fiber/cancel` (`cancel`) | `(fiber value?) → value` | Hard-kill: set to :error, no unwinding |
-| `fiber/abort` (`abort`) | `(fiber value?) → value` | Graceful: inject error, resume for unwinding |
+| `fiber/cancel` (`cancel`) | `(fiber value?) → value` | End a fiber for good: it goes `:dead`, and no code in it runs |
+| `fiber/abort` (`abort`) | `(fiber value?) → value` | Raise an error at a paused fiber's suspension point; it stops `:error` and stays resumable |
 | `fiber/refuse` | `(fiber value?) → value` | Refuse a paused fiber's call: raise at its call site, fiber lives on |
 | `fiber/set-fuel`, `fiber/fuel`, `fiber/clear-fuel` | `(fiber n)`, `(fiber)`, `(fiber)` | Set, read, and remove the instruction budget |
 | `fiber/error?`, `fiber/done?` | `(fiber) → bool` | `:error`; `:dead` or `:error` |
@@ -68,7 +68,8 @@ Error handling is signal handling:
 it with a recovery value, which becomes that call's result — restart-style
 error handling. A child whose mask does not catch `:error` stops `:error`,
 and the error continues past the parent's `fiber/resume` to the next fiber
-up. An error that no fiber catches ends the program.
+up. That child restarts the same way. An error that no fiber catches ends
+the program.
 
 ```lisp
 (def restartable
@@ -89,9 +90,9 @@ as a fiber waiting to resume — and only `SIG_ERROR` in `fiber/bits` tells
 the two apart. That makes "is this fiber finished?" a question about intent
 rather than state, and it has two different answers:
 
-- **A resumer** decides. `fiber/error?` and `fiber/done?` answer for the
-  terminal statuses alone, because a paused fiber holding an error is a
-  fiber you may still resume with a recovery value.
+- **A resumer** decides. `fiber/error?` and `fiber/done?` read the status
+  alone, so both answer false for a paused fiber holding an error, which you
+  may still resume with a recovery value.
 - **A scheduler** already decided, when it routed the fiber to completion.
   It records that in its own completion map, so it reads that map rather
   than re-deriving from a status that cannot distinguish the two cases. A
@@ -103,6 +104,72 @@ pins the distinction and the wait.
 
 `try`/`catch` is a prelude macro that wraps this pattern
 ([src/prelude.lisp](../../src/prelude.lisp)).
+
+### Where a restart lands
+
+A restart answers the call that raised. The recovery value takes the place
+of that call's result, whether the call is `error`, a primitive or an
+instruction, and the rest of the expression runs on it:
+
+```lisp
+(def lookup (fiber/new (fn [] (+ 1 (get nil :x))) |:error|))
+(assert (= (get (fiber/resume lookup) :error) :type-error))
+(assert (= (fiber/resume lookup 41) 42))        # 41 stands in for the get
+```
+
+A raise in a function the body calls lands the same way, and the frames
+above it run on. That holds for a callee that has suspended once before it
+raises:
+
+```lisp
+(defn after-yield [] (yield 1) (+ 100 (error :boom)))
+(def nested (fiber/new (fn [] (list :got (after-yield))) |:yield :error|))
+(assert (= (fiber/resume nested) 1))
+(assert (= (fiber/resume nested) :boom))
+(assert (= (fiber/resume nested 41) (list :got 141)))
+```
+
+A raise in a callee on the fiber's first run is the exception. The callee's
+frames are gone by the time the fiber stops, so the restart answers the
+body's call to that callee instead
+([#1289](https://github.com/elle-lisp/elle/issues/1289)):
+
+```lisp
+(defn first-run [] (+ 100 (error :boom)))
+(def early (fiber/new (fn [] (list :got (first-run))) |:error|))
+(fiber/resume early)
+(assert (= (fiber/resume early 41) (list :got 41)))   # the call to first-run answers
+```
+
+An `:error` fiber restarts at the raising call too. When a child's error
+passes its parent, the parent stops at its own `fiber/resume` call, and a
+restart of the parent answers that call.
+
+```lisp
+(def escaped (fiber/new (fn [] (list :got (+ 1 (get nil :x)))) |:yield|))
+(assert (not (first (protect (fiber/resume escaped)))))
+(assert (= (fiber/status escaped) :error))
+(assert (= (fiber/resume escaped 41) (list :got 42)))
+```
+
+A raise with no result has nothing to answer. A `silence` bound on a
+parameter, a `parameterize` of a value that is not a parameter, and the
+object limit (`arena/set-object-limit`) each raise where no call result is
+waiting. A restart continues after the raise, and the recovery value goes
+nowhere. A `parameterize` that raised binds nothing, so its body runs with
+the bindings around it:
+
+```lisp
+(def depth (make-parameter 0))
+(def not-a-parameter 42)
+(def unbound
+  (fiber/new (fn []
+               (parameterize ((depth 5))
+                 (list :a (parameterize ((not-a-parameter 1)) :x) (depth))))
+             |:error|))
+(assert (= (get (fiber/resume unbound) :error) :type-error))
+(assert (= (fiber/resume unbound :ignored) (list :a :x 5)))
+```
 
 ## Terminal vs. Resumable Signals
 
@@ -122,20 +189,24 @@ self-cancel works — the terminal signal cannot be caught by `protect` or
 
 ## Cancel vs. Abort
 
-Two distinct operations for ending a fiber's execution:
+`fiber/cancel` ends a fiber for good. `fiber/abort` raises an error in the
+fiber and leaves the parent free to resume it.
 
-### fiber/cancel — hard kill
+### fiber/cancel — end a fiber
 
-Sets the fiber to `:error` status immediately. No VM dispatch, no
-frame execution, no defer/protect unwinding. The fiber is dead.
+Sets the fiber to `:dead` at once. No frame of the fiber runs, so no
+`defer` or `protect` in it sees the cancel, and it can never be resumed.
+`fiber/value` holds the cancel value and `fiber/bits` holds `SIG_ERROR`,
+which is how a reader tells a cancel from a return.
 
-- Accepts `:new` or `:paused` fibers (other-cancel)
-- Accepts `:alive` fibers (self-cancel only — the currently running fiber)
-- Self-cancel returns `SIG_ERROR | SIG_TERMINAL`, which terminates the
-  dispatch loop without unwinding. The terminal signal is uncatchable —
-  it propagates through all masks including `protect` and `defer`
-- Other-cancel returns `SIG_OK` with the error value
-- A `:dead` or `:error` fiber raises a `:state-error`
+- Accepts a `:new`, `:paused` or `:error` fiber (other-cancel), and
+  answers the cancel value
+- Accepts an `:alive` fiber only as self-cancel, the currently running
+  fiber
+- Self-cancel returns `SIG_ERROR | SIG_TERMINAL`, which ends the dispatch
+  loop at once. The terminal signal passes every mask, including the ones
+  `protect` and `defer` set
+- A `:dead` fiber raises a `:state-error`
 
 ```lisp
 (def cleanups @[])
@@ -144,25 +215,37 @@ frame execution, no defer/protect unwinding. The fiber is dead.
 (fiber/resume cancelled)
 (assert (= (fiber/status cancelled) :paused))
 (assert (= (fiber/cancel cancelled :reason) :reason))
-(assert (= (fiber/status cancelled) :error))
+(assert (= (fiber/status cancelled) :dead))
+(assert (= (fiber/value cancelled) :reason))
+(assert (= (fiber/bits cancelled) 1))            # SIG_ERROR: a cancel, not a return
 (assert (empty? cleanups))                       # the defer never ran
+(assert (not (first (protect (fiber/resume cancelled)))))   # it never runs again
+
+(def stopped (fiber/new (fn [] (error :boom)) |:yield|))
+(protect (fiber/resume stopped))
+(assert (= (fiber/status stopped) :error))
+(fiber/cancel stopped :gone)
+(assert (= (fiber/status stopped) :dead))
 ```
 
-### fiber/abort — graceful termination
+### fiber/abort — raise at the suspension point
 
-Injects an error into a `:paused` fiber and resumes it. The fiber's
-error handlers (`protect`) and cleanup blocks (`defer`) execute during
-unwinding. The result is handled identically to `fiber/resume` — the
-child's actual outcome determines what the parent sees.
+Raises an error at a `:paused` fiber's suspension point, as though the call
+the fiber waits on had raised it. The fiber's own `protect` and `defer` see
+the error there, as they see any raise at that call. Where nothing in the
+fiber catches it, the fiber stops `:error` at that call. The parent may
+resume it, and the resume value answers the call.
 
-- A `:paused` fiber unwinds; the call returns `SIG_ABORT` and the VM
-  handles the fiber swap
-- A `:new` fiber has nothing to unwind, so it is hard-killed as
-  `fiber/cancel` would
+- A `:paused` fiber takes the error. The abort answers what the fiber stops
+  on: the abort value where nothing in the fiber catches it
+- A `:new` fiber has no suspension point, so it ends `:error` holding the
+  value and never runs
 - A `:dead` fiber is left alone, and the call answers its final value
 - An `:alive` or `:error` fiber raises a `:state-error`
-- No post-hoc status stomp: if the fiber's protect catches and recovers,
-  the fiber may end up `:dead` instead of `:error`
+- The fiber's status is whatever its code makes of the error: a `protect`
+  that catches it and runs on can leave the fiber `:dead` or `:paused`
+- Where the fiber's mask does not catch `:error`, the error continues past
+  the `fiber/abort` call, as it would past `fiber/resume`
 
 ```lisp
 (def aborted
@@ -172,23 +255,28 @@ child's actual outcome determines what the parent sees.
 (assert (= (fiber/status aborted) :error))
 (assert (= cleanups @[:aborted]))                # the defer ran
 
+(def resumable (fiber/new (fn [] (list :got (+ 100 (yield 1)))) |:error :yield|))
+(fiber/resume resumable)
+(assert (= (fiber/abort resumable :stop) :stop))
+(assert (= (fiber/status resumable) :error))
+(assert (= (fiber/resume resumable 5) (list :got 105)))   # 5 answers the yield
+
 (def finished (fiber/new (fn [] 7) |:error|))
 (fiber/resume finished)
 (assert (= (fiber/abort finished :reason) 7))    # a dead fiber answers its value
 ```
 
-#### Unwinding that suspends
+#### Handlers that suspend
 
-An abort ends the fiber only when the unwinding runs to its end. The
-unwinding is ordinary code, so it can suspend: a `defer` cleanup that
-writes to a port emits `:io`, and so does a `protect` body that continues
-into an I/O call after it captures the injected error. The abort then
-returns that signal, and the fiber stays `:paused` with the request in
-`fiber/value` — the same result `fiber/resume` gives for the same call.
-The next resume continues the unwinding from where it stopped.
+The handlers an abort reaches are ordinary code, so they can suspend: a
+`defer` cleanup that writes to a port emits `:io`, and so does a `protect`
+body that continues into an I/O call after it captures the error. The
+abort then returns that signal, and the fiber stays `:paused` with the
+request in `fiber/value` — the same result `fiber/resume` gives for the
+same call. The next resume continues the handler from where it stopped.
 
 The rule holds at every depth. A fiber parked at `(fiber/resume child)`
-runs its own continuation only after the child's unwinding finishes, so a
+runs its own continuation only after the child's handler finishes, so a
 `defer` inside a `defer` still runs the inner body before the outer
 cleanup. [tests/elle/unwind-suspend.lisp](../../tests/elle/unwind-suspend.lisp) pins the four shapes —
 `protect`, `try`, `defer`, and one `defer` inside another.
@@ -261,7 +349,7 @@ sequenceDiagram
 
 Step 5 is provisional for an error. The resume handler that called
 `with_child_fiber` promotes a `SIG_ERROR` outside the child's mask
-to `Error`, the terminal status `failing` shows under Error Handling.
+to `Error`, the status `failing` shows under Error Handling.
 
 ### Swap protocol invariants
 

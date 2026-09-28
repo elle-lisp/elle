@@ -1,5 +1,9 @@
 # Signal Recovery
 
+<!-- audited: 2026-09-28 -->
+
+How a handler recovers from a signal by resuming the fiber that raised it.
+
 ## Non-Unwinding Recovery
 
 The fiber model supports non-unwinding recovery without additional mechanism.
@@ -144,13 +148,19 @@ Errors propagate up the fiber chain until caught:
 1. Child signals `:error`
 2. Parent checks: does the mask include `:error`?
    - **Yes**: parent catches, child stays suspended
-   - **No**: parent also suspends, signal propagates to grandparent
+   - **No**: the child stops `:error`, and the error stops the parent at
+     its `fiber/resume` call. The parent's own mask then decides the same
+     way, one fiber up
 3. At the root fiber: uncaught error terminates the program
 
+A fiber stopped `:error` is not unwound. Its parent may resume it, and the
+resume value answers the call that raised
+([primitives.md](primitives.md)).
+
 `fiber/propagate` re-signals a caught signal, preserving the child chain for
-stack traces. `fiber/cancel` hard-kills a fiber (no unwinding).
-`fiber/abort` injects an error and resumes a suspended fiber for graceful
-unwinding (defer/protect blocks run).
+stack traces. `fiber/cancel` ends a fiber `:dead`, and no code in it runs.
+`fiber/abort` raises an error at a paused fiber's suspension point, where its
+own `protect` and `defer` see it.
 
 ### The Public API Boundary
 

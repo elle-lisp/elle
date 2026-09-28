@@ -213,10 +213,11 @@ symmetric with its unpark; the node and the deferred set a park moves are
   compiler-emitted result release consumes one owning reference of the value the
   replay pushes. A normally-completing child funds it: its `Return` runs the
   ReturnValue retain before the result is handed up, and each frame of a replayed
-  chain funds the next the same way. An **aborted** child's error exit runs no
-  `Return`, and the reference the replay consumes is the one `fiber/abort`'s
-  injection minted for the payload — the replayed frame is one of the four
-  consumers that single mint answers for
+  chain funds the next the same way. An **aborted** child — a `protect` or `defer`
+  sub-fiber the abort reaches through a `FiberResume` frame — leaves by an error
+  that runs no `Return`, and the reference the replay of its caller's frames
+  consumes is the one `fiber/abort`'s injection minted for the payload. That
+  replay is one of the four consumers the single mint answers for
   ([effects.md](effects.md) § `Delivers`). Without a mint anywhere the replay
   consumes a reference the abort's caller still owns, and a fresh heap payload is
   freed under the caller's read (a constant payload has no region, which is what
@@ -245,6 +246,28 @@ symmetric with its unpark; the node and the deferred set a park moves are
   ([an operation in flight](../io-inflight.md)). Where the answer is a value the
   requesting call pre-allocated — a port, a read's buffer — the allocation is that
   call's own `Fresh` mint, which the install that ends the park already releases.
+- **A restart delivers into an error park, and owes what the raise site left
+  unfunded.** A fiber stopped on an error parks its innermost frame just past the
+  raising call, with nothing on the stack in place of the call's result, and
+  `fiber/resume` restarts it there: the resume value takes that place, and the
+  continuation releases it like any result. What funds that release depends on the
+  raise, so the dispatch loop's error exit carries its site (`RaiseSite`) out to the
+  fiber boundary, and the boundary records it in the ledger (`park_error`). An
+  `Emit` raise (`(error v)`) owes nothing, because its continuation funds its own
+  release of the resume value, as for any emit park (§ "A resume value crosses
+  counted, or not at all", below). A raise with no result position (`NoResult`) —
+  an instruction that produces no value, or the object limit between two
+  instructions — parks without taking the resume value, so it owes nothing
+  either ([vm.md](../vm.md)). Every other raise is a `Call` site — a
+  primitive, an instruction, a callee — whose result was never produced, so nothing
+  mints for it and the delivery mints `ResumeDelivery`, as for a suspending
+  primitive. Two parks meet this rule without a raise of their own. An injected
+  `fiber/abort` / `fiber/refuse` error raises in place over the park it finds, so it
+  keeps that park's funding (`raise_in_park`): a primitive or denial park still
+  owes the mint, and an emit park or a fuel pause does not. And a parent that a
+  child's error passes is parked at its `fiber/resume` call, which is a `Call`
+  site. Pinned by `tests/elle/region-fiber-restart-uaf.lisp` under
+  `--trace=guardfree`, with the leak gauge in `tests/elle/region-fiber-restart.lisp`.
 - **A propagated signal is a fresh park, and owes its own delivery reference.**
   `fiber/propagate` installs the child's parked payload as the propagating fiber's own
   `signal`. That fiber's resumer then reads the payload as its resume result and runs the
@@ -319,11 +342,16 @@ symmetric with its unpark; the node and the deferred set a park moves are
   value owes a mint at the delivery. One record carries all three — `Fiber::delivery`
   (`src/value/fiber/delivery.rs`), whose fields are private to its module — so a park
   names its funding through a method or not at all. The park writes are
-  `park_primitive()` (a suspending primitive or io park), `park_denial(payload)` (a
-  capability denial: a primitive park whose payload also has no body reference),
-  `record_mint(payload)` (a raise minted the payload's delivery), and
-  `install_abort(payload)` (an abort injection: the mint is recorded, no resume value is
-  owed, and the displaced park's records leave with its payload). The consume seams are
+  `park_primitive(bits, payload)` (a suspending primitive or io park),
+  `park_denial(bits, payload)` (a capability denial: a primitive park whose payload also
+  has no body reference), `park_emit(bits, payload)` (an `Emit` park, which owes no
+  resume mint), `park_error(site)` (an error park, which owes a resume mint for a `Call`
+  site and none for an `Emit` site), `record_mint(payload)` (a raise minted the
+  payload's delivery), `raise_in_park(payload)` (an in-place abort or refusal: the mint
+  is recorded, the displaced payload's records leave with it, and the park keeps its
+  resume funding), and `install_abort(payload)` (an abort that replays a `FiberResume`
+  chain or finds no park: the mint is recorded and no resume value is owed). The
+  consume seams are
   `take_resume_funding()` at each tier's one delivery funnel (`do_fiber_resume_single`,
   the WASM `handle_fiber_resume`), which clears the mint record with the parked signal
   and answers whether to mint the `ResumeDelivery` retain; `take_bodyless()`, run by
@@ -332,8 +360,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   trampoline's `FiberResume` short-circuit replaces the parked payload without
   delivering it (the unfunded flag survives a displace, because the funnel that consumes
   it has not run yet); and `discharge()`, where the park is over with no delivery to
-  fund: `take_parked_state` consuming the park of a fiber that can never run again, the
-  squelch/abort discard chokepoint (`discard_suspended_frames`), and
+  fund: `take_parked_state` consuming the park of a fiber that can never run again,
+  `kill_fiber` ending any park a cancel finds, the squelch/abort discard chokepoint
+  (`discard_suspended_frames`), and
   `VM::abandon_hosted_park` — the seam every host that drives a thunk on the current
   fiber (`eval`, `import`, `arena/allocs`, `compile/run-on`, the root driver) crosses
   when it refuses a suspend-class signal it cannot host and the fiber runs on. After a
@@ -347,8 +376,10 @@ symmetric with its unpark; the node and the deferred set a park moves are
   edge for the same value is `signal`'s). The method surface is the enforcement: a park
   write asserts (debug builds) that the previous park's funding was consumed, so a new
   park shape wired without a consume seam panics at its first park instead of leaking one
-  region per cycle. Pinned by `value::fiber::delivery::tests` (each transition, the
-  displace/discharge split, and the double-park panic).
+  region per cycle. An error park writes through the same net, so a route that ends a
+  restartable error park without consuming it panics at the next park. Pinned by
+  `value::fiber::delivery::tests` (each transition, the displace/discharge split, the
+  error-park sites, and the double-park panic).
 - **A parked TERMINAL result displaced by a resume or abort install is released as it is
   displaced.** A terminal result parked in `fiber.signal` carries the park-retain and a
   recorded `fiber-region → result-region` content edge, both counting on the fiber's
