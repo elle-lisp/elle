@@ -1,5 +1,7 @@
 # Modules
 
+<!-- audited: 2026-09-28 -->
+
 Elle's module system is built from Elle, plus one primitive: `import-file`.
 Conventions — closures, structs, keyword arguments, destructuring — provide
 the rest. No special module syntax, no export declarations, no visibility
@@ -98,8 +100,8 @@ What the closure does not return is private. `greeting` and
 `format-greeting` are not visible to the caller. Encapsulation comes from
 lexical scope, not from access modifiers.
 
-**This convention is load-bearing.** The compiler's signal projection
-system depends on the return expression being a struct literal (or a
+**The compiler's signal projection depends on this convention.** It requires
+the return expression to be a struct literal (or a
 closure whose body is a struct literal). When a file follows this
 convention, the compiler can extract a signal profile for each exported
 closure — enabling cross-file signal inference. If a file returns a
@@ -333,6 +335,11 @@ The VM tracks which files are currently being loaded. If file A imports file B w
 import: circular dependency detected for 'a.lisp'
 ```
 
+The set holds only the loads that are in progress. Every way out of a load
+releases its mark, so a file that failed — a compile error, a read failure, an
+error it raised — reports that same failure again when it is imported once
+more, and only a load that is still on the stack reads as a cycle.
+
 **Why**: `import` is a runtime primitive (compiles and executes a file). Circular dependency detection happens when the cycle is actually triggered, not preemptively. This is consistent with how the module system treats all imports as dynamic: the return value is computed at runtime, so dependency analysis is runtime-only.
 
 **Consequence**: Circular import bugs surface at runtime, not compile-time. This is acceptable because circular imports are design errors, not programming mistakes—they should never happen in correct code.
@@ -345,9 +352,9 @@ converges). Cross-file signal inference uses a different mechanism:
 
 When a file returns a struct of closures — the standard closure-as-module
 convention — the compiler extracts a signal projection: a mapping from
-keyword field names to the signals of the closures they hold. This is the
-**load-bearing convention**: signal projection depends on the file's return
-expression being a struct literal (or a closure whose body is a struct
+keyword field names to the signals of the closures they hold.
+**Signal projection depends on this convention**: the file's return
+expression must be a struct literal (or a closure whose body is a struct
 literal). Dynamic or computed return values fall back to Polymorphic.
 
 When an importing file sees `((import "std/math"))` with a literal string
@@ -377,9 +384,9 @@ boundaries.
 parameters and computation. Signal projection works because it only
 requires analyzing the return expression's shape, not executing the file.
 
-**Solution for agents**: The [MCP knowledge graph](../mcp.md) provides
+**Solution for agents**: The [MCP knowledge graph](mcp.md) provides
 complete cross-file visibility via SPARQL queries. See
-[Agent Reasoning in Elle](../analysis/agent-reasoning.md) for cross-file
+[Agent Reasoning in Elle](analysis/agent-reasoning.md) for cross-file
 reasoning patterns.
 
 
