@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-28
 //! The HIR node — its kind, the span and signal it carries, and the identity
 //! every analysis side table keys on.
 //!
@@ -387,6 +387,9 @@ impl Hir {
     /// - `Eval` allocates because its runtime region is opaque to
     ///   the caller (the callee chooses), so the result needs a name
     ///   so `emit_decrefs_for` can emit `DecrefValueRegion`.
+    /// - `Emit` allocates for the same reason: its value is the resume
+    ///   value, which `lower_emit` mints a reference for, and only a
+    ///   named slot releases it (docs/impl/anf.md).
     /// - `Intrinsic` defers to `IntrinsicOp::allocates` (currently
     ///   `Pair`, `Freeze`, `Thaw`).
     /// - `Match` allocates iff any arm's pattern would allocate at
@@ -399,6 +402,7 @@ impl Hir {
             HirKind::Lambda { .. } => true,
             HirKind::Call { .. } => true,
             HirKind::Eval { .. } => true,
+            HirKind::Emit { .. } => true,
             // `produces_call_result_region`: %put/%del/%string-push/
             // %array-push/%bytes-push are call-results (region freed by value),
             // so ANF must NAME them to give the result a slot — otherwise the
