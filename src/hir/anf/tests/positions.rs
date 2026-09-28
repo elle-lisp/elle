@@ -1,4 +1,4 @@
-// audited: 2026-09-16
+// audited: 2026-09-28
 // Which child positions the ANF lift names, and which it leaves alone.
 //
 // src/hir/anf.rs
@@ -229,5 +229,64 @@ fn match_with_rest_pattern_is_lifted() {
         matches!(&init.kind, HirKind::Match { .. }),
         "expected Match as wrapped init — got {:?}",
         init.kind
+    );
+}
+
+// ── 10. a resume value an operand consumes is named ─────────────
+
+/// The id of every `Emit` in `hir`.
+fn emit_ids(hir: &Hir) -> Vec<crate::hir::expr::HirId> {
+    let mut out = Vec::new();
+    let mut visit = |node: &Hir| {
+        if matches!(node.kind, HirKind::Emit { .. }) {
+            out.push(node.id);
+        }
+    };
+    walk_pre(hir, &mut visit);
+    out
+}
+
+#[test]
+fn emit_as_call_arg_is_named() {
+    // `(g (yield 1))`. The resume value takes the `Emit`'s place as `g`'s
+    // argument, and `lower_emit` mints a reference for it. Only a named slot
+    // releases that reference.
+    //
+    // Counter-factual: with the `Emit` unnamed the program still runs and
+    // returns the right value; the mint strands one region per resume, which
+    // no value assertion sees.
+    let (hir, _arena, _symbols) = analyze_anf("(g (emit :yield 1))");
+    let emits = emit_ids(&hir);
+    assert_eq!(emits.len(), 1, "expected exactly one emit");
+    assert!(
+        named_node_ids(&hir).contains(&emits[0]),
+        "an emit in a call argument must carry a name of its own"
+    );
+}
+
+#[test]
+fn emit_in_a_discarded_position_is_named() {
+    // `(begin (yield 1) (g 2))`. A non-last `begin` slot discards the resume
+    // value, and the name's slot is the only route its release can load.
+    let (hir, _arena, _symbols) = analyze_anf("(begin (emit :yield 1) (g 2))");
+    let emits = emit_ids(&hir);
+    assert_eq!(emits.len(), 1, "expected exactly one emit");
+    assert!(
+        named_node_ids(&hir).contains(&emits[0]),
+        "a discarded emit must carry a name of its own"
+    );
+}
+
+#[test]
+fn emit_in_a_returning_position_is_not_named() {
+    // `(fn () (yield 1))`. The body returns the resume value, and the `Return`
+    // mint funds it, so `lower_emit` takes no reference and the frame owes no
+    // release. A returning position names only an owed release.
+    let (hir, _arena, _symbols) = analyze_anf("(fn () (emit :yield 1))");
+    let emits = emit_ids(&hir);
+    assert_eq!(emits.len(), 1, "expected exactly one emit");
+    assert!(
+        !named_node_ids(&hir).contains(&emits[0]),
+        "a returned emit must stay unnamed"
     );
 }

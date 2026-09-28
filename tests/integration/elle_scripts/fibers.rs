@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-28
 // Guardfree pins for the fiber frontier: parks, resumes, error unwinds, squelch boundaries and the compiled tier.
 //
 // docs/analysis/testing.md
@@ -33,6 +33,22 @@ fn region_jit_passthrough() {
 fn region_fiber_frontier_window_uaf() {
     run_elle_script_with_args(
         "region-fiber-frontier-window-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
+// Guard — a resume value an operand consumes is named by the ANF lift, so the
+// reference `lower_emit` mints for it is released through that name's slot
+// (docs/impl/anf.md § "A resume value is named like a call result"). The release
+// is new wherever the value is an array or struct element, a call argument, or a
+// restarted raise's element. So this drives what must outlive it: a resume value
+// held across a further park, and one that outlives the fiber in the array it
+// returned. Freeing either early faults on the read — SIGSEGV under guardfree.
+// The same file gauges the leak the name closes.
+#[test]
+fn region_resume_value_operand_uaf() {
+    run_elle_script_with_args(
+        "region-resume-value-operand",
         &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
     );
 }

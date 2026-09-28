@@ -1,3 +1,8 @@
+// audited: 2026-09-28
+// Which HIR nodes `Hir::allocates` counts, and so which ones the ANF lift names.
+//
+// docs/impl/anf.md
+
 use super::*;
 use crate::hir::binding::Binding;
 use crate::hir::pattern::{HirPattern, PatternKey};
@@ -42,6 +47,20 @@ fn eval_allocates() {
         HirKind::Eval {
             expr: Box::new(nil()),
             env: Box::new(nil()),
+        },
+        Span::synthetic(),
+    );
+    assert!(e.allocates());
+}
+
+#[test]
+fn emit_allocates() {
+    // The resume value takes the `Emit`'s place, and `lower_emit` mints a
+    // reference for it that only a named slot can release.
+    let e = Hir::silent(
+        HirKind::Emit {
+            signal: crate::signals::SIG_YIELD,
+            value: Box::new(int(1)),
         },
         Span::synthetic(),
     );
