@@ -153,13 +153,15 @@ The residual is unchanged in kind: a holder escape marks by a facet no edge at
 the point replaces.
 
 Pinned by [tests/impl/region-tail-frame-exit.lisp](../../../tests/impl/region-tail-frame-exit.lisp) (the reclamation, with the
-argument-move and callee exemptions, the per-arm faces, the captured-holder faces,
-the non-self-cancelling boundary, the env-cell faces, the
-handed-back-through-the-callee faces, the forward-cell faces, the
-id-routed letrec closure whose body's tail is a branch, and the merge that
-inherits its points from the branch's entry — the `if`, `when`, `cond` and loop
-faces of the branch functionalization inserts for a reassigned local — driven as
-rows),
+argument-move and callee exemptions, the per-arm faces, the non-self-cancelling
+boundary, and the merge that inherits its points from the branch's entry — the
+`if`, `when`, `cond` and loop faces of the branch functionalization inserts for a
+reassigned local — driven as rows),
+[region-tail-frame-exit-capture.lisp](../../../tests/impl/region-tail-frame-exit-capture.lisp)
+(the captured-holder, env-cell and handed-back-through-the-callee faces),
+[region-tail-frame-exit-letrec.lisp](../../../tests/impl/region-tail-frame-exit-letrec.lisp)
+(the forward-cell faces and the id-routed letrec closure whose body's tail is a
+branch),
 the `tail-frame-exit-unused` /
 `tail-frame-exit-moved` / `tail-frame-exit-arms` / `tail-frame-exit-captured` /
 `tail-frame-exit-handback` / `tail-frame-exit-fold-driver` /

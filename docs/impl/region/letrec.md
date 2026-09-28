@@ -313,7 +313,7 @@ region: a merge MEMBER callee is absent from `cycle_tail_release`, and
 `tail_callee_defers_release` refuses every `closure_cycle_members` region. Order
 between them is immaterial — each is a decref of a `Counted` region, so the cascade
 and the direct decref commute. Pinned by the `fwd-cell-sib` row of
-[region-tail-frame-exit.lisp](../../../tests/impl/region-tail-frame-exit.lisp), the
+[region-tail-frame-exit-letrec.lisp](../../../tests/impl/region-tail-frame-exit-letrec.lisp), the
 `tail-frame-exit-fwd-cell-sib` probe in
 [the branch probes](../../../tests/impl/probe/branch.lisp), and witness (s) of
 [region-tail-frame-exit-uaf.lisp](../../../tests/impl/region-tail-frame-exit-uaf.lisp)

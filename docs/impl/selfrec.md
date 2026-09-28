@@ -305,7 +305,7 @@ live scope-exit drop is reachable and would fire ahead of the mint.
   replica is the channel rather than the deferral; both arms driven. The placement peer is
   `lir::lower::tests::release::frameexit::a_letrec_closure_under_a_branch_tail_is_replicated_into_every_arm`
   (with `…_no_arm_strands_keeps_its_release_by_id` as the decline), the leak rows are
-  [region-tail-frame-exit.lisp](../../tests/impl/region-tail-frame-exit.lisp) § (d16b)–(d16d),
+  [region-tail-frame-exit-letrec.lisp](../../tests/impl/region-tail-frame-exit-letrec.lisp) (rows h–h3),
   and the soundness witness is
   [its -uaf peer](../../tests/impl/region-tail-frame-exit-uaf.lisp) § (e17).
 - `…::self_recursive_define_with_arith_reclaims_per_call` — a `def` tail-loop recursing with
@@ -330,7 +330,7 @@ live scope-exit drop is reachable and would fire ahead of the mint.
   — the soundness half of the same admission under the UAF oracle: every returned handle
   is RE-ENTERED after the deferred release, across allocation churn that recycles a
   prematurely freed page.
-- [region-tail-frame-exit.lisp](../../tests/impl/region-tail-frame-exit.lisp) § the `def`
+- [region-tail-frame-exit-letrec.lisp](../../tests/impl/region-tail-frame-exit-letrec.lisp), the `def`
   binder — the four `def` bodies of the placement table driven as leak rows, beside the
   `letrec` faces of the same three.
 - [region-define-init-release.lisp](../../tests/impl/region-define-init-release.lisp) and

@@ -428,9 +428,11 @@ compensation used to reach at its head, got nothing. This is `self_cancelling_ru
 restriction read one step earlier, at the admission it builds on, and it is the
 same value-route line compensation's `tail` route already draws.
 
-Pinned by [tests/impl/region-branch-arm-window.lisp](../../../tests/impl/region-branch-arm-window.lisp) (the reclamation, with all
-three boundaries, the `If` face, the captured-holder face, the frame-replacing-arm
-faces and the returned-parameter faces driven as rows), the `param-used-arm` /
+Pinned by [tests/impl/region-branch-arm-window.lisp](../../../tests/impl/region-branch-arm-window.lisp) (the reclamation, with the
+loop and lambda boundaries, the `If` face and the captured-holder face driven as
+rows) and [tests/impl/region-branch-arm-tailcall.lisp](../../../tests/impl/region-branch-arm-tailcall.lisp)
+(the tail-callee boundary, the frame-replacing-arm faces and the
+returned-parameter faces), the `param-used-arm` /
 `param-used-arm-if` / `branch-arm-tailcall-sibling` / `branch-arm-return-captured`
 probes in [tests/impl/probe/branch.lisp](../../../tests/impl/probe/branch.lisp), run by the oracle dashboard (the per-op
 rates), the placement pins in `lir::lower::tests::release`
