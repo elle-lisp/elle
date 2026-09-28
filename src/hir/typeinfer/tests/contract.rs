@@ -1,4 +1,4 @@
-// audited: 2026-09-07
+// audited: 2026-09-28
 // src/hir/AGENTS.md
 // docs/intrinsics.md
 //! The prove-or-reject operand contract, and the lowering route each proven op
@@ -136,6 +136,36 @@ fn diverging_guard_narrows_the_fall_through() {
            (%add b 1))",
     )
     .expect("the diverging guard proves b on the fall-through path");
+}
+
+/// Discharge: a raise a `let` binds still diverges, because the binding runs
+/// before the body. The ANF lift gives every raise an operand consumes this
+/// shape, the raise inside a guard's taken branch included.
+///
+/// Counter-factual: reading a `let` as diverging only when its body does misses
+/// the raise in the init, and the stdlib's own guards stop proving their
+/// subjects.
+#[test]
+fn a_raise_bound_by_a_let_still_diverges() {
+    compile_result(
+        "(defn f [b] \
+           (when (%not (%int? b)) (let [e (emit :error {:message \"no\"})] e)) \
+           (%add b 1))",
+    )
+    .expect("the raise in the binding makes the guard diverge");
+}
+
+/// Reject: a `let` whose init and body both fall through does not diverge, so
+/// the guard proves nothing on the fall-through.
+#[test]
+fn a_let_that_falls_through_does_not_diverge() {
+    let err = compile_result(
+        "(defn f [b] \
+           (when (%not (%int? b)) (let [e 1] e)) \
+           (%add b 1))",
+    )
+    .expect_err("a guard whose taken branch falls through proves nothing");
+    assert!(err.contains("%add"), "error must name the op; got: {err}");
 }
 
 /// Reject, div family: the divisor must be provably nonzero — a type proof
