@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-28
 //! Where a yielded value's release lands, and which `Emit` sites yield a payload
 //! their own body releases nowhere.
 //!
@@ -139,6 +139,46 @@ fn own_parameter_yield_payload_is_not_borrowed() {
         !info.borrowed_emit_payloads.contains(&emit),
         "a body owns the parameter it was handed; borrowed_emit_payloads = {:?}, emit @{}",
         info.borrowed_emit_payloads,
+        emit.0,
+    );
+}
+
+// ── which resume values need a minted reference ─────────────────────────────
+//
+// The resume value arrives on the resumer's reference, so the frame mints one of
+// its own exactly where a binding's release will give one back
+// (docs/impl/region/park.md § "A resume value crosses counted, or not at all").
+
+#[test]
+fn a_bound_resume_value_is_minted_though_it_is_returned() {
+    // `v`'s release runs whether or not the body hands `v` back, and the `Return`
+    // marker mints the caller's reference on top of it.
+    //
+    // Counter-factual: skipping the mint because `v` is on the return frontier
+    // leaves `v`'s release consuming the resumer's reference, and the resumer's
+    // next read of its own value is a use-after-free.
+    let (hir, _arena, _symbols, info) = analyze_with_hir("(fn () (let [v (emit :yield 1)] v))");
+    let emit = find_first_emit(&hir).expect("emit present");
+    assert!(
+        info.unfunded_resume_values.contains(&emit),
+        "a bound resume value owes the mint its binding's release consumes; \
+         unfunded_resume_values = {:?}, emit @{}",
+        info.unfunded_resume_values,
+        emit.0,
+    );
+}
+
+#[test]
+fn a_returning_tail_resume_value_is_not_minted() {
+    // The body's own tail: no binding names it and no slot releases it, so a
+    // mint would strand one reference per resume.
+    let (hir, _arena, _symbols, info) = analyze_with_hir("(fn () (emit :yield 1))");
+    let emit = find_first_emit(&hir).expect("emit present");
+    assert!(
+        !info.unfunded_resume_values.contains(&emit),
+        "a returning tail's resume value has no release to pair a mint with; \
+         unfunded_resume_values = {:?}, emit @{}",
+        info.unfunded_resume_values,
         emit.0,
     );
 }

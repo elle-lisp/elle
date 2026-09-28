@@ -144,8 +144,38 @@
     (fiber/resume f)
     (fiber/resume f (fresh n))))
 
+# The body hands its resume value back, so the resumer holds it twice: its own
+# argument, and the resume result. Releasing the result must not take the
+# argument's reference, which the resumer reads afterwards.
+(defn bound-return [n]
+  (let [f (fiber/new (fn []
+                       (let [v (yield 0)]
+                         v)) |:yield|)
+        x (fresh n)]
+    (fiber/resume f)
+    (fiber/resume f x)
+    (fresh (%add n 1))
+    (get x 1)))
+
+# The same, where the returned yield is the tail of a `begin`, which the ANF lift
+# names like any other slot of it.
+(defn tail-return [n]
+  (let [f (fiber/new (fn []
+                       (begin
+                         (length "warm")
+                         (yield 0))) |:yield|)
+        x (fresh n)]
+    (fiber/resume f)
+    (fiber/resume f x)
+    (fresh (%add n 1))
+    (get x 1)))
+
 (var k 0)
 (while (%lt k 200)
+  (assert (= (bound-return k) (string "b" k))
+          "the resumer's value outlives a body that bound and returned it")
+  (assert (= (tail-return k) (string "b" k))
+          "the resumer's value outlives a body that returned it from a begin")
   (let [r (held-across-park k)]
     (assert (= (get (get r 0) 1) (string "b" k)) "element held across a park")
     (assert (= (get r 1) :x) "second element"))
