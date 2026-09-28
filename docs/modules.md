@@ -281,8 +281,8 @@ Circular includes are detected at compile time. The compiler tracks which files
 have been included (including the root file) and signals an error if a file
 appears twice:
 
-```
-include: circular dependency on 'macros.lisp'
+```text
+main.lisp:3:1: include: circular dependency on 'macros.lisp'
 ```
 
 Unlike runtime circular import detection, this happens during compilation —
@@ -317,7 +317,7 @@ execute, return. Everything else is Elle code and conventions.
 
 ## Architectural Constraints
 
-These are design choices that enable the elegance of the module system. They are constraints, not limitations.
+The module system makes four design choices, and each has a cost.
 
 ### No .lisp caching
 
@@ -342,7 +342,7 @@ more, and only a load that is still on the stack reads as a cycle.
 
 **Why**: `import` is a runtime primitive (compiles and executes a file). Circular dependency detection happens when the cycle is actually triggered, not preemptively. This is consistent with how the module system treats all imports as dynamic: the return value is computed at runtime, so dependency analysis is runtime-only.
 
-**Consequence**: Circular import bugs surface at runtime, not compile-time. This is acceptable because circular imports are design errors, not programming mistakes—they should never happen in correct code.
+**Consequence**: Circular import bugs surface at runtime, not compile-time. A circular import is a design error, and correct code has none.
 
 ### Cross-file signal inference via projection
 
@@ -394,15 +394,15 @@ reasoning patterns.
 
 | File | Role |
 |------|------|
-| `src/primitives/modules.rs` | `import-file` primitive: file I/O, compilation, execution, circular import detection, plugin caching |
-| `src/plugin.rs` | `.so` plugin loading: `dlsym`, `elle_plugin_init`, primitive registration |
-| `src/hir/analyze/forms.rs` | Qualified symbol desugaring (`a:b` → `(get a :b)`), projection lookup for cross-file signal inference |
-| `src/hir/analyze/call.rs` | Import pattern detection, compile-time squelch inference |
-| `src/hir/analyze/fileletrec.rs` | `compute_signal_projection`: extracts keyword→signal mapping from struct-returning files |
-| `src/pipeline/cache.rs` | Per-instance signal projection cache (`CompileCtx.projections`), `get_or_compile_projection` |
-| `src/reader/lexer.rs` | Qualified symbol lexing (`a:b` as single token) |
-| `src/pipeline/compile.rs` | `compile_file`: file-as-letrec compilation, `include`/`include-file` splicing, projection threading |
-| `tests/integration/projection.rs` | Signal projection and compile-time squelch tests |
-| `tests/elle/modules.lisp` | Behavioral tests for module patterns |
-| `tests/elle/include.lisp` | Behavioral tests for compile-time inclusion |
-| `tests/modules/` | Module fixtures (formatter, counter, test) |
+| [modules.rs](../src/primitives/modules.rs) | `import-file` primitive: file I/O, compilation, execution, circular import detection, plugin caching |
+| [plugin.rs](../src/plugin.rs) | `.so` plugin loading: `dlsym`, `elle_plugin_init`, primitive registration |
+| [forms.rs](../src/hir/analyze/forms.rs) | Qualified symbol desugaring (`a:b` → `(get a :b)`), projection lookup for cross-file signal inference |
+| [call.rs](../src/hir/analyze/call.rs) | Import pattern detection, compile-time squelch inference |
+| [fileletrec.rs](../src/hir/analyze/fileletrec.rs) | `compute_signal_projection`: extracts keyword→signal mapping from struct-returning files |
+| [cache.rs](../src/pipeline/cache.rs) | Per-instance signal projection cache (`CompileCtx.projections`), `get_or_compile_projection` |
+| [lexer.rs](../src/reader/lexer.rs) | Qualified symbol lexing (`a:b` as single token) |
+| [compile.rs](../src/pipeline/compile.rs) | `compile_file`: file-as-letrec compilation, `include`/`include-file` splicing, projection threading |
+| [projection.rs](../tests/integration/projection.rs) | Signal projection and compile-time squelch tests |
+| [modules.lisp](../tests/lang/modules.lisp) | Behavioral tests for module patterns |
+| [include.lisp](../tests/lang/include.lisp) | Behavioral tests for compile-time inclusion |
+| [modules/](../tests/modules) | Module fixtures (formatter, counter, test) |

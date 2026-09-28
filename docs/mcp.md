@@ -1,6 +1,6 @@
 # MCP Server
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 The Elle MCP server gives a coding assistant structured access to an Elle codebase over the Model Context Protocol.
 
@@ -350,16 +350,17 @@ gating pushes on test status.
 ### `test_run`
 
 ```json
-{"path": "tests/elle/core.lisp", "mode": "single", "jit": "off"}
+{"path": "tests/lang/core.lisp", "mode": "single"}
 ```
 
 Parameters:
 - `mode` (required) — `"smoke"` runs `make smoke`, `"test"` runs `make test`,
   and `"single"` runs one file with `$ELLE`, else `./target/debug/elle`
 - `path` — the file, required for `"single"`
-- `jit` (optional) — `"off"`, `"eager"` or `"adaptive"`. A single file gets it
-  as a command-line flag; a make target gets it as `ELLE_JIT` in the
-  environment, which the binary does not read
+- `jit` (optional) — `"off"`, `"eager"` or `"adaptive"`. A make target gets it
+  as `ELLE_JIT` in the environment, which the binary does not read. A single
+  file gets it as `--jit=0` or `--jit=1`, which `elle` refuses as an unknown
+  option ([config.md](config.md)), so a `"single"` run with `jit` set fails.
 
 The answer:
 ```json

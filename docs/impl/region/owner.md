@@ -134,7 +134,7 @@ ordered after every member allocation and before the park),
 by `runtime::tests::ownership::region_ownership_capture_back_edge_cycle_reclaims`
 (bounded flag-on beside the leaking flag-off counterfactual, panic-clean, on the
 interpreter and under the JIT), and end-to-end by the `adopt-park-*` probe family in
-[the concurrent probes](../../../tests/elle/probe/concurrent.lisp): a park inside the
+[the concurrent probes](../../../tests/impl/probe/concurrent.lisp): a park inside the
 adopt scope reclaims on the handle-drop, abort, and cancel routes alike, and the `ap-*`
 controls attribute each ingredient.
 
@@ -314,9 +314,9 @@ replayed frame that raises is not such a frame: it re-parks with the rest of its
 multi-frame chains; the member's generation bumps at the discard, bounded across repeated
 park-discard cycles), `…::discard_runs_the_abandoned_frames_release_tables` (both routes,
 against a frame whose slot the emitter never recorded), and the leak gauge
-[region-squelch-unwind.lisp](../../../tests/elle/region-squelch-unwind.lisp), with
-[region-squelch-unwind-uaf.lisp](../../../tests/elle/region-squelch-unwind-uaf.lisp)
-and the full-stdlib squelch corpus under `--trace=guardfree` as the panic-clean gate.
+[region-squelch-unwind.lisp](../../../tests/impl/region-squelch-unwind.lisp), with
+[region-squelch-unwind-uaf.lisp](../../../tests/impl/region-squelch-unwind-uaf.lisp)
+under `--trace=guardfree` as the panic-clean gate.
 
 **Exactly one reclamation path (the double-free invariant, positively).** A node member is
 `Owned`: it has no count for any other release route to reach, the inference that emits its
@@ -378,7 +378,7 @@ never left to be freed under the consumer's read. Pinned by
 `…_survives_parks_and_frees_at_completion` (a multi-frame chain: every parked frame's
 node and the fiber node reclaim), and `fiber_kill_frees_parked_and_fiber_owned`
 (cancel of a parked fiber; abort of a new one), with
-[region-fiber-cancel.lisp](../../../tests/elle/region-fiber-cancel.lisp) under `--trace=guardfree` as the
+[region-fiber-cancel.lisp](../../../tests/impl/region-fiber-cancel.lisp) under `--trace=guardfree` as the
 frees-nothing-live gate.
 
 **The free-path fiber discharge — the dropped-handle case.** A fiber abandoned **outside**
@@ -398,7 +398,7 @@ already tore down discharges nothing, and an executing (borrowed) fiber is skipp
 region cannot be dying while it runs. Pinned by
 `runtime::tests::ownership::dropped_parked_fiber_discharges_owned_state` and the
 `yield-discard`/`denied-discard`/`abort-discard` probes in
-[the concurrent probes](../../../tests/elle/probe/concurrent.lisp).
+[the concurrent probes](../../../tests/impl/probe/concurrent.lisp).
 
 **The bounded residual: a dead continuation's pending value releases.** A discarded fiber's
 parked frames still hold values whose releases live only in the continuation that will
@@ -413,7 +413,7 @@ and a parameter released through an env slot, which carries no nil stamp. This c
 bounded per discarded fiber and has no gauge of its own: the `denied-discard` probe reads
 closed ([assessment.md](../assessment.md)). A variadic callee's rest list is not in it: the
 rest parameter's slot is a value route with a receipt, so the discharge releases the list
-([region-discard-variadic-rest.lisp](../../../tests/elle/region-discard-variadic-rest.lisp)).
+([region-discard-variadic-rest.lisp](../../../tests/impl/region-discard-variadic-rest.lisp)).
 
 A **borrowed tail argument's** retain is not part of the residual. The frame mints it so
 a callee has a reference to release. That retain has one consumer per path, and a native

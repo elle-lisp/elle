@@ -1,6 +1,6 @@
 # src
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-28 -->
 
 Core interpreter and compiler crate. Implements the full Elle pipeline from source to bytecode execution.
 
@@ -11,18 +11,19 @@ Provide the complete Elle implementation:
 - Analyze code for bindings, captures, and signals
 - Lower to intermediate representations
 - Emit bytecode
-- Execute bytecode on a register-based VM
+- Execute bytecode on the VM
 - Provide built-in functions and FFI support
 
 ## Top-level files
 
 | File | Purpose |
 |------|---------|
-| `lib.rs` | Public API exports, crate documentation |
-| `main.rs` | CLI entry point (REPL, file execution, and the fmt, lint, lsp, rewrite, test, and semver subcommands) |
-| `arithmetic.rs` | Unified arithmetic operations (shared by VM and primitives) |
-| `plugin.rs` | Dynamic plugin loading for `.so` cdylib crates |
-| `path.rs` | UTF-8 path operations (wraps camino, path-clean, pathdiff) |
+| [lib.rs](lib.rs) | Public API exports, crate documentation |
+| [main.rs](main.rs) | CLI entry point (REPL, file execution, and the fmt, lint, lsp, rewrite, test, and semver subcommands) |
+| [program.rs](program.rs) | The run path `elle` and `elle-rig` share (`elle::program`): run a file or a source string, and format a gated exit and an error |
+| [arithmetic.rs](arithmetic.rs) | Unified arithmetic operations (shared by VM and primitives) |
+| [plugin.rs](plugin.rs) | Dynamic plugin loading for `.so` cdylib crates |
+| [path.rs](path.rs) | UTF-8 path operations (wraps camino, path-clean, pathdiff) |
 
 ## Module structure
 
@@ -71,9 +72,9 @@ Source locations flow through the entire pipeline: Syntax spans → HIR spans �
 
 ## Where to start
 
-1. Read `pipeline/mod.rs` — shows the full compilation flow in ~50 lines
-2. Read a test under `tests/elle/` to see the surface syntax at work
-3. Read `value/mod.rs` to understand runtime representation
+1. Read [pipeline/mod.rs](pipeline/mod.rs) — shows the full compilation flow in ~50 lines
+2. Read a test under [tests/lang](../tests/lang/AGENTS.md) to see the surface syntax at work
+3. Read [value/mod.rs](value/mod.rs) to understand runtime representation
 4. Read a failing test to understand what's expected
 5. Read the AGENTS.md in the specific module you're working on
 

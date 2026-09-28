@@ -1,5 +1,7 @@
 # JSON Support
 
+<!-- audited: 2026-09-28 -->
+
 JSON parsing and serialization for Elle. Converts between an Elle `Value`
 and JSON text. The parser and the serializer are hand-written; the module
 depends on no external JSON library.
@@ -127,7 +129,7 @@ kind, so one `catch` covers both directions.
 ## See Also
 
 - [AGENTS.md](AGENTS.md) — technical reference for LLM agents
-- [`tests/elle/prim-json.lisp`](../../../tests/elle/prim-json.lisp) — the
+- [prim-json.lisp](../../../tests/lang/prim-json.lisp) — the
   behavior tests for these primitives
-- [`src/primitives/`](../) — other built-in functions
-- [`src/value/`](../../value/) — runtime value representation
+- [primitives/](../) — other built-in functions
+- [value/](../../value/) — runtime value representation

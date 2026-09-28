@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -101,7 +101,7 @@ slot that route loads. Every other binding that names a region names the whole
 value — an alias binder is a second name for the reference the call moves, and
 hoisting its release ahead of the call would free what the callee is about to take
 over (stdlib `zip`'s `arrs`, a second name for the array an inner `let` returned).
-Pinned by [tests/elle/region-tailcall-arg-transfer.lisp](../../../tests/elle/region-tailcall-arg-transfer.lisp), whose alias case is the
+Pinned by [tests/impl/region-tailcall-arg-transfer.lisp](../../../tests/impl/region-tailcall-arg-transfer.lisp), whose alias case is the
 counter-factual for reading a leaf's rule onto a whole.
 
 **A slot comparison cannot see a value held under two slot names.** The route
@@ -141,7 +141,7 @@ owned-param release then takes the element's last one, under its own read. The
 strand is the answer: the collection is held to fiber teardown on the closure
 path, at one region per call, and the destructure keeps the release it already
 had on every other path ([anchors.md](anchors.md)). Pinned by
-[tests/elle/region-rest-pattern-slice-uaf.lisp](../../../tests/elle/region-rest-pattern-slice-uaf.lisp) (the fault) and
+[tests/impl/region-rest-pattern-slice-uaf.lisp](../../../tests/impl/region-rest-pattern-slice-uaf.lisp) (the fault) and
 `lir::lower::tests::release::restpattern` (the placement).
 
 **Whether the frame holds the region alone** — the admission, and escape is its
@@ -326,7 +326,7 @@ either.
 The exemption states its reason positively: the callee's own region keeps its place
 in the dead block because the new activation takes the release over
 (`defer_callee_release`). That is a claim about a *channel*, and it holds only where
-the channel reaches the release in question. The deferral recognises a callee whose
+the channel reaches the release in question. The deferral recognizes a callee whose
 region **demises at the call node** — the per-call local closure a body builds and
 immediately calls, whose one use is the call. A letrec **member** the body tail-calls
 does not fit that description: a sibling captures it, so its uses span the whole
@@ -356,7 +356,7 @@ region — deferring it decrements a count the frame never raised — which is t
 exclusion the demise reading makes through `suppressed_decref_regions`. A **closure-
 cycle member** is released by the merge's own channel, which already covers every
 stranding tail path of an admitted cycle ([letrec.md](letrec.md)). And the
-marking is honoured only through a **non-upvalue** reference, for the reason the arena
+marking is honored only through a **non-upvalue** reference, for the reason the arena
 channel is: a nested closure that captures the member completes its own activation
 before the enclosing letrec's later uses, so deferring there frees the region early.
 
@@ -424,6 +424,6 @@ An **owned** call (`own_params = true`, the ordinary non-tail call) is not this
 case at all: the caller keeps its reference and releases it at the argument's own
 last use, so releasing here would over-free.
 
-[tests/elle/region-collector-arg-move.lisp](../../../tests/elle/region-collector-arg-move.lisp) pins the rate for each collector kind
+[tests/impl/region-collector-arg-move.lisp](../../../tests/impl/region-collector-arg-move.lisp) pins the rate for each collector kind
 against a positional-parameter control.
 

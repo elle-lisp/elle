@@ -7,3 +7,8 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [overview.md](overview.md) — **The rig** `elle-rig` hosts the same compiler and runtime as `elle`, and configures them in ways a user build cannot.
+
+## Directories
+
+- [src/](src/AGENTS.md) — (empty)
+- [tests/](tests/AGENTS.md) — (empty)

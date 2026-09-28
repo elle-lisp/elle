@@ -1,6 +1,6 @@
 # Descriptors and workers
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-28 -->
 
 What a `port/close` retires, how it wakes the operations still holding the
 descriptor, and how the thread pool reuses a worker.
@@ -41,14 +41,14 @@ operation naming it has let its hold go.
 
 Pinned for the watcher by
 `a_watcher_freed_with_its_fibers_regions_keeps_its_descriptor_number`
-(`src/io/aio/tests/park.rs`).
+([src/io/aio/tests/descriptor.rs](../../src/io/aio/tests/descriptor.rs)).
 
-Pinned by `tests/elle/io-cancel-releases.lisp`, by
-`a_descriptor_share_holds_the_number_until_it_drops` (`src/port/tests.rs`)
+Pinned by [tests/lang/io-cancel-releases.lisp](../../tests/lang/io-cancel-releases.lisp), by
+`a_descriptor_share_holds_the_number_until_it_drops` ([src/port/tests.rs](../../src/port/tests.rs))
 for the share itself, and — for a port that goes with its fiber's regions
 rather than through a close — by
 `a_port_freed_with_its_fibers_regions_keeps_its_descriptor_number`
-(`src/io/aio/tests/park.rs`).
+([src/io/aio/tests/descriptor.rs](../../src/io/aio/tests/descriptor.rs)).
 
 ## How a close wakes the operations it retires
 
@@ -71,8 +71,8 @@ on the port, by descriptor kind:
 Unlike `io/cancel`, the close does not mark the operation cancelled: the
 worker's error completion flows back to the fiber, which resumes and can
 exit cleanly. Pinned by `closing_a_listener_ends_its_parked_pool_accept`
-(`src/io/aio/tests/net.rs`) and, end to end through two processes, by
-`tests/elle/process-accept-close.lisp`.
+([src/io/aio/tests/netend.rs](../../src/io/aio/tests/netend.rs)) and, end to end through two processes, by
+[tests/lang/process-accept-close.lisp](../../tests/lang/process-accept-close.lisp).
 
 ## How many operations run at once
 
@@ -105,12 +105,12 @@ queue, which drains as it is submitted.
 
 A worker that finishes an operation waits for another instead of exiting, so
 the next submission costs a channel send rather than a thread. `WorkerPool`
-(`threadpool/pool.rs`) is the crew and the handoffs that reach it.
+([src/io/threadpool/pool.rs](../../src/io/threadpool/pool.rs)) is the crew and the handoffs that reach it.
 What reuse buys is wall clock under contention: starting and tearing down a
 thread costs kernel work that scales with how many elle processes are doing it
 at once, while the operation itself costs the same either way.
 
-Each parked worker posts a **handoff** — a channel of its own — and a
+Each parked worker posts a **handoff** — a slot of its own — and a
 submission takes one out of the list and sends the job through it, or starts a
 thread when the list is empty. A worker leaves only by withdrawing its own
 handoff under the same lock, so a claimed worker is committed to the job it was
@@ -123,7 +123,7 @@ condition variable, not a channel, because a channel receiver spins before it
 sleeps and this wait happens once per operation. Where there are more cores
 than threads that spin is free and often saves the sleep; where there are
 fewer, it burns the cores the rest of the program is waiting for. On a
-three-core runner the channel cost the heaviest corpus files **twice the user
+three-core runner the channel cost the heaviest test files **twice the user
 CPU** they cost with no pool at all — 2.4s → 5.5s on one of them — while the
 same files on a thirty-two-core box were unchanged either way. That is the
 whole reason this is a `Condvar` and a slot rather than four lines of
@@ -153,8 +153,8 @@ reuse buys measurable rather than asserted. Two schedulers in one process can
 answer differently, so this is a parameter rather than a dialect.
 
 Pinned by `a_backend_takes_the_keepalive_it_was_given`
-(`src/io/aio/tests/backend.rs`) for the path from the argument to the crew, and
-by `tests/elle/io.lisp` § "worker keepalive" for the parameter and the forms
+([src/io/aio/tests/backend.rs](../../src/io/aio/tests/backend.rs)) for the path from the argument to the crew, and
+by [tests/lang/io.lisp](../../tests/lang/io.lisp) § "worker keepalive" for the parameter and the forms
 `io/backend` accepts.
 
 Dropping the backend drops every posted handoff, so each parked worker's wait
@@ -169,9 +169,9 @@ what a worker is started with rather than what each job does
 different mask — the macOS `EVFILT_SIGNAL` read, which must be selectable for
 delivery — puts back what it found
 (`the_macos_signal_read_blocks_again_what_it_unblocked`,
-`src/io/threadpool/tests/signals.rs`).
+[src/io/threadpool/tests/signals.rs](../../src/io/threadpool/tests/signals.rs)).
 
-Pinned by `src/io/threadpool/tests/pool.rs`: a second submission runs on the
+Pinned by [src/io/threadpool/tests/pool.rs](../../src/io/threadpool/tests/pool.rs): a second submission runs on the
 first one's thread, the next job goes to the worker that parked last, a parked
 operation delays no other submission, an idle worker retires, and a zero
 keepalive gives every operation its own thread.

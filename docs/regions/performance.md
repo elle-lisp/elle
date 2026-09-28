@@ -1,5 +1,7 @@
 # Region performance — merging and the cost model
 
+<!-- audited: 2026-09-28 -->
+
 This is the consumer's view of where region performance comes from and what you
 can and cannot affect. The implementor's account of the page pool is in
 [docs/impl/region/model.md](../impl/region/model.md) and the merge predicate in
@@ -59,7 +61,7 @@ VM instruction and claims none.
 That is the price of the wrapper's polymorphism, its runtime type checks, and
 its `:error` signal — and it is the reason
 [docs/intrinsics.md](../intrinsics.md) tells you to reach for `%add` in a hot
-loop and for `+` everywhere else. `tests/elle/region-page-recycle.lisp` pins
+loop and for `+` everywhere else. [region-page-recycle.lisp](../../tests/impl/region-page-recycle.lisp) pins
 the per-call page count, so the number above is measured rather than asserted.
 
 ## Passing arguments costs one pass over them
@@ -78,7 +80,7 @@ would free it out from under a live use. So the release step needs each
 value's occurrence count — and it takes them from one counting pass, not from
 comparing every argument with every other. `(apply f xs)` in tail position over
 a 40000-element `xs` is a 40000-step operation, not a 1.6-billion-step one
-(`tests/elle/apply-tail-linear.lisp`).
+([apply-tail-linear.lisp](../../tests/impl/apply-tail-linear.lisp)).
 
 ## What you can do
 

@@ -1,6 +1,6 @@
 # http2
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 The submodules behind [http2.lisp](../http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
 
@@ -64,7 +64,7 @@ handshake.
   deadline. So the close races the writer against a timer and aborts the
   writer when the timer wins. Joining the writer outright hands the peer
   control over when the close returns, which is the wedge
-  [h2-close-on-dead-peer.lisp](../../tests/elle/h2-close-on-dead-peer.lisp)
+  [h2-close-on-dead-peer.lisp](../../tests/lang/h2-close-on-dead-peer.lisp)
   holds shut.
 
 ## Invariants

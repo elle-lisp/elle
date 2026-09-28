@@ -1,6 +1,6 @@
 # tests/common
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Shared test helpers for the Elle test suite.
 
@@ -12,8 +12,9 @@ Provide canonical eval and setup functions so test files don't need to copy-past
 - Proptest configuration respecting `PROPTEST_CASES` env var
 - A scratch directory under the platform temp root, removed on drop
 - The documents `make doctest` runs, and the documents it must run
-- Readers of the corpus, of the Makefile and of the workflow files, for the
-  tests that check how CI dimensions a run and what it keeps
+- Readers of the two Elle suites, of the Makefile and of the workflow files,
+  for the tests that check what CI runs, how it dimensions a run, and what it
+  keeps
 
 Does NOT:
 - Run tests (that's the test harness)
@@ -110,28 +111,29 @@ This is safe because:
 
 | File | Content |
 |------|---------|
-| `mod.rs` | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, the Makefile readers (`make_var`, `make_dry_run`, `make_expand`, `makefile`), the corpus readers (`repo_root`, `corpus_files`, `declared_deadline`, `wide_patterns`, `budget_seconds`), the workflow readers (`workflow_files`, `workflow_jobs`), `paint_stack`, and `ScratchDir` |
+| `mod.rs` | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, the Makefile readers (`make_var`, `make_dry_run`, `make_dry_run_with`, `make_expand`, `makefile`), the suite readers (`repo_root`, `suite`, `suite_files`, `declared_deadline`, `wide_patterns`), the workflow readers (`workflow_files`, `workflow_jobs`, `runs_target`), `paint_stack`, and `ScratchDir` |
 | `documents.rs` | the documents `make doctest` runs (`doctest_documents`) and the documents it must run (`covered_documents`), for `doctest.rs` and `doctest_scope.rs` |
 
 ### Reading the Makefile
 
 **`make_var(name, env)`** and **`make_dry_run(target)`** answer what `make`
 itself will use: one variable's expanded value, and the commands a target will
-run. A test about how a CI pass is dimensioned reads through these rather than
-parsing the Makefile, because a parser that resolves variables, `ifdef`s and
-`$(shell …)` is a second `make` that disagrees with the first.
+run. **`make_dry_run_with(target, vars)`** sets variables on the command line
+first, the way a CI job does. A test about what a CI pass runs reads through
+these rather than parsing the Makefile, because a parser that resolves
+variables, `ifdef`s and `$(shell …)` is a second `make` that disagrees with the
+first.
 **`make_expand(name)`** is `make_var` with the failure spelled out, for a test
 that cannot proceed without the value.
 
-### Reading the corpus
+### Reading the suites
 
-**`corpus_files()`**, **`declared_deadline(path)`**, **`wide_patterns()`** and
-**`budget_seconds(budget)`** answer which files the corpus holds, which of them
-declare a deadline of their own, which families the Makefile gives a wider
-budget, and what a `timeout` argument is as a number. Two test files ask those
-questions — one about the per-file passes, one about the runner — and they exist
-to check that the two budgets agree, which a second copy of the readers would
-quietly undermine.
+**`suite(dir)`** answers the files a suite runs, the `.lisp` files at the top of
+`tests/lang` or `tests/impl`, and **`suite_files()`** answers both.
+**`declared_deadline(path)`** reads the deadline a file gives itself, and
+**`wide_patterns()`** the families the Makefile gives a wider budget. Several
+test files ask those questions, and a second copy of a reader is a second
+answer.
 
 **`paint_stack(pattern, depth)`** fills stack frames with a byte pattern, so a
 determinism test can prove an artifact carries none of what a construction
@@ -146,9 +148,10 @@ hardcoded `/tmp`; `tests/integration/scratch.rs` fails the build over it.
 **`workflow_files()`** answers every file under `.github/workflows`, and
 **`workflow_jobs(text)`** splits one into (name, body) pairs with the comment
 lines dropped — a job that discusses a command it does not run must not read as
-a job that runs it. `workflows.rs` asks what the gate waits for and
-`run_artifacts.rs` asks what a corpus job leaves behind, so the reading lives
-here rather than twice.
+a job that runs it. **`runs_target(body, target)`** asks whether a job runs one
+make target, and not a longer one it prefixes. `workflows.rs` asks what the gate
+waits for and `run_artifacts.rs` asks what a suite job leaves behind, so the
+reading lives here rather than twice.
 
 ## Invariants
 

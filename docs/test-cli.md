@@ -56,7 +56,7 @@ to an agent in specific, mechanical ways:
    that the *first* run already had and threw away.
 
 3. **Metadata lives out-of-band.** Which tiers a test supports and why it's
-   skipped live in `Makefile` grep patterns (`ELLE_SKIP_VM`, `WASM_SKIP`, …),
+   skipped live in `Makefile` grep patterns (`ELLE_SKIP_FFI`, `WASM_SKIP`, …),
    decoupled from the test. [`AGENTS.md`](../AGENTS.md) declares "no skip lists"
    as policy while the Makefile carries them.
 
@@ -155,13 +155,12 @@ nothing else, which reads as a slow runner rather than as the stall it found.
 So the budget follows the path, not the run. `--wide PATTERN` names a path
 substring, and a path holding any named substring gives its forms
 `--wide-timeout MS` instead of `--timeout MS`. The [`Makefile`](../Makefile)
-already writes that family list down for the one-process-per-file passes; it
-names the families once and hands the same list to both budgets, so a family
-added there widens in both.
+names the families once, in `WIDE_FAMILIES`, and every suite batch passes the
+same list as `--wide` flags, so a family added there widens in every pass.
 
 `--budget` answers rather than runs. It prints the budget each named path would
 get, in milliseconds, one path per line, and exits zero without touching the
-session store. [budget.rs](../tests/integration/budget.rs) reads the runner's
+session store. [runner_budget.rs](../tests/integration/runner_budget.rs) reads the runner's
 own selector through it rather than restating the rule in Rust.
 
 ### A run recorded elsewhere reads like a local one
@@ -279,8 +278,8 @@ from ([test-store](test-store.md) § The boot fingerprint).
 - `(clock/cpu)` granularity and whether per-form deltas are meaningful once
   the JIT has compiled a form (it may run in sub-microsecond territory).
   Decide whether to record CPU per-form, per-file, or only run-level.
-- Concurrency: the current harness gets parallelism from GNU `parallel` across
-  files. The new runner parallelizes across forms/files internally (worker
+- Concurrency: the suite targets get parallelism from `xargs -P` over batches
+  of files. The runner parallelizes across forms/files internally (worker
   threads, [test-runner](test-runner.md)) while keeping SQLite writes
   serialized (single writer, WAL).
 - The `%assert` intrinsic's elision rules: when may the analyzer drop the

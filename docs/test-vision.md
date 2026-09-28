@@ -54,7 +54,7 @@ Dev boxes, CI, and fleet workers then append to one history.
 ### One scheduler
 
 `elle test` schedules everything. The oracle, plumb, the guardfree family, and
-the per-file passes are runs it owns, and their verdicts land in the same DB.
+every suite pass are runs it owns, and their verdicts land in the same DB.
 The Makefile keeps `make smoke` as the entry point, and it names each suite's
 files and each rig profile rather than a matrix of passes.
 
@@ -79,8 +79,8 @@ no verdicts, the same shape as the oracle's `@dual-read` table.
 The Makefile already tells people to "read the budget from a timed run, never
 from a number written here". The runner has the timed runs, so it applies the
 rule itself: a form's budget is a multiple of its own recorded wall time, with
-a floor at the default for new forms. `WIDE_FILES`, `DOCTEST_TIMEOUT`, and
-`PLUGIN_TIMEOUT` are deleted. A file that asserts its own deadline keeps doing
+a floor at the default for new forms. `WIDE_FAMILIES`, `WIDE_TIMEOUT_MS`,
+`DOCTEST_TIMEOUT`, and `PLUGIN_TIMEOUT` are deleted. A file that asserts its own deadline keeps doing
 so in ordinary code; the harness budget is the backstop.
 
 ### The suites stay plain Elle
@@ -110,8 +110,8 @@ The fingerprint is in: every run records one ([test-store](test-store.md)).
 What is missing is the lookup that spends it.
 
 Under this key, a compiler change moves the fingerprint and every cached
-result misses, so the full corpus re-runs. A change to one corpus file misses
-only its closure. `--changed` becomes a cache lookup with no impact heuristic
+result misses, so both suites re-run. A change to one suite file misses only
+its closure. `--changed` becomes a cache lookup with no impact heuristic
 inside it.
 
 The rule for every derived signal: **derived impact may reorder work; only

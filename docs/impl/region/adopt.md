@@ -1,6 +1,6 @@
 # Ownership adopts and the root's lifetime obligation
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 The owner edges no store site names, the capture and funnel adopts, and the lifetime obligation a root's single demise must meet.
 
@@ -51,7 +51,7 @@ captured binding is materialized (`ownership::capture`):
   `capture_containment_edges` skips the capture and `compute_adopt_edges`'s `adoptable_cell`
   refuses its `cell ⊇ content` edge — which the walk still records (the cell holds *a*
   content) for external-uniqueness counting — and the content reclaims on the per-region-RC
-  baseline. Pinned by `region_capture_cell_loop_uaf_ownership` (the guardfree witness) and
+  baseline. Pinned by [region-capture-cell-loop-uaf.lisp](../../../tests/impl/region-capture-cell-loop-uaf.lisp) (the guardfree witness) and
   `region::infer::tests::adopt::{capture_edge_skips_restorable_cell_admits_immutable_in_one_clique,
   restorable_compiled_cell_records_content_edge_but_is_not_adopted}`.
 
@@ -59,7 +59,7 @@ A mutually-recursive `letrec` closure **cycle** (each closure holds the other's 
 cell) is a *cyclic* clique, not a rooted subtree, so it is reclaimed by the closure-cycle
 **MERGE** ([letrec.md](letrec.md)), which collapses the SCC ∪ its cells onto one
 arena before this pass — never by this capture-adopt path (the `recur-local-mutual` and
-`recur-local-self` probes in [the tail-call probes](../../../tests/elle/probe/tailcall.lisp)
+`recur-local-self` probes in [the tail-call probes](../../../tests/impl/probe/tailcall.lisp)
 read closed). The capture-adopt path serves the *acyclic*
 rooted clique above.
 
@@ -161,10 +161,10 @@ state discharges on the free path ([owner.md](owner.md)). The
 runtime backstop is a debug assert at `RegionStore::adopt_region`: an adopted
 region's pool holds no live `Fiber` object. Pinned by
 `region::infer::tests::adopt::owned_subtree_refuses_fiber_member` (beside its admitting
-`@array` twin) and the guardfree fixture pin `region_fiber_exhume_uaf`
-([region-fiber-exhume-uaf.lisp](../../../tests/integration/fixtures/region-fiber-exhume-uaf.lisp));
-[fibers.lisp](../../../tests/elle/fibers.lisp) (the propagate child-chain reads) and
-[grpc.lisp](../../../tests/elle/grpc.lisp) exercise the class under the full
+`@array` twin) and the guardfree witness
+[region-fiber-exhume-uaf.lisp](../../../tests/impl/region-fiber-exhume-uaf.lisp);
+[fibers.lisp](../../../tests/lang/fibers.lisp) (the propagate child-chain reads) and
+[grpc.lisp](../../../tests/lang/grpc.lisp) exercise the class under the full
 scheduler.
 
 ## The lifetime obligation the root carries
@@ -223,7 +223,7 @@ store-adopted member's decref hits the still-frozen
 `Owned` region — a no-op — because it is emitted before the root's drop. The reference
 for the inverted-order double-free it prevents is a test, never this prose:
 `lir::lower::tests::release::store_adopted_member_release_precedes_owner_in_shared_bucket`
-(the emit-order pin), `region_array_push_pair_loop_uaf` (the guardfree witness), and
+(the emit-order pin), [region-array-push-pair-loop-uaf.lisp](../../../tests/impl/region-array-push-pair-loop-uaf.lisp) (the guardfree witness), and
 `runtime::tests::ownership::region_ownership_pair_pushed_into_let_bound_array_in_loop_reclaims`
 (bounded + panic-clean).
 
@@ -298,7 +298,7 @@ Pinned by `region::infer::tests::borrow::{opaque_call_result_refuses_the_adopt,
 read_out_of_an_opaque_call_result_refuses_the_adopt,
 read_out_of_a_funnel_result_refuses_the_adopt, container_read_is_not_recorded_as_a_result_alias,
 fresh_call_result_records_no_alias}` with their admitting twin, and by the guardfree
-witness `region_call_result_alias_uaf`.
+witness [region-call-result-alias-uaf.lisp](../../../tests/impl/region-call-result-alias-uaf.lisp).
 
 An **opcode** read (`%get`/`%first`/`%rest`) is a different problem, not this one: it takes
 no retain at all, so the borrow has no RC protection with or without adoption, and what
@@ -308,9 +308,9 @@ source: it *extracts* the element from the subtree (`extract_owned_region`), so 
 is no longer interior and the container is not borrowed from. Pinned by
 `region::infer::tests::borrow` (the refusal and its admitting twin),
 `lir::lower::tests::release::container_read_alias_release_precedes_container_in_shared_bucket`,
-and the guardfree witness `region_container_read_borrow_uaf`; the sibling face — a read
+and the guardfree witness [region-container-read-borrow-uaf.lisp](../../../tests/impl/region-container-read-borrow-uaf.lisp); the sibling face — a read
 result that *escapes* — is escape's, not this pass's ([escape.md](../escape.md), pinned by
-`region_container_read_escape_uaf`).
+[region-container-read-escape-uaf.lisp](../../../tests/impl/region-container-read-escape-uaf.lisp)).
 
 ## Why this is hybrid, and where RC remains
 

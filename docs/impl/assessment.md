@@ -1,6 +1,6 @@
 # The region roadmap
 
-<!-- audited: 2026-09-26 -->
+<!-- audited: 2026-09-28 -->
 
 The region system's plan of work: the state gauges, the fix-selection
 discipline, the measured dead ends, and the open work in order.
@@ -40,11 +40,12 @@ CI, which take hours rather than about thirty minutes — pass `ELLE`,
   `--trace=guardfree` under the full stdlib is the only trustworthy UAF
   oracle — plain-VM green is not evidence, and neither is a tight leak rate.
   The `region-*-uaf` files in
-  [tests/impl](../../tests/impl/overview.md) are the pinned corpus: each arms
+  [tests/impl](../../tests/impl/overview.md) are the pinned set: each arms
   the oracle in its sidecar, and `make smoke-impl` runs every one as its own
   child.
-- **The corpus smoke is a real third gauge, not a formality.** Oracle-green
-  and guardfree-green together still admit a corpus over-free no pin covers.
+- **The language suite is a real third gauge, not a formality.** Oracle-green
+  and guardfree-green together still admit an over-free that no pin covers
+  and a language test reaches.
   `make smoke-lang` batches the language suite so a killed batch fails loud. Never
   read a batched suite's exit through a pipe (`| tail` reports the pipe's
   exit); use `elle test --summary` or the run DB.
@@ -55,8 +56,8 @@ lowered — or its probe block deleted — in the same change.
 
 ### The resting state
 
-**Every declared probe is closed.** Both dashboards — [oracle.lisp](../../tests/elle/oracle.lisp)
-and the io [plumb.lisp](../../tests/elle/plumb.lisp) — read zero open defects, so the ledgers' own burndown is
+**Every declared probe is closed.** Both dashboards — [oracle.lisp](../../tests/impl/oracle.lisp)
+and the io [plumb.lisp](../../tests/impl/plumb.lisp) — read zero open defects, so the ledgers' own burndown is
 empty and every probe in them is a closed control: regression insurance for a
 settled mechanism, not work. That is not "leaks are gone": the ratchet
 asserts nothing regressed, over the shapes somebody wrote a probe for. The
@@ -72,7 +73,7 @@ self-test. A block-local accumulator is not genuine growth — it frees at the
 block's return; only a module-level sink is.
 
 **The h2 per-request rate reads zero.**
-[h2-stress-scoped.lisp](../../tests/elle/h2-stress-scoped.lisp) holds the ceiling,
+[h2-stress-scoped.lisp](../../tests/impl/h2-stress-scoped.lisp) holds the ceiling,
 shrink-only, at two request counts; the merge-inherits-its-entry and
 break-relocation mechanisms keep it there
 ([region/replicate.md](region/replicate.md)). The subject stays live even at
@@ -81,11 +82,11 @@ this mechanism came from, and its own gauge-live sink is what says a green
 ceiling is the loop reclaiming rather than the gauge dying.
 
 **Direct gauges live outside the dashboards**, all of the ledger's own kind:
-[region-error-unwind.lisp](../../tests/elle/region-error-unwind.lisp) (the error exit's release tables),
-[region-squelch-unwind.lisp](../../tests/elle/region-squelch-unwind.lisp) (the same tables at a squelch/attune boundary),
-[region-boundary-park.lisp](../../tests/elle/region-boundary-park.lisp) (what the park itself owes there),
-[region-tail-deferred-exits.lisp](../../tests/elle/region-tail-deferred-exits.lisp) (the deferred tail-call set across all four
-exits), and [region-break-loop-replica.lisp](../../tests/elle/region-break-loop-replica.lisp) (the release the breaking
+[region-error-unwind.lisp](../../tests/impl/region-error-unwind.lisp) (the error exit's release tables),
+[region-squelch-unwind.lisp](../../tests/impl/region-squelch-unwind.lisp) (the same tables at a squelch/attune boundary),
+[region-boundary-park.lisp](../../tests/impl/region-boundary-park.lisp) (what the park itself owes there),
+[region-tail-deferred-exits.lisp](../../tests/impl/region-tail-deferred-exits.lisp) (the deferred tail-call set across all four
+exits), and [region-break-loop-replica.lisp](../../tests/impl/region-break-loop-replica.lisp) (the release the breaking
 iteration owes). A shape with a direct gauge needs no dashboard probe; what
 it needs is to be run, which `make smoke-impl` does.
 
@@ -165,7 +166,7 @@ at 0 forever. The ledger shrinks as classes close.
   an uncounted borrow the solver never named. The same-node retain
   requirement and the escape admission on the branch-arm window are required
   ([region/compensate.md](region/compensate.md)). Neither failure shows in
-  the guardfree pins — both surface only in the corpus, one with the JIT
+  the guardfree pins — both surface only in the suites, one with the JIT
   eager.
 - **Relocating an existing instruction does not waive the count argument.**
   On the path the release did not previously run, it is a new release at
@@ -187,7 +188,7 @@ at 0 forever. The ledger shrinks as classes close.
   its op.
 - **Attribute by decomposition, not resemblance.** A shape that looks like a
   known family is not a member of it; the only settling test is removing one
-  ingredient and re-measuring. Four reading rules the corpus keeps demanding:
+  ingredient and re-measuring. Four reading rules the probes keep demanding:
   - Vary the shape's bindings, not only its ops — a name that merely reads a
     value can decide whether a whole model applies to it.
   - A rate flat in input size and keyed on which arm runs is a placement
@@ -203,12 +204,13 @@ at 0 forever. The ledger shrinks as classes close.
   count. Where removing `freeze` moves a rate it does so by changing which
   arm wins the `decref_point` max. Do not build move-consumption for it.
 - **A closed leak routinely exposes a latent over-free.** Closing a leak runs
-  a free path that never executed before, so run the batched corpus smoke and
-  the guardfree family per landing. Budget for the other face too, which no
-  region gauge sees: a leaked region can be the only thing holding an OS
-  resource open, so freeing it hands a descriptor number back
-  ([io.lisp](../../tests/elle/io.lisp)). Run the io, fiber, and posix corpus files, not only
-  the region ones.
+  a free path that never executed before, so run the language suite and the
+  guardfree family per landing. The exits a fix most recently reached — a
+  park's discharge, a discard, a squelch boundary — are the ones with the
+  fewest probes. Budget for the other face too, which no region gauge sees: a
+  leaked region can be the only thing holding an OS resource open, so freeing
+  it hands a descriptor number back ([io.lisp](../../tests/lang/io.lisp)). Run
+  the io, fiber and posix files of both suites, not only the region ones.
 - **Do not chase the may-store clique further; it is discharged — but a
   `Mixed` declaration is never free.** The `Unknown` census over the
   canonical tables is held empty by a build test, the fiber value installers
@@ -234,7 +236,7 @@ first when one appears again — it is always the cheapest close on the board.
 
 **Dissolution** (the mission's third leg) is realized by HOF-chain loop
 fusion; [dissolution.md](dissolution.md) is the spec, and the seams to read
-before widening are under [src/hir/typeinfer/fuse/](../../src/hir/typeinfer/fuse.rs): the pipeline builder
+before widening are under [src/hir/typeinfer/fuse/](../../src/hir/typeinfer/fuse): the pipeline builder
 (`build.rs`), the legality gate (`chain.rs`), and the clone whitelist
 (`collect.rs`), each with its decline pins in `fuse::tests`.
 
@@ -243,7 +245,7 @@ The pipeline carries every array arm the stdlib has — `map`,
 scalar terminals — with the capture gate closed (a call-site lambda literal
 may capture; only a cloned template must be non-capturing). Dissolution is a
 **realization** goal, not a leak goal: gauged by cumulative allocation counts
-(the `dissolution-*.lisp` corpus), with the leak oracle only a non-regression
+(the `dissolution-*.lisp` files), with the leak oracle only a non-regression
 check and soundness pinned by the `region-*-fuse-uaf.lisp` family. Widening
 it is gauged by a new allocation-count subject per op admitted, never by an
 oracle re-pin.
@@ -254,7 +256,7 @@ element the closure the pass exists to dissolve, so every counter advances by
 the raw `%add` opcode ([dissolution.md](dissolution.md)). The loop the pass emits is code like any other and can carry the
 very cost it was written to remove.
 
-**Hand-dissolution of F1a is exhausted for the probed corpus.** What was left
+**Hand-dissolution of F1a is exhausted for the probed shapes.** What was left
 under those probes decomposed into F5 strands, so a new hand-rewrite needs an
 explicit reason. F1a has no probe at all — the ephemeral copy-scratch the
 model describes still has no gauge of its own, so a new F1a fix needs a new
@@ -326,7 +328,7 @@ probes port to each tier on a build that carries it. MLIR-CPU is bounded by
 construction; WASM is the named program-duration over-keep, pinned
 shrink-only in `wasm::tests`, its close unscheduled until the tier carries
 production workloads. **SPIR-V device arenas remain unmeasured** — that
-needs a GPU runtime beside the corpus. Do not build GPU offload on the
+needs a GPU runtime beside the suites. Do not build GPU offload on the
 device-arena claim until it lands.
 
 ## Costs and risks to budget
@@ -334,15 +336,7 @@ device-arena claim until it lands.
 - Adoption is the O(members) fallback and the mission promises no runtime
   cost; prefer MERGE and dissolution wherever a static slot can name the
   region.
-- Deferred release needs a within-activation gauge — the per-op oracle alone
-  false-greens it.
 - A green dashboard is the resting state, so it discriminates nothing. A task
   that claims to close something must show its own direct gauge failing
   first; re-running the dashboard is the non-regression half and never the
   proof.
-- A closed leak routinely exposes a latent over-free, and the exits this most
-  recently reached — a park's discharge, a discard, a squelch boundary — are
-  the ones with the fewest probes. Run the fiber, io and posix corpus files
-  per landing, not only the region ones.
-- Run all three gauges on every task; keep the by-design probes open; re-ask
-  the compensation locus before adding a gate.
