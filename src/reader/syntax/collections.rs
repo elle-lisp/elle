@@ -4,38 +4,70 @@
 
 use super::super::token::{OwnedToken, SourceLoc};
 use super::{OpenFormKind, SyntaxReader};
-use crate::syntax::{Syntax, SyntaxKind};
+use crate::syntax::{SeqCtor, Syntax, SyntaxKind};
 
 impl SyntaxReader {
+    /// Read one collection: skip its opening token, read elements until
+    /// `close`, and build the node with `make`.
+    ///
+    /// The collection is on `open_forms` while its elements are read, so an
+    /// unterminated-input error names the outermost collection still open and
+    /// counts all of them. Every exit truncates `open_forms` to the depth it
+    /// had on entry, so an error inside the collection leaves nothing behind
+    /// for the next read to blame.
+    fn read_delimited(
+        &mut self,
+        kind: OpenFormKind,
+        close: OwnedToken,
+        make: SeqCtor,
+        start_loc: &SourceLoc,
+        start_boff: usize,
+    ) -> Result<Syntax, String> {
+        let depth = self.open_forms.len();
+        self.open_form(kind, start_loc);
+        self.advance();
+        let result = self.read_elements(close, make, start_loc, start_boff);
+        self.open_forms.truncate(depth);
+        result
+    }
+
+    fn read_elements(
+        &mut self,
+        close: OwnedToken,
+        make: SeqCtor,
+        start_loc: &SourceLoc,
+        start_boff: usize,
+    ) -> Result<Syntax, String> {
+        let mut elements = Vec::new();
+        loop {
+            match self.current() {
+                None => return Err(self.unterminated_collection()),
+                Some(token) if *token == close => {
+                    let end = self.current_byte_offset() + self.current_length();
+                    self.advance();
+                    let span = self.make_span(start_boff, end, start_loc);
+                    return Ok(Syntax::new(make(self.arena.nodes(&elements)), span));
+                }
+                Some(OwnedToken::Comment(_)) => {
+                    self.advance();
+                }
+                _ => elements.push(self.read()?),
+            }
+        }
+    }
+
     pub(super) fn read_set(
         &mut self,
         start_loc: &SourceLoc,
         start_boff: usize,
     ) -> Result<Syntax, String> {
-        self.open_form(OpenFormKind::Set, start_loc);
-        self.advance(); // skip opening |
-        let mut elements = Vec::new();
-
-        loop {
-            match self.current() {
-                None => return Err(self.unterminated_collection()),
-                Some(OwnedToken::Pipe) => {
-                    let end = self.current_byte_offset() + self.current_length();
-                    self.advance();
-                    self.close_form();
-                    let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(
-                        SyntaxKind::Set(self.arena.nodes(&elements)),
-                        span,
-                    ));
-                }
-                Some(OwnedToken::Comment(_)) => {
-                    self.advance();
-                    continue;
-                }
-                _ => elements.push(self.read()?),
-            }
-        }
+        self.read_delimited(
+            OpenFormKind::Set,
+            OwnedToken::Pipe,
+            SyntaxKind::Set,
+            start_loc,
+            start_boff,
+        )
     }
 
     pub(super) fn read_set_mut(
@@ -43,30 +75,13 @@ impl SyntaxReader {
         start_loc: &SourceLoc,
         start_boff: usize,
     ) -> Result<Syntax, String> {
-        self.open_form(OpenFormKind::Set, start_loc);
-        self.advance(); // skip opening @|
-        let mut elements = Vec::new();
-
-        loop {
-            match self.current() {
-                None => return Err(self.unterminated_collection()),
-                Some(OwnedToken::Pipe) => {
-                    let end = self.current_byte_offset() + self.current_length();
-                    self.advance();
-                    self.close_form();
-                    let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(
-                        SyntaxKind::SetMut(self.arena.nodes(&elements)),
-                        span,
-                    ));
-                }
-                Some(OwnedToken::Comment(_)) => {
-                    self.advance();
-                    continue;
-                }
-                _ => elements.push(self.read()?),
-            }
-        }
+        self.read_delimited(
+            OpenFormKind::Set,
+            OwnedToken::Pipe,
+            SyntaxKind::SetMut,
+            start_loc,
+            start_boff,
+        )
     }
 
     pub(super) fn read_bytes(
@@ -74,29 +89,13 @@ impl SyntaxReader {
         start_loc: &SourceLoc,
         start_boff: usize,
     ) -> Result<Syntax, String> {
-        self.open_form(OpenFormKind::Bytes, start_loc);
-        self.advance(); // skip b[
-        let mut elements = Vec::new();
-        loop {
-            match self.current() {
-                None => return Err(self.unterminated_collection()),
-                Some(OwnedToken::RightBracket) => {
-                    let end = self.current_byte_offset() + self.current_length();
-                    self.advance();
-                    self.close_form();
-                    let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(
-                        SyntaxKind::Bytes(self.arena.nodes(&elements)),
-                        span,
-                    ));
-                }
-                Some(OwnedToken::Comment(_)) => {
-                    self.advance();
-                    continue;
-                }
-                _ => elements.push(self.read()?),
-            }
-        }
+        self.read_delimited(
+            OpenFormKind::Bytes,
+            OwnedToken::RightBracket,
+            SyntaxKind::Bytes,
+            start_loc,
+            start_boff,
+        )
     }
 
     pub(super) fn read_bytes_mut(
@@ -104,29 +103,13 @@ impl SyntaxReader {
         start_loc: &SourceLoc,
         start_boff: usize,
     ) -> Result<Syntax, String> {
-        self.open_form(OpenFormKind::Bytes, start_loc);
-        self.advance(); // skip @b[
-        let mut elements = Vec::new();
-        loop {
-            match self.current() {
-                None => return Err(self.unterminated_collection()),
-                Some(OwnedToken::RightBracket) => {
-                    let end = self.current_byte_offset() + self.current_length();
-                    self.advance();
-                    self.close_form();
-                    let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(
-                        SyntaxKind::BytesMut(self.arena.nodes(&elements)),
-                        span,
-                    ));
-                }
-                Some(OwnedToken::Comment(_)) => {
-                    self.advance();
-                    continue;
-                }
-                _ => elements.push(self.read()?),
-            }
-        }
+        self.read_delimited(
+            OpenFormKind::Bytes,
+            OwnedToken::RightBracket,
+            SyntaxKind::BytesMut,
+            start_loc,
+            start_boff,
+        )
     }
 
     pub(super) fn read_list(
@@ -134,36 +117,13 @@ impl SyntaxReader {
         start_loc: &SourceLoc,
         start_boff: usize,
     ) -> Result<Syntax, String> {
-        self.open_form(OpenFormKind::List, start_loc);
-        self.advance(); // skip (
-        let mut elements = Vec::new();
-
-        loop {
-            match self.current() {
-                None => return Err(self.unterminated_collection()),
-                Some(OwnedToken::RightParen) => {
-                    let end = self.current_byte_offset() + self.current_length();
-                    self.advance();
-                    self.close_form();
-                    let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(
-                        SyntaxKind::List(self.arena.nodes(&elements)),
-                        span,
-                    ));
-                }
-                Some(OwnedToken::Comment(_)) => {
-                    self.advance();
-                    continue;
-                }
-                Some(OwnedToken::Pipe) => {
-                    let set_loc = self.current_location();
-                    let set_boff = self.current_byte_offset();
-                    elements.push(self.read_set(&set_loc, set_boff)?);
-                    continue;
-                }
-                _ => elements.push(self.read()?),
-            }
-        }
+        self.read_delimited(
+            OpenFormKind::List,
+            OwnedToken::RightParen,
+            SyntaxKind::List,
+            start_loc,
+            start_boff,
+        )
     }
 
     pub(super) fn read_array(
@@ -171,36 +131,13 @@ impl SyntaxReader {
         start_loc: &SourceLoc,
         start_boff: usize,
     ) -> Result<Syntax, String> {
-        self.open_form(OpenFormKind::Array, start_loc);
-        self.advance(); // skip [
-        let mut elements = Vec::new();
-
-        loop {
-            match self.current() {
-                None => return Err(self.unterminated_collection()),
-                Some(OwnedToken::RightBracket) => {
-                    let end = self.current_byte_offset() + self.current_length();
-                    self.advance();
-                    self.close_form();
-                    let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(
-                        SyntaxKind::Array(self.arena.nodes(&elements)),
-                        span,
-                    ));
-                }
-                Some(OwnedToken::Comment(_)) => {
-                    self.advance();
-                    continue;
-                }
-                Some(OwnedToken::Pipe) => {
-                    let set_loc = self.current_location();
-                    let set_boff = self.current_byte_offset();
-                    elements.push(self.read_set(&set_loc, set_boff)?);
-                    continue;
-                }
-                _ => elements.push(self.read()?),
-            }
-        }
+        self.read_delimited(
+            OpenFormKind::Array,
+            OwnedToken::RightBracket,
+            SyntaxKind::Array,
+            start_loc,
+            start_boff,
+        )
     }
 
     pub(super) fn read_struct(
@@ -208,38 +145,17 @@ impl SyntaxReader {
         start_loc: &SourceLoc,
         start_boff: usize,
     ) -> Result<Syntax, String> {
-        self.open_form(OpenFormKind::Struct, start_loc);
-        self.advance(); // skip {
-        let mut elements = Vec::new();
-
-        loop {
-            match self.current() {
-                None => return Err(self.unterminated_collection()),
-                Some(OwnedToken::RightBrace) => {
-                    let end = self.current_byte_offset() + self.current_length();
-                    self.advance();
-                    self.close_form();
-                    let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(
-                        SyntaxKind::Struct(self.arena.nodes(&elements)),
-                        span,
-                    ));
-                }
-                Some(OwnedToken::Comment(_)) => {
-                    self.advance();
-                    continue;
-                }
-                Some(OwnedToken::Pipe) => {
-                    let set_loc = self.current_location();
-                    let set_boff = self.current_byte_offset();
-                    elements.push(self.read_set(&set_loc, set_boff)?);
-                    continue;
-                }
-                _ => elements.push(self.read()?),
-            }
-        }
+        self.read_delimited(
+            OpenFormKind::Struct,
+            OwnedToken::RightBrace,
+            SyntaxKind::Struct,
+            start_loc,
+            start_boff,
+        )
     }
 
+    /// `@` before `[`, `{` or a string: the mutable form of that literal. The
+    /// node's span starts at the `@`.
     pub(super) fn read_list_sugar(
         &mut self,
         start_loc: &SourceLoc,
@@ -248,62 +164,21 @@ impl SyntaxReader {
         self.advance(); // skip @
 
         match self.current() {
-            Some(OwnedToken::LeftBracket) => {
-                // @[...] produces an array literal
-                self.open_form(OpenFormKind::Array, start_loc);
-                self.advance(); // skip [
-                let mut elements = Vec::new();
-
-                loop {
-                    match self.current() {
-                        None => return Err(self.unterminated_collection()),
-                        Some(OwnedToken::RightBracket) => {
-                            let end = self.current_byte_offset() + self.current_length();
-                            self.advance();
-                            self.close_form();
-                            let span = self.make_span(start_boff, end, start_loc);
-                            return Ok(Syntax::new(
-                                SyntaxKind::ArrayMut(self.arena.nodes(&elements)),
-                                span,
-                            ));
-                        }
-                        Some(OwnedToken::Comment(_)) => {
-                            self.advance();
-                            continue;
-                        }
-                        _ => elements.push(self.read()?),
-                    }
-                }
-            }
-            Some(OwnedToken::LeftBrace) => {
-                // @{...} produces a table literal
-                self.open_form(OpenFormKind::Struct, start_loc);
-                self.advance(); // skip {
-                let mut elements = Vec::new();
-
-                loop {
-                    match self.current() {
-                        None => return Err(self.unterminated_collection()),
-                        Some(OwnedToken::RightBrace) => {
-                            let end = self.current_byte_offset() + self.current_length();
-                            self.advance();
-                            self.close_form();
-                            let span = self.make_span(start_boff, end, start_loc);
-                            return Ok(Syntax::new(
-                                SyntaxKind::StructMut(self.arena.nodes(&elements)),
-                                span,
-                            ));
-                        }
-                        Some(OwnedToken::Comment(_)) => {
-                            self.advance();
-                            continue;
-                        }
-                        _ => elements.push(self.read()?),
-                    }
-                }
-            }
+            Some(OwnedToken::LeftBracket) => self.read_delimited(
+                OpenFormKind::Array,
+                OwnedToken::RightBracket,
+                SyntaxKind::ArrayMut,
+                start_loc,
+                start_boff,
+            ),
+            Some(OwnedToken::LeftBrace) => self.read_delimited(
+                OpenFormKind::Struct,
+                OwnedToken::RightBrace,
+                SyntaxKind::StructMut,
+                start_loc,
+                start_boff,
+            ),
             Some(OwnedToken::String(s)) => {
-                // @"..." is a mutable string literal
                 let string_val = self.arena.text(s);
                 let end = self.current_byte_offset() + self.current_length();
                 self.advance(); // skip the string token

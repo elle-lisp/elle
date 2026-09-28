@@ -6,7 +6,7 @@
 //! - Intern symbols (leaves them as strings)
 //! - Desugar quote forms to lists
 //!
-//! This is a parallel implementation to the existing Value-producing parser.
+//! `Reader` in parser.rs parses the same tokens to `Value`.
 //! docs/impl/reader.md
 
 use super::token::{OwnedToken, SourceLoc};
@@ -18,12 +18,8 @@ mod collections;
 /// span it: its source location, its source byte length, and its start byte
 /// offset.
 ///
-/// This collapses what used to be four parallel `Vec`s — `tokens`, `locations`,
-/// `lengths`, `byte_offsets`, all indexed by a single `pos` with nothing
-/// keeping their lengths in agreement — into one `Vec<LexedToken>`. That makes
-/// the agreement structural: each token carries its own three companions, so
-/// they can no longer fall out of sync, be indexed past one another, or be
-/// supplied in mismatched counts to the reader's internals.
+/// Each token carries its own three companions, so they cannot fall out of
+/// sync or be indexed past one another inside the reader.
 struct LexedToken {
     token: OwnedToken,
     loc: SourceLoc,
@@ -85,7 +81,7 @@ pub struct SyntaxReader {
     open_forms: Vec<OpenForm>,
     /// Where the nodes this reader builds are born. A field rather than a
     /// per-call argument: one source parses into one arena
-    /// (docs/impl/syntax.md § "Where a node lives").
+    /// (docs/impl/syntax.md).
     arena: SyntaxArena,
 }
 
@@ -94,8 +90,8 @@ impl SyntaxReader {
     /// is the single point where the four columns meet — and the only place a
     /// length mismatch between them could matter. A position absent from
     /// `locations`/`lengths`/`byte_offsets` (only possible if a caller passes
-    /// ragged columns) falls back to the same defaults the old per-field
-    /// accessors used.
+    /// ragged columns) falls back to the start location, a one-character
+    /// length, and offset 0.
     fn from_columns(
         tokens: Vec<OwnedToken>,
         locations: Vec<SourceLoc>,
@@ -127,7 +123,7 @@ impl SyntaxReader {
         lengths: Vec<usize>,
         arena: SyntaxArena,
     ) -> Self {
-        // No byte offsets supplied: every token defaults to offset 0, as before.
+        // No byte offsets supplied: every token defaults to offset 0.
         Self::from_columns(tokens, locations, lengths, Vec::new(), arena)
     }
 
@@ -147,7 +143,7 @@ impl SyntaxReader {
 
     fn current_location(&self) -> SourceLoc {
         // At or past the end, fall back to the last token's location (or the
-        // start sentinel for an empty stream), as before.
+        // start sentinel for an empty stream).
         self.tokens
             .get(self.pos)
             .or_else(|| self.tokens.last())
@@ -223,12 +219,6 @@ impl SyntaxReader {
             kind,
             loc: loc.clone(),
         });
-    }
-
-    fn close_form(&mut self) {
-        self.open_forms
-            .pop()
-            .expect("closed collection without an open form");
     }
 
     /// Build a span from byte offsets and source location.

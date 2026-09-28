@@ -8,7 +8,6 @@
 pub mod arithmetic;
 pub mod call;
 pub mod capture;
-// Note: jit_entry is not pub — it only adds impl VM methods
 pub mod closure;
 pub mod comparison;
 pub mod control;
@@ -19,6 +18,7 @@ pub mod env;
 pub mod eval;
 pub mod execute;
 pub mod fiber;
+// Not pub: jit_entry only adds `impl VM` methods.
 #[cfg(feature = "jit")]
 mod jit_entry;
 pub mod literals;
@@ -52,12 +52,12 @@ impl VM {
     /// single allocation), freed value-based by the consumer's `DecrefValueRegion`
     /// at the result's last use — the native-call result discipline. A *fresh*
     /// mint, never a region a tail-call is already freeing (a result born there
-    /// would be freed under its reader — region-native-tail-return-uaf).
+    /// would be freed under its reader).
     ///
     /// Test-only: the VM error/result chokepoint ([`escaping_error`],
-    /// [`set_error`], [`error_extra`], [`escaping_match_fail`]) builds through a
-    /// `NativeCtx::new(self.heap())`, which mints+owns exactly such a fresh region
-    /// and exposes the `ctx.*` allocation surface; this bare mint survives only for
+    /// [`set_error`], [`error_extra`], [`escaping_match_fail`]) builds through an
+    /// `Alloc::new(self.heap())`, which mints+owns exactly such a fresh region
+    /// and exposes the `ctx.*` allocation surface; this bare mint exists only for
     /// the pin tests that assert the contract.
     ///
     /// [`escaping_error`]: Self::escaping_error
@@ -80,7 +80,7 @@ impl VM {
     /// The VM-scope rich-error routine (docs/impl/region/errors.md): build
     /// `{:error :kind :message msg …extra}` in a fresh result region,
     /// freed value-based by the consumer's `DecrefValueRegion`. Same name as
-    /// [`NativeCtx::error_extra`](crate::primitives::ctx::Alloc::error_extra)
+    /// [`Alloc::error_extra`](crate::primitives::ctx::Alloc::error_extra)
     /// so `rich_error!` is uniform over `ctx` and `self`. The `extra` field
     /// values must be born in the same region — immediates (keywords/ints) or
     /// pass-throughs (incref'd by `alloc`'s content scan); a VM site has no
@@ -101,8 +101,8 @@ impl VM {
         ctx.match_fail(val)
     }
 
-    /// Set an error signal on the current fiber, the error value built through a
-    /// `NativeCtx` over the VM's heap (docs/impl/region/ctx.md), which mints and
+    /// Set an error signal on the current fiber, the error value built through an
+    /// `Alloc` over the VM's heap (docs/impl/region/ctx.md), which mints and
     /// owns its own fresh result region. The error escapes as the fiber's signal
     /// payload and is freed value-based by the consumer's `DecrefValueRegion`.
     pub(crate) fn set_error(&mut self, kind: &str, msg: impl Into<String>) {
@@ -149,9 +149,8 @@ impl VM {
     ) -> Result<Value, String> {
         // The blueprint carries the function's region tables with the rest of
         // its payload: the builder-idiom merge set the alloc dispatch
-        // mint-or-reuses (docs/impl/region/merging.md § Merging), and the two
-        // release tables an error exit walks (docs/impl/region/mechanism.md
-        // § "An abandoned frame runs the releases it still owes").
+        // mint-or-reuses (docs/impl/region/merging.md), and the two release
+        // tables an error exit walks (docs/impl/region/mechanism.md).
         let code = crate::value::ClosureTemplate::for_proto(self.heap(), proto).code();
         self.execute_code(code, closure_env)
     }
@@ -256,8 +255,8 @@ impl VM {
                 // Everything that is not an error, a halt, or the switch
                 // trampoline arrives here with no handler left to run, and one
                 // report answers for all of it: `:yield` is not privileged
-                // among the bits that reach the root (docs/signals/protocol.md
-                // § "Reaching the root"). The keywords are what the author of
+                // among the bits that reach the root (docs/signals/protocol.md).
+                // The keywords are what the author of
                 // the emitting call can act on; the mask alone is not. The
                 // refused park is abandoned with its host.
                 self.abandon_hosted_park(bits);
@@ -272,7 +271,7 @@ impl VM {
         // the owner node (one tolerant decref → subtree drop over node +
         // adopted members) and whatever a top-level tail call deferred — at the
         // program's completion, the root counterpart of `trampoline_loop`'s
-        // normal-break release (docs/impl/region/owner.md § "Owner nodes"). Runs
+        // normal-break release (docs/impl/region/owner.md). Runs
         // on every root exit — a finished program has no resumable state at this
         // boundary, so an error exit releases identically.
         if at_root {
