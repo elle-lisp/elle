@@ -1,3 +1,10 @@
+// audited: 2026-09-28
+//! The region walk: each HIR node's source regions, one fresh region per allocation,
+//! and the binders that route them.
+//!
+//! docs/impl/region/model.md
+//! docs/impl/region/rules.md
+
 use super::*;
 
 impl RegionInference {
@@ -10,7 +17,7 @@ impl RegionInference {
     pub(super) fn walk(&mut self, hir: &Hir) -> Vec<Region> {
         match &hir.kind {
             // Immediates / interned constants — no heap allocation, no region.
-            // (Keyword/Symbol are tag+hash immediates; `Quote` now holds only an
+            // (Keyword/Symbol are tag+hash immediates; `Quote` holds only an
             // immediate, or — on the macro-hygiene path — a pre-baked pool Value
             // that is its own root, so still no per-activation region here.)
             HirKind::Nil
@@ -21,14 +28,13 @@ impl RegionInference {
             | HirKind::Keyword(_)
             | HirKind::Quote(_) => Vec::new(),
 
-            // A string literal AND quoted compound data are ordinary heap
-            // allocations: each gets its OWN region (the one-region-per-value
-            // baseline), is materialized fresh into that region by
-            // `MaterializeConst` each execution, and is freed at its
-            // `decref_point` like any value. Its region flows up so the caller
-            // tracks every escape (return/store/capture/call-arg) by normal RC
-            // (docs/impl/region/model.md § "Constants lower as ordinary allocations"). A
-            // quoted aggregate's whole structure shares this one region.
+            // A string literal AND quoted compound data are ordinary heap allocations:
+            // each gets its OWN region (the one-region-per-value baseline), is
+            // materialized fresh into that region by `MaterializeConst` each execution,
+            // and is freed at its `decref_point` like any value. Its region flows up so
+            // the caller tracks every escape (return/store/capture/call-arg) by normal
+            // RC (docs/impl/region/model.md). A quoted aggregate's whole structure
+            // shares this one region.
             HirKind::String(_) | HirKind::QuoteConst(_) => {
                 let r = self.alloc_here(hir.id);
                 vec![r]
@@ -79,7 +85,7 @@ impl RegionInference {
                 // (docs/impl/region/rules.md Rule 2 "opaque Call"): the lowerer will emit
                 // a value-based `DecrefValueRegion` (reading the param's slot)
                 // at `decref_point`, releasing the arg's *runtime* region —
-                // whatever it turns out to be. Crucially we do NOT `alloc_here`
+                // whatever it turns out to be. We do NOT `alloc_here`
                 // for it: a param has no allocation instruction of its own (it
                 // arrives on the stack), so the region is "phantom" — not in
                 // `live_regions`, so `build_info` filters out any cross-region
@@ -101,7 +107,7 @@ impl RegionInference {
                     self.binding_region.insert(*p, body_region);
                     if self.arena().get(*p).needs_capture() {
                         // Captured (env-allocated) param: `populate_env` wraps it
-                        // in a CaptureCell minted in its OWN region (Inc1). Give
+                        // in a CaptureCell minted in its OWN region. Give
                         // it a phantom cell placeholder so the lowerer releases
                         // that cell at the param's last use via `DecrefCellRegion`
                         // (region_of the cell), marked in `cell_release_regions`.
@@ -126,7 +132,7 @@ impl RegionInference {
                     match vararg_kind {
                         // `&keys`/`&named` collect their keyword args into a
                         // SINGLE struct, minted in its OWN region by
-                        // `collect_struct_in_own_region` (Inc1). That struct is
+                        // `collect_struct_in_own_region`. That struct is
                         // an OWNED value (rc=1, no caller incref — built by the
                         // callee's calling convention), so the callee must
                         // release it value-based at its last use, exactly like a
@@ -137,12 +143,11 @@ impl RegionInference {
                         // sets its `decref_point` from `rp`'s last use:
                         //   - `&named` (`(&named @flag) flag`): the synthetic
                         //     `__named_param`'s last use is the param-destructure
-                        //     that extracts the named bindings → released there
-                        //     (this increment).
+                        //     that extracts the named bindings → released there.
                         //   - `&keys opts` whose body tail-calls a native
                         //     (`(length opts)`): last use is the native tail
                         //     call → dead past `TailCall` → released by the
-                        //     native-tail path (Increment 4).
+                        //     native-tail path.
                         // docs/impl/region/rules.md Rule 8 (the unmodeled env region).
                         // `&keys`/`&named` collect into a single struct; the
                         // variadic rest LIST is built per-cons with ownership
@@ -152,7 +157,7 @@ impl RegionInference {
                         // releases value-based at the rest-param's last use — give
                         // each an owned placeholder. For a native tail call
                         // (`(& xs) (length xs)`), the release rides the
-                        // not-frame-replacing native-tail path (Inc4): the
+                        // not-frame-replacing native-tail path: the
                         // compiler's post-`TailCall` `DecrefValueRegion` runs when
                         // the dispatch loop continues past the native. For a
                         // closure tail call (`(& xs) (sink xs)`) the move transfers
@@ -169,8 +174,8 @@ impl RegionInference {
 
                 self.in_lambda_depth += 1;
                 // Walk the body for its edges / binding flow / call-result regions.
-                // The body's tail regions — the return-as-escape frontier — are no
-                // longer a solver fact: escape (`analyze_escape`'s return facet) owns
+                // The body's tail regions — the return-as-escape frontier — are not
+                // a solver fact: escape (`analyze_escape`'s return facet) owns
                 // that judgment, projected to regions by `region::infer::escape`.
                 self.walk(body);
                 self.in_lambda_depth -= 1;
@@ -186,8 +191,7 @@ impl RegionInference {
                 // Let (`lower_let` wraps each captured binding's init in a
                 // MakeCaptureCell when outside a lambda). A single shared
                 // region slot orphans all but the last minted physical
-                // region — the shared-slot capture-cell leak (docs/impl/region/model.md,
-                // "one allocation execution per slot between drops"). The
+                // region, and each orphan leaks (docs/impl/region/model.md). The
                 // `!in_lambda` gate mirrors the lowerer exactly: inside a
                 // lambda a captured let binding goes through StoreCapture
                 // (no compiled cell), so a region here would be a phantom
@@ -223,7 +227,7 @@ impl RegionInference {
                     // lambda, where the compiled `MakeCaptureCell` the arm head mints
                     // a region for is the cell instead — so this is the same
                     // treatment, and the same argument, as the `Define` binder's
-                    // (tests/elle/region-let-capture-cell-leak.lisp).
+                    // (tests/impl/region-let-capture-cell-leak.lisp).
                     if let Some(cell_r) = self.env_cell_placeholder(*b) {
                         let entry = self.binding_regions.entry(*b).or_default();
                         if !entry.contains(&cell_r) {
@@ -254,8 +258,7 @@ impl RegionInference {
                 // keeps the env-cell route (StoreCapture), so a region here
                 // would be a phantom. One region per cell, never one shared
                 // slot — N cells against one slot orphan all but the last
-                // minted physical region (docs/impl/region/model.md, "one
-                // allocation execution per slot between drops"). Skipped on an
+                // minted physical region (docs/impl/region/model.md). Skipped on an
                 // inline re-walk: `try_inline_call` revisits a callee's body
                 // with the CALLER's lambda depth, which would mint duplicate
                 // (and wrongly-classified) cells — the structural walk is the
@@ -289,16 +292,16 @@ impl RegionInference {
                         self.binding_lambda.insert(*b, init as *const Hir);
                     }
                     let init_regions = self.walk(init);
-                    // Rule 5 counted reader, exactly as the Let arm applies it:
-                    // a letrec binding whose init is a whole-value read of a
-                    // RE-STORABLE capture cell (the file-letrec statement
-                    // wrapper around a trailing `(deref-cell x)` read of a
-                    // mutated `(var x …)`) must NOT inherit the cell's static
-                    // source regions — those name the init value (or the cell),
-                    // not whatever the cell holds at read time, and a static
-                    // route against them (a coalesced return retain through the
-                    // wrapper) resolves the slot against repointed content (the
-                    // `AssertRegionMatches` mis-coalesce;
+                    // Rule 5 counted reader, exactly as the Let arm applies it: a
+                    // letrec binding whose init is a whole-value read of a
+                    // RE-STORABLE capture cell (the file-letrec statement wrapper
+                    // around a trailing `(deref-cell x)` read of a mutated `(var
+                    // x …)`) must NOT inherit the cell's static source regions —
+                    // those name the init value (or the cell), not whatever the
+                    // cell holds at read time, and a static route against them (a
+                    // coalesced return retain through the wrapper) resolves the
+                    // slot against repointed content, which `AssertRegionMatches`
+                    // catches (the runtime face is
                     // file_scope::captures::test_mutable_var_mutation_visible_after_call).
                     // The counted read mints a placeholder (a call-result
                     // region), so the reader stays value-resolved and takes its
@@ -317,9 +320,8 @@ impl RegionInference {
                     // skip-empty short-circuit then leaves the source
                     // region's decref_point at the destructure id,
                     // letting it be freed before `r`'s use reads
-                    // through to a stale ptr (counter-factual:
-                    // `letrec_init_does_not_overwrite_destructure_
-                    // binding_regions`).
+                    // through to a stale ptr (the counter-factual is
+                    // `letrec_init_does_not_overwrite_destructure_binding_regions`).
                     let entry = self.binding_regions.entry(*b).or_default();
                     for r in init_regions {
                         if !entry.contains(&r) {
@@ -420,6 +422,7 @@ fn dedup_regions(v: &mut Vec<Region>) {
 mod call;
 mod cells;
 mod classify;
+mod funnel;
 mod inline;
 mod intrinsic;
 mod tail;

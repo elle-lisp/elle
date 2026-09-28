@@ -1,3 +1,15 @@
+// audited: 2026-09-28
+//! Pins last use through loops: a binding bound outside a loop and read inside it outlives the loop, and no other does.
+//!
+//! docs/impl/region/anchors.md
+//!
+//! A binding bound OUTSIDE a `while` body but read INSIDE it must outlive the
+//! whole loop, not die at the consumer inside the body. The counter-factual:
+//! the body's use takes that consumer (a Call) as its last use, the
+//! binding-chain extension copies it to the init, and the region's
+//! `decref_point` lands inside the body, so the per-iteration decref frees the
+//! value after the first iteration (tests/impl/jit-lbox-param-repro.lisp).
+
 use super::*;
 
 #[test]
@@ -58,29 +70,9 @@ fn last_use_var_to_binding_bound_inside_loop_does_not_extend() {
     let (hir, arena, symbols, info) =
         analyze_with_hir("(fn () (let [seq @[1]] (while (%lt 0 1) (let [f (fn () 1)] f))))");
     let loop_id = find_first_loop(&hir).expect("expected a Loop node");
-    // Find the `f` Var — the binding whose name resolves to "f".
-    let var_id = {
-        fn find_var_named(
-            h: &super::Hir,
-            arena: &BindingArena,
-            symbols: &SymbolTable,
-            name: &str,
-        ) -> Option<HirId> {
-            if let HirKind::Var(b) = &h.kind {
-                if symbols.name(arena.get(*b).name) == Some(name) {
-                    return Some(h.id);
-                }
-            }
-            let mut found = None;
-            h.for_each_child(|c| {
-                if found.is_none() {
-                    found = find_var_named(c, arena, symbols, name);
-                }
-            });
-            found
-        }
-        find_var_named(&hir, &arena, &symbols, "f").expect("expected a Var(f)")
-    };
+    let vars = find_vars_by_name(&hir, "f", &arena, &symbols);
+    assert_eq!(vars.len(), 1, "expected exactly one Var(f)");
+    let var_id = vars[0];
     let got = info
         .last_use
         .get(&var_id)
@@ -106,8 +98,8 @@ fn last_use_var_to_binding_bound_inside_loop_does_not_extend() {
 // by a PRECEDING SIBLING (a `def` earlier in the same body, not an
 // enclosing `let`) and referenced inside the loop MUST have its
 // last_use extended to the loop — its value is re-read every
-// iteration, so freeing it after the first use dangles it (the
-// minimized supervisor.lisp UAF, `loop-def-closure-uaf.lisp`).
+// iteration, so freeing it after the first use dangles it
+// (tests/impl/loop-def-closure-uaf.lisp).
 //
 // The `def` node is a sibling that precedes the loop, so its
 // post-order index is SMALLER than the loop's — a plain
@@ -120,29 +112,13 @@ fn last_use_var_to_def_bound_before_loop_extends_to_loop() {
     let (hir, arena, symbols, info) =
         analyze_with_hir("(fn () (def helper (fn (x) x)) (while (%lt 0 1) (helper 1)))");
     let loop_id = find_first_loop(&hir).expect("expected a Loop node");
-    let var_id = {
-        fn find_var_named(
-            h: &super::Hir,
-            arena: &BindingArena,
-            symbols: &SymbolTable,
-            name: &str,
-        ) -> Option<HirId> {
-            if let HirKind::Var(b) = &h.kind {
-                if symbols.name(arena.get(*b).name) == Some(name) {
-                    return Some(h.id);
-                }
-            }
-            let mut found = None;
-            h.for_each_child(|c| {
-                if found.is_none() {
-                    found = find_var_named(c, arena, symbols, name);
-                }
-            });
-            found
-        }
-        find_var_named(&hir, &arena, &symbols, "helper")
-            .expect("expected a Var(helper) inside the loop")
-    };
+    let vars = find_vars_by_name(&hir, "helper", &arena, &symbols);
+    assert_eq!(
+        vars.len(),
+        1,
+        "expected exactly one Var(helper), inside the loop"
+    );
+    let var_id = vars[0];
     let got = info
         .last_use
         .get(&var_id)
@@ -157,7 +133,7 @@ fn last_use_var_to_def_bound_before_loop_extends_to_loop() {
              extended to the loop so the binding survives every iteration \
              (got last_use=@{}, which is BEFORE the loop in execution order — \
              the lowerer would free it after the first iteration, dangling \
-             the closure: the supervisor.lisp use-after-free).",
+             the closure).",
         var_id.0,
         loop_id.0,
         got.0,
@@ -180,7 +156,7 @@ fn last_use_var_to_def_bound_before_loop_extends_to_loop() {
 // iteration. The next inner read would see nil; for an indexed-sequence
 // `each` the freed binding is the inner loop's own `len`, so the bound
 // check `(%lt idx nil)` would raise `%lt: ... integer and nil`
-// (tests/elle/portrait.lisp, tests/elle/nested-loop-inner-invariant.lisp).
+// (tests/lang/portrait.lisp, tests/impl/nested-loop-inner-invariant.lisp).
 // The two bounds below pin the behavior: at or after the inner loop
 // (survives it) AND strictly before the outer loop (not over-extended —
 // over-extension would leak the prior iterations' values and re-introduce
@@ -232,8 +208,7 @@ fn last_use_binding_between_nested_loops_extends_to_inner_loop() {
              @{} and the inner loop @{}, and read inside the inner loop; its \
              last_use must be at or after the INNER loop so the value survives \
              every inner iteration (got last_use=@{}, inside the inner body — \
-             the lowerer frees it after the inner loop's first iteration, the \
-             nested-each `%lt: integer and nil` bug).",
+             the lowerer frees it after the inner loop's first iteration).",
         alloc.0,
         outer_loop.0,
         inner_loop.0,
@@ -251,13 +226,3 @@ fn last_use_binding_between_nested_loops_extends_to_inner_loop() {
         got.0,
     );
 }
-
-// Direct guard on the property that makes the loop-extension logic
-// robust: an execution-order index must rank by STRUCTURE, not by
-// HirId magnitude. ANF appends synthetic `let` bindings with fresh,
-// high HirIds even when they sit inside a loop body — so a binding
-// bound INSIDE a loop can carry an id LARGER than the loop. Comparing
-// HirId magnitude would misclassify such a binding as "bound outside",
-// over-extending its region's decref_point to the loop and producing a
-// phantom DecrefRegion on an empty iterator. A degenerate compute_order
-// that returned HirId.0 would fail this.

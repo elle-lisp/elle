@@ -1,27 +1,29 @@
-//! The `escape` dump kind — a normalized, deterministic snapshot of the
-//! escape-relevant compiler facts and the region instructions they drive.
+// audited: 2026-09-28
+//! The `escape` dump kind: an id-normalized snapshot of the escape facts and the region
+//! instructions they drive.
 //!
-//! Unlike the other dump bodies (which mirror `elle --dump=KIND`'s human
-//! rendering, complete with the absolute `@`-HirIds that make them
-//! non-deterministic across compiles — docs/test-runner.md), this body is
-//! **id-normalized** so two compiles of the same source render byte-identically.
-//! That makes it the input to the escape golden (`tests/elle/escape-golden.lisp`).
-//! Escape (`hir/escape.rs`) is the single authority for whether a value escapes; the
-//! region solver, `functionalize`, and the lowerer's tail-call predicates read it
-//! rather than recomputing a proxy. The snapshot records that surface — escape's
-//! verdict projected to regions (`[return_frontier]`) and the RC instructions it
-//! drives (`[region_instrs]`) — so a change to escape or its consumers is visible as
-//! a snapshot diff to be reviewed (the emitted RC may *tighten* as escape's precision
-//! lands; it must never coarsen or introduce a UAF/leak).
+//! docs/impl/escape.md
+//! docs/test-runner.md
+//!
+//! The other dump bodies mirror `elle --dump=KIND`'s rendering, whose absolute
+//! `@`-HirIds differ across compiles. This body is **id-normalized**, so two
+//! compiles of the same source render byte-identically, and it is the input to
+//! the escape golden (tests/impl/escape-golden.lisp). Escape (`hir/escape.rs`)
+//! is the single authority for whether a value escapes; the region solver,
+//! `functionalize`, and the lowerer's tail-call predicates read it rather than
+//! recomputing a proxy. The snapshot records that surface — escape's verdict
+//! projected to regions (`[return_frontier]`) and the RC instructions it drives
+//! (`[region_instrs]`) — so a change to escape or its consumers shows as a
+//! snapshot diff to review. The emitted RC may *tighten* as escape gains
+//! precision; it must never coarsen or introduce a UAF or a leak.
 //!
 //! ## Sections (the escape producer/consumer surface)
 //!
 //! - `[needs_capture]` — per program binding: the cell-layout decision
-//!   `needs_capture()` (consumed by `functionalize` and `lambda.rs`) and its
+//!   `needs_capture()` (consumed by `functionalize` and the lowerer) and its
 //!   independent structural inputs (`mutated`/`immutable`/scope). The
-//!   lexical-capture proxy `is_captured` is module-private with no escape
-//!   authority, so it is not rendered — `needs_capture()` is the surface that
-//!   matters here.
+//!   lexical-capture flag `is_captured` is private to the binding arena, with no
+//!   escape authority, so it is not rendered.
 //! - `[lambda_captures]` — per lambda: its params and capture set (`CaptureInfo`).
 //! - `[return_frontier]` — the regions escape's authoritative return verdict
 //!   projects onto (`crate::hir::EscapeInfo`, projected through `alloc_region` /
@@ -71,12 +73,9 @@ pub fn escape_module(
     // and the `[return_frontier]` section below.
     let return_frontier =
         crate::hir::return_frontier_regions(escape, &ri.alloc_region, &ri.binding_source_regions);
-    // One deterministic pre-order walk yields both id-spaces. `HirId` → `#n`
-    // (process-global counter; must be anchored). `Binding` → `b<n>` by dense
-    // first-appearance, NOT raw arena index: the arena also holds compile-time-env
-    // stdlib bindings whose count shifts every program's indices when the prelude
-    // grows. Only bindings that appear in the program's HIR are collected, and
-    // primitives are skipped (never captured/mutated — pure noise).
+    // One deterministic pre-order walk yields both id-spaces (the module doc's
+    // Normalization list). Primitives are skipped: they are never captured or
+    // mutated.
     let mut preorder: Vec<HirId> = Vec::new();
     let mut binding_order: Vec<Binding> = Vec::new();
     let mut seen: std::collections::HashSet<Binding> = std::collections::HashSet::new();
@@ -179,7 +178,7 @@ pub fn escape_module(
                 // Render the kind WITHOUT the raw `Binding` a `Recursive` variant carries:
                 // that index is non-normalized and would make the golden non-deterministic
                 // (it is the same binding `blabel` already prints). `Local`/`Capture` keep
-                // their `{:?}` form, so existing snapshots are unchanged.
+                // their `{:?}` form.
                 let kstr = match k {
                     CaptureKind::Recursive { .. } => "Recursive".to_string(),
                     other => format!("{other:?}"),

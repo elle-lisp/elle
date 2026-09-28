@@ -1,3 +1,9 @@
+// audited: 2026-09-28
+//! The per-instance registry that carries an inlineable function body from the
+//! unit that defines it to every later unit.
+//!
+//! docs/impl/dissolution/inline.md
+
 use super::*;
 
 /// Per-instance persistent map of cross-unit-inlineable function fragments,
@@ -6,7 +12,7 @@ use super::*;
 /// `inc`/`dec`/…), and every later unit consults it, so a user→stdlib `(map inc
 /// xs)` inlines the stdlib body exactly as a same-unit named fn does — the
 /// dissolution leg reaching across the compile-unit boundary
-/// (docs/impl/dissolution.md § "Cross-unit named functions").
+/// (docs/impl/dissolution/inline.md).
 ///
 /// Compile-time-only state: the rewrite it drives leaves the inlined body in the
 /// HIR, so nothing here reaches the runtime. It rides on `CompileCtx` (the
@@ -118,8 +124,7 @@ impl<'a> FnResolver<'a> {
     /// Does this function argument's body prove it returns an **array**? Asked
     /// only of a `mapcat`, the one op that reads its function's result as a
     /// collection and walks it: the fused inner walk is an indexed one, linear
-    /// over an array and quadratic over a list (docs/impl/dissolution.md
-    /// § "Mapcat — the stage that fans out").
+    /// over an array and quadratic over a list (docs/impl/dissolution/stages.md).
     ///
     /// A call-site literal is read here, against this unit's own init-keyword
     /// proof. A fragment answers from the fact it recorded when it closed, which

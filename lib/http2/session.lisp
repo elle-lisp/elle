@@ -1,6 +1,7 @@
-(elle/epoch 12)
-# audited: 2026-09-14
+(elle/epoch 13)
+# audited: 2026-09-28
 ## lib/http2/session.lisp — session state and everything an h2 session sends
+## lib/http2/overview.md
 ##
 ## Loaded via:
 ##   (def session ((import "std/http2/session")
@@ -13,16 +14,13 @@
 ##           :send-data-with-flow-control :ack-settings-received
 ##           :default-settings :initial-window :max-frame :test}
 ##
-## The receive side is lib/http2/reader.lisp, which imports this one.
+## The receive side is lib/http2/reader.lisp, which takes this module as
+## an argument.
 ##
-## The SETTINGS-ACK latch key comes from `(sys/unique)`, a process-global
-## primitive counter, NOT a module-local counter.  `(import ...)` returns
-## a fresh module instance each call, so a module-local counter would
-## restart in every importer and hand out colliding keys; since the
-## scheduler's park-queue is process-global, acking one session's SETTINGS
-## would then wake another session's settings-waiter (same elle bug class
-## as the lib/sync futex-key collision, #861).  An integer key also
-## interns nothing, where a gensym key retained one symbol per session.
+## The SETTINGS-ACK latch key comes from `(sys/unique)`, for the reason
+## lib/sync.lisp gives above make-futex: a module-local counter would hand
+## every importer the same keys, and acking one session's SETTINGS would
+## wake another session's waiter.
 
 (fn [&named frame stream hpack]
   (def C frame:constants)

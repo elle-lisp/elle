@@ -1,12 +1,17 @@
-//! Callee inlining for the region walk: temporarily bind a Var-callee Lambda's
-//! params to the caller's arg regions and re-walk its body so intrinsics buried
-//! inside the callee emit their cross-region edges at the call site.
+// audited: 2026-09-28
+//! Callee inlining for the region walk: re-walk a known lambda body so its intrinsics
+//! record their edges at the call site.
+//!
+//! docs/impl/region/mechanism.md
+//!
+//! The walk binds a Var callee's params to the caller's arg regions for the
+//! re-walk, so an intrinsic buried inside the callee records its cross-region
+//! edges here.
 //!
 //! What crosses back is only what the walk RECORDED, plus the one summary fact
 //! [`Inlined`] carries. The regions the walk yields name the callee's activation,
 //! so the caller names the call's own region for the result
-//! (docs/impl/region/mechanism.md § "A call's result is named by the call's own
-//! region").
+//! (docs/impl/region/mechanism.md).
 
 use super::*;
 
@@ -14,7 +19,7 @@ use super::*;
 ///
 /// Not the body's regions — those name the callee's activation and are remapped to
 /// fresh physical regions per call, so handing them to the caller would make it a
-/// nominal holder of a region it never allocates (§ the module doc). What does
+/// nominal holder of a region it never allocates (see the module doc). What does
 /// cross back is the one fact the caller cannot read off the callee's declaration:
 /// whether the call yields a heap value at all. That is the same question
 /// `call_returns_immediate` answers for a native, asked of a body this compilation
@@ -85,7 +90,7 @@ impl RegionInference {
         // would then name no region at all, and the collected list/struct — an
         // owned value the callee releases at that binding's last use — would
         // have nothing for a release to name. Pinned by
-        // `tests/elle/region-inline-rest-param-leak.lisp`.
+        // tests/impl/region-inline-rest-param-leak.lisp.
         let mut saved: Vec<(Binding, Option<Vec<Region>>)> = Vec::new();
         let mut snapshotted = rustc_hash::FxHashSet::default();
         for b in params.iter().chain(rest_param.iter()) {
@@ -124,16 +129,15 @@ impl RegionInference {
         // caller's. Every `in_lambda()` reader asks "is this node inside a lambda
         // body", a structural fact of the node and not of who reached it: the
         // reassign gate's module-scope-vs-fn-local split
-        // (docs/impl/region/bindings.md § "Reassigned mutable bindings are 1-slot
-        // containers" — the split is structural) and the `Begin`/`Let`/`Letrec`
-        // compiled-capture-cell mints, which the lowerer emits only outside a
-        // lambda. Bypassing the `Lambda` arm's own bump would answer each of them
-        // with the call site's nesting.
+        // (docs/impl/region/bindings.md — the split is structural) and the
+        // `Begin`/`Let`/`Letrec` compiled-capture-cell mints, which the lowerer
+        // emits only outside a lambda. Bypassing the `Lambda` arm's own bump
+        // would answer each of them with the call site's nesting.
         self.in_lambda_depth += 1;
         self.inline_depth += 1;
         // The walk is run for its RECORDING side effects — the edges, sites and
         // classifications the body's intrinsics contribute at this call site. Of its
-        // result regions only the EMPTINESS crosses back (§ [`Inlined`]); the
+        // result regions only the EMPTINESS crosses back (see [`Inlined`]); the
         // regions themselves are the callee's own and are discarded.
         let yields_heap = !self.walk(body).is_empty();
         self.inline_depth -= 1;

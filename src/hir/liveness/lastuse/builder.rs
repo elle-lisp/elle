@@ -1,5 +1,7 @@
-//! audited: 2026-09-21
+// audited: 2026-09-28
 //! The structural walk that computes each node's raw last-use.
+//!
+//! docs/impl/region/anchors.md
 //!
 //! Also carries the bookkeeping the fixpoint solver in the module root
 //! consumes: `binding_init`/`binding_scope`, the iter-scope stack, and the
@@ -33,8 +35,7 @@ pub(super) struct LastUseBuilder<'a> {
     ///
     /// Every binder that can be bound INSIDE a loop body records here,
     /// because an absent scope is read as bound-outside and hoists the
-    /// binding's region's release past the loop (docs/impl/region/
-    /// mechanism.md § "Every binder records its scope"). A lambda's
+    /// binding's region's release past the loop (docs/impl/region/anchors.md). A lambda's
     /// parameters are the one binder deliberately left unrecorded: the
     /// iter-scope stack is cleared at the lambda boundary, so the only
     /// loops in scope are inside the body and a parameter is bound
@@ -51,8 +52,7 @@ pub(super) struct LastUseBuilder<'a> {
     /// unused-binding narrowing may pull its last use back to the init
     /// itself. A `def` evaluates to what it bound, so the same init is still
     /// live wherever the `def` is — the narrowing must not reach below the
-    /// point the walk gave the `def` (docs/impl/region/mechanism.md § "A
-    /// binder's init release lands after the slot store").
+    /// point the walk gave the `def` (docs/impl/region/anchors.md).
     pub(super) propagated_inits: rustc_hash::FxHashSet<HirId>,
     /// Stack of iterative-scope HirIds (Loop / While) currently being
     /// walked. Outermost-first. Used to extend `last_use` for `Var`
@@ -61,7 +61,7 @@ pub(super) struct LastUseBuilder<'a> {
     /// the binding's region's `decref_point` lands inside the loop body
     /// and per-iteration DecrefRegion frees the binding's value after
     /// the first iteration (the phantom-region symptom on
-    /// `tests/elle/jit-lbox-param-repro.lisp`).
+    /// `tests/impl/jit-lbox-param-repro.lisp`).
     pub(super) iter_scope_stack: Vec<HirId>,
     /// Structural execution-order index (see `compute_order`). Every
     /// ordering/containment decision compares these indices, never
@@ -126,18 +126,18 @@ impl LastUseBuilder<'_> {
             // the binding). Extending to it subsumes every inner scope it is
             // also outside of, so we take it and stop.
             //
-            // Considering ONLY the absolute-outermost scope
-            // (`iter_scope_stack.first()`) was wrong for a binding bound
-            // BETWEEN two nested loops — inside the outer, outside the inner.
-            // It is bound INSIDE the outermost loop, so that test found
-            // `bound_outside=false` and never extended, leaving the decref
-            // inside the INNER loop body. The lowerer then freed the value
+            // The counter-factual: consulting ONLY the absolute-outermost
+            // scope (`iter_scope_stack.first()`) misses a binding bound
+            // BETWEEN two nested loops, inside the outer and outside the
+            // inner. It is bound INSIDE the outermost loop, so the test finds
+            // `bound_outside=false`, never extends, and leaves the decref
+            // inside the INNER loop body. The lowerer then frees the value
             // (decref + nil-stamp) after the inner loop's FIRST iteration and
-            // the next inner read saw nil. For an indexed-sequence `each` the
+            // the next inner read sees nil. For an indexed-sequence `each` the
             // freed binding is the inner loop's own `len`, so `(%lt idx nil)`
-            // raised `%lt: ... integer and nil` (lib/portrait.lisp
-            // module-portrait; tests/elle/nested-loop-inner-invariant.lisp,
-            // tests/elle/portrait.lisp).
+            // raises `%lt: ... integer and nil`
+            // (tests/impl/nested-loop-inner-invariant.lisp,
+            // tests/lang/portrait.lisp).
             //
             // "Bound outside S" is a structural-containment question,
             // answered with execution-order indices, NOT HirId magnitude.
@@ -151,16 +151,15 @@ impl LastUseBuilder<'_> {
             // It misses a binding bound by a PRECEDING SIBLING `def`/`let*`
             // in the same body: that scope node has a *smaller* post-order
             // index than the loop yet is still outside it, so the magnitude
-            // test wrongly classified it as bound-inside and let the lowerer
-            // free it per iteration (`loop-def-closure-uaf`, the minimized
-            // supervisor.lisp UAF). The interval test sees it sits below
-            // `low[S]` and extends correctly.
+            // test classifies it as bound-inside and the lowerer frees it per
+            // iteration (tests/impl/loop-def-closure-uaf.lisp). The interval
+            // test sees it sits below `low[S]` and extends.
             //
             // ANF appends synthetic `let` bindings with large HirIds even
             // when they sit INSIDE the loop body, so comparing `HirId`
             // magnitude would misclassify them as outside and re-introduce
             // the phantom (see `compute_order`). The init id is also not a
-            // valid proxy: it's a child of the scope node and so has a
+            // valid proxy: it is a child of the scope node and so has a
             // smaller index than the scope itself.
             let scope = self.binding_scope.get(b).and_then(|s| s.last()).copied();
             for i in 0..self.iter_scope_stack.len() {
@@ -219,8 +218,8 @@ impl LastUseBuilder<'_> {
             // the cell's life at the load, one node ahead of its reader, and the
             // cell's free cascade then reclaims the borrowed value under that
             // reader — latent on a plain build, a deref-site panic under
-            // `--trace=scrub` (docs/impl/region/cells.md § "A read through an
-            // env cell is an uncounted borrow"; tests/region_cell_borrow.rs).
+            // `--trace=scrub` (docs/impl/region/cells.md;
+            // tests/region_cell_borrow.rs).
             HirKind::DerefCell { cell } => self.walk(cell, true, my_last),
             HirKind::Destructure { pattern, value, .. } => {
                 // Register each destructured binding as bound to this
@@ -284,11 +283,10 @@ impl LastUseBuilder<'_> {
                 // uncounted read, so it resolves to the scrutinee's region — an
                 // unrecorded scope makes a read of it in any arm hoist a whole
                 // fresh scrutinee's release past the enclosing loop, once per
-                // iteration (docs/impl/region/mechanism.md § "Every binder
-                // records its scope"). Unlike `Destructure` this registers no
-                // `binding_init`: the names are readable only inside this node's
-                // subtree, and the scrutinee's own last use is this node, which
-                // already post-dates every arm.
+                // iteration (docs/impl/region/anchors.md). Unlike `Destructure`
+                // this registers no `binding_init`: the names are readable only
+                // inside this node's subtree, and the scrutinee's own last use
+                // is this node, which already post-dates every arm.
                 for (pat, _guard, _body) in arms {
                     for b in pat.bindings().bindings {
                         self.binding_scope.entry(b).or_default().push(hir.id);
@@ -407,15 +405,13 @@ impl LastUseBuilder<'_> {
                 // forcing its DecrefRegion outside the loop where the alloc
                 // never ran (the phantom-region panic the `Var` path guards).
                 //
-                // NOTE: unlike the `Var` path above, this consults only the
+                // Unlike the `Var` path above, this consults only the
                 // absolute-OUTERMOST iter-scope, so a binding captured by a
                 // lambda built in an INNER loop while bound BETWEEN two loops
-                // is not extended here. That shape is part of the separate
-                // pre-allocated-capture-cell-vs-loop-scope cluster (a cell is
-                // pre-allocated once but the binding is re-bound per outer
-                // iteration); generalizing this scan alone does not fix it —
-                // the cell's premature free comes from the alloc/binding-chain
-                // decref path, not this extension.
+                // is not extended here. Scanning every scope would not change
+                // that shape's release: its cell is allocated once while the
+                // binding is re-bound per outer iteration, and the cell's
+                // release comes from the alloc/binding-chain decref path.
                 if let Some(&outermost) = self.iter_scope_stack.first() {
                     for cap in captures {
                         let b = cap.binding;

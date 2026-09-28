@@ -82,7 +82,7 @@
   # already tracks, and resuming it out of turn hands its park a nil
   # result: a timer parked in ev/sleep would complete instantly, and every
   # ev/timeout in a process would report its deadline at once
-  # (tests/elle/process-select.lisp). A fiber already queued would be
+  # (tests/lang/process-select.lisp). A fiber already queued would be
   # resumed a second time the same way.
   (defn pump-target [target pid]
     (when (and (= (fiber/status target) :new)

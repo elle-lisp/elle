@@ -1,15 +1,10 @@
-use super::*;
+// audited: 2026-09-28
+//! The four searches fuse to a scalar answer loop, whose sentinel ends the walk
+//! when the search is alone. Over a prefix, the sentinel gates only the search.
+//!
+//! docs/impl/dissolution/terminals.md
 
-/// Count the `and` nodes — a lone fused search's loop condition is the ONLY `and`
-/// the scaffold emits (`(and (< i len) more)`), so it is the discriminator for
-/// where the sentinel is read: one for a lone search (the walk ends at the
-/// decision), none over a prefix (the walk stays exhaustive and the sentinel gates
-/// the search's own stage).
-fn count_ands(h: &Hir) -> usize {
-    let mut n = usize::from(matches!(h.kind, HirKind::And(_)));
-    h.for_each_child(|c| n += count_ands(c));
-    n
-}
+use super::*;
 
 /// A single `(any? pred xs)` dissolves to a **scalar answer** loop: the `any?`
 /// dispatch is gone, no closure survives (neither the predicate nor the
@@ -209,9 +204,10 @@ fn find_index_over_a_filter_prefix_counts_survivors() {
     );
 }
 
-/// The shape the prefixed early-exit fixture drives: a division in the predicate
+/// The shape tests/impl/dissolution-search-fuse.lisp drives for the prefixed early
+/// exit: a division in the predicate
 /// carries `SIG_ERROR` alone, which the reorder gate permits, so the composition
-/// fuses. Pinned here because that fixture's whole point is that the sentinel gate
+/// fuses. Pinned here because that file's whole point is that the sentinel gate
 /// keeps the predicate off the elements past the decision — which it can only
 /// gauge if the chain fused.
 #[test]
@@ -248,10 +244,10 @@ fn search_over_non_reorder_safe_prefix_fuses_inner_only() {
     );
 }
 
-/// The heap shapes the soundness fixture drives: a `find` over a `map` prefix
+/// The heap shapes tests/impl/region-search-fuse-uaf.lisp drives: a `find` over a `map` prefix
 /// records a value the LOOP minted (the transform's result) and hands it out,
 /// where a lone `find` records one the base owns; a `find-index` over a `filter`
-/// prefix counts heap survivors. Pinned here so the fixture is known to gauge the
+/// prefix counts heap survivors. Pinned here so that file is known to gauge the
 /// fused form rather than a declined dispatch.
 #[test]
 fn heap_valued_prefixes_fuse() {
@@ -296,8 +292,8 @@ fn user_shadowed_search_is_not_fused() {
 }
 
 /// A capturing predicate fuses: the splice is the call site, so `k` is in scope
-/// where the search's guard lands (docs/impl/dissolution.md § "Captures"). Fails
-/// while the gate refuses a capture: the `any?` call and the closure both survive.
+/// where the search's guard lands (docs/impl/dissolution.md). A gate that refused
+/// captures would leave the `any?` call and the closure standing.
 #[test]
 fn capturing_search_predicate_fuses() {
     let (hir, arena, mut rt) = compile("(let [k 2] (any? (fn [x] (> x k)) [1 2 3 4]))");

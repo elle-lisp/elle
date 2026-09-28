@@ -1,8 +1,8 @@
-(elle/epoch 12)
-## audited: 2026-09-21
+(elle/epoch 13)
+## audited: 2026-09-28
 ## lib/semver/file.lisp — read and write .surface files
 ##
-## docs/versioning.md fixes the format; tests/elle/semver-file.lisp pins
+## docs/versioning.md fixes the format; tests/lang/semver-file.lisp pins
 ## the bytes. Rendering sorts exports by name and keeps a fixed field
 ## order per line, so two equal surfaces always render byte-identically.
 ##

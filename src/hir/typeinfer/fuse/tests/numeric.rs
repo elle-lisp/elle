@@ -1,16 +1,21 @@
+// audited: 2026-09-28
+//! A body holding a raw `%`-intrinsic fuses only under `(numeric!)`, whose
+//! parameter floor travels with the binding into the loop.
+//!
+//! docs/impl/dissolution/inline.md
+
 use super::*;
 
 /// A raw call-position `%`-intrinsic body fuses under a `(numeric!)`
-/// declaration (docs/impl/dissolution.md § "Raw `%`-intrinsic bodies"). The
-/// declaration floors the parameter at Number — the sole proof that discharges
-/// `(%add x 1)`'s prove-or-reject obligation — and it is recorded on the
-/// parameter BINDING, so it survives the splice that dissolves the lambda: the
-/// `map` dispatch is gone, no closure survives, and the `%add` opcode runs
-/// inline in the loop over the let-bound element. That the compile still
-/// succeeds is half the assertion — `compile` panics on a compile error, which
-/// is exactly what an uncarried floor would produce. Fails before the carried
-/// declaration lands: the body declines and the `map` call survives.
-
+/// declaration. The declaration floors the parameter at Number — the sole proof
+/// that discharges `(%add x 1)`'s prove-or-reject obligation — and it is
+/// recorded on the parameter BINDING, so it survives the splice that dissolves
+/// the lambda: the `map` dispatch is gone, no closure survives, and the `%add`
+/// opcode runs inline in the loop over the let-bound element.
+///
+/// The trap: that the compile succeeds is half the assertion. `compile` panics
+/// on a compile error, which is what a floor scoped to the lambda node would
+/// produce once the lambda is gone.
 #[test]
 fn numeric_declared_intrinsic_body_map_fuses() {
     let (hir, arena, mut rt) = compile("(map (fn [x] (numeric!) (%add x 1)) [1 2 3])");

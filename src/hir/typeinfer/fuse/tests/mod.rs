@@ -1,6 +1,9 @@
+// audited: 2026-09-28
 //! Fusion tests, by what the chain is made of.
 //!
 //! The shared helpers live here; each submodule takes one shape of chain.
+//!
+//! docs/impl/dissolution.md
 
 use crate::hir::arena::BindingArena;
 use crate::hir::expr::{Hir, HirKind};
@@ -52,11 +55,21 @@ fn count_lambdas(h: &Hir) -> usize {
     n
 }
 
-/// Count the `if` nodes — a fused `filter` emits one guarded push per
-/// predicate stage; a fused `map` emits none.
+/// Count the `if` nodes — the loop's `while`→`loop` lowering emits one, and a
+/// fused `filter` adds one guarded push per predicate stage.
 fn count_ifs(h: &Hir) -> usize {
     let mut n = usize::from(matches!(h.kind, HirKind::If { .. }));
     h.for_each_child(|c| n += count_ifs(c));
+    n
+}
+
+/// Count the `and` nodes. The scaffold emits one only for the loop condition
+/// `(and (< i len) more)`, which exactly one early exit claims: the innermost op's,
+/// when that op carries one. So the count says where an early exit is read — the
+/// loop condition, or a gate stage while the walk stays exhaustive.
+fn count_ands(h: &Hir) -> usize {
+    let mut n = usize::from(matches!(h.kind, HirKind::And(_)));
+    h.for_each_child(|c| n += count_ands(c));
     n
 }
 
@@ -83,7 +96,7 @@ fn count_intrinsic(h: &Hir, want: &str) -> usize {
 /// Chains whose lambda literal captures an enclosing local — where the capture
 /// reaches from, and the composition it declines.
 mod capture;
-/// `map`, `filter`, their compositions, and the mutable-array cases.
+/// `map`, `filter` and their compositions over an immutable base.
 mod collect;
 /// The `count` terminal — a guard stage plus a scalar tally.
 mod count;
@@ -97,6 +110,8 @@ mod fold;
 mod indexed;
 /// The `mapcat` stage — a fan-out whose element statement carries a walk of its own.
 mod mapcat;
+/// A single op over a mutable `@array` base, and the shapes that decline there.
+mod mutable;
 /// Chains whose lambda is a named function, same-unit or cross-unit.
 mod named;
 /// Bodies holding a raw `%`-intrinsic under a `(numeric!)` declaration.

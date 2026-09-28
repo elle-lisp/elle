@@ -1,9 +1,15 @@
+// audited: 2026-09-28
+//! The `mapcat` stage fuses to a second walk inside the element statement, only
+//! over a function whose result is a proven array.
+//!
+//! docs/impl/dissolution/stages.md
+
 use super::*;
 
 /// Count the `loop` nodes — functionalization turns each synthesized `while` into
 /// one. A `mapcat` is the only stage whose element statement carries a walk of its
 /// own, so this is the discriminator that the fan-out fused rather than declined
-/// (docs/impl/dissolution.md § "Mapcat — the stage that fans out").
+/// (docs/impl/dissolution/stages.md).
 fn count_loops(h: &Hir) -> usize {
     let mut n = usize::from(matches!(h.kind, HirKind::Loop { .. }));
     h.for_each_child(|c| n += count_loops(c));
@@ -280,9 +286,9 @@ fn user_shadowed_mapcat_is_not_fused() {
 }
 
 /// A capturing function fuses: the splice is the call site, so `k` is in scope
-/// inside the per-element array the fan-out walks (docs/impl/dissolution.md
-/// § "Captures"). Fails while the gate refuses a capture: the `mapcat` call and the
-/// closure both survive.
+/// inside the per-element array the fan-out walks (docs/impl/dissolution.md). A
+/// gate that refused a capture would leave the `mapcat` call and the closure in
+/// place.
 #[test]
 fn capturing_mapcat_fn_fuses() {
     let (hir, arena, mut rt) = compile("(let [k 2] (mapcat (fn [x] [x k]) [1 2 3]))");

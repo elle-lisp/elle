@@ -1,7 +1,9 @@
-// audited: 2026-09-23
-// src/io/AGENTS.md
+// audited: 2026-09-28
 //! A pool read counts the remainder its port is already holding, in bytes and
 //! in grapheme clusters.
+//!
+//! src/io/AGENTS.md
+//! docs/impl/io-bytes.md
 
 use super::*;
 
@@ -16,7 +18,7 @@ use super::*;
 /// The counter-factual: a runner that counts only what it read from the
 /// descriptor waits for the full count from a peer that has already said
 /// everything it has to say — and a redis `GET` of a value past one chunk
-/// hangs forever (`tests/elle/redis-short-read.lisp`, which is gated on a live
+/// hangs forever (tests/lang/redis-short-read.lisp, which is gated on a live
 /// Redis and so never runs on the macOS CI box, the only one that uses this
 /// backend).
 ///

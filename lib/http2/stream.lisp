@@ -1,24 +1,22 @@
-(elle/epoch 12)
-## lib/http2/stream.lisp — HTTP/2 stream state machine + flow control
+(elle/epoch 13)
+# audited: 2026-09-28
+## lib/http2/stream.lisp — the HTTP/2 stream state machine, per-stream flow control and the channel.
+## lib/http2/overview.md
 ##
 ## Loaded via:
 ##   (def frame  ((import "std/http2/frame")))
 ##   (def stream ((import "std/http2/stream") :frame frame))
 ##
-## No sync dependency — uses bare ev/futex-wait and ev/futex-wake.
+## The channel and the flow control park on bare ev/futex-wait and
+## ev/futex-wake; nothing here imports std/sync.
 ##
-## Futex keys come from `(sys/unique)`, a process-global primitive
-## counter, NOT a module-local counter.  `(import ...)` returns a fresh
-## module instance each call, so a module-local counter would restart at
-## 0 in every importer and hand out colliding keys — and since the
-## scheduler's park-queue is process-global (one key -> one wait list), a
-## wake on one channel/flow-control futex would unpark a waiter on
-## another instance's (same elle bug class as the lib/sync futex-key
-## collision, #861).  An integer key also interns nothing, where a gensym
-## key retained one symbol per stream (tests/elle/sync-keys.lisp pins the
-## property for the sync constructors).
+## Futex keys come from `(sys/unique)`, for the reason lib/sync.lisp
+## gives above make-futex: a module-local counter would hand every
+## importer the same keys.
 ##
-## Exports: {:make-stream :make-channel :transition :make-flow-control :test}
+## Exports: {:make-stream :make-channel :transition :make-flow-control
+##           :consume-send-window :apply-window-update
+##           :consume-recv-window :replenish-recv-window :test}
 
 (fn [&named frame]
 

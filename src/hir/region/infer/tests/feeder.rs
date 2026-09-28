@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-09-28
 //! The store's feeder: a name whose only job is to carry a value into a
 //! reassigned binding, and what disqualifies one.
 //!
@@ -34,8 +34,7 @@ fn one_binder_shape(body: &str) -> (RegionInfo, Binding, Vec<HirId>) {
 
 /// A name whose only job is to carry the value INTO the store is the store's
 /// FEEDER, and the gate reads it as no holder of that value
-/// (docs/impl/region/bindings.md § "What the cell donates it must hold alone;
-/// what it counts it need not"). Nothing reads `v` after the store, so the
+/// (docs/impl/region/bindings.md). Nothing reads `v` after the store, so the
 /// donation's sole-held question has nothing to protect.
 ///
 /// The counter-factual is `reassign_gate_counts_an_aliased_assign_value`, the
@@ -43,7 +42,7 @@ fn one_binder_shape(body: &str) -> (RegionInfo, Binding, Vec<HirId>) {
 /// rather than the name, and the read costs the donation alone. Refusing here
 /// leaves the unsuppressed baseline, whose one release covers every value the
 /// loop stored, so a walk's own collection strands per call
-/// (`tests/elle/region-cell-feeder.lisp`).
+/// (tests/impl/region-cell-feeder.lisp).
 #[test]
 fn reassign_gate_counts_a_feeder_as_no_holder() {
     let (info, last, last_sites) = one_binder_shape(
@@ -69,12 +68,10 @@ fn reassign_gate_counts_a_feeder_as_no_holder() {
     );
 }
 
-/// Counterfactual against over-admission: a name bound OUTSIDE the loop that
+/// The counter-factual against over-admission: a name bound OUTSIDE the loop that
 /// stores it refuses the model, however little reads it. The store-site pin
 /// fires once per iteration against one producer reference, so it would release
-/// a reference the producer never took (docs/impl/region/bindings.md § "The
-/// store-site pin asks only that the store run once per binding of the name it
-/// reads").
+/// a reference the producer never took (docs/impl/region/bindings.md).
 ///
 /// `reassign_gate_counts_a_feeder_as_no_holder` above is the same shape with the
 /// binder inside the loop, so the pair isolates where the name is bound. The
@@ -109,12 +106,11 @@ fn reassign_gate_refuses_a_feeder_bound_outside_the_loop() {
 /// structural reading `reassign_gate_refuses_a_feeder_bound_outside_the_loop`
 /// turns on. Yet no store reads `keep`: it holds one reference to whatever the
 /// loop left, against no pin at all, so the model stands
-/// (docs/impl/region/bindings.md § "The store-site pin asks only that the store
-/// run once per binding of the name it reads").
+/// (docs/impl/region/bindings.md).
 ///
 /// Without the read the two shapes are indistinguishable, and refusing this one
 /// returns the loop to the baseline whose single release covers every value it
-/// stored — the strand behind elle-lisp/elle#1186.
+/// stored.
 #[test]
 fn reassign_gate_counts_a_name_no_store_reads() {
     let (info, last, last_sites) = one_binder_shape(

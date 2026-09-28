@@ -1,15 +1,10 @@
-use super::*;
+// audited: 2026-09-28
+//! The `drop-while` stage fuses to a flag-gated push that never ends the walk, and
+//! declines over a base whose emptiness `len` cannot decide.
+//!
+//! docs/impl/dissolution/stages.md
 
-/// Count the `and` nodes — the fused scaffold emits one only for the loop condition
-/// `(and (< i len) more)`, which an early exit claims. A `drop-while` carries none:
-/// its decision opens the rest of the pipeline rather than closing the walk, so this
-/// is the discriminator that the walk stays exhaustive however the chain is arranged
-/// (docs/impl/dissolution.md § "Drop-while — the stage that starts late").
-fn count_ands(h: &Hir) -> usize {
-    let mut n = usize::from(matches!(h.kind, HirKind::And(_)));
-    h.for_each_child(|c| n += count_ands(c));
-    n
-}
+use super::*;
 
 /// A single `(drop-while pred xs)` dissolves to a flag-gated push: the `drop-while`
 /// dispatch is gone, no closure survives (neither the predicate nor the two
@@ -286,9 +281,8 @@ fn user_shadowed_drop_while_is_not_fused() {
 }
 
 /// A capturing predicate fuses: the splice is the call site, so `k` is in scope
-/// where the dropping flag's guard lands (docs/impl/dissolution.md § "Captures").
-/// Fails while the gate refuses a capture: the `drop-while` call and the closure
-/// both survive.
+/// where the dropping flag's guard lands (docs/impl/dissolution.md). A gate that
+/// refused a capture would leave the `drop-while` call and the closure in place.
 #[test]
 fn capturing_drop_while_predicate_fuses() {
     let (hir, arena, mut rt) = compile("(let [k 2] (drop-while (fn [x] (> x k)) [3 4 1]))");
