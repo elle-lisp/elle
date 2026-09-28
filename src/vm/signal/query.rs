@@ -1,11 +1,17 @@
+// audited: 2026-09-28
+//! `SIG_QUERY` dispatch: the questions a primitive asks the running VM.
+//!
+//! docs/runtime.md
+//! docs/impl/region/effects.md
+
 use super::*;
 
 impl VM {
     /// Dispatch a VM state query. Value is (operation . argument).
     ///
-    /// The operation can be a keyword or a string. Keywords are resolved
-    /// via the content-addressed keyword registry; strings are used
-    /// directly. SIG_QUERY is for questions that can only be answered
+    /// The operation can be a keyword or a string. A keyword's spelling comes
+    /// from the instance memo or the vocabulary (`keyword_spelling`); a string
+    /// is used directly. SIG_QUERY is for questions that can only be answered
     /// from the VM's context (call counts, documentation, current fiber).
     ///
     /// Operations:
@@ -13,14 +19,26 @@ impl VM {
     /// - (:"doc" . name) — return formatted documentation for a primitive
     /// - (:"global?" . symbol) — always false (no runtime globals exist)
     /// - (:"fiber/self" . _) — return the currently executing fiber, or nil
-    /// - (:"list-primitives" . _) — return sorted list of all primitive names
+    /// - (:"fiber/caps" . _) — the capabilities the current fiber holds, as a set
+    /// - (:"list-primitives" . category) — sorted primitive names, all when nil
     /// - (:"primitive-meta" . name) — return struct with primitive metadata
-    /// - (:"arena/stats" . nil) — return unified stats struct (12 fields) for current fiber
-    /// - (:"arena/stats" . fiber) — return unified stats struct for a suspended/dead fiber
-    /// - (:"arena/count" . _) — return heap arena object count as int (zero overhead)
+    /// - (:"arena/stats" . nil-or-fiber) — the 8-field stats struct of this
+    ///   instance's heap, which every fiber shares
+    /// - (:"arena/allocs" . thunk) — `(result . net)`: the thunk's result and
+    ///   the objects it allocated
+    /// - (:"jit/rejections" . _) — one struct per closure the JIT refused
     /// - (:"jit?" . closure) — true if closure has JIT-compiled native code
     /// - (:"jit/map" . _) — the JIT code-address registry as text
     /// - (:"jit/peek" . `"0x<addr>"`) — instruction words around a JIT address, or nil
+    /// - (:"vm/config" . field-or-nil) and (:"vm/config-set" . (key . value))
+    ///   — read or set the runtime configuration (config.rs)
+    /// - (:"mlir/compile-spirv" . closure-or-pair) — SPIR-V bytes for a
+    ///   GPU-eligible closure (`mlir` builds only)
+    /// - (:"git" . closure-or-pair) — the closure, its SPIR-V cached on its
+    ///   template (`mlir` builds only)
+    /// - `compile/run-on`, `compile/barrier-module`, `compile/whole-module`,
+    ///   `compile/whole-module-syntax`, `compile/dumps` — run or compile a
+    ///   closure or module (modules.rs)
     ///
     /// Every operation here READS its argument or copies it out; none retains it
     /// past the call. `vm/query` declares `RegionEffect::Opaque` on the strength of

@@ -66,7 +66,6 @@ A memo learns a name where names already travel:
 | the plugin ABI | every keyword a plugin mints through `make_keyword`'s call ctx |
 | `make_external` | the type name a plugin wraps an external in; the string lives in the plugin's `.so`, so no vocabulary entry can carry it |
 | the signal registry | every signal name read back out of the process-global registry — by `(signals)`, `fiber/caps`, a compile query's `:bits` set, or a capability denial |
-| `(vm/config)` | every key of the instance's trace set: the `--trace` keywords, or a set a program passed to `(vm/config-set :trace …)` |
 | `send` | the bundle's name table — the spelling of every symbol and keyword the value holds, resolved through the sender's memo and the vocabulary — replayed into the receiver's memo |
 | the stdlib cache | the stored templates' name table, replayed as the cache loads |
 | hydration and the boot image | the image's name table, recorded as the image is built and replayed into the hydrating instance |
@@ -75,9 +74,7 @@ A memo learns a name where names already travel:
 The signal registry is a read site, not a mint site. It holds spellings a
 program coined at run time — `(signal :my-sig)` allocates a bit — in a
 process-global table. An instance that reads a name back may never have met
-the spelling, and a worker thread met none of them. The trace set is a read
-site for another reason: `--trace` accepts only the build-fixed
-`TRACE_KEYWORDS`, and most of those spellings are absent from `VOCABULARY`.
+the spelling, and a worker thread met none of them.
 
 Because a name is recorded only where it travels, a memo answers for the names
 its instance has actually met. That is the whole contract: a value whose name
@@ -88,9 +85,9 @@ correctly. It just has no name to print.
 
 The memo answers for names that arrive at run time. The Rust runtime also
 coins keywords of its own — every struct key a primitive returns, every type
-name, every status, every error kind — and each of those spellings is fixed
-when the binary is built. `VOCABULARY` in
-[keyword.rs](../../src/value/keyword.rs) is that list,
+name, every status, every error kind, every `--trace` and `--dump` keyword —
+and each of those spellings is fixed when the binary is built. `VOCABULARY` in
+[vocabulary.rs](../../src/value/keyword/vocabulary.rs) is that list,
 and `resolve_keyword_name` reads it after the memo. A vocabulary spelling
 needs no instance, so it survives a display path that threads no memo at all.
 
@@ -119,13 +116,18 @@ Three standing checks keep the list complete, because the constructor cannot —
   rather than as a string and no scan of the source can find it.
 - `vocabulary_covers_literal_mint_sites` scans `src/` for every form that
   hands a literal to a keyword constructor, and fails on a spelling the
-  vocabulary lacks. The forms:
+  vocabulary lacks. The literal may follow a line break, where `rustfmt`
+  splits a long call. The forms:
   - `Value::keyword("…")` and `TableKey::keyword("…")`
   - `kw("…")`, the struct-key helper of the compile and file primitives and
     of the reader's syntax builder
   - `ctx.error("…")`, `birth.error("…")` and
     `Completion::failed(id, birth, "…")`, whose kind becomes the `:error`
     field's keyword
+  - `set_error("…")`, `escaping_error("…")` and `error_extra("…")`, the VM's
+    error constructors, and the kind of `rich_error!(scope, "…", …)`. The VM
+    builds an error through an `Alloc`, which holds no memo, so only the
+    vocabulary can spell the kind of an error the VM raises.
   - `ctx.external("…")`, whose type name becomes the keyword `type-of`
     returns
   - `Syntax::keyword(arena, "…")`, a keyword a desugaring writes into the
@@ -133,9 +135,10 @@ Three standing checks keep the list complete, because the constructor cannot —
 - `vocabulary_covers_accessor_mint_sites` enumerates the closed tables whose
   `&'static str` accessors feed those same constructors — the signal
   registry's built-ins, `sigmap`'s POSIX signals, the JIT/WASM/MLIR policy
-  keywords, the VM's tier names, `FiberStatus`, `WatchEventKind` — and
-  asserts each spelling resolves. A scan cannot see these: the literal sits
-  in a `match` arm, not in the call.
+  keywords, the VM's tier names, `FiberStatus`, `WatchEventKind`, and the
+  `--trace` and `--dump` keyword tables — and asserts each spelling
+  resolves. A scan cannot see these: the literal sits in a `match` arm or a
+  table, not in the call.
 
 Adding a spelling to one of those tables therefore fails
 `vocabulary_covers_accessor_mint_sites` until it is added to `VOCABULARY` too.
@@ -198,8 +201,11 @@ the moment it would first confuse a reader.
 The payload is a full `u64` — the tag lives in the `Value`'s separate tag word,
 so all 64 bits carry discrimination. For a program with 10,000 distinct names
 the birthday bound puts the collision probability near 3 in 10^12. That bound
-covers every name. The keyword vocabulary alone is checked rather than
-estimated: `vocabulary_is_collision_free` asserts its spellings hash apart.
+covers every name. The names the build fixes are checked rather than
+estimated. `static_vocabulary_is_collision_free` records all of them into one
+memo, whose guard panics on a collision: each primitive's name and aliases, the
+keyword vocabulary, and each symbol and keyword that core, prelude and stdlib
+spell.
 
 `SymbolId::SYNTHETIC` (`u64::MAX`) marks a compiler-generated binding with no
 source-level name — a phi temporary, a desugaring's scratch variable. It is

@@ -144,9 +144,8 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 ## Invariants
 
 1. **Stack underflow is a VM bug.** Every pop must have a preceding push.
-   If you see "Stack underflow," the bytecode or emitter is broken. Handlers
-   panic on stack underflow; `CheckSignalBound` is the one exception, and
-   reads NIL.
+   If you see "Stack underflow," the bytecode or emitter is broken. Every
+   handler panics on stack underflow.
 
 2. **Closure environments are immutable Rc<Vec>.** The vec is created at
    closure call time; mutations go through cells, not env modification.

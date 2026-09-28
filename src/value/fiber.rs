@@ -1,17 +1,19 @@
-// audited: 2026-09-23
+// audited: 2026-09-28
 //! Fiber types for the Elle runtime.
 //!
 //! A fiber is an independent execution context: it owns its operand stack,
 //! call frames, and signal state. The VM dispatches into the current fiber;
 //! suspended fibers are stored as heap values.
+//!
+//! docs/signals/fibers.md
 
 use crate::value::closure::Closure;
 use crate::value::Value;
 use smallvec::SmallVec;
 use std::rc::Rc;
 
-// The fiber's cohesive item groups live in submodules; re-exported here so
-// every `crate::value::fiber::<Item>` path resolves unchanged.
+// The fiber's cohesive item groups live in submodules, re-exported here so
+// every item has the one path `crate::value::fiber::<Item>`.
 mod caller;
 mod frame;
 mod handle;
@@ -33,9 +35,8 @@ pub use parked::{ParkedDues, ParkedState};
 mod signalbits;
 pub use signalbits::SignalBits;
 
-// Signal constants are canonically defined in `crate::signals` (the semantic
-// owner). Re-exported here so existing `use crate::value::fiber::SIG_*`
-// imports continue to work.
+// Signal constants are defined in `crate::signals`, their owner, and
+// re-exported here beside the fiber that carries them.
 pub use crate::signals::{
     SIG_ABORT, SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FS, SIG_FUEL, SIG_HALT, SIG_IO, SIG_OK,
     SIG_PROPAGATE, SIG_QUERY, SIG_RESUME, SIG_SWITCH, SIG_TERMINAL, SIG_WAIT, SIG_YIELD,
@@ -43,8 +44,7 @@ pub use crate::signals::{
 
 /// The fiber: an independent execution context.
 ///
-/// Holds all per-execution state:
-/// operand stack, call frames, exception handlers.
+/// Holds all per-execution state: operand stack, call frames, signal state.
 /// The VM retains only shared state (modules, JIT cache, FFI, docs, heap).
 ///
 /// The heap lives on the VM, not on individual fibers. All fibers share
@@ -149,12 +149,11 @@ pub struct Fiber {
     /// Suspended execution frames. Set when the fiber suspends; consumed
     /// when it resumes.
     ///
-    /// - Signal suspension (`fiber/signal`): single frame, empty stack
-    /// - Yield suspension (`yield`): chain of frames from yielder to
-    ///   fiber boundary, each with its operand stack captured
-    ///
-    /// On resume, frames are replayed from innermost (index 0) to
-    /// outermost (last index).
+    /// Frame 0 is where the suspend happened — an `emit` instruction, a
+    /// suspending primitive call (a dynamic `emit`, an I/O request, a
+    /// capability denial), or a fuel pause — with its operand stack. Each
+    /// caller the suspend left adds one frame after it. On resume, frames are
+    /// replayed from innermost (index 0) to outermost (last index).
     pub suspended: Option<Vec<SuspendedFrame>>,
 
     /// Per-activation region-slot remap (docs/impl/region/model.md — every value its
@@ -189,7 +188,7 @@ pub struct Fiber {
     /// moves it, unlike the per-activation slots above. Minted lazily; `None`
     /// for a fiber that owns nothing. Freed only at the fiber's terminal
     /// transitions (`take_fiber_owned` / `release_fiber_owned`,
-    /// `src/vm/fiber.rs`) — never while the fiber is resumable.
+    /// `src/vm/fiber/owned.rs`) — never while the fiber is resumable.
     pub fiber_owner_node: Option<crate::hir::region::RuntimeRegion>,
 
     /// The closure whose body is currently executing in this fiber — an
@@ -209,7 +208,6 @@ pub struct Fiber {
     /// body) or when an entrant left it untracked.
     pub current_closure: Value,
 
-    // --- Execution state migrated from VM ---
     /// The non-tail closure calls in progress, on every tier. A call past
     /// `RuntimeConfig::max_depth` halts with `:stack-overflow`.
     pub call_depth: usize,
