@@ -1,12 +1,12 @@
 # An abandoned frame runs the releases it still owes
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-28 -->
 
 The two tables naming what an abandoned frame still owed, and the exits that walk
 them. An error, a squelch boundary, a discard and a compiled unwind share one walk.
 
-The section above places one release in the block a signal exit skips. That block is
-not the only thing skipped. An **error** leaves through the signal machinery, so
+[What a signal exit owes](signalexit.md) places one release in the block a signal
+exit skips. That block is not the only thing skipped. An **error** leaves through the signal machinery, so
 *none* of the frame's remaining instructions run — and every release the frame still
 owed is among them. The frame that called the raising native holds the arguments it
 materialized for that call, and every binding whose last use lies past it; each of
@@ -106,7 +106,10 @@ parks its own frame on an error exit (`do_fiber_first_resume`), so a restart rep
 those instructions and the releases among them; running them here as well would release
 twice. The parking caller says so with a one-shot (`VM::pending_error_park`), taken at
 the activation's entry so the frames that body *calls* — which nothing parks — still
-walk. What the parked frame owes runs where no resume can reach it either: the fiber's
+walk. A replayed frame that raises is parked the same way: `resume_suspended` re-parks
+it and keeps the outer frames of the chain behind it, so a replayed error parks its
+whole chain and nothing in it is abandoned. What the parked frame owes runs where no
+resume can reach it either: the fiber's
 own discharge reads the same two tables off each parked `BytecodeFrame`, its saved
 locals and its saved activation map standing in for the live ones
 ([owner.md](owner.md)).

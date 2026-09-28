@@ -77,7 +77,8 @@ error message.
 Most instruction handlers return `()`. The call, tail-call and emit handlers
 return the signal that ends the dispatch loop. VM bugs panic. A user error in
 call position calls `VM::set_error(kind, msg)` and pushes `Value::NIL` to keep
-the stack consistent; one in tail position returns `Some(SIG_ERROR)`.
+the stack consistent (invariant 7 below); one in tail position returns
+`Some(SIG_ERROR)`.
 
 ## Threading the code object
 
@@ -180,6 +181,12 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
    a value routes through its registered NativeFn, which validates arguments
    at runtime. See `VM::set_error` in [mod.rs](mod.rs) and
    `Fiber::set_error_in` in [fiber.rs](../value/fiber.rs).
+   A handler that raises pushes one `Value::NIL` in place of its result, and
+   the post-handler error exit pops it, so an error park holds nothing in the
+   raising call's result position and a restart's resume value lands there.
+   An instruction with no result (`CheckSignalBound`, `PushParamFrame`) pushes
+   no placeholder, and its park takes no resume value
+   ([vm.md](../../docs/impl/vm.md)).
 
 ## Key VM fields
 
@@ -252,20 +259,22 @@ overwritten, and how to add a caller.
 
 ## Suspension mechanism
 
-When a fiber suspends (through the Emit instruction or a suspending primitive):
+When a fiber suspends, or stops on an error:
 
 1. **Emit instruction** (`handle_emit`): captures innermost frame as a
    `SuspendedFrame` with the code object, env (Rc clone), IP (after the emit),
    and operand stack. Stored in `fiber.suspended`.
-2. **Return into a paused caller** (if the yield leaves a callee):
+2. **Suspending primitive** (`handle_primitive_signal`, call position): parks
+   its own frame the same way. A tail-position suspend, a fuel pause and an
+   error park no frame of their own: the driver they return to parks it
+   (`do_fiber_first_resume`, the re-suspend in `resume_suspended`).
+3. **Return into a paused caller** (if a suspend leaves a callee):
    `run_dispatch` appends the caller's frame to the `fiber.suspended` vec.
-3. **Suspending primitive** (dynamic `emit`, io op, capability denial):
-   `handle_primitive_signal` parks one `SuspendedFrame` with the full operand
-   stack.
 4. **Frame ordering**: innermost (yielder/signaler) at index 0, outermost
    (caller) at last index.
 5. **Resume** (`resume_suspended`): iterates frames forward, calling
-   `execute_bytecode_from_ip` for each. Handles re-yields and errors.
+   `execute_bytecode_from_ip` for each. A frame that stops again re-parks,
+   and every signal but a halt keeps the outer frames behind it.
 
 A park at a suspending primitive call records how its delivery is funded in
 the delivery ledger (`Fiber::delivery`), and the install that displaces the

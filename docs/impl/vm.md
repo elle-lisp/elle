@@ -52,6 +52,28 @@ integer path before falling back to the general one
 the compiler proved both operands are integers — see
 [impl/bytecode.md](bytecode.md).
 
+### The error exit
+
+A handler that raises sets `fiber.signal` to the error and pushes `nil` in
+place of its result, so the stack stays consistent. The loop's error exit
+pops that placeholder. A fiber stopped on an error therefore parks with
+nothing in the raising call's result position, and a restart pushes the
+resume value there.
+
+Three raises have no result position. A `silence` bound on a parameter
+(`CheckSignalBound`) and a `parameterize` of a value that is not a parameter
+(`PushParamFrame`) are instructions that produce no value, so they raise
+without a placeholder. The object limit raises between two instructions,
+after the allocating one pushed its result. The fiber parks without taking
+a resume value there, and a restart continues after the raise.
+
+The exit also carries the raise site, `RaiseSite`, out to the fiber
+boundary. An `Emit` raise is `Emit`, because its continuation funds its own
+release of the resume value. A raise with no result position is `NoResult`,
+and a restart delivers nothing to fund. Every other raise is `Call`, and the
+delivery must mint instead. The boundary records the site in the delivery
+ledger ([park.md](region/park.md)).
+
 ## Fiber integration
 
 - **Emit** (`Instruction::Emit` with a signal bits operand — see
@@ -138,7 +160,9 @@ restores the caller's stack and register, and completes the call:
   `Fiber::suspended` holds the innermost frame first, as `resume_suspended`
   expects.
 - **Error or halt** — the caller leaves by the same signal from the call
-  instruction. The abandoned-frame walk runs for each frame on the way out.
+  instruction. The abandoned-frame walk runs for each callee frame on the way
+  out. A fiber body's own frame is parked for a restart instead
+  ([unwind.md](region/unwind.md)).
 
 `execute_code` (the root) and `trampoline_loop` (every other entry) call
 `run_dispatch` where they would call the dispatch loop itself. The callers that

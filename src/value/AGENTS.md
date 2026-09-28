@@ -1,6 +1,6 @@
 # value
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Runtime value representation using a tagged union.
 
@@ -69,7 +69,7 @@ so that `fiber/parent` and `fiber/child` return identity-preserving values
 | `child` | `Option<FiberHandle>` | Strong pointer to child fiber |
 | `child_value` | `Option<Value>` | Cached Value for child |
 
-These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
+These are set during the swap protocol in `with_child_fiber` (`vm/fiber/child.rs`).
 
 ## Invariants
 
@@ -85,7 +85,7 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
    an uncounted container store is a compile error. Membership-neutral
    mutation uses `with_array_mut_neutral`.
 
-1. **`Value` is `Copy`.** All 16 bytes (tag + payload). Heap data is `Rc`.
+1. **`Value` is `Copy`.** All 16 bytes (tag + payload). Heap data lives in regions.
    The `traits: Value` field on heap variants is also `Copy`.
 
 2. **`traits` field is always NIL or a struct.** The `with-traits`
@@ -124,8 +124,7 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
 
 7. **`SuspendedFrame` captures everything needed to resume.** A single type
      holds the bytecode, constants, env, IP, and operand stack for a suspended
-     fiber. Signal suspension has an empty stack; yield suspension captures the
-     stack.
+     fiber. Every parked frame captures its operand stack.
 
 8. **A stored struct key is interned into the struct's region.** `TableKey`
      is `Copy` and its string and array arms hold a `Value`, so a key built by
@@ -146,7 +145,7 @@ The tagged union uses a `(tag: u64, payload: u64)` pair:
 ### Syntax objects
 
 `HeapObject::Syntax { syntax: Syntax, .. }` preserves scope sets through the
-Value round-trip during macro expansion. Created by `Value::syntax()`, accessed
+Value round-trip during macro expansion. Created by `value::build::syntax`, accessed
 by `Value::as_syntax()`. The node is stored inline and `value::build::syntax`
 **copies** the whole tree into the value's own region, so the object is
 self-contained page bytes (docs/impl/syntax.md § "A syntax `Value` owns its
@@ -175,12 +174,12 @@ in `types.rs` is `&'static PrimitiveDef`, the static primitive definition the
 Two set types exist, following the immutable/mutable split:
 
 - **`LSet { data: RegionSlice<Value> }`** — immutable set, stored region-inline,
-  no `RefCell`. Created via `Value::set()` (takes a `BTreeSet<Value>` and freezes
+  no `RefCell`. Created via `value::build::set` (takes a `BTreeSet<Value>` and freezes
   it into the slice). Accessed via `Value::as_set()`. Displays as `|1 2 3|`.
   `type_name()` returns `"set"`. Type keyword: `:set`.
 
 - **`LSetMut { data: Rc<RefCell<BTreeSet<Value>>> }`** — mutable set.
-  Created via `Value::set_mut()`. Accessed via `Value::as_set_mut()`. Displays
+  Created via `value::build::set_mut`. Accessed via `Value::as_set_mut()`. Displays
   as `@|1 2 3|`. `type_name()` returns `"@set"`. Type keyword: `:@set`.
 
 Set membership uses structural equality (from `Value: Eq`). When a mutable value
@@ -190,9 +189,9 @@ after insertion).
 
 Predicates: `is_set()` and `is_set_mut()` for type checking.
 
-Create values via methods: `Value::int(42)`, `Value::pair(head, tail)`,
-`Value::closure(c)`, `Value::set(btree_set)`,
-`Value::set_mut(btree_set)`. Don't construct enum variants directly.
+Create an immediate with `Value::int(42)` and the like. Build a heap value
+through [build.rs](build.rs) or a primitive's ctx. Don't construct enum
+variants directly.
 
 ## Trait table field
 

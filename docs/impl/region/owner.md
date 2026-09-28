@@ -1,6 +1,6 @@
 # Owner nodes — an activation as a forest root
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 The pages-less region that realizes an activation or a fiber as a forest root, the two cuts that fill it, and what frees it.
 
@@ -306,9 +306,10 @@ state no live frame shares.
 What stays refused is the rest of the parked `activation_region_map`: a blanket per-slot
 release of it carries no receipt, and the regions it names may be an outer, non-discarded
 frame's or the catching activation's, and releasing one double-frees it. A frame
-dropped *outside* the chokepoint (an abandoned error park) still abandons its dues — a
-bounded leak, never a double-free (the members have no count for any other release route
-to reach). Pinned by
+dropped *outside* the chokepoint still abandons its dues — a bounded leak, never a
+double-free (the members have no count for any other release route to reach). A
+replayed frame that raises is not such a frame: it re-parks with the rest of its chain
+([unwind.md](unwind.md)). Pinned by
 `runtime::tests::ownership::discard_frees_parked_activation_owner_node` (single frame and
 multi-frame chains; the member's generation bumps at the discard, bounded across repeated
 park-discard cycles), `…::discard_runs_the_abandoned_frames_release_tables` (both routes,
@@ -363,11 +364,13 @@ set-drop over the fiber's whole owned set — node + members + interior cycles, 
 frontier cascading once from the recorded `outgoing` tables; with no fiber node each
 parked node subtree-drops directly. The terminal transitions are: normal completion
 (`with_child_fiber`'s `:dead` arm), a halt (`VM::finalize_dead_fiber`, at every
-`SIG_HALT → Dead` promotion), and the hard kills — `fiber/cancel` of a new/parked fiber
-and `fiber/abort` of a not-yet-started one (`kill_fiber`, which the discarding
-`suspended = None` sites route through). An `:error` fiber is **not** terminal — it is
-resumable (the restarts system replays its re-parked frame) — so an error promotion
-releases nothing: its parked chain and nodes stay live for the resume. The contract a
+`SIG_HALT → Dead` promotion), and the hard kills — `fiber/cancel` of a new, paused or
+errored fiber, which leaves it `:dead`, and `fiber/abort` of a not-yet-started one,
+which leaves it `:error` (`kill_fiber`, which takes the status from its caller). A kill
+also releases the terminal signal it displaces, where the fiber held one. An `:error`
+fiber is otherwise **not** terminal — it is resumable (the restarts system replays its
+re-parked chain) — so an error promotion releases nothing: its parked chain and nodes
+stay live for the resume. The contract a
 fiber-node member carries: it must never hold the fiber's **terminal result** — a result
 that outlives its fiber is transferred out (`reparent_owned_children`) before completion,
 never left to be freed under the consumer's read. Pinned by

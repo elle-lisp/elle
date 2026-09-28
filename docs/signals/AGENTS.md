@@ -17,4 +17,4 @@ Up: [..](../AGENTS.md)
 - [primitives.md](primitives.md) — **Fiber Primitives** User-facing fiber operations and patterns.
 - [protocol.md](protocol.md) — **Signal Protocol** How a signal is encoded, carried, caught and reported: the bits, the payload, propagation, I/O requests and the registry.
 - [questions.md](questions.md) — **Signal Questions** What the signal design has not settled, and what it has.
-- [recovery.md](recovery.md) — **Signal Recovery (more...)**
+- [recovery.md](recovery.md) — **Signal Recovery** How a handler recovers from a signal by resuming the fiber that raised it.

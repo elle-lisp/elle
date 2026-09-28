@@ -146,14 +146,14 @@ pub struct Fiber {
     /// ([`Delivery`]; docs/impl/region/park.md § "A park names its funding in
     /// the delivery ledger").
     pub delivery: Delivery,
-    /// Suspended execution frames. Set when the fiber suspends; consumed
-    /// when it resumes.
+    /// Suspended execution frames. Set when the fiber suspends or stops on an
+    /// error; consumed when it resumes.
     ///
-    /// Frame 0 is where the suspend happened — an `emit` instruction, a
+    /// Frame 0 is where the fiber stopped — an `emit` instruction, a
     /// suspending primitive call (a dynamic `emit`, an I/O request, a
-    /// capability denial), or a fuel pause — with its operand stack. Each
-    /// caller the suspend left adds one frame after it. On resume, frames are
-    /// replayed from innermost (index 0) to outermost (last index).
+    /// capability denial), a fuel pause, or a raise — with its operand stack.
+    /// Each caller the stop left adds one frame after it. On resume, frames
+    /// are replayed from innermost (index 0) to outermost (last index).
     pub suspended: Option<Vec<SuspendedFrame>>,
 
     /// Per-activation region-slot remap (docs/impl/region/model.md — every value its

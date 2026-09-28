@@ -144,8 +144,8 @@ Two invariants govern delivery:
   held — an operation whose operands are gone has no reader either
   ([the io backend rules](../src/io/AGENTS.md)). The scheduler drops that
   error exactly as it would a result. An abort retains those regions instead,
-  because the unwinding it starts can suspend and be resumed
-  ([the fiber primitives](signals/primitives.md)).
+  because the fiber it raises in stays resumable, and its handlers can
+  suspend ([the fiber primitives](signals/primitives.md)).
 - **A finished fiber holds no operation.** Completing a fiber cancels the
   submission it still waits on. Otherwise that submission keeps a worker
   and a descriptor for a fiber that can never read the result, and the

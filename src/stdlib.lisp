@@ -1375,24 +1375,27 @@
   "True if fiber is paused (waiting to resume)."
   (= (fiber/status f) :paused))
 (defn fiber/dead? [f]
-  "True if fiber completed normally."
+  "True if the fiber is :dead: it returned, halted, or was cancelled."
   (= (fiber/status f) :dead))
 (defn fiber/error? [f]
-  "True if fiber terminated with an error."
+  "True if the fiber is :error: an error passed its mask, or an abort stopped
+   it. A parent may still resume it."
   (= (fiber/status f) :error))
 (defn fiber/done? [f]
-  "True if fiber is terminal (dead or errored)."
+  "True if the fiber is :dead or :error. An :error fiber runs again only when
+   a parent resumes it."
   (let [s (fiber/status f)]
     (or (= s :dead) (= s :error))))
 (defn fiber-failed? [f]
-  "True when `f` stopped on an uncaught error.
+  "True when `f` stopped on an error, or was cancelled.
 
-   Not the same question as `fiber/error?`. An error does not unwind a
+   Not the same question as `fiber/error?`. A caught error does not unwind a
    fiber: it suspends holding the error signal, so `fiber/status` answers
-   :paused — what a fiber waiting to resume answers — and only the SIG_ERROR
-   bit tells the two apart. Whether that fiber is finished is the resumer's
-   decision (docs/signals/primitives.md): a parent can resume it with a
-   recovery value. This answers the narrower question a scheduler asks about
+   :paused — what a fiber waiting to resume answers. A cancel leaves the
+   fiber :dead, as a return does. Only the SIG_ERROR bit tells each pair
+   apart. Whether a stopped fiber is finished is the resumer's decision
+   (docs/signals/primitives.md): a parent can resume it with a recovery
+   value. This answers the narrower question a scheduler asks about
    its own program: did this fiber stop because it failed?"
   (let [s (fiber/status f)]
     (or (= s :error) (not (= 0 (bit/and (fiber/bits f) 1))))))
