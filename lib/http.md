@@ -1,12 +1,13 @@
 # http
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
-HTTP/1.1 client and server over TCP, in one file of pure Elle, with HTTPS and compression as opt-in module arguments.
+HTTP/1.1 client and server over TCP in pure Elle, with HTTPS and compression as opt-in module arguments.
 
 The export struct at the bottom of [http.lisp](http.lisp) lists what the
 module offers, and `(doc name)` carries each function's arguments and
-its errors. This file holds what the source cannot: the shapes on the
+its errors. [http/overview.md](http/overview.md) lists the submodules
+behind it. This file holds what the source cannot: the shapes on the
 wire and the invariants a caller has to respect.
 
 ## Loading
@@ -73,6 +74,10 @@ Server-sent events ride the chunked path: `sse-response` sets
 `text/event-stream`, and each call to the `send-event` function it hands
 the body becomes one chunk. `sse-get` answers with a `|:yield|` fiber of
 `{:event :data :id :retry}` structs that reconnects on its own.
+
+An `id:` field that holds NUL (U+0000) is ignored, as the HTML standard's
+event-stream rules require. Any other value, `10` among them, becomes the
+event's `:id` and the `Last-Event-ID` of the next reconnect.
 
 ## Invariants
 

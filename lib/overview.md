@@ -1,6 +1,6 @@
 # lib
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Reusable Elle modules, one closure each: `(import "std/name")` gives you the closure, and calling it returns the struct of exports.
 
@@ -29,6 +29,7 @@ This table lists the modules with a guide here, and their neighbours.
 | File | Purpose | Guide |
 |------|---------|-------|
 | [http.lisp](http.lisp) | HTTP/1.1 client and server over TCP | [http.md](http.md) |
+| [http/](http/AGENTS.md) | HTTP/1.1 submodules: url, transport, chunked, wire, sse | [http/overview.md](http/overview.md) |
 | [http2.lisp](http2.lisp) | HTTP/2 client and server (h2 over TLS, h2c cleartext) | [http2.md](http2.md) |
 | [http2/](http2/AGENTS.md) | HTTP/2 submodules: huffman, hpack, frame, stream, transport, session, reader, server | [http2/overview.md](http2/overview.md) |
 | [websocket.lisp](websocket.lisp) | WebSocket client and server (RFC 6455, ws:// and wss://) | |
@@ -36,6 +37,7 @@ This table lists the modules with a guide here, and their neighbours.
 | [tls.lisp](tls.lisp) | TLS 1.2/1.3 client and server, with ALPN | [tls.md](tls.md) |
 | [redis.lisp](redis.lisp) | Redis client (RESP2) over TCP | [redis.md](redis.md) |
 | [dns.lisp](dns.lisp) | DNS client (RFC 1035) | |
+| [dns/](dns/AGENTS.md) | The DNS wire codec: names, queries, responses | |
 | [aws.lisp](aws.lisp) | AWS client: SigV4 signing, HTTPS, service dispatch | [aws/](aws/AGENTS.md) |
 | [contract.lisp](contract.lisp) | Compositional validation for function boundaries | |
 | [lua.lisp](lua.lisp) | Lua standard library compatibility prelude; fails to compile today ([#1217](https://github.com/elle-lisp/elle/issues/1217)) | |
