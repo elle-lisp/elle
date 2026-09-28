@@ -16,10 +16,8 @@
 (def CLASS-IN 1)
 
 # DNS header flags
-(def FLAG-RD 256)
-# Recursion Desired (bit 8)
-(def FLAG-QR 32768)
-# Query/Response (bit 15)
+(def FLAG-RD 256)  # Recursion Desired (bit 8)
+(def FLAG-QR 32768)  # Query/Response (bit 15)
 
 # RCODE values (low 4 bits of flags word 2)
 (def RCODE-OK 0)
@@ -93,7 +91,8 @@
               :message "name decode loop exceeded 128 iterations"}))
     (assign safety (+ safety 1))
     (let [b (get buf pos)]
-      (cond  # Null terminator — end of name
+      (cond
+        # Null terminator — end of name
         (= b 0)
           (begin
             (unless jumped (assign return-offset (+ pos 1)))
@@ -163,7 +162,8 @@
   (if (<= count 0)
     offset
     (let* [decoded (decode-name buf offset)
-           after-name decoded:offset  # Skip QTYPE (2 bytes) + QCLASS (2 bytes)
+           after-name decoded:offset
+           # Skip QTYPE (2 bytes) + QCLASS (2 bytes)
            next (+ after-name 4)]
       (skip-questions buf next (- count 1)))))
 
@@ -250,7 +250,8 @@
 ## ── resolv.conf parsing ───────────────────────────────────────────────
 
 (defn parse-resolv-conf [text]
-  "Parse /etc/resolv.conf and return a list of nameserver IP strings."
+  "Parse the text of /etc/resolv.conf and return an array of nameserver IP
+   strings."
   (let* [lines (map string/trim (string/split text "\n"))
          ns-lines (filter (fn [l] (string/starts-with? l "nameserver")) lines)
          addrs (map (fn [l]
@@ -303,11 +304,13 @@
                     :reason :txid-mismatch
                     :expected txid
                     :actual resp:header:id
-                    :message "transaction ID mismatch"}))  # Check truncation
+                    :message "transaction ID mismatch"}))
+          # Check truncation
           (when resp:header:tc
             (error {:error :dns-error
                     :reason :truncated
-                    :message "response truncated (TC bit set)"}))  # Check RCODE
+                    :message "response truncated (TC bit set)"}))
+          # Check RCODE
           (unless (= resp:header:rcode RCODE-OK)
             (let [rcode-name (or (get rcode-names resp:header:rcode)
                                  (string resp:header:rcode))]
@@ -331,7 +334,8 @@
         (break result)
         (begin
           (assign last-err result)
-          (assign attempt (+ attempt 1))))))  # All retries exhausted
+          (assign attempt (+ attempt 1))))))
+  # All retries exhausted
   (when last-err (error last-err))
   (error {:error :dns-timeout
           :reason :retries-exhausted
@@ -355,31 +359,36 @@
               :limit MAX-CNAME-DEPTH
               :message (concat "CNAME chain too deep for " name)}))
     (let* [resp (query-with-retries server current-name qtype timeout retries)
-           answers resp:answers  # Collect direct answers of the requested type
+           answers resp:answers
+           # Collect direct answers of the requested type
            direct (filter (fn [r]
                             (= r:type
                                (case qtype
                                  TYPE-A :a
                                  TYPE-AAAA :aaaa
-                                 nil))) answers)  # Check for CNAME redirects
+                                 nil))) answers)
+           # Check for CNAME redirects
            cnames (filter (fn [r] (= r:type :cname)) answers)]
-      (if (not (empty? direct))  # Found direct answers — done
+      # Found direct answers — done
+      (if (not (empty? direct))
         (begin
           (each r in direct
             (push all-records r))
-          (break nil))  # Follow CNAME if present
+          (break nil))
+        # Follow CNAME if present
         (if (not (empty? cnames))
           (begin
             (each r in cnames
               (push all-records r))
             (assign current-name (get (first cnames) :target))
-            (assign depth (+ depth 1)))  # No answers and no CNAMEs — done
+            (assign depth (+ depth 1)))
+          # No answers and no CNAMEs — done
           (break nil)))))
   (freeze all-records))
 
 (defn resolve [name &named server timeout retries]
-  "Resolve a domain name. Returns a list of record structs.
-   Queries for both A and AAAA records.
+  "Resolve a domain name. Returns its record structs, the A records before
+   the AAAA records. A query that fails contributes no records.
    Options:
      :server  — nameserver IP (default: from /etc/resolv.conf)
      :timeout — per-query timeout in ms (default: 3000)
@@ -461,7 +470,8 @@
     (assert (= (read-u16 q 0) 0x1234) "build-query: txid")
     (assert (= (read-u16 q 2) FLAG-RD) "build-query: flags RD")
     (assert (= (read-u16 q 4) 1) "build-query: qdcount")
-    (assert (= (read-u16 q 6) 0) "build-query: ancount")  # Question section starts at offset 12
+    (assert (= (read-u16 q 6) 0) "build-query: ancount")
+    # Question section starts at offset 12
     (assert (= (get q 12) 7) "build-query: name label length"))
 
   # ── header parsing ──
@@ -513,9 +523,8 @@
                         (u16->bytes 0)  # NSCOUNT
                          (u16->bytes 0))  # ARCOUNT
          qname (encode-name "example.com")
-         # (qname in question)
          question (concat qname (u16->bytes TYPE-A) (u16->bytes CLASS-IN))
-         # Answer: compression pointer to offset 12
+         # Answer: compression pointer to offset 12 (qname in question)
          answer (concat (bytes 0xc0 12)  # Name pointer
                         (u16->bytes TYPE-A)  # TYPE
                         (u16->bytes CLASS-IN)  # CLASS
@@ -564,12 +573,14 @@
                         (u16->bytes 2)  # ANCOUNT (CNAME + A)
                          (u16->bytes 0) (u16->bytes 0))
          qname (encode-name "www.example.com")
-         question (concat qname (u16->bytes TYPE-A) (u16->bytes CLASS-IN))  # CNAME answer
+         question (concat qname (u16->bytes TYPE-A) (u16->bytes CLASS-IN))
+         # CNAME answer
          cname-target (encode-name "example.com")
          cname-answer (concat (bytes 0xc0 12)  # Name pointer
                                (u16->bytes TYPE-CNAME) (u16->bytes CLASS-IN)
                               (bytes 0 0 0 60)  # TTL = 60
-                               (u16->bytes (length cname-target)) cname-target)  # A answer for the CNAME target
+                               (u16->bytes (length cname-target)) cname-target)
+         # A answer for the CNAME target
          a-answer (concat (encode-name "example.com") (u16->bytes TYPE-A)
                           (u16->bytes CLASS-IN)
                           (bytes 0 0 0xe 0x10)  # TTL = 3600
