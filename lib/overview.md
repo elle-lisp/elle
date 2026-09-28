@@ -37,7 +37,7 @@ This table lists the modules with a guide here, and their neighbours.
 | [tls.lisp](tls.lisp) | TLS 1.2/1.3 client and server, with ALPN | [tls.md](tls.md) |
 | [redis.lisp](redis.lisp) | Redis client (RESP2) over TCP | [redis.md](redis.md) |
 | [dns.lisp](dns.lisp) | DNS client (RFC 1035) | |
-| [dns/](dns/AGENTS.md) | The DNS wire codec: names, queries, responses | |
+| [dns/wire.lisp](dns/wire.lisp) | The DNS wire codec: names, queries, responses | |
 | [aws.lisp](aws.lisp) | AWS client: SigV4 signing, HTTPS, service dispatch | [aws/](aws/AGENTS.md) |
 | [contract.lisp](contract.lisp) | Compositional validation for function boundaries | |
 | [lua.lisp](lua.lisp) | Lua standard library compatibility prelude; fails to compile today ([#1217](https://github.com/elle-lisp/elle/issues/1217)) | |

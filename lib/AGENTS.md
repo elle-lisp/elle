@@ -17,6 +17,7 @@ Up: [..](../AGENTS.md)
 ## Directories
 
 - [aws/](aws/AGENTS.md) — Elle AWS Client
+- [dns/](dns/AGENTS.md) — (empty)
 - [git/](git/AGENTS.md) — (empty)
 - [gtk4/](gtk4/AGENTS.md) — (empty)
 - [http/](http/AGENTS.md) — The submodules behind [http.lisp](../http.lisp): URLs, transports, the wire format, chunked bodies and server-sent events.
