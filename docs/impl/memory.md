@@ -1,6 +1,6 @@
 # The region memory model
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 The mission of the region system, the map of its documents, the settled
 invariants, and the leak classes that name the open frontier.
@@ -13,7 +13,7 @@ current state, the fix-selection discipline, and the open work in order — is
 do next.
 
 State is read from the instruments, never from prose. A class is closed when
-[the oracle](../../tests/elle/oracle.lisp) measures its representative shape bounded and
+[the oracle](../../tests/impl/oracle.lisp) measures its representative shape bounded and
 `--trace=guardfree` is clean — not when a sentence claims it. Git holds the
 history; this document describes the system as it stands.
 
@@ -342,15 +342,16 @@ Leak-freedom has two failure modes: a region no mechanism reclaims (the
 F-classes above), and a region freed before its true last use (a UAF). The
 forest runs unconditionally, so `--trace=guardfree` under the full stdlib is
 the soundness gate; any over-free is a first-class defect pinned by a
-guardfree fixture (the `region_*_uaf` family in
-[tests/integration/elle_scripts/](../../tests/integration/elle_scripts.rs)). This axis is orthogonal to the leak
+guardfree test (the `region-*-uaf` files in
+[the implementation suite](../../tests/impl/overview.md), each arming guardfree in
+its sidecar). This axis is orthogonal to the leak
 burndown — closing a leak class does not close it, and it does not close a
 leak class.
 
 ## The backend-realization frontier
 
 The arena gauges are host-side and tier-transparent, so the interpreter's
-probes port under each tier's flag
+probes port to each tier on a build that carries it
 ([region/diagnostics.md](region/diagnostics.md)):
 
 - **MLIR CPU/GPU** is allocation-free by construction — the GPU-eligibility
@@ -374,7 +375,7 @@ beside a live-growth discriminator that proves the gauge is not dead; and
 `--trace=guardfree` under the full stdlib for UAF. A fix is proven by measured
 slope → 0 plus guardfree-clean.
 
-[The oracle](../../tests/elle/oracle.lisp) is the single leak-state dashboard: representative
+[The oracle](../../tests/impl/oracle.lisp) is the single leak-state dashboard: representative
 shapes per class, an adaptive sequential rate estimator that catches
 sub-integer leaks, and shrink-only pins. `oracle: ok` is a ratchet, not a
 certificate — it asserts no leak got worse and no closed class regressed,
@@ -421,8 +422,7 @@ so the split cannot drift. How to run all three gauges is
   `RegionEffect` declarations, oracle-checked).
 - **The stdlib the F1 class lives in:** [src/core.lisp](../../src/core.lisp),
   [src/stdlib.lisp](../../src/stdlib.lisp), [src/prelude.lisp](../../src/prelude.lisp).
-- **Tests and oracle:** [the oracle](../../tests/elle/oracle.lisp) and
-  [its probes](../../tests/elle/probe/); [src/runtime/tests/ownership/](../../src/runtime/tests/ownership/);
-  the `region-*`/`fiber-*` corpus under [tests/elle/](../../tests/elle/);
-  [tests/integration/elle_scripts/](../../tests/integration/elle_scripts.rs);
+- **Tests and oracle:** [the oracle](../../tests/impl/oracle.lisp) and
+  [its probes](../../tests/impl/probe/); [src/runtime/tests/ownership/](../../src/runtime/tests/ownership/);
+  the `region-*`/`fiber-*` files in [the implementation suite](../../tests/impl/overview.md);
   [tests/region_process_teardown.rs](../../tests/region_process_teardown.rs).
