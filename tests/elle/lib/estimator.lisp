@@ -1,28 +1,25 @@
-(elle/epoch 12)
-# audited: 2026-09-17
+(elle/epoch 13)
+# audited: 2026-09-28
 ## The instrument the leak dashboards share: the gauges, the estimator, the
 ## ledger, and the channel each verdict is reported through.
 ## docs/impl/region/diagnostics.md
 ## docs/test-store.md
 ##
-## Each dashboard (oracle.lisp, plumb.lisp) splices this file with the
-## top-level `include-file` directive (docs/modules.md § "Compile-Time
-## Inclusion"), so every dashboard compiles its own copy: fresh ledger state
-## per process — which is why each must run its own gauge-live discriminators
-## (oracle.lisp § "The gauge-live discriminator"); a gauge is proven live per
-## process, never per library — and the `check` macro crosses, splicing
-## preceding expansion. This directory is outside the corpus glob
-## (`tests/elle/*.lisp`), so the library is never run as a test itself.
+## Each dashboard (oracle.lisp, plumb.lisp) splices this file in with the
+## top-level `include-file` directive (docs/modules.md). The splice happens
+## before expansion, so the `check` macro reaches the dashboard, and every
+## dashboard compiles its own copy with its own ledger state. A gauge is
+## therefore proven live per process, never per library, and each dashboard
+## runs its own gauge-live discriminators. This directory is outside the
+## corpus glob (`tests/elle/*.lisp`), so the library never runs as a test.
 
 # ── Empirical-Bernstein half-width ────────────────────────────────────
 # Total error budget δ, spent across an unbounded number of peeks via a per-m
 # union bound: δ_m = δ·(6/π²)/m², so Σ_m δ_m ≤ δ and the interval is valid at
 # EVERY block boundary (no optional-stopping inflation — the classic trap of
 # "peek at the CI and stop when it looks tight").
-(def EB-DELTA 0.000001)
-# 1e-6 — two-sided, anytime-valid
-(def INV-PI2-6 0.6079271018540267)
-# 6/π², the union-bound normalizer
+(def EB-DELTA 0.000001)  # 1e-6 — two-sided, anytime-valid
+(def INV-PI2-6 0.6079271018540267)  # 6/π², the union-bound normalizer
 
 (defn eb-halfwidth [m var rng]
   "Anytime-valid empirical-Bernstein half-width on the per-op-rate mean after m
@@ -41,7 +38,7 @@
 # carries, and the reading itself. The axis rides the GAUGE rather than the
 # probe's label because that is where it is a fact — every probe already hands
 # the estimator the gauge it wants, so no probe declares an axis and none can
-# declare the wrong one (docs/test-store.md § Measurements).
+# declare the wrong one (docs/test-store.md).
 #
 # `read` is pulled out once, before a measurement starts, and called inside the
 # window exactly as a bare gauge function was: a struct read between the two
@@ -49,18 +46,17 @@
 (defn gauge [axis unit read]
   {:axis axis :unit unit :read read})
 
-(def count-gauge (gauge "objects" "objects/op" (fn [] (arena/count))))
-# object-count gauge
-(def bytes-gauge (gauge "bytes" "bytes/op" (fn [] (arena/bytes))))
-# bump-arena bytes gauge
+(def count-gauge (gauge "objects" "objects/op" (fn [] (arena/count))))  # object-count gauge
+(def bytes-gauge (gauge "bytes" "bytes/op" (fn [] (arena/bytes))))  # bump-arena bytes gauge
+
+# The live-region-entry gauge: every active RegionEntry counts, a pages-less
+# owner node included. What the object count cannot see is a ZERO-OBJECT
+# entry: an owner node (docs/impl/region/owner.md), or a region emptied of
+# objects but pinned by an unbalanced count.
 (def region-gauge (gauge "regions" "regions/op" (fn [] (arena/region-count))))
-# live-region-entry gauge — every active RegionEntry counts, a pages-less owner
-# node included. What the object count cannot see is a ZERO-OBJECT entry: an
-# owner node (docs/impl/region/owner.md § "Owner nodes"), or a region emptied
-# of objects but pinned by an unbalanced count.
-(def ids-gauge (gauge "ids" "ids/op" (fn [] (arena/region-ids))))
-# physical-id issuance gauge — `next_physical`, the dimension every other gauge
-# is blind to (docs/impl/region/diagnostics.md § the `arena/region-ids` bullet).
+
+# The physical-id issuance gauge reads `next_physical`, the dimension every
+# other gauge is blind to (docs/impl/region/diagnostics.md, `arena/region-ids`).
 # A physical id minted for a call whose callee allocates nothing never becomes a
 # live region, so it holds no object, no page, no bytes and no reference count,
 # and `count-gauge`/`bytes-gauge`/`region-gauge` all read flat while it strands.
@@ -72,6 +68,7 @@
 # so its high-water mark is already past anything a loop driving the counter can
 # reach, and it cannot move for any probe shape. An unmovable gauge paints every
 # verdict green, which is what the discriminator discipline exists to refuse.
+(def ids-gauge (gauge "ids" "ids/op" (fn [] (arena/region-ids))))
 
 # ── The sequential estimator (general core) ───────────────────────────
 # RUN-BLOCK is (fn [b]) that performs b ops on the heap; GAUGE is one of the
@@ -93,6 +90,7 @@
   (when (%not (%int? minb)) (error :minb-not-int))
   (when (%not (%int? maxb)) (error :maxb-not-int))
   (run-block block)  # warmup block, discarded
+
   # Resolved once, outside every measurement window: the reading is what the
   # window must hold, not the lookup that finds it.
   (def read (get gauge :read))
@@ -140,8 +138,8 @@
 
 (defn run-thunk-block [probe b]
   "Run PROBE b times, passing the iteration index — the run-block for direct-loop
-   probes. PROBE is (fn [j]): j varies the input so a body cannot constant-fold,
-   faithful to the originals' use of the loop variable i."
+   probes. PROBE is (fn [j]): j varies the input so a body cannot
+   constant-fold."
   # b arrives through a closure value (untyped); the allocation-free diverging
   # guard proves it for the loop's %lt. PROBE is a closure, so a blanket
   # (numeric!) would be wrong here.
@@ -209,6 +207,7 @@
   (when (%not (%int? minb)) (error :minb-not-int))
   (when (%not (%int? maxb)) (error :maxb-not-int))
   (run-block block)  # warmup block, discarded
+
   # Both readings resolved once, outside every window (see measure-core).
   (def reada (get ga :read))
   (def readb (get gb :read))
@@ -333,7 +332,7 @@
           (if (nil? root) (push unclassified label) (put roots-seen root true)))
         :open))))
 
-# ── The measurement channel (docs/test-store.md § Measurements) ───────
+# ── The measurement channel ───────────────────────────────────────────
 # Every verdict is reported as well as printed: one JSON object per line,
 # appended to the file ELLE_TEST_MEASUREMENTS names. Unset, the channel is
 # closed and nothing is written.
