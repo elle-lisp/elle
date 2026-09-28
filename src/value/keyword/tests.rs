@@ -1,4 +1,4 @@
-//! audited: 2026-09-18
+//! audited: 2026-09-28
 //! Unit tests (`super` is the parent impl module).
 //!
 //! docs/impl/symbol.md
@@ -146,32 +146,50 @@ fn vocabulary_membership_answers_in_a_const_context() {
 }
 
 // Every form in `src/` that hands a *literal* spelling to a keyword
-// constructor. `kw("…")` is the per-module helper each primitive module
+// constructor: the call up to its opening paren, and how many arguments come
+// before the literal. `kw("…")` is the per-module helper each primitive module
 // defines for its struct keys (`primitives/compile/mod.rs`,
 // `primitives/fileio/manage.rs`) and the reader's syntax builder
-// (`reader/synbuild.rs`); it is the form the earlier scan missed, and the form
-// most of the runtime's struct keys are written in. `ctx.error("…")`,
-// `birth.error("…")` and `Completion::failed(id, birth, "…")` name a kind that
-// becomes the `:error` field's keyword — the last one spelled out to the
-// argument before its literal, per the rule below.
-// `ctx.external("…")` names a type that becomes the keyword `type-of` returns.
-// `Syntax::keyword(arena, "…")` is a keyword a desugaring writes into the
-// tree: no source token backs it, so no reader learns it and only the
-// vocabulary can spell it.
+// (`reader/synbuild.rs`); it is the form most of the runtime's struct keys are
+// written in. `ctx.error("…")`, `birth.error("…")` and
+// `Completion::failed(id, birth, "…")` name a kind that becomes the `:error`
+// field's keyword. So do the VM's own constructors and `rich_error!`, and the
+// VM builds through an `Alloc` that holds no memo, so nothing but the
+// vocabulary spells what the VM raises. `ctx.external("…")` names a type that
+// becomes the keyword `type-of` returns. `Syntax::keyword(arena, "…")` is a
+// keyword a desugaring writes into the tree: no source token backs it, so no
+// reader learns it and only the vocabulary can spell it.
 //
-// Each pattern ends at the quote that opens the spelling, because the
-// extraction reads from there to the next quote. A form whose literal is not
-// in that position needs its own entry, spelled out to the argument before it.
-const LITERAL_MINT_FORMS: &[&str] = &[
-    "Value::keyword(\"",
-    "TableKey::keyword(\"",
-    "kw(\"",
-    "ctx.error(\"",
-    "birth.error(\"",
-    "Completion::failed(id, birth, \"",
-    "ctx.external(\"",
-    "Syntax::keyword(arena, \"",
+// The scan skips whitespace before the literal. Counter-factual: a scan that
+// read the literal only straight after the paren missed every call `rustfmt`
+// had split across lines — `CheckSignalBound`'s `escaping_error(` among them,
+// whose kind printed as a hash.
+const LITERAL_MINT_FORMS: &[(&str, usize)] = &[
+    ("Value::keyword(", 0),
+    ("TableKey::keyword(", 0),
+    ("kw(", 0),
+    ("ctx.error(", 0),
+    ("birth.error(", 0),
+    ("Completion::failed(", 2),
+    ("set_error(", 0),
+    ("escaping_error(", 0),
+    ("error_extra(", 0),
+    ("rich_error!(", 1),
+    ("ctx.external(", 0),
+    ("Syntax::keyword(", 1),
 ];
+
+/// The literal spelling a mint form hands its constructor, given the text just
+/// past the form's opening paren and the count of arguments before the
+/// literal. `None` where that argument is not a string literal — a variable, a
+/// `format!` — or where the match is the constructor's own definition.
+fn literal_argument(mut rest: &str, args_before: usize) -> Option<&str> {
+    for _ in 0..args_before {
+        rest = &rest[rest.find(',')? + 1..];
+    }
+    let rest = rest.trim_start().strip_prefix('"')?;
+    Some(&rest[..rest.find('"').expect("terminated literal")])
+}
 
 // Every fixed spelling the runtime mints must be in VOCABULARY, or the value
 // it names prints as #<keyword:hash> — and `json/serialize` refuses a struct
@@ -185,10 +203,11 @@ const LITERAL_MINT_FORMS: &[&str] = &[
 fn vocabulary_covers_literal_mint_sites() {
     let mut missing = std::collections::BTreeMap::new();
     for (path, text) in runtime_sources() {
-        for pat in LITERAL_MINT_FORMS {
-            for (i, _) in text.match_indices(pat) {
-                let rest = &text[i + pat.len()..];
-                let name = &rest[..rest.find('"').expect("terminated literal")];
+        for (form, args_before) in LITERAL_MINT_FORMS {
+            for (i, _) in text.match_indices(form) {
+                let Some(name) = literal_argument(&text[i + form.len()..], *args_before) else {
+                    continue;
+                };
                 if static_keyword_name(keyword_hash(name)).is_none() {
                     missing.insert(name.to_string(), path.clone());
                 }
@@ -203,8 +222,8 @@ fn vocabulary_covers_literal_mint_sites() {
 }
 
 // The other half: a spelling that reaches the same constructors through a
-// `&'static str` an accessor returns. The literal sits in a `match` arm, not
-// in the call, so the scan above cannot see it — every one of these tables
+// `&'static str` an accessor returns. The literal sits in a `match` arm or a
+// table, not in the call, so the scan above cannot see it — every one of these tables
 // drifted out from under VOCABULARY without a single test noticing.
 //
 // Each table is enumerated rather than listed, so adding a variant fails this
@@ -277,6 +296,15 @@ fn vocabulary_covers_accessor_mint_sites() {
         WatchEventKind::Rename,
     ] {
         spellings.push(("WatchEventKind", k.as_keyword().to_string()));
+    }
+
+    // The trace set `(vm/config)` hands back, whose keys `--trace` admits only
+    // from this table, and the compile-dump kinds.
+    for name in crate::config::TRACE_KEYWORDS {
+        spellings.push(("TRACE_KEYWORDS", name.to_string()));
+    }
+    for name in crate::config::DUMP_KEYWORDS {
+        spellings.push(("DUMP_KEYWORDS", name.to_string()));
     }
 
     // `VM::active_tier` is a bare `&'static str` field, so its values are

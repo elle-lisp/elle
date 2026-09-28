@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-28
 //! Keyword identity and the static keyword vocabulary.
 //!
 //! A keyword's payload is the 64-bit FNV-1a hash of its name — the same
@@ -41,7 +41,7 @@ pub const fn keyword_hash(name: &str) -> u64 {
 /// literal to a keyword constructor, and `vocabulary_covers_accessor_mint_sites`
 /// enumerates the tables whose `&'static str` accessors feed the same
 /// constructors from behind a `match` arm no scan can see.
-static VOCABULARY: &[&str] = &[
+pub(crate) static VOCABULARY: &[&str] = &[
     // Result-struct keys and general fields
     "a",
     "active-allocator",

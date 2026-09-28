@@ -1,7 +1,10 @@
+// audited: 2026-09-28
 //! `CheckSignalBound` opcode body.
 //!
 //! Split out of the dispatch match: formatting a `restrict` violation from the
 //! global registry is verbose enough to crowd the routing.
+//!
+//! docs/impl/vm.md
 
 use super::*;
 
@@ -36,3 +39,6 @@ impl VM {
         // signal bound check. Only closures carry signal metadata.
     }
 }
+
+#[cfg(test)]
+mod tests;
