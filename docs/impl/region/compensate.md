@@ -192,7 +192,7 @@ that candidate came from. Otherwise the arms stay mutually exclusive, so exactly
 release runs per path; no merge point and no nil-stamp is involved, which is what a
 cell release cannot supply.
 
-Pinned by [region-tail-frame-exit.lisp](../../../tests/impl/region-tail-frame-exit.lisp)
+Pinned by [region-tail-frame-exit-capture.lisp](../../../tests/impl/region-tail-frame-exit-capture.lisp)
 (the `arm-cell` / `arm-cell-ro` / `arm-cell-read` rows, both arms of each), the
 `env-cell-read-arm` probe in [the direct probes](../../../tests/impl/probe/direct.lisp)
 (the per-op rate), the analysis pins in
