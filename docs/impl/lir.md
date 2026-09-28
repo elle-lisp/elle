@@ -1,6 +1,6 @@
 # LIR — Low-level IR
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 LIR is an SSA-form intermediate representation with virtual registers,
 basic blocks, and explicit control flow.
@@ -118,8 +118,8 @@ receives that same closure value as a compiled-body parameter, so `LoadSelf`
 reads it directly rather than naming a capture slot. The value it yields is the
 closure itself, so an invocation of that value recurses correctly
 ([selfrec.rs](../../src/runtime/tests/selfrec.rs),
-[recur-as-value.lisp](../../tests/elle/recur-as-value.lisp),
-[recur-after-tail-call.lisp](../../tests/elle/recur-after-tail-call.lisp)).
+[recur-as-value.lisp](../../tests/lang/recur-as-value.lisp),
+[recur-after-tail-call.lisp](../../tests/lang/recur-after-tail-call.lisp)).
 
 A self-reference in **call** position (`(loop args)`) lowers its callee to
 `LoadSelf` too, so the call re-enters the same code and environment with new

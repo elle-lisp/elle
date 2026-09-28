@@ -1,13 +1,13 @@
 # Type inference: the ascent, and what a call proves
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Where the types come from: an ascent from below whose limit is the least
 fixpoint, and what each kind of call contributes to it.
 
 [intrinsics.md](../intrinsics.md) says what each `%`-intrinsic contract needs.
 This file says where the types that discharge it are computed, and what happens
-when the computation does not settle. The pass is `src/hir/typeinfer/`.
+when the computation does not settle. The pass is [typeinfer/](../../src/hir/typeinfer).
 
 ## The ascent
 
@@ -110,9 +110,10 @@ no Bottom: at the ascent's limit, every Bottom left in the node map settles to
 Top, which is above the fixpoint and proves nothing.
 
 That one rule covers every consumer, because they all read that one map — the
-operand contracts (`contract.rs`), the signal narrowing (`narrow.rs`), the
-wrapper monomorphization (`monomorphize.rs`), and the LIR operand proof
-(`src/lir/lower/expr/intrinsic.rs`). The last two ask with equality, so a
+operand contracts ([contract.rs](../../src/hir/typeinfer/contract.rs)), the signal narrowing
+([narrow.rs](../../src/hir/narrow.rs)), the wrapper monomorphization
+([monomorphize.rs](../../src/hir/typeinfer/monomorphize.rs)), and the LIR operand proof
+([intrinsic.rs](../../src/lir/lower/expr/intrinsic.rs)). The last two ask with equality, so a
 Bottom proves nothing there. The first two ask with `subtype`, where a Bottom
 would prove every row.
 
@@ -244,7 +245,7 @@ The pass has no flow, so it cannot order the write against a call:
   loop that rewrites its own callee between two turns, the branch a Bottom would
   have joined away, and two controls — the unwritten binding, and the
   SSA-renamed function-local write that still proves.
-- `tests/elle/typed-int-ops.lisp` — the corpus peer, on every tier: a
+- [typed-int-ops.lisp](../../tests/impl/typed-int-ops.lisp) — the implementation-suite peer: a
   self-recursive integer `fib` emits `AddInt` and computes with it, a float
   base case is refused at compile time, and a reassigned local lambda binding
   is refused where its unreassigned twin emits `AddInt`.

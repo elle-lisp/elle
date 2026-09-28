@@ -1,6 +1,6 @@
 # Capture cells
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 How a captured binding's cell is realized, what a read through one borrows, and where the cell's own release lands.
 
@@ -31,7 +31,7 @@ fn-local `is_restorable_capture_cell` read through an upvalue by a nested closur
 is exactly as exposed as a top-level `def @cell` read. The fn-local shape is
 `(let [batch ready] (assign ready @[]) …)`, where `ready` is a local of the
 enclosing fn.
-[region-reassign-captured-cell-reader.lisp](../../../tests/elle/region-reassign-captured-cell-reader.lisp)
+[region-reassign-captured-cell-reader.lisp](../../../tests/impl/region-reassign-captured-cell-reader.lisp)
 pins both.
 
 The writer side owes one rule of its own, at the **init**. A celled binding's
@@ -67,7 +67,7 @@ keeps the routing and takes no init drop frees the cell's content while the cell
 still holds it. Any later reader of the cell then reads that freed content,
 including a closure the defining scope encloses. A spawned fiber that writes a
 captured `@`-mutable buffer to a port reaches this shape
-([region-capture-cell-let-reassign-uaf.lisp](../../../tests/integration/fixtures/region-capture-cell-let-reassign-uaf.lisp)).
+([region-capture-cell-let-reassign-uaf.lisp](../../../tests/impl/region-capture-cell-let-reassign-uaf.lisp)).
 
 `let` mints its compiled cell holding NIL and stores the init through it with
 `StoreCaptureCell`, the shape the other two binders take. So all three binders
@@ -84,7 +84,7 @@ has a compiled cell, because its define is outside any lambda, and `collect`
 repoints it. A classification by the *assign site*'s scope would call it
 fn-local and leave the cell-slot routing in place. The routed release then frees
 the reassigned value under the program that returns it
-([region-capture-cell-closure-reassign-uaf.lisp](../../../tests/integration/fixtures/region-capture-cell-closure-reassign-uaf.lisp)).
+([region-capture-cell-closure-reassign-uaf.lisp](../../../tests/impl/region-capture-cell-closure-reassign-uaf.lisp)).
 
 A fn-local captured binding, defined inside a lambda, enters the set on the same
 terms. `lower_define`, `lower_let` and `lower_letrec` read the set before they
@@ -119,8 +119,8 @@ blanks a released page's body and turns the same read into a panic at the deref
 site ([diagnostics.md](diagnostics.md)).
 [region_cell_borrow.rs](../../../tests/region_cell_borrow.rs) runs the shapes with
 scrub armed, and
-[region-capture-cell-borrow.lisp](../../../tests/elle/region-capture-cell-borrow.lisp)
-holds them for the plain corpus.
+[region-capture-cell-borrow.lisp](../../../tests/impl/region-capture-cell-borrow.lisp)
+holds them for the implementation suite.
 
 **Env cells in loops: release once per activation, not per iteration.** A
 captured local (a `needs_capture` binding defined inside a lambda) and a captured
@@ -153,7 +153,7 @@ beside their `Define` twins. A binder that records it for one and not the other
 leaks one region and one object per activation per such local. That is the cost
 of the closure-as-module idiom: a constructor returning a struct of closures over
 its own mutable state pays it once per field, on every construction
-([region-let-capture-cell-leak.lisp](../../../tests/elle/region-let-capture-cell-leak.lisp)).
+([region-let-capture-cell-leak.lisp](../../../tests/impl/region-let-capture-cell-leak.lisp)).
 
 The binding-chain `decref_point` extension places a cell-release region's
 release at the binding's last use. When the only use is a capture by a closure
@@ -169,7 +169,7 @@ That use-after-free shows as an `as_capture_cell` deref tag mismatch under the
 plain VM, and as a cascade free under `--trace=guardfree`. It occurs whether the
 loop is single or nested. A binding bound *between* two nested loops (the
 `(cap2)` shape,
-[region-capture-cell-loop-uaf.lisp](../../../tests/elle/region-capture-cell-loop-uaf.lisp))
+[region-capture-cell-loop-uaf.lisp](../../../tests/impl/region-capture-cell-loop-uaf.lisp))
 is one instance. An *escaping* closure does not fault, but only because its
 capture-incref outlives the iteration and masks the over-release as an
 accidental balance.
@@ -208,7 +208,7 @@ the guard. The env-cell loop hoist above excludes that case instead: it moves th
 cell's `decref_point` to the loop's own node, outside every arm of the branch, so
 compensation finds no arm that holds it. `each` splices its body into one arm per
 sequence type, which is how ordinary code reaches this shape;
-[region-capture-cell-loop-uaf.lisp](../../../tests/elle/region-capture-cell-loop-uaf.lisp)
+[region-capture-cell-loop-uaf.lisp](../../../tests/impl/region-capture-cell-loop-uaf.lisp)
 pins both the direct form and the `each` form.
 
 The same fact, that the box is not the slot, decides the other placement rule the

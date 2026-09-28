@@ -31,7 +31,7 @@ Called with no argument, the module speaks plain HTTP. HTTPS takes the
 
 ## Data flow
 
-```
+```text
 client:  request → parse-url → open transport → request line → headers
                  → flush → status line → headers → body → close
 
@@ -95,5 +95,5 @@ event's `:id` and the `Last-Event-ID` of the next reconnect.
 ## Running tests
 
 ```bash
-elle tests/elle/http.lisp
+elle tests/lang/http.lisp
 ```

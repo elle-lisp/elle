@@ -7,7 +7,7 @@ signal exit answers for the releases left in it.
 
 ## What the fall-through owes, a signal exit owes too
 
-The relocation above decides which releases *leave* the post-`TailCall` block. What it
+[The relocation](relocate.md) decides which releases *leave* the post-`TailCall` block. What it
 cannot decide is whether the block ever runs. The block belongs to the native
 fall-through, and a native reaches it on exactly one outcome: **normal completion**
 (`bits.is_empty()`, the `SignalAction::Ok` classification). Every other outcome — an
@@ -101,28 +101,29 @@ fiber value itself, which then pins the body closure, its captures and its
 parked payload behind it. What remains stranded is the denied call's own
 argument scratch ([owner.md](owner.md)).
 
-The **JIT** tier carries none of these channels: `elle_jit_tail_call` names neither the
-stash slots nor the callee-adoption channels (`defer_callee_release`,
-`deferred_release_slot`). A compiled frame whose tail call SUSPENDS still owes nothing
-here, because it parks at the post-`TailCall` ip as the interpreter's driver does
-([park.md](park.md)), and the replay runs the whole block, stash releases included. A
-compiled frame that leaves by an error strands the retain as before — a bounded
-over-keep, never an over-free.
+The **JIT** tier does not carry this channel. Its native tail call
+(`elle_jit_tail_call`) consumes no borrowed-argument retain on a signal exit. A
+compiled frame whose tail call SUSPENDS still owes nothing here, because it parks at
+the post-`TailCall` ip as the interpreter's driver does ([park.md](park.md)), and the
+replay runs the whole block, stash releases included. A compiled frame that leaves by
+an error strands the retain: a bounded over-keep, never an over-free. The
+callee-adoption channels are a different matter, and the compiled tier carries both
+([the relocation](relocate.md)).
 
-Pinned by `tests/elle/region-tail-signal-exit.lisp` (the reclamation, with the
+Pinned by [region-tail-signal-exit.lisp](../../../tests/impl/region-tail-signal-exit.lisp) (the reclamation, with the
 fiber-carrier exit, a heap payload beside it, and a restarted `:error` fiber
-driven as rows), the `abort-discard` probe in `tests/elle/oracle.lisp` (the
+driven as rows), the `abort-discard` probe in [oracle.lisp](../../../tests/impl/oracle.lisp) (the
 per-op rate),
 `lir::lower::tests::release::frameexit::{a_borrowed_tail_argument_is_named_on_the_call,
 an_owned_tail_argument_is_not_named_on_the_call}` (the naming pins, both faces),
-and `tests/elle/region-tail-signal-exit-uaf.lisp` (the soundness complement — a
+and [region-tail-signal-exit-uaf.lisp](../../../tests/impl/region-tail-signal-exit-uaf.lisp) (the soundness complement — a
 value the signal payload carries, a restarted `:error` fiber that replays the
 block, a suspending handoff, and a caught error whose handler reads the released
 value's holder must all survive the exit's release). The suspend half of the
-payload exemption is pinned by `tests/elle/region-dynamic-emit-borrow-uaf.lisp`
+payload exemption is pinned by [region-dynamic-emit-borrow-uaf.lisp](../../../tests/impl/region-dynamic-emit-borrow-uaf.lisp)
 (a tail dynamic `emit` of a borrowed value, driven past an abandoned park) and
-gauged by the `emit-dyn-tail` probe in `tests/elle/oracle.lisp`; the terminal
-half by `tests/elle/region-dynamic-emit-terminal-uaf.lisp` (a tail dynamic
+gauged by the `emit-dyn-tail` probe in [oracle.lisp](../../../tests/impl/oracle.lisp); the terminal
+half by [region-dynamic-emit-terminal-uaf.lisp](../../../tests/impl/region-dynamic-emit-terminal-uaf.lisp) (a tail dynamic
 `(emit sig v)` raise of a borrowed value, read back through every holder that
 outlives the fiber) and gauged by the `emit-dyn-*-error*` probes there, whose
 `emit-dyn-error-fresh` and `emit-dyn-error-repeat` faces are the ones that read
@@ -182,9 +183,9 @@ minted and the one the delivery did. Running one is what a skipped block looks l
 from the outside: a rate of one region per abort, flat in the payload's size.
 
 Pinned by the `abort-tail-result`, `abort-mask-caught-literal` and
-`refuse-tail-result` probes in `tests/elle/oracle.lisp` (the per-op rates, each beside
+`refuse-tail-result` probes in [oracle.lisp](../../../tests/impl/oracle.lisp) (the per-op rates, each beside
 the control that removes the tail position), and by
-`tests/elle/region-fiber-abort-delivery-uaf.lisp` (the soundness complement — the block
+[region-fiber-abort-delivery-uaf.lisp](../../../tests/impl/region-fiber-abort-delivery-uaf.lisp) (the soundness complement — the block
 frees the fiber and the payload at the call the carrier returned through, so every
 reader that outlives it must still find them).
 

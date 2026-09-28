@@ -180,7 +180,7 @@ This is what lets a generator masked `|:yield|` do I/O in its body:
 [sse.lisp](../../lib/http/sse.lisp) all have that shape. Their `(yield line)`
 is caught by the consumer; their `port/read-line` raises `|:io|`, which the
 mask does not name, so it travels out to the scheduler. Pinned by
-[io-request-carries-no-yield.lisp](../../tests/elle/io-request-carries-no-yield.lisp).
+[io-request-carries-no-yield.lisp](../../tests/lang/io-request-carries-no-yield.lisp).
 
 ## Signal Registry
 

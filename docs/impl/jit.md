@@ -102,7 +102,7 @@ the interpreter, so a callee called from nowhere else never becomes hot. The
 worker's latency masks that, because the caller keeps running interpreted while
 Cranelift works. `--trace=syncjit` installs on the first call and leaves no such
 window, so it is where the two policies are held to the same answer
-([jit-compiled-caller-promotes-callee.lisp](../../tests/elle/jit-compiled-caller-promotes-callee.lisp)).
+([jit-compiled-caller-promotes-callee.lisp](../../tests/impl/jit-compiled-caller-promotes-callee.lisp)).
 
 A tail call is counted by neither tier. It replaces the frame rather than
 building one — `tail_call_inner` in the interpreter, the tail-call sentinel in
@@ -155,7 +155,7 @@ pure wasted work.
 Eager JIT is where this invariant pays. With the JIT eager the hotness
 threshold is 0, so *every* call is "hot"; absent the negative cache, each call
 to an un-jit'able function re-submits it to the background worker. A single
-un-jit'able function called in a hot loop (e.g. stdlib `-`/`/`, which build a
+un-jit'able function called in a hot loop (for example stdlib `-`/`/`, which build a
 rest-arg closure → `MakeClosure` rejection) then saturates the JIT worker
 thread, re-compiling the same function thousands of times and burning CPU that
 dwarfs the program's real work. The `jit/rejections` report exposes a per-
@@ -209,8 +209,8 @@ that gap. Every successful compile, on every thread, records
 `(entry address, label)` in one process-global table
 ([registry.rs](../../src/jit/registry.rs)).
 The label is the function's declared name when one exists, else its
-smallest-offset source location (`ClosureTemplate::display_label`) — lowering
-names almost nothing, so the location is what actually identifies a function
+smallest-offset source location (`ClosureTemplate::display_label`). Lowering
+names only a lambda a `def` or `let` binds, so the location is what identifies the rest
 to a reader. The table only grows; entries are never removed,
 because a stack captured at any time may reference code whose `JitCode` has
 since been dropped.
@@ -277,13 +277,13 @@ the call count behind each rejection.
 
 ## Files
 
-```text
-src/jit/compiler.rs    JitCompiler, module management
-src/jit/translate.rs   FunctionTranslator, LIR → Cranelift IR
-src/jit/code.rs        JitCode wrapper
-src/jit/vtable.rs      Runtime helper dispatch table
-src/jit/dispatch.rs    JIT dispatch integration with VM
-```
+| File | Holds |
+|------|-------|
+| [src/jit/compiler.rs](../../src/jit/compiler.rs) | `JitCompiler`, module management |
+| [src/jit/translate.rs](../../src/jit/translate.rs) | `FunctionTranslator`, LIR → Cranelift IR |
+| [src/jit/code.rs](../../src/jit/code.rs) | The `JitCode` wrapper |
+| [src/jit/vtable.rs](../../src/jit/vtable.rs) | The runtime helper dispatch table |
+| [src/jit/dispatch.rs](../../src/jit/dispatch.rs) | JIT dispatch integration with the VM |
 
 ---
 

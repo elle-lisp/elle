@@ -39,7 +39,7 @@ is already parked on I/O, a futex, or a wait the scheduler tracks, and
 is woken only by its own completion. Resuming it out of turn would hand
 its park a nil — a timer parked in `ev/sleep` would "complete"
 instantly, and every `ev/timeout` in a process would report its
-deadline at once. Pinned by [process-select.lisp](../tests/elle/process-select.lisp).
+deadline at once. Pinned by [process-select.lisp](../tests/lang/process-select.lisp).
 
 A process that exits drops every futex park it made, from the process fiber
 or from one of its sub-fibers. An `ev/futex-wake` after that exit counts and

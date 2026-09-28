@@ -1,6 +1,6 @@
 # process
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Erlang-style processes on fibers: message passing, links, monitors, timers, named registration, and OTP-shaped behaviors above them.
 
@@ -61,7 +61,7 @@ says what each callback does.
 ## Running tests
 
 ```bash
-elle tests/elle/process.lisp
-elle tests/elle/genserver.lisp
-elle tests/elle/supervisor.lisp
+elle tests/lang/process.lisp
+elle tests/lang/genserver.lisp
+elle tests/lang/supervisor.lisp
 ```

@@ -1,6 +1,6 @@
 # Region diagnostics and validation
 
-<!-- audited: 2026-09-26 -->
+<!-- audited: 2026-09-28 -->
 
 Implementation-facing: the instruments that tell correct from broken, and the
 test scaffolding that keeps the region rules honest.
@@ -91,7 +91,7 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`. The macOS CI job pairs the two
   for exactly this reason: its implementation suite runs the language suite
   under the rig's `scrub.toml` profile, on a build with debug assertions on.
-- `(arena/dump)`: a Lisp-level leak localiser — prints every live mortal region
+- `(arena/dump)`: a Lisp-level leak localizer — prints every live mortal region
   (id, RC, object count, and the object *tags* it holds) to stderr. Where
   `arena/count` / `arena/region-count` say *that* memory grew across a loop, the
   per-region tags name *what* leaked (a stray `Fiber` / `Closure` region pinning
@@ -116,7 +116,7 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   in-edge count is pinned from outside the region graph (an unbalanced
   Rust-side claim — a true leak root), and an SCC among the edges is a
   reference cycle per-region RC can never reclaim. It runs inside
-  `Runtime::teardown` (src/runtime.rs), after the root release and cascade, so
+  `Runtime::teardown` ([runtime.rs](../../../src/runtime.rs)), after the root release and cascade, so
   the file, REPL, and embedding paths all report through it. Composes with
   `--trace=arena`: with both set each residue line carries its mint site.
 - `(arena/page-claims)`: the live count of pages this heap's `RegionStore` has
@@ -126,7 +126,7 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   object each own three pages, so a shape can be leak-free by object count and
   still claim a page per call ([model.md](model.md) § "Page recycling",
   [regions/performance.md](../../regions/performance.md) § "A call into a
-  variadic stdlib operator allocates"). `tests/impl/region-page-recycle.lisp`
+  variadic stdlib operator allocates"). [region-page-recycle.lisp](../../../tests/impl/region-page-recycle.lisp)
   reads it. Immediate, so sampling it allocates nothing and does not perturb
   the measurement.
 - `(arena/region-ids)` and `(arena/region-table)`: the *id* dimension, which no
@@ -146,7 +146,7 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
     can leak ids at full rate and leave this gauge flat, which is why it is the
     wrong one to assert on.
 
-  The `id-*` probes of `tests/impl/oracle.lisp` read `region-ids`, beside a
+  The `id-*` probes of [oracle.lisp](../../../tests/impl/oracle.lisp) read `region-ids`, beside a
   live-growth discriminator that proves it moves. They do not read
   `region-table`, and the reason is stronger than the lag: physical ids reach
   the store from two independent sources — the per-heap `next_physical` counter
@@ -173,7 +173,7 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   validation make that search sound, so this is for *policy* analysis, not
   correctness). Off by default and zero-cost then. Each `elle test` worker
   aggregates into the one process-wide histogram (`elle test --dump=stats …`); sum the
-  lines across batched runs for a corpus-wide distribution. The size classes
+  lines across batched runs for a suite-wide distribution. The size classes
   scale with the host page, so compare distributions across hosts by class, not
   by byte count ([model.md](model.md) § "The base page is the OS page").
   Measured baseline on a 4 KiB-page host: ~99.9 % of claims are one base page;
@@ -198,7 +198,7 @@ every variant is what makes the recorded-`outgoing`-vs-scan assertion at free a
 *complete* check, not a partial one — a content edge the scan can see but the
 recorder forgot is caught the moment that region frees.
 
-The **leak state** lives in one runnable dashboard, `tests/impl/oracle.lisp`. It runs
+The **leak state** lives in one runnable dashboard, [oracle.lisp](../../../tests/impl/oracle.lisp). It runs
 one representative shape per residual class in a loop with a heap gauge sampled *by
 the program* — `arena/count`, `arena/region-count`, `arena/bytes` or
 `arena/region-ids`, chosen for the dimension the class leaks in — and prints a
@@ -239,11 +239,11 @@ live reader still needs the oracle.
 ## The backend-tier gauge
 
 The arena gauges (`arena/count`, `arena/region-count`, `arena/bytes`,
-`arena/page-claims` — src/primitives/arena.rs) are **host-side and
+`arena/page-claims` — [arena.rs](../../../src/primitives/arena.rs)) are **host-side and
 tier-transparent**: a primitive call
 executes on the host against the driving instance's own heap on every tier — the
 VM and JIT natively, the WASM host through `call_primitive` with a `NativeCtx`
-built on `vm.heap_ptr` (src/wasm/host.rs), and the MLIR tier admits no calls at
+built on `vm.heap_ptr` ([host.rs](../../../src/wasm/host.rs)), and the MLIR tier admits no calls at
 all (below). So a program that samples the gauge measures the same `RegionStore`
 no matter which tier executes it, and an interpreter oracle probe ports to a
 backend tier by running the same shape on a build that carries the tier: under
@@ -253,9 +253,9 @@ backend tier by running the same shape on a build that carries the tier: under
 Per-tier region-reclamation state, each with its pinning test:
 
 - **VM / JIT** — the region runtime proper; state is the oracle's closed/open
-  split (`tests/impl/oracle.lisp`).
+  split ([oracle.lisp](../../../tests/impl/oracle.lisp)).
 - **MLIR CPU / GPU (SPIR-V)** — **allocation-free by construction.** The
-  eligibility gate (`is_gpu_eligible`, src/lir/types/mod.rs `is_gpu_instruction`)
+  eligibility gate (`is_gpu_eligible`, [mod.rs](../../../src/lir/types/mod.rs) `is_gpu_instruction`)
   whitelists numeric instructions only: every instruction that can put a heap
   value in a register is refused, and with it every region instruction except
   the two value-targeted RC ops (no-ops on unboxed scalars, so admitting them
@@ -265,15 +265,15 @@ Per-tier region-reclamation state, each with its pinning test:
   measured bounded by the gauge probe with the MLIR tier eager.
 - **WASM full-module (`--wasm=full`)** — **a program-duration over-keep,
   pinned shrink-only.** Every region instruction is a structural no-op in the
-  emitter (src/wasm/instruction/dispatch.rs), and the host mints a fresh region
-  per boundary call (`rt_data_op` in src/wasm/linker/dataop.rs,
+  emitter ([dispatch.rs](../../../src/wasm/instruction/dispatch.rs)), and the host mints a fresh region
+  per boundary call (`rt_data_op` in [dataop.rs](../../../src/wasm/linker/dataop.rs),
   `call_primitive`, the closure-env cell builders). A mint alone costs nothing —
   region entries materialize lazily on first allocation
   (regionstore/alloc.rs) — so the strand rate is per **allocating** boundary
   call, not per host call: every heap allocation the run makes (data-op
   results, native results, call scaffolding such as variadic rest-lists and
   capture cells) lives until process teardown. The `HandleTable`
-  (src/wasm/handle.rs) is the same over-keep on the host side: a handle is
+  ([handle.rs](../../../src/wasm/handle.rs)) is the same over-keep on the host side: a handle is
   never removed during a run, so every heap value that crosses the boundary
   pins an entry for the store's lifetime. Pinned by the `wasm::tests` gauge
   pins (`wasm_full_*`); realizing region release on this tier shrinks them
@@ -293,7 +293,7 @@ above so its growth is not mistaken for a gauge artifact.
 ## The squelch/abort discard
 
 Abandoning suspended work routes through one chokepoint, `VM::discard_suspended_frames`
-(src/vm/core.rs), on every tier — the interpreter's `enforce_squelch`, `compile/run-on`'s
+([core.rs](../../../src/vm/core.rs)), on every tier — the interpreter's `enforce_squelch`, `compile/run-on`'s
 squelch enforcement, and the JIT call paths. The chokepoint runs everything a discarded
 frame chain owed and nothing else ([owner.md](owner.md) § "A discard runs what the
 abandoned frames owed"): each frame's parked activation owner node, the releases its
@@ -308,13 +308,13 @@ region is one the compiler named as this activation's, and a table entry carries
 receipt that says the release did not run. The pin is two-sided:
 `runtime::tests::ownership::discard_frees_parked_activation_owner_node` and
 `…::discard_runs_the_abandoned_frames_release_tables` prove the set IS freed at the
-discard (bounded, generation bump), and the squelch corpus
-(`region-squelch-unwind-uaf.lisp`, `region-squelch-nested.lisp`,
-`region-loop-capture-squelch.lisp`, and the redis-driven `redis.lisp` scheduler shape
+discard (bounded, generation bump), and the squelch files
+([region-squelch-unwind-uaf.lisp](../../../tests/impl/region-squelch-unwind-uaf.lisp), [region-squelch-nested.lisp](../../../tests/impl/region-squelch-nested.lisp),
+[region-loop-capture-squelch.lisp](../../../tests/impl/region-loop-capture-squelch.lisp), and the redis-driven [redis.lisp](../../../tests/lang/redis.lisp) scheduler shape
 when a live Redis is present) with the full stdlib proves the discard frees nothing
 more (panic-clean). The three `region-` files run on the rig under a guardfree
 sidecar; `redis.lisp` is a language test, so it runs with no mode. The rate the tables carry is gauged by
-`tests/impl/region-squelch-unwind.lisp`.
+[region-squelch-unwind.lisp](../../../tests/impl/region-squelch-unwind.lisp).
 
 ## The terminal-fiber teardown
 
@@ -329,6 +329,6 @@ set-drop. An `:error` fiber is NOT torn down — it is resumable (restarts), so 
 state must survive the promotion. The pin is two-sided, exactly as the discard's:
 `runtime::tests::ownership::fiber_owner_node_*` prove the owned set IS freed at each
 terminal transition (generation bumps, bounded over repeated cycles), and
-`tests/impl/region-fiber-cancel.lisp` — cancel of parked fibers and abort of new ones in
+[region-fiber-cancel.lisp](../../../tests/impl/region-fiber-cancel.lisp) — cancel of parked fibers and abort of new ones in
 a loop — under a guardfree sidecar with the full stdlib proves the teardown frees
 nothing a live frame counts on (panic-clean, bounded slope sampled by the program).

@@ -165,7 +165,7 @@ drops the code after the suspend; the fiber then returns its resume value.
 And a host that answers "suspended" by OR-ing a bit back onto the signal
 puts that bit where programs can see it: `fiber/bits` reports
 `|:io :yield|` where the VM reports `|:io|`. Pinned by
-[wasm-suspend-not-by-bit.lisp](../../tests/elle/wasm-suspend-not-by-bit.lisp).
+[wasm-suspend-not-by-bit.lisp](../../tests/impl/wasm-suspend-not-by-bit.lisp).
 
 A non-zero `status` likewise does not mean "parked". `(yield v)` and
 `(error …)` both compile to an `Emit` terminator and both route through
@@ -182,7 +182,7 @@ on its runtime type, mirroring the interpreter's `call_inner` /
 - **Compiled closure** (`wasm_func_idx` set) — the common case; run in the
   module's function table (or a pre-compiled per-closure `Module`).
 - **NativeFn** / **parameter** — dispatched host-side directly.
-- **Bytecode closure** (`wasm_func_idx == None`) — `core.lisp`, the prelude,
+- **Bytecode closure** (`wasm_func_idx == None`) — [core.lisp](../../src/core.lisp), the prelude,
   and any closure the module never compiled run via the host VM
   (`run_bytecode_closure`); only stdlib is compiled into the full module.
 - **Callable collection** — a struct/array/set/string/bytes applied as a
@@ -194,8 +194,8 @@ on its runtime type, mirroring the interpreter's `call_inner` /
 The last two are the host-VM fallbacks: without them a call reaching a
 bytecode closure or a collection-as-function raises a `cannot call …` type
 error that terminates the compiled entry. Pinned by
-[wasm-bytecode-closure-call.lisp](../../tests/elle/wasm-bytecode-closure-call.lisp)
-and [wasm-collection-call.lisp](../../tests/elle/wasm-collection-call.lisp).
+[wasm-bytecode-closure-call.lisp](../../tests/lang/wasm-bytecode-closure-call.lisp)
+and [wasm-collection-call.lisp](../../tests/lang/wasm-collection-call.lisp).
 
 ### The capability gate on a native call
 
@@ -225,7 +225,7 @@ does not. The handle table that `value_to_wasm` inserts the payload into is what
 keeps the payload alive, which is this tier's escape route for any value a call
 hands back. A fiber therefore reads the same `{:error :capability-denied …}`
 struct whichever tier ran its body. Pinned by
-[caps-wasm-host.lisp](../../tests/elle/caps-wasm-host.lisp) and
+[caps-wasm-host.lisp](../../tests/lang/caps-wasm-host.lisp) and
 `wasm::tests::caps`.
 
 ### Suspension and resume
@@ -334,15 +334,15 @@ costs a fraction of one. (`--cache=<dir>` amortizes either way.)
 **Cranelift JIT** (`cranelift-jit`), so optimizing it also speeds up JIT
 compilation. The generated JIT *code* is unchanged: the JIT pins its own output
 at `opt_level = "speed"` ([compiler.rs](../../src/jit/compiler.rs)) independent
-of how `cranelift-codegen` was itself built, so the tier is behaviour-identical
+of how `cranelift-codegen` was itself built, so the tier is behavior-identical
 across the override — only compile *latency* moves. A faster background compile
 does shift *when* a hot function crosses from the interpreter to JIT
 mid-execution, so two crossover invariants are each pinned by a test that fails
 if the shift mishandles the boundary: a fuel-suspended callee's frame survives
-the JIT tier ([fuel-jit-preempt.lisp](../../tests/elle/fuel-jit-preempt.lisp)),
+the JIT tier ([fuel-jit-preempt.lisp](../../tests/impl/fuel-jit-preempt.lisp)),
 and a value emitted from JIT-compiled code is retained as it escapes into
 `fiber.signal`, where the resumer reads it
-([region-jit-emit-escape-uaf.lisp](../../tests/elle/region-jit-emit-escape-uaf.lisp)).
+([region-jit-emit-escape-uaf.lisp](../../tests/impl/region-jit-emit-escape-uaf.lisp)).
 
 ### One Cranelift in the dependency graph
 
@@ -375,7 +375,7 @@ The full-module tier runs the language suite under `make smoke-wasm`, except the
 files the Makefile's `WASM_SKIP` names: dynamic compilation (`eval`) is not a
 WASM backend feature. Two invariants that this tier — and only this tier —
 must uphold are worth calling out, because each is invisible on the VM/JIT path
-and each is pinned by a specific corpus file run under `--wasm=full`.
+and each is pinned by a specific suite file run under `--wasm=full`.
 
 - **every io-backend strands to the heap's teardown.** Every region instruction
   is a structural no-op on this tier (its emitter lowers each to nothing —
@@ -392,7 +392,7 @@ and each is pinned by a specific corpus file run under `--wasm=full`.
   ([io-inflight.md](io-inflight.md) § "A hold is let go while its
   store is still there"). This tier is where it shows up on the widest range of
   programs, so it is the coverage that pins it. Canonical reference:
-  [posix.lisp](../../tests/elle/posix.lisp).
+  [posix.lisp](../../tests/lang/posix.lisp).
 
 - **a fn-local reassigned mutable binding's slot is never value-route decref'd +
   nil-stamped.** `allocate_slot` gives such a binding its own never-reused stack
@@ -407,14 +407,14 @@ and each is pinned by a specific corpus file run under `--wasm=full`.
   nil-stamp. This is a lowering the VM/JIT (bytecode-derived LIR) never take. The
   branch-result-loop nil-stamp guard is untouched — the suppression keys on the
   slot's binding, not the branch-union region
-  ([region-branch-result-loop-uaf.lisp](../../tests/elle/region-branch-result-loop-uaf.lisp)
+  ([region-branch-result-loop-uaf.lisp](../../tests/impl/region-branch-result-loop-uaf.lisp)
   stays green). Canonical reference:
-  [region-capture-cell-loop-uaf.lisp](../../tests/elle/region-capture-cell-loop-uaf.lisp).
+  [region-capture-cell-loop-uaf.lisp](../../tests/impl/region-capture-cell-loop-uaf.lisp).
 
 ## Testing
 
 CI gates on `make check-wasm` only: the feature compiles, the full-module tier
-boots one module, and the `[wasm]` marker proves the tier engaged. The corpus
+boots one module, and the `[wasm]` marker proves the tier engaged. The suite
 passes below do not gate CI while the tier carries no production workloads.
 
 ```bash
@@ -425,10 +425,10 @@ make check-wasm
 make smoke-wasm
 
 # Individual test
-elle --wasm=full tests/elle/arithmetic.lisp
+elle --wasm=full tests/lang/arithmetic.lisp
 
 # Tiered mode test
-elle --wasm=11 tests/elle/wasm-tier.lisp
+elle --wasm=11 tests/impl/wasm-tier.lisp
 
 # Rust-side WASM tests — the feature is off by default, so name it
 cargo test -p elle --lib --features wasm wasm::

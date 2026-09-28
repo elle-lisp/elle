@@ -1,6 +1,6 @@
 # The rig
 
-<!-- audited: 2026-09-26 -->
+<!-- audited: 2026-09-28 -->
 
 `elle-rig` hosts the same compiler and runtime as `elle`, and configures them
 in ways a user build cannot.
@@ -25,11 +25,24 @@ elle-rig --print-config tests/impl/region-tail-move-toplevel-uaf.lisp
 The rig takes every flag `elle` takes, then the rig's own two:
 
 - `--profile PATH` applies one configuration to the file, over its sidecar.
-- `--print-config` prints the configuration the file would run under, one
-  `key = value` line per setting, and exits without running it.
+- `--print-config` prints the configuration the file would run under, and exits
+  without running it.
 
 The first argument that is not a flag names the program, and every argument
 after it belongs to the program, exactly as under `elle`.
+
+The printed configuration is itself a sidecar the same build accepts, so a
+failing file's configuration reproduces its run. It has one line per setting:
+
+```toml
+jit = 10
+trace = ["guardfree", "scrub"]
+```
+
+`jit` prints a threshold, `"eager"` or `"off"`. `trace` prints the keywords
+sorted, each once. `mlir` prints only in a build that carries the MLIR tier. A
+file with no sidecar prints the build's defaults: `jit = 10` and `trace = []`
+in the default build.
 
 ## The sidecar
 
@@ -48,16 +61,20 @@ trace = ["guardfree"]
 |---|---|---|
 | `jit` | `"off"`, `"eager"`, or a positive integer | The interpreter alone; compile on the first call; or compile after that many calls |
 | `mlir` | the same | The MLIR tier's policy, in a build that carries it |
-| `trace` | an array of trace keywords | The keywords `--trace=` accepts, `guardfree` and `scrub` among them |
+| `trace` | an array of trace keywords | The build's trace keywords (`TRACE_KEYWORDS`), `guardfree` and `scrub` among them |
 
-The rig refuses a sidecar with a key it does not know, a value of the wrong
-type, or an `mlir` key in a build with no MLIR tier. A misspelled key that the
+The rig refuses a sidecar and runs nothing when the sidecar has a key the rig
+does not know, a value of the wrong type, a threshold below one, a trace
+keyword the build does not know (`TRACE_KEYWORDS`), or an `mlir` key in a build with no MLIR
+tier. It refuses a file that is not TOML the same way. The refusal names the
+key, the value, or the sidecar's file. A misspelled key that the
 rig ignored would run the file under the defaults and report a pass, which is
 the vacuous result this suite exists to prevent.
 
 ## Profiles
 
-A profile is a sidecar the rig applies to every file of a pass. The
+A profile is a sidecar the rig applies to every file of a pass, read with the
+same rules. The
 implementation suite uses two, under
 [tests/impl/profiles](../tests/impl/profiles/): `jit-eager.toml` runs both
 suites with every function compiled on its first call, and `scrub.toml`, on

@@ -99,7 +99,7 @@ rather than state, and it has two different answers:
   status test there reads a failed program as still running, and then waits
   for it against orphans that can never finish on their own.
 
-[tests/elle/ev-run-error-teardown.lisp](../../tests/elle/ev-run-error-teardown.lisp)
+[tests/lang/ev-run-error-teardown.lisp](../../tests/lang/ev-run-error-teardown.lisp)
 pins the distinction and the wait.
 
 `try`/`catch` is a prelude macro that wraps this pattern
@@ -343,7 +343,7 @@ same call. The next resume continues the handler from where it stopped.
 The rule holds at every depth. A fiber parked at `(fiber/resume child)`
 runs its own continuation only after the child's handler finishes, so a
 `defer` inside a `defer` still runs the inner body before the outer
-cleanup. [tests/elle/unwind-suspend.lisp](../../tests/elle/unwind-suspend.lisp) pins the four shapes —
+cleanup. [tests/lang/unwind-suspend.lisp](../../tests/lang/unwind-suspend.lisp) pins the four shapes —
 `protect`, `try`, `defer`, and one `defer` inside another.
 
 ### Aliases

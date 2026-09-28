@@ -6,13 +6,13 @@ The two tables naming what an abandoned frame still owed, and the exits that wal
 them. An error, a squelch boundary, a discard and a compiled unwind share one walk.
 
 [What a signal exit owes](signalexit.md) places one release in the block a signal
-exit skips. That block is not the only thing skipped. An **error** leaves through the signal machinery, so
-*none* of the frame's remaining instructions run — and every release the frame still
-owed is among them. The frame that called the raising native holds the arguments it
-materialized for that call, and every binding whose last use lies past it; each of
-those is one region nobody releases. The rate is per unwound frame and per pending
-value, so a `try`/`protect` in a loop grows without bound — the shape a retry loop
-and a server request loop both are.
+exit skips. That block is not the only thing skipped. An **error** leaves through
+the signal machinery, so *none* of the frame's remaining instructions run — and
+every release the frame still owed is among them. The frame that called the raising
+native holds the arguments it materialized for that call, and every binding whose
+last use lies past it; each of those is one region nobody releases. The rate is per
+unwound frame and per pending value, so a `try`/`protect` in a loop grows without
+bound — the shape a retry loop and a server request loop both are.
 
 The frame is gone, so the release cannot be reached by resuming it — the runtime
 runs it at the exit instead. What that needs is the set the frame still owes,
@@ -204,20 +204,20 @@ the frame resumes and still owes its releases to the resumed body.
 `jit::compiler::tests::every_compiled_exit_pops_the_region_map` pins it on the emitted
 code, where a missing pop is visible without an activation having to return first.
 
-Pinned by `tests/elle/region-error-unwind.lisp` (the leak gauge — the pending
+Pinned by [region-error-unwind.lisp](../../../tests/impl/region-error-unwind.lisp) (the leak gauge — the pending
 release of a raising call's argument, of two of them, of a binding live across
 the raising call, and of an enclosing frame, each bounded beside a control that
 raises holding nothing), the `error-payload*` closed controls in
-`tests/elle/oracle.lisp` (the emitted payload's own region, bounded per face —
+[oracle.lisp](../../../tests/impl/oracle.lisp) (the emitted payload's own region, bounded per face —
 raised in the parked body frame, in a walked non-tail callee, handed down as an
 owned parameter, and as a two-region struct — beside the native-raise control
 whose gap isolates the recorded mint from the walk and discharge) with
-`tests/elle/region-error-payload-uaf.lisp` as their guardfree complement (the
+[region-error-payload-uaf.lisp](../../../tests/impl/region-error-payload-uaf.lisp) as their guardfree complement (the
 payload a catcher stores outward, a borrowed module payload raised repeatedly, a
 native raise's unrecorded install, and a restarted `:error` fiber's replay), the
-`denied-discard` probe in `tests/elle/oracle.lisp` (the per-op rate of what the
-tables cannot name), `tests/elle/region-jit-error-unwind.lisp` with
-`tests/elle/region-jit-error-unwind-uaf.lisp` as its guardfree complement (the
+`denied-discard` probe in [oracle.lisp](../../../tests/impl/oracle.lisp) (the per-op rate of what the
+tables cannot name), [region-jit-error-unwind.lisp](../../../tests/impl/region-jit-error-unwind.lisp) with
+[region-jit-error-unwind-uaf.lisp](../../../tests/impl/region-jit-error-unwind-uaf.lisp) as its guardfree complement (the
 compiled face — one subject per compiled error exit, and, on the soundness side,
 the caller's binding live across a compiled callee's exit),
 `vm::core::region::tests::a_compiled_frames_*` (the spilled locals stand in for
@@ -229,16 +229,16 @@ a_reassigned_binding_records_no_value_route,
 a_non_tail_dynamic_emit_payload_release_carries_its_receipt}` (the tables are
 the emit sites, so a route the emitter declined has no entry and the one other
 site that records carries both halves of a value route's receipt), with
-`tests/elle/region-dynamic-emit-statement-uaf.lisp` as that site's guardfree
-complement, and `tests/elle/region-error-unwind-uaf.lisp` (the soundness
+[region-dynamic-emit-statement-uaf.lisp](../../../tests/impl/region-dynamic-emit-statement-uaf.lisp) as that site's guardfree
+complement, and [region-error-unwind-uaf.lisp](../../../tests/impl/region-error-unwind-uaf.lisp) (the soundness
 complement — the payload the raising native builds while the frame holds its
 argument, a value the frame stored into a container that outlives it, a parked
 frame the restarts system replays, and a catching frame's own values, all under
 `--trace=guardfree`). The squelch face carries the same pair —
-`tests/elle/region-squelch-unwind.lisp` (the leak gauge: a pending value in the
+[region-squelch-unwind.lisp](../../../tests/impl/region-squelch-unwind.lisp) (the leak gauge: a pending value in the
 emitting frame, two of them, an enclosing frame's, and the same under an
 `attune` boundary, each bounded beside a violation that has nothing pending) and
-`tests/elle/region-squelch-unwind-uaf.lisp` (the soundness complement: what the
+[region-squelch-unwind-uaf.lisp](../../../tests/impl/region-squelch-unwind-uaf.lisp) (the soundness complement: what the
 catching activation, an outer non-discarded frame, and a longer-lived container
 still read after the discard ran) — with
 `runtime::tests::ownership::discard_runs_the_abandoned_frames_release_tables`

@@ -1,6 +1,6 @@
 # Where a release is anchored
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Where the solver anchors a release: what each binding form pins, and what a
 `break` does to the releases its jump passes over.
@@ -21,7 +21,7 @@ A release lands there only when the initializer is *itself* the region's
 so the value's last use is pulled back to where the value was made. `Let` and
 `Letrec` therefore route the init node through `deferred_decref_points` and emit its
 releases themselves, after the store
-([region-unused-let-binding.lisp](../../../tests/elle/region-unused-let-binding.lisp) is the pin).
+([region-unused-let-binding.lisp](../../../tests/impl/region-unused-let-binding.lisp) is the pin).
 
 `Define` is the binder that must not be narrowed there in the first place, because
 **a `def` evaluates to what it bound**. Every other binding form's value is its
@@ -33,9 +33,9 @@ second name, propagated out of a `begin` or a branch arm. The narrowing's floor 
 one, and the `Define` node when the `def`'s value is discarded — whose releases
 `lower_expr` emits after `lower_define` has stored. Narrowing below that frees the
 value under the expression it was handed to
-([region-define-init-release-uaf.lisp](../../../tests/elle/region-define-init-release-uaf.lisp));
+([region-define-init-release-uaf.lisp](../../../tests/impl/region-define-init-release-uaf.lisp));
 leaving it at the init frees nothing
-([region-define-init-release.lisp](../../../tests/elle/region-define-init-release.lisp)).
+([region-define-init-release.lisp](../../../tests/impl/region-define-init-release.lisp)).
 
 So a `def`'s initializer region is released by the ordinary last-use mechanism,
 whatever it holds. This is what a cell-free self-recursive `def` rides — its closure
@@ -82,11 +82,11 @@ the unused-binding narrowing (`compute_last_use`'s first phase pulls an init's l
 use back to the init itself when no bound name is read), shrinking a lifetime the
 `Match` node already states correctly.
 
-Pinned by [region-match-bind-loop.lisp](../../../tests/elle/region-match-bind-loop.lisp) (the
+Pinned by [region-match-bind-loop.lisp](../../../tests/impl/region-match-bind-loop.lisp) (the
 reclamation, with the arm-taken, arm-not-taken, nested-loop and guard faces driven
-as rows) and the `struct-match` probe in [the branch probes](../../../tests/elle/probe/branch.lisp)
+as rows) and the `struct-match` probe in [the branch probes](../../../tests/impl/probe/branch.lisp)
 (the per-op rate), with
-[region-match-bind-loop-uaf.lisp](../../../tests/elle/region-match-bind-loop-uaf.lisp) as the
+[region-match-bind-loop-uaf.lisp](../../../tests/impl/region-match-bind-loop-uaf.lisp) as the
 soundness complement — a
 pattern-bound projection stored, returned, broken out of the loop, captured, or
 carried across a yield must survive the per-iteration release.
@@ -154,10 +154,10 @@ build, and the lowerer parks the n-th collection against it. A name is what the
 release is then carried OVER, and never what the region is found by — which is
 what gives a build no name reaches a route like any other.
 
-Pinned by [region-rest-pattern-slice.lisp](../../../tests/elle/region-rest-pattern-slice.lisp) (the
+Pinned by [region-rest-pattern-slice.lisp](../../../tests/impl/region-rest-pattern-slice.lisp) (the
 reclamation, with the flat pattern and the list rest as the discriminators that must
 already read zero), `region::infer::tests::patterns` (the placement, structurally), and
-[region-rest-pattern-slice-uaf.lisp](../../../tests/elle/region-rest-pattern-slice-uaf.lisp) (the soundness complement — a
+[region-rest-pattern-slice-uaf.lisp](../../../tests/impl/region-rest-pattern-slice-uaf.lisp) (the soundness complement — a
 rest collection returned, stored, captured, carried across a yield, or read
 after the loop iteration that built it must survive the release). The pure
 pattern queries the two sides read are `hir::pattern::rest_tests`.
@@ -222,18 +222,18 @@ fallback a suspending guard forces — so `[a & _]` builds nothing wherever it i
 written.
 
 The language-level half is
-[destructuring-rest-wildcard.lisp](../../../tests/elle/destructuring-rest-wildcard.lisp): the
+[destructuring-rest-wildcard.lisp](../../../tests/lang/destructuring-rest-wildcard.lisp): the
 fixed names a `& _` pattern still binds, and the type error the skipped opcode
 must not take with it.
 
 Pinned by the `q`–`v`, `x` and `y` rows of
-[region-rest-pattern-slice.lisp](../../../tests/elle/region-rest-pattern-slice.lisp) (the reclamation), its `u` and `w`
+[region-rest-pattern-slice.lisp](../../../tests/impl/region-rest-pattern-slice.lisp) (the reclamation), its `u` and `w`
 rows (the two baselines, each of which must read the FULL rate),
 `region::infer::tests::patterns` (what the solver records against the node),
 `hir::pattern::rest_tests` (the three predicates both sides read),
 `lir::lower::tests::release::restpattern` (the parked slot and the tail-call
 placement, per slot), and rows 13 to 15 of
-[region-rest-pattern-slice-uaf.lisp](../../../tests/elle/region-rest-pattern-slice-uaf.lisp) (the soundness complement — a
+[region-rest-pattern-slice-uaf.lisp](../../../tests/impl/region-rest-pattern-slice-uaf.lisp) (the soundness complement — a
 name the inner pattern binds, read after the destructure and handed to a tail
 call, must survive the release).
 
@@ -281,10 +281,10 @@ site. On a path that did not run the break, the value-route reloads a slot that
 still holds `nil` and the release no-ops — the same nil-stamp discipline the
 branch-union release relies on.
 
-Pinned here: [region-break-transfer.lisp](../../../tests/elle/region-break-transfer.lisp) (the
-reclamation), the `break-value*` probes in [the branch probes](../../../tests/elle/probe/branch.lisp)
+Pinned here: [region-break-transfer.lisp](../../../tests/impl/region-break-transfer.lisp) (the
+reclamation), the `break-value*` probes in [the branch probes](../../../tests/impl/probe/branch.lisp)
 (the rates), `region::infer::tests::blocks` (the placement, structurally), and
-[region-break-transfer-uaf.lisp](../../../tests/elle/region-break-transfer-uaf.lisp) (the soundness
+[region-break-transfer-uaf.lisp](../../../tests/impl/region-break-transfer-uaf.lisp) (the soundness
 complement — a value broken out and read afterwards, stored, or returned must survive).
 
 ### A break out of a TAIL block carries the return mint
@@ -314,9 +314,9 @@ the break is not itself a tail position — the loop's fall-through value is the
 loop's, not the function's — yet `v` is the function's result. Sever the set
 there and `v` is returned with no mint while the exit-label release still fires:
 the caller reads a freed value. Pinned structurally (`return_incref::tests` — the
-mint count per break, with the interior-block control) and behaviourally
-(`region-break-transfer-uaf.lisp`'s tail-loop witnesses, whose faulting shape is
-`lib/tls.lisp`'s `tls/read`).
+mint count per break, with the interior-block control) and behaviorally
+([region-break-transfer-uaf.lisp](../../../tests/impl/region-break-transfer-uaf.lisp)'s tail-loop witnesses, whose faulting shape is
+[tls.lisp](../../../lib/tls.lisp)'s `tls/read`).
 
 ### A release the break jumps over is not a release
 
@@ -389,7 +389,7 @@ is a point every path **reaches**:
   and that path stays exactly as it was. The shape is ordinary because a break's
   value is walked as a tail value in a tail block, so a `{…}` or `[…]` literal
   carried by any break past the first is a tail-marked `Call` sitting in the
-  window. `dt-lookup` in `lib/http2/hpack.lisp` is four of them.
+  window. `dt-lookup` in [hpack.lisp](../../../lib/http2/hpack.lisp) is four of them.
 
   A `Return` node is **not** one of these, and reading it as one costs a region
   per call on the most ordinary shape there is. `Return` is what
@@ -410,10 +410,10 @@ is a point every path **reaches**:
 All three leave the conservative baseline (the release stays where it is,
 skipped on the break path), never a mis-free.
 
-Pinned by [region-break-skip.lisp](../../../tests/elle/region-break-skip.lisp) (the reclamation,
+Pinned by [region-break-skip.lisp](../../../tests/impl/region-break-skip.lisp) (the reclamation,
 with all three boundaries driven as rows that must stay bounded on their own
 releases), `region::infer::tests::blocks` (the placement and the boundaries,
-structurally), and [region-break-skip-uaf.lisp](../../../tests/elle/region-break-skip-uaf.lisp) (the soundness complement — a value in
+structurally), and [region-break-skip-uaf.lisp](../../../tests/impl/region-break-skip-uaf.lisp) (the soundness complement — a value in
 the window that is read, stored, or returned after the block must survive the
 moved release).
 

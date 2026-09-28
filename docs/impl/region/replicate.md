@@ -1,6 +1,6 @@
 # The relocation point and its replicas
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 How a relocation point outlives its own block, so one release covers a merge and
 every path that leaves the frame before it.
@@ -152,7 +152,7 @@ between the two having cleared it.
 The residual is unchanged in kind: a holder escape marks by a facet no edge at
 the point replaces.
 
-Pinned by [tests/elle/region-tail-frame-exit.lisp](../../../tests/elle/region-tail-frame-exit.lisp) (the reclamation, with the
+Pinned by [tests/impl/region-tail-frame-exit.lisp](../../../tests/impl/region-tail-frame-exit.lisp) (the reclamation, with the
 argument-move and callee exemptions, the per-arm faces, the captured-holder faces,
 the non-self-cancelling boundary, the env-cell faces, the
 handed-back-through-the-callee faces, the forward-cell faces, the
@@ -164,15 +164,15 @@ the `tail-frame-exit-unused` /
 `tail-frame-exit-moved` / `tail-frame-exit-arms` / `tail-frame-exit-captured` /
 `tail-frame-exit-handback` / `tail-frame-exit-fold-driver` /
 `tail-frame-exit-fwd-cell` / `tail-frame-exit-fwd-cell-ret` / `fresh-env-cell`
-probes the [tests/elle/oracle.lisp](../../../tests/elle/oracle.lisp) dashboard runs
-(the per-op rates, defined in [tests/elle/probe/branch.lisp](../../../tests/elle/probe/branch.lisp)
-and [tests/elle/probe/direct.lisp](../../../tests/elle/probe/direct.lisp)), the analysis-level
+probes the [tests/impl/oracle.lisp](../../../tests/impl/oracle.lisp) dashboard runs
+(the per-op rates, defined in [tests/impl/probe/branch.lisp](../../../tests/impl/probe/branch.lisp)
+and [tests/impl/probe/direct.lisp](../../../tests/impl/probe/direct.lisp)), the analysis-level
 projection pins in `hir::region::infer::tests::cells`
 (`frame_held_names_a_sibling_captured_forward_cell`,
 `frame_held_names_a_returned_capturers_forward_cell`, and their
 escaping-holder counterfactual), the placement pins in
 `lir::lower::tests::release`, and
-[tests/elle/region-tail-frame-exit-uaf.lisp](../../../tests/elle/region-tail-frame-exit-uaf.lisp) (the soundness complement — a value
+[tests/impl/region-tail-frame-exit-uaf.lisp](../../../tests/impl/region-tail-frame-exit-uaf.lisp) (the soundness complement — a value
 moved into the tail callee, reached through its captured environment, filled in
 place by it, handed back out through it, handed back when the frame holds the only
 other reference, held in an env cell the callee rewrites, held in a sibling's
@@ -247,15 +247,15 @@ block's value is consumed.
 
 A frame-replacing tail call in the block clears the points it dominates, the
 break's among them, so a release emitted after one keeps the conservative
-baseline. Dropping a licence to replicate can only over-keep.
+baseline. Dropping a license to replicate can only over-keep.
 
-Pinned by [tests/elle/region-break-loop-replica.lisp](../../../tests/elle/region-break-loop-replica.lisp)
+Pinned by [tests/impl/region-break-loop-replica.lisp](../../../tests/impl/region-break-loop-replica.lisp)
 (the reclamation — the `cond` clause body, the release past the branch's merge,
 the `if` and bare-break controls, and the three boundaries driven as rows), the
-per-request ceilings in [tests/elle/h2-stress-scoped.lisp](../../../tests/elle/h2-stress-scoped.lisp),
+per-request ceilings in [tests/impl/h2-stress-scoped.lisp](../../../tests/impl/h2-stress-scoped.lisp),
 for requests that carry a body, the
 placement pins in `lir::lower::tests::release::breakexit`, and
-[tests/elle/region-break-loop-replica-uaf.lisp](../../../tests/elle/region-break-loop-replica-uaf.lisp)
+[tests/impl/region-break-loop-replica-uaf.lisp](../../../tests/impl/region-break-loop-replica-uaf.lisp)
 (the soundness complement — a
 value the break carries out, one it carries a borrow out of, one a container
 outside the loop still holds, and one a closure captured must all survive the

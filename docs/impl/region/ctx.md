@@ -1,6 +1,6 @@
 # NativeCtx — explicit allocation: every value names its region and heap
 
-<!-- audited: 2026-09-19 -->
+<!-- audited: 2026-09-28 -->
 
 Implementation-facing. Native code allocates only through a capability it is
 handed. The `PrimFn` signature carries a `&mut NativeCtx`; that ctx owns the
@@ -42,7 +42,7 @@ release never fires.
    any region but its own call's without being handed another explicitly — which
    nothing does.
 
-## The capability split: `Alloc` vs `NativeCtx` (`src/primitives/ctx.rs`)
+## The capability split: `Alloc` vs `NativeCtx` ([ctx.rs](../../../src/primitives/ctx.rs))
 
 The capability comes in two layers, because two different callers need it:
 
@@ -50,7 +50,7 @@ The capability comes in two layers, because two different callers need it:
   else. A *pure allocation context*: it structurally cannot re-enter the
   interpreter. Built at the sites that allocate Elle values with **no VM in
   scope** — the reader (`read_str`, run by the formatter/LSP), the async-IO
-  completion payload builders (`io::io_error` and the backends' result values,
+  completion payload builders (`io::Birthplace`, which builds the error and result values,
   born off the reaping call and handed to the resumed fiber), `send`
   reconstruction, the plugin `make_*` ctors, FFI argument marshalling, and test
   scaffolding.
@@ -98,8 +98,8 @@ impl<'h> Deref for NativeCtx<'h> { type Target = Alloc<'h>; /* &self.alloc */ }
 impl<'h> DerefMut for NativeCtx<'h> { /* &mut self.alloc */ }
 
 impl<'h> NativeCtx<'h> {
-    /// The three VM-bearing dispatch constructors mirror the `Alloc` ctors but
-    /// also take the driving VM (`with_region_vm`, `new_vm`, `boundary_vm`).
+    /// The two VM-bearing dispatch constructors mirror `Alloc::with_region` and
+    /// `Alloc::boundary` but also take the driving VM.
     pub(crate) fn with_region_vm(region: RuntimeRegion, heap: &'h mut FiberHeap, vm: *mut VM) -> Self;
     pub(crate) fn boundary_vm(vm: &'h mut VM) -> Self;   // mints from vm.heap()
     /// Total: a native always runs under a VM. Reborrows the raw pointer (the
@@ -151,7 +151,7 @@ it, and the `Fresh` declaration the primitive makes ([effects.md](effects.md))
 is true of the members as well as the aggregate. Two helpers sit on this seam:
 `traitregistry::call_method_fn` (below) and `io::Completion::to_value`, whose
 structs `io/wait` / `io/reap` collect into the array they return. The reference
-is the test: `tests/elle/region-io-completion-leak.lisp` measures a pumped io
+is the test: [region-io-completion-leak.lisp](../../../tests/impl/region-io-completion-leak.lisp) measures a pumped io
 loop bounded, and
 `runtime::tests::ownership::region_native_trait_dispatch_fresh_result_reclaims`
 pins the trait-dispatch face.
@@ -173,7 +173,7 @@ Deciding this at the mint is what keeps the region unreadable: a caller that
 rooted the region afterwards would need the getter no constructor offers.
 
 The reference is `a_cache_hit_leaves_no_unexplained_references`
-(`tests/region_process_teardown`). It asks of a cache-hit runtime what
+([region_process_teardown/](../../../tests/region_process_teardown)). It asks of a cache-hit runtime what
 `teardown_leaves_no_unexplained_references` asks of a compiled one, on the same
 programs.
 
@@ -184,7 +184,7 @@ programs.
 re-entry** (`vm.call_closure`, `execute_bytecode_saving_stack` — a trait-method
 closure, a module load). It resolves the call's own driving VM, so two embedded
 instances on one thread each read their own VM state — pinned by
-`two_instances_read_their_own_vm_args` (`src/runtime/tests/lifecycle.rs`).
+`two_instances_read_their_own_vm_args` ([lifecycle.rs](../../../src/runtime/tests/lifecycle.rs)).
 
 The one caller with no ctx is the **FFI callback trampoline** (`ffi/callback.rs`),
 invoked by C with nothing to thread. It captures its VM explicitly at registration
@@ -223,31 +223,31 @@ cannot disagree about a name, and none of the reach paths above affects what a
 symbol means.
 
 Pinned by `two_instances_agree_on_every_symbol_name`
-(`src/runtime/tests/lifecycle.rs`): a symbol one `Runtime` compiled is the same
+([lifecycle.rs](../../../src/runtime/tests/lifecycle.rs)): a symbol one `Runtime` compiled is the same
 symbol in the other.
 
 ## JIT intrinsic helpers reach the VM through a `JitCtx`
 
 The JIT fast-path intrinsics (`%put`/`%del`/`%has?`/`%array-push`/`%string-push`/
 `%bytes-push`/`%freeze`/`%thaw`) lower to `extern "C"` helpers (`elle_jit_*`,
-`src/jit/runtime/ops.rs`) that run the same `PrimFn` bodies as the interpreter, so
+[ops.rs](../../../src/jit/runtime/ops.rs)) that run the same `PrimFn` bodies as the interpreter, so
 they need a VM-bearing `NativeCtx`. They have no `NativeCtx` to call `ctx.vm()` on —
 only raw `(tag, payload)` operands handed up from compiled code — and each must reach
 its own instance's VM so two coexisting instances on one thread stay isolated.
 
-The vehicle is **`JitCtx`** (`src/jit/mod.rs`): a `*mut`-threadable capability
+The vehicle is **`JitCtx`** ([mod.rs](../../../src/jit/mod.rs)): a `*mut`-threadable capability
 bundle carrying the driving VM. The compiled function's prologue
-(`src/jit/compiler/translate.rs`) builds one in a stack slot from its `vm` entry
+([translate.rs](../../../src/jit/compiler/translate.rs)) builds one in a stack slot from its `vm` entry
 parameter, and the intrinsic emit sites thread its address as the helper's last
 argument; the helper resolves the VM from it and builds the `NativeCtx`
 (`run_alloc_intrinsic` for the allocating intrinsics, `boundary_vm`/`with_region_vm`
-for the others). `run_alloc_intrinsic` (`src/vm/types.rs`) — the one body shared by
+for the others). `run_alloc_intrinsic` ([types.rs](../../../src/vm/types.rs)) — the one body shared by
 the interpreter intrinsic handlers and the JIT helpers — takes the VM explicitly, so
 the VM is named on both tiers. `JitCtx` is `#[repr(C)]` with the VM at offset
 0, matching the prologue's raw store; the heap axis extends the same bundle with a
 heap capability, threaded the same way, so the allocating intrinsics name their heap
 too without another ABI change. Pinned by `jit_intrinsics_use_threaded_vm`
-(`src/jit/dispatch/tests.rs`): each intrinsic helper runs correctly off the
+([tests.rs](../../../src/jit/dispatch/tests.rs)): each intrinsic helper runs correctly off the
 threaded `JitCtx`.
 
 ## The `ctx.*` allocation surface
@@ -279,13 +279,13 @@ ctx at the flip, minting the per-call region exactly as `dispatch_native_call`
 does:
 
 - The WASM hosts: `call_primitive` (full backend) and the tiered linker's
-  `rt_call` NativeFn branch (`src/wasm/lazy/linker.rs`).
+  `rt_call` NativeFn branch ([linker.rs](../../../src/wasm/lazy/linker.rs)).
 - `plugin_api::call_plugin` — see Plugins.
 
 `traitregistry::call_method_fn` also calls a native's pointer directly, but does
 **not** mint: it runs the resolved trait-method native against the *outer* call's
 ctx (`prim_fn(ctx, args)`), so a fresh method result — `(rest [array])`'s copied
-tail — lands in that call's `alloc_region` and is recognised as fresh by
+tail — lands in that call's `alloc_region` and is recognized as fresh by
 `dispatch_native_call`. A separate `boundary` region here would strand a
 genuinely-fresh result (a region distinct from `alloc_region`), which the
 pass-through accounting then mis-reads as a borrow and over-retains — the region
@@ -306,7 +306,7 @@ names each value's region directly.
 ## Plugins
 
 The stable ABI's resolved API constructors (`make_string`, `make_bytes`,
-`make_array`, `make_struct`, … — `plugin_api/capi.rs`) allocate into the plugin
+`make_array`, `make_struct`, … — [capi.rs](../../../src/plugin_api/capi.rs)) allocate into the plugin
 call's region. `call_plugin` builds the call's `(region, heap)` capability as a
 `CallCtx` and passes it — as an opaque first argument — to the plugin primitive,
 which threads it back into every allocating constructor. The capability is thus a
@@ -337,20 +337,20 @@ rather than mismatching the calling convention.
 The same explicit-capability rule governs *compile-time* state, so two embedded
 Elle instances can compile and run in one process — even on one thread — without
 sharing macro definitions, stdlib exports, or REPL bindings. The capability is
-**`CompileCtx`** (`src/pipeline/cache.rs`): the macro-expansion VM, the
+**`CompileCtx`** ([cache.rs](../../../src/pipeline/cache.rs)): the macro-expansion VM, the
 prelude/core `Expander`, the resident `PrimitiveMeta` (primitives + core.lisp +
 stdlib exports + REPL value bindings), and the file→signal projection cache. A
 compile names its instance's `CompileCtx` or it does not compile.
 
 An instance's three capabilities — the `VM`, the `SymbolTable`, and the
-`CompileCtx` — are owned together by a **`RuntimeCore`** (`src/runtime.rs`), which
+`CompileCtx` — are owned together by a **`RuntimeCore`** ([runtime.rs](../../../src/runtime.rs)), which
 hands them out as the disjoint borrows `parts() -> (&mut VM, &mut SymbolTable,
 &mut CompileCtx)` that the pipeline entry points
 (`compile`/`compile_file`/`eval`/`analyze`/`execute_scheduled`) thread
 explicitly. `register_stdlib_exports`, the REPL-binding registration, and the
 projection lookup are `CompileCtx` methods. Two owners construct a `RuntimeCore`:
 `Runtime` (the `elle foo.lisp` / REPL / embedding path) and the `os/spawn` worker
-(`src/primitives/concurrency/worker.rs`), so a spawned thread compiles against
+([worker.rs](../../../src/primitives/concurrency/worker.rs)), so a spawned thread compiles against
 its own instance, never a shared cache.
 
 Three seams reach the compile context where no `CompileCtx` parameter is in
@@ -366,7 +366,7 @@ scope, without reintroducing shared state:
   pointer (`Analyzer::set_compile_ctx`), so projections are the instance's own.
 
 The pinning counterfactual is `two_instances_interleaved_defs_are_isolated`
-(`src/runtime/tests/lifecycle.rs`): two `Runtime`s on one thread each maintain their own
+([lifecycle.rs](../../../src/runtime/tests/lifecycle.rs)): two `Runtime`s on one thread each maintain their own
 top-level `(def x …)` via `compile_file_repl` +
 `CompileCtx::register_repl_binding`, and each reads back only its own binding — a
 shared compile cache fails it. (The symbol table and heap are threaded

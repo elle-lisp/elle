@@ -6,7 +6,7 @@ LIR → WASM emission via `wasm-encoder`, execution via Wasmtime.
 
 ## Architecture
 
-```
+```text
 LIR → WasmEmitter (emit.rs) → .wasm bytes + const_pool
                                     ↓
                               Wasmtime Engine/Store (store.rs)
@@ -60,7 +60,7 @@ Int-to-float promotion for mixed operands. Bitwise ops remain integer-only.
 
 ### Signal propagation
 
-`store_result_with_signal` writes signal to memory[0..4] before returning.
+`store_result_with_signal` writes the signal to `SIGNAL_SLOT`, memory[0..8], before returning.
 `handle_wasm_result` reads signal from memory after WASM call returns.
 Signals propagate through WASM↔host boundaries.
 
@@ -77,25 +77,25 @@ WASM closure host-side via `handle_fiber_resume` (in resume.rs).
 
 | File | Purpose |
 |------|---------|
-| `emit.rs` | LIR → WASM emission. `emit_module()` is the entry point. |
-| `emit/abi.rs` | The numbers the module and the host agree on: imports, memory slots, data-op codes. |
-| `emit/functions.rs` | Module sections, and the entry / closure function bodies. |
-| `instruction.rs` | LIR instruction → WASM instruction translation. |
-| `controlflow.rs` | CFG emission: loop + br_table dispatch, terminators. |
-| `suspend.rs` | CPS spill/restore and block splitting at suspending calls. |
-| `liveness.rs` | Which register slots are live at each suspend point. |
-| `outcome.rs` | `CallOutcome`: what a call reports back to emitted code. |
-| `handle.rs` | `HandleTable`: maps u64 handles to `Rc<HeapObject>`. |
-| `host.rs` | `ElleHost` state (handle table + primitives + suspension frames). |
-| `host/io.rs` | Top-level I/O with no scheduler to take it: the backend a request reaches, and the completion it reads its answer out of. |
-| `linker.rs` | Host function registration (`create_linker`); `linker/` holds the registrations and the data-op dispatch. |
-| `resume.rs` | Fiber resume chain (`drive_resume_chain`, `handle_fiber_resume`). |
-| `resume/route.rs` | What a fiber's own mask makes of its body's outcome: caught, parked, or propagated. |
-| `store.rs` | Engine/Store creation, `call_wasm_closure`, `resume_wasm_closure`, `run_module`. |
-| `lazy.rs` | `WasmTier`: per-closure WASM compilation and tiered dispatch. |
-| `regalloc.rs` | Register allocation for WASM locals. |
-| `mod.rs` | `eval_wasm()` entry point. |
-| `tests/` | The unit tests, one file per subject. |
+| [emit.rs](emit.rs) | LIR → WASM emission. `emit_module()` is the entry point. |
+| [emit/abi.rs](emit/abi.rs) | The numbers the module and the host agree on: imports, memory slots, data-op codes. |
+| [emit/functions.rs](emit/functions.rs) | Module sections, and the entry / closure function bodies. |
+| [instruction.rs](instruction.rs) | LIR instruction → WASM instruction translation. |
+| [controlflow.rs](controlflow.rs) | CFG emission: loop + br_table dispatch, terminators. |
+| [suspend.rs](suspend.rs) | CPS spill/restore and block splitting at suspending calls. |
+| [liveness.rs](liveness.rs) | Which register slots are live at each suspend point. |
+| [outcome.rs](outcome.rs) | `CallOutcome`: what a call reports back to emitted code. |
+| [handle.rs](handle.rs) | `HandleTable`: maps u64 handles to `Rc<HeapObject>`. |
+| [host.rs](host.rs) | `ElleHost` state (handle table + primitives + suspension frames). |
+| [host/io.rs](host/io.rs) | Top-level I/O with no scheduler to take it: the backend a request reaches, and the completion it reads its answer out of. |
+| [linker.rs](linker.rs) | Host function registration (`create_linker`); `linker/` holds the registrations and the data-op dispatch. |
+| [resume.rs](resume.rs) | Fiber resume chain (`drive_resume_chain`, `handle_fiber_resume`). |
+| [resume/route.rs](resume/route.rs) | What a fiber's own mask makes of its body's outcome: caught, parked, or propagated. |
+| [store.rs](store.rs) | Engine/Store creation, `call_wasm_closure`, `resume_wasm_closure`, `run_module`. |
+| [lazy.rs](lazy.rs) | `WasmTier`: per-closure WASM compilation and tiered dispatch. |
+| [regalloc.rs](regalloc.rs) | Register allocation for WASM locals. |
+| [mod.rs](mod.rs) | `eval_wasm()` entry point. |
+| [tests/](tests/) | The unit tests, one file per subject. |
 
 ## Host functions (WASM imports)
 
@@ -117,7 +117,7 @@ WASM closure host-side via `handle_fiber_resume` (in resume.rs).
 
 | Region | Offset | Purpose |
 |--------|--------|---------|
-| Signal word | 0..4 | Signal bits from last host call |
+| Signal word | 0..8 (SIGNAL_SLOT) | Signal bits from last host call |
 | Args buffer | 256 (ARGS_BASE) | Call args + data op args |
 | Env stack | 4096+ (ENV_STACK_BASE) | Closure envs for `call_wasm_closure` |
 
@@ -153,9 +153,9 @@ that suspension to the resumer (so the scheduler drives it), then RE-DRIVE
 `SuspendedFrame::FiberResume`. `route_emit` parks `child`, records it under the
 parent in `pending_redrive`, and returns `SIG_YIELD | bits`; `rt_yield` stamps
 the parent's continuation frame with `redrive_child`; `drive_resume_chain`
-honours that marker (via `redrive_child`) before resuming the frame. This is
+honors that marker (via `redrive_child`) before resuming the frame. This is
 what makes `protect`/`defer`/`with` around a suspending body work. Pinned by
-tests/lang/wasm-protect-suspend.lisp.
+[wasm-protect-suspend.lisp](../../tests/lang/wasm-protect-suspend.lisp).
 
 **The capability gate.** Every host path that reaches a native — `rt_call`,
 `rt_prepare_tail_call`, the `call_primitive` import, and the tiered linker's own
@@ -214,7 +214,7 @@ and hot closures are compiled to per-closure WASM modules on demand.
 `standalone_emittable` gate in `emit.rs` (`emit_single_closure` returns `None`;
 the tiered/precache callers fall back to the VM / full-module dispatch). A
 standalone module serves one closure through hosts whose suspension and
-tail-call imports are panic stubs (`lazy/linker.rs`, this directory) and whose
+tail-call imports are panic stubs ([linker.rs](lazy/linker.rs)) and whose
 funcref table has a single entry, so the gate refuses every shape whose
 execution would reach one:
 - No `TailCall`/`TailCallArrayMut` (`return_call_indirect` needs callee table
@@ -236,8 +236,7 @@ efficient within a single WASM instance.
 ## What this tier does not do
 
 - `eval` — dynamic module compilation, which no WASM path has. The Makefile's
-  `WASM_SKIP` keeps `eval.lisp`/`eval-env.lisp` out of `make smoke-wasm`, beside
-  `wasm-tier-error-signal.lisp`, which forces the tiered backend.
+  `WASM_SKIP` keeps [eval.lisp](../../tests/lang/eval.lisp)/[eval-env.lisp](../../tests/lang/eval-env.lisp) out of `make smoke-wasm`.
 - Tiered mode creates a `Store` per cross-closure call
   (`call_precached_closure`), so such a call costs a store setup.
 - `call_primitive` is imported and never called: the module declaration lists

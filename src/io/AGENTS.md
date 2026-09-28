@@ -1,6 +1,6 @@
 # I/O Module
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 ## Purpose
 
@@ -13,40 +13,40 @@ to a backend for execution.
 
 | Module | Responsibility |
 |--------|----------------|
-| `types.rs` | Shared types: `PortKey`, `FdState` — used by both backends |
-| `pool.rs` | `BufferPool`, `BufferHandle` — pinned buffer management for async I/O |
-| `pending.rs` | `PendingTable`, the backend's set of in-flight entries plus the ids no fiber will read. `take` answers "does anybody want this?" once, for both backends. |
-| `pending/op.rs` | `PendingOp` — what one in-flight operation's completion needs, one variant per operation shape — and `OpKind`. |
-| `pending/hold.rs` | `OperandHold` and `TakenOp` — the heap values a submitted operation retains, and the entry a completion reads them through. |
-| `aio.rs` | `AsyncBackend` — async I/O with io_uring (Linux) or thread-pool fallback |
-| `aio/requests.rs` | `submit_op`, the frame every submission shares, and the operations that name no OS object of their own. |
-| `aio/externals.rs` | The submissions that name an OS object the request carries or creates: a watcher, a signal receiver, a file, a child, a background task. |
+| [types.rs](types.rs) | Shared types: `PortKey`, `FdState` — used by both backends |
+| [pool.rs](pool.rs) | `BufferPool`, `BufferHandle` — pinned buffer management for async I/O |
+| [pending.rs](pending.rs) | `PendingTable`, the backend's set of in-flight entries plus the ids no fiber will read. `take` answers "does anybody want this?" once, for both backends. |
+| [pending/op.rs](pending/op.rs) | `PendingOp` — what one in-flight operation's completion needs, one variant per operation shape — and `OpKind`. |
+| [pending/hold.rs](pending/hold.rs) | `OperandHold` and `TakenOp` — the heap values a submitted operation retains, and the entry a completion reads them through. |
+| [aio.rs](aio.rs) | `AsyncBackend` — async I/O with io_uring (Linux) or thread-pool fallback |
+| [aio/requests.rs](aio/requests.rs) | `submit_op`, the frame every submission shares, and the operations that name no OS object of their own. |
+| [aio/externals.rs](aio/externals.rs) | The submissions that name an OS object the request carries or creates: a watcher, a signal receiver, a file, a child, a background task. |
 | `aio/{submit,poll,drain,convert}.rs` | Dispatch into the request, the reap and wait loops, the CQE drain, and the value conversions a completion answers with. |
-| `request.rs` | `IoRequest`, `IoOp` and `PortOp` — typed I/O request descriptors |
-| `request/spawn.rs` | `SpawnRequest`, the command it builds, and `spawn_to_subprocess` |
-| `request/process.rs` | `ProcessHandle` and `ExitRecord` — the `subprocess` value and the record its status is kept in |
+| [request.rs](request.rs) | `IoRequest`, `IoOp` and `PortOp` — typed I/O request descriptors |
+| [request/spawn.rs](request/spawn.rs) | `SpawnRequest`, the command it builds, and `spawn_to_subprocess` |
+| [request/process.rs](request/process.rs) | `ProcessHandle` and `ExitRecord` — the `subprocess` value and the record its status is kept in |
 | `request/{buffer,socket}.rs` | In-place buffer edits a completion makes, and the socket request shapes. |
-| `completion.rs` | `process_raw_completion` — converts raw CQE/thread results to `Completion` |
-| `frame.rs` | Where a read's answer ends in the bytes it owns, and how a port's remainder joins it |
-| `landing.rs` | Where a stream operation's bytes land: the remainder a read borrows, a write's payload by address, and what a pool worker is handed of both. See [where a stream operation's bytes live](../../docs/impl/io-bytes.md). |
-| `watch.rs` | `FsWatcher` — inotify (Linux) or kqueue (macOS), for `fs/watch` |
-| `mock.rs` | An in-memory backend for tests and benchmarks, with configurable latency |
-| `sigfd.rs` | `SignalReceiver` — POSIX signalfd (Linux) or kqueue+EVFILT_SIGNAL (macOS) external for `os/sig-watch`; also the worker-thread mask helper `mask_all_signals_on_this_thread` |
-| `sigmap.rs` | Shared keyword↔signum mapping; `resolve(value, ctx)` parses a `:sigterm`/integer Value to libc signum |
-| `sockaddr.rs` | Sockaddr construction, formatting, parsing — single source of truth |
-| `threadpool.rs` | `RawCompletion`, `PoolOp`, `PoolCompletion` — typed thread-pool I/O. Every spawned worker calls `crate::io::sigfd::mask_all_signals_on_this_thread()` first so the kernel never selects it as a POSIX-signal delivery target. |
-| `threadpool/hub.rs` | `CompletionHub` — the one shared completion channel, the stop pipes that end its operations, and the crew that runs them. |
-| `threadpool/stdin.rs` | `StdinThread` — the one thread that reads descriptor 0, and the requests and completions that cross to it. |
-| `threadpool/opbound.rs` | `Bounds` and `OpBound` — the declared and the live half of one operation's bound — plus `Wake`, the stop pipe, `take_when_ready` and `pace_retry`. |
-| `threadpool/submitop.rs` | `CompletionHub::submit`: hand the operation to a worker, run it, publish the result. The `match` there names each operation's runner and the descriptor its bound watches. |
-| `threadpool/pool.rs` | `WorkerPool`, `Crew` and `Job` — the parked workers' handoffs, and the choice between handing a job to one of them and starting a thread. See [descriptors and workers](../../docs/impl/io-descriptor.md). |
+| [completion.rs](completion.rs) | `process_raw_completion` — converts raw CQE/thread results to `Completion` |
+| [frame.rs](frame.rs) | Where a read's answer ends in the bytes it owns, and how a port's remainder joins it |
+| [landing.rs](landing.rs) | Where a stream operation's bytes land: the remainder a read borrows, a write's payload by address, and what a pool worker is handed of both. See [where a stream operation's bytes live](../../docs/impl/io-bytes.md). |
+| [watch.rs](watch.rs) | `FsWatcher` — inotify (Linux) or kqueue (macOS), for `fs/watch` |
+| [mock.rs](mock.rs) | An in-memory backend for tests and benchmarks, with configurable latency |
+| [sigfd.rs](sigfd.rs) | `SignalReceiver` — POSIX signalfd (Linux) or kqueue+EVFILT_SIGNAL (macOS) external for `os/sig-watch`; also the worker-thread mask helper `mask_all_signals_on_this_thread` |
+| [sigmap.rs](sigmap.rs) | Shared keyword↔signum mapping; `resolve(value, ctx)` parses a `:sigterm`/integer Value to libc signum |
+| [sockaddr.rs](sockaddr.rs) | Sockaddr construction, formatting, parsing — single source of truth |
+| [threadpool.rs](threadpool.rs) | `RawCompletion`, `PoolOp`, `PoolCompletion` — typed thread-pool I/O. Every spawned worker calls `crate::io::sigfd::mask_all_signals_on_this_thread()` first so the kernel never selects it as a POSIX-signal delivery target. |
+| [threadpool/hub.rs](threadpool/hub.rs) | `CompletionHub` — the one shared completion channel, the stop pipes that end its operations, and the crew that runs them. |
+| [threadpool/stdin.rs](threadpool/stdin.rs) | `StdinThread` — the one thread that reads descriptor 0, and the requests and completions that cross to it. |
+| [threadpool/opbound.rs](threadpool/opbound.rs) | `Bounds` and `OpBound` — the declared and the live half of one operation's bound — plus `Wake`, the stop pipe, `take_when_ready` and `pace_retry`. |
+| [threadpool/submitop.rs](threadpool/submitop.rs) | `CompletionHub::submit`: hand the operation to a worker, run it, publish the result. The `match` there names each operation's runner and the descriptor its bound watches. |
+| [threadpool/pool.rs](threadpool/pool.rs) | `WorkerPool`, `Crew` and `Job` — the parked workers' handoffs, and the choice between handing a job to one of them and starting a thread. See [descriptors and workers](../../docs/impl/io-descriptor.md). |
 | `threadpool/{stream,net,event,child,open}.rs` | The runners, grouped by what they wait on: byte streams, sockets, event descriptors (inotify / kqueue / signalfd), a child's exit, a file open. |
-| `uring.rs` | io_uring SQE submission and CQE processing (Linux only). The standing `POLL_ADD` on the hub's bridge eventfd carries the `EVENTFD_USER_DATA` sentinel; `drain_cqes` reports it as `eventfd_fired` and the wait/poll path clears + re-arms it. |
-| `eventfd.rs` | Bridge eventfd helpers — `create`/`signal`/`drain` (Linux only). One definition of each eventfd syscall, shared by the io_uring bridge and `primitives::chan`'s wake fd. |
+| [uring.rs](uring.rs) | io_uring SQE submission and CQE processing (Linux only). The standing `POLL_ADD` on the hub's bridge eventfd carries the `EVENTFD_USER_DATA` sentinel; `drain_cqes` reports it as `eventfd_fired` and the wait/poll path clears + re-arms it. |
+| [eventfd.rs](eventfd.rs) | Bridge eventfd helpers — `create`/`signal`/`drain` (Linux only). One definition of each eventfd syscall, shared by the io_uring bridge and `primitives::chan`'s wake fd. |
 
 ## Data Flow
 
-```
+```text
 Stream primitive → (SIG_IO, IoRequest) → Scheduler → io/submit → AsyncBackend → OS
                                                    ← io/wait   ← completions  ← OS
 ```
@@ -206,13 +206,13 @@ output is canonically shortened.
 | `io/reap` | errors | Non-blocking poll for completions (returns array) |
 | `io/wait` | errors | Blocking wait for completions with timeout (returns array) |
 | `io/cancel` | errors | Cancel a pending async I/O operation by submission ID |
-| `ev/sleep` | error, yield, io | Async sleep (in `primitives/time.rs`) |
+| `ev/sleep` | error, yield, io | Async sleep (in [time.rs](../primitives/time.rs)) |
 
 ## Timeout Handling
 
 **io_uring:** a `LinkTimeout` SQE follows the operation SQE with the `IO_LINK` flag, so the kernel cancels the operation when the timeout fires first. The operation's CQE then carries `result = -ECANCELED` (errno 125). The timeout's own CQE carries a high-bit tag (`id | (1 << 63)`) and completion processing skips it.
 
-**Thread pool:** `OpBound` (`threadpool/opbound.rs`) takes the descriptor
+**Thread pool:** `OpBound` ([opbound.rs](threadpool/opbound.rs)) takes the descriptor
 non-blocking and waits in `poll(2)` for readiness, for the caller's `:timeout`,
 or for the stop pipe. § "Operation timeouts" holds the mechanism, and
 [an operation in flight](../../docs/impl/io-inflight.md) the cancellation half.
@@ -445,18 +445,18 @@ the next `ring.submit()`.
 
 ### Subprocess Operations
 
-**`SpawnRequest::spawn_to_subprocess()`** (in `request/spawn.rs`) — Spawns a subprocess using `std::process::Command`. Returns one external, type name `subprocess`, wrapping a `ProcessHandle` that carries:
+**`SpawnRequest::spawn_to_subprocess()`** (in [spawn.rs](request/spawn.rs)) — Spawns a subprocess using `std::process::Command`. Returns one external, type name `subprocess`, wrapping a `ProcessHandle` that carries:
 - the pid
 - the `stdin`, `stdout` and `stderr` port `Value`s (or `Value::NIL`), created per `StdioDisposition`
 - the `ExitRecord` every later wait and kill reads
 
 The ports and the handle are built at the completion's `Birthplace` — one region on the requesting instance's heap, whose one reference the completion hands over when it becomes a value ([an operation in flight](../../docs/impl/io-inflight.md)). So they hold no cross-heap reference, and the region they share is nobody's to leak. The external itself is what `subprocess/wait`, `subprocess/kill`, `subprocess/pid` and `subprocess/exit` take.
 
-**`pipe_to_port()`** (in `request/spawn.rs`) — Converts a subprocess pipe (ChildStdin, ChildStdout, ChildStderr) to a Port Value.
+**`pipe_to_port()`** (in [spawn.rs](request/spawn.rs)) — Converts a subprocess pipe (ChildStdin, ChildStdout, ChildStderr) to a Port Value.
 
-**`AsyncBackend::submit_spawn()`** (in `aio/externals.rs`) — Calls `spawn_to_subprocess()`. Spawn is an immediate completion (no CQE arrives); the result is pushed directly to the completions queue.
+**`AsyncBackend::submit_spawn()`** (in [externals.rs](aio/externals.rs)) — Calls `spawn_to_subprocess()`. Spawn is an immediate completion (no CQE arrives); the result is pushed directly to the completions queue.
 
-**`AsyncBackend::submit_process_wait()`** (in `aio/externals.rs`) — Submits subprocess wait via `IORING_OP_WAITID` (Linux 6.7+), or on the thread pool. Fast path: if the handle's `ExitRecord` already holds a status, returns an immediate completion. Otherwise, allocates a `siginfo_t` buffer, submits the SQE, and stores the pending operation — with a clone of the record in both the `PoolOp` and the `PendingOp`.
+**`AsyncBackend::submit_process_wait()`** (in [externals.rs](aio/externals.rs)) — Submits subprocess wait via `IORING_OP_WAITID` (Linux 6.7+), or on the thread pool. Fast path: if the handle's `ExitRecord` already holds a status, returns an immediate completion. Otherwise, allocates a `siginfo_t` buffer, submits the SQE, and stores the pending operation — with a clone of the record in both the `PoolOp` and the `PendingOp`.
 
 **`child::process_wait()`** (in [child.rs](../../src/io/threadpool/child.rs)) — the thread-pool half. `ExitRecord::reap` asks with `waitpid(pid, .., WNOHANG)` and returns either way, and `pace_retry` waits between asks with the stop pipe visible — starting at a millisecond and growing to fifty, so a child that exits at once is reported at once while a long-running one costs few wakeups. The blocking `waitpid` it replaces held the worker for the child's whole life, where neither `io/cancel` nor a deadline could reach it. Asking through the record is what keeps a reap this worker's cancellation discards — see § "A reap is never wasted". Pinned by [process.rs](../../src/io/threadpool/tests/process.rs).
 

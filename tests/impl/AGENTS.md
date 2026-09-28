@@ -12,4 +12,5 @@ Up: [..](../AGENTS.md)
 
 - [lib/](lib/AGENTS.md) — (empty)
 - [probe/](probe/AGENTS.md) — (empty)
+- [profiles/](profiles/AGENTS.md) — (empty)
 - [tailexit/](tailexit/AGENTS.md) — (empty)
