@@ -367,16 +367,22 @@ fn an_error_inside_a_collection_leaves_no_open_form_behind() {
     // The counter-factual: a collection that returns an error without closing
     // its open form leaves it on the reader. The next unterminated form then
     // blames `(a` at 1:1 and counts two parens, one of them already reported.
-    let (tokens, locs, lens, offs) = lex_columns("(a @x (b");
+    //
+    // The trap: `@x` lexes as one symbol, so it raises no error inside the
+    // list. An `@` before a quote does.
+    let (tokens, locs, lens, offs) = lex_columns("(a @'x (b");
     let mut reader =
         SyntaxReader::with_byte_offsets(tokens, locs, lens, offs, crate::syntax::thread_arena());
     let err = reader.read().unwrap_err();
-    assert!(err.contains("@ must be followed by"), "{err}");
-    assert!(matches!(reader.read().unwrap().kind, SyntaxKind::Symbol(ref s) if s == "x"));
+    assert_eq!(
+        err,
+        "<unknown>:1:4: @ must be followed by [...], {...}, |...|, or \"...\""
+    );
+    assert!(matches!(reader.read().unwrap().kind, SyntaxKind::Quote(_)));
     let err = reader.read().unwrap_err();
     assert_eq!(
         err,
-        "<unknown>:1:7: unterminated list (1 closing paren needed)"
+        "<unknown>:1:8: unterminated list (1 closing paren needed)"
     );
 }
 
