@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 A Lisp whose compiler infers what each function does and where each value dies,
 and runs on those facts.
@@ -145,11 +145,8 @@ Structured concurrency sits on top of the scheduler:
 
 Janet's fibers are the model we started from. [lib/process.lisp](lib/process.lisp)
 builds Erlang-style processes from the same fibers, in Elle alone: mailboxes,
-links, monitors, GenServers and supervisors. The process layer is young. Links,
-supervisor restarts and timeouts have open defects under the
-[processes](https://github.com/elle-lisp/elle/issues?q=is%3Aopen+label%3Aprocesses)
-label. See [docs/concurrency.md](docs/concurrency.md) and
-[docs/processes.md](docs/processes.md).
+links, monitors, GenServers and supervisors. See
+[docs/concurrency.md](docs/concurrency.md) and [docs/processes.md](docs/processes.md).
 
 ## Memory without a collector
 
@@ -188,11 +185,7 @@ and the bytes stay in the pages where they were born:
 (assert (> (- (arena/bytes) before) 100000))
 ```
 
-I/O follows the same design: a read hands the kernel a buffer in the caller's
-region. Two paths still copy today. A stream read's completion copies its
-bytes through a Rust buffer and back, and a write copies its payload before the
-kernel sees it ([#1246](https://github.com/elle-lisp/elle/issues/1246)). A
-value that crosses to another thread is deep-copied, where it could move with
+A value that crosses to another thread is deep-copied, where it could move with
 its regions instead ([#1247](https://github.com/elle-lisp/elle/issues/1247)).
 
 Freed pages return to a small per-thread cache, and pages past that cache go
