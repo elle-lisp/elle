@@ -114,26 +114,24 @@ impl VM {
     /// Check arity and set error signal if mismatch.
     /// Returns true if arity is OK, false if there's a mismatch.
     pub(crate) fn check_arity(&mut self, arity: &crate::value::Arity, arg_count: usize) -> bool {
-        let mismatch = match arity {
-            crate::value::Arity::Exact(n) if arg_count != *n => {
-                Some(format!("expected {} arguments, got {}", n, arg_count))
-            }
-            crate::value::Arity::AtLeast(n) if arg_count < *n => Some(format!(
-                "expected at least {} arguments, got {}",
-                n, arg_count
-            )),
-            crate::value::Arity::Range(min, max) if arg_count < *min || arg_count > *max => Some(
-                format!("expected {}-{} arguments, got {}", min, max, arg_count),
-            ),
-            _ => None,
-        };
-
-        if let Some(msg) = mismatch {
-            let err = self.escaping_error("arity-error", msg);
-            self.fiber.signal = Some((SIG_ERROR, err));
-            return false;
+        if arity.matches(arg_count) {
+            return true;
         }
-        true
+
+        let msg = match arity {
+            crate::value::Arity::Exact(n) => {
+                format!("expected {} arguments, got {}", n, arg_count)
+            }
+            crate::value::Arity::AtLeast(n) => {
+                format!("expected at least {} arguments, got {}", n, arg_count)
+            }
+            crate::value::Arity::Range(min, max) => {
+                format!("expected {}-{} arguments, got {}", min, max, arg_count)
+            }
+        };
+        let err = self.escaping_error("arity-error", msg);
+        self.fiber.signal = Some((SIG_ERROR, err));
+        false
     }
 
     /// Execute a code-object blueprint with an optional closure environment.
