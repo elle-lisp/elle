@@ -1,8 +1,9 @@
-// audited: 2026-09-23
-// The VM's execution entries: a blueprint, a code object at the root, and a
-// program under the async scheduler. The module list sits above them.
-// docs/impl/vm.md
-// docs/impl/region/rules.md
+// audited: 2026-09-28
+//! The VM's execution entries: a blueprint, a code object at the root, and a
+//! program under the async scheduler. The module list sits above them.
+//!
+//! docs/impl/vm.md
+//! docs/impl/region/rules.md
 
 pub mod arithmetic;
 pub mod call;
@@ -169,6 +170,10 @@ impl VM {
         closure_env: Option<&Rc<Vec<Value>>>,
     ) -> Result<Value, String> {
         self.error_loc = None;
+        // The body addresses its locals from stack position 0, so it runs on a
+        // stack of its own and the one found here goes back at the end
+        // (docs/impl/vm.md § "Every body starts on an empty operand stack").
+        let saved_stack = std::mem::take(&mut self.fiber.stack);
 
         let empty_env = Rc::new(vec![]);
         let mut current_code = code;
@@ -275,6 +280,8 @@ impl VM {
         if at_root {
             self.release_activation_dues();
         }
+        self.root_exit_depth = self.fiber.stack.len();
+        self.fiber.stack = saved_stack;
         self.fiber.current_closure = saved_closure;
         result
     }

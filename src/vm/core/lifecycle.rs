@@ -1,6 +1,7 @@
-// audited: 2026-09-23
-// docs/impl/vm.md
+// audited: 2026-09-28
 //! Building a VM over a heap it owns or shares, and resetting one for reuse.
+//!
+//! docs/impl/vm.md
 
 use super::*;
 
@@ -112,6 +113,7 @@ impl VM {
             pending_error_park: false,
             trampoline_parent_override: None,
             error_loc: None,
+            root_exit_depth: 0,
             arena_site: None,
             gated_exit_reason: None,
             active_tier: "bytecode",
