@@ -1,6 +1,6 @@
 # Intrinsics
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-28 -->
 
 Intrinsics are silent bytecode operations prefixed with `%`. A `%`-intrinsic
 in **call position** is a compile-time type-checked request for the fast
@@ -89,7 +89,8 @@ Inference discharges contracts from:
 - **diverging type guards** — after
   `(when (%not (number? b)) (error …))`, `b` is a Number in everything
   that follows; predicate spellings (`(number? b)`) and intrinsic
-  spellings (`(%int? b)`) both count;
+  spellings (`(%int? b)`) both count, and the raise diverges wherever the
+  taken branch evaluates it, inside a `let` binding too;
 - **nonzero facts** for the div family — a nonzero literal divisor, or a
   diverging zero guard: after `(when (= d 0) (error …))`, `d` is provably
   nonzero;
@@ -110,6 +111,15 @@ Inference discharges contracts from:
     (when (%not (int? x)) (error {:error :type-error :message "half: int required"}))
     (%div x 2)))
 (assert (= (half 10) 5) "guard-narrowed %div lowers to the opcode")
+
+# No caller proves x here, so the guard alone must: the raise sits in a
+# binding, and the guard still diverges.
+(compile/whole-module "(defn parity [x]
+                          (when (%not (%int? x))
+                            (let [e (error {:error :type-error :message \"no\"})]
+                              e))
+                          (%rem x 2))"
+                      "<doc>")
 
 (defn sq [x]
   "A numeric kernel: the declaration proves the parameter for the whole body."

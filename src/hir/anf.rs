@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-09-28
 //! A-normal form (ANF) lift: each value a frame releases through a slot gets a
 //! binding naming that slot.
 //!
@@ -402,6 +402,7 @@ fn kind_label(k: &HirKind) -> &'static str {
         HirKind::Call { .. } => "call",
         HirKind::Lambda { .. } => "lambda",
         HirKind::Eval { .. } => "eval",
+        HirKind::Emit { .. } => "emit",
         HirKind::Intrinsic { .. } => "intrinsic",
         HirKind::Match { .. } => "match",
         _ => "expr",

@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-28
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
 //!
@@ -207,6 +207,10 @@ pub struct VM {
     /// call sites. This also protects against fiber error propagation
     /// overwriting the child fiber's error origin.
     pub(crate) error_loc: Option<SourceLoc>,
+    /// The operand depth the last root body left at its exit, recorded by
+    /// `execute_code` before it hands back the stack it took. Read through
+    /// `root_exit_depth`.
+    pub(crate) root_exit_depth: usize,
     /// The instruction the interpreter is executing, as `--trace=arena` reports
     /// it: the running function's name and the source location of the
     /// instruction itself (docs/impl/region/diagnostics.md § `--trace=arena`).
@@ -427,6 +431,14 @@ impl VM {
             .last()
             .map(|f| f.frame_base)
             .unwrap_or(0)
+    }
+
+    /// The operand depth the last root body left at its exit. The stack
+    /// `execute_code` hands back cannot show it, because the body ran on a
+    /// stack of its own (docs/impl/vm.md § "Every body starts on an empty
+    /// operand stack").
+    pub fn root_exit_depth(&self) -> usize {
+        self.root_exit_depth
     }
 
     /// Push a synthetic trace frame for `name`, whose call site is at `ip` in a

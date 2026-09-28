@@ -1,4 +1,7 @@
+// audited: 2026-09-28
 //! Guard-fact extraction: what a condition proves about bindings.
+//!
+//! docs/intrinsics.md
 //!
 //! One recognizer serves both consumers of guard knowledge:
 //!
@@ -250,12 +253,17 @@ pub(super) fn cond_facts(cond: &Hir, arena: &BindingArena) -> CondFacts {
 /// makes a guard's fall-through narrowing sound: after
 /// `(when (%not (number? b)) (error …))`, every continuation where `b` is not
 /// a number has left the straight-line path.
+///
+/// A `let` runs its inits before its body, so a diverging init diverges the
+/// form. The ANF lift names a raise that way: `(let [t (error …)] t)`.
 pub(super) fn diverges(h: &Hir) -> bool {
     match &h.kind {
         HirKind::Emit { signal, .. } => signal.intersects(crate::value::SIG_ERROR),
         HirKind::Begin(xs) => xs.last().is_some_and(diverges),
         HirKind::Block { body, .. } => body.last().is_some_and(diverges),
-        HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => diverges(body),
+        HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+            bindings.iter().any(|(_, init)| diverges(init)) || diverges(body)
+        }
         HirKind::If {
             then_branch,
             else_branch,

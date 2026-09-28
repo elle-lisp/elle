@@ -1,6 +1,6 @@
 # The ANF lift
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Which values the ANF lift names with a synthetic binding, and why each name lands on the node it does.
 
@@ -98,6 +98,29 @@ body as the returned value, which gives the canonical `(let [t e] (return t))`.
 Pinned by `hir::anf::tests::tails` and by
 [region-eval-return-leak.lisp](../../tests/elle/region-eval-return-leak.lisp),
 which the guardfree oracle also runs.
+
+## A resume value is named like a call result
+
+An `Emit` suspends the fiber, and the value the resume delivers takes its place
+in the expression. That value crosses from the resumer uncounted, so
+`lower_emit` mints a reference for this frame
+([what a park retains](region/park.md)). The frame releases that reference
+through a slot and by no other route.
+
+So `Hir::allocates` counts an `Emit`, and a consumer position names one exactly
+as it names a call. `[:got (yield 1)]` becomes `[:got (let [t (yield 1)] t)]`,
+and `t`'s release consumes the mint. Unnamed, the mint strands one region per
+resume that delivers a heap value. The same holds for an `(error v)` a restart
+resumes, because that raise is an `Emit` too.
+
+A binder position already names its init, and a returning position leaves its
+own tail `Emit` unnamed. No slot releases that one, so `lower_emit` takes no
+reference for it, and the `Return` mint funds the caller. A named `Emit` takes
+the mint whether or not its value is returned, because its binding's release
+runs either way.
+
+Pinned by `hir::anf::tests::positions` and by
+[region-resume-value-operand.lisp](../../tests/elle/region-resume-value-operand.lisp).
 
 ## Idempotence
 

@@ -1,6 +1,6 @@
 # vm
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Bytecode execution. Stack-based operand handling with register-addressed locals.
 
@@ -76,7 +76,7 @@ keep the stack consistent.
 
 Bytecode, constants and the location table are threaded through the dispatch
 loop as one `Code` — the code object itself, a payload slice plus a blueprint
-pointer (docs/impl/region/template.md). Individual instruction handlers take
+pointer ([template.md](../../docs/impl/region/template.md)). Individual instruction handlers take
 slices (`&[u8]`, `&[Value]`) read off it. Only the dispatch loop and its direct
 callees (`handle_emit`, `handle_call`) need the `Code` — they clone it cheaply
 (two words and one refcount) when creating `SuspendedFrame`s, `TailCallInfo`, or
@@ -89,18 +89,18 @@ callees (`handle_emit`, `handle_call`) need the `Code` — they clone it cheaply
   squelch mask — tail calls clone the `Rc`s (cheap), not the `Vec`s (expensive).
   The releases the call strands are NOT carried here: `tail_call_inner` records
   them on the activation's own `ActivationDues`, which outlives whoever consumes
-  the pending call (docs/impl/region/owner.md § "A deferred tail-call release has
+  the pending call ([owner.md](../../docs/impl/region/owner.md) § "A deferred tail-call release has
   the node's life")
 - `PendingCall` carries a non-tail callee's `Code`, env `Rc` and closure value
   from `call_inner` to `run_dispatch`, which pauses the caller and runs the
-  callee on the same loop (docs/impl/vm.md § "Non-tail calls")
+  callee on the same loop ([vm.md](../../docs/impl/vm.md) § "Non-tail calls")
 - `closure_env` parameter is `&Rc<Vec<Value>>` (non-optional; empty Rc for no env)
 
 ## Primitive dispatch (NativeFn)
 
 A primitive is a `PrimitiveDef` whose `func` is a `PrimFn`:
 `fn(&mut NativeCtx, &[Value]) -> (SignalBits, Value)`. The VM
-dispatches the return signal in `handle_primitive_signal()` (`signal.rs`):
+dispatches the return signal in `handle_primitive_signal()` ([signal.rs](signal.rs)):
 - `SIG_OK` → push value to stack
 - `SIG_ERROR` → store `(SIG_ERROR, value)` in `fiber.signal`, push NIL
 - `SIG_YIELD` → store in `fiber.signal`, return yield
@@ -121,8 +121,8 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 ## Dependents
 
 - `primitives/` - NativeFn primitives; SIG_RESUME signals trigger VM-side execution
-- `repl.rs` - REPL session: form-by-form compilation with def persistence across inputs
-- `main.rs` - file execution
+- [repl.rs](../repl.rs) - REPL session: form-by-form compilation with def persistence across inputs
+- [main.rs](../main.rs) - file execution
 
 ## Invariants
 
@@ -143,7 +143,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
    stores a `PendingCall` and returns; `run_dispatch` pauses the caller in
    `fiber.callers` and runs the callee on the same loop. Only re-entry (a
    primitive calling a closure) and compiled code nest on the Rust stack, and
-   both check `native_stack` first (docs/impl/vm.md § "Non-tail calls").
+   both check `native_stack` first ([vm.md](../../docs/impl/vm.md) § "Non-tail calls").
 
 6. **Yield uses `SuspendedFrame` chains.** On yield, a `SuspendedFrame`
    captures the code object, env (`Rc`), IP, and operand stack. When the yield
@@ -159,11 +159,11 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
    produce garbage, not crashes or signals. This matches WASM/SPIR-V
    semantics, and it is sound because a call-position `%`-op only compiles
    when its operand contract is proven (prove-or-reject,
-   `hir/typeinfer/contract.rs`) — which is what makes the ops'
+   [contract.rs](../hir/typeinfer/contract.rs)) — which is what makes the ops'
    compile-time `Silent` signal truthful. A `%`-op called dynamically as a
    value routes through its registered NativeFn, which validates arguments
    at runtime.
-   See `set_error()` in `call.rs` and `fiber.rs` for the signal-based helper.
+   See `set_error()` in [mod.rs](mod.rs) for the signal-based helper.
 
 ## Key VM fields
 
@@ -173,12 +173,13 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `heap_ptr` | `*mut FiberHeap` | This instance's single heap, owned by `RuntimeCore` (or privately leaked for a bare VM). All fibers share it; reach it via `heap()` |
 | `current_fiber_handle` | `Option<FiberHandle>` | Handle for current fiber (`None` for root) |
 | `current_fiber_value` | `Option<Value>` | Cached Value for current fiber (`None` for root) |
-| `jit_cache` | `FxHashMap<*const u8, JitCacheEntry>` | JIT code cache; each entry pins the bytecode allocation its key names (docs/impl/jit.md § "Cache identity"). Write via `install_jit_code`, read via `jit_code_for` |
+| `jit_cache` | `FxHashMap<*const u8, JitCacheEntry>` | JIT code cache; each entry pins the bytecode allocation its key names ([jit.md](../../docs/impl/jit.md) § "Cache identity"). Write via `install_jit_code`, read via `jit_code_for` |
 | `jit_rejections` | `FxHashMap<*const u8, JitRejectionInfo>` | JIT rejection log: first rejection per closure template |
 | `closure_call_counts` | `FxHashMap<*const u8, usize>` | JIT hotness profiling (FxHash for pointer keys) |
 | `pending_tail_call` | `Option<TailCallInfo>` | Rc-based tail call info (transient) |
 | `pending_call` | `Option<PendingCall>` | The non-tail callee `call_inner` hands to `run_dispatch` (transient) |
-| `error_loc` | `Option<SourceLoc>` | Where the error now propagating was raised. Written by `record_error_loc` (first-writer-wins, so the innermost frame keeps it), taken by `absorbs` when a mask catches (docs/impl/vm.md § "Where a reported error's location comes from") |
+| `root_exit_depth` | `usize` | The operand depth the last root body left at its exit, recorded before `execute_code` restores the stack it took ([vm.md](../../docs/impl/vm.md) § "Every body starts on an empty operand stack") |
+| `error_loc` | `Option<SourceLoc>` | Where the error now propagating was raised. Written by `record_error_loc` (first-writer-wins, so the innermost frame keeps it), taken by `absorbs` when a mask catches ([vm.md](../../docs/impl/vm.md) § "Where a reported error's location comes from") |
 | `env_cache` | `Vec<Value>` | Reusable buffer for `build_closure_env` (avoids alloc per call) |
 | `tail_call_env_cache` | `Vec<Value>` | Reusable buffer for `handle_tail_call` env building |
 | `eval_expander` | `Option<Expander>` | Cached Expander for runtime `eval` (avoids re-loading prelude) |
@@ -195,7 +196,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `signal` | `Option<(SignalBits, Value)>` | Signal from execution (errors, yields) |
 | `error_loc` | `Option<(Value, SourceLoc)>` | The parked `SIG_ERROR` payload and where it was raised. Parked by `absorbs`, read back by `fiber/propagate` so a re-raised error keeps its raising form |
 | `suspended` | `Option<Vec<SuspendedFrame>>` | Suspended execution frames (for yield/signal resumption) |
-| `delivery` | `Delivery` | The delivery ledger: how the current park's delivery references are funded — the raise-minted payload, the bodyless (denial) payload whose release the displacing install owes, and whether the resume value owes a mint. Method-only surface (docs/impl/region/park.md § "A park names its funding in the delivery ledger") |
+| `delivery` | `Delivery` | The delivery ledger: how the current park's delivery references are funded — the raise-minted payload, the bodyless (denial) payload whose release the displacing install owes, and whether the resume value owes a mint. Method-only surface ([park.md](../../docs/impl/region/park.md) § "A park names its funding in the delivery ledger") |
 | `mask` | `SignalBits` | Which of this fiber's signals its parent catches |
 | `param_frames` | `Vec<Vec<(u32, Value)>>` | Parameter binding frames (stack of frames, each frame a vec of (param id, value) pairs) |
 | `parent` | `Option<WeakFiberHandle>` | Weak back-pointer to parent fiber |
@@ -215,12 +216,12 @@ parameter frames). Each re-entry nests on the Rust stack, so it halts with
 
 | Caller | File | Context |
 |--------|------|---------|
-| `eval` primitive | `eval.rs` | Compiles and runs Elle source from within running code |
-| A fiber's first resume | `fiber/resume.rs` | Runs a new fiber's body |
-| `arena/allocs` SIG_QUERY handler | `signal/config.rs` | Runs a thunk to measure its allocations |
-| `call_closure` | `call.rs` | Macro transformers and trait methods |
-| JIT helpers | `jit/calls/callops.rs` | Run an uncompiled callee, or any callee once the native stack is low |
-| FFI callback | `ffi/callback.rs` | Runs a closure a C function calls back |
+| `eval` primitive | [eval.rs](eval.rs) | Compiles and runs Elle source from within running code |
+| A fiber's first resume | [fiber/resume.rs](fiber/resume.rs) | Runs a new fiber's body |
+| `arena/allocs` SIG_QUERY handler | [signal/config.rs](signal/config.rs) | Runs a thunk to measure its allocations |
+| `call_closure` | [call.rs](call.rs) | Macro transformers and trait methods |
+| JIT helpers | [callops.rs](../jit/calls/callops.rs) | Run an uncompiled callee, or any callee once the native stack is low |
+| FFI callback | [callback.rs](../ffi/callback.rs) | Runs a closure a C function calls back |
 
 ### Yield hazard
 
@@ -230,7 +231,7 @@ closures (`eval`, `arena/allocs`) do not handle yield — they propagate the sig
 upward. Closures passed to these must be non-yielding (silent signal). This is not
 currently enforced at the call site.
 
-See `execute.rs` module doc for the full rules on what is preserved, what is
+See [execute.rs](execute.rs) module doc for the full rules on what is preserved, what is
 overwritten, and how to add new callers.
 
 ## Suspension mechanism
@@ -270,7 +271,7 @@ holds no record to defer to. The installs are `fiber/resume`, the `fiber/abort` 
 `fiber/refuse` injection, and the three `FiberResume` deliveries that reach an
 inner fiber directly, and each owes the release — a `Fresh` op whose completion
 buffer lives in the request's own region is a second value there, not a second
-consumer of the retain. See docs/impl/region/park.md § "A payload the RUNTIME
+consumer of the retain. See [park.md](../../docs/impl/region/park.md) § "A payload the RUNTIME
 built is released by the install that displaces it".
 
 Key methods:
@@ -280,7 +281,7 @@ Key methods:
 - `execute_bytecode_saving_stack`: Saves/restores caller's stack, handles tail calls
 - `run_thunk_to_completion`: `execute_bytecode_saving_stack` + the `SIG_SWITCH` drain loop — the safe entry for re-entrant callers running a thunk on the current fiber (`eval`, `arena/allocs`, test-setup module loader)
 - `resume_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and errors
-- `with_child_fiber` (`fiber/child.rs`): Shared swap protocol for fiber
+- `with_child_fiber` ([fiber/child.rs](fiber/child.rs)): Shared swap protocol for fiber
   resume/cancel. Swaps the child fiber into `vm.fiber`, wires the parent/child
   chain, runs the body, then swaps back. No heap swap is involved: all fibers
   (including root) share the VM's single heap, reached via `vm.heap_ptr`.
@@ -296,7 +297,7 @@ same way (`vm.heap_ptr`) on every fiber; isolation is per-region, not per-fiber.
 `FiberHeap` allocates every value into a region, and a region is freed when its
 reference count reaches zero ([memory.md](../../docs/impl/memory.md)).
 
-`reset_fiber()` in `core/lifecycle.rs` does not clear the heap — objects accumulate across
+`reset_fiber()` in [core/lifecycle.rs](core/lifecycle.rs) does not clear the heap — objects accumulate across
 resets, so Values returned across multiple invocations remain valid.
 
 ## Parameter resolution
@@ -315,7 +316,7 @@ VM iterates from the top frame downward, searching for a matching parameter.
 frame — the creator's stack flattened at `fiber/new`, innermost winning — because
 the creator's `parameterize` blocks unwind long before the scheduler resumes the
 child. The baseline is a counted holder of every heap value in it
-(docs/impl/region/park.md § "A child's inherited parameter baseline is a counted
+([park.md](../../docs/impl/region/park.md) § "A child's inherited parameter baseline is a counted
 holder").
 ## Truthiness
 
