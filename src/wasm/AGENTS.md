@@ -155,7 +155,7 @@ parent in `pending_redrive`, and returns `SIG_YIELD | bits`; `rt_yield` stamps
 the parent's continuation frame with `redrive_child`; `drive_resume_chain`
 honours that marker (via `redrive_child`) before resuming the frame. This is
 what makes `protect`/`defer`/`with` around a suspending body work. Pinned by
-tests/elle/wasm-protect-suspend.lisp.
+tests/lang/wasm-protect-suspend.lisp.
 
 **The capability gate.** Every host path that reaches a native — `rt_call`,
 `rt_prepare_tail_call`, the `call_primitive` import, and the tiered linker's own
