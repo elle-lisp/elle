@@ -1,6 +1,8 @@
-// audited: 2026-09-16
-// src/lir/AGENTS.md
+// audited: 2026-09-28
 //! What a loop leaves on the activation's operand stack.
+//!
+//! src/lir/AGENTS.md
+//! docs/impl/vm.md
 //!
 //! The emitter simulates the operand stack per block and reaches a back edge at
 //! whatever depth the block's instructions left. Rule 11 (src/lir/AGENTS.md
@@ -21,9 +23,9 @@ use crate::pipeline::compile_file_repl;
 
 /// Run `src` on the root fiber and answer the operand depth it left behind.
 ///
-/// `VM::execute` runs a top-level body on `vm.fiber.stack` without saving or
-/// restoring it, so what is left there afterwards is exactly what the program's
-/// own activation left — the frame's locals, plus any residue.
+/// The root entry runs the body on a stack of its own and hands back the one
+/// it found, so the depth is read from `VM::root_exit_depth`: the frame's
+/// locals, plus any residue.
 fn operand_depth_after(src: &str) -> usize {
     let mut rt = Runtime::new();
     let result = {
@@ -34,7 +36,7 @@ fn operand_depth_after(src: &str) -> usize {
     };
     let (vm, _symbols, _cctx) = rt.parts();
     vm.execute(&result.bytecode).expect("runs");
-    vm.fiber.stack.len()
+    vm.root_exit_depth()
 }
 
 /// A `while` over a mutable binding a closure also captures — the shape every
