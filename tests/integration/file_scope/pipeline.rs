@@ -1,3 +1,9 @@
+// audited: 2026-09-28
+// The file-as-letrec pipeline, and what `import-file` reports when the file it
+// loads fails.
+//
+// tests/AGENTS.md
+//
 use super::*;
 
 // ============================================================================
@@ -258,6 +264,57 @@ fn test_import_file_does_not_corrupt_captured_bindings() {
     "#,
         |result| assert_eq!(result.unwrap(), Value::bool(true)),
     );
+}
+
+// ============================================================================
+// SECTION 0b3: A load that failed is not left in the loading set
+// ============================================================================
+
+/// Run `code` and return the string it evaluates to, as owned data (the
+/// runtime is torn down before the caller sees it).
+fn evaluated_string(code: &str) -> String {
+    eval_file_source_with_stdlib(code, |r| {
+        let value = r.unwrap_or_else(|e| panic!("the form itself signalled: {e}"));
+        value
+            .with_string(str::to_owned)
+            .expect("the form should evaluate to a string")
+    })
+}
+
+#[test]
+fn a_module_that_failed_to_compile_reports_the_same_failure_on_the_next_import() {
+    // The second import of a file that failed to compile reports that compile
+    // failure again. A circular dependency here would name the file as its own
+    // cycle, which is not what is on the stack.
+    let message = evaluated_string(
+        r#"
+        (let [first (protect (import-file "tests/modules/unbound-symbol.lisp"))
+              second (protect (import-file "tests/modules/unbound-symbol.lisp"))]
+          (assert (not (get first 0)) "the first import must fail to compile")
+          (get (get second 1) :message))
+    "#,
+    );
+    assert!(
+        message.contains("undefined variable: host/no-such-primitive"),
+        "the second import reports the compile failure: {message}"
+    );
+    assert!(
+        !message.contains("circular dependency"),
+        "a failed load is not a cycle: {message}"
+    );
+}
+
+#[test]
+fn a_module_that_imports_itself_is_a_circular_dependency() {
+    // The mark a load holds while it runs is what catches a real cycle.
+    let message = evaluated_string(
+        r#"
+        (let [r (protect (import-file "tests/modules/self-import.lisp"))]
+          (assert (not (get r 0)) "the self-import must fail")
+          (get (get r 1) :message))
+    "#,
+    );
+    assert!(message.contains("circular dependency detected"), "{message}");
 }
 
 // ============================================================================

@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-28
 // The import-file primitive: resolve a module spec, then run a .lisp module or
 // load a native plugin, with circular-import detection.
 // docs/modules.md
@@ -226,168 +226,168 @@ pub(crate) fn prim_import_file(
             );
         }
 
-        // Mark as loading for circular-import detection
+        // Mark as loading for circular-import detection. The mark brackets the
+        // load: everything a load does is the one call below, so every way out of
+        // it — a compile error, a read failure, an error the module raised —
+        // reaches the single unmark after that call.
         vm.mark_module_loading(path.clone());
 
-        // The caller's symbol table, reached through the driving VM (this
-        // instance's own table).
-        let symbols_ptr = vm.symbols_ptr;
-        if symbols_ptr.is_null() {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "internal-error",
-                    "import: symbol table context not initialized".to_string(),
-                ),
-            );
-        }
-
-        let symbols = &mut *symbols_ptr;
-
-        // Plugin loading for native shared libraries (.so, .dylib, .dll)
-        if is_native_library(&path) {
-            // Return cached value if already loaded (avoids re-registering primitives)
-            if let Some(&cached) = vm.loaded_plugins.get(&path) {
-                vm.unmark_module_loading(&path);
-                // `import` declares `result_minted`, so the dispatch retain is
-                // skipped; this call did not run a thunk to produce the cached
-                // value, so mint the caller's reference here (the retain the
-                // dispatch would have taken for a pass-through result).
-                retain_plugin_result(vm, cached);
-                return (SIG_OK, cached);
+        let outcome = (|| -> (SignalBits, Value) {
+            // The caller's symbol table, reached through the driving VM (this
+            // instance's own table).
+            let symbols_ptr = vm.symbols_ptr;
+            if symbols_ptr.is_null() {
+                return (
+                    SIG_ERROR,
+                    ctx.error(
+                        "internal-error",
+                        "import: symbol table context not initialized".to_string(),
+                    ),
+                );
             }
-            let result = match crate::plugin::load_plugin(&path, vm, symbols) {
-                Ok(value) => {
-                    vm.loaded_plugins.insert(path.clone(), value);
-                    retain_plugin_result(vm, value);
-                    (SIG_OK, value)
-                }
-                Err(e) => crate::rich_error!(
-                    ctx,
-                    "io-error",
-                    format!("import: {}", e),
-                    path = ctx.string(path.as_str()),
-                ),
-            };
-            vm.unmark_module_loading(&path);
-            return result;
-        }
 
-        // Elle source file loading — fall back to plugin loading on UTF-8 failure
-        let contents = match std::fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
-                // File exists but isn't valid UTF-8 — try loading as a plugin
+            let symbols = &mut *symbols_ptr;
+
+            // Plugin loading for native shared libraries (.so, .dylib, .dll)
+            if is_native_library(&path) {
+                // Return cached value if already loaded (avoids re-registering primitives)
+                if let Some(&cached) = vm.loaded_plugins.get(&path) {
+                    // `import` declares `result_minted`, so the dispatch retain is
+                    // skipped; this call did not run a thunk to produce the cached
+                    // value, so mint the caller's reference here (the retain the
+                    // dispatch would have taken for a pass-through result).
+                    retain_plugin_result(vm, cached);
+                    return (SIG_OK, cached);
+                }
                 let result = match crate::plugin::load_plugin(&path, vm, symbols) {
                     Ok(value) => {
                         vm.loaded_plugins.insert(path.clone(), value);
                         retain_plugin_result(vm, value);
                         (SIG_OK, value)
                     }
-                    Err(plugin_err) => crate::rich_error!(
+                    Err(e) => crate::rich_error!(
                         ctx,
                         "io-error",
-                        format!(
-                            "import: '{}' is not valid Elle source ({}), \
-                             and plugin loading also failed: {}",
-                            path, e, plugin_err
-                        ),
+                        format!("import: {}", e),
                         path = ctx.string(path.as_str()),
                     ),
                 };
-                vm.unmark_module_loading(&path);
                 return result;
             }
-            Err(e) => {
-                vm.unmark_module_loading(&path);
-                return crate::rich_error!(
-                    ctx,
-                    "io-error",
-                    format!("import: failed to read '{}': {}", path, e),
-                    path = ctx.string(path.as_str()),
-                );
+
+            // Elle source file loading — fall back to plugin loading on UTF-8 failure
+            let contents = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                    // File exists but isn't valid UTF-8 — try loading as a plugin
+                    let result = match crate::plugin::load_plugin(&path, vm, symbols) {
+                        Ok(value) => {
+                            vm.loaded_plugins.insert(path.clone(), value);
+                            retain_plugin_result(vm, value);
+                            (SIG_OK, value)
+                        }
+                        Err(plugin_err) => crate::rich_error!(
+                            ctx,
+                            "io-error",
+                            format!(
+                                "import: '{}' is not valid Elle source ({}), \
+                             and plugin loading also failed: {}",
+                                path, e, plugin_err
+                            ),
+                            path = ctx.string(path.as_str()),
+                        ),
+                    };
+                    return result;
+                }
+                Err(e) => {
+                    return crate::rich_error!(
+                        ctx,
+                        "io-error",
+                        format!("import: failed to read '{}': {}", path, e),
+                        path = ctx.string(path.as_str()),
+                    );
+                }
+            };
+
+            // Compile the module in this instance's compile context, reached through
+            // the executing VM. The borrow ends with the match.
+            let compiled = match vm.compile_ctx() {
+                Some(cctx) => crate::pipeline::compile_file(&contents, symbols, cctx, &path),
+                None => Err("import: compile context unavailable".to_string()),
+            };
+            let result = match compiled {
+                Ok(r) => r,
+                Err(e) => {
+                    return crate::rich_error!(
+                        ctx,
+                        "eval-error",
+                        format!("import: compilation error in {}: {}", path, e),
+                        path = ctx.string(path.as_str()),
+                    );
+                }
+            };
+
+            // Save/restore the caller's stack. import executes the
+            // module's bytecode on the same VM, which would overwrite the
+            // caller's local variable slots without this protection.
+            let code = crate::value::ClosureTemplate::for_proto(
+                vm.heap(),
+                &std::rc::Rc::new(result.bytecode.into_proto()),
+            )
+            .code();
+            let empty_env = std::rc::Rc::new(vec![]);
+
+            // Drive the module's top-level forms to completion, draining any
+            // nested fiber/resume SIG_SWITCH trampoline — a module's forms run as
+            // part of the CURRENT fiber's execution (like `eval`'s thunk), so a
+            // top-level `protect`/`fiber/resume` returns SIG_SWITCH that must be
+            // drained here rather than leaked out of the import boundary. Using the
+            // raw executor reported that internal signal as "unexpected".
+            let bits = vm.run_thunk_to_completion(&code, &empty_env);
+
+            match bits {
+                SIG_OK => {
+                    let (_, value) = vm
+                        .fiber
+                        .signal
+                        .take()
+                        .unwrap_or((SIG_OK, crate::value::Value::NIL));
+                    // The module value left its compiled top level through the
+                    // return convention, so it already carries the one owed
+                    // reference the caller's release consumes — the
+                    // `result_minted` declaration's claim on this path. The plugin
+                    // paths above return a value no thunk minted, and take the
+                    // reference explicitly (`retain_plugin_result`).
+                    (SIG_OK, value)
+                }
+                SIG_ERROR => {
+                    let (_, err_value) = vm
+                        .fiber
+                        .signal
+                        .take()
+                        .unwrap_or((SIG_ERROR, crate::value::Value::NIL));
+                    let msg = vm.format_error_with_location(err_value);
+                    crate::rich_error!(
+                        ctx,
+                        "eval-error",
+                        format!("import: runtime error in {}: {}", path, msg),
+                        path = ctx.string(path.as_str()),
+                    )
+                }
+                bits => {
+                    // The refused suspend-class park is abandoned with its host.
+                    vm.abandon_hosted_park(bits);
+                    crate::rich_error!(
+                        ctx,
+                        "eval-error",
+                        format!("import: unexpected signal {} in {}", bits, path),
+                        path = ctx.string(path.as_str()),
+                    )
+                }
             }
-        };
-
-        // Compile the module in this instance's compile context, reached through
-        // the executing VM. The borrow ends with the match.
-        let compiled = match vm.compile_ctx() {
-            Some(cctx) => crate::pipeline::compile_file(&contents, symbols, cctx, &path),
-            None => Err("import: compile context unavailable".to_string()),
-        };
-        let result = match compiled {
-            Ok(r) => r,
-            Err(e) => {
-                return crate::rich_error!(
-                    ctx,
-                    "eval-error",
-                    format!("import: compilation error in {}: {}", path, e),
-                    path = ctx.string(path.as_str()),
-                );
-            }
-        };
-
-        // Save/restore the caller's stack. import executes the
-        // module's bytecode on the same VM, which would overwrite the
-        // caller's local variable slots without this protection.
-        let code = crate::value::ClosureTemplate::for_proto(
-            vm.heap(),
-            &std::rc::Rc::new(result.bytecode.into_proto()),
-        )
-        .code();
-        let empty_env = std::rc::Rc::new(vec![]);
-
-        // Drive the module's top-level forms to completion, draining any
-        // nested fiber/resume SIG_SWITCH trampoline — a module's forms run as
-        // part of the CURRENT fiber's execution (like `eval`'s thunk), so a
-        // top-level `protect`/`fiber/resume` returns SIG_SWITCH that must be
-        // drained here rather than leaked out of the import boundary. Using the
-        // raw executor reported that internal signal as "unexpected".
-        let bits = vm.run_thunk_to_completion(&code, &empty_env);
-
-        // Unmark loading regardless of outcome
+        })();
         vm.unmark_module_loading(&path);
-
-        match bits {
-            SIG_OK => {
-                let (_, value) = vm
-                    .fiber
-                    .signal
-                    .take()
-                    .unwrap_or((SIG_OK, crate::value::Value::NIL));
-                // The module value left its compiled top level through the
-                // return convention, so it already carries the one owed
-                // reference the caller's release consumes — the
-                // `result_minted` declaration's claim on this path. The plugin
-                // paths above return a value no thunk minted, and take the
-                // reference explicitly (`retain_plugin_result`).
-                (SIG_OK, value)
-            }
-            SIG_ERROR => {
-                let (_, err_value) = vm
-                    .fiber
-                    .signal
-                    .take()
-                    .unwrap_or((SIG_ERROR, crate::value::Value::NIL));
-                let msg = vm.format_error_with_location(err_value);
-                crate::rich_error!(
-                    ctx,
-                    "eval-error",
-                    format!("import: runtime error in {}: {}", path, msg),
-                    path = ctx.string(path.as_str()),
-                )
-            }
-            bits => {
-                // The refused suspend-class park is abandoned with its host.
-                vm.abandon_hosted_park(bits);
-                crate::rich_error!(
-                    ctx,
-                    "eval-error",
-                    format!("import: unexpected signal {} in {}", bits, path),
-                    path = ctx.string(path.as_str()),
-                )
-            }
-        }
+        outcome
     }
 }
 
