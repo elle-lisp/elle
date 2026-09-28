@@ -1,5 +1,5 @@
-(elle/epoch 12)
-## audited: 2026-09-21
+(elle/epoch 13)
+## audited: 2026-09-28
 ## lib/git/read.lisp — every read of a repository: refs, commits, the
 ## log, status, branches, tags, remotes, config, and committed trees.
 ##
@@ -183,7 +183,8 @@
                                    "git/status")))
            count (c-status-list-entrycount slist)
            results @[]]
-      (each i in (range count)  ## git_status_entry: status (u32 at 0),
+      (each i in (range count)
+        ## git_status_entry: status (u32 at 0),
         ## head_to_index (ptr at 8), index_to_workdir (ptr at 16)
         (let* [entry (c-status-byindex slist i)
                flags (ffi/read entry :u32)
@@ -211,7 +212,8 @@
                path-delta (if (not (= h2i null-ptr))
                             h2i
                             (if (not (= i2w null-ptr)) i2w null-ptr))]
-          (when (not (= path-delta null-ptr))  ## Read path: the new_file.path is simpler to get. git_diff_delta layout varies by version.
+          (when (not (= path-delta null-ptr))
+            ## Read path: the new_file.path is simpler to get. git_diff_delta layout varies by version.
             ## Safest approach: we know the entry has a path, just skip struct details for now.
             ## TODO: properly decode git_diff_delta struct offsets
             (push results

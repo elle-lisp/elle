@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## lib/http2/huffman.lisp — HPACK Huffman codec (RFC 7541 Appendix B)
 ##
 ## Loaded via: (def huffman ((import "std/http2/huffman")))
@@ -122,6 +123,7 @@
            out @[]
            @node decode-tree
            @i 0]
+      # Reject missing trie paths and EOS symbols while decoding each bit.
       (while (< i len)
         (let [byte-val (get src i)]
           (def @bit-idx 7)
@@ -142,9 +144,7 @@
                     (assign node decode-tree))
                 true (assign node next)))
             (assign bit-idx (- bit-idx 1))))
-        (assign i (+ i 1)))  # Verify padding: remaining bits in the tree traversal must be a
-      # prefix of EOS (all 1-bits). Check that current node is reachable
-      # by following only 1-bits from decode-tree.
+        (assign i (+ i 1)))
       (apply bytes out)))
 
   ## ── Tests ──────────────────────────────────────────────────────────────

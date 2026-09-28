@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-21
+(elle/epoch 13)
+# audited: 2026-09-28
 ## elle test — running one test: worker isolation, output capture, the
 ## per-form deadline, and the tiers this build carries.
 ## docs/test-runner.md
@@ -233,7 +233,8 @@
                                       (capture-run tier thunk out-path err-path)))))
                                   (form-budget)))]
     (if (get outcome 0)
-      (get outcome 1)  # The worker spawn/join failed. If the thunk simply can't cross into a
+      (get outcome 1)
+      # The worker spawn/join failed. If the thunk simply can't cross into a
       # worker (unsendable capture), run it IN-PROCESS — no isolation, no
       # timeout, but it runs (docs/test-runner.md § Isolation). Any other
       # thread-error (e.g. a worker panic) stays a recorded fail.
@@ -311,7 +312,8 @@
                                       w-out w-err thunk out-path err-path))))
                                   (form-budget)))]
     (if (get outcome 0)
-      (get outcome 1)  # Unsendable RESULT (an orphan fiber, an io-request, …) can't cross back
+      (get outcome 1)
+      # Unsendable RESULT (an orphan fiber, an io-request, …) can't cross back
       # through os/join. Fall back to running IN-PROCESS — no isolation, no
       # timeout — compiling the same syntax against the MAIN stdlib and running
       # under the runner's own ev/run + *stdout*/*stderr* (all main-consistent),

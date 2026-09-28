@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## Bug Regression Tests
 ##
 ## Migrated from tests/property/bugfixes.rs
@@ -226,7 +227,8 @@
 # fiber-swap path), then passes the sub-fiber's return value to the outer frame.
 # ============================================================================
 
-(begin  # Minimal reproduction: deep call chain with many locals, fiber inside defer
+(begin
+  # Minimal reproduction: deep call chain with many locals, fiber inside defer
   # doing I/O (port/write to a real port). Caused LoadLocal panic before fix.
   (defn inner-with-many-locals (port msg)
     (let [a 1
@@ -288,7 +290,8 @@
                                            (port/close c)))))]
             (ev/join server-fiber)
             (ev/join client-fiber))
-          (port/close listener)  # TCP ports use binary encoding; port/read returns bytes.
+          (port/close listener)
+          # TCP ports use binary encoding; port/read returns bytes.
           # Convert to string for assertion.
           (assert (= (string (get server-got 0)) "ping")
                   "server received data from client (Bug 7)")

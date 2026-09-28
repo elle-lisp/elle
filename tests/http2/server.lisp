@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## tests/http2/server.lisp — comprehensive HTTP/2 server behavior tests
 
 (def http2 ((import "std/http2")))
@@ -252,8 +253,9 @@
   (with-server (fn [req]
                  (ev/sleep 0.5)
                  {:status 200 :body "ok"})
-               (fn [session]  # Server allows 100 concurrent streams by default
-               # Send 3 concurrent requests — all should succeed
+               (fn [session]
+                 # Server allows 100 concurrent streams by default
+                 # Send 3 concurrent requests — all should succeed
                  (let [fibers (map (fn [i]
                                      (ev/spawn (fn []
                                        (http2:send session "GET"

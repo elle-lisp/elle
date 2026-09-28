@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## Fiber Primitive Tests
 ##
 ## Migrated from tests/property/fibers.rs (behavioral property tests).
@@ -605,7 +606,8 @@
   (let [f (fiber/new (fn []
                        (yield :ping)
                        :done) 2)]
-    (push fibers f))  # The let scope has exited. If the escape analysis incorrectly freed f,
+    (push fibers f))
+  # The let scope has exited. If the escape analysis incorrectly freed f,
   # fiber/bits will crash or return the wrong type.
   (assert (fiber? (get fibers 0))
           "issue 525: fiber survives let scope exit after push into outer array")

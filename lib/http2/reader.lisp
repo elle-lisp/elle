@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-14
+(elle/epoch 13)
+# audited: 2026-09-28
 ## lib/http2/reader.lisp — the frame reader both an h2 client and an h2 server run
 ##
 ## Loaded via:
@@ -219,7 +219,8 @@
                                 :end-stream end?})
                                 (when sess:closed? (break nil))
                                 (when end?
-                                  (stream:transition s :recv-end-stream)  # Only remove stream when fully closed
+                                  (stream:transition s :recv-end-stream)
+                                  # Only remove stream when fully closed
                                   # (both sides done). Half-closed-remote
                                   # means our side still needs to send +
                                   # receive WU for flow control.

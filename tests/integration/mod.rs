@@ -235,6 +235,9 @@ mod doctest {
 mod doctest_scope {
     include!("doctest_scope.rs");
 }
+mod joined_comments {
+    include!("joined_comments.rs");
+}
 
 // `allocator.rs` is absent from the list above and does not compile. It calls
 // FiberHeap methods the region-ownership model retired — `alloc`, `mark`,

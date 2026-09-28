@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## TLS library integration tests — Chunk 4: handshake only
 ##
 ## Requires network access (connects to example.com:443).
@@ -115,7 +116,8 @@
     (if (not (= gen-result:exit 0))
       (println "tls chunk 6: SKIPPED (openssl not available)\n")
 
-      (begin  ## Shared mutable cell: the client fiber writes true here when done.
+      (begin
+        ## Shared mutable cell: the client fiber writes true here when done.
         ## Checked after the async scheduler to confirm the client fiber actually completed.
         (def loopback-ok @[false])
 

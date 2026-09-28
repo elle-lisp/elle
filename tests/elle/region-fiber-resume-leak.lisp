@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 # Counterfactual for the `fiber/resume` carrier-region leak (oracle.lisp's
 # `fiber-resume` probe, focused).
 #
@@ -89,7 +90,8 @@
       (assert (fiber? p)
               "fiber/parent returns the parent while it is still alive")
       (assert (identical? p outer)
-              "fiber/parent preserves the parent's identity (same handle)")  # Keep `outer` live across the parent read above so its region is not
+              "fiber/parent preserves the parent's identity (same handle)")
+      # Keep `outer` live across the parent read above so its region is not
       # reclaimed at the resume (its prior last use) before we read it.
       (fiber/status outer))))
 

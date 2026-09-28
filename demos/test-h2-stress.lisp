@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## infra/test-h2-stress.lisp — h2 stress tests for grace usage patterns
 ##
 ## Pure h2 loopback tests — no grace code, no grace server dependency.
@@ -355,7 +356,8 @@
    2. POST /events (Subscribe mock) → stream of gRPC-framed completion events
    3. For each completed ID, parallel GET /result/:id (GetRun mock)
    All on the same h2 session."
-  (let [num-jobs 200  ## Build completion event stream: each event is a small message
+  (let [num-jobs 200
+        ## Build completion event stream: each event is a small message
         ## containing the job id as a 4-byte big-endian uint
         event-body (apply concat
                           (map (fn [i]
@@ -871,8 +873,9 @@
    primitives work for the gRPC client-streaming path."
   (let [num-msgs 100
         msg-size 500]
-    (with-server (fn [req]  ## Server receives all gRPC frames in req:body, echoes them back
-                 ## with gRPC trailers (simulating a server that processes all
+    (with-server (fn [req]
+                   ## Server receives all gRPC frames in req:body, echoes them back
+                   ## with gRPC trailers (simulating a server that processes all
                    ## client messages then responds).
                    {:status 200
                     :headers {:content-type "application/grpc"}

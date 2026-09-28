@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 
 ## XML plugin integration tests
 
@@ -157,7 +158,8 @@
 ## Error: malformed XML during streaming (unclosed tag inside root)
 (let [reader (reader-new-fn "<root><unclosed></root>")]
   (next-event-fn reader)  ## unclosed start event for <unclosed>
-  (next-event-fn reader)  ## The </root> closes the wrong tag — quick-xml may error or return end
+  (next-event-fn reader)
+  ## The </root> closes the wrong tag — quick-xml may error or return end
   ## Either an error or an :end event is acceptable; just confirm no crash
   (let [e (protect (fn () (next-event-fn reader)))]
     (assert (not (nil? e)) "stream: malformed XML does not crash")))

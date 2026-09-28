@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## lib/dns.lisp — Pure Elle DNS client (RFC 1035)
 ##
 ## Loaded via: (def dns ((import "std/dns")))
@@ -511,9 +512,10 @@
                         (u16->bytes 1)  # ANCOUNT
                         (u16->bytes 0)  # NSCOUNT
                          (u16->bytes 0))  # ARCOUNT
-         qname (encode-name "example.com")  # Answer: compression pointer to offset 12
+         qname (encode-name "example.com")
          # (qname in question)
          question (concat qname (u16->bytes TYPE-A) (u16->bytes CLASS-IN))
+         # Answer: compression pointer to offset 12
          answer (concat (bytes 0xc0 12)  # Name pointer
                         (u16->bytes TYPE-A)  # TYPE
                         (u16->bytes CLASS-IN)  # CLASS

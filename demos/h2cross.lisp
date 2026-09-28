@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## infra/h2cross.lisp — differential h2 echo-amplify crosstest
 ##
 ## Tests all 4 permutations: {elle,rust} × {client,server} to isolate
@@ -209,8 +210,9 @@
           (unless (nil? msg)
             (match msg:type
               :headers
-                (begin  # Initial response headers or trailers
-                  # Trailers arrive as second :headers with end-stream
+                # Initial response headers or trailers
+                # Trailers arrive as second :headers with end-stream
+                (begin
                   (when msg:end-stream
                     (assign got-trailers true)
                     (assign done true))
@@ -223,7 +225,8 @@
                   (assign buf (concat buf msg:data))
                   (when (= 0 (mod frame-count 64))
                     (eprintln "[" (ts) "] elle-client: recv DATA frame #"
-                              frame-count ", " total-bytes " bytes total"))  # In trailers mode, END_STREAM should NOT be on DATA
+                              frame-count ", " total-bytes " bytes total"))
+                  # In trailers mode, END_STREAM should NOT be on DATA
                   # but handle it defensively
                   (when msg:end-stream
                     (when expect-trailers

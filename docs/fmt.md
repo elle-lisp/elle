@@ -1,6 +1,6 @@
 # elle fmt
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Opinionated code formatter for Elle. One canonical style.
 
@@ -305,5 +305,7 @@ own.
 
 - Inline comments: 2 spaces before `#`, stay on the same line.
 - Block comments: own line, indented with surrounding code.
+- A block comment that explains a form starts above that form. Do not continue
+  it after an inline comment on the preceding line.
 - A trailing comment ends its line, and that line break does not add a blank
   line before the next form.

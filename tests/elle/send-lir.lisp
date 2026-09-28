@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 # Regression: a closure whose LIR embeds a COMPOUND constant (a quoted list,
 # struct, …) must keep its LIR across an os/spawn boundary, so the optimizing
 # tiers can still run it in the worker thread.
@@ -33,7 +34,8 @@
 (defn ship-to-jit [thunk]
   (os/join (os/spawn-vm (fn [] (protect (compile/run-on :jit thunk))))))
 
-(when (jit-available?)  # The assert macro embeds (quote (= (+ 1 1) 2)) — a compound — in its payload.
+(when (jit-available?)
+  # The assert macro embeds (quote (= (+ 1 1) 2)) — a compound — in its payload.
   # Its LIR must survive the send so :jit can run it.
   (let [r (run-on-jit-in-worker (quote (assert (= (+ 1 1) 2) "lir survives send")))]
     (assert (get r 0)

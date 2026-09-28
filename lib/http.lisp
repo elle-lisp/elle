@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## lib/http.lisp — Pure Elle HTTP/1.1 client and server
 ##
 ## Plain HTTP only:
@@ -573,7 +574,8 @@
           (let [loc (get resp:headers :location)]
             (when (nil? loc) (break :redirects nil))
             (let [next-url (resolve-location current-parsed loc)]
-              (assign current-parsed (parse-url next-url)))  # Drop :query on redirect — Location already carries the
+              (assign current-parsed (parse-url next-url)))
+            # Drop :query on redirect — Location already carries the
             # redirected query; caller's :query was for the *initial*
             # request only.
             (assign current-query nil)
@@ -710,7 +712,7 @@
           (case parsed:field
             "event" (put state :event-type parsed:value)
             "data" (push state:data-lines parsed:value)
-            "id" (unless (string/contains? parsed:value "\0")
+            "id" (unless (string/contains? parsed:value "0")
                    (put state :last-id parsed:value))
             "retry"
               (let [[ok? n] (protect (parse-int parsed:value))]

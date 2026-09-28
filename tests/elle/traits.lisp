@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## Traits test suite
 ##
 ## Tests for the per-value trait table mechanism: `with-traits` and `traits`.
@@ -193,8 +194,9 @@
   (def make2 (fn (data) (with-traits @{:data data} {:type :t})))
   (def a (make1 1))
   (def b (make2 1))
-  (assert (= (traits a) (traits b))  # identical? uses value equality (= semantics)
-          # not pointer identity
+  # identical? uses value equality (= semantics),
+  # not pointer identity
+  (assert (= (traits a) (traits b))
           "independently created tables with same structure are equal")
   (assert (identical? (traits a) (traits b))
           "independently created tables with same content are identical? (value equality)"))

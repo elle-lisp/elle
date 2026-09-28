@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## Vulkan compute plugin tests
 ##
 ## Tests that we can:
@@ -112,12 +113,13 @@
                         a (s:f2u (s:load 0 id))
                         b (s:const-u 8)  ## test ior: a | 0xFF = 0xFF for a in [0..8]
                         or-r (s:ior a (s:const-u 0xFF))  ## test ishl: a << 8
-                        shl-r (s:ishl a b)  ## test umin: min(a, 3)
+                        shl-r (s:ishl a b)
+                        ## test umin: min(a, 3)
+                        min-r (s:umin a (s:const-u 3))
+                        shl-byte (s:iand shl-r (s:const-u 0xFF00))
                         ## pack results:
                         ## (or << 16) | (shl << 8) | min
                         ## (all values fit in a byte, a in [0..8])
-                        min-r (s:umin a (s:const-u 3))
-                        shl-byte (s:iand shl-r (s:const-u 0xFF00))
                         packed (s:ior (s:ishl or-r (s:const-u 16))
                                       (s:ior shl-byte min-r))]
                    (s:store 1 id (s:u2f packed))))))

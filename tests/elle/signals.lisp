@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## Signal System Tests
 ##
 ## Tests for the signal declaration, silence, and signals introspection
@@ -199,7 +200,8 @@
     (let [safe-g (squelch g :yield)]
       (begin
         (f x)
-        (begin  # f must be truly silent (no SIG_ERROR);
+        (begin
+          # f must be truly silent (no SIG_ERROR);
           # use identity instead of (* x 2)
           (safe-g x)))))
   (assert (= (apply-sq-sil (fn (x) x) (fn (x) (+ x 1)) 5) 6)

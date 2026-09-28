@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 13)
+# audited: 2026-09-28
 # A whole-value read out of a reassigned captured cell takes a counted reference.
 # docs/impl/region/cells.md
 #
@@ -33,7 +33,8 @@
 (let [step (make-fn-local)]
   (def @acc 0)
   (var i 0)
-  (while (%lt i 300)  # recycle physical ids so a stale read lands on reuse
+  (while (%lt i 300)
+    # recycle physical ids so a stale read lands on reuse
     # `step` came out of `make-fn-local` as a value, so its result types as
     # unknown; the coerce-guard proves the %add operand without disturbing the
     # per-iteration overwrite/read cycle (the pin).

@@ -1525,7 +1525,8 @@
                display (get block :display)
                term-display (get block :term-display)
                term-kind (get block :term-kind)
-               edges (get block :edges)  # Choose node shape based on terminator kind
+               edges (get block :edges)
+               # Choose node shape based on terminator kind
                # All labels are quoted to avoid parser issues with special chars
                open-delim (cond
                             (= term-kind :branch) "{\""
@@ -1957,14 +1958,16 @@
 
     (defn complete-fiber [fiber status]
       "Handle fiber completion: wake join and select waiters."  # Record completion
-      (put completed fiber status)  # Leave the queue of work the loop has yet to run, on the rule that
+      (put completed fiber status)
+      # Leave the queue of work the loop has yet to run, on the rule that
       # takes a terminated fiber out of a park queue and a waiter list. A
       # fiber aborted before the loop ever reached it is sitting there;
       # left there it is resumed once more and completes a second time,
       # writing a record for a failure whose mark `retire-fiber` already
       # dropped, which the loop's tail then reads as a failure nobody
       # observed.
-      (leave-array runnable fiber)  # Give back the operation this fiber was waiting on. `pending` and
+      (leave-array runnable fiber)
+      # Give back the operation this fiber was waiting on. `pending` and
       # `fiber-io` are the two halves of one pairing, so both go; the
       # submission itself is cancelled because the only fiber that could
       # read its result is this one, and it is finished. Left behind, the
@@ -1974,14 +1977,16 @@
         (when (not (nil? id))
           (del fiber-io fiber)
           (del pending id)
-          (io/cancel backend id)))  # Leave the park queue. A terminated fiber that stays queued takes
+          (io/cancel backend id)))
+      # Leave the park queue. A terminated fiber that stays queued takes
       # a wake permit from a live waiter — `(ev/futex-wake key 1)` would
       # grant its one permit to a fiber that can never use it — and its
       # key keeps `step` from ever reporting :done.
       (let [key (get fiber-park fiber)]
         (when (not (nil? key))
           (del fiber-park fiber)
-          (leave-queue park-queues key fiber)))  # Leave the join waiter list and the select set. `fiber/abort`
+          (leave-queue park-queues key fiber)))
+      # Leave the join waiter list and the select set. `fiber/abort`
       # injects an error this fiber's own `protect` may catch, so it can
       # reach :dead while the fiber it waited on still runs. Left where
       # it was, it is resumed when that fiber finishes, and the resume
@@ -1993,7 +1998,8 @@
           (leave-queue waiters target fiber)))
       (del select-sets fiber)  # Wake join waiters with [ok? value] pair
       (let [ws (get waiters fiber)]
-        (when (not (nil? ws))  # Take each waiter off the live list rather than walking a copy
+        (when (not (nil? ws))
+          # Take each waiter off the live list rather than walking a copy
           # of it. Resuming one waiter runs that waiter's own code before
           # the next is reached, and an `ev/abort` in there evicts a
           # sibling from this very array.
@@ -2005,7 +2011,8 @@
                 (fiber/resume w pair)
                 (handle-fiber-after-resume w))))
           (del waiters fiber))  # Wake select waiters
-        (wake-select-waiters fiber))  # A success record has no reader — the loop's tail raises failures
+        (wake-select-waiters fiber))
+      # A success record has no reader — the loop's tail raises failures
       # alone, and a join that arrives later re-derives the status from the
       # fiber — so it is retired HERE, not at a join that may never come.
       # `retire-fiber` keeps a failure and keeps the program's own fibers;
@@ -2064,14 +2071,16 @@
         (if done  # Immediate: resume with the completed fiber
           (begin
             (fiber/resume caller done)
-            (handle-fiber-after-resume caller))  # Park with a select set — wake-select-waiters scans select-sets directly,
+            (handle-fiber-after-resume caller))
+          # Park with a select set — wake-select-waiters scans select-sets directly,
           # so we don't add to the waiters map (that's for join waiters only).
           (let [entry @{:candidates candidates :woken @[false]}]
             (put select-sets caller entry)))))
 
     (defn handle-abort [caller target]
       "Handle an :abort wait request."
-      (add joined target)  # get-completion records the completion if target has already
+      (add joined target)
+      # get-completion records the completion if target has already
       # transitioned to :dead/:error but the scheduler hadn't noticed yet.
       # Without this, the guard below would pass and fiber/abort would be
       # called on an already-terminal target (state-error without Option A,
@@ -2213,7 +2222,8 @@
             (if (not (nil? fiber))
               (begin
                 (del pending id)
-                (del fiber-io fiber)  # Deliver only to a fiber still waiting for this result. A
+                (del fiber-io fiber)
+                # Deliver only to a fiber still waiting for this result. A
                 # fiber can terminate by a path the scheduler did not
                 # route — `fiber/abort` injects an error the fiber's own
                 # `protect` catches, so it runs to :dead with this
@@ -2386,8 +2396,8 @@
         fiber)
      :step step
      :report report
-     :pump  # pump-fn: event loop.
-      # Program-completion teardown: when called with the program's
+     :pump # pump-fn: event loop.
+     # Program-completion teardown: when called with the program's
      # fibers (its thunks), the loop ends as soon as THEY have all
      # completed.  Each iteration first drains runnable work without
      # blocking (step 0); once the program's fibers are done it shuts
@@ -2419,7 +2429,8 @@
              (when (and have-entry (all-done? entry))
                (do-shutdown 100)
                (break :loop nil))  # Live program work remains — block for the next I/O event.
-             (when (= (step (- 0 1)) :done) (break :loop nil)))))  # Crash on unjoined errored fibers — never swallow errors silently.
+             (when (= (step (- 0 1)) :done) (break :loop nil)))))
+       # Crash on unjoined errored fibers — never swallow errors silently.
        # scheduler-killed fibers are excluded: we injected their :shutdown
        # at teardown time, so re-raising would surface our own signal as a
        # user error.
@@ -2441,8 +2452,8 @@
          (when (not (nil? unjoined)) (fiber/propagate unjoined))))
      :shutdown  # shutdown-fn: signal shutdown
       (fn (timeout-ms) (put shutdown-req 0 timeout-ms))
-     :mark-joined  # mark one of the program's own fibers: observed (suppress the
-      # unjoined-error crash) and exempt from retirement, because `:pump`
+     :mark-joined # mark one of the program's own fibers: observed (suppress the
+     # unjoined-error crash) and exempt from retirement, because `:pump`
      # reads its completion record to know the program finished.
      (fn (fiber)
        (add joined fiber)
@@ -2510,19 +2521,23 @@
       (let [mark (get sched :mark-joined)
             fibers @[]]
         (each t in thunks
-          (push fibers (ev/spawn t)))  # ev/run owns its thunk fibers: mark them joined so :pump's
+          (push fibers (ev/spawn t)))
+        # ev/run owns its thunk fibers: mark them joined so :pump's
         # unjoined-error tail won't re-raise them — we surface the first
         # error ourselves below.
         (each f in fibers
-          (mark f))  # Run the program; :pump drains runnable work, and once these
+          (mark f))
+        # Run the program; :pump drains runnable work, and once these
         # fibers complete it tears the scheduler down, aborting every
         # remaining (un-awaited) fiber uniformly — see :pump's note.
-        (apply (get sched :pump) fibers)  # Propagate the first error among our thunks; else the last
+        (apply (get sched :pump) fibers)
+        # Propagate the first error among our thunks; else the last
         # thunk's value.
         (def @result nil)
         (def @failed nil)
         (each f in fibers
-          (when (and (nil? failed) (fiber-failed? f)) (assign failed f)))  # fiber/propagate, not (error (fiber/value f)): re-raising the
+          (when (and (nil? failed) (fiber-failed? f)) (assign failed f)))
+        # fiber/propagate, not (error (fiber/value f)): re-raising the
         # fiber's own signal carries the location of the form that raised it,
         # which a fresh raise of the payload would replace with this line.
         (when (not (nil? failed)) (fiber/propagate failed))  # Return the last fiber's value
@@ -2637,7 +2652,8 @@
       (block :done
         (forever
           (let [done (next)]
-            (when (nil? done) (break :done nil))  # Use ev/join-protected to get the scheduler's view of completion
+            (when (nil? done) (break :done nil))
+            # Use ev/join-protected to get the scheduler's view of completion
             # status (fiber/status stays :paused for caught errors).
             (let [[ok? val] (ev/join-protected done)]
               (when (= done body-fiber) (assign body-val val))
@@ -2715,7 +2731,8 @@
                 (begin
                   (assign result [:timeout])
                   (break))
-                (let [wr (chan/wait-ready rxs remaining-ms)  ## chan/wait-ready returns nil after parking,
+                (let [wr (chan/wait-ready rxs remaining-ms)
+                      ## chan/wait-ready returns nil after parking,
                       ## [:ready i v] if a value was found by the
                       ## post-register re-check (no yield), or
                       ## [:disconnected] if the re-check observed a
@@ -2730,8 +2747,9 @@
                       (begin
                         (assign result [:disconnected])
                         (break))
-                    _  ## Woken or timed out at the scheduler — pick a
-                    ## ready receiver or loop again.
+                    _
+                      ## Woken or timed out at the scheduler — pick a
+                      ## ready receiver or loop again.
                       (let [r (chan/try-select rxs)]
                         (match (get r 0)
                           :empty nil  ## spurious wake — re-park

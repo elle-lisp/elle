@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-14
+(elle/epoch 13)
+# audited: 2026-09-28
 ## tests/http2/flow.lisp — h2 flow control, GOAWAY, and protocol tests
 
 (def frame ((import "std/http2/frame")))
@@ -207,7 +207,8 @@
          enc (hpack:make-encoder :use-huffman false)
          sf (ev/spawn (fn []
                         (let [t (make-raw-transport (tcp/accept listener))]
-                          (server-handshake t)  # Wait for client SETTINGS ACK, then send our own SETTINGS
+                          (server-handshake t)
+                          # Wait for client SETTINGS ACK, then send our own SETTINGS
                           # changing INITIAL_WINDOW_SIZE
                           (ev/sleep 0.1)
                           (let [[ft fl si pl] (frame:make-settings-frame [[C:settings-initial-window-size
