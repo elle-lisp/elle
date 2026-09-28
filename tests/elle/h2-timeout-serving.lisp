@@ -1,6 +1,9 @@
-(elle/epoch 12)
-# Bidi streams under a deadline, over a session that keeps getting
-# replaced — varying what the SERVER does under the churn.
+(elle/epoch 13)
+# audited: 2026-09-28
+# Timed bidi streams over an h2 session that keeps getting replaced, varying what the server does.
+# tests/AGENTS.md
+# docs/concurrency.md
+# docs/scheduler.md
 #
 # `ev/timeout` races the work against a timer and aborts whichever loses,
 # so every call tears a fiber down — twice per call, counting the timer.
@@ -10,27 +13,33 @@
 # the next.
 #
 # What must hold across all of it is that the session still answers. Each
-# case below runs bidi streams under a budget, closes the session,
-# reconnects, runs more, and finishes with a unary request. The unary
-# request is the check: a session whose reader, stream table or
-# flow-control window did not survive the teardown answers it with a
-# hang rather than a 200.
+# case runs legs of bidi streams under a budget, with a recycle between
+# legs, and finishes with unary requests under their own budget. A session
+# whose reader, stream table or flow-control window did not survive the
+# teardown answers them with a hang rather than a 200.
+#
+# The unary requests run on the session that carried the last leg, where
+# the torn-down readers sat. A case that sets `:fresh-session` recycles
+# once more first, so its unary requests meet a session no stream touched.
+# The counter-factual: a driver that always recycles before the unary
+# requests never asks a session that carried streams for anything more.
 #
 # h2-timeout-recycle.lisp varies the recycle itself and carries the
 # bare-queue control that separates the scheduler from the protocol. The
 # cases here vary what the teardown has to interrupt: a handler that is
-# genuinely slow rather than idle, a budget tight enough to bite, streams
-# running concurrently so several teardowns overlap one recycle, unary
+# slow rather than idle, a budget tight enough to bite, streams running
+# concurrently so several teardowns overlap one recycle, several unary
 # requests after the streams, and a server that streams its response back
 # rather than buffering it.
-#
-# See docs/concurrency.md § ev/timeout and docs/scheduler.md.
 
 (def http2 ((import "std/http2")))
 
 # A budget no unblocked stream here can reach. One case deliberately
 # runs a tighter one.
 (def deadline 30)
+
+# A budget no unblocked unary request here can reach.
+(def unary-budget 10)
 
 (defn listen-ephemeral []
   "A listening socket on a kernel-chosen port, with that port."
@@ -146,10 +155,11 @@
 # ── The driver every case shares ─────────────────────────────────────
 
 (defn run-recycles [opts]
-  "Serve `opts:handler`, then repeat `opts:cycles` times: run
-   `opts:streams` bidi streams under `opts:budget`, close the session and
-   reconnect. Finish with a unary request the session must answer, plus
-   `opts:unary-tail` more under their own budget.
+  "Serve `opts:handler`, then run `opts:cycles` legs of `opts:streams`
+   bidi streams under `opts:budget`, closing the session and reconnecting
+   between legs. Finish with `opts:unaries` unary requests, each under
+   `unary-budget`, on the session that carried the last leg, or on a
+   fresh one when `opts:fresh-session` is set.
 
    `opts:concurrent` runs the cycle's streams in parallel rather than one
    after another, so several teardowns overlap one recycle.
@@ -161,7 +171,7 @@
          msgs (or (get opts :msgs) 5)
          size (or (get opts :size) 500)
          budget (or (get opts :budget) deadline)
-         tail (or (get opts :unary-tail) 0)
+         unaries (or (get opts :unaries) 1)
          [listener lport] (listen-ephemeral)
          url (concat "http://127.0.0.1:" (string lport))
          sf (ev/spawn (fn []
@@ -169,12 +179,18 @@
                                    (http2:serve-streaming listener handler)
                                    (http2:serve listener handler)))))
          @session (http2:connect url)]
+    (defn recycle []
+      "Close the session the streams just torn down were reading, and
+       reconnect."
+      (http2:close session)
+      (assign session (http2:connect url)))
     (defer
       (begin
         (protect (http2:close session))
         (protect (port/close listener))
         (protect (ev/abort sf)))
       (each cycle in (range 0 cycles)
+        (when (> cycle 0) (recycle))
         (if (get opts :concurrent)
           (let* [fibers (map (fn [_]
                                (ev/spawn (fn []
@@ -190,20 +206,19 @@
             (let [r (ev/timeout budget (fn [] (do-bidi session msgs size)))]
               (assert (not (nil? r))
                       (string label ": stream " (string i) " of cycle "
-                              (string cycle) " reached its budget")))))
-        # Recycle: the streams just torn down were reading this connection.
-        (http2:close session)
-        (assign session (http2:connect url)))
-      (let [resp (http2:send session "GET" "/health")]
-        (assert (= resp:status 200)
-                (string label ": the unary request after the last recycle")))
-      (each i in (range 0 tail)
-        (let [r (ev/timeout budget
-                            (fn []
-                              (http2:send session "GET"
-                              (concat "/health?i=" (string i)))))]
-          (assert (not (nil? r))
-                  (string label ": trailing unary request " (string i)))))
+                              (string cycle) " reached its budget"))))))
+      (when (get opts :fresh-session) (recycle))
+      (each i in (range 0 unaries)
+        (let [resp (ev/timeout unary-budget
+                               (fn []
+                                 (http2:send session "GET"
+                                 (concat "/health?i=" (string i)))))]
+          (assert (not (nil? resp))
+                  (string label ": unary request " (string i)
+                          " reached its budget"))
+          (assert (= resp:status 200)
+                  (string label ": unary request " (string i)
+                          " after the last leg"))))
       true)))
 
 (defn run-case [label opts]
@@ -228,13 +243,19 @@
            :msgs 3
            :size 500
            :budget 2
-           :handler (delayed-echo-handler 50)})
+           :handler (delayed-echo-handler 50)
+           :fresh-session true})
 
 (run-case "four concurrent streams per recycle"
-          {:cycles 5 :streams 4 :msgs 5 :size 500 :concurrent true})
+          {:cycles 5
+           :streams 4
+           :msgs 5
+           :size 500
+           :concurrent true
+           :fresh-session true})
 
 (run-case "ten timed unary requests after the streams"
-          {:cycles 2 :streams 10 :msgs 10 :size 1000 :unary-tail 10})
+          {:cycles 2 :streams 10 :msgs 10 :size 1000 :unaries 10})
 
 (run-case "a server that streams its response back"
           {:cycles 2

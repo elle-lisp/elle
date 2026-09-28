@@ -1357,6 +1357,28 @@
                        (assert (= e1:event "message") "SSE default event type")
                        (assert (= e1:id "42") "SSE id persists across events")))
 
+                   # SSE: an id holding NUL is ignored, and any other id is kept.
+                   # The counter-factual is a check for the digit 0, which drops
+                   # `id: 10` and keeps an id that holds NUL.
+                   (let [events @[]
+                         state @{:event-type nil
+                                 :data-lines @[]
+                                 :last-id nil
+                                 :retry nil}]
+                     (defn collect [e]
+                       (push events e))
+                     (sse-handle-line state "id: 10" collect)
+                     (sse-handle-line state "data: first" collect)
+                     (sse-handle-line state "" collect)
+                     (sse-handle-line state "id: 1\02" collect)
+                     (sse-handle-line state "data: second" collect)
+                     (sse-handle-line state "" collect)
+                     (assert (= (length events) 2) "SSE id: 2 events")
+                     (assert (= (get (get events 0) :id) "10")
+                             "SSE id holding the digit 0 is kept")
+                     (assert (= (get (get events 1) :id) "10")
+                             "SSE id holding NUL is ignored"))
+
                    # SSE: format-sse-event round-trips basics
                    (assert (= (format-sse-event {:event "message" :data "hi"})
                               "data: hi\n\n")

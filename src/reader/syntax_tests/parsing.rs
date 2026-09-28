@@ -49,23 +49,23 @@ fn test_parse_symbol() {
 
 #[test]
 fn test_parse_qualified_symbol() {
-    // The lexer now handles module:name as a single qualified symbol
+    // The lexer reads module:name as one qualified symbol
     let result = lex_and_parse("string:upcase").unwrap();
     assert!(matches!(result.kind, SyntaxKind::Symbol(ref s) if s == "string:upcase"));
 
     let result = lex_and_parse("math:abs").unwrap();
     assert!(matches!(result.kind, SyntaxKind::Symbol(ref s) if s == "math:abs"));
 
-    // Keywords still work (colon at start)
+    // A colon at the start makes a keyword
     let result = lex_and_parse(":keyword").unwrap();
     assert!(matches!(result.kind, SyntaxKind::Keyword(ref s) if s == "keyword"));
 
-    // Plain symbols still work
+    // A name without a colon is a plain symbol
     let result = lex_and_parse("list").unwrap();
     assert!(matches!(result.kind, SyntaxKind::Symbol(ref s) if s == "list"));
 }
 
-// Lists and vectors
+// Lists and arrays
 #[test]
 fn test_parse_empty_list() {
     let result = lex_and_parse("()").unwrap();
@@ -87,13 +87,13 @@ fn test_parse_simple_list() {
 }
 
 #[test]
-fn test_parse_empty_tuple() {
+fn test_parse_empty_immutable_array() {
     let result = lex_and_parse("[]").unwrap();
     assert!(matches!(result.kind, SyntaxKind::Array(ref items) if items.is_empty()));
 }
 
 #[test]
-fn test_parse_simple_tuple() {
+fn test_parse_simple_immutable_array() {
     let result = lex_and_parse("[1 2 3]").unwrap();
     match result.kind {
         SyntaxKind::Array(ref items) => {
@@ -102,18 +102,18 @@ fn test_parse_simple_tuple() {
             assert!(matches!(items[1].kind, SyntaxKind::Int(2)));
             assert!(matches!(items[2].kind, SyntaxKind::Int(3)));
         }
-        _ => panic!("Expected tuple"),
+        _ => panic!("Expected array"),
     }
 }
 
 #[test]
-fn test_parse_empty_array() {
+fn test_parse_empty_mutable_array() {
     let result = lex_and_parse("@[]").unwrap();
     assert!(matches!(result.kind, SyntaxKind::ArrayMut(ref items) if items.is_empty()));
 }
 
 #[test]
-fn test_parse_simple_array() {
+fn test_parse_simple_mutable_array() {
     let result = lex_and_parse("@[1 2 3]").unwrap();
     match result.kind {
         SyntaxKind::ArrayMut(ref items) => {
@@ -149,7 +149,7 @@ fn test_parse_nested_list() {
 }
 
 #[test]
-fn test_parse_list_with_tuple() {
+fn test_parse_list_with_immutable_array() {
     let result = lex_and_parse("(1 [2 3] 4)").unwrap();
     match result.kind {
         SyntaxKind::List(ref items) => {
@@ -163,7 +163,7 @@ fn test_parse_list_with_tuple() {
 }
 
 #[test]
-fn test_parse_list_with_array() {
+fn test_parse_list_with_mutable_array() {
     let result = lex_and_parse("(1 @[2 3] 4)").unwrap();
     match result.kind {
         SyntaxKind::List(ref items) => {
@@ -232,7 +232,7 @@ fn test_parse_quote_list() {
     }
 }
 
-// Struct/Table forms
+// Struct forms
 #[test]
 fn test_parse_struct() {
     let result = lex_and_parse("{:a 1 :b 2}").unwrap();
@@ -249,7 +249,7 @@ fn test_parse_struct() {
 }
 
 #[test]
-fn test_parse_table() {
+fn test_parse_mutable_struct() {
     let result = lex_and_parse("@{:a 1 :b 2}").unwrap();
     match result.kind {
         SyntaxKind::StructMut(ref items) => {
@@ -259,41 +259,10 @@ fn test_parse_table() {
             assert!(matches!(items[2].kind, SyntaxKind::Keyword(ref k) if k == "b"));
             assert!(matches!(items[3].kind, SyntaxKind::Int(2)));
         }
-        _ => panic!("Expected table"),
+        _ => panic!("Expected mutable struct"),
     }
 }
 
-// Old sugar forms tests (for backwards compatibility check)
-#[test]
-fn test_parse_array_sugar() {
-    let result = lex_and_parse("@[1 2 3]").unwrap();
-    match result.kind {
-        SyntaxKind::ArrayMut(ref items) => {
-            assert_eq!(items.len(), 3);
-            assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
-            assert!(matches!(items[1].kind, SyntaxKind::Int(2)));
-            assert!(matches!(items[2].kind, SyntaxKind::Int(3)));
-        }
-        _ => panic!("Expected array"),
-    }
-}
-
-#[test]
-fn test_parse_table_sugar() {
-    let result = lex_and_parse("@{:a 1 :b 2}").unwrap();
-    match result.kind {
-        SyntaxKind::StructMut(ref items) => {
-            assert_eq!(items.len(), 4); // 2 keyword-value pairs
-            assert!(matches!(items[0].kind, SyntaxKind::Keyword(ref k) if k == "a"));
-            assert!(matches!(items[1].kind, SyntaxKind::Int(1)));
-            assert!(matches!(items[2].kind, SyntaxKind::Keyword(ref k) if k == "b"));
-            assert!(matches!(items[3].kind, SyntaxKind::Int(2)));
-        }
-        _ => panic!("Expected table"),
-    }
-}
-
-// Error cases
 #[test]
 fn test_unclosed_paren() {
     let result = lex_and_parse("(1 2 3");
@@ -322,6 +291,92 @@ fn test_unclosed_array_reports_array_type() {
     assert!(
         err.contains("<unknown>:1:1: unterminated array (missing closing bracket)"),
         "{err}"
+    );
+}
+
+#[test]
+fn unclosed_collections_name_their_type_and_delimiter() {
+    let cases = [
+        (
+            "|1 2",
+            "<unknown>:1:1: unterminated set (missing closing |)",
+        ),
+        (
+            "@|1 2",
+            "<unknown>:1:1: unterminated set (missing closing |)",
+        ),
+        (
+            "b[1 2",
+            "<unknown>:1:1: unterminated bytes literal (missing closing bracket)",
+        ),
+        (
+            "@b[1 2",
+            "<unknown>:1:1: unterminated bytes literal (missing closing bracket)",
+        ),
+        (
+            "@[1 2",
+            "<unknown>:1:1: unterminated array (missing closing bracket)",
+        ),
+        (
+            "@{:a 1",
+            "<unknown>:1:1: unterminated struct (missing closing brace)",
+        ),
+        (
+            "{:a {:b",
+            "<unknown>:1:1: unterminated struct (2 closing braces needed)",
+        ),
+        (
+            "[1 @[2",
+            "<unknown>:1:1: unterminated array (2 closing brackets needed)",
+        ),
+        (
+            "[1 b[2",
+            "<unknown>:1:1: unterminated array (2 closing brackets needed)",
+        ),
+    ];
+    for (input, expected) in cases {
+        let err = lex_and_parse(input).unwrap_err();
+        assert_eq!(err, expected, "input: {input}");
+    }
+}
+
+#[test]
+fn unclosed_mixed_delimiters_count_every_open_collection() {
+    let cases = [
+        (
+            "(a [b",
+            "<unknown>:1:1: unterminated list (2 closing delimiters needed)",
+        ),
+        (
+            "[a {b (c",
+            "<unknown>:1:1: unterminated array (3 closing delimiters needed)",
+        ),
+        (
+            "(a |b",
+            "<unknown>:1:1: unterminated list (2 closing delimiters needed)",
+        ),
+    ];
+    for (input, expected) in cases {
+        let err = lex_and_parse(input).unwrap_err();
+        assert_eq!(err, expected, "input: {input}");
+    }
+}
+
+#[test]
+fn an_error_inside_a_collection_leaves_no_open_form_behind() {
+    // The counter-factual: a collection that returns an error without closing
+    // its open form leaves it on the reader. The next unterminated form then
+    // blames `(a` at 1:1 and counts two parens, one of them already reported.
+    let (tokens, locs, lens, offs) = lex_columns("(a @x (b");
+    let mut reader =
+        SyntaxReader::with_byte_offsets(tokens, locs, lens, offs, crate::syntax::thread_arena());
+    let err = reader.read().unwrap_err();
+    assert!(err.contains("@ must be followed by"), "{err}");
+    assert!(matches!(reader.read().unwrap().kind, SyntaxKind::Symbol(ref s) if s == "x"));
+    let err = reader.read().unwrap_err();
+    assert_eq!(
+        err,
+        "<unknown>:1:7: unterminated list (1 closing paren needed)"
     );
 }
 
@@ -376,7 +431,7 @@ fn test_parse_buffer_literal_empty() {
 
 #[test]
 fn test_at_symbol() {
-    // @symbol is now a valid symbol with @ prefix
+    // @ before a name character starts a symbol, not a mutable literal
     let result = lex_and_parse("@set").unwrap();
     assert!(matches!(result.kind, SyntaxKind::Symbol(ref s) if s == "@set"));
 }

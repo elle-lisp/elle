@@ -1,6 +1,9 @@
-(elle/epoch 12)
-# Bidi streams under a deadline, over a session that keeps getting
-# replaced.
+(elle/epoch 13)
+# audited: 2026-09-28
+# Timed bidi streams over an h2 session that keeps getting replaced, varying the recycle.
+# tests/AGENTS.md
+# docs/concurrency.md
+# docs/scheduler.md
 #
 # `ev/timeout` races the work against a timer and aborts whichever loses,
 # so every call tears a fiber down — twice per call, counting the timer.
@@ -10,32 +13,36 @@
 # the next.
 #
 # What must hold across all of it is that the session still answers. Each
-# case below runs bidi streams under a budget, closes the session,
-# reconnects, runs more, and finishes with a unary request. The unary
-# request is the check: a session whose reader, stream table or
-# flow-control window did not survive the teardown answers it with a
-# hang rather than a 200.
+# case runs legs of bidi streams under a budget, with a recycle between
+# legs, and finishes with a unary request under its own budget. A session
+# whose reader, stream table or flow-control window did not survive the
+# teardown answers that request with a hang rather than a 200.
+#
+# The unary request runs on the session that carried the last leg, where
+# the torn-down readers sat. A case that sets `:fresh-session` recycles
+# once more first, so its unary request meets a session no stream touched.
+# The counter-factual: a driver that always recycles before the unary
+# request never asks a session that carried streams for anything more.
 #
 # The cases here vary the RECYCLE: how many streams sit either side of
 # one, how large their messages are, and how tightly the recycles follow
-# each other. h2-timeout-serving.lisp varies what the SERVER does under
-# the same churn — a slow handler, a tight budget, concurrent streams, a
-# streaming response. The two are separate files because each is a whole
-# program under a wall-clock budget, and together they were the slowest
-# file in the corpus on the thread-pool I/O backend, which is the one
-# every non-Linux build uses.
+# each other. h2-timeout-serving.lisp varies what the SERVER does. The
+# two are separate files because each is a whole program under a
+# wall-clock budget, and the thread-pool I/O backend that every non-Linux
+# build uses runs them slowest.
 #
-# The last section belongs to both: it puts the same `ev/timeout` churn
-# on a bare queue with no h2 under it, so a failure there separates the
-# scheduler from the protocol.
-#
-# See docs/concurrency.md § ev/timeout and docs/scheduler.md.
+# The last section puts the same `ev/timeout` churn on a bare queue with
+# no h2 under it, so a failure there separates the scheduler from the
+# protocol.
 
 (def http2 ((import "std/http2")))
 (def sync ((import "std/sync")))
 
 # A budget no unblocked stream here can reach.
 (def deadline 30)
+
+# A budget no unblocked unary request here can reach.
+(def unary-budget 10)
 
 (defn listen-ephemeral []
   "A listening socket on a kernel-chosen port, with that port."
@@ -120,9 +127,11 @@
 # ── The driver every case shares ─────────────────────────────────────
 
 (defn run-recycles [opts]
-  "Serve the echo handler, then repeat `opts:cycles` times: run
-   `opts:streams` bidi streams under `opts:budget`, close the session and
-   reconnect. Finish with a unary request the session must answer."
+  "Serve the echo handler, then run `opts:cycles` legs of `opts:streams`
+   bidi streams under `opts:budget`, closing the session and reconnecting
+   between legs. Finish with a unary request under `unary-budget` on the
+   session that carried the last leg, or on a fresh one when
+   `opts:fresh-session` is set."
   (let* [label opts:label
          cycles (or (get opts :cycles) 1)
          streams (or (get opts :streams) 5)
@@ -133,23 +142,30 @@
          url (concat "http://127.0.0.1:" (string lport))
          sf (ev/spawn (fn [] (protect (http2:serve listener echo-handler))))
          @session (http2:connect url)]
+    (defn recycle []
+      "Close the session the streams just torn down were reading, and
+       reconnect."
+      (http2:close session)
+      (assign session (http2:connect url)))
     (defer
       (begin
         (protect (http2:close session))
         (protect (port/close listener))
         (protect (ev/abort sf)))
       (each cycle in (range 0 cycles)
+        (when (> cycle 0) (recycle))
         (each i in (range 0 streams)
           (let [r (ev/timeout budget (fn [] (do-bidi session msgs size)))]
             (assert (not (nil? r))
                     (string label ": stream " (string i) " of cycle "
-                            (string cycle) " reached its budget"))))
-        # Recycle: the streams just torn down were reading this connection.
-        (http2:close session)
-        (assign session (http2:connect url)))
-      (let [resp (http2:send session "GET" "/health")]
+                            (string cycle) " reached its budget")))))
+      (when (get opts :fresh-session) (recycle))
+      (let [resp (ev/timeout unary-budget
+                             (fn [] (http2:send session "GET" "/health")))]
+        (assert (not (nil? resp))
+                (string label ": the unary request reached its budget"))
         (assert (= resp:status 200)
-                (string label ": the unary request after the last recycle")))
+                (string label ": the unary request after the last leg")))
       true)))
 
 (defn run-case [label opts]
@@ -168,10 +184,10 @@
           {:cycles 2 :streams 10 :msgs 20 :size 2000})
 
 (run-case "recycle after every two streams, ten times"
-          {:cycles 10 :streams 2 :msgs 10 :size 1000})
+          {:cycles 10 :streams 2 :msgs 10 :size 1000 :fresh-session true})
 
 (run-case "twenty recycles, three streams each"
-          {:cycles 20 :streams 3 :msgs 5 :size 500})
+          {:cycles 20 :streams 3 :msgs 5 :size 500 :fresh-session true})
 
 # ── The same churn with no h2 under it ───────────────────────────────
 

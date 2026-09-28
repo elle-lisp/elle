@@ -1,85 +1,57 @@
 // audited: 2026-09-28
-// Reject Elle comments continued after inline comments.
+// Fails on an Elle comment that continues a trailing comment on the line above.
 // docs/fmt.md
 // tests/AGENTS.md
 
+use elle::epoch::prescan_epoch;
+use elle::epoch::rules::Lexicon;
+use elle::formatter::comments::{lex_for_format, strip_shebang};
 use std::path::{Path, PathBuf};
 
-fn trailing_comment<'a>(
-    line: &'a str,
-    in_string: &mut bool,
-    escaped: &mut bool,
-) -> Option<&'a str> {
-    for (i, byte) in line.bytes().enumerate() {
-        if *in_string {
-            if *escaped {
-                *escaped = false;
-            } else if byte == b'\\' {
-                *escaped = true;
-            } else if byte == b'"' {
-                *in_string = false;
-            }
-        } else if byte == b'"' {
-            *in_string = true;
-        } else if byte == b'#' {
-            if line[..i].ends_with("  ") && !line[..i].trim().is_empty() {
-                return Some(&line[i..]);
-            }
-            return None;
-        }
-    }
-    None
+/// One comment the reader's lexer found, and whether code precedes it on its
+/// line.
+///
+/// The lexer is the only judge of what a comment is. A scan over bytes has to
+/// re-derive string escapes and symbol boundaries, and gets them wrong: `a#b`
+/// is one symbol, and a trailing comment needs one space before it, not the
+/// two `elle fmt` writes.
+struct Comment {
+    line: usize,
+    trailing: bool,
 }
 
-fn allowed_continuation(path: &str, inline: &str, next: &str) -> bool {
-    let cases = [
-        ("lib/compress.lisp", "# avail_out = 32", "## Compress"),
-        ("lib/tls.lisp", "# Plaintext buffer empty", "# Use 16384"),
-        (
-            "demos/test-h2-stress.lisp",
-            "# Possibly read server WINDOW_UPDATE for conn",
-            "# Send our SETTINGS ACK",
-        ),
-        (
-            "tests/elle/sync.lisp",
-            "# let waiter B reach its park",
-            "# Wake ONLY fxB",
-        ),
-        (
-            "tests/elle/lib/estimator.lisp",
-            "# warmup block, discarded",
-            "# Resolved once, outside every measurement window",
-        ),
-        (
-            "tests/elle/lib/estimator.lisp",
-            "# warmup block, discarded",
-            "# Both readings resolved once",
-        ),
-    ];
-    cases.iter().any(|(file, start, continuation)| {
-        path == *file && inline.starts_with(start) && next.starts_with(continuation)
-    })
+fn comments(path: &str, source: &str) -> Vec<Comment> {
+    let epoch = prescan_epoch(source).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let (body, shebang) = strip_shebang(source);
+    let lexed = lex_for_format(body, path, Lexicon::for_epoch(epoch))
+        .unwrap_or_else(|e| panic!("{path}: {e}"));
+    let shebang_lines = shebang.lines().count();
+    lexed
+        .comment_map
+        .comments()
+        .iter()
+        .map(|c| {
+            let offset = c.byte_offset.get();
+            let line_start = body[..offset].rfind('\n').map_or(0, |i| i + 1);
+            Comment {
+                line: c.line.get() as usize + shebang_lines,
+                trailing: !body[line_start..offset].trim().is_empty(),
+            }
+        })
+        .collect()
 }
 
+/// Every trailing comment whose next line is a comment of its own. The line
+/// below reads as a continuation, whatever its author meant, so a block
+/// comment that starts a new subject sits behind a blank line (docs/fmt.md).
 fn joined_comments(path: &str, source: &str) -> Vec<String> {
     let lines: Vec<&str> = source.lines().collect();
-    let mut in_string = false;
-    let mut escaped = false;
-    let comments: Vec<Option<&str>> = lines
-        .iter()
-        .map(|line| trailing_comment(line, &mut in_string, &mut escaped))
-        .collect();
-    lines
+    comments(path, source)
         .windows(2)
-        .enumerate()
-        .filter_map(|(i, pair)| {
-            let inline = comments[i]?;
-            let continuation = pair[1].trim_start();
-            if continuation.starts_with('#') && !allowed_continuation(path, inline, continuation) {
-                Some(format!("{path}:{}: {}\n{}", i + 1, pair[0], pair[1]))
-            } else {
-                None
-            }
+        .filter(|pair| pair[0].trailing && !pair[1].trailing && pair[1].line == pair[0].line + 1)
+        .map(|pair| {
+            let (above, below) = (pair[0].line, pair[1].line);
+            format!("{path}:{above}: {}\n{}", lines[above - 1], lines[below - 1])
         })
         .collect()
 }
@@ -118,6 +90,33 @@ fn the_check_finds_a_comment_continued_after_code() {
 #[test]
 fn the_check_ignores_comment_markers_inside_multiline_strings() {
     let source = "(form \"first\n  # text\nlast\")\n# standalone\n(next)\n";
+    assert!(joined_comments("fixture.lisp", source).is_empty());
+}
+
+#[test]
+fn the_check_finds_a_continuation_after_a_one_space_trailing_comment() {
+    // The counter-factual: a scanner that recognizes a trailing comment only
+    // by the two spaces `elle fmt` puts before it passes a hand-edited file
+    // that joins the same two comments with one space.
+    let found = joined_comments("fixture.lisp", "(form) # describes the next form\n# in more detail\n");
+    assert_eq!(found.len(), 1, "a single space still makes a trailing comment");
+}
+
+#[test]
+fn the_check_finds_a_continuation_after_a_multiline_string_closes() {
+    let source = "(form \"first\nlast\")  # describes the next form\n# in more detail\n";
+    assert_eq!(joined_comments("fixture.lisp", source).len(), 1);
+}
+
+#[test]
+fn a_blank_line_separates_a_trailing_comment_from_the_next_block() {
+    let source = "(form)  # about this form\n\n# about the next form\n(next)\n";
+    assert!(joined_comments("fixture.lisp", source).is_empty());
+}
+
+#[test]
+fn a_hash_inside_a_symbol_starts_no_comment() {
+    let source = "(def a#b 1)\n# about the next form\n(next)\n";
     assert!(joined_comments("fixture.lisp", source).is_empty());
 }
 

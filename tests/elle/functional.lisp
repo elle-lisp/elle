@@ -199,9 +199,12 @@
 (let [f (flatten @[1 @[2 3] @[4]])]
   (assert (array? f) "flatten: array returns array")
   (assert (= (length f) 4) "flatten: array length"))
-## Length and depth are the two axes that can drive `flatten` past the
-## call-depth limit. Every case above stays under five elements, so these
-## are the ones that pin the flat native stack.
+## Length and depth are the two axes that can grow `flatten`'s call depth.
+## Every case above stays under five elements. The cases below run under a
+## depth cap of 200, so a `flatten` that recurses once per element or once per
+## level halts. Under the default cap of 10,000,000, it passes.
+(def default-max-depth (vm/config :max-depth))
+(vm/config-set :max-depth 200)
 (let [long-list (reduce (fn (acc i) (pair i acc)) () (range 1000))]
   (assert (= (length (flatten long-list)) 1000)
           "flatten: 1000-element list does not exhaust the call stack"))
@@ -210,6 +213,7 @@
 ## Depth: one cursor per nested sequence.
 (let [deep (reduce (fn (acc i) (list acc)) (list 42) (range 500))]
   (assert (= (flatten deep) (list 42)) "flatten: 500 levels of nesting"))
+(vm/config-set :max-depth default-max-depth)
 ## Arrays nested inside a list expand too.
 (assert (= (flatten (list 1 @[2 3] (list 4 @[5]))) (list 1 2 3 4 5))
         "flatten: arrays nested in a list")
@@ -375,8 +379,10 @@
         "sort-by-cmp: alias works")
 
 ## ── sort-by / sort-with on large lists ────────────────────────────────
-# 1000 elements puts the final merge beyond the 200 call-depth limit.
-# A smaller input could fit within that limit and miss a linear-depth merge.
+# The depth cap drops to 200 for these two sections, so a function whose call
+# depth grows with its input halts on 1000 or 500 elements. Under the default
+# cap, a merge that recurses once per element passes.
+(vm/config-set :max-depth 200)
 (let [sorted (sort-by identity (reverse (range 1000)))]
   (assert (= (length sorted) 1000) "sort-by: 1000 elements reversed")
   (assert (= (first sorted) 0) "sort-by: first element is 0")
@@ -385,9 +391,7 @@
   (assert (= (length sorted) 1000) "sort-with: 1000 elements reversed")
   (assert (= (first sorted) 0) "sort-with: first element is 0"))
 
-## ── Tail-recursive stdlib functions on large lists ───────────────────
-# These functions were converted from O(N)-deep recursion to tail-recursive
-# accumulator + reverse to avoid hitting the 200 call-depth limit.
+## ── Stdlib functions on large lists, under the lowered cap ───────────
 (let [big (range 500)]
   (assert (= (length (filter (fn (x) (= (rem x 2) 0)) big)) 250)
           "filter: 500 elements, half pass")
@@ -416,6 +420,7 @@
   (assert (= (length (distinct big)) 500) "distinct: all 500 elements unique")
   (assert (= (distinct (pair 1 (pair 1 (pair 2 ())))) (list 1 2))
           "distinct: deduplicates small list"))
+(vm/config-set :max-depth default-max-depth)
 
 ## ── freeze / thaw: structs ───────────────────────────────────────────
 (let [t @{:a 1 :b 2}]
