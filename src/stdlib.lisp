@@ -2396,68 +2396,72 @@
         fiber)
      :step step
      :report report
-     :pump # pump-fn: event loop.
-     # Program-completion teardown: when called with the program's
-     # fibers (its thunks), the loop ends as soon as THEY have all
-     # completed.  Each iteration first drains runnable work without
+     # pump-fn: the event loop, and program-completion teardown. When called
+     # with the program's fibers (its thunks), the loop ends as soon as THEY
+     # have all completed.  Each iteration first drains runnable work without
      # blocking (step 0); once the program's fibers are done it shuts
      # the scheduler down — aborting every remaining fiber uniformly
      # (do-shutdown) rather than blocking forever on orphans that can
      # never complete on their own (a futex never woken, a reader on a
      # socket the program never closed).  This is NOT a fiber taxonomy:
      # `entry` is simply the program; everything else is torn down
-     # identically.  Called with no fibers it runs until the scheduler
-     # is globally idle (legacy behaviour, e.g. ev/run-on).
-     (fn (& entry)
-       (let [have-entry (> (length entry) 0)
-             # `completed` is the scheduler's own record of every fiber it
-             # has finished with — `complete-fiber` writes it from
-             # `handle-fiber-after-resume`, which is where the paused-carrying-
-             # SIG_ERROR case is already decided. Asking the fiber's status
-             # again here would ask a different question and get a different
-             # answer: a fiber that stopped on an error still reports :paused,
-             # so a status test reads a failed program as one still running and
-             # waits for it against orphans that can never finish on their own.
-             all-done? (fn (fs)
-                         (let [@d true]
-                           (each f in fs
-                             (when (nil? (get completed f)) (assign d false)))
-                           d))]
-         (block :loop
-           (forever  # Drain all currently-runnable work without blocking on I/O.
-             (when (= (step 0) :done) (break :loop nil))  # Program complete?  Tear down instead of waiting on orphans.
-             (when (and have-entry (all-done? entry))
-               (do-shutdown 100)
-               (break :loop nil))  # Live program work remains — block for the next I/O event.
-             (when (= (step (- 0 1)) :done) (break :loop nil)))))
-       # Crash on unjoined errored fibers — never swallow errors silently.
-       # scheduler-killed fibers are excluded: we injected their :shutdown
-       # at teardown time, so re-raising would surface our own signal as a
-       # user error.
-       # fiber/propagate, not (error (fiber/value fiber)): re-raising the
-       # fiber's own signal carries the location of the form that raised it,
-       # which a fresh raise of the payload would replace with this line.
-       #
-       # The fiber to raise is chosen BEFORE the records are dropped, and
-       # raised after: `fiber/propagate` leaves through the signal machinery,
-       # so a `forget-fibers` sitting behind it would be skipped on exactly
-       # the runs a caller catches the error and keeps going.
-       (let [@unjoined nil]
-         (each [fiber status] in (pairs completed)
-           (when (and (nil? unjoined) (= status :error)
-                      (not (contains? joined fiber))
-                      (not (contains? scheduler-killed fiber)))
-             (assign unjoined fiber)))
-         (forget-fibers)
-         (when (not (nil? unjoined)) (fiber/propagate unjoined))))
+     # identically.  Called with no fibers, as ev/run-on calls it, it runs
+     # until the scheduler is globally idle.
+     :pump (fn (& entry)
+             (let [have-entry (> (length entry) 0)
+                   # `completed` is the scheduler's own record of every fiber it
+                   # has finished with — `complete-fiber` writes it from
+                   # `handle-fiber-after-resume`, which is where the paused-carrying-
+                   # SIG_ERROR case is already decided. Asking the fiber's status
+                   # again here would ask a different question and get a different
+                   # answer: a fiber that stopped on an error still reports :paused,
+                   # so a status test reads a failed program as one still running and
+                   # waits for it against orphans that can never finish on their own.
+                   all-done? (fn (fs)
+                               (let [@d true]
+                                 (each f in fs
+                                   (when (nil? (get completed f))
+                                     (assign d false)))
+                                 d))]
+               (block :loop
+                 (forever
+                   # Drain all currently-runnable work without blocking on I/O.
+                   (when (= (step 0) :done) (break :loop nil))
+                   # Program complete?  Tear down instead of waiting on orphans.
+                   (when (and have-entry (all-done? entry))
+                     (do-shutdown 100)
+                     (break :loop nil))
+                   # Live program work remains — block for the next I/O event.
+                   (when (= (step (- 0 1)) :done) (break :loop nil)))))
+             # Crash on unjoined errored fibers — never swallow errors silently.
+             # scheduler-killed fibers are excluded: we injected their :shutdown
+             # at teardown time, so re-raising would surface our own signal as a
+             # user error.
+             # fiber/propagate, not (error (fiber/value fiber)): re-raising the
+             # fiber's own signal carries the location of the form that raised it,
+             # which a fresh raise of the payload would replace with this line.
+             #
+             # The fiber to raise is chosen BEFORE the records are dropped, and
+             # raised after: `fiber/propagate` leaves through the signal machinery,
+             # so a `forget-fibers` sitting behind it would be skipped on exactly
+             # the runs a caller catches the error and keeps going.
+             (let [@unjoined nil]
+               (each [fiber status] in (pairs completed)
+                 (when (and (nil? unjoined) (= status :error)
+                            (not (contains? joined fiber))
+                            (not (contains? scheduler-killed fiber)))
+                   (assign unjoined fiber)))
+               (forget-fibers)
+               (when (not (nil? unjoined)) (fiber/propagate unjoined))))
      :shutdown  # shutdown-fn: signal shutdown
       (fn (timeout-ms) (put shutdown-req 0 timeout-ms))
-     :mark-joined # mark one of the program's own fibers: observed (suppress the
-     # unjoined-error crash) and exempt from retirement, because `:pump`
-     # reads its completion record to know the program finished.
-     (fn (fiber)
-       (add joined fiber)
-       (add entry-fibers fiber))
+     # mark-joined-fn: mark one of the program's own fibers as observed, which
+     # suppresses the unjoined-error crash, and exempt it from retirement,
+     # because `:pump` reads its completion record to know the program
+     # finished.
+     :mark-joined (fn (fiber)
+                    (add joined fiber)
+                    (add entry-fibers fiber))
      :backend backend}))
 
 (def *shutdown* (make-parameter nil))
