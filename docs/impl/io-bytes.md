@@ -155,7 +155,7 @@ the whole process shares, and its teardown is not a backend's.
   ([bytes.rs](../../src/io/aio/tests/bytes.rs)).
 - `a_cancelled_entry_keeps_what_the_kernel_addresses`
   ([hold.rs](../../src/io/pending/tests/hold.rs)).
-- [port-longline.lisp](../../tests/elle/port-longline.lisp) and
-  [port-text-framing.lisp](../../tests/elle/port-text-framing.lisp), in the
-  corpus: every Linux corpus job runs them on the ring, and the Thread-Pool I/O
-  job runs them on the pool ([ci](../analysis/ci.md)).
+- [port-longline.lisp](../../tests/lang/port-longline.lisp) and
+  [port-text-framing.lisp](../../tests/lang/port-text-framing.lisp), which
+  every build runs, the thread-pool build among them
+  ([testing](../testing.md)).
