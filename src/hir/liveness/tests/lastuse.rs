@@ -1,3 +1,8 @@
+// audited: 2026-09-28
+//! Pins each node's last use: where a value dies relative to its binder, its consumer and the forms it flows through.
+//!
+//! docs/impl/region/anchors.md
+
 use super::*;
 
 #[test]
@@ -58,8 +63,7 @@ fn last_use_let_multiple_uses_in_body() {
 
 /// A `def` evaluates to what it bound, so the unused-binding narrowing must not pull
 /// its initializer's last use back onto the initializer
-/// (docs/impl/region/mechanism.md § "A binder's init release lands after the slot
-/// store"). Nothing reads `x` in either subject, which is exactly the condition the
+/// (docs/impl/region/anchors.md). Nothing reads `x` in either subject, which is exactly the condition the
 /// narrowing keys on — and the value is still live, because the `def` form's own
 /// value is it.
 ///
@@ -224,9 +228,8 @@ fn last_use_across_nested_let() {
 // form itself. A call-result region whose `decref_point` is set too early
 // releases its slot before the outer consumer reads it — the slot's
 // memory then gets reused for the next allocation and the stale
-// Value's tag bits no longer match the heap object's discriminant.
-// (Surfaced at tests/elle/telemetry.lisp:135 via
-// `@{:attrs (or attrs {})}` — see tests/elle/bug-propagate-free-at.lisp.)
+// Value's tag bits no longer match the heap object's discriminant
+// (tests/lang/bug-propagate-free-at.lisp).
 
 #[test]
 fn last_use_or_propagates_to_outer_consumer() {
@@ -385,23 +388,3 @@ fn last_use_begin_non_tail_dies_at_statement_boundary() {
         got
     );
 }
-
-// ── propagation through iterative scopes (While / Loop) ─────────
-//
-// A binding bound OUTSIDE a `while` body but referenced INSIDE the
-// body must outlive the entire while — not die at the immediate
-// consumer inside the body. Otherwise the per-iteration decref of
-// the binding's region triggers UAF on iteration 2 (the canonical
-// symptom that surfaces as the phantom-region panic on
-// tests/elle/jit-lbox-param-repro.lisp).
-//
-// Counterfactual: with the current `walk` for While (`walk(body,
-// false, hir.id)`), uses inside the body have last_use set to the
-// immediate consumer (e.g., the Call's HirId), which is strictly
-// less than the While's HirId. The binding-chain extension then
-// sets `last_use[init_id] = call.id`, leaking the bug into
-// regions analysis (`r.decref_point = call.id`, inside the while body).
-//
-// Fix: when walking a use inside a While/Loop body, the effective
-// last_use for binding-extension purposes must be at LEAST the
-// While/Loop's HirId (or anything that survives a single iteration).

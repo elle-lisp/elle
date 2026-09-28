@@ -1,15 +1,17 @@
-// audited: 2026-09-14
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-09-28
+//! Pins the configuration: per-instance trace cells, the tier a build starts, the
+//! refused flags and the page size.
+//!
+//! docs/config.md
 
 use super::*;
 use crate::value::fiberheap::pagepool::base_page;
 
 /// Trace state is per-instance: a `RuntimeConfig` reads and writes its own
 /// [`TraceCell`], so a diagnostic toggle on one instance never reaches another.
-/// This is the property the corpus runner relies on to keep a `--trace=`-heavy
-/// file from bleeding into a parallel file's run — before the relocation the two
-/// shared a process-global atomic, so any instance's `set_trace` flipped the bit
-/// every off-VM reader saw.
+/// The test runner relies on this to keep a `--trace=`-heavy file from bleeding
+/// into a parallel file's run. The counter-factual: one process-global atomic,
+/// where any instance's `set_trace` flips the bit every off-VM reader sees.
 #[test]
 fn trace_bits_are_per_cell_not_global() {
     use std::collections::HashSet;
@@ -71,9 +73,8 @@ fn trace_cell_clone_observes_updates() {
 /// then each keyword is OR'd through `trace_bits::from_name`. If a real
 /// keyword (one that maps to a non-zero bit) is missing from the array,
 /// `--trace=all` silently skips that subsystem even though `--trace=<kw>`
-/// works when named explicitly. This guards against re-introducing that
-/// drift (e.g. `chan` and `anf`, which were each added with a bit +
-/// `from_name` entry + `--help` line but originally forgotten here).
+/// works when named explicitly. The counter-factual: a keyword added with a
+/// bit, a `from_name` entry and a `--help` line, and left out of the array.
 #[test]
 fn trace_all_covers_every_defined_bit() {
     let from_all: u32 = TRACE_KEYWORDS
@@ -130,50 +131,135 @@ fn parse_args(args: &[&str]) -> Result<Config, String> {
     Config::parse(&owned).map(|(c, _)| c)
 }
 
-// ── The tier a fresh config starts from (docs/config.md) ──
+// ── The tier a build starts from (docs/config.md) ──
 
 /// The binary and the embedding library start from one JIT policy.
 ///
-/// The counter-factual this pins: `Config::parse` used to override the struct
-/// `Default` with `Off`, so `elle script.lisp` ran interpreted forever while a
-/// host calling `Config::default()` compiled. Two answers to one question, and
-/// whichever document a reader found, it was wrong half the time.
+/// The counter-factual: `Config::parse` overrides the struct `Default` with
+/// `Off`, so `elle script.lisp` runs interpreted forever while a host calling
+/// `Config::default()` compiles. Two answers to one question, and whichever
+/// document a reader found was wrong half the time.
 #[test]
 fn the_cli_starts_the_jit_where_the_library_does() {
-    assert_eq!(Config::default().jit, JitPolicy::Adaptive { threshold: 10 });
     assert_eq!(
         parse_args(&[]).unwrap().jit,
         Config::default().jit,
         "no flag must mean what the struct Default means"
     );
+    assert_eq!(parse_args(&[]).unwrap().mlir, Config::default().mlir);
 }
 
-/// `--jit=off` is how a run asks for the interpreter alone. A default that
-/// moves must not take the flag with it — the corpus runs its VM tier through
-/// this spelling, and the integer alias predates the named policies.
+/// The JIT is the tier of a build that carries no other: it compiles a
+/// function once the function has been called ten times.
+#[cfg(all(feature = "jit", not(feature = "mlir"), not(feature = "wasm")))]
 #[test]
-fn an_explicit_jit_flag_outranks_the_default() {
-    assert_eq!(parse_args(&["--jit=off"]).unwrap().jit, JitPolicy::Off);
-    assert_eq!(parse_args(&["--jit=0"]).unwrap().jit, JitPolicy::Off);
-    assert_eq!(parse_args(&["--jit=eager"]).unwrap().jit, JitPolicy::Eager);
+fn a_jit_build_starts_the_jit_adaptive() {
+    assert_eq!(Config::default().jit, JitPolicy::Adaptive { threshold: 10 });
 }
 
-/// MLIR keeps its own answer. `mlir` is not a default feature, so a stock
-/// build has no tier to start and the CLI leaves it off.
-///
-/// The counter-factual: the two defaults were written on one struct literal,
-/// so the obvious edit moves both and nothing else complains.
+/// A build carries one optimizing tier, and MLIR and WebAssembly each replace
+/// the JIT. The counter-factual: the JIT default was written unconditionally,
+/// so an `mlir` build ran both tiers and no build was one implementation.
+#[cfg(any(feature = "mlir", feature = "wasm", not(feature = "jit")))]
 #[test]
-fn the_cli_starts_mlir_off() {
-    assert_eq!(parse_args(&[]).unwrap().mlir, MlirPolicy::Off);
+fn a_build_without_the_jit_tier_starts_it_off() {
+    assert_eq!(Config::default().jit, JitPolicy::Off);
+}
+
+/// MLIR is the tier of an `mlir` build, unless WebAssembly replaces it.
+#[cfg(all(feature = "mlir", not(feature = "wasm")))]
+#[test]
+fn an_mlir_build_starts_mlir_adaptive() {
     assert_eq!(
-        parse_args(&["--mlir=adaptive"]).unwrap().mlir,
+        Config::default().mlir,
         MlirPolicy::Adaptive { threshold: 10 }
     );
 }
 
-// ── `--region-page-size` (docs/impl/region/model.md § "The base page is the OS
-// page") ──
+/// A build without the MLIR tier has nothing to start. The counter-factual:
+/// the struct `Default` answered `Adaptive` in every build, and only the CLI
+/// turned it off, so an embedding host asked a tier the build did not carry.
+#[cfg(not(all(feature = "mlir", not(feature = "wasm"))))]
+#[test]
+fn a_build_without_the_mlir_tier_starts_it_off() {
+    assert_eq!(Config::default().mlir, MlirPolicy::Off);
+}
+
+// ── The flags a user build no longer has (docs/config.md) ──
+
+/// A flag that chose a tier, a backend or a pass is gone: the build chooses
+/// them, and no user runs a matrix of runtimes. Before the program such a flag
+/// is an unknown option, refused by name. The counter-factual is worse than an
+/// error: a flag that no longer parses would otherwise become the program's
+/// name, and `elle` would report a missing file called `--jit=off`.
+#[test]
+fn a_removed_flag_is_an_unknown_option() {
+    for flag in [
+        "--jit=off",
+        "--jit=eager",
+        "--jit=0",
+        "--mlir=eager",
+        "--anf=off",
+        "--no-uring",
+        "--stats",
+    ] {
+        let err = parse_args(&[flag, "prog.lisp"]).unwrap_err();
+        assert!(
+            err.contains("unknown option") && err.contains(flag),
+            "{flag} must be refused as an unknown option, got {err:?}"
+        );
+    }
+}
+
+/// After the program, an argument belongs to the program, whatever it looks
+/// like (docs/config.md).
+#[test]
+fn an_unknown_flag_after_the_program_is_the_programs() {
+    let owned: Vec<String> = ["prog.lisp", "--jit=off"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let (_, rest) = Config::parse(&owned).unwrap();
+    assert_eq!(rest, owned, "the program keeps every argument after it");
+}
+
+/// `--wasm=` exists only where the backend does.
+#[cfg(not(feature = "wasm"))]
+#[test]
+fn the_wasm_flag_is_unknown_without_the_wasm_feature() {
+    let err = parse_args(&["--wasm=full", "prog.lisp"]).unwrap_err();
+    assert!(err.contains("unknown option"), "got {err:?}");
+}
+
+#[cfg(feature = "wasm")]
+#[test]
+fn the_wasm_flag_sets_the_policy_in_a_wasm_build() {
+    assert_eq!(parse_args(&["--wasm=full"]).unwrap().wasm, WasmPolicy::Full);
+}
+
+/// `--dump=stats` runs the program and prints statistics at its end; every
+/// other dump keyword prints an artifact and runs nothing. So `stats` sets the
+/// statistics switch and stays out of the dump set, whose non-emptiness is what
+/// stops a run.
+#[test]
+fn dump_stats_runs_the_program() {
+    let alone = parse_args(&["--dump=stats"]).unwrap();
+    assert!(alone.stats, "--dump=stats turns statistics on");
+    assert!(
+        alone.dump.is_empty(),
+        "--dump=stats alone must still run the program, got {:?}",
+        alone.dump
+    );
+    let both = parse_args(&["--dump=lir,stats"]).unwrap();
+    assert!(both.stats);
+    assert_eq!(
+        both.dump,
+        std::collections::HashSet::from(["lir".to_string()]),
+        "a stage beside stats still dumps and exits"
+    );
+}
+
+// ── `--region-page-size` (docs/impl/region/model.md) ──
 
 /// A region's first page is one OS page, so a program that sets nothing gets
 /// the page the kernel charges for rather than a fraction of it.

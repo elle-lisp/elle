@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-09-28
 //! Where a stored value's producer release is pinned, and where the cell's own
 //! content drop lands.
 //!
@@ -6,15 +6,13 @@
 
 use super::*;
 
-/// An aliased STORED value takes the model (docs/impl/region/bindings.md § "The
-/// store-site pin asks only that the store run once per binding of the name it
-/// reads"). `v` is a second name for the value each iteration stores, and it
-/// refuses nothing: the pin rule is a maximum and `v`'s own reads extend the
-/// stored region's release through the binding chain, so the release lands at or
-/// after `(%length v)`. What refusing bought instead was the baseline, whose one
-/// chain-extended release rode the cell's uses past the loop and served a region
-/// minted per iteration — the conditional-accumulate strand behind
-/// elle-lisp/elle#1186.
+/// An aliased STORED value takes the model (docs/impl/region/bindings.md). `v` is
+/// a second name for the value each iteration stores, and it refuses nothing: the
+/// pin rule is a maximum and `v`'s own reads extend the stored region's release
+/// through the binding chain, so the release lands at or after `(%length v)`. The
+/// counter-factual is a refusal, which leaves the baseline: one chain-extended
+/// release rides the cell's uses past the loop and serves a region minted per
+/// iteration, so every other iteration's value strands.
 ///
 /// The stored region rides the phi onto the binding's own source set, so the
 /// aliased overlap withholds the donation and the cell counts its init at the
@@ -59,18 +57,18 @@ fn reassign_gate_counts_an_aliased_assign_value() {
     );
 }
 
-/// The content drop POST-DOMINATES every store (docs/impl/region/bindings.md
-/// § "Where the content drop lands"). A store inside a loop inside one branch
-/// arm seeds the demise there — a point no other arm's path reaches, and one a
-/// later iteration re-enters — so the drop must hoist to the nodes of the loop
-/// and the branch, where the lowerer emits it after each on every path.
+/// The content drop POST-DOMINATES every store (docs/impl/region/bindings.md). A store
+/// inside a loop inside one branch arm seeds the demise there — a point no other arm's
+/// path reaches, and one a later iteration re-enters — so the drop must hoist to the
+/// nodes of the loop and the branch, where the lowerer emits it after each on every
+/// path.
 ///
 /// The counter-factual: left at the seed, the drop frees the just-stored value
 /// once per iteration on the storing path and never on any other, and nothing
 /// fails on it because each path alone stays consistent with SOME accounting.
-/// This is the `each`-expansion face of elle-lisp/elle#1186: the macro's arms
-/// each store the loop's element into the outer binding, and the seed lands in
-/// whichever arm is structurally last.
+/// The `each` expansion has this shape: the macro's arms each store the loop's
+/// element into the outer binding, and the seed lands in whichever arm is
+/// structurally last.
 #[test]
 fn cell_content_drop_postdominates_arm_stores() {
     let (hir, _, info) = pipeline(
@@ -109,8 +107,7 @@ fn cell_content_drop_postdominates_arm_stores() {
 /// forward — neither a cell binding's uses nor an uncounted opcode read of the
 /// cell (`%get`/`%first`/`%rest`), whose borrow the cell protects. Both routes
 /// reach past the loop that stores a fresh value every iteration, so one release
-/// would cover N allocations (docs/impl/region/bindings.md § "A chain of
-/// forwarding edges hands one reference along, so the fold follows it whole").
+/// would cover N allocations (docs/impl/region/bindings.md).
 #[test]
 fn a_cell_stored_value_is_not_extended_by_a_read_of_the_cell() {
     // The read sits in statement position: an uncounted read in TAIL position
@@ -160,8 +157,8 @@ fn a_cell_stored_value_is_not_extended_by_a_read_of_the_cell() {
 /// stores as one set pins the first arm's value inside the SECOND arm, so an
 /// iteration taking the first arm again displaces the previous value from its own
 /// ANF slot before that pin ever runs — one stranded region per repeat, growing
-/// with the iteration count (docs/impl/region/bindings.md § "The store site is
-/// the store that took THAT value"; `tests/elle/region-cell-arm-store.lisp`).
+/// with the iteration count (docs/impl/region/bindings.md;
+/// tests/impl/region-cell-arm-store.lisp).
 ///
 /// Stated over the program rather than over the container's fields: each stored
 /// value's release must land inside the subtree of the `assign` that stored it.

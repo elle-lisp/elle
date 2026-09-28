@@ -1,7 +1,9 @@
-// audited: 2026-09-20
-// src/io/AGENTS.md
+// audited: 2026-09-28
 //! The endings a pool operation reaches with nobody cancelling it: a close on
 //! the port beneath it, its own deadline, and a retirement.
+//!
+//! src/io/AGENTS.md
+//! docs/impl/io-inflight.md
 
 use super::*;
 
@@ -9,23 +11,23 @@ use super::*;
 ///
 /// `port/close` is the only unblocking mechanism a program has for an accept
 /// nobody cancels — an accept loop parked in a live process, closed by another
-/// process at teardown (tests/elle/process-accept-close.lisp is the scheduler
+/// process at teardown (tests/lang/process-accept-close.lisp is the scheduler
 /// shape). The close path may not lean on `shutdown(2)` for this: shutdown of
 /// a LISTENING socket is a Linux extension — macOS and the BSDs return
 /// ENOTCONN and wake nothing, and the accept's worker then polls the retired
 /// descriptor forever while the scheduler waits on a completion that never
 /// comes. The wake must come from the operation's stop pipe instead.
 ///
-/// Built on `new_thread_pool` for the reason the cancellation tests give: on a
-/// Linux dev box the default backend is the ring, and this property would go
-/// unchecked everywhere it can regress.
+/// Built on `new_thread_pool` for the reason the cancellation tests in
+/// netcancel.rs give: on a Linux dev box the default backend is the ring, and
+/// this property would go unchecked everywhere it can regress.
 #[test]
 fn closing_a_listener_ends_its_parked_pool_accept() {
     crate::value::arena::with_test_region(|| {
         let h = crate::primitives::ctx::TestHeap::new();
         use std::os::unix::io::FromRawFd;
 
-        // A BLOCKING listener, deliberately — see the cancellation test above.
+        // A BLOCKING listener, deliberately — see the cancellation tests in netcancel.rs.
         let listener_fd = unsafe {
             let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
             assert!(fd >= 0, "socket() failed");
@@ -140,11 +142,11 @@ fn closing_a_listener_ends_its_parked_pool_accept() {
 
 /// A pool connect must stop at the caller's `:timeout`, and say so.
 ///
-/// The same full accept queue as the cancellation test above, waited on with a
-/// deadline instead of cancelled. Two things are pinned: the connect ends near
+/// The same full accept queue the cancellation tests in netcancel.rs use, waited on
+/// with a deadline instead of cancelled. Two things are pinned: the connect ends near
 /// its deadline rather than at the kernel's own, minutes later; and it reports
-/// `:timeout`, the kind `ev/timeout` and every caller that distinguishes a
-/// deadline from a broken connection matches on.
+/// `:timeout`, the kind `ev/timeout` and every caller that distinguishes a deadline
+/// from a broken connection matches on.
 #[test]
 fn a_pool_connect_reports_its_own_deadline_as_a_timeout() {
     crate::value::arena::with_test_region(|| {

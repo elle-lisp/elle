@@ -1,3 +1,9 @@
+// audited: 2026-09-28
+//! Closes this unit's inlineable function bodies into fragments, by binding for
+//! this unit and by name for the registry.
+//!
+//! docs/impl/dissolution/inline.md
+
 use super::*;
 use crate::hir::fragment::HirFragment;
 
@@ -20,8 +26,7 @@ pub(crate) struct FnFragment {
     pub(super) fragment: HirFragment,
     /// Does the body prove it returns an **array**? Asked only of a `mapcat`,
     /// whose fused inner walk is indexed — linear over an array, quadratic over
-    /// a list (docs/impl/dissolution.md § "Mapcat — the stage that fans out").
-    /// Recorded here because the proof reads the defining unit's arena and
+    /// a list (docs/impl/dissolution/stages.md). Recorded here because the proof reads the defining unit's arena and
     /// init-keyword map, which the call site may not have.
     pub(super) returns_array: bool,
 }
@@ -128,14 +133,15 @@ impl<'a> Collector<'a> {
 
 /// The inlineable fragment of a lambda initializer, or `None`.
 ///
-/// The lambda must have 1 or 2 fixed parameters (a `map`/`filter`/`count`/search
-/// element, or a `fold` accumulator and element — the use site checks the exact
-/// arity), no rest parameter, and unmutated parameters. Its body must then close
+/// The lambda must have 1 or 2 fixed parameters (the element of a one-parameter
+/// op, or a `fold`'s accumulator and element, or a `map-indexed`'s position and
+/// element — the use site checks the exact arity), no rest parameter, and
+/// unmutated parameters. Its body must then close
 /// over its own bindings, which is what rejects a body naming an enclosing
 /// runtime local: such a name belongs to the scope the function was defined in,
 /// which the call site need not sit inside — unlike a call-site literal, which
 /// is spliced at its own scope and keeps its captures
-/// (docs/impl/dissolution.md § "Captures").
+/// (docs/impl/dissolution.md).
 fn fn_fragment(
     value: &Hir,
     arena: &BindingArena,

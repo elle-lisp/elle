@@ -1,185 +1,13 @@
-//! Escape analysis over the canonical (functionalized + ANF) HIR.
+// audited: 2026-09-28
+//! Escape analysis over the canonical (functionalized + ANF) HIR: the one authority on
+//! whether a value outlives its activation.
 //!
-//! The **single authority** for whether a value outlives the activation it was born
-//! in — computed once over the regularized IR. Every consumer that needs the
-//! property reads it rather than recomputing a proxy: the region solver (the Owned-
-//! vs-Shared classifier, the reassign gate, the merge gate, branch compensation —
-//! all through the region projection in `region::infer::escape`) and the lowerer's
-//! tail-call ownership predicates. There is no parallel escape judgment anywhere
-//! else: the former lexical proxy (`is_captured`) is demoted to a structural hint
-//! (below), and the region solver records no escape facts of its own — it projects
-//! this analysis's verdict onto regions through `region::infer::escape`.
+//! docs/impl/escape.md
 //!
-//! ## The two questions it answers
-//!
-//! - **per binding** — does the binding's value *escape its defining
-//!   activation*? (`binding_escapes_activation`)
-//! - **per lambda** — does the closure *escape its definition*?
-//!   (`lambda_escapes_definition`)
-//!
-//! plus a complementary pair that splits the per-binding answer on the **return**
-//! facet — `binding_escapes_via_return` and `binding_escapes_beyond_return` — so a
-//! consumer can ask "by the return facet and no other", which neither the full set
-//! nor either half can express alone.
-//!
-//! ## The four escape facets
-//!
-//! Escape is a value-flow over the atoms (binding / lambda) the region solver's
-//! `walk` tracks:
-//!
-//! - **return** — a binding/lambda escapes when its value reaches a function's
-//!   tail/return position. (This also covers a fiber's *terminal* value: a fiber
-//!   body is a lambda whose tail is seeded, and that value crosses to the joiner.)
-//! - **store** — a binding/lambda escapes when its value is *stored into a
-//!   longer-lived region*. Two store sources: the allocating **intrinsics**
-//!   (`(%pair v …)`, `(%array-push coll v)`, `(%put obj k v)` — the value embeds in
-//!   the fresh aggregate), and **native calls that declare a store** via their
-//!   `RegionEffect` (read from the `CallClassification`): `Stores{args}`/`Sends{args}`
-//!   escape those args, `Mixed`/`Unknown` escapes every arg, and `Fresh`/`Immediate`/
-//!   `PassThrough`/`Funnel` escape nothing. This is how `chan/send` (`Sends{[1]}`)
-//!   marks its message escaping — the *send* fiber boundary — while `fiber/new`/
-//!   `chan/recv` (`Fresh`) do not. (`Sends` and `Stores` escape a binding identically;
-//!   they differ in the facet: a `Sends` message crosses the fiber frontier, which
-//!   the fiber facet records — see below — and its store is seam-counted, so the
-//!   solver records no edge for it.)
-//! - **capture** — a value *captured by a closure that itself escapes* escapes
-//!   too, transitively. The capture facet has **no seed of its own**: a closure
-//!   escapes its definition ONLY when its value returns/stores/crosses a fiber
-//!   boundary (the frontier facets above). Each escaping closure then propagates
-//!   its escape to every binding it captures (`lambda_captures`), transitively (a
-//!   captured binding may be a lambda whose own captures escape). A closure that
-//!   is captured but never crosses a frontier is called in place and escapes
-//!   nothing, so the lexical-capture proxy `is_captured` seeds escape NOWHERE
-//!   (precision-point-3 made flow-true).
-//! - **fiber boundary** — a value handed across a fiber boundary escapes:
-//!   - *yield/emit* — an `Emit` node's value is delivered to the resumer.
-//!   - *terminal value* — the return facet (a fiber body is a lambda whose tail
-//!     is seeded, and that value crosses to the joiner).
-//!   - *send* — the store facet: `chan/send` declares `Sends{[1]}` (a `Stores` that
-//!     also crosses the fiber frontier), so its message escapes (above).
-//!   - *spawn* — `fiber/new` is `Fresh`: the spawned closure rides the fresh fiber
-//!     result and escapes only if that result does (the ordinary result-flow), so
-//!     it needs no separate rule. (`ev/spawn` is a stdlib fn, so the closure's
-//!     escape is accounted in its own compilation.)
-//!
-//! All four facets seed atoms (see the function doc), then propagate backward to a
-//! fixpoint through the binding-definition edges and the capture edges, so an
-//! alias of an escaping value — and a value captured by an escaping closure —
-//! escapes too.
-//!
-//! ## The region-level frontier (atomless escapes)
-//!
-//! The two **frontier** facets — **return** and **fiber** (emit/send) — are the
-//! ownership Shared seeds, and a value can cross them with no binding/lambda atom to
-//! name it: `(yield (%pair 1 2))`, a bare aggregate at a tail. So alongside the atom
-//! sets, the frontier facets also record the **allocation-site `HirId`s** they reach
-//! (`record_frontier_sites`): `return_frontier_sites` / `fiber_frontier_sites`. The
-//! region solver projects these — and the atom-level facets — onto regions through
-//! its own `alloc_region` / `binding_source_regions` maps (`region::infer::escape`). Escape
-//! never sees a region; the projection is the consumer's.
-//!
-//! ## Consumers
-//!
-//! Every consumer reads this analysis; none keeps a parallel judgment.
-//!
-//! - **The region solver** (`region::infer::escape` projects the verdict to regions):
-//!   the ownership **Shared seed** (`compute_shared_seeds` = the return ∪ fiber
-//!   frontier), the **merge** gate's not-returned check (`returned_regions` = the
-//!   return frontier; its separate sole-held *reachability* refusal reads the
-//!   region capture-graph `region::infer::escape::captured_bindings`, never escape and
-//!   never the `is_captured` proxy), branch **compensation**'s escaping-exclusion
-//!   (the return frontier), and the MODULE-SCOPE half of the reassign
-//!   1-slot-container gate (`binding_escapes_via_return`, per binding — the
-//!   fn-local half counts what it stores and so asks nothing about the return).
-//! - **The lowerer** (`lir/lower`): `tail_callee_defers_release` reads
-//!   `lambda_escapes_definition` / `binding_escapes_activation` for the escape half
-//!   of the deferral decision — region-locality stays a region fact. A letrec
-//!   cycle/member callee narrows that to `escapes_fiber` alone: the store/capture
-//!   facets are containment, and the return facet is funded by the callee's own
-//!   return mint, which precedes the deferred release. A **stranded recursive**
-//!   callee reads no facet at all — the deferral supplies the frame's own reference
-//!   and every frontier crossing counts its own (docs/impl/selfrec.md § "The
-//!   deferral needs no escape gate").
-//!
-//! Two lowerer/HIR decisions deliberately do **not** read this analysis, because
-//! the question they answer is *ownership-location / mutation-sharing*, which is
-//! structural lexical capture, not true-escape:
-//!  - `tail_arg_is_borrowed` (`lir/lower/control.rs`): a tail-arg is borrowed iff
-//!    its binding is a captured upvalue (the env owns the capture-incref). Escape
-//!    over-approximates this (a born-here value that flows to a tail *escapes* but
-//!    is *owned*), and minting for those owned-escaping args double-releases
-//!    across a fiber suspend/resume — a phantom `DecrefRegion`/UAF (witnessed on
-//!    `contracts.lisp`). So it reads `upvalue_bindings` (structural capture).
-//!  - cell insertion in `functionalize` / the lowerer's closure-env layout: a
-//!    captured *mutable* binding needs a shared cell even when its capturing
-//!    closure never escapes, so this reads `needs_capture` — for a local,
-//!    `is_captured ∧ (¬immutable ∨ is_prebound)`: a captured *mutable* local, **or** a
-//!    *prebound* immutable one (a recursive `letrec`'s forward reference, the carve-out
-//!    the closure-cycle merge relies on); for a param, `is_mutated` — not escape.
-//!
-//! These two are the *structural-only* role of lexical capture, and the **only**
-//! roles left to `is_captured`: it feeds NO escape facet (the capture facet is
-//! flow-true — pure transitive `lambda_captures` propagation from genuine frontier
-//! seeds), and it is module-private with no getter, so no consumer can re-couple
-//! the solver to it.
-//!
-//! ## Verification
-//!
-//! Escape is the authority, so it is pinned by its **own** four-facet spec, not by
-//! agreement with another analysis. Three layers: the unit tests (`tests/`) assert
-//! each facet's discriminating behaviour directly (a returned value return-escapes;
-//! a stored value escapes-but-is-not-returned; a value captured by a non-escaping
-//! closure does not escape; an emitted/sent value crosses the fiber frontier); the
-//! escape golden (`tests/elle/escape-golden.lisp`) pins the normalized dump — the
-//! return-frontier projection and the RC instructions it drives — on real corpus
-//! files; and the region suite + `oracle.lisp` prove the projection reclaims
-//! soundly (no UAF, no leak regression).
-//!
-//! ## Interprocedural return transparency
-//!
-//! The return facet is **interprocedural** for an *arg-returning* callee. A tail
-//! call `(id y)` to a function that returns its parameter is region-transparent in
-//! that argument: the call yields whatever flowed into the arg, so `y` escapes
-//! when the call's result does.
-//!
-//! It is realized as an **arg-return summary** (`compute_arg_return`): per
-//! inlinable lambda binding, which fixed-param indices flow to its tail, computed
-//! to a fixpoint (so `(fn (z) (id z))` chains through `id`'s summary). `tail_sources`
-//! consumes it at a `Call` — descending into the returned-arg positions instead of
-//! treating the call as opaque. "Inlinable" is an immutable, unmutated binding
-//! bound to a `Lambda` by a `Let`/`Letrec` — **never** a top-level `Define` (a
-//! `def`-bound callee stays opaque, and an arg returned through it does not escape
-//! via the call).
-//!
-//! ## Precision characteristics
-//!
-//! Escape is finer than the structural proxies it replaces; these are the
-//! characterized points where its verdict is the *precise* one (each pinned by a
-//! test):
-//! - *Stored borrowed param.* A stored borrowed param — `(fn (x) (%pair x x))`, or
-//!   a `chan/send` whose message is a param — genuinely escapes (it embeds in a
-//!   longer-lived aggregate / crosses a fiber), so the store facet marks it. A
-//!   param's region is a runtime placeholder the region projection treats as
-//!   not-ownable, so marking it is sound and costs the consumers nothing.
-//! - *Store target vs stored value.* `(%put obj k v)` / `(assign acc v)` escapes the
-//!   stored *value*, never the *container* `obj`/`acc` (writing into a container is
-//!   not the container escaping). Escape marks only the value; the projection acts
-//!   per region, so the value's region is marked exactly once.
-//! - *Lexical capture is not escape.* A value captured by a closure that is *called
-//!   in place* (never escapes) does not escape via capture — the capture facet marks
-//!   it only when its capturing closure escapes, where `is_captured` marks every
-//!   captured binding unconditionally. (A value the closure *returns* still
-//!   return-escapes through the closure's own tail — a separate facet.)
-//! - *Fiber boundary.* An emitted/sent value crosses to the resumer/receiver, so the
-//!   fiber facet marks it (and the region-level `fiber_frontier_sites` catch an
-//!   atomless `(yield (%pair …))`). There is no compile-time RC edge at an `Emit`
-//!   (the runtime incref in `handle_emit` keeps it alive) — the fiber crossing is
-//!   purely escape's to record.
-//! - *Native `Mixed`/`Unknown` clique is conservative.* A native declared `Mixed`
-//!   (uncounted store, examined) or `Unknown` (unexamined — the default) marks
-//!   *every* heap argument escaping. Sound; as imprecise as the declarations are
-//!   honest. Examining a primitive and declaring a tighter `RegionEffect` narrows
-//!   it.
+//! The design document owns the four facets, every consumer, the two decisions
+//! that read structural capture instead, and the precision points. This file
+//! holds `EscapeInfo` and `analyze_escape`, which seeds the facets through
+//! `flow` and propagates them to a fixpoint.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -239,9 +67,8 @@ pub struct EscapeInfo {
     /// business.
     ///
     /// Read by the frame-held admission the branch-arm window and the frame-exit
-    /// release share (docs/impl/region/mechanism.md § "The callee's return mint,
-    /// and why the point owes it nothing"), which admits the return facet and must
-    /// therefore know no other facet is also refusing.
+    /// release share (docs/impl/region/relocate.md), which admits the return facet
+    /// and must therefore know no other facet is also refusing.
     binding_escapes_beyond: FxHashSet<Binding>,
     /// Bindings whose value escapes by a **containment** facet — stored into a
     /// longer-lived region, or captured by a closure that itself escapes. The
@@ -354,17 +181,18 @@ impl EscapeInfo {
 ///   1. **Seed (return)** the atoms in a tail/return position — the top-level
 ///      expression's tail and every lambda body's tail, descended through the
 ///      region-transparent forms (`tail_sources`), *including interprocedurally*
-///      through an arg-returning callee (the arg-return summary; see "Interprocedural
-///      return transparency" in the module doc).
+///      through an arg-returning callee (the arg-return summary;
+///      docs/impl/escape.md).
 ///   2. **Seed (store)** the atoms stored into a longer-lived region — the operands
 ///      the solver records as `cross_region_refs` sources. Two sources: the
 ///      allocating intrinsics (`collect_flow`'s `Intrinsic` arm — `%pair` every
 ///      arg, `%array-push` arg 1, `%put` arg 2) and **native calls that declare a
 ///      store** (`collect_flow`'s `Call` arm, keyed on the callee's `RegionEffect`
-///      from `call_class`): `Stores{args}` seeds those args, `Sends{args}` seeds
-///      them on the fiber facet (a seam-counted frontier crossing, not an edge
-///      source), `Mixed`/`Unknown` seeds every arg (the solver's mutual clique),
-///      and `Fresh`/`Immediate`/`PassThrough`/`Funnel` seed nothing. This is how
+///      from `call_class`): `Stores{args}` seeds those args, `Sends{args}` and
+///      `Delivers{args}` seed them on the fiber facet (a seam-counted frontier
+///      crossing, not an edge source), `Mixed`/`Unknown` seeds every arg (the
+///      solver's mutual clique), and `Fresh`/`Immediate`/`PassThrough`/`Funnel`/
+///      `Opaque` seed nothing. This is how
 ///      `chan/send` (`Sends{[1]}`) marks its message escaping while `fiber/new`
 ///      (`Fresh` — the closure rides the fresh fiber result) and `chan/recv`
 ///      (`Fresh`) do not.
@@ -376,13 +204,13 @@ impl EscapeInfo {
 ///      SetCell) and capture edges (an escaping lambda pulls in every binding it
 ///      captures — `lambda_captures`). The **capture facet has no seed step**: a
 ///      value escapes via capture only here, pulled in transitively once a frontier
-///      seed marks its capturing closure escaping (precision-point-3, flow-true).
+///      seed marks its capturing closure escaping.
 ///
 /// The seed positions mirror the solver's value-flow walk (so the projection lines
 /// up with the regions the lowerer emits): the binding-definition edges parallel
 /// `binding_source_regions` copying an init's regions, and the store seeds parallel
 /// the `cross_region_refs` edges recorded at the same intrinsics/native calls. The
-/// facets and their precision characteristics are documented in the module doc.
+/// facets and their precision characteristics are documented in docs/impl/escape.md.
 pub fn analyze_escape(
     hir: &Hir,
     arena: &BindingArena,
@@ -409,7 +237,7 @@ pub fn analyze_escape(
     // Interprocedural return transparency: which fixed-param indices each
     // inlinable callee returns (the arg-return summary). `tail_sources` reads it
     // to descend through an arg-returning tail call, mirroring the solver's
-    // inline (see the module doc).
+    // inline.
     let arg_return = compute_arg_return(hir, arena);
     let ctx = TailCtx {
         arena,
@@ -495,7 +323,7 @@ pub fn analyze_escape(
     // Fiber-frontier bindings: the directly emitted/sent binding seeds. No backward
     // propagation — the solver folds a binding's aliases into its
     // `binding_source_regions`, so projecting the direct seed already names the
-    // crossing region (matching the former region-level `emit`/`send` seeds).
+    // crossing region.
     for a in &fiber_seeds {
         if let Atom::Binding(b) = a {
             info.fiber_frontier_bindings.insert(*b);

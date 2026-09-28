@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+// audited: 2026-09-28
 //! Each RegionEffect variant, held to the arg-clique edges it should and
 //! should not produce.
 //!
@@ -6,7 +6,7 @@
 
 use super::*;
 
-// ── native region effects (docs/impl/region/effects.md "Native region effects") ──
+// ── native region effects (docs/impl/region/effects.md) ──
 //
 // A primitive's declared `RegionEffect` keys the opaque-call arg clique:
 // Immediate/Fresh/PassThrough natives store no argument, so a call to one
@@ -16,7 +16,7 @@ use super::*;
 // compile-time `IncrefRegion` balanced only by the target's free-time
 // cascade IF the store actually happens — for a never-storing native the
 // incref never balances (two leaked regions per call;
-// tests/elle/region-native-effect-clique-leak.lisp).
+// tests/impl/region-native-effect-clique-leak.lisp).
 
 #[test]
 fn effect_immediate_call_emits_no_arg_clique() {
@@ -63,8 +63,8 @@ fn effect_mixed_call_keeps_arg_clique() {
 /// carries. `k` here has one per arm of its `if`, and the two are alternatives
 /// for the single value `git` receives — never two values one could store into
 /// the other — so an edge between them would be an `IncrefRegion` no free cascade
-/// balances (docs/impl/region/effects.md § "What the solver derives"; the rate is
-/// pinned by tests/elle/region-native-effect-clique-leak.lisp).
+/// balances (docs/impl/region/effects.md; the rate is pinned by
+/// tests/impl/region-native-effect-clique-leak.lisp).
 ///
 /// The declarant must be one that is genuinely `Mixed`, or the test would assert
 /// nothing about the clique loop: `git` caches compiled SPIR-V on its argument's
@@ -103,9 +103,9 @@ fn effect_delivers_call_emits_no_arg_clique() {
     // install that outlives the call, a transient handover the resume consumes
     // otherwise. So the call records NO may-store edge, exactly as `Funnel` does for
     // the mutable-store funnel; a compile-time incref would never balance
-    // (tests/elle/region-fiber-install-clique-leak.lisp). Uses the REAL
-    // classification, so a regression that re-declares an installer `Mixed` fails
-    // here as well as on the rate.
+    // (tests/impl/region-fiber-install-clique-leak.lisp). Uses the REAL
+    // classification, so an installer re-declared `Mixed` fails here as well as on
+    // the rate.
     let (hir, arena, _symbols, info) = analyze_with_class("(fiber/resume \"a\" \"b\")");
     let calls = find_calls_to_primitive(&hir, "fiber/resume", &arena);
     assert_eq!(calls.len(), 1, "expected one (fiber/resume ...) call");
@@ -138,6 +138,7 @@ fn effect_unknown_call_keeps_arg_clique() {
         edges
     );
 }
+
 #[test]
 fn effect_fresh_call_emits_no_arg_clique() {
     // Fresh: the result is freshly allocated, no argument is stored —
@@ -202,6 +203,7 @@ fn effect_stores_call_emits_directed_edges_only() {
         r_a.0, r_b.0, r_c.0
     );
 }
+
 #[test]
 fn effect_sends_call_emits_no_arg_clique() {
     // `Sends{args}` is seam-counted, exactly like `Delivers`: the send body
@@ -211,8 +213,8 @@ fn effect_sends_call_emits_no_arg_clique() {
     // compile-time edge is doubly wrong here: it double-counts against the
     // receive's single release where its region pair is nameable, and it silently
     // fails to fire where the channel is an upvalue or module-level binding (no
-    // pair to key the incref on) — the owned-parameter message UAF
-    // (tests/elle/region-chan-send-owned-param-uaf.lisp). The fiber-frontier
+    // pair to key the incref on), a use-after-free of an owned-parameter message
+    // (tests/impl/region-chan-send-owned-param-uaf.lisp). The fiber-frontier
     // *escape* of a `Sends` message is escape's judgment, not a solver-recorded
     // seed — pinned in the escape tests (`native_store_spec`, the real
     // `chan/send`). Same shape and harness as
@@ -244,7 +246,7 @@ fn hard_edge_sites_marks_native_uncounted_store_sites() {
     // `git` is declared `Mixed` (it caches compiled SPIR-V on its closure argument's
     // template, a retention no compile-time seam records), so its clique edges are
     // HARD — the lowerer emits the incref value-based for a call-result source
-    // (docs/impl/region/effects.md "Hard edges: how a may-store edge is emitted"). Pins
+    // (docs/impl/region/effects.md). Pins
     // the inclusion side of the hard/soft split, the Mixed companion of
     // `hard_edge_sites_marks_declared_stores_sites`, through the REAL classification.
     let (hir, arena, _symbols, info) = analyze_with_class("(git \"a\" \"b\")");
@@ -273,6 +275,7 @@ fn hard_edge_sites_marks_declared_stores_sites() {
         "a declared Stores native call site must be a hard-edge site"
     );
 }
+
 #[test]
 fn userfn_call_site_records_no_arg_clique() {
     // `h` is a function-valued parameter — a genuinely opaque user fn
@@ -283,12 +286,11 @@ fn userfn_call_site_records_no_arg_clique() {
     // statically complete) or via a counted edge in its OWN compilation,
     // so a caller-side clique incref is pure redundancy that leaks one
     // region per alloc-region heap argument per call (pinned by
-    // region-userfn-clique-noleak.lisp). So a `None`-effect call records
+    // tests/impl/region-userfn-clique-noleak.lisp). So a `None`-effect call records
     // NO arg-clique edges at all — distinct from a Mixed/Unknown NATIVE,
     // which can store uncounted and keeps the full clique. The site is of
     // course also NOT a hard-edge site (only declared natives are).
-    // (docs/impl/region/effects.md "What the solver derives", the
-    // user-functions case.)
+    // (docs/impl/region/effects.md, the user-functions case.)
     let (hir, arena, _symbols, info) = analyze_with_class("((fn (h) (h \"a\" \"b\")) f)");
     let calls = find_calls_to_primitive(&hir, "h", &arena);
     assert_eq!(calls.len(), 1, "expected one (h ...) call");

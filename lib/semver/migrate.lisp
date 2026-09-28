@@ -1,11 +1,11 @@
-(elle/epoch 12)
-## audited: 2026-09-21
+(elle/epoch 13)
+## audited: 2026-09-28
 ## lib/semver/migrate.lisp — a module's shipped migration rules: read
 ## them, judge a major claim's coverage, and repair consumer sources.
 ##
 ## docs/semver.md owns the coverage gate and the migrate command,
-## docs/versioning.md the rule vocabulary; tests/elle/semver-check.lisp
-## and tests/elle/semver-migrate.lisp pin both ends.
+## docs/versioning.md the rule vocabulary; tests/lang/semver-check.lisp
+## and tests/lang/semver-migrate.lisp pin both ends.
 ##
 ## Usage:
 ##   (def mig ((import "std/semver/migrate")))

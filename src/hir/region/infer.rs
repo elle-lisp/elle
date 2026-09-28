@@ -1,4 +1,4 @@
-// audited: 2026-09-15
+// audited: 2026-09-28
 //! Tofte-Talpin region inference for functional HIR: the walk's state, and how
 //! it mints a region.
 //!
@@ -52,7 +52,7 @@ struct RegionInference {
     /// the init value's alloc reference must be dropped at the define off its own
     /// register, NOT routed through the cell slot (which a later reassignment has
     /// repointed). See `Lowerer::store_captured_cell_init` and
-    /// region-capture-cell-reassign-uaf.lisp.
+    /// tests/impl/region-capture-cell-reassign-loop-uaf.lisp.
     captured_reassigns: rustc_hash::FxHashSet<Binding>,
     /// Binding → (assign/set-cell sites, value regions stored) for an
     /// IN-LAMBDA (fn-local, `in_lambda_depth > 0`), non-capture binding that is
@@ -64,8 +64,7 @@ struct RegionInference {
     /// `lower_assign`'s incref-on-store; drop-on-overwrite releases the priors,
     /// the first overwrite releases the (decref-suppressed) init. Without this,
     /// the cell slot holds an UNCOUNTED reference yet still receives a scope-exit
-    /// `DecrefValueRegion`, one decref too many for the final value → the
-    /// fn-local mutable-reassign double-free (`fn/cfg … :mermaid`).
+    /// `DecrefValueRegion`, one decref too many for the final value.
     local_reassigns: HashMap<Binding, CellStores>,
     /// Loop parameter → the binding its init `Var` forwards from. Functionalization
     /// rewrites a `while` that assigns a binding into a `Loop` whose parameter is a
@@ -74,7 +73,7 @@ struct RegionInference {
     /// same source regions while holding ONE reference between them (a `Var` read
     /// mints nothing), which the reassign 1-slot gate's sole-held check must not
     /// read as two holders of one name — see `RegionHolders::with_aliases` and
-    /// docs/impl/region/bindings.md § "The gate". An entry is recorded only for an
+    /// docs/impl/region/bindings.md. An entry is recorded only for an
     /// init that is a bare `Var`; any other init expression is a real value the
     /// parameter does not merely carry forward.
     loop_forwarded_params: HashMap<Binding, Binding>,
@@ -111,8 +110,7 @@ struct RegionInference {
     /// the retain has to sit where the value is on the operand stack, just ahead
     /// of that store. A binding whose value arrives some other way — a
     /// parameter, a `Loop` parameter's forwarding init — has no entry, and the
-    /// gate keeps donate-or-refuse for it (docs/impl/region/bindings.md § "What
-    /// the cell donates it must hold alone; what it counts it need not"). The
+    /// gate keeps donate-or-refuse for it (docs/impl/region/bindings.md). The
     /// three arms that record here are exactly the three lowering sites that
     /// emit the retain. `None` records a binding bound by more than one binder
     /// (file-scope duplicate `def`s share a `Binding`): two stores would take
@@ -215,8 +213,8 @@ struct RegionInference {
     /// last read, so the post-pass extends each region's `decref_point` to
     /// the Destructure node (docs/impl/region/rules.md Rule 4). Without it, a
     /// destructure whose bindings are all unused anchors the value's
-    /// release at the inner read and the extraction reads freed pages (the
-    /// `&named`-param prologue UAF, region-named-param-uaf.lisp).
+    /// release at the inner read and the extraction reads freed pages
+    /// (tests/impl/region-named-param-uaf.lisp).
     destructure_sites: Vec<(HirId, Vec<Region>)>,
     /// BlockId → enclosing region at the point the block was entered.
     /// Reserved for tooling; the region walk does not read it.
@@ -225,8 +223,7 @@ struct RegionInference {
     /// walk order. A `break` TRANSFERS its value to the block — the block's
     /// value is its fall-through value OR any break's — so the `Block` arm
     /// unions these into its own result regions and clears the entry
-    /// (docs/impl/region/mechanism.md § "`break` transfers its value; it does
-    /// not consume it"). Without the union, a binding named to the block's
+    /// (docs/impl/region/anchors.md). Without the union, a binding named to the block's
     /// value holds NO region, the binding-chain `decref_point` extension never
     /// sees the broken value, and its release stays at the block's exit label —
     /// under every later read of the result. Drained at the `Block` node into
@@ -243,8 +240,7 @@ struct RegionInference {
     /// re-anchors every region whose `decref_point` falls in the window those
     /// breaks jump over — from the earliest break site to the exit label — onto
     /// the block, since a release emitted there never runs on the break path
-    /// (docs/impl/region/mechanism.md § "A release the break jumps over is not a
-    /// release").
+    /// (docs/impl/region/anchors.md).
     break_skip_blocks: Vec<(HirId, Vec<HirId>)>,
     /// `Block` node HirId → the regions every targeting `break` hands it. The
     /// dual of `return_sites`: a `Break` is a *transferring* node, so the
@@ -258,8 +254,7 @@ struct RegionInference {
     /// calls that REPLACE this frame instead of falling through. A tail call to a
     /// native pushes no frame and is absent here. The branch-arm release window
     /// declines any branch containing one, since its merge label is then not a
-    /// point every arm reaches (docs/impl/region/mechanism.md § "A release inside
-    /// one arm is not a release on the other arms").
+    /// point every arm reaches (docs/impl/region/window.md).
     frame_replacing_tail_calls: rustc_hash::FxHashSet<HirId>,
     /// Next region id
     next_region: u32,
@@ -387,8 +382,8 @@ impl RegionInference {
     /// the lowerer's `alloc_region`: for a body whose tail allocation is reached in
     /// a discarding caller context, the lowerer emits a discarded-result
     /// `DecrefValueRegion` INSIDE the closure body — the closure frees the value it
-    /// returns and the caller's release derefs freed memory (the stale-region-deref
-    /// UAF; tests/elle/region-loop-local-closure-tail-uaf.lisp). Reuse the
+    /// returns and the caller's release derefs freed memory
+    /// (tests/impl/region-loop-local-closure-tail-uaf.lisp). Reuse the
     /// structural region instead. Edge discovery — the re-walk's only purpose — is
     /// unaffected: edges bind to the value's real (structural) region. Mirrors
     /// `env_cell_placeholder`'s re-walk idempotency below. The structural walk

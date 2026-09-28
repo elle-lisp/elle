@@ -1,27 +1,28 @@
-(elle/epoch 12)
-## lib/sync.lisp — Concurrency primitives built on futex (park/notify)
+(elle/epoch 13)
+# audited: 2026-09-28
+## lib/sync.lisp — fiber-level locks, semaphores, condvars, barriers and queues, built on one futex.
+## docs/concurrency.md
 ##
 ## Loaded via: (def sync ((import "std/sync")))
 ## Usage:      (def lock (sync:make-lock))
 ##             (lock:acquire)
 ##             (lock:release)
 ##
-## All primitives are cooperative (fiber-level), not OS-level.
-## They use ev/futex-wait and ev/futex-wake from stdlib.
+## Every primitive is cooperative: a waiter parks its fiber, never the OS
+## thread, through the standard library's ev/futex-wait and ev/futex-wake.
 
 ## ── Layer 1: Futex ──────────────────────────────────────────────────
 
-## Futex identity must be unique across the WHOLE process, not just
-## within this module instance.  `(import ...)` returns a fresh module
-## each call, so a module-local counter restarts at 0 in every importer
-## — two independently-imported sync modules would then hand out
-## colliding keys, and since the scheduler's park-queue is process-global
-## (one key → one wait list), a wake on one futex would unpark a waiter
-## on the other (which re-checks its unchanged value and re-parks),
-## losing the intended wakeup.  `sys/unique` is a process-global
-## primitive counter, so keys are globally unique regardless of how many
-## times the module is imported — and unlike a gensym, an integer key
-## interns nothing into the symbol table (tests/elle/sync-keys.lisp).
+## A futex key must be unique across the whole process, not only within
+## this module instance. `(import ...)` returns a fresh module each call,
+## so a module-local counter would restart at 0 in every importer and
+## two sync modules would hand out the same keys. The scheduler's park
+## queue is process-global (one key, one wait list), so a wake on one
+## futex would then unpark a waiter on the other, which re-checks its
+## unchanged value and re-parks, and the intended wakeup is lost.
+## `sys/unique` is a process-global counter, so its keys stay unique
+## however often the module is imported. Unlike a gensym, an integer key
+## interns nothing into the symbol table (tests/impl/sync-keys.lisp).
 (defn make-futex [initial]
   "Low-level futex. Wraps a box with park/notify."
   (let [key (sys/unique)

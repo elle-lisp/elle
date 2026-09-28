@@ -1,5 +1,6 @@
-// audited: 2026-09-22
-//! A returned fn-local cell takes the same model an unreturned one takes, because the Return's mint is a reference of its own.
+// audited: 2026-09-28
+//! A returned fn-local cell takes the same model an unreturned one takes, because the
+//! Return's mint is a reference of its own.
 //!
 //! docs/impl/region/bindings.md
 
@@ -9,12 +10,10 @@ use super::*;
 /// the counted-init route: the phi copies the store's regions onto the binding's
 /// own source set, so the aliased overlap withholds the donation, the cell
 /// counts its heap init at the binder, and nothing is suppressed. Being read at
-/// the tail decides nothing, since the `Return`'s mint is a reference the
-/// callee did not hold a moment earlier (docs/impl/region/bindings.md
-/// § "Returned fn-local reassigned mutables"). The phi itself stays UNCOUNTED —
-/// a version hands the one reference along rather than claiming a second
-/// (docs/impl/region/reads.md § "A version of the container is not an alias of
-/// it").
+/// the tail decides nothing, since the `Return`'s mint is a reference the callee
+/// did not hold a moment earlier (docs/impl/region/bindings.md). The phi itself
+/// stays UNCOUNTED — a version hands the one reference along rather than
+/// claiming a second (docs/impl/region/reads.md).
 #[test]
 fn reassign_gate_counts_a_phi_carried_returned_value() {
     let (hir, _, info) = pipeline(
@@ -57,7 +56,7 @@ fn reassign_gate_counts_a_phi_carried_returned_value() {
 /// the one returned value; the unsuppressed baseline would emit a value-route
 /// decref for EACH at the `Return`, double-freeing the callee's single
 /// reference — the second frees the caller's minted reference before the
-/// caller's read (`region_capture_cell_string_accum_uaf`). Suppressing the
+/// caller's read (tests/impl/region-capture-cell-string-accum-uaf.lisp). Suppressing the
 /// binding's own region keeps the single assign-value decref (the callee's one
 /// release) and lets the `Return` mint carry ownership to the caller. Contrast
 /// `reassign_gate_counts_a_phi_carried_returned_value` (an `if`-shaped reassign
@@ -122,9 +121,8 @@ fn reassign_gate_splits_returned_loop_carried_region() {
 /// reference is the counted store's and claims nothing from anyone. So being
 /// returned decides nothing about the container half — and withholding it
 /// strands every value the loop displaces, one region per trip
-/// (docs/impl/region/bindings.md § "Returned fn-local reassigned mutables — the
-/// return claims the MINT's reference, not the cell's";
-/// `tests/elle/region-loop-acc-return.lisp` measures the strand).
+/// (docs/impl/region/bindings.md;
+/// tests/impl/region-loop-acc-return.lisp measures the strand).
 #[test]
 fn reassign_gate_counts_a_returned_loop_accumulator() {
     let (hir, info) = returned_loop_accumulator();
@@ -168,8 +166,7 @@ fn reassign_gate_counts_a_returned_loop_accumulator() {
 /// reference of its own from the store onward, and drops it at the content drop
 /// the same `Return` node carries, after the mint. Left extended, the one
 /// release names whatever the producer's ANF slot holds LAST, so every earlier
-/// value of a loop is stranded (docs/impl/region/bindings.md § "A `Return` is a
-/// reader of the cell's content").
+/// value of a loop is stranded (docs/impl/region/bindings.md).
 #[test]
 fn reassign_return_does_not_extend_a_cell_stored_value() {
     let (hir, info) = returned_loop_accumulator();

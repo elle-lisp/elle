@@ -1,8 +1,12 @@
+// audited: 2026-09-28
+//! The HIR child walks: `for_each_child` and its mutable twin visit a node's children in execution order.
+//!
+//! docs/impl/hir.md
+
 use super::*;
 
 impl Hir {
-    /// Iterate over the immediate child HIR nodes of this node.
-    /// Visit each child mutably, in the same order as `for_each_child`.
+    /// Visit each immediate child mutably, in the same order as `for_each_child`.
     pub(crate) fn for_each_child_mut(&mut self, mut f: impl FnMut(&mut Hir)) {
         match &mut self.kind {
             HirKind::Nil
@@ -49,10 +53,9 @@ impl Hir {
             // and splice paths — src/lir/lower/control/call.rs), and
             // `compute_order` derives the structural execution order every
             // liveness/region decision compares from this enumeration.
-            // Visiting func first releases a binding whose last read sits
-            // in func position at its earlier arg-position read — the
-            // nil-stamp mistarget pinned by
-            // tests/elle/region-call-func-position-reread.lisp.
+            // The counter-factual: visiting func first releases a binding
+            // whose last read sits in func position at its earlier
+            // arg-position read (tests/impl/region-call-func-position-reread.lisp).
             HirKind::Call { func, args, .. } => {
                 for a in args {
                     f(&mut a.expr);
@@ -117,10 +120,10 @@ impl Hir {
             // Visit the KEY before the VALUE, matching `lower_parameterize`'s
             // evaluation order (parameter expression first, then its value).
             // The key is a real evaluated sub-expression, so `compute_order`
-            // must rank it — skipping it left a binding whose last read is a
-            // parameterize key invisible to decref placement, reclaiming its
-            // slot before the parameterize read it (the `capture.rs:47`
-            // nil-cell panic, tests/elle/parameters.lisp).
+            // must rank it. The counter-factual: a binding whose last read is
+            // a parameterize key is invisible to decref placement, which
+            // reclaims its slot before the parameterize reads it
+            // (tests/lang/parameters.lisp).
             HirKind::Parameterize { bindings, body } => {
                 for (k, v) in bindings {
                     f(k);
@@ -137,7 +140,7 @@ impl Hir {
         }
     }
 
-    /// Visit each immediate child HIR node, read-only, in source order. Public
+    /// Visit each immediate child HIR node, read-only, in execution order. Public
     /// so out-of-crate analysis and tests can walk the tree the same way the
     /// compiler does — consistent with the already-public `Hir::{kind, id}`. The
     /// mutating twin (`for_each_child_mut`) stays crate-private: rewriting the HIR

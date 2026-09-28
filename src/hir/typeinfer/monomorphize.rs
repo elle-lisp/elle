@@ -1,7 +1,10 @@
-//! Container-dispatch wrapper monomorphization — collapse `(match (type-of coll)
-//! …)` through the call boundary when the container type is statically proven.
+// audited: 2026-09-28
+//! Container-dispatch wrapper monomorphization: collapse `(match (type-of coll) …)` through a call when the container type is proven.
 //!
-//! ## The shape and the leak it removes
+//! docs/impl/dissolution.md
+//! docs/impl/typeinfer.md
+//!
+//! ## The shape
 //!
 //! The collection-mutation wrappers (`push`, `put`, and the remove/add wrappers)
 //! are type-dispatch closures: `(match (type-of coll) :array (%put-array …) :@array
@@ -9,10 +12,9 @@
 //! to a monomorphic `%`-op. The container is referenced in every arm, so the region
 //! solver places its single owned-arg release in the textually-last arm — a block the
 //! executed path never reaches, so the moved-in container argument's region is never
-//! reclaimed (one leaked region per call — the dispatch-wrapper passthrough leak,
-//! pinned by the `native-tail-put-*` oracle controls). A hand-collapsed single-arm
-//! wrapper does NOT leak: with one arm
-//! the release lands on the executed path.
+//! reclaimed. A single-arm wrapper reclaims it: with one arm the release lands on the
+//! executed path. The `native-tail-put-*` rows of tests/impl/probe/stdlib.lisp
+//! measure the rate.
 //!
 //! ## What this pass does
 //!
@@ -28,7 +30,7 @@
 //! This is the function-boundary generalization of the `each`-macro dead-arm prune
 //! (`prune.rs`): there the dispatch is inlined by macro expansion and the dead arms
 //! removed in place; here the dispatch lives behind a call, and the whole call
-//! collapses to the live arm. It is behavior-preserving — the rewritten op is exactly
+//! collapses to the live arm. It preserves behavior: the rewritten op is exactly
 //! the arm the proven type would run, and its operand contract (`contract.rs`) is
 //! discharged by the same proof that selected it, so it is checked like any other
 //! call-position `%`-op immediately after.
@@ -59,9 +61,9 @@ use std::collections::HashMap;
 /// collapsing to the direct op. Every other store/remove op — including immutable
 /// `del` and the fresh-result mutable funnels `%bytes-push`/`%pop-string` —
 /// collapses on any container mutability. The exclusion is conservative, not
-/// forced: the raw op self-reclaims (`raw-del` reads 0), so lifting it is a
-/// separate, measurable step, gated on `del-wrapper`/`set-del-wrapper` staying at
-/// 0 in `tests/elle/oracle.lisp`.
+/// forced: the raw op self-reclaims (the `raw-del` row of
+/// tests/impl/probe/store.lisp reads 0, beside the `del-wrapper` and
+/// `set-del-wrapper` rows that measure the wrapper).
 fn is_mutable_container(ty: TyId) -> bool {
     matches!(
         ty,
@@ -89,127 +91,6 @@ struct Arm {
 struct Wrapper {
     arity: usize,
     arms: Vec<Arm>,
-}
-
-/// One arm of a wrapper summarized for the cross-unit registry: the container type
-/// it selects on and the monomorphic op it routes to, named by `SymbolId` rather
-/// than a `Binding`. A `Binding` is a per-arena index, meaningless in a later unit;
-/// the op's name and the container `TyId` (a well-known `TypeInterner` constant) are
-/// both stable, so the arm re-resolves against the consuming unit's own primitive
-/// bindings. The operand map (`Arm::arg_src`) is not carried — it was already proven
-/// to be the identity `0..arity` when the wrapper was collected, so the rewrite reuses
-/// the call's args in order.
-pub(crate) struct RegArm {
-    pub(crate) ty: TyId,
-    pub(crate) native_name: SymbolId,
-    /// This arm does not monomorphize cross-unit — it is a mutable in-place `del`
-    /// and stays on the wrapper's container compensation (see
-    /// `is_mutable_container`). Decided at record time because an arm's `ty` is
-    /// its fixed container type.
-    skip: bool,
-}
-
-/// A wrapper summarized by name for cross-unit reuse (see `RegArm`).
-pub(crate) struct RegWrapper {
-    pub(crate) arity: usize,
-    pub(crate) arms: Vec<RegArm>,
-}
-
-/// Per-instance persistent map of dispatch wrappers, keyed by wrapper NAME. Each
-/// unit's `monomorphize_dispatch_wrappers` records its locally-defined wrappers
-/// here (the stdlib's `push`/`put` land in it when `stdlib.lisp` compiles), and
-/// every later unit consults it, so a user→stdlib wrapper call monomorphizes
-/// exactly as an intra-unit one does — the F1b close, without a compensation gate.
-///
-/// This is compile-time-only state: the rewrite it drives leaves the direct op in
-/// the HIR, so nothing here reaches the runtime. It rides on `CompileCtx` (the
-/// per-instance compile context) precisely because it must outlive the single
-/// compile that defined the wrapper — never on any VM/region structure.
-#[derive(Default)]
-pub struct DispatchWrapperRegistry {
-    pub(crate) by_name: HashMap<SymbolId, RegWrapper>,
-}
-
-impl DispatchWrapperRegistry {
-    /// Record a locally-collected wrapper under its name. First definition wins,
-    /// so the stdlib's canonical wrapper is never clobbered by a later same-named
-    /// user binding, and re-recording across compiles is a cheap no-op.
-    fn record(&mut self, name: SymbolId, w: &Wrapper, arena: &BindingArena) {
-        self.by_name.entry(name).or_insert_with(|| RegWrapper {
-            arity: w.arity,
-            arms: w
-                .arms
-                .iter()
-                .map(|a| {
-                    let native_name = arena.get(a.native).name;
-                    let is_del = crate::primitives::registration::static_name(native_name)
-                        .is_some_and(|n| n.starts_with("%del"));
-                    RegArm {
-                        ty: a.ty,
-                        native_name,
-                        skip: is_mutable_container(a.ty) && is_del,
-                    }
-                })
-                .collect(),
-        });
-    }
-    /// Snapshot this registry for the stdlib disk cache. SymbolIds are
-    /// per-process; names travel instead, re-interned on load. `TyId` is a
-    /// well-known `TypeInterner` constant (stable across processes).
-    pub(crate) fn to_stored(&self, symbols: &crate::symbol::SymbolTable) -> StoredDispatchRegistry {
-        StoredDispatchRegistry {
-            by_name: self
-                .by_name
-                .iter()
-                .map(|(name, rw)| {
-                    (
-                        symbols.name(*name).unwrap_or("").to_string(),
-                        StoredRegWrapper {
-                            arity: rw.arity,
-                            arms: rw
-                                .arms
-                                .iter()
-                                .map(|a| StoredRegArm {
-                                    ty: a.ty.0,
-                                    native_name: symbols
-                                        .name(a.native_name)
-                                        .unwrap_or("")
-                                        .to_string(),
-                                    skip: a.skip,
-                                })
-                                .collect(),
-                        },
-                    )
-                })
-                .collect(),
-        }
-    }
-    /// Restore a registry snapshot into this one (used by the stdlib disk
-    /// cache load path; re-interns names in the loading process's table).
-    pub(crate) fn restore(
-        &mut self,
-        stored: StoredDispatchRegistry,
-        symbols: &mut crate::symbol::SymbolTable,
-    ) {
-        self.by_name.clear();
-        for (name, rw) in stored.by_name {
-            self.by_name.insert(
-                symbols.intern(&name),
-                RegWrapper {
-                    arity: rw.arity,
-                    arms: rw
-                        .arms
-                        .into_iter()
-                        .map(|a| RegArm {
-                            ty: TyId(a.ty),
-                            native_name: symbols.intern(&a.native_name),
-                            skip: a.skip,
-                        })
-                        .collect(),
-                },
-            );
-        }
-    }
 }
 
 /// Rewrite every container-dispatch wrapper call whose container argument's type is a
@@ -559,98 +440,9 @@ fn arg_type_id(arg: &Hir) -> HirId {
     unwrap_anf_let(arg).id
 }
 
+mod registry;
 #[cfg(test)]
-mod tests {
-    use crate::hir::arena::BindingArena;
-    use crate::hir::expr::{Hir, HirKind};
+mod tests;
 
-    /// Collect the name of every call callee (through the ANF/`Var` wrappers) in
-    /// the tree, so a test can assert which ops a source form lowered to.
-    fn callee_names(h: &Hir, arena: &BindingArena, out: &mut Vec<String>) {
-        if let HirKind::Call { func, .. } = &h.kind {
-            if let Some(b) = super::unwrap_callee_binding(func) {
-                if let Some(n) = crate::primitives::registration::static_name(arena.get(b).name) {
-                    out.push(n.to_string());
-                }
-            }
-        }
-        h.for_each_child(|c| callee_names(c, arena, out));
-    }
-
-    /// Cross-unit dispatch-wrapper monomorphization: a user call to the stdlib
-    /// `put` wrapper on a statically-proven `:struct` must collapse to the direct
-    /// `%put-struct` op — even though `put`'s definition lives in the stdlib
-    /// compile unit, not the caller's. This is the F1b close: no surviving wrapper
-    /// means no stranded owned-param container reference (the immutable residual),
-    /// with no compensation gate. Fails before the cross-unit wrapper registry
-    /// lands (the call stays a `put` wrapper call, leaking 1 region/op —
-    /// `oracle.lisp` `native-tail-put-struct`).
-    #[test]
-    fn cross_unit_put_on_proven_struct_monomorphizes() {
-        let mut rt = crate::runtime::Runtime::new(); // stdlib loaded
-        let (_vm, symbols, cctx) = rt.parts();
-        let (hir, arena) =
-            crate::pipeline::compile_file_to_fhir("(put {:a 1} :b 2)", symbols, cctx, "<test>")
-                .expect("compile");
-        let mut callees = Vec::new();
-        callee_names(&hir, &arena, &mut callees);
-        assert!(
-            callees.iter().any(|n| n == "%put-struct"),
-            "a `put` on a proven :struct must collapse to %put-struct; callees were {:?}",
-            callees,
-        );
-        assert!(
-            !callees.iter().any(|n| n == "put"),
-            "the polymorphic `put` wrapper call must be gone after monomorphization; \
-             callees were {:?}",
-            callees,
-        );
-    }
-
-    /// The store family beyond `put`: `push`/`add` on a proven immutable container
-    /// collapse cross-unit to their monomorphic op the same way, through the same
-    /// registry with no per-op change. Guards that the mechanism is generic over the
-    /// store wrappers, not special-cased to `put`.
-    #[test]
-    fn cross_unit_push_add_on_proven_immutable_monomorphize() {
-        let cases = [
-            ("(push [1 2] 3)", "%push-array", "push"),
-            ("(add (set 1 2) 3)", "%add-set", "add"),
-            ("(push \"ab\" \"c\")", "%string-push", "push"),
-        ];
-        for (src, want_op, wrapper) in cases {
-            let mut rt = crate::runtime::Runtime::new();
-            let (_vm, symbols, cctx) = rt.parts();
-            let (hir, arena) = crate::pipeline::compile_file_to_fhir(src, symbols, cctx, "<test>")
-                .expect("compile");
-            let mut callees = Vec::new();
-            callee_names(&hir, &arena, &mut callees);
-            assert!(
-                callees.iter().any(|n| n == want_op),
-                "{src} must collapse to {want_op}; callees were {callees:?}",
-            );
-            assert!(
-                !callees.iter().any(|n| n == wrapper),
-                "the `{wrapper}` wrapper call must be gone in {src}; callees were {callees:?}",
-            );
-        }
-    }
-}
-
-/// Serializable snapshot of [`DispatchWrapperRegistry`] for the stdlib disk
-/// cache. Names (not per-process `SymbolId`s) travel; re-interned on load.
-#[derive(serde::Serialize, serde::Deserialize, Default)]
-pub(crate) struct StoredDispatchRegistry {
-    pub(crate) by_name: Vec<(String, StoredRegWrapper)>,
-}
-#[derive(serde::Serialize, serde::Deserialize)]
-pub(crate) struct StoredRegWrapper {
-    pub(crate) arity: usize,
-    pub(crate) arms: Vec<StoredRegArm>,
-}
-#[derive(serde::Serialize, serde::Deserialize)]
-pub(crate) struct StoredRegArm {
-    pub(crate) ty: u32,
-    pub(crate) native_name: String,
-    pub(crate) skip: bool,
-}
+pub use registry::DispatchWrapperRegistry;
+pub(crate) use registry::StoredDispatchRegistry;

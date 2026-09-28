@@ -1,13 +1,17 @@
+// audited: 2026-09-28
+//! A named function's body reaches a fused loop by graft, from this compile unit
+//! or across one. A body the fragment cannot close stays a plain call.
+//!
+//! docs/impl/dissolution/inline.md
+
 use super::*;
 
-/// Named same-unit function inlining (docs/impl/dissolution.md § "Named
-/// same-unit functions"): a `map` whose function argument is a `Var` naming a
-/// top-level `(defn dbl …)` fuses just as an inline lambda does — the `map`
-/// dispatch is gone and `dbl`'s body is GRAFTED inline. The definition PERSISTS
-/// (it is copied, not moved), so its own `(fn …)` still stands — hence the body
-/// op `*` now appears TWICE (the surviving definition + the inlined copy) where
-/// before fusion it appeared once and the `map` call survived.
-
+/// A `map` whose function argument is a `Var` naming a top-level `(defn dbl …)`
+/// fuses just as an inline lambda does — the `map` dispatch is gone and `dbl`'s
+/// body is GRAFTED inline. The definition PERSISTS (it is copied, not moved), so
+/// its own `(fn …)` still stands — hence the body op `*` appears TWICE: the
+/// surviving definition plus the inlined copy. Unfused, it appears once and the
+/// `map` call survives.
 #[test]
 fn named_map_fn_inlines() {
     let (hir, arena, mut rt) = compile("(defn dbl [x] (* x 2)) (map dbl [1 2 3])");
@@ -36,8 +40,7 @@ fn named_map_fn_inlines() {
 /// A named 2-parameter combinator inlines into a fused fold: `(defn mul …)` used
 /// as `(fold mul 1 xs)` dissolves to the scalar-accumulator loop with `mul`'s
 /// body spliced in (so `*` appears twice — definition + inlined copy), and the
-/// `fold` dispatch is gone. The body op is `*`, not `+`: the loop scaffold's own
-/// `(+ i 1)` increment uses `+`, so `+` would not be a clean discriminator.
+/// `fold` dispatch is gone.
 #[test]
 fn named_fold_fn_inlines() {
     let (hir, arena, mut rt) = compile("(defn mul [a b] (* a b)) (fold mul 1 [1 2 3])");
@@ -130,8 +133,6 @@ fn named_fn_with_match_body_declines() {
 /// spliced bodies never collide in the region walk's per-id side tables — the
 /// hazard the graft's re-minting exists to prevent. `g`'s body op `*` appears
 /// THREE times (the definition plus two inlined copies) over one accumulator.
-/// (`*` is the clean discriminator, not `+`: the loop scaffold's own `(+ i 1)`
-/// increment also uses `+`.)
 #[test]
 fn named_let_body_fn_composition_fuses_to_one_loop() {
     let (hir, arena, mut rt) =
@@ -156,9 +157,9 @@ fn named_let_body_fn_composition_fuses_to_one_loop() {
 /// Safety: a `let`-bound local function that CAPTURES a free variable is not
 /// inlined. Its body names the scope the function was defined in — which the call
 /// site need not sit inside, so a graft could splice an out-of-scope reference.
-/// That is the one place the capture refusal still
-/// belongs; a call-site literal is spliced AT its own scope and keeps its captures
-/// (docs/impl/dissolution.md § "Captures"). The `map` call survives.
+/// That is the one place the capture refusal belongs; a call-site literal is
+/// spliced AT its own scope and keeps its captures (docs/impl/dissolution.md). The
+/// `map` call survives.
 #[test]
 fn named_capturing_local_fn_declines() {
     let (hir, arena, mut rt) = compile("(let [k 10] (let [g (fn [x] (+ x k))] (map g [1 2 3])))");
@@ -182,16 +183,15 @@ fn named_non_lambda_var_declines() {
     );
 }
 
-/// Cross-unit named-function inlining (docs/impl/dissolution.md § "Cross-unit
-/// named functions"): `dec` is a stdlib `(defn dec [x] (- x 1))` — its body
-/// lives in the `<stdlib>` compile unit, NOT this one. Carried across the
-/// compile-unit boundary through the persistent registry, `(map dec [1 2 3])`
-/// fuses: the `map` dispatch is gone and `dec`'s body op `-` is spliced into
-/// the loop. `-` is the clean discriminator (the loop scaffold uses only `<`
-/// and `+`) and appears exactly ONCE — unlike a same-unit named fn, the
-/// definition does NOT persist in this unit (it is the stdlib's), so there is
-/// no second, surviving copy. Fails before cross-unit inlining lands: `map`
-/// survives and no `-` appears at all (dec's body is not in this tree).
+/// Cross-unit named-function inlining: `dec` is a stdlib `(defn dec [x] (- x 1))`
+/// — its body lives in the `<stdlib>` compile unit, NOT this one. Carried across
+/// the compile-unit boundary through the persistent registry, `(map dec [1 2 3])`
+/// fuses: the `map` dispatch is gone and `dec`'s body op `-` is spliced into the
+/// loop. `-` is the clean discriminator (the scaffold compares with `<` and
+/// advances by the `%add` intrinsic) and appears exactly ONCE — unlike a
+/// same-unit named fn, the definition does NOT persist in this unit, so there is
+/// no second, surviving copy. Without the registry, `map` survives and no `-`
+/// appears at all, `dec`'s body not being in this tree.
 #[test]
 fn named_map_cross_unit_stdlib_fn_inlines() {
     let (hir, arena, mut rt) = compile("(map dec [1 2 3])");
@@ -219,8 +219,8 @@ fn named_map_cross_unit_stdlib_fn_inlines() {
 }
 
 /// Safety: a stdlib fn whose body does not close into a fragment is not inlined
-/// cross-unit either — one gate serves both paths. `distinct` has a `letrec`
-/// body, which a fragment cannot represent, so it is never recorded and
+/// cross-unit either — one gate serves both paths. `distinct`'s body holds a
+/// `letrec`, which a fragment cannot represent, so it is never recorded and
 /// `(map distinct …)` stays a plain `map` call.
 #[test]
 fn cross_unit_non_inlineable_stdlib_fn_declines() {

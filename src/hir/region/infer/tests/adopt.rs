@@ -1,31 +1,37 @@
-// ── ownership inference: adopt-edge emission (compute_adopt_edges, step 4) ──────
-//
-// `region::infer::ownership::compute_adopt_edges` is the map the lowerer consumes: for each
-// externally-unique Owned subtree (the lifetime obligation + no merge overlap), it
-// emits one `AdoptRegion(owner, member)` per non-root member. A `%`-store is an opaque
-// `Funnel` native call recording NO `cross_region_refs` edge — its containment reaches
-// the walk as site-keyed funnel-recovered `containment_edges`, and the store adopt is
-// keyed at that funnel CALL site (region/adopt.md § The funnel adopt); a capture member
-// is keyed at its closure's Lambda. Each member is adopted by its **actual parent**:
-// the root when a direct `member → root` edge exists (a flat star, the common case — an
-// interior member↔member cycle among root's direct children rides along, reclaimed by
-// the root's subtree drop with no adopt of its own), else the single interior container
-// that holds it (multi-level nesting `root ⊇ a ⊇ b`: `a` adopts `b`, the root adopts
-// `a`, and the root's recursive subtree drop frees the whole chain). A member with no
-// containment edge naming an owner, or with two-or-more non-root containers and no root
-// edge (an ambiguous single owner), refuses the whole subtree to Shared (the
-// always-legal baseline). These pins are written from that definition.
-//
-// One submodule per question the map has to answer:
-//
-// - `structural` — the lifetime obligation, decided by post-dominance over the scope
-//   tree rather than by counting.
-// - `subtrees` — which members a subtree contains: a `Fresh` native's embed
-//   declaration, and store + capture + deep nesting together.
-// - `captures` — what a closure may adopt: the suppress ⊆ adopt contract, the
-//   capture-cell clique, and the re-storable-cell gate.
-// - `cuts` — where a subtree stops: the activation-owner cut and the
-//   transferred-returned-subtree cut.
+// audited: 2026-09-28
+//! Pins adopt-edge emission: which Owned-subtree member each owner adopts, and where a
+//! subtree is refused to Shared.
+//!
+//! docs/impl/region/adopt.md
+//!
+//! `region::infer::ownership::compute_adopt_edges` is the map the lowerer consumes: for
+//! each externally-unique Owned subtree (the lifetime obligation + no merge overlap), it
+//! emits one `AdoptRegion(owner, member)` per non-root member. A `%`-store is an opaque
+//! `Funnel` native call recording NO `cross_region_refs` edge — its containment reaches
+//! the walk as site-keyed funnel-recovered `containment_edges`, and the store adopt is
+//! keyed at that funnel CALL site; a capture member is keyed at its closure's Lambda.
+//! Each member is adopted by its **actual parent**: the root when a direct `member →
+//! root` edge exists (a flat star, the common case — an interior member↔member cycle
+//! among root's direct children rides along, reclaimed by the root's subtree drop with no
+//! adopt of its own), else the single interior container that holds it (multi-level
+//! nesting `root ⊇ a ⊇ b`: `a` adopts `b`, the root adopts `a`, and the root's recursive
+//! subtree drop frees the whole chain). A member with no containment edge naming an
+//! owner, or with two-or-more non-root containers and no root edge (an ambiguous single
+//! owner), refuses the whole subtree to Shared (the always-legal baseline). These pins
+//! are written from that definition.
+//!
+//! One submodule per question the map has to answer:
+//!
+//! - `structural` — the lifetime obligation, decided by post-dominance over the scope
+//!   tree rather than by counting.
+//! - `embed` — a `Fresh` native's embed declaration, which keeps an embedded capture out
+//!   of the capturing closure's subtree.
+//! - `subtrees` — which members a subtree contains when store, capture and deep nesting
+//!   meet in one.
+//! - `captures` — what a closure may adopt: the suppress ⊆ adopt contract, the
+//!   capture-cell clique, and the re-storable-cell gate.
+//! - `cuts` — where a subtree stops: the activation-owner cut and the
+//!   transferred-returned-subtree cut.
 
 // Re-glob the parent's test imports so each submodule can `use super::*;` and
 // so `super::ownership` — the only `super::IDENT` a test body names — resolves
@@ -34,6 +40,7 @@ use super::*;
 
 mod captures;
 mod cuts;
+mod embed;
 mod structural;
 mod subtrees;
 

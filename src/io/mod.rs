@@ -1,5 +1,9 @@
-//! audited: 2026-09-23
-//! I/O subsystem: request types and backends.
+// audited: 2026-09-28
+//! The I/O subsystem's root: the backend trait, a completion and the region it builds
+//! its answer in.
+//!
+//! src/io/AGENTS.md
+//! docs/impl/io-inflight.md
 //!
 //! `IoBackend` is the async submission-and-completion model: `submit`
 //! enqueues a request; `poll`/`wait` harvest completions; `cancel`
@@ -25,7 +29,7 @@ pub(crate) mod sigfd;
 /// for the terminate (TERM/INT/QUIT/HUP), job-control (TSTP/TTIN/TTOU),
 /// and resume (CONT) sets; `SIG_IGN` for SIGPIPE; and
 /// `pthread_sigmask(SIG_BLOCK)` for the absorb set (USR1/USR2/CHLD/
-/// URG/WINCH/ALRM) on the main thread. See `docs/posix-signals.md`
+/// URG/WINCH/ALRM) on the main thread. See docs/posix-signals.md
 /// for the full disposition table.
 pub fn init_process_signals() {
     sigfd::init_process_signals();
@@ -51,6 +55,18 @@ pub(crate) fn os_error(context: &str) -> String {
     format!("{}: {}", context, std::io::Error::last_os_error())
 }
 
+/// How many grapheme clusters the longest valid UTF-8 prefix of `buf` holds.
+pub(crate) fn grapheme_count_in_valid_prefix(buf: &[u8], gen: crate::segment::Generation) -> usize {
+    let valid = match std::str::from_utf8(buf) {
+        Ok(s) => s,
+        Err(e) => {
+            let upto = e.valid_up_to();
+            unsafe { std::str::from_utf8_unchecked(&buf[..upto]) }
+        }
+    };
+    crate::segment::grapheme_count(valid, gen)
+}
+
 /// Byte offset where the Nth grapheme cluster ends in `buf` (treated
 /// as UTF-8).  Used by text-port `ReadExact` to count progress in
 /// graphemes — the unit Elle strings are measured in — instead of
@@ -68,17 +84,6 @@ pub(crate) fn os_error(context: &str) -> String {
 ///   bytes.  Mid-buffer invalid UTF-8 is conservatively treated the
 ///   same way (stop at the last valid prefix); in practice this never
 ///   fires for well-formed text.
-pub(crate) fn grapheme_count_in_valid_prefix(buf: &[u8], gen: crate::segment::Generation) -> usize {
-    let valid = match std::str::from_utf8(buf) {
-        Ok(s) => s,
-        Err(e) => {
-            let upto = e.valid_up_to();
-            unsafe { std::str::from_utf8_unchecked(&buf[..upto]) }
-        }
-    };
-    crate::segment::grapheme_count(valid, gen)
-}
-
 pub(crate) fn nth_grapheme_byte_end(
     buf: &[u8],
     n: usize,
@@ -320,16 +325,14 @@ impl Completion {
 
     /// Convert to an Elle struct: {:id n :value v :error nil} or {:id n :value nil :error e}.
     ///
-    /// Built through the REAPING CALL's own capability — `io/wait` / `io/reap`
-    /// collect these structs into the array they return, and both declare
-    /// `RegionEffect::Fresh`, so one region carries the whole result and the
-    /// caller's single `DecrefValueRegion` reclaims it (docs/impl/region/ctx.md
-    /// § "A helper reached from inside a call allocates through THAT call's
-    /// ctx"). The `:value`/`:error` payloads are the exception the edge
-    /// accounting exists for: the backend built them off this call, on the
-    /// requesting instance's heap (see [`completion_heap_ptr`]), so the struct
-    /// records a counted edge to each and the resumed fiber's own reference
-    /// carries it past this array's demise.
+    /// Built through the REAPING CALL's own capability — `io/wait` / `io/reap` collect
+    /// these structs into the array they return, and both declare
+    /// `RegionEffect::Fresh`, so one region carries the whole result and the caller's
+    /// single `DecrefValueRegion` reclaims it (docs/impl/region/ctx.md). The
+    /// `:value`/`:error` payloads are the exception the edge accounting exists for: the
+    /// backend built them off this call, on the requesting instance's heap (see
+    /// [`completion_heap_ptr`]), so the struct records a counted edge to each and the
+    /// resumed fiber's own reference carries it past this array's demise.
     ///
     /// That edge is also what the completion hands its own reference over TO,
     /// which is why this consumes the completion and releases afterwards: the
@@ -375,11 +378,10 @@ pub(crate) trait IoBackend {
     /// ones its unreaped completions built. Idempotent and a no-op once nothing
     /// is pending. The default is a no-op for a backend that has neither.
     ///
-    /// The backend's own `Drop` runs this, but a heap that STRANDS a backend —
-    /// one the program never let go of — must run it BEFORE the region sweep.
-    /// `FiberHeap::quiesce_io_backends` is that caller, and the order is the
-    /// argument: docs/impl/io-inflight.md § "A hold is let go while its store is
-    /// still there". Canonical reference `tests/elle/posix.lisp` under
+    /// The backend's own `Drop` runs this, but a heap that STRANDS a backend — one the
+    /// program never let go of — must run it BEFORE the region sweep.
+    /// `FiberHeap::quiesce_io_backends` is that caller, and the order is the argument:
+    /// docs/impl/io-inflight.md. Canonical reference `tests/lang/posix.lisp` under
     /// `--wasm=full`.
     fn quiesce(&self) {}
 

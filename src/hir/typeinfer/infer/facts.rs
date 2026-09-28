@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-28
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
 //! The declared floor, and the guard-derived narrowing facts a branching form
@@ -13,7 +13,7 @@ use super::super::*;
 /// meeting there would erase a proof that owes nothing to a call site: a guard
 /// holds in the branch it governs, and a declaration holds through the body,
 /// whether or not this unit calls the enclosing function
-/// (docs/impl/typeinfer.md § "Bottom is not a proof").
+/// (docs/impl/typeinfer.md).
 ///
 /// A Bottom the meet PRODUCES is the opposite reading — the accumulated type
 /// and the fact are disjoint, so no value reaches the site the fact governs —
@@ -34,12 +34,12 @@ fn refine(interner: &TypeInterner, accumulated: TyId, fact: TyId) -> TyId {
 /// The declaration floors the binding at Number — callers may refine it to
 /// Int/Float, never widen past the declared contract — which is what discharges a
 /// `%`-intrinsic's operand contract in the declaring function's body
-/// (docs/intrinsics.md § "What counts as proof").
+/// (docs/intrinsics.md).
 ///
 /// The floor is applied wherever a declared binding is BOUND: at lambda entry, at
 /// the call-site parameter join, and at a `let` init — the last being the form a
 /// spliced kernel parameter takes once HOF fusion has dissolved its lambda
-/// (docs/impl/dissolution.md § "Raw `%`-intrinsic bodies"). It is deliberately NOT
+/// (docs/impl/dissolution/inline.md). It is deliberately NOT
 /// applied at an `assign`: a mutated binding has flow the per-pass recomputation
 /// cannot see, so it never receives proofs.
 pub(crate) fn declared_floor(

@@ -1,105 +1,31 @@
-//! HOF-chain loop fusion — the first closure dissolution (docs/impl/dissolution.md).
+// audited: 2026-09-28
+//! HOF-chain loop fusion: a higher-order call over a proven array becomes one loop
+//! with its function's body spliced in.
 //!
-//! At a call `(map f xs)` / `(filter p xs)` where `xs` is a statically-proven
-//! immutable array and the lambda is a non-capturing single-parameter one written
-//! at the call site, this rewrites the cross-unit stdlib dispatch to the
-//! index-walk loop that op's own array arm runs (`src/stdlib.lisp`) — but with the
-//! lambda body **spliced inline** rather than called through a closure value. The
-//! closure ceases to exist: no per-element closure allocation, no indirect call.
-//! `map` pushes each transform's result; `map-indexed` does the same with the walk's
-//! induction variable bound beside the element (`(f i elem)`); `filter` pushes the
-//! element itself under
-//! an `if` guard; `take-while` pushes it under a guard whose rejecting side ends
-//! the run, `drop-while` under the complementary flag, which its rejecting side
-//! clears to open the rest of the pipeline, and `mapcat` pushes every element of the
-//! array its function returns, walked by a second loop. A chain's optional outermost
-//! **terminal** is a scalar op:
-//! `fold`/`reduce` (`(fold f init xs)`, `f` called `(f acc elem)`) threads an
-//! accumulator seeded by `init` one left-fold step per element, `count`
-//! (`(count pred xs)`) tallies the elements its predicate admits, and each of the
-//! four short-circuiting searches `any?`/`all?`/`find`/`find-index` writes the
-//! answer its first deciding element settles and clears the sentinel its loop
-//! condition reads, so no later element is fetched — so there is no
-//! `@array` and no `freeze`, and the result is the accumulator's final value. A
-//! composition —
-//! `(map g (map f xs))`, `(filter q (filter p xs))`, any mix like `(map f (filter
-//! p xs))`, or a terminal over a map/filter prefix like `(fold f init (map g xs))` —
-//! fuses to a **single** loop through one unified transform/guard pipeline
-//! (`build_loop`/`Build::element`): each `map`/`filter` op is a *stage* (a `map`
-//! transforms the threaded value; a `filter` guards it), the stages nest in
-//! application order, and the base case is the terminal (a `push` for a collect, a
-//! fold step for a fold, an increment for a count). The intermediate array any inner
-//! op would have allocated never exists. `map`-only and `filter`-only chains are just
-//! the all-transform and all-guard ends of the collect pipeline; a fold reuses the
-//! same stages with a scalar terminal — the map-reduce shape, no array at all — and a
-//! count is that same shape with its predicate appended as the pipeline's last guard.
-//! A search is a count's shape again, appending the guard whichever way round its
-//! answer is decided, and a `take-while` is a guard whose rejecting side ends the
-//! run. Both carry an early exit, and the rule for where it is read is the same:
-//! the chain's INNERMOST op may end the walk — nothing runs before it, so no
-//! per-element work goes unrun — and its sentinel is the loop condition's. Every
-//! other early exit gates its own stage while the walk stays exhaustive. A
-//! `drop-while` carries no early exit at all: its flag opens the pipeline instead of
-//! closing the walk, so the loop condition stays the bare range test whatever the
-//! chain around it looks like. A `map-indexed` carries none either, and needs no
-//! survivor count for its position: every stage that renumbers is one that shortens
-//! the walk, and the emptiness rule (`Hof::preserves_length`) already refuses each
-//! one inner to an untyped array arm, of which `map-indexed` is one. A `mapcat`
-//! threads a whole RUN of values on where every other stage threads exactly one: its
-//! element statement carries a SECOND walk over the collection its function returns,
-//! with the rest of the pipeline spliced inside it, so each stage outer to it runs
-//! once per spliced element — which is what the flat collection the stdlib op builds
-//! gives them.
+//! docs/impl/dissolution.md
+//! docs/impl/dissolution/inline.md
 //!
-//! Every counter the emitted loop owns advances by the raw `%add` opcode
-//! (`Build::advance`), never the stdlib `+`, whose rest-list and `letrec` walker
-//! would re-mint per element the very closure this pass dissolves.
+//! A chain of pipeline stages (`map`, `map-indexed`, `filter`, `take-while`,
+//! `drop-while`, `mapcat`) under an optional scalar terminal (`fold`/`reduce`,
+//! `count`, `any?`, `all?`, `find`, `find-index`), over one proven base, fuses to
+//! a single loop. The loop is *surface* HIR — plain `while`/`push`/`freeze` — and
+//! the pass runs in `regularize` before `functionalize`, so every later pass
+//! lowers it exactly as it lowers the stdlib op's own body. The pass never builds
+//! a `loop`/`recur` or a capture cell by hand.
 //!
-//! ## Why this shape, here
+//! A function argument is a call-site lambda literal, which the rewrite moves and
+//! which may capture when its op is alone in the chain (`captures_locals`), or a
+//! named function whose body a fragment carries: this unit's, by binding, or an
+//! earlier unit's, by name through the registry. A chain of two or more ops
+//! interleaves its functions' calls, so each must pass `reorder_safe` and capture
+//! nothing. Only the chain's innermost op may end the walk early; every other
+//! early exit gates its own stage.
 //!
-//! The pass emits *surface* HIR — plain `while`/`push`/`freeze` (plus `if` for
-//! `filter`), the same shape the stdlib op's body has before functionalization —
-//! and runs in `regularize` (`src/hir/regularize.rs`) **before** `functionalize`.
-//! So every downstream pass consumes the fused loop exactly as it consumes the
-//! op's own body: the `while` becomes a `loop`/`recur`, `push` monomorphizes to
-//! `%push-array-mut` on the proven `@array` accumulator, region inference frees
-//! the accumulator by subtree drop. The pass never hand-builds a `loop`/`recur`
-//! or a capture cell.
-//!
-//! It mirrors the container-dispatch monomorphization (`monomorphize.rs`):
-//! recognize a proven-type call across the compile-unit boundary (the callee is
-//! `is_primitive` — a `bind_primitives` stdlib export — and named `map`/`map-indexed`/
-//! `filter`/
-//! `take-while`/`drop-while`/`mapcat`/`fold`/`reduce`/`count`/`any?`/`all?`/`find`/`find-index`; a user redefinition
-//! shadows it with a non-primitive binding and is left alone) and collapse it to the
-//! direct form the proof selects.
-//!
-//! ## Legality
-//!
-//! Fusion preserves the program's value. A single op also preserves the exact
-//! per-element evaluation order (the loop applies the lambda left to right,
-//! identically to the stdlib op), so it needs no purity gate. A **composition**
-//! interleaves the per-element work (`f x0; g …; f x1; g …`) rather than running
-//! all of the first op then all of the second — a reorder observable through two
-//! channels, so each lambda in a chain of length ≥ 2 must have neither. It must be
-//! free of **sequencing effects** (`reorder_safe`): no yield/I/O/emit/FFI/halt.
-//! `SIG_ERROR` is permitted; see `reorder_safe`. And it must be **non-capturing**
-//! (`captures_locals`): a captured binding is state two bodies can share with no
-//! signal to gate it. A lone op interleaves nothing and is asked neither question,
-//! which is why a capturing literal fuses there — its body is spliced AT the call
-//! site, so its free variables are in scope with no rename. An early exit would go
-//! further than reordering if it
-//! cut the walk short with a stage inner to it — leaving that stage's work unrun on
-//! every element past the decision — so only the chain's innermost op ends the
-//! walk; the others stop their own stage while the walk stays exhaustive.
-//!
-//! A body may hold a raw call-position `%`-intrinsic only under the function's own
-//! `(numeric!)` declaration. That declaration floors the parameters at Number —
-//! the fact that discharges the intrinsic's operand contract — and it is recorded
-//! on the parameter BINDINGS (`BindingInner::declared_numeric`), so it travels with
-//! the parameter the splice turns into a loop local and the site proves in the loop
-//! exactly as it did in the function. Fusion therefore never changes whether a
-//! program compiles (docs/impl/dissolution.md § "Raw `%`-intrinsic bodies").
+//! A body may hold a call-position `%`-intrinsic only under its function's
+//! `(numeric!)` declaration, which floors the parameter BINDINGS
+//! (`BindingInner::declared_numeric`). The floor travels with the parameter the
+//! splice turns into a loop local, so fusion never changes whether a program
+//! compiles.
 
 use super::prune::concrete_init_keywords;
 use super::unwrap_callee_binding;
@@ -151,13 +77,13 @@ pub(crate) fn fuse_map_chains(
     // too, for the array proof a `mapcat` asks of its function.
     let bases = concrete_init_keywords(hir, arena);
     // Close this unit's inlineable functions into fragments: by `Binding` for a
-    // `Var` naming one here (docs/impl/dissolution.md § "Named same-unit
-    // functions"), and by NAME into the registry so later units can reach them
-    // (§ "Cross-unit named functions"). Done over the pre-rewrite tree, and BEFORE
-    // `Ops::resolve` below: during the `<stdlib>` compile the loop-scaffold
-    // primitives are not yet `is_primitive`, so `Ops::resolve` fails and fusion is
-    // inert here — but the stdlib is exactly where the `inc`/`dec` fragments that
-    // later units inline are defined, so the recording must not sit behind that gate.
+    // `Var` naming one here, and by NAME into the registry so later units can
+    // reach them (docs/impl/dissolution/inline.md). Done over the pre-rewrite
+    // tree, and BEFORE `Ops::resolve` below: during the `<stdlib>` compile the
+    // loop-scaffold primitives are not yet `is_primitive`, so `Ops::resolve` fails
+    // and fusion is inert here — but the stdlib is exactly where the `inc`/`dec`
+    // fragments that later units inline are defined, so the recording must not
+    // sit behind that gate.
     let mut collector = Collector::new(arena, &bases);
     collector.walk(hir, registry);
     let templates = collector.templates;
@@ -188,11 +114,11 @@ pub(crate) fn fuse_map_chains(
 /// Pre-order walk: try to fuse a HOF chain rooted at `hir` (consuming the whole
 /// chain, including its inner HOF calls); whether or not it fused, recurse into
 /// the resulting node's children (which fuses nested HOFs in the spliced lambda
-/// bodies or the base array's elements). A chain of any `map`/`filter` mix under
+/// bodies or the base array's elements). A chain of pipeline stages under
 /// an optional outermost scalar terminal, over the same proven base, fuses to one
 /// loop; the recursion still reaches HOFs nested inside a spliced lambda body or a
 /// declined chain's inner run (a chain declined by the reorder gate, say, whose
-/// inner map/filter run then fuses on its own).
+/// inner run then fuses on its own).
 fn rewrite(
     hir: &mut Hir,
     arena: &mut BindingArena,

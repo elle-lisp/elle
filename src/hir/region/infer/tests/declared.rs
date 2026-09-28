@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+// audited: 2026-09-28
 //! What each shipped primitive declares, held to what the solver then does —
 //! the real-primitive companions to the variant tests in effects.rs.
 //!
@@ -13,13 +13,12 @@ fn port_write_declares_immediate_no_arg_clique() {
     // declaration. `port/write` takes two heap args (port + data) but stores
     // neither — it writes the bytes to a file descriptor and yields an integer
     // byte count — so it is `Immediate` and its call records NO arg-clique
-    // edges. Under the prior `Mixed` declaration the mutual clique increfed
-    // both heap args' regions, and since nothing is stored the increfs never
-    // balanced: one leaked region per call for a freshly-materialized data arg
-    // (region-port-write-effect.lisp documents the runtime side). The yielding
-    // result side is oracle-exempt (a SIG_YIELD return is not a normal
-    // completion), so the declaration's clique effect is what guards the leak —
-    // a regression back to Mixed reintroduces it and goes RED here.
+    // edges. The counter-factual is a `Mixed` declaration: the mutual clique
+    // increfs both heap args' regions, and since nothing is stored the increfs
+    // never balance, one leaked region per call for a freshly-materialized data
+    // arg (tests/impl/region-port-write-effect.lisp holds the runtime side). The
+    // yielding result side is oracle-exempt (a SIG_YIELD return is not a normal
+    // completion), so this clique check is what guards the leak.
     let (hir, arena, _symbols, info) = analyze_with_class("(port/write \"a\" \"b\")");
     let calls = find_calls_to_primitive(&hir, "port/write", &arena);
     assert_eq!(calls.len(), 1, "expected one (port/write ...) call");
@@ -27,7 +26,7 @@ fn port_write_declares_immediate_no_arg_clique() {
     assert!(
         edges.is_empty(),
         "port/write declares Immediate, so its call must record no arg-clique \
-         edges; got {:?} (a regression to Mixed — the data-region leak)",
+         edges; got {:?} (a Mixed declaration — the data-region leak)",
         edges
     );
 }
@@ -39,10 +38,10 @@ fn udp_send_to_declares_immediate_no_arg_clique() {
     // the kernel and copies `addr` out to a Rust String — and the io completion
     // returns `Value::int(result_code)`. So it is `Immediate`: its call records
     // NO arg-clique edges. Under `Mixed` the full mutual clique (three pairs)
-    // increfed all three regions, never balanced (nothing stored) — a per-call
-    // leak. Yielding, so oracle-exempt; the declaration's clique effect is the
-    // guard. Sibling of `port_write_declares_immediate_no_arg_clique`, with a
-    // wider clique (the >2-heap-arg case). RED under a regression to Mixed.
+    // increfs all three regions and never balances (nothing stored) — a per-call
+    // leak. Yielding, so oracle-exempt; this clique check is the guard. Sibling
+    // of `port_write_declares_immediate_no_arg_clique`, with a wider clique (the
+    // >2-heap-arg case).
     let (hir, arena, _symbols, info) = analyze_with_class("(udp/send-to \"s\" \"d\" \"a\" 9000)");
     let calls = find_calls_to_primitive(&hir, "udp/send-to", &arena);
     assert_eq!(calls.len(), 1, "expected one (udp/send-to ...) call");
@@ -50,7 +49,7 @@ fn udp_send_to_declares_immediate_no_arg_clique() {
     assert!(
         edges.is_empty(),
         "udp/send-to declares Immediate, so its call must record no arg-clique \
-         edges; got {:?} (a regression to Mixed — the three-arg-clique leak)",
+         edges; got {:?} (a Mixed declaration — the three-arg-clique leak)",
         edges
     );
 }
@@ -63,10 +62,10 @@ fn subprocess_exec_declares_opaque_no_arg_clique() {
     // another, while returning an OPAQUE result minted on the scheduler heap (the
     // `subprocess`, in neither the call's own region nor an arg's). So
     // it is `Opaque`, not `Mixed`: it records NO arg-clique edges. Under `Mixed`
-    // the full mutual clique increfed every heap arg's region and never balanced
-    // (nothing is stored) — a per-call leak on a no-store primitive, exactly the
-    // gap `Opaque` closes (docs/impl/region/effects.md § Opaque: the clique is
-    // keyed on the store, not the result shape). RED under a regression to Mixed.
+    // the full mutual clique increfs every heap arg's region and never balances
+    // (nothing is stored) — a per-call leak on a no-store primitive, the gap
+    // `Opaque` closes: the clique is keyed on the store, not the result shape
+    // (docs/impl/region/effects.md).
     let (hir, arena, _symbols, info) =
         analyze_with_class("(subprocess/exec \"echo\" (list \"hi\"))");
     let calls = find_calls_to_primitive(&hir, "subprocess/exec", &arena);
@@ -75,7 +74,7 @@ fn subprocess_exec_declares_opaque_no_arg_clique() {
     assert!(
         edges.is_empty(),
         "subprocess/exec declares Opaque, so its call must record no arg-clique \
-         edges; got {:?} (a regression to Mixed — the no-store clique leak)",
+         edges; got {:?} (a Mixed declaration — the no-store clique leak)",
         edges
     );
 }
@@ -88,11 +87,10 @@ fn has_declares_opaque_no_arg_clique() {
     // is bounded regardless — the built-in `Collection:has?` reads and returns a bool,
     // and a user closure is ordinary Elle code, which stores only through the
     // runtime-counted mutable-store funnel. Unbounded result + no store is `Opaque`, so
-    // the call records NO arg-clique edges. Under `Mixed` the mutual clique increfed
-    // both heap args' regions and never balanced (nothing is stored) — two leaked
-    // regions per call (tests/elle/region-has-clique-leak.lisp). The sibling of
-    // `subprocess_exec_declares_opaque_no_arg_clique` on the trait-dispatch face; RED
-    // under a regression to Mixed.
+    // the call records NO arg-clique edges. Under `Mixed` the mutual clique increfs
+    // both heap args' regions and never balances (nothing is stored) — two leaked
+    // regions per call (tests/impl/region-has-clique-leak.lisp). The sibling of
+    // `subprocess_exec_declares_opaque_no_arg_clique` on the trait-dispatch face.
     let (hir, arena, _symbols, info) = analyze_with_class("(has? \"a\" \"b\")");
     let calls = find_calls_to_primitive(&hir, "has?", &arena);
     assert_eq!(calls.len(), 1, "expected one (has? ...) call");
@@ -100,7 +98,7 @@ fn has_declares_opaque_no_arg_clique() {
     assert!(
         edges.is_empty(),
         "has? declares Opaque, so its call must record no arg-clique edges; \
-         got {:?} (a regression to Mixed — the trait-dispatch clique leak)",
+         got {:?} (a Mixed declaration — the trait-dispatch clique leak)",
         edges
     );
     assert!(
@@ -116,8 +114,8 @@ fn fiber_graph_natives_declare_opaque_and_git_keeps_the_hard_edge() {
     // its argument; `fiber/propagate` returns SIG_PROPAGATE, which drives the VM to
     // WRITE its argument into that pair. Neither is a store: the free-time walk's
     // Fiber arm does not enumerate the child chain, so the field creates no holder
-    // of the region and can under-count nothing (docs/impl/region/effects.md
-    // § `Opaque`, "The child-chain WIRING is `Opaque` too"). The escape half is
+    // of the region and can under-count nothing (docs/impl/region/effects.md).
+    // The escape half is
     // `a_fiber_graph_write_does_not_seed_the_store_facet`.
     for name in ["fiber/child", "fiber/propagate"] {
         let (hir, arena, _symbols, info) = analyze_with_class(&format!("({name} \"f\")"));
@@ -126,7 +124,7 @@ fn fiber_graph_natives_declare_opaque_and_git_keeps_the_hard_edge() {
         assert!(
             !info.hard_edge_sites.contains(&calls[0]),
             "{name} declares Opaque — it stores nothing — so its call site must NOT \
-             be a hard-edge site (a regression to Mixed re-seeds the store facet on \
+             be a hard-edge site (a Mixed declaration re-seeds the store facet on \
              every fiber it names)"
         );
     }
@@ -152,10 +150,10 @@ fn import_declares_opaque_no_hard_edge() {
     // `import` copies its specifier out to a Rust `String` to resolve it and stores
     // no argument; the module value it hands back is produced by compiled code run
     // on the driving VM, so the RESULT is unbounded and nothing else is — the VM
-    // re-entry rule's answer, `Opaque` (docs/impl/region/effects.md § `Opaque`).
+    // re-entry rule's answer, `Opaque` (docs/impl/region/effects.md).
     // Single-heap-arg, so the clique is empty either way: `hard_edge_sites` and the
-    // store-facet seed (`import_does_not_seed_the_store_facet`) are what a
-    // regression to Mixed brings back. The result stays non-fresh — it lives in
+    // store-facet seed (`import_does_not_seed_the_store_facet`) are what a `Mixed`
+    // declaration brings back. The result stays non-fresh — it lives in
     // neither the call's own region nor the specifier's.
     let (hir, arena, _symbols, info) = analyze_with_class("(import \"std/nonexistent\")");
     let calls = find_calls_to_primitive(&hir, "import", &arena);
@@ -178,23 +176,22 @@ fn import_declares_opaque_no_hard_edge() {
 
 #[test]
 fn io_yield_pass_tightenings_drop_the_mixed_hard_edge() {
-    // The io / fiber pass (docs/impl/region/effects.md "Native region effects").
-    // Every primitive
-    // here yields (`SIG_YIELD|SIG_IO`) or returns a signal, so the result-side
+    // The io and fiber natives (docs/impl/region/effects.md). Every primitive here
+    // yields (`SIG_YIELD|SIG_IO`) or returns a signal, so the result-side
     // declaration ORACLE is exempt — it never panics on an over-claim. This
     // solver counterfactual is the guard instead:
     //
     //   * a tightened native must NOT be a `hard_edge_sites` member — only
-    //     Mixed/Unknown insert one (walkrest.rs's Mixed arm; region/effects.md
-    //     "What the solver derives"). Every call below is single-heap-arg, so the
+    //     Mixed/Unknown insert one (walkrest.rs's Mixed arm;
+    //     docs/impl/region/effects.md). Every call below is single-heap-arg, so the
     //     clique edge set is already empty under both Mixed and the tightened
     //     effect — `hard_edge_sites`, NOT `edges_at_site`, is what distinguishes
     //     them.
     //   * its call-result region appears in `fresh_result_regions` IFF declared
-    //     `Fresh` (walkrest.rs's Fresh arm seeds the Stage-6 Owned candidate).
+    //     `Fresh` (walkrest.rs's Fresh arm seeds the Owned candidate).
     //
-    // Both flip RED under a regression to `Mixed`: Mixed re-adds the hard edge
-    // and drops the fresh marking. (The ≥2-heap-arg leak declarants port/write and
+    // The counter-factual is a `Mixed` declaration: it re-adds the hard edge and
+    // drops the fresh marking. (The ≥2-heap-arg leak declarants port/write and
     // udp/send-to have their own edge-shape tests above.)
     use crate::primitives::def::RegionEffect;
     let cases: &[(&str, &str, RegionEffect)] = &[
@@ -287,7 +284,7 @@ fn io_yield_pass_tightenings_drop_the_mixed_hard_edge() {
         assert!(
             !info.hard_edge_sites.contains(&site),
             "{} is declared {:?}, so its call site must NOT be a hard-edge site — \
-             a regression to Mixed re-adds it (the spurious uncounted-store clique)",
+             a Mixed declaration re-adds it (the spurious uncounted-store clique)",
             prim,
             effect,
         );
@@ -300,8 +297,8 @@ fn io_yield_pass_tightenings_drop_the_mixed_hard_edge() {
             assert!(
                 is_fresh,
                 "{} is declared Fresh, so its call-result region r{} must be in \
-                 fresh_result_regions (the Stage-6 Owned candidate); a regression \
-                 to Mixed drops it",
+                 fresh_result_regions (the Owned candidate); a Mixed \
+                 declaration drops it",
                 prim, call_r.0,
             );
         } else {

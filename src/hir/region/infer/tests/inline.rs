@@ -1,3 +1,9 @@
+// audited: 2026-09-28
+//! Pins the naming of an inlined call's result: the call's own region, never the
+//! regions the callee's body minted.
+//!
+//! docs/impl/region/mechanism.md
+
 use super::*;
 use crate::value::SymbolId;
 
@@ -7,8 +13,8 @@ use crate::value::SymbolId;
 // record their edges at this call site. The regions that walk yields are the
 // CALLEE's — minted against the callee's own nodes, remapped per activation — so
 // they must not become the caller's naming for the result. See
-// docs/impl/region/mechanism.md § "A call's result is named by the call's own
-// region" and the end-to-end pin tests/elle/region-inline-result-naming.lisp.
+// docs/impl/region/mechanism.md and the end-to-end pin
+// tests/impl/region-inline-result-naming.lisp.
 
 /// The HirId of the first `Call` whose callee names `callee`, looking through the
 /// `DerefCell` wrapper functionalization puts around a `needs_capture` read.
@@ -68,7 +74,7 @@ fn an_inlined_call_result_is_named_by_the_call_node() {
 
 #[test]
 fn a_base_arms_result_is_released_in_the_base_arm() {
-    // The shape the naming leak bites: the recursive arm inlines the same body, so
+    // The shape the naming rule guards: the recursive arm inlines the same body, so
     // without the rule its result binding names the BASE arm's result region too —
     // and, being structurally later, takes that region's one release into an arm
     // mutually exclusive with the only path that mints it.
@@ -110,7 +116,7 @@ fn an_inlined_callee_keeps_its_rest_params_collected_region() {
     // still allocates, the callee still runs, and only `arena/region-count`
     // reads the difference — one region and one object per call, for every
     // `&named`/`&keys`/`&` callee this unit can resolve
-    // (tests/elle/region-inline-rest-param-leak.lisp).
+    // (tests/impl/region-inline-rest-param-leak.lisp).
     let (hir, arena, _symbols, info) = analyze_with_class("(let [k (fn (&named a) 42)] (k))");
     let p = find_binding_by_name(&hir, "__named_param", &arena).expect("the named param");
     let regions = info

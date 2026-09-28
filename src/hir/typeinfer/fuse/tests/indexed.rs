@@ -1,13 +1,10 @@
-use super::*;
+// audited: 2026-09-28
+//! The `map-indexed` stage fuses to a `map`'s push with the walk's index bound
+//! beside the element. It declines inner stages that change the walk's length.
+//!
+//! docs/impl/dissolution/stages.md
 
-/// Count the `and` nodes — the fused scaffold emits one only for a loop condition an
-/// early exit claims. A `map-indexed` carries none, so this is the discriminator that
-/// it never contends for the condition.
-fn count_ands(h: &Hir) -> usize {
-    let mut n = usize::from(matches!(h.kind, HirKind::And(_)));
-    h.for_each_child(|c| n += count_ands(c));
-    n
-}
+use super::*;
 
 /// A single `(map-indexed f xs)` dissolves to a `map`'s indexed push: the dispatch is
 /// gone, no closure survives (neither the function nor the self-recursive walker its
@@ -17,7 +14,7 @@ fn count_ands(h: &Hir) -> usize {
 ///
 /// The two `if`s are the whole emitted shape: the loop's, and the empty-base `()`
 /// arm's. `map-indexed` adds no guard and no sentinel, so a walk-ending `and` never
-/// appears, and the single `+` is the index walk's own — the position the function
+/// appears, and the single `%add` is the index walk's own — the position the function
 /// reads is that index, never a survivor count.
 #[test]
 fn single_map_indexed_dissolves_to_an_indexed_push() {
@@ -157,7 +154,7 @@ fn map_indexed_inner_to_an_untyped_arm_fuses() {
 }
 
 /// The complement, and the reason a `map-indexed`'s position is the base index: every
-/// stage that could RENUMBER what reaches it is a stage that SHORTENS the walk, and
+/// stage that could RENUMBER what reaches it is a stage that changes the walk's length, and
 /// the emptiness rule already refuses each one inner to an untyped array arm. So the
 /// chain declines whole and the inner op still fuses on the recursion — no survivor
 /// count is ever owed.
@@ -219,9 +216,9 @@ fn user_shadowed_map_indexed_is_not_fused() {
 }
 
 /// A capturing function fuses: the splice is the call site, so `k` is in scope
-/// beside the position and the element (docs/impl/dissolution.md § "Captures").
-/// Fails while the gate refuses a capture: the `map-indexed` call and the closure
-/// both survive.
+/// beside the position and the element (docs/impl/dissolution.md).
+/// A gate that refused captures would leave the `map-indexed` call and the closure
+/// standing.
 #[test]
 fn capturing_map_indexed_fn_fuses() {
     let (hir, arena, mut rt) = compile("(let [k 2] (map-indexed (fn [i x] (* k x)) [1 2 3]))");

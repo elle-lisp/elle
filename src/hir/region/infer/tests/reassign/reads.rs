@@ -1,13 +1,13 @@
-// audited: 2026-09-22
-//! What a whole-value read of a 1-slot container takes, through a branch, a begin wrapper, and an uncelled cell.
+// audited: 2026-09-28
+//! What a whole-value read of a 1-slot container takes, through a branch, a begin
+//! wrapper, and an uncelled cell.
 //!
 //! docs/impl/region/bindings.md
 
 use super::*;
 
 /// A whole-value read of an UNCELLED 1-slot container takes a counted reference,
-/// exactly as a read of the celled realization does (docs/impl/region/reads.md
-/// § "A whole-value read of a 1-slot container takes a counted reference"). The
+/// exactly as a read of the celled realization does (docs/impl/region/reads.md). The
 /// container releases what it held at every overwrite — here the compiler's own
 /// drop-on-overwrite rather than `capture_store_with_rebind` — so `keep` borrows
 /// a reference that dies at the first `(assign last …)`, and the release the
@@ -20,7 +20,7 @@ use super::*;
 /// region, which here is the CELL's own — a mutated slot, and no release route.
 ///
 /// The discriminator is the ordering. `reassign_gate_counts_an_aliased_init`
-/// above is the same program with the alias bound FIRST, so the alias allocates,
+/// (counted.rs) is the same program with the alias bound FIRST, so the alias allocates,
 /// its own untainted slot carries the release, and the counted-init route runs
 /// instead.
 #[test]
@@ -87,10 +87,9 @@ fn reassign_gate_counts_a_read_of_an_uncelled_cell() {
 }
 
 /// A BRANCH whose every arm is a whole-value read of a 1-slot container is a
-/// whole-value read (docs/impl/region/reads.md § "A branch is a read of
-/// whichever arms read"). What obliges the reader is the value it holds, not
-/// the syntax that selected it: `keep` names, on every path, a borrow out of a
-/// container that re-stores, and one `IncrefValueRegion` at the binder covers
+/// whole-value read (docs/impl/region/reads.md). What obliges the reader is the value
+/// it holds, not the syntax that selected it: `keep` names, on every path, a borrow out
+/// of a container that re-stores, and one `IncrefValueRegion` at the binder covers
 /// every arm because it names the runtime value.
 ///
 /// The discriminator against
@@ -100,7 +99,7 @@ fn reassign_gate_counts_a_read_of_an_uncelled_cell() {
 /// holder of the init region, so the container falls back to the counted-init
 /// route, whose release routes through the CELL's own slot — a mutated slot, and
 /// no release route, so the init strands per call
-/// (`tests/elle/region-cell-alias-branch.lisp`).
+/// (tests/impl/region-cell-alias-branch.lisp).
 #[test]
 fn reassign_gate_counts_a_branch_read_of_a_container() {
     let (hir, _, info) = pipeline(
@@ -154,11 +153,10 @@ fn reassign_gate_counts_a_branch_read_of_a_container() {
 
 /// A MIXED branch — one arm reading the container, one allocating — takes the
 /// counted read too, and pays for the allocating arm by KEEPING that arm's source
-/// regions (docs/impl/region/reads.md § "A branch is a read of whichever arms
-/// read"). The replacement is per-arm: the reader stops holding the container's
-/// regions, so the donation runs, while the allocating arm's region stays in the
-/// reader's set — it is the only thing extending that value's last use out to the
-/// binder's retain.
+/// regions (docs/impl/region/reads.md). The replacement is per-arm: the reader
+/// stops holding the container's regions, so the donation runs, while the
+/// allocating arm's region stays in the reader's set — it is the only thing
+/// extending that value's last use out to the binder's retain.
 #[test]
 fn reassign_gate_counts_a_mixed_branch_init() {
     let (hir, _, info) = pipeline(
@@ -233,8 +231,7 @@ fn reassign_gate_counts_a_mixed_branch_init() {
 
 /// A statement wrapper around the read is descended too: a `Begin`'s value is
 /// its tail's, so the reader ends up holding what the tail read and takes the
-/// same counted reference (docs/impl/region/reads.md § "A branch is a read of
-/// whichever arms read").
+/// same counted reference (docs/impl/region/reads.md).
 #[test]
 fn reassign_gate_counts_a_begin_wrapped_read() {
     let (hir, _, info) = pipeline(
@@ -271,7 +268,7 @@ fn reassign_gate_counts_a_begin_wrapped_read() {
     );
 }
 
-/// Counterfactual against over-admission: a branch NO arm of which reads a
+/// The counter-factual against over-admission: a branch NO arm of which reads a
 /// container is a read of nothing, so the reader keeps every source region it
 /// had and the container falls back to counting its init. Nothing here obliges a
 /// retain — neither arm's value can be freed by the container's next overwrite.
