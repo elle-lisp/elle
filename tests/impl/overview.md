@@ -1,6 +1,6 @@
 # The implementation suite
 
-<!-- audited: 2026-09-26 -->
+<!-- audited: 2026-09-27 -->
 
 Elle programs that check this implementation: its gauges, its tiers, its crashes
 and its mechanisms, each run on the rig.
@@ -71,7 +71,9 @@ their instruments.
 
 `make smoke-impl` runs every file here as its own child of `elle test --host
 elle-rig`, so each verdict lands in the session store. It then runs the
-suites once more under each profile the pass names. A new file is picked up
-by being here; there is nothing to register.
+suites once more under each profile the pass names. `make smoke-pool` runs the
+files here again on the thread-pool build's rig. A file that reads a resource
+only one build has gates itself on the others. A new file is picked up by being
+here; there is nothing to register.
 
 One file at a time, `elle-rig tests/impl/NAME.lisp` runs it with its sidecar.

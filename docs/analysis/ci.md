@@ -20,7 +20,7 @@ renamed heading breaks the site generator.
 | No-JIT Build Tests | ubuntu | `smoke-nojit` — the language suite on the interpreter alone | — |
 | Boot Image Tests | ubuntu | `smoke-boot-image` — the language suite booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, then property tests | 16 |
-| Thread-Pool I/O Tests | ubuntu | `smoke-pool` — the language suite on a build without `uring` | — |
+| Thread-Pool I/O Tests | ubuntu | `smoke-pool` — both suites on a build without `uring` and its rig | — |
 | MLIR Tests | ubuntu | `doctest`, `smoke-mlir` — the language suite on the MLIR build | — |
 | WASM Build | ubuntu | `check-wasm` — the feature compiles, the tier boots | — |
 | Plugin Tests | ubuntu | Builds the `plugins/` submodule, asserts its artifacts, runs its corpus | — |
@@ -49,8 +49,11 @@ another has found a defect in the build that fails.
 
 The implementation suite runs where the default build runs: `Default Build
 Tests`, `AArch64 Smoke` and `macOS Smoke` each build the rig beside `elle`, and
-`make smoke` runs both suites. `tests/integration/workflows.rs` is the standing
-check that every implementation keeps its job.
+`make smoke` runs both suites. `Thread-Pool I/O Tests` runs the implementation
+suite on the pool build's rig too, because some resources of this
+implementation exist only on the pool: a file that counts worker threads reads
+zero on io_uring and gates itself there. `tests/integration/workflows.rs` is
+the standing check that every implementation keeps its job.
 
 ### Why each platform has two test jobs
 
