@@ -98,7 +98,7 @@ impl JitCompiler {
                 std::mem::size_of::<crate::jit::JitCtx>() as u32,
                 0,
             ));
-        builder.ins().stack_store(vm_ptr, jit_ctx_slot, 0);
+        builder.ins().stack_store(I64, vm_ptr, jit_ctx_slot, 0);
         let jit_ctx_ptr = builder.ins().stack_addr(I64, jit_ctx_slot, 0);
         translator.jit_ctx_ptr = Some(jit_ctx_ptr);
 

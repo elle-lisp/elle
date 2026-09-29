@@ -131,18 +131,27 @@ pub(crate) fn load_value_slot(
 
 /// Write the `index`-th `Value` of a stack slot from its (tag, payload) halves.
 pub(crate) fn store_value_slot(
-    _builder: &mut FunctionBuilder,
-    _slot: cranelift_codegen::ir::StackSlot,
-    _index: u32,
-    _tag: cranelift_codegen::ir::Value,
-    _payload: cranelift_codegen::ir::Value,
+    builder: &mut FunctionBuilder,
+    slot: cranelift_codegen::ir::StackSlot,
+    index: u32,
+    tag: cranelift_codegen::ir::Value,
+    payload: cranelift_codegen::ir::Value,
 ) {
+    const STRIDE: i32 = std::mem::size_of::<crate::value::Value>() as i32;
+    const TAG: i32 = std::mem::offset_of!(crate::value::Value, tag) as i32;
+    const PAYLOAD: i32 = std::mem::offset_of!(crate::value::Value, payload) as i32;
+
+    let offset = index as i32 * STRIDE;
+    builder.ins().stack_store(I64, tag, slot, offset + TAG);
+    builder
+        .ins()
+        .stack_store(I64, payload, slot, offset + PAYLOAD);
 }
 
 /// End a function's construction, handing `FunctionBuilder::finalize` the
 /// target configuration `module` holds.
-pub(crate) fn finalize_function(builder: FunctionBuilder, _module: &JITModule) {
-    builder.finalize();
+pub(crate) fn finalize_function(builder: FunctionBuilder, module: &JITModule) {
+    builder.finalize(module.target_config());
 }
 
 impl<'a> FunctionTranslator<'a> {

@@ -1,8 +1,11 @@
-//! The shared spill slot: one stack slot, sized once to the worst-case
-//! save requirement, reused at every yield and call site to save live locals
-//! and operands across the side-exit. Both methods stay `pub(crate)` because
-//! the compiler driver allocates the slot in the prologue and the terminator
-//! and instruction paths spill into it.
+// audited: 2026-09-29
+// docs/impl/jit.md
+//! The shared spill slot: one stack slot that every yield and call site reuses.
+//!
+//! The prologue sizes the slot once to the worst-case save requirement. A
+//! side-exit saves live locals and operands into it. Both methods stay
+//! `pub(crate)` because the compiler driver allocates the slot in the prologue,
+//! and the terminator and instruction paths spill into it.
 
 use super::*;
 
@@ -66,16 +69,13 @@ impl<'a> FunctionTranslator<'a> {
             .shared_spill_slot
             .expect("JIT bug: spill_locals_and_operands called but no shared spill slot allocated");
 
-        let mut slot_idx: i32 = 0;
+        let mut slot_idx: u32 = 0;
 
         // 1. Spill parameters (from arg variables)
         for i in 0..arity as u32 {
             let base = self.arg_var_base + i;
             let (tag, payload) = self.use_var_pair(builder, base);
-            let tag_offset = slot_idx * 16;
-            let payload_offset = slot_idx * 16 + 8;
-            builder.ins().stack_store(tag, slot, tag_offset);
-            builder.ins().stack_store(payload, slot, payload_offset);
+            store_value_slot(builder, slot, slot_idx, tag, payload);
             slot_idx += 1;
         }
 
@@ -83,20 +83,14 @@ impl<'a> FunctionTranslator<'a> {
         for i in 0..num_locally_defined as u32 {
             let base = self.local_var_base + i;
             let (tag, payload) = self.use_var_pair(builder, base);
-            let tag_offset = slot_idx * 16;
-            let payload_offset = slot_idx * 16 + 8;
-            builder.ins().stack_store(tag, slot, tag_offset);
-            builder.ins().stack_store(payload, slot, payload_offset);
+            store_value_slot(builder, slot, slot_idx, tag, payload);
             slot_idx += 1;
         }
 
         // 3. Spill operand stack registers
         for reg in stack_regs {
             let (tag, payload) = self.use_var_pair(builder, reg.0);
-            let tag_offset = slot_idx * 16;
-            let payload_offset = slot_idx * 16 + 8;
-            builder.ins().stack_store(tag, slot, tag_offset);
-            builder.ins().stack_store(payload, slot, payload_offset);
+            store_value_slot(builder, slot, slot_idx, tag, payload);
             slot_idx += 1;
         }
 
