@@ -1,12 +1,11 @@
-// audited: 2026-09-14
+// audited: 2026-09-29
 // What reaches the running program: `sys/args` and `sys/argv`, end to end.
 //
-// Every argument after the source file (or stdin `-`) belongs to the program,
-// and no separator is needed to say so. `--` is not consumed either — elle
-// stops reading its own flags there and passes the rest through verbatim.
-// These tests spawn the binary, because `main` is what fills `vm.user_args`.
-//
 // docs/config.md
+//
+// Every argument after the source file (or stdin `-`) belongs to the program, a
+// `--` included, and no separator is needed to say so. These tests spawn the
+// binary, because `main` is what fills `vm.user_args`.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -49,11 +48,10 @@ fn run_stdin(args: &[&str], source: &str) -> (String, String) {
 /// A flag named like one of elle's own still belongs to the program once `--`
 /// has ended elle's flags.
 ///
-/// The counter-factual: scan the whole argv for `--help` and `--version`, the
-/// way `main` did, and these two answer with the banner while the program
-/// never runs. Every other flag already passes through — `--jit=off` after
-/// `--` reaches the program and leaves the tier alone — so the two were the
-/// sole exception, and a script could not carry a flag of either name.
+/// The counter-factual: a `main` that scans the whole argv for `--help` and
+/// `--version` answers these two with the banner, and the program never runs,
+/// while every other flag after `--` reaches the program (`--trace=call` below).
+/// A script could then carry no flag of either name.
 #[test]
 fn help_after_the_separator_belongs_to_the_program() {
     let (out, _) = run_stdin(&["-", "--", "--help"], "(print (sys/args))");
@@ -66,8 +64,7 @@ fn version_after_the_separator_belongs_to_the_program() {
     assert_eq!(out, "(-- --version)");
 }
 
-/// The other half of the pair: before the separator both are still elle's, so
-/// the fix must move the boundary rather than drop the flags.
+/// The other half of the pair: before the source, both are still elle's.
 #[test]
 fn help_and_version_before_the_separator_are_elles_own() {
     let out = Command::new(get_elle_binary())
@@ -95,265 +92,45 @@ fn help_and_version_before_the_separator_are_elles_own() {
 #[test]
 fn an_ordinary_flag_after_the_separator_reaches_the_program_untouched() {
     let (out, _) = run_stdin(
-        &["-", "--", "--jit=off"],
-        "(print (sys/args)) (println \" jit=\" (vm/config :jit))",
+        &["-", "--", "--trace=call"],
+        "(print (sys/args)) (println \" trace=\" (vm/config :trace))",
     );
     assert_eq!(
-        out, "(-- --jit=off) jit=adaptive",
-        "the program gets the flag and the tier keeps its default"
+        out, "(-- --trace=call) trace=||",
+        "the program gets the flag and tracing stays off"
     );
 }
 
+// ── `sys/args` and `sys/argv` ──
+
+/// With nothing after the source, the program has no arguments: an empty list,
+/// never nil.
 #[test]
-fn test_sys_args_no_trailing_args_returns_empty() {
-    // Run `elle -` with stdin `(print (sys/args))` and no trailing args.
-    // sys/args should return () — display of empty list is "()".
-    let elle_bin = get_elle_binary();
-
-    let mut child = Command::new(elle_bin)
-        .arg("-")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap_or_else(|_| panic!("Failed to spawn elle at {}", elle_bin));
-
-    {
-        let stdin = child.stdin.as_mut().expect("Failed to open stdin");
-        stdin
-            .write_all(b"(print (sys/args))")
-            .expect("Failed to write to stdin");
-    }
-
-    let output = child.wait_with_output().expect("Failed to wait on child");
-    let stdout = String::from_utf8(output.stdout).expect("stdout is not UTF-8");
-
-    assert!(
-        output.status.success(),
-        "elle exited with error, stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        stdout.trim(),
-        "()",
-        "sys/args without trailing args should print as (), got: {:?}",
-        stdout
-    );
+fn sys_args_is_empty_with_no_trailing_arguments() {
+    let (out, _) = run_stdin(&["-"], "(print (sys/args))");
+    assert_eq!(out, "()");
 }
 
 #[test]
-fn test_sys_args_trailing_args_returned() {
-    // Run `elle - foo bar` with stdin `(print (sys/args))`.
-    // sys/args should return ("foo" "bar").
-    let elle_bin = get_elle_binary();
-
-    let mut child = Command::new(elle_bin)
-        .args(["-", "foo", "bar"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap_or_else(|_| panic!("Failed to spawn elle at {}", elle_bin));
-
-    {
-        let stdin = child.stdin.as_mut().expect("Failed to open stdin");
-        stdin
-            .write_all(b"(print (sys/args))")
-            .expect("Failed to write to stdin");
-    }
-
-    let output = child.wait_with_output().expect("Failed to wait on child");
-    let stdout = String::from_utf8(output.stdout).expect("stdout is not UTF-8");
-
-    assert!(
-        output.status.success(),
-        "elle exited with error, stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        stdout.contains("foo"),
-        "expected 'foo' in sys/args output, got: {:?}",
-        stdout
-    );
-    assert!(
-        stdout.contains("bar"),
-        "expected 'bar' in sys/args output, got: {:?}",
-        stdout
-    );
+fn sys_args_holds_every_trailing_argument() {
+    let (out, _) = run_stdin(&["-", "foo", "bar"], "(print (sys/args))");
+    assert_eq!(out, "(foo bar)");
 }
 
+/// A flag after the source is the program's, not elle's.
 #[test]
-fn test_sys_args_flags_after_source_passed_through() {
-    // Run `elle - -v foo` with stdin `(print (sys/args))`.
-    // Flags that appear after the source arg are passed through as user args,
-    // not interpreted by elle.
-    let elle_bin = get_elle_binary();
-
-    let mut child = Command::new(elle_bin)
-        .args(["-", "-v", "foo"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap_or_else(|_| panic!("Failed to spawn elle at {}", elle_bin));
-
-    {
-        let stdin = child.stdin.as_mut().expect("Failed to open stdin");
-        stdin
-            .write_all(b"(print (sys/args))")
-            .expect("Failed to write to stdin");
-    }
-
-    let output = child.wait_with_output().expect("Failed to wait on child");
-    let stdout = String::from_utf8(output.stdout).expect("stdout is not UTF-8");
-
-    assert!(
-        output.status.success(),
-        "elle exited with error, stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        stdout.contains("-v"),
-        "expected '-v' in sys/args output, got: {:?}",
-        stdout
-    );
-    assert!(
-        stdout.contains("foo"),
-        "expected 'foo' in sys/args output, got: {:?}",
-        stdout
-    );
+fn a_flag_after_the_source_is_a_program_argument() {
+    let (out, _) = run_stdin(&["-", "-v", "foo"], "(print (sys/args))");
+    assert_eq!(out, "(-v foo)");
 }
 
-// --- sys/argv ---
-
+/// `sys/argv` is `sys/args` with the source name in front: `-` for stdin.
 #[test]
-fn test_sys_argv_includes_script_name() {
-    // Run `elle - foo bar` with stdin `(print (sys/argv))`.
-    // sys/argv should include "-" as element 0, then "foo", "bar".
-    let elle_bin = get_elle_binary();
-
-    let mut child = Command::new(elle_bin)
-        .args(["-", "foo", "bar"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap_or_else(|_| panic!("Failed to spawn elle at {}", elle_bin));
-
-    {
-        let stdin = child.stdin.as_mut().expect("Failed to open stdin");
-        stdin
-            .write_all(b"(print (sys/argv))")
-            .expect("Failed to write to stdin");
-    }
-
-    let output = child.wait_with_output().expect("Failed to wait on child");
-    let stdout = String::from_utf8(output.stdout).expect("stdout is not UTF-8");
-
-    assert!(
-        output.status.success(),
-        "elle exited with error, stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    // print of a list outputs elements without quotes: (- foo bar)
-    // so "-" appears as a bare hyphen in the output.
-    assert!(
-        stdout.contains('-'),
-        "expected '-' in sys/argv output, got: {:?}",
-        stdout
-    );
-    assert!(
-        stdout.contains("foo"),
-        "expected 'foo' in sys/argv output, got: {:?}",
-        stdout
-    );
-    assert!(
-        stdout.contains("bar"),
-        "expected 'bar' in sys/argv output, got: {:?}",
-        stdout
-    );
-}
-
-#[test]
-fn test_sys_argv_no_trailing_args() {
-    // Run `elle -` with stdin `(print (sys/argv))` and no trailing args.
-    // sys/argv should return ("-") — a one-element list containing just the script name.
-    let elle_bin = get_elle_binary();
-
-    let mut child = Command::new(elle_bin)
-        .arg("-")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap_or_else(|_| panic!("Failed to spawn elle at {}", elle_bin));
-
-    {
-        let stdin = child.stdin.as_mut().expect("Failed to open stdin");
-        stdin
-            .write_all(b"(print (sys/argv))")
-            .expect("Failed to write to stdin");
-    }
-
-    let output = child.wait_with_output().expect("Failed to wait on child");
-    let stdout = String::from_utf8(output.stdout).expect("stdout is not UTF-8");
-
-    assert!(
-        output.status.success(),
-        "elle exited with error, stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    // Should contain "-" as the only element; output should be a single-element list.
-    assert!(
-        stdout.contains('-'),
-        "expected '-' in sys/argv output, got: {:?}",
-        stdout
-    );
-    assert!(
-        !stdout.contains("foo") && !stdout.contains("bar"),
-        "sys/argv with no trailing args should not contain user args, got: {:?}",
-        stdout
-    );
-}
-
-#[test]
-fn test_sys_argv_flags_after_source() {
-    // Run `elle - -v foo` with stdin `(print (sys/argv))`.
-    // Flags that appear after the source arg are passed through as user args.
-    // sys/argv should include "-", "-v", "foo".
-    let elle_bin = get_elle_binary();
-
-    let mut child = Command::new(elle_bin)
-        .args(["-", "-v", "foo"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap_or_else(|_| panic!("Failed to spawn elle at {}", elle_bin));
-
-    {
-        let stdin = child.stdin.as_mut().expect("Failed to open stdin");
-        stdin
-            .write_all(b"(print (sys/argv))")
-            .expect("Failed to write to stdin");
-    }
-
-    let output = child.wait_with_output().expect("Failed to wait on child");
-    let stdout = String::from_utf8(output.stdout).expect("stdout is not UTF-8");
-
-    assert!(
-        output.status.success(),
-        "elle exited with error, stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        stdout.contains("-v"),
-        "expected '-v' in sys/argv output, got: {:?}",
-        stdout
-    );
-    assert!(
-        stdout.contains("foo"),
-        "expected 'foo' in sys/argv output, got: {:?}",
-        stdout
-    );
+fn sys_argv_puts_the_source_name_first() {
+    let (out, _) = run_stdin(&["-", "foo", "bar"], "(print (sys/argv))");
+    assert_eq!(out, "(- foo bar)");
+    let (out, _) = run_stdin(&["-"], "(print (sys/argv))");
+    assert_eq!(out, "(-)", "with no trailing arguments, only the source name");
+    let (out, _) = run_stdin(&["-", "-v", "foo"], "(print (sys/argv))");
+    assert_eq!(out, "(- -v foo)");
 }

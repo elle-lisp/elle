@@ -1,9 +1,9 @@
-// audited: 2026-09-20
+// audited: 2026-09-29
 // The `elle` binary gives the program value's owning reference back, so a run
 // that answers with a heap value leaves nothing behind.
 //
-// A script run answers once; a REPL session answers form by form, so the same
-// defect reads as a slope there rather than a fixed cost.
+// A script run answers once; a REPL session answers form by form, so a kept
+// reference reads as a slope there rather than a fixed cost.
 //
 // docs/impl/region/rules.md
 
@@ -14,8 +14,8 @@ fn elle_binary() -> &'static str {
     env!("CARGO_BIN_EXE_elle")
 }
 
-/// The residue count out of the `--stats` teardown line, or a panic naming what
-/// the run printed instead.
+/// The residue count out of the `--dump=stats` teardown line, or a panic naming
+/// what the run printed instead.
 fn residue_of(stderr: &str, what: &str) -> usize {
     let line = stderr
         .lines()
@@ -28,25 +28,26 @@ fn residue_of(stderr: &str, what: &str) -> usize {
         .unwrap_or_else(|| panic!("unparseable residue line {line:?}"))
 }
 
-/// Run `elle --stats <args>` and answer its reported residue.
+/// Run `elle --dump=stats <args>` and answer its reported residue.
 fn residue_after(args: &[&str], what: &str) -> usize {
     let out = Command::new(elle_binary())
-        .arg("--stats")
+        .arg("--dump=stats")
         .args(args)
         .output()
         .expect("run elle");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         out.status.success(),
-        "elle --stats {args:?} failed on {what}; stderr:\n{stderr}"
+        "elle --dump=stats {args:?} failed on {what}; stderr:\n{stderr}"
     );
     residue_of(&stderr, what)
 }
 
-/// Run `elle --stats -` with `source` on stdin and answer its reported residue.
+/// Run `elle --dump=stats -` with `source` on stdin and answer its reported
+/// residue.
 fn residue_after_stdin(source: &str) -> usize {
     let mut child = Command::new(elle_binary())
-        .args(["--stats", "-"])
+        .args(["--dump=stats", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -62,7 +63,7 @@ fn residue_after_stdin(source: &str) -> usize {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         out.status.success(),
-        "elle --stats - failed on {source}; stderr:\n{stderr}"
+        "elle --dump=stats - failed on {source}; stderr:\n{stderr}"
     );
     residue_of(&stderr, source)
 }
@@ -73,7 +74,7 @@ fn residue_after_stdin(source: &str) -> usize {
 /// through `run_source`.
 fn repl(session: &str) -> (String, String) {
     let mut child = Command::new(elle_binary())
-        .arg("--stats")
+        .arg("--dump=stats")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -119,7 +120,7 @@ const ANSWERS: [&str; 5] = [
 ];
 
 /// A run that answers with a heap value leaves nothing behind
-/// (docs/impl/region/rules.md § "Teardown — every region frees").
+/// (docs/impl/region/rules.md).
 ///
 /// The counter-factual is `(begin <answer> nil)`, measured beside it. It
 /// allocates the very same value and drops it inside the program, where the
