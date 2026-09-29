@@ -1,6 +1,6 @@
 # Where a stream operation's bytes live
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-29 -->
 
 A read lands in the caller's region and a write leaves from the payload's, and the operation holds both while the kernel works.
 
@@ -140,11 +140,11 @@ the whole process shares, and its teardown is not a backend's.
 
 ## Pinned by
 
-- [io_copies.rs](../../tests/io_copies.rs) and
-  [io_copies_pool.rs](../../tests/io_copies_pool.rs) count the Rust heap
-  bytes a read, a write and a `read-all` allocate, one binary per backend. The
-  count must not grow with the bytes moved, except for the one copy
-  `read-all` makes.
+- [io_copies.rs](../../tests/io_copies.rs) counts the Rust heap bytes a read,
+  a write and a `read-all` allocate on the platform's own backend: the ring on
+  Linux, and the pool on a Mac or in a build with the `no-uring` feature. The
+  count must not grow with the bytes moved, except for the one copy `read-all`
+  makes.
 - `a_write_hands_the_kernel_the_payload_where_it_lies`
   ([bytes.rs](../../src/io/aio/tests/bytes.rs)) changes a payload after its
   write parks. The peer receives the changed bytes.
@@ -156,7 +156,6 @@ the whole process shares, and its teardown is not a backend's.
 - `a_cancelled_entry_keeps_what_the_kernel_addresses`
   ([hold.rs](../../src/io/pending/tests/hold.rs)).
 - [port-longline.lisp](../../tests/elle/port-longline.lisp) and
-  [port-text-framing.lisp](../../tests/elle/port-text-framing.lisp), on the
-  other backend by `port_longline_threadpool` and
-  `port_text_framing_threadpool`
-  ([modes.rs](../../tests/integration/elle_scripts/modes.rs)).
+  [port-text-framing.lisp](../../tests/elle/port-text-framing.lisp), in the
+  corpus: every Linux corpus job runs them on the ring, and the Thread-Pool I/O
+  job runs them on the pool ([ci](../analysis/ci.md)).
