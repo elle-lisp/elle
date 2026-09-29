@@ -1,4 +1,10 @@
-//! Conversion between Syntax and Value
+// audited: 2026-09-29
+//! Conversion between Syntax and Value: runtime quote, and macro results read back as syntax.
+//!
+//! docs/impl/syntax.md
+//! docs/impl/region/model.md
+//!
+//! `tests/lang/syntax-roundtrip.lisp` pins the round trip.
 //!
 //! These conversions are needed for:
 //! - Runtime quote (Syntax → Value)
@@ -25,7 +31,7 @@ pub(crate) fn contains_syntax_literal(s: &Syntax) -> bool {
 /// tree it enters (macro arguments and quasiquote templates round-trip
 /// keywords as bare hashes, so their spellings must be learned before the
 /// round-trip) and by the analyzer as a pre-pass
-/// (docs/impl/symbol.md § "The display memo"). Idempotent; the memo dedups.
+/// (docs/impl/symbol.md). Idempotent; the memo dedups.
 pub(crate) fn learn_keywords(syntax: &Syntax, symbols: &mut SymbolTable) {
     match &syntax.kind {
         SyntaxKind::Keyword(name) => {
@@ -89,7 +95,7 @@ impl Syntax {
     /// Convert Syntax to a runtime Value as an **ordinary allocation** into the
     /// ctx's own region (reclaimed by RC). Used by the read-time primitives `read`
     /// / `read-all` / `syntax->datum`, whose native call mints a fresh region for
-    /// the result (region/model.md, "Constants lower as ordinary allocations").
+    /// the result (docs/impl/region/model.md).
     ///
     /// `ctx` is the allocation capability — the read-time primitives pass their
     /// call's ctx (docs/impl/region/ctx.md). The whole tree lands in the ctx's
@@ -220,7 +226,7 @@ impl Syntax {
     /// Convert Syntax to a `ConstTemplate` — the allocation-free compile-time
     /// form of [`to_value`](Self::to_value): plain recursive data that
     /// `MaterializeConst` materializes fresh into a reclaimable region each
-    /// execution (region/model.md, "Constants lower as ordinary allocations").
+    /// execution (docs/impl/region/model.md).
     /// The desugaring matches `to_value` — a quoted `{:a 1}` becomes the list
     /// template `(struct :a 1)`, etc. — so the quoted datum's value is unchanged.
     ///
@@ -294,8 +300,7 @@ impl Syntax {
             // A hygiene-bearing macro-template symbol (always a `Symbol`,
             // produced by quasiquote): carry its scope set verbatim into a
             // `SyntaxSymbol` template so it materializes as an ordinary
-            // allocation with hygiene intact (region/model.md, "Constants lower
-            // as ordinary allocations").
+            // allocation with hygiene intact (docs/impl/region/model.md).
             SyntaxKind::SyntaxLiteral(s) => {
                 if let SyntaxKind::Symbol(name) = &s.kind {
                     T::SyntaxSymbol {
@@ -343,7 +348,7 @@ impl Syntax {
             // children. SyntaxLiteral holds a heap-pointer Value that may be
             // arena-allocated; if it survives into the result Syntax, it will
             // dangle after arena release. Current code paths don't produce
-            // nested SyntaxLiterals, but this assertion catches future regressions.
+            // nested SyntaxLiterals, and this assertion keeps it that way.
             debug_assert!(
                 !contains_syntax_literal(&s),
                 "from_value: copied Syntax contains SyntaxLiteral (arena pointer would escape)"
@@ -441,5 +446,3 @@ impl Syntax {
         Ok(Syntax::new(kind, span))
     }
 }
-
-// Tests migrated to tests/elle/syntax-roundtrip.lisp
