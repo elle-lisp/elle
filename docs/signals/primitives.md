@@ -1,6 +1,6 @@
 # Fiber Primitives
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-29 -->
 
 User-facing fiber operations and patterns.
 
@@ -24,6 +24,7 @@ User-facing fiber operations and patterns.
 | `fiber/refuse` | `(fiber value?) → value` | Refuse a paused fiber's call: raise at its call site, fiber lives on |
 | `fiber/set-fuel`, `fiber/fuel`, `fiber/clear-fuel` | `(fiber n)`, `(fiber)`, `(fiber)` | Set, read, and remove the instruction budget |
 | `fiber/error?`, `fiber/done?` | `(fiber) → bool` | `:error`; `:dead` or `:error` |
+| `fiber/denied?` | `(fiber) → bool` | Paused on a capability denial ([capabilities.md](capabilities.md)) |
 | `fiber?` | `(value) → bool` | Type predicate |
 
 Primitives that need VM-side execution (`fiber/resume`) signal the VM
