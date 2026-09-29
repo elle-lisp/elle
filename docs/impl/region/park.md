@@ -1,6 +1,6 @@
 # What a park retains, and who releases it
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 The references a suspended fiber's park leaves standing, and the one seam that consumes each.
 
@@ -22,7 +22,8 @@ symmetric with its unpark; the node and the deferred set a park moves are
   holders' ordinary counted references — a binding's slot, a container store — so a fiber
   whose last reference drops while parked genuinely reaches rc 0 and frees, chain and all
   (the free-path discharge in [owner nodes](owner.md)). Pinned by the `multi-resume`/`yield-discard`/`cancel-discard`
-  oracle probes and `runtime::tests::ownership::fiber_parked_then_dropped_reclaims`.
+  oracle probes and `dropped_parked_fiber_discharges_owned_state`
+  ([drop.rs](../../../src/runtime/tests/ownership/fnode/drop.rs)).
 - **A suspending native tail call parks its continuation.** A non-suspending native tail
   call keeps its frame and falls through to the post-`TailCall` block, whose compiler-emitted
   releases consume the tail args' moved/retained references with exact per-arg ownership
@@ -32,8 +33,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   re-suspend, `call_inner`) capture the continuation at the post-`TailCall` ip, and the
   resume replays it — running exactly the releases the fall-through would have. Parking an
   empty chain instead ("the result is the child's result") strands every owned tail arg —
-  one region per nested drained fiber (the `fiber-nested` probe;
-  `runtime::tests::ownership::fiber_nested_tail_resume_reclaims`).
+  one region per nested drained fiber (the `fiber-nested` probe).
 - **The parked signal's escape retain has a release on every path.** A suspending signal's
   payload is retained once as it escapes into `fiber.signal` (`EmitEscape` for
   `yield`/`emit`, `SuspendEscape` for a yielding io op or a capability denial). The resume
@@ -276,8 +276,12 @@ symmetric with its unpark; the node and the deferred set a park moves are
   primitive. A capability denial of `:error` parks under `SIG_ERROR` as well,
   and in tail position the driver builds its frame, as for any tail suspend.
   It stays a denial park: `park_denial` recorded its funding, so the error park
-  finds that record for the same payload and leaves it standing. Two parks meet
-  this rule without a raise of their own. An injected
+  finds that record for the same payload and leaves it standing. A squelch
+  boundary that refuses a tail call ends the activation the call replaced, so its
+  park (`TailRefused`) holds no frame of that activation, only the frames outside
+  it. The resume value answers the outer frame's call, or becomes a fiber body's
+  result, and nothing produced it, so the delivery mints as for a `Call` site.
+  Two parks meet this rule without a raise of their own. An injected
   `fiber/abort` / `fiber/refuse` error raises in place over the park it finds, so it
   keeps that park's funding (`raise_in_park`): a primitive or denial park still
   owes the mint, and an emit park or a fuel pause does not. And a parent that a
@@ -380,7 +384,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   delivering it (the unfunded flag survives a displace, because the funnel that consumes
   it has not run yet); and `discharge()`, where the park is over with no delivery to
   fund: `take_parked_state` consuming the park of a fiber that can never run again,
-  `kill_fiber` ending any park a cancel finds, the squelch/abort discard chokepoint
+  `kill_fiber` ending any park a cancel finds, the squelch discard chokepoint
   (`discard_suspended_frames`), which a host that refuses a park crosses as well, and
   `VM::abandon_hosted_park`, where a host hands a thunk's suspension on as its own call's
   park (`arena/allocs`, `compile/run-on :bytecode`) and the thunk's park ends. After a
