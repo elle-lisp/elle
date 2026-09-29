@@ -168,6 +168,36 @@ fn an_mlir_key_sets_the_mlir_tier_in_an_mlir_build() {
     assert!(got.contains(&"mlir = \"eager\"".to_string()), "got {got:?}");
 }
 
+/// A build with no WebAssembly backend has no policy for it to set, so a
+/// `wasm` key would run the file on the build's own tier and report a pass.
+#[cfg(not(feature = "wasm"))]
+#[test]
+fn a_wasm_key_is_refused_in_a_build_without_the_wasm_backend() {
+    assert_refused("wasm = \"full\"\n", "wasm");
+}
+
+/// A `wasm` build reads the policy as `--wasm=` reads it, and prints it back.
+#[cfg(feature = "wasm")]
+#[test]
+fn a_wasm_key_reads_back_as_written_in_a_wasm_build() {
+    let dir = Scratch::new("wasm");
+    for policy in ["\"full\"", "\"off\"", "5"] {
+        let got = printed(&dir, Some(&format!("wasm = {policy}\n")), &[]);
+        assert!(
+            got.contains(&format!("wasm = {policy}")),
+            "the sidecar's wasm policy {policy}, got {got:?}"
+        );
+    }
+}
+
+#[cfg(feature = "wasm")]
+#[test]
+fn a_wasm_value_the_backend_does_not_know_is_refused() {
+    assert_refused("wasm = \"sometimes\"\n", "wasm");
+    assert_refused("wasm = true\n", "wasm");
+    assert_refused("wasm = 0\n", "wasm");
+}
+
 // ── Profiles ──
 
 /// A profile's tier setting replaces the sidecar's, and its trace keywords
@@ -190,6 +220,33 @@ fn a_profile_replaces_the_tier_and_joins_the_trace() {
         got.contains(&"trace = [\"guardfree\", \"scrub\"]".to_string()),
         "the two trace sets join, sorted, got {got:?}"
     );
+}
+
+/// A profile's `wasm` replaces the sidecar's, as its `jit` does. The
+/// counter-factual: a profile that deferred to a sidecar's `wasm = "off"` would
+/// leave that file on the interpreter in the pass that exists to run it whole
+/// on the WebAssembly backend.
+#[cfg(feature = "wasm")]
+#[test]
+fn a_profile_replaces_the_wasm_policy() {
+    let dir = Scratch::new("wasmprofile");
+    let profile = dir.write("full.toml", "wasm = \"full\"\n");
+    let profile = profile.display().to_string();
+    let got = printed(&dir, Some("wasm = \"off\"\n"), &["--profile", &profile]);
+    assert!(got.contains(&"wasm = \"full\"".to_string()), "got {got:?}");
+}
+
+/// The profile `smoke-wasm` names compiles each file whole to one module.
+#[cfg(feature = "wasm")]
+#[test]
+fn the_wasm_full_profile_sets_the_full_module_policy() {
+    let profile = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/impl/profiles/wasm-full.toml")
+        .display()
+        .to_string();
+    let dir = Scratch::new("wasmfull");
+    let got = printed(&dir, None, &["--profile", &profile]);
+    assert!(got.contains(&"wasm = \"full\"".to_string()), "got {got:?}");
 }
 
 /// A profile is read with the same rules as a sidecar.
@@ -238,6 +295,16 @@ fn a_running_file_reads_the_jit_setting() {
     assert_eq!(running(Some("jit = \"off\"\n"), ":jit"), "nil");
     assert_eq!(running(Some("jit = \"eager\"\n"), ":jit"), "0");
     assert_eq!(running(Some("jit = 5\n"), ":jit"), "5");
+}
+
+/// `(vm/config :wasm)` reads the policy keyword, so a running file proves the
+/// sidecar's `wasm` reached the VM.
+#[cfg(feature = "wasm")]
+#[test]
+fn a_running_file_reads_the_wasm_policy() {
+    assert_eq!(running(Some("wasm = \"off\"\n"), ":wasm"), ":off");
+    assert_eq!(running(Some("wasm = \"full\"\n"), ":wasm"), ":full");
+    assert_eq!(running(Some("wasm = 5\n"), ":wasm"), ":lazy");
 }
 
 #[test]
