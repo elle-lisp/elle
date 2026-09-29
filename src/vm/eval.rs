@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! Runtime eval instruction handler.
 //!
 //! Compiles and executes a datum (quoted value) at runtime.
@@ -227,6 +227,7 @@ fn eval_in_arena(
 
     // Drive the evaluated code, including any nested fiber/resume SIG_SWITCH
     // trampoline, to completion — see VM::run_thunk_to_completion.
+    let depth = vm.fiber.param_depth();
     let bits = vm.run_thunk_to_completion(&code, &empty_env);
 
     match bits {
@@ -241,8 +242,7 @@ fn eval_in_arena(
         _ => {
             // eval cannot hold a park of the code it ran, so it refuses it and
             // raises at its own call.
-            let parked = vm.fiber.signal.take();
-            vm.refuse_hosted_park(bits, parked);
+            vm.refuse_hosted_park(bits, depth);
             Err(LError::generic(format!(
                 "eval: unexpected signal: {}",
                 bits

@@ -1,11 +1,11 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! Interpreted non-tail calls on one dispatch loop: a caller pauses in the
 //! fiber while its callee runs, and resumes when the callee ends.
 //!
 //! docs/impl/vm.md
 
 use super::{ExecResult, Exit};
-use crate::value::fiber::{Activation, CallSite, PausedCaller};
+use crate::value::fiber::{Activation, CallSite, ParamDepth, PausedCaller, TailSquelch};
 use crate::value::{BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT};
 use crate::vm::core::{PendingCall, VM};
 use std::rc::Rc;
@@ -57,7 +57,9 @@ impl VM {
             };
             if bits.is_empty() {
                 if let Some(tail) = self.pending_tail_call.take() {
-                    callee.tail_squelch |= tail.squelch_mask;
+                    callee
+                        .tail_squelch
+                        .add(tail.squelch_mask, self.fiber.param_depth());
                     (callee.code, callee.env) = self.replace_by_tail_call(tail);
                     exit = self.execute_bytecode_inner_impl(&callee.code, &callee.env, 0);
                     running = Some(callee);
@@ -80,8 +82,14 @@ impl VM {
                 Some(activation) => (&activation.code, &activation.env),
                 None => (code, env),
             };
-            exit = match self.complete_call(caller_code, caller_env, caller.resume_ip, site, result)
-            {
+            exit = match self.complete_call(
+                caller_code,
+                caller_env,
+                caller.resume_ip,
+                site,
+                caller.param_depth,
+                result,
+            ) {
                 None => self.execute_bytecode_inner_impl(caller_code, caller_env, caller.resume_ip),
                 // The call instruction leaves the caller by the callee's signal,
                 // as it would have left the dispatch loop.
@@ -109,7 +117,7 @@ impl VM {
             resume_ip,
             call_ip: call.call_ip,
             stack,
-            param_depth: self.fiber.param_frames.len(),
+            param_depth: self.fiber.param_depth(),
             closure: self.fiber.current_closure,
         });
         // `do_fiber_first_resume` sets this for the fiber body alone, and the
@@ -127,7 +135,7 @@ impl VM {
         Activation {
             code: call.code,
             env: call.env,
-            tail_squelch: SignalBits::EMPTY,
+            tail_squelch: TailSquelch::none(self.fiber.param_depth()),
             call: call.site,
             #[cfg(debug_assertions)]
             entry_depth,
@@ -151,6 +159,7 @@ impl VM {
 
     /// Complete a non-tail closure call whose callee ended with `result`, in
     /// the caller running `code` with `env`, which resumes at `resume_ip`.
+    /// `depth` is the parameter depth at the call.
     ///
     /// `None`: the result is on the caller's stack and the caller continues.
     /// `Some(bits)`: the caller leaves by `bits` too. A suspend has parked the
@@ -162,6 +171,7 @@ impl VM {
         env: &Rc<Vec<Value>>,
         resume_ip: usize,
         site: CallSite,
+        depth: ParamDepth,
         result: ExecResult,
     ) -> Option<SignalBits> {
         self.fiber.call_depth -= 1;
@@ -201,7 +211,7 @@ impl VM {
         //
         // A fiber body is exempt: it runs outside any call, so its first resume
         // enforces no squelch.
-        if self.enforce_squelch(bits, site.squelch_mask) {
+        if self.enforce_squelch(bits, site.squelch_mask, depth) {
             self.fiber.call_stack.pop();
             return Some(SIG_ERROR);
         }

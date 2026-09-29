@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-29
 // docs/impl/jit.md
 //! Where a closure call meets the JIT: the hotness counter, the code cache, and
 //! the trampolines back into the interpreter.
@@ -8,6 +8,7 @@
 //! compiled callee's result comes back through `run_jit`.
 
 use crate::jit::{JitCode, JitRejectionInfo, JitValue, TAIL_CALL_SENTINEL, YIELD_SENTINEL};
+use crate::value::fiber::ParamDepth;
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_YIELD};
 use std::sync::Arc;
 
@@ -102,15 +103,17 @@ impl VM {
     /// Returns `Some(Option<SignalBits>)` if JIT handled the call (the inner
     /// Option follows handle_call's convention), or `None` to fall through
     /// to the interpreter path. Caller is responsible for decrementing
-    /// call_depth on the `Some` path.
+    /// call_depth on the `Some` path. `depth` is the parameter depth at the
+    /// call, where a squelch violation truncates to.
     pub(super) fn try_jit_call(
         &mut self,
         closure: &crate::value::Closure,
         args: &[Value],
         func: Value,
+        depth: ParamDepth,
     ) -> Option<Option<SignalBits>> {
         let jit_code = self.profile_jit_candidate(closure)?;
-        Some(self.run_jit(&jit_code, closure, args, func))
+        Some(self.run_jit(&jit_code, closure, args, func, depth))
     }
 
     /// Poll the background JIT worker for completed compilations.
@@ -270,12 +273,14 @@ impl VM {
     ///
     /// Returns `Option<SignalBits>` following handle_call's convention:
     /// `None` to continue dispatch, `Some(bits)` to return immediately.
+    /// `depth` is `try_jit_call`'s.
     fn run_jit(
         &mut self,
         jit_code: &JitCode,
         closure: &crate::value::Closure,
         args: &[Value],
         func: Value,
+        depth: ParamDepth,
     ) -> Option<SignalBits> {
         let result = self.call_jit(jit_code, closure, args, func);
 
@@ -299,7 +304,7 @@ impl VM {
                 .map(|(b, _)| *b)
                 .unwrap_or(SIG_YIELD);
 
-            if self.enforce_squelch(sig, closure.squelch_mask) {
+            if self.enforce_squelch(sig, closure.squelch_mask, depth) {
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
@@ -350,7 +355,7 @@ impl VM {
                     let mut frames = self.fiber.suspended.take().unwrap_or_default();
                     self.park_suspended_callee_frame(&mut frames, eb, exec_result);
                     self.fiber.suspended = Some(frames);
-                    if self.enforce_squelch(eb, tail.squelch_mask | closure.squelch_mask) {
+                    if self.enforce_squelch(eb, tail.squelch_mask | closure.squelch_mask, depth) {
                         self.fiber.stack.push(Value::NIL);
                         return None;
                     }

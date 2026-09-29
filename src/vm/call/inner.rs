@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! The interpreter's Call-position dispatch by callee kind: native, parameter,
 //! closure and collection, behind the capability gate.
 //!
@@ -209,8 +209,8 @@ impl VM {
             // Skip profiling for primitives (no LIR means not JIT-compilable).
             #[cfg(feature = "jit")]
             if compiled_room && closure.template.lir_function().is_some() {
-                let param_depth = self.fiber.param_frames.len();
-                if let Some(bits) = self.try_jit_call(closure, &args, func) {
+                let param_depth = self.fiber.param_depth();
+                if let Some(bits) = self.try_jit_call(closure, &args, func, param_depth) {
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();
                     // A compiled callee's frames are abandoned by its raise,

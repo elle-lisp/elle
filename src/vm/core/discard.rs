@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! Abandoning suspended work: the squelch boundary, a host's refusal, and the
 //! chokepoint that runs what the discarded frames still owed.
 //!
@@ -7,6 +7,7 @@
 //! docs/impl/region/mechanism.md
 
 use super::VM;
+use crate::value::fiber::ParamDepth;
 use crate::value::{SignalBits, Value};
 
 impl VM {
@@ -15,8 +16,14 @@ impl VM {
     /// Callers handle any additional side effects (stack push, call_stack pop, etc.).
     ///
     /// Which bits a boundary enforces is `signals::squelched_bits`' answer, shared
-    /// with the JIT's inlined checks.
-    pub(crate) fn enforce_squelch(&mut self, bits: SignalBits, mask: SignalBits) -> bool {
+    /// with the JIT's inlined checks. `depth` is the parameter depth at the
+    /// boundary's call ([`Self::discard_suspended_frames`]).
+    pub(crate) fn enforce_squelch(
+        &mut self,
+        bits: SignalBits,
+        mask: SignalBits,
+        depth: ParamDepth,
+    ) -> bool {
         let squelched = crate::signals::squelched_bits(bits, mask);
         if squelched.is_empty() {
             return false;
@@ -24,7 +31,7 @@ impl VM {
         // The park this boundary ends is the fiber's own live signal here: every
         // site reaching the boundary through this predicate is still holding it
         // (the two that are not pass their own — see `squelch_violation`).
-        let err = self.squelch_violation(squelched, self.fiber.signal);
+        let err = self.squelch_violation(squelched, self.fiber.signal, depth);
         self.fiber.signal = Some((crate::value::SIG_ERROR, err));
         true
     }
@@ -42,11 +49,13 @@ impl VM {
     /// `invoke_closure_jit`, which restores the CALLER's signal before it asks
     /// the boundary's question and holds the parked one in a local. What the
     /// park owed is released against it (docs/impl/region/park.md § "A boundary
-    /// ends a park with no reader and no install").
+    /// ends a park with no reader and no install"). `depth` is the parameter
+    /// depth at the boundary's call.
     pub(crate) fn squelch_violation(
         &mut self,
         squelched: SignalBits,
         parked: Option<(SignalBits, Value)>,
+        depth: ParamDepth,
     ) -> Value {
         let squelched_str = crate::signals::registry::format_bits(squelched);
         let err = self.escaping_error(
@@ -57,11 +66,11 @@ impl VM {
         // the payload the discard's own releases must leave standing — built in a
         // fresh region of its own, so in practice it exempts nothing and the
         // abandoned frames' tables run in full.
-        self.discard_suspended_frames(err, parked);
+        self.discard_suspended_frames(err, parked, depth);
         err
     }
 
-    /// Discard the LIVE fiber's suspended frames (squelch, abort, a host's
+    /// Discard the LIVE fiber's suspended frames (a squelch boundary, a host's
     /// refusal) — the chokepoint for abandoning suspended work while the fiber
     /// runs on, the
     /// discard counterpart of `resume_suspended` (docs/impl/region/owner.md
@@ -109,11 +118,19 @@ impl VM {
     /// § "An abandoned frame runs the releases it still owes"). `parked` is the
     /// signal whose park this ends, named by the site that ends it (see
     /// `squelch_violation`).
+    ///
+    /// `depth` is the parameter depth at the call the boundary or the host
+    /// answers. The discarded frames pushed every `parameterize` frame above
+    /// it and will pop none of them, so they leave with the frames, and the
+    /// code around the call runs on with its own bindings
+    /// (docs/signals/primitives.md § "Where a restart lands").
     pub(crate) fn discard_suspended_frames(
         &mut self,
         payload: Value,
         parked: Option<(SignalBits, Value)>,
+        depth: ParamDepth,
     ) {
+        self.fiber.unwind_params(depth);
         if let Some(frames) = self.fiber.suspended.take() {
             let dues = crate::value::fiber::ParkedDues::of(frames);
             let protect = Some(payload).filter(|v| !self.fiber.delivery.mint_names(*v));
@@ -131,8 +148,8 @@ impl VM {
         self.fiber.delivery.discharge();
     }
 
-    /// A host that runs code on the current fiber refused `parked`, a park of
-    /// that code. `eval`, `import`, the `compile/*-module` setup runs,
+    /// A host that runs code on the current fiber refused a park of that code.
+    /// `eval`, `import`, the `compile/*-module` setup runs,
     /// `compile/run-on :jit` and the root driver cannot hold a suspension of
     /// the code they run, so each answers one with an error at its own call.
     /// The refused park has no reader and no install, and its frames never run
@@ -142,21 +159,33 @@ impl VM {
     /// (docs/impl/region/park.md § "A host that refuses a park ends it the same
     /// way").
     ///
-    /// `parked` is the refused signal, which the host takes out of the slot
-    /// before it builds its error. `invoke_closure_jit` holds it in a local
-    /// instead, as it does for its squelch check. A no-op for anything but a
-    /// park (see [`Self::is_park`]).
-    pub(crate) fn refuse_hosted_park(
+    /// The refused signal is the one in the fiber's slot, which this takes
+    /// out; the host builds its error afterwards. `depth` is the parameter
+    /// depth at the host's entry. A no-op for anything but a park (see
+    /// [`Self::is_park`]).
+    pub(crate) fn refuse_hosted_park(&mut self, bits: SignalBits, depth: ParamDepth) {
+        if !Self::is_park(bits) {
+            return;
+        }
+        let parked = self.fiber.signal.take();
+        self.refuse_held_park(bits, parked, depth);
+    }
+
+    /// [`Self::refuse_hosted_park`] for a host that holds the refused signal
+    /// `parked` itself: `invoke_closure_jit` restores the caller's signal
+    /// before it asks, as it does for its squelch check.
+    pub(crate) fn refuse_held_park(
         &mut self,
         bits: SignalBits,
         parked: Option<(SignalBits, Value)>,
+        depth: ParamDepth,
     ) {
         if !Self::is_park(bits) {
             return;
         }
         // The host's error is built after this, in a fresh region of its own, so
         // no value leaving this exit needs the walk's payload exemption.
-        self.discard_suspended_frames(Value::NIL, parked);
+        self.discard_suspended_frames(Value::NIL, parked, depth);
     }
 
     /// A host that runs a thunk on the current fiber hands the thunk's
