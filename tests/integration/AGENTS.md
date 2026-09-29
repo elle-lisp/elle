@@ -28,7 +28,7 @@ check the repository rather than the language:
 | Group | Files |
 |-------|-------|
 | The documents and their policy | `agents.rs`, `audit.rs`, `audit_report.rs`, `prose.rs`, `paths.rs`, `bytecode_doc.rs`, `doctest.rs`, `doctest_scope.rs`, `rustsource.rs`, `joined_comments.rs` |
-| CI and the corpus runner | `workflows.rs`, `run_artifacts.rs`, `plugins.rs`, `budget.rs`, `runner_budget.rs`, `dashboards.rs`, `capacity.rs`, `profiles.rs`, `truncation.rs`, `runner_exit_trap.rs`, `timeout_capture.rs`, `runner_gauges.rs`, `measurements.rs`, `isolation.rs`, `state_dir.rs`, `run_identity.rs`, `import.rs`, `form_profile.rs`, `boot_fingerprint.rs` |
+| CI and the corpus runner | `workflows.rs`, `run_artifacts.rs`, `plugins.rs`, `budget.rs`, `runner_budget.rs`, `dashboards.rs`, `corpus_targets.rs`, `capacity.rs`, `profiles.rs`, `truncation.rs`, `runner_exit_trap.rs`, `timeout_capture.rs`, `runner_gauges.rs`, `measurements.rs`, `isolation.rs`, `state_dir.rs`, `run_identity.rs`, `import.rs`, `form_profile.rs`, `boot_fingerprint.rs` |
 | CLI surfaces | `argv_cli.rs`, `dump_cli.rs`, `flip_cli.rs`, `tier_cli.rs`, `trace_cli.rs`, `version.rs`, `dispatch.rs`, `repl_exit_codes.rs` |
 
 `allocator.rs` sits in the directory unregistered and does not compile; the

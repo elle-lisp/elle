@@ -226,6 +226,9 @@ mod runner_budget {
 mod dashboards {
     include!("dashboards.rs");
 }
+mod corpus_targets {
+    include!("corpus_targets.rs");
+}
 mod budget {
     include!("budget.rs");
 }
