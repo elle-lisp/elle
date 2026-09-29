@@ -97,3 +97,46 @@ fn a_joined_region_is_never_adopted() {
     );
     assert_eq!(store.rc(joined), 2, "the adopt consumed no reference");
 }
+
+#[test]
+fn a_mint_joins_the_region_it_handed_out() {
+    // The scope arena's shape: a tracked mint, materialized by its first
+    // allocation, joined while it lives. The birth reference is the minting
+    // site's, so the join takes one more.
+    let mut store = RegionStore::default();
+    let mint = store.new_runtime_region_tracked();
+    let arena = mint.region();
+    store.alloc_obj(arena, cons_obj());
+
+    assert_eq!(store.join_minted(mint), Some(arena));
+    assert_eq!(store.rc(arena), 2, "the join holds a reference of its own");
+}
+
+#[test]
+fn a_mint_refuses_the_join_once_its_id_names_another_region() {
+    // The mint's generation names the incarnation it handed out. Once that
+    // region dies and a later mint takes its id, the id names another live
+    // region, and a join on the old mint would land in it — a reference on a
+    // region the joining site never meant, released as though it were its own.
+    //
+    // The trap: the id is live again, so a check that consults the generation
+    // only for an id with no region entry reads this as the mint's own region.
+    let mut store = RegionStore::default();
+    let mint = store.new_runtime_region_tracked();
+    let old = mint.region();
+    store.alloc_obj(old, cons_obj());
+    store.decref(old);
+    let reused = live_region(&mut store);
+    assert_eq!(reused, old, "precondition: the freed id is minted again");
+
+    assert_eq!(
+        store.join_minted(mint),
+        None,
+        "a mint whose region died joins nothing, whatever holds its id now",
+    );
+    assert_eq!(
+        store.rc(reused),
+        1,
+        "the region now holding the id gained nothing"
+    );
+}
