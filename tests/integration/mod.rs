@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -198,6 +198,9 @@ mod agents {
 }
 mod audit {
     include!("audit.rs");
+}
+mod audit_report {
+    include!("audit_report.rs");
 }
 mod prose {
     include!("prose.rs");
