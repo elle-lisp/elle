@@ -13,9 +13,8 @@ const SEMVER_RUNNER: &str = include_str!("semver/main.lisp");
 /// driver calls `(os/exit ...)` itself; an uncaught error maps to 2, the
 /// driver's tool-error code, so a crash never reads as a verdict.
 pub(super) fn run_semver_subcommand(sub_args: Vec<String>) -> i32 {
-    let (config_flags, sub_args): (Vec<String>, Vec<String>) = sub_args
-        .into_iter()
-        .partition(|a| a.starts_with("--trace=") || a == "--stats");
+    let (config_flags, sub_args) =
+        crate::split_own_flags(sub_args, &[("--tests", 1), ("--from", 1)]);
     let (config, _rest) = elle::config::Config::parse(&config_flags).unwrap_or_else(|e| {
         eprintln!("elle semver: {}", e);
         std::process::exit(2);

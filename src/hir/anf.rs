@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! A-normal form (ANF) lift: each value a frame releases through a slot gets a
 //! binding naming that slot.
 //!
@@ -11,12 +11,7 @@ use super::binding::Binding;
 use super::expr::{CallArg, Hir, HirKind};
 
 /// Run the ANF lift on a HIR tree.
-///
-/// When `--anf=off` is set on the CLI, this is a no-op.
 pub fn anf_lift(hir: &mut Hir, arena: &mut BindingArena) {
-    if !crate::config::get().anf {
-        return;
-    }
     let mut ctx = AnfCtx { arena };
     *hir = ctx.r(hir);
     // After ANF, tail positions are settled. Mark each function's tail

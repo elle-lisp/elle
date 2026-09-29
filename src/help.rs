@@ -56,7 +56,7 @@ pub(super) fn print_help() {
     println!("       elle lint [options] <file|dir>... Static analysis");
     println!("       elle lsp                          Start language server");
     println!("       elle rewrite [options] <file...>  Source-to-source rewriting");
-    println!("       elle test [options] <file...>     Run the test corpus");
+    println!("       elle test [options] <file...>     Run test files");
     println!("       elle semver [CMD] [PATH...]       Surface diffs and version gates");
     println!("                                         (CMD: check, release, migrate)");
     println!("       elle image dump-boot <file>       Write a boot image\n");
@@ -66,8 +66,8 @@ pub(super) fn print_help() {
     println!("  -e, --eval EXPR       Evaluate expression");
     println!("  -                     Read from stdin");
     println!("  --dump=KW[,KW,...]    Dump compiler artifacts and exit. Keywords:");
-    // Driven by DUMP_KEYWORDS so a new stage can't be added without appearing
-    // here (the list had already drifted — `escape` was missing).
+    // Driven by DUMP_KEYWORDS, so a new stage appears here without a hand-kept
+    // copy of the list.
     for kw in elle::config::DUMP_KEYWORDS {
         println!(
             "                          {kw:<8}— {}",
@@ -75,18 +75,16 @@ pub(super) fn print_help() {
         );
     }
     println!("  --dump=all            Dump every stage");
-    println!("  --jit=POLICY          JIT policy: off, eager, adaptive (default), or integer N");
-    println!("  --mlir=POLICY         MLIR policy: off (default), eager, adaptive, or integer N");
+    println!("  --dump=stats          Run the program, and print statistics when it ends normally");
+    #[cfg(feature = "wasm")]
     println!("  --wasm=POLICY         WASM policy: off (default), full, lazy, or integer N");
-    println!("  --flip=on|off         Legacy no-op (accepted for backwards compat)");
     println!("  --trace=KW[,KW,...]   Trace subsystems. Keywords:");
-    // Generated from the single source of truth so help can never drift from
-    // the accepted set (a recurring friction point when both were hand-edited).
+    // Generated from TRACE_KEYWORDS, so help cannot drift from the set --trace
+    // accepts.
     for line in wrap_keywords(elle::config::TRACE_KEYWORDS, 50) {
         println!("                          {line}");
     }
     println!("  --trace=all           Trace everything");
-    println!("  --stats               Print statistics at normal program termination");
     println!("  --no-stdlib           Skip loading stdlib (debugging compile_core / prelude)");
     println!("  --home=DIR            Module resolution root (env: ELLE_HOME)");
     println!("  --path=DIRS           Colon-separated module search path (env: ELLE_PATH)");

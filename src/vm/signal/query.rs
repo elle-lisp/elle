@@ -439,7 +439,7 @@ impl VM {
             "compile/whole-module-syntax" => self.dispatch_whole_module_syntax(ctx, arg),
             "compile/dumps" => self.dispatch_compile_dumps(ctx, arg),
             "arena/allocs" => self.handle_arena_allocs(ctx, arg),
-            "vm/config-set" => (SIG_OK, self.handle_vm_config_set(ctx, arg)),
+            "vm/config-set" => self.handle_vm_config_set(ctx, arg),
             _ => (
                 SIG_ERROR,
                 ctx.error(

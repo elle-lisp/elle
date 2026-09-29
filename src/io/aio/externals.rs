@@ -67,8 +67,9 @@ impl AsyncBackend {
                     PlatformBackend::Uring(ring) => {
                         // One `IORING_OP_READ` on the signalfd, completing
                         // through the kernel's poll pipeline with no worker
-                        // thread of ours. On Linux the arm below is reached only
-                        // in a `no-uring` build, or when the ring will not open.
+                        // thread of ours. The arm below is reached only in a
+                        // build without the `uring` feature, or where the ring
+                        // would not open.
                         crate::io::uring::submit_uring_sig_next(
                             ring,
                             d.id,
@@ -230,9 +231,8 @@ impl AsyncBackend {
 
         // Fast path: this process is already holding the child's status, so
         // there is nothing left to reap. Push an immediate completion and file
-        // no pending entry. See src/io/AGENTS.md § "A reap is never wasted" —
-        // the status is here whether the wait that took it was read or
-        // cancelled.
+        // no pending entry (src/io/AGENTS.md): the status is here whether the
+        // wait that took it was read or cancelled.
         if let Some(code) = handle.exit().status() {
             let mut inner = self.inner.borrow_mut();
             let id = inner.mint_id();

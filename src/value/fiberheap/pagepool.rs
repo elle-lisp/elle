@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-09-29
 //! Per-thread page cache for region allocation.
 //!
 //! docs/impl/region/model.md
@@ -13,7 +13,7 @@
 //! header and writes every slot it hands out. Under `--trace=scrub` a release
 //! additionally blanks the spans the dying region wrote (`PageDirty`), so a
 //! read through a pointer that outlived its region detonates instead of
-//! returning plausible bytes. See docs/impl/region/model.md § "Page recycling".
+//! returning plausible bytes. See docs/impl/region/model.md.
 
 mod page;
 
@@ -35,7 +35,7 @@ const MIN_BASE_PAGE: usize = 4096;
 /// Asked of the OS once and cached. Both accounting gauges the pool keeps
 /// (`cached_bytes` and [`mapped_bytes`]) count the length a page records, so
 /// that length has to be the length the kernel charges — see
-/// docs/impl/region/model.md § "The base page is the OS page".
+/// docs/impl/region/model.md.
 pub(crate) fn base_page() -> usize {
     static BASE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *BASE.get_or_init(|| derive_base_page(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }))
@@ -55,7 +55,7 @@ fn derive_base_page(os_page: libc::c_long) -> usize {
 /// bumping up, and the inline-data suffix it filled, bumping down. The gap
 /// between them it never touched. This is what `--trace=scrub` zeroes, and
 /// bounding the scrub to these spans is what makes it cost the region's own
-/// footprint rather than a page (docs/impl/region/model.md § "Page recycling").
+/// footprint rather than a page (docs/impl/region/model.md).
 ///
 /// **The page header is not one of the spans.** A cached page keeps the
 /// `(region, generation, store)` stamp of the region that died on it, so a
@@ -123,9 +123,9 @@ pub(crate) fn class_size_of(base: usize, class: usize) -> usize {
 /// Number of size classes to track: the base page through `base << 10`.
 const NUM_CLASSES: usize = 11;
 
-// ── Page-claim histogram (a `--stats` exit summary, for page-size analysis) ──
+// ── Page-claim histogram (a `--dump=stats` exit summary, for page-size analysis) ──
 //
-// Under `--stats`, every `claim` records its (power-of-two) size into a global
+// Under `--dump=stats`, every `claim` records its (power-of-two) size into a global
 // per-size-class histogram, printed at process exit alongside the other
 // `[stats]` lines. It measures how often geometric growth escalates past
 // `base_page()` across a run — the precondition for the large-page
@@ -140,7 +140,7 @@ static PAGE_CLAIM_COUNT: [AtomicU64; NUM_CLASSES + 1] =
 static PAGE_CLAIM_BYTES: [AtomicU64; NUM_CLASSES + 1] =
     [const { AtomicU64::new(0) }; NUM_CLASSES + 1];
 
-/// Whether `--stats` is active (the histogram's gate). Off ⇒ `record_claim` and
+/// Whether `--dump=stats` is active (the histogram's gate). Off ⇒ `record_claim` and
 /// `dump_page_hist` are no-ops, so the histogram costs nothing in normal runs.
 /// Read live from the global config like `has_trace`. A page claimed before
 /// `config::init` reads the defaults and does not freeze them
@@ -155,7 +155,7 @@ fn record_claim(size: usize) {
     }
     // Register the at-exit dump on first recorded claim, so it fires even when
     // the test runner ends via `os/exit` (which runs C atexit handlers but not
-    // Rust destructors, so the main-thread `--stats` block is bypassed).
+    // Rust destructors, so the main-thread `--dump=stats` block is bypassed).
     static REGISTER: std::sync::Once = std::sync::Once::new();
     REGISTER.call_once(|| unsafe {
         extern "C" fn at_exit() {
@@ -168,7 +168,7 @@ fn record_claim(size: usize) {
     PAGE_CLAIM_BYTES[bucket].fetch_add(size as u64, Ordering::Relaxed);
 }
 
-/// Print the page-claim histogram to stderr under `--stats`: one `[stats]
+/// Print the page-claim histogram to stderr under `--dump=stats`: one `[stats]
 /// page-claim size=<bytes> claims=<n> bytes=<n>` line per non-empty size class
 /// (`size=0` = the oversized one-off bucket above the size classes). The fields
 /// are stable so a batched corpus run can sum them across processes.
@@ -192,10 +192,9 @@ pub(crate) fn dump_page_hist() {
 }
 
 /// Live counters for one `PagePool` — the measurement surface behind the
-/// `arena/page-claims` gauge (docs/impl/region/diagnostics.md) and behind the
-/// contract tests for the claim path (docs/impl/region/model.md § "Page
-/// recycling"). Both are monotonic and always on: a counter a release binary
-/// does not keep is a counter a test cannot read.
+/// `arena/page-claims` gauge (docs/impl/region/diagnostics.md) and behind the contract
+/// tests for the claim path (docs/impl/region/model.md). Both are monotonic and always
+/// on: a counter a release binary does not keep is a counter a test cannot read.
 #[derive(Default)]
 pub(crate) struct PoolCounters {
     /// Pages handed out by `claim`, fresh mappings and recycled pages alike.
@@ -261,7 +260,7 @@ impl PagePool {
     /// Pops from the free list if available (O(1)), otherwise mmaps fresh. A
     /// fresh mapping is zero; a recycled page holds whatever its last region
     /// wrote, because the claimant writes every slot before anything reads it
-    /// (docs/impl/region/model.md § "Page recycling"). So a claim is a
+    /// (docs/impl/region/model.md). So a claim is a
     /// free-list pop — no system call, no page byte touched, and no fault on
     /// memory that is already resident. The caller stamps the header, which
     /// until then still carries the dead region's stamp.
@@ -287,7 +286,7 @@ impl PagePool {
     ///
     /// The page keeps its contents: the next claimant stamps the header and
     /// writes every slot it hands out, so blanking the body would be work with
-    /// no reader (docs/impl/region/model.md § "Page recycling"). Under
+    /// no reader (docs/impl/region/model.md). Under
     /// `--trace=scrub` the body is blanked anyway, over `dirty` only, so that a
     /// read through a pointer that outlived its region finds zeros and detonates
     /// at the deref instead of returning the dead region's bytes.

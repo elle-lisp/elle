@@ -243,7 +243,7 @@ impl VM {
     }
 
     /// Block until all pending background JIT compilations complete.
-    /// Used by `jit/rejections` and `--stats` to ensure all results
+    /// Used by `jit/rejections` and `--dump=stats` to ensure all results
     /// are available before reporting.
     pub fn drain_jit_pending(&mut self) {
         while !self.jit_pending.is_empty() {
