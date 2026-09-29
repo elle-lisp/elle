@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Lowering a call: the argument loop that decides what each argument owes,
 //! and the dispatch to the tail, spliced and ordinary arms.
 //!
@@ -43,8 +43,8 @@ impl<'a> Lowerer<'a> {
     /// — there the frame names the result and `lower_return`'s mint plus the
     /// binding's `decref_point` carry the whole return convention, so the
     /// post-`TailCall` fall-through retain would be a second, unbalanced
-    /// reference (docs/impl/region/mechanism.md § "The return mint is emitted
-    /// exactly once"; pinned by `region-native-tail-compound-leak.lisp`).
+    /// reference (docs/impl/region/mechanism.md; pinned by
+    /// `tests/impl/region-native-tail-compound-leak.lisp`).
     fn return_mint_covers_here(&self) -> bool {
         self.current_hir_id
             .is_some_and(|id| self.return_minted_calls.contains(&id))
@@ -77,10 +77,10 @@ impl<'a> Lowerer<'a> {
         // post-`TailCall` block — which must consume the retain itself
         // (below) or every borrowed arg pins its region's rc by one per
         // call, an unbounded over-keep
-        // (region-const-tail-move-borrow-uaf.lisp, witness (c)). The slot
-        // stash keeps the RETAINED value addressable there: re-lowering the
-        // arg instead would re-READ a cell a callee-run closure (`apply`)
-        // may have reassigned, releasing the wrong value.
+        // (tests/impl/region-const-tail-move-borrow-uaf.lisp, witness (c)). The
+        // slot stash keeps the RETAINED value addressable there: re-lowering the
+        // arg instead would re-READ a cell a callee-run closure (`apply`) may
+        // have reassigned, releasing the wrong value.
         let mut borrowed_arg_slots = Vec::new();
         // If a LATER argument lowers a loop, its back-edge resets the operand
         // stack and drops any earlier argument value parked there (see
@@ -109,8 +109,7 @@ impl<'a> Lowerer<'a> {
             .map(|f| f.fixed_params);
         // A dynamic `emit` whose payload this body releases nowhere. The park
         // owes the body one reference of every value it yields, and the shape
-        // that carries it depends on position (docs/impl/region/park.md
-        // § "What yields is the emit OPERATION, not the `Emit` node"): a TAIL
+        // that carries it depends on position (docs/impl/region/park.md): a TAIL
         // call already mints one for a borrowed argument, which the suspending
         // exit leaves standing and the replayed fall-through releases, so only
         // a non-tail call owes a mint of its own. Routed through `borrowed`
@@ -129,8 +128,8 @@ impl<'a> Lowerer<'a> {
             // when the borrowed arg is a `@`-mutable param read, that node's
             // last-use release is a `DecrefCellRegion` of the param's OWN cell,
             // whose cascade frees the cell's contents — the very value being
-            // moved. A retain emitted after it reads a freed page (the reassigned
-            // mutable-param double-release UAF, region-mutable-reassign-param.lisp).
+            // moved. A retain emitted after it reads a freed page
+            // (tests/impl/region-mutable-reassign-param.lisp).
             // So defer this node's decrefs, emit the retain, then emit the
             // deferred decrefs — the retain now precedes the cell's cascade-free.
             //
@@ -161,8 +160,8 @@ impl<'a> Lowerer<'a> {
             // stack top, so deferring it until after the remaining args and
             // the func are pushed would force `ensure_on_top` to `DupN` the
             // value up, orphaning it and corrupting the tail call's argument
-            // layout. The single-arg case tolerated the late incref; a
-            // multi-arg tail call (e.g. a `(struct :k v …)` whose values are
+            // layout. A single-arg call tolerates a late incref; a
+            // multi-arg tail call (for example a `(struct :k v …)` whose values are
             // cell-backed upvalues, as stdlib's export struct is) does not.
             // `IncrefValueRegion` does not pop, so the arg stays in place for
             // the rest of the arg/func pushes and the `TailCall`.
@@ -256,7 +255,7 @@ impl<'a> Lowerer<'a> {
         // continuation frame, and the code after the wait would be lost on
         // resume (the whole async scheduler's `handle-wait` path). SIG_ERROR
         // / SIG_HALT are excluded: they unwind or terminate, never resume.
-        // Pinned by tests/elle/wasm-wait-call-resumes.lisp.
+        // Pinned by tests/lang/wasm-wait-call-resumes.lisp.
         if call_signals.intersects(
             crate::signals::SIG_YIELD
                 .union(crate::signals::SIG_DEBUG)
@@ -283,10 +282,9 @@ impl<'a> Lowerer<'a> {
         // the primitive parks at the instruction after this call, so this
         // is the continuation past the suspend — the release a fiber
         // abandoned while suspended never reaches and the discard discharge
-        // stands in for (docs/impl/region/park.md). The stash is private
-        // to this site, and the
-        // `LoadLocal`/`DecrefValueRegion` pair is push-pop-neutral around
-        // the result the call left on top. Empty for every other non-tail
+        // stands in for (docs/impl/region/park.md). The stash is private to
+        // this site, and the `LoadLocal`/`DecrefValueRegion` pair is
+        // push-pop-neutral around the result the call left on top. Empty for every other non-tail
         // call: only the emit payload sets `borrowed` off tail position.
         //
         // The nil stamp and the table entry are what make this release run
@@ -294,8 +292,7 @@ impl<'a> Lowerer<'a> {
         // consumes the delivery the raise minted and this retain answers to
         // the continuation alone — reached by a restart's replay, or, for a
         // fiber nobody restarts, by the abandoned-frame walk off exactly
-        // this table (docs/impl/region/mechanism.md § "An abandoned frame
-        // runs the releases it still owes"). A frame that takes both routes
+        // this table (docs/impl/region/mechanism.md). A frame that takes both routes
         // reloads the stamp on the second and no-ops. A SUSPENDING raise
         // records the slot too and is unaffected: its parked payload is what
         // the walk protects, so the walk passes the slot over.

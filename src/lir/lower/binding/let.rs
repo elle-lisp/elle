@@ -1,8 +1,11 @@
-// audited: 2026-09-21
-//! Recursive/scoped binding forms: `let` and `letrec`.
+// audited: 2026-09-29
+//! The recursive and scoped binding forms: `let` and `letrec`.
 //!
-//! These share the region-scope, capture-cell, and tail-call stranding
-//! machinery — kept together so the parallel `lower_let`/`lower_letrec`
+//! docs/impl/region/letrec.md
+//! docs/impl/region/cells.md
+//!
+//! They share the region-scope, capture-cell, and tail-call stranding
+//! machinery, kept together so the parallel `lower_let`/`lower_letrec`
 //! ordering (slot-before-init, deferred decrefs) reads side by side.
 
 use super::*;
@@ -42,9 +45,9 @@ impl<'a> Lowerer<'a> {
         // names the result, so `lower_return` mints the caller's reference here
         // and this binding's `decref_point` drops the frame's own. Record the
         // call so its post-`TailCall` fall-through retain stands down: exactly
-        // one return mint per returned value (docs/impl/region/mechanism.md
-        // § "The return mint is emitted exactly once"). This is the only site
-        // that sees the wrap — ANF builds no other binding form for it.
+        // one return mint per returned value (docs/impl/region/mechanism.md). This
+        // is the only site that sees the wrap — ANF builds no other binding form
+        // for it.
         if let Some(call_id) = anf_wrapped_return_minted_call(bindings, body) {
             self.return_minted_calls.insert(call_id);
         }
@@ -78,13 +81,12 @@ impl<'a> Lowerer<'a> {
             // the slot makes its decref reload the cell and — via
             // `result_region_of`, which unwraps a capture cell — free whatever
             // the cell holds when the release fires, a different and live value
-            // (the capture-cell reassign UAF). Skip the routing and drop the
-            // init's alloc reference off its own register below, exactly as
-            // `lower_letrec` and `lower_define` do for the same binding class
-            // (docs/impl/region/cells.md § "Every binder that mints the cell owes
-            // the rule too"). A captured binding never reassigned keeps the
-            // routing — its cell content is stable, so the unwrap always names
-            // this init value.
+            // (tests/impl/region-capture-cell-reassign-loop-uaf.lisp). Skip the
+            // routing and drop the init's alloc reference off its own register
+            // below, exactly as `lower_letrec` and `lower_define` do for the same
+            // binding class (docs/impl/region/cells.md). A captured binding never
+            // reassigned keeps the routing — its cell content is stable, so the
+            // unwrap always names this init value.
             let captured_reassigned = self
                 .region_info
                 .captured_reassigned_bindings
@@ -116,9 +118,9 @@ impl<'a> Lowerer<'a> {
                 if needs_capture {
                     // One region PER cell, looked up by binding — multiple
                     // captured bindings in one Let must not share this node's
-                    // single slot (the shared-slot capture-cell leak;
-                    // docs/impl/region/model.md, "one allocation execution per slot
-                    // between drops").
+                    // single slot (tests/impl/region-capture-cell-shared-slot-leak.lisp;
+                    // docs/impl/region/model.md: one allocation execution per slot
+                    // between drops).
                     //
                     // The cell is minted holding NIL and the init stored THROUGH
                     // it, which is the shape the other two binders take and the
@@ -239,11 +241,12 @@ impl<'a> Lowerer<'a> {
             // `MakeCaptureCell` whose content a later reassignment repoints —
             // wherever that reassignment sits, a sibling form or a closure the
             // defining scope encloses; routing the init's region through this slot
-            // makes its decref free a different, live value (the capture-cell
-            // reassign UAF). Skip the routing and drop the init's alloc reference off its
-            // register below via `store_captured_cell_init`. (A captured binding
-            // that is never reassigned keeps the routing — the cell content is
-            // stable, so the unwrap always names this init value.)
+            // makes its decref free a different, live value
+            // (tests/impl/region-capture-cell-reassign-loop-uaf.lisp). Skip the
+            // routing and drop the init's alloc reference off its register below
+            // via `store_captured_cell_init`. (A captured binding that is never
+            // reassigned keeps the routing — the cell content is stable, so the
+            // unwrap always names this init value.)
             let captured_reassigned = self
                 .region_info
                 .captured_reassigned_bindings
@@ -254,19 +257,18 @@ impl<'a> Lowerer<'a> {
             // Defer the init node's region releases until after the value is
             // stored (mirrors `lower_let`). Without this, an init region whose
             // `decref_point` is the init's own node — an UNUSED captured
-            // binding's closure, e.g. a shadowed duplicate definition — has
+            // binding's closure, for example a shadowed duplicate definition — has
             // its `DecrefRegion` emitted between `MakeClosure` and the cell
             // store: the closure is freed before `UpdateCapture` increfs it,
             // and the cell holds a dangling value whose free-time scan
-            // misattributes the pages to their next tenant (the teardown
-            // phantom-decref panic / double-free).
+            // misattributes the pages to their next tenant, a double free that
+            // teardown reports as a phantom decref.
             self.deferred_decref_points.insert(init.id);
             let init_reg = self.lower_expr(init)?;
             // The walk's `Letrec` arm records a whole-value container read exactly
             // as its `Let` arm does, and the container's donation is granted on
             // the strength of the reader's own reference — so the retain belongs
-            // at both binders (docs/impl/region/reads.md § "Every binder form
-            // that records the read must emit the retain").
+            // at both binders (docs/impl/region/reads.md).
             self.emit_counted_cell_read_retain(init.id, init_reg);
             self.emit_counted_cell_init_retain(init.id, init_reg);
             self.current_function_binding = None;
@@ -330,9 +332,8 @@ impl<'a> Lowerer<'a> {
     ///
     /// Read by both binder forms of a mutual-recursion cycle, because both leave
     /// the same releases stranded: a `Letrec`'s body, and the last expression of
-    /// the `Begin` a run of local `defn`s sits in (docs/impl/region/letrec.md
-    /// § "The binder form does not decide the shape"). `scope_id` is the node
-    /// whose scope-end releases the tail call passes over.
+    /// the `Begin` a run of local `defn`s sits in (docs/impl/region/letrec.md).
+    /// `scope_id` is the node whose scope-end releases the tail call passes over.
     pub(in crate::lir::lower) fn mark_body_tail_strands(&mut self, scope_id: HirId, body: &Hir) {
         // Every tail call the body makes, by callee binding.
         let mut tail_callees: Vec<Binding> = Vec::new();
@@ -364,25 +365,25 @@ impl<'a> Lowerer<'a> {
             // the still-live cell.
             // docs/impl/selfrec.md: the cell-free case is exactly the one the
             // self-edge leaves uncaptured. Pinned by
-            // tests/elle/region-selfrec-captured-tail-release.lisp.
+            // tests/impl/region-selfrec-captured-tail-release.lisp.
             if self.self_recursive_bindings.contains(&b) && !self.arena.get(b).needs_capture() {
                 self.stranded_self_bindings.insert(b);
             }
         }
-        // A body that TAIL-CALLS a closure-cycle merge MEMBER strands the
-        // merged arena's binding-scope DecrefRegion as dead code past the
-        // frame-replacing TailCall; mark those callees so the body's tail call
-        // defers the merged region's release (`tail_callee_defers_release`) — the runtime then
-        // releases it exactly once at the recursion's normal completion. Scanned
-        // over the letrec BODY only and never through nested lambdas: a nested
-        // closure's tail call completes inside its own activation, before later
-        // uses of the arena, so deferring there would free it early (the
-        // non-upvalue guard in `tail_callee_defers_release` is the second half of that
-        // exclusion). Marked BEFORE lowering the body so the body's own call
-        // sites see it; the init lambdas were lowered above, so an interior
-        // sibling rotation (`ev` tail-calling `od`) is never marked. A NON-member
-        // body tail (a native / redefined operator / foreign fn) instead rides the
-        // explicit `TailCall::deferred_release_slot` (keyed by HirId in
+        // A body that TAIL-CALLS a closure-cycle merge MEMBER strands the merged
+        // arena's binding-scope DecrefRegion as dead code past the frame-replacing
+        // TailCall; mark those callees so the body's tail call defers the merged
+        // region's release (`tail_callee_defers_release`) — the runtime then releases
+        // it exactly once at the recursion's normal completion. Scanned over the
+        // letrec BODY only and never through nested lambdas: a nested closure's tail
+        // call completes inside its own activation, before later uses of the arena, so
+        // deferring there would free it early (the non-upvalue guard in
+        // `tail_callee_defers_release` is the second half of that exclusion). Marked
+        // BEFORE lowering the body so the body's own call sites see it; the init
+        // lambdas were lowered above, so an interior sibling rotation (`ev`
+        // tail-calling `od`) is never marked. A NON-member body tail (a native /
+        // redefined operator / foreign fn) instead rides the explicit
+        // `TailCall::deferred_release_slot` (keyed by HirId in
         // `RegionInfo::cycle_tail_release`), NOT this binding-keyed marking — the two
         // channels are disjoint, so every admitted cycle's stranding tail paths are
         // covered exactly once (`compute_closure_cycle_merges`).
@@ -393,12 +394,12 @@ impl<'a> Lowerer<'a> {
         // demise lands at this scope end rather than at the call node, so the
         // dies-here reading never claims it. The exemption keeps that release in
         // the dead block on the premise that the new activation takes it over, so
-        // the deferral has to reach a release placed here (mechanism.md § "What the
-        // exemption keeps, a channel must still run"). Two exclusions keep the
-        // three channels naming disjoint regions: a `closure_cycle_members` region
-        // is the merge's to release, and a SUPPRESSED release belongs to the store
-        // or capture-adopt path that claimed the region — deferring either
-        // decrements a count this frame never raised.
+        // the deferral has to reach a release placed here
+        // (docs/impl/region/relocate.md). Two exclusions keep the three channels
+        // naming disjoint regions: a `closure_cycle_members` region is the merge's
+        // to release, and a SUPPRESSED release belongs to the store or
+        // capture-adopt path that claimed the region — deferring either decrements
+        // a count this frame never raised.
         {
             let scope_end_releases: Vec<crate::hir::region::Region> = self
                 .decrefs_by_decref_point

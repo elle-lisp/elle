@@ -1,10 +1,11 @@
-// audited: 2026-09-23
+// audited: 2026-09-29
 //! What a 1-slot container's binder emits for the init it stores.
+//!
+//! docs/impl/region/bindings.md
+//! docs/impl/region/cells.md
 //!
 //! The retains a read and an aliased init take, and the cell store that ends a
 //! reassigned binding's claim on its own init.
-//! docs/impl/region/bindings.md
-//! docs/impl/region/cells.md
 
 use super::*;
 
@@ -16,8 +17,7 @@ impl<'a> Lowerer<'a> {
     /// next overwrite cannot free the value under the reader. Both realizations
     /// re-store the same way as far as the reader is concerned: a capture cell
     /// through `capture_store_with_rebind`, an uncelled `@`-mutable local through
-    /// the compiler's own drop-on-overwrite (docs/impl/region/bindings.md § "A
-    /// whole-value read of a 1-slot container takes a counted reference"). The
+    /// the compiler's own drop-on-overwrite (docs/impl/region/bindings.md). The
     /// balancing `DecrefValueRegion` fires at the reader's last use: the walk
     /// minted the read's placeholder region at `hir_id`, so it lands in
     /// `call_result_regions` and its `decref_point` is the reader's last use.
@@ -29,9 +29,9 @@ impl<'a> Lowerer<'a> {
     /// the container's donation is granted on the strength of the reader's own
     /// reference, so a binder that recorded the read and retained nothing frees
     /// the value under its reader. No-op unless `hir_id` is a counted read site.
-    /// Pinned by tests/elle/region-reassign-captured-cell-reader.lisp (the
-    /// fn-local binder) and `region_container_read_toplevel_uaf` (the
-    /// file-letrec binder).
+    /// Pinned by tests/impl/region-reassign-captured-cell-reader.lisp (the
+    /// fn-local binder) and tests/impl/region-container-read-toplevel-uaf.lisp
+    /// (the file-letrec binder).
     pub(in crate::lir::lower) fn emit_counted_cell_read_retain(&mut self, hir_id: HirId, src: Reg) {
         if self.region_info.counted_cell_read_sites.contains(&hir_id) {
             self.emit(LirInstr::IncrefValueRegion { src });
@@ -42,8 +42,7 @@ impl<'a> Lowerer<'a> {
     /// second name (`RegionInfo::counted_cell_init_sites`): the cell takes that
     /// value by a COUNTED store rather than by donation, so the alias keeps the
     /// producer's reference and the ordinary decref that releases it
-    /// (docs/impl/region/bindings.md § "What the cell donates it must hold alone;
-    /// what it counts it need not"). The retain is balanced by the same
+    /// (docs/impl/region/bindings.md). The retain is balanced by the same
     /// drop-on-overwrite that balances every later store — the cell's own
     /// reference, dropped at the first overwrite or at the content drop.
     ///
@@ -51,7 +50,7 @@ impl<'a> Lowerer<'a> {
     /// `lower_expr(init)` and before the slot store: `IncrefValueRegion` peeks the
     /// top and does not pop, so the value stays in place for the store. No-op
     /// unless `hir_id` is a counted-init site. Pinned by
-    /// tests/elle/region-cell-aliased-init.lisp.
+    /// tests/impl/region-cell-aliased-init.lisp.
     pub(in crate::lir::lower) fn emit_counted_cell_init_retain(&mut self, hir_id: HirId, src: Reg) {
         if self.region_info.counted_cell_init_sites.contains(&hir_id) {
             self.emit(LirInstr::IncrefValueRegion { src });
@@ -73,9 +72,9 @@ impl<'a> Lowerer<'a> {
     ///   reassignment, is always exactly this init value. Nothing extra here.
     ///
     /// - `true` (the binding is reassigned): the cell content CHANGES, so a
-    ///   later slot-load + unwrap would free a different, live value (the
-    ///   capture-cell reassign UAF; region-capture-cell-reassign-uaf.lisp). The
-    ///   caller SKIPS `record_region_slot` for the init, and we drop its alloc
+    ///   later slot-load + unwrap would free a different, live value
+    ///   (tests/impl/region-capture-cell-reassign-loop-uaf.lisp). The caller
+    ///   SKIPS `record_region_slot` for the init, and we drop its alloc
     ///   reference HERE off `value_reg` directly. `StoreCaptureCell`
     ///   (`handle_update_capture`) already raised the value's region for the
     ///   cell's membership; this releases the producer's reference, leaving
@@ -83,8 +82,8 @@ impl<'a> Lowerer<'a> {
     ///   free cascade (the final value) or by the next reassignment's
     ///   drop-on-overwrite.
     ///
-    ///   This drop is transform 1's **decref side** (docs/impl/region/mechanism.md
-    ///   § "Compile-time region selection (coalescing)"): when `value` is a fresh
+    ///   This drop is the **decref side** of compile-time region selection
+    ///   (docs/impl/region/mechanism.md): when `value` is a fresh
     ///   local allocation whose region is a known slot (the usual case for a
     ///   captured binding's init), the release is slot-resolved
     ///   (`DecrefRegion`, guarded under `debug_assertions` by the equivalence
