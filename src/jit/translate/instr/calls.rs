@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-29
 // docs/impl/jit.md
 //! How a call leaves compiled code: the self-tail-call loop, the dispatch
 //! helper that carries every other call, and a `MakeClosure`.
@@ -96,6 +96,17 @@ impl<'a> FunctionTranslator<'a> {
                 // code hands its release forward").
                 let defer = TailDeferrals::of(*defer_callee_release, *deferred_release_slot);
 
+                // The emitter records one call site per tail call of a function
+                // that may suspend; take it before the self-call branch so the
+                // counts agree whichever path runs.
+                let park_site = if self.lir.signal.may_suspend() {
+                    let idx = self.call_site_index;
+                    self.call_site_index += 1;
+                    Some(idx)
+                } else {
+                    None
+                };
+
                 // Self-tail-call optimization
                 if let (Some((self_tag, self_payload)), Some(loop_header)) =
                     (self.self_tag_payload, self.loop_header)
@@ -152,7 +163,7 @@ impl<'a> FunctionTranslator<'a> {
                         // falls through so the post-`TailCall` releases run.
                         // Builder is left on the continue block; keep
                         // translating the rest of this LIR block.
-                        self.emit_tail_call_result_branch(builder, *dst, rt, rp)?;
+                        self.emit_tail_call_result_branch(builder, *dst, rt, rp, park_site)?;
                         return Ok(false);
                     }
                 }
@@ -171,7 +182,7 @@ impl<'a> FunctionTranslator<'a> {
                 // post-`TailCall` owned-arg releases; a closure (sentinel),
                 // yield, or error returns. Builder is left on the continue
                 // block, so keep translating the rest of this LIR block.
-                self.emit_tail_call_result_branch(builder, *dst, rt, rp)?;
+                self.emit_tail_call_result_branch(builder, *dst, rt, rp, park_site)?;
                 return Ok(false);
             }
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-29
 // docs/impl/bytecode.md
 //! The emitter's instruction dispatch: what each `LirInstr` writes into the
 //! bytecode, and what it does to the simulated operand stack.
@@ -328,6 +328,18 @@ impl Emitter {
                 self.bytecode.emit_byte(n as u8);
                 for &slot in &borrowed_arg_slots[..n] {
                     self.bytecode.emit_u16(slot);
+                }
+                // A callee that suspends parks this frame at the ip past the
+                // call, where the fall-through block starts. The simulation
+                // keeps func and args on the stack, so the site's operands are
+                // the prefix below them.
+                if self.current_func_may_suspend {
+                    let below = self.stack.len() - total_values;
+                    self.call_sites.push(CallSiteInfo {
+                        resume_ip: self.bytecode.current_pos(),
+                        stack_regs: self.stack[..below].to_vec(),
+                        num_locals: self.current_func_num_locals,
+                    });
                 }
             }
 
