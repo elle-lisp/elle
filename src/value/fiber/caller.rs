@@ -26,17 +26,13 @@ pub struct CallSite {
 }
 
 /// How many `parameterize` frames a fiber held at an entry: a call, a host
-/// that runs code, or a squelch boundary. Code that stops running pops none of
-/// the frames it pushed, so whatever abandons it truncates the fiber's frames
-/// to the depth recorded at its entry ([`super::Fiber::unwind_params`]). Read
-/// only off a fiber ([`super::Fiber::param_depth`]).
+/// that runs code, or a squelch boundary (src/vm/AGENTS.md § "Parameter
+/// resolution"). Read only off a fiber ([`super::Fiber::param_depth`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParamDepth(pub(super) usize);
 
 /// The squelch masks of the tail calls that replaced an activation's body,
-/// OR'd together, and the parameter depth at those calls. A body pops its own
-/// `parameterize` frames before its tail call, so the depth is where a
-/// violation the masks raise truncates to.
+/// OR'd together, and the parameter depth at the last of them.
 #[derive(Debug, Clone, Copy)]
 pub struct TailSquelch {
     pub mask: SignalBits,
@@ -90,9 +86,7 @@ pub struct PausedCaller {
     pub call_ip: usize,
     /// The caller's operand stack, locals included.
     pub stack: Vec<Value>,
-    /// How many parameter frames the fiber held at the call. A callee that
-    /// leaves by an error is abandoned, and the `parameterize` frames it pushed
-    /// leave with it (docs/signals/primitives.md § "Where a restart lands").
+    /// How many parameter frames the fiber held at the call.
     pub param_depth: ParamDepth,
     /// The caller's executing-closure register.
     pub closure: Value,

@@ -8,11 +8,8 @@ use crate::value::{SignalBits, Value, SIG_ERROR, SIG_OK};
 use crate::vm::core::VM;
 
 impl VM {
-    /// Run a closure under pure bytecode interpretation.
-    ///
-    /// Turns the JIT policy off for the run and restores it afterwards, so
-    /// neither this call nor a call it makes enters the JIT. A call it makes
-    /// can still run on the WASM or MLIR tier.
+    /// Run a closure under bytecode interpretation, with the JIT policy off
+    /// for the run (docs/impl/differential.md § "Primitive").
     pub fn invoke_closure_bytecode(
         &mut self,
         closure_val: Value,

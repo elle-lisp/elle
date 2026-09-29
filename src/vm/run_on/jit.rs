@@ -78,17 +78,14 @@ impl VM {
         // Save the operand stack and signal — call_jit may push and set.
         let saved_stack = std::mem::take(&mut self.fiber.stack);
         let saved_signal = self.fiber.signal.take();
-        // Compiled frames that leave by an error or a refused park pop none of
-        // the `parameterize` frames they pushed, so each such exit below
-        // truncates to this.
+        // Where an error or a refused park truncates the parameter frames to
+        // (src/vm/AGENTS.md § "Parameter resolution").
         let depth = self.fiber.param_depth();
 
         let result_jv = self.call_jit(&jit_code, closure, args, closure_val);
 
         // Capture any signal the JIT set (errors, halts, yields).
         let post_signal = self.fiber.signal.take();
-        // An error abandons the compiled frames. A tail callee that raises
-        // drops its own, in `execute_bytecode_saving_stack`.
         if post_signal.is_some_and(|(bits, _)| bits.intersects(SIG_ERROR)) {
             self.fiber.unwind_params(depth);
         }
@@ -159,9 +156,8 @@ impl VM {
             self.fiber.signal = Some(sig);
         }
 
-        // An error or halt wins over the sentinel. Compiled code leaves an
-        // `(error …)` through the yield side exit, as it leaves any emit, so
-        // the sentinel alone does not say the closure suspended.
+        // An error or halt wins over the sentinel (docs/impl/jit.md § "How a
+        // signal leaves compiled code").
         if let Some((bits, val)) = post_signal {
             if bits.intersects(SIG_ERROR) || bits.intersects(crate::value::SIG_HALT) {
                 return (bits, val);
