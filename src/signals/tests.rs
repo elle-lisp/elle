@@ -1,4 +1,8 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-09-29
+//! Unit tests for `Signal`: combination, squelch, the named constructors, and the capability bits.
+//!
+//! docs/signals/design.md
+//! docs/signals/capabilities.md
 
 use super::*;
 
@@ -310,7 +314,7 @@ fn subprocess_names_the_dispatch_bit_and_the_capability_bit() {
 //
 // The interpreter and both JIT call paths share this predicate, so its
 // exemption classes are the tier-independent statement of the rule.
-// `tests/elle/squelch-fuel.lisp` pins the pause exemption end to end.
+// `tests/lang/squelch-fuel.lisp` pins the pause exemption end to end.
 
 #[test]
 fn squelched_bits_names_the_bits_the_mask_covers() {
@@ -415,7 +419,7 @@ fn capability_gated_io_constructors_extend_the_same_base() {
 /// The counter-factual is a generator: `port/lines` masks `|:yield|` around a
 /// body that calls `port/read-line`. With `:yield` on the request, that mask
 /// swallows the read and it never reaches the scheduler
-/// (tests/elle/io-request-carries-no-yield.lisp).
+/// (tests/lang/io-request-carries-no-yield.lisp).
 #[test]
 fn a_scheduler_round_trip_does_not_carry_yield() {
     for sig in [
