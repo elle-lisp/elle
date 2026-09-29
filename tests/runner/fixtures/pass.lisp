@@ -1,4 +1,5 @@
-(elle/epoch 12)
-# Fixture for the agent-first test runner (docs/test-runner.md).
-# A single top-level form that passes on every tier.
+(elle/epoch 13)
+# audited: 2026-09-29
+# Fixture: a single top-level form that passes.
+# docs/test-runner.md
 (assert (= (+ 1 1) 2) "one plus one is two")

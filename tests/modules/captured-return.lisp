@@ -1,7 +1,7 @@
 (elle/epoch 13)
-# audited: 2026-09-28
+# audited: 2026-09-29
 # tests/modules/captured-return.lisp — fixture for
-# tests/elle/region-captured-return-move-uaf.lisp.
+# tests/impl/region-captured-return-move-uaf.lisp.
 #
 # A closure-as-module that captures a struct at init and exposes accessor
 # methods returning it — the shape of `lib/http.lisp`'s `:compress` module
