@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-29 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -122,6 +122,26 @@ the runner, and its owner can pass `JOBS=`.
 
 `tests/integration/capacity.rs` is the standing check that the CI count still
 tracks the runner.
+
+### Corpus batch size
+
+`elle test` runs the corpus in batches of `CORPUS_BATCH` files, one process per
+batch. Each process keeps the compiled module and the region heap of every file
+in its batch until it exits. The batch size therefore bounds the peak memory of
+one process.
+
+The default is 25 files. `macOS Smoke` uses 10. A 25-file batch stalled there:
+[region-eval-return-leak](../../tests/elle/region-eval-return-leak.lisp) hit
+its deadline with `join: deadline exceeded`, and the same run passed on Linux
+and AArch64.
+
+The working theory is page size. Pages on the macOS runner (arm64) are 16 KiB,
+and pages on the x86_64 Linux runner are 4 KiB. Nobody has confirmed the theory,
+so the smaller batch is a mitigation and not a diagnosis.
+
+The Makefile reads the platform from `HOST_OS`, which defaults to `uname -s`.
+A test sets `HOST_OS` to present another platform. Pass `CORPUS_BATCH=` to
+override the choice for one run.
 
 ### The plugins job
 
