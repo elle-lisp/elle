@@ -1,7 +1,8 @@
 // audited: 2026-09-29
-// docs/impl/jit.md
-// docs/impl/region/relocate.md
 //! Terminator translation and the generic tail-call result branch.
+//!
+//! docs/impl/jit.md
+//! docs/impl/region/relocate.md
 //!
 //! `translate_terminator` lowers each LIR `Terminator`; the two tail-call helpers
 //! carry the interpreter's native-vs-closure tail dispatch, which a generic
@@ -12,7 +13,7 @@ use crate::value::repr::TAG_TRUE;
 
 impl<'a> FunctionTranslator<'a> {
     /// Branch on a generic (helper-dispatched) tail call's runtime result so
-    /// the JIT mirrors the interpreter's `tail_call_inner` (src/vm/call.rs):
+    /// the JIT mirrors the interpreter's `tail_call_inner` (src/vm/call/inner/tail.rs):
     ///
     /// - `TAIL_CALL_SENTINEL` (callee was a closure → the trampoline runs it) or
     ///   a pending error: pop the region map and return the value. The
@@ -30,7 +31,7 @@ impl<'a> FunctionTranslator<'a> {
     ///   per-arg `DecrefValueRegion`/`DecrefRegion`s that release each moved
     ///   native arg. The interpreter reaches the same block by NOT replacing the
     ///   frame for a normally-completing native; a tier that returns at the call
-    ///   instead strands every moved arg (tests/elle/region-native-tail-move.lisp;
+    ///   instead strands every moved arg (tests/impl/region-native-tail-move.lisp;
     ///   docs/impl/region/rules.md Rule 8).
     ///
     /// On return the builder is positioned on the continue (fall-through)
@@ -127,9 +128,9 @@ impl<'a> FunctionTranslator<'a> {
                 let (tag, payload) = self.use_var_pair(builder, reg.0);
                 // Free this activation's owner node at normal completion — the
                 // JIT twin of the interpreter trampoline's clean-break release
-                // (docs/impl/region/owner.md § "Owner nodes"). Emitted before
-                // the region-map pop, mirroring the interpreter's ordering, and
-                // only for a function whose LIR can mint a node.
+                // (docs/impl/region/owner.md). Emitted before the region-map pop,
+                // mirroring the interpreter's ordering, and only for a function
+                // whose LIR can mint a node.
                 if self.uses_activation_owner_node {
                     let vm = self.vm_ptr.ok_or_else(|| {
                         JitError::InvalidLir("owner-node release without vm pointer".to_string())

@@ -105,12 +105,12 @@ fn jit_handle_primitive_signal(
             // Rule-5 suspend-escape retain — the exact mirror of the
             // interpreter's `handle_primitive_signal` Suspend arm
             // (src/vm/signal.rs). The yielded value escapes into `fiber.signal`,
-            // where the scheduler reads it (e.g. an `IoRequest` whose read buffer
-            // becomes the resume result, co-located in one region). Without this
+            // where the scheduler reads it (for example an `IoRequest` whose read
+            // buffer becomes the resume result, co-located in one region). Without this
             // incref the region's only reference is dropped when the resume
             // consumer's `DecrefValueRegion` fires, and the scheduler's release
             // of the same region frees it a second time
-            // (tests/elle/region-jit-io-suspend-uaf.lisp). `region_of`, NOT
+            // (tests/impl/region-jit-io-suspend-uaf.lisp). `region_of`, NOT
             // `result_region_of`: the escaping value's own region is the one held
             // live across the suspend.
             let heap = unsafe { &mut *vm.heap_ptr };
@@ -138,9 +138,10 @@ fn jit_handle_primitive_signal(
 /// (`call_inner`, src/vm/call/inner.rs: `def.signal ∩ withheld ∩ CAP_MASK`) and,
 /// when they overlap, denies the call instead of running it. The JIT native
 /// dispatch path (`elle_jit_call`) must apply the identical gate — otherwise a
-/// JIT-compiled fiber body reaches a withheld primitive (e.g. an `:io` `port/write`
-/// on an `:io`-denied fiber), runs it, and suspends on the raw effect request
-/// rather than the denial payload, so `fiber/value` reads the wrong value.
+/// JIT-compiled fiber body reaches a withheld primitive (for example an `:io`
+/// `port/write` on an `:io`-denied fiber), runs it, and suspends on the raw
+/// effect request rather than the denial payload, so `fiber/value` reads the
+/// wrong value.
 ///
 /// This mirrors the `SignalAction::Suspend` arm above: build the
 /// `{:error :capability-denied …}` payload, retain its region for the escape into
@@ -180,7 +181,7 @@ pub(crate) fn jit_capability_denial(
 /// Returns TRUE if one is set, FALSE otherwise.
 ///
 /// Uses bitwise containment (`contains`) rather than exact equality,
-/// because signals can be compound (e.g. `SIG_ERROR | SIG_IO`).
+/// because signals can be compound (for example `SIG_ERROR | SIG_IO`).
 #[no_mangle]
 pub extern "C" fn elle_jit_has_exception(vm: u64) -> JitValue {
     let vm = unsafe { &*(vm as *const crate::vm::VM) };

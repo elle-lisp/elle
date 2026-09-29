@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Yield side-exit helpers for JIT-compiled code.
 //!
 //! docs/impl/jit.md
@@ -160,7 +160,7 @@ pub extern "C" fn elle_jit_yield(
     // decref_point (fired as this activation suspends and, on resume, continues
     // past the yield); without this incref that decref drops the value's only
     // reference while the resumer still holds it, freeing it out from under the
-    // read (tests/elle/region-jit-emit-escape-uaf.lisp). The symmetric release
+    // read (tests/impl/region-jit-emit-escape-uaf.lisp). The symmetric release
     // is the resume path's own pending decref, `release_discarded_signal` for a
     // fiber that never runs again, or the free-path fiber discharge — all
     // tier-agnostic (they act on `fiber.signal`), so they balance this retain
@@ -183,9 +183,9 @@ pub extern "C" fn elle_jit_yield(
     } else {
         // …and every other emit records the PARK, so a `squelch`/`attune`
         // boundary can release the delivery retain no reader will consume
-        // (docs/impl/region/park.md § "A boundary ends a park with no reader
-        // and no install"). The record follows the retain this helper took just
-        // above, which is what keeps the two balanced whatever the bits are.
+        // (docs/impl/region/park.md). The record follows the retain this helper
+        // took just above, which is what keeps the two balanced whatever the bits
+        // are.
         vm.fiber.delivery.park_emit(sig, yielded);
     }
     vm.fiber.signal = Some((sig, yielded));
@@ -212,7 +212,7 @@ pub extern "C" fn elle_jit_yield(
         // MOVE what the activation owes into the frame (its slot is
         // likewise still on top) so it rides the park to the resumed body's
         // completion — the compiled twin of the interpreter yield park
-        // (docs/impl/region/owner.md § "Owner nodes").
+        // (docs/impl/region/owner.md).
         let activation_dues = vm.take_activation_dues();
         // The yielding body's own closure — park it so a self-edge resolved after
         // resume (re-entering via the interpreter) names the right closure. The JIT
