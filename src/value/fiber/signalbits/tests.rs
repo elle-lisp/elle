@@ -1,4 +1,7 @@
+// audited: 2026-09-29
 //! Pins the set semantics of `SignalBits`.
+//!
+//! docs/signals/design.md
 //!
 //! The predicate names are the point of these tests. `intersects` shares a
 //! bit; it is not a subset test, and reading it as one would silently change
@@ -64,9 +67,11 @@ fn has_bit_agrees_with_intersects_on_a_single_bit() {
 
 #[test]
 fn covers_privileges_no_bit_over_another() {
-    // A subprocess request is |:io :exec|. Both bits route it, and a mask
+    // A subprocess request is |    // An intermediate fiber masking |:yield| must not swallow a request the
+    // scheduler has to service. The two share no bit: an I/O request raises
+    // |:io| and does not carry :yield. :exec|. Both bits route it, and a mask
     // naming either one catches it — `:io` is not a precondition for `:exec`
-    // taking effect (#895, tests/elle/mask-exec-routes.lisp).
+    // taking effect (tests/lang/mask-exec-routes.lisp).
     let request = SIG_IO | SIG_EXEC;
     assert!(SIG_EXEC.covers(request));
     assert!(SIG_IO.covers(request));
@@ -78,10 +83,9 @@ fn covers_privileges_no_bit_over_another() {
 
 #[test]
 fn a_yield_mask_does_not_catch_an_io_request() {
-    // The guarantee the old SIG_IO special case bought: an intermediate fiber
-    // masking |:yield| must not swallow a request the scheduler has to service.
-    // It now holds because the two genuinely share no bit — an I/O request
-    // raises |:io| and does not carry :yield.
+    // An intermediate fiber masking |:yield| must not swallow a request the
+    // scheduler has to service. The two share no bit: an I/O request raises
+    // |:io| and does not carry :yield.
     assert!(!SIG_YIELD.intersects(SIG_IO));
     assert!(!SIG_YIELD.covers(SIG_IO));
     assert!(!SIG_YIELD.covers(SIG_IO | SIG_EXEC));

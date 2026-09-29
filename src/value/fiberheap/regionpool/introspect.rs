@@ -1,3 +1,9 @@
+// audited: 2026-09-29
+//! What a region pool can say about itself: its live objects and pages, and the cross-region references it holds.
+//!
+//! docs/impl/region/model.md
+//! docs/impl/region/rules.md
+
 use super::*;
 
 impl RegionPool {
@@ -123,8 +129,8 @@ impl RegionPool {
         // not inline. It is enumerated here, once, for all variants so the
         // alloc-scan increfs and the free-cascade decrefs it symmetrically
         // (Rule 5/7); the per-variant `match` below covers only the inline
-        // content fields. Omitting this was a UAF: the table was freed at its
-        // constructor's decref_point while the host still referenced it.
+        // content fields. The counter-factual: omit it, and the table is freed at
+        // its constructor's decref_point while the host still references it.
         check(&obj.traits());
 
         match obj {
@@ -160,13 +166,13 @@ impl RegionPool {
                 // OWN region (built together by the lowerer), so the synthetic
                 // backing ref below is filtered by `rid == own_id`. But a
                 // closure built by SHARING another closure's env — `squelch` /
-                // `attune` (src/primitives/meta.rs) clone the template and copy
+                // `attune` (src/primitives/meta/syntaxops.rs) clone the template and copy
                 // the env's `(ptr, len)` pair, leaving the backing data in the
                 // SOURCE closure's region — has its env backing in a DIFFERENT
                 // region. Without a cross-region edge to that backing, the
                 // source region is freed at its owning-scope decref while this
-                // closure still reads the env (the protect+squelch+nested-yield
-                // UAF: `populate_env` reads a freed page on first fiber resume).
+                // closure still reads the env: `populate_env` reads a freed page
+                // on the first fiber resume (tests/lang/signals.lisp).
                 // Synthesize a heap Value at the backing pointer so the shared
                 // `check` routes it like any cross-region ref — symmetric with
                 // the Fiber arm below, and balanced because a closure's env is
@@ -203,7 +209,7 @@ impl RegionPool {
                 // a cross-region reference just like the value — enumerate both so
                 // the key's region is increfed/recorded at alloc and cascade-decrefed
                 // at free (else the key's region frees while the struct still points
-                // into it; see region-struct-heap-key-uaf.lisp).
+                // into it; see tests/impl/region-struct-heap-key-uaf.lisp).
                 for (k, v) in data.iter() {
                     k.for_each_heap_value(&mut check);
                     check(v);
@@ -228,7 +234,7 @@ impl RegionPool {
                 // The fiber's `traits` edge is tracked by the top-level
                 // `check(&obj.traits())` above, with every other traitable
                 // variant. This arm covers only the fiber's closure/env/signal.
-                // EXPERIMENT: keep the fiber's (immutable) closure alive. The
+                // Keep the fiber's (immutable) closure alive. The
                 // closure's env RegionSlice backing and its captured Values
                 // live in the region where the closure was built — usually a
                 // *different* activation than the fiber. Without a cross-region
@@ -244,7 +250,7 @@ impl RegionPool {
                 // Track it as a cross-region edge so the fiber keeps it alive
                 // until the fiber itself dies (cascade-decref here at free).
                 // The matching incref is added when the fiber parks/dies (see
-                // `incref_signal_region` in vm/fiber.rs).
+                // `incref_signal_region` in src/vm/fiber/refcount.rs).
                 let mut signal_val = Value::NIL;
                 // The fiber's closure holds a `Region` template (a region-allocated
                 // `HeapObject::ClosureTemplate`) usually CO-region with the env
@@ -265,7 +271,7 @@ impl RegionPool {
                 // `closure_value`. Without this edge that region frees at its binding's
                 // decref_point while the fiber still holds the value, and a later
                 // free's cross-ref scan reads the freed page
-                // (tests/elle/region-squelch-fiber-uaf.lisp).
+                // (tests/impl/region-squelch-fiber-uaf.lisp).
                 let mut closure_value = Value::NIL;
                 // The seeded parameter BASELINE (frames[0], exactly when
                 // `param_baseline_seeded`) was retained at the seed with a
@@ -273,8 +279,7 @@ impl RegionPool {
                 // (`retain_param_baseline`); walking it here is the symmetric
                 // release at the fiber object's free. The fiber's own later
                 // `parameterize` frames are NOT walked — their values belong
-                // to the parked activation (docs/impl/region/owner.md § "A
-                // child's inherited parameter baseline is a counted holder").
+                // to the parked activation (docs/impl/region/owner.md).
                 let mut param_vals: Vec<Value> = Vec::new();
                 let _ = handle.try_with(|fib| {
                     closure_value = fib.closure_value;
@@ -300,7 +305,7 @@ impl RegionPool {
                     }
                     if let Some((bits, v)) = fib.signal {
                         // Only terminal results are park-retained (see
-                        // vm/fiber.rs `is_terminal_signal`); match that here so
+                        // src/vm/fiber/refcount.rs `is_terminal_signal`); match that here so
                         // the cascade-decref balances the park-retain. Yield /
                         // suspending signal values are not pinned.
                         if crate::vm::fiber::is_terminal_signal(bits) {
