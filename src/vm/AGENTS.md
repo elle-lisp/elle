@@ -1,6 +1,6 @@
 # vm
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 The VM executes bytecode on a fiber's operand stack, with each local in a stack slot above the frame base.
 
@@ -251,11 +251,13 @@ parameter frames). Each re-entry nests on the Rust stack, so it halts with
 | The WASM host | [linker.rs](../wasm/linker.rs), [linker.rs](../wasm/lazy/linker.rs) | Falls back to bytecode for a callee the module does not hold |
 | FFI callback | [callback.rs](../ffi/callback.rs) | Runs a closure a C function calls back |
 
-A host that runs a thunk on the current fiber refuses a suspending signal.
-`eval`, `import` and the test-setup loader report an error, and `arena/allocs`
-abandons the park (`VM::abandon_hosted_park`). The module doc of
-[execute.rs](execute.rs) holds the rules on what is preserved, what is
-overwritten, and how to add a caller.
+A host that runs code on the current fiber cannot hold a suspension of that
+code. `eval`, `import`, the `compile/*-module` setup runs, `compile/run-on :jit`
+and the root driver refuse one: `refuse_hosted_park` ends the park through the
+discard chokepoint, and the host raises at its own call. `arena/allocs` and
+`compile/run-on :bytecode` hand the suspension on as their own call's park
+(`abandon_hosted_park`). The module doc of [execute.rs](execute.rs) holds the
+rules on what is preserved, what is overwritten, and how to add a caller.
 
 ## Suspension mechanism
 
@@ -331,6 +333,12 @@ frame — the creator's stack flattened at `fiber/new`, innermost winning — be
 the creator's `parameterize` blocks unwind long before the scheduler resumes the
 child. The baseline is a counted holder of every heap value in it
 ([park.md](../../docs/impl/region/park.md)).
+
+**Abandonment**: code that stops running pops no frame it pushed, so whatever
+abandons it truncates the stack. Each call, host and boundary records the depth
+at its entry as a `ParamDepth`. A caller whose callee raised truncates to it,
+and so does the discard chokepoint where a `squelch` boundary or a refusing
+host ends a park (`discard_suspended_frames`).
 
 ## Truthiness
 

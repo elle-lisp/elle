@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! Bytecode execution entry points, the tail-call trampoline, and the opening
 //! and closing of an activation.
 //!
@@ -37,10 +37,10 @@
 //!
 //! If the inner closure suspends (a yield, an I/O request),
 //! `execute_bytecode_saving_stack` returns the suspending bits with the outer
-//! stack restored. No host resumes the inner continuation, so each refuses
-//! the suspend: `eval`, `import` and the test-setup loader report an error,
-//! and `arena/allocs` returns the signal from its own call. Each first calls
-//! `VM::abandon_hosted_park`, because the refused park is dead.
+//! stack restored. No host resumes the inner continuation. `eval`, `import`
+//! and the test-setup loader end the park through `VM::refuse_hosted_park` and
+//! raise at their own call. `arena/allocs` returns the signal from its own
+//! call, so its park ends there, through `VM::abandon_hosted_park`.
 //!
 //! ### Nested `fiber/resume` — the SIG_SWITCH obligation
 //!
@@ -59,8 +59,9 @@
 //! is later resumed by the *outer* trampoline — that is, OUTSIDE the
 //! re-entrant caller's scope. An `arena/allocs` measurement would then answer
 //! with the resumed child's value instead of `(result . net)` and never finish
-//! the thunk (`tests/elle/arena.lisp` "arena/allocs measures a thunk that resumes
-//! a fiber"; the `fiber-spawn-10` scenario in `tests/elle/resource.lisp`).
+//! the thunk (`tests/elle/arena.lisp` "arena/allocs measures a thunk that
+//! resumes a fiber"; the `fiber-spawn-10` scenario in
+//! `tests/elle/resource.lisp`).
 //!
 //! `VM::run_thunk_to_completion` is the safe entry point: it drives
 //! `SIG_SWITCH` to completion exactly as the root loop does, so a nested
@@ -79,8 +80,9 @@
 //! 1. Read `fiber.signal` immediately after return to get the result.
 //! 2. Check `exec_result.bits` for `SIG_ERROR` and `SIG_HALT` before using
 //!    the result.
-//! 3. If the closure may suspend, refuse the suspending bits and call
-//!    `VM::abandon_hosted_park`, as the section above describes.
+//! 3. If the closure may suspend, end its park as the section above
+//!    describes: refuse it through `VM::refuse_hosted_park`, or hand it on as
+//!    your own call's park through `VM::abandon_hosted_park`.
 //! 4. Do NOT assume `fiber.signal` is unchanged after the call.
 //! 5. The inner execution runs on the SAME fiber — same heap, same
 //!    parameter frames. It is not isolated.
