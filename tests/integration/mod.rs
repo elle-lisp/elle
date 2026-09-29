@@ -223,6 +223,9 @@ mod plugins {
 mod runner_budget {
     include!("runner_budget.rs");
 }
+mod dashboards {
+    include!("dashboards.rs");
+}
 mod budget {
     include!("budget.rs");
 }
