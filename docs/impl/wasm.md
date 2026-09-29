@@ -353,15 +353,19 @@ they share the one `regalloc2` the union of their requirements allows, so the
 JIT every default build runs gets its register allocator chosen by the WASM
 tier's pin.
 
-The two pins therefore move together. `wasmtime 46` carries Cranelift 0.133,
+The two pins therefore move together. `wasmtime 49` carries Cranelift 0.136,
 and `Cargo.toml` pins `cranelift-codegen`, `-frontend`, `-module`, `-jit`, and
-`-native` at 0.133 to match. Raising `wasmtime` means raising the JIT's
+`-native` at 0.136 to match. Raising `wasmtime` means raising the JIT's
 Cranelift in the same change, which is a code change and not only a manifest
-one — 0.133 interns memory-operation flags per function (see
-[impl/jit.md](jit.md) § "Memory flags on emitted loads").
+one. Each Cranelift line has changed a builder call the translator makes (see
+[impl/jit.md](jit.md) § "Memory flags on emitted loads" and § "Stores into
+stack slots").
+
 `integration::deps` ([deps.rs](../../tests/integration/deps.rs)) reads
 `Cargo.lock` and fails if the graph ever holds two versions of
-`cranelift-codegen` or `regalloc2`.
+`cranelift-codegen` or `regalloc2`. It also fails if `wasmtime` resolves below
+the release that fixed its newest published advisory. When `cargo audit` names
+a newer fix, raise that floor in the same change as the pin.
 
 ## Full-module coverage and its two teardown/lowering invariants
 
