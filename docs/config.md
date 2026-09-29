@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
@@ -29,11 +29,10 @@ function has been called ten times; `vm/config` reads and sets that threshold
 (below).
 
 A build is one implementation of Elle, and every build must pass the language
-suite ([spec](spec.md) § A build is an implementation). There is therefore no
-flag that chooses a tier or a backend. A user who wants the interpreter alone
-builds without the `jit` feature. The rig can switch the JIT off or make it
-eager for one implementation test ([rig](../rig/overview.md)); a user build
-cannot.
+suite ([spec](spec.md)). There is therefore no flag that chooses a tier or a
+backend. A user who wants the interpreter alone builds without the `jit`
+feature. The rig can switch the JIT off or make it eager for one implementation
+test ([rig](../rig/overview.md)); a user build cannot.
 
 ## CLI flags
 
@@ -57,12 +56,12 @@ A program name that starts with `--` is a flag `elle` does not know, and
 
 ### Where elle's flags stop
 
-`--` ends them. Elle reads every flag below wherever it appears before that
-separator, and hands the program every argument after it — the separator
-included — through `sys/args`.
+The program name ends them. Elle reads the flags below before the program name,
+and hands the program every argument after it through `sys/args`, a `--`
+included.
 
 ```bash
-elle --trace=call script.lisp -- --trace=call   # elle takes the first, the script the second
+elle --trace=call script.lisp -- --trace=call   # elle takes the first, the script the rest
 ```
 
 `--help` and `--version` obey the same boundary, so a script is free to carry

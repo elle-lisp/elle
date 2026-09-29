@@ -9,7 +9,7 @@ Wasmtime, over the same front end the bytecode VM uses.
 > time. It is disabled by default to reduce binary size. Build with
 > `cargo build --features wasm` to enable it. A `wasm` build carries
 > WebAssembly as its one optimizing tier: the JIT is off in it, and only such a
-> build accepts `--wasm=` ([config.md](../config.md) § Builds).
+> build accepts `--wasm=` ([config.md](../config.md)).
 
 It is an alternative to the bytecode VM, sharing that front end
 (reader → expander → analyzer → HIR → LIR) and replacing everything below it.
@@ -254,14 +254,13 @@ builds a WASM closure value it builds the code object from that blueprint, so a
 spawned worker can run `template.code()` on the VM.
 
 The blueprint travels whole, through `TemplateProto::wasm_closure`
-([region/template.md](region/template.md) § "The WASM backend is handed a
-blueprint instead"). Every field of it earns the trip. The nested-lambda
-blueprints are the loudest: a closure's bytecode `MakeClosure` instructions
-index `child_protos`, so a code object built without them leaves that list empty
-and the worker panics on its first `MakeClosure`
-([closure.rs](../../src/vm/closure.rs)). The two
-release tables are the quietest, and are what an abandoned frame on that worker
-walks. Pinned by `wasm::tests::closure`.
+([region/template.md](region/template.md)). Every field of it earns the trip. The
+nested-lambda blueprints are the loudest: a closure's bytecode `MakeClosure`
+instructions index `child_protos`, so a code object built without them leaves
+that list empty and the worker panics on its first `MakeClosure`
+([closure.rs](../../src/vm/closure.rs)). The two release tables are the quietest,
+and are what an abandoned frame on that worker walks. Pinned by
+`wasm::tests::closure`.
 
 ### Register allocation
 
@@ -359,10 +358,8 @@ The two pins therefore move together. `wasmtime 49` carries Cranelift 0.136,
 and `Cargo.toml` pins `cranelift-codegen`, `-frontend`, `-module`, `-jit`, and
 `-native` at 0.136 to match. Raising `wasmtime` means raising the JIT's
 Cranelift in the same change, which is a code change and not only a manifest
-one. Each Cranelift line has changed a builder call the translator makes (see
-[impl/jit.md](jit.md) § "Memory flags on emitted loads" and § "Stores into
-stack slots").
-
+one. Each Cranelift line has changed a builder call the translator makes
+([impl/jit.md](jit.md)).
 `integration::deps` ([deps.rs](../../tests/integration/deps.rs)) reads
 `Cargo.lock` and fails if the graph ever holds two versions of
 `cranelift-codegen` or `regalloc2`. It also fails if `wasmtime` resolves below
@@ -371,11 +368,14 @@ a newer fix, raise that floor in the same change as the pin.
 
 ## Full-module coverage and its two teardown/lowering invariants
 
-The full-module tier runs the language suite under `make smoke-wasm`, except the
-files the Makefile's `WASM_SKIP` names: dynamic compilation (`eval`) is not a
-WASM backend feature. Two invariants that this tier — and only this tier —
-must uphold are worth calling out, because each is invisible on the VM/JIT path
-and each is pinned by a specific suite file run under `--wasm=full`.
+`make smoke-wasm` runs both suites on the full-module tier, less the files the
+Makefile's `WASM_SKIP` names: dynamic compilation (`eval`) is not a WASM backend
+feature. It runs the language suite under `elle --wasm=full`, and the
+implementation suite on the `wasm` build's rig under the profile
+[wasm-full.toml](../../tests/impl/profiles/wasm-full.toml) ([rig](../../rig/overview.md)).
+Two invariants that this tier — and only this tier — must uphold are worth
+calling out, because each is invisible on the VM/JIT path and each is pinned by
+a specific suite file that one of those passes runs.
 
 - **every io-backend strands to the heap's teardown.** Every region instruction
   is a structural no-op on this tier (its emitter lowers each to nothing —
@@ -389,10 +389,9 @@ and each is pinned by a specific suite file run under `--wasm=full`.
   What handles them is not this tier's: `FiberHeap::quiesce_io_backends` drains
   each before the region sweep, on every tier, because the VM reaches the same
   state whenever a program ends without dropping its backend
-  ([io-inflight.md](io-inflight.md) § "A hold is let go while its
-  store is still there"). This tier is where it shows up on the widest range of
-  programs, so it is the coverage that pins it. Canonical reference:
-  [posix.lisp](../../tests/lang/posix.lisp).
+  ([io-inflight.md](io-inflight.md)). This tier is where it shows up on the
+  widest range of programs, so it is the coverage that pins it. Canonical
+  reference: [posix.lisp](../../tests/lang/posix.lisp).
 
 - **a fn-local reassigned mutable binding's slot is never value-route decref'd +
   nil-stamped.** `allocate_slot` gives such a binding its own never-reused stack
@@ -421,11 +420,13 @@ passes below do not gate CI while the tier carries no production workloads.
 # Build gate: feature compiles, tier boots (the CI gate)
 make check-wasm
 
-# The language suite on a wasm build, under --wasm=full
+# Both suites on a wasm build: the language suite under --wasm=full, and the
+# implementation suite on the wasm rig under the wasm-full profile
 make smoke-wasm
 
-# Individual test
+# Individual tests
 elle --wasm=full tests/lang/arithmetic.lisp
+elle-rig --profile tests/impl/profiles/wasm-full.toml tests/impl/region-capture-cell-loop-uaf.lisp
 
 # Tiered mode test
 elle --wasm=11 tests/impl/wasm-tier.lisp
