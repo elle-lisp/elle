@@ -1,6 +1,6 @@
 # Driving the test runner
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-29 -->
 
 Why `elle test` exists, the command line it offers, what it refuses to
 offer, and what is still design.
@@ -95,7 +95,7 @@ agent would normally re-run *with special flags to obtain* (`--dump=lir`,
 - **Elle drives `cargo`, not the reverse.** `cargo`'s `integration::elle_scripts`
   harness no longer drives the `.lisp` corpus — `elle test` does. What remains in
   `elle_scripts.rs` is the few files that need a *process-global* runtime mode
-  (`--trace=guardfree`, `--no-uring`, `--mlir=off`+adaptive), each run as a
+  (`--trace=guardfree`, `--mlir=off`+adaptive), each run as a
   one-off subprocess. `--isolate` now runs a file that way and records it
   ([test-runner](test-runner.md)), so those files have a home in the database;
   moving them is the [profiles](test-vision.md) step. The remaining dependency
@@ -134,13 +134,15 @@ elle test [paths...]            # default: tests/elle, ALL tiers, write DB
 ```
 
 These global `elle` flags pass through to the runner's own VM rather than
-being read as corpus paths: `--trace=...`, `--boot-image=...`, `--stats`, and
-`--no-uring`. `--no-uring` runs the whole corpus on the thread-pool I/O
-backend — the only backend a Mac has — so a pool-only wedge can be chased on a
-Linux box (`elle test --no-uring tests/elle/process-io.lisp`).
+being read as corpus paths: `--trace=...`, `--boot-image=...`, and `--stats`.
 `--boot-image=` boots the runner from an image, so every corpus file is
 compiled against a hydrated stdlib rather than a freshly compiled one
 ([boot](impl/image/boot.md)).
+
+The I/O backend is a build choice rather than a flag. A Linux binary built
+with the `no-uring` feature runs every operation on the thread pool — the only
+backend a Mac has — so `elle test` on that binary chases a pool-only wedge on a
+Linux box.
 
 ### The budget follows the file
 

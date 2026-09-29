@@ -144,10 +144,9 @@ each form, so it lives in the worker — which the corpus will migrate toward.)
 ### Isolation: a file can have its own process
 
 A worker thread isolates a fault and shares the process. That is enough for a
-form that raises, and not enough for a mode the process sets once: `--no-uring`
-picks the I/O backend for the whole binary, and `--trace=guardfree` reports a
-use-after-free as a SIGSEGV, which takes the runner down along with every
-result it had not written yet. Those files live in
+form that raises, and not enough for a mode the process sets once:
+`--trace=guardfree` reports a use-after-free as a SIGSEGV, which takes the
+runner down along with every result it had not written yet. Those files live in
 [elle_scripts.rs](../tests/integration/elle_scripts.rs) today, and their
 verdicts reach no database.
 

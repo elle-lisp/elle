@@ -1,6 +1,6 @@
 # Installing Elle
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-29 -->
 
 What to install, how to build Elle and its plugins, and how to run the tests.
 
@@ -101,6 +101,16 @@ export LIBCLANG_PATH=/usr/lib/llvm-22/lib
 
 ```sh
 cargo build --release -p elle --features mlir
+```
+
+## Optional: the thread-pool I/O backend on Linux
+
+A Linux build runs its I/O on io_uring, and every other platform runs it on a
+thread pool. The `no-uring` feature builds a Linux binary that uses the thread
+pool, so a defect that shows only on a Mac can be chased on a Linux box:
+
+```sh
+cargo build --release -p elle --features no-uring
 ```
 
 ## Plugins

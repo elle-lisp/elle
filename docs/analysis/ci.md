@@ -19,7 +19,7 @@ renamed heading breaks the site generator.
 | VM+JIT Tests | ubuntu | `doctest`, `smoke-vm`, `smoke-jit` | — |
 | Boot Image Tests | ubuntu | `smoke-boot-image` — the corpus booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, then property tests | 16 |
-| Thread-Pool I/O Tests | ubuntu | The corpus on the thread-pool I/O backend | — |
+| Thread-Pool I/O Tests | ubuntu | `smoke-nouring` — the corpus through `elle test`, on a `no-uring` build | — |
 | MLIR Tests | ubuntu | `smoke-mlir` — the corpus through `elle test`, with the mlir-cpu tier | — |
 | WASM Build | ubuntu | `check-wasm` — the feature compiles, the tier boots | — |
 | Plugin Tests | ubuntu | Builds the `plugins/` submodule, asserts its artifacts, runs its corpus | — |
@@ -69,6 +69,10 @@ I/O Tests` and `macOS Smoke` set `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS`,
 which is what compiles the region checks in. Those checks are
 `#[cfg(debug_assertions)]`, so a corpus job without the flag drives the whole
 corpus blind to every one of them.
+
+`Thread-Pool I/O Tests` also builds with the `no-uring` feature. That binary
+runs every I/O operation on the thread pool, the backend every non-Linux build
+runs, so a pool-only defect fails on a Linux runner before it reaches the Mac.
 
 The rule is one such job per I/O backend. `Thread-Pool I/O Tests` covers the
 pool and `VM+JIT Tests` covers io_uring, so finding a region defect never

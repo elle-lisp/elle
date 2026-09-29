@@ -99,8 +99,8 @@ execution.
 
 `elle test --isolate 'FLAGS'` runs each path as `elle FLAGS PATH`, one child per
 path, recorded on the `process` tier. This is for a mode the process sets once
-and the runner cannot vary per file — `--no-uring`, or `--trace=guardfree`,
-whose use-after-free report is a SIGSEGV that would take a shared runner down.
+and the runner cannot vary per file — `--trace=guardfree`, for example, whose
+use-after-free report is a SIGSEGV that would take a shared runner down.
 
 A child that dies on a signal is a `fail` naming the signal and the run
 continues; an exit code is a `fail` naming the code; a child over its budget

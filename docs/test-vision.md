@@ -19,14 +19,15 @@ Six products test this repository today:
   is a query.
 - [escape-golden.lisp](../tests/elle/escape-golden.lisp) pins escape snapshots.
 - `tests/integration/elle_scripts.rs` runs the files that need a process-global
-  flag (`--trace=guardfree`, `--no-uring`), each as a cargo-driven subprocess.
+  flag (`--trace=guardfree`), each as a cargo-driven subprocess.
   `elle test --isolate` runs a file the same way and records the child's status,
   signal and output ([test-runner](test-runner.md)); what these files still wait
   on is a profile that selects them.
-- The Makefile runs five more corpus passes outside the runner: per-file vm,
-  per-file jit, the no-features build, nouring, and whole-file wasm — each with
-  its own skip and timeout lists. The mlir build runs the corpus through the
-  runner alone, which puts every form on the mlir-cpu tier.
+- The Makefile runs four more corpus passes outside the runner: per-file vm,
+  per-file jit, the no-features build, and whole-file wasm — each with its own
+  skip and timeout lists. The mlir build and the `no-uring` build run the corpus
+  through the runner alone: the first adds the mlir-cpu tier, and the second
+  runs every I/O operation on the thread pool.
 
 The runner's thesis is "capture everything once; query forever", and the data
 now survives the run that produced it. The DB lives in the state directory, so
@@ -72,8 +73,8 @@ Isolation is the piece that unlocks the rest, and it is in: `--isolate FLAGS`
 runs each selected path as `elle FLAGS PATH`, so a guardfree SIGSEGV kills one
 child and lands as a recorded failure ([test-runner](test-runner.md)). What a
 profile adds is the selection — which files run under which flags — so that
-`elle_scripts.rs` and the per-file teardown passes (`smoke-vm`, `smoke-jit`,
-`smoke-nouring`) become profiles named process, jit, and pool.
+`elle_scripts.rs` and the per-file teardown passes (`smoke-vm`, `smoke-jit`)
+become profiles named process and jit.
 
 Profiles add coverage; the default profile still runs everything. A
 completeness gate fails when a declared profile records no verdicts, the same
