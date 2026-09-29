@@ -1,10 +1,12 @@
-// Unicode segmentation generations: per-VM table selection.
+// audited: 2026-09-29
+// Unicode segmentation generations: which tables each VM selects, and who may choose.
 //
-// The corpus (tests/elle/unicode.lisp) covers the default generation only,
-// because corpus files compile on the shared runner VM. Everything that
-// needs a non-default generation lives here: G16 runtimes built through
-// the embedding surface, the CLI flag, main-file selection, and the
-// program-wide agreement rules.
+// docs/strings.md
+//
+// The language suite (tests/lang/unicode.lisp) runs under the build's default
+// generation. Everything that needs another generation lives here: G16
+// runtimes built through the embedding surface, the CLI flag, main-file
+// selection, and the program-wide agreement rules.
 //
 // The divergence vector: U+10EFA is Extend in the Unicode 17 grapheme
 // table and unassigned in Unicode 16 (the 16 table's range starts at
@@ -166,17 +168,18 @@ fn vm_config_unicode_is_readable() {
 
 #[test]
 fn vm_config_unicode_is_immutable() {
-    // vm/config-set reports rejection as an error value (its contract for
-    // every field); the message must explain the immutability.
-    let src = "(def r (vm/config-set :unicode [16 0 0])) \
-               (if (and (= (get r :error) :argument-error) \
-                        (string/contains? (get r :message) \"fixed at VM construction\")) 1 0)";
+    // vm/config-set raises when it refuses a field, as it does for every
+    // refusal (docs/config.md); the message explains the immutability.
+    let src = "(let [[ok? err] (protect (vm/config-set :unicode [16 0 0]))] \
+               (if (and (not ok?) \
+                        (= (get err :error) :argument-error) \
+                        (string/contains? (get err :message) \"fixed at VM construction\")) 1 0))";
     eval_source(src, |r| {
         assert_eq!(r.expect("eval").as_int(), Some(1));
     });
     // The set must not have taken effect.
     eval_source(
-        "(vm/config-set :unicode [16 0 0]) (if (= (vm/config :unicode) [17 0 0]) 1 0)",
+        "(protect (vm/config-set :unicode [16 0 0])) (if (= (vm/config :unicode) [17 0 0]) 1 0)",
         |r| {
             assert_eq!(r.expect("eval").as_int(), Some(1));
         },
