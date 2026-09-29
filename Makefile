@@ -368,12 +368,14 @@ WASM_SKIP := -e eval.lisp -e eval-env.lisp -e wasm-tier-error-signal.lisp
 # batching by file does not weaken it, and every batch appends to the one session
 # DB that `--query`/`--summary` read (docs/testing.md § Reading a run).
 #
-# macOS gets a smaller batch than everything else; docs/analysis/ci.md § "Corpus
-# batch size" owns the argument. HOST_OS is overridable so that
-# tests/integration/capacity.rs can present a platform the suite is not running
-# on.
-HOST_OS ?= $(shell uname -s)
-ifeq ($(HOST_OS),Darwin)
+# macOS and AArch64 get a smaller batch than everything else; docs/analysis/ci.md
+# § "Corpus batch size" owns the argument. HOST_OS and HOST_ARCH are overridable
+# so that tests/integration/capacity.rs can present a platform the suite is not
+# running on. The AArch64 runner says `Linux` to `uname -s`, so it is told apart
+# by `uname -m`: `aarch64` on Linux, `arm64` on a Mac.
+HOST_OS   ?= $(shell uname -s)
+HOST_ARCH ?= $(shell uname -m)
+ifneq ($(filter Darwin,$(HOST_OS))$(filter aarch64 arm64,$(HOST_ARCH)),)
   CORPUS_BATCH ?= 10
 else
   CORPUS_BATCH ?= 25
