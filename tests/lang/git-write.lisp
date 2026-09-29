@@ -1,16 +1,14 @@
 (elle/epoch 12)
-# Git module write-path tests (lib/git.lisp, FFI to libgit2).
+# audited: 2026-09-29
+# std/git writes a repository: init, config, add, commit, status, branches and tags.
+# lib/git.lisp
 #
-# Complements tests/elle/git.lisp, which reads the *current* repo (open, head,
-# log, …); this file exercises the write path — init, config, add, commit,
-# status, branches, tags — against a throwaway repo in a scratch temp dir.
-#
-# The module does not (yet) export diff/diff-patch/show/add-all/checkout, so
-# those surfaces are untested here.
+# tests/lang/git.lisp reads the current repository; this file writes a throwaway
+# one in a scratch directory, and removes it at the end.
 
-# Gate the whole file on libgit2: if it can't load, re-raise as a loud :gated
-# so `elle test` records a file-level SKIP with a reason (docs § Gating).
-# Never (exit 0): under the runner that would kill the process mid-run.
+# Gate the whole file on libgit2: if it cannot load, re-raise as a :gated error
+# so `elle test` records a file-level SKIP with a reason (docs/test-runner.md).
+# An `(exit 0)` here would read as a pass.
 (def _libgit2
   (let [r (protect (ffi/native "libgit2.so"))]
     (if (get r 0)
