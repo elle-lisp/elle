@@ -1,6 +1,6 @@
 # What a signal exit owes
 
-<!-- audited: 2026-09-05 -->
+<!-- audited: 2026-09-29 -->
 
 A native tail call runs its fall-through block on normal completion alone, so a
 signal exit answers for the releases left in it.
@@ -101,10 +101,13 @@ fiber value itself, which then pins the body closure, its captures and its
 parked payload behind it. What remains stranded is the denied call's own
 argument scratch ([owner.md](owner.md)).
 
-The **JIT** tier keeps today's behaviour: `elle_jit_tail_call` carries neither this
-channel nor the callee-adoption channels (`defer_callee_release`,
-`deferred_release_slot`), so a compiled frame that leaves by a signal strands the
-retain as before — a bounded over-keep, never an over-free.
+The **JIT** tier carries none of these channels: `elle_jit_tail_call` names neither the
+stash slots nor the callee-adoption channels (`defer_callee_release`,
+`deferred_release_slot`). A compiled frame whose tail call SUSPENDS still owes nothing
+here, because it parks at the post-`TailCall` ip as the interpreter's driver does
+([park.md](park.md)), and the replay runs the whole block, stash releases included. A
+compiled frame that leaves by an error strands the retain as before — a bounded
+over-keep, never an over-free.
 
 Pinned by `tests/elle/region-tail-signal-exit.lisp` (the reclamation, with the
 fiber-carrier exit, a heap payload beside it, and a restarted `:error` fiber

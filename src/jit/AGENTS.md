@@ -1,12 +1,12 @@
 # jit
 
-<!-- audited: 2026-09-13 -->
+<!-- audited: 2026-09-29 -->
 
 JIT compilation for Elle using Cranelift.
 
 ## Responsibility
 
-Compile `LirFunction` to native x86_64 code. A function's signal decides
+Compile `LirFunction` to native code. A function's signal decides
 nothing about admission (see [signals/AGENTS.md](../signals/AGENTS.md) for signal definitions);
 what it decides is the code around a call. Yielding functions use side-exit:
 JIT code calls a runtime helper that builds a `SuspendedFrame` and returns
@@ -38,9 +38,10 @@ function is submitted. Both tiers reach it: the interpreter through
 `try_jit_call`, and compiled code through the arm of `elle_jit_call` that
 finds no compiled code for the callee. Each visit polls for completed
 compilations via non-blocking `try_recv()`. Compiled code is inserted
-into `jit_cache`; rejections are recorded in `jit_rejections`. All three
-maps key by raw bytecode address, sound only because every entry pins the
-allocation it is keyed by — see docs/impl/jit.md § "Cache identity".
+into `jit_cache`; rejections are recorded in `jit_rejections`; a submitted
+function waits in `jit_pending`. All three maps key by raw bytecode address,
+sound only because every entry pins the allocation it is keyed by
+([jit.md](../../docs/impl/jit.md)).
 
 Diagnostics (`jit/rejections`, `--stats`) call `drain_jit_pending()`
 to block until all pending compilations finish before reporting.
@@ -60,7 +61,8 @@ execution). Combine with `--trace=jit` to log each synchronous install.
 | `JitCompiler` | Translates LIR to native code via Cranelift |
 | `JitCode` | Wrapper for native function pointer + module lifetime + yield metadata |
 | `JitError` | Compilation errors |
-| `YieldPointMeta` | Metadata for a yield point: resume IP and spilled register count |
+| `YieldPointMeta` | Metadata for a yield point: resume IP and the spill counts |
+| `CallSiteMeta` | Metadata for a call site, the same shape, for a caller parked behind a suspended callee |
 | `YIELD_SENTINEL` | Sentinel value indicating JIT function yielded (side-exited) |
 | `JitWorker` | Background compilation thread; allocates no Elle values, so it carries no heap |
 | `JitTask` | Compilation request (cloned LIR + cache key) |
@@ -78,7 +80,7 @@ type JitFn = unsafe extern "C" fn(
     vm: *mut VM,            // pointer to VM (for function calls, fiber access)
     self_tag: u64,          // the executing closure as a Value, tag half
     self_payload: u64,      // and its payload half
-) -> Value;
+) -> JitValue;              // a Value's tag and payload, or a sentinel
 ```
 
 Values are 16-byte tagged unions (see [value/repr/AGENTS.md](../value/repr/AGENTS.md)).
@@ -103,12 +105,12 @@ Supported instructions:
 - **Constants**: `Const` (Int, Float, Bool, Nil, EmptyList, Symbol, Keyword), `ValueConst`
 - **Arithmetic**: `BinOp` (inline integer fast path, extern fallback), `UnaryOp` (Not fully inlined, Neg/BitNot inline integer fast path)
 - **Comparison**: `Compare` (inline integer fast path, extern fallback)
-- **Variables**: `Move`, `Dup`, `LoadLocal`, `StoreLocal` (via `local_slot_to_var`), `LoadCapture`, `LoadCaptureRaw`
-- **Data structures**: `Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`
+- **Variables**: `LoadLocal`, `StoreLocal` (via `local_slot_to_var`), `LoadCapture`, `LoadCaptureRaw`
+- **Data structures**: `List`, `First`, `Rest`, `MakeArrayMut`, `IsPair`
 - **LBoxes**: `MakeCaptureCell`, `LoadCaptureCell`, `StoreCaptureCell`, `StoreCapture`
 - **Globals**: Read as depth-0 upvalues via `LoadCapture`/`LoadCaptureRaw`, or baked as a `ValueConst` immediate where the binding is immutable. The LIR carries no global-load instruction, so nothing names a global by symbol at this tier
 - **Function calls**: `Call`, `TailCall` (self-calls become native loops; non-self calls use `elle_jit_tail_call` trampoline)
-- **Terminators**: `Return`, `Jump`, `Branch`
+- **Terminators**: `Return`, `Jump`, `Branch`, `Emit`, `Unreachable`
 
 Unsupported (returns JitError::UnsupportedInstruction):
 - `MakeClosure` — rare in hot loops, deferred
@@ -116,7 +118,8 @@ Unsupported (returns JitError::UnsupportedInstruction):
 
 Supported in yielding functions (via side-exit):
 - `LoadResumeValue` — emitted as dead code (unreachable in JIT, resume goes through interpreter)
-- `Yield` — emitted as side-exit: spill registers, call `elle_jit_yield`, return `YIELD_SENTINEL`
+- `Emit` — emitted as side-exit: spill registers, call `elle_jit_yield`, return `YIELD_SENTINEL`
+
 ## Runtime Helpers
 
 All operations go through `extern "C"` runtime helpers for safety.
@@ -132,8 +135,9 @@ These handle type checking and tagged-union encoding.
 
 ### dispatch.rs (thin re-export layer + non-call helpers)
 
-`dispatch.rs` re-exports everything from `calls.rs`, `data.rs`, and `suspend.rs` so that
-`vtable/symbols.rs` can register all helpers as `dispatch::elle_jit_*`. It also
+[dispatch.rs](dispatch.rs) re-exports everything from [calls.rs](calls.rs),
+[data.rs](data.rs) and [suspend.rs](suspend.rs), so that
+[vtable/symbols.rs](vtable/symbols.rs) can register all helpers as `dispatch::elle_jit_*`. It also
 houses:
 
 - **Array mutation**: `elle_jit_array_push`, `elle_jit_array_extend`
@@ -141,7 +145,7 @@ houses:
 - **Struct access**: `elle_jit_struct_get_or_nil`, `elle_jit_struct_get_destructure`, `elle_jit_struct_rest`
 - **Signal bound checking**: `elle_jit_check_signal_bound`
 
-### calls.rs (function call dispatch)
+### calls.rs and calls/callops (function call dispatch)
 
 - **Sentinels**: `TAIL_CALL_SENTINEL`, `YIELD_SENTINEL`
 - **Metadata types**: `YieldPointMeta`, `CallSiteMeta`
@@ -151,7 +155,7 @@ houses:
 
 ### data.rs (heap/VM interaction)
 
-- **Data structures**: `elle_jit_cons`, `elle_jit_car`, `elle_jit_cdr`, `elle_jit_make_array`, `elle_jit_is_pair`, and array/slice ops
+- **Data structures**: `elle_jit_pair`, `elle_jit_first`, `elle_jit_rest`, `elle_jit_make_array`, `elle_jit_is_pair`, and array/slice ops
 - **LBoxes**: `elle_jit_make_capture`, `elle_jit_load_capture_cell`, `elle_jit_store_capture_cell`, `elle_jit_load_capture`, `elle_jit_store_capture`
 - **Type checks**: `elle_jit_is_array`, `elle_jit_is_struct`, `elle_jit_is_set`, etc.
 
@@ -228,11 +232,9 @@ Special cases:
 
 The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
 
-- **JIT-safe fiber primitives**: `fiber/new`, `fiber/status`, `fiber/value`,
-  `fiber/bits`, `fiber/mask` have `Signal::errors()` — `may_suspend()` is
-  false, so closures calling them can be JIT-compiled. `fiber?` has
-  `Signal::silent()`. These all return `SIG_OK` or `SIG_ERROR`, which
-  `jit_handle_primitive_signal` handles.
+- **Fiber primitives that cannot suspend**: `fiber/new`, `fiber/status`,
+  `fiber/value`, `fiber/bits` and `fiber/mask` have `Signal::errors()`. They
+  return `SIG_OK` or `SIG_ERROR`, and a call to one carries no yield check.
 
 - **Suspending fiber primitives**: `fiber/resume` and `emit` carry `SIG_YIELD`,
   so `may_suspend()` is true and every closure calling them inherits it. Such a
@@ -240,40 +242,37 @@ The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
   site carries a yield check, and that the function's yield points reach the
   interpreter through the side-exit below.
 
-- **Yield side-exit**: When a JIT-compiled function reaches a `Yield` terminator,
-  it calls `elle_jit_yield` (a runtime helper) which:
+- **Yield side-exit**: When a JIT-compiled function reaches an `Emit`
+  terminator, it spills its locals and operands and calls `elle_jit_yield` (a
+  runtime helper) which:
   1. Reads yield point metadata from `JitCode.yield_points`
-  2. Spills live registers to a temporary buffer
-  3. Builds a `SuspendedFrame` with the bytecode resume IP and spilled stack
-  4. Sets `fiber.signal = (SIG_YIELD, yielded_value)` and `fiber.suspended`
+  2. Rebuilds the frame's env and stack from the spill buffer
+  3. Builds a `SuspendedFrame` with the bytecode resume IP, for a suspending
+     signal
+  4. Sets `fiber.signal` to the emit's signal and value, and `fiber.suspended`
   5. Returns `YIELD_SENTINEL` to the JIT caller
-  
+
   The JIT caller detects `YIELD_SENTINEL` and returns it to the interpreter,
   which resumes via `execute_bytecode_from_ip`.
 
 - **Yield-through-call**: When a JIT-compiled function calls another function
   that yields, the JIT detects the yield via post-call signal check and calls
   `elle_jit_yield_through_call` to build the caller's `SuspendedFrame` and
-  append it to the suspended frame chain.
+  append it to the suspended frame chain. A tail call whose callee yields does
+  the same at the tail call's call site.
 
-- **SIG_YIELD handling**: `jit_handle_primitive_signal` now handles `SIG_YIELD`
-  from primitives (e.g., `fiber/resume`) by returning `YIELD_SENTINEL`.
-
-- **SIG_QUERY handling**: `jit_handle_primitive_signal` dispatches `SIG_QUERY`
-  to `vm.dispatch_query()` and returns the result. This supports primitives
-  like `list-primitives` and `primitive-meta` that read VM state but don't
-  suspend execution.
-
-- **Catch-all panic**: `jit_handle_primitive_signal` panics on unexpected
-  signal bits (not `SIG_OK`, `SIG_ERROR`, `SIG_HALT`, `SIG_YIELD`, or `SIG_QUERY`).
-  Reaching this means the signal system has a bug — a polymorphic primitive
-  was called from JIT code.
+- **Primitive signals**: `jit_handle_primitive_signal` classifies a
+  primitive's signal as the interpreter does. A suspending signal parks the
+  payload and returns `YIELD_SENTINEL`; a fiber carrier (`SIG_RESUME`,
+  `SIG_PROPAGATE`, `SIG_ABORT`) runs the fiber handler; `SIG_QUERY` goes to
+  `vm.dispatch_query()`, for primitives such as `vm/list-primitives` that read
+  VM state.
 
 ## JIT-to-JIT Calling
 
 Every call a compiled function makes leaves through a dispatch helper, and a
-tail call to the executing closure is the one exception (docs/impl/jit.md
-§ "How a call leaves compiled code"). Compiled functions never call one
+tail call to the executing closure is the one exception
+([jit.md](../../docs/impl/jit.md)). Compiled functions never call one
 another directly.
 
 When `elle_jit_call` dispatches to a closure, it checks `vm.jit_cache` for
@@ -289,7 +288,7 @@ Key details:
   to create a slice without Vec allocation.
 - **Call depth tracking**: Increments/decrements `call_depth` for stack traces.
 - **Tail call handling**: If the callee returns `TAIL_CALL_SENTINEL`, the
-  pending tail call is executed via `execute_closure_bytecode`.
+  pending tail call is executed via `execute_bytecode_saving_stack`.
 - **Exception propagation**: Checks `fiber.signal` for `SIG_ERROR` after call.
 
 ## Error Handling in Dispatch
@@ -346,14 +345,14 @@ No errors are silently swallowed.
 
 12. **Yield helpers set fiber.signal and fiber.suspended.** `elle_jit_yield`
      and `elle_jit_yield_through_call` are responsible for building the
-     `SuspendedFrame` and setting `fiber.signal = (SIG_YIELD, value)` and
-     `fiber.suspended`. The JIT caller must not modify these fields.
+     `SuspendedFrame` and setting `fiber.signal` and `fiber.suspended`. The
+     JIT caller must not modify these fields.
 
-13. **Variadic functions with `VarargKind::List` are JIT-supported.** The JIT
+13. **Variadic functions with `VarargTag::List` are JIT-supported.** The JIT
      entry block emits a Cranelift cons-building loop that iterates over
      `args[fixed..nargs]` in reverse, calling `elle_jit_cons` to build the
      rest-arg list. `capture_params_mask` is checked for the rest param slot.
-     Functions with `VarargKind::Struct` or `VarargKind::StrictStruct` are
+     Functions with `VarargTag::Struct` or `VarargTag::StrictStruct` are
      still rejected (they require fiber access for keyword error reporting)
      and fall back to the interpreter.
 
@@ -364,7 +363,7 @@ spaces:
 
 - **Stack-relative (LoadLocal/StoreLocal):** The lowerer assigns slots starting
   at 0 for all non-LBox locals (non-LBox params copied into local slots, plus
-  let bindings). The JIT maps these via `local_slot_to_var()` in `helpers.rs`:
+  let bindings). The JIT maps these via `local_slot_to_var()` in [helpers.rs](helpers.rs):
   every slot offsets into the `local_var_base` region.
 
 - **Env-relative (LoadCapture/StoreCapture):** Indices address the closure
@@ -385,16 +384,13 @@ locally-defined variables are Cranelift variables (CPU registers/stack), so
 lbox wrapping is only needed when `binding.needs_capture()` is true (captured by
 nested closure or mutated via `set!`).
 
-The optimization applies to three code paths in `translate.rs`:
+The optimization applies to three code paths in the translator:
 
 1. **`init_locally_defined_vars`**: Only calls `elle_jit_make_capture` when the
    bit is set in `capture_locals_mask`; others get NIL directly.
 2. **`LoadCapture` for locals**: Skips `load_capture_cell` unwrapping when bit not set.
 3. **`StoreCapture` for locals**: Skips `store_capture_cell` when bit not set, uses
    `def_var` directly.
-
-Impact: 3.2x speedup on N-Queens N=12 (4.4s → 1.38s), 30x reduction in
-kernel time (2.4s → 80ms) from eliminated allocation pressure.
 
 ## Yield Side-Exit Implementation Details
 
@@ -412,8 +408,8 @@ run of them belongs in the rebuilt frame.
 
 ### Yield Point Recording
 
-During bytecode emission, when a `Terminator::Yield` is encountered:
-1. The emitter records the bytecode position after the Yield opcode as `resume_ip`
+During bytecode emission, when a `Terminator::Emit` is encountered:
+1. The emitter records the bytecode position after the Emit opcode as `resume_ip`
 2. The emitter captures the current operand stack state as `stack_regs`
 3. A `YieldPointInfo` is pushed to `Emitter.yield_points`
 
@@ -431,15 +427,21 @@ YieldPointMeta {
 
 ### Call Site Recording
 
-During bytecode emission, when a `LirInstr::Call` is encountered in a function
-where `signal.may_suspend()`:
-1. The emitter records the bytecode position after the Call opcode as `resume_ip`
-2. The emitter captures the operand stack state (after popping func/args, before pushing result) as `stack_regs`
-3. A `CallSiteInfo` is pushed to `Emitter.call_sites`
+During bytecode emission, in a function where `signal.may_suspend()`, each
+call (`Call`, `SuspendingCall`, `CallArrayMut`) and each `TailCall` records a
+`CallSiteInfo` in `Emitter.call_sites`:
+1. `resume_ip` — the bytecode position after the call instruction. For a
+   `TailCall` that is where the block a completing native falls through to
+   starts
+2. `stack_regs` — the operand stack after the callee and arguments are popped,
+   before the result is pushed
 
-This metadata is used by the JIT to generate yield-through-call code: when a
+The JIT reads this metadata to generate yield-through-call code: when a
 callee yields, the JIT builds the caller's `SuspendedFrame` using the recorded
-resume IP and stack state.
+resume IP and stack state. A tail call parks the same way, so the resume runs
+the releases after it ([park.md](../../docs/impl/region/park.md)). The
+translator counts the sites in the emitter's order, and a count mismatch
+rejects the compile.
 
 ### Environment Reconstruction on Side-Exit
 
@@ -479,8 +481,8 @@ self-tail-call boundary needs no separate release step.
 
 An **error** exit runs none of those instructions, so the releases still among
 them run at the exit instead — `elle_jit_release_abandoned_frame`, the compiled
-half of the interpreter's abandoned-frame walk (docs/impl/region/mechanism.md
-§ "An abandoned frame runs the releases it still owes"). The prologue
+half of the interpreter's abandoned-frame walk
+([unwind.md](../../docs/impl/region/unwind.md)). The prologue
 materializes the function's two release tables into stack slots, and every error
 exit — the post-call exception check, and an `Emit` of `SIG_ERROR` — hands both
 to the helper with the frame's locals spilled in slot order, ahead of the
@@ -488,4 +490,4 @@ region-map pop. `emit_abandoned_error_return` is the one route out; a new
 error exit that returns directly leaks whatever the tables name.
 
 `elle_jit_rotate_pools` survives as an exported no-op that nothing calls —
-its vtable `FuncId` carries `#[allow(dead_code)]`. See `jit/calls/callops.rs`.
+its vtable `FuncId` carries `#[allow(dead_code)]`. See [callops.rs](calls/callops.rs).
