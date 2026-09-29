@@ -1,7 +1,7 @@
 (elle/epoch 13)
-# audited: 2026-09-28
+# audited: 2026-09-29
 ## elle test — running one test: worker isolation, output capture, the
-## per-form deadline, and the tiers this build carries.
+## per-form deadline, and a file run as its own process.
 ## docs/test-runner.md
 ##
 ## A fragment of one module (see store.lisp).
@@ -11,14 +11,14 @@
 ## path (epoch + whole-module analysis: shared bindings, forward references,
 ## capture/signal inference). It runs the file's def/var forms eagerly to
 ## establish the shared environment and hands back one 0-arg THUNK per test
-## form, each capturing that environment. We then run each thunk on each tier
-## via (compile/run-on TIER thunk) under (protect ...) in a worker. This
-## preserves the *typed* failure signal (e.g. {:error :failed-assertion ...}) —
+## form, each capturing that environment. Each thunk then runs once, on the
+## runtime this build ships, under (protect ...) in a worker. This preserves
+## the *typed* failure signal (e.g. {:error :failed-assertion ...}) —
 ## no eval stringification, no subprocess, no stderr scraping.
 ##
-## stdout/stderr capture: each tier run executes under a worker-side (ev/run
-## ...), with *stdout*/*stderr* rebound to temp files; non-empty output becomes
-## `stdout`/`stderr` assets per (form × tier). See exec-thunk-capture.
+## stdout/stderr capture: each run executes under a worker-side (ev/run ...),
+## with *stdout*/*stderr* rebound to temp files; non-empty output becomes
+## `stdout`/`stderr` assets per form. See exec-thunk-capture.
 ##
 ## Per-test timeout: the budget the form's path earned (--timeout MS, default
 ## 60000, or --wide-timeout for a path --wide names) bounds each form's worker
@@ -27,23 +27,7 @@
 ## the runner's VM/free-log (e.g. `--trace=free` to attribute a UAF); the runner
 ## itself does not interpret it.
 
-# Test code is untrusted: it can corrupt VM state, loop, or exhaust resources.
-#
-# `exec-thunk` runs one thunk on a tier, fault-isolated: spawn a worker (own
-# VM), force the closure onto the tier under `protect`, and `os/join` marshals
-# back the structured [ok? payload]. The barrier lives OUTSIDE the tiered
-# closure deliberately — a fiber-based catch INSIDE a closure handed to
-# compile/run-on is rejected by the optimizing tiers (they cannot create the
-# handler closure), so per-form catching is a bytecode-tier property and the
-# optimizing tiers run only the forms that complete normally. compile/run-on
-# preserves the typed failure signal (e.g. {:error :failed-assertion ...}).
-# This probe path joins with no deadline (its closures are trivial and always
-# finish); real test forms run under exec-thunk-capture, which bounds the join
-# with `form-budget` so a hung test is recorded `timeout`, not a wedge.
-(defn exec-thunk [tier thunk]
-  (os/join (os/spawn-vm (fn [] (protect (compile/run-on tier thunk))))))
-
-# Worker tier for the per-form execution (exec-thunk-capture). Default is the
+# Worker kind for the per-form execution (exec-thunk-capture). Default is the
 # LIGHT worker (sys/spawn-vm, primitives only, ~1.6ms): a sliced single-form
 # thunk captures its already-imported deps from the eager main-VM setup, so it
 # needs no stdlib in the worker. A whole-file thunk (legacy multi-form mode) runs
@@ -63,27 +47,31 @@
   (let [ms (*form-budget-ms*)]
     (if ms ms test-timeout-ms)))
 
-# Like exec-thunk, but also CAPTURE the test's stdout/stderr.
+# Test code is untrusted: it can corrupt VM state, loop, or exhaust resources.
+# So each thunk runs in a worker with a VM of its own, under `protect`, and
+# `os/join` marshals back the structured [ok? payload] (docs/test-runner.md).
+# The join carries the form's budget, so a hung test is recorded `timeout`
+# rather than wedging the run.
 #
 # A spawned worker has only primitives — no scheduler — so any async I/O the test
 # does (println, port/open, sockets) would yield into the void. We give the worker
 # a real runtime the cheap way: the closure we ship references `ev/run` (stdlib),
 # so the serializer drags `ev/run`'s whole closure graph into the bundle. The
-# worker runs the tiered call under that ev/run, with `*stdout*`/`*stderr*`
+# worker runs the call under that ev/run, with `*stdout*`/`*stderr*`
 # rebound to temp files; it slurps and deletes them and marshals [result stdout
 # stderr] back through os/join.
 #
-# Run the tiered call with *stdout*/*stderr* rebound to temp files, returning
+# Run the call with *stdout*/*stderr* rebound to temp files, returning
 # {:result [ok? payload] :stdout S :stderr S}. Assumes a scheduler is running
 # (port I/O yields): the worker supplies its own via ev/run; the in-process
 # fallback relies on the runner's top-level ev/run.
-(defn capture-run [tier thunk out-path err-path]
+(defn capture-run [thunk out-path err-path]
   (let [op (port/open out-path :write)
         ep (port/open err-path :write)]
     (sys/trap-exit! true)
     (let [v (parameterize ((*stdout* op)
                            (*stderr* ep))
-              (protect (compile/run-on tier thunk)))]
+              (protect (thunk)))]
       (sys/trap-exit! false)
       (port/close op)
       (port/close ep)
@@ -160,8 +148,7 @@
         # The photograph cannot symbolize JIT frames (anonymous Cranelift
         # mappings). The registry is their symbol table — process-global, so
         # it covers the wedged worker's compiles too. A sampled `???` address
-        # resolves to the nearest preceding entry. docs/impl/jit.md § "The
-        # code-address registry".
+        # resolves to the nearest preceding entry (docs/impl/jit.md).
         (let [[map-ok? jit-map] (protect (vm/query "jit/map" nil))]
           (when (and map-ok? (string? jit-map) (> (length jit-map) 0))
             (eprintln "── jit code map (addr name; match ??? frames to the nearest preceding addr) ──")
@@ -169,8 +156,8 @@
         # The words each sampled JIT frame is parked on. The map names the
         # frame's function; this shows the bytes its PC is executing, which
         # is what decides whether the wedge is IN the emitted code or in
-        # what the core fetched (docs/impl/jit.md § "The code-address
-        # registry" — on AArch64, `0x14000000` is a branch to itself).
+        # what the core fetched (docs/impl/jit.md; on AArch64, `0x14000000` is a
+        # branch to itself).
         (let [[a-ok? addrs] (protect (jit-frame-addrs shot))]
           (when (and a-ok? (> (length addrs) 0))
             (eprintln "── code around sampled jit frames (each line names its address) ──")
@@ -203,8 +190,7 @@
 
 # Recover the output of a run that never came back.
 #
-# `capture-run` slurps and deletes the redirect files once the tiered call
-# returns; a form killed by the join deadline never reaches that. Its output is
+# `capture-run` slurps and deletes the redirect files once the call returns; a form killed by the join deadline never reaches that. Its output is
 # the only account of which call it was in when the deadline struck, and the
 # form wrote it before it wedged — so read the files here and record them
 # against the timeout. Deleting them also keeps an abandoned worker from
@@ -227,16 +213,16 @@
        (let [m (string (get payload :message))]
          (or (string/contains? m "send") (string/contains? m "serialize")))))
 
-(defn exec-thunk-capture [tier thunk out-path err-path]
+(defn exec-thunk-capture [thunk out-path err-path]
   (let [outcome (protect (os/join (worker-spawn (fn []
                                     (ev/run (fn []
-                                      (capture-run tier thunk out-path err-path)))))
+                                      (capture-run thunk out-path err-path)))))
                                   (form-budget)))]
     (if (get outcome 0)
       (get outcome 1)
       # The worker spawn/join failed. If the thunk simply can't cross into a
       # worker (unsendable capture), run it IN-PROCESS — no isolation, no
-      # timeout, but it runs (docs/test-runner.md § Isolation). Any other
+      # timeout, but it runs (docs/test-runner.md). Any other
       # thread-error (e.g. a worker panic) stays a recorded fail.
       (if (serialization-error? (get outcome 1))
         # In-process runs share the MAIN VM, so a form that sets :trace (e.g.
@@ -245,7 +231,7 @@
         # Save and restore the main VM's trace around the run to contain it
         # (worker runs are already isolated by their fresh VM).
         (let [saved-trace (vm/config :trace)
-              r (capture-run tier thunk out-path err-path)]
+              r (capture-run thunk out-path err-path)]
           (vm/config-set :trace saved-trace)
           r)
         (salvage-capture [false (get outcome 1)] out-path err-path)))))
@@ -254,8 +240,7 @@
 # NO synchronous I/O — every port/socket/subprocess op yields an io-request — so
 # the file's TOP-LEVEL I/O is only serviced if the thunk runs as a fiber under a
 # running scheduler. `(spawn thunk)` adds it to the harness's `evrun` scheduler
-# and `(join …)` pumps it to completion; running it inline via `compile/run-on`
-# never schedules it, so a whole-file script doing its own I/O (not just inside
+# and `(join …)` pumps it to completion; running it inline never schedules it, so a whole-file script doing its own I/O (not just inside
 # ev/spawn'd sub-fibers) would escape an io-request. The thunk shares the ONE
 # `evrun` scheduler (no nested ev/run — that crashes files like process.lisp that
 # start their own scheduler). EVRUN/SPAWN/JOIN/OUT/ERR are passed so the caller
@@ -291,16 +276,10 @@
 # (sync/redis/http2/process/grpc) breaks. ev/run, *stdout*, *stderr* are resolved
 # IN the worker (eval) for the same reason — they must be the worker's parameter
 # objects. Syntax compiles in the heavy worker (it runs the file's own
-# import/eval), so os/spawn (not -vm). `policy` is the JIT policy (:off / :eager,
-# see whole-file-policies): the worker sets it via (vm/config-set :jit policy)
-# before running, so the SAME file runs under bytecode and under JIT — the
-# smoke-vm/smoke-jit split. The worker's VM is fresh, so the policy is isolated;
-# the in-process fallback saves and restores the main VM's policy around the run.
-# (vm/config-set, not (put (vm/config) …) — the put→set analyzer rewrite the docs
-# describe does not fire here; the direct setter is what actually mutates the VM.)
-(defn exec-source-capture [policy forms name out-path err-path]
+# import/eval), so os/spawn (not -vm). The file runs once, on the runtime this
+# build ships, and the runner sets no policy on it (docs/test-runner.md).
+(defn exec-source-capture [forms name out-path err-path]
   (let [outcome (protect (os/join (os/spawn (fn []
-                                    (vm/config-set :jit policy)
                                     (let [w-evrun (eval (quote ev/run))
                                       w-spawn (eval (quote ev/spawn))
                                       w-join (eval (quote ev/join))
@@ -317,16 +296,12 @@
       # through os/join. Fall back to running IN-PROCESS — no isolation, no
       # timeout — compiling the same syntax against the MAIN stdlib and running
       # under the runner's own ev/run + *stdout*/*stderr* (all main-consistent),
-      # exactly as exec-thunk-capture does for unsendable captures. The main VM's
-      # JIT policy is set for the run and restored after (it is shared, not fresh).
+      # exactly as exec-thunk-capture does for unsendable captures.
       (if (serialization-error? (get outcome 1))
-        (let [saved (vm/config :jit)
-              saved-trace (vm/config :trace)
+        (let [saved-trace (vm/config :trace)
               thunk (get (get (compile/whole-module-syntax forms name) 0) 1)]
-          (vm/config-set :jit policy)
           (let [r (capture-pumped ev/run ev/spawn ev/join *stdout* *stderr*
                                   thunk out-path err-path)]
-            (vm/config-set :jit saved)
             # Restore the main VM's trace too: a whole-file form that sets
             # :trace and aborts before clearing must not bleed into the runner.
             (vm/config-set :trace saved-trace)
@@ -335,16 +310,18 @@
 
 # ── running a file as its own process ────────────────────────────────
 # A worker thread isolates a fault and shares the process, which is not enough
-# for a mode the process sets once: --no-uring picks the I/O backend for the
-# whole binary, and --trace=guardfree reports a use-after-free as a SIGSEGV
-# that would take the runner down with every result it had not written yet.
-# `--isolate FLAGS` runs each path as `elle FLAGS PATH` instead, and the
-# child's exit status is the whole verdict. See docs/test-runner.md § Isolation.
+# for a mode the process sets once: --trace=guardfree reports a use-after-free
+# as a SIGSEGV that would take the runner down with every result it had not
+# written yet. `--isolate FLAGS` runs each path as `elle FLAGS PATH` instead, and
+# the child's exit status is the whole verdict. `--host PROGRAM` names the
+# program each child runs, which is how the implementation suite reaches the rig
+# (docs/test-runner.md).
 
-# The child is THIS binary, never whatever `elle` a PATH lookup finds: a run
-# has to say something about the build under test, and a different build would
-# make it say nothing. (sys/argv) cannot answer — under a subcommand its head
-# is the subcommand's own source name — so the binary reports its own path.
+# The child is THIS binary unless `--host` names another, never whatever `elle` a
+# PATH lookup finds: a run has to say something about the build under test, and
+# a different build would make it say nothing. (sys/argv) cannot answer — under
+# a subcommand its head is the subcommand's own source name — so the binary
+# reports its own path.
 (defn child-argv [flags path]
   (concat (filter (fn [f] (> (length f) 0)) (string/split flags " ")) [path]))
 
@@ -362,9 +339,10 @@
 # out and the child was killed. A deadline can land in the moment a wait has
 # already reaped the child, so the recorded status is consulted before the
 # timeout is believed; a reap is kept on the subprocess, never spent
-# (docs/subprocess.md § "A wait keeps the status it reaped").
+# (docs/subprocess.md).
 (defn run-child [argv budget-ms env]
-  (let [child (subprocess/exec (elle/executable) argv {:stdin :null :env env})
+  (let [child (subprocess/exec (if host-program host-program (elle/executable))
+                               argv {:stdin :null :env env})
         out-f (ev/spawn (fn [] (drain (get child :stdout))))
         err-f (ev/spawn (fn [] (drain (get child :stderr))))
         waited (ev/timeout (/ (float budget-ms) 1000.0)
@@ -391,7 +369,7 @@
 
 # The line the binary prints when a loud gate refuses to run a file. A gated
 # child exits 0, so its exit status alone would read as a vacuous pass — the
-# coverage-hiding failure gate! exists to prevent. src/main.rs writes it.
+# coverage-hiding failure gate! exists to prevent. src/program.rs writes it.
 (def gated-marker "SKIP (gated): ")
 
 (defn gated-reason [text]
@@ -420,45 +398,3 @@
             (struct :status :fail :sig (get note :sig)
                     :reason (get note :reason)))
           (struct :status :fail :reason (string "exit " status)))))))
-
-# ── tier set: probe which backends this build carries ────────────────
-# compile/run-on answers :tier-rejected/:feature-disabled for a tier whose
-# feature wasn't compiled in. Such a tier is dropped from the run entirely (a
-# feature the binary lacks is not a coverage gap of THIS build). A tier that is
-# present but can't run a particular form answers :ineligible — that is a
-# per-form skip (see classify), not an absent tier.
-(defn feature-disabled? [r]
-  (and (not (get r 0)) (= (get (get r 1) :error) :tier-rejected)
-       (= (get (get r 1) :reason) :feature-disabled)))
-
-(defn tier-available? [tk]
-  (not (feature-disabled? (exec-thunk tk (fn [] 0)))))
-# probe with a trivial closure
-
-# Candidate tiers as [tier-keyword tier-label]; :bytecode is recorded as :vm.
-# The label is a keyword (result.tier is keyword-typed; sqlite stores its name).
-(def candidate-tiers
-  [[:bytecode :vm] [:jit :jit] [:wasm :wasm] [:mlir-cpu :mlir-cpu]])
-
-(def active-tiers (filter (fn [p] (tier-available? (get p 0))) candidate-tiers))
-
-# A whole-file (legacy multi-form) thunk is a yielding imperative script: it runs
-# under the worker's full scheduler, NOT forced onto a backend via compile/run-on
-# (that only fits a single non-yielding form). So instead of a tier we vary the
-# JIT POLICY it runs under — :off (pure bytecode, recorded "vm") and :eager (JIT
-# every function, recorded "jit") — set per-worker via (put (vm/config) :jit …).
-# That is exactly the old smoke-vm + smoke-jit split, folded into one run. :eager
-# is included only when this build carries the JIT. Each entry is [policy label].
-# No value-divergence is judged across policies (process-whole passes diverge?
-# false): a script's pids/timestamps differ run-to-run by design.
-(def whole-file-policies
-  (concat [[:off :vm]] (if (tier-available? :jit) [[:eager :jit]] [])))
-
-# Comma-joined tier labels for the run.tiers column. Labels are keywords, so
-# stringify each (`(string :vm)` → "vm").
-(defn tiers-str [tiers]
-  (if (empty? tiers)
-    ""
-    (if (empty? (rest tiers))
-      (string (get (first tiers) 1))
-      (string (string (get (first tiers) 1)) "," (tiers-str (rest tiers))))))
