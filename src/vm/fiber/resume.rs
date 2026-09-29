@@ -156,13 +156,13 @@ impl VM {
                 // records leave with it: a park whose payload the RUNTIME built
                 // is owed the release its body has none for, exactly as at
                 // `fiber/resume` itself — this is the route a `protect`ed
-                // body's denial takes, the denial parking in the inner fiber
-                // the outer one awaits through a `FiberResume` frame
+                // body's denial or io request takes, the park sitting in the
+                // inner fiber the outer one awaits through a `FiberResume` frame
                 // (docs/impl/region/park.md) — and
                 // the displace clears the mint record. The resume funding
                 // survives for the delivery funnel that runs when the
                 // trampoline descends.
-                crate::vm::fiber::release_displaced_denial_payload(self.heap(), &inner_handle);
+                crate::vm::fiber::release_displaced_bodyless_payload(self.heap(), &inner_handle);
                 inner_handle.with_mut(|f| {
                     f.signal = Some((SIG_OK, resume_value));
                     f.delivery.displace();
@@ -417,7 +417,7 @@ impl VM {
                     // the RUNTIME built there is owed its release first — the
                     // `protect`ed face of the injection's own (see
                     // `inject_error_at_suspension`).
-                    crate::vm::fiber::release_displaced_denial_payload(vm.heap(), &inner_handle);
+                    crate::vm::fiber::release_displaced_bodyless_payload(vm.heap(), &inner_handle);
                     inner_handle.with_mut(|f| {
                         f.signal = Some((SIG_ERROR, error_value));
                     });

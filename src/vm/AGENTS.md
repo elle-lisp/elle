@@ -219,7 +219,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `signal` | `Option<(SignalBits, Value)>` | Signal from execution (errors, yields) |
 | `error_loc` | `Option<(Value, SourceLoc)>` | The parked `SIG_ERROR` payload and where it was raised. Parked by `absorbs`, read back by `fiber/propagate` so a re-raised error keeps its raising form |
 | `suspended` | `Option<Vec<SuspendedFrame>>` | Suspended execution frames (for yield/signal resumption) |
-| `delivery` | `Delivery` | The delivery ledger: how the current park's delivery references are funded — the raise-minted payload, the bodyless (denial) payload whose release the displacing install owes, the park whose delivery retain no reader has consumed, and whether the resume value owes a mint. Method-only surface ([park.md](../../docs/impl/region/park.md)) |
+| `delivery` | `Delivery` | The delivery ledger: how the current park's delivery references are funded — the raise-minted payload, the bodyless payload (a denial's struct, an io op's request) whose release the displacing install owes, the park whose delivery retain no reader has consumed, and whether the resume value owes a mint. Method-only surface ([park.md](../../docs/impl/region/park.md)) |
 | `mask` | `SignalBits` | Which of this fiber's signals its parent catches |
 | `param_frames` | `Vec<Vec<(u32, Value)>>` | Parameter binding frames (stack of frames, each frame a vec of (param id, value) pairs) |
 | `parent` | `Option<WeakFiberHandle>` | Weak back-pointer to parent fiber |

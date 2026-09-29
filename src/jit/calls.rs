@@ -71,12 +71,13 @@ pub(crate) struct CallSiteMeta {
 
 /// Handle signal bits from a primitive call in JIT context.
 ///
-/// Returns a `JitValue` for the result.
+/// Returns a `JitValue` for the result. `args` are the arguments the primitive
+/// was called with.
 fn jit_handle_primitive_signal(
     vm: &mut crate::vm::VM,
     bits: SignalBits,
     value: Value,
-    _args: &[Value],
+    args: &[Value],
 ) -> JitValue {
     match classify(bits, &value) {
         SignalAction::Ok => JitValue::from_value(value),
@@ -122,8 +123,9 @@ fn jit_handle_primitive_signal(
             // …and the same arm's park classification: this primitive never
             // returns, so the resume value stands in for its result and the
             // delivery owes the reference the missing `Return` mint would have
-            // carried (docs/impl/region/park.md).
-            vm.fiber.delivery.park_primitive(bits, value);
+            // carried, and an io op's own request owes its install a release
+            // (docs/impl/region/park.md).
+            vm.park_suspending_primitive(bits, value, args);
             vm.fiber.signal = Some((bits, value));
             YIELD_SENTINEL
         }

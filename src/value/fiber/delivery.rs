@@ -80,13 +80,13 @@ pub struct Delivery {
     /// the payload's birth reference or the frame's left-standing one, which
     /// the exemption preserves.
     minted: Option<Value>,
-    /// The capability-denial payload parked in `Fiber::signal`, whose region
-    /// the install that displaces it owes one decref. The denial path builds
-    /// the `{:error :capability-denied …}` struct itself, so the body never
-    /// names it and no `decref_point` names its region; the reference the
-    /// allocation left is owed by whatever replaces the payload in the slot —
-    /// a resume's delivery, or an abort's / refusal's injected error
-    /// (docs/impl/region/park.md § "A payload the
+    /// The runtime-built payload parked in `Fiber::signal`, whose region the
+    /// install that displaces it owes one decref: a capability denial's
+    /// `{:error :capability-denied …}` struct, or the `IoRequest` an io op
+    /// built. The body never names either, so no `decref_point` names its
+    /// region; the reference the allocation left is owed by whatever replaces
+    /// the payload in the slot — a resume's delivery, or an abort's /
+    /// refusal's injected error (docs/impl/region/park.md § "A payload the
     /// RUNTIME built is released by the install that displaces it"). Carried
     /// as the payload rather than a flag so the release is gated on
     /// representation identity with the live parked signal, and TAKEN by the
@@ -142,10 +142,11 @@ impl Delivery {
         Self::default()
     }
 
-    /// A suspending PRIMITIVE parked (a yielding io op, a dynamic `emit`): the
-    /// resume value owes one `ResumeDelivery` mint at the delivery funnel.
-    /// Callers: `handle_primitive_signal[_tail]`'s Suspend arms and their JIT
-    /// twin (`jit_handle_primitive_signal`).
+    /// A suspending PRIMITIVE parked a payload that is not an io op's own
+    /// request — a dynamic `emit` of one of its arguments, whose body owns it:
+    /// the resume value owes one `ResumeDelivery` mint at the delivery funnel.
+    /// Caller: `VM::park_suspending_primitive`, for both Suspend arms and their
+    /// JIT twin.
     pub(crate) fn park_primitive(&mut self, bits: SignalBits, payload: Value) {
         self.assert_consumed();
         self.resume_unfunded = true;
@@ -168,16 +169,26 @@ impl Delivery {
     /// its region one decref besides the mint. Callers:
     /// `handle_capability_denial[_tail]` and `jit_capability_denial`.
     pub(crate) fn park_denial(&mut self, bits: SignalBits, payload: Value) {
+        self.park_bodyless(bits, payload);
+    }
+
+    /// A yielding io op parked the `IoRequest` it built: a primitive park
+    /// whose request has no body reference, exactly as a denial's struct has
+    /// none. Caller: `VM::park_suspending_primitive`, the one site that can
+    /// tell the request an op built from a relay's `(emit :io v)` of the same
+    /// request.
+    pub(crate) fn park_request(&mut self, bits: SignalBits, request: Value) {
+        self.park_bodyless(bits, request);
+    }
+
+    /// A primitive park of a payload the RUNTIME built: the resume value owes
+    /// a mint, and the install that displaces the payload owes its region a
+    /// decref ([`Self::take_bodyless`]).
+    fn park_bodyless(&mut self, bits: SignalBits, payload: Value) {
         self.assert_consumed();
         self.resume_unfunded = true;
         self.bodyless = Some(payload);
         self.record_park(bits, payload);
-    }
-
-    /// A yielding io op parked the `IoRequest` it built.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn park_request(&mut self, bits: SignalBits, request: Value) {
-        self.park_primitive(bits, request);
     }
 
     /// Record the park whose escape retain no reader has consumed, where there
@@ -284,7 +295,7 @@ impl Delivery {
     /// trampoline's `FiberResume` short-circuit): the payload-named records
     /// describe a value no longer in the slot, so they go with it. The
     /// displacing installs consume the bodyless record's release through
-    /// `release_displaced_denial_payload` ([`Self::take_bodyless`]) before
+    /// `release_displaced_bodyless_payload` ([`Self::take_bodyless`]) before
     /// this runs, so the clear here is the mint record's. `resume_unfunded`
     /// survives — the funnel that consumes it has not run yet, and the
     /// replayed frame still owes its resume value the mint.
@@ -313,10 +324,11 @@ impl Delivery {
         self.minted.is_some_and(|m| m.bit_identical(payload))
     }
 
-    /// Take the recorded bodyless (denial) payload — the one consuming read,
-    /// run by `release_displaced_denial_payload` at every install that
-    /// replaces the parked signal. Taking is the receipt: a second install
-    /// finds nothing and releases nothing.
+    /// Take the recorded bodyless payload, a denial's struct or an io op's
+    /// request — the one consuming read, run by
+    /// `release_displaced_bodyless_payload` at every install that replaces the
+    /// parked signal. Taking is the receipt: a second install finds nothing and
+    /// releases nothing.
     pub(crate) fn take_bodyless(&mut self) -> Option<Value> {
         self.bodyless.take()
     }

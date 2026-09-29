@@ -127,7 +127,7 @@ pub(crate) fn prim_fiber_new(
 /// (fiber/resume fiber) → value
 /// (fiber/resume fiber value) → value
 ///
-/// Resume a fiber. If the fiber is New, starts execution. If Suspended,
+/// Resume a fiber. If the fiber is New, starts execution. If Paused or Error,
 /// delivers the value and continues from where it left off.
 ///
 /// Returns SIG_RESUME — the VM handles the actual fiber swap.
@@ -158,17 +158,13 @@ pub(crate) fn prim_fiber_resume(
     let (status, parked) = handle.with(|fiber| (fiber.status, fiber.signal));
     match status {
         FiberStatus::New | FiberStatus::Paused | FiberStatus::Error => {
-            // The park's payload is the RUNTIME's, not the body's, in two shapes,
-            // and each owes one release as this resume displaces it: a
-            // capability-denial struct, named by the classifier's record, and a
-            // yielding io op's `IoRequest`, named by the payload's own type. The
-            // two readings name disjoint payloads, so both run
-            // (docs/impl/region/park.md). The io arm
-            // goes first because it is the one that READS the parked value to
-            // decide, and the denial arm's release may have been the payload's
-            // last (`release_displaced_denial_payload`).
-            crate::vm::fiber::release_displaced_io_request(ctx.heap_mut(), parked);
-            crate::vm::fiber::release_displaced_denial_payload(ctx.heap_mut(), handle);
+            // A park whose payload the RUNTIME built — a capability denial's
+            // struct, a yielding io op's `IoRequest` — owes that payload one
+            // release as this resume displaces it. The classifier that built the
+            // park recorded it in the ledger, and nothing else can tell it from
+            // a body-owned `(emit …)` of the same value
+            // (docs/impl/region/park.md).
+            crate::vm::fiber::release_displaced_bodyless_payload(ctx.heap_mut(), handle);
             // And a parked TERMINAL result this resume displaces (a restarted
             // `:error` fiber, a re-resumed drained stream source): its
             // park-retain + recorded content edge counted on the free-time

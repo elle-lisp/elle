@@ -1,5 +1,8 @@
+// audited: 2026-09-29
 //! `fiber/propagate`: re-raise a child fiber's caught signal to this fiber's
 //! own parent. Call- and tail-position handlers (see the `super` module doc).
+//!
+//! docs/impl/region/park.md
 
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
 use crate::vm::core::VM;
@@ -15,16 +18,16 @@ impl VM {
     /// resumer's release, not this one, so without a mint here that release
     /// consumes a reference nothing took — the payload's count then runs one
     /// short of the recorded `fiber → payload` edges and the free cascade
-    /// reclaims it under the caller (docs/impl/region/owner.md § "Park/unpark
-    /// symmetry").
+    /// reclaims it under the caller (docs/impl/region/park.md § "A propagated
+    /// signal is a fresh park, and owes its own delivery reference").
     ///
     /// Three cases take no mint, each because the delivery already has an owner
     /// or no consumer:
     ///
     /// - A NON-TERMINAL signal (a yield, an io request). The fiber runs again,
     ///   so the resume path proper governs the payload —
-    ///   `release_displaced_io_request` for an io request, the resumed body's own
-    ///   pending release otherwise.
+    ///   `release_displaced_bodyless_payload` at the install on the child that
+    ///   parked an io request, the resumed body's own pending release otherwise.
     ///   `with_child_fiber` step 6a excludes exactly this set from its park
     ///   retain for the same reason ("retaining here would leak"), and the
     ///   delivery follows the park.
