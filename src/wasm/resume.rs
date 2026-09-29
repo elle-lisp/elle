@@ -1,6 +1,7 @@
 // audited: 2026-09-29
-// docs/impl/wasm.md
 //! Fiber resume chain: drive suspended WASM closures through yield-resume cycles.
+//!
+//! docs/impl/wasm.md
 //!
 //! What a fiber's own mask then makes of the outcome a frame produced lives in
 //! `route.rs` beside this — caught, parked, or propagated one level up.
@@ -14,7 +15,7 @@
 //!   resumer (so the scheduler drives it) and the resumer re-drives `child` on
 //!   its own resume. This is what makes `protect`/`defer`/`with` around a
 //!   suspending body work — the WASM analogue of the VM's FiberResume frame
-//!   (src/vm/fiber/trampoline.rs). Pinned by tests/elle/wasm-protect-suspend.lisp.
+//!   (src/vm/fiber/trampoline.rs). Pinned by tests/lang/wasm-protect-suspend.lisp.
 //! - **Signal re-raise** (`handle_fiber_propagate`): `(fiber/propagate child)`
 //!   re-raises `child`'s caught signal as the caller's own — the WASM analogue of
 //!   `handle_fiber_propagate_signal` (src/vm/fiber/propagate.rs), used by
@@ -243,10 +244,9 @@ pub(super) fn handle_fiber_resume(
     // Fund the crossing into a frame parked at a suspending PRIMITIVE call: that
     // frame resumes into the parked call's continuation, which runs the call's
     // compiler-emitted result release, and the primitive that never returned
-    // minted nothing for it (docs/impl/region/owner.md § "A delivery into a
-    // replayed frame carries one owning reference"). Emitted past the guards
-    // above, so a resume that never reaches the body mints nothing; `region_of`
-    // no-ops an immediate.
+    // minted nothing for it (docs/impl/region/owner.md). Emitted past the
+    // guards above, so a resume that never reaches the body mints nothing;
+    // `region_of` no-ops an immediate.
     if unfunded {
         let heap = unsafe { &mut *caller.data().heap_ptr() };
         let r = crate::value::arena::region_of(heap, resume_value);

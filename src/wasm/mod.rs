@@ -1,6 +1,7 @@
-// audited: 2026-09-06
-// docs/impl/wasm.md
+// audited: 2026-09-29
 //! WASM backend: LIR → WASM emission and Wasmtime execution.
+//!
+//! docs/impl/wasm.md
 //!
 //! Two modes:
 //! - Full-module: compiles stdlib + user code as one WASM
@@ -187,10 +188,10 @@ pub fn eval_wasm(source: &str, source_name: &str) -> Result<String, String> {
 
 /// Compile and execute with stdlib prepended.
 ///
-/// Stdlib closures are bytecode and can't be called from WASM, so we
-/// compile stdlib + user source as a single unit. The implicit letrec
-/// makes all stdlib definitions visible to user code. Returns the result's
-/// display form (see [`eval_wasm`]).
+/// The stdlib and the user source compile as one unit, so a call into the
+/// stdlib stays in the module instead of falling back to the interpreter. The
+/// implicit letrec makes all stdlib definitions visible to user code. Returns
+/// the result's display form (see [`eval_wasm`]).
 pub fn eval_wasm_with_stdlib(source: &str, source_name: &str) -> Result<String, String> {
     eval_wasm_raw(source, source_name, true)
 }
@@ -254,23 +255,21 @@ fn build_full_source(source: &str, source_name: &str) -> Result<(String, usize),
     // User DEFINITIONS stay at the file-letrec top level; only consecutive
     // EXPRESSION runs are wrapped in `(ev/run (fn [] …))`. This matches the VM,
     // whose `execute_scheduled` wraps the scheduler around already-top-level-
-    // analyzed bytecode (src/vm/mod.rs): a file's top level uses sequential
+    // analyzed bytecode (src/vm/scheduled.rs): a file's top level uses sequential
     // shadowing, so `(def a 10) (def a (+ a 1))` is a redefinition, not an error.
     // Nesting the whole body in a single `(fn [] …)` instead (the naive wrap)
-    // makes those defs a fn-body letrec* where a duplicate binding is rejected —
-    // the divergence that failed def-shadow/numeric/… under `--wasm=full`
-    // (src/wasm/tests/toplevel.rs).
+    // makes those defs a fn-body letrec* where a duplicate binding is rejected,
+    // though the VM accepts it (src/wasm/tests/toplevel.rs).
     //
     // But the restructure has a cost: a top-level def's RHS then runs in the
     // ENTRY function, and some operations (`eval`'s dynamic compilation) trap
     // there while working in a closure. The single-thunk wrap keeps the WHOLE
     // program in a closure, so it is the safe default; the restructure is used
     // ONLY when the program actually redefines a top-level name — the case the
-    // single wrap cannot compile. (A file that both redefines AND calls `eval`
-    // in a def RHS would still hit the entry-`eval` limitation, but none do; the
-    // corpus's redefining files keep `eval` inside expressions.) Pinned by
+    // single wrap cannot compile. A file that both redefines a name AND calls
+    // `eval` in a def RHS still traps in the entry. Pinned by
     // `wasm_full_allows_toplevel_def_redefinition` (restructure path) and
-    // tests/elle/region-termination-sweep.lisp (single-wrap `eval`-in-def path).
+    // tests/impl/region-termination-sweep.lisp (single-wrap `eval`-in-def path).
     let scheduled_body = if has_toplevel_redefinition(body, source_name) {
         build_scheduled_toplevel(body, source_name)
     } else {
@@ -451,10 +450,9 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     // discards the result (program output comes from `println` side effects during
     // execution), but test harnesses format it; returning the owned string keeps
     // them sound for heap results, not only immediates. Pinned by the `wasm_smoke`
-    // / `wasm_stdlib` heap-result tests (e.g. `[1 2 3]`, `(map … (list 1 2 3))`).
+    // / `wasm_stdlib` heap-result tests (for example `[1 2 3]`, `(map … (list 1 2 3))`).
     // Render through this instance's table: a bare `Display` prints a symbol or
-    // keyword as `#<symbol:hash>` (docs/impl/symbol.md § "Reading a name, and
-    // not reading one").
+    // keyword as `#<symbol:hash>` (docs/impl/symbol.md).
     let ret = ret.map(|v| format!("{}", v.display_with(Some(&symbols))));
 
     let funcs = 1 + lir_module.closures.len();
