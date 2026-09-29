@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Wasmtime Engine/Store/Linker setup, and the closure-env builder both
 //! WASM hosts share.
 //!
@@ -37,7 +37,7 @@ pub(in crate::wasm) fn write_self_slot<T: 'static>(
 /// returns (0 = ran to completion, >0 = the resume state it suspended at), and
 /// the `SignalBits` it raised, written to `SIGNAL_SLOT`. A caller that reads
 /// only `status` reports a failed primitive as a successful return of the error
-/// value — pinned by `tests/elle/wasm-tier-error-signal.lisp`.
+/// value — pinned by `tests/impl/wasm-tier-error-signal.lisp`.
 ///
 /// Generic over the host type so the full-module (`ElleHost`) and tiered
 /// (`TieredHost`) paths, and both `Caller` and `Store` contexts, share it.
@@ -111,8 +111,7 @@ pub(crate) fn cache_path_for(kind: &str, wasm_bytes: &[u8]) -> Option<std::path:
 /// a hash of the WASM bytes and nothing else, while `Module::deserialize`
 /// accepts an artifact only from the wasmtime that wrote it. Compiling fresh
 /// and overwriting repairs the entry in place, which is what keeps a wasmtime
-/// upgrade from stranding every warm cache
-/// (docs/impl/wasm.md § "The module cache is a cache").
+/// upgrade from stranding every warm cache (docs/impl/wasm.md).
 pub(crate) fn cached_or_compile(
     engine: &Engine,
     wasm_bytes: &[u8],
@@ -169,9 +168,8 @@ fn hex_name(key: &[u8]) -> String {
 
 /// Create a Wasmtime Engine with tail-call support.
 ///
-/// Honors `config.jit_enabled()` for cranelift optimization:
-///   - unset or non-zero: aggressive cranelift optimization (OptLevel::Speed)
-///   - "0": cranelift optimization disabled (OptLevel::None) for faster compile
+/// Cranelift optimizes at `OptLevel::Speed` when the JIT is enabled, and not at
+/// all (`OptLevel::None`, a faster compile) when it is off.
 pub fn create_engine() -> Result<Engine> {
     let mut config = Config::new();
     config.wasm_tail_call(true);
