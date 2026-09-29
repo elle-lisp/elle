@@ -1,17 +1,16 @@
 # The implementation suite
 
-<!-- audited: 2026-09-27 -->
+<!-- audited: 2026-09-29 -->
 
 Elle programs that check this implementation: its gauges, its tiers, its crashes
 and its mechanisms, each run on the rig.
 
-A file here is an implementation test ([spec](../../docs/spec.md) § Two
-suites). Its claim holds for this implementation and may be false of another
-correct one: a region count, a page claim, whether the JIT compiled a
-function, whether a release ran twice. The Rust suite under
-[tests](../AGENTS.md) holds the rest of the implementation suite, and a test
-that has to build its input beneath the compiler — a call written as LIR or
-bytecode — belongs there.
+A file here is an implementation test ([spec](../../docs/spec.md)). Its claim
+holds for this implementation and may be false of another correct one: a region
+count, a page claim, whether the JIT compiled a function, whether a release ran
+twice. The Rust suite under [tests](../AGENTS.md) holds the rest of the
+implementation suite, and a test that has to build its input beneath the
+compiler — a call written as LIR or bytecode — belongs there.
 
 ## What a file here is
 
@@ -56,14 +55,15 @@ hold what those files read, and the suite runs none of them:
 - `tailexit/` holds the tail-exit ledgers, which
   [region-tail-frame-exit-uaf.lisp](region-tail-frame-exit-uaf.lisp)
   includes.
-- `profiles/` holds the rig profiles a pass applies to both suites.
+- `profiles/` holds the rig profiles, each of which a pass applies to every
+  file it runs.
 
 ## The dashboards
 
 [oracle.lisp](oracle.lisp) measures the leak rate of each residual class, and
 [plumb.lisp](plumb.lisp) measures the I/O leak rates. Each loops a shape
 under a heap gauge and reports a verdict per class through the measurement
-channel ([test-store](../../docs/test-store.md) § Measurements).
+channel ([test-store](../../docs/test-store.md)).
 [docs/impl/region/diagnostics.md](../../docs/impl/region/diagnostics.md) owns
 their instruments.
 
@@ -72,8 +72,9 @@ their instruments.
 `make smoke-impl` runs every file here as its own child of `elle test --host
 elle-rig`, so each verdict lands in the session store. It then runs the
 suites once more under each profile the pass names. `make smoke-pool` runs the
-files here again on the thread-pool build's rig. A file that reads a resource
-only one build has gates itself on the others. A new file is picked up by being
-here; there is nothing to register.
+files here again on the thread-pool build's rig, and `make smoke-wasm` on the
+`wasm` build's rig. A file that reads a resource only one build has gates
+itself on the others. A new file is picked up by being here; there is nothing
+to register.
 
 One file at a time, `elle-rig tests/impl/NAME.lisp` runs it with its sidecar.
