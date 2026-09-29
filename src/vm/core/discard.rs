@@ -1,6 +1,6 @@
 // audited: 2026-09-28
-//! Abandoning suspended work: the squelch boundary, and the chokepoint that runs
-//! what the discarded frames still owed.
+//! Abandoning suspended work: the squelch boundary, a host's refusal, and the
+//! chokepoint that runs what the discarded frames still owed.
 //!
 //! docs/impl/region/park.md
 //! docs/impl/region/owner.md
@@ -61,8 +61,9 @@ impl VM {
         err
     }
 
-    /// Discard the LIVE fiber's suspended frames (squelch / abort) — the
-    /// chokepoint for abandoning suspended work while the fiber runs on, the
+    /// Discard the LIVE fiber's suspended frames (squelch, abort, a host's
+    /// refusal) — the chokepoint for abandoning suspended work while the fiber
+    /// runs on, the
     /// discard counterpart of `resume_suspended` (docs/impl/region/owner.md
     /// § "A discard runs what the abandoned frames owed"; a fiber reaching a
     /// TERMINAL state instead releases through
@@ -101,12 +102,13 @@ impl VM {
     /// payload, so both are owed here (docs/impl/region/park.md § "A boundary
     /// ends a park with no reader and no install").
     ///
-    /// `payload` is the value the exit leaves with — the boundary's own
-    /// `signal-violation` error — whose region no release here may take, on the
-    /// same reading the abandoned-frame walk makes
-    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
-    /// still owes"). `parked` is the signal whose park this ends, named by the
-    /// enforcement site (see `squelch_violation`).
+    /// `payload` is the value the exit leaves with — a boundary's own
+    /// `signal-violation` error, or `nil` for a refusing host, which builds its
+    /// error afterwards — whose region no release here may take, on the same
+    /// reading the abandoned-frame walk makes (docs/impl/region/mechanism.md
+    /// § "An abandoned frame runs the releases it still owes"). `parked` is the
+    /// signal whose park this ends, named by the site that ends it (see
+    /// `squelch_violation`).
     pub(crate) fn discard_suspended_frames(
         &mut self,
         payload: Value,
@@ -130,41 +132,56 @@ impl VM {
     }
 
     /// A host that runs code on the current fiber refused `parked`, a park of
-    /// that code (docs/impl/region/park.md § "A host that refuses a park ends
-    /// it the same way").
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "no caller outside the unit tests")
-    )]
+    /// that code. `eval`, `import`, the `compile/*-module` setup runs,
+    /// `compile/run-on :jit` and the root driver cannot hold a suspension of
+    /// the code they run, so each answers one with an error at its own call.
+    /// The refused park has no reader and no install, and its frames never run
+    /// again, so it ends as a squelch boundary's park does: through
+    /// [`Self::discard_suspended_frames`]. The host's error then parks the
+    /// fiber's own frame at the host's call, so a restart answers that call
+    /// (docs/impl/region/park.md § "A host that refuses a park ends it the same
+    /// way").
+    ///
+    /// `parked` is the refused signal, which the host takes out of the slot
+    /// before it builds its error. `invoke_closure_jit` holds it in a local
+    /// instead, as it does for its squelch check. A no-op for anything but a
+    /// park (see [`Self::is_park`]).
     pub(crate) fn refuse_hosted_park(
         &mut self,
         bits: SignalBits,
-        _parked: Option<(SignalBits, Value)>,
+        parked: Option<(SignalBits, Value)>,
     ) {
-        self.abandon_hosted_park(bits);
+        if !Self::is_park(bits) {
+            return;
+        }
+        // The host's error is built after this, in a fresh region of its own, so
+        // no value leaving this exit needs the walk's payload exemption.
+        self.discard_suspended_frames(Value::NIL, parked);
     }
 
-    /// A host that drives a thunk on the CURRENT fiber (`eval`, `import`,
-    /// `arena/allocs`, `compile/run-on`, the root driver) refuses a
-    /// suspend-class signal it cannot host: it extracts the signal as a value
-    /// or reports it, and the fiber runs on. The park that raised the signal
-    /// is dead at that moment, so its funding record must not survive into
-    /// the fiber's next park — the delivery funnel that would consume it
-    /// belongs to a resume no host will ever run (docs/impl/region/park.md
-    /// § "A park names its funding in the delivery ledger"). A no-op for a
-    /// completion, an error (an `:error` fiber is resumable and its records
-    /// are identity-gated), a halt, or the switch trampoline — none of those
-    /// abandons a suspend-class park.
+    /// A host that runs a thunk on the current fiber hands the thunk's
+    /// suspension on as its own call's park: `arena/allocs` and
+    /// `compile/run-on :bytecode` return the thunk's signal as their own, and
+    /// the call's park is built from it. The thunk's park ends there, so its
+    /// funding record must not survive into the park the host's call makes
+    /// (docs/impl/region/park.md § "A park names its funding in the delivery
+    /// ledger"). A no-op for anything but a park (see [`Self::is_park`]).
     pub(crate) fn abandon_hosted_park(&mut self, bits: SignalBits) {
-        use crate::value::{SIG_ERROR, SIG_HALT, SIG_SWITCH};
-        if bits.is_empty()
-            || bits.intersects(SIG_ERROR)
-            || bits.intersects(SIG_HALT)
-            || bits == SIG_SWITCH
-        {
+        if !Self::is_park(bits) {
             return;
         }
         self.fiber.delivery.discharge();
+    }
+
+    /// Whether `bits` leave a park a host must end: not a completion, not an
+    /// error (an `:error` fiber is resumable, and its records are
+    /// identity-gated), not a halt, and not the switch trampoline.
+    fn is_park(bits: SignalBits) -> bool {
+        use crate::value::{SIG_ERROR, SIG_HALT, SIG_SWITCH};
+        !(bits.is_empty()
+            || bits.intersects(SIG_ERROR)
+            || bits.intersects(SIG_HALT)
+            || bits == SIG_SWITCH)
     }
 }
 

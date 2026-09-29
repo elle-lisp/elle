@@ -1,10 +1,12 @@
-// audited: 2026-09-10
+// audited: 2026-09-28
 //! Runtime eval instruction handler.
 //!
 //! Compiles and executes a datum (quoted value) at runtime.
 //! The expression is compiled in an environment seeded from primitives
 //! and prelude. When the optional env argument is a non-nil struct,
 //! its symbol-keyed entries become additional immutable bindings.
+//!
+//! docs/impl/region/park.md
 
 use crate::error::{LError, LResult};
 use crate::hir::tailcall::mark_tail_calls;
@@ -237,8 +239,10 @@ fn eval_in_arena(
             Err(LError::generic(vm.format_error_with_location(err_value)))
         }
         _ => {
-            // The refused suspend-class park is abandoned with its host.
-            vm.abandon_hosted_park(bits);
+            // eval cannot hold a park of the code it ran, so it refuses it and
+            // raises at its own call.
+            let parked = vm.fiber.signal.take();
+            vm.refuse_hosted_park(bits, parked);
             Err(LError::generic(format!(
                 "eval: unexpected signal: {}",
                 bits

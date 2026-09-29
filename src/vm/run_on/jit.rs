@@ -99,31 +99,24 @@ impl VM {
                 let exec_result = self.execute_bytecode_saving_stack(&tail.code, &tail.env);
                 let eb = exec_result.bits;
 
+                // The tail callee's own signal — its result, its error, or the
+                // park it made — taken before the caller's is restored, as the
+                // non-tail path below takes `post_signal`.
+                let tail_signal = self.fiber.signal.take();
                 self.fiber.stack = saved_stack;
-                if let Some(sig) = saved_signal {
-                    self.fiber.signal = Some(sig);
-                }
+                self.fiber.signal = saved_signal;
 
                 if eb.is_empty() {
-                    let val = if let Some((_, v)) = self.fiber.signal.take() {
-                        v
-                    } else {
-                        Value::NIL
-                    };
+                    let val = tail_signal.map_or(Value::NIL, |(_, v)| v);
                     return (SIG_OK, val);
                 } else if eb == crate::value::SIG_HALT {
-                    let val = if let Some((_, v)) = self.fiber.signal.take() {
-                        v
-                    } else {
-                        Value::NIL
-                    };
+                    let val = tail_signal.map_or(Value::NIL, |(_, v)| v);
                     if val == Value::NIL {
                         return (SIG_OK, val);
                     }
                     return (crate::value::SIG_HALT, val);
                 } else if eb.intersects(SIG_ERROR) {
-                    // Error already set on fiber.signal — extract it.
-                    if let Some((bits, val)) = self.fiber.signal.take() {
+                    if let Some((bits, val)) = tail_signal {
                         return (bits, val);
                     }
                     return (
@@ -132,8 +125,8 @@ impl VM {
                     );
                 } else {
                     // Suspending signal — not supported under compile/run-on.
-                    // The refused park is over, and so is its funding.
-                    self.abandon_hosted_park(eb);
+                    // This host refuses the park and raises at its own call.
+                    self.refuse_hosted_park(eb, tail_signal);
                     return (
                         SIG_ERROR,
                         rejected(self, "jit", "tail-call target yielded under compile/run-on"),
@@ -170,8 +163,10 @@ impl VM {
                 return (SIG_ERROR, self.squelch_violation(squelched, post_signal));
             }
 
-            // Not squelched: this host refuses the park, and its funding with it.
-            self.abandon_hosted_park(yield_bits);
+            // Not squelched: this host refuses the park and raises at its own
+            // call. The park is `post_signal`, for the reason the squelch check
+            // above names.
+            self.refuse_hosted_park(yield_bits, post_signal);
 
             if let Some((bits, val)) = post_signal {
                 return (
