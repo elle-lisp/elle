@@ -1,6 +1,6 @@
-// audited: 2026-09-20
-//! Trait table primitives: attach a table, read it back, and resolve the
-//! method a collection operator dispatches through.
+// audited: 2026-09-29
+//! Trait table primitives: attach a table, read it back, and resolve the method a collection operator dispatches through.
+//!
 //! docs/traits.md
 //!
 //! `with-traits` attaches an immutable struct as a trait table to a value,
@@ -24,7 +24,8 @@ use crate::value::Value;
 
 /// (with-traits value table) → new value with trait table attached
 ///
-/// - value must be one of the 19 traitable heap types
+/// - value must be a traitable heap type (every heap type but the
+///   infrastructure ones `clone_with_traits` refuses)
 /// - table must be an immutable struct (LStruct)
 /// - returns a new heap object with the same data and traits = table
 /// - for mutable collections the store is COPIED, so the result is
@@ -109,9 +110,8 @@ unsafe fn clone_with_traits(
         // copying the (ptr, len) pair instead aliases backing pages in the
         // SOURCE's region with no counted edge — the source's ordinary
         // demise frees the payload under the live clone, and the declared
-        // Fresh effect is falsified (docs/impl/region/model.md, "RegionSlice contents
-        // share their object's region"; the with-traits UAF,
-        // tests/elle/region-withtraits-slice-uaf.lisp).
+        // Fresh effect is falsified (docs/impl/region/model.md;
+        // tests/impl/region-withtraits-slice-uaf.lisp).
         HeapObject::LString { s, .. } => Ok(ctx.alloc(HeapObject::LString {
             s: ctx.alloc_slice::<u8>(s.as_slice()),
             traits: table,
@@ -189,7 +189,7 @@ unsafe fn clone_with_traits(
         // payloads in the SOURCE's region — freed-page reads once the source
         // dies. Every slice-backed arm above copies for the same reason (see
         // `RegionSlice`'s module docs and
-        // tests/elle/region-withtraits-slice-uaf.lisp).
+        // tests/impl/region-withtraits-slice-uaf.lisp).
         HeapObject::Syntax { syntax, .. } => {
             let owned = syntax.copy_into(&ctx.syntax_arena());
             Ok(ctx.alloc(HeapObject::Syntax {
@@ -254,7 +254,7 @@ pub(crate) fn prim_traits(
 ///
 /// A collection operator answers for these itself and never reads their trait
 /// table, which is what keeps `(with-traits [1 2 3] …)` mapping as an array
-/// and keeps a plain array's cost where it was. Every other value — a struct,
+/// and keeps a plain array free of the trait lookup. Every other value — a struct,
 /// a set, a closure, a box — reaches the trait layer.
 fn is_builtin_sequence(val: &Value) -> bool {
     if val.is_empty_list() || val.as_syntax().is_some() {
@@ -366,7 +366,7 @@ primitive! {
         // the result never references arg 0's region. Declaring `&[1]` makes the region
         // walk record `result ⊇ table`, so the ownership forest sees a captured table flow
         // out through an escaping traited value and keeps it Shared instead of adopting it
-        // (region/effects.md § "Native region effects").
+        // (docs/impl/region/effects.md).
         embeds: &[1],
     }
     "traits" => prim_traits {

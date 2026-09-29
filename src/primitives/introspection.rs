@@ -1,4 +1,8 @@
-//! Function introspection primitives
+// audited: 2026-09-29
+//! Introspection primitives: what a closure is, `doc`, `vm/query`, the signal registry, and `keyword`.
+//!
+//! docs/functions.md
+//! docs/impl/symbol.md
 
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
@@ -203,7 +207,7 @@ pub(crate) fn prim_signals(
     for (name, bit) in names {
         // A learning site: the registry is process-global and carries names a
         // program declared at run time, so the spelling may be new to this
-        // instance (docs/impl/symbol.md § "The display memo"). Without this the
+        // instance (docs/impl/symbol.md). Without this the
         // struct's own keys have no name to print, and `json/serialize` refuses
         // the whole value.
         let key = crate::value::TableKey::from_value(&ctx.keyword(&name)).unwrap();
@@ -220,7 +224,7 @@ pub(crate) fn prim_keyword(
     args: &[Value],
 ) -> (SignalBits, Value) {
     // A learning site: the spelling exists only at run time, so the instance
-    // memo records it here (docs/impl/symbol.md § "The display memo").
+    // memo records it here (docs/impl/symbol.md).
     if let Some(name) = args[0].with_string(str::to_string) {
         (SIG_OK, ctx.keyword(&name))
     } else {
@@ -232,9 +236,9 @@ pub(crate) fn prim_keyword(
 /// instructions converted to `ClosureRef` by the LIR cross-thread
 /// serializer during this process's lifetime.
 ///
-/// Used by regression tests to assert the ClosureRef LIR-transfer fix
-/// is actually firing on real spawn patterns. See
-/// `src/lir/types.rs::convert_value_consts_for_send`.
+/// tests/impl/spawn-lir-closure-ref.lisp reads it to assert the conversion
+/// runs on a real spawn. See `LirFunction::convert_value_consts_for_send`
+/// (src/lir/types/func.rs).
 pub(crate) fn prim_closure_value_const_count(
     _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     _args: &[Value],
@@ -424,8 +428,8 @@ primitive! {
         // side is not: every operation there reads its argument or copies it out,
         // and the Elle code some of them re-enter stores only through the
         // runtime-counted funnel. Unbounded result + no store is `Opaque` — no arg
-        // clique (docs/impl/region/effects.md § Opaque;
-        // tests/elle/region-query-clique-leak.lisp). The obligation rides
+        // clique (docs/impl/region/effects.md;
+        // tests/impl/region-query-clique-leak.lisp). The obligation rides
         // `dispatch_query`: an operation that RETAINS its argument past the call
         // moves this declaration back to `Mixed`.
         effect: RegionEffect::Opaque,
@@ -445,7 +449,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "lir/closure-value-const-count" => prim_closure_value_const_count {
-        doc: "Number of closure-valued ValueConst instructions converted to ClosureRef by the LIR cross-thread serializer. Used by regression tests to assert the ClosureRef LIR-transfer fix fires.",
+        doc: "Number of closure-valued ValueConst instructions converted to ClosureRef by the LIR cross-thread serializer. A test reads it to assert the conversion runs on a real spawn.",
         category: "meta",
         example: "(lir/closure-value-const-count)",
         effect: RegionEffect::Immediate,
