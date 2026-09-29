@@ -58,14 +58,16 @@
 
 # ── A restart that raises again ───────────────────────────────────────
 
-# The replayed frame raises at the same call, so it parks again, and the
-# next restart answers that call.
+# A nil restart answers `get`, and `+` raises on the nil. `+` is a stdlib
+# closure, entered by the replay and gone by the time the fiber stops, as a
+# first-run callee's frames are, so the replayed frame parks again at its call
+# to `+`, and the next restart answers that call.
 (let [f (fiber/new (fn [] (list :got (+ 1 (get nil :x)))) |:error|)]
   (fiber/resume f)
   (assert (= :type-error (get (fiber/resume f nil) :error))
           "a nil restart raises in +")
-  (assert (= (list :got 42) (fiber/resume f 41))
-          "and the next restart answers +"))
+  (assert (= (list :got 41) (fiber/resume f 41))
+          "and the next restart answers the call to +"))
 
 # ── A callee that suspended before it raised ──────────────────────────
 
