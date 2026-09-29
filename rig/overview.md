@@ -97,8 +97,9 @@ keywords join the sidecar's.
 instead of this `elle` ([test-runner](../docs/test-runner.md)), so every
 verdict lands in the session store. The `Makefile` target `smoke-impl` runs the
 implementation suite through `elle test --host target/release/elle-rig`, then
-one pass per profile. The target `smoke-wasm` runs the `wasm-full.toml` pass on
-the rig of the `wasm` build, less the files `WASM_SKIP` names.
+one pass per profile. The target `smoke-wasm` runs the implementation suite on
+the rig of the `wasm` build twice: under each file's sidecar, then under
+`wasm-full.toml` less the files `WASM_SKIP` names.
 
 ## Building it
 
