@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-22
+(elle/epoch 13)
+# audited: 2026-09-29
 ## elle test — the session store: where a run is kept, the schema it is kept
 ## in, what a run row says about the code it ran against, and the CAS.
 ## docs/test-store.md
@@ -46,7 +46,8 @@
 (def run-code-columns
   [["git_commit" "TEXT"] ["git_dirty" "INTEGER"] ["tree_hash" "TEXT"]
    ["worktree" "TEXT"] ["boot_fingerprint" "INTEGER"] ["elle_version" "TEXT"]
-   ["build_profile" "TEXT"] ["host" "TEXT"] ["argv" "TEXT"] ["run_key" "TEXT"]])
+   ["build_profile" "TEXT"] ["host" "TEXT"] ["argv" "TEXT"] ["run_key" "TEXT"]
+   ["pid" "INTEGER"]])
 
 (defn ensure-code-columns [conn cols]
   (if (empty? cols)
@@ -57,7 +58,7 @@
 
 (defn ensure-schema [conn]
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, run_key TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, boot_fingerprint INTEGER, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0)")
+               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, run_key TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, boot_fingerprint INTEGER, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, pid INTEGER, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS form (hash TEXT PRIMARY KEY, origin TEXT, session TEXT, file TEXT, form_index INTEGER, line INTEGER, col INTEGER, label TEXT, src TEXT, caps TEXT, touches TEXT, signal TEXT)")
   (sqlite:exec conn
@@ -131,7 +132,8 @@
 # The code state and the machine this run ran on. Outside a repository the git
 # fields are nil, which lands as SQL NULL: the run happened, and nothing names
 # the code it ran against. The host and the build are facts about the box and
-# the binary, so they are recorded either way.
+# the binary, so they are recorded either way, and so is the pid: with the
+# host, it is what tells a run still in flight from a killed one (view.lisp).
 #
 # The boot fingerprint is the binary itself, hashed (docs/test-store.md § The
 # boot fingerprint): a commit says which sources a run was meant to test, and
@@ -145,7 +147,8 @@
             :tree (if commit (capture-cmd tree-hash-cmd) nil)
             :worktree (capture-cmd "git rev-parse --show-toplevel 2>/dev/null")
             :boot (elle/boot-fingerprint) :host host :version (elle/version)
-            :profile (elle/build-profile) :argv argv :key (run-key host argv))))
+            :profile (elle/build-profile) :argv argv :key (run-key host argv)
+            :pid (sys/pid))))
 
 # What names this run in any store that holds it (docs/test-store.md § The run
 # key). The machine, the process and the instant are what separate two runs
