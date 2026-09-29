@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 // Guardfree pins for io parks: the request an install releases, and the port and buffer beside it.
 //
 // docs/impl/region/park.md
@@ -14,10 +14,10 @@ use super::*;
 // park before it ends it — `fiber/value` is pass-through, so a binding carries a
 // counted reference of its own — and every witness DEREFERENCES the request after
 // the install; a bare status check passes over a freed one. The `:io` denial
-// witnesses are the bits collision: a fiber denied `:io` parks under `SIG_IO`, so
-// the ledger record and the io bit both answer for one park and exactly one
-// reference is owed. Running both frees the payload under the mediator's read —
-// SIGSEGV under guardfree. The leak face is `tests/elle/region-io-park.lisp`.
+// witnesses park a struct under `SIG_IO`, the bit an io op's request parks
+// under, and exactly one reference is owed. A second release frees the payload
+// under the mediator's read — SIGSEGV under guardfree. The leak face is
+// `tests/elle/region-io-park.lisp`.
 #[test]
 fn region_io_park_uaf() {
     run_elle_script_with_args(
@@ -66,9 +66,10 @@ fn region_io_read_strand_guardfree() {
 // relay owes that request nothing (docs/impl/region/park.md). The request's
 // region also holds what the child reads next: the port `port/open` answers
 // with, the buffer a read answers in. Each relaying install that releases it
-// frees those under the child. The witnesses relay once, twice, and through a
-// relay that reads each request after its install, and the child reads its port
-// and lines, closes, writes and reads the file back. A stale read faults —
+// frees those under the child. The witnesses relay once, twice, through a relay
+// that reads each request after its install, and through the `emit` primitive
+// in call and tail position. The child reads its port and lines, closes, writes
+// and reads the file back. A stale read faults —
 // SIGSEGV under guardfree. The same file gauges the leak a relay must not trade
 // the fault for.
 #[test]

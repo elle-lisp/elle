@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Region refcount bookkeeping for fiber signals.
 //!
 //! Park-retains on terminal results, and the symmetric releases when a parked
@@ -195,6 +195,18 @@ pub(crate) fn release_displaced_denial_payload(
     };
     let region = crate::value::arena::region_of(heap, payload);
     crate::value::arena::decref_region(heap, region);
+}
+
+/// Release the reference a parked runtime-built payload leaves stranded when an
+/// install displaces it from `fiber.signal`.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn release_displaced_bodyless_payload(
+    heap: &mut crate::value::fiberheap::FiberHeap,
+    handle: &crate::value::fiber::FiberHandle,
+) {
+    let parked = handle.with(|fiber| fiber.signal);
+    release_displaced_io_request(heap, parked);
+    release_displaced_denial_payload(heap, handle);
 }
 
 /// Release the `SuspendEscape` an io op left on its IoRequest's region when an

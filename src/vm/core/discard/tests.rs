@@ -42,7 +42,7 @@ fn a_refused_park_takes_its_frames_off_the_fiber() {
         let (code, env) = test_fixtures();
         let mut ip = 0usize;
 
-        vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &code, &env, &mut ip);
+        vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &[], &code, &env, &mut ip);
         assert!(vm.fiber.suspended.is_some(), "the park parks its frame");
 
         vm.refuse_hosted_park(SIG_YIELD, vm.fiber.param_depth());
@@ -76,7 +76,7 @@ fn a_refused_park_releases_its_delivery_retain() {
         );
         let before = vm.heap().region_rc(region);
 
-        vm.handle_primitive_signal(SIG_YIELD, payload, &code, &env, &mut ip);
+        vm.handle_primitive_signal(SIG_YIELD, payload, &[], &code, &env, &mut ip);
         assert_eq!(
             vm.heap().region_rc(region),
             before + 1,
@@ -101,7 +101,7 @@ fn an_error_is_not_a_refused_park() {
         let (code, env) = test_fixtures();
         let mut ip = 0usize;
 
-        vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &code, &env, &mut ip);
+        vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &[], &code, &env, &mut ip);
         vm.refuse_hosted_park(SIG_ERROR, vm.fiber.param_depth());
         assert!(
             vm.fiber.suspended.is_some(),
@@ -127,7 +127,7 @@ fn a_refused_hosted_park_leaves_no_funding() {
         let (code, env) = test_fixtures();
         let mut ip = 0usize;
 
-        vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &code, &env, &mut ip);
+        vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &[], &code, &env, &mut ip);
         assert!(vm.fiber.delivery.resume_unfunded());
 
         vm.abandon_hosted_park(SIG_YIELD);
@@ -148,7 +148,7 @@ fn an_error_exit_abandons_no_funding() {
         let (code, env) = test_fixtures();
         let mut ip = 0usize;
 
-        vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &code, &env, &mut ip);
+        vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &[], &code, &env, &mut ip);
         vm.abandon_hosted_park(SIG_ERROR);
         assert!(
             vm.fiber.delivery.resume_unfunded(),

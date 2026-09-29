@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-29
 // What a compiled call does with the signal a primitive raised, and with a
 // closure whose environment outlived its region.
 //
@@ -48,7 +48,7 @@ fn test_has_exception() {
 #[test]
 fn sig_ok_returns_value() {
     let mut vm = make_vm();
-    let result = jit_handle_primitive_signal(&mut vm, SIG_OK, Value::int(42));
+    let result = jit_handle_primitive_signal(&mut vm, SIG_OK, Value::int(42), &[]);
     assert_eq!(result, JitValue::from_value(Value::int(42)));
     assert!(vm.fiber.signal.is_none());
 }
@@ -56,7 +56,7 @@ fn sig_ok_returns_value() {
 #[test]
 fn bare_sig_yield_stores_signal_returns_yield_sentinel() {
     let mut vm = make_vm();
-    let result = jit_handle_primitive_signal(&mut vm, SIG_YIELD, Value::int(1));
+    let result = jit_handle_primitive_signal(&mut vm, SIG_YIELD, Value::int(1), &[]);
     assert_eq!(result, YIELD_SENTINEL);
     let (sig, val) = vm.fiber.signal.take().unwrap();
     assert_eq!(sig, SIG_YIELD);
@@ -67,7 +67,7 @@ fn bare_sig_yield_stores_signal_returns_yield_sentinel() {
 fn composed_sig_yield_io_stores_signal_returns_yield_sentinel() {
     let mut vm = make_vm();
     let bits = SIG_YIELD | SIG_IO;
-    let result = jit_handle_primitive_signal(&mut vm, bits, Value::int(99));
+    let result = jit_handle_primitive_signal(&mut vm, bits, Value::int(99), &[]);
     assert_eq!(result, YIELD_SENTINEL);
     let (sig, val) = vm.fiber.signal.take().unwrap();
     assert_eq!(sig, bits);
@@ -77,7 +77,7 @@ fn composed_sig_yield_io_stores_signal_returns_yield_sentinel() {
 #[test]
 fn sig_halt_stores_signal_returns_nil() {
     let mut vm = make_vm();
-    let result = jit_handle_primitive_signal(&mut vm, SIG_HALT, Value::int(0));
+    let result = jit_handle_primitive_signal(&mut vm, SIG_HALT, Value::int(0), &[]);
     assert_eq!(result, JitValue::nil());
     let (sig, _) = vm.fiber.signal.take().unwrap();
     assert_eq!(sig, SIG_HALT);
@@ -87,7 +87,7 @@ fn sig_halt_stores_signal_returns_nil() {
 fn sig_debug_treated_as_suspension() {
     let mut vm = make_vm();
     vm.fiber.signal = Some((SIG_DEBUG, Value::NIL));
-    let result = jit_handle_primitive_signal(&mut vm, SIG_DEBUG, Value::NIL);
+    let result = jit_handle_primitive_signal(&mut vm, SIG_DEBUG, Value::NIL, &[]);
     assert_eq!(result, YIELD_SENTINEL);
     let (sig, _) = vm.fiber.signal.take().unwrap();
     assert_eq!(sig, SIG_DEBUG);
@@ -98,7 +98,7 @@ fn user_defined_signal_treated_as_suspension() {
     let user_bit = SignalBits::from_bit(32);
     let mut vm = make_vm();
     vm.fiber.signal = Some((user_bit, Value::NIL));
-    let result = jit_handle_primitive_signal(&mut vm, user_bit, Value::NIL);
+    let result = jit_handle_primitive_signal(&mut vm, user_bit, Value::NIL, &[]);
     assert_eq!(result, YIELD_SENTINEL);
     let (sig, _) = vm.fiber.signal.take().unwrap();
     assert_eq!(sig, user_bit);
@@ -110,7 +110,7 @@ fn bare_sig_error_stores_signal_returns_nil() {
         let h = crate::primitives::ctx::TestHeap::new();
         let mut vm = make_vm();
         let err = h.ctx().string("boom");
-        let result = jit_handle_primitive_signal(&mut vm, SIG_ERROR, err);
+        let result = jit_handle_primitive_signal(&mut vm, SIG_ERROR, err, &[]);
         assert_eq!(result, JitValue::nil());
         let (sig, _) = vm.fiber.signal.take().unwrap();
         assert_eq!(sig, SIG_ERROR);
@@ -123,7 +123,7 @@ fn composed_sig_error_io_stores_signal_returns_nil() {
         let h = crate::primitives::ctx::TestHeap::new();
         let mut vm = make_vm();
         let bits = SIG_ERROR | SIG_IO;
-        let result = jit_handle_primitive_signal(&mut vm, bits, h.ctx().string("io-error"));
+        let result = jit_handle_primitive_signal(&mut vm, bits, h.ctx().string("io-error"), &[]);
         assert_eq!(result, JitValue::nil());
         let (sig, _) = vm.fiber.signal.take().unwrap();
         assert!(sig.intersects(SIG_ERROR));
@@ -138,11 +138,55 @@ fn sig_error_terminal_stored_as_error_not_panic() {
         let bits = SIG_ERROR | SIG_TERMINAL;
         let h = crate::primitives::ctx::TestHeap::new();
         let mut vm = make_vm();
-        let result = jit_handle_primitive_signal(&mut vm, bits, h.ctx().string("terminal"));
+        let result = jit_handle_primitive_signal(&mut vm, bits, h.ctx().string("terminal"), &[]);
         assert_eq!(result, JitValue::nil());
         let (sig, _) = vm.fiber.signal.take().unwrap();
         assert!(sig.intersects(SIG_ERROR));
         assert!(sig.intersects(SIG_TERMINAL));
+    });
+}
+
+// -- jit_handle_primitive_signal: which suspend parks a runtime-built payload --
+
+/// A portless `Sleep` request on the VM's own heap, built the way an io op
+/// builds one.
+fn sleep_request(vm: &mut VM) -> Value {
+    let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm.heap_ptr });
+    crate::io::request::IoRequest::test_sleep(&ctx)
+}
+
+/// The compiled mirror of the interpreter's io op park: the request the op
+/// built is recorded for the install that displaces it
+/// (docs/impl/region/park.md).
+#[test]
+fn an_io_op_suspend_records_its_request() {
+    crate::value::arena::with_test_region(|| {
+        let mut vm = make_vm();
+        let request = sleep_request(&mut vm);
+        let result = jit_handle_primitive_signal(&mut vm, SIG_IO, request, &[Value::int(0)]);
+        assert_eq!(result, YIELD_SENTINEL);
+        assert_eq!(
+            vm.fiber
+                .delivery
+                .bodyless()
+                .map(|p| p.bit_identical(request)),
+            Some(true),
+            "a compiled io op's request is recorded like an interpreted one's",
+        );
+    });
+}
+
+/// The counter-factual: the `emit` primitive suspending on its own argument is
+/// a relay, and its body owns that request. Recording it frees the child's
+/// request region under the child.
+#[test]
+fn a_suspend_on_its_own_argument_records_nothing_to_release() {
+    crate::value::arena::with_test_region(|| {
+        let mut vm = make_vm();
+        let request = sleep_request(&mut vm);
+        let args = [Value::keyword("io"), request];
+        jit_handle_primitive_signal(&mut vm, SIG_IO, request, &args);
+        assert!(vm.fiber.delivery.bodyless().is_none());
     });
 }
 

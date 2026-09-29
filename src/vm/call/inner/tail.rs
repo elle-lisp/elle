@@ -1,4 +1,4 @@
-//! audited: 2026-09-21
+// audited: 2026-09-29
 //! VM::tail_call_inner — shared TailCall/TailCallArrayMut dispatch.
 //!
 //! docs/impl/vm.md
@@ -8,7 +8,7 @@ use super::*;
 impl VM {
     /// Resolve this tail call's borrowed-argument retains to physical regions
     /// and CONSUME the local each one is stashed in, without releasing anything
-    /// yet (docs/impl/region/mechanism.md § "What the fall-through owes, a
+    /// yet (docs/impl/region/signalexit.md § "What the fall-through owes, a
     /// signal exit owes too").
     ///
     /// Stamping the local `nil` is what makes the release count once: a frame
@@ -28,7 +28,7 @@ impl VM {
     /// `spare` is the value a SUSPENDING exit parks, and it is left standing: that
     /// exit's continuation is parked at the post-`TailCall` ip, so the release the
     /// retain answers to still runs on the resume, and the retain is the one
-    /// reference the park owes the body for what it yields (owner.md § "A fiber
+    /// reference the park owes the body for what it yields (park.md § "A fiber
     /// body owns one reference of every value it yields"). Its slot keeps its
     /// value, so the replay releases it rather than no-opping on a stamp. `None`
     /// everywhere else, where nothing reaches the block again.
@@ -95,7 +95,7 @@ impl VM {
     /// the retain here instead — except at a SUSPEND, which parks the
     /// continuation at the post-`TailCall` ip, so the block does run on resume and
     /// the retain naming the parked payload is the reference that park owes the
-    /// body (docs/impl/region/mechanism.md § "What the fall-through owes, a signal
+    /// body (docs/impl/region/signalexit.md § "What the fall-through owes, a signal
     /// exit owes too"). A terminal `:error` consumes them like any other exit and
     /// mints the payload's delivery instead
     /// ([`Self::mint_raised_argument_delivery`]).
@@ -224,7 +224,7 @@ impl VM {
             if action == crate::signals::dispatch::SignalAction::Error {
                 self.mint_raised_argument_delivery(&args, value);
             }
-            let bits = self.handle_primitive_signal_tail(bits, value);
+            let bits = self.handle_primitive_signal_tail(bits, value, &args);
             self.run_borrowed_arg_retains(owed);
             // A fiber CARRIER (`fiber/resume`/`fiber/abort`/`fiber/propagate`/
             // `fiber/refuse`)
@@ -233,7 +233,7 @@ impl VM {
             // mask ABSORBS the child's outcome the request is answered here, so
             // the value is the call's result and the frame never left — it takes
             // the fall-through, exactly as a native that completed normally does
-            // (docs/impl/region/mechanism.md § "A carrier that comes back with a
+            // (docs/impl/region/signalexit.md § "A carrier that comes back with a
             // result never left the frame"). The post-`TailCall` block then runs
             // the releases it holds for this call: one per owned argument, plus
             // the result's own, plus the return mint. Handing the value out

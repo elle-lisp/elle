@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! How a primitive's signal is dispatched, and what each park records about the
 //! references it leaves standing.
 //!
@@ -36,7 +36,8 @@ fn composed_error_io_treated_as_error() {
         let mut ip = 0usize;
         let bits = SIG_ERROR | SIG_IO;
 
-        let result = vm.handle_primitive_signal(bits, h.ctx().string("boom"), &code, &env, &mut ip);
+        let result =
+            vm.handle_primitive_signal(bits, h.ctx().string("boom"), &[], &code, &env, &mut ip);
 
         // Error path returns None
         assert!(result.is_none());
@@ -57,7 +58,7 @@ fn unknown_signal_propagates() {
         let mut ip = 0usize;
         let bits = SIG_DEBUG; // not handled by any specific branch
 
-        let result = vm.handle_primitive_signal(bits, Value::int(1), &code, &env, &mut ip);
+        let result = vm.handle_primitive_signal(bits, Value::int(1), &[], &code, &env, &mut ip);
 
         assert_eq!(result, Some(SIG_DEBUG));
         let (sig, _) = vm.fiber.signal.take().unwrap();
@@ -74,7 +75,7 @@ fn tail_composed_error_io_treated_as_error() {
         let mut vm = VM::new();
         let bits = SIG_ERROR | SIG_IO;
 
-        let result = vm.handle_primitive_signal_tail(bits, h.ctx().string("boom"));
+        let result = vm.handle_primitive_signal_tail(bits, h.ctx().string("boom"), &[]);
 
         // Should return the full composed bits
         assert!(result.intersects(SIG_ERROR));
@@ -91,7 +92,7 @@ fn tail_composed_yield_io_propagates() {
         let mut vm = VM::new();
         let bits = SIG_YIELD | SIG_IO;
 
-        let result = vm.handle_primitive_signal_tail(bits, Value::int(42));
+        let result = vm.handle_primitive_signal_tail(bits, Value::int(42), &[]);
 
         assert_eq!(result, SIG_YIELD | SIG_IO);
         let (sig, val) = vm.fiber.signal.take().unwrap();
@@ -105,7 +106,7 @@ fn tail_sig_ok_stores_ok() {
     with_test_region(|| {
         let mut vm = VM::new();
 
-        let result = vm.handle_primitive_signal_tail(SIG_OK, Value::int(5));
+        let result = vm.handle_primitive_signal_tail(SIG_OK, Value::int(5), &[]);
 
         assert_eq!(result, SIG_OK);
         let (sig, val) = vm.fiber.signal.take().unwrap();
@@ -121,7 +122,7 @@ fn tail_error_priority_over_yield() {
         let mut vm = VM::new();
         let bits = SIG_ERROR | SIG_YIELD;
 
-        let result = vm.handle_primitive_signal_tail(bits, h.ctx().string("err"));
+        let result = vm.handle_primitive_signal_tail(bits, h.ctx().string("err"), &[]);
 
         assert!(result.intersects(SIG_ERROR));
         let (sig, _) = vm.fiber.signal.take().unwrap();
@@ -176,7 +177,8 @@ fn a_suspending_primitive_park_owes_its_resume_value_a_reference() {
         let (code, env) = test_fixtures();
         let mut ip = 0usize;
 
-        let result = vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &code, &env, &mut ip);
+        let result =
+            vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &[], &code, &env, &mut ip);
 
         assert_eq!(result, Some(SIG_YIELD));
         assert!(
@@ -194,7 +196,7 @@ fn a_tail_suspending_primitive_park_owes_its_resume_value_a_reference() {
     with_test_region(|| {
         let mut vm = VM::new();
 
-        let result = vm.handle_primitive_signal_tail(SIG_YIELD, Value::int(1));
+        let result = vm.handle_primitive_signal_tail(SIG_YIELD, Value::int(1), &[]);
 
         assert_eq!(result, SIG_YIELD);
         assert!(
@@ -214,7 +216,7 @@ fn a_completing_primitive_owes_its_resume_value_nothing() {
         let (code, env) = test_fixtures();
         let mut ip = 0usize;
 
-        let result = vm.handle_primitive_signal(SIG_OK, Value::int(1), &code, &env, &mut ip);
+        let result = vm.handle_primitive_signal(SIG_OK, Value::int(1), &[], &code, &env, &mut ip);
 
         assert!(
             result.is_none(),
@@ -234,7 +236,7 @@ fn a_completing_primitive_owes_its_resume_value_nothing() {
 /// its region one decref (docs/impl/region/park.md § "A payload the RUNTIME built
 /// is released by the install that displaces it"). Only the denial site can tell a
 /// park has that shape, so it records the payload for
-/// `release_displaced_denial_payload` to match against the live parked signal.
+/// `release_displaced_bodyless_payload` to match against the live parked signal.
 #[test]
 fn a_capability_denial_park_records_the_payload_it_leaves_over() {
     with_test_region(|| {
@@ -302,7 +304,8 @@ fn an_ordinary_suspend_records_no_payload_to_release() {
         let (code, env) = test_fixtures();
         let mut ip = 0usize;
 
-        let result = vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &code, &env, &mut ip);
+        let result =
+            vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &[], &code, &env, &mut ip);
 
         assert_eq!(result, Some(SIG_YIELD));
         assert!(
@@ -373,3 +376,5 @@ fn an_immediate_raised_argument_takes_no_delivery() {
         );
     })
 }
+
+mod request;

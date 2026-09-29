@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! The ledger's transitions: each park write, each consume seam, and the
 //! debug net for a park shape wired without a consume.
 //!
@@ -68,6 +68,34 @@ fn a_denial_park_records_both_facts() {
     assert!(d.take_resume_funding(), "a denial is a primitive park too");
 }
 
+/// An io op's park is a primitive park whose request the op built: the resume
+/// value owes a mint, and the request owes the install that displaces it a
+/// release, so the park records both.
+#[test]
+fn a_request_park_records_both_facts() {
+    let mut d = Delivery::new();
+    d.park_request(SIG_IO, payload());
+    assert_eq!(
+        d.bodyless().map(|p| p.bit_identical(payload())),
+        Some(true),
+        "the request is recorded for the install's decref",
+    );
+    assert!(d.take_resume_funding(), "an io op is a primitive park too");
+}
+
+/// The counter-factual: a primitive park of a payload the body owns — the
+/// `emit` primitive relaying a child's request — records nothing to release.
+/// Recording it would release the child's request at the relay's install.
+#[test]
+fn a_primitive_park_records_no_payload_to_release() {
+    let mut d = Delivery::new();
+    d.park_primitive(SIG_IO, payload());
+    assert!(
+        d.bodyless().is_none(),
+        "a body-owned payload owes the install nothing",
+    );
+}
+
 #[test]
 fn an_abort_install_displaces_the_park_and_records_the_mint() {
     let mut d = Delivery::new();
@@ -134,7 +162,7 @@ fn a_discharge_leaves_no_funding() {
 
 /// The record names the payload the park's escape retain was taken on, so the
 /// boundary that ends the park releases the right region. Both bits and payload
-/// travel: the io arm reads the bits before it dereferences anything.
+/// travel with the record.
 #[test]
 fn a_park_records_the_payload_its_retain_was_taken_on() {
     let mut d = Delivery::new();
@@ -198,6 +226,15 @@ fn a_second_park_over_an_unconsumed_one_panics() {
     let mut d = Delivery::new();
     d.park_primitive(SIG_IO, payload());
     d.park_primitive(SIG_IO, payload());
+}
+
+#[test]
+#[should_panic(expected = "unconsumed")]
+#[cfg(debug_assertions)]
+fn a_request_park_over_an_unconsumed_one_panics() {
+    let mut d = Delivery::new();
+    d.park_primitive(SIG_IO, payload());
+    d.park_request(SIG_IO, payload());
 }
 
 #[test]

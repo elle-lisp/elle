@@ -79,7 +79,14 @@ impl VM {
             {
                 self.mint_raised_argument_delivery(args.as_slice(), value);
             }
-            return self.handle_primitive_signal(bits, value, code, closure_env, ip);
+            return self.handle_primitive_signal(
+                bits,
+                value,
+                args.as_slice(),
+                code,
+                closure_env,
+                ip,
+            );
         }
 
         if let Some((id, default)) = func.as_parameter() {

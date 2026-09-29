@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 //! Primitive signal dispatch.
 //!
 //! Routes signal bits returned by NativeFn primitives to the appropriate
@@ -65,11 +65,13 @@ impl VM {
     /// Handle signal bits returned by a primitive in a Call position.
     ///
     /// Returns `None` to continue the dispatch loop, or `Some(bits)` to
-    /// return from the dispatch loop (for yields/signals).
+    /// return from the dispatch loop (for yields/signals). `args` are the
+    /// arguments the primitive was called with.
     pub(super) fn handle_primitive_signal(
         &mut self,
         bits: SignalBits,
         value: Value,
+        _args: &[Value],
         code: &crate::value::Code,
         closure_env: &Rc<Vec<Value>>,
         ip: &mut usize,
@@ -180,10 +182,12 @@ impl VM {
     /// Handle signal bits returned by a primitive in a TailCall position.
     ///
     /// Always returns SignalBits (tail calls always return from the dispatch loop).
+    /// `args` are the arguments the primitive was called with.
     pub(super) fn handle_primitive_signal_tail(
         &mut self,
         bits: SignalBits,
         value: Value,
+        _args: &[Value],
     ) -> SignalBits {
         if !bits.is_empty() {
             etrace!(

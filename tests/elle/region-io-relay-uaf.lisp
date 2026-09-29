@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-28
+# audited: 2026-09-29
 # A fiber that relays a child's io park with `(emit :io v)` owns its reference
 # to `v`, so the install that answers the relay owes the request no release
 # (docs/impl/region/park.md).
@@ -51,6 +51,32 @@
 (defn relayed-reading [body]
   (let [f (fiber/new body |:io|)]
     (relay-reading f (fiber/resume f))))
+
+# The relaying body raises the request through the `emit` primitive: a keyword
+# in a parameter is no literal, so the compiler lowers no `Emit` node. The park
+# is the primitive's, and the request is one of the call's own arguments, so
+# the body owns a reference to it exactly as a literal `emit` does.
+(defn relay-dynamic [f v kw]
+  (if (= (fiber/status f) :dead)
+    v
+    (relay-dynamic f (fiber/resume f (emit kw v)) kw)))
+
+(defn relayed-dynamic [body]
+  (let [f (fiber/new body |:io|)]
+    (relay-dynamic f (fiber/resume f) :io)))
+
+# The same raise from a tail call, which parks through the tail arm.
+(defn raise [kw v]
+  (emit kw v))
+
+(defn relay-tail [f v kw]
+  (if (= (fiber/status f) :dead)
+    v
+    (relay-tail f (fiber/resume f (raise kw v)) kw)))
+
+(defn relayed-tail [body]
+  (let [f (fiber/new body |:io|)]
+    (relay-tail f (fiber/resume f) :io)))
 
 # The control: the child's io goes straight to the scheduler, with no relay.
 (defn direct [body]
@@ -123,6 +149,8 @@
                    (check-round src dir relayed "relayed" i)
                    (check-round src dir relayed-twice "relayed-twice" i)
                    (check-round src dir relayed-reading "relayed-reading" i)
+                   (check-round src dir relayed-dynamic "relayed-dynamic" i)
+                   (check-round src dir relayed-tail "relayed-tail" i)
                    (assign i (%add i 1)))))
 
 # ── the leak face ────────────────────────────────────────────────────────────
@@ -146,6 +174,8 @@
 (def direct-d (measure (fn [] (direct (sleeper 0))) 30 window))
 (def relayed-d (measure (fn [] (relayed (sleeper 0))) 30 window))
 (def twice-d (measure (fn [] (relayed-twice (sleeper 0))) 30 window))
+(def dynamic-d (measure (fn [] (relayed-dynamic (sleeper 0))) 30 window))
+(def tail-d (measure (fn [] (relayed-tail (sleeper 0))) 30 window))
 
 # A stranded request is at least one object per relayed park, and each round
 # parks twice, so a strand reads at least 400 over the window.
@@ -155,5 +185,7 @@
 (bounded? direct-d "control: a timer with no relay")
 (bounded? relayed-d "a timer relayed once")
 (bounded? twice-d "a timer relayed twice")
+(bounded? dynamic-d "a timer relayed through the emit primitive")
+(bounded? tail-d "a timer relayed through a tail emit")
 
 (println "region-io-relay-uaf: ok")
