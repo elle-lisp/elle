@@ -1,4 +1,11 @@
-//! String manipulation primitives
+// audited: 2026-09-29
+//! The string primitives: case, search, split, replace, trim, join, repeat, and the @string constructor.
+//!
+//! docs/strings.md
+//!
+//! `tests/lang/prim-string.lisp` pins them; the segmentation table's version
+//! pin is `newest_matches_dep` in src/segment.rs.
+
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::Signal;
@@ -272,7 +279,7 @@ primitive! {
         ret: RetType::MutableString,
         signal: Signal::errors(),
         arity: Arity::AtLeast(0),
-        doc: "Create a mutable string from byte arguments.",
+        doc: "Create a mutable string from bytes (0-255), strings, or @strings.",
         category: "string",
         example: "(@string 72 101 108 108 111)",
         effect: RegionEffect::Fresh,
@@ -412,6 +419,3 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
 }
-
-// Tests migrated to tests/elle/prim-string.lisp; the segmentation table
-// version pin lives in src/segment.rs (newest_matches_dep).

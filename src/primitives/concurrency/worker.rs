@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 const WORKER_STACK_FLOOR: usize = 2 * 1024 * 1024;
 /// Used when the main thread's stack limit is unreadable or unbounded.
 const WORKER_STACK_FALLBACK: usize = 8 * 1024 * 1024;
-/// Don't reserve a pathologically large stack per worker (e.g. when the main
+/// Don't reserve a pathologically large stack per worker (for example when the main
 /// thread's limit is enormous). 64 MiB dwarfs any real compile depth.
 const WORKER_STACK_CAP: usize = 64 * 1024 * 1024;
 
@@ -68,7 +68,7 @@ fn main_thread_stack_limit() -> Option<u64> {
     Some(u64::from(rl.rlim_cur))
 }
 
-/// Stack size for an `os/spawn` worker thread: see [`resolve_worker_stack`].
+/// Stack size for a `sys/spawn` worker thread: see [`resolve_worker_stack`].
 fn worker_stack_size() -> usize {
     let env = std::env::var("RUST_MIN_STACK").ok();
     resolve_worker_stack(env.as_deref(), main_thread_stack_limit())
@@ -82,7 +82,7 @@ fn worker_stack_size() -> usize {
 /// `sys/spawn-vm` worker (primitives + intrinsics only); `true` is the heavy
 /// `sys/spawn` worker, which additionally runs `init_stdlib` so that runtime
 /// reflection (`eval`/`read`) in the worker resolves the standard-library
-/// vocabulary. See docs/threads.md § Two worker environments.
+/// vocabulary. See docs/threads.md.
 pub(super) fn spawn_closure_impl(
     closure: &crate::value::Closure,
     load_stdlib: bool,
@@ -146,7 +146,7 @@ pub(super) fn spawn_closure_impl(
             crate::io::sigfd::mask_all_signals_on_this_thread();
 
             // Run the worker body under catch_unwind so that even a panic
-            // (e.g. an `.expect` deep in the VM) still finalizes the completion
+            // (for example an `.expect` deep in the VM) still finalizes the completion
             // channel below — otherwise a joiner parked in chan/select would
             // wait forever for a wake that never comes.
             let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -157,8 +157,7 @@ pub(super) fn spawn_closure_impl(
                 // SendBundle (a deep copy), so nothing on this heap is
                 // reachable after the join, and a leaked one makes a program
                 // that runs workers in sequence pay for every worker it ever
-                // ran (docs/threads.md § "A worker owns its heap and gives it
-                // back"). Declared before `vm` so it drops LAST — the same
+                // ran (docs/threads.md). Declared before `vm` so it drops LAST — the same
                 // order `RuntimeCore` holds its fields in, so the heap is live
                 // while the VM, symbols and compile context drop against it.
                 // The `Box` also gives the raw `heap_ptr` a stable address.
@@ -168,7 +167,8 @@ pub(super) fn spawn_closure_impl(
                 vm.set_unicode_generation(unicode_generation);
                 let mut symbols = SymbolTable::new();
                 // Register primitives so docs are available in the spawned thread.
-                // Primitives are in the bytecode constant pool — no globals remapping needed.
+                // Primitives are in the bytecode constant pool — no globals
+                // remapping needed.
                 let _signals = register_primitives(&mut vm, &mut symbols);
 
                 // Point this worker's VM at its own symbol table so runtime
@@ -223,8 +223,8 @@ pub(super) fn spawn_closure_impl(
                 // are invisible to the oracle (the light worker `sys/spawn-vm` skips
                 // init_stdlib, so without the arm above `GUARD_ARMED` stays false on
                 // this thread). Trivially true when guardfree is off. Caught by the
-                // body's catch_unwind, so a regression surfaces as a `[:failed ...]`
-                // join (RED), not a crash.
+                // body's catch_unwind, so a missing arm surfaces as a `[:failed ...]`
+                // join, not a crash.
                 debug_assert!(
                     !crate::config::get().has_trace("guardfree")
                         || crate::value::fiberheap::freelog::guard_armed(),
@@ -283,8 +283,7 @@ pub(super) fn spawn_closure_impl(
                         // would aim that `DecrefCellRegion` at recv_region, driving
                         // its RC to 0 mid-body so the worker's cleanup
                         // `decref_region(recv_region)` double-frees a phantom region.
-                        // Pinned by tests/elle/region-spawn-capture-mutate.lisp
-                        // (RED before this under the inlined-intrinsic store path).
+                        // Pinned by tests/impl/region-spawn-capture-mutate.lisp.
                         let cell_region = vm.heap().new_runtime_region();
                         env_values.push(crate::value::build::capture_cell(
                             vm.heap(),
@@ -339,8 +338,7 @@ pub(super) fn spawn_closure_impl(
             if let Ok(mut holder) = result_clone.lock() {
                 if holder.is_none() {
                     // Surface the panic payload (an `.expect`/`panic!` message deep
-                    // in the VM) rather than a generic string — uninformative
-                    // "worker thread panicked" hid which primitive faulted.
+                    // in the VM), so the join names the primitive that faulted.
                     let detail = match &unwind {
                         Err(p) => p
                             .downcast_ref::<&str>()

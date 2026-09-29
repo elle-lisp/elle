@@ -1,4 +1,9 @@
+// audited: 2026-09-29
 //! Network primitives — TCP and UDP.
+//!
+//! docs/io.md
+//!
+//! `tests/lang/prim-net.lisp` pins them.
 //!
 //! Unix domain socket primitives are in `unix.rs`.
 //!
@@ -297,12 +302,12 @@ primitive! {
         // the result is always an immediate. `Immediate` records no may-store
         // edges — `udp/send-to` takes THREE heap args (socket + data + addr
         // string) but stores none into another (the `data` it ships rides into
-        // the kernel; `addr` is copied out to a Rust String), so the `Mixed`
-        // clique only leaked. The `data` value is held in the IoRequest across
+        // the kernel; `addr` is copied out to a Rust String), so a `Mixed`
+        // clique would only leak. The `data` value is held in the IoRequest across
         // the yield, but it stays pinned by the suspended caller frame (whose
         // `DecrefValueRegion` is suspended too), so dropping the clique cannot
         // free it early. Pinned by `udp_send_to_declares_immediate_no_arg_clique`
-        // (no clique) and region-udp-send-effect.lisp (resumed int). The
+        // (no clique) and tests/impl/region-udp-send-effect.lisp (resumed int). The
         // result side is oracle-exempt (always yields).
         effect: RegionEffect::Immediate,
     }
@@ -332,12 +337,10 @@ primitive! {
     }
     "sys/ip?" => prim_sys_ip_p {
         arity: Arity::Exact(1),
-        doc: "True if the argument is a string holding an IPv4 or IPv6 address literal (e.g. \"127.0.0.1\", \"::1\"). Hostnames, bracketed or port-suffixed addresses, and non-strings are false. Synchronous — does no resolution; tcp/connect uses it to skip sys/resolve for IP literals.",
+        doc: "True if the argument is a string holding an IPv4 or IPv6 address literal (for example \"127.0.0.1\", \"::1\"). Hostnames, bracketed or port-suffixed addresses, and non-strings are false. Synchronous — does no resolution; tcp/connect uses it to skip sys/resolve for IP literals.",
         params: &["value"],
         category: "predicate",
         example: "(sys/ip? \"127.0.0.1\") #=> true",
         effect: RegionEffect::Immediate,
     }
 }
-
-// Tests migrated to tests/elle/prim-net.lisp
