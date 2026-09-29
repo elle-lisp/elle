@@ -99,6 +99,37 @@
   (assert (= (list :got 41) (fiber/resume f 41))
           "the body's call to the callee answers the restart"))
 
+# The parameterize bindings the callee's frames made leave with them. The
+# counter-factual is a binding that stays: the body reads the callee's 9, and
+# its own scope-end pop takes the callee's frame, so 5 outlives its scope.
+(def restart-depth (make-parameter 0))
+(defn bound-raise []
+  (parameterize ((restart-depth 9))
+    (+ 1 (get nil :x))))
+(let [f (fiber/new (fn []
+                     (list (parameterize ((restart-depth 5))
+                             (list (bound-raise) (restart-depth)))
+                           (restart-depth))) |:error|)]
+  (fiber/resume f)
+  (assert (= (list (list 41 5) 0) (fiber/resume f 41))
+          "a callee's binding leaves with its abandoned frames"))
+
+# The same for a callee whose parameterize itself raised. The flag keeps the
+# callee from being inferred silent, which a raise in it would violate.
+(def not-a-param 42)
+(defn bad-binding [flag]
+  (when flag (error :never))
+  (parameterize ((not-a-param 1))
+    :x))
+(let [f (fiber/new (fn []
+                     (list (parameterize ((restart-depth 5))
+                             (list (bad-binding false) (restart-depth)))
+                           (restart-depth))) |:error|)]
+  (assert (= :type-error (get (fiber/resume f) :error))
+          "the callee's parameterize raises")
+  (assert (= (list (list 41 5) 0) (fiber/resume f 41))
+          "and the body's own bindings are the ones it runs on with"))
+
 # ── An abort raises at the suspension point ───────────────────────────
 
 (let [f (fiber/new (fn [] (list :got (+ 100 (yield 1)))) |:yield :error|)]
