@@ -1,10 +1,12 @@
-// audited: 2026-09-13
-// docs/impl/jit.md
+// audited: 2026-09-28
 //! `compile/run-on :jit` — force Cranelift JIT execution.
 //!
 //! Both variants live here: the real entry point under `--features jit`, and
 //! the always-rejecting stub when the feature is off, so callers can invoke
 //! `invoke_closure_jit` unconditionally.
+//!
+//! docs/impl/jit.md
+//! docs/impl/region/park.md
 
 use super::rejected;
 #[cfg(feature = "jit")]
@@ -130,6 +132,8 @@ impl VM {
                     );
                 } else {
                     // Suspending signal — not supported under compile/run-on.
+                    // The refused park is over, and so is its funding.
+                    self.abandon_hosted_park(eb);
                     return (
                         SIG_ERROR,
                         rejected(self, "jit", "tail-call target yielded under compile/run-on"),
@@ -165,6 +169,9 @@ impl VM {
                 // `fiber.signal` holds the caller's by here.
                 return (SIG_ERROR, self.squelch_violation(squelched, post_signal));
             }
+
+            // Not squelched: this host refuses the park, and its funding with it.
+            self.abandon_hosted_park(yield_bits);
 
             if let Some((bits, val)) = post_signal {
                 return (
