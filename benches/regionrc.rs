@@ -1,6 +1,9 @@
-//! Compile-time RC-coalescing benchmark — the measured win of compile-time
-//! region selection (docs/impl/region/mechanism.md § "Compile-time region selection
-//! (coalescing)" / "Self-edge elimination").
+// audited: 2026-09-29
+//! Compile-time RC-coalescing benchmark: the measured win of compile-time region
+//! selection and of self-edge elimination.
+//!
+//! docs/impl/region/mechanism.md
+//! docs/impl/region/merging.md
 //!
 //! Reports, across real compilations, how many region-mints the lowerer resolved
 //! to a static slot (the value→slot reduction of transform 1) versus left
@@ -15,8 +18,7 @@
 //! `elle::lir::lower::rcstats`, which the lowerer bumps at each coalescing-
 //! candidate site (the decision is not recoverable from the final LIR). `%pair`
 //! compiles as the `Pair` intrinsic on every compile, so the builder-idiom merge —
-//! hence transform 2 — always has sites to fire on (see region/merging.md
-//! § Merging).
+//! hence transform 2 — always has sites to fire on.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -66,15 +68,19 @@ fn measure_stdlib_load() -> RcCoalesceStats {
     stats
 }
 
-/// Compile every `tests/elle/*.lisp` against one stdlib-loaded runtime,
-/// accumulating the coalescing decisions. Compile-only (no execution), so corpus
-/// `def`s do not persist into the shared context. Files that fail to compile
-/// standalone (FFI/import/home-path dependencies) or panic the compiler are
-/// skipped and counted. Returns `(stats, compiled, skipped)`.
+/// The two Elle suites the corpus sweep compiles.
+const SUITES: [&str; 2] = ["tests/lang", "tests/impl"];
+
+/// Compile every `.lisp` file at the top of each suite against one
+/// stdlib-loaded runtime, accumulating the coalescing decisions. Compile-only (no
+/// execution), so corpus `def`s do not persist into the shared context. Files that
+/// fail to compile standalone (FFI/import/home-path dependencies) or panic the
+/// compiler are skipped and counted. Returns `(stats, compiled, skipped)`.
 fn measure_corpus() -> (RcCoalesceStats, usize, usize) {
     let mut rt = Runtime::new();
-    let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir("tests/elle")
-        .expect("tests/elle corpus directory")
+    let mut paths: Vec<std::path::PathBuf> = SUITES
+        .iter()
+        .flat_map(|dir| std::fs::read_dir(dir).unwrap_or_else(|e| panic!("{dir}: {e}")))
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "lisp"))
         .collect();
@@ -132,7 +138,7 @@ fn measure_builder_idiom() -> RcCoalesceStats {
 
 fn main() {
     println!();
-    println!("region RC coalescing — the measured win (verona/5a)");
+    println!("region RC coalescing — the measured win");
     println!();
 
     let stdlib = measure_stdlib_load();
@@ -141,7 +147,7 @@ fn main() {
 
     let (corpus, compiled, skipped) = measure_corpus();
     report(
-        &format!("tests/elle corpus ({compiled} compiled, {skipped} skipped)"),
+        &format!("Elle suites ({compiled} compiled, {skipped} skipped)"),
         &corpus,
     );
     println!();

@@ -1,0 +1,21 @@
+[package]
+name = "elle-rig"
+version = "2.0.0"
+edition = "2021"
+description = "The executable the implementation suite runs on: elle, configured per file by a sidecar"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "elle-rig"
+path = "src/main.rs"
+
+# The rig is built against the features `elle` is built with. Each one names
+# the build the rig hosts (rig/overview.md).
+[features]
+default = ["jit", "ffi", "uring"]
+jit = []
+ffi = []
+uring = []
+mlir = []
+wasm = []

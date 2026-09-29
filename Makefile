@@ -56,7 +56,7 @@ LISP_FILES := $(shell find src/ lib/ tests/ demos/ tools/ docs/ -name '*.lisp' 2
 # run, never from a number written here.
 # $(1) is the tier flags for the pass (e.g. --jit=off --mlir=off).
 ORACLE_TIMEOUT ?= 120s
-ORACLE_FILE    := tests/elle/oracle.lisp
+ORACLE_FILE    := tests/impl/oracle.lisp
 define RUN_ORACLE
 	@timeout $(ORACLE_TIMEOUT) $(ELLE) $(1) $(ORACLE_FILE) \
 		|| { echo "FAILED: oracle.lisp ($(1))"; exit 1; }
@@ -66,7 +66,7 @@ endef
 # under its own timed budget (io probes cost wall-clock; read the number from
 # a timed run, as with ORACLE_TIMEOUT above).
 PLUMB_TIMEOUT ?= 60s
-PLUMB_FILE    := tests/elle/plumb.lisp
+PLUMB_FILE    := tests/impl/plumb.lisp
 define RUN_PLUMB
 	@timeout $(PLUMB_TIMEOUT) $(ELLE) $(1) $(PLUMB_FILE) \
 		|| { echo "FAILED: plumb.lisp ($(1))"; exit 1; }
@@ -519,7 +519,7 @@ elle-wasm:   ## Build elle with WASM support (for check-wasm/smoke-wasm)
 # gated nothing. Full corpus coverage on this tier is smoke-wasm.
 check-wasm: elle-wasm  ## Build the WASM backend and boot one module through it
 	@echo "=== wasm boot check ==="
-	@out=$$(timeout 300s $(ELLE) --wasm=full tests/elle/arithmetic.lisp 2>&1); code=$$?; \
+	@out=$$(timeout 300s $(ELLE) --wasm=full tests/lang/arithmetic.lisp 2>&1); code=$$?; \
 	printf '%s\n' "$$out"; \
 	[ $$code -eq 0 ] || { echo "FAILED: wasm boot (exit $$code)"; exit 1; }; \
 	printf '%s\n' "$$out" | grep -q '\[wasm\]' \
