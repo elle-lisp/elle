@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-28
 //! Replaying a fiber's suspended frame chain: each frame's stack, region map and
 //! dues are restored before its body is re-entered.
 //!
@@ -7,9 +7,42 @@
 //! docs/impl/region/generations.md
 
 use super::*;
-use crate::value::fiber::ActivationDues;
+use crate::value::fiber::{ActivationDues, RaiseSite};
+
+/// How a replay of a parked chain ended.
+pub(crate) struct Replay {
+    /// The signal the replay ended with. The value is in `fiber.signal`.
+    pub bits: SignalBits,
+    /// The raise site of the error park the replay built: a frame of the chain
+    /// raised, and the replay parked it for a restart. `None` for every other
+    /// end, including an error whose handler parked a frame of its own. A fiber
+    /// boundary records it in the delivery ledger (`park_error`); a driver on
+    /// the current fiber has no park to record.
+    pub error_park: Option<RaiseSite>,
+}
+
+impl Replay {
+    /// A replay that ended with `bits` and built no error park.
+    fn ended(bits: SignalBits) -> Self {
+        Replay {
+            bits,
+            error_park: None,
+        }
+    }
+}
 
 impl VM {
+    /// Resume execution from suspended frames, for a driver that records no
+    /// park: `handle_sig_switch`, which replays the current fiber's own caller
+    /// frames. See `replay_suspended`.
+    pub fn resume_suspended(
+        &mut self,
+        frames: Vec<SuspendedFrame>,
+        resume_value: Value,
+    ) -> SignalBits {
+        self.replay_suspended(frames, resume_value).bits
+    }
+
     /// Resume execution from suspended frames.
     ///
     /// Replays the frame chain from innermost (index 0) to outermost
@@ -25,15 +58,22 @@ impl VM {
     ///   with the current value via `do_fiber_resume`, using the proper
     ///   fiber-swap machinery so heap context and parent/child chain are correct.
     ///
-    /// Returns SignalBits. The result value is stored in `self.fiber.signal`.
-    pub fn resume_suspended(
+    /// A frame that stops again re-parks, and every signal but a halt keeps the
+    /// frames outside it: a restart of a raise answers the raising call and the
+    /// frames that called it run on. The chain is MOVED from `frames` into the
+    /// new park, never cloned, because each frame carries dues that must live
+    /// in exactly one place.
+    ///
+    /// Returns how the replay ended ([`Replay`]). The result value is stored in
+    /// `self.fiber.signal`.
+    pub(crate) fn replay_suspended(
         &mut self,
         mut frames: Vec<SuspendedFrame>,
         resume_value: Value,
-    ) -> SignalBits {
+    ) -> Replay {
         if frames.is_empty() {
             self.fiber.signal = Some((SIG_OK, resume_value));
-            return SIG_OK;
+            return Replay::ended(SIG_OK);
         }
 
         // Save current stack state
@@ -85,13 +125,14 @@ impl VM {
                     });
 
                     // Save remaining outer frames for later resumption.
-                    if i + 1 < frames.len() {
-                        self.fiber.suspended = Some(frames[i + 1..].to_vec());
+                    let outer: Vec<SuspendedFrame> = frames.drain(i + 1..).collect();
+                    if !outer.is_empty() {
+                        self.fiber.suspended = Some(outer);
                     }
 
                     self.fiber.signal = Some((SIG_SWITCH, Value::NIL));
                     self.fiber.stack = saved_stack;
-                    return SIG_SWITCH;
+                    return Replay::ended(SIG_SWITCH);
                 }
 
                 SuspendedFrame::Bytecode(frame) => {
@@ -99,11 +140,13 @@ impl VM {
                     self.fiber.stack.clear();
                     self.fiber.stack.extend(frame.stack.iter().copied());
 
-                    // For yield frames and caller frames: the resume value is the
-                    // "return value" of the suspended operation (yield result, or
-                    // call return). Push it so the next instruction sees it.
-                    // For fuel/signal-pause frames: the instruction at frame.ip
-                    // re-executes from scratch — no extra value is injected.
+                    // For yield frames, caller frames and error parks: the resume
+                    // value is the "return value" of the suspended operation
+                    // (yield result, call return, or the raising call's result).
+                    // Push it so the next instruction sees it. For a fuel pause
+                    // the instruction at frame.ip re-executes from scratch, and
+                    // for a raise with no result position execution continues
+                    // past it — no extra value is injected.
                     if frame.push_resume_value {
                         self.fiber.stack.push(current_value);
                     }
@@ -273,6 +316,7 @@ impl VM {
                                 i, exec.bits, susp_len, remaining,
                             );
                         }
+                        let mut error_park = None;
                         if !exec.bits.intersects(SIG_HALT) && self.fiber.suspended.is_none() {
                             // `from_ip` does not pop, so the activation's remap
                             // (mutated by this resumed execution) is still on
@@ -287,12 +331,20 @@ impl VM {
                                 .cloned()
                                 .unwrap_or_default();
                             let activation_dues = self.take_activation_dues();
+                            // A fuel pause re-runs its instruction, and a raise
+                            // with no result position continues after it:
+                            // neither takes the resume value.
+                            let push_resume_value =
+                                !exec.bits.intersects(SIG_FUEL) && exec.site.delivers();
+                            if exec.bits.intersects(SIG_ERROR) {
+                                error_park = Some(exec.site);
+                            }
                             let re_suspend = BytecodeFrame::suspend(
                                 exec.code,
                                 exec.env,
                                 exec.ip,
                                 exec.stack,
-                                !exec.bits.intersects(SIG_FUEL),
+                                push_resume_value,
                                 activation_region_map,
                                 activation_dues,
                                 exec.current_closure,
@@ -301,16 +353,12 @@ impl VM {
                             self.fiber.suspended = Some(vec![SuspendedFrame::Bytecode(re_suspend)]);
                         }
 
-                        // For suspending signals (any bits except error/halt),
-                        // merge remaining outer frames
-                        if !exec.bits.intersects(SIG_ERROR)
-                            && !exec.bits.intersects(SIG_HALT)
-                            && i + 1 < frames.len()
-                        {
+                        // Every signal but a halt keeps the frames outside this
+                        // one: a suspend resumes them, and a restart of an
+                        // error answers the raising call and runs them on.
+                        if !exec.bits.intersects(SIG_HALT) && i + 1 < frames.len() {
                             if let Some(ref mut new_frames) = self.fiber.suspended {
-                                for f in frames[i + 1..].iter() {
-                                    new_frames.push(f.clone());
-                                }
+                                new_frames.extend(frames.drain(i + 1..));
                             }
                         }
 
@@ -319,7 +367,10 @@ impl VM {
                         // discarding it here is safe.
                         self.pop_activation_region_map();
                         self.fiber.stack = saved_stack;
-                        return exec.bits;
+                        return Replay {
+                            bits: exec.bits,
+                            error_park,
+                        };
                     }
                 }
             }
@@ -327,6 +378,6 @@ impl VM {
 
         self.fiber.stack = saved_stack;
         self.fiber.signal = Some((SIG_OK, current_value));
-        SIG_OK
+        Replay::ended(SIG_OK)
     }
 }

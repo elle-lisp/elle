@@ -1,6 +1,9 @@
-//! `fiber/abort`: inject an error into a fiber and resume it for unwinding. The
-//! child's outcome (dead/error/paused) decides what the parent sees — no status
-//! stomp. Call- and tail-position handlers (see the `super` module doc).
+// audited: 2026-09-28
+//! `fiber/abort`: raise an error at a fiber's suspension point, and hand its
+//! outcome to the parent as a resume's would be. Call- and tail-position
+//! handlers (see the `super` module doc).
+//!
+//! docs/signals/primitives.md
 
 use std::rc::Rc;
 
@@ -13,15 +16,15 @@ impl VM {
     /// uncaught arm, shared by all three positions so they cannot drift.
     ///
     /// The payload's delivery is funded before it gets here, and never by this
-    /// frame: the injection minted it (`AbortDelivery`) where the fiber unwound
-    /// with the value it was aborted with, and the child's own raise minted it
+    /// frame: the injection minted it (`AbortDelivery`) where the fiber stopped on
+    /// the value it was aborted with, and the child's own raise minted it
     /// where the fiber raised an error of its own instead. So a slot of this
     /// frame that holds the payload owes a release like any other, and the
     /// record is what stops the abandoned-frame walk exempting it
     /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
     /// still owes"). A materialized literal handed straight to `fiber/abort` is
     /// the shape that reaches this — it lives in a frame slot and in nothing
-    /// else (the `abort-discard` probe in `tests/elle/oracle.lisp`).
+    /// else (the `abort-discard` probe in `tests/elle/probe/concurrent.lisp`).
     pub(in crate::vm::fiber) fn park_propagating_abort(&mut self, bits: SignalBits, value: Value) {
         self.fiber.signal = Some((bits, value));
         if bits.intersects(SIG_ERROR) {
@@ -31,9 +34,9 @@ impl VM {
 
     /// Handle SIG_ABORT from fiber/abort (Call position).
     ///
-    /// Injects an error and resumes the fiber. The result is handled
-    /// identically to fiber/resume — the child's actual outcome (dead,
-    /// error, paused) determines what the parent sees. No status stomp.
+    /// Raises the injected error at the fiber's suspension point
+    /// (`do_fiber_abort`), and handles the outcome as `fiber/resume`'s: the
+    /// child's own code decides whether it ends dead, error or paused.
     pub(in crate::vm) fn handle_fiber_abort_signal(
         &mut self,
         fiber_value: Value,
@@ -55,8 +58,8 @@ impl VM {
         let mask = handle.with(|fiber| fiber.mask);
 
         if self.absorbs(&handle, mask, result_bits, result_value) {
-            // Abort is terminal — even if the parent catches the signal,
-            // the aborted fiber is finished and must not stay :paused.
+            // An abort that ends on an error leaves the fiber :error even where
+            // the caller catches it; the fiber stays restartable.
             if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
@@ -102,7 +105,7 @@ impl VM {
         let mask = handle.with(|fiber| fiber.mask);
 
         if self.absorbs(&handle, mask, result_bits, result_value) {
-            // Abort is terminal — set child to :error even when caught
+            // An abort that ends on an error leaves the fiber :error, caught or not.
             if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }

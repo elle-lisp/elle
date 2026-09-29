@@ -1,23 +1,28 @@
+// audited: 2026-09-28
 //! MLIR tier-2 compilation entry point.
+//!
+//! docs/impl/mlir.md
 //!
 //! GPU-eligible closures that are already hot (past the JIT threshold)
 //! are compiled through MLIR → LLVM for optimized native execution.
 //! The MLIR cache is lazily initialized on first use.
 
-use crate::value::{SignalBits, Value, SIG_ERROR};
+use crate::value::{Value, SIG_ERROR};
 
 use super::core::VM;
 
 impl VM {
     /// Try MLIR compilation/dispatch for a GPU-eligible closure.
     ///
-    /// Returns `Some(None)` if MLIR handled the call (result on stack),
-    /// or `None` to fall through to the Cranelift/interpreter path.
+    /// Returns `Some(())` if MLIR handled the call, or `None` to fall through
+    /// to the Cranelift/interpreter path. A handled call leaves its result on
+    /// the stack, or raises as any handler does: the error in `fiber.signal`
+    /// and a `nil` placeholder where the result goes.
     pub(super) fn try_mlir_call(
         &mut self,
         closure: &crate::value::Closure,
         args: &[Value],
-    ) -> Option<Option<SignalBits>> {
+    ) -> Option<()> {
         // Only GPU-eligible closures qualify for MLIR
         if !closure.template.is_gpu_candidate() {
             return None;
@@ -107,8 +112,8 @@ impl VM {
     /// Returns:
     /// - `None` — MLIR can't handle this call (non-numeric arg or cache miss);
     ///   caller should fall through to Cranelift/interpreter.
-    /// - `Some(None)` — handled, no signal.
-    /// - `Some(Some(bits))` — handled with signal (error stored in fiber.signal).
+    /// - `Some(())` — handled: the result on the stack, or a raise, the error in
+    ///   `fiber.signal` and a `nil` placeholder on the stack.
     fn run_mlir_cached(
         &mut self,
         closure: &crate::value::Closure,
@@ -116,7 +121,7 @@ impl VM {
         args: &[Value],
         capture_types: u64,
         param_types: u64,
-    ) -> Option<Option<SignalBits>> {
+    ) -> Option<()> {
         let num_captures = closure.template.num_captures();
 
         // Unbox captures + args: ints pass through, floats bitcast f64→i64.
@@ -153,13 +158,13 @@ impl VM {
                     _ => Value::int(result),
                 };
                 self.fiber.stack.push(val);
-                Some(None) // handled, no signal
+                Some(())
             }
             Some(Err(_)) => {
                 let err = self.escaping_error("mlir-error", "MLIR execution failed".to_string());
                 self.fiber.signal = Some((SIG_ERROR, err));
                 self.fiber.stack.push(Value::NIL);
-                Some(Some(SIG_ERROR))
+                Some(())
             }
             None => None,
         }

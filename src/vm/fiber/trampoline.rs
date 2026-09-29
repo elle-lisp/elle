@@ -1,8 +1,11 @@
+// audited: 2026-09-28
 //! The SIG_SWITCH trampoline driving nested `fiber/resume` iteratively rather
 //! than on the Rust stack. `finish_fiber_resume` is the shared completion driver
 //! for `do_fiber_resume` and `do_fiber_abort` (see their docs in `super`).
+//!
+//! docs/impl/region/park.md
 
-use crate::value::fiber::FiberStatus;
+use crate::value::fiber::{FiberStatus, RaiseSite};
 use crate::value::{
     FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_SWITCH,
 };
@@ -116,9 +119,8 @@ impl VM {
 
                     // Resume the parent fiber: it was suspended waiting
                     // for this child to complete. Clear its child wiring
-                    // (set by seed_child_inheritance at suspension) just as
-                    // the recursion-era caught path did, and deliver the
-                    // child's result as the resume value.
+                    // (set by seed_child_inheritance at suspension), and
+                    // deliver the child's result as the resume value.
                     let (parent_handle, parent_fv) = fiber_stack.last().unwrap();
                     parent_handle.with_mut(|f| {
                         f.child = None;
@@ -140,6 +142,17 @@ impl VM {
 
                     if fiber_stack.is_empty() {
                         return (bits, value);
+                    }
+
+                    // An error stops the parent at its own `fiber/resume` call,
+                    // parked there when it handed this child to the trampoline.
+                    // A restart of the parent answers that call, which produced
+                    // no result, so the delivery owes the mint
+                    // (docs/impl/region/park.md § "A restart delivers into an
+                    // error park").
+                    if bits.intersects(SIG_ERROR) {
+                        let (parent_handle, _) = fiber_stack.last().unwrap();
+                        parent_handle.with_mut(|f| f.delivery.park_error(RaiseSite::Call));
                     }
 
                     // For uncaught suspending signals (e.g. SIG_IO), build

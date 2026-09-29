@@ -1,8 +1,10 @@
+// audited: 2026-09-28
 //! Dynamic parameter-frame opcode bodies.
 //!
+//! docs/parameters.md
+//!
 //! Split out of the dispatch match because building a `parameterize` frame is
-//! long enough to obscure the surrounding opcode routing. Behavior is
-//! unchanged; the loop simply calls these methods.
+//! long enough to obscure the surrounding opcode routing.
 
 use super::*;
 
@@ -13,9 +15,12 @@ impl VM {
     /// The stack holds pairs pushed as `[param1, val1, param2, val2, ...]`, so
     /// they pop in reverse (last pair first); we re-reverse to restore source
     /// order before installing. A non-parameter operand raises a type-error and
-    /// aborts the frame (pushing nil for the aborted `parameterize` result);
-    /// the error's unwind also skips the scope-end `PopParamFrame`, so push
-    /// and pop stay balanced on both paths.
+    /// installs an empty frame in place of the aborted one. The instruction has
+    /// no result, so the raise pushes no placeholder, and a restart continues
+    /// into the `parameterize` body with nothing bound (docs/impl/vm.md § "The
+    /// error exit"). The empty frame is what that body's scope-end
+    /// `PopParamFrame` pops, so push and pop stay balanced on every path: a
+    /// fiber stopped on the error keeps one frame that binds nothing.
     ///
     /// The abort must be decided by THIS opcode's own failure, never by
     /// `fiber.signal`: that slot ambiently carries the `(SIG_OK, value)`
@@ -51,7 +56,7 @@ impl VM {
                     "type-error",
                     format!("parameterize: {} is not a parameter", param.type_name()),
                 );
-                self.fiber.stack.push(Value::NIL);
+                self.fiber.param_frames.push(Vec::new());
                 return;
             }
         }

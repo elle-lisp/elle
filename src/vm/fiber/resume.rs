@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-28
 //! One level of fiber resumption: the swap in and out, and what it funds.
 //!
 //! The abort that injects an error at the suspension point instead is here too.
@@ -54,16 +54,19 @@ impl VM {
                 (rv, first, !child.param_frames.is_empty(), unfunded)
             });
 
-        // Fund the crossing into a frame parked at a suspending PRIMITIVE call.
-        // The replayed frame re-enters at that call's continuation and runs the
-        // call's compiler-emitted result release; a bytecode callee funds that
-        // release with its `Return` mint, but a primitive that suspends never
-        // returns and the resume value stands in for its result. Without the
-        // retain the continuation consumes a reference the resumer still owns,
-        // and the value is freed under every holder that outlives the resume
-        // (docs/impl/region/park.md § "A delivery into a replayed frame carries
-        // one owning reference"; `tests/elle/region-primitive-resume-uaf.lisp`).
-        // `region_of` no-ops an immediate.
+        // Fund the crossing into a frame parked at a call that never produced
+        // its result: a suspending PRIMITIVE call, or a raising call a restart
+        // answers. The replayed frame re-enters at that call's continuation and
+        // runs the call's compiler-emitted result release; a bytecode callee
+        // funds that release with its `Return` mint, but a primitive that
+        // suspends never returns and a raise never completes, so the resume
+        // value stands in for the result. Without the retain the continuation
+        // consumes a reference the resumer still owns, and the value is freed
+        // under every holder that outlives the resume (docs/impl/region/park.md
+        // § "A delivery into a replayed frame carries one owning reference";
+        // `tests/elle/region-primitive-resume-uaf.lisp`,
+        // `tests/elle/region-fiber-restart-uaf.lisp`). `region_of` no-ops an
+        // immediate.
         if unfunded {
             let heap = unsafe { &mut *self.heap_ptr };
             let r = crate::value::arena::region_of(heap, resume_value);
@@ -270,19 +273,28 @@ impl VM {
             // args are still present and must be restored.
             //
             // push_resume_value — SIG_FUEL: re-execute the paused instruction from
-            // scratch (args on the stack, nothing extra to push). All other signals
-            // (SIG_ERROR, user-defined, etc.): the instruction at result.ip expects
-            // the signal's "return value" on the stack (e.g. Return needs a value to
-            // pop), so push it.
+            // scratch (args on the stack, nothing extra to push). A raise with no
+            // result position: continue past it, the resume value going nowhere.
+            // All other signals (SIG_ERROR, user-defined, etc.): the instruction at
+            // result.ip expects the signal's "return value" on the stack (e.g.
+            // Return needs a value to pop), so push it.
             // What the body's activation owed rode out of the popped activation in
             // `result.activation_dues` (moved, beside the region map) —
             // park it so the resumed body's completion frees it.
+            let push_resume_value = !result.bits.intersects(SIG_FUEL) && result.site.delivers();
+            // This exit built an error park, so it records what a restart owes
+            // (docs/impl/region/park.md § "A restart delivers into an error
+            // park"). A handler that parked its own frame under SIG_ERROR — a
+            // denial of `:error` — never reaches here.
+            if result.bits.intersects(SIG_ERROR) {
+                self.fiber.delivery.park_error(result.site);
+            }
             let frame = BytecodeFrame::suspend(
                 result.code,
                 result.env,
                 result.ip,
                 result.stack,
-                !result.bits.intersects(SIG_FUEL),
+                push_resume_value,
                 result.activation_region_map,
                 result.activation_dues,
                 result.current_closure,
@@ -306,19 +318,39 @@ impl VM {
             }
         };
 
-        self.resume_suspended(frames, resume_value)
+        self.replay_at_boundary(frames, resume_value)
     }
-    /// Execute a fiber abort: inject error into the fiber's execution context.
+
+    /// Replay this fiber's parked chain, and record the error park the replay
+    /// built, if it built one, in the fiber's delivery ledger. The one route
+    /// every replay at a fiber boundary takes, so none of them can forget the
+    /// park a restart will deliver into.
+    fn replay_at_boundary(
+        &mut self,
+        frames: Vec<SuspendedFrame>,
+        resume_value: Value,
+    ) -> SignalBits {
+        let replay = self.replay_suspended(frames, resume_value);
+        if let Some(site) = replay.error_park {
+            self.fiber.delivery.park_error(site);
+        }
+        replay.bits
+    }
+    /// Execute a fiber abort: raise the injected error at the fiber's
+    /// suspension point.
     ///
-    /// For `FiberResume` frames (protect/defer children blocked on I/O),
-    /// the inner fiber is aborted recursively so that protect/defer sees
-    /// the child error and runs cleanup code. Unwinding that suspends again
-    /// leaves the chain parked and propagates the suspension — the abort ends
-    /// this fiber only once the innermost unwinding runs to its end.
+    /// For a `FiberResume` park — a `protect`/`defer` sub-fiber blocked on
+    /// I/O — the inner fiber is aborted recursively, so the handler that
+    /// awaits it sees the error. A handler that suspends again leaves the
+    /// chain parked and propagates the suspension; otherwise the replay of the
+    /// frames past the sub-fiber delivers its result.
     ///
-    /// For `Bytecode` frames (direct bytecode suspension), the error is
-    /// set on `fiber.signal` so the dispatch loop returns it immediately.
-    /// The error then propagates through the caller's protect/defer chain.
+    /// For a `Bytecode` park the fiber is stopped in its own code, where
+    /// nothing in it can catch: the error is raised in place, and the chain
+    /// stays parked for a restart, which answers the call the fiber waits on
+    /// (docs/impl/region/park.md § "A restart delivers into an error park").
+    ///
+    /// A fiber that never started takes the error as its value.
     pub(super) fn do_fiber_abort(
         &mut self,
         child_handle: &FiberHandle,
@@ -331,30 +363,18 @@ impl VM {
         let (bits, value) = self.with_child_fiber(child_handle, child_value, |vm| {
             vm.fiber.status = FiberStatus::Alive;
             // Clear the signal — prim_fiber_abort pre-set it with the error
-            // value, which we already extracted above. If we leave it set,
-            // the dispatch loop will see SIG_ERROR and bail immediately
-            // when we try to resume remaining bytecode frames.
+            // value, which we already extracted above. Each arm below installs
+            // what the fiber stops on.
             vm.fiber.signal = None;
-            // The injection minted the payload's delivery (`AbortDelivery`), so
-            // record it the way a raise records its own: with the delivery funded
-            // independently, a frame of THIS fiber that owns a reference to the
-            // payload funds nothing, and the abandoned-frame walk and the parked
-            // frame's discharge must stop exempting the payload's region
-            // (docs/impl/region/mechanism.md § "An abandoned frame runs the
-            // releases it still owes"). A fiber handed the same value it is
-            // aborted with is the shape that reaches this — the record is what
-            // keeps its release owed. An abort delivers no resume value — the
-            // replayed frame re-enters with `SIG_ERROR` set and leaves before the
-            // parked call's result release — so the displaced park's funding goes
-            // with the signal it rode in on; each arm below funds what it does
-            // hand over (docs/impl/region/park.md § "A delivery into a replayed
-            // frame carries one owning reference").
-            vm.fiber.delivery.install_abort(error_value);
 
-            let frames = match vm.fiber.suspended.take() {
+            let mut frames = match vm.fiber.suspended.take() {
                 Some(frames) => frames,
                 None => {
-                    // New fiber that was never started — just mark as errored
+                    // A fiber that never started: nothing parked takes the
+                    // error, and no resume value is owed. The injection minted
+                    // the payload's delivery (`AbortDelivery`), so it is
+                    // recorded the way a raise records its own.
+                    vm.fiber.delivery.install_abort(error_value);
                     vm.fiber.signal = Some((SIG_ERROR, error_value));
                     return SIG_ERROR;
                 }
@@ -363,12 +383,24 @@ impl VM {
             // Check the innermost frame. FiberResume means a protect/defer
             // child is blocked on I/O — abort it recursively so protect
             // sees the error. Bytecode means the fiber itself is suspended
-            // — set the error and let the dispatch loop return it.
+            // — raise the error there.
             match frames.first() {
                 Some(SuspendedFrame::FiberResume {
                     handle,
                     fiber_value,
                 }) => {
+                    // The injection minted the payload's delivery
+                    // (`AbortDelivery`), so record it the way a raise records its
+                    // own: with the delivery funded independently, a frame of
+                    // THIS fiber that owns a reference to the payload funds
+                    // nothing, and the abandoned-frame walk and the parked
+                    // frame's discharge must stop exempting the payload's region
+                    // (docs/impl/region/mechanism.md § "An abandoned frame runs
+                    // the releases it still owes"). The replay below delivers the
+                    // inner fiber's result, funded by that same mint rather than
+                    // by a resume mint (docs/impl/region/park.md § "A delivery
+                    // into a replayed frame carries one owning reference").
+                    vm.fiber.delivery.install_abort(error_value);
                     let inner_handle = handle.clone();
                     let inner_value = *fiber_value;
 
@@ -384,16 +416,16 @@ impl VM {
                     });
                     let (inner_bits, inner_result) = vm.do_fiber_abort(&inner_handle, inner_value);
 
-                    // The inner fiber's own unwinding is ordinary code, so it
-                    // can suspend again — a `protect` body that continues into
-                    // an I/O call after it captures the injected error, a
-                    // `defer` cleanup that writes to a port. The inner fiber
-                    // then still owes its continuation, and this fiber's
-                    // continuation must not run ahead of it: park the chain as
-                    // it stands and propagate, exactly as the trampoline's
-                    // unwind does for the same signal on a plain resume. The
-                    // resume re-enters the inner fiber first, and only its
-                    // completion delivers the value the frames below wait for.
+                    // The inner fiber's handlers are ordinary code, so they can
+                    // suspend again — a `protect` body that continues into an
+                    // I/O call after it captures the injected error, a `defer`
+                    // cleanup that writes to a port. The inner fiber then still
+                    // owes its continuation, and this fiber's continuation must
+                    // not run ahead of it: park the chain as it stands and
+                    // propagate, exactly as the trampoline's unwind does for the
+                    // same signal on a plain resume. The resume re-enters the
+                    // inner fiber first, and only its completion delivers the
+                    // value the frames below wait for.
                     //
                     // `mask_catches`, not `VM::absorbs`: this is a lookahead at
                     // what the INNER fiber's mask will do, and absorbs nothing
@@ -409,7 +441,7 @@ impl VM {
                     }
 
                     // Resume remaining frames so protect/defer cleanup runs.
-                    let remaining: Vec<SuspendedFrame> = frames[1..].to_vec();
+                    let remaining: Vec<SuspendedFrame> = frames.drain(1..).collect();
                     if remaining.is_empty() {
                         vm.fiber.signal = Some((inner_bits, inner_result));
                         inner_bits
@@ -425,29 +457,37 @@ impl VM {
                         // takes no retain of its own. Pinned by
                         // `region_fiber_abort_io_protect_uaf`;
                         // tests/elle/grpc.lisp is the full-scheduler witness.
-                        vm.resume_suspended(remaining, inner_result)
+                        vm.replay_at_boundary(remaining, inner_result)
                     }
                 }
-                Some(SuspendedFrame::Bytecode(_)) => {
-                    // Innermost frame is bytecode — set error and resume
-                    // through the chain. The dispatch loop will see SIG_ERROR
-                    // and return immediately from this frame, then outer
-                    // frames run normally (defer/protect).
+                Some(SuspendedFrame::Bytecode(frame)) => {
+                    // Raise in place: the fiber stops on the error at the call
+                    // it waits on, with its whole chain still parked, so a
+                    // restart answers that call and the frames outside it run
+                    // on. The park keeps the funding it was built with — a
+                    // primitive or denial park still owes the resume mint, an
+                    // emit park or a fuel pause does not — and the injection's
+                    // mint is recorded with the payload.
+                    vm.record_error_loc(frame.code.locations(), frame.ip);
+                    vm.fiber.delivery.raise_in_park(error_value);
                     vm.fiber.signal = Some((SIG_ERROR, error_value));
-                    vm.resume_suspended(frames, Value::NIL)
+                    vm.fiber.suspended = Some(frames);
+                    SIG_ERROR
                 }
                 None => {
-                    // No frames (shouldn't happen — we checked above)
+                    // An empty chain: take the error as the value, as for a
+                    // fiber that never started.
+                    vm.fiber.delivery.install_abort(error_value);
                     vm.fiber.signal = Some((SIG_ERROR, error_value));
                     SIG_ERROR
                 }
             }
         });
 
-        // The abort's frame replay runs cleanup code (defer/protect) that
-        // may itself call fiber/resume; under the trampoline that surfaces
-        // as SIG_SWITCH + pending_fiber_resume rather than recursing. Drive
-        // it to a real signal — a no-op for every other result.
+        // The abort's replay runs cleanup code (defer/protect) that may itself
+        // call fiber/resume; under the trampoline that surfaces as SIG_SWITCH +
+        // pending_fiber_resume rather than recursing. Drive it to a real signal
+        // — a no-op for every other result.
         self.finish_fiber_resume(bits, value, child_handle, child_value)
     }
 }

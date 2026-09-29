@@ -2046,23 +2046,24 @@
        on record from then on, and handle-abort / handle-join / handle-select
        read one answer.
 
-       The failure reading is `fiber-failed?` rather than a status test: an
-       error does not unwind a fiber, so one that stopped on an error answers
-       :paused and only the SIG_ERROR bit tells it from a fiber waiting to
-       resume. That is the reading `handle-fiber-after-resume` already routes
-       a completed fiber by, and it is what makes a retired failure
+       The failure reading is `fiber-failed?` rather than a status test, and it
+       comes first: an error does not unwind a fiber, so one that stopped on an
+       error answers :paused, and a cancel leaves a fiber :dead. Only the
+       SIG_ERROR bit tells either from a fiber waiting to resume or one that
+       returned. That is the reading `handle-fiber-after-resume` routes a
+       completed fiber by, and it is what makes a retired failure
        re-derivable. See docs/scheduler.md § Completion records."
       (let [recorded (get completed fiber)]
         (if (not (nil? recorded))
           recorded
-          (if (= (fiber/status fiber) :dead)
+          (if (fiber-failed? fiber)
             (begin
-              (complete-fiber fiber :ok)
-              :ok)
-            (if (fiber-failed? fiber)
+              (complete-fiber fiber :error)
+              :error)
+            (if (= (fiber/status fiber) :dead)
               (begin
-                (complete-fiber fiber :error)
-                :error)
+                (complete-fiber fiber :ok)
+                :ok)
               nil)))))
 
     (defn handle-join [caller target]
@@ -2197,7 +2198,8 @@
     (defn handle-fiber-after-resume [fiber]
       "Route a fiber to the right place after resume."
       (case (fiber/status fiber)
-        :dead (complete-fiber fiber :ok)
+        :dead
+          (complete-fiber fiber (if (fiber-failed? fiber) :error :ok))
         :error (complete-fiber fiber :error)
         :paused
           (let [bits (fiber/bits fiber)]
@@ -2230,7 +2232,8 @@
         (let [fiber (pop runnable)]
           (let [status (fiber/status fiber)]
             (cond
-              (= status :dead) (complete-fiber fiber :ok)
+              (= status :dead)
+                (complete-fiber fiber (if (fiber-failed? fiber) :error :ok))
               (= status :error) (complete-fiber fiber :error)
               true (begin
                      (fiber/resume fiber)

@@ -209,8 +209,7 @@ impl VM {
         let mut bits;
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
         loop {
-            let (b, _ip) = self.run_dispatch(&current_code, &current_env, 0);
-            bits = b;
+            bits = self.run_dispatch(&current_code, &current_env, 0).bits;
             if let Some(tail) = self.pending_tail_call.take() {
                 accumulated_squelch_mask |= tail.squelch_mask;
                 // A top-level tail call re-enters the frame as the callee closure.

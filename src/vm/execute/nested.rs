@@ -1,10 +1,10 @@
-// audited: 2026-09-23
+// audited: 2026-09-28
 //! Interpreted non-tail calls on one dispatch loop: a caller pauses in the
 //! fiber while its callee runs, and resumes when the callee ends.
 //!
 //! docs/impl/vm.md
 
-use super::ExecResult;
+use super::{ExecResult, Exit};
 use crate::value::fiber::{Activation, CallSite, PausedCaller};
 use crate::value::{BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT};
 use crate::vm::core::{PendingCall, VM};
@@ -14,9 +14,9 @@ impl VM {
     /// Run one activation's dispatch loop from `start_ip`, with every
     /// interpreted non-tail callee it reaches run on the same loop.
     ///
-    /// To its driver this is the dispatch loop itself: it answers the
-    /// `(bits, ip)` at which the activation it was entered with exits, the
-    /// calls that activation made having completed in between. A caller waits
+    /// To its driver this is the dispatch loop itself: it answers the `Exit` at
+    /// which the activation it was entered with leaves, the calls that
+    /// activation made having completed in between. A caller waits
     /// in `fiber.callers` while its callee runs, so the Rust stack stays flat
     /// however deep the calls go (docs/impl/vm.md § "Non-tail calls").
     pub(in crate::vm) fn run_dispatch(
@@ -24,7 +24,7 @@ impl VM {
         code: &crate::value::Code,
         env: &Rc<Vec<Value>>,
         start_ip: usize,
-    ) -> (SignalBits, usize) {
+    ) -> Exit {
         let mut exit = self.execute_bytecode_inner_impl(code, env, start_ip);
         if self.pending_call.is_none() {
             return exit;
@@ -35,7 +35,7 @@ impl VM {
         // call was entered with, whose code and environment are the arguments.
         let mut running: Option<Activation> = None;
         loop {
-            let (bits, ip) = exit;
+            let Exit { bits, ip, .. } = exit;
             if let Some(call) = self.pending_call.take() {
                 debug_assert!(
                     bits.is_empty(),
@@ -65,12 +65,13 @@ impl VM {
                 }
             }
             let site = callee.call;
-            let result = self.leave_callee(callee, bits, ip);
+            let result = self.leave_callee(callee, exit);
             let caller = self
                 .fiber
                 .callers
                 .pop()
                 .expect("VM bug: a callee returns into a paused caller");
+            self.drop_abandoned_param_frames(caller.param_depth);
             self.fiber.stack.clear();
             self.fiber.stack.extend(caller.stack);
             self.fiber.current_closure = caller.closure;
@@ -88,7 +89,7 @@ impl VM {
                     if bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT) {
                         self.record_error_loc(caller_code.locations(), caller.call_ip);
                     }
-                    (bits, caller.resume_ip)
+                    Exit::at(bits, caller.resume_ip)
                 }
             };
         }
@@ -108,6 +109,7 @@ impl VM {
             resume_ip,
             call_ip: call.call_ip,
             stack,
+            param_depth: self.fiber.param_frames.len(),
             closure: self.fiber.current_closure,
         });
         // `do_fiber_first_resume` sets this for the fiber body alone, and the
@@ -132,13 +134,13 @@ impl VM {
         }
     }
 
-    /// End a callee's activation whose dispatch loop exited with `bits` at
-    /// `ip`. A callee is always abandoned by an error, so the walk runs.
-    fn leave_callee(&mut self, callee: Activation, bits: SignalBits, ip: usize) -> ExecResult {
+    /// End a callee's activation whose dispatch loop exited at `exit`. A
+    /// callee is always abandoned by an error, so the walk runs.
+    fn leave_callee(&mut self, callee: Activation, exit: Exit) -> ExecResult {
         #[cfg(debug_assertions)]
         let entry_depth = callee.entry_depth;
         let mut result =
-            self.end_activation(callee.code, callee.env, bits, ip, callee.tail_squelch, true);
+            self.end_activation(callee.code, callee.env, exit, callee.tail_squelch, true);
         self.close_activation(
             &mut result,
             #[cfg(debug_assertions)]
@@ -165,9 +167,8 @@ impl VM {
         self.fiber.call_depth -= 1;
         let bits = result.bits;
 
-        // Silence enforcement: if the closure declared (silence) and the body
-        // produced ANY signal, that's a purity violation. The programmer
-        // asserted purity — any signal (error, yield, I/O) is a programmer bug.
+        // Silence enforcement: if the callee's signal is silent, declared or
+        // inferred, and the body produced ANY signal, that claim was wrong.
         // Abort with a clear diagnostic.
         if site.silent
             && self
@@ -179,8 +180,9 @@ impl VM {
             let (sig_bits, sig_val) = self.fiber.signal.take().unwrap();
             let name = site.name.unwrap_or("<anonymous>");
             eprintln!("panic: silence violation in '{}'", name);
-            eprintln!("  A (silence)'d function signaled at runtime.");
-            eprintln!("  silence asserts purity — any signal is a programmer bug.");
+            eprintln!(
+                "  A function whose signal is silent, declared or inferred, signaled at runtime."
+            );
             eprintln!(
                 "  signal: {}",
                 crate::signals::registry::format_bits(sig_bits)
