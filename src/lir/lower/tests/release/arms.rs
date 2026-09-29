@@ -1,8 +1,8 @@
-// audited: 2026-09-14
-// Where a release lands across branch arms, and why a re-storable capture
-// cell's slot is no release route at all.
-// docs/impl/region/mechanism.md
-// docs/impl/region/cells.md
+// audited: 2026-09-29
+//! Where a release lands across branch arms, and why a re-storable capture cell's slot is no release route.
+//!
+//! docs/impl/region/window.md
+//! docs/impl/region/cells.md
 
 use super::*;
 
@@ -15,13 +15,12 @@ use super::*;
 // where the list arm hands the argument to `append-list` and every other arm pays
 // the argument's whole object graph. The relocation covers the frame-exiting arm
 // instead, by replica or by the ownership-move exemption
-// (docs/impl/region/mechanism.md § "An arm that leaves through a callee takes a
-// replica, not the anchor").
+// (docs/impl/region/window.md).
 //
 // The counterfactual is declining the branch whole: then `x`'s only release sits
 // in the tail-calling arm and no block outside it names slot 0. End-to-end
-// witnesses: tests/elle/region-branch-arm-window.lisp (rows g/h) and
-// tests/elle/region-branch-arm-window-uaf.lisp.
+// witnesses: tests/impl/region-branch-arm-tailcall.lisp rows (a) and (b), and
+// tests/impl/region-branch-arm-window-uaf.lisp.
 
 #[test]
 fn fallthrough_arm_releases_though_a_sibling_tail_call_exits() {
@@ -98,15 +97,14 @@ fn tail_call_argument_release_stays_the_ownership_move() {
 // release against that slot (`LoadLocal slot` + `DecrefValueRegion`) unwraps the
 // cell — `result_region_of` sees through a capture cell — and frees the region of
 // whatever content the cell holds when the release FIRES. For a cell an `assign`
-// repoints, that is a different, live value: the capture-cell reassign UAF
-// (docs/impl/region/cells.md § "Captured reassigned cells"). The init's
+// repoints, that is a different, live value (docs/impl/region/cells.md). The init's
 // producer reference is dropped at the define instead
 // (`store_captured_cell_init`), so no such route may be emitted at all.
 //
 // The counterfactual is reading the reassign off the ASSIGN SITE's scope: every
 // shape below writes the cell from inside a closure, which classifies as fn-local
 // and leaves the route in place. End-to-end witness:
-// tests/integration/fixtures/region-capture-cell-closure-reassign-uaf.lisp.
+// tests/impl/region-capture-cell-closure-reassign-uaf.lisp.
 
 /// The local slots that hold a compiled `MakeCaptureCell` in `func` — the cell
 /// boxes a `StoreLocal` parks right after the mint.
@@ -175,7 +173,7 @@ fn assert_no_cell_slot_value_release(source: &str, what: &str) {
                 "{what}: slot {slot} holds a compiled capture cell yet carries a \
                  value-routed release — `DecrefValueRegion` unwraps the cell and \
                  frees whatever content it holds when the release fires, which a \
-                 reassignment has already repointed (the capture-cell reassign UAF)",
+                 reassignment has already repointed",
             );
         }
     }
@@ -222,11 +220,10 @@ fn nested_closure_reassign_leaves_no_cell_slot_release() {
 fn let_bound_reassign_leaves_no_cell_slot_release() {
     // The binder decides nothing about the rule: a `let` mints the same compiled
     // cell into the same slot, so it owes the same init drop and the same skipped
-    // routing (docs/impl/region/cells.md § "Every binder that mints the cell owes
-    // the rule too"). `let` is the third binder, and the one whose cell takes its
-    // membership reference from `MakeCaptureCell` itself rather than from a later
-    // `StoreCaptureCell`. End-to-end witness:
-    // tests/integration/fixtures/region-capture-cell-let-reassign-uaf.lisp.
+    // routing (docs/impl/region/cells.md). `let` is the third binder, and the one
+    // whose cell takes its membership reference from `MakeCaptureCell` itself
+    // rather than from a later `StoreCaptureCell`. End-to-end witness:
+    // tests/impl/region-capture-cell-let-reassign-uaf.lisp.
     assert_no_cell_slot_value_release(
         "(let [@acc (list 0)] \
          (def push (fn (x) (assign acc (list x acc)))) \
@@ -238,10 +235,9 @@ fn let_bound_reassign_leaves_no_cell_slot_release() {
 #[test]
 fn let_bound_reassign_in_place_leaves_no_cell_slot_release() {
     // The same binder with the write in the `let`'s own body rather than inside
-    // the closure — the shape issue #1124 reports, where the capturing closure is
-    // a fiber body that only READS the cell. The reassignment is what repoints
-    // the cell, so the routing has to go whether or not the write sits in a
-    // lambda.
+    // the closure, where the capturing closure is a fiber body that only READS
+    // the cell. The reassignment is what repoints the cell, so the routing has
+    // to go whether or not the write sits in a lambda.
     assert_no_cell_slot_value_release(
         "(let [@buf (list 0)] \
          (assign buf (list 1 2)) \
