@@ -26,7 +26,7 @@ renamed heading breaks the site generator.
 | Plugin Tests | ubuntu | Builds the `plugins/` submodule, asserts its artifacts, runs its corpus | — |
 | AArch64 Smoke | ubuntu-arm | `make smoke` | — |
 | AArch64 Rust Tests | ubuntu-arm | Integration tests, then property tests | 8 |
-| AArch64 No-Features | ubuntu-arm | `smoke-noffi` — the language suite on a build with no features | — |
+| AArch64 No-Features | ubuntu-arm | `smoke-noffi` — the language suite on a build with no features, under the default build's runner | — |
 | Android Cross-Check | ubuntu | `cargo check` for `aarch64-linux-android` | — |
 | macOS Smoke | macos | clippy, then `make smoke` with the scrub profile | — |
 | macOS Rust Tests | macos | Integration tests, then property tests | 8 |
@@ -46,6 +46,12 @@ the implementation matrix: the default build, a build with no JIT, a
 thread-pool build, an MLIR build, a build with no features, and the default
 build on AArch64 and macOS. A language test that passes on one and fails on
 another has found a defect in the build that fails.
+
+The build with no features cannot host the runner: the runner's store reaches
+SQLite and zstd through FFI. So `smoke-noffi` runs `elle test` on the default
+build and each file's child on the no-features binary, `ELLE_NOFFI`, through
+`--host`. Each child is still the build under test, run with no flag, and
+`AArch64 No-Features` builds both binaries.
 
 The implementation suite runs where the default build runs: `Default Build
 Tests`, `AArch64 Smoke` and `macOS Smoke` each build the rig beside `elle`, and
