@@ -256,6 +256,13 @@ under callgrind with the callers of `add_page` separated.
 [rank.lisp](../../../tools/pageclaims/rank.lisp) sums the claims of each call
 path, and `run.lisp` prints the total, then the paths with the most claims first.
 
+The profiled `elle` reads the standard library from a cache of its own, which
+the tool warms first by running an empty program without callgrind. So the
+claims are those of a warm start, and two runs of one program rank alike. The
+shared cache under `$TMPDIR` would not do. Each elle binary that stores to it
+removes the other binaries' files, so the profiled run would compile the
+standard library, and claim its pages, only when another elle ran last.
+
 A path is the first `DEPTH` frames above `add_page`, 3 unless set. It skips
 the frames that only move an allocation toward a page: the region store, the
 page pool, the heap's allocation entry points and the value builders. So two
