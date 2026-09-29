@@ -1,5 +1,5 @@
 // audited: 2026-09-29
-//! The run path `elle` and the rig share: one `Runtime` driven from a file, `-e`, stdin or the REPL.
+//! What `elle` and the rig share: the run path of one `Runtime`, from a file, `-e`, stdin or the REPL, and the subcommands.
 //!
 //! docs/config.md
 //! rig/overview.md
@@ -19,7 +19,11 @@ use std::io::Read;
 
 mod dump;
 mod errors;
+mod image;
+mod semver;
+mod subcommand;
 use errors::{format_error_json, format_runtime_error, parse_compilation_error};
+pub use subcommand::subcommand;
 
 /// Run a program as `elle` does, and answer the process exit code.
 ///
