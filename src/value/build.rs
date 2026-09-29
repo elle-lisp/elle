@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-29
 //! Region-and-heap-explicit value construction, one constructor per heap type.
 //!
 //! The single source of `HeapObject` construction, shared by the `NativeCtx`
@@ -18,7 +18,7 @@ use std::rc::Rc;
 
 use crate::hir::region::RuntimeRegion;
 use crate::primitives::traitregistry::default_traits_for;
-use crate::value::heap::{ExternalObject, HeapObject, HeapTag, Pair, TableKey};
+use crate::value::heap::{ExternalObject, HeapObject, HeapTag, HeldValues, Pair, TableKey};
 use crate::value::FiberHeap;
 use crate::value::Value;
 
@@ -341,7 +341,8 @@ pub(crate) fn managed_pointer(heap: &mut FiberHeap, addr: usize, region: Runtime
     )
 }
 
-/// Allocate an external (plugin-provided) object into `region` on `heap`.
+/// Allocate an opaque external (plugin-provided) object into `region` on
+/// `heap`. The region scan cannot see into its payload.
 #[inline]
 pub(crate) fn external<T: Any + 'static>(
     heap: &mut FiberHeap,
@@ -349,12 +350,32 @@ pub(crate) fn external<T: Any + 'static>(
     data: T,
     region: RuntimeRegion,
 ) -> Value {
+    external_object(
+        heap,
+        ExternalObject::opaque(type_name, Rc::new(data)),
+        region,
+    )
+}
+
+/// Allocate an external whose payload declares the heap values it holds into
+/// `region` on `heap`. The allocation counts each declared value as it counts
+/// an immutable container's contents (docs/impl/region/rules.md Rule 5).
+#[inline]
+pub(crate) fn external_holding<T: Any + HeldValues>(
+    heap: &mut FiberHeap,
+    type_name: &'static str,
+    data: T,
+    region: RuntimeRegion,
+) -> Value {
+    external_object(heap, ExternalObject::holding(type_name, data), region)
+}
+
+/// The `External` object over `obj`, allocated into `region`.
+#[inline]
+fn external_object(heap: &mut FiberHeap, obj: ExternalObject, region: RuntimeRegion) -> Value {
     heap.alloc_in_region(
         HeapObject::External {
-            obj: ExternalObject {
-                type_name,
-                data: Rc::new(data),
-            },
+            obj,
             traits: Value::NIL,
         },
         region,

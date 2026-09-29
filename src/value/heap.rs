@@ -399,22 +399,54 @@ pub trait HeldValues {
     fn each_held(&self, f: &mut dyn FnMut(&Value));
 }
 
+/// Reads the values a payload of one concrete type declares, through the
+/// `dyn Any` the external stores it as.
+type EachHeld = fn(&dyn Any, &mut dyn FnMut(&Value));
+
+/// The `EachHeld` for payload type `T`. `ExternalObject::holding` stores the
+/// payload and this reader together, so the downcast names the type the
+/// payload was built from.
+fn each_held_of<T: Any + HeldValues>(data: &dyn Any, f: &mut dyn FnMut(&Value)) {
+    data.downcast_ref::<T>()
+        .expect("an external's held-value reader is built with its payload's own type")
+        .each_held(f);
+}
+
 /// External object for a plugin-provided or runtime type.
 /// Holds a type name (for Elle-side identity) and an arbitrary Rust value.
 pub struct ExternalObject {
     pub type_name: &'static str,
     pub data: Rc<dyn Any>,
+    /// The reader of the values the payload declares, or `None` for an
+    /// opaque payload. Private, so only the two constructors set it.
+    held: Option<EachHeld>,
 }
 
 impl ExternalObject {
     /// An external whose payload the region scan cannot see into.
     pub fn opaque(type_name: &'static str, data: Rc<dyn Any>) -> Self {
-        ExternalObject { type_name, data }
+        ExternalObject {
+            type_name,
+            data,
+            held: None,
+        }
     }
 
     /// An external whose payload declares the heap values it holds.
     pub fn holding<T: Any + HeldValues>(type_name: &'static str, data: T) -> Self {
-        Self::opaque(type_name, Rc::new(data))
+        ExternalObject {
+            type_name,
+            data: Rc::new(data),
+            held: Some(each_held_of::<T>),
+        }
+    }
+
+    /// Call `f` on every heap value the payload declares. An opaque payload
+    /// declares none.
+    pub fn each_held(&self, f: &mut dyn FnMut(&Value)) {
+        if let Some(each) = self.held {
+            each(&*self.data, f);
+        }
     }
 }
 
@@ -423,6 +455,7 @@ impl Clone for ExternalObject {
         ExternalObject {
             type_name: self.type_name,
             data: self.data.clone(),
+            held: self.held,
         }
     }
 }

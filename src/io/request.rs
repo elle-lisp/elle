@@ -258,17 +258,49 @@ impl From<PortOp> for IoOp {
     }
 }
 
+impl PortOp {
+    /// The heap value this operation names besides its port: the buffer a
+    /// read fills, the payload a write sends, the port an accept fills, or the
+    /// struct a `recv-from` stamps. `Value::NIL` for an operation that names
+    /// none.
+    pub(crate) fn operand(&self) -> Value {
+        match self {
+            PortOp::ReadLine { buffer }
+            | PortOp::Read { buffer, .. }
+            | PortOp::ReadExact { buffer, .. } => *buffer,
+            PortOp::Write { data } | PortOp::SendTo { data, .. } => *data,
+            PortOp::Accept { accept_port, .. } => *accept_port,
+            PortOp::RecvFrom { result, .. } => *result,
+            PortOp::ReadAll | PortOp::Flush | PortOp::Shutdown { .. } => Value::NIL,
+        }
+    }
+}
+
 /// A typed I/O request. Wrapped as ExternalObject with type_name "io-request".
 ///
 /// The port is stored as `Value` (not `&Port`) because:
 /// - The `Value` holds the `Rc` to the `ExternalObject` containing the `Port`
 /// - The backend extracts `&Port` via `value.as_external::<Port>()`
+///
+/// The request declares the values it names (`HeldValues`), so its region
+/// counts them until it frees. The request can outlive the frame that asked
+/// for it: a fiber that relays a child's request can release the child before
+/// it raises the request (docs/impl/region/rules.md Rule 5).
 #[derive(Debug)]
 pub struct IoRequest {
     pub op: IoOp,
     pub port: Value,
     /// How long the operation may wait (docs/io/timeout.md).
     pub bound: Bound,
+}
+
+impl crate::value::heap::HeldValues for IoRequest {
+    fn each_held(&self, f: &mut dyn FnMut(&Value)) {
+        f(&self.port);
+        if let IoOp::Port(op) = &self.op {
+            f(&op.operand());
+        }
+    }
 }
 
 impl IoRequest {
@@ -298,7 +330,7 @@ impl IoRequest {
     /// Create an IoRequest that waits no longer than `bound` allows, born in
     /// `ctx`'s region. A request on a port with a `:timeout` of its own takes
     /// that timeout for each operation when `bound` names none
-    /// (docs/io/timeout.md).
+    /// (docs/io/timeout.md). Every other constructor builds its request here.
     #[allow(clippy::new_ret_no_self)]
     pub fn bounded(
         ctx: &crate::primitives::ctx::Alloc,
@@ -310,7 +342,7 @@ impl IoRequest {
             Some(p) => bound.or_timeout(p.timeout()),
             None => bound,
         };
-        ctx.external("io-request", IoRequest::unbounded(op, port).within(bound))
+        ctx.external_holding("io-request", IoRequest::unbounded(op, port).within(bound))
     }
 
     /// Create a portless IoRequest (e.g., Sleep), born in `ctx`'s region.
