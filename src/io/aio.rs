@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-29
 //! `AsyncBackend`: the state an in-flight operation is tracked through, and the
 //! platform that runs it.
 //!
@@ -76,9 +76,10 @@ struct AsyncBackendInner {
 pub(crate) enum PlatformBackend {
     #[cfg(target_os = "linux")]
     Uring(Box<io_uring::IoUring>),
-    /// The pool platform (macOS, or Linux `--no-uring`). There is no separate
-    /// pool object — all pool work runs through the shared `CompletionHub`; this
-    /// variant only marks which `wait()` path the scheduler takes.
+    /// The pool platform (macOS, or a Linux `no-uring` build). There is no
+    /// separate pool object — all pool work runs through the shared
+    /// `CompletionHub`; this variant only marks which `wait()` path the
+    /// scheduler takes.
     ThreadPool,
 }
 
@@ -156,9 +157,9 @@ impl AsyncBackend {
     /// A backend on the thread-pool platform, whatever this host would pick.
     ///
     /// The pool is what every non-Linux build runs, and what a Linux host runs
-    /// when io_uring will not open or `--no-uring` is set. Its wait path is not
-    /// the ring's, so a property that holds on one is no evidence about the
-    /// other. A test that built the host's default backend would reach the ring
+    /// when io_uring will not open or the build has the `no-uring` feature. Its
+    /// wait path is not the ring's, so a property that holds on one is no
+    /// evidence about the other. A test that built the host's default backend would reach the ring
     /// on a Linux desktop and the pool on another machine, checking different
     /// code on each without saying so. This constructor makes the platform the
     /// test's choice rather than the machine's.
@@ -226,9 +227,13 @@ impl AsyncBackend {
         Ok(())
     }
 
+    /// The ring, unless the build asked for the pool or the ring will not open.
+    ///
+    /// `cfg!` rather than `#[cfg]`, so a `no-uring` build still compiles and
+    /// lints the ring arm it never takes, and a default build the pool arm.
     #[cfg(target_os = "linux")]
     fn create_platform_backend() -> PlatformBackend {
-        if crate::config::get().no_uring {
+        if cfg!(feature = "no-uring") {
             return PlatformBackend::ThreadPool;
         }
         match io_uring::IoUring::new(256) {

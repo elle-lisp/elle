@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-29
 //! The `elle` binary: dispatch a subcommand, or set up one `Runtime` and drive
 //! it from a file, `-e`, stdin or the REPL.
 //!
@@ -91,21 +91,16 @@ fn test_runner_source() -> String {
 /// mapping here is the fallback if it returns without exiting.
 fn run_test_subcommand(sub_args: Vec<String>) -> i32 {
     // Split off the global config flags (`--trace=...`, `--boot-image=...`,
-    // `--stats`, `--no-uring`) so the embedded runner's VM (and the off-VM
-    // free-log / page-claim histogram) honour them; the rest become the
-    // runner's argv. The runner itself does not interpret these, so without
-    // this they would be slurped as corpus file paths. (Runner-owned
-    // `--summary`/`--query`/… stay in `sub_args`.) `--no-uring` lets a Linux
-    // box run the corpus on the thread-pool backend — the only backend a Mac
-    // has — so a pool-only wedge can be chased without a Mac.
-    // `--boot-image=` boots this instance from an image, which is how the
-    // corpus is compiled against a hydrated stdlib (docs/impl/image/boot.md).
+    // `--stats`) so the embedded runner's VM (and the off-VM free-log /
+    // page-claim histogram) honour them; the rest become the runner's argv.
+    // The runner itself does not interpret these, so without this they would
+    // be slurped as corpus file paths. (Runner-owned `--summary`/`--query`/…
+    // stay in `sub_args`.) `--boot-image=` boots this instance from an image,
+    // which is how the corpus is compiled against a hydrated stdlib
+    // (docs/impl/image/boot.md).
     let (config_flags, sub_args): (Vec<String>, Vec<String>) =
         sub_args.into_iter().partition(|a| {
-            a.starts_with("--trace=")
-                || a.starts_with("--boot-image=")
-                || a == "--stats"
-                || a == "--no-uring"
+            a.starts_with("--trace=") || a.starts_with("--boot-image=") || a == "--stats"
         });
     let (config, _rest) = elle::config::Config::parse(&config_flags).unwrap_or_else(|e| {
         eprintln!("elle test: {}", e);

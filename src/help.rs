@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 //! `elle --help`: the usage text, with the `--trace` and `--dump` keyword
 //! lists generated from the tables that define them.
 //!
@@ -88,7 +88,6 @@ pub(super) fn print_help() {
     println!("  --trace=all           Trace everything");
     println!("  --stats               Print statistics at normal program termination");
     println!("  --no-stdlib           Skip loading stdlib (debugging compile_core / prelude)");
-    println!("  --no-uring            Linux: disable io_uring; route I/O through the thread pool");
     println!("  --home=DIR            Module resolution root (env: ELLE_HOME)");
     println!("  --path=DIRS           Colon-separated module search path (env: ELLE_PATH)");
     println!("  --cache=DIR           Disk cache directory (env: ELLE_CACHE)");

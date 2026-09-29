@@ -1,5 +1,5 @@
 .PHONY: all elle docs docgen smoke test qa crosscheck clean space help \
-       smoke-elle smoke-boot-image smoke-vm smoke-noffi smoke-jit smoke-nouring \
+       smoke-elle smoke-boot-image smoke-vm smoke-noffi smoke-jit smoke-nouring elle-nouring \
        smoke-wasm smoke-mlir \
        doctest doctest-list myplugin elle-wasm check-wasm elle-mlir elle-noffi plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding \
@@ -488,22 +488,16 @@ smoke-jit: elle
 # spends the whole per-file budget, so it reads as a flaky timeout rather than
 # as the defect it is, and two pool-only defects reached main that way.
 #
-# The per-file passes rather than the runner: whole-program teardown and
-# anything wall-clock-sensitive are reachable only there (see the pass
-# descriptions above), and that is where both defects surfaced.
-#
-# `tests/integration/elle_scripts.rs` § "I/O backend selection" pins a handful
-# of corpus files under this flag one at a time, which is what this target
-# generalises; those stay, because they also run under debug assertions.
-smoke-nouring: elle  ## Corpus per-file passes on the thread-pool backend (what every non-Linux build runs)
-	@echo "=== elle tests (thread-pool backend, VM) ==="
-	$(call RUN_PER_FILE,$(ELLE_SKIP_VM),--no-uring --jit=off --mlir=off,thread-pool VM pass,nouring-vm)
-	$(call RUN_ORACLE,--no-uring --jit=off --mlir=off)
-	$(call RUN_PLUMB,--no-uring --jit=off --mlir=off)
-	@echo "=== elle tests (thread-pool backend, eager JIT) ==="
-	$(call RUN_PER_FILE,$(ELLE_SKIP_JIT),--no-uring --jit=eager,thread-pool JIT pass,nouring-jit)
-	$(call RUN_ORACLE,--no-uring --jit=eager)
-	$(call RUN_PLUMB,--no-uring --jit=eager)
+# The pool is a build, not a flag: the `no-uring` feature makes every backend
+# the binary opens a pool, the runner's own and its workers' alike, so the
+# corpus goes through `elle test` like every other recorded pass.
+elle-nouring:  ## Build elle with the no-uring feature (for smoke-nouring)
+	@echo "=== build elle with the no-uring feature ==="
+	cargo build $(CARGO_PROFILE) -p elle --features no-uring -q
+
+smoke-nouring: elle-nouring  ## Corpus via elle test on the thread-pool backend (what every non-Linux build runs)
+	@echo "=== elle test (no-uring build: every I/O operation on the thread pool) ==="
+	$(RUN_CORPUS)
 
 elle-mlir:   ## Build elle with MLIR support (for smoke-mlir)
 	@echo "=== build elle with MLIR ==="
