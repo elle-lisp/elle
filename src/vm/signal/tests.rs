@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-28
 //! How a primitive's signal is dispatched, and what each park records about the
 //! references it leaves standing.
 //!
@@ -370,51 +370,6 @@ fn an_immediate_raised_argument_takes_no_delivery() {
         assert!(
             !vm.fiber.delivery.mint_names(Value::int(9)),
             "an immediate payload has no region for the record to speak for",
-        );
-    })
-}
-
-// -- a host that refuses a suspend-class signal abandons the park's funding --
-
-/// A host driving a thunk on the current fiber (`eval`, `import`,
-/// `compile/run-on`, the root driver) can refuse a suspend-class signal it
-/// cannot host: the park is dead, and its funding must not survive into the
-/// fiber's next park — a stale record there would mint a `ResumeDelivery`
-/// retain no consumer ever releases, one region per refused park.
-#[test]
-fn a_refused_hosted_park_leaves_no_funding() {
-    with_test_region(|| {
-        let mut vm = VM::new();
-        let (code, env) = test_fixtures();
-        let mut ip = 0usize;
-
-        vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &code, &env, &mut ip);
-        assert!(vm.fiber.delivery.resume_unfunded());
-
-        vm.abandon_hosted_park(SIG_YIELD);
-        assert!(
-            !vm.fiber.delivery.resume_unfunded(),
-            "the refused park's funding is consumed by the abandonment",
-        );
-    })
-}
-
-/// The counter-factual: an error is not an abandonment — an `:error` fiber is
-/// resumable and its payload-named records are identity-gated — so the
-/// abandonment seam leaves an error's ledger alone.
-#[test]
-fn an_error_exit_abandons_no_funding() {
-    with_test_region(|| {
-        let mut vm = VM::new();
-        let (code, env) = test_fixtures();
-        let mut ip = 0usize;
-
-        vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &code, &env, &mut ip);
-        vm.abandon_hosted_park(crate::value::SIG_ERROR);
-        assert!(
-            vm.fiber.delivery.resume_unfunded(),
-            "an error exit is not a refusal of the park — the funding stays for \
-             the delivery funnel",
         );
     })
 }

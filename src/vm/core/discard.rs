@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-28
 //! Abandoning suspended work: the squelch boundary, and the chokepoint that runs
 //! what the discarded frames still owed.
 //!
@@ -129,6 +129,21 @@ impl VM {
         self.fiber.delivery.discharge();
     }
 
+    /// A host that runs code on the current fiber refused `parked`, a park of
+    /// that code (docs/impl/region/park.md § "A host that refuses a park ends
+    /// it the same way").
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "no caller outside the unit tests")
+    )]
+    pub(crate) fn refuse_hosted_park(
+        &mut self,
+        bits: SignalBits,
+        _parked: Option<(SignalBits, Value)>,
+    ) {
+        self.abandon_hosted_park(bits);
+    }
+
     /// A host that drives a thunk on the CURRENT fiber (`eval`, `import`,
     /// `arena/allocs`, `compile/run-on`, the root driver) refuses a
     /// suspend-class signal it cannot host: it extracts the signal as a value
@@ -152,3 +167,6 @@ impl VM {
         self.fiber.delivery.discharge();
     }
 }
+
+#[cfg(test)]
+mod tests;
