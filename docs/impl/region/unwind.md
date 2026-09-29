@@ -1,6 +1,6 @@
 # An abandoned frame runs the releases it still owes
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 The two tables naming what an abandoned frame still owed, and the exits that walk
 them. An error, a squelch boundary, a discard and a compiled unwind share one walk.
@@ -117,11 +117,27 @@ locals and its saved activation map standing in for the live ones
 **A squelch boundary abandons frames the same way, so it runs the same walk.** A
 `squelch`/`attune` boundary raises a `signal-violation` the activation it breaks out of
 never catches (`VM::enforce_squelch`), so that activation reaches none of its remaining
-instructions either. The exit **is** the error exit, and the trampoline writes it as
-one: the squelch arm turns the bits into `SIG_ERROR` and falls through to the walk
-below it. One arm is what keeps the two exits from drifting, and it hands the frame's
-operand stack out exactly as an error's does — a fiber body's first run parks that
-frame, and what a parked frame owes runs at its discharge.
+instructions either. At a call, the boundary belongs to the caller, and the callee's
+activation has closed before the caller asks: the caller leaves by the error exit like
+any other.
+
+At a tail call the callee has already replaced the activation's body, so the refusal
+ends the activation itself, whichever entrant runs it (`VM::end_refused_activation`).
+No frame of it is left to park, not even for a fiber body's restart, so the exit
+carries `RaiseSite::TailRefused` and every parker keeps none ([park.md](park.md)).
+What the activation owed runs at this exit instead, and where it lives depends on
+whether the refused code parked the activation's frame before the boundary saw the
+signal:
+
+- **It did.** An emit, a paused callee's return, or a compiled callee's side exit
+  moved the frame's locals and dues into the park, and the discard below runs what
+  they owed. The live activation keeps only its region map, which the park cloned. A
+  walk over the live frame would find the same mappings and release them a second
+  time, so it does not run.
+- **It did not.** A tail call to a primitive that suspends parks no frame of its own,
+  so the live frame still holds its locals and its map, and the walk reads them.
+
+Either way, the activation's dues are released at the exit, owner node included.
 
 The boundary abandons a whole chain rather than one frame. Every frame parked between
 the emitting site and the boundary is discarded at one chokepoint,
