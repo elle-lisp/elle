@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-29
 ## tests/elle/net-wait-timeout.lisp
 ##
 ## `:timeout` bounds the socket calls that wait for a peer to appear:
@@ -16,8 +17,8 @@
 ## bound. Stalling one needs a listener backlog no Elle primitive sets, so they
 ## are pinned in src/io/aio/tests/net.rs instead.
 ##
-## The thread-pool backend runs this file via the `net_wait_timeout_threadpool`
-## pin in tests/integration/elle_scripts.rs (`--no-uring` is process-global).
+## The thread-pool backend runs this file in the Thread-Pool I/O job, whose
+## binary is built with the `no-uring` feature.
 
 (defn listen-port [listener]
   "Return the port number of a listener bound to an ephemeral port."

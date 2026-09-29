@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-29
 //! The ring's own paths, driven without a backend: a signal read, the
 //! short-write resubmission, and the linked timeout.
 //!
@@ -187,8 +187,8 @@ fn short_write_resubmits_until_the_payload_is_gone() {
     let mut ring = match io_uring::IoUring::new(8) {
         Ok(ring) => ring,
         // No io_uring on this host kernel — nothing to cover here. The
-        // thread-pool half of the invariant is pinned by the `--no-uring`
-        // run of port-shortwrite.lisp.
+        // thread-pool half of the invariant is port-shortwrite.lisp, run on
+        // the pool by the Thread-Pool I/O job's `no-uring` build.
         Err(_) => return,
     };
 

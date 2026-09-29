@@ -51,3 +51,25 @@ fn runs_the_corpus_through_the_runner_alone(target: &str) {
 fn smoke_mlir_runs_the_corpus_through_the_runner_alone() {
     runs_the_corpus_through_the_runner_alone("smoke-mlir");
 }
+
+// The counter-factual: `smoke-nouring` ran two per-file passes under
+// `--no-uring`, one process per file, and every pool-only failure it found was
+// a line in a CI log.
+#[test]
+fn smoke_nouring_runs_the_corpus_through_the_runner_alone() {
+    runs_the_corpus_through_the_runner_alone("smoke-nouring");
+}
+
+// The pool is a build, not a flag. A target that ran the default binary would
+// run the corpus on the ring — green, and saying nothing about the backend a
+// Mac runs.
+#[test]
+fn smoke_nouring_builds_the_no_uring_feature() {
+    let recipe = recipe("smoke-nouring");
+    assert!(
+        recipe
+            .lines()
+            .any(|line| line.contains("cargo build") && line.contains("--features no-uring")),
+        "`make smoke-nouring` builds no binary with the no-uring feature:\n{recipe}"
+    );
+}

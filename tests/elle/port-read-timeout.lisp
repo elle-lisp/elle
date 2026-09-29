@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-29
 ## tests/elle/port-read-timeout.lisp
 ##
 ## `:timeout` bounds a read that needs more than one kernel operation, and it
@@ -24,8 +25,8 @@
 ## satisfies both.
 ##
 ## `port-write-timeout.lisp` is the write-direction twin.
-## The thread-pool backend runs this file via the `port_read_timeout_threadpool`
-## pin in tests/integration/elle_scripts.rs (`--no-uring` is process-global).
+## The thread-pool backend runs this file in the Thread-Pool I/O job, whose
+## binary is built with the `no-uring` feature.
 
 (defn listen-port [listener]
   "Return the port number of a listener bound to an ephemeral port."
@@ -94,8 +95,7 @@
 ## ── 4. The single-operation read, against a peer that sends nothing ──
 ##
 ## One kernel operation, so this needs no re-arming — but the thread-pool
-## backend bounds it by the same mechanism as the looping reads, and had no
-## bound at all before.
+## backend bounds it by the same mechanism as the looping reads.
 
 (assert-timed-out "read"
                   (from-stalled-peer 0

@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-29
 ## tests/elle/port-shortwrite.lisp
 ##
 ## `port/write` writes every byte before it returns, and returns that count.
@@ -34,8 +35,8 @@
 ## would pass cases 1 and 2 and fail case 3.
 ##
 ## `port-shortread-framing.lisp` covers the read direction.
-## The thread-pool backend runs the same file via the `port_shortwrite_threadpool`
-## pin in tests/integration/elle_scripts.rs (`--no-uring` is process-global).
+## The thread-pool backend runs this file in the Thread-Pool I/O job, whose
+## binary is built with the `no-uring` feature.
 
 ## ── Helper ───────────────────────────────────────────────────────────
 

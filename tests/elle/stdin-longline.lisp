@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-28
+# audited: 2026-09-29
 ## tests/elle/stdin-longline.lisp
 ##
 ## A line on STDIN longer than the buffer `port/read-line` reserves is
@@ -17,9 +17,8 @@
 ## left to read them again: the fiber gets a truncated line with no way to
 ## tell that it was truncated.
 ##
-## Stdin reaches the StdinThread on either backend, so unlike
-## port-longline this file has no `--no-uring` counterpart to pin: there
-## is one mechanism, and it is the one that runs here.
+## Stdin reaches the StdinThread on either backend, so unlike port-longline
+## this file measures one mechanism, whichever backend the build takes.
 ##
 ## The counter-factual: a payload under 64 KiB passes every assertion here
 ## whether or not the bytes past the reservation survive. The line has to
