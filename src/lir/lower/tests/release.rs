@@ -1,32 +1,37 @@
-// audited: 2026-09-19
-// ── Region-lifecycle: decref/release emission ────────────────────
-//
-// Where the lowerer puts each region's release, split by the question each
-// group answers:
-//
-// - `emission` — that a release is emitted at all, and at which `decref_point`.
-// - `parkmint` — the reference a park mints for a payload the emitting body
-//   borrows (docs/impl/region/park.md).
-// - `frametables` — that the abandoned-frame release tables name exactly the
-//   routes the emitter wrote.
-// - `order` — the order releases take when several share one decref_point
-//   (docs/impl/region/rules.md Rule 4).
-// - `frameexit` — the release a frame owes on the way out.
-// - `breakexit` — the replica a `break` leaves at the end of the block it
-//   leaves, for the release its jump passes over.
-// - `arms` — releases across branch arms: a tail-calling arm must not hold back
-//   its falling-through siblings, and a re-storable capture cell's slot is not
-//   a release route.
-// - `shortcircuit` — the same placement across the branch `and`/`or` lower to,
-//   whose arms are their operands.
-// - `restpattern` — the collection a rest pattern built, whose release route is
-//   a parked slot rather than the slot a call passes.
+// audited: 2026-09-29
+//! Where the lowerer puts each region's release, one submodule per question.
+//!
+//! docs/impl/region/rules.md
+//!
+//! - `emission` — that a release is emitted at all, and at which `decref_point`.
+//! - `parkmint` — the reference a park mints for a payload the emitting body
+//!   borrows (docs/impl/region/park.md).
+//! - `frametables` — that the abandoned-frame release tables name exactly the
+//!   routes the emitter wrote.
+//! - `order` — the order releases take when several share one decref_point
+//!   (docs/impl/region/rules.md Rule 4).
+//! - `determinism` — that the analysis and the release order it drives are a
+//!   pure function of the source.
+//! - `cellslots` — that a compiled capture cell owns its region slot, and that
+//!   its init is released after the store into it.
+//! - `frameexit` — the release a frame owes on the way out.
+//! - `breakexit` — the replica a `break` leaves at the end of the block it
+//!   leaves, for the release its jump passes over.
+//! - `arms` — releases across branch arms: a tail-calling arm must not hold back
+//!   its falling-through siblings, and a re-storable capture cell's slot is not
+//!   a release route.
+//! - `shortcircuit` — the same placement across the branch `and`/`or` lower to,
+//!   whose arms are their operands.
+//! - `restpattern` — the collection a rest pattern built, whose release route is
+//!   a parked slot rather than the slot a call passes.
 
 // Re-glob the parent's test imports so each submodule can `use super::*;`.
 use super::*;
 
 mod arms;
 mod breakexit;
+mod cellslots;
+mod determinism;
 mod emission;
 mod frameexit;
 mod frametables;

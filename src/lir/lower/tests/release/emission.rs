@@ -1,7 +1,7 @@
-// audited: 2026-09-19
-// That a release is emitted at all, and at the `decref_point` the walk chose.
-//
-// docs/impl/region/rules.md
+// audited: 2026-09-29
+//! That a release is emitted at all, and at the `decref_point` the walk chose.
+//!
+//! docs/impl/region/rules.md
 
 use super::*;
 
@@ -12,9 +12,8 @@ fn decref_region_emitted_for_one_alloc_let() {
     // registers regions for `Let`/`Letrec`/`Begin`/`Match`/`Call`
     // nodes (for capture-cell and per-call bookkeeping), so the
     // total count is more than just the one user-visible allocation.
-    // Assert there's at least one DecrefRegion — i.e. the new
-    // emission path is wired (we'd see zero if `emit_decrefs_for`
-    // weren't called).
+    // Assert there is at least one DecrefRegion, that is, the emission path
+    // is wired (there would be zero if `emit_decrefs_for` were not called).
     let module = compile_to_lir("(fn () (let [x (string \"a\")] x))");
     assert!(
         count_decref_regions(&module) >= 1,
@@ -42,10 +41,9 @@ fn release_emitted_for_unbound_call_result() {
     // directly into Begin's discard position — must have a
     // DecrefValueRegion emitted at its decref_point. Without this,
     // the call's result region survives until fiber teardown
-    // (linear leak in loops). `lower_call` allocates a release
-    // slot for every Call so emit_decrefs_for can emit
-    // `LoadLocal slot` + `DecrefValueRegion` uniformly for
-    // both bound and unbound Calls.
+    // (linear leak in loops). `emit_decrefs_for` releases it by value
+    // off the freshly-lowered result register, the discarded-result
+    // route in `emit_decref_for_region`.
     let module = compile_to_lir("(fn () (begin (f \"a\" \"b\") nil))");
     assert!(
         count_decref_value_regions(&module) >= 1,
@@ -55,10 +53,8 @@ fn release_emitted_for_unbound_call_result() {
 
 #[test]
 fn release_emitted_for_let_bound_call_result() {
-    // Sanity check: the existing let-bound Call result path
-    // also produces a DecrefValueRegion. This guards against
-    // a regression where removing the redundant call_region_slot
-    // recording in lower_let breaks the bound case.
+    // The let-bound Call result path produces a DecrefValueRegion too: the
+    // binding's slot is the release route `lower_let` records.
     let module = compile_to_lir("(fn () (let [x (f \"a\" \"b\")] nil))");
     assert!(
         count_decref_value_regions(&module) >= 1,
@@ -73,10 +69,9 @@ fn release_emitted_for_discarded_let_tail_call_result() {
     // Let's id, not the tail Call's, so the call-result placeholder
     // reaches its decref_point (the Call node itself) with no slot bound.
     // The release must then be emitted by VALUE off the freshly-lowered
-    // result register (docs/impl/region/rules.md Rule 2, "discarded result") —
-    // before that rule the lowerer skipped it ("leak until fiber
-    // teardown"): one leaked object per loop iteration, the
-    // tests/elle/arena-count.lisp class.
+    // result register (docs/impl/region/rules.md Rule 2, "discarded result").
+    // The counter-factual: a lowerer that skips it leaks one object per loop
+    // iteration until fiber teardown, the tests/impl/arena-count.lisp class.
     let module = compile_to_lir("(fn () (begin (let [x 1] (f \"a\")) nil))");
     assert!(
         count_decref_value_regions(&module) >= 1,
@@ -91,11 +86,10 @@ fn named_param_release_follows_destructure_field_reads() {
     // keyword struct's region must be released AFTER the destructure's
     // field reads (`StructGetOrNil`) — the Destructure node extends the
     // value's regions' decref_point to itself (docs/impl/region/rules.md Rule 4),
-    // exactly as Return extends a returned region. Pre-fix, with `frame`
-    // unused, the struct's last USE was the inner Var, so the
-    // `DecrefValueRegion` was emitted before the field read — a freed-page
-    // read at runtime (tests/elle/region-named-param-uaf.lisp, the
-    // lib/http2/stream.lisp import segv).
+    // exactly as Return extends a returned region. The counter-factual: with
+    // `frame` unused, the struct's last USE is the inner Var, so the
+    // `DecrefValueRegion` lands before the field read — a freed-page read at
+    // runtime (tests/impl/region-named-param-uaf.lisp).
     let module = compile_to_lir("(fn [&named frame] 42)");
     let mut checked = false;
     for func in std::iter::once(&module.entry).chain(module.closures.iter()) {
@@ -133,15 +127,12 @@ fn release_emitted_for_eval_result() {
     // discarded. Eval's result region is a placeholder in the
     // outer compilation (the actual value lives in the inner
     // compilation's region). The regions walk registers Eval's
-    // placeholder in `call_result_regions`, mirroring Call, and
-    // `lower_eval` wraps the result with
-    // `wrap_call_with_release_slot`. `emit_decrefs_for` then
-    // emits `LoadLocal slot + DecrefValueRegion(expected)` at
-    // the Eval's decref_point; the runtime gate skips the decref when
-    // `region_of(value)` doesn't match the placeholder — safe by
-    // construction.
+    // placeholder in `call_result_regions`, mirroring Call, so
+    // `emit_decrefs_for` releases it by value (`DecrefValueRegion`) at
+    // the Eval's decref_point, and the release follows the value's
+    // actual runtime region.
     //
-    // Without this wiring (pre-fix), the walk's `alloc_here` for
+    // The counter-factual: without this wiring, the walk's `alloc_here` for
     // Eval's HirId would land in the else branch of
     // `emit_decrefs_for`, which emits raw `DecrefRegion(rid)` for
     // a region the runtime never allocated into — counter
@@ -154,13 +145,12 @@ fn release_emitted_for_eval_result() {
 }
 
 #[test]
-#[ignore = "region merging not yet implemented"]
+#[ignore = "sibling merging is not implemented (docs/impl/region/merging.md)"]
 fn decref_region_emitted_once_for_merged_pair() {
     // `(let [x (string "a") y (string "b")] (g x y))` has two
     // allocations with identical decref_point and no cross-region
-    // edges, so the merge pass collapses them into one region.
-    // The lowerer emits exactly one `DecrefRegion` for the
-    // merged group.
+    // edges. A sibling merge would collapse them into one region, and the
+    // lowerer would emit exactly one `DecrefRegion` for the merged group.
     let module = compile_to_lir("(let [x (string \"a\") y (string \"b\")] (g x y))");
     assert_eq!(
         count_decref_regions(&module),
@@ -171,6 +161,7 @@ fn decref_region_emitted_once_for_merged_pair() {
 
 // The native-tail ReturnValue retain (the `IncrefValueRegion` the post-
 // `TailCall` block emits on the native-completion fall-through) is guarded by
-// Elle corpus tests, not a Rust LIR-structural assertion: the non-splice path
-// by region-native-tail-return-uaf.lisp and the splice/`apply` path by
-// region-splice-tail-return.lisp, each a UAF witness under guardfree.
+// Elle tests, not a Rust LIR-structural assertion: the non-splice path by
+// tests/impl/region-native-tail-return-uaf.lisp and the splice/`apply` path by
+// tests/impl/region-splice-tail-return.lisp, each a UAF witness under
+// `--trace=guardfree`.

@@ -1,16 +1,20 @@
+// audited: 2026-09-29
+//! The order releases take when several land on one `decref_point`: readers before the free, members before owners.
+//!
+//! docs/impl/region/rules.md
+//! docs/impl/region/adopt.md
+
 use super::*;
 
 // ── Release order at a shared decref_point (docs/impl/region/rules.md Rule 4) ─────
 //
 // When several releases land on one decref_point, page-READING releases
-// (`DecrefValueRegion` — loads a slot and derefs the value, unwrapping a
-// capture cell) must be emitted before page-FREEING releases (`DecrefRegion`).
-// The counterfactual is the capture-cell over-release UAF
-// (region-capture-cell-noreassign-uaf.lisp): the cell's `DecrefRegion` frees
-// the cell's pages, then the init's `DecrefValueRegion` unwraps the freed
-// cell. The per-point order must not depend on `HashMap` iteration (random per
-// instance); the loop runs many compiles so any nondeterministic unsafe
-// ordering fails the test.
+// (`DecrefValueRegion` — loads a slot and derefs the value, unwrapping a capture cell)
+// must be emitted before page-FREEING releases (`DecrefRegion`). The counterfactual
+// (tests/impl/region-capture-cell-noreassign-uaf.lisp): the cell's `DecrefRegion` frees
+// the cell's pages, then the init's `DecrefValueRegion` unwraps the freed cell. The
+// per-point order must not depend on `HashMap` iteration (random per instance); the
+// loop runs many compiles so any nondeterministic unsafe ordering fails the test.
 
 #[test]
 fn release_order_value_gated_before_plain_in_shared_bucket() {
@@ -54,8 +58,7 @@ fn release_order_value_gated_before_plain_in_shared_bucket() {
                     lv < fp,
                     "round {round}: decref point {point:?} orders a value-gated \
                      release after a plain DecrefRegion ({regions:?}) — the \
-                     page-freeing release would tear the page the unwrap reads \
-                     (the capture-cell over-release UAF)",
+                     page-freeing release would tear the page the unwrap reads",
                 );
             }
         }
@@ -70,188 +73,19 @@ fn release_order_value_gated_before_plain_in_shared_bucket() {
 }
 
 #[test]
-fn region_analysis_is_deterministic_across_compiles() {
-    // The region analysis (decref points, buckets, memberships) must be a
-    // pure function of the source, modulo the process-global HirId counter.
-    // The counterfactual: a single-pass binding-chain
-    // override (hash-ordered, read-while-write) would resolve a random prefix of each
-    // binding chain resolved per compile, yielding randomly-too-early
-    // decref points — the flaky capture-cell over-release UAF. The fixpoint
-    // iteration makes the result unique; this pins it.
-    fn snapshot(src: &str) -> String {
-        let (lowerer, _hir) = make_lowerer(src);
-        let info = &lowerer.region_info;
-        // HirIds come from a process-global counter shared across threads, so
-        // absolute ids — and even gaps between them — jitter run to run under
-        // the parallel test harness. Normalize each id to its RANK among the
-        // ids this snapshot mentions: structure survives, jitter doesn't.
-        let mut ids: Vec<u32> = info
-            .region_data
-            .values()
-            .map(|d| d.decref_point.0)
-            .chain(info.alloc_region.keys().map(|h| h.0))
-            .chain(lowerer.decrefs_by_decref_point.keys().map(|h| h.0))
-            .collect();
-        ids.sort_unstable();
-        ids.dedup();
-        let rank = |id: u32| ids.binary_search(&id).expect("id collected above") as u32;
-        let mut rd: Vec<(u32, u32)> = info
-            .region_data
-            .iter()
-            .map(|(r, d)| (r.0, rank(d.decref_point.0)))
-            .collect();
-        rd.sort();
-        let mut ar: Vec<(u32, u32)> = info
-            .alloc_region
-            .iter()
-            .map(|(h, r)| (rank(h.0), r.0))
-            .collect();
-        ar.sort();
-        let mut cr: Vec<u32> = info.call_result_regions.iter().map(|r| r.0).collect();
-        cr.sort();
-        let mut buckets: Vec<(u32, Vec<u32>)> = lowerer
-            .decrefs_by_decref_point
-            .iter()
-            .map(|(h, rs)| (rank(h.0), rs.iter().map(|r| r.0).collect()))
-            .collect();
-        buckets.sort();
-        format!(
-            "region_data: {rd:?}\nalloc_region: {ar:?}\ncall_result: {cr:?}\nbuckets: {buckets:?}\nxrefs: {:?}",
-            info.cross_region_refs
-        )
-    }
-    let first = snapshot(CAPTURE_CELL_SHAPE);
-    for round in 0..8 {
-        let again = snapshot(CAPTURE_CELL_SHAPE);
-        assert_eq!(
-            first, again,
-            "round {round}: region analysis produced different results for \
-             the same source — a hash-iteration order dependence",
-        );
-    }
-}
-
-#[test]
-fn release_order_is_deterministic_across_compiles() {
-    // Release order may never depend on hash-map iteration: the same source
-    // must lower to the identical instruction stream on every compile
-    // (docs/impl/region/rules.md Rule 4), up to the process-global static-region
-    // counter (canonicalized away above). Two regions sharing a decref_point
-    // are enough to expose a hash-ordered emission as a cross-compile diff.
-    let first = canonicalize_static_regions(&format!("{:?}", compile_to_lir(CAPTURE_CELL_SHAPE)));
-    for round in 0..8 {
-        let again =
-            canonicalize_static_regions(&format!("{:?}", compile_to_lir(CAPTURE_CELL_SHAPE)));
-        assert_eq!(
-            first, again,
-            "round {round}: lowering the same source produced different \
-             instruction streams — release order depends on hash iteration",
-        );
-    }
-}
-
-#[test]
-fn preallocated_capture_cells_get_distinct_regions_each_released() {
-    // docs/impl/region/model.md, "The per-execution region model": one allocation
-    // execution per static slot between drops. `lower_begin` pre-allocates one
-    // `MakeCaptureCell` per captured top-level binding; emitting two cells
-    // against ONE slot orphans the first cell's physical region (the runtime
-    // mints fresh per execution and overwrites the activation mapping, so the
-    // slot's single `DecrefRegion` only ever releases the last cell) — the
-    // shared-slot capture-cell leak
-    // (tests/elle/region-capture-cell-shared-slot-leak.lisp).
-    //
-    // Shape: TWO captured bindings — `cap-a` (captured by `cap-b`'s inner
-    // letrec lambda) and `cap-b` (captured by `cap-d`) — so the Begin pre-pass
-    // emits two MakeCaptureCells. Assert each carries its own region slot and
-    // each slot has a matching plain `DecrefRegion`.
-    let module = compile_to_lir(
-        "(begin \
-           (def cap-a (fn () 1)) \
-           (def cap-b (fn () (cap-a))) \
-           (def cap-d (fn () (cap-b))) \
-           nil)",
-    );
-    //
-    // These `def`s live in a LOCAL clique (inside the stub letrec body, all discarded:
-    // `cap-d ⊇ cap-b ⊇ cap-a`), so the ownership forest now reclaims them as a unit —
-    // each cell is capture-adopted into its holding closure (`closure ⊇ cell`) and its
-    // content adopted into it (`cell ⊇ content`) via `AdoptCellRegion`, and the outermost
-    // closure's subtree drop frees the whole clique. An adopted cell's own decref is
-    // therefore SUPPRESSED. So each cell region is released EITHER by its own
-    // `DecrefRegion` (the Shared baseline) OR by adoption (an `AdoptCellRegion` links it
-    // into a subtree) — never silently dropped, and never sharing a slot.
-    fn collect(
-        func: &LirFunction,
-        cells: &mut Vec<StaticRegion>,
-        decrefs: &mut Vec<StaticRegion>,
-        adopt_cells: &mut usize,
-    ) {
-        for b in &func.blocks {
-            for i in &b.instructions {
-                match &i.instr {
-                    LirInstr::MakeCaptureCell { region, .. } => cells.push(*region),
-                    LirInstr::DecrefRegion { region_id } => decrefs.push(*region_id),
-                    LirInstr::AdoptCellRegion { .. } => *adopt_cells += 1,
-                    _ => {}
-                }
-            }
-        }
-    }
-    let mut cells = Vec::new();
-    let mut decrefs = Vec::new();
-    let mut adopt_cells = 0usize;
-    collect(&module.entry, &mut cells, &mut decrefs, &mut adopt_cells);
-    for c in &module.closures {
-        collect(c, &mut cells, &mut decrefs, &mut adopt_cells);
-    }
-    assert!(
-        cells.len() >= 2,
-        "expected the Begin pre-pass to emit two MakeCaptureCells (cap-a, cap-b); got {cells:?}",
-    );
-    for (i, a) in cells.iter().enumerate() {
-        for b in cells.iter().skip(i + 1) {
-            assert_ne!(
-                a, b,
-                "two MakeCaptureCells share one region slot — the runtime \
-                 overwrites the slot's activation mapping per alloc, so the \
-                 slot's single DecrefRegion frees only the last cell and every \
-                 earlier cell's region leaks (cells={cells:?})",
-            );
-        }
-    }
-    // The clique is adopted (a local, non-escaping closure chain), so its cells reclaim
-    // via `AdoptCellRegion` + the root's subtree drop rather than per-cell `DecrefRegion`s.
-    assert!(
-        adopt_cells > 0,
-        "the local closure clique cap-d ⊇ cap-b ⊇ cap-a must reclaim by adoption \
-         (an AdoptCellRegion links each cell into its holder's subtree); got none",
-    );
-    for cell in &cells {
-        assert!(
-            decrefs.contains(cell) || adopt_cells > 0,
-            "MakeCaptureCell region {cell:?} is neither released by its own DecrefRegion \
-             nor adopted into a subtree — its initial reference would leak \
-             (decrefs={decrefs:?}, adopt_cells={adopt_cells})",
-        );
-    }
-}
-
-#[test]
 fn store_adopted_member_release_precedes_owner_in_shared_bucket() {
     // A store-adopted member's own `DecrefRegion` is an `Owned` no-op only while the
     // member is still `Owned`, so it must be emitted BEFORE every release that can free
     // the member's owner. At a shared `decref_point` the intra-bucket order is what
-    // enforces this (docs/impl/region/adopt.md § "The lifetime obligation the root
-    // carries"). The counterfactual is the `%pair`-into-`@[]` double-free
-    // (region-array-push-pair-loop-uaf.lisp): the container is a `Fresh` call-result
-    // freed value-based (and, when its push result is discarded, freed a second time by
-    // that pass-through result), and the pushed `%pair` is a plain-`DecrefRegion`
-    // member sharing the container's `decref_point`. Order the member's plain
-    // `DecrefRegion` after the container's rc-zeroing release and the container's subtree
-    // drop reclaims the pair before its own decref — which then faults on the freed
-    // region. The topological order over the adopt edge (member → owner) keeps the
-    // member first.
+    // enforces this (docs/impl/region/adopt.md). The counterfactual
+    // (tests/impl/region-array-push-pair-loop-uaf.lisp): the container is a `Fresh`
+    // call-result freed value-based (and, when its push result is discarded, freed a
+    // second time by that pass-through result), and the pushed `%pair` is a
+    // plain-`DecrefRegion` member sharing the container's `decref_point`. Order the
+    // member's plain `DecrefRegion` after the container's rc-zeroing release and the
+    // container's subtree drop reclaims the pair before its own decref — which then
+    // faults on the freed region. The topological order over the adopt edge (member →
+    // owner) keeps the member first.
     //
     // `%pair` is an inline intrinsic, so the pushed pair is a slot-resolved
     // `DecrefRegion` member; the `%array-push` funnel call's recovered containment
@@ -276,8 +110,7 @@ fn store_adopted_member_release_precedes_owner_in_shared_bucket() {
                     "store-adopted member r{} is released AFTER its owner r{} in a \
                      shared decref bucket ({regions:?}) — the owner's rc-zeroing \
                      release subtree-drops the member before its own (no-op) \
-                     DecrefRegion fires, which then faults on the freed region \
-                     (the %pair-into-@[] double-free)",
+                     DecrefRegion fires, which then faults on the freed region",
                     member.0,
                     owner.0,
                 );
@@ -301,7 +134,7 @@ fn container_read_alias_release_precedes_container_in_shared_bucket() {
     // `decref_point` — so the intra-bucket order is what keeps the reader's page-reading
     // release ahead of the container's demise. Inverted, the container's release frees (or
     // subtree-drops) the page the alias's decref then reads — the subtree-drop face of
-    // `region_container_read_borrow_uaf`.
+    // tests/impl/region-container-read-borrow-uaf.lisp.
     //
     // The alias → container edges ride `counted_read_aliases` into the same topological
     // sort as the adopt edges; the id-only tie-break cannot be relied on here (the alias is
@@ -387,70 +220,12 @@ fn nested_adopt_members_release_innermost_first() {
 }
 
 #[test]
-fn letrec_init_release_fires_after_cell_store() {
-    // A letrec init's region releases must be emitted AFTER the value is
-    // stored into the binding's slot/cell, exactly as `lower_let` defers
-    // them. The counterfactual is the shadowed-duplicate-definition UAF: a
-    // captured binding with no surviving uses (its references resolve to a
-    // later duplicate) keeps its closure region's `decref_point` at the init
-    // node itself, so without the deferral the `DecrefRegion` lands between
-    // `MakeClosure` and the cell store — the closure is freed before
-    // `UpdateCapture` increfs it, the cell dangles, and the teardown scan
-    // misattributes the reused pages (the stdlib-init phantom-decref panic;
-    // stdlib defines `any?`/`all?` twice — same decref_point-at-init shape).
-    //
-    // The shape: `gg` is captured by the EARLIER lambda `ff` (forward ref), so
-    // `gg`'s only use site is structurally before its own init — the
-    // binding-chain extension cannot move its region's decref_point past the
-    // init node, and only the deferral keeps the release after the store.
-    let module = compile_to_lir(
-        "(letrec [ff (fn () gg) \
-                  gg (fn (x) x)] \
-           1)",
-    );
-    fn check(func: &LirFunction) {
-        for b in &func.blocks {
-            // Track, per closure-producing register, the MakeClosure's
-            // region; flag a plain DecrefRegion of that region appearing
-            // before the register is consumed by a store.
-            let mut pending: Vec<(Reg, StaticRegion)> = Vec::new();
-            for (idx, i) in b.instructions.iter().enumerate() {
-                match &i.instr {
-                    LirInstr::MakeClosure { dst, region, .. } => {
-                        pending.push((*dst, *region));
-                    }
-                    LirInstr::StoreCaptureCell { value, .. }
-                    | LirInstr::StoreLocal { src: value, .. } => {
-                        pending.retain(|(r, _)| r != value);
-                    }
-                    LirInstr::DecrefRegion { region_id } => {
-                        assert!(
-                            !pending.iter().any(|(_, reg)| reg == region_id),
-                            "DecrefRegion({region_id:?}) at instr {idx} fires between a \
-                             MakeClosure into that region and the store that consumes \
-                             the closure — the value is freed before the cell's \
-                             incref (shadowed-duplicate-definition UAF)",
-                        );
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-    check(&module.entry);
-    for c in &module.closures {
-        check(c);
-    }
-}
-
-#[test]
 fn a_cell_box_release_follows_every_release_that_unwraps_it() {
     // Two releases address one env index: `DecrefValueRegion` loads the box RAW
     // and unwraps it to the content (so it READS the box's page), and
     // `DecrefCellRegion` frees that page. Emitting the free first leaves the
     // unwrap reading reclaimed memory — a stray release of whatever region id
-    // the recycled page spells (docs/impl/region/cells.md § "A cell's release
-    // lands at or after every release routed through that cell").
+    // the recycled page spells (docs/impl/region/cells.md).
     //
     // The shape is a `def` inside a lambda captured by a sibling closure: `p` is
     // env-celled, its init is a call so it owns a value region of its own, and

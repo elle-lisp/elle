@@ -1,18 +1,23 @@
+// audited: 2026-09-29
+//! The coalescing predicate: which region mints a static slot can name, and which stay value-resolved.
+//!
+//! docs/impl/region/mechanism.md
+
 use super::*;
 
 // ── The coalescing staticness predicate ─────────────────────────────────────
 //
-// `coalescible_region` / `coalescible_solver_region` (src/lir/lower/regionemit.rs)
-// classify whether a value's region-RC mint can be slot-resolved (the value is a
-// fresh local allocation whose region is statically nameable) or must stay
-// value-resolved (the dynamic boundary). The predicate is computed and logged
-// under --trace=rc; emission consumes it without changing behavior.
+// `coalescible_region` / `coalescible_solver_region`
+// (src/lir/lower/regionemit/coalesce.rs) classify whether a value's region-RC
+// mint can be slot-resolved (the value is a fresh local allocation whose region
+// is statically nameable) or must stay value-resolved (the dynamic boundary).
+// The predicate is computed and logged under --trace=rc; emission consumes it
+// without changing behavior.
 //
-// These pins are written from docs/impl/region/mechanism.md § "Compile-time region
-// selection (coalescing)", NOT from emission output: each is counterfactual
-// against a predicate that misclassifies the case (an accept-all-live predicate
-// accepts every "refused" pin; a reject-all predicate refuses every "accepted"
-// pin).
+// These pins are written from docs/impl/region/mechanism.md, NOT from emission
+// output: each is counterfactual against a predicate that misclassifies the
+// case (an accept-all-live predicate accepts every "refused" pin; a reject-all
+// predicate refuses every "accepted" pin).
 
 #[test]
 fn coalescible_predicate_class_logic() {
@@ -21,10 +26,9 @@ fn coalescible_predicate_class_logic() {
     // (`suppressed_decref_regions`, `mutated_binding_value_regions`,
     // `cell_stored_regions`) that functionalize's assignment-conversion makes
     // unreachable from straight-line Elle source in this unit harness — exactly
-    // per docs/impl/region/mechanism.md § "Compile-time region selection
-    // (coalescing)": Some iff the region is `live` and in NONE of the dynamic
-    // classes, and (for a returned `Var`) `binding_source_regions` names exactly
-    // one region.
+    // per docs/impl/region/mechanism.md: Some iff the region is `live` and in
+    // NONE of the dynamic classes, and (for a returned `Var`)
+    // `binding_source_regions` names exactly one region.
     use crate::hir::region::Region;
     let arena = crate::hir::BindingArena::new();
 
@@ -93,7 +97,7 @@ fn coalescible_predicate_class_logic() {
              dynamic boundary, docs/impl/region/mechanism.md)",
         );
     }
-    // Not live (a phantom region — e.g. a param's placeholder) refuses.
+    // Not live (a phantom region — for example a param's placeholder) refuses.
     assert_eq!(
         lw(build(None, false, vec![target])).coalescible_solver_region(&var),
         None,
@@ -148,7 +152,7 @@ fn coalescible_region_requires_locally_emitted_slot() {
     // function (`emitted_alloc_regions`), so the activation map populates it at
     // runtime. A value whose region is class-coalescible yet allocated in another
     // activation — an immutable captured upvalue, a `sys/spawn-vm` thunk returning
-    // a captured string (tests/elle/concurrency.lisp) — has no slot stamped here,
+    // a captured string (tests/lang/concurrency.lisp) — has no slot stamped here,
     // so a slot-resolved `IncrefRegion` would resolve to None and free a live
     // region. Counterfactual: a wrapper that minted on demand (or omitted the
     // emitted-alloc guard) would accept the unstamped region — `AssertRegionMatches`
@@ -197,8 +201,8 @@ fn coalescible_region_requires_locally_emitted_slot() {
 fn coalescible_accepts_returned_fresh_pair() {
     // `(fn () (%pair 1 2))` — the tail is a fresh `%pair` allocation wrapped in
     // `Return`. Its region is a real local allocation (walk.rs `op.allocates()`),
-    // so the return mint is coalescible (docs/impl/region/mechanism.md § "Compile-time
-    // region selection (coalescing)", the direct-alloc branch). Counterfactual: a
+    // so the return mint is coalescible (docs/impl/region/mechanism.md, the
+    // direct-alloc branch). Counterfactual: a
     // reject-all predicate refuses it.
     let (lowerer, hir) = make_lowerer("(fn () (%pair 1 2))");
     let mut found = false;
@@ -268,11 +272,11 @@ fn coalescible_refuses_a_cell_stored_value() {
     // re-mints it at every store and each store's producer release unmaps the
     // allocation's static slot, leaving nothing for a later mint to resolve. The
     // returned `Var` must therefore take the value-resolved encoding
-    // (docs/impl/region/bindings.md § "A value a 1-slot container holds is a
-    // runtime fact"). Counterfactual: without the `cell_stored_regions` row the
-    // `%pair`'s region reads as a clean local allocation and the return mint is
-    // slot-resolved — `AssertRegionMatches` then detonates on the emptied slot
-    // (tests/elle/region-pair-heap-content-uaf.lisp).
+    // (docs/impl/region/bindings.md). Counterfactual: without the
+    // `cell_stored_regions` row the `%pair`'s region reads as a clean local
+    // allocation and the return mint is slot-resolved — `AssertRegionMatches`
+    // then detonates on the emptied slot
+    // (tests/impl/region-pair-heap-content-uaf.lisp).
     let (lowerer, hir) = make_lowerer(
         "(fn (n) (let [@acc (%pair 0 0)] \
             (var i 0) \
