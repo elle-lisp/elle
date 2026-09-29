@@ -1,7 +1,10 @@
-(elle/epoch 12)
-# Fixture: a form gated to the JIT tier (docs/test-runner.md § Gating).
-# Expected runner behavior, per tier:
-#   vm  -> status=skip,  reason="needs JIT"  (the loud gate emits :gated)
-#   jit -> status=pass   (gate open, body runs)
-# Uses the proposed compile-time gate `gate!` and predicate `backend?`.
-(gate! (backend? :jit) "needs JIT" (assert true "runs only under JIT"))
+(elle/epoch 13)
+# audited: 2026-09-29
+# Fixture: a form gated on a fact about the machine.
+# docs/test-runner.md
+#
+# The runner never sets the variable the gate reads, so the gate is shut, the
+# runner records one skip with the reason "needs a widget", and the body never
+# runs.
+(gate! (get (sys/env) "ELLE_RUNNER_FIXTURE_WIDGET") "needs a widget"
+       (assert false "the gate ran its body"))
