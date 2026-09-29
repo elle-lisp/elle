@@ -1,13 +1,12 @@
-// audited: 2026-09-17
+// audited: 2026-09-29
 // A dashboard verdict is a row: what the measurement channel carries, what the
 // runner writes, and what a direct run still does not write.
 //
 // docs/test-store.md
 //
-// The counter-factual: the estimator printed every rate to stdout and asserted
-// on it, so a rate existed only as prose in a terminal. No query could ask what
-// it was three commits ago, and the coverage of a dashboard could be checked
-// against nothing. These read the rows that answer both.
+// The counter-factual: a rate printed only to stdout exists only as prose in a
+// terminal. No query can ask what it was three commits ago, and a dashboard's
+// coverage can be checked against nothing. These read the rows that answer both.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -23,7 +22,7 @@ fn repo_root() -> PathBuf {
 /// The miniature dashboard: one probe read on the object count and the region
 /// count, through the same estimator the leak dashboards use.
 fn dashboard() -> PathBuf {
-    repo_root().join("tests/elle/measure-channel.lisp")
+    repo_root().join("tests/impl/measure-channel.lisp")
 }
 
 /// Run the dashboard as an isolated child, which is what opens the channel.
@@ -140,8 +139,7 @@ fn the_summary_names_the_measurements() {
 
 /// The channel is a file the environment names, so a dashboard writes to it
 /// only when something opened it. Unset, the dashboard prints and records
-/// nothing — which is what keeps `elle tests/elle/oracle.lisp` reading as it
-/// always did.
+/// nothing, so a direct run of tests/impl/oracle.lisp only prints.
 #[test]
 fn the_channel_is_closed_unless_the_environment_opens_it() {
     let dir = crate::common::ScratchDir::new("measure-channel-env");
