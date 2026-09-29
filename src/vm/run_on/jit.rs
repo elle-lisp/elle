@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! `compile/run-on :jit` — force Cranelift JIT execution.
 //!
 //! Both variants live here: the real entry point under `--features jit`, and
@@ -78,11 +78,20 @@ impl VM {
         // Save the operand stack and signal — call_jit may push and set.
         let saved_stack = std::mem::take(&mut self.fiber.stack);
         let saved_signal = self.fiber.signal.take();
+        // Compiled frames that leave by an error or a refused park pop none of
+        // the `parameterize` frames they pushed, so each such exit below
+        // truncates to this.
+        let depth = self.fiber.param_depth();
 
         let result_jv = self.call_jit(&jit_code, closure, args, closure_val);
 
         // Capture any signal the JIT set (errors, halts, yields).
         let post_signal = self.fiber.signal.take();
+        // An error abandons the compiled frames. A tail callee that raises
+        // drops its own, in `execute_bytecode_saving_stack`.
+        if post_signal.is_some_and(|(bits, _)| bits.intersects(SIG_ERROR)) {
+            self.fiber.unwind_params(depth);
+        }
 
         // Decode the return value — handle tail calls before restoring
         // the caller's stack, since the trampoline needs the VM state.
@@ -126,7 +135,7 @@ impl VM {
                 } else {
                     // Suspending signal — not supported under compile/run-on.
                     // This host refuses the park and raises at its own call.
-                    self.refuse_hosted_park(eb, tail_signal);
+                    self.refuse_held_park(eb, tail_signal, depth);
                     return (
                         SIG_ERROR,
                         rejected(self, "jit", "tail-call target yielded under compile/run-on"),
@@ -160,13 +169,16 @@ impl VM {
             if !squelched.is_empty() {
                 // …and the park it ends is `post_signal` for the same reason:
                 // `fiber.signal` holds the caller's by here.
-                return (SIG_ERROR, self.squelch_violation(squelched, post_signal));
+                return (
+                    SIG_ERROR,
+                    self.squelch_violation(squelched, post_signal, depth),
+                );
             }
 
             // Not squelched: this host refuses the park and raises at its own
             // call. The park is `post_signal`, for the reason the squelch check
             // above names.
-            self.refuse_hosted_park(yield_bits, post_signal);
+            self.refuse_held_park(yield_bits, post_signal, depth);
 
             if let Some((bits, val)) = post_signal {
                 return (
@@ -194,7 +206,10 @@ impl VM {
             // reason for not routing through `enforce_squelch`.
             let squelched = crate::signals::squelched_bits(bits, closure.squelch_mask);
             if !squelched.is_empty() {
-                return (SIG_ERROR, self.squelch_violation(squelched, post_signal));
+                return (
+                    SIG_ERROR,
+                    self.squelch_violation(squelched, post_signal, depth),
+                );
             }
             if !bits.is_empty() {
                 return (bits, val);

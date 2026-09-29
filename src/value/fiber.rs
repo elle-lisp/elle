@@ -18,7 +18,7 @@ mod caller;
 mod frame;
 mod handle;
 mod status;
-pub use caller::{Activation, CallSite, PausedCaller};
+pub use caller::{Activation, CallSite, ParamDepth, PausedCaller, TailSquelch};
 pub use frame::*;
 pub use handle::*;
 pub use status::*;
@@ -326,6 +326,19 @@ impl Fiber {
                 cursor: 0,
             }),
         }
+    }
+
+    /// How many `parameterize` frames this fiber holds, for an entry to record.
+    #[inline]
+    pub fn param_depth(&self) -> ParamDepth {
+        ParamDepth(self.param_frames.len())
+    }
+
+    /// Drop the `parameterize` frames pushed above `depth` by code that
+    /// stopped running ([`ParamDepth`]).
+    #[inline]
+    pub fn unwind_params(&mut self, depth: ParamDepth) {
+        self.param_frames.truncate(depth.0);
     }
 
     /// Set an error signal on this fiber, the error value born in the

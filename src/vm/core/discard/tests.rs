@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! How a host that runs code on the current fiber ends a park of that code:
 //! refused, or handed on as its own call's park.
 //!
@@ -45,8 +45,7 @@ fn a_refused_park_takes_its_frames_off_the_fiber() {
         vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &code, &env, &mut ip);
         assert!(vm.fiber.suspended.is_some(), "the park parks its frame");
 
-        let parked = vm.fiber.signal;
-        vm.refuse_hosted_park(SIG_YIELD, parked);
+        vm.refuse_hosted_park(SIG_YIELD, vm.fiber.param_depth());
         assert!(
             vm.fiber.suspended.is_none(),
             "the refused frames leave the fiber",
@@ -84,8 +83,7 @@ fn a_refused_park_releases_its_delivery_retain() {
             "the park takes the delivery retain",
         );
 
-        let parked = vm.fiber.signal;
-        vm.refuse_hosted_park(SIG_YIELD, parked);
+        vm.refuse_hosted_park(SIG_YIELD, vm.fiber.param_depth());
         assert_eq!(
             vm.heap().region_rc(region),
             before,
@@ -104,8 +102,7 @@ fn an_error_is_not_a_refused_park() {
         let mut ip = 0usize;
 
         vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &code, &env, &mut ip);
-        let parked = vm.fiber.signal;
-        vm.refuse_hosted_park(SIG_ERROR, parked);
+        vm.refuse_hosted_park(SIG_ERROR, vm.fiber.param_depth());
         assert!(
             vm.fiber.suspended.is_some(),
             "the frames stay for the restart"

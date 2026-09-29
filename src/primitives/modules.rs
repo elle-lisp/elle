@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! The import-file primitive: resolve a module spec, then run a .lisp module or
 //! load a native plugin, with circular-import detection.
 //!
@@ -346,6 +346,7 @@ pub(crate) fn prim_import_file(
             // top-level `protect`/`fiber/resume` returns SIG_SWITCH that must be
             // drained here rather than leaked out of the import boundary. Using the
             // raw executor reported that internal signal as "unexpected".
+            let depth = vm.fiber.param_depth();
             let bits = vm.run_thunk_to_completion(&code, &empty_env);
 
             match bits {
@@ -380,8 +381,7 @@ pub(crate) fn prim_import_file(
                 bits => {
                     // import cannot hold a park of the module it ran, so it
                     // refuses it and raises at its own call.
-                    let parked = vm.fiber.signal.take();
-                    vm.refuse_hosted_park(bits, parked);
+                    vm.refuse_hosted_park(bits, depth);
                     crate::rich_error!(
                         ctx,
                         "eval-error",

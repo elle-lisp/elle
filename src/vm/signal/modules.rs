@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! The `compile/*` queries that run code on this VM: `compile/run-on`'s tier
 //! dispatch, the test-module compilations, and `compile/dumps`.
 //!
@@ -391,6 +391,7 @@ impl VM {
         let empty_env = Rc::new(vec![]);
         // Drive the module body, including any nested fiber/resume SIG_SWITCH
         // trampoline, to completion — see VM::run_thunk_to_completion.
+        let depth = self.fiber.param_depth();
         let bits = self.run_thunk_to_completion(&code, &empty_env);
 
         match bits {
@@ -411,8 +412,7 @@ impl VM {
             other => {
                 // The setup run cannot hold a park of the module it ran, so it
                 // refuses it and raises at its own call.
-                let parked = self.fiber.signal.take();
-                self.refuse_hosted_park(other, parked);
+                self.refuse_hosted_park(other, depth);
                 (
                     SIG_ERROR,
                     ctx.error(

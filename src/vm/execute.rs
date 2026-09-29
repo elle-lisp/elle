@@ -91,6 +91,7 @@
 //!    so the `SIG_SWITCH` trampoline is driven inside your scope — see the
 //!    SIG_SWITCH section above.
 
+use crate::value::fiber::{ParamDepth, TailSquelch};
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
 use std::rc::Rc;
 
@@ -128,8 +129,8 @@ impl VM {
     }
 
     /// Replace the running activation's body with a pending tail call's callee,
-    /// answering the callee's code and environment. The caller ORs the tail
-    /// call's squelch mask into the activation's own.
+    /// answering the callee's code and environment. The caller adds the tail
+    /// call's squelch mask to the activation's [`TailSquelch`].
     fn replace_by_tail_call(
         &mut self,
         tail: crate::vm::core::TailCallInfo,
@@ -171,7 +172,7 @@ impl VM {
         code: crate::value::Code,
         env: Rc<Vec<Value>>,
         exit: Exit,
-        tail_squelch: SignalBits,
+        tail_squelch: TailSquelch,
         walk_abandoned: bool,
     ) -> ExecResult {
         if exit.bits.is_empty() {
@@ -191,7 +192,7 @@ impl VM {
         // abandonment accounting in step (docs/impl/region/mechanism.md § "A
         // squelch boundary abandons frames the same way, so it runs the same
         // walk").
-        let exit = if self.enforce_squelch(exit.bits, tail_squelch) {
+        let exit = if self.enforce_squelch(exit.bits, tail_squelch.mask, tail_squelch.depth) {
             Exit::at(SIG_ERROR, exit.ip)
         } else {
             exit
@@ -223,13 +224,13 @@ impl VM {
     /// raised: a nested interpreted callee (`run_dispatch`), a compiled one
     /// (`call_inner`), and a re-entered body the error abandons
     /// (`execute_bytecode_saving_stack`).
-    pub(crate) fn drop_abandoned_param_frames(&mut self, depth: usize) {
+    pub(crate) fn drop_abandoned_param_frames(&mut self, depth: ParamDepth) {
         if self
             .fiber
             .signal
             .is_some_and(|(bits, _)| bits.intersects(SIG_ERROR))
         {
-            self.fiber.param_frames.truncate(depth);
+            self.fiber.unwind_params(depth);
         }
     }
 
@@ -307,13 +308,13 @@ impl VM {
         let mut current_code = code.clone();
         let mut current_env = closure_env.clone();
         let mut current_ip = start_ip;
-        let mut accumulated_squelch_mask = SignalBits::EMPTY;
+        let mut tail_squelch = TailSquelch::none(self.fiber.param_depth());
 
         loop {
             let exit = self.run_dispatch(&current_code, &current_env, current_ip);
             if exit.bits.is_empty() {
                 if let Some(tail) = self.pending_tail_call.take() {
-                    accumulated_squelch_mask |= tail.squelch_mask;
+                    tail_squelch.add(tail.squelch_mask, self.fiber.param_depth());
                     (current_code, current_env) = self.replace_by_tail_call(tail);
                     current_ip = 0;
                     continue;
@@ -323,7 +324,7 @@ impl VM {
                 current_code,
                 current_env,
                 exit,
-                accumulated_squelch_mask,
+                tail_squelch,
                 walk_abandoned,
             );
         }
@@ -372,7 +373,7 @@ impl VM {
         // (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
         // it still owes").
         let parks_error_frame = std::mem::take(&mut self.pending_error_park);
-        let param_depth = self.fiber.param_frames.len();
+        let param_depth = self.fiber.param_depth();
         #[cfg(debug_assertions)]
         let entry_depth = self.fiber.activation_region_maps.len();
         self.open_activation();
@@ -387,7 +388,7 @@ impl VM {
                 code.clone(),
                 closure_env.clone(),
                 Exit::at(SIG_HALT, 0),
-                SignalBits::EMPTY,
+                TailSquelch::none(param_depth),
                 !parks_error_frame,
             )
         } else {

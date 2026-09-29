@@ -1,4 +1,8 @@
+// audited: 2026-09-29
 //! `compile/run-on :bytecode` — force pure interpreter execution.
+//!
+//! docs/impl/differential.md
+//! docs/impl/region/park.md
 
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_OK};
 use crate::vm::core::VM;
@@ -6,10 +10,9 @@ use crate::vm::core::VM;
 impl VM {
     /// Run a closure under pure bytecode interpretation.
     ///
-    /// Saves and restores JIT policy so the VM's tier dispatch can't
-    /// route the top-level call through JIT or MLIR. Nested calls still
-    /// honor the surrounding configuration — Phase 1 differential tests
-    /// use leaf functions, so this is a non-issue in practice.
+    /// Turns the JIT policy off for the run and restores it afterwards, so
+    /// neither this call nor a call it makes enters the JIT. A call it makes
+    /// can still run on the WASM or MLIR tier.
     pub fn invoke_closure_bytecode(
         &mut self,
         closure_val: Value,
@@ -37,6 +40,7 @@ impl VM {
         // Hand the target its executing-closure register via the one-shot — a
         // forced-tier entry runs a closure body like any other entrant.
         self.pending_entry_closure = closure_val;
+        let depth = self.fiber.param_depth();
         let result = self.execute_bytecode_saving_stack(&closure.template.code(), &new_env);
 
         self.runtime_config.jit = saved_jit;
@@ -62,7 +66,7 @@ impl VM {
             return (crate::value::SIG_HALT, val);
         }
 
-        if self.enforce_squelch(bits, squelch_mask) {
+        if self.enforce_squelch(bits, squelch_mask, depth) {
             return self.fiber.signal.take().unwrap();
         }
 
@@ -70,7 +74,7 @@ impl VM {
         // park it names is abandoned with its host (`abandon_hosted_park`).
         self.abandon_hosted_park(bits);
 
-        // Other errors: extract from fiber signal.
+        // An error, or the suspension handed on: the slot holds the result.
         if let Some((sig_bits, val)) = self.fiber.signal.take() {
             return (sig_bits, val);
         }
