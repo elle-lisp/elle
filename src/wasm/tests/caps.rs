@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 // docs/impl/wasm.md
 //! The capability gate on this tier: a native the calling fiber withholds is
 //! denied, and the fiber reads the shared denial payload.
@@ -140,6 +140,73 @@ fn wasm_full_tail_denial_of_error_parks_like_any_other() {
         "true",
         "a tail-position :error denial must come to rest :paused, as it does on \
          the interpreter"
+    );
+}
+
+/// A fiber takes its creator's withheld set. This tier runs the sandbox's body
+/// without installing it as `vm.fiber`, so `fiber/new` reading the VM's fiber
+/// gives the made fiber the top-level set, and an unrestricted resume from
+/// outside then runs its denied native to completion.
+#[test]
+fn wasm_full_a_fiber_takes_its_creators_withheld_set() {
+    assert_eq!(
+        eval_with_stdlib(
+            "(let [made (fiber/resume \
+                          (fiber/new (fn [] (fiber/new (fn [] (do (path/exists? \"blocked\") 1)) \
+                                                       |:error :fs|)) \
+                                     |:error| :deny |:fs|))] \
+               (fiber/resume made) \
+               (= :paused (fiber/status made)))"
+        ),
+        "true",
+        "a fiber a driven sandbox creates must carry the sandbox's denial"
+    );
+}
+
+/// A resume adds the resumer's withheld set, as `with_child_fiber` does on the
+/// VM. The fiber here is made outside the sandbox, so only the resume can
+/// carry the denial to it.
+#[test]
+fn wasm_full_a_resume_adds_the_resumers_withheld_set() {
+    assert_eq!(
+        eval_with_stdlib(
+            "(let [inner (fiber/new (fn [] (do (path/exists? \"blocked\") 1)) |:error :fs|) \
+                   outer (fiber/new (fn [f] (fiber/resume f) (fiber/status f)) \
+                                    |:error| :deny |:fs|)] \
+               (= :paused (fiber/resume outer inner)))"
+        ),
+        "true",
+        "a fiber a denied fiber resumes must carry the resumer's denial"
+    );
+}
+
+/// `(fiber/caps)` answers for the fiber whose body is running, which on this
+/// tier is the driven fiber and not `vm.fiber`.
+#[test]
+fn wasm_full_fiber_caps_answers_for_the_driven_fiber() {
+    assert_eq!(
+        eval_with_stdlib(
+            "(let [f (fiber/new (fn [] (fiber/caps)) |:error| :deny |:fs|)] \
+               (not (contains? (fiber/resume f) :fs)))"
+        ),
+        "true",
+        "(fiber/caps) inside a driven fiber must omit the bit it withholds"
+    );
+}
+
+/// A thread takes the spawning fiber's withheld set. On this tier that fiber is
+/// the driven one, so a worker built from `vm.fiber` runs with the top-level
+/// set and the sandbox escapes by spawning a thread.
+#[test]
+fn wasm_full_a_thread_takes_the_driven_fibers_withheld_set() {
+    assert_eq!(
+        eval_with_stdlib(
+            "(let [f (fiber/new (fn [] (sys/spawn-vm (fn [] (fiber/caps)))) \
+                                |:error :fs| :deny |:fs|)] \
+               (not (contains? (sys/join (fiber/resume f)) :fs)))"
+        ),
+        "true",
+        "a worker spawned from a driven fiber must lack the bit that fiber withholds"
     );
 }
 
