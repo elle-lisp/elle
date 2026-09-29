@@ -24,7 +24,7 @@ pub use handle::*;
 pub use status::*;
 
 mod delivery;
-pub use delivery::Delivery;
+pub use delivery::{Delivery, RaiseSite};
 
 mod dues;
 pub use dues::ActivationDues;

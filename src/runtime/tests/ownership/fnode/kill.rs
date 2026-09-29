@@ -1,5 +1,6 @@
-// audited: 2026-09-19
-//! What a hard kill of a parked fiber frees, and the one payload it must retain instead.
+// audited: 2026-09-28
+//! What a hard kill of a parked or stopped fiber frees, the payload it must retain,
+//! and the error payload it displaces.
 //!
 //! docs/impl/region/park.md
 
@@ -10,10 +11,9 @@ use super::*;
 /// owner node (gathered under it by `reparent_owned_children` — one set-drop),
 /// and `fiber/abort` of a not-yet-started fiber releases the fiber node
 /// (docs/impl/region/owner.md § "Owner nodes" — "Fiber teardown frees
-/// everything the fiber owns"). Both route through `kill_fiber`; before it, the
-/// cancel arm dropped the chain bare (`suspended = None`), stranding every
-/// parked node. The counterfactual is exactly that strand: without the
-/// teardown, no generation bumps and the count grows per cycle.
+/// everything the fiber owns"). Both route through `kill_fiber`. The
+/// counter-factual is a cancel that drops the chain bare (`suspended = None`):
+/// no generation bumps, and the count grows per cycle.
 #[test]
 fn fiber_kill_frees_parked_and_fiber_owned() {
     use crate::compiler::bytecode::{Bytecode, Instruction};
@@ -64,7 +64,7 @@ fn fiber_kill_frees_parked_and_fiber_owned() {
         };
         assert!(bits.is_empty(), "cancelling a parked fiber succeeds");
         unsafe { &mut *heap_ptr }.decref_region_if_present(ctx_region);
-        assert_eq!(handle.with(|f| f.status), FiberStatus::Error);
+        assert_eq!(handle.with(|f| f.status), FiberStatus::Dead);
         assert!(
             handle.with(|f| f.suspended.is_none()),
             "the cancel consumed the parked chain"
@@ -126,13 +126,12 @@ fn fiber_kill_frees_parked_and_fiber_owned() {
 
 /// `kill_fiber` parks the cancel payload as the fiber's TERMINAL signal, so it
 /// owes the SAME park-retain + recorded content edge the normal completion path
-/// takes (`do_fiber_resume` step 6a): the fiber's free releases the payload's
+/// takes (`with_child_fiber` step 6a): the fiber's free releases the payload's
 /// region once (the recorded-edge cascade / the object scan's Fiber signal arm),
 /// so without the pair a heap payload in a LIVE foreign region is (a) an
 /// unrecorded content edge — the debug equivalence oracle detonates at the fiber
 /// region's free — and (b) an over-free of the payload's region (a scan decref
-/// with no matching incref). Historically masked by the borrowed tail-arg leak,
-/// which pinned every cancelled fiber's region so the free never ran.
+/// with no matching incref).
 #[test]
 fn fiber_kill_park_retains_terminal_payload() {
     use crate::compiler::bytecode::{Bytecode, Instruction};
@@ -175,7 +174,7 @@ fn fiber_kill_park_retains_terminal_payload() {
     };
     assert!(bits.is_empty(), "cancelling a parked fiber succeeds");
     unsafe { &mut *heap_ptr }.decref_region_if_present(ctx_region);
-    assert_eq!(handle.with(|f| f.status), FiberStatus::Error);
+    assert_eq!(handle.with(|f| f.status), FiberStatus::Dead);
 
     // The park-retain: exactly one owning reference for the parked terminal
     // signal (the counterfactual — kill_fiber without it leaves the rc flat,
@@ -209,4 +208,82 @@ fn fiber_kill_park_retains_terminal_payload() {
         unsafe { &*heap_ptr }.generation_raw(rid_p.get()) > gen_p,
         "the payload's region frees once the test's references drop"
     );
+}
+
+/// A fiber stopped on an error holds its payload as a TERMINAL signal, with the
+/// park-retain and recorded content edge `with_child_fiber` step 6a takes. The
+/// hard kill installs its own payload over that signal, so it owes the displaced
+/// one the release a restart's install owes (`release_displaced_terminal_signal`,
+/// docs/impl/region/park.md § "A parked TERMINAL result displaced by a resume or
+/// abort install is released as it is displaced"). Without it the retain has no
+/// consumer, and the recorded edge outlives the signal the free-time scan reads,
+/// so the equivalence oracle panics at the fiber's free.
+///
+/// Two faces, one per status a stopped fiber can have: a mask that catches the
+/// error leaves it `:paused`, and one that does not leaves it `:error`, which
+/// the resume handler promotes. Cancel accepts both and ends the fiber `:dead`
+/// (docs/signals/primitives.md § "Cancel vs. Abort").
+#[test]
+fn fiber_kill_releases_displaced_error_signal() {
+    use crate::compiler::bytecode::{Bytecode, Instruction};
+    use crate::value::fiber::FiberStatus;
+
+    let mut vm = crate::vm::VM::new();
+    let heap_ptr = vm.heap_ptr;
+    let vm_ptr: *mut crate::vm::VM = &mut vm;
+
+    for uncaught in [false, true] {
+        let (payload, rid_p) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
+        let mut bc = Bytecode::new();
+        let idx = bc.add_constant(payload);
+        bc.emit(Instruction::LoadConst);
+        bc.emit_u16(idx);
+        bc.emit(Instruction::Emit);
+        bc.emit_signal_bits(crate::value::fiber::SIG_ERROR);
+        bc.emit(Instruction::Return);
+        let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, bc);
+
+        let (bits, v) = vm.do_fiber_resume(&handle, fiber_value);
+        assert!(
+            bits.intersects(crate::value::fiber::SIG_ERROR),
+            "the body stops on its raise"
+        );
+        assert!(v.bit_identical(payload), "the raise carries the payload");
+        if uncaught {
+            // The resume handler's promotion for a mask that lets the error pass.
+            handle.with_mut(|f| f.status = FiberStatus::Error);
+        }
+
+        let rc_before = region_rc(unsafe { &*heap_ptr }, rid_p);
+        let ctx_region = unsafe { &mut *heap_ptr }.new_runtime_region();
+        let (bits, _v) = {
+            let mut ctx = crate::primitives::ctx::NativeCtx::with_region_vm(
+                ctx_region,
+                unsafe { &mut *heap_ptr },
+                vm_ptr,
+            );
+            crate::primitives::fiber_introspect::prim_fiber_cancel(&mut ctx, &[fiber_value])
+        };
+        unsafe { &mut *heap_ptr }.decref_region_if_present(ctx_region);
+        assert!(
+            bits.is_empty(),
+            "cancelling a fiber stopped on an error succeeds (uncaught={uncaught})"
+        );
+        assert_eq!(
+            region_rc(unsafe { &*heap_ptr }, rid_p),
+            rc_before - 1,
+            "the kill releases the park-retain of the error it displaces \
+             (uncaught={uncaught})"
+        );
+        assert_eq!(handle.with(|f| f.status), FiberStatus::Dead);
+        assert!(
+            handle.with(|f| f.suspended.is_none()),
+            "the cancel consumed the error park"
+        );
+
+        // The fiber's free: the debug equivalence oracle compares the recorded
+        // edge table with the content scan, so an edge the kill left for the
+        // displaced payload panics here.
+        release_fiber_value(unsafe { &mut *heap_ptr }, fiber_value);
+    }
 }
