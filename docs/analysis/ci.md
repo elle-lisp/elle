@@ -130,18 +130,24 @@ batch. Each process keeps the compiled module and the region heap of every file
 in its batch until it exits. The batch size therefore bounds the peak memory of
 one process.
 
-The default is 25 files. `macOS Smoke` uses 10. A 25-file batch stalled there:
-[region-eval-return-leak](../../tests/elle/region-eval-return-leak.lisp) hit
-its deadline with `join: deadline exceeded`, and the same run passed on Linux
-and AArch64.
+The default is 25 files. `macOS Smoke` and `AArch64 Smoke` use 10. A 25-file
+batch stalled on macOS: [region-eval-return-leak](../../tests/elle/region-eval-return-leak.lisp)
+hit its deadline with `join: deadline exceeded`, and the same run passed on
+Linux and AArch64. The smaller batch then shortened the macOS job's wall clock
+a great deal.
 
-The working theory is page size. Pages on the macOS runner (arm64) are 16 KiB,
-and pages on the x86_64 Linux runner are 4 KiB. Nobody has confirmed the theory,
-so the smaller batch is a mitigation and not a diagnosis.
+AArch64 Smoke takes the same batch to shorten its wall clock too. It never
+stalled, and this document records no measurement of the effect there. Read the
+job's time before and after the change to learn whether it helped.
 
-The Makefile reads the platform from `HOST_OS`, which defaults to `uname -s`.
-A test sets `HOST_OS` to present another platform. Pass `CORPUS_BATCH=` to
-override the choice for one run.
+The working theory for the macOS stall is page size. Pages on the macOS runner
+(arm64) are 16 KiB, and pages on the x86_64 Linux runner are 4 KiB. Nobody has
+confirmed the theory, so the smaller batch is a mitigation and not a diagnosis.
+
+The Makefile reads the platform from `HOST_OS` and `HOST_ARCH`, which default to
+`uname -s` and `uname -m`. A batch of 10 applies on Darwin and on `aarch64` or
+`arm64`. A test sets both variables to present another platform. Pass
+`CORPUS_BATCH=` to override the choice for one run.
 
 ### The plugins job
 
