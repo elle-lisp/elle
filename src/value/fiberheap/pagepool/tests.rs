@@ -1,4 +1,8 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-09-29
+//! Unit tests for the page pool: page classes, alignment, the cache bound, and a recycle that writes nothing.
+//!
+//! docs/impl/region/model.md
+//! docs/impl/memory.md
 
 use super::*;
 
@@ -26,8 +30,7 @@ fn claim_rounds_up_to_power_of_two() {
     assert_eq!(page.len(), 2 * base_page());
 }
 
-// ── The base page is the OS page (docs/impl/region/model.md § "The base page
-// is the OS page") ──
+// ── The base page is the OS page (docs/impl/region/model.md) ──
 
 #[test]
 fn base_page_is_the_os_page() {
@@ -216,12 +219,12 @@ fn geometric_growth_sizes() {
     assert_eq!(size, base_page() << 5);
 }
 
-// ── The page-recycle contract (docs/impl/region/model.md § "Page recycling") ──
+// ── The page-recycle contract (docs/impl/region/model.md) ──
 //
 // Recycling a page is a free-list pop. The pool neither reads nor writes the
 // page on the way through, in either direction, so a region pays for a page
 // once — when it writes it. The Elle-level companion is
-// tests/elle/region-page-recycle.lisp, which measures what a claim costs a
+// tests/impl/region-page-recycle.lisp, which measures what a claim costs a
 // running program through the `arena/page-claims` gauge.
 //
 // The `--trace=scrub` diagnostic is the one thing that does write a released
@@ -340,10 +343,10 @@ fn large_pages_are_self_aligned() {
     }
 }
 
-// A file-backed (hydrated image) page is never cached: its release is
-// `munmap`, even when the cache has room (docs/impl/image.md § Hydration
-// step 3). The anonymous release above (`release_and_reclaim`) is the
-// counter-factual: same pool, same room, an anonymous page IS cached.
+// A file-backed (hydrated image) page is never cached: its release is `munmap`, even
+// when the cache has room (docs/impl/image.md). The anonymous release above
+// (`release_and_reclaim`) is the counter-factual: same pool, same room, an anonymous
+// page IS cached.
 #[test]
 fn file_backed_release_is_munmap_not_cache() {
     let mut pool = PagePool::default();

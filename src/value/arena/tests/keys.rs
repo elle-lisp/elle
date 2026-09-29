@@ -1,14 +1,13 @@
-// audited: 2026-09-09
-// An `@struct` key is interned into the container's region, and costs that
-// region nothing.
-//
-// docs/impl/values.md
+// audited: 2026-09-29
+//! An `@struct` key is interned into the container's region, and costs that region nothing.
+//!
+//! docs/impl/values.md
 
 use super::*;
 
 // A key that is actually stored is interned into the container's region, so an
 // `@struct` never holds a key borrowed from whatever region the caller built it
-// in (docs/impl/values.md § "Struct keys").
+// in (docs/impl/values.md).
 #[test]
 fn a_stored_at_struct_key_is_interned_into_the_container_region() {
     use crate::value::heap::TableKey;
@@ -82,16 +81,15 @@ fn rebinding_an_at_struct_key_interns_nothing_new() {
 
 // ── A key's region is counted only when it is another region ───────────────
 //
-// docs/impl/values.md § "A key's region is counted like a value's". An interned
-// key is co-region with its container, so it is a self-edge that neither the RC
-// nor the outgoing-edge table counts — the rule the free-time cascade already
-// follows through its `own_id` filter.
+// docs/impl/values.md: an interned key is co-region with its container, so it
+// is a self-edge that neither the RC nor the outgoing-edge table counts — the
+// rule the free-time cascade already follows through its `own_id` filter.
 
 // The counter-factual: a put funnel that increfs the container's own region for
 // its interned key takes a reference the free cascade never releases, because
-// the cascade skips self-edges. `put` of a string key then leaked the container
+// the cascade skips self-edges. `put` of a string key then leaks the container
 // region outright — one region per call, measured in
-// tests/elle/region-struct-key.lisp.
+// tests/impl/region-struct-key.lisp.
 #[test]
 fn an_interned_at_struct_key_adds_no_reference_to_the_container_region() {
     use crate::value::heap::TableKey;
@@ -133,7 +131,7 @@ fn an_interned_at_struct_key_adds_no_reference_to_the_container_region() {
 // counter-factual: `del` of a key `struct_mut_from` interned decrefs the
 // container's region — taking a sole reference to zero — and the next read of
 // the struct lands on a freed page (the macOS `--trace=scrub` crash in
-// tests/elle/array-keys.lisp).
+// tests/lang/array-keys.lisp).
 #[test]
 fn removing_a_constructor_interned_key_leaves_the_container_region_live() {
     use crate::value::heap::TableKey;
