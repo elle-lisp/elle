@@ -72,6 +72,17 @@ define RUN_PLUMB
 		|| { echo "FAILED: plumb.lisp ($(1))"; exit 1; }
 endef
 
+# One dashboard through the runner, as an isolated child under each JIT policy.
+# The runner opens the measurement channel only for an `--isolate` child, so
+# this is the shape that turns each verdict into a row (docs/testing.md). The
+# per-file passes above spell the direct runs; every `elle test` target spells
+# this one. The dashboard's own budget becomes the child's `--timeout`.
+# $(1) the dashboard file   $(2) its budget in seconds, as `120s`
+define RUN_DASHBOARD
+	@$(ELLE) test $(ELLE_TEST_FLAGS) --isolate '--jit=off' --timeout $(patsubst %s,%000,$(2)) $(1) || { echo "FAILED: the --jit=off dashboard run"; exit 1; }
+	@$(ELLE) test $(ELLE_TEST_FLAGS) --isolate '--jit=eager' --timeout $(patsubst %s,%000,$(2)) $(1) || { echo "FAILED: the --jit=eager dashboard run"; exit 1; }
+endef
+
 # Some corpus files spend most of a per-file budget on work the case needs: the
 # h2 families drive hundreds of requests or streams over one session, and
 # region-jit-io-suspend-uaf reads 20000 lines to drive one function hot enough
@@ -289,10 +300,10 @@ semver-check: elle  ## Verify every versioned library surface against its commit
 #
 # The featured builds run the SAME corpus through the runner
 # (smoke-mlir/smoke-wasm — the binary's extra tier joins the matrix and its
-# divergence rows land in the session DB), plus one whole-file pass in the
-# process-global mode the runner cannot vary per file (--mlir=eager /
-# --wasm=full). smoke-noffi is the same per-file shape for a build with no
-# features.
+# divergence rows land in the session DB). smoke-wasm adds one whole-file pass
+# in the process-global mode the runner cannot vary per file (--wasm=full).
+# smoke-noffi is the per-file shape for a build with no features, which cannot
+# host the runner: the runner's store is FFI bindings to libsqlite3 and libzstd.
 
 # The agent-first runner: ONE process, the whole corpus, ONE SQLite session DB.
 # `elle test` (docs/testing.md, docs/test-runner.md) compiles + runs every file
@@ -309,16 +320,16 @@ semver-check: elle  ## Verify every versioned library surface against its commit
 # rather than raising (docs/test-runner.md § Concurrent runs wait).
 
 # Quarantine list for the gate — known HARNESS bugs (NOT test failures) get
-# parked here with a tracked reason, plus the one file whose budget the runner
-# cannot express.
+# parked here with a tracked reason, plus the two dashboards whose budgets a
+# batch cannot express.
 #
-# oracle.lisp is that file: it is a measurement instrument whose cost is tens of
-# seconds of region alloc/reclaim on any tier, close enough to the runner's
+# oracle.lisp and plumb.lisp are those files: each is a measurement instrument
+# whose cost is tens of seconds on any tier, close enough to the runner's
 # per-form budget that a batch running it beside 24 other files loses the race
-# and records `timeout`. `RUN_CORPUS` runs it after the batch under
-# `ORACLE_TIMEOUT` instead, which is what smoke-vm/jit/noffi already do — so the
-# gate still covers it on both policies and every other file keeps failing fast
-# on a hang.
+# and records `timeout`. `RUN_CORPUS` runs each after the batches through
+# `RUN_DASHBOARD`, an isolated child under the dashboard's own budget — so the
+# gate still covers both policies, the verdicts land in the session DB, and
+# every other file keeps failing fast on a hang.
 #
 # (Resolved: subprocess.lisp used to hang in a worker thread — children inherited
 # the worker's all-blocked signal mask across fork/exec, so SIGTERM never landed
@@ -404,10 +415,8 @@ define RUN_CORPUS
 		| $(DEAL_CORPUS) \
 		| xargs -n $(CORPUS_BATCH) $(ELLE) test $(WIDE_FLAGS) $(ELLE_TEST_FLAGS) \
 		|| { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md § Reading a run)"; exit 1; }
-	$(call RUN_ORACLE,--jit=off)
-	$(call RUN_ORACLE,--jit=eager)
-	$(call RUN_PLUMB,--jit=off)
-	$(call RUN_PLUMB,--jit=eager)
+	$(call RUN_DASHBOARD,$(ORACLE_FILE),$(ORACLE_TIMEOUT))
+	$(call RUN_DASHBOARD,$(PLUMB_FILE),$(PLUMB_TIMEOUT))
 endef
 
 smoke-elle: elle  ## Run the whole corpus through `elle test` (vm + jit + divergence)
@@ -500,17 +509,9 @@ elle-mlir:   ## Build elle with MLIR support (for smoke-mlir)
 	@echo "=== build elle with MLIR ==="
 	cargo build $(CARGO_PROFILE) -p elle --features mlir -q
 
-smoke-mlir: elle-mlir  ## Corpus via elle test (+ mlir-cpu tier) + whole-file --mlir=eager pass
+smoke-mlir: elle-mlir  ## Corpus via elle test, with the mlir-cpu tier
 	@echo "=== elle test (mlir build: + mlir-cpu tier, cross-tier divergence) ==="
 	$(RUN_CORPUS)
-	@echo "=== elle tests (eager MLIR, whole-file) ==="
-	@printf '%s\n' tests/elle/*.lisp | \
-		grep -v $(ORACLE_FILE) | grep -v $(PLUMB_FILE) | \
-		parallel -j $(JOBS) --tag \
-			'timeout $(FILE_TIMEOUT) $(ELLE) --mlir=eager {}' \
-		|| { echo "FAILED: elle tests MLIR pass (eager)"; exit 1; }
-	$(call RUN_ORACLE,--mlir=eager)
-	$(call RUN_PLUMB,--mlir=eager)
 
 elle-wasm:   ## Build elle with WASM support (for check-wasm/smoke-wasm)
 	@echo "=== build elle with WASM ==="
