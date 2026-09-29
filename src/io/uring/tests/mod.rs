@@ -10,10 +10,9 @@ use crate::io::sigfd::SignalReceiver;
 
 mod sockopt;
 
-/// End-to-end regression: a SIGUSR1 delivered to the process must
-/// surface as a CQE on the io_uring instance via the dedicated
-/// `submit_uring_sig_next` helper, with no threadpool worker
-/// involved on the elle side.
+/// A SIGUSR1 delivered to the process surfaces as a CQE on the io_uring instance via
+/// the dedicated `submit_uring_sig_next` helper, with no threadpool worker involved on
+/// the elle side.
 ///
 /// This is the production Linux path: `submit_sig_next` (in
 /// `src/io/aio/externals.rs`) on the `PlatformBackend::Uring` arm calls
@@ -44,7 +43,7 @@ fn sig_next_via_uring_returns_after_kill_to_self() {
         unsafe { libc::_exit(code) };
     }
 
-    // PARENT: bounded waitpid so an io_uring regression (CQE never
+    // PARENT: bounded waitpid so a broken ring path (CQE never
     // arrives, ring fd closed early, helper rewires onto something
     // that doesn't actually submit, etc.) surfaces as a hung child
     // panic rather than wedging the whole `cargo test` run.
@@ -161,17 +160,17 @@ fn sig_next_uring_child_logic() -> i32 {
     0
 }
 
-/// The full-write invariant at the drain loop (src/io/AGENTS.md § Full-Write
-/// Invariant). One write(2) transfers only what fits in the fd's send buffer,
-/// so `drain_cqes` must resubmit the unwritten tail — from the pooled buffer
-/// the submission copied the payload into — until nothing is left, and report
-/// the total across every resubmission rather than the last CQE's count.
+/// The full-write invariant at the drain loop (src/io/AGENTS.md). One write(2)
+/// transfers only what fits in the fd's send buffer, so `drain_cqes` must resubmit the
+/// unwritten tail — from the pooled buffer the submission copied the payload into —
+/// until nothing is left, and report the total across every resubmission rather than
+/// the last CQE's count.
 ///
 /// A 4 KiB send buffer cannot take a 512 KiB payload in one syscall, so a
 /// backend that completes on the first CQE fails both assertions: the reported
 /// count is short, and the peer's tally is short. Driving `drain_cqes` directly
 /// keeps the coverage at the resubmission mechanism; the end-to-end contract is
-/// `tests/elle/port-shortwrite.lisp`.
+/// `tests/lang/port-shortwrite.lisp`.
 #[test]
 fn short_write_resubmits_until_the_payload_is_gone() {
     use crate::io::pending::PendingOp;
@@ -187,8 +186,8 @@ fn short_write_resubmits_until_the_payload_is_gone() {
     let mut ring = match io_uring::IoUring::new(8) {
         Ok(ring) => ring,
         // No io_uring on this host kernel — nothing to cover here. The
-        // thread-pool half of the invariant is port-shortwrite.lisp, run on
-        // the pool by the Thread-Pool I/O job's `no-uring` build.
+        // thread-pool half of the invariant is pinned by the thread-pool
+        // backend's run of `tests/lang/port-shortwrite.lisp`.
         Err(_) => return,
     };
 
@@ -265,7 +264,7 @@ fn short_write_resubmits_until_the_payload_is_gone() {
     let mut completions: VecDeque<Completion> = VecDeque::new();
     let mut eventfd_fired = false;
 
-    // Bounded so a regression that stops resubmitting fails here instead of
+    // Bounded so a drain that stops resubmitting fails here instead of
     // wedging the test run.
     let deadline = Instant::now() + Duration::from_secs(20);
     while completions.is_empty() {

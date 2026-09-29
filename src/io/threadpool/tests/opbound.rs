@@ -1,5 +1,7 @@
-//! audited: 2026-09-23
+// audited: 2026-09-29
 //! The per-operation bound, on a descriptor that carries no socket options.
+//!
+//! docs/impl/io-inflight.md
 //!
 //! A pipe is the case that separates a bound belonging to the operation from
 //! one belonging to the descriptor: it rejects `SO_RCVTIMEO`/`SO_SNDTIMEO`, and
@@ -7,8 +9,8 @@
 //! a socket. So a `:timeout` that rides the socket options bounds nothing here,
 //! and the worker parks in the kernel for as long as the pipe stays full.
 //!
-//! The end-to-end pins are `tests/elle/port-write-timeout.lisp` case 3 and
-//! `tests/elle/port-read-timeout.lisp` case 6, which run on both backends.
+//! The end-to-end pins are `tests/lang/port-write-timeout.lisp` case 3 and
+//! `tests/lang/port-read-timeout.lisp` case 6, which run on both backends.
 //! These cover the same mechanism in the fast inner loop.
 
 use super::super::*;

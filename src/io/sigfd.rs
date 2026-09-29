@@ -1,26 +1,19 @@
-//! POSIX signal reception via signalfd (Linux) and kqueue (macOS).
+// audited: 2026-09-29
+//! POSIX signal reception through signalfd (Linux) and kqueue (macOS), and the process-wide signal traps.
+//!
+//! docs/posix-signals.md
 //!
 //! `SignalReceiver` is the External object behind `os/sig-watch`. Each
 //! receiver owns a kernel file descriptor (signalfd on Linux, a dedicated
 //! kqueue fd on macOS) that becomes readable when a watched signal is
-//! delivered. The scheduler reads the fd via the same IoOp dispatch
-//! machinery as filesystem watchers.
+//! delivered. The scheduler reads the fd through the same IoOp dispatch as
+//! filesystem watchers.
 //!
-//! ## Mask policy
-//!
-//! The kernel only queues a signal onto signalfd/kqueue if the signal is
-//! blocked from default delivery in every thread that might otherwise
-//! absorb it. A receiver therefore must block its target signals on the
-//! main thread before opening the fd, and worker threads must mask all
-//! signals so the kernel never selects them as the delivery target.
-//!
-//! A module-level [`WatchedSet`] holds the union of currently-blocked
-//! signals and per-signal refcounts. `SignalReceiver::new` increments
-//! refcounts (blocking each new signal as it crosses zero); `Drop`
-//! decrements (unblocking when refcount returns to zero). Pending
-//! instances in the kernel queue at the moment of unblock fire their
-//! default disposition — preferred to silent swallowing. See
-//! `docs/posix-signals.md` for the user-facing contract.
+//! A module-level [`WatchedSet`] holds a refcount per watched signal.
+//! `SignalReceiver::new` increments it and blocks a signal as its count leaves
+//! zero. `Drop` decrements it; at zero it drains the pending instances and
+//! unblocks the signal, unless the signal is in [`ABSORB_SET`], which stays
+//! blocked. The mask policy is in the governing document.
 
 use crate::config::TraceCell;
 use std::collections::HashMap;
@@ -28,9 +21,8 @@ use std::sync::{Mutex, OnceLock};
 
 /// Emit a `[trace:posix] …` line to stderr when `trace`'s owning instance has the
 /// `posix` bit set (`--trace=posix`, `--trace=all`, or `(vm/config-set :trace …)`
-/// at runtime). Used to triage POSIX-signal regressions — correlate these with the
-/// per-test progress lines emitted by `tests/elle/posix.lisp` to pinpoint exactly
-/// which kernel call diverges between Linux and macOS.
+/// at runtime). Read beside the per-test progress lines `tests/lang/posix.lisp`
+/// writes to stderr, the trace names the kernel call where Linux and macOS part.
 ///
 /// `trace` is the instance's own [`TraceCell`], threaded here from a
 /// `SignalReceiver` (which captured it at `os/sig-watch`), a `NativeCtx`'s heap,
@@ -98,58 +90,16 @@ fn saved_dispositions() -> &'static Mutex<HashMap<libc::c_int, libc::sigaction>>
     DISP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Process-wide signal trap installation, called exactly once from
-/// `main()` before any worker thread spawns. Workers call
-/// `mask_all_signals_on_this_thread` on entry and thereby inherit a
-/// no-async-signal-delivery posture (the fault set stays deliverable);
-/// the *main* thread is what this function
-/// configures, and the policy below decides which signals get a
-/// sigaction handler (delivered to the main thread by the kernel
-/// because everyone else has them masked) and which are
-/// `pthread_sigmask`-blocked on the main thread (queued by the kernel
-/// for `signalfd`-style consumption).
+/// Install the process-wide signal traps, on the main thread and before any
+/// worker thread spawns. What each set of signals gets, and how a watcher
+/// overrides a trap, is in docs/posix-signals.md.
 ///
-/// ## Disposition table
+/// A thread a C library spawns later (Cranelift, an FFI cdylib) inherits the
+/// mask set here. It blocks the absorb set too, so it cannot take a signal a
+/// user watches.
 ///
-/// | Set | Signals | What we do |
-/// |-----|---------|------------|
-/// | Terminate | TERM, INT, QUIT, HUP | `sigaction(SA_RESTART)` to a handler that writes a tagged line to stderr via `write(2)` and `_exit(128 + signum)`. The handler is async-signal-safe — no allocation, no Rust stdio, no locks. |
-/// | Job control | TSTP, TTIN, TTOU | `sigaction` to a handler that calls `raise(SIGSTOP)`. The kernel stops the process; the shell can later `bg`/`fg` it. On `SIGCONT` the process resumes mid-handler and returns normally. |
-/// | Resume | CONT | `sigaction` to an empty handler so the delivery is consumed and the kernel doesn't try anything else. (No state to clean up — io_uring + signalfd survive across SIGSTOP/SIGCONT untouched.) |
-/// | Pipe | PIPE | `sigaction(SIG_IGN)`. Writes to broken pipes surface as `EPIPE`. |
-/// | Absorb | USR1, USR2, CHLD, URG, WINCH, ALRM | `pthread_sigmask(SIG_BLOCK)` on the main thread. With every worker also masking on spawn, no thread has these unblocked, the kernel queues them, and nobody reads. They are silently absorbed unless a user `os/sig-watch` opens a `signalfd` to drain. |
-/// | Fault | SEGV, BUS, FPE, ILL, ABRT, TRAP, SYS | Untouched. These are synchronous fault signals; intercepting them only obscures real bugs. The kernel default (core/term) runs. |
-/// | Uncatchable | KILL, STOP | Kernel forbids touching these. Pass through. |
-///
-/// ## Watcher override semantics
-///
-/// A user `os/sig-watch :sigterm` (etc.) lazily `pthread_sigmask`-blocks
-/// the watched signal on the main thread before opening its
-/// per-receiver `signalfd`. With the main thread blocking the signal
-/// and every worker thread already masking every asynchronous signal,
-/// the kernel has
-/// no delivery target — the sigaction handler installed here cannot
-/// fire while a watcher is alive. The signalfd reads it instead.
-/// When the last watcher closes, the lazy-block unblocks the signal,
-/// the kernel can again pick the main thread, and the sigaction handler
-/// re-arms. No explicit watcher-vs-builtin coordination logic in user
-/// space — the kernel's delivery rules do it for free.
-///
-/// ## Counter-cases this defends against
-///
-/// 1. **Startup race**: a `SIGTERM` arriving between `config::init` and
-///    the first `os/sig-watch` no longer kills the program — the
-///    handler runs.
-/// 2. **C-spawned thread inheritance**: Cranelift / FFI cdylib threads
-///    inherit the main thread's startup mask. After this function,
-///    that mask blocks the absorb-set, narrowing the window where a
-///    rogue thread could absorb a signal the user intended to watch.
-/// 3. **Accidental `kill -USR1`**: previously killed the process
-///    (kernel default Term). Now absorbed by the startup mask.
-///
-/// Idempotent: safe to call multiple times. (`sigaction` overwrites the
-/// previous handler; `pthread_sigmask(SIG_BLOCK)` is additive but the
-/// set is constant.) Tests fork and call it in each child.
+/// Idempotent: `sigaction` overwrites the previous handler, and the blocked
+/// set is constant. The tests fork and call it in each child.
 pub fn init_process_signals() {
     install_terminate_handlers();
     install_job_control_handlers();
@@ -264,8 +214,8 @@ fn block_absorb_set_on_main_thread() {
 /// the process anyway, but macOS leaves the signal pending and
 /// re-executes the faulting instruction, pinning the thread at one PC
 /// forever (`fault_on_a_masked_thread_kills_the_process` is the pin).
-/// Worker masks therefore always exclude this set — the disposition
-/// stays "Untouched" per docs/posix-signals.md § "Disposition table".
+/// Worker masks therefore always exclude this set, and every signal in it
+/// keeps the kernel's default disposition.
 const FAULT_SET: &[libc::c_int] = &[
     libc::SIGSEGV,
     libc::SIGBUS,
@@ -349,11 +299,12 @@ pub fn currently_watched() -> Vec<libc::c_int> {
 /// Called from each platform's `rollback` immediately before the saved
 /// disposition is restored and the signals are unblocked. Without this
 /// drain, a signal queued during the watch that the watcher never
-/// consumed (e.g. macOS test 5: two kill(SIGUSR1) calls, kqueue
-/// `EVFILT_SIGNAL` reported count=2 but only one delivery actually
-/// drained the process pending queue) would fire its now-restored
-/// default disposition on `pthread_sigmask(SIG_UNBLOCK, …)` and
-/// terminate the process mid-close. On Linux the situation is the same
+/// consumed would fire its now-restored default disposition on
+/// `pthread_sigmask(SIG_UNBLOCK, …)` and terminate the process mid-close.
+/// The trap on macOS: after two `kill(SIGUSR1)` calls, kqueue
+/// `EVFILT_SIGNAL` reports count=2, but one delivery drains the process
+/// pending queue and the other stays (`tests/lang/posix.lisp` test 5).
+/// On Linux the situation is the same
 /// when a user opens a `SignalReceiver`, the kernel queues a signal
 /// they intentionally chose to watch, and they close without ever
 /// calling `os/sig-next`: the unblock would Term them on the way out.
