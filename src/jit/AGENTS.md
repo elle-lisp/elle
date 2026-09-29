@@ -49,10 +49,9 @@ to block until all pending compilations finish before reporting.
 **`--trace=syncjit`** disables the worker entirely: `submit_jit_task`
 compiles on the VM thread and installs into `jit_cache` before returning.
 Codegen inputs are identical (same `prepare_task` output), so this is the
-first lever when chasing a suspected JIT race — a failure that persists
-under `syncjit` is a codegen or input bug; one that vanishes lives at the
-worker boundary (the `Send` claim on `JitTask`, or poll/install racing
-execution). Combine with `--trace=jit` to log each synchronous install.
+first lever when chasing a suspected JIT race. A failure that persists under
+`syncjit` is a codegen or input bug. One that vanishes lives at the worker
+boundary: the `Send` claim on `JitTask`, or poll/install racing execution. Combine with `--trace=jit` to log each synchronous install.
 
 ## Interface
 
@@ -98,23 +97,28 @@ variables and jumps to the loop header instead of calling
 
 ## Supported Instructions
 
-The JIT supports closures with captures, data structures, lboxes, function
-calls, self-tail-call optimization, JIT-to-JIT calling, and `ValueConst`.
+The translator has an arm for every `LirInstr` variant. `JitCompiler::compile`
+returns `JitError::UnsupportedInstruction` for three shapes, and the function
+stays in the interpreter:
 
-Supported instructions:
-- **Constants**: `Const` (Int, Float, Bool, Nil, EmptyList, Symbol, Keyword), `ValueConst`
-- **Arithmetic**: `BinOp` (inline integer fast path, extern fallback), `UnaryOp` (Not fully inlined, Neg/BitNot inline integer fast path)
-- **Comparison**: `Compare` (inline integer fast path, extern fallback)
-- **Variables**: `LoadLocal`, `StoreLocal` (via `local_slot_to_var`), `LoadCapture`, `LoadCaptureRaw`
-- **Data structures**: `List`, `First`, `Rest`, `MakeArrayMut`, `IsPair`
-- **LBoxes**: `MakeCaptureCell`, `LoadCaptureCell`, `StoreCaptureCell`, `StoreCapture`
-- **Globals**: Read as depth-0 upvalues via `LoadCapture`/`LoadCaptureRaw`, or baked as a `ValueConst` immediate where the binding is immutable. The LIR carries no global-load instruction, so nothing names a global by symbol at this tier
-- **Function calls**: `Call`, `TailCall` (self-calls become native loops; non-self calls use `elle_jit_tail_call` trampoline)
-- **Terminators**: `Return`, `Jump`, `Branch`, `Emit`, `Unreachable`
+- a function containing `MakeClosure`;
+- a variadic function with `Struct`/`StrictStruct` varargs, which needs the
+  fiber for keyword error reporting;
+- a function containing `Eval`.
 
-Unsupported (returns JitError::UnsupportedInstruction):
-- `MakeClosure` — rare in hot loops, deferred
-- Variadic functions with `Struct`/`StrictStruct` varargs — need fiber for keyword error reporting
+Some details of the supported set:
+
+- **Arithmetic and comparison**: `BinOp` and `Compare` take an inline integer
+  fast path with an extern fallback. `UnaryOp` inlines `Not` fully, and `Neg`
+  and `BitNot` take an inline integer fast path.
+- **Globals**: Read as depth-0 upvalues via `LoadCapture`/`LoadCaptureRaw`, or
+  baked as a `ValueConst` immediate where the binding is immutable. The LIR
+  carries no global-load instruction, so nothing names a global by symbol at
+  this tier.
+- **Function calls**: `Call` and `TailCall`. A self tail call becomes a native
+  loop; any other tail call uses the `elle_jit_tail_call` trampoline.
+- **Region instructions**: the value-resolved ones call a helper in
+  [dispatch/region.rs](dispatch/region.rs), among them `elle_jit_join_region` for `JoinRegion`.
 
 Supported in yielding functions (via side-exit):
 - `LoadResumeValue` — emitted as dead code (unreachable in JIT, resume goes through interpreter)
@@ -125,7 +129,7 @@ Supported in yielding functions (via side-exit):
 All operations go through `extern "C"` runtime helpers for safety.
 These handle type checking and tagged-union encoding.
 
-### runtime.rs (pure arithmetic on tagged-union values)
+### runtime/ (pure arithmetic on tagged-union values)
 
 - **Arithmetic**: `elle_jit_add`, `_sub`, `_mul`, `_div`, `_rem`
 - **Bitwise**: `elle_jit_bit_and`, `_or`, `_xor`, `_shl`, `_shr`
@@ -142,22 +146,34 @@ houses:
 
 - **Array mutation**: `elle_jit_array_push`, `elle_jit_array_extend`
 - **Parameter frames**: `elle_jit_push_param_frame`
-- **Struct access**: `elle_jit_struct_get_or_nil`, `elle_jit_struct_get_destructure`, `elle_jit_struct_rest`
 - **Signal bound checking**: `elle_jit_check_signal_bound`
+- **Struct access** ([dispatch/structops.rs](dispatch/structops.rs)): `elle_jit_struct_get_or_nil`,
+  `elle_jit_struct_get_destructure`, `elle_jit_struct_rest`
+- **Regions** ([dispatch/region.rs](dispatch/region.rs)): the refcount, adopt and join helpers,
+  and `elle_jit_release_abandoned_frame`
 
 ### calls.rs and calls/callops (function call dispatch)
 
 - **Sentinels**: `TAIL_CALL_SENTINEL`, `YIELD_SENTINEL`
 - **Metadata types**: `YieldPointMeta`, `CallSiteMeta`
 - **Exception check**: `elle_jit_has_exception`
-- **Function calls**: `elle_jit_call`, `elle_jit_tail_call`, `elle_jit_call_array`, `elle_jit_tail_call_array`
+- **Function calls** ([calls/callops.rs](calls/callops.rs)): `elle_jit_call`, `elle_jit_tail_call`,
+  and in [calls/callops/arraycall.rs](calls/callops/arraycall.rs) `elle_jit_call_array`,
+  `elle_jit_tail_call_array`
 - **Misc call helpers**: `elle_jit_pop_param_frame`, `elle_jit_make_closure`
 
 ### data.rs (heap/VM interaction)
 
-- **Data structures**: `elle_jit_pair`, `elle_jit_first`, `elle_jit_rest`, `elle_jit_make_array`, `elle_jit_is_pair`, and array/slice ops
-- **LBoxes**: `elle_jit_make_capture`, `elle_jit_load_capture_cell`, `elle_jit_store_capture_cell`, `elle_jit_load_capture`, `elle_jit_store_capture`
-- **Type checks**: `elle_jit_is_array`, `elle_jit_is_struct`, `elle_jit_is_set`, etc.
+- **Data structures** ([data/build.rs](data/build.rs)): `elle_jit_pair`, `elle_jit_first`,
+  `elle_jit_rest`, `elle_jit_make_array`, `elle_jit_is_pair`, and array/slice
+  ops
+- **Type checks** ([data/build.rs](data/build.rs)): `elle_jit_is_array`, `elle_jit_is_struct`,
+  `elle_jit_is_set`, and the rest
+- **Destructuring** ([data/destructure.rs](data/destructure.rs)): the pattern-binding accessors
+- **Capture cells and the rest list** ([data/cell.rs](data/cell.rs)): `elle_jit_make_capture`,
+  `elle_jit_make_capture_owned`, `elle_jit_load_capture_cell`,
+  `elle_jit_store_capture_cell`, `elle_jit_load_capture`,
+  `elle_jit_store_capture`, `elle_jit_collect_rest_list`
 
 ## Self-Tail-Call Optimization
 
@@ -192,41 +208,11 @@ Key implementation details:
 
 ## Inline Integer Fast Paths
 
-For each arithmetic (`BinOp`) and comparison (`Compare`) operation, the JIT
-emits a diamond-shaped CFG that checks if both operands are integers and
-performs the operation inline, falling back to the extern runtime helper for
-non-integer operands:
-
-```
-current_block:
-    tag check: both operands have TAG_INT?
-    brif -> fast_block / slow_block
-
-fast_block:
-    extract payloads, native op, re-tag result
-    jump -> merge_block(fast_result)
-
-slow_block:
-    call extern helper (e.g., elle_jit_add)
-    jump -> merge_block(slow_result)
-
-merge_block(phi):
-    result = phi
-```
-
-Special cases:
-- **Div/Rem**: An extra `int_check_block` checks for zero divisor after the
-  tag check. If divisor is zero, falls to `slow_block` (two predecessors).
-- **Eq/Ne**: Use tag+payload equality (both have the same
-  TAG_INT tag, so direct comparison is correct for integers).
-- **Ordered comparisons** (Lt/Le/Gt/Ge) and **shifts** (Shl/Shr): Use the
-  full i64 payload directly for the native operation.
-- **Not** (unary): Fully inlined with no slow path. The truthiness check
-  (compare tag against the falsy tags) works for all types — only nil and
-  false have falsy tags. Returns `TAG_TRUE` or `TAG_FALSE` directly.
-- **Neg/BitNot** (unary): Same diamond pattern as binary ops but with a
-  single-operand tag check (`icmp eq` against `TAG_INT`). Neg negates the
-  i64 payload, re-tags. BitNot inverts the payload bits, re-tags.
+Arithmetic, comparison, negation and bitwise-not compile to a tag-check diamond
+in [fastpath.rs](fastpath.rs): an inline integer operation, or a call to the
+runtime helper for any other operand. [jit.md](../../docs/impl/jit.md) owns the
+diamond and the proof that skips it. `Not` has no slow path: only `nil` and
+`false` carry falsy tags, so the tag compare alone decides it.
 
 ## Fiber Integration and Yield Side-Exit
 
@@ -304,7 +290,8 @@ No errors are silently swallowed.
    accepts a polymorphic function and a yielding one alike: the runtime
    dispatch helper handles an arbitrary callable, and a callee that suspends
    leaves through the yield side-exit. What `compile` refuses is a
-   `Struct`/`StrictStruct` variadic and a function containing `MakeClosure`.
+   `Struct`/`StrictStruct` variadic and a function containing `MakeClosure` or
+   `Eval`.
 
 2. **Yield metadata is populated during emission.** `Emitter::emit()` returns
    `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`. The caller attaches
@@ -348,13 +335,13 @@ No errors are silently swallowed.
      `SuspendedFrame` and setting `fiber.signal` and `fiber.suspended`. The
      JIT caller must not modify these fields.
 
-13. **Variadic functions with `VarargTag::List` are JIT-supported.** The JIT
-     entry block emits a Cranelift cons-building loop that iterates over
-     `args[fixed..nargs]` in reverse, calling `elle_jit_cons` to build the
-     rest-arg list. `capture_params_mask` is checked for the rest param slot.
-     Functions with `VarargTag::Struct` or `VarargTag::StrictStruct` are
-     still rejected (they require fiber access for keyword error reporting)
-     and fall back to the interpreter.
+13. **Variadic functions with `VarargKind::List` are JIT-supported.** The JIT
+     entry block calls `elle_jit_collect_rest_list`, which builds the rest list
+     from `args[fixed..nargs]` in one value region, as the interpreter's
+     `args_to_list` does. `capture_params_mask` is checked for the rest param
+     slot. Functions with `VarargKind::Struct` or `VarargKind::StrictStruct`
+     are still rejected (they require fiber access for keyword error
+     reporting) and fall back to the interpreter.
 
 ## Dual Address Space for Variables
 
@@ -382,9 +369,11 @@ a lambda gets a `CaptureCell(NIL)` at function entry (because `StoreUpvalue`
 requires lbox indirection to write through `Rc<Vec<Value>>`). In JIT code,
 locally-defined variables are Cranelift variables (CPU registers/stack), so
 lbox wrapping is only needed when `binding.needs_capture()` is true (captured by
-nested closure or mutated via `set!`).
+nested closure or mutated via `assign`).
 
-The optimization applies to three code paths in the translator:
+The optimization applies to three code paths, the first in
+[translate/region.rs](translate/region.rs) and the other two in
+[translate/instr.rs](translate/instr.rs):
 
 1. **`init_locally_defined_vars`**: Only calls `elle_jit_make_capture` when the
    bit is set in `capture_locals_mask`; others get NIL directly.
@@ -403,8 +392,8 @@ Stored in `JitCode.yield_points`, indexed by yield point index:
 - `num_params: u16` — Number of function parameters
 
 The JIT yield helper reads the three counts to know how many u64 values to
-read from the spilled buffer and convert back to `Value`s, and where each
-run of them belongs in the rebuilt frame.
+read from the spilled buffer and convert back to `Value`s. The counts also
+say where each run of them belongs in the rebuilt frame.
 
 ### Yield Point Recording
 
@@ -467,12 +456,7 @@ local (`populate_env` pads with nil / CaptureCell). The asymmetry is
 benign because celled locals require `MakeClosure`, which the JIT
 rejects.
 
-## Roadmap
-
-- JIT-native signal handling (setjmp/longjmp or Cranelift exception tables)
-- Benchmarks and profiling
-
-### Reclamation
+## Reclamation
 
 Regions reclaim: a region frees at `FreeRegion(ρ)` when its RC reaches 0.
 The JIT emits the same `IncrefValueRegion` / `DecrefValueRegion` /
@@ -483,7 +467,7 @@ An **error** exit runs none of those instructions, so the releases still among
 them run at the exit instead — `elle_jit_release_abandoned_frame`, the compiled
 half of the interpreter's abandoned-frame walk
 ([unwind.md](../../docs/impl/region/unwind.md)). The prologue
-materializes the function's two release tables into stack slots, and every error
+materializes the function's two release tables into stack slots. Every error
 exit — the post-call exception check, and an `Emit` of `SIG_ERROR` — hands both
 to the helper with the frame's locals spilled in slot order, ahead of the
 region-map pop. `emit_abandoned_error_return` is the one route out; a new
