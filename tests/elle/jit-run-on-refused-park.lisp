@@ -1,12 +1,12 @@
 (elle/epoch 13)
 # audited: 2026-09-28
-# A suspension `compile/run-on :jit` refuses ends its park's funding.
+# A suspension `compile/run-on :jit` refuses ends its park.
 #
 # docs/impl/region/park.md
 #
 # The forced JIT tier cannot host a suspension, so it answers a park with a
-# :tier-rejected error and the fiber runs on. The park that raised the signal
-# is over, and the host discharges its funding (`abandon_hosted_park`). The JIT
+# :tier-rejected error at its own call. The park that raised the signal is
+# over, and the host ends it (`refuse_hosted_park`). The JIT
 # tier answers a park on two arms: its own code yielded, or a bytecode tail
 # callee did. Each case below reaches one arm.
 #
@@ -37,5 +37,46 @@
 
 # The fiber runs on after both refusals.
 (assert (= (ev/sleep 0) nil) "io still works after the refusals")
+
+# A refusal is an error at the `compile/run-on` call, and the thunk's parked
+# frames are dropped. A restart answers the call. The counter-factual keeps the
+# thunk's frames parked: the restart replays the thunk, and its value ends the
+# fiber in place of the body.
+(def restarted
+  (fiber/new (fn [] (list :got (compile/run-on :jit (fn [] (+ 1 (yield 1))))))
+             |:yield :error|))
+(assert (refused? [false (fiber/resume restarted)])
+        "the thunk's yield is refused")
+(assert (= (fiber/resume restarted 41) (list :got 41))
+        "a restart answers the compile/run-on call")
+
+# A refusal costs no more than a raise at the same call. The counter-factual
+# only clears the ledger, and the thunk's frames and the park's delivery
+# retain go with the dropped fiber: regions and objects past the control.
+(defn measure [thunk]
+  (var i 0)
+  (while (%lt i 20)
+    (thunk)
+    (assign i (%add i 1)))
+  (def objects (arena/count))
+  (def regions (arena/region-count))
+  (var j 0)
+  (while (%lt j 300)
+    (thunk)
+    (assign j (%add j 1)))
+  [(%sub (arena/count) objects) (%sub (arena/region-count) regions)])
+
+(def d-control
+  (measure (fn []
+             (protect (compile/run-on :jit (fn [] (+ 1 (error (string "y" 1)))))))))
+(def d-refused
+  (measure (fn []
+             (protect (compile/run-on :jit (fn [] (+ 1 (yield (string "y" 1)))))))))
+(println "jit-run-on-refused-park [objects regions]: control " d-control
+         " refused " d-refused)
+(assert (< (- (get d-refused 0) (get d-control 0)) 50)
+        "a refusal leaves no objects behind")
+(assert (< (- (get d-refused 1) (get d-control 1)) 50)
+        "a refusal leaves no regions behind")
 
 (println "jit-run-on-refused-park: ok")
