@@ -1,6 +1,6 @@
 # Differential Tier Testing
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-29 -->
 
 A correct closure returns the same value on every execution tier that accepts it, and `compile/run-on` is how a test asks each tier.
 
@@ -25,8 +25,8 @@ underlying engine.
 `(compile/run-on tier f & args)` force-runs `f` on the named tier with the
 given arguments and returns the result. `tier` is one of:
 
-- `:bytecode` — the interpreter. The JIT is off for this call, but a nested
-  call still goes through ordinary tier dispatch.
+- `:bytecode` — the interpreter. The JIT is off for this call and for every
+  call it makes. A call it makes can still run on the WASM or MLIR tier.
 - `:jit` — force-compiles through Cranelift, then calls the native code. A
   tail call out of the native code runs its callee once under the bytecode
   interpreter.
@@ -43,7 +43,8 @@ A tier that does not accept the closure signals a structured
 `:tier-rejected` error instead of running it. The `:reason` says why:
 
 - `:ineligible` — the tier cannot compile this closure. MLIR-CPU also answers
-  this for an argument or a capture that is not an integer or a float.
+  this for an argument or a capture that is not an integer or a float, and
+  `:jit` for a closure that suspends, because it cannot hold the suspension.
 - `:feature-disabled` — the build does not carry the tier's feature.
 - `:unknown-tier` — the keyword names no tier.
 
@@ -59,7 +60,15 @@ A tier that does not accept the closure signals a structured
 ```
 
 Arity and type errors in the arguments surface as ordinary errors, not as
-rejections.
+rejections. So does an error the closure raises on a tier that runs it: the
+caller receives that error, as it would from an ordinary call.
+
+```lisp
+(def [raise-ok? raise-err]
+  (protect (compile/run-on :jit (fn [] (error {:error :boom :message "b"})))))
+(assert (not raise-ok?))
+(assert (= (get raise-err :error) :boom))     # not :tier-rejected
+```
 
 ## The harness is the test runner
 
