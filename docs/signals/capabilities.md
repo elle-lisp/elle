@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-29 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -191,8 +191,9 @@ capability space that is NOT withheld:
 
 ## Transitivity
 
-Withheld capabilities propagate from parent to child at resume time.
-A child inherits its parent's restrictions plus any `:deny` of its own:
+A fiber takes the withheld set of the fiber that creates it, when `fiber/new`
+makes it. Each resume then adds the withheld set of the fiber that resumes it.
+A child inherits both restrictions plus any `:deny` of its own:
 
 ```lisp
 (let [outer (fiber/new
@@ -208,9 +209,22 @@ A child inherits its parent's restrictions plus any `:deny` of its own:
 # (missing :fs from parent, missing :ffi from own deny)
 ```
 
-A child can never gain capabilities its parent lacks. Requesting to
-deny something the parent already withholds is a no-op (silently
-absorbed).
+A child can never gain a capability that its creator lacks, or that any
+fiber which resumes it lacks. Requesting to deny something the parent
+already withholds is a no-op (silently absorbed).
+
+The creator's half is what holds when a fiber leaves the sandbox that made
+it. A fiber that code inside the sandbox creates keeps the denial, even
+when a fiber outside the sandbox resumes it:
+
+```lisp
+(let [sandbox (fiber/new (fn [] (fiber/new (fn [] (fiber/caps)) |:error|))
+                         |:error| :deny |:fs|)
+      made (fiber/resume sandbox)]
+  (assert (not (contains? (fiber/caps made) :fs)) "the new fiber lacks :fs")
+  (assert (not (contains? (fiber/resume made) :fs))
+          "and still lacks it when an unrestricted fiber resumes it"))
+```
 
 Withheld capabilities also cross a thread. `sys/spawn` and
 `sys/spawn-vm` run a deep-copied closure in a fresh VM, and that VM's
@@ -287,6 +301,43 @@ whatever the parent does.
 An uncaught refusal is an ordinary uncaught error: it unwinds the child
 through any `defer` blocks and the fiber ends `:error`. To end a fiber
 outright rather than refuse one call, use `fiber/abort`.
+
+## A fiber a scheduler runs
+
+`ev/spawn` creates a fiber in the calling fiber and hands it to the scheduler,
+which resumes it. The spawned fiber therefore carries its creator's denial. Its
+resumer is the scheduler, though, and the scheduler is not the mediator that
+imposed the denial.
+
+So the scheduler refuses the call. It hands the fiber `fiber/refuse`, with the
+denial payload as the error, and the fiber's `protect` sees that payload at its
+own call site. An uncaught refusal ends the fiber, and `ev/join` raises the
+payload in the fiber that joins it:
+
+```lisp
+(with-temp-dir dir
+  (let [target (path/join dir "x")
+        sandbox (fiber/new
+                  (fn []
+                    (let [caught (ev/join (ev/spawn (fn [] (protect (file/write target "x")))))
+                          raised (protect (ev/join (ev/spawn (fn [] (file/write target "x")))))]
+                      [caught raised]))
+                  |:fs :error| :deny |:fs|)
+        [[ok1? denial] [ok2? raised]] (fiber/resume sandbox)]
+    (assert (not ok1?) "the spawned fiber's protect sees the refusal")
+    (assert (= (get denial :error) :capability-denied) "carrying the denial")
+    (assert (= (get denial :primitive) "file/write") "which names the call")
+    (assert (not ok2?) "an uncaught refusal ends the fiber, and the join raises it")
+    (assert (= (get raised :error) :capability-denied))
+    (assert (not (path/exists? target)) "nothing is written")))
+```
+
+A spawned fiber's mask names the bits a denial raises, `:ffi`, `:exec`, `:gpu`,
+`:os-signal` and `:fs`, as well as the bits the scheduler's own protocol uses.
+A mediator above the scheduler therefore never sees a spawned fiber's denial.
+The process scheduler does the same for a process and for each fiber a process
+spawns, and `process:spawn` creates the new process's fiber in the fiber that
+calls it ([process-scheduler.md](../process-scheduler.md)).
 
 ## Intrinsics are not checked
 

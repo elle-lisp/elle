@@ -1,6 +1,6 @@
 # Authority
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-29 -->
 
 What holds authority in a running program, and where the runtime asks whether a
 fiber may spend it.
@@ -101,7 +101,7 @@ closes a route only where a crossing reads the requirement off the value.
 
 ## Where a fiber's work crosses out
 
-An effect leaves a fiber by one of four routes. The table names them, and says
+An effect leaves a fiber by one of five routes. The table names them, and says
 what the runtime asks today.
 
 | Crossing | What crosses | Asked today |
@@ -112,9 +112,10 @@ what the runtime asks today.
 | A device | a fiber lowered and dispatched | nothing exists yet |
 | A child fiber or a thread | the withheld set itself | the transitive check |
 
-The child crossing has always worked, and it works because the requirement
-travels with the thing that crosses. A child cannot argue its way past a denial,
-because it inherits the set rather than consulting one. The three argument-derived
+The child crossing works because the requirement travels with the thing that
+crosses: a fiber takes its creator's withheld set when it is made, and its
+resumer's at each resume. A child cannot argue its way past a denial, because it
+inherits the set rather than consulting one. The three argument-derived
 checks work the same way: the requirement is the value's own — the request's
 operation, the import's path, the emit's bits — so the crossing reads it off the
 value rather than trusting the primitive's declaration.

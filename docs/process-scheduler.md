@@ -1,6 +1,6 @@
 # Process scheduler
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-29 -->
 
 How a process scheduler runs sub-fibers, forwards its I/O to the scheduler it runs in, and nests.
 
@@ -148,6 +148,36 @@ like any other I/O it had in flight.
       (process:send me :inner-done)))
     (assert (= (process:recv) :inner-done)
             "a scheduler inside a process does its I/O and finishes"))))
+```
+
+## Capability denials
+
+`process:spawn`, `spawn-link` and `spawn-monitor` create the new process's fiber
+in the fiber that calls them, and hand the fiber to the scheduler. A process
+therefore carries the withheld set of the fiber that spawned it, as a fiber from
+`ev/spawn` does. Were the scheduler to create the fiber itself, a process would
+take the scheduler's authority instead.
+
+The scheduler refuses a denied call from a process, and from a sub-fiber a
+process spawns, exactly as the async scheduler does
+([capabilities.md](signals/capabilities.md)). The process sees the denial at its
+own call site:
+
+```lisp
+(with-temp-dir dir
+  (let [target (path/join dir "x")]
+    (process:start (fn []
+      (let [me (process:self)
+            sandbox (fiber/new
+                      (fn []
+                        (process:spawn (fn []
+                          (process:send me (protect (file/write target "x"))))))
+                      |:fs :error| :deny |:fs|)]
+        (fiber/resume sandbox)
+        (let [[ok? denial] (process:recv)]
+          (assert (not ok?) "the spawned process is refused")
+          (assert (= (get denial :primitive) "file/write") "at its own call")))))
+    (assert (not (path/exists? target)) "and nothing is written")))
 ```
 
 ## See also
