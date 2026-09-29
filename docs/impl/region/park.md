@@ -261,13 +261,19 @@ symmetric with its unpark; the node and the deferred set a park moves are
   site — a primitive, an instruction, a callee, the object limit's refusal —
   whose result was never produced, so nothing mints for it and the delivery
   mints `ResumeDelivery`, as for a suspending
-  primitive. Two parks meet this rule without a raise of their own. An injected
+  primitive. A capability denial of `:error` parks under `SIG_ERROR` as well,
+  and in tail position the driver builds its frame, as for any tail suspend.
+  It stays a denial park: `park_denial` recorded its funding, so the error park
+  finds that record for the same payload and leaves it standing. Two parks meet
+  this rule without a raise of their own. An injected
   `fiber/abort` / `fiber/refuse` error raises in place over the park it finds, so it
   keeps that park's funding (`raise_in_park`): a primitive or denial park still
   owes the mint, and an emit park or a fuel pause does not. And a parent that a
   child's error passes is parked at its `fiber/resume` call, which is a `Call`
   site. Pinned by `tests/elle/region-fiber-restart-uaf.lisp` under
-  `--trace=guardfree`, with the leak gauge in `tests/elle/region-fiber-restart.lisp`.
+  `--trace=guardfree`, with the leak gauge in `tests/elle/region-fiber-restart.lisp`;
+  the tail denial of `:error`, first run and replay, by `tests/elle/caps.lisp`
+  and `value::fiber::delivery::tests`.
 - **A propagated signal is a fresh park, and owes its own delivery reference.**
   `fiber/propagate` installs the child's parked payload as the propagating fiber's own
   `signal`. That fiber's resumer then reads the payload as its resume result and runs the
