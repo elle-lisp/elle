@@ -257,9 +257,9 @@ impl VM {
                 // among the bits that reach the root (docs/signals/protocol.md).
                 // The keywords are what the author of
                 // the emitting call can act on; the mask alone is not. The
-                // refused park is abandoned with its host.
-                self.abandon_hosted_park(bits);
-                self.fiber.signal.take();
+                // root driver cannot hold the park, so it refuses it.
+                let parked = self.fiber.signal.take();
+                self.refuse_hosted_park(bits, parked);
                 break Err(format!(
                     "Unhandled signal {} outside fiber context",
                     crate::signals::registry::format_bits(bits)

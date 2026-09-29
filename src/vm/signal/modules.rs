@@ -1,3 +1,11 @@
+// audited: 2026-09-28
+//! The `compile/*` queries that run code on this VM: `compile/run-on`'s tier
+//! dispatch, the test-module compilations, and `compile/dumps`.
+//!
+//! docs/test-runner.md
+//! docs/impl/differential.md
+//! docs/impl/region/park.md
+
 use super::*;
 
 impl VM {
@@ -131,7 +139,7 @@ impl VM {
     /// docs/test-runner.md § Mechanism.
     ///
     /// Mirrors `eval`'s re-entrant execution: the module bytecode runs on this
-    /// VM via `execute_bytecode_saving_stack` (preserving the caller's stack), so
+    /// VM via `run_thunk_to_completion` (preserving the caller's stack), so
     /// `def`/`var` setup forms run and the thunk closures are created on the
     /// bytecode tier (where `MakeClosure` is legal). A compile failure, or a
     /// def-initializer runtime fault, surfaces as `SIG_ERROR` — the runner's
@@ -401,8 +409,10 @@ impl VM {
                 (SIG_ERROR, e)
             }
             other => {
-                // The refused suspend-class park is abandoned with its host.
-                self.abandon_hosted_park(other);
+                // The setup run cannot hold a park of the module it ran, so it
+                // refuses it and raises at its own call.
+                let parked = self.fiber.signal.take();
+                self.refuse_hosted_park(other, parked);
                 (
                     SIG_ERROR,
                     ctx.error(
