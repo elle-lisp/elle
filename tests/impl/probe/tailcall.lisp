@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-10
+# audited: 2026-09-29
 # Tail-call rotation, letrec-local recursive closures, a returned self-recursive closure's region, and the scheduler round trip.
 #
 # docs/impl/region/diagnostics.md
@@ -7,13 +7,12 @@
 # The loop IS the recursion, so the run-block is the recursive call itself: one
 # call with arg b performs b allocations via tail recursion. Tail-call rotation
 # (not while-scope) is the mechanism that must reclaim them — so it gets its own
-# driver. n varies the input so a body cannot constant-fold.
-# All four recur fns are passed as fn-values into measure-core, so no visible
-# call site can prove `n` and call-site param joins do not fire; a local
-# diverging guard proves each %sub operand instead (docs/intrinsics.md § The
-# contract). Contrast lcl-self below, which is called directly and needs no
-# guard. The guard never fires on the driver's int inputs and holds no heap arg,
-# so the measured tails are undisturbed at 0/op.
+# driver. n varies the input so a body cannot constant-fold. All four recur fns
+# are passed as fn-values into measure-core, so no visible call site can prove
+# `n` and call-site param joins do not fire; a local diverging guard proves each
+# %sub operand instead (docs/intrinsics.md). Contrast lcl-self below, which is
+# called directly and needs no guard. The guard never fires on the driver's int
+# inputs and holds no heap arg, so the measured tails are undisturbed at 0/op.
 (defn struct-recur [n]
   (when (%not (%int? n)) (error :struct-recur-nan))
   (if (= n 0)
@@ -58,16 +57,17 @@
 # cell↔closure cycle; its self-reference resolves to the executing closure (`LoadSelf` /
 # a self-call), RC-identical to a top-level recursive `defn` (docs/impl/selfrec.md). The
 # per-call closure region is stranded past the recursive `TailCall` and reclaimed by the
-# tail-call deferred release (lir/lower/control/call.rs `tail_callee_defers_release`). The HOF pins above
-# (map/reduce/zip/…) ride this same cell-free mechanism — their `go` helpers.
+# tail-call deferred release (lir/lower/control/call.rs `tail_callee_defers_release`).
+# The HOF pins above (map/reduce/zip/…) ride this same cell-free mechanism — their `go`
+# helpers.
 #
 # MUTUAL recursion (`recur-local-mutual`) is reclaimed (rate 0): `ev`/`od` each capture
 # the OTHER, a genuine closure↔closure cell cycle — but an immutable lambda-initialized
 # letrec binding's forward cell is a compiled static-slot cell in every position, so the
 # closure-cycle merge collapses the SCC + cells onto one arena in-lambda exactly as at
 # top level. The tail-call letrec body `(ev n)` strands the binding-scope drop; the
-# tail-call deferred release releases the merged arena once at the recursion's normal completion
-# (docs/impl/region/letrec.md § The letrec closure-cycle merge).
+# tail-call deferred release releases the merged arena once at the recursion's normal
+# completion (docs/impl/region/letrec.md).
 (defn lcl-self [n]
   (letrec [go (fn [m] (if (%lt m 1) :done (go (%sub m 1))))]
     (go n)))
@@ -81,18 +81,17 @@
 
 # NON-member body tail — the same ev/od cycle, but the letrec BODY ends in a tail call
 # to a NON-member. `(ev n)` above is a tail call to a MEMBER (its stranded binding-scope
-# drop rides `stranded_cycle_bindings`); here `(%add (ev n) 0)` (an inline opcode
-# whose operand is the call) and `(+ (ev n) 0)` (the stdlib redefines `+`
-# to a bytecode CLOSURE) end in a frame-replacing tail call to a non-member.
-# That strands the merged arena's binding-scope drop as dead code, so the
-# release rides the explicit arena adopt (`TailCall::deferred_release_slot`,
-# `RegionInfo::cycle_tail_release`): a closure callee (`+`) adopts the arena at
-# the recursion's completion, a native callee (`%add`) never replaces
-# the frame and falls through to the live scope-exit drop — mutually exclusive per call,
-# so exactly one release fires however the callee resolves. Both reclaim (rate 0); the
-# closure-cycle merge previously REFUSED a non-member-tail clique, leaving it Shared and
-# leaking its whole arena ~4/op (docs/impl/region/letrec.md § The letrec closure-cycle
-# merge). The base cases return 0/1 so `(%add (ev n) 0)` is well-typed.
+# drop rides `stranded_cycle_bindings`); here `(%add (ev n) 0)` (an inline opcode whose
+# operand is the call) and `(+ (ev n) 0)` (the stdlib redefines `+` to a bytecode
+# CLOSURE) end in a frame-replacing tail call to a non-member. That strands the merged
+# arena's binding-scope drop as dead code, so the release rides the explicit arena adopt
+# (`TailCall::deferred_release_slot`, `RegionInfo::cycle_tail_release`): a closure
+# callee (`+`) adopts the arena at the recursion's completion, a native callee (`%add`)
+# never replaces the frame and falls through to the live scope-exit drop — mutually
+# exclusive per call, so exactly one release fires however the callee resolves. Both
+# reclaim (rate 0); a closure-cycle merge that refused a non-member-tail clique would
+# leave it Shared, leaking its whole arena ~4/op (docs/impl/region/letrec.md). The base
+# cases return 0/1 so `(%add (ev n) 0)` is well-typed.
 (defn lcl-mutual-native [n]
   (letrec [ev (fn [m] (if (%lt m 1) 0 (od (%sub m 1))))
            od (fn [m] (if (%lt m 1) 1 (ev (%sub m 1))))]
@@ -106,19 +105,19 @@
 (pin (measure "recur-local-mutual-op" (fn [j] (lcl-mutual-op 3)) 100 6 60 0.4
               0.5) 0)
 
-# RETURNED closure cycle — the return-funded merge admission (rate 0). The same ev/od
-# SCC as `recur-local-mutual` above, one base case apart: it returns the MEMBER `ev`
-# instead of a keyword, putting a member on the return frontier. The merge admits it
-# anyway, because the merge's release is a decref rather than a free and the returned
-# member lives IN the merged arena, so the callee's `Return` mint raises the arena's own
-# count — and the letrec body's tail is a call to the MEMBER `ev`, whose deferral runs at
-# the recursion's normal completion, AFTER that mint. So the deferral drops only the
-# frame's reference while the caller's stands, and the discard at the call site takes the
-# arena to zero and subtree-drops the cycle (docs/impl/region/letrec.md § The frontier
-# gate). The FIBER half of the frontier still refuses outright, and a returned cycle
-# whose letrec body does not hand the value over itself keeps the Shared baseline — its
-# binding-scope drop would then fire before any mint. Refusing the whole return facet
-# instead holds this cycle's four regions — two closures, two forward cells — per call.
+# RETURNED closure cycle — the return-funded merge admission (rate 0). The same ev/od SCC
+# as `recur-local-mutual` above, one base case apart: it returns the MEMBER `ev` instead
+# of a keyword, putting a member on the return frontier. The merge admits it anyway,
+# because the merge's release is a decref rather than a free and the returned member
+# lives IN the merged arena, so the callee's `Return` mint raises the arena's own count —
+# and the letrec body's tail is a call to the MEMBER `ev`, whose deferral runs at the
+# recursion's normal completion, AFTER that mint. So the deferral drops only the frame's
+# reference while the caller's stands, and the discard at the call site takes the arena
+# to zero and subtree-drops the cycle (docs/impl/region/letrec.md). The FIBER half of the
+# frontier still refuses outright, and a returned cycle whose letrec body does not hand
+# the value over itself keeps the Shared baseline — its binding-scope drop would then
+# fire before any mint. Refusing the whole return facet instead holds this cycle's four
+# regions — two closures, two forward cells — per call.
 (defn lcl-mutual-ret [n]
   # `ev` is returned (a value use), which disables call-site param joins, so a local
   # diverging guard proves the %lt/%sub operands.
@@ -179,7 +178,7 @@
 # at the letrec, under a live `c`; the merge instead follows the value out and adopts the
 # release point the last-use rule already computed for the handed-out member — here the
 # enclosing `Return`, whose mint precedes that node's own releases
-# (docs/impl/region/letrec.md § "Drop site — following a handed-out member"). This is the
+# (docs/impl/region/letrec.md). This is the
 # boundary control for `recur-local-mutual-ret-value` above — the two differ only in
 # whether the letrec is the frame's tail, which is exactly the fact that decides where the
 # mint lands — so the pair reads the two dispositions directly rather than by
@@ -206,11 +205,11 @@
 # merged arena a second time against the deferred release. A native does neither — it
 # borrows its arguments and keeps the frame — so the binding-scope drop stays live and
 # single, and the members the returned struct keeps are a cross-region reference into
-# the arena, RC-counted exactly as a foreign capture is (docs/impl/region/letrec.md
-# § "What the non-member tail still refuses"). Refusing it held five regions per call:
-# the cycle's two closures and two forward cells, plus the `t` the leaked cycle pinned.
-# A CLOSED control, undeclared like `rest-array-copy`, so a regression to open trips
-# the completeness gate as an F4 defect rather than being absorbed under the root.
+# the arena, RC-counted exactly as a foreign capture is (docs/impl/region/letrec.md).
+# Refusing it held five regions per call: the cycle's two closures and two forward
+# cells, plus the `t` the leaked cycle pinned. A CLOSED control, undeclared like
+# `rest-array-copy`, so a regression to open trips the completeness gate as an F4
+# defect rather than being absorbed under the root.
 (defn lcl-mutual-factory [n]
   # Both members leave in the struct (a value use), which disables call-site param
   # joins, so a local diverging guard proves the %lt/%sub operands.
@@ -229,9 +228,9 @@
 # The same cycle written the way a body writes it: two local `defn`s rather than a
 # `letrec`. A sibling reads each name before its initializer has run, so each is
 # prebound with a forward cell exactly as a letrec binding is — one shape, one
-# merge, whichever binder spells it (docs/impl/region/letrec.md § "The binder form
-# does not decide the shape"). Reading the run as a different shape refused it and
-# leaked the whole cycle — two closures and two forward cells — per call.
+# merge, whichever binder spells it (docs/impl/region/letrec.md). Reading the run
+# as a different shape refused it and leaked the whole cycle — two closures and
+# two forward cells — per call.
 (defn lcl-defn-mutual [n]
   (defn dv [m]
     (when (%not (%int? m)) (error :m))
@@ -249,8 +248,8 @@
 # merge. The members CAPTURE the table, a counted reference OUT of the arena rather
 # than a member of it. And the factory HANDS THE MEMBERS OUT: the struct's hold is a
 # foreign capture, RC-counted, so it outlives the arena's single decref and the arena
-# dies with the struct. This is the async scheduler's own shape, and its cycle held
-# 100% of every program's teardown residue (elle-lisp/elle#1081). It is the `defn`
+# dies with the struct. This is the async scheduler's own shape, and a refused merge
+# puts its cycle in every program's teardown residue. It is the `defn`
 # twin of `recur-local-mutual-factory` above, so the two together read the
 # binder-form claim on the shape the merge was extended for.
 #
@@ -258,10 +257,10 @@
 # struct, which is the half the two tiers can disagree on. The construction is the
 # merge's; the call is a tail call into a member out of a caller the JIT compiles,
 # whose stranded arena release the compiled tier must hand to the activation that
-# runs the member (docs/impl/region/relocate.md § "A channel built in compiled code
-# hands its release forward"). Dropping the call left the whole cycle — two closures,
-# two forward cells, and the table they capture — growing ~7 objects and ~2 regions
-# per op under `--jit=eager`, and flat on the VM.
+# runs the member (docs/impl/region/relocate.md). Dropping the call left the whole
+# cycle — two closures, two forward cells, and the table they capture — growing ~7
+# objects and ~2 regions per op with every function compiled eagerly, and flat on
+# the VM.
 (defn defn-module-factory []
   (let [t @{}]
     (defn fa [m]
@@ -287,8 +286,7 @@
 # runtime deferred release is the region's ONLY channel. A returned closure keeps
 # that channel: the callee's `Return` mints the caller's reference before
 # `trampoline_loop` breaks and runs the deferred decref, so the caller's reference is
-# standing while the deferral drops the frame's own (docs/impl/selfrec.md § "The
-# deferral needs no escape gate"). The CONTROL
+# standing while the deferral drops the frame's own (docs/impl/selfrec.md). The CONTROL
 # `lcl-foreign-ret` is not self-recursive, so nothing strands its release in the
 # first place and the gap isolates the strand rather than the retain. Object growth,
 # not region growth, is the gauge (closure + env share one region). The
@@ -296,7 +294,7 @@
 # deterministically by runtime::tests::ownership::self_recursive_loop_is_cell_free;
 # the soundness half — that the returned handle is still live after the deferred
 # release — is pinned under the UAF oracle by
-# tests/elle/region-selfrec-return-release.lisp.
+# tests/impl/region-selfrec-return-release.lisp.
 (defn lcl-self-ret [n]
   "Self-recursive local closure that RETURNS itself (so a retain pins its region)."
   # go is returned (value position), which disables call-site param joins, so a
@@ -339,11 +337,11 @@
 # region's only channel. The crossing is no reason to withhold it: the emit's park
 # retain into `fiber.signal` (which the resumer's result release consumes) and
 # `chan/send`'s send-site incref each count a reference of their own, so the deferral
-# drops the frame's alone (docs/impl/selfrec.md § "The deferral needs no escape
-# gate"). `recur-local-self` above is the control — the same strand with no crossing —
-# so the gap between them isolates the crossing rather than the strand. The soundness
-# half, that the delivered handle is still live after the deferred release, is pinned
-# under the UAF oracle by tests/elle/region-selfrec-fiber-release.lisp.
+# drops the frame's alone (docs/impl/selfrec.md). `recur-local-self` above is the
+# control — the same strand with no crossing — so the gap between them isolates the
+# crossing rather than the strand. The soundness half, that the delivered handle is
+# still live after the deferred release, is pinned under the UAF oracle by
+# tests/impl/region-selfrec-fiber-release.lisp.
 (defn lcl-self-yield [n]
   "Self-recursive local closure YIELDED to the resumer before the body tail-calls it."
   # go crosses the frontier (a value use), which disables call-site param joins, so a
@@ -375,25 +373,23 @@
 
 # ── The scheduler frontier — a spawned fiber's round trip ─────────────
 # `ev/spawn` + `ev/join` is the shape every structured-concurrency program
-# is built out of, and it is the one the h2 corpus multiplies: one session
+# is built out of, and it is the one the h2 tests multiply: one session
 # answering 320 requests held ~1 GB of live heap on this round trip alone.
 #
-# What stranded, read off `--trace=rc` for one op: the fiber's own region,
-# the closure it was made from, and the `[ok? value]` pair the join
-# delivered — each left at rc=1, its birth reference never released. The
-# frame that owned each one handed it to another fiber on ONE path and
-# reached its end on every other: `wake-select-waiters` takes the completed
-# fiber by tail-call move and resumes a select waiter with it, and a
-# program with no select outstanding never takes that arm. The release the
-# branch-arm window would anchor at the merge was refused because the
-# region crosses the fiber frontier — a refusal the crossing's own count
-# retires (docs/impl/region/mechanism.md § "A fiber crossing is a counted
-# holder too"). A CLOSED control now, and the shape is gauged directly by
-# tests/elle/region-fiber-frontier-window.lisp.
+# What stranded, read off `--trace=rc` for one op: the fiber's own region, the closure
+# it was made from, and the `[ok? value]` pair the join delivered — each left at rc=1,
+# its birth reference never released. The frame that owned each one handed it to another
+# fiber on ONE path and reached its end on every other: `wake-select-waiters` takes the
+# completed fiber by tail-call move and resumes a select waiter with it, and a program
+# with no select outstanding never takes that arm. The release the branch-arm window
+# would anchor at the merge was refused because the region crosses the fiber frontier —
+# a refusal the crossing's own count retires (docs/impl/region/window.md). A CLOSED
+# control, and the shape is gauged directly by
+# tests/impl/region-fiber-frontier-window.lisp.
 #
 # The SCHEDULER's half of the per-fiber cost is closed and stays closed:
-# a delivered join retires the completion records that used to hold every
-# fiber a program ever spawned (docs/scheduler.md § Completion records,
-# pinned by tests/elle/sched-completion-records.lisp).
+# a delivered join retires the completion records that would otherwise hold
+# every fiber a program ever spawned (docs/scheduler.md,
+# pinned by tests/impl/sched-completion-records.lisp).
 (pin (measure "spawn-join" (fn [j] (ev/join (ev/spawn (fn [] 7)))) 100 6 60 0.4
               0.5) 0)

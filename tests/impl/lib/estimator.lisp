@@ -1,17 +1,17 @@
 (elle/epoch 13)
-# audited: 2026-09-28
+# audited: 2026-09-29
 ## The instrument the leak dashboards share: the gauges, the estimator, the
 ## ledger, and the channel each verdict is reported through.
 ## docs/impl/region/diagnostics.md
 ## docs/test-store.md
 ##
-## Each dashboard (oracle.lisp, plumb.lisp) splices this file in with the
-## top-level `include-file` directive (docs/modules.md). The splice happens
-## before expansion, so the `check` macro reaches the dashboard, and every
-## dashboard compiles its own copy with its own ledger state. A gauge is
-## therefore proven live per process, never per library, and each dashboard
-## runs its own gauge-live discriminators. This directory is outside the
-## corpus glob (`tests/elle/*.lisp`), so the library never runs as a test.
+## Each dashboard (oracle.lisp, plumb.lisp) splices this file with the top-level
+## `include-file` directive (docs/modules.md), so every dashboard compiles its own copy:
+## fresh ledger state per process — which is why each must run its own gauge-live
+## discriminators (tests/impl/oracle.lisp); a gauge is proven live
+## per process, never per library — and the `check` macro crosses, splicing preceding
+## expansion. The suite runs only the files at the top of tests/impl, so the library is
+## never run as a test itself.
 
 # ── Empirical-Bernstein half-width ────────────────────────────────────
 # Total error budget δ, spent across an unbounded number of peeks via a per-m
