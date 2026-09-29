@@ -1,4 +1,8 @@
+// audited: 2026-09-28
 //! Signal type for tracking which signals a function may emit.
+//!
+//! docs/signals/protocol.md
+//! docs/signals/inference.md
 //!
 //! Signals are signal-bits-based: they track which signals a function
 //! might emit (error, yield, debug, ffi, user-defined) and which
@@ -10,7 +14,7 @@
 //! `Signal` (this module) is a **compile-time** type used during HIR analysis
 //! and LIR lowering. Its `propagates` field is a bitmask of parameter indices
 //! whose signals flow through the function — this is needed to infer the signal
-//! of a call site based on its arguments. `SignalBits` (in `value/fiber.rs`) is
+//! of a call site based on its arguments. `SignalBits` (in `value/fiber/signalbits.rs`) is
 //! the **runtime** representation: a flat bitmask stored on closures and used by
 //! the VM and JIT for dispatch. These are intentionally separate types serving
 //! different phases. The `propagates` field has no runtime analogue. Do not
@@ -38,7 +42,7 @@ use std::fmt;
 //   Bit  3:     Resume - run a suspended fiber (VM-internal)
 //   Bit  4:     FFI — calls foreign code
 //   Bit  5:     Propagate — propagate caught signal (VM-internal)
-//   Bit  6:     Abort — graceful fiber termination with error injection (VM-internal)
+//   Bit  6:     Unused (the abort signal, SIG_ABORT, is Error + Terminal)
 //   Bit  7:     Query — read VM state without fiber swap (VM-internal)
 //   Bit  8:     Halt — graceful VM termination with return value
 //   Bit  9:     IO — I/O request to scheduler
@@ -66,7 +70,7 @@ pub const SIG_DEBUG: SignalBits = SignalBits::new(1 << 2); // breakpoint / trace
 pub const SIG_RESUME: SignalBits = SignalBits::new(1 << 3); // fiber resumption (VM-internal)
 pub const SIG_FFI: SignalBits = SignalBits::new(1 << 4); // calls foreign code
 pub const SIG_PROPAGATE: SignalBits = SignalBits::new(1 << 5); // propagate caught signal (VM-internal)
-pub const SIG_ABORT: SignalBits = SIG_ERROR.union(SIG_TERMINAL); // graceful fiber termination with error injection (VM-internal)
+pub const SIG_ABORT: SignalBits = SIG_ERROR.union(SIG_TERMINAL); // raise an error at a paused fiber's suspension point (VM-internal)
 pub const SIG_QUERY: SignalBits = SignalBits::new(1 << 7); // VM state query (VM-internal)
 pub const SIG_HALT: SignalBits = SignalBits::new(1 << 8); // graceful VM termination
 pub const SIG_IO: SignalBits = SignalBits::new(1 << 9); // I/O request to scheduler
@@ -91,8 +95,10 @@ pub const SIG_FS: SignalBits = SignalBits::new(1 << 17); // filesystem access (c
 /// every such mask on its way to the scheduler.
 const IO_ROUND_TRIP: SignalBits = SIG_IO.union(SIG_ERROR);
 
-/// VM-internal signal bits: infrastructure signals that user code cannot
-/// produce. These are emitted exclusively by the VM's own dispatch machinery.
+/// VM-internal signal bits: signals the runtime raises for its own machinery
+/// rather than for what a program does — the VM's dispatch, fuel metering, and
+/// the stdlib scheduler's `:wait`. They lie outside `CAP_MASK`, so no fiber can
+/// be denied them.
 const VM_INTERNAL: SignalBits = SIG_RESUME
     .union(SIG_PROPAGATE)
     .union(SIG_QUERY)

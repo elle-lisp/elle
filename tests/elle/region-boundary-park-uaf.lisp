@@ -1,15 +1,15 @@
-(elle/epoch 12)
-# audited: 2026-09-19
+(elle/epoch 13)
+# audited: 2026-09-28
 # Soundness complement of region-boundary-park.lisp
 # (docs/impl/region/park.md § "A boundary ends a park with no reader and no
 # install, so it owes both references"). Run under `--trace=guardfree` by the
 # subprocess pin `region_boundary_park_uaf` in tests/integration/elle_scripts.rs.
 #
-# A `squelch`/`attune` boundary now releases two references a park was left
-# with: the delivery retain no reader consumed, and — for a payload the runtime
-# built — the one its allocation left. Both are decrefs that never ran before,
-# and the fiber SURVIVES the boundary, so what has to be whole afterwards is
-# everything that still names the payload or shares its region.
+# A `squelch`/`attune` boundary releases two references a park was left with:
+# the delivery retain no reader consumed, and — for a payload the runtime built
+# — the one its allocation left. The fiber SURVIVES the boundary, so what has
+# to be whole afterwards is everything that still names the payload or shares
+# its region.
 #
 # Six faces.
 #
@@ -24,8 +24,8 @@
 # 4. REPETITION over the io machinery. The scheduler and its backend are reused
 #    across boundaries, so a region drained by one over-release surfaces within
 #    a few iterations; each subject runs in a loop and reads afterwards.
-# 5. A park some other host ended. `compile/run-on` rejects a suspension, and
-#    the ledger record outlives it; a boundary later in the same fiber must not
+# 5. A park some other host ended. `compile/run-on` rejects a suspension and
+#    discharges its record; a boundary later in the same fiber must not
 #    release a park that is already over.
 # 6. The park that was NOT abandoned. An ordinary io call after every boundary
 #    proves the install path still owns its own release — the boundary must not
@@ -122,11 +122,10 @@
   (assign i (+ i 1)))
 
 # ── 5. a park some other host ended is no longer the boundary's to claim ─────
-# `compile/run-on :jit` cannot host a suspension, so it rejects the park and the
-# ledger record outlives it. The boundary below ends no park at all (a squelched
-# raise), so what keeps it off that stale record is the identity gate: the exit
-# names the park it is ending, and a record that does not name it is skipped.
-# Anything released here would be the stale record's.
+# `compile/run-on :jit` cannot host a suspension, so it rejects the park and
+# discharges the ledger record. The boundary below ends no park at all (a
+# squelched raise), so it must release nothing. Anything released here would
+# belong to the park the host already ended.
 
 (def escaped (string "escaped-" 1))
 (defn yielder []

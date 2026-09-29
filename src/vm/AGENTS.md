@@ -1,6 +1,6 @@
 # vm
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 The VM executes bytecode on a fiber's operand stack, with each local in a stack slot above the frame base.
 
@@ -77,7 +77,8 @@ error message.
 Most instruction handlers return `()`. The call, tail-call and emit handlers
 return the signal that ends the dispatch loop. VM bugs panic. A user error in
 call position calls `VM::set_error(kind, msg)` and pushes `Value::NIL` to keep
-the stack consistent; one in tail position returns `Some(SIG_ERROR)`.
+the stack consistent (invariant 7 below); one in tail position returns
+`Some(SIG_ERROR)`.
 
 ## Threading the code object
 
@@ -180,6 +181,12 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
    a value routes through its registered NativeFn, which validates arguments
    at runtime. See `VM::set_error` in [mod.rs](mod.rs) and
    `Fiber::set_error_in` in [fiber.rs](../value/fiber.rs).
+   A handler that raises pushes one `Value::NIL` in place of its result, and
+   the post-handler error exit pops it, so an error park holds nothing in the
+   raising call's result position and a restart's resume value lands there.
+   An instruction with no result (`CheckSignalBound`, `PushParamFrame`) pushes
+   no placeholder, and its park takes no resume value
+   ([vm.md](../../docs/impl/vm.md)).
 
 ## Key VM fields
 
@@ -212,7 +219,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `signal` | `Option<(SignalBits, Value)>` | Signal from execution (errors, yields) |
 | `error_loc` | `Option<(Value, SourceLoc)>` | The parked `SIG_ERROR` payload and where it was raised. Parked by `absorbs`, read back by `fiber/propagate` so a re-raised error keeps its raising form |
 | `suspended` | `Option<Vec<SuspendedFrame>>` | Suspended execution frames (for yield/signal resumption) |
-| `delivery` | `Delivery` | The delivery ledger: how the current park's delivery references are funded — the raise-minted payload, the bodyless (denial) payload whose release the displacing install owes, the park whose delivery retain no reader has consumed, and whether the resume value owes a mint. Method-only surface ([park.md](../../docs/impl/region/park.md)) |
+| `delivery` | `Delivery` | The delivery ledger: how the current park's delivery references are funded — the raise-minted payload, the bodyless payload (a denial's struct, an io op's request) whose release the displacing install owes, the park whose delivery retain no reader has consumed, and whether the resume value owes a mint. Method-only surface ([park.md](../../docs/impl/region/park.md)) |
 | `mask` | `SignalBits` | Which of this fiber's signals its parent catches |
 | `param_frames` | `Vec<Vec<(u32, Value)>>` | Parameter binding frames (stack of frames, each frame a vec of (param id, value) pairs) |
 | `parent` | `Option<WeakFiberHandle>` | Weak back-pointer to parent fiber |
@@ -244,28 +251,32 @@ parameter frames). Each re-entry nests on the Rust stack, so it halts with
 | The WASM host | [linker.rs](../wasm/linker.rs), [linker.rs](../wasm/lazy/linker.rs) | Falls back to bytecode for a callee the module does not hold |
 | FFI callback | [callback.rs](../ffi/callback.rs) | Runs a closure a C function calls back |
 
-A host that runs a thunk on the current fiber refuses a suspending signal.
-`eval`, `import` and the test-setup loader report an error, and `arena/allocs`
-abandons the park (`VM::abandon_hosted_park`). The module doc of
-[execute.rs](execute.rs) holds the rules on what is preserved, what is
-overwritten, and how to add a caller.
+A host that runs code on the current fiber cannot hold a suspension of that
+code. `eval`, `import`, the `compile/*-module` setup runs, `compile/run-on :jit`
+and the root driver refuse one: `refuse_hosted_park` ends the park through the
+discard chokepoint, and the host raises at its own call. `arena/allocs` and
+`compile/run-on :bytecode` hand the suspension on as their own call's park
+(`abandon_hosted_park`). The module doc of [execute.rs](execute.rs) holds the
+rules on what is preserved, what is overwritten, and how to add a caller.
 
 ## Suspension mechanism
 
-When a fiber suspends (through the Emit instruction or a suspending primitive):
+When a fiber suspends, or stops on an error:
 
 1. **Emit instruction** (`handle_emit`): captures innermost frame as a
    `SuspendedFrame` with the code object, env (Rc clone), IP (after the emit),
    and operand stack. Stored in `fiber.suspended`.
-2. **Return into a paused caller** (if the yield leaves a callee):
+2. **Suspending primitive** (`handle_primitive_signal`, call position): parks
+   its own frame the same way. A tail-position suspend, a fuel pause and an
+   error park no frame of their own: the driver they return to parks it
+   (`do_fiber_first_resume`, the re-suspend in `resume_suspended`).
+3. **Return into a paused caller** (if a suspend leaves a callee):
    `run_dispatch` appends the caller's frame to the `fiber.suspended` vec.
-3. **Suspending primitive** (dynamic `emit`, io op, capability denial):
-   `handle_primitive_signal` parks one `SuspendedFrame` with the full operand
-   stack.
 4. **Frame ordering**: innermost (yielder/signaler) at index 0, outermost
    (caller) at last index.
 5. **Resume** (`resume_suspended`): iterates frames forward, calling
-   `execute_bytecode_from_ip` for each. Handles re-yields and errors.
+   `execute_bytecode_from_ip` for each. A frame that stops again re-parks,
+   and every signal but a halt keeps the outer frames behind it.
 
 A park at a suspending primitive call records how its delivery is funded in
 the delivery ledger (`Fiber::delivery`), and the install that displaces the
@@ -280,7 +291,10 @@ Key methods:
 - `execute_bytecode_from_ip`: Executes from a given IP with the code object (`&Code`)
 - `execute_bytecode_saving_stack`: Saves/restores caller's stack, handles tail calls
 - `run_thunk_to_completion`: `execute_bytecode_saving_stack` + the `SIG_SWITCH` drain loop — the safe entry for re-entrant callers running a thunk on the current fiber (`eval`, `import`, `arena/allocs`, test-setup module loader)
-- `resume_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and errors
+- `replay_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and
+  errors, and answers a `Replay` naming the error park it built; a fiber
+  boundary records that park in the delivery ledger. `resume_suspended` is the
+  same replay for a driver that records no park (`handle_sig_switch`)
 - `with_child_fiber` ([child.rs](fiber/child.rs)): Shared swap protocol for
   fiber resume and abort. Swaps the child fiber into `vm.fiber`, wires the
   parent/child chain, runs the body, then swaps back. No heap swap is
@@ -319,6 +333,12 @@ frame — the creator's stack flattened at `fiber/new`, innermost winning — be
 the creator's `parameterize` blocks unwind long before the scheduler resumes the
 child. The baseline is a counted holder of every heap value in it
 ([park.md](../../docs/impl/region/park.md)).
+
+**Abandonment**: code that stops running pops no frame it pushed, so whatever
+abandons it truncates the stack. Each call, host and boundary records the depth
+at its entry as a `ParamDepth`. A caller whose callee raised truncates to it,
+and so does the discard chokepoint where a `squelch` boundary or a refusing
+host ends a park (`discard_suspended_frames`).
 
 ## Truthiness
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-29
 //! A caller paused in its fiber while its interpreted callee runs on the same
 //! dispatch loop, and what completing the call needs.
 //!
@@ -17,11 +17,42 @@ pub struct CallSite {
     /// The callee's squelch mask. A suspending signal it names becomes a
     /// `signal-violation` error at this call.
     pub squelch_mask: SignalBits,
-    /// The callee was declared `silence`d, so any signal leaving it is a
-    /// programmer error that aborts the process.
+    /// The callee's signal is silent, declared or inferred, so any signal
+    /// leaving it breaks that claim, and the call aborts the process with a
+    /// diagnostic.
     pub silent: bool,
     /// The callee's name, for the silence diagnostic.
     pub name: Option<&'static str>,
+}
+
+/// How many `parameterize` frames a fiber held at an entry: a call, a host
+/// that runs code, or a squelch boundary (src/vm/AGENTS.md § "Parameter
+/// resolution"). Read only off a fiber ([`super::Fiber::param_depth`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParamDepth(pub(super) usize);
+
+/// The squelch masks of the tail calls that replaced an activation's body,
+/// OR'd together, and the parameter depth at the last of them.
+#[derive(Debug, Clone, Copy)]
+pub struct TailSquelch {
+    pub mask: SignalBits,
+    pub depth: ParamDepth,
+}
+
+impl TailSquelch {
+    /// An activation no tail call has replaced yet, entered at `depth`.
+    pub fn none(depth: ParamDepth) -> Self {
+        TailSquelch {
+            mask: SignalBits::EMPTY,
+            depth,
+        }
+    }
+
+    /// A tail call whose callee carries `mask` replaced the body at `depth`.
+    pub fn add(&mut self, mask: SignalBits, depth: ParamDepth) {
+        self.mask |= mask;
+        self.depth = depth;
+    }
 }
 
 /// An interpreted callee's activation, running on its caller's dispatch loop.
@@ -30,9 +61,8 @@ pub struct Activation {
     /// The body being run. A tail call inside the activation replaces it.
     pub code: crate::value::Code,
     pub env: Rc<Vec<Value>>,
-    /// The squelch masks of every tail call that replaced this activation's
-    /// body, OR'd together.
-    pub tail_squelch: SignalBits,
+    /// What the tail calls that replaced this activation's body enforce.
+    pub tail_squelch: TailSquelch,
     /// The call that entered this activation.
     pub call: CallSite,
     /// How many region-remap frames the fiber held before this activation
@@ -56,6 +86,8 @@ pub struct PausedCaller {
     pub call_ip: usize,
     /// The caller's operand stack, locals included.
     pub stack: Vec<Value>,
+    /// How many parameter frames the fiber held at the call.
+    pub param_depth: ParamDepth,
     /// The caller's executing-closure register.
     pub closure: Value,
 }

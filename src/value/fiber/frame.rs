@@ -12,18 +12,19 @@ use std::rc::Rc;
 /// A suspended bytecode execution point.
 ///
 /// Captures everything needed to resume bytecode execution: the code object,
-/// closure environment, instruction pointer, and operand stack state. An
-/// `emit` instruction, a suspending primitive call (a dynamic `emit`, an I/O
-/// request, a capability denial) and a fuel pause each park one, and a suspend
-/// parks one more for each caller it leaves.
+/// closure environment, instruction pointer, and operand stack state. Used for
+/// every park: an emit, a suspending primitive call (a dynamic `emit`, an I/O
+/// request, a capability denial), a caller waiting on its callee, a fuel
+/// pause, and an error park.
 ///
 /// `stack` always captures the full operand stack at the moment of suspension.
-/// After a fuel pause, `ip` points at the paused instruction and the stack is
-/// already complete — no extra value is pushed. Otherwise `ip` points past the
-/// instruction that suspended, and resume pushes the resume value as that
-/// instruction's result. The `push_resume_value` field encodes which case
-/// applies.
-#[derive(Debug, Clone)]
+/// For an emit, `ip` points past the `Emit` and the resume value is pushed as
+/// the `(yield ...)` expression's result; an error park is the same, the resume
+/// value taking the raising call's result. For a fuel pause, `ip` points at the
+/// paused instruction and the stack is already complete. For a raise with no
+/// result position, `ip` points past the raise and nothing is pushed. The
+/// `push_resume_value` field encodes which case applies.
+#[derive(Debug)]
 pub struct BytecodeFrame {
     /// Code object to resume executing (bytecode + constants + location map +
     /// child protos). The template-derived half of the execution context; see
@@ -37,18 +38,20 @@ pub struct BytecodeFrame {
     pub stack: Vec<Value>,
     /// Whether to push `current_value` onto the stack before resuming.
     ///
-    /// `true` for every frame but a fuel pause: the resume value is the
-    /// "return value" of the suspended operation (the `emit`, the primitive
-    /// call, or the call a caller frame waits on). `false` for a fuel pause:
-    /// the instruction at `ip` re-executes from scratch with the stack exactly
-    /// as saved — no extra value is injected.
+    /// `true` for yield frames, caller frames and error parks: the resume value
+    /// is the "return value" of the suspended operation (the yield expression
+    /// result, a call's return value, or the raising call's result). `false`
+    /// for a fuel pause, whose instruction at `ip` re-executes from scratch
+    /// with the stack exactly as saved, and for a raise with no result
+    /// position, where execution continues past it — no extra value is
+    /// injected.
     pub push_resume_value: bool,
     /// This activation's static→physical region remap at the moment of
     /// suspension (docs/regions/semantics.md — every value its own region). A yield
     /// leaves every activation it passes and pops each one's region frame;
     /// without carrying it here, a region allocated before the yield and
     /// `DecrefRegion`'d after resume would resolve in the wrong frame (a leak,
-    /// or — on a static-slot collision — a use-after-free). `resume_suspended`
+    /// or — on a static-slot collision — a use-after-free). `replay_suspended`
     /// restores this as the activation's region frame before re-entering.
     pub activation_region_map: rustc_hash::FxHashMap<u32, crate::hir::region::MappedRegion>,
     /// What this activation owed at the moment of suspension — MOVED (taken,
@@ -60,14 +63,14 @@ pub struct BytecodeFrame {
     /// regions have no route at all — their emitting instruction died with the
     /// frame the tail call replaced — so both must ride the park to the resumed
     /// body's completion, where the trampoline's clean-break release runs them.
-    /// `resume_suspended` restores the record into the live slot beside
+    /// `replay_suspended` restores the record into the live slot beside
     /// `activation_region_map`. Default (no node, nothing deferred) for an
     /// activation that neither adopted nor tail-called.
     pub activation_dues: crate::value::fiber::ActivationDues,
     /// The executing-closure register (`Fiber::current_closure`) at the moment this
     /// activation suspended. A yield leaves every activation it passes and restores the
     /// live register to the caller's value, so without parking it here a self-edge
-    /// resolved after resume would name the wrong closure. `resume_suspended`
+    /// resolved after resume would name the wrong closure. `replay_suspended`
     /// re-installs it before re-entering the body. An uncounted borrow that may be
     /// DEAD by resume time — the region solver frees a closure value at its last
     /// use while the activation's `code`/`env` live on as `Rc`s — so it is never
@@ -83,7 +86,7 @@ pub struct BytecodeFrame {
     /// snapshotted regions are this activation's own live allocations, kept alive by
     /// its still-pending `DecrefRegion`s while the fiber is parked; a map slot whose
     /// region's generation has already moved on is a dead leftover (see
-    /// `record_region_borrows`) and is skipped, not recorded. `resume_suspended`
+    /// `record_region_borrows`) and is skipped, not recorded. `replay_suspended`
     /// re-checks each recorded generation before `restore_activation_region_map`, so
     /// a live borrow freed while parked panics at the resume boundary (naming the
     /// slot) instead of corrupting the resumed activation's allocs/decrefs. Filled by
@@ -136,7 +139,7 @@ impl BytecodeFrame {
 /// `activation_region_map` holds: for each live `(slot, region)`, record
 /// `(slot, region, establish-generation)`. The suspended-frame analogue of
 /// `record_param_borrows` (the cross-fiber param snapshot, `src/vm/fiber/param.rs`);
-/// the recorded generation lets `resume_suspended`'s `first_stale_borrow`
+/// the recorded generation lets `replay_suspended`'s `first_stale_borrow`
 /// confirm the region has not been freed since the fiber parked.
 ///
 /// A slot whose recorded `MappedRegion::gen` no longer matches the region's
@@ -196,7 +199,7 @@ pub struct ParkSite<'a> {
 
 impl<'a> ParkSite<'a> {
     /// Read the site off the frame's own code object and resume ip. `frame` is
-    /// the index `resume_suspended` is replaying and `frames` the chain's
+    /// the index `replay_suspended` is replaying and `frames` the chain's
     /// length, which together say how far into the replay the park sits.
     pub fn of(code: &'a crate::value::Code, ip: usize, frame: usize, frames: usize) -> Self {
         let locations = code.locations();
@@ -247,7 +250,7 @@ impl<'a> ParkSite<'a> {
 /// A suspended execution step — either a bytecode frame or a sub-fiber resume.
 ///
 /// The `suspended` Vec on a `Fiber` contains a chain of these, replayed
-/// innermost-first by `resume_suspended`.
+/// innermost-first by `replay_suspended`.
 ///
 /// - `Bytecode`: resume bytecode execution at a saved instruction pointer.
 /// - `FiberResume`: resume a suspended sub-fiber (e.g. a `defer`/`protect`
@@ -257,7 +260,7 @@ impl<'a> ParkSite<'a> {
 ///   the sub-fiber first, and the sub-fiber's final return value then flows
 ///   into the next frame in the chain (typically the outer `BytecodeFrame`
 ///   that continues the `defer`/`protect` expansion after `fiber/resume`).
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum SuspendedFrame {
     /// Resume bytecode execution from a saved point.
     Bytecode(BytecodeFrame),

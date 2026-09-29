@@ -1,4 +1,4 @@
-// audited: 2026-09-11
+// audited: 2026-09-29
 // Corpus files run with the JIT compiling on the VM thread (`--trace=syncjit`).
 //
 // docs/impl/jit.md
@@ -44,4 +44,22 @@ fn jit_string_push_syncjit() {
 #[test]
 fn compiled_caller_promotes_callee_syncjit() {
     run_elle_script_with_args("jit-compiled-caller-promotes-callee", SYNCJIT);
+}
+
+// A compiled function whose tail call suspends parks its continuation there,
+// so the resume runs the releases after the tail call
+// (docs/impl/region/park.md). Under syncjit each face runs compiled from its
+// first call, so the gauge reads compiled tail calls alone. The guardfree run
+// faults where a replayed release frees an argument its caller still reads.
+#[test]
+fn region_jit_tail_suspend_syncjit() {
+    run_elle_script_with_args("region-jit-tail-suspend", SYNCJIT);
+}
+
+#[test]
+fn region_jit_tail_suspend_guardfree() {
+    run_elle_script_with_args(
+        "region-jit-tail-suspend",
+        &["--jit=eager", "--trace=syncjit,guardfree"],
+    );
 }

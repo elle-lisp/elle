@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-29
 // docs/impl/jit.md
 // docs/impl/region/owner.md
 //! The helpers a compiled call site enters: dispatch by callee kind, and the
@@ -55,7 +55,7 @@ pub extern "C" fn elle_jit_call(
         let region = crate::hir::region::StaticRegion::new(region_id)
             .expect("JIT region slot is nonzero — emitter invariant");
         let (bits, value) = vm.dispatch_native_call(def, args_slice, region);
-        return jit_handle_primitive_signal(vm, bits, value);
+        return jit_handle_primitive_signal(vm, bits, value, args_slice);
     }
 
     // Dispatch to parameter (dynamic binding lookup)
@@ -140,6 +140,7 @@ pub extern "C" fn elle_jit_call(
                 args_ptr_to_value_slice(args_ptr, nargs),
             );
 
+            let depth = vm.fiber.param_depth();
             let result = unsafe {
                 jit_code.call(
                     env_ptr,
@@ -174,7 +175,7 @@ pub extern "C" fn elle_jit_call(
                         // what each parked frame owed before handing back the error
                         // (docs/impl/region/owner.md § "A discard runs what the
                         // abandoned frames owed").
-                        let err = vm.squelch_violation(squelched, vm.fiber.signal);
+                        let err = vm.squelch_violation(squelched, vm.fiber.signal, depth);
                         vm.fiber.signal = Some((SIG_ERROR, err));
                         return JitValue::nil();
                     }
@@ -233,6 +234,7 @@ pub extern "C" fn elle_jit_call(
         // handoff every re-entry into the interpreter makes — a self-reference
         // in the fallback body resolves to `func`, not `NIL`.
         vm.pending_entry_closure = func;
+        let depth = vm.fiber.param_depth();
         let result = vm.execute_bytecode_saving_stack(&closure.template.code(), &new_env);
         vm.fiber.call_depth -= 1;
 
@@ -242,7 +244,7 @@ pub extern "C" fn elle_jit_call(
         let squelched = crate::signals::squelched_bits(bits, closure_squelch_mask);
         if !squelched.is_empty() {
             // The squelch discard chokepoint (see the JIT-to-JIT arm above).
-            let err = vm.squelch_violation(squelched, vm.fiber.signal);
+            let err = vm.squelch_violation(squelched, vm.fiber.signal, depth);
             vm.fiber.signal = Some((SIG_ERROR, err));
             return JitValue::nil();
         }

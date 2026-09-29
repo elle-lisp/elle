@@ -1,6 +1,6 @@
 # Agent-First Test Runner
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-29 -->
 
 How a run executes: each file compiled, isolated, gated, run on every tier,
 its output captured, and its end recorded honestly.
@@ -144,10 +144,9 @@ each form, so it lives in the worker — which the corpus will migrate toward.)
 ### Isolation: a file can have its own process
 
 A worker thread isolates a fault and shares the process. That is enough for a
-form that raises, and not enough for a mode the process sets once: `--no-uring`
-picks the I/O backend for the whole binary, and `--trace=guardfree` reports a
-use-after-free as a SIGSEGV, which takes the runner down along with every
-result it had not written yet. Those files live in
+form that raises, and not enough for a mode the process sets once:
+`--trace=guardfree` reports a use-after-free as a SIGSEGV, which takes the
+runner down along with every result it had not written yet. Those files live in
 [elle_scripts.rs](../tests/integration/elle_scripts.rs) today, and their
 verdicts reach no database.
 
@@ -441,20 +440,25 @@ enough at each boundary that truncation is self-evident:
   never written, not because nothing failed.
 
   `finished_at IS NULL` means "did not finish", which covers *died* and *still
-  running* alike — the row looks the same either way. One session DB serves
-  every checkout on the machine, so a second worktree running its own corpus at
-  the same time leaves in-flight rows that the first one reports as killed. The
-  warning therefore names the worktree of the run it warns about, read from
-  that run's `worktree` column: a path that is not yours is a sibling checkout
-  still running, and a row that is still NULL once every runner has exited is
-  the kill marker.
+  running* alike. One session DB serves every checkout on the machine, and two
+  runs may share it at once, so the row alone cannot say which.
+- **At insert, too:** the runner's `host` and `pid`. A view that finds a row
+  with no `finished_at` asks whether that process is still alive. The row is
+  *still running* when its host is this host and `ps` still shows an `elle`
+  under its pid. Any other row was killed. A row imported from another box is
+  never running here.
 
-The views refuse to launder that: `--summary` and the post-run summary compute
-their tallies **live** from `result` (never from the stored counters) and label
-a truncated run loudly — `DID NOT COMPLETE — killed after recording results for
-N of M selected files`. The next `elle test` invocation prints the same warning
-about its predecessor, so a killed `make smoke` is diagnosed by the very next
-run instead of reading as an all-pass mystery. Both summaries name the run's
+The views refuse to launder a killed run: `--summary` and the post-run summary
+compute their tallies **live** from `result` (never from the stored counters)
+and label a killed run loudly — `DID NOT COMPLETE — killed after recording
+results for N of M selected files`. The next `elle test` invocation prints the
+same warning about its predecessor, so a killed `make smoke` is diagnosed by the
+very next run instead of reading as an all-pass mystery.
+
+A run still in flight is labelled as that: `--summary` reads `STILL RUNNING
+(pid P) — results for N of M selected files so far`, and the next invocation
+prints one line naming the pid instead of the kill warning. Both warnings name
+the worktree of the run they describe, and both summaries name the run's
 commit, so a tally read from a log says which code it describes.
 Pinned by [truncation.rs](../tests/integration/truncation.rs) and
 [run_identity.rs](../tests/integration/run_identity.rs).

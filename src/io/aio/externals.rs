@@ -1,4 +1,4 @@
-//! audited: 2026-09-18
+//! audited: 2026-09-29
 //! The submissions that name an OS object the request carries or creates: a
 //! watcher, a signal receiver, a file, a child, a background task.
 //!
@@ -67,8 +67,8 @@ impl AsyncBackend {
                     PlatformBackend::Uring(ring) => {
                         // One `IORING_OP_READ` on the signalfd, completing
                         // through the kernel's poll pipeline with no worker
-                        // thread of ours. The arm below is reached only under
-                        // `--no-uring`.
+                        // thread of ours. On Linux the arm below is reached only
+                        // in a `no-uring` build, or when the ring will not open.
                         crate::io::uring::submit_uring_sig_next(
                             ring,
                             d.id,

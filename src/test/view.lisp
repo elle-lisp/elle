@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-28
+# audited: 2026-09-29
 ## elle test — reading a run back: the tally, the problem list, the warning
 ## about a predecessor that never finished, and raw SQL.
 ## docs/test-store.md
@@ -44,8 +44,21 @@
 # commit column answers to `sha` here.
 (defn run-meta [conn run-id]
   (get (sqlite:query conn
-                     "SELECT (finished_at IS NULL) AS trunc, n_selected AS sel, git_commit AS sha, git_dirty AS dirty, worktree AS worktree FROM run WHERE id = ?1"
+                     "SELECT (finished_at IS NULL) AS trunc, n_selected AS sel, git_commit AS sha, git_dirty AS dirty, worktree AS worktree, host AS host, pid AS pid FROM run WHERE id = ?1"
                      [run-id]) 0))
+
+# An unfinished row is a run still in flight when its process is still alive:
+# the row's host is this host, and `ps` shows an elle under the row's pid. The
+# name check keeps a pid the kernel has since handed to another program from
+# reading as the run. Anything else — another host, no pid, a pid that is gone
+# — is a kill (docs/test-runner.md § Run honesty).
+(defn run-alive? [meta]
+  (let [pid (get meta :pid)
+        host (get meta :host)]
+    (if (or (= pid nil) (= host nil) (not (= host (capture-cmd "uname -n"))))
+      false
+      (let [comm (capture-cmd (string "ps -p " pid " -o comm= 2>/dev/null"))]
+        (and (not (= comm nil)) (string/contains? comm "elle"))))))
 
 (defn short-commit [sha]
   "The first seven characters of a commit, or nil when the run named none."
@@ -63,11 +76,14 @@
       "")))
 
 # One session DB serves every checkout on the box, so a warning about an
-# unfinished run has to say whose run it found. A path that is not yours is a
-# sibling checkout still running, not a kill.
+# unfinished run has to say whose run it found.
 (defn worktree-note [meta]
   (let [w (get meta :worktree)]
     (if w (string " (worktree " w ")") "")))
+
+(defn running-note [meta]
+  (let [w (get meta :worktree)]
+    (string " (pid " (get meta :pid) (if w (string ", worktree " w) "") ")")))
 
 # ── the measurements a run recorded (docs/test-store.md § Measurements) ──
 # A tally by verdict, then a line for each reading that is neither `closed` nor
@@ -163,10 +179,11 @@
   nil)
 
 # Tally line + the problem rows (only when there are any). Tallies are computed
-# live (count-status); a run without finished_at was KILLED mid-flight (OOM,
-# signal — docs/test-runner.md § Run honesty) and is labelled so, because a
-# partial all-pass result set must never read as green. To stderr, so it never
-# mingles with --query's stdout or a test's captured output.
+# live (count-status). A run without finished_at is either still running or was
+# KILLED mid-flight (OOM, signal — docs/test-runner.md § Run honesty), and is
+# labelled as whichever it is, because a partial all-pass result set must never
+# read as green. To stderr, so it never mingles with --query's stdout or a
+# test's captured output.
 (defn print-summary [conn run-id]
   (let [meta (run-meta conn run-id)
         # The DB is a SESSION: it accumulates every run. Show which run this is of
@@ -181,12 +198,17 @@
         bad (+ nf nd nt)]
     (eprintln "")
     (if (= (get meta :trunc) 1)
-      (eprintln "run " run-id
-                " DID NOT COMPLETE — killed after recording results for "
-                (files-recorded conn run-id) " of "
-                (let [sel (get meta :sel)]
-                  (if sel sel "?"))
-                " selected files; the tally below is partial, not green")
+      (let [sel (let [n (get meta :sel)]
+                  (if n n "?"))
+            done (files-recorded conn run-id)]
+        (if (run-alive? meta)
+          (eprintln "run " run-id " STILL RUNNING (pid " (get meta :pid)
+                    ") — results for " done " of " sel
+                    " selected files so far; the tally below is partial, not green")
+          (eprintln "run " run-id
+                    " DID NOT COMPLETE — killed after recording results for "
+                    done " of " sel
+                    " selected files; the tally below is partial, not green")))
       nil)
     (eprintln "elle test · run " run-id " of " nruns (commit-note meta))
     (eprintln np " pass · " ns " skip · " nf " fail · " nd " diverge · " nt
@@ -202,18 +224,24 @@
 
 # Gate honesty at startup: if this session DB's latest run never completed,
 # say so before starting a new one — the killed process could not report
-# anything itself, and its absence of failures must not read as green. The
-# warning names the worktree that run ran in: every checkout on the box shares
-# this DB, so the row may belong to a sibling that is still running.
+# anything itself, and its absence of failures must not read as green. Every
+# checkout on the box shares this DB, and two runs may share it at once, so a
+# row still being written by a live sibling gets one line naming it, not the
+# kill warning.
 (defn warn-if-truncated [conn]
   (let [rows (sqlite:query conn
                            "SELECT id AS id FROM run WHERE finished_at IS NULL AND id = (SELECT max(id) FROM run)")]
     (if (empty? rows)
       nil
-      (let [rid (get (get rows 0) :id)]
-        (eprintln "warning: the previous run in this session DB was killed"
-                  (worktree-note (run-meta conn rid)) ":")
-        (print-summary conn rid)))))
+      (let [rid (get (get rows 0) :id)
+            meta (run-meta conn rid)]
+        (if (run-alive? meta)
+          (eprintln "note: the previous run in this session DB is still running"
+                    (running-note meta))
+          (begin
+            (eprintln "warning: the previous run in this session DB was killed"
+                      (worktree-note meta) ":")
+            (print-summary conn rid)))))))
 
 # --query SQL: run it, print each row, exit. --summary: the latest run's tally.
 (defn run-query [conn sql]

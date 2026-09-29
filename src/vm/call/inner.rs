@@ -1,7 +1,8 @@
-// audited: 2026-09-23
-// The interpreter's Call-position dispatch by callee kind: native, parameter,
-// closure and collection, behind the capability gate.
-// docs/impl/vm.md
+// audited: 2026-09-29
+//! The interpreter's Call-position dispatch by callee kind: native, parameter,
+//! closure and collection, behind the capability gate.
+//!
+//! docs/impl/vm.md
 use super::*;
 
 mod park;
@@ -78,7 +79,14 @@ impl VM {
             {
                 self.mint_raised_argument_delivery(args.as_slice(), value);
             }
-            return self.handle_primitive_signal(bits, value, code, closure_env, ip);
+            return self.handle_primitive_signal(
+                bits,
+                value,
+                args.as_slice(),
+                code,
+                closure_env,
+                ip,
+            );
         }
 
         if let Some((id, default)) = func.as_parameter() {
@@ -193,12 +201,14 @@ impl VM {
             // Checked before Cranelift — MLIR produces better optimized code
             // for numeric functions (LLVM vectorization, LICM, GVN).
             #[cfg(feature = "mlir")]
-            if compiled_room && self.mlir_enabled && closure.template.lir_function().is_some() {
-                if let Some(bits) = self.try_mlir_call(closure, &args) {
-                    self.fiber.call_depth -= 1;
-                    self.fiber.call_stack.pop();
-                    return bits;
-                }
+            if compiled_room
+                && self.mlir_enabled
+                && closure.template.lir_function().is_some()
+                && self.try_mlir_call(closure, &args).is_some()
+            {
+                self.fiber.call_depth -= 1;
+                self.fiber.call_stack.pop();
+                return None;
             }
 
             // JIT compilation and dispatch.
@@ -206,9 +216,13 @@ impl VM {
             // Skip profiling for primitives (no LIR means not JIT-compilable).
             #[cfg(feature = "jit")]
             if compiled_room && closure.template.lir_function().is_some() {
-                if let Some(bits) = self.try_jit_call(closure, &args, func) {
+                let param_depth = self.fiber.param_depth();
+                if let Some(bits) = self.try_jit_call(closure, &args, func, param_depth) {
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();
+                    // A compiled callee's frames are abandoned by its raise,
+                    // and the `parameterize` frames they pushed with them.
+                    self.drop_abandoned_param_frames(param_depth);
                     match bits {
                         Some(sig) if !sig.intersects(SIG_ERROR) && !sig.intersects(SIG_HALT) => {
                             // JIT function suspended — any bits except SIG_ERROR/SIG_HALT
@@ -279,13 +293,16 @@ impl VM {
             };
 
             // Guard: WASM-compiled closures have empty bytecode. They
-            // cannot be executed by the bytecode VM.
+            // cannot be executed by the bytecode VM. The raise is an
+            // ordinary one: the error in the signal slot, a placeholder
+            // where the call's result goes.
             if closure.template.bytecode().is_empty() {
                 let err =
                     self.escaping_error("exec-error", "cannot execute WASM closure in bytecode VM");
-                self.fiber.stack.push(err);
+                self.fiber.signal = Some((SIG_ERROR, err));
+                self.fiber.stack.push(Value::NIL);
                 self.fiber.call_depth -= 1;
-                return Some(SIG_ERROR);
+                return None;
             }
 
             // Hand the callee to the dispatch loop's driver, which pauses this

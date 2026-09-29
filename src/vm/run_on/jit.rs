@@ -1,10 +1,12 @@
-// audited: 2026-09-13
-// docs/impl/jit.md
+// audited: 2026-09-29
 //! `compile/run-on :jit` — force Cranelift JIT execution.
 //!
 //! Both variants live here: the real entry point under `--features jit`, and
 //! the always-rejecting stub when the feature is off, so callers can invoke
 //! `invoke_closure_jit` unconditionally.
+//!
+//! docs/impl/jit.md
+//! docs/impl/region/park.md
 
 use super::rejected;
 #[cfg(feature = "jit")]
@@ -76,11 +78,17 @@ impl VM {
         // Save the operand stack and signal — call_jit may push and set.
         let saved_stack = std::mem::take(&mut self.fiber.stack);
         let saved_signal = self.fiber.signal.take();
+        // Where an error or a refused park truncates the parameter frames to
+        // (src/vm/AGENTS.md § "Parameter resolution").
+        let depth = self.fiber.param_depth();
 
         let result_jv = self.call_jit(&jit_code, closure, args, closure_val);
 
         // Capture any signal the JIT set (errors, halts, yields).
         let post_signal = self.fiber.signal.take();
+        if post_signal.is_some_and(|(bits, _)| bits.intersects(SIG_ERROR)) {
+            self.fiber.unwind_params(depth);
+        }
 
         // Decode the return value — handle tail calls before restoring
         // the caller's stack, since the trampoline needs the VM state.
@@ -97,31 +105,24 @@ impl VM {
                 let exec_result = self.execute_bytecode_saving_stack(&tail.code, &tail.env);
                 let eb = exec_result.bits;
 
+                // The tail callee's own signal — its result, its error, or the
+                // park it made — taken before the caller's is restored, as the
+                // non-tail path below takes `post_signal`.
+                let tail_signal = self.fiber.signal.take();
                 self.fiber.stack = saved_stack;
-                if let Some(sig) = saved_signal {
-                    self.fiber.signal = Some(sig);
-                }
+                self.fiber.signal = saved_signal;
 
                 if eb.is_empty() {
-                    let val = if let Some((_, v)) = self.fiber.signal.take() {
-                        v
-                    } else {
-                        Value::NIL
-                    };
+                    let val = tail_signal.map_or(Value::NIL, |(_, v)| v);
                     return (SIG_OK, val);
                 } else if eb == crate::value::SIG_HALT {
-                    let val = if let Some((_, v)) = self.fiber.signal.take() {
-                        v
-                    } else {
-                        Value::NIL
-                    };
+                    let val = tail_signal.map_or(Value::NIL, |(_, v)| v);
                     if val == Value::NIL {
                         return (SIG_OK, val);
                     }
                     return (crate::value::SIG_HALT, val);
                 } else if eb.intersects(SIG_ERROR) {
-                    // Error already set on fiber.signal — extract it.
-                    if let Some((bits, val)) = self.fiber.signal.take() {
+                    if let Some((bits, val)) = tail_signal {
                         return (bits, val);
                     }
                     return (
@@ -130,6 +131,8 @@ impl VM {
                     );
                 } else {
                     // Suspending signal — not supported under compile/run-on.
+                    // This host refuses the park and raises at its own call.
+                    self.refuse_held_park(eb, tail_signal, depth);
                     return (
                         SIG_ERROR,
                         rejected(self, "jit", "tail-call target yielded under compile/run-on"),
@@ -153,6 +156,14 @@ impl VM {
             self.fiber.signal = Some(sig);
         }
 
+        // An error or halt wins over the sentinel (docs/impl/jit.md § "How a
+        // signal leaves compiled code").
+        if let Some((bits, val)) = post_signal {
+            if bits.intersects(SIG_ERROR) || bits.intersects(crate::value::SIG_HALT) {
+                return (bits, val);
+            }
+        }
+
         if result_jv == crate::jit::YIELD_SENTINEL {
             // Squelch enforcement on the suspension the sentinel reports. The
             // signal is on `post_signal`, not `fiber.signal` — the caller's
@@ -163,36 +174,39 @@ impl VM {
             if !squelched.is_empty() {
                 // …and the park it ends is `post_signal` for the same reason:
                 // `fiber.signal` holds the caller's by here.
-                return (SIG_ERROR, self.squelch_violation(squelched, post_signal));
-            }
-
-            if let Some((bits, val)) = post_signal {
                 return (
                     SIG_ERROR,
-                    rejected(
-                        self,
-                        "jit",
-                        format!(
-                            "closure yielded under compile/run-on (signal {}, value type {})",
-                            bits,
-                            val.type_name()
-                        ),
-                    ),
+                    self.squelch_violation(squelched, post_signal, depth),
                 );
             }
-            return (
-                SIG_ERROR,
-                rejected(self, "jit", "closure yielded under compile/run-on"),
-            );
+
+            // Not squelched: this host refuses the park and raises at its own
+            // call. The park is `post_signal`, for the reason the squelch check
+            // above names. The refusal may release the payload, so the message
+            // reads it first.
+            let msg = match post_signal {
+                Some((bits, val)) => format!(
+                    "closure yielded under compile/run-on (signal {}, value type {})",
+                    bits,
+                    val.type_name()
+                ),
+                None => "closure yielded under compile/run-on".to_string(),
+            };
+            self.refuse_held_park(yield_bits, post_signal, depth);
+            return (SIG_ERROR, rejected(self, "jit", msg));
         }
 
-        // Error or halt set during execution wins over the return value.
+        // Any other signal set during execution wins over the return value.
         if let Some((bits, val)) = post_signal {
-            // Squelch enforcement for non-yield signals — same predicate, same
-            // reason for not routing through `enforce_squelch`.
+            // Squelch enforcement for a signal the sentinel did not report —
+            // same predicate, same reason for not routing through
+            // `enforce_squelch`.
             let squelched = crate::signals::squelched_bits(bits, closure.squelch_mask);
             if !squelched.is_empty() {
-                return (SIG_ERROR, self.squelch_violation(squelched, post_signal));
+                return (
+                    SIG_ERROR,
+                    self.squelch_violation(squelched, post_signal, depth),
+                );
             }
             if !bits.is_empty() {
                 return (bits, val);

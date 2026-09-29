@@ -1,20 +1,19 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 # ── The terminal-fiber teardown, exercised in a loop ──
 #
-# `fiber/cancel` of a parked fiber and `fiber/abort` of a not-yet-started
-# one are hard kills: both route through `kill_fiber` (src/vm/fiber.rs),
-# which consumes the parked chain and frees everything the fiber owns —
-# each parked frame's activation owner node and the fiber owner node
-# (docs/impl/region/owner.md § "Owner nodes" — "Fiber teardown frees
-# everything the fiber owns"). No production lowering emits owner-node
-# adopts yet, so the node-freeing half is pinned Rust-side
-# (`runtime::tests::ownership::fiber_kill_frees_parked_and_fiber_owned`);
-# this file pins the OTHER side on the production path: killing parked and
-# new fibers in a loop frees nothing a live frame still counts on
-# (`--trace=guardfree`, full stdlib, is the oracle that turns an
-# over-release into a fault). The kill's per-op region RESIDUE — the
-# suspending resume's carrier retain, which only a completing resume
-# releases — is tracked by `oracle.lisp`'s `cancel-discard` probe, not here.
+# `fiber/cancel` of a parked or stopped fiber and `fiber/abort` of a
+# not-yet-started one are hard kills: both route through `kill_fiber`
+# (src/vm/fiber/owned.rs), which consumes the parked chain and frees everything
+# the fiber owns. The node-freeing half is pinned Rust-side, where a test can
+# read a member's generation (the `runtime::tests::ownership::fnode::kill`
+# tests). This file pins the other side on the production path: killing fibers
+# in a loop frees nothing a live frame still counts on. `region_fiber_cancel_uaf`
+# runs it under `--trace=guardfree`, which turns an over-release into a fault.
+# The kill's region residue is gauged by the `cancel-discard` probe in
+# tests/elle/probe/concurrent.lisp, not here.
+#
+# docs/impl/region/owner.md
 
 (defn park-and-cancel []
   (let [f (fiber/new (fn []
@@ -23,8 +22,20 @@
     (fiber/resume f nil)
     (assert (= (fiber/value f) 1) "the body parks at its first yield")
     (fiber/cancel f :killed)
-    (assert (= (fiber/status f) :error) "cancel hard-kills the parked fiber")
+    (assert (= (fiber/status f) :dead) "cancel hard-kills the parked fiber")
     (assert (= (fiber/value f) :killed) "the kill leaves a readable error value")))
+
+# A fiber stopped on an error holds its payload as its result, and the kill
+# replaces it. The trap: the payload is a heap value the caller keeps reading
+# after the kill, so a kill that releases it twice frees it under the caller.
+(defn raise-and-cancel []
+  (let* [payload @[:boom]
+         f (fiber/new (fn [] (list :got (+ 1 (error payload)))) |:error|)]
+    (assert (identical? (fiber/resume f) payload) "the body stops on its raise")
+    (fiber/cancel f [:killed])
+    (assert (= (fiber/status f) :dead) "cancel hard-kills the stopped fiber")
+    (assert (= (fiber/value f) [:killed]) "the kill leaves its own value")
+    (assert (= (get payload 0) :boom) "the displaced payload is still readable")))
 
 (defn abort-new []
   (let [f (fiber/new (fn [] 42) |:yield|)]
@@ -35,10 +46,11 @@
 (var n 0)
 (while (< n 250)
   (park-and-cancel)
+  (raise-and-cancel)
   (abort-new)
   (assign n (+ n 1)))
 
-# Fresh fiber machinery must read intact state after 500 kills (an
+# Fresh fiber machinery must read intact state after 750 kills (an
 # over-releasing teardown drains live regions, and this is where the stale
 # read would surface).
 (def coro (fiber/new (fn [] (yield 3)) |:yield|))

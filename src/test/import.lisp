@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-22
+(elle/epoch 13)
+# audited: 2026-09-29
 ## elle test — merging another store's runs into this one: the key that makes
 ## an import repeatable, the rows that follow a run, and the bytes copied by
 ## address.
@@ -16,7 +16,7 @@
 (def run-columns
   ["run_key" "started_at" "finished_at" "tiers" "selection" "n_selected"
    "git_commit" "git_dirty" "tree_hash" "worktree" "boot_fingerprint"
-   "elle_version" "build_profile" "host" "argv" "n_pass" "n_fail" "n_skip"
+   "elle_version" "build_profile" "host" "argv" "pid" "n_pass" "n_fail" "n_skip"
    "n_diverge" "n_timeout"])
 
 (def form-columns

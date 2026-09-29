@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-29 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -116,6 +116,7 @@ interpreted.
 Not all functions can be JIT-compiled. The JIT rejects functions that:
 
 - Use features not yet implemented in the translator
+- Contain `MakeClosure`, or collect struct or named varargs
 - Fail Cranelift verification
 
 **Negative-cache invariant.** A function whose compilation is rejected is
@@ -214,11 +215,29 @@ from the bytes the core is executing. A sampler that parks every sample of a
 busy thread on ONE address is showing a single-instruction loop; on AArch64
 the word `0x14000000` is `b .` — an unconditional branch to itself.
 
-## Yield-through-call
+## How a signal leaves compiled code
 
-For functions that call other functions which might yield, the JIT
-collects yield-site metadata during LIR emission. This enables proper
-save/restore sequences so a yielded fiber can resume into JIT code.
+Compiled code has no resume point of its own. An `Emit` spills the frame's
+locals and operands and calls `elle_jit_yield`, which installs the signal in
+`fiber.signal`. For a suspending signal the helper also parks the frame as a
+bytecode frame at the emit's resume ip, so the interpreter runs the
+continuation when the fiber resumes. An error emit parks nothing, and the
+frame runs the abandoned-frame walk before it returns
+([unwind.md](region/unwind.md)).
+
+Either way the function returns `YIELD_SENTINEL`, so the sentinel alone does
+not say the function suspended. A reader of the sentinel reads the signal
+first, and treats an error or a halt as one: `run_jit`, and the
+`compile/run-on :jit` entry ([differential.md](differential.md)).
+
+A call whose callee suspended is the other way out. The check after the call
+finds the callee's signal and calls `elle_jit_yield_through_call`, which parks
+this frame at the call's resume ip behind the callee's frames. A tail call
+parks the same way at the ip past the tail call, where the interpreter's
+fall-through block starts, so the resume runs the releases the frame still owed
+([park.md](region/park.md)). The emitter records each emit's resume ip, and each
+call's and each tail call's, with the operand stack at that point, during LIR
+emission. These two helpers read them.
 
 ## CLI flags
 

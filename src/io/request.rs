@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+// audited: 2026-09-29
 //! IoRequest — typed I/O request descriptors.
 //!
 //! Stream primitives build IoRequest values and yield them via SIG_IO.
@@ -304,6 +304,18 @@ impl IoRequest {
                 op,
                 port: Value::NIL,
                 timeout: None,
+            },
+        )
+    }
+
+    /// A portless one-second `Sleep`, born in `ctx`'s region: the request a
+    /// test parks when only the payload's type matters.
+    #[cfg(test)]
+    pub(crate) fn test_sleep(ctx: &crate::primitives::ctx::Alloc) -> Value {
+        Self::portless(
+            ctx,
+            IoOp::Sleep {
+                duration: Duration::from_secs(1),
             },
         )
     }

@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-29
 // docs/impl/jit.md
 // docs/impl/region/relocate.md
 //! Terminator translation and the generic tail-call result branch.
@@ -8,17 +8,22 @@
 //! `TailCall` in `instr::calls` relies on.
 
 use super::*;
+use crate::value::repr::TAG_TRUE;
 
 impl<'a> FunctionTranslator<'a> {
     /// Branch on a generic (helper-dispatched) tail call's runtime result so
     /// the JIT mirrors the interpreter's `tail_call_inner` (src/vm/call.rs):
     ///
-    /// - `TAIL_CALL_SENTINEL` (callee was a closure → the trampoline runs it),
-    ///   `YIELD_SENTINEL` (a yielding native side-exited), or a pending error:
-    ///   pop the region map and return the value, exactly as before. The
+    /// - `TAIL_CALL_SENTINEL` (callee was a closure → the trampoline runs it) or
+    ///   a pending error: pop the region map and return the value. The
     ///   post-`TailCall` owned-arg releases do NOT run — for a closure that is
     ///   the ownership MOVE (the owned-param callee releases the moved args),
-    ///   and on error/yield the frame unwinds/suspends.
+    ///   and on error the frame unwinds.
+    /// - `YIELD_SENTINEL` (a suspending callee side-exited): in a function that
+    ///   may suspend (`park_site` is its call site) with no error pending, the
+    ///   frame parks at the ip past the tail call, so the resume runs the
+    ///   post-`TailCall` block the interpreter's park replays. Otherwise it
+    ///   returns the value like the sentinel above.
     /// - any other value: the callee was a NATIVE (or a parameter/collection)
     ///   that completed normally. Bind `dst` and fall through so the caller
     ///   keeps translating the post-`TailCall` block — the compiler's own
@@ -36,6 +41,7 @@ impl<'a> FunctionTranslator<'a> {
         dst: Reg,
         rt: cranelift_codegen::ir::Value,
         rp: cranelift_codegen::ir::Value,
+        park_site: Option<u32>,
     ) -> Result<(), JitError> {
         use crate::jit::value::{TAIL_CALL_SENTINEL_JV, YIELD_SENTINEL_JV};
 
@@ -55,10 +61,48 @@ impl<'a> FunctionTranslator<'a> {
             .ins()
             .brif(is_sentinel, return_block, &[], cont_block, &[]);
 
-        // Closure-trampoline / yield side-exit: return the value unchanged.
+        // Closure-trampoline / yield side-exit: return the value unchanged,
+        // except that a suspending callee's yield parks this frame.
         builder.switch_to_block(return_block);
         builder.seal_block(return_block);
-        self.emit_pop_then_return(builder, rt, rp)?;
+        match park_site {
+            None => self.emit_pop_then_return(builder, rt, rp)?,
+            Some(site) => {
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("tail call park without vm pointer".to_string())
+                })?;
+                let plain_block = builder.create_block();
+                let check_block = builder.create_block();
+                builder
+                    .ins()
+                    .brif(is_yield, check_block, &[], plain_block, &[]);
+
+                builder.switch_to_block(plain_block);
+                builder.seal_block(plain_block);
+                self.emit_pop_then_return(builder, rt, rp)?;
+
+                // An error left with the sentinel parks nothing: it unwinds.
+                builder.switch_to_block(check_block);
+                builder.seal_block(check_block);
+                let (exc_tag, _) =
+                    self.call_helper_vm_only(builder, self.helpers.has_exception, vm)?;
+                let tag_true = builder.ins().iconst(I64, TAG_TRUE as i64);
+                let has_error = builder.ins().icmp(IntCC::Equal, exc_tag, tag_true);
+                let error_block = builder.create_block();
+                let park_block = builder.create_block();
+                builder
+                    .ins()
+                    .brif(has_error, error_block, &[], park_block, &[]);
+
+                builder.switch_to_block(error_block);
+                builder.seal_block(error_block);
+                self.emit_pop_then_return(builder, rt, rp)?;
+
+                builder.switch_to_block(park_block);
+                builder.seal_block(park_block);
+                self.emit_park_at_call_site(builder, site)?;
+            }
+        }
 
         // Native (or param/collection) completed normally: bind dst, propagate
         // any pending error, then fall through into the post-`TailCall` block.

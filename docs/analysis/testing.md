@@ -1,6 +1,6 @@
 # Testing Strategy
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-29 -->
 
 Which *kind* of test to write, and where it belongs.
 
@@ -17,11 +17,14 @@ Which *kind* of test to write, and where it belongs.
 
 | Tier | What | Purpose |
 |------|------|---------|
-| 1 | `make smoke` | The Elle corpus across the vm and jit policies, then the doctests and the embedding demo |
-| 2 | `make smoke-nouring` | The corpus again on the thread-pool I/O backend |
-| 3 | `make qa` | rustfmt, clippy, the macOS and Android cross-checks, rustdoc, and the Rust doctests |
+| 1 | `make qa` | rustfmt, clippy, the macOS and Android cross-checks, rustdoc, and the Rust doctests |
+| 2 | `make smoke` | The Elle corpus across the vm and jit policies, then the doctests, the embedding demo and the semver surface gate |
+| 3 | `make smoke-nouring` | The corpus again through `elle test`, on a build with the `no-uring` feature, whose I/O runs on the thread pool |
 | 4 | `cargo test --workspace --lib --all-features` | The unit tests, inline beside the code they test |
 | 5 | `cargo test --test '*'` | The integration tests and the standalone test binaries |
+
+`qa` takes about two minutes and `smoke` about thirty, so a formatting or
+clippy failure stops the gate before the corpus starts.
 
 The Elle corpus is the cheapest full-pipeline check: reader, expander, analyzer,
 lowerer, emitter, VM, JIT, and a broad swath of primitives. If it fails, the

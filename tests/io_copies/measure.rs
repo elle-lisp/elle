@@ -1,6 +1,6 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-29
 //! The Rust heap bytes a stream read or write allocates per byte it moves,
-//! counted on every thread, for the two io_copies binaries.
+//! counted on every thread, for the io_copies binary.
 //!
 //! docs/impl/io-bytes.md
 //
@@ -59,18 +59,16 @@ static SERIAL: Mutex<()> = Mutex::new(());
 const SMALL: usize = 1 << 20;
 const LARGE: usize = 9 << 20;
 
-/// Take the runtime's configuration before anything reads it, and the ring or
-/// the pool as the binary asks.
+/// Take the runtime's configuration before anything reads it.
 ///
 /// The trap: three things allocate at times of their own and swamp the gauge.
 /// The JIT and MLIR compile in the background. The stdlib disk cache is written
 /// by one runtime and read by the next, which moved a reading by hundreds of
 /// megabytes and made it negative. All three are off here.
-pub fn configure(no_uring: bool) {
+pub fn configure() {
     elle::config::init(elle::config::Config {
         jit: elle::config::JitPolicy::Off,
         mlir: elle::config::MlirPolicy::Off,
-        no_uring,
         cache: None,
         ..Default::default()
     });

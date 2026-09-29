@@ -42,6 +42,11 @@
                  :queue io-completions
                  :wake-box io-wakeup-box}))
 
+  (defn failed? [f]
+    "Whether f stopped on an error or was cancelled. Its bits hold SIG_ERROR
+     whether it is :paused, :error or :dead, so the bit, not the status, says."
+    (not (= 0 (bit/and (fiber/bits f) 1))))
+
   (defn finished? [f]
     (or (not (nil? (get sub-completed f))) (= (fiber/status f) :dead)
         (= (fiber/status f) :error)))
@@ -50,7 +55,7 @@
     "[ok? value] for a finished fiber."
     (let [comp (get sub-completed f)]
       (if (nil? comp)
-        [(= (fiber/status f) :dead) (fiber/value f)]
+        [(not (failed? f)) (fiber/value f)]
         [(= comp :ok) (fiber/value f)])))
 
   # ---- completion ----
@@ -194,7 +199,8 @@
   (defn after-resume [fiber pid]
     "Route a sub-fiber after resume — the same logic as ev/run's."
     (case (fiber/status fiber)
-      :dead (complete-sub-fiber fiber :ok)
+      :dead
+        (complete-sub-fiber fiber (if (failed? fiber) :error :ok))
       :error (complete-sub-fiber fiber :error)
       :paused
         (let [bits (fiber/bits fiber)]
@@ -224,7 +230,8 @@
              fiber (get entry :fiber)
              status (fiber/status fiber)]
         (cond
-          (= status :dead) (complete-sub-fiber fiber :ok)
+          (= status :dead)
+            (complete-sub-fiber fiber (if (failed? fiber) :error :ok))
           (= status :error) (complete-sub-fiber fiber :error)
           (begin
             (fiber/resume fiber)

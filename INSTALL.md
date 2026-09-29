@@ -1,6 +1,6 @@
 # Installing Elle
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-29 -->
 
 What to install, how to build Elle and its plugins, and how to run the tests.
 
@@ -103,6 +103,16 @@ export LIBCLANG_PATH=/usr/lib/llvm-22/lib
 cargo build --release -p elle --features mlir
 ```
 
+## Optional: the thread-pool I/O backend on Linux
+
+A Linux build runs its I/O on io_uring, and every other platform runs it on a
+thread pool. The `no-uring` feature builds a Linux binary that uses the thread
+pool, so a defect that shows only on a Mac can be chased on a Linux box:
+
+```sh
+cargo build --release -p elle --features no-uring
+```
+
 ## Plugins
 
 Plugins live in a [separate repository](https://github.com/elle-lisp/plugins),
@@ -127,7 +137,7 @@ plugins.
 |---------|---------|-------------|
 | `cargo test -p elle --lib` | ~1.5 min | Rust unit tests |
 | `make smoke` | ~30 min, release | The Elle corpus under the VM and the JIT, the doctests and the embedding demos |
-| `make test` | smoke + ~5 min | smoke, the corpus on the thread-pool backend, QA, and the Rust unit and integration tests |
+| `make test` | smoke + ~5 min | QA, smoke, the corpus on the thread-pool backend, and the Rust unit and integration tests |
 
 Give the corpus the release binary; the debug default takes hours:
 

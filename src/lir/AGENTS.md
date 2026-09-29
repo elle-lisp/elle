@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-29 -->
 
 The LIR types, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
 
@@ -146,7 +146,7 @@ are allocated in creation order.
 
 4. **Yield and call-site metadata come from emission.** The emitter records a
    `YieldPointInfo` at each `Terminator::Emit` and a `CallSiteInfo` at each
-   call. `TemplateProto::nested_lambda`
+   call and each `TailCall`. `TemplateProto::nested_lambda`
    ([src/value/closure/proto.rs](../value/closure/proto.rs)) writes both into
    the template's copy of the `LirFunction`, which is what the JIT reads.
 
@@ -177,6 +177,12 @@ helper.
 
 That is the interpreter's stack when a yield propagates through a call. The JIT
 builds the caller's `SuspendedFrame` from it when a callee yields.
+
+A `TailCall` records a call site too. Its `resume_ip` is where the block after
+the tail call starts, the block a native callee falls through to when it
+completes. A compiled frame whose tail callee suspends parks there, so the
+resume runs that block ([park.md](../../docs/impl/region/park.md)).
+`TailCallArrayMut` records none.
 
 ## Merge operand depth
 

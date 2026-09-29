@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-09-29
 // src/jit/AGENTS.md
 // docs/impl/region/mechanism.md
 //! The two checks a compiled call site runs on the way back.
@@ -73,9 +73,6 @@ impl FunctionTranslator<'_> {
         let vm = self.vm_ptr.ok_or_else(|| {
             JitError::InvalidLir("emit_yield_check without vm pointer".to_string())
         })?;
-        let (self_tag, self_payload) = self.self_tag_payload.ok_or_else(|| {
-            JitError::InvalidLir("emit_yield_check without self_tag_payload".to_string())
-        })?;
 
         // Check if any signal is pending
         let (has_sig_tag, _) = self.call_helper_vm_only(builder, self.helpers.has_signal, vm)?;
@@ -90,8 +87,33 @@ impl FunctionTranslator<'_> {
 
         builder.switch_to_block(yield_block);
         builder.seal_block(yield_block);
+        self.emit_park_at_call_site(builder, call_site_idx)?;
 
-        // Every yield check must have its emitter-recorded call site: the
+        builder.switch_to_block(cont_block);
+        builder.seal_block(cont_block);
+
+        Ok(())
+    }
+
+    /// Park this frame at an emitter-recorded call site and return the park's
+    /// result.
+    ///
+    /// The builder must sit on a block that only a suspended callee reaches.
+    /// The block ends here: the exit pops this activation's region map after
+    /// the helper has cloned it into the parked frame.
+    pub(crate) fn emit_park_at_call_site(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        call_site_idx: u32,
+    ) -> Result<(), JitError> {
+        let vm = self.vm_ptr.ok_or_else(|| {
+            JitError::InvalidLir("park at call site without vm pointer".to_string())
+        })?;
+        let (self_tag, self_payload) = self.self_tag_payload.ok_or_else(|| {
+            JitError::InvalidLir("park at call site without self_tag_payload".to_string())
+        })?;
+
+        // Every park must have its emitter-recorded call site: the
         // runtime helper indexes JitCode.call_sites with this same index, so
         // a missing entry means the counters diverged and the side-exit
         // would rebuild the frame from another site's stack shape.
@@ -119,11 +141,6 @@ impl FunctionTranslator<'_> {
         );
         let result_tag = builder.inst_results(call)[0];
         let result_payload = builder.inst_results(call)[1];
-        self.emit_pop_then_return(builder, result_tag, result_payload)?;
-
-        builder.switch_to_block(cont_block);
-        builder.seal_block(cont_block);
-
-        Ok(())
+        self.emit_pop_then_return(builder, result_tag, result_payload)
     }
 }

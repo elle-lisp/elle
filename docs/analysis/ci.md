@@ -16,11 +16,11 @@ renamed heading breaks the site generator.
 | Detect Changes | ubuntu | Sets `source` from the changed paths | — |
 | QA | ubuntu | `cargo fmt`, clippy, the macOS cross-check, rustdoc | — |
 | Documentation Build | ubuntu | `make docs` and the Elle doc site, minus the publish | — |
-| VM+JIT Tests | ubuntu | `doctest`, `smoke-vm`, `smoke-jit` | — |
+| VM+JIT Tests | ubuntu | `doctest`, `smoke-elle`, `smoke-vm`, `smoke-jit` | — |
 | Boot Image Tests | ubuntu | `smoke-boot-image` — the corpus booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, then property tests | 16 |
-| Thread-Pool I/O Tests | ubuntu | The corpus on the thread-pool I/O backend | — |
-| MLIR Tests | ubuntu | `smoke-mlir` | — |
+| Thread-Pool I/O Tests | ubuntu | `smoke-nouring` — the corpus through `elle test`, on a `no-uring` build | — |
+| MLIR Tests | ubuntu | `smoke-mlir` — the corpus through `elle test`, with the mlir-cpu tier | — |
 | WASM Build | ubuntu | `check-wasm` — the feature compiles, the tier boots | — |
 | Plugin Tests | ubuntu | Builds the `plugins/` submodule, asserts its artifacts, runs its corpus | — |
 | AArch64 Smoke | ubuntu-arm | `make smoke` | — |
@@ -69,6 +69,10 @@ I/O Tests` and `macOS Smoke` set `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS`,
 which is what compiles the region checks in. Those checks are
 `#[cfg(debug_assertions)]`, so a corpus job without the flag drives the whole
 corpus blind to every one of them.
+
+`Thread-Pool I/O Tests` also builds with the `no-uring` feature. That binary
+runs every I/O operation on the thread pool, the backend every non-Linux build
+runs, so a pool-only defect fails on a Linux runner before it reaches the Mac.
 
 The rule is one such job per I/O backend. `Thread-Pool I/O Tests` covers the
 pool and `VM+JIT Tests` covers io_uring, so finding a region defect never
@@ -130,18 +134,24 @@ batch. Each process keeps the compiled module and the region heap of every file
 in its batch until it exits. The batch size therefore bounds the peak memory of
 one process.
 
-The default is 25 files. `macOS Smoke` uses 10. A 25-file batch stalled there:
-[region-eval-return-leak](../../tests/elle/region-eval-return-leak.lisp) hit
-its deadline with `join: deadline exceeded`, and the same run passed on Linux
-and AArch64.
+The default is 25 files. `macOS Smoke` and `AArch64 Smoke` use 10. A 25-file
+batch stalled on macOS: [region-eval-return-leak](../../tests/elle/region-eval-return-leak.lisp)
+hit its deadline with `join: deadline exceeded`, and the same run passed on
+Linux and AArch64. The smaller batch then shortened the macOS job's wall clock
+a great deal.
 
-The working theory is page size. Pages on the macOS runner (arm64) are 16 KiB,
-and pages on the x86_64 Linux runner are 4 KiB. Nobody has confirmed the theory,
-so the smaller batch is a mitigation and not a diagnosis.
+AArch64 Smoke takes the same batch to shorten its wall clock too. It never
+stalled, and this document records no measurement of the effect there. Read the
+job's time before and after the change to learn whether it helped.
 
-The Makefile reads the platform from `HOST_OS`, which defaults to `uname -s`.
-A test sets `HOST_OS` to present another platform. Pass `CORPUS_BATCH=` to
-override the choice for one run.
+The working theory for the macOS stall is page size. Pages on the macOS runner
+(arm64) are 16 KiB, and pages on the x86_64 Linux runner are 4 KiB. Nobody has
+confirmed the theory, so the smaller batch is a mitigation and not a diagnosis.
+
+The Makefile reads the platform from `HOST_OS` and `HOST_ARCH`, which default to
+`uname -s` and `uname -m`. A batch of 10 applies on Darwin and on `aarch64` or
+`arm64`. A test sets both variables to present another platform. Pass
+`CORPUS_BATCH=` to override the choice for one run.
 
 ### The plugins job
 

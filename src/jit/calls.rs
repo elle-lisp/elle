@@ -1,8 +1,9 @@
-// audited: 2026-09-23
+// audited: 2026-09-29
 //! Function call dispatch helpers for JIT-compiled code.
 //!
 //! docs/impl/jit.md
 //! docs/impl/region/owner.md
+//! docs/impl/region/park.md
 //!
 //! The `extern "C"` call helpers themselves live in `callops`: calling Elle
 //! closures, native functions, and parameters from JIT-compiled code. This file
@@ -70,8 +71,14 @@ pub(crate) struct CallSiteMeta {
 
 /// Handle signal bits from a primitive call in JIT context.
 ///
-/// Returns a `JitValue` for the result.
-fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: Value) -> JitValue {
+/// Returns a `JitValue` for the result. `args` are the arguments the primitive
+/// was called with.
+fn jit_handle_primitive_signal(
+    vm: &mut crate::vm::VM,
+    bits: SignalBits,
+    value: Value,
+    args: &[Value],
+) -> JitValue {
     match classify(bits, &value) {
         SignalAction::Ok => JitValue::from_value(value),
         SignalAction::Resume => vm.handle_fiber_resume_signal_jit(value),
@@ -116,8 +123,9 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
             // …and the same arm's park classification: this primitive never
             // returns, so the resume value stands in for its result and the
             // delivery owes the reference the missing `Return` mint would have
-            // carried (docs/impl/region/owner.md).
-            vm.fiber.delivery.park_primitive(bits, value);
+            // carried, and an io op's own request owes its install a release
+            // (docs/impl/region/park.md).
+            vm.park_suspending_primitive(bits, value, args);
             vm.fiber.signal = Some((bits, value));
             YIELD_SENTINEL
         }
@@ -158,7 +166,7 @@ pub(crate) fn jit_capability_denial(
     // the park classification, because the denied primitive never runs so the
     // mediating parent's resume value stands in for its result, and the payload,
     // because the RUNTIME built it and the install that displaces the park owes
-    // the reference the allocation left (docs/impl/region/owner.md).
+    // the reference the allocation left (docs/impl/region/park.md).
     vm.fiber.delivery.park_denial(blocked, payload);
     vm.fiber.signal = Some((blocked, payload));
     YIELD_SENTINEL

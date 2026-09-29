@@ -1,6 +1,6 @@
 # One test system
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-29 -->
 
 The plan that folds every test product into `elle test`, keeps the results,
 and states what a run may skip.
@@ -13,17 +13,21 @@ Six products test this repository today:
   ([test-store](test-store.md)).
 - [oracle.lisp](../tests/elle/oracle.lisp) and
   [plumb.lisp](../tests/elle/plumb.lisp) measure leak rates. The Makefile runs
-  them outside the corpus, under hand-set timeouts. Each verdict they report
-  through the measurement channel lands in the session DB
-  ([test-store](test-store.md)), so a rate's history is a query.
+  each one through `elle test --isolate` beside every corpus pass, under a
+  hand-set budget. Each verdict they report through the measurement channel
+  lands in the session DB ([test-store](test-store.md)), so a rate's history
+  is a query.
 - [escape-golden.lisp](../tests/elle/escape-golden.lisp) pins escape snapshots.
 - `tests/integration/elle_scripts.rs` runs the files that need a process-global
-  flag (`--trace=guardfree`, `--no-uring`), each as a cargo-driven subprocess.
+  flag (`--trace=guardfree`), each as a cargo-driven subprocess.
   `elle test --isolate` runs a file the same way and records the child's status,
   signal and output ([test-runner](test-runner.md)); what these files still wait
   on is a profile that selects them.
-- The Makefile runs five more corpus passes: per-file vm, per-file jit,
-  nouring, mlir, wasm — each with its own skip and timeout lists.
+- The Makefile runs four more corpus passes outside the runner: per-file vm,
+  per-file jit, the no-features build, and whole-file wasm — each with its own
+  skip and timeout lists. The mlir build and the `no-uring` build run the corpus
+  through the runner alone: the first adds the mlir-cpu tier, and the second
+  runs every I/O operation on the thread pool.
 
 The runner's thesis is "capture everything once; query forever", and the data
 now survives the run that produced it. The DB lives in the state directory, so
@@ -69,8 +73,8 @@ Isolation is the piece that unlocks the rest, and it is in: `--isolate FLAGS`
 runs each selected path as `elle FLAGS PATH`, so a guardfree SIGSEGV kills one
 child and lands as a recorded failure ([test-runner](test-runner.md)). What a
 profile adds is the selection — which files run under which flags — so that
-`elle_scripts.rs` and the per-file teardown passes (`smoke-vm`, `smoke-jit`,
-`smoke-nouring`) become profiles named process, jit, and pool.
+`elle_scripts.rs` and the per-file teardown passes (`smoke-vm`, `smoke-jit`)
+become profiles named process and jit.
 
 Profiles add coverage; the default profile still runs everything. A
 completeness gate fails when a declared profile records no verdicts, the same
@@ -163,8 +167,9 @@ the CI habit of reading failures out of logs.
 
 1. Persistence: in. The state directory, the `run` identity columns, the CI
    artifact upload and `--import`.
-2. Profiles that select a flag set; fold in the guardfree family, the oracle,
-   plumb, and the per-file passes. Child-process isolation is in.
+2. Profiles that select a flag set; fold in the guardfree family and the
+   per-file passes. Child-process isolation is in, and the oracle and plumb run
+   through it.
 3. Derived budgets.
 4. The coverage gate (elle-lisp/elle#1144), then the runtime-structure gauges
    (elle-lisp/elle#1143, elle-lisp/elle#1135). The measurement channel is in.

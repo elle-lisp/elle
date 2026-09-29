@@ -73,6 +73,9 @@ ffi = ["libffi"]
 jit = ["cranelift-codegen", "cranelift-frontend", "cranelift-module", "cranelift-jit", "cranelift-native", "target-lexicon"]
 wasm = ["wasmtime", "wasm-encoder"]
 mlir = ["melior"]
+# Run I/O on the thread pool on Linux too, the backend every other platform
+# runs (INSTALL.md). An `--all-features` build takes it.
+no-uring = []
 
 [profile.dev.package."*"]
 opt-level = 3

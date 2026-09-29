@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-29
 //! Two configurations: `Config` is set once at startup and read anywhere,
 //! `RuntimeConfig` rides on one VM and a running program may change it.
 //!
@@ -219,10 +219,6 @@ pub struct Config {
     /// directory of its own.
     pub boot_image: Option<String>,
 
-    // -- I/O --
-    /// Disable io_uring on Linux.
-    pub no_uring: bool,
-
     // -- Paths --
     /// Elle home directory (module resolution root).
     pub home: Option<String>,
@@ -298,7 +294,6 @@ impl Default for Config {
             no_stdlib: false,
             cache: default_cache_dir(),
             boot_image: None,
-            no_uring: false,
             home: std::env::var("ELLE_HOME").ok(),
             path: std::env::var("ELLE_PATH").ok(),
             json: false,

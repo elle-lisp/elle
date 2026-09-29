@@ -1,12 +1,12 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! What a discard frees: the parked activations' owner nodes, and the releases their abandoned frames still owed.
 //!
 //! docs/impl/region/mechanism.md
 
 use super::*;
 
-/// A squelch/abort DISCARD frees the parked owner node
-/// (docs/impl/region/owner.md § "A discard runs what the abandoned frames
+/// A DISCARD, by a squelch boundary or a refusing host, frees the parked owner
+/// node (docs/impl/region/owner.md § "A discard runs what the abandoned frames
 /// owed"). The hand-emitted body adopts a fresh-region member into the
 /// activation's node and yields; instead of resuming, the park is abandoned
 /// through the one discard chokepoint (`VM::discard_suspended_frames`, the
@@ -58,7 +58,7 @@ fn discard_frees_parked_activation_owner_node() {
             "the body parks at the yield"
         );
 
-        vm.discard_suspended_frames(crate::value::Value::NIL, None);
+        vm.discard_suspended_frames(crate::value::Value::NIL, None, vm.fiber.param_depth());
         assert!(
             vm.fiber.suspended.is_none(),
             "the discard consumed the parked chain"
@@ -71,7 +71,7 @@ fn discard_frees_parked_activation_owner_node() {
              (gen {gen_before} -> {gen_after})",
         );
         // A second discard finds nothing — the release ran exactly once.
-        vm.discard_suspended_frames(crate::value::Value::NIL, None);
+        vm.discard_suspended_frames(crate::value::Value::NIL, None, vm.fiber.param_depth());
     }
 
     // ── multi-frame chain: two parked activations, one discard frees both ──
@@ -96,7 +96,7 @@ fn discard_frees_parked_activation_owner_node() {
         chain.extend(vm.fiber.suspended.take().expect("second park"));
 
         vm.fiber.suspended = Some(chain);
-        vm.discard_suspended_frames(crate::value::Value::NIL, None);
+        vm.discard_suspended_frames(crate::value::Value::NIL, None, vm.fiber.param_depth());
         let bumped_a = unsafe { &*heap_ptr }.generation_raw(rid_a.get()) > gen_a;
         let bumped_b = unsafe { &*heap_ptr }.generation_raw(rid_b.get()) > gen_b;
         assert!(
@@ -114,8 +114,8 @@ fn discard_frees_parked_activation_owner_node() {
     );
 }
 
-/// A squelch/abort DISCARD also runs the releases each abandoned frame still
-/// owed, off the two tables its own `Code` records
+/// A DISCARD also runs the releases each abandoned frame still owed, off the
+/// two tables its own `Code` records
 /// (docs/impl/region/owner.md § "A discard runs what the abandoned frames
 /// owed"). The frame is hand-built so both routes are present and each has a
 /// neighbour the emitter did NOT record: slot 1 is a value route and slot 0 is
@@ -189,7 +189,7 @@ fn discard_runs_the_abandoned_frames_release_tables() {
             &[(9, mapped_rid), (8, unmapped_rid)],
         );
 
-        vm.discard_suspended_frames(Value::NIL, None);
+        vm.discard_suspended_frames(Value::NIL, None, vm.fiber.param_depth());
 
         assert_eq!(
             vm.heap().region_rc(owed_rid),
@@ -221,7 +221,7 @@ fn discard_runs_the_abandoned_frames_release_tables() {
         let (payload, payload_rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
         park(&mut vm, vec![Value::NIL, payload], &[]);
 
-        vm.discard_suspended_frames(payload, None);
+        vm.discard_suspended_frames(payload, None, vm.fiber.param_depth());
 
         assert_eq!(
             vm.heap().region_rc(payload_rid),
@@ -236,7 +236,7 @@ fn discard_runs_the_abandoned_frames_release_tables() {
         park(&mut vm, vec![Value::NIL, payload], &[]);
         vm.fiber.delivery.record_mint(payload);
 
-        vm.discard_suspended_frames(payload, None);
+        vm.discard_suspended_frames(payload, None, vm.fiber.param_depth());
 
         assert_eq!(
             vm.heap().region_rc(payload_rid),
@@ -262,7 +262,11 @@ fn discard_runs_the_abandoned_frames_release_tables() {
             .delivery
             .park_emit(crate::value::fiber::SIG_YIELD, parked);
 
-        vm.discard_suspended_frames(violation, Some((crate::value::fiber::SIG_YIELD, parked)));
+        vm.discard_suspended_frames(
+            violation,
+            Some((crate::value::fiber::SIG_YIELD, parked)),
+            vm.fiber.param_depth(),
+        );
 
         assert_eq!(
             vm.heap().region_rc(parked_rid),
@@ -283,7 +287,7 @@ fn discard_runs_the_abandoned_frames_release_tables() {
             .delivery
             .park_emit(crate::value::fiber::SIG_YIELD, stale);
 
-        vm.discard_suspended_frames(Value::NIL, None);
+        vm.discard_suspended_frames(Value::NIL, None, vm.fiber.param_depth());
 
         assert_eq!(
             vm.heap().region_rc(stale_rid),

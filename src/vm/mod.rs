@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! The VM's execution entries: a blueprint, a code object at the root, and a
 //! program under the async scheduler. The module list sits above them.
 //!
@@ -39,7 +39,8 @@ pub use crate::value::fiber::CallFrame;
 pub use core::VM;
 
 use crate::compiler::bytecode::Bytecode;
-use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_SWITCH};
+use crate::value::fiber::TailSquelch;
+use crate::value::{Value, SIG_ERROR, SIG_HALT, SIG_SWITCH};
 use std::rc::Rc;
 
 impl VM {
@@ -203,16 +204,17 @@ impl VM {
         // activation (depth > 1), whose dues belong to that caller's own
         // completion release — they must not be touched here.
         let at_root = self.fiber.activation_dues.len() == 1;
+        // Where a refused park truncates the `parameterize` frames to.
+        let depth = self.fiber.param_depth();
 
         // Initial execution with tail-call loop: a top-level tail call replaces
         // the body in place.
         let mut bits;
-        let mut accumulated_squelch_mask = SignalBits::EMPTY;
+        let mut tail_squelch = TailSquelch::none(depth);
         loop {
-            let (b, _ip) = self.run_dispatch(&current_code, &current_env, 0);
-            bits = b;
+            bits = self.run_dispatch(&current_code, &current_env, 0).bits;
             if let Some(tail) = self.pending_tail_call.take() {
-                accumulated_squelch_mask |= tail.squelch_mask;
+                tail_squelch.add(tail.squelch_mask, self.fiber.param_depth());
                 // A top-level tail call re-enters the frame as the callee closure.
                 #[cfg(debug_assertions)]
                 Self::debug_assert_entry_closure_matches(tail.closure, &tail.code);
@@ -220,7 +222,7 @@ impl VM {
                 current_code = tail.code;
                 current_env = tail.env;
             } else {
-                if self.enforce_squelch(bits, accumulated_squelch_mask) {
+                if self.enforce_squelch(bits, tail_squelch.mask, tail_squelch.depth) {
                     bits = SIG_ERROR;
                 }
                 break;
@@ -258,9 +260,8 @@ impl VM {
                 // among the bits that reach the root (docs/signals/protocol.md).
                 // The keywords are what the author of
                 // the emitting call can act on; the mask alone is not. The
-                // refused park is abandoned with its host.
-                self.abandon_hosted_park(bits);
-                self.fiber.signal.take();
+                // root driver cannot hold the park, so it refuses it.
+                self.refuse_hosted_park(bits, depth);
                 break Err(format!(
                     "Unhandled signal {} outside fiber context",
                     crate::signals::registry::format_bits(bits)

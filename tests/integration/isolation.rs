@@ -1,4 +1,4 @@
-// audited: 2026-09-17
+// audited: 2026-09-29
 // A file can have its own process: what a child's exit status becomes in the
 // store, and that the run goes on after one of them dies.
 //
@@ -244,7 +244,7 @@ fn a_gated_child_is_a_skip_carrying_its_reason() {
 }
 
 /// The flags reach the child. Without this the mode the path exists for —
-/// `--trace=guardfree`, `--no-uring` — would be dropped silently and every
+/// `--trace=guardfree`, for one — would be dropped silently and every
 /// file would run under the default configuration, green and meaningless.
 #[test]
 fn the_flags_reach_the_child() {

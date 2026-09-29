@@ -1,8 +1,11 @@
+// audited: 2026-09-29
 //! The ledger's transitions: each park write, each consume seam, and the
 //! debug net for a park shape wired without a consume.
+//!
+//! docs/impl/region/park.md
 
 use super::*;
-use crate::value::{SIG_IO, SIG_YIELD};
+use crate::value::{SIG_ERROR, SIG_IO, SIG_YIELD};
 
 /// A payload on a region of its own. The ledger never dereferences what it
 /// names — identity is bit-wise — but it does gate the park record on the value
@@ -63,6 +66,34 @@ fn a_denial_park_records_both_facts() {
         "the denial payload is recorded for the resume's decref",
     );
     assert!(d.take_resume_funding(), "a denial is a primitive park too");
+}
+
+/// An io op's park is a primitive park whose request the op built: the resume
+/// value owes a mint, and the request owes the install that displaces it a
+/// release, so the park records both.
+#[test]
+fn a_request_park_records_both_facts() {
+    let mut d = Delivery::new();
+    d.park_request(SIG_IO, payload());
+    assert_eq!(
+        d.bodyless().map(|p| p.bit_identical(payload())),
+        Some(true),
+        "the request is recorded for the install's decref",
+    );
+    assert!(d.take_resume_funding(), "an io op is a primitive park too");
+}
+
+/// The counter-factual: a primitive park of a payload the body owns — the
+/// `emit` primitive relaying a child's request — records nothing to release.
+/// Recording it would release the child's request at the relay's install.
+#[test]
+fn a_primitive_park_records_no_payload_to_release() {
+    let mut d = Delivery::new();
+    d.park_primitive(SIG_IO, payload());
+    assert!(
+        d.bodyless().is_none(),
+        "a body-owned payload owes the install nothing",
+    );
 }
 
 #[test]
@@ -131,7 +162,7 @@ fn a_discharge_leaves_no_funding() {
 
 /// The record names the payload the park's escape retain was taken on, so the
 /// boundary that ends the park releases the right region. Both bits and payload
-/// travel: the io arm reads the bits before it dereferences anything.
+/// travel with the record.
 #[test]
 fn a_park_records_the_payload_its_retain_was_taken_on() {
     let mut d = Delivery::new();
@@ -200,6 +231,15 @@ fn a_second_park_over_an_unconsumed_one_panics() {
 #[test]
 #[should_panic(expected = "unconsumed")]
 #[cfg(debug_assertions)]
+fn a_request_park_over_an_unconsumed_one_panics() {
+    let mut d = Delivery::new();
+    d.park_primitive(SIG_IO, payload());
+    d.park_request(SIG_IO, payload());
+}
+
+#[test]
+#[should_panic(expected = "unconsumed")]
+#[cfg(debug_assertions)]
 fn a_denial_park_over_an_unconsumed_one_panics() {
     let mut d = Delivery::new();
     d.park_primitive(SIG_IO, payload());
@@ -236,4 +276,140 @@ fn an_immediate_park_records_nothing() {
         d.take_undelivered().is_none(),
         "a payload in no region took no retain, so no seam owes it a release",
     );
+}
+
+// -- the error park: a restart delivers into the raising call's result --
+
+/// An `Emit` raise's continuation funds its own release of the resume value, so
+/// the park owes none. Counter-factual: minting here strands the restart value of
+/// every restarted `(error v)`, one region per restart.
+#[test]
+fn an_emit_error_park_owes_no_resume_mint() {
+    let mut d = Delivery::new();
+    d.park_error(RaiseSite::Emit, payload());
+    assert!(
+        !d.take_resume_funding(),
+        "an `Emit` raise's continuation funds the restart value itself",
+    );
+}
+
+/// Every other raise produced no result, so the restart value arrives owing the
+/// reference the continuation's result release consumes. Counter-factual: no
+/// mint frees the restart value under every holder that outlives the restart.
+#[test]
+fn a_call_error_park_owes_one_resume_mint() {
+    let mut d = Delivery::new();
+    d.park_error(RaiseSite::Call, payload());
+    assert!(
+        d.take_resume_funding(),
+        "a raising call's result position owes the restart value a mint",
+    );
+}
+
+/// A raise with no result position parks without taking the restart value, so
+/// the park owes no mint. Counter-factual: minting here strands one reference
+/// per restart, because no continuation releases a value it never received.
+#[test]
+fn a_no_result_error_park_owes_no_resume_mint() {
+    let mut d = Delivery::new();
+    d.park_error(RaiseSite::NoResult, payload());
+    assert!(
+        !d.take_resume_funding(),
+        "a restart after a raise with no result delivers nothing to fund",
+    );
+}
+
+/// An injected abort or refusal raises in place over a primitive park: the
+/// frame still resumes at the denied call's result, so the park's mint stays
+/// owed, while the injection's own mint travels with the new payload and the
+/// displaced payload's records leave with it.
+#[test]
+fn a_raise_in_a_primitive_park_keeps_its_mint_and_records_the_payload() {
+    let mut d = Delivery::new();
+    d.park_denial(SIG_IO, payload());
+    d.raise_in_park(other());
+    assert!(
+        d.mint_names(other()),
+        "the injection's mint travels with its payload"
+    );
+    assert!(
+        d.bodyless().is_none(),
+        "the displaced denial record left with its payload"
+    );
+    assert!(
+        d.take_undelivered().is_none(),
+        "the displaced park's delivery record left with its payload",
+    );
+    assert!(
+        d.take_resume_funding(),
+        "the restart still delivers into the denied call's result",
+    );
+}
+
+/// The same raise over an `Emit` park owes nothing: that continuation funds its
+/// own release, whatever raised there.
+#[test]
+fn a_raise_in_an_emit_park_owes_no_resume_mint() {
+    let mut d = Delivery::new();
+    d.park_emit(SIG_YIELD, payload());
+    d.raise_in_park(other());
+    assert!(d.mint_names(other()));
+    assert!(!d.take_resume_funding());
+}
+
+/// An error park writes through the net: a route that ended the previous park
+/// without consuming its funding panics here rather than leaking a region.
+#[test]
+#[should_panic(expected = "unconsumed")]
+#[cfg(debug_assertions)]
+fn an_error_park_over_an_unconsumed_one_panics() {
+    let mut d = Delivery::new();
+    d.park_primitive(SIG_IO, payload());
+    d.park_error(RaiseSite::Call, other());
+}
+
+/// A denial of `:error` parks under `SIG_ERROR`, and in tail position the
+/// driver that builds its frame reads the exit as a raise. The error park finds
+/// the denial's record for the same payload and leaves the denial's funding
+/// standing. Counter-factual: an error park that treats that funding as an
+/// unconsumed park panics on every tail denial of `:error`.
+#[test]
+fn an_error_park_over_its_own_denial_keeps_the_denial() {
+    let mut d = Delivery::new();
+    d.park_denial(SIG_ERROR, payload());
+    d.park_error(RaiseSite::Call, payload());
+    assert_eq!(
+        d.bodyless().map(|p| p.bit_identical(payload())),
+        Some(true),
+        "the install that displaces the denial still owes its payload a release",
+    );
+    assert!(
+        d.take_resume_funding(),
+        "the resume still owes the denied call's result a mint",
+    );
+}
+
+/// The same holds whatever the raise site says, because a denial's funding is
+/// the denial's own. Counter-factual: an `Emit` site recorded over the denial
+/// clears the mint the denied call's continuation consumes.
+#[test]
+fn an_error_park_site_does_not_rewrite_a_denial() {
+    let mut d = Delivery::new();
+    d.park_denial(SIG_ERROR, payload());
+    d.park_error(RaiseSite::Emit, payload());
+    assert!(
+        d.take_resume_funding(),
+        "the denial's mint survives an error park over it",
+    );
+}
+
+/// A denial record names one payload. An error park for another payload over
+/// an unconsumed denial is still a route that skipped a consume seam.
+#[test]
+#[should_panic(expected = "unconsumed")]
+#[cfg(debug_assertions)]
+fn an_error_park_over_another_payloads_denial_panics() {
+    let mut d = Delivery::new();
+    d.park_denial(SIG_ERROR, payload());
+    d.park_error(RaiseSite::Call, other());
 }

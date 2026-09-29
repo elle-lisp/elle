@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 // docs/impl/jit.md
 // docs/impl/region/relocate.md
 //! Array-call, closure-construction, tail-call, and env-building JIT entry points.
@@ -335,7 +335,7 @@ fn jit_tail_call_inner(
         let region = crate::hir::region::StaticRegion::new(region_id)
             .expect("JIT region slot is nonzero — emitter invariant");
         let (bits, value) = vm.dispatch_native_call(def, args_slice, region);
-        return jit_handle_primitive_signal(vm, bits, value);
+        return jit_handle_primitive_signal(vm, bits, value, args_slice);
     }
 
     // Handle parameter (dynamic binding lookup)

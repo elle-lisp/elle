@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-29
 //! `elle semver ...`: set up one full VM and run the embedded gate driver.
 //!
 //! docs/semver.md
@@ -15,7 +15,7 @@ const SEMVER_RUNNER: &str = include_str!("semver/main.lisp");
 pub(super) fn run_semver_subcommand(sub_args: Vec<String>) -> i32 {
     let (config_flags, sub_args): (Vec<String>, Vec<String>) = sub_args
         .into_iter()
-        .partition(|a| a.starts_with("--trace=") || a == "--stats" || a == "--no-uring");
+        .partition(|a| a.starts_with("--trace=") || a == "--stats");
     let (config, _rest) = elle::config::Config::parse(&config_flags).unwrap_or_else(|e| {
         eprintln!("elle semver: {}", e);
         std::process::exit(2);

@@ -99,21 +99,22 @@ resumable in one context and terminal in another.
 Signal propagation (Janet model):
 
 1. The child fiber emits a signal: it stores the value in `child.signal`, and
-   its status becomes `:paused`.
-2. The execution functions return the signal bits to the parent.
+   it stops.
+2. The VM hands the signal bits to the parent's `fiber/resume`.
 3. The parent asks whether the child's mask covers the bits. The child's mask
    records which signals the parent catches from it.
-    - **Caught**: Parent handles the signal. Child is paused and
+    - **Caught**: Parent handles the signal. Child is `:paused` and
       reachable via parent's `child` pointer.
-    - **Not caught**: Parent also pauses (entire chain freezes).
-      Signal propagates up until caught or reaches root.
+    - **Not caught**: the signal passes the parent's `fiber/resume` call,
+      and the parent stops there too. An error leaves the child `:error`.
+      The signal propagates up until caught or reaches root.
 4. Handler walks `child` chain to find originator. Every fiber in the
-   chain is paused and inspectable via `fiber/value`.
+   chain is stopped and inspectable via `fiber/value`.
 
 This is O(1) dispatch — a single AND operation. No handler chain traversal.
 When a handler catches a signal, it can walk the fiber chain to inspect the
-propagation path. Every fiber in the chain is paused and can be resumed
-independently for non-unwinding recovery.
+propagation path. Every fiber in the chain is stopped and can be resumed
+independently for non-unwinding recovery ([recovery.md](recovery.md)).
 
 ## Reaching the root
 

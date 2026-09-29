@@ -141,6 +141,10 @@ jobs:
       # `create_platform_backend` picks on Linux; `nouring` below is the pool.
       # See docs/analysis/ci.md § "What each job builds".
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
+      # `smoke-elle` records every form's verdict here; the per-file passes
+      # record nothing (docs/analysis/ci.md § "A corpus job's results leave the
+      # runner").
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -154,10 +158,21 @@ jobs:
         run: make elle
       - name: make doctest
         run: make doctest
+      - name: make smoke-elle
+        run: make smoke-elle
       - name: make smoke-vm
         run: make smoke-vm
       - name: make smoke-jit
         run: make smoke-jit
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-tests
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
 
   # The corpus booted from an image rather than from core.lisp, prelude.lisp
   # and stdlib.lisp. `--boot-image=` is off by default (docs/impl/image/boot.md
@@ -201,7 +216,8 @@ jobs:
             target/elle-state/cas
           retention-days: 14
 
-  # The corpus against the thread-pool I/O backend. Every other Linux job runs
+  # The corpus against the thread-pool I/O backend, through `elle test` on a
+  # binary built with the `no-uring` feature. Every other Linux job runs
   # io_uring, and every non-Linux build runs the pool, so without this job the
   # pool's only sampler is the macOS one below: one run per PR, on the slowest
   # runner, against defects that hang rather than fail. Redis is installed for
@@ -220,19 +236,31 @@ jobs:
       # the pool, so a pool-only region defect has no other Linux detector.
       # See docs/analysis/ci.md § "What each job builds".
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
+      # The one record of how the corpus behaves on the pool from a Linux
+      # runner (docs/analysis/ci.md § "A corpus job's results leave the runner").
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install GNU parallel and Redis
+      - name: Install Redis
         run: |
           sudo apt-get update
-          sudo apt-get install -y parallel redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
+          sudo apt-get install -y redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
           sudo systemctl start redis-server
-      - name: make elle
-        run: make elle
+      - name: make elle-nouring
+        run: make elle-nouring
       - name: make smoke-nouring
         run: make smoke-nouring
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-nouring
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
 
   tests-combined:
     name: Rust Tests

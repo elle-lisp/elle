@@ -18,13 +18,13 @@ mod caller;
 mod frame;
 mod handle;
 mod status;
-pub use caller::{Activation, CallSite, PausedCaller};
+pub use caller::{Activation, CallSite, ParamDepth, PausedCaller, TailSquelch};
 pub use frame::*;
 pub use handle::*;
 pub use status::*;
 
 mod delivery;
-pub use delivery::Delivery;
+pub use delivery::{Delivery, RaiseSite};
 
 mod dues;
 pub use dues::ActivationDues;
@@ -146,14 +146,14 @@ pub struct Fiber {
     /// ([`Delivery`]; docs/impl/region/park.md § "A park names its funding in
     /// the delivery ledger").
     pub delivery: Delivery,
-    /// Suspended execution frames. Set when the fiber suspends; consumed
-    /// when it resumes.
+    /// Suspended execution frames. Set when the fiber suspends or stops on an
+    /// error; consumed when it resumes.
     ///
-    /// Frame 0 is where the suspend happened — an `emit` instruction, a
+    /// Frame 0 is where the fiber stopped — an `emit` instruction, a
     /// suspending primitive call (a dynamic `emit`, an I/O request, a
-    /// capability denial), or a fuel pause — with its operand stack. Each
-    /// caller the suspend left adds one frame after it. On resume, frames are
-    /// replayed from innermost (index 0) to outermost (last index).
+    /// capability denial), a fuel pause, or a raise — with its operand stack.
+    /// Each caller the stop left adds one frame after it. On resume, frames
+    /// are replayed from innermost (index 0) to outermost (last index).
     pub suspended: Option<Vec<SuspendedFrame>>,
 
     /// Per-activation region-slot remap (docs/impl/region/model.md — every value its
@@ -326,6 +326,19 @@ impl Fiber {
                 cursor: 0,
             }),
         }
+    }
+
+    /// How many `parameterize` frames this fiber holds, for an entry to record.
+    #[inline]
+    pub fn param_depth(&self) -> ParamDepth {
+        ParamDepth(self.param_frames.len())
+    }
+
+    /// Drop the `parameterize` frames pushed above `depth` by code that
+    /// stopped running ([`ParamDepth`]).
+    #[inline]
+    pub fn unwind_params(&mut self, depth: ParamDepth) {
+        self.param_frames.truncate(depth.0);
     }
 
     /// Set an error signal on this fiber, the error value born in the

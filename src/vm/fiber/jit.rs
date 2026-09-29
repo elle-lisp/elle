@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-28
 //! The fiber signals a compiled frame raises — resume, propagate and abort —
 //! each answered as the interpreter answers it, or side-exited.
 //!
@@ -116,7 +116,7 @@ impl VM {
         let mask = handle.with(|fiber| fiber.mask);
 
         if self.absorbs(&handle, mask, result_bits, result_value) {
-            // Abort is terminal — set child to :error even when caught
+            // An abort that ends on an error leaves the fiber :error, caught or not.
             if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }

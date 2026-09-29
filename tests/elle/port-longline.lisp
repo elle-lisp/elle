@@ -1,5 +1,5 @@
-(elle/epoch 12)
-## audited: 2026-09-23
+(elle/epoch 13)
+## audited: 2026-09-29
 ## tests/elle/port-longline.lisp
 ##
 ## A line longer than the buffer `port/read-line` reserves is answered
@@ -25,7 +25,7 @@
 ## The counter-factual: a payload under 64 KiB passes every assertion
 ## whatever the backend does. The line has to outgrow the reservation
 ## before any trap is reachable, which is why the payload here is 200 KiB.
-## Run on the other backend by `port_longline_threadpool`.
+## The Thread-Pool I/O job runs it on the other backend.
 
 (defn listener-port [listener]
   "The port number a listener bound to an ephemeral port received."

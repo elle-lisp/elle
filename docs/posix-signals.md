@@ -1,6 +1,6 @@
 # POSIX signals
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-29 -->
 
 Elle programs can send POSIX signals to other processes and observe
 signals delivered to themselves. The surface lives under `os/sig-*`.
@@ -247,16 +247,16 @@ mask, so `subprocess/kill … 15` hangs `subprocess/wait` forever.
 ## Backend dispatch
 
 Elle's async backend chooses how to wait on a `SignalReceiver`'s
-kernel fd based on platform and CLI flags:
+kernel fd based on platform and build features:
 
-| Platform | Default | `--no-uring` |
+| Platform | Default | Thread pool (`no-uring` feature) |
 |----------|---------|--------------|
 | Linux | `IORING_OP_READ` on the signalfd, via the dedicated `submit_uring_sig_next` SQE helper. The read is queued on the io_uring instance and the kernel completes a CQE when one or more `signalfd_siginfo` records become available. No worker thread is involved on the elle side. | The threadpool worker waits for the signalfd and for the operation's stop pipe together, then `read(2)`s the signalfd. Uses one OS thread per outstanding `os/sig-next`, given back when the read completes or is cancelled. |
 | macOS | n/a — io_uring is Linux-only | A threadpool worker waits for the kqueue and the stop pipe together, then calls `kevent()` with a zero timeout on a per-receiver kqueue registered with `EVFILT_SIGNAL`. The worker `pthread_sigmask`-unblocks the watched signals on itself for that read so the kernel can pick it as the delivery target, and blocks them again before it takes another operation (see "macOS: per-receive worker unblock + no-op handler" above). |
 
-The threadpool path on Linux is exercised only when `--no-uring` is
-passed on the CLI or `io_uring_setup(2)` fails on the host kernel
-(extremely old / locked-down kernels). Production Linux always rides
+The threadpool path on Linux is exercised only in a binary built with the
+`no-uring` feature, or when `io_uring_setup(2)` fails on the host kernel
+(extremely old / locked-down kernels). A default Linux build always rides
 the dedicated io_uring path.
 
 ## Documented limitations

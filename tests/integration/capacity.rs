@@ -95,10 +95,11 @@ fn the_local_default_stays_a_constant() {
     );
 }
 
-// The corpus batch size, per platform. `HOST_OS` is the seam: it defaults to
-// `uname -s`, and these tests set it to present a platform the suite is not
-// running on. Without the seam only the platform running the suite is
-// checked, and the macOS choice would go unchecked on every Linux box.
+// The corpus batch size, per platform. `HOST_OS` and `HOST_ARCH` are the seam:
+// they default to `uname -s` and `uname -m`, and these tests set them to present
+// a platform the suite is not running on. Without the seam only the platform
+// running the suite is checked, and the macOS and AArch64 choices would go
+// unchecked on every x86_64 Linux box.
 //
 // The counter-factual is a single constant: 25 fits every runner except the one
 // that stalled, and passes every gate on the box it was chosen for.
@@ -124,15 +125,30 @@ fn the_macos_corpus_batch_is_ten_files() {
 }
 
 #[test]
-fn the_linux_corpus_batch_stays_twenty_five_files() {
-    let Some(files) = batch(&[("HOST_OS", "Linux")]) else {
+fn the_x86_64_linux_corpus_batch_stays_twenty_five_files() {
+    let Some(files) = batch(&[("HOST_OS", "Linux"), ("HOST_ARCH", "x86_64")]) else {
         return;
     };
     assert_eq!(
         files, "25",
-        "on Linux the Makefile deals {files} files to each `elle test` \
-         process. The smaller batch is a macOS mitigation, and it costs a \
+        "on x86_64 Linux the Makefile deals {files} files to each `elle test` \
+         process. The smaller batch is an arm64 choice, and it costs a \
          process start per batch everywhere it applies."
+    );
+}
+
+// The AArch64 runner reports `Linux` to `uname -s`, so the OS alone cannot tell
+// it from x86_64. The counter-factual is the Darwin-only rule, which deals it 25.
+#[test]
+fn the_aarch64_linux_corpus_batch_is_ten_files() {
+    let Some(files) = batch(&[("HOST_OS", "Linux"), ("HOST_ARCH", "aarch64")]) else {
+        return;
+    };
+    assert_eq!(
+        files, "10",
+        "on aarch64 Linux the Makefile deals {files} files to each `elle test` \
+         process, and the AArch64 choice is 10; see docs/analysis/ci.md \
+         § \"Corpus batch size\"."
     );
 }
 

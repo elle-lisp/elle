@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-22
+(elle/epoch 13)
+# audited: 2026-09-29
 ## elle test — the command line, the store it opens, and the run it drives.
 ## docs/test-cli.md
 ##
@@ -197,18 +197,19 @@
 
 (warn-if-truncated conn)
 
-# n_selected and the code state land at insert (everything else about the row
-# is written at completion), so a killed run's row still says how much work was
-# planned and which commit, worktree, and machine it was planned on.
+# n_selected, the code state and the pid land at insert (everything else about
+# the row is written at completion), so an unfinished run's row still says how
+# much work was planned, which commit, worktree and machine it was planned on,
+# and which process to ask whether it is still working.
 (def ident (run-identity))
 (sqlite:exec conn
-             "INSERT INTO run (tiers, n_selected, git_commit, git_dirty, tree_hash, worktree, boot_fingerprint, elle_version, build_profile, host, argv, run_key) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"
+             "INSERT INTO run (tiers, n_selected, git_commit, git_dirty, tree_hash, worktree, boot_fingerprint, elle_version, build_profile, host, argv, run_key, pid) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)"
              [(if isolate-flags "process" (tiers-str active-tiers))
               (+ (length (get opts :paths)) (length (get opts :eval)))
               (get ident :commit) (get ident :dirty) (get ident :tree)
               (get ident :worktree) (get ident :boot) (get ident :version)
               (get ident :profile) (get ident :host) (get ident :argv)
-              (get ident :key)])
+              (get ident :key) (get ident :pid)])
 (def run-id (last-rowid conn))
 
 # What the runner's own heap reads before the first file. Every later reading

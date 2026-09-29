@@ -295,12 +295,50 @@ on its next call.
 
 Refuse with `:fs`, not with `:error`. The child's own `protect` runs
 primitives that declare `:error`, so a fiber denying that bit has no
-working recovery path for the refusal to land in, and it ends `:error`
-whatever the parent does.
+working recovery path for the refusal to land in.
 
-An uncaught refusal is an ordinary uncaught error: it unwinds the child
-through any `defer` blocks and the fiber ends `:error`. To end a fiber
-outright rather than refuse one call, use `fiber/abort`.
+An uncaught refusal stops the child `:error` at the refused call. With
+`:error` in the child's mask, `fiber/refuse` answers the refusal and
+`fiber/value` holds it. Without `:error`, the refusal raises past
+`fiber/refuse` into the mediator, as an error passes `fiber/resume`:
+
+```lisp
+(let [f (fiber/new (fn [] (file/read "/etc/hostname")) |:fs| :deny |:fs|)]
+  (fiber/resume f)
+  (let [[ok? err] (protect (fiber/refuse f :not-permitted))]
+    (assert (not ok?))
+    (assert (= err :not-permitted))
+    (assert (= (fiber/status f) :error))))
+```
+
+The mediator then decides what the stopped child does. `fiber/resume`
+restarts it at the refused call, and the resume value answers the call
+exactly as a grant would. `fiber/cancel` ends it `:dead`, and the code past
+the call never runs:
+
+```lisp
+(with-temp-dir dir
+  (let [target (path/join dir "notes")
+        f (fiber/new (fn [] (list :wrote (file/write target "x")))
+                     |:fs :error| :deny |:fs|)]
+    (fiber/resume f)
+    (assert (= (fiber/refuse f :not-permitted) :not-permitted))
+    (assert (= (fiber/status f) :error))
+    (assert (= (fiber/value f) :not-permitted))
+    (assert (= (fiber/resume f 1) (list :wrote 1)))   # the restart answers the call
+    (assert (not (path/exists? target)))))            # and nothing was written
+
+(let [ran @[]
+      f (fiber/new (fn [] (file/read "/etc/hostname") (push ran :continued))
+                   |:fs :error| :deny |:fs|)]
+  (fiber/resume f)
+  (fiber/refuse f :not-permitted)
+  (fiber/cancel f)
+  (assert (= (fiber/status f) :dead))
+  (assert (empty? ran)))                              # the continuation never ran
+```
+
+To end a fiber outright rather than refuse one call, use `fiber/cancel`.
 
 ## A fiber a scheduler runs
 

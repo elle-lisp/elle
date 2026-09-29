@@ -223,6 +223,12 @@ mod plugins {
 mod runner_budget {
     include!("runner_budget.rs");
 }
+mod dashboards {
+    include!("dashboards.rs");
+}
+mod corpus_targets {
+    include!("corpus_targets.rs");
+}
 mod budget {
     include!("budget.rs");
 }
@@ -240,6 +246,9 @@ mod doctest_scope {
 }
 mod joined_comments {
     include!("joined_comments.rs");
+}
+mod test_setup {
+    include!("test_setup.rs");
 }
 
 // `allocator.rs` is absent from the list above and does not compile. It calls

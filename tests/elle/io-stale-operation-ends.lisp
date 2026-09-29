@@ -1,8 +1,9 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 # An operation whose asking fiber is gone ends without its peer acting.
 #
 # `a_completion_is_withheld_when_the_fiber_that_asked_is_gone`
-# (src/io/aio/tests/park.rs) holds the other half of the rule: the completion
+# (src/io/aio/tests/gone.rs) holds the other half of the rule: the completion
 # for such an operation is retired unread and answered with an error. That half
 # is only assertable there, because the answer goes to a fiber that is gone.
 # This file is about the completion ARRIVING at all, which a program can see.
@@ -19,12 +20,12 @@
 # (`:workers` stays 1) for as long as the program is pumped.
 #
 # The other trap: `fiber/cancel` is the route, and `fiber/abort` is not
-# interchangeable with it. An abort resumes the fiber to unwind, and that
-# unwinding can suspend and be resumed again (docs/signals/primitives.md
-# § "Unwinding that suspends"), so the fiber is `:paused` rather than terminal
-# and still has a result to come back for — the sweep leaves it alone and the
-# read stays submitted, which is the same red this file reports for a missing
-# sweep, from the opposite cause. Cancel gives the fiber no such chance.
+# interchangeable with it. An abort raises an error at the read, where the
+# fiber's own handlers run. A handler that suspends leaves the fiber `:paused`
+# with a result still to come back for (docs/signals/primitives.md). The sweep
+# leaves such a fiber alone and the read stays submitted, which is the same red
+# this file reports for a missing sweep, from the opposite cause. A cancel runs
+# no handler.
 #
 # The victim is also `:paused` in its CONNECT before it is in its read, and
 # cancelling the connect would measure that instead. So the victim says when it
@@ -71,9 +72,9 @@
 
 # Nothing tells the scheduler the victim's operation is gone: the cancel ends
 # the fiber with the read still submitted, and the regions holding the port and
-# the read buffer are released as it unwinds.
+# the read buffer are released with the fiber's parked frames.
 (protect (fiber/cancel victim))
-(assert (= (fiber/status victim) :error)
+(assert (= (fiber/status victim) :dead)
         "the victim ended without running to its own result")
 
 # The read is the only operation left, and no byte will ever arrive on it.

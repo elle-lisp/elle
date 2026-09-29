@@ -1,8 +1,9 @@
-// audited: 2026-09-28
-// docs/impl/vm.md
-// docs/impl/region/relocate.md
+// audited: 2026-09-29
 //! Bytecode execution entry points, the tail-call trampoline, and the opening
 //! and closing of an activation.
+//!
+//! docs/impl/vm.md
+//! docs/impl/region/relocate.md
 //!
 //! An interpreted non-tail call does not come back through here: the callee
 //! runs on its caller's dispatch loop, in `nested.rs`. What does come through
@@ -15,6 +16,8 @@
 //! - **Operand stack**: saved before inner execution, restored after. The
 //!   inner execution sees an empty stack. The outer stack is invisible to it.
 //! - **Executing-closure register**: saved, and restored on the way out.
+//! - **Parameter frames**, on an error that abandons the body: the frames the
+//!   body pushed and never popped are dropped (`drop_abandoned_param_frames`).
 //!
 //! ### What it does NOT preserve
 //!
@@ -34,10 +37,10 @@
 //!
 //! If the inner closure suspends (a yield, an I/O request),
 //! `execute_bytecode_saving_stack` returns the suspending bits with the outer
-//! stack restored. No host resumes the inner continuation, so each refuses
-//! the suspend: `eval`, `import` and the test-setup loader report an error,
-//! and `arena/allocs` returns the signal from its own call. Each first calls
-//! `VM::abandon_hosted_park`, because the refused park is dead.
+//! stack restored. No host resumes the inner continuation. `eval`, `import`
+//! and the test-setup loader end the park through `VM::refuse_hosted_park` and
+//! raise at their own call. `arena/allocs` returns the signal from its own
+//! call, so its park ends there, through `VM::abandon_hosted_park`.
 //!
 //! ### Nested `fiber/resume` — the SIG_SWITCH obligation
 //!
@@ -53,11 +56,12 @@
 //! is that trampoline at the root; a re-entrant boundary that runs a thunk on
 //! the current fiber must be one too. If it is not, the `SIG_SWITCH` unwinds
 //! straight out of `execute_bytecode_saving_stack` and the thunk's continuation
-//! is later resumed by the *outer* trampoline — i.e. OUTSIDE the re-entrant
-//! caller's scope. An `arena/allocs` measurement would then answer with the
-//! resumed child's value instead of `(result . net)` and never finish the
-//! thunk (`tests/elle/arena.lisp` "arena/allocs measures a thunk that resumes
-//! a fiber"; the `fiber-spawn-10` scenario in `tests/elle/resource.lisp`).
+//! is later resumed by the *outer* trampoline — that is, OUTSIDE the
+//! re-entrant caller's scope. An `arena/allocs` measurement would then answer
+//! with the resumed child's value instead of `(result . net)` and never finish
+//! the thunk (`tests/elle/arena.lisp` "arena/allocs measures a thunk that
+//! resumes a fiber"; the `fiber-spawn-10` scenario in
+//! `tests/elle/resource.lisp`).
 //!
 //! `VM::run_thunk_to_completion` is the safe entry point: it drives
 //! `SIG_SWITCH` to completion exactly as the root loop does, so a nested
@@ -76,8 +80,9 @@
 //! 1. Read `fiber.signal` immediately after return to get the result.
 //! 2. Check `exec_result.bits` for `SIG_ERROR` and `SIG_HALT` before using
 //!    the result.
-//! 3. If the closure may suspend, refuse the suspending bits and call
-//!    `VM::abandon_hosted_park`, as the section above describes.
+//! 3. If the closure may suspend, end its park as the section above
+//!    describes: refuse it through `VM::refuse_hosted_park`, or hand it on as
+//!    your own call's park through `VM::abandon_hosted_park`.
 //! 4. Do NOT assume `fiber.signal` is unchanged after the call.
 //! 5. The inner execution runs on the SAME fiber — same heap, same
 //!    parameter frames. It is not isolated.
@@ -86,90 +91,16 @@
 //!    so the `SIG_SWITCH` trampoline is driven inside your scope — see the
 //!    SIG_SWITCH section above.
 
-use crate::value::fiber::ActivationDues;
+use crate::value::fiber::{ParamDepth, RaiseSite, TailSquelch};
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
 use std::rc::Rc;
 
 use super::core::VM;
 
+mod exit;
 mod nested;
 
-/// Result of `execute_bytecode_saving_stack`.
-///
-/// Contains the signal, IP, the active bytecode/constants/env at exit, and
-/// the inner operand stack at the moment of suspension.
-///
-/// When a tail call occurs before a signal, the active context differs from
-/// the original closure — callers that create `SuspendedFrame`s must use
-/// these fields, not the original closure's bytecode/constants.
-///
-/// `stack` captures the inner execution's operand stack at suspension time.
-/// This is essential for fuel-pause resumption: when `SIG_FUEL` fires at a
-/// `TailCall` or `Call` instruction, the args are still on the stack. On
-/// resume the instruction re-executes from `ip`, so the stack must be
-/// restored exactly as it was.  `SIG_YIELD` is exempt — `handle_emit`
-/// drains the stack into `fiber.suspended` before returning, so
-/// `fiber.suspended` is already populated and the `stack` field here is
-/// unused for that signal.
-pub(crate) struct ExecResult {
-    pub bits: SignalBits,
-    pub ip: usize,
-    /// The active code object at exit (may differ from the input if a tail call
-    /// occurred before the signal). The template-derived half of the context.
-    pub code: crate::value::Code,
-    pub env: Rc<Vec<Value>>,
-    /// The inner operand stack at suspension. Populated by
-    /// `execute_bytecode_saving_stack`; empty for `execute_bytecode_from_ip`.
-    pub stack: Vec<Value>,
-    /// This activation's static→physical region remap, captured by
-    /// `close_activation` just before it pops the frame on a suspending exit.
-    /// Callers that build a `SuspendedFrame::Bytecode` from the callee's
-    /// returned context (the inner/fuel-pause frame) attach this so the remap
-    /// survives the yield. Default (empty) for `execute_bytecode_from_ip`,
-    /// whose caller manages frames itself.
-    pub activation_region_map: rustc_hash::FxHashMap<u32, crate::hir::region::MappedRegion>,
-    /// What this activation owed, TAKEN by `close_activation` beside
-    /// `activation_region_map` on a non-OK exit — the channel that carries the
-    /// record out of the already-popped activation to the caller that builds
-    /// its park (`BytecodeFrame::activation_dues`): the fiber body's pause in
-    /// `do_fiber_first_resume`, the interrupted callee's inner frame in
-    /// `complete_call`. A suspend handler that parked the frame itself (the
-    /// yield path) already took the record, so this reads default there — the
-    /// move discipline holds. Always default for `execute_bytecode_from_ip`
-    /// (`resume_suspended` manages the slot directly).
-    pub activation_dues: crate::value::fiber::ActivationDues,
-    /// The executing-closure register (`fiber.current_closure`) at the moment the
-    /// activation ended — the callee's value, possibly re-installed by tail calls
-    /// in this activation. A caller building a `SuspendedFrame` from this returned
-    /// context parks it so the self-identity survives the yield. `NIL` for an
-    /// untracked activation.
-    pub current_closure: Value,
-}
-
-impl ExecResult {
-    /// The result of an activation that ended with `bits` at `ip`. The region
-    /// remap and the dues start empty; `close_activation` moves them in where
-    /// the activation parks.
-    fn ended(
-        bits: SignalBits,
-        ip: usize,
-        code: crate::value::Code,
-        env: Rc<Vec<Value>>,
-        stack: Vec<Value>,
-        current_closure: Value,
-    ) -> Self {
-        ExecResult {
-            bits,
-            ip,
-            code,
-            env,
-            stack,
-            activation_region_map: rustc_hash::FxHashMap::default(),
-            activation_dues: ActivationDues::default(),
-            current_closure,
-        }
-    }
-}
+pub(crate) use exit::{ExecResult, Exit};
 
 impl VM {
     /// Debug-only: the executing-closure register handed to a body entry must
@@ -198,8 +129,8 @@ impl VM {
     }
 
     /// Replace the running activation's body with a pending tail call's callee,
-    /// answering the callee's code and environment. The caller ORs the tail
-    /// call's squelch mask into the activation's own.
+    /// answering the callee's code and environment. The caller adds the tail
+    /// call's squelch mask to the activation's [`TailSquelch`].
     fn replace_by_tail_call(
         &mut self,
         tail: crate::vm::core::TailCallInfo,
@@ -222,14 +153,14 @@ impl VM {
         (tail.code, tail.env)
     }
 
-    /// Close out an activation whose dispatch loop exited with `bits` at `ip`,
-    /// answering its `ExecResult`.
+    /// Close out an activation whose dispatch loop exited at `exit`, answering
+    /// its `ExecResult`.
     ///
-    /// On a signal: a squelch the activation's tail calls accumulated turns the
-    /// signal into an error, an error runs the abandoned-frame walk when
-    /// `walk_abandoned` says the frame is abandoned, and the operand stack
-    /// leaves in the result. On a clean return: the activation discharges what
-    /// it owes.
+    /// On a signal: a squelch the activation's tail calls accumulated ends the
+    /// activation with an error ([`Self::end_refused_activation`]), an error
+    /// runs the abandoned-frame walk when `walk_abandoned` says the frame is
+    /// abandoned, and the operand stack leaves in the result. On a clean
+    /// return: the activation discharges what it owes.
     ///
     /// `walk_abandoned` — run the releases this activation still owes when it
     /// leaves by an **error** (docs/impl/region/mechanism.md § "An abandoned
@@ -240,12 +171,11 @@ impl VM {
         &mut self,
         code: crate::value::Code,
         env: Rc<Vec<Value>>,
-        bits: SignalBits,
-        ip: usize,
-        tail_squelch: SignalBits,
+        exit: Exit,
+        tail_squelch: TailSquelch,
         walk_abandoned: bool,
     ) -> ExecResult {
-        if bits.is_empty() {
+        if exit.bits.is_empty() {
             // Normal completion: discharge what this activation owes — the
             // decrefs its frame-replacing tail calls left dead, and its owner
             // node, whose single decref subtree-drops every member the
@@ -254,19 +184,13 @@ impl VM {
             // keeps the activation alive to the recursion's completion here,
             // and so keeps everything it owes.
             self.release_activation_dues();
-            return ExecResult::ended(bits, ip, code, env, vec![], self.fiber.current_closure);
+            return ExecResult::ended(exit, code, env, vec![], self.fiber.current_closure);
         }
-        // A squelch/attune boundary turns the signal into an error this
-        // activation never catches, so this exit IS the error exit and is
-        // written as one — a second arm would be a second place to keep the
-        // abandonment accounting in step (docs/impl/region/mechanism.md § "A
-        // squelch boundary abandons frames the same way, so it runs the same
-        // walk").
-        let bits = if self.enforce_squelch(bits, tail_squelch) {
-            SIG_ERROR
-        } else {
-            bits
-        };
+        let parked = self.fiber.suspended.is_some();
+        if self.enforce_squelch(exit.bits, tail_squelch.mask, tail_squelch.depth) {
+            return self.end_refused_activation(code, env, exit.ip, parked);
+        }
+        let bits = exit.bits;
         // The frame's locals are still on the stack, and an error leaves
         // through the signal machinery without running the rest of its
         // instructions — so the releases among them run here, before the
@@ -281,7 +205,48 @@ impl VM {
             self.release_abandoned_deferred();
         }
         let stack = std::mem::take(&mut self.fiber.stack).into_vec();
-        ExecResult::ended(bits, ip, code, env, stack, self.fiber.current_closure)
+        ExecResult::ended(exit, code, env, stack, self.fiber.current_closure)
+    }
+
+    /// Close out an activation whose tail call a squelch boundary refused at
+    /// `ip`, with an error at [`RaiseSite::TailRefused`]. `parked` says whether
+    /// the refused code parked the activation's frame
+    /// (docs/impl/region/unwind.md § "A squelch boundary abandons frames the
+    /// same way, so it runs the same walk").
+    fn end_refused_activation(
+        &mut self,
+        code: crate::value::Code,
+        env: Rc<Vec<Value>>,
+        ip: usize,
+        parked: bool,
+    ) -> ExecResult {
+        if !parked {
+            let payload = self.fiber.signal.map(|(_, v)| v).unwrap_or(Value::NIL);
+            self.release_abandoned_frame(&code, payload);
+        }
+        self.release_activation_dues();
+        self.fiber.stack.clear();
+        let exit = Exit::raised(SIG_ERROR, ip, RaiseSite::TailRefused);
+        ExecResult::ended(exit, code, env, vec![], self.fiber.current_closure)
+    }
+
+    /// Drop the `parameterize` frames a call pushed above `depth` and left
+    /// behind by raising. The error abandoned the activations that pushed
+    /// them, so no scope-end `PopParamFrame` will run for them, and the caller
+    /// — or a restart of it — runs on with its own bindings
+    /// (docs/signals/primitives.md § "Where a restart lands"). A no-op unless
+    /// the fiber's signal is an error. Called where a caller learns its callee
+    /// raised: a nested interpreted callee (`run_dispatch`), a compiled one
+    /// (`call_inner`), and a re-entered body the error abandons
+    /// (`execute_bytecode_saving_stack`).
+    pub(crate) fn drop_abandoned_param_frames(&mut self, depth: ParamDepth) {
+        if self
+            .fiber
+            .signal
+            .is_some_and(|(bits, _)| bits.intersects(SIG_ERROR))
+        {
+            self.fiber.unwind_params(depth);
+        }
     }
 
     /// Open a fresh activation: a region-remap frame, so the body's static
@@ -358,13 +323,13 @@ impl VM {
         let mut current_code = code.clone();
         let mut current_env = closure_env.clone();
         let mut current_ip = start_ip;
-        let mut accumulated_squelch_mask = SignalBits::EMPTY;
+        let mut tail_squelch = TailSquelch::none(self.fiber.param_depth());
 
         loop {
-            let (bits, ip) = self.run_dispatch(&current_code, &current_env, current_ip);
-            if bits.is_empty() {
+            let exit = self.run_dispatch(&current_code, &current_env, current_ip);
+            if exit.bits.is_empty() {
                 if let Some(tail) = self.pending_tail_call.take() {
-                    accumulated_squelch_mask |= tail.squelch_mask;
+                    tail_squelch.add(tail.squelch_mask, self.fiber.param_depth());
                     (current_code, current_env) = self.replace_by_tail_call(tail);
                     current_ip = 0;
                     continue;
@@ -373,9 +338,8 @@ impl VM {
             break self.end_activation(
                 current_code,
                 current_env,
-                bits,
-                ip,
-                accumulated_squelch_mask,
+                exit,
+                tail_squelch,
                 walk_abandoned,
             );
         }
@@ -389,13 +353,14 @@ impl VM {
         closure_env: &Rc<Vec<Value>>,
         start_ip: usize,
     ) -> ExecResult {
-        // The caller (`resume_suspended`) owns this frame and may re-park it, so
+        // The caller (`replay_suspended`) owns this frame and may re-park it, so
         // its error exit is not an abandonment the walk may act on.
         self.trampoline_loop(code, closure_env, start_ip, false)
     }
 
-    /// Execute bytecode returning SignalBits (for fiber/closure execution).
-    /// The result value is stored in `self.fiber.signal`.
+    /// Run a body from IP 0 on the current fiber as a fresh activation,
+    /// answering how it ended. The result value is stored in
+    /// `self.fiber.signal`.
     ///
     /// Saves/restores the caller's stack around execution.
     /// Handles pending tail calls in a loop.
@@ -423,6 +388,7 @@ impl VM {
         // (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
         // it still owes").
         let parks_error_frame = std::mem::take(&mut self.pending_error_park);
+        let param_depth = self.fiber.param_depth();
         #[cfg(debug_assertions)]
         let entry_depth = self.fiber.activation_region_maps.len();
         self.open_activation();
@@ -436,9 +402,8 @@ impl VM {
             self.end_activation(
                 code.clone(),
                 closure_env.clone(),
-                SIG_HALT,
-                0,
-                SignalBits::EMPTY,
+                Exit::at(SIG_HALT, 0),
+                TailSquelch::none(param_depth),
                 !parks_error_frame,
             )
         } else {
@@ -449,6 +414,11 @@ impl VM {
             #[cfg(debug_assertions)]
             entry_depth,
         );
+        // A body parked for a restart keeps its bindings; one the error
+        // abandons leaves them behind.
+        if !parks_error_frame {
+            self.drop_abandoned_param_frames(param_depth);
+        }
         // Restore the caller's executing-closure register. On a suspending exit the
         // callee's value is already in `result.current_closure`; on normal return
         // the caller resumes as itself.
@@ -464,15 +434,8 @@ impl VM {
     ///
     /// It wraps [`Self::execute_bytecode_saving_stack`] with the same
     /// `SIG_SWITCH`-draining loop the root dispatch ([`VM::execute_proto`])
-    /// runs. A `fiber/resume` inside the thunk, with the program itself inside a
-    /// fiber (the async scheduler always runs user code in one), suspends the
-    /// thunk's continuation and returns `SIG_SWITCH` for a driving trampoline
-    /// rather than executing inline (`handle_fiber_resume_signal`). Without
-    /// driving it here the switch unwinds out of the re-entrant boundary and the
-    /// continuation resumes OUTSIDE the caller's scope, so the `arena/allocs`
-    /// measurement answers with the resumed child's value instead of `(result .
-    /// net)` and never finishes the thunk (`tests/elle/arena.lisp`,
-    /// `tests/elle/resource.lisp` `fiber-spawn-10`).
+    /// runs, so a `fiber/resume` inside the thunk completes inside the caller's
+    /// scope. The module doc's SIG_SWITCH section says why that matters.
     ///
     /// Returns the final signal bits; the result value is left in
     /// `self.fiber.signal` (read it immediately — see the re-entrancy rules in

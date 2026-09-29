@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! `Config::parse`: turn an argv into a `Config` and the positional arguments
 //! left over. Every flag `elle --help` lists is recognized here.
 //!
@@ -264,7 +264,6 @@ impl Config {
                 "--json" => config.json = true,
                 "--stats" => config.stats = true,
                 "--wasm-no-stdlib" | "--no-stdlib" => config.no_stdlib = true,
-                "--no-uring" => config.no_uring = true,
                 // Old debug flags — kept as aliases for --trace=<kw>
                 "--debug" => config.trace_keywords.push("bytecode".into()),
                 "--debug-jit" => config.trace_keywords.push("jit".into()),

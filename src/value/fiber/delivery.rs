@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! The delivery ledger: how the current park's delivery references are funded.
 //!
 //! docs/impl/region/park.md
@@ -20,6 +20,47 @@
 
 use crate::value::{SignalBits, Value};
 
+/// Where an error was raised, carried out of the dispatch loop with the exit.
+/// It says what a restart delivers into, and so what the delivery owes
+/// (docs/impl/vm.md § "The error exit").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RaiseSite {
+    /// An `Emit` raise: the restart value takes the emit's result, and the
+    /// continuation funds its own release of it.
+    Emit,
+    /// A call, or an instruction that produces a value: the restart value takes
+    /// the result the raise never produced, so the delivery mints.
+    #[default]
+    Call,
+    /// A raise with no result position: an instruction that produces no value,
+    /// or an object-limit refusal from outside the frame, raised before its
+    /// first instruction. A restart continues after it and delivers nothing.
+    NoResult,
+    /// A squelch boundary refused a tail call, ending the activation the call
+    /// replaced (docs/impl/region/park.md § "A restart delivers into an error
+    /// park").
+    TailRefused,
+}
+
+impl RaiseSite {
+    /// Whether a restart delivers its value into the raise's result position:
+    /// the frame parks with `push_resume_value` set.
+    pub fn delivers(self) -> bool {
+        self != RaiseSite::NoResult
+    }
+
+    /// Whether the delivery mints the reference the continuation's release of
+    /// the restart value consumes.
+    pub fn owes_mint(self) -> bool {
+        matches!(self, RaiseSite::Call | RaiseSite::TailRefused)
+    }
+
+    /// Whether the error park keeps a frame of the raising activation.
+    pub fn parks_frame(self) -> bool {
+        self != RaiseSite::TailRefused
+    }
+}
+
 /// The funding record of a fiber's current park. One instance rides each
 /// `Fiber` (`Fiber::delivery`); see the module doc for the model and
 /// docs/impl/region/park.md for the per-shape rules the methods encode.
@@ -39,13 +80,13 @@ pub struct Delivery {
     /// the payload's birth reference or the frame's left-standing one, which
     /// the exemption preserves.
     minted: Option<Value>,
-    /// The capability-denial payload parked in `Fiber::signal`, whose region
-    /// the install that displaces it owes one decref. The denial path builds
-    /// the `{:error :capability-denied …}` struct itself, so the body never
-    /// names it and no `decref_point` names its region; the reference the
-    /// allocation left is owed by whatever replaces the payload in the slot —
-    /// a resume's delivery, or an abort's / refusal's injected error
-    /// (docs/impl/region/park.md § "A payload the
+    /// The runtime-built payload parked in `Fiber::signal`, whose region the
+    /// install that displaces it owes one decref: a capability denial's
+    /// `{:error :capability-denied …}` struct, or the `IoRequest` an io op
+    /// built. The body never names either, so no `decref_point` names its
+    /// region; the reference the allocation left is owed by whatever replaces
+    /// the payload in the slot — a resume's delivery, or an abort's /
+    /// refusal's injected error (docs/impl/region/park.md § "A payload the
     /// RUNTIME built is released by the install that displaces it"). Carried
     /// as the payload rather than a flag so the release is gated on
     /// representation identity with the live parked signal, and TAKEN by the
@@ -82,15 +123,16 @@ pub struct Delivery {
     /// and its region resolved, never structurally read, and the counted edge for
     /// the same value is `Fiber::signal`'s.
     undelivered: Option<(SignalBits, Value)>,
-    /// Whether this fiber's innermost suspension is a PRIMITIVE call, whose
-    /// resume value therefore arrives owing one reference. A parked frame
-    /// re-enters at its suspending call's continuation, which runs that call's
-    /// compiler-emitted result release; a bytecode callee funds that reference
-    /// with its `Return` mint, but a primitive that suspends never returns, so
-    /// the delivery mints it instead (docs/impl/region/park.md § "A delivery
-    /// into a replayed frame carries one owning reference"). Rides the fiber
-    /// rather than the frame because a tail suspend's park is built later and
-    /// elsewhere, by a driver that never saw the primitive.
+    /// Whether the resume value of this fiber's innermost park arrives owing one
+    /// reference: a park at a PRIMITIVE call, or an error park at a `Call` site.
+    /// A parked frame re-enters at its call's continuation, which runs that
+    /// call's compiler-emitted result release; a bytecode callee funds that
+    /// reference with its `Return` mint, but a primitive that suspends never
+    /// returns and a raising call never produced its result, so the delivery
+    /// mints it instead (docs/impl/region/park.md § "A delivery into a replayed
+    /// frame carries one owning reference"). Rides the fiber rather than the
+    /// frame because a tail suspend's park is built later and elsewhere, by a
+    /// driver that never saw the primitive.
     resume_unfunded: bool,
 }
 
@@ -100,10 +142,11 @@ impl Delivery {
         Self::default()
     }
 
-    /// A suspending PRIMITIVE parked (a yielding io op, a dynamic `emit`): the
-    /// resume value owes one `ResumeDelivery` mint at the delivery funnel.
-    /// Callers: `handle_primitive_signal[_tail]`'s Suspend arms and their JIT
-    /// twin (`jit_handle_primitive_signal`).
+    /// A suspending PRIMITIVE parked a payload that is not an io op's own
+    /// request — a dynamic `emit` of one of its arguments, whose body owns it:
+    /// the resume value owes one `ResumeDelivery` mint at the delivery funnel.
+    /// Caller: `VM::park_suspending_primitive`, for both Suspend arms and their
+    /// JIT twin.
     pub(crate) fn park_primitive(&mut self, bits: SignalBits, payload: Value) {
         self.assert_consumed();
         self.resume_unfunded = true;
@@ -114,8 +157,8 @@ impl Delivery {
     /// The compiler funds this continuation itself — the emit's own decref_point
     /// balances the release past the suspend — so the park owes no resume mint,
     /// and the record is the escape retain's alone. Never reached by a TERMINAL
-    /// emit: an error raise parks nothing and records its mint instead, and a
-    /// halt takes no retain at all.
+    /// emit: an error raise records its mint, and the fiber boundary parks it
+    /// through [`Self::park_error`]; a halt takes no retain at all.
     pub(crate) fn park_emit(&mut self, bits: SignalBits, payload: Value) {
         self.assert_consumed();
         self.record_park(bits, payload);
@@ -126,6 +169,22 @@ impl Delivery {
     /// its region one decref besides the mint. Callers:
     /// `handle_capability_denial[_tail]` and `jit_capability_denial`.
     pub(crate) fn park_denial(&mut self, bits: SignalBits, payload: Value) {
+        self.park_bodyless(bits, payload);
+    }
+
+    /// A yielding io op parked the `IoRequest` it built: a primitive park
+    /// whose request has no body reference, exactly as a denial's struct has
+    /// none. Caller: `VM::park_suspending_primitive`, the one site that can
+    /// tell the request an op built from a relay's `(emit :io v)` of the same
+    /// request.
+    pub(crate) fn park_request(&mut self, bits: SignalBits, request: Value) {
+        self.park_bodyless(bits, request);
+    }
+
+    /// A primitive park of a payload the RUNTIME built: the resume value owes
+    /// a mint, and the install that displaces the payload owes its region a
+    /// decref ([`Self::take_bodyless`]).
+    fn park_bodyless(&mut self, bits: SignalBits, payload: Value) {
         self.assert_consumed();
         self.resume_unfunded = true;
         self.bodyless = Some(payload);
@@ -170,11 +229,46 @@ impl Delivery {
         self.minted = Some(payload);
     }
 
-    /// An abort injection installed its payload over the park: the injection's
-    /// mint is recorded, the displaced park's payload records leave with its
-    /// payload, and no resume value is owed — an abort delivers none (the
-    /// replayed frame re-enters with `SIG_ERROR` set and leaves before the
-    /// parked call's result release). Caller: `do_fiber_abort`.
+    /// An error park: the fiber stopped on a raise, and a restart delivers into
+    /// the raising call's result position. A `Call` site produced no result, so
+    /// the resume value owes the `ResumeDelivery` mint; an `Emit` site's
+    /// continuation funds its own release, and a `NoResult` site takes no
+    /// resume value at all (docs/impl/region/park.md § "A restart delivers into
+    /// an error park"). The raise's own mint record stands: it names the parked
+    /// payload.
+    ///
+    /// A capability denial of `:error` also exits under `SIG_ERROR`, and in tail
+    /// position the driver builds its frame. That park is the denial's own, so a
+    /// bodyless record naming `payload` means its funding stands untouched.
+    /// Callers: the fiber boundary where the error exit built the park
+    /// (`do_fiber_first_resume`, `do_fiber_subsequent_resume`, the abort's
+    /// `FiberResume` replay), and a parent a child's error stopped at its
+    /// `fiber/resume` call (`finish_fiber_resume`).
+    pub(crate) fn park_error(&mut self, site: RaiseSite, payload: Value) {
+        if self.bodyless.is_some_and(|b| b.bit_identical(payload)) {
+            return;
+        }
+        self.assert_consumed();
+        self.resume_unfunded = site.owes_mint();
+    }
+
+    /// An injected `fiber/abort` / `fiber/refuse` raised in place over the
+    /// current park: the injection's mint is recorded, the displaced payload's
+    /// records leave with it, and the park keeps its resume funding, because a
+    /// restart still delivers into the parked call's result. Caller:
+    /// `do_fiber_abort`, for a fiber parked in its own bytecode.
+    pub(crate) fn raise_in_park(&mut self, payload: Value) {
+        self.minted = Some(payload);
+        self.bodyless = None;
+        self.undelivered = None;
+    }
+
+    /// An abort injection installed its payload where no bytecode park takes
+    /// it: a `FiberResume` park, whose replay delivers the aborted sub-fiber's
+    /// result and is funded by the injection's own mint, or a fiber that never
+    /// started. The injection's mint is recorded, the displaced park's payload
+    /// records leave with its payload, and no resume mint is owed. Caller:
+    /// `do_fiber_abort`.
     pub(crate) fn install_abort(&mut self, payload: Value) {
         self.minted = Some(payload);
         self.bodyless = None;
@@ -201,7 +295,7 @@ impl Delivery {
     /// trampoline's `FiberResume` short-circuit): the payload-named records
     /// describe a value no longer in the slot, so they go with it. The
     /// displacing installs consume the bodyless record's release through
-    /// `release_displaced_denial_payload` ([`Self::take_bodyless`]) before
+    /// `release_displaced_bodyless_payload` ([`Self::take_bodyless`]) before
     /// this runs, so the clear here is the mint record's. `resume_unfunded`
     /// survives — the funnel that consumes it has not run yet, and the
     /// replayed frame still owes its resume value the mint.
@@ -230,10 +324,11 @@ impl Delivery {
         self.minted.is_some_and(|m| m.bit_identical(payload))
     }
 
-    /// Take the recorded bodyless (denial) payload — the one consuming read,
-    /// run by `release_displaced_denial_payload` at every install that
-    /// replaces the parked signal. Taking is the receipt: a second install
-    /// finds nothing and releases nothing.
+    /// Take the recorded bodyless payload, a denial's struct or an io op's
+    /// request — the one consuming read, run by
+    /// `release_displaced_bodyless_payload` at every install that replaces the
+    /// parked signal. Taking is the receipt: a second install finds nothing and
+    /// releases nothing.
     pub(crate) fn take_bodyless(&mut self) -> Option<Value> {
         self.bodyless.take()
     }

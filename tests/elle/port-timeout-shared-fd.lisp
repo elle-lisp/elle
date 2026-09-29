@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-29
 ## tests/elle/port-timeout-shared-fd.lisp
 ##
 ## Two timed operations on one descriptor each keep their own deadline.
@@ -20,9 +21,10 @@
 ## The peer closes at 4 s rather than holding forever, so a lost bound returns
 ## late instead of hanging: `elapsed` then names which happened.
 ##
-## The thread-pool backend runs this file via the
-## `port_timeout_shared_fd_threadpool` pin in tests/integration/elle_scripts.rs
-## (`--no-uring` is process-global).
+## The thread-pool backend runs this file in the Thread-Pool I/O job, whose
+## binary is built with the `no-uring` feature. The ring gives each operation
+## its own linked timeout and shares nothing, so that job is where the file
+## measures anything.
 
 (defn listen-port [listener]
   "Return the port number of a listener bound to an ephemeral port."
