@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# audited: 2026-09-23
+# audited: 2026-09-29
 # Names the files whose stale documentation costs the most, and gates a commit
 # on the files it stages carrying today's stamp.
 # docs/impl/audit.md
@@ -198,7 +198,9 @@ case "$mode" in
         ranked | awk -F'\t' -v floor="$floor" '$2 == "never" || $2 < floor' | show
         ;;
     --all) ranked | show ;;
-    --next) ranked | head -"${arg:-5}" | show ;;
+    # awk, not head: a reader that exits early kills the writer with SIGPIPE,
+    # and `pipefail` turns that into exit 141 once the queue outgrows the pipe.
+    --next) ranked | awk -v n="${arg:-5}" 'NR <= n' | show ;;
     --stale)
         # Compared as day counts, not as a cutoff date, so no date arithmetic
         # is needed beyond what `days_since` already does portably.
@@ -213,7 +215,7 @@ case "$mode" in
         never=$(printf '%s\n' "$all" | awk -F'\t' '$2 == "never"' | grep -c . || true)
         echo "$total files want a stamp; $never have never been audited."
         echo
-        printf '%s\n' "$all" | head -10 | show
+        printf '%s\n' "$all" | awk 'NR <= 10' | show
         echo
         echo "next: scripts/audit --next 20"
         ;;
