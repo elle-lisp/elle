@@ -122,6 +122,9 @@
 # `$PPID` inside `sh` is this process — the runner has no pid of its own to
 # pass. Both samplers bound their own runtime (`sample` by its duration
 # argument), so neither can wedge the run that is already in trouble.
+#
+# The photograph is printed whole. The runner cannot tell which thread wedged,
+# and a cut at any length drops the threads the sampler happens to list last.
 (defn photograph-threads []
   "A native backtrace of every thread in this process, or nil when the box has
    no sampler. `sample` is macOS's and always present there; `eu-stack` covers
@@ -132,10 +135,7 @@
     (when ok?
       (let [[read-ok? out] (protect (string (port/read-all (get proc :stdout))))]
         (protect (subprocess/wait proc))
-        (when (and read-ok? (> (length out) 0))
-          (if (> (length out) 20000)
-            (concat (slice out 0 20000) "\n…truncated")
-            out))))))
+        (when (and read-ok? (> (length out) 0)) out)))))
 
 (defn jit-frame-addrs [shot]
   "The unique `[0x…]` addresses on the photograph's `???` lines — the JIT
