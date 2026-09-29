@@ -1,7 +1,8 @@
 // audited: 2026-09-29
-// docs/impl/wasm.md
 //! Wasmtime host state and primitive dispatch: everything the compiled module
 //! reaches across the boundary for.
+//!
+//! docs/impl/wasm.md
 //!
 //! `host/io.rs` carries the one part that is not dispatch: what a top-level
 //! primitive's I/O does when no scheduler is there to take it.
@@ -84,7 +85,7 @@ pub struct WasmSuspensionFrame {
     /// so on resume the scheduler's value must feed a re-drive of `child` — not
     /// this frame's continuation — until `child` completes. The WASM analogue of
     /// the VM's `SuspendedFrame::FiberResume` (src/vm/fiber/trampoline.rs). Pinned
-    /// by tests/elle/wasm-protect-suspend.lisp.
+    /// by tests/lang/wasm-protect-suspend.lisp.
     pub redrive_child: Option<Value>,
 }
 
@@ -158,7 +159,8 @@ pub struct ElleHost {
     /// Populated from `EmitResult` so `rt_make_closure` can give a WASM closure
     /// a code object the bytecode VM can run after a spawn.
     pub closure_bytecodes: Vec<ClosureBytecode>,
-    /// Debug logging enabled (set once from `config.debug_wasm` at construction).
+    /// Debug logging enabled (set once from the `wasm` trace keyword at
+    /// construction).
     pub debug: bool,
     /// Lazily-initialized I/O backend for inline I/O execution.
     /// Created on first use, reused for subsequent I/O operations.

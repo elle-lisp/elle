@@ -1,3 +1,8 @@
+// audited: 2026-09-29
+//! The module sections, and the two function bodies an emitter produces: the entry and a closure.
+//!
+//! docs/impl/wasm.md
+
 use super::*;
 
 impl WasmEmitter {
@@ -112,8 +117,9 @@ impl WasmEmitter {
             // The blueprint carries child_protos: the bytecode's MakeClosure
             // instructions index that list, so a spawned worker building a code
             // object from this needs it (rt_make_closure,
-            // src/wasm/linker/create/closure.rs). Dropping it left the code
-            // object's child list empty and the worker panicked.
+            // src/wasm/linker/create/closure.rs). Without it the code object's
+            // child list is empty, and the worker panics on its first
+            // MakeClosure (`wasm::tests::closure`).
             closure_bytecodes.push(std::rc::Rc::new(bytecode.into_proto()));
         }
 
@@ -203,7 +209,7 @@ impl WasmEmitter {
         // slices `func.blocks[..][instr_offset..]`; against the entry's own
         // (unrelated, shorter) blocks a stale offset panics. The entry does not
         // suspend to its host caller (`may_suspend = false` above), so the
-        // correct state is empty. Pinned by tests/elle/bug-propagate-free-at.lisp
+        // correct state is empty. Pinned by tests/lang/bug-propagate-free-at.lisp
         // under `--wasm=full` (which produces multiple suspending `ev/run` thunks
         // ahead of a short entry).
         self.next_resume_state = 1;
@@ -256,7 +262,7 @@ impl WasmEmitter {
         // br_table and slicing `func.blocks[stale_src][stale_offset..]` against
         // this function's unrelated (shorter) blocks. The entry function resets
         // the same scratch for the same reason. Pinned by
-        // `tests/elle/region-capture-cell-loop-uaf.lisp` under `--wasm=full`.
+        // `tests/impl/region-capture-cell-loop-uaf.lisp` under `--wasm=full`.
         self.next_resume_state = 1;
         self.resume_states.clear();
         self.call_continuations.clear();
@@ -279,27 +285,6 @@ impl WasmEmitter {
         self.num_stack_locals = func.num_locals as u32;
         self.may_suspend = func.signal.may_suspend();
         self.current_num_captures = func.num_captures;
-        // Build LBox mask
-        let nc = func.num_captures as u64;
-        let capture_bits = if nc >= 64 { u64::MAX } else { (1u64 << nc) - 1 };
-        let param_bits = if nc >= 64 {
-            u64::MAX
-        } else {
-            func.capture_params_mask.wrapping_shl(nc as u32)
-        };
-        let np = nc + func.num_params as u64;
-        // `env_lbox_mask` is a u64 view kept for compatibility; its low-64 width
-        // is unchanged by the `CaptureMask` widening (the field is currently
-        // unread). Take the low-64 bits of the locals mask before shifting.
-        let local_bits = if np >= 64 {
-            u64::MAX
-        } else {
-            func.capture_locals_mask.low_u64().wrapping_shl(np as u32)
-        };
-        self.env_lbox_mask = capture_bits | param_bits | local_bits;
-        self.next_resume_state = 1;
-        self.resume_states.clear();
-        self.call_continuations.clear();
 
         let m = self.num_stack_locals;
         self.signal_local = 4 + 2 * n + 2 * m;
