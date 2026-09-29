@@ -217,6 +217,25 @@ code made, with its frames, so the code around the call runs on with its own:
 (assert (= (fiber/resume evaluated 41) (list :got 41 0)))
 ```
 
+A tail call to a squelched closure has already replaced the calling function
+when the boundary refuses. The refusal drops both, so a restart answers the
+call to the calling function. A fiber's body has no such call, so the recovery
+value becomes the fiber's result. Both hold whether or not the fiber suspended
+before the refusal:
+
+```lisp
+(defn relay [] (yield 0) ((squelch bound-yield :yield)))
+(def relayed (fiber/new (fn [] (list :got (relay) (depth))) |:yield :error|))
+(assert (= (fiber/resume relayed) 0))
+(assert (= (get (fiber/resume relayed) :error) :signal-violation))
+(assert (= (fiber/resume relayed 41) (list :got 41 0)))   # 41 answers relay
+
+(def ended (fiber/new (fn [] ((squelch bound-yield :yield))) |:yield :error|))
+(assert (= (get (fiber/resume ended) :error) :signal-violation))
+(assert (= (fiber/resume ended 41) 41))                   # the body's result
+(assert (= (fiber/status ended) :dead))
+```
+
 ## Terminal vs. Resumable Signals
 
 Whether a caught signal is terminal or resumable is a **handler decision**,
