@@ -166,12 +166,15 @@ carries the driven fiber's withheld set, so a fiber or thread the native starts
 inherits it. `handle_fiber_resume` adds the resumer's set to the fiber it
 drives. See [wasm.md](../../docs/impl/wasm.md).
 
-**Signal handling in `rt_call`.** `rt_call` intercepts three fiber signals from a
-native call's return: `SIG_RESUME` (`fiber/resume` → `handle_fiber_resume`),
-`SIG_PROPAGATE` (`fiber/propagate` → `handle_fiber_propagate`, which re-raises
-the named child's caught signal as this call's own), and `SIG_IO` (via
-`maybe_execute_io`). The tail-call host (`rt_prepare_tail_call`) mirrors the
-RESUME and PROPAGATE handoffs.
+**Signal handling in `rt_call`.** Every host path that runs a native first settles
+its result (`ElleHost::settle_native_signal`): a `SIG_QUERY` (`vm/config`, the
+`compile/*` primitives) is answered on the driving VM through
+`VM::dispatch_query`, as the interpreter and the JIT answer it, and a top-level
+`SIG_IO` runs inline. `rt_call` then intercepts two fiber signals: `SIG_RESUME`
+(`fiber/resume` → `handle_fiber_resume`) and `SIG_PROPAGATE` (`fiber/propagate`
+→ `handle_fiber_propagate`, which re-raises the named child's caught signal as
+this call's own). The tail-call host (`rt_prepare_tail_call`) mirrors the RESUME
+and PROPAGATE handoffs.
 
 ## CPS state-machine transform
 

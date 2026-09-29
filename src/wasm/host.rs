@@ -394,6 +394,27 @@ impl ElleHost {
         }
     }
 
+    /// Settle the signal a native call returned, before the call's caller sees
+    /// it: answer a query on the driving VM, then run top-level I/O inline.
+    ///
+    /// A query (`SIG_QUERY`, raised by `vm/config`, the `compile/*` primitives
+    /// and the rest) asks the VM something only it can answer. The interpreter
+    /// and the JIT answer it through `VM::dispatch_query`, and so does this
+    /// tier; left unanswered, the query pair would unwind the program as an
+    /// error. Every host path that runs a native settles its result here.
+    pub fn settle_native_signal(&mut self, bits: SignalBits, value: Value) -> (SignalBits, Value) {
+        let (bits, value) = if bits.intersects(crate::value::fiber::SIG_QUERY) && !self.vm.is_null()
+        {
+            let vm = unsafe { &mut *self.vm };
+            let heap = unsafe { &mut *self.heap_ptr() };
+            let mut ctx = crate::primitives::ctx::Alloc::boundary(heap);
+            vm.dispatch_query(&mut ctx, value)
+        } else {
+            (bits, value)
+        };
+        self.maybe_execute_io(bits, value)
+    }
+
     /// Resolve a parameter's current value by walking param_frames.
     pub fn resolve_parameter(&self, id: u32, default: Value) -> Value {
         for frame in self.param_frames.iter().rev() {
@@ -447,11 +468,9 @@ impl WasmEnvHost for ElleHost {
 /// fiber stays the top-level one throughout and answers only for top-level code
 /// (`ElleHost::calling_withheld`).
 ///
-/// The VM arrives as a parameter rather than off `ElleHost::vm`, because the
-/// tiered host owns its own `vm` pointer and leaves the `ElleHost` it wraps with
-/// a null one (`TieredHost`, src/wasm/lazy.rs). A caller that reached for the
-/// wrapped field would gate the full-module tier and silently skip the tiered
-/// one.
+/// The VM arrives as a parameter: the full-module host passes `ElleHost::vm`,
+/// and the tiered host passes its own `vm` (`TieredHost`, src/wasm/lazy.rs),
+/// which names the same driving VM as the `ElleHost` it wraps.
 ///
 /// The payload is the shared `{:error :capability-denied …}` struct, which the
 /// caller hands back as the call's own signal. Nothing retains it here: the

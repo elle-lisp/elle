@@ -30,7 +30,7 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
                 .data_mut()
                 .inner
                 .call_primitive(prim_id as u32, &args);
-            let (bits, result) = caller.data_mut().inner.maybe_execute_io(bits, result);
+            let (bits, result) = caller.data_mut().inner.settle_native_signal(bits, result);
             let (tag, payload) = caller.data_mut().inner.value_to_wasm(result);
             (tag, payload, bits.raw() as i64)
         },
@@ -52,7 +52,7 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
 
             if let Some(def) = func_val.as_native_def() {
                 // The capability gate (`host::capability_denial`), reading this
-                // host's own `vm` — the `ElleHost` it wraps carries a null one.
+                // host's own `vm`.
                 if let Some((blocked, payload)) = crate::wasm::host::capability_denial(
                     &caller.data().inner,
                     caller.data().vm,
@@ -68,7 +68,7 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
                 let region = heap.new_runtime_region();
                 let mut ctx = caller.data().inner.native_ctx(vm, region, heap);
                 let (bits, result) = native_fn(&mut ctx, &args);
-                let (bits, result) = caller.data_mut().inner.maybe_execute_io(bits, result);
+                let (bits, result) = caller.data_mut().inner.settle_native_signal(bits, result);
                 let (tag, payload) = caller.data_mut().inner.value_to_wasm(result);
                 return CallOutcome::signalled(tag, payload, bits).to_wasm();
             }
@@ -379,7 +379,7 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
         },
     )?;
 
-    // rt_yield — stub (yield not yet supported in tiered/standalone mode)
+    // rt_yield — stub: `standalone_emittable` refuses every closure that emits
     linker.func_wrap(
         "elle",
         "rt_yield",

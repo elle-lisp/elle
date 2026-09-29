@@ -117,9 +117,9 @@ several):
 
 ## Disposition table (eager trap at startup)
 
-`elle::io::init_process_signals` runs from `main()` once the command line is
-parsed and before `VM::new` ([main.rs](../src/main.rs)). It installs
-process-wide POSIX traps before any worker thread spawns:
+`elle::io::init_process_signals` runs from `elle::program::run` once the command
+line is parsed and before the runtime is built ([program.rs](../src/program.rs)).
+It installs process-wide POSIX traps before any worker thread spawns:
 
 | Set | Signals | What we do |
 |-----|---------|------------|

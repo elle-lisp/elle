@@ -1,8 +1,10 @@
 # Compilation Pipeline
 
-Compilation entry points. Orchestrates Reader → Expander → Analyzer → Lowerer → Emitter.
+<!-- audited: 2026-09-29 -->
 
-Module: `src/pipeline/` (7 files, ~540 lines of implementation).
+Compilation entry points: source reaches bytecode through the reader, expander, analyzer, lowerer and emitter.
+
+Module: [src/pipeline](../src/pipeline/AGENTS.md).
 
 ## Contents
 
@@ -10,16 +12,18 @@ Module: `src/pipeline/` (7 files, ~540 lines of implementation).
 - [VM ownership patterns](#vm-ownership-patterns)
 - [Expander lifecycle](#expander-lifecycle)
 - [The fixpoint loop](#the-fixpoint-loop)
-- [Pre-scanning functions](#pre-scanning-functions-in-srcpipelinescanrs)
 - [Compilation phases (single-form)](#compilation-phases-single-form)
 - [Compile context](#compile-context-in-srcpipelinecachersrs)
 - [Known issues](#known-issues)
 
-| File | Lines | Purpose |
-|------|-------|---------|
+| File | Purpose |
+|------|---------|
 | `mod.rs` | `CompileResult`, `AnalyzeResult`, re-exports |
 | `cache.rs` | `CompileCtx`: per-instance compile state (macro VM, Expander, PrimitiveMeta, projection cache) |
-| `compile.rs` | `compile()`, `compile_file()`, and the whole-module entry points |
+| `bootstrap.rs` | Compile and run core.lisp before any compile context exists |
+| `sources.rs` | The core, prelude and stdlib sources a boot compiles, embedded at build time |
+| `directives.rs` | Validate and strip `(elle/version …)` and `(elle/migration …)` |
+| `compile.rs` | `compile()`, `compile_file()`, `compile_file_repl()`, and the whole-module entry points |
 | `compile/frontend.rs` | Read, expand, and classify forms ahead of analysis |
 | `compile/transforms.rs` | Post-analysis HIR transforms |
 | `analyze.rs` | `analyze()`, `analyze_file()` |
@@ -41,16 +45,16 @@ pub struct AnalyzeResult {
 
 ### Functions
 
-| Function | Lines | VM for macros | Fixpoint? | Callers |
-|----------|-------|---------------|-----------|---------|
-| `compile` | 119–151 | Internal | No | Integration tests |
-| `compile_file` | 162–261 | Internal | Yes | `main.rs:86` (file/stdin), `modules.rs:78` (`import-file`) |
-| `eval` | 266–291 | Borrowed | No | `init_stdlib` (`module_init.rs` — loads `stdlib.lisp`), tests |
-| `eval_all` | 298–309 | Internal (delegates to `compile_file`) | Yes | Tests |
-| `eval_file` | (new) | Borrowed | Yes | File evaluation |
-| `eval_syntax` | 91–113 | Borrowed | No | `macro_expand.rs:150` (macro body evaluation) |
-| `analyze` | 313–326 | Borrowed | No | `hir/lint.rs`, `hir/symbols.rs` (tests only) |
-| `analyze_file` | 330–413 | Borrowed | Yes | LSP (`lsp/state.rs:90`), linter (`lint/cli.rs:53`), property tests |
+| Function | VM for macros | Fixpoint? | Callers |
+|----------|---------------|-----------|---------|
+| `compile` | Internal | No | Integration tests |
+| `compile_file` | Internal | Yes | `elle::program::run_source` (file, stdin, `-e`), `import-file`, the stdlib load |
+| `eval` | Borrowed | No | Tests |
+| `eval_all` | Internal (delegates to `compile_file`) | Yes | Tests |
+| `eval_file` | Borrowed | Yes | Tests |
+| `eval_syntax` | Borrowed | No | Macro body evaluation (src/syntax/expand/macro_expand.rs) |
+| `analyze` | Borrowed | No | Tests |
+| `analyze_file` | Borrowed | Yes | The LSP, the linter, `compile/analyze` |
 
 ### Signatures
 
@@ -103,17 +107,15 @@ borrow is needed mid-expansion.
 
 ## Expander lifecycle
 
-Every public function except `eval_syntax` creates a fresh `Expander::new()`
-and calls `expander.load_prelude(symbols, vm)` before expanding user code.
-The prelude (`prelude.lisp`, embedded via `include_str!`) defines macros like
-`defn`, `let*`, `when`, `unless`, `try`/`catch`, etc.
+The prelude (`prelude.lisp`, embedded at build time) defines macros like
+`defn`, `let*`, `when`, `unless` and `try`/`catch`. It is loaded once, into the
+`CompileCtx`'s `Expander`, when the context is built (`cache.rs`). Every entry
+point expands with a clone of that `Expander`: `compile` and `compile_file`
+through `with_macro_expansion`, the `eval` and `analyze` families through
+`expander_and_meta`. A clone carries the loaded prelude, so no call parses it
+again.
 
-`eval_syntax` reuses the caller's Expander because it's invoked mid-expansion.
-The prelude is already loaded in that Expander.
-
-The prelude is parsed and expanded on every `Expander` creation. This means
-every call to `compile`, `eval`, `analyze`, etc. re-parses the prelude. This
-is intentional — Expanders are not cached or reused across top-level calls.
+`eval_syntax` reuses the caller's `Expander` because it runs mid-expansion.
 
 ## The fixpoint loop
 
@@ -129,7 +131,7 @@ The signal inference computed here is exposed to tools and agents via:
 - **`portrait`** — Semantic portrait showing signal profile, composition properties, and observations
 - **MCP server** — RDF knowledge graph with signal predicates (`elle:signal-yields`, `elle:signal-io`, etc.)
 
-See [MCP server documentation](../docs/mcp.md) and [Agent Reasoning](../docs/analysis/agent-reasoning.md) for how to query this information.
+See [MCP server documentation](mcp.md) and [Agent Reasoning](analysis/agent-reasoning.md) for how to query this information.
 
 ### Problem
 
@@ -185,8 +187,7 @@ enforcement in `attune`/`silence` is the backstop, not the guarantee.
 
 Convergence is per-file. Mutual recursion across a file boundary does not
 converge, because each import is a separate compilation — see
-[signals/inference.md](signals/inference.md) § Mutual Recursion Across Files
-for why that is a design choice and what `squelch` does about it.
+[signals/inference.md](signals/inference.md) for why that is a design choice and what `squelch` does about it.
 
 
 ## Compilation phases (single-form)
@@ -237,7 +238,7 @@ Single-form functions
 (`compile`, `eval`, `analyze`) don't benefit from cross-form signal inference —
 a file compiled via `compile` instead of `compile_file` will treat all
 cross-form calls as `Polymorphic`. The REPL compiles each form individually
-via `compile_file` and registers def bindings in the compilation cache
+via `compile_file_repl` and registers def bindings in the compilation cache
 (`register_repl_binding`) so they are visible to subsequent compilations.
 However, cross-form signal inference within a single REPL input is limited
 to what `compile_file` can infer for each form in isolation.
