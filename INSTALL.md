@@ -137,7 +137,7 @@ plugins.
 |---------|---------|-------------|
 | `cargo test -p elle --lib` | ~1.5 min | Rust unit tests |
 | `make smoke` | ~30 min, release | The Elle corpus under the VM and the JIT, the doctests and the embedding demos |
-| `make test` | smoke + ~5 min | smoke, the corpus on the thread-pool backend, QA, and the Rust unit and integration tests |
+| `make test` | smoke + ~5 min | QA, smoke, the corpus on the thread-pool backend, and the Rust unit and integration tests |
 
 Give the corpus the release binary; the debug default takes hours:
 

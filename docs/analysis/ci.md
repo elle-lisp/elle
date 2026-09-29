@@ -16,7 +16,7 @@ renamed heading breaks the site generator.
 | Detect Changes | ubuntu | Sets `source` from the changed paths | — |
 | QA | ubuntu | `cargo fmt`, clippy, the macOS cross-check, rustdoc | — |
 | Documentation Build | ubuntu | `make docs` and the Elle doc site, minus the publish | — |
-| VM+JIT Tests | ubuntu | `doctest`, `smoke-vm`, `smoke-jit` | — |
+| VM+JIT Tests | ubuntu | `doctest`, `smoke-elle`, `smoke-vm`, `smoke-jit` | — |
 | Boot Image Tests | ubuntu | `smoke-boot-image` — the corpus booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, then property tests | 16 |
 | Thread-Pool I/O Tests | ubuntu | `smoke-nouring` — the corpus through `elle test`, on a `no-uring` build | — |

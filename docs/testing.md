@@ -21,9 +21,9 @@ specification is [docs/test-runner.md](test-runner.md), with
 
 | Command | What it does |
 |---------|--------------|
-| `make smoke` | The corpus through `elle test` + doctests + the embedding demo |
-| `make test` | `make smoke` + Rust fmt/clippy/crosscheck/rustdoc/unit/integration |
-| `make crosscheck` | Clippy the macOS `cfg(target_os)` arms from Linux (no SDK needed) |
+| `make smoke` | The corpus through `elle test` and one process per file + doctests + the embedding demo + the semver surface gate |
+| `make test` | `make qa`, then `make smoke` and `make smoke-nouring`, then the Rust unit and integration tests |
+| `make crosscheck` | Compile the macOS and Android `cfg(target_os)` arms from Linux (no SDK or NDK needed) |
 | `elle test tests/elle/*.lisp` | Run those files; print a summary; gate on exit code |
 | `elle test --summary` | Re-print the last run's summary (no re-run) |
 | `elle test --query 'SQL'` | Run ad-hoc SQL |
@@ -351,9 +351,9 @@ see the other, which is why the claim is stated once more over the finished emis
 
 ## The Rust suite
 
-`make test` runs the Rust gate after the corpus: `cargo fmt --check`, clippy,
-`make crosscheck`, rustdoc, `cargo test --lib`, and the integration tests. For
-what kind of Rust test to write and where, see [tests/AGENTS.md](../tests/AGENTS.md) and
+`make test` runs `make qa` first — `cargo fmt --check`, clippy,
+`make crosscheck`, rustdoc — then the corpus, then `cargo test --lib` and the
+integration tests. For what kind of Rust test to write and where, see [tests/AGENTS.md](../tests/AGENTS.md) and
 [docs/analysis/testing.md](analysis/testing.md). (`elle test --rust`, which folds
 the cargo suite into the same DB, is specced but not yet implemented.)
 

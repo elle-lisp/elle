@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-29 -->
 
 Elle is a Lisp. Source text becomes bytecode; bytecode runs on a VM.
 
@@ -194,10 +194,10 @@ It takes ~30 minutes.
 | Command | Runtime | What it does |
 |---------|---------|-------------|
 | `cargo test -p elle --lib` | ~1.5min | Rust unit tests — the fast inner loop |
-| `make smoke` | ~30min release | corpus + doctests + embedding |
+| `make smoke` | ~30min release | corpus + doctests + embedding + the semver surface gate |
 | `make qa` | ~2min | The PR gate's QA job, locally: rustfmt, workspace clippy, the cross-checks, rustdoc. Run before every push |
-| `make test` | smoke + ~5min | smoke, then qa, then unit and integration tests |
-| `make crosscheck` | ~2min | Clippy over the macOS and Android `cfg(target_os)` arms — needs `rustup target add x86_64-apple-darwin aarch64-linux-android` |
+| `make test` | smoke + ~5min | qa, then smoke and the corpus on a `no-uring` build, then unit and integration tests |
+| `make crosscheck` | ~2min | Clippy over the macOS arms and `cargo check` over the Android arms of `cfg(target_os)` — needs `rustup target add x86_64-apple-darwin aarch64-linux-android` |
 | `cargo test --workspace` | ~30min | full suite — **ask first** |
 
 **Pass the release binary to anything that runs the corpus.** `make smoke` and
