@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Calling, resuming, and driving full-module WASM closures; the precached
 //! per-closure path lives in `precached.rs`.
 //!
@@ -18,11 +18,9 @@ pub(in crate::wasm) use precached::call_precached_closure;
 /// `SIGNAL_SLOT`, or — when it parked — on the suspension frame `rt_yield`
 /// pushed, because the signal that matters then is the innermost one.
 ///
-/// It used to answer on one word, manufacturing `SIG_YIELD` to mean "parked" and
-/// OR-ing it onto a tail-position `SIG_IO`. Three sites downstream then guessed
-/// which had happened by testing whether the word equalled `SIG_YIELD` exactly.
-/// Reporting `suspended` separately removes the guess, and stops the transport
-/// bit reaching `fiber/bits` — see `tests/elle/wasm-suspend-not-by-bit.lisp`.
+/// Reporting `suspended` apart from the signal means no caller guesses a park
+/// from the signal word, and no transport bit is OR-ed onto the signal where
+/// `fiber/bits` would show it (tests/impl/wasm-suspend-not-by-bit.lisp).
 pub(in crate::wasm) fn handle_wasm_result(
     caller: &mut Caller<'_, ElleHost>,
     call_result: std::result::Result<(), wasmtime::Error>,
@@ -84,9 +82,9 @@ pub(in crate::wasm) fn handle_wasm_result(
                 // records the signal word this function returns.
                 //
                 // Classifying here is what makes an uncaught `(error …)` unwind.
-                // Reporting it as a park returned `status > 0` with an empty
-                // SIGNAL_SLOT, and `run_module`'s uncaught-error check then read
-                // zero and exited 0 silently (tests/elle/upvalue-u16.lisp).
+                // Reported as a park, it would leave SIGNAL_SLOT empty, and
+                // `run_module`'s uncaught-error check would read zero and exit 0
+                // (tests/lang/upvalue-u16.lisp).
                 let emitted = caller
                     .data()
                     .back_suspension_frame_signal()
@@ -101,7 +99,7 @@ pub(in crate::wasm) fn handle_wasm_result(
                 // `rt_prepare_tail_call` — lands here with no frame pushed, and
                 // `is_suspending` parks the caller on it without the signal
                 // having to carry `SIG_YIELD`. Pinned by
-                // tests/elle/wasm-tail-io-in-fiber.lisp.
+                // tests/lang/wasm-tail-io-in-fiber.lisp.
                 let signal = super::take_raised_signal(&mut *caller, &memory);
 
                 if caller.data().debug {
@@ -187,7 +185,7 @@ pub(in crate::wasm) fn call_wasm_closure(
 
 /// Resume a suspended WASM closure with a resume value.
 ///
-/// Pops the outermost suspension frame, restores its env to linear memory,
+/// Pops the innermost suspension frame, restores its env to linear memory,
 /// sets the resume value, and re-invokes the WASM function with
 /// `ctx = resume_state`. If the function suspends again, the new frame
 /// is saved. If it returns normally, returns the result.
@@ -220,7 +218,7 @@ pub(in crate::wasm) fn resume_wasm_closure(
     // it — overwrites the driver's own locals. The env is position-independent
     // (the function addresses its slots relative to the `env_base` it is passed),
     // so the snapshot restores identically at any base. Pinned by
-    // tests/elle/wasm-collection-call.lisp's scheduler join and the
+    // tests/lang/wasm-collection-call.lisp's scheduler join and the
     // `wasm_full_scheduler_resumes_joined_fiber` unit test.
     let env_base = caller.data().env_stack_ptr;
 
@@ -325,7 +323,7 @@ pub fn compile_module(engine: &Engine, wasm_bytes: &[u8]) -> Result<Module> {
 
 /// Instantiate a module and call its entry function.
 /// If the entry function suspends (e.g. I/O inside ev/run), drive it
-/// to completion by processing I/O inline via SyncBackend and resuming.
+/// to completion by processing I/O inline on the host's backend and resuming.
 pub fn run_module(
     linker: &Linker<ElleHost>,
     store: &mut Store<ElleHost>,
@@ -410,8 +408,8 @@ pub fn run_module(
         // Shown through the driving VM's `show_value`, the same spelling the
         // bytecode tier's report gives the author: a symbol or keyword in the
         // raised value is a name hash only this instance's memo can spell
-        // (docs/impl/symbol.md § "Reading a name, and not reading one"). The
-        // host's VM pointer is the memo's only route in here.
+        // (docs/impl/symbol.md). The host's VM pointer is the memo's only route
+        // in here.
         let shown = match unsafe { store.data().vm.as_ref() } {
             Some(vm) => vm.show_value(value),
             None => format!("{:?}", value),
