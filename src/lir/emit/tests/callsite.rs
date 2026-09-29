@@ -11,24 +11,37 @@ use crate::hir::region::StaticRegion;
 
 /// One block: an operand left on the stack below the call, then a tail call
 /// of `r1` with the argument `r2`, then a return of the call's result.
-fn tail_call_func(signal: crate::signals::Signal) -> LirFunction {
+///
+/// The call reads its argument below its callee. With `in_place` the constants
+/// are pushed in that order and the call finds them on top. Without it the
+/// callee is pushed first, so the call copies it to the top and the original
+/// stays on the stack beneath.
+fn tail_call_func(signal: crate::signals::Signal, in_place: bool) -> LirFunction {
+    let operand = LirInstr::Const {
+        dst: Reg(0),
+        value: LirConst::Int(7),
+    };
+    let callee = LirInstr::Const {
+        dst: Reg(1),
+        value: LirConst::Nil,
+    };
+    let arg = LirInstr::Const {
+        dst: Reg(2),
+        value: LirConst::Int(1),
+    };
+    let [first, second, third] = if in_place {
+        [operand, arg, callee]
+    } else {
+        [operand, callee, arg]
+    };
     LirFixture::new(Arity::Exact(0))
         .signal(signal)
         .block(
             0,
             vec![
-                LirInstr::Const {
-                    dst: Reg(0),
-                    value: LirConst::Int(7),
-                },
-                LirInstr::Const {
-                    dst: Reg(1),
-                    value: LirConst::Nil,
-                },
-                LirInstr::Const {
-                    dst: Reg(2),
-                    value: LirConst::Int(1),
-                },
+                first,
+                second,
+                third,
                 LirInstr::TailCall {
                     dst: Reg(3),
                     func: Reg(1),
@@ -69,7 +82,7 @@ fn offset_after_tail_call(bytecode: &Bytecode) -> usize {
 /// call and the releases in that block never run.
 #[test]
 fn a_suspending_functions_tail_call_records_a_call_site() {
-    let func = tail_call_func(crate::signals::Signal::yields());
+    let func = tail_call_func(crate::signals::Signal::yields(), true);
     let (bytecode, _, call_sites) = Emitter::new().emit(&func);
 
     assert_eq!(call_sites.len(), 1, "one tail call, one call site");
@@ -88,7 +101,29 @@ fn a_suspending_functions_tail_call_records_a_call_site() {
 /// A function that cannot suspend parks nowhere, a tail call's site included.
 #[test]
 fn a_silent_functions_tail_call_records_no_call_site() {
-    let func = tail_call_func(crate::signals::Signal::silent());
+    let func = tail_call_func(crate::signals::Signal::silent(), true);
     let (_, _, call_sites) = Emitter::new().emit(&func);
     assert!(call_sites.is_empty(), "got {call_sites:?}");
+}
+
+/// The resumed frame's stack must match the real one, so the copy of the callee
+/// that the call leaves beneath its operands belongs to the recorded stack. A
+/// `Call` site records it the same way. The counter-factual is the
+/// operand-only stack, which shifts every local the resumed block addresses.
+#[test]
+fn a_tail_call_site_keeps_the_callee_copy_left_beneath_its_operands() {
+    let func = tail_call_func(crate::signals::Signal::yields(), false);
+    let (bytecode, _, call_sites) = Emitter::new().emit(&func);
+
+    let lines = disassemble_lines(&bytecode.instructions);
+    assert!(
+        lines.iter().any(|l| l.contains("DupN")),
+        "the callee was copied to the top: {lines:?}",
+    );
+    assert_eq!(call_sites.len(), 1, "one tail call, one call site");
+    assert_eq!(
+        call_sites[0].stack_regs,
+        vec![Reg(0), Reg(1)],
+        "the original callee stays on the stack beneath the call's operands",
+    );
 }
