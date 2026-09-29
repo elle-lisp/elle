@@ -120,10 +120,8 @@ impl VM {
     /// `squelch_violation`).
     ///
     /// `depth` is the parameter depth at the call the boundary or the host
-    /// answers. The discarded frames pushed every `parameterize` frame above
-    /// it and will pop none of them, so they leave with the frames, and the
-    /// code around the call runs on with its own bindings
-    /// (docs/signals/primitives.md § "Where a restart lands").
+    /// answers, and the fiber's parameter frames are truncated to it
+    /// (src/vm/AGENTS.md § "Parameter resolution").
     pub(crate) fn discard_suspended_frames(
         &mut self,
         payload: Value,
