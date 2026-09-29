@@ -1,11 +1,12 @@
-// audited: 2026-09-16
+// audited: 2026-09-29
 // docs/impl/bytecode.md
 //! What the bytecode emitter writes: control flow, yield points, the
 //! coalescing oracle, and a nested lambda's blueprint. What an edge owes the
-//! operand stack is `depth`'s subject.
+//! operand stack is `depth`'s subject, and where a call parks is `callsite`'s.
 
 use super::*;
 
+mod callsite;
 mod depth;
 mod opcodes;
 use crate::lir::testkit::LirFixture;
