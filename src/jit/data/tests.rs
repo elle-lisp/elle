@@ -1,6 +1,8 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Unit tests for the JIT data helpers: cons, arrays, capture cells, and the
-//! prologue's own-region env values.
+//! env values a compiled function's entry builds.
+//!
+//! docs/impl/region/colocation.md
 
 use super::*;
 
@@ -107,20 +109,14 @@ fn test_cell_operations() {
     assert_eq!(loaded2.as_int(), Some(100));
 }
 
-// ── wall E: JIT-prologue env values must be born in their OWN region ──
+// ── the prologue's env values never land in the caller's region ──
 //
-// A JIT-compiled function's prologue builds env values — capture cells (a
-// mutable-captured param/local) and the variadic rest cons-list — that the
-// interpreter's `populate_env` mints a FRESH per-value region for
-// (`env_value_region`, src/vm/env.rs; `args_to_list`, src/vm/env/rest.rs).
-// The prologue must do the
-// same. On a JIT->JIT call the callee inherits the caller's region; an env value
-// allocated into the *caller's* region commingles with it
-// (docs/impl/region/rules.md Rule 6) and its value-based `DecrefCellRegion` /
-// `DecrefValueRegion` decrefs the caller's region — a leak (Rule 8) and a latent
-// use-after-free. The owned helpers (`elle_jit_make_capture_owned` /
-// `elle_jit_collect_rest_list`) mint a fresh region per value, exactly like the
-// interpreter; these counterfactuals pin that.
+// A compiled function's JIT entry builds env values: capture cells for a
+// captured mutable parameter, and the rest list. On a JIT->JIT call the callee
+// runs in the caller's region, so a helper that allocated there would release
+// the caller's region with the env value. The owned helpers mint through
+// `new_value_region`, as the interpreter's `env_value_region` does, and these
+// tests pin that no env value lands in the caller's region.
 
 /// Build a VM and mint a live "caller" region on its heap, then run `f` with both.
 /// The region stands in for a JIT caller's region that the owned env helpers must
@@ -137,11 +133,11 @@ fn with_caller_region<R>(
     f(&mut vm, other)
 }
 
-/// SPEC (Rule 6): a prologue capture cell is born in its OWN fresh region, never
-/// the caller's region. RED against `elle_jit_make_capture` (caller's region),
-/// GREEN against `elle_jit_make_capture_owned`.
+/// A prologue capture cell never lands in the caller's region. RED against
+/// `elle_jit_make_capture`, which allocates into the region it is handed; GREEN
+/// against `elle_jit_make_capture_owned`.
 #[test]
-fn prologue_capture_cell_gets_its_own_region_not_callers() {
+fn prologue_capture_cell_is_not_in_the_callers_region() {
     with_caller_region(|vm, caller_region| {
         let heap = vm.heap_ptr;
         let vm_ptr = vm as *mut crate::vm::VM as *mut ();
@@ -153,7 +149,7 @@ fn prologue_capture_cell_gets_its_own_region_not_callers() {
         assert_ne!(
             region, caller_region,
             "JIT-prologue capture cell commingled into the caller's region (Rule 6) \
-             — it must mint its own per-value region like populate_env"
+             — it must mint through new_value_region like populate_env"
         );
         // The wrapped value is reachable (alloc_obj scanned + increfed it).
         let loaded = elle_jit_load_capture_cell(cell.tag, cell.payload).to_value();
@@ -161,12 +157,11 @@ fn prologue_capture_cell_gets_its_own_region_not_callers() {
     });
 }
 
-/// SPEC (Rule 6 + args_to_list): each rest-list cons is born in its OWN fresh
-/// region, none in the caller's region; the list reads back correctly. RED
-/// against an `elle_jit_pair` cons-loop (caller's region), GREEN against
-/// `elle_jit_collect_rest_list`.
+/// No rest-list cons lands in the caller's region, and the list reads back in
+/// order. RED against an `elle_jit_pair` cons-loop, which allocates into the
+/// caller's region; GREEN against `elle_jit_collect_rest_list`.
 #[test]
-fn prologue_rest_list_conses_get_own_regions_not_callers() {
+fn prologue_rest_list_is_not_in_the_callers_region() {
     with_caller_region(|vm, caller_region| {
         let heap = vm.heap_ptr;
         let vm_ptr = vm as *mut crate::vm::VM as *mut ();
@@ -184,7 +179,7 @@ fn prologue_rest_list_conses_get_own_regions_not_callers() {
             assert_ne!(
                 region, caller_region,
                 "JIT-prologue rest cons commingled into the caller's region (Rule 6) \
-                 — each cons must mint its own region like args_to_list"
+                 — the list must mint through new_value_region like args_to_list"
             );
             let car = elle_jit_first(cur.tag, cur.payload).to_value();
             assert_eq!(car.as_int(), Some(seen + 1));
@@ -209,4 +204,81 @@ fn prologue_rest_list_empty_is_empty_list() {
         let head = elle_jit_collect_rest_list(args.as_ptr(), 1, 1, vm_ptr).to_value();
         assert!(head.is_empty_list());
     });
+}
+
+// ── colocation: the prologue's env values share the interpreter's regions ──
+//
+// The interpreter builds a rest list in one region and mints every env value
+// through `new_value_region`, which joins an open macro scope's arena
+// (docs/impl/region/colocation.md). A compiled callee builds the same values in
+// its JIT entry, so the entry's helpers must place them exactly as the
+// interpreter does, or the two tiers keep different footprints for one program.
+
+/// A rest list is one region: every cons shares the head's region, and that
+/// region holds the one reference the list's release gives back. The
+/// counter-factual: a region per cons, chained head → tail, also reads back in
+/// order and frees on the head's release, so only the region check sees it.
+#[test]
+fn prologue_rest_list_is_one_region() {
+    with_caller_region(|vm, caller_region| {
+        let heap = vm.heap_ptr;
+        let vm_ptr = vm as *mut crate::vm::VM as *mut ();
+        let args = [Value::int(1), Value::int(2), Value::int(3), Value::int(4)];
+        let head = elle_jit_collect_rest_list(args.as_ptr(), 0, 4, vm_ptr).to_value();
+        let region = crate::value::arena::region_of(unsafe { &*heap }, head)
+            .expect("a heap cons must have a region");
+        assert_ne!(region, caller_region);
+
+        let mut cur = head;
+        let mut seen = 0;
+        while cur.as_pair().is_some() {
+            assert_eq!(
+                crate::value::arena::region_of(unsafe { &*heap }, cur),
+                Some(region),
+                "cons {seen} of the rest list is in a region of its own",
+            );
+            cur = elle_jit_rest(cur.tag, cur.payload).to_value();
+            seen += 1;
+        }
+        assert_eq!(seen, 4);
+        assert_eq!(
+            crate::value::arena::region_rc(unsafe { &*heap }, region),
+            1,
+            "the list's region holds one reference, the one its release gives back",
+        );
+    });
+}
+
+/// Inside a macro scope, the entry's env values join the scope's arena, as the
+/// interpreter's `env_value_region` does: the owned capture cell and the rest
+/// list alike. The close then frees them with the arena.
+#[test]
+fn prologue_env_values_join_an_open_macro_scope_arena() {
+    let mut vm = crate::vm::VM::new();
+    let heap = vm.heap_ptr;
+    let vm_ptr = &mut vm as *mut crate::vm::VM as *mut ();
+    let scope = crate::value::arena::begin_macro_scope(unsafe { &mut *heap });
+    let arena = scope.arena();
+
+    let v = Value::int(42);
+    let cell = elle_jit_make_capture_owned(v.tag, v.payload, vm_ptr).to_value();
+    let args = [Value::int(1), Value::int(2)];
+    let list = elle_jit_collect_rest_list(args.as_ptr(), 0, 2, vm_ptr).to_value();
+    assert_eq!(
+        crate::value::arena::region_of(unsafe { &*heap }, cell),
+        Some(arena),
+        "a capture cell the JIT entry makes inside a macro scope must join its arena",
+    );
+    assert_eq!(
+        crate::value::arena::region_of(unsafe { &*heap }, list),
+        Some(arena),
+        "a rest list the JIT entry builds inside a macro scope must join its arena",
+    );
+
+    crate::value::arena::reclaim_macro_scope(unsafe { &mut *heap }, scope);
+    assert_eq!(
+        crate::value::arena::region_rc(unsafe { &*heap }, arena),
+        0,
+        "the close frees the arena and every env value joined into it",
+    );
 }

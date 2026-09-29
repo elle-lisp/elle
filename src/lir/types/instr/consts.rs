@@ -1,17 +1,16 @@
-// audited: 2026-09-06
-// src/lir/AGENTS.md
+// audited: 2026-09-29
 //! The constants an instruction carries, visited in place.
+//!
+//! src/lir/AGENTS.md
 
 use super::*;
 
 impl LirInstr {
     /// Visit every `LirConst` this instruction carries.
     ///
-    /// Exhaustive on purpose. The `send` path rewrites `LirConst::Symbol` ids
-    /// into the loading process's table, and an instruction it fails to visit
-    /// keeps the storing process's id — a silently wrong symbol, not an error.
-    /// A new variant that carries a constant cannot be added without choosing
-    /// its arm here.
+    /// Exhaustive on purpose: a variant that carries a constant cannot join the
+    /// enum without choosing its arm here. The send tests walk it to read the
+    /// `LirConst::Symbol` ids a deserialized function carries.
     pub fn for_each_const_mut(&mut self, mut f: impl FnMut(&mut LirConst)) {
         use LirInstr::*;
         match self {
@@ -77,6 +76,7 @@ impl LirInstr {
             | FreeRegionGroup { .. }
             | AdoptIntoActivation { .. }
             | AssertRegionMatches { .. }
+            | JoinRegion { .. }
             | PushParamFrame { .. }
             | PopParamFrame
             | CheckSignalBound { .. }

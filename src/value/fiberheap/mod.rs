@@ -1,11 +1,12 @@
-// audited: 2026-09-10
+// audited: 2026-09-29
 //! Per-instance heap ownership.
 //!
 //! docs/impl/region/model.md
 //!
-//! `FiberHeap` uses `RegionStore` — a physical region allocator where
-//! each region owns its pages exclusively. `FreeRegion(ρ)` tears down
-//! the region's pages (with cascade decref for cross-region refs).
+//! `FiberHeap` uses `RegionStore` — a physical region allocator where each
+//! region owns its pages exclusively. A region frees when its count reaches zero
+//! or its owner's subtree drop reaches it, and the free decrefs every region its
+//! contents reference.
 
 use std::rc::Rc;
 
@@ -94,16 +95,18 @@ pub struct FiberHeap {
     /// Regions held on behalf of this instance — resident roots the teardown
     /// sweep releases by RC (decref once) so their graph can be reclaimed.
     process_roots: Vec<RuntimeRegion>,
-    /// This instance's materialized code payloads, one per compile-time
-    /// blueprint (docs/impl/region/template.md § "Who owns the payload
-    /// region"). The cache holds each payload region's owning reference and
-    /// releases it when the last blueprint packed into it dies.
+    /// This instance's materialized code payloads, one per compile-time blueprint
+    /// (docs/impl/region/template.md). The cache holds each payload region's owning
+    /// reference and releases it when the last blueprint packed into it dies.
     pub(crate) template_payloads: crate::value::closure::cache::TemplatePayloads,
     /// This instance's authoritative trace bitfield (`--trace=` / runtime
     /// `(vm/config-set :trace …)`). The VM's `RuntimeConfig` and the region
     /// pool's `PAGES` gate each hold a clone of this one cell, so a diagnostic
     /// toggle is scoped to this instance — two coexisting heaps never share it.
     trace: crate::config::TraceCell,
+    /// The open macro scope's arena, while one is open (docs/impl/region/macroscope.md).
+    /// Every value mint joins it until the scope closes.
+    scope_arena: Option<regionstore::RegionMint>,
 }
 
 impl FiberHeap {
@@ -128,6 +131,7 @@ impl FiberHeap {
             process_roots: Vec::new(),
             template_payloads: Default::default(),
             trace,
+            scope_arena: None,
         }
     }
 

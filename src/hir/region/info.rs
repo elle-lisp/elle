@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! `RegionInfo`: what region inference produces for a compilation unit — the
 //! per-allocation and per-scope assignments, and the lowerer's cuts.
 //!
@@ -273,6 +273,17 @@ pub struct RegionInfo {
     ///
     /// docs/impl/region/merging.md
     pub merged_parent: HashMap<Region, Region>,
+    /// Allocation site → the container binding whose region the site's value
+    /// joins. The lowerer emits a `JoinRegion` naming a read of the container
+    /// just before the allocation. Empty unless the append seed admitted a site.
+    ///
+    /// docs/impl/region/colocation.md
+    pub joins: HashMap<HirId, Binding>,
+    /// Every region a join relates: each joined value's and its container's.
+    /// None of them is ownable, and no merge seed uses one.
+    ///
+    /// docs/impl/region/colocation.md
+    pub join_regions: FxHashSet<Region>,
     /// Every member region of a letrec closure-cycle merge, roots included.
     /// The merged arena is released exactly once, by the merge's own channel.
     /// Empty when no cycle merged.
@@ -410,6 +421,8 @@ impl RegionInfo {
             begin_cell_regions: HashMap::new(),
             pattern_rest_regions: HashMap::new(),
             merged_parent: HashMap::new(),
+            joins: HashMap::new(),
+            join_regions: FxHashSet::default(),
             closure_cycle_members: FxHashSet::default(),
             cycle_tail_release: HashMap::new(),
             owned_adopt_edges: HashMap::new(),

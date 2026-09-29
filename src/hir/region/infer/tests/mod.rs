@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 //! The region-inference unit tests, one module per subject the solver decides.
 //!
 //! docs/impl/region/diagnostics.md
@@ -38,6 +38,7 @@ mod emit;
 mod escape;
 mod feeder;
 mod inline;
+mod join;
 mod looprc;
 mod merge;
 mod owned;

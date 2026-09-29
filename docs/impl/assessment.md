@@ -1,6 +1,6 @@
 # The region roadmap
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-29 -->
 
 The region system's plan of work: the state gauges, the fix-selection
 discipline, the measured dead ends, and the open work in order.
@@ -31,7 +31,7 @@ rather than about thirty minutes — pass `ELLE`/`CARGO_PROFILE` as above.
 - **The oracle** prints the split — `open defects: N across M roots;
   by-design: K` — and a completeness gate fails the run if any open probe is
   undeclared, so the split cannot silently drift. `oracle: ok` is a ratchet,
-  not a certificate: every pin is the current measured rate, shrink-only, so a
+  not a certificate: every pin is the current measured rate, shrink-only. So a
   green exit asserts no leak got worse and no closed class regressed — never
   that leaks are gone.
 - **Guardfree** is the soundness axis, orthogonal to the leak burndown.
@@ -52,39 +52,47 @@ lowered — or its probe block deleted — in the same change.
 
 ### The resting state
 
-**Every declared probe is closed.** Both dashboards — [oracle.lisp](../../tests/elle/oracle.lisp)
-and the io [plumb.lisp](../../tests/elle/plumb.lisp) — read zero open defects, so the ledgers' own burndown is
-empty and every probe in them is a closed control: regression insurance for a
-settled mechanism, not work. That is not "leaks are gone": the ratchet
-asserts nothing regressed, over the shapes somebody wrote a probe for. The
-open work is what has no probe, and it is read from § "The open work", never
-from the dashboards. A new fix under any root needs a new probe rather than a
-re-pin.
+**Every declared probe is closed.** Both dashboards,
+[oracle.lisp](../../tests/elle/oracle.lisp) and the io
+[plumb.lisp](../../tests/elle/plumb.lisp), read zero open defects. So the
+ledgers' own burndown is empty, and every probe in them is a closed control:
+regression insurance for a settled mechanism, not work. That is not "leaks
+are gone": the ratchet asserts nothing regressed, over the shapes somebody
+wrote a probe for. The open work is what has no probe, and it is read from
+the open work below, never from the dashboards. A new fix under any root
+needs a new probe rather than a re-pin.
 
 The by-design probes must **stay** open — a "fix" that closes one has broken
-the gauge: the four live-growth discriminators (object, id, region, and byte
-dimensions — each proves its gauge is not dead, so a discriminator reading
-closed voids every closed verdict of that run), and the sub-integer estimator
-self-test. A block-local accumulator is not genuine growth — it frees at the
-block's return; only a module-level sink is.
+the gauge. They are the four live-growth discriminators (object, id, region, and
+byte dimensions) and the sub-integer estimator self-test. Each discriminator
+proves its gauge is not dead, so a discriminator reading closed voids every
+closed verdict of that run. A block-local accumulator is not genuine growth,
+because it frees at the block's return. Only a module-level sink is.
 
 **The h2 per-request rate reads zero.**
 [h2-stress-scoped.lisp](../../tests/elle/h2-stress-scoped.lisp) holds the ceiling,
 shrink-only, at two request counts; the merge-inherits-its-entry and
 break-relocation mechanisms keep it there
 ([region/replicate.md](region/replicate.md)). The subject stays live even at
-zero, and without a dashboard probe: it is where the last measured defects on
-this mechanism came from, and its own gauge-live sink is what says a green
+zero, and without a dashboard probe. It is where the last measured defects on
+this mechanism came from. Its own gauge-live sink is what says a green
 ceiling is the loop reclaiming rather than the gauge dying.
 
 **Direct gauges live outside the dashboards**, all of the ledger's own kind:
-[region-error-unwind.lisp](../../tests/elle/region-error-unwind.lisp) (the error exit's release tables),
-[region-squelch-unwind.lisp](../../tests/elle/region-squelch-unwind.lisp) (the same tables at a squelch/attune boundary),
-[region-boundary-park.lisp](../../tests/elle/region-boundary-park.lisp) (what the park itself owes there),
-[region-tail-deferred-exits.lisp](../../tests/elle/region-tail-deferred-exits.lisp) (the deferred tail-call set across all four
-exits), and [region-break-loop-replica.lisp](../../tests/elle/region-break-loop-replica.lisp) (the release the breaking
-iteration owes). A shape with a direct gauge needs no dashboard probe; what
-it needs is to be run, which the corpus smoke does.
+
+- [region-error-unwind.lisp](../../tests/elle/region-error-unwind.lisp) (the
+  error exit's release tables)
+- [region-squelch-unwind.lisp](../../tests/elle/region-squelch-unwind.lisp)
+  (the same tables at a squelch/attune boundary)
+- [region-boundary-park.lisp](../../tests/elle/region-boundary-park.lisp) (what
+  the park itself owes there)
+- [region-tail-deferred-exits.lisp](../../tests/elle/region-tail-deferred-exits.lisp)
+  (the deferred tail-call set across all four exits)
+- [region-break-loop-replica.lisp](../../tests/elle/region-break-loop-replica.lisp)
+  (the release the breaking iteration owes)
+
+A shape with a direct gauge needs no dashboard probe; what it needs is to be
+run, which the corpus smoke does.
 
 ## The fix-selection discipline — invariants over shape-patches
 
@@ -103,9 +111,9 @@ shape? Prefer the invariant; a shape-patch needs an explicit reason the
 invariant form is infeasible.
 
 **The one shape-enumerating locus to watch:** the compensation family
-([compensate.rs](../../src/hir/region/infer/compensate.rs) and the gates it drives, including the four
-funnel site-lists). Each gate answers a pinned over-free, so none may be
-removed casually — and the family only grows. The class-scale close for the
+([compensate.rs](../../src/hir/region/infer/compensate.rs) and the gates it
+drives, including the four funnel site-lists). Each gate answers a pinned
+over-free, so none may be removed casually, and the family only grows. The class-scale close for the
 dispatch-wrapper family is dissolving the dispatch shape itself, so a fifth
 site-list needs an explicit reason that close is infeasible.
 
@@ -114,9 +122,9 @@ a count argument you cannot supply, ask instead whether the one release is
 merely in the wrong **place**. A release moved to a point every path reaches
 needs only a placement argument and adds nothing. Its limit: a placement
 argument still needs to know the frame holds the value alone for as long as
-the frame lives — escape's question, which no arm-structure premise answers —
-so every such window is gated on `frame_held_regions` and everything else
-keeps the counted route ([region/window.md](region/window.md)). The return
+the frame lives. That is escape's question, which no arm-structure premise
+answers. So every such window is gated on `frame_held_regions`, and everything
+else keeps the counted route ([region/window.md](region/window.md)). The return
 facet costs nothing there, and the fiber facet is a counted holder
 ([the settled invariants](region/settled.md)).
 
@@ -127,7 +135,7 @@ at 0 forever. The ledger shrinks as classes close.
 ## Constraints — measured dead ends, do not redo
 
 - **Do not defer release to activation completion for an acyclic result.**
-  `AdoptIntoActivation` frees at activation completion, not at last use, so
+  `AdoptIntoActivation` frees at activation completion, not at last use. So
   an acyclic call-result released that way over-keeps at loop scale, where
   the RC cascade reclaims per iteration. For a cycle the activation bound is
   unavoidable and correct. Corollary: the per-op oracle is blind to
@@ -151,14 +159,14 @@ at 0 forever. The ledger shrinks as classes close.
   knowledge; do not reconstruct it at the discard.
 - **Do not hold a per-activation obligation in the driving loop's own
   local.** The deferred tail-call set was a `Vec` inside `trampoline_loop`,
-  discharged on that loop's clean break — so every other exit dropped it, and
+  discharged on that loop's clean break. So every other exit dropped it, and
   the worst was the **park**, which returns out of the loop and resumes
   through a fresh one. Anything an activation owes belongs on the activation
   (`ActivationDues`). When a release fires "at completion", ask which loop
   holds it and what a suspend does to that loop.
 - **Do not admit a per-arm tail release at every arm-last-use node.**
   Symmetry with the global `decref_point` is a placement argument where
-  admission needs a count argument: an arm that used the region can hold out
+  admission needs a count argument. An arm that used the region can hold out
   an uncounted borrow the solver never named. The same-node retain
   requirement and the escape admission on the branch-arm window are required
   ([region/compensate.md](region/compensate.md)). Neither failure shows in
@@ -168,15 +176,15 @@ at 0 forever. The ledger shrinks as classes close.
   On the path the release did not previously run, it is a new release at
   runtime and owes what any new release owes.
 - **Do not run the whole abandoned post-`TailCall` block at a signal exit.**
-  Two of the three things in there refuse: the call's own result, whose slot
-  a signal exit never stored, and each argument, whose release is the
-  ownership move — and the payload may BE that argument. Only the frame's
+  Two of the three things in there refuse. One is the call's own result, whose
+  slot a signal exit never stored. The other is each argument, whose release is
+  the ownership move — and the payload may BE that argument. Only the frame's
   extra borrowed-argument retain has a count argument
   ([region/signalexit.md](region/signalexit.md)).
 - **A release another channel owns is not a release to move.** Where a
   mechanism exempts a release, ask what stands in — and whether that
   substitute is keyed on the release's position. An argument's substitute
-  runs wherever the caller's copy sat; the callee's own region has only the
+  runs wherever the caller's copy sat. The callee's own region has only the
   deferred channel, keyed on where the release sits, so moving it silently
   deletes it ([region/relocate.md](region/relocate.md)).
 - **A probe named after its innermost op is not a diagnosis of that op.**
@@ -193,7 +201,7 @@ at 0 forever. The ledger shrinks as classes close.
     the hoist lands at the thunk's loop and measures 0. Whenever a suspected
     leak reads 0, re-measure it inline before concluding it is not there.
   - A rate that grows with N is per-element; constant across N is a per-call
-    strand — but a per-element rate can still be an F5 strand, so remove the
+    strand. But a per-element rate can still be an F5 strand, so remove the
     suspected closure or copy and re-measure.
 - **`freeze` is not a leak mechanism.** A builder that fills a mutable
   accumulator and freezes it reads 0 in every position and at every element
@@ -202,20 +210,25 @@ at 0 forever. The ledger shrinks as classes close.
 - **A closed leak routinely exposes a latent over-free.** Closing a leak runs
   a free path that never executed before, so run the batched corpus smoke and
   the guardfree family per landing. Budget for the other face too, which no
-  region gauge sees: a leaked region can be the only thing holding an OS
+  region gauge sees. A leaked region can be the only thing holding an OS
   resource open, so freeing it hands a descriptor number back
-  ([io.lisp](../../tests/elle/io.lisp)). Run the io, fiber, and posix corpus files, not only
-  the region ones.
-- **Do not chase the may-store clique further; it is discharged — but a
-  `Mixed` declaration is never free.** The `Unknown` census over the
-  canonical tables is held empty by a build test, the fiber value installers
-  declare `Delivers`, and every remaining single-arg `Mixed` declarant's
+  ([io.lisp](../../tests/elle/io.lisp)). Run the io, fiber, and posix
+  corpus files, not only the region ones.
+- **Do not chase the may-store clique further.** It is discharged, but a
+  `Mixed` declaration is never free. The `Unknown` census over the
+  canonical tables is held empty by a build test, and the fiber value
+  installers declare `Delivers`. Every remaining single-arg `Mixed` declarant's
   store is real (`fiber/propagate`'s handler writes the child chain's one
   counted field). What is left is the escape side, which reads the same
   declaration and does not care how many arguments there are
   ([region/effects.md](region/effects.md)). `git` is the one multi-arg
   `Mixed` declarant left, and the clique's inclusion-side unit tests use it,
   so tightening it needs a replacement declarant first.
+- **Do not colocate into a region that churns.** A region's count cannot tell
+  which of its objects died, and a slot is never reused. So a long-lived
+  container that both takes and loses members grows by one slot per value it
+  ever held. Every colocation pattern states the bound that rules this out
+  ([region/colocation.md](region/colocation.md)).
 
 ## The open work, in order
 
@@ -230,26 +243,30 @@ first when one appears again — it is always the cheapest close on the board.
 ### F1 — the dominant production leak
 
 **Dissolution** (the mission's third leg) is realized by HOF-chain loop
-fusion; [dissolution.md](dissolution.md) is the spec, and the seams to read
-before widening are under [src/hir/typeinfer/fuse/](../../src/hir/typeinfer/fuse.rs): the pipeline builder
-(`build.rs`), the legality gate (`chain.rs`), and the clone whitelist
-(`collect.rs`), each with its decline pins in `fuse::tests`.
+fusion, and [dissolution.md](dissolution.md) is the spec. The seams to read
+before widening are under [src/hir/typeinfer/fuse/](../../src/hir/typeinfer/fuse.rs).
+They are the pipeline builder
+([build.rs](../../src/hir/typeinfer/fuse/build.rs)), the legality gate
+([chain.rs](../../src/hir/typeinfer/fuse/chain.rs)), and the clone whitelist
+([collect.rs](../../src/hir/typeinfer/fuse/collect.rs)), each with its decline
+pins in `fuse::tests`.
 
-The pipeline carries every array arm the stdlib has — `map`,
-`map-indexed`, `filter`, `take-while`, `drop-while`, `mapcat`, under the
-scalar terminals — with the capture gate closed (a call-site lambda literal
-may capture; only a cloned template must be non-capturing). Dissolution is a
-**realization** goal, not a leak goal: gauged by cumulative allocation counts
-(the `dissolution-*.lisp` corpus), with the leak oracle only a non-regression
+The pipeline carries every array arm the stdlib has — `map`, `map-indexed`,
+`filter`, `take-while`, `drop-while`, `mapcat`, under the scalar terminals. The
+capture gate is closed: a call-site lambda literal may capture; only a
+cloned template must be non-capturing. Dissolution is a **realization**
+goal, not a leak goal. It is gauged by cumulative allocation counts (the
+`dissolution-*.lisp` corpus), with the leak oracle only a non-regression
 check and soundness pinned by the `region-*-fuse-uaf.lisp` family. Widening
 it is gauged by a new allocation-count subject per op admitted, never by an
 oracle re-pin.
 
 **When a new stage reads as a wash, weigh the scaffold before the stage.**
 A counter the fused loop advances through the variadic `+` re-mints per
-element the closure the pass exists to dissolve, so every counter advances by
-the raw `%add` opcode ([dissolution.md](dissolution.md)). The loop the pass emits is code like any other and can carry the
-very cost it was written to remove.
+element the closure the pass exists to dissolve. So every counter advances by
+the raw `%add` opcode ([dissolution.md](dissolution.md)). The loop the pass
+emits is code like any other and can carry the very cost it was written to
+remove.
 
 **Hand-dissolution of F1a is exhausted for the probed corpus.** What was left
 under those probes decomposed into F5 strands, so a new hand-rewrite needs an
@@ -258,7 +275,7 @@ model describes still has no gauge of its own, so a new F1a fix needs a new
 probe.
 
 Beyond the ops, the widening of the same mechanism is **backend realization**
-(below): the fused loop is the substrate for JIT-group / CPU SIMD / GPU
+(below). The fused loop is the substrate for JIT-group / CPU SIMD / GPU
 dispatch; until then it runs on the VM.
 
 ### F5 — named accounting fixes
@@ -270,7 +287,7 @@ a settled mechanism; the mechanisms live in
 open:
 
 - **An escaping region's used sibling arm.** The branch-arm window is
-  admitted only where escape proves the frame holds the region alone; a
+  admitted only where escape proves the frame holds the region alone. A
   region escaping by a containment facet keeps the conservative baseline and
   the counted compensation routes. The gate itself is not the defect — a
   genuinely escaping region is correctly refused — so audit the **verdict**
@@ -290,9 +307,9 @@ The mechanism is settled — the release tables, the deferred set, the squelch
 boundary, the park's own two references
 ([the settled invariants](region/settled.md)) — and every probe this root
 carried is a closed control. What remains open are the two values the tables
-cannot **name**, each with no binding, no gauge, and no measured rate: a
-literal the raising call materialized straight into an argument, and a
-parameter released through an env slot, which carries no nil stamp, so a
+cannot **name**, each with no binding, no gauge, and no measured rate. One is a
+literal the raising call materialized straight into an argument. The other is a
+parameter released through an env slot, which carries no nil stamp. So a
 release that ran reads exactly like one that did not. Giving either a stamped
 stack slot is a lowering change, to be weighed against the `StoreLocal` it
 costs every call — and it needs a probe of its own first.
@@ -312,9 +329,41 @@ check both sides together.
   refusals, [region/adopt.md](region/adopt.md)).
 
 **Do not build owner-node admission for the returned self-recursive
-closure.** It resembles this class and is not a member: it records no region
+closure.** It resembles this class and is not a member. It records no region
 cycle and is cell-free, so nothing holds a runtime self-reference. It is a
 control at 0 ([selfrec.md](selfrec.md)).
+
+### Footprint — colocation and page packing
+
+Leak-freedom bounds how long a region lives; footprint is what each live region
+costs. A region owns at least one base page, so a retained structure built one
+region per value costs a page per value.
+[region/colocation.md](region/colocation.md) catalogs the patterns that share a
+region, and [region-colocation.lisp](../../tests/elle/region-colocation.lisp)
+gauges each one. The open patterns, each needing a probe that fails first:
+
+- **The accumulator.** A cons pushed onto a reassigned accumulator joins the
+  previous value's region. Its bound refuses any store of a value read out of
+  the accumulator.
+- **Containment through constructors.** A child built by a `Fresh` native and
+  stored into a parent built by one, and a returned or captured parent.
+- **Siblings.** Two local values with one demise and no edge between them.
+
+**Sub-page regions** are the runtime lever beside colocation. Small regions
+would share an OS page in chunks of 512 bytes to 2 KiB. So a one-object region
+would cost about a chunk instead of a page, with no analysis. The change
+reaches past the page pool:
+
+- Rule 6 becomes "regions never share a chunk", and a page returns to the pool
+  only when all its chunks are free ([region/rules.md](region/rules.md)).
+- `region_of_ptr` finds a chunk's header by the same masked walk it uses for a
+  large page, one size class lower ([region/model.md](region/model.md)).
+- `--trace=guardfree` protects whole OS pages, so under it every region takes
+  whole pages again, and the chunk path runs unguarded
+  ([region/diagnostics.md](region/diagnostics.md)).
+
+Measure it against colocation before building it: the two overlap wherever a
+colocated region would otherwise have held one small object.
 
 ### The backend gauge — SPIR-V remains
 

@@ -56,7 +56,7 @@ pub struct Fiber {
     /// The caller activations waiting for an interpreted callee, innermost
     /// last. A non-tail call pauses its caller here and runs the callee on the
     /// same dispatch loop, so call depth costs memory rather than native stack
-    /// (docs/impl/vm.md § "Non-tail calls"). Empty whenever the fiber is
+    /// (docs/impl/vm.md). Empty whenever the fiber is
     /// parked: a suspend moves every paused caller into `suspended`.
     pub callers: Vec<PausedCaller>,
     /// Current status
@@ -96,8 +96,7 @@ pub struct Fiber {
     /// first-resume fallback). The seed retains each heap entry's region and
     /// records a `fiber → value` content edge; the Fiber content-scan arm
     /// visits the baseline exactly when this is set, so the fiber's free
-    /// cascade is the symmetric release (docs/impl/region/park.md § "A
-    /// child's inherited parameter baseline is a counted holder"). The
+    /// cascade is the symmetric release (docs/impl/region/park.md). The
     /// fiber's own later `parameterize` frames are not covered — their values
     /// belong to the parked activation.
     pub param_baseline_seeded: bool,
@@ -108,8 +107,7 @@ pub struct Fiber {
     /// lets the resume and `resolve_parameter` checks PROVE it (debug
     /// builds), turning a missing or displaced retain into a panic at the
     /// borrow instead of a stale read. Populated only under
-    /// `debug_assertions`; empty otherwise (docs/impl/region/generations.md
-    /// § "Uncounted-borrow check").
+    /// `debug_assertions`; empty otherwise (docs/impl/region/generations.md).
     pub param_borrows: Vec<(u32, crate::hir::region::RuntimeRegion, u32)>,
     /// Signal value from this fiber. Canonical location for both
     /// signal payloads and normal return values.
@@ -123,8 +121,7 @@ pub struct Fiber {
     /// moves the live record (`VM::error_loc`) here rather than discarding it;
     /// `fiber/propagate` reads it back when it re-raises this fiber's parked
     /// signal, which is how the location survives the `defer` and scheduler
-    /// catch-then-re-raise chains (docs/impl/vm.md § "Where a reported error's
-    /// location comes from").
+    /// catch-then-re-raise chains (docs/impl/vm.md).
     ///
     /// The payload is carried so the reader can tell that the location still
     /// describes the error being re-raised — representation identity, as in
@@ -143,8 +140,7 @@ pub struct Fiber {
     /// funded — the raise-minted payload, the bodyless (denial) payload, and
     /// whether the resume value owes a mint. Written where a park is built,
     /// consumed where the park ends, through a method-only surface
-    /// ([`Delivery`]; docs/impl/region/park.md § "A park names its funding in
-    /// the delivery ledger").
+    /// ([`Delivery`]; docs/impl/region/park.md).
     pub delivery: Delivery,
     /// Suspended execution frames. Set when the fiber suspends or stops on an
     /// error; consumed when it resumes.
@@ -156,7 +152,7 @@ pub struct Fiber {
     /// are replayed from innermost (index 0) to outermost (last index).
     pub suspended: Option<Vec<SuspendedFrame>>,
 
-    /// Per-activation region-slot remap (docs/impl/region/model.md — every value its
+    /// Per-activation region-slot remap (docs/impl/region/model.md: every value its
     /// own region). Each entry maps a static bytecode region id (a per-
     /// function "slot") to a fresh physical region id minted for *this*
     /// activation. The stack mirrors the call stack: the top is the current
@@ -171,19 +167,17 @@ pub struct Fiber {
     /// `pop_activation_region_map`, which keep the two stacks in lockstep). An
     /// entry holds what the activation owes the region system when it ends: its
     /// pages-less owner-node region — the forest root `AdoptIntoActivation`
-    /// adopts members into (docs/impl/region/owner.md § "Owner nodes — an
-    /// activation as a forest root") — and the releases it took over from
+    /// adopts members into (docs/impl/region/owner.md) — and the releases it took over from
     /// frame-replacing tail calls. Discharged at the activation's normal
     /// completion (`VM::release_activation_dues`); a suspend MOVES the whole
     /// record into the parked frame ([`BytecodeFrame::activation_dues`]) and the
     /// resume restores it, so both reach that completion across any number of
-    /// parks (docs/impl/region/owner.md § "A deferred tail-call release has the
-    /// node's life").
+    /// parks (docs/impl/region/owner.md).
     pub activation_dues: Vec<ActivationDues>,
 
     /// The FIBER's own owner node — the pages-less forest root for a region whose
     /// owner is the fiber itself, outliving every single activation
-    /// (docs/impl/region/owner.md § "Owner nodes" — "The fiber owner node").
+    /// (docs/impl/region/owner.md).
     /// Fiber state, so it rides parks and fiber swaps structurally — nothing
     /// moves it, unlike the per-activation slots above. Minted lazily; `None`
     /// for a fiber that owns nothing. Freed only at the fiber's terminal
@@ -229,6 +223,19 @@ pub struct Fiber {
     /// When set, fiber/resume pulls the next value from here instead of
     /// executing bytecode. `None` = normal bytecode fiber.
     pub native_iter: Option<NativeIter>,
+    /// The join the last `JoinRegion` left for the next value mint of its slot
+    /// (docs/impl/region/colocation.md). That mint consumes it or drops it.
+    pub pending_join: Option<PendingJoin>,
+}
+
+/// A join a `JoinRegion` left for the next value mint of `slot`. It holds no
+/// reference: the mint that consumes it takes one, and a join nothing consumes
+/// costs nothing. `partner` records the generation it was read at, so a join
+/// never lands in a region that reused the partner's id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingJoin {
+    pub slot: crate::hir::region::StaticRegion,
+    pub partner: crate::hir::region::MappedRegion,
 }
 
 /// A Rust-side iterator that feeds values to a fiber.
@@ -282,6 +289,7 @@ impl Fiber {
             fuel: None,
             withheld: SignalBits::EMPTY,
             native_iter: None,
+            pending_join: None,
         }
     }
 
@@ -294,37 +302,13 @@ impl Fiber {
         elements: Vec<Value>,
         mask: SignalBits,
     ) -> Self {
-        let closure = noop_closure(heap);
         Fiber {
-            stack: SmallVec::new(),
-            callers: Vec::new(),
             status: FiberStatus::Paused,
-            mask,
-            parent: None,
-            parent_value: None,
-            child: None,
-            child_value: None,
-            closure,
-            closure_value: Value::NIL,
-            param_frames: Vec::new(),
-            param_baseline_seeded: false,
-            param_borrows: Vec::new(),
-            signal: None,
-            error_loc: None,
-            delivery: Delivery::new(),
-            suspended: None,
-            activation_region_maps: vec![rustc_hash::FxHashMap::default()],
-            activation_dues: vec![ActivationDues::default()],
-            fiber_owner_node: None,
-            current_closure: Value::NIL,
-            call_depth: 0,
-            call_stack: Vec::new(),
-            fuel: None,
-            withheld: SignalBits::EMPTY,
             native_iter: Some(NativeIter {
                 elements,
                 cursor: 0,
             }),
+            ..Fiber::new(noop_closure(heap), mask)
         }
     }
 

@@ -1,15 +1,14 @@
-// audited: 2026-09-23
-//! Region reference-counting and ownership-forest instruction handlers.
+// audited: 2026-09-29
+//! The interpreter's region instruction handlers: reference counts, forest adopts and group frees, the oracle, and joins.
 //!
 //! docs/impl/region/mechanism.md
 //! docs/impl/region/ownership.md
 //! docs/impl/region/owner.md
 //!
-//! These arms of the dispatch loop manage the per-region RC baseline and the
-//! ownership forest's adopt / subtree-drop / co-owned-group emit
-//! (docs/impl/region/ownership.md). They are factored out of the dispatch table so
-//! it stays a flat one-line-per-opcode jump table; the heavy tracing/freelog
-//! bookkeeping lives here.
+//! These arms of the dispatch loop manage the per-region reference-count
+//! baseline, the ownership forest's adopts and co-owned group frees, and the
+//! pending join. They live apart from the dispatch table, which stays one line
+//! per opcode, and they hold the tracing and freelog bookkeeping.
 
 use crate::vm::core::VM;
 
@@ -102,8 +101,9 @@ pub(crate) fn handle_decref_value_region(
     // The result's *runtime* region is released unconditionally
     // (immediates — region `None` — excepted). The caller half of the
     // prediction-free calling convention: the callee handed
-    // back one owning reference via `IncrefValueRegion`, and
-    // this consumes it at the result binding's decref_point.
+    // back one owning reference (a closure's return mint, a
+    // native call's region or pass-through retain), and this
+    // consumes it at the result binding's decref_point.
     if let Some(region_id) = region_id {
         if crate::config::get().has_trace("rc") {
             let rc = vm.heap().region_rc(region_id);
@@ -210,7 +210,8 @@ pub(crate) fn handle_adopt_region(vm: &mut VM) {
     // them solely to drive this adopt), resolve each to its runtime
     // region, and adopt — freezing the child's RC so it frees only
     // with the parent's subtree drop. An immediate operand (no
-    // region) or a self-edge (same region) is a no-op.
+    // region) or a self-edge (same region) is a no-op, and `adopt_region`
+    // leaves a joined child `Counted` (docs/impl/region/colocation.md).
     let child = vm
         .fiber
         .stack
@@ -270,7 +271,8 @@ pub(crate) fn handle_adopt_into_activation(vm: &mut VM) {
     // (`result_region_of` — unwraps a capture cell), lazily mint the node, and
     // adopt — freezing the child's RC so the node's subtree drop at the
     // activation's normal completion is its sole demise. An immediate operand
-    // (no region) adopts nothing and mints no node.
+    // (no region) adopts nothing and mints no node, and `adopt_region` leaves a
+    // joined child `Counted`.
     let child = vm
         .fiber
         .stack
@@ -338,11 +340,10 @@ pub(crate) fn handle_assert_region_matches(vm: &mut VM, bytecode: &[u8], ip: &mu
     // on top of the stack actually lives in. The value is the
     // return value (peek, never pop: the following
     // `IncrefRegion`/`Return` reads it). A mismatch means a slot
-    // was made to name the wrong region; its free-time cascade
-    // would reclaim a live region (a UAF). Detonate here, at the
-    // exact instruction, under the trustworthy guardfree oracle,
-    // rather than corrupt the heap later (the equivalence oracle of
-    // docs/impl/region/mechanism.md).
+    // names the wrong region, and its free-time cascade would
+    // reclaim a live region. The assert panics at this
+    // instruction instead of corrupting the heap later (the
+    // equivalence oracle of docs/impl/region/mechanism.md).
     #[cfg(debug_assertions)]
     {
         let value = *vm
@@ -366,4 +367,19 @@ pub(crate) fn handle_assert_region_matches(vm: &mut VM, bytecode: &[u8], ip: &mu
     }
     #[cfg(not(debug_assertions))]
     let _ = region;
+}
+
+/// Pop the join partner and record a pending join for the region slot operand
+/// (docs/impl/region/colocation.md). The lowerer loads the partner only to name
+/// its region. The next allocation-slot or call-slot mint takes the record: a
+/// mint of this slot joins the partner's region, and a mint of another slot
+/// drops it.
+pub(crate) fn handle_join_region(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+    let slot = vm.read_static_region(bytecode, ip);
+    let partner = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: stack underflow on JoinRegion");
+    vm.set_pending_join(slot, partner);
 }

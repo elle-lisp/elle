@@ -1,6 +1,6 @@
 # Region representation — id-spaces, per-execution model, layout
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-29 -->
 
 Implementation-facing. How the compiler and runtime represent regions: the two
 id-spaces, the per-activation physical-region model, the page layout, and how an
@@ -22,12 +22,12 @@ and conflating them is a class of UAF. Name them:
 These two id-spaces are **types**, not conventions. A runtime physical id is a
 `RuntimeRegion(NonZeroU32)`; a compile-time slot is a `StaticRegion(NonZeroU32)`.
 `NonZeroU32` on both makes region/slot 0 *unrepresentable* (Rule 1 by
-construction, not by a runtime `!= 0` assert), and being distinct newtypes means
-a static slot cannot be passed where a runtime region is expected — "never index
+construction, not by a runtime `!= 0` assert). Being distinct newtypes means a
+static slot cannot be passed where a runtime region is expected. So "never index
 a static id into `RegionStore`" is a compile error. "No region active" / "this
 value has no region" is `Option<RuntimeRegion>` (`None`), never a sentinel `0`.
 
-Crucially, a region is **not** a uniform optional field hung on every
+A region is **not** a uniform optional field hung on every
 instruction (which would let an allocation exist with no region — the invalid
 state spelled `None`). It is a mandatory `region: StaticRegion` field on exactly
 the LIR instruction *variants* that allocate or route a per-call region, and
@@ -41,8 +41,9 @@ Both index the single `RegionStore`, so two soundness guards keep them from
 colliding:
 
 - a static slot is resolved to a physical id through the current activation's
-  `activation_region_map` (`runtime_region_for_alloc_slot`/`new_runtime_region_for_call_slot`/`take_runtime_region_for_drop_slot`), never indexed into
-  the store as if it were physical;
+  `activation_region_map` (`runtime_region_for_alloc_slot`,
+  `new_runtime_region_for_call_slot`, `take_runtime_region_for_drop_slot`),
+  never indexed into the store as if it were physical;
 - `new_runtime_region` never reissues an id that currently names a live region.
 
 Drop either guard and two logical regions land on one physical id — a torn read
@@ -51,32 +52,42 @@ when one is freed under the other.
 ## The per-execution region model
 
 A static region id is a per-function slot; every activation mints its own
-physical region for it. `runtime_region_for_alloc_slot` records the slot→physical mapping
-in the activation's frame so the matching `DecrefRegion` frees the same physical
-region; `take_runtime_region_for_drop_slot` clears the slot so the next loop iteration mints
-fresh. This is what makes deep recursion and loops run in bounded memory: one
-static id names a per-function slot, never a single live physical region shared
-across activations.
+physical region for it. `runtime_region_for_alloc_slot` records the
+slot→physical mapping in the activation's frame, so the matching `DecrefRegion`
+frees the same physical region. `take_runtime_region_for_drop_slot` clears the
+slot, so the next loop iteration mints fresh. This is what makes deep recursion
+and loops run in bounded memory: one static id names a per-function slot, never
+a single live physical region shared across activations.
 
 The model carries an emission-side obligation — **one allocation execution per
 slot between drops**. `runtime_region_for_alloc_slot` mints fresh on every
-execution and *overwrites* the frame's mapping, so if the lowerer emits N
+execution and *overwrites* the frame's mapping. So if the lowerer emits N
 allocation instructions against one slot with only the final `DecrefRegion`,
 the first N−1 physical regions are orphaned the moment their mapping is
-overwritten — an unreleasable initial reference each, i.e. a structural leak
-(Rule 4's dual: every allocation *execution* needs its own demise, so every
-allocation *instruction* needs its own slot unless a drop provably intervenes,
-as the loop back-edge drop does). The file-letrec capture-cell pre-pass is the
-case in point: `lower_begin` emits one `MakeCaptureCell` per captured top-level
-binding, and routing them all through the Begin's single region slot would
-orphan every cell but the last (at stdlib scale, thousands of cells plus
-everything they pin). Pre-allocated capture cells therefore get **one region
-per cell** (`begin_cell_regions`), each released by its own `DecrefRegion` at
-its binding's last use. A spliced call's args array is the same obligation with
-a different resolution: it takes a managed slot of its own so the call's result
-mint cannot orphan it, and its drop is the call's own — the runtime takes that
-slot (mechanism.md § "A spliced call's arguments come out of an array the
-convention owns").
+overwritten. Each carries an unreleasable initial reference, that is, a
+structural leak. (Rule 4's dual: every allocation *execution* needs its own
+demise. So every allocation *instruction* needs its own slot unless a drop
+provably intervenes, as the loop back-edge drop does.)
+
+The file-letrec capture-cell pre-pass is the case in point. `lower_begin` emits
+one `MakeCaptureCell` per captured top-level binding. Routing them all through
+the Begin's single region slot would orphan every cell but the last (at stdlib
+scale, thousands of cells plus everything they pin). Pre-allocated capture
+cells therefore get **one region per cell** (`begin_cell_regions`), each
+released by its own `DecrefRegion` at its binding's last use.
+
+A spliced call's args array is the same obligation with a different
+resolution. It takes a managed slot of its own so the call's result mint cannot
+orphan it. Its drop is the call's own: the runtime takes that slot
+([mechanism.md](mechanism.md)).
+
+A slot's execution can also **join** an existing region instead of minting one.
+A `JoinRegion` instruction leaves a pending join on the fiber, and the very next
+alloc-slot or call-slot mint consumes it. The slot resolves to the partner's
+region, which the mint takes one reference on. The slot's usual release gives
+that reference back, so the model's obligation is unchanged: one reference per
+allocation execution, and one demise per reference
+([colocation.md](colocation.md)).
 
 ## Constants lower as ordinary allocations, not promoted values
 
@@ -85,22 +96,24 @@ a pre-allocated `Value` baked into the code object. The constant pool holds the
 literal's immutable *template* (the bytes, the structure, the closure template)
 as plain compile-time data. A `MaterializeConst` instruction builds a *fresh*
 value from that template each time it executes, into the literal's own
-solver-assigned region (`alloc_here(hir.id)`, the one-region-per-value baseline),
-resolved per activation to a fresh physical region and allocated with
-`arena::alloc_in_region(obj, region)` — exactly as `MakeArrayMut`/`List` do.
+solver-assigned region (`alloc_here(hir.id)`, the one-region-per-value baseline).
+That region is resolved per activation to a fresh physical region, and the value
+is allocated with `arena::alloc_in_region(obj, region)` — exactly as
+`MakeArrayMut`/`List` do.
 
-So a literal is born in the right region (Rule 3), dies at its `decref_point`
-(Rule 4), and lives past that point only by ordinary RC if it escapes (Rule 5).
-Re-materializing per execution is the correct-and-slow baseline: runtime
-`(eval …)` and module load re-run the compiler, so the same source materializes
-fresh copies each time, each reclaimed when it falls out of use. The rejected
-alternative — a "constant-pool region" whose lifetime is the code object — would
-promote a value into a longer-lived region (Rule 3 forbids promotion), need a
-second demise mechanism outside `DecrefRegion`, and share one region across every
-activation of the code object; do not adopt it.
+So a literal is born in the right region (Rule 3) and dies at its
+`decref_point` (Rule 4). It lives past that point only by ordinary RC if it
+escapes (Rule 5). Re-materializing per execution is the correct-and-slow
+baseline. Runtime `(eval …)` and module load re-run the compiler, so the same
+source materializes fresh copies each time, each reclaimed when it falls out of
+use. The rejected alternative is a "constant-pool region" whose lifetime is the
+code object. It would promote a value into a longer-lived region (Rule 3 forbids
+promotion) and need a second demise mechanism outside `DecrefRegion`. It would
+also share one region across every activation of the code object. Do not adopt
+it.
 
 Closure **templates** are no exception: the template is itself a
-region-allocated heap object, materialized at its definition site; a closure
+region-allocated heap object, materialized at its definition site. A closure
 **instance** holds a normal cross-region reference to it, increfed when the
 instance is built and cascade-released when its region frees. Region RC is the
 single reclamation mechanism for code objects too. What the materialized
@@ -109,29 +122,34 @@ execution, is [template.md](template.md).
 
 ## Physical representation
 
-A per-thread page pool with size classes hands pages to regions on demand and
+A per-thread page pool with size classes hands pages to regions on demand. It
 takes them back when their region frees, by a count reaching zero or by its
 owner's subtree drop. A page released past the pool's `max_cached` bound is
 `munmap`ed at once. Regions never share pages (Rule 6). `RegionStore` holds one
 `Reclaim` per physical region: a count for a `Counted` region, an owner for an
 `Owned` one ([ownership.md](ownership.md)). One region per value, unmerged, is
-the baseline: it claims a page per allocation — correct but expensive. Two kinds of *merging* amortize that cost, both
-collapsing several solver `Region`s onto one physical region (the
-consumer-facing performance account is in
-[regions/performance.md](../../regions/performance.md)):
+the baseline: it claims a page per allocation, correct but expensive. Two
+kinds of *merging* amortize that cost, both collapsing several solver `Region`s
+onto one physical region. The consumer-facing performance account is in
+[regions/performance.md](../../regions/performance.md).
 
-- the **builder-idiom seed** below — merge a freshly-built child aggregate into
-  the parent aggregate it is stored into (the `%pair` car/cdr store). This is
-  implemented as the analysis and runtime mint-or-reuse described in [merging.md](merging.md);
+- the **builder-idiom seed** merges a freshly-built child aggregate into the
+  parent aggregate it is stored into (the `%pair` car/cdr store). The analysis
+  and the runtime mint-or-reuse are in [merging.md](merging.md);
 - **sibling page-amortization** — collapse sibling regions with coincident
   lifetimes and no edge between them. A later rider, not yet implemented.
 
+Merging is one form of colocation. [colocation.md](colocation.md) owns the
+whole set: the join rule every form obeys, the bound each pattern argues, and
+which patterns are realized.
+
 ### The base page is the OS page
 
-`base_page()` (`pagepool.rs`) asks the OS for its page size once and caches the
-answer. Class 0 of the size-class ladder is that page, and every larger class is
-a power-of-two multiple of it, so a region page is always a whole number of OS
-pages. `--region-page-size` rejects anything below `base_page()`.
+`base_page()` ([pagepool.rs](../../../src/value/fiberheap/pagepool.rs)) asks
+the OS for its page size once and caches the answer. Class 0 of the size-class
+ladder is that page, and every larger class is a power-of-two multiple of it. So
+a region page is always a whole number of OS pages. `--region-page-size`
+rejects anything below `base_page()`.
 
 The rejected alternative is a fixed 4096. It is right on Linux x86-64 and wrong
 on every host with a larger page — macOS aarch64 uses 16384, and Linux aarch64
@@ -152,7 +170,7 @@ things at once, and the OS query removes all four together:
   mapping survives to `Drop`, which unmaps the whole rounded-up range, but until
   then the page holds 16384 bytes and records 8192.
 - **`mapped_bytes` reports the same understatement.** It records the length each
-  `mmap` asked for, not the mapping the kernel made, so the gauge that says
+  `mmap` asked for, not the mapping the kernel made. So the gauge that says
   whether a worker gave its heap back is short by 4× for every class-0 page.
 
 Every accounting claim the pool makes rests on one identity: the size a page
@@ -165,12 +183,12 @@ page.
 `release` pushes it onto a size-class free list; `claim` pops it and hands it
 straight back. Neither reads nor writes a byte of it, and neither makes a
 system call. The hot path of a small short-lived region — mint, claim, write
-one object, free — therefore costs the write and nothing else, which matters
-because that is the *common* path: one region per value is the baseline above,
+one object, free — therefore costs the write and nothing else. That matters
+because it is the *common* path: one region per value is the baseline above,
 so a program allocates regions at the rate it allocates values.
 
 Nothing needs the page prepared. `RegionPage::new` stamps the header, sets the
-object cursor to `HEADER_SIZE` and the data cursor to the page top; every
+object cursor to `HEADER_SIZE`, and sets the data cursor to the page top. Every
 object slot is written before it is read, and every inline-data slice is fully
 copied before its `RegionSlice` is handed out. **A claimed page's body is
 therefore unspecified, not blank** — it holds whatever the previous occupant
@@ -180,17 +198,17 @@ Two consequences worth stating, because both are easy to get wrong:
 
 - **Do not discard the page's frames at claim.** `madvise(MADV_DONTNEED)` on a
   page about to be written hands memory back that the very next store faults
-  straight in — a system call and a fault per claim, for no resident-memory
-  reduction. Cached bytes are bounded by the pool's `max_cached`, and a page
-  past that bound is `munmap`ed on release; that is where memory genuinely
-  returns to the OS.
+  straight in. That costs a system call and a fault per claim, for no
+  resident-memory reduction. Cached bytes are bounded by the pool's
+  `max_cached`, and a page past that bound is `munmap`ed on release. That is
+  where memory returns to the OS.
 - **A page in the free list keeps its header.** A cached page still carries the
-  `(region_id, generation, store)` stamp of the region that died on it, which
-  is exactly what a pointer outliving that region finds: the ids match, the
-  generations do not, and the debug-build check panics at the deref site
+  `(region_id, generation, store)` stamp of the region that died on it. That
+  stamp is exactly what a pointer outliving that region finds: the ids match,
+  the generations do not, and the debug-build check panics at the deref site
   ([generations.md](generations.md)). Blanking offset 0 would take that
   detector away and leave the stale pointer with no self-validating header at
-  its own page size, so `region_of_ptr`'s page-base walk would mask past this
+  its own page size. Then `region_of_ptr`'s page-base walk would mask past this
   page into memory the store does not own.
 
 ### `--trace=scrub`: make a stale read wrong on purpose
@@ -202,20 +220,22 @@ together one `PageDirty` pair, sparing the header for the reason above. The gap
 between the two cursors was never written by that region, so it is not scrubbed
 either; a region holding one pair costs one 128-byte `HeapObject` slot of work.
 
-The point is not hygiene. A read through a pointer that outlived its region
-normally finds the dead region's bytes — plausible, well-typed, and silently
-wrong. Scrubbed, it finds an all-zero `HeapObject` slot, whose tag matches no
-live value, so `arena::deref` panics naming the deref site. It is the cheap
-member of the family: `--trace=guardfree` never reuses a page and so catches a
-stale read at any distance, at a mapping per freed page; the generation check
-catches a stale *region resolution*, but only in debug builds and only while
-the page is unclaimed; scrub catches a stale *content* read, in release builds
-too, for one `memset` per freed page. A page on its way to `munmap` is never
-scrubbed — an unmapped address faults on its own.
+Scrub turns a silent wrong read into a panic. A read through a pointer that
+outlived its region normally finds the dead region's bytes: plausible,
+well-typed, and wrong. Scrubbed, it finds an all-zero `HeapObject` slot, whose
+tag matches no live value, so `arena::deref` panics naming the deref site.
 
-`tests/elle/region-page-recycle.lisp` measures what the claim path costs per
-call from Elle, through the `arena/page-claims` gauge; `pagepool::tests` pins
-the untouched-recycle contract and the scrub's spans.
+Scrub is the cheap member of the family. `--trace=guardfree` never reuses a page
+and so catches a stale read at any distance, at a mapping per freed page. The
+generation check catches a stale *region resolution*, but only in debug builds
+and only while the page is unclaimed. Scrub catches a stale *content* read, in
+release builds too, for one `memset` per freed page. A page on its way to
+`munmap` is never scrubbed, because an unmapped address faults on its own.
+
+[tests/elle/region-page-recycle.lisp](../../../tests/elle/region-page-recycle.lisp)
+measures what the claim path costs per call from Elle, through the
+`arena/page-claims` gauge. `pagepool::tests` pins the untouched-recycle contract
+and the scrub's spans.
 
 ## Physical id recycling: reserved, live, free
 
@@ -229,7 +249,7 @@ A physical region id has three states, and every id must reach `free` again.
   sizes `regions` and `generations` to the id, so **the table is as long as the
   largest id ever made live**, whatever the count of live regions is. (Static
   slot ids reach `ensure_raw` too and size the table the same way; they come
-  from the compiler's own bounded counter — see § "Two id-spaces".)
+  from the compiler's own bounded counter, as the two id-spaces above say.)
 - **Free.** A teardown returns the id's pages, bumps its generation, and pushes
   the id onto `free_physical`, where the next mint finds it.
 
@@ -243,18 +263,19 @@ because the callee may allocate its result into it. A primitive that returns an
 immediate (`(< a b)`), or one that returns a value borrowed from an argument
 (`first`, `rest`, `get`), allocates nothing into it.
 
-The **macro-expansion transient** is the other. An expansion wraps each argument
-as a `Value` born in a region of its own, and an atom argument becomes an
-immediate rather than a heap value, so a macro call whose arguments are all
-atoms — `(when true 1)` — wraps nothing at all. The scope's own open and close
-own that region: `begin_macro_scope` mints it and answers with a `MacroScope`
-carrying the receipt, and `reclaim_macro_scope` consumes the scope and returns
-the id. The expander cannot name the region without holding the receipt, so it
-cannot reach the close having lost it.
+The **macro-expansion arena** is the other ([macroscope.md](macroscope.md)).
+An expansion wraps each argument as a `Value` born in the arena, and an atom
+argument becomes an immediate rather than a heap value. So an expansion whose
+arguments are all atoms, and whose transformer allocates nothing, never touches
+the arena. The scope's own open and close own that region: `begin_macro_scope`
+mints it and answers with a `MacroScope` carrying the receipt, and
+`reclaim_macro_scope` consumes the scope and returns the id. The expander
+cannot name the region without holding the receipt, so it cannot reach the
+close having lost it.
 
 An id stranded that way costs no heap object, no page, and no reference count,
 which is why the object and region gauges cannot see it. It costs the region
-**table**: it raises the largest id a later mint hands out, and `regions` is a
+**table**: it raises the largest id a later mint hands out. `regions` is a
 `Vec<Option<RegionEntry>>` indexed by id, so a stranded id is one
 `size_of::<Option<RegionEntry>>()` slot of resident memory that nothing frees.
 Resident memory then grows with total work while `arena/count`,
@@ -268,7 +289,7 @@ mint.
 
 The generation half is what makes the test exact, and it is not optional. A
 region that materialized and was freed inside the call (a native that re-enters
-the VM) also leaves `regions[id]` empty — but its teardown already pushed that
+the VM) also leaves `regions[id]` empty. But its teardown already pushed that
 id, so pushing it again would put a **duplicate** in `free_physical`. Two mints
 could then take the same id before either materialized, and `new_runtime_region`
 could not tell them apart: its skip loop only rejects an id that is already
@@ -278,10 +299,12 @@ rejects exactly that id and admits only a mint that nothing has touched since.
 
 `arena/region-ids` reads `next_physical` from Elle — the gauge that moves the
 moment an id fails to come back — and `arena/region-table` reads what the table
-costs. The bound is pinned by the `id-*` probes of `tests/elle/oracle.lisp`,
-which measure id issuance per call against a live-growth discriminator of their
-own: a loop of calls that allocate nothing issues no new id, and a materializing
-call's id comes back by its teardown. `tests/elle/region-macro-id-recycle.lisp`
+costs. The bound is pinned by the `id-*` probes of
+[tests/elle/oracle.lisp](../../../tests/elle/oracle.lisp). They measure id
+issuance per call against a live-growth discriminator of their own. A loop of
+calls that allocate nothing issues no new id, and a materializing call's id
+comes back by its teardown.
+[tests/elle/region-macro-id-recycle.lisp](../../../tests/elle/region-macro-id-recycle.lisp)
 gauges the expansion site the same way, against the same discriminator.
 `regionstore::tests::recycle` pins the store-level contract, the duplicate the
 generation check refuses included, and `arena::tests::macroscope` pins what the
@@ -305,12 +328,13 @@ owns the captures.
 
 The corollary for **metadata-only clones**: an operation that rebuilds a heap
 object to change only its metadata (`with-traits` is the canonical case) must
-**copy the payload slice into the clone's own region** — `RegionSlice` is
+**copy the payload slice into the clone's own region**. `RegionSlice` is
 `Copy`, and copying the `(ptr, len)` pair instead aliases backing pages in the
-*source's* region with no counted edge: the source's ordinary demise then frees
-the payload under the live clone (the with-traits UAF — a clone of `[1 2 3]`
-captured by a spawned closure read freed pages in the send serializer;
-tests/elle/region-withtraits-slice-uaf.lisp). It also falsifies the operation's
+*source's* region with no counted edge. The source's ordinary demise then frees
+the payload under the live clone. That is the with-traits UAF: a clone of
+`[1 2 3]` captured by a spawned closure read freed pages in the send serializer
+([tests/elle/region-withtraits-slice-uaf.lisp](../../../tests/elle/region-withtraits-slice-uaf.lisp)).
+It also falsifies the operation's
 `Fresh` declaration, which claims the whole result lives in the call's own
 region. The one sanctioned alias is the closure-env share (`squelch`/`attune`),
 which pays for itself with an explicit backing edge in the free-cascade scan's

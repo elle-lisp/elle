@@ -1,6 +1,8 @@
-// audited: 2026-09-06
-// src/wasm/AGENTS.md
+// audited: 2026-09-29
 //! Emitting one LIR instruction as WASM.
+//!
+//! docs/impl/wasm.md
+//! src/wasm/AGENTS.md
 //!
 //! Each arm either emits the instructions inline or calls one of the concrete
 //! emitters beside it. `intrinsics` takes the chain tail.
@@ -31,9 +33,8 @@ impl WasmEmitter {
                 // RC, so the region slot is irrelevant here. A flat string takes
                 // the fast path (`emit_const` handles `LirConst::String`);
                 // a compound literal is reconstructed as a host Value and baked as
-                // a constant, materialized into a freshly minted region held for
-                // the module's lifetime (never freed — region reclamation is a
-                // VM/JIT property; wasm literals live for the module's lifetime).
+                // a constant, materialized into a fresh region that nothing
+                // releases while the module runs.
                 match template {
                     crate::value::ConstTemplate::String(s) => {
                         self.emit_const(f, *dst, &LirConst::String(s.clone()));
@@ -242,18 +243,18 @@ impl WasmEmitter {
                     self.emit_tail_call_dispatch(f);
                 }
             }
+            // This backend keeps no region counts, so every region instruction
+            // is a no-op arm; the heap's teardown reclaims the regions
+            // (docs/impl/wasm.md).
             LirInstr::IncrefRegion { .. } | LirInstr::DecrefRegion { .. } => {}
             // The ownership-forest ops (adopt, activation adopt, co-owned-group
-            // free) are region-RC ops realized on the VM/JIT tiers; handled
-            // structurally here — a no-op arm, like every other region op in
-            // this backend (the arena boundary reclaims).
+            // free) are realized on the VM and JIT tiers only.
             LirInstr::AdoptRegion { .. }
             | LirInstr::AdoptCellRegion { .. }
             | LirInstr::AdoptIntoActivation { .. }
             | LirInstr::FreeRegionGroup { .. } => {}
-            // Region/refcount support is VM-only in this backend.
             LirInstr::StoreLocalRefcounted { slot, src } => {
-                // Treat as a plain StoreLocal — wasm doesn't track refcounts.
+                // A plain StoreLocal: this backend keeps no reference counts.
                 if self.is_closure {
                     f.instruction(&Instruction::LocalGet(self.tag_local(*src)));
                     f.instruction(&Instruction::LocalSet(self.local_slot_tag(*slot)));
@@ -267,8 +268,11 @@ impl WasmEmitter {
             LirInstr::DecrefValueRegion { .. } => {}
             LirInstr::DecrefCellRegion { .. } => {}
             LirInstr::IncrefValueRegion { .. } => {}
-            // The coalescing oracle is a VM-interp-only debug instrument.
+            // The coalescing oracle is a debug instrument of the interpreter only.
             LirInstr::AssertRegionMatches { .. } => {}
+            // A join steers the next region-slot mint, and this backend resolves
+            // no region slots (docs/impl/region/colocation.md).
+            LirInstr::JoinRegion { .. } => {}
             LirInstr::List {
                 dst, head, tail, ..
             } => {
@@ -373,7 +377,7 @@ impl WasmEmitter {
                 // The executing closure lives in the reserved `SELF_SLOT` in linear
                 // memory (tag at `SELF_SLOT`, payload at `SELF_SLOT + 8`), written by
                 // the host at every closure entry and carried across suspend/resume
-                // (src/wasm/store/call.rs, src/wasm/linker/create.rs). Read it into
+                // (`write_self_slot`, src/wasm/store.rs). Read it into
                 // `dst` — the value path materializes the closure; a call-position
                 // self-reference calls it (re-entering the same code+env).
                 f.instruction(&Instruction::I32Const(SELF_SLOT));

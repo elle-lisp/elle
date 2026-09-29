@@ -1,6 +1,9 @@
-//! Region-ownership test helpers (pair-store edges, shared seeds, owned
-//! subtrees, adopt edges). Split from `helpers.rs` to keep each file < 500
-//! lines. `super::ownership` resolves via the re-export in `mod.rs`.
+// audited: 2026-09-29
+//! Region-ownership test helpers: pair-store edges, shared seeds, owned subtrees, adopt edges.
+//!
+//! docs/impl/region/ownership.md
+//!
+//! `super::ownership` resolves through the re-export in `mod.rs`.
 use super::*;
 
 /// The ownership forest is unconditional, so `analyze_regions`/`analyze_regions_with`
@@ -65,11 +68,7 @@ pub(super) fn shared_seeds(source: &str) -> (Hir, RegionInfo, rustc_hash::FxHash
 pub(super) fn shared_seeds_with_effects(
     source: &str,
 ) -> (Hir, RegionInfo, rustc_hash::FxHashSet<Region>) {
-    let mut symbols = SymbolTable::new();
-    let (hir, arena) = compile_fhir(source, &mut symbols);
-    let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
-    let cc = pc.call_classification;
+    let (hir, arena, cc) = compile_with_effects(source);
     let info = analyze_regions_with(&hir, &arena, cc.clone());
     let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
     let seeds = super::ownership::compute_shared_seeds(&info, &escape);
@@ -124,11 +123,7 @@ pub(super) fn owned_subtrees_with_effects(
     RegionInfo,
     rustc_hash::FxHashMap<Region, rustc_hash::FxHashSet<Region>>,
 ) {
-    let mut symbols = SymbolTable::new();
-    let (hir, arena) = compile_fhir(source, &mut symbols);
-    let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
-    let cc = pc.call_classification;
+    let (hir, arena, cc) = compile_with_effects(source);
     let mut info = analyze_regions_with(&hir, &arena, cc.clone());
     restore_pre_ownership_view(&mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
@@ -151,15 +146,11 @@ pub(super) fn in_some_owned_subtree(
 /// is an opaque `Funnel` native call recording NO `cross_region_refs` edge —
 /// its containment reaches the adopt walk as site-keyed funnel-recovered
 /// `containment_edges`, and the emitted adopt is keyed at the funnel call
-/// site (region/adopt.md § The funnel adopt). Mirrors
+/// site (docs/impl/region/adopt.md). Mirrors
 /// `owned_subtrees_with_effects`, threading the `compute_order` index
 /// `compute_adopt_edges` needs for the lifetime obligation.
 pub(super) fn adopt_edges(source: &str) -> (Hir, RegionInfo, super::ownership::AdoptEdges) {
-    let mut symbols = SymbolTable::new();
-    let (hir, arena) = compile_fhir(source, &mut symbols);
-    let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
-    let cc = pc.call_classification;
+    let (hir, arena, cc) = compile_with_effects(source);
     let mut info = analyze_regions_with(&hir, &arena, cc.clone());
     restore_pre_ownership_view(&mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
@@ -180,11 +171,7 @@ pub(super) fn adopt_edges(source: &str) -> (Hir, RegionInfo, super::ownership::A
 pub(super) fn capture_edges(
     source: &str,
 ) -> (Hir, BindingArena, RegionInfo, Vec<(HirId, Region, Region)>) {
-    let mut symbols = SymbolTable::new();
-    let (hir, arena) = compile_fhir(source, &mut symbols);
-    let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
-    let cc = pc.call_classification;
+    let (hir, arena, cc) = compile_with_effects(source);
     let info = analyze_regions_with(&hir, &arena, cc.clone());
     let edges = super::ownership::capture_containment_edges(&hir, &info, &arena);
     (hir, arena, info, edges)
@@ -195,11 +182,7 @@ pub(super) fn capture_edges(
 /// [`adopt_edges`], threading the `compute_order` index the group walk needs for the
 /// drop-site post-dominance check and the deterministic member emit-order.
 pub(super) fn owned_region_groups(source: &str) -> (Hir, RegionInfo, HashMap<HirId, Vec<Region>>) {
-    let mut symbols = SymbolTable::new();
-    let (hir, arena) = compile_fhir(source, &mut symbols);
-    let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
-    let cc = pc.call_classification;
+    let (hir, arena, cc) = compile_with_effects(source);
     let mut info = analyze_regions_with(&hir, &arena, cc.clone());
     restore_pre_ownership_view(&mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
@@ -215,12 +198,26 @@ pub(super) fn owned_region_groups(source: &str) -> (Hir, RegionInfo, HashMap<Hir
 /// together). The activation-adopt pins read THIS (not a direct `compute_*` call)
 /// so they exercise the same wiring `analyze_regions_with` hands the lowerer.
 pub(super) fn analyze_full(source: &str) -> (Hir, RegionInfo) {
+    let (hir, _arena, info) = analyze_full_with_arena(source);
+    (hir, info)
+}
+
+/// [`analyze_full`], keeping the arena so a test can name a binding.
+pub(super) fn analyze_full_with_arena(source: &str) -> (Hir, BindingArena, RegionInfo) {
+    let (hir, arena, cc) = compile_with_effects(source);
+    let info = analyze_regions_with(&hir, &arena, cc);
+    (hir, arena, info)
+}
+
+/// Compile `source` and build the REAL primitive `CallClassification`: the declared
+/// `RegionEffect`s, return types and funnel sets the production pipeline hands the
+/// solver. The default classification treats every call as an opaque user function.
+pub(super) fn compile_with_effects(source: &str) -> (Hir, BindingArena, CallClassification) {
     let mut symbols = SymbolTable::new();
     let (hir, arena) = compile_fhir(source, &mut symbols);
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
-    let info = analyze_regions_with(&hir, &arena, pc.call_classification);
-    (hir, info)
+    let cc = crate::lir::intrinsics::PrimitiveClassification::new(&meta).call_classification;
+    (hir, arena, cc)
 }
 
 /// The container **root** (the region that is the TARGET of a containment edge but
@@ -249,8 +246,8 @@ pub(super) fn container_root_and_members(info: &RegionInfo) -> (Region, Vec<Regi
 
 /// Which reload path would `lower_lambda_expr` use for the capture-adopt edge
 /// `(member, closure)` — true for a LOCAL-SLOT reload (`LoadLocal`), false for an
-/// env reload (`LoadCapture` — an upvalue or transitive capture; region/adopt.md
-/// § "The capture adopt"). Slot-loaded iff the lambda whose `alloc_region` is
+/// env reload (`LoadCapture` — an upvalue or transitive capture;
+/// docs/impl/region/adopt.md). Slot-loaded iff the lambda whose `alloc_region` is
 /// `closure` captures the binding holding `member` with `CaptureKind::Local` AND no
 /// lambda lexically *enclosing* it also captures that binding. Both paths are
 /// emittable; boundary pins use this to assert a shape genuinely exercises the

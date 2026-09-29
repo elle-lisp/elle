@@ -1,9 +1,9 @@
-// audited: 2026-09-20
+// audited: 2026-09-29
 //! Process roots, the program value's hand-off, the pinned root region, and the
 //! macro-expansion scope.
 //! docs/impl/region/rules.md
+//! docs/impl/region/macroscope.md
 //! docs/impl/region/template.md
-//! docs/impl/region/model.md
 
 use super::*;
 use crate::value::fiberheap::regionstore::RegionMint;
@@ -16,7 +16,7 @@ pub fn register_process_root_region(heap: &mut FiberHeap, region: RuntimeRegion)
     heap.register_process_root_region(region);
 }
 /// Which reference the process root a host registers is funded by
-/// (docs/impl/region/rules.md § "The program value is the host's to release").
+/// (docs/impl/region/rules.md).
 /// The sweep decrefs a registered region once, so every registration answers
 /// this or it decrefs a reference nobody holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,18 +47,16 @@ pub fn register_process_root(heap: &mut FiberHeap, value: Value, funding: RootRe
     }
     heap.register_process_root_region(r);
 }
-/// Give back the one owning reference a completed run handed its host with the
-/// program value (docs/impl/region/rules.md § "The program value is the host's
-/// to release"). The mirror of the `DecrefValueRegion` a compiled caller runs:
-/// it resolves the value's own runtime region, seeing through a capture cell
+/// Give back the one owning reference a completed run handed its host with the program
+/// value (docs/impl/region/rules.md). The mirror of the `DecrefValueRegion` a compiled
+/// caller runs: it resolves the value's own runtime region, seeing through a capture cell
 /// exactly as the return convention's mint did.
 ///
 /// A host that reads the value for the rest of the runtime's life registers it
-/// with [`register_process_root`] instead, taking the reference, and the
-/// teardown sweep releases it. A host that keeps only a PART of the value —
-/// the REPL, whose destructuring `def` binds the leaves of a tuple — mints a
-/// reference for the part and still releases here. An immediate has no region,
-/// so this is a no-op for one.
+/// with [`register_process_root`] instead, taking the reference, and the teardown
+/// sweep releases it. A host that keeps only a PART of the value — the REPL, whose
+/// destructuring `def` binds the leaves of a tuple — mints a reference for the part
+/// and still releases here. An immediate has no region, so this is a no-op for one.
 pub fn release_program_value(heap: &mut FiberHeap, value: Value) {
     let region = result_region_of(heap, value);
     decref_region(heap, region);
@@ -68,14 +66,14 @@ pub fn release_program_value(heap: &mut FiberHeap, value: Value) {
 /// the number released. This is the *only* heap-region action the teardown sweep
 /// takes — it decrefs roots and lets the RC cascade do the rest (Rule 5/7); it
 /// never iterates the region table freeing live entries (see
-/// docs/impl/region/rules.md § "Teardown", property 1).
+/// docs/impl/region/rules.md, teardown property 1).
 ///
 /// Draining the registry makes a second call a no-op, so teardown is idempotent.
 pub fn teardown_process_root_regions(heap: &mut FiberHeap) -> usize {
-    // Code payloads are released alongside the roots: nothing may still be
-    // executing at teardown, so every payload is dead whatever its blueprint's
-    // refcount says (docs/impl/region/template.md § "Who owns the payload
-    // region"). Like a root, each is a decref — the RC cascade does the rest.
+    // Code payloads are released alongside the roots: nothing may still be executing
+    // at teardown, so every payload is dead whatever its blueprint's refcount says
+    // (docs/impl/region/template.md). Like a root, each is a decref — the RC cascade
+    // does the rest.
     heap.release_all_template_payloads();
     let roots = heap.take_process_roots();
     // The root region's slot is consumed here too: it was registered at mint, so
@@ -93,8 +91,7 @@ pub fn teardown_process_root_regions(heap: &mut FiberHeap) -> usize {
 ///
 /// `pub(crate)` for the root values whose payload must be built in the same
 /// region as their header — a slice-backed root cannot go through
-/// [`alloc_root`] alone (docs/impl/region/model.md, "RegionSlice contents share
-/// their object's region").
+/// [`alloc_root`] alone (docs/impl/region/model.md).
 pub(crate) fn root_region(heap: &mut FiberHeap) -> RuntimeRegion {
     if let Some(r) = heap.root_region_slot() {
         return r;
@@ -107,38 +104,38 @@ pub(crate) fn root_region(heap: &mut FiberHeap) -> RuntimeRegion {
     r
 }
 
-/// One open macro-expansion scope: the transient region the expansion wraps its
-/// arguments into, held as the mint receipt that returns the region's physical
-/// id (docs/impl/region/model.md § "Physical id recycling").
+/// One open macro-expansion scope: the arena its value mints join, held as the
+/// mint receipt that returns the arena's physical id (docs/impl/region/macroscope.md).
 ///
 /// The open hands this out rather than a bare `RuntimeRegion`, so the expander
 /// cannot name the region without also holding what closes it. The close is
 /// [`reclaim_macro_scope`], which consumes the scope.
-#[must_use = "an unreclaimed macro scope strands the transient region's id and \
-              leaves the transformer's scratch holding unbalanced references"]
+#[must_use = "an unreclaimed macro scope strands the arena's id and leaves the \
+              transformer's scratch holding unbalanced references"]
 pub struct MacroScope {
-    arg: RegionMint,
+    arena: RegionMint,
 }
 
 impl MacroScope {
-    /// The region this expansion's wrapped arguments are born in.
-    pub fn arg_region(&self) -> RuntimeRegion {
-        self.arg.region()
+    /// The arena: the region the wrapped arguments are born in and every value
+    /// mint joins while the scope is open.
+    pub fn arena(&self) -> RuntimeRegion {
+        self.arena.region()
     }
 }
 
-/// Open a macro-expansion allocation scope (docs/impl/region/rules.md § "Macro
-/// expansion — a closed allocation scope"). Every region minted until the
-/// matching [`reclaim_macro_scope`] is recorded so its dead scratch can be
-/// reclaimed by RC.
+/// Open a macro-expansion allocation scope (docs/impl/region/macroscope.md). Every
+/// region minted until the matching [`reclaim_macro_scope`] is recorded, so its dead
+/// scratch can be reclaimed by RC.
 ///
-/// The transient argument region is minted here, inside the log, so the reclaim
-/// covers it like any other region the expansion mints.
+/// The arena is minted here, inside the log, so the reclaim covers it like any other
+/// region the expansion mints. It stays unmaterialized until the first allocation
+/// into it, and that first allocation takes its birth reference: the scope's own.
 pub fn begin_macro_scope(heap: &mut FiberHeap) -> MacroScope {
     heap.begin_region_mint_log();
-    MacroScope {
-        arg: heap.new_runtime_region_tracked(),
-    }
+    let arena = heap.new_runtime_region_tracked();
+    heap.open_scope_arena(arena);
+    MacroScope { arena }
 }
 
 /// Close the scope opened by [`begin_macro_scope`] and reclaim the transformer's
@@ -159,14 +156,16 @@ pub fn begin_macro_scope(heap: &mut FiberHeap) -> MacroScope {
 /// owner: teardown for a process root, the death of the last blueprint packed
 /// into it for a payload region.
 ///
-/// The transient argument region's physical id comes back here, and the recycle
-/// runs FIRST so it reads the region as the expansion left it. An expansion that
-/// wrapped nothing left it unmaterialized, and no teardown can ever return an id
-/// that names no region; one that wrapped an argument left a live region the
-/// reclaim below frees, whose own teardown books the id, so the recycle reads it
-/// live and pushes nothing (docs/impl/region/model.md § "Physical id recycling").
+/// The arena closes first, so no mint during the reclaim joins it. Its physical
+/// id comes back here, and the recycle runs before the reclaim so it reads the
+/// arena as the expansion left it. An expansion that allocated nothing left it
+/// unmaterialized, and no teardown can ever return an id that names no region.
+/// One that allocated left a live region the reclaim below frees, whose own
+/// teardown books the id, so the recycle reads it live and pushes nothing
+/// (docs/impl/region/model.md).
 pub fn reclaim_macro_scope(heap: &mut FiberHeap, scope: MacroScope) {
-    heap.recycle_unmaterialized_region(scope.arg);
+    heap.close_scope_arena();
+    heap.recycle_unmaterialized_region(scope.arena);
     let mut protected = heap.process_roots_snapshot();
     if let Some(root) = heap.root_region_slot() {
         protected.push(root);

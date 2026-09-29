@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+// audited: 2026-09-29
 //! Minting, lazy region creation, and allocation into a region.
 //!
 //! docs/impl/region/model.md
@@ -52,7 +52,7 @@ impl RegionStore {
 
     /// Mint a physical region id together with the receipt that can return it —
     /// the mint used where the caller may end without allocating into the id
-    /// (docs/impl/region/model.md § "Physical id recycling"). The per-call result
+    /// (docs/impl/region/model.md). The per-call result
     /// region is that case: it is minted before the callee runs, because the
     /// callee may allocate its result into it, and a callee that returns an
     /// immediate or a borrowed value allocates nothing.
@@ -65,8 +65,7 @@ impl RegionStore {
     }
 
     /// Return a minted id to the free list when the mint never materialized it —
-    /// the reserved → free exit of the id lifecycle (docs/impl/region/model.md
-    /// § "Physical id recycling"). Without it an id that no allocation touched is
+    /// the reserved → free exit of the id lifecycle (docs/impl/region/model.md). Without it an id that no allocation touched is
     /// stranded forever, and since `regions` is indexed by id, each stranded id
     /// is a table slot of resident memory that no heap gauge accounts for.
     ///
@@ -104,7 +103,7 @@ impl RegionStore {
             // real program can hold (see `MAX_PLAUSIBLE_REGION_ID`), so detonate
             // here, naming it, instead of resizing the table to hundreds of GB
             // and OOM-aborting far from the deref
-            // (docs/impl/region/generations.md § "Region generations").
+            // (docs/impl/region/generations.md).
             //
             // The message names both admissible causes rather than asserting
             // one. The expected cause is a corrupt page-header read; the other
@@ -119,7 +118,7 @@ impl RegionStore {
                  corrupt page-header read (a misidentified page base, or a \
                  stale/foreign read) was handed back as a region id, or this \
                  heap's physical ids stopped returning to the free list \
-                 (docs/impl/region/model.md § 'Physical id recycling'). Sequential \
+                 (docs/impl/region/model.md). Sequential \
                  ids and a live-region count far below this id point at the \
                  second. For the first, the in-situ detectors are the \
                  ownership-validated walk and generation check in region_of_ptr \
@@ -136,18 +135,12 @@ impl RegionStore {
                 generation: self.generations[idx],
                 store: self.store_id,
             };
-            self.regions[idx] = Some(RegionEntry {
-                pool: RegionPool::new(
-                    id,
-                    stamp,
-                    self.pool.initial_page_size(),
-                    std::sync::Arc::clone(&self.trace),
-                ),
-                reclaim: Reclaim::Counted(1),
-                owned_children: Vec::new(),
-                outgoing: FxHashMap::default(),
-                incoming: FxHashMap::default(),
-            });
+            self.regions[idx] = Some(RegionEntry::new(RegionPool::new(
+                id,
+                stamp,
+                self.pool.initial_page_size(),
+                std::sync::Arc::clone(&self.trace),
+            )));
         }
     }
 

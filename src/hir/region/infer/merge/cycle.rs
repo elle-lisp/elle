@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-29
 //! The `letrec` closure-cycle merge: one SCC of mutually-recursive closures and their
 //! prebound capture cells, collapsed onto one arena.
 //!
@@ -24,24 +24,24 @@ pub(crate) struct ClosureCycleMerge {
     pub root: Region,
     /// Every member region — the SCC closures and their cells, the root included.
     pub members: Vec<Region>,
-    /// Where the merged arena's single `DecrefRegion` fires. Normally the cycle's
-    /// **binding scope** — the non-lambda `Let`/`Letrec` that prebinds every member's
-    /// capture cell — whose scope-exit post-dominates every direct (binding-scoped) use
-    /// of the members, while a foreign capture of a member is RC-counted and outlives
-    /// the single decref. Where the letrec HANDS A MEMBER OUT (its body falls out to a
-    /// bare member value), that value leaves the scope on an uncounted read, and this is
-    /// instead the release point the last-use rule already computed for the handed-out
-    /// member — a node post-dominating the binding scope from outside it
-    /// (docs/impl/region/letrec.md § "Drop site — following a handed-out member").
-    /// Either way decided by structural ancestry, never a numeric `ord` compare
-    /// (docs/impl/region/adopt.md § The lifetime obligation the root carries).
+    /// Where the merged arena's single `DecrefRegion` fires. Normally that is the
+    /// cycle's **binding scope**, the `Begin`/`Let`/`Letrec` that prebinds every
+    /// member's capture cell. Its scope-exit post-dominates every direct use of the
+    /// members, and a foreign capture of a member is RC-counted and outlives the single
+    /// decref. Where the letrec HANDS A MEMBER OUT (its body falls out to a bare member
+    /// value), that value leaves the scope on an uncounted read. The drop site is then
+    /// the release point the last-use rule already computed for that member, a node
+    /// post-dominating the binding scope from outside it (docs/impl/region/letrec.md).
+    /// Structural ancestry decides it either way, never a numeric `ord` compare
+    /// (docs/impl/region/adopt.md).
     pub drop_site: HirId,
     /// The HirIds of the letrec body's tail calls to a **non-member** callee — the
     /// sites whose binding-scope `DecrefRegion` is stranded past a frame-replacing
-    /// `TailCall` with no member-deferral channel. The lowerer keys `deferred_release_slot`
-    /// (this cycle's `root` slot) at each so a closure callee's frame replacement is
-    /// balanced by the activation-completion deferred release (a native callee falls through to
-    /// the live scope-exit drop). Empty when the body has no tail call, or only
+    /// `TailCall` with no member-deferral channel. The lowerer keys
+    /// `deferred_release_slot` (this cycle's `root` slot) at each, so the
+    /// activation-completion deferred release balances a closure callee's frame
+    /// replacement. A native callee falls through to the live scope-exit drop. Empty
+    /// when the body has no tail call, or only
     /// member-callee tail calls (which ride `stranded_cycle_bindings` instead).
     /// Recorded in `RegionInfo::cycle_tail_release` keyed to this `root`.
     pub tail_release_sites: Vec<HirId>,
@@ -54,16 +54,16 @@ pub(crate) struct ClosureCycleMerge {
 /// Detection is two-layer, because the cell↔closure structure is not one SCC in the
 /// graphs the other passes build. The **closures** carry the cycle: a
 /// `closure ⊇ closure` capture graph keeping the `r == closure_r` self-edge that
-/// `capture_containment_edges` drops, which is what admits the one mixed shape with a
-/// cell and no mutual cycle — a self-recursive member a sibling also captures. The
+/// `capture_containment_edges` drops. That self-edge admits the one mixed shape with a
+/// cell and no mutual cycle: a self-recursive member a sibling also captures. The
 /// **cells** are paired in from each member binding's `begin_cell_regions` entry, so
 /// a member with no static-slot cell (a mutated in-lambda letrec binding, a purely
 /// self-recursive closure) never reaches the gates at all.
 ///
-/// The binding scope is whichever node prebinds the cells, which is the `letrec`
-/// for one spelling and the `begin` a run of local `defn`s sits in for the other:
-/// a sibling reads each name before its initializer has run either way, so one
-/// predicate answers for both (`BindingInner::compiled_forward_cell`).
+/// The binding scope is whichever node prebinds the cells: the `letrec` for one
+/// spelling, and the `begin` a run of local `defn`s sits in for the other. A sibling
+/// reads each name before its initializer has run either way, so one predicate
+/// answers for both (`BindingInner::compiled_forward_cell`).
 ///
 /// The gates, in the order the loop asks them:
 ///
@@ -98,13 +98,13 @@ pub(crate) fn compute_closure_cycle_merges(
     }
     let closure_regs: FxHashSet<Region> = lambda_of.keys().copied().collect();
 
-    // The frontier gate (docs/impl/region/letrec.md § The frontier gate), read as its
-    // two halves rather than the combined Shared-seed set, and NOT through
-    // `lambda_escapes_definition`: that method folds in a CONTAINMENT relation, and a
-    // `letrec` SCC's closures capture each other, so one member crossing a frontier
-    // would propagate "escaping" around the whole cycle and over-refuse a mergeable
-    // one. The FIBER half refuses outright below; the RETURN half raises
-    // `return_facet`, which the tail-shape gate further down has to fund.
+    // The frontier gate (docs/impl/region/letrec.md), read as its two halves rather
+    // than the combined Shared-seed set, and NOT through `lambda_escapes_definition`.
+    // That method folds in a CONTAINMENT relation, and a `letrec` SCC's closures
+    // capture each other. So one member crossing a frontier would propagate
+    // "escaping" around the whole cycle and over-refuse a mergeable one. The FIBER
+    // half refuses outright below; the RETURN half raises `return_facet`, which the
+    // tail-shape gate further down has to fund.
     let fiber = super::super::escape::fiber_frontier_regions(escape, info);
     let returned = super::super::escape::return_frontier_regions(
         escape,
@@ -119,7 +119,7 @@ pub(crate) fn compute_closure_cycle_merges(
 
     // closure region → its prebound capture cell (via `begin_cell_regions` and the
     // binding's source closure region); and every member region → its allocation HirId
-    // (a closure's lambda, a cell's `Begin`/`Letrec`) for the drop site and root order.
+    // (a closure's lambda, a cell's binding scope) for the drop site and root order.
     let mut cell_of: FxHashMap<Region, Region> = FxHashMap::default();
     let mut alloc_hir: FxHashMap<Region, HirId> = FxHashMap::default();
     for (&r, &lid) in &lambda_of {
@@ -199,25 +199,24 @@ pub(crate) fn compute_closure_cycle_merges(
         for &c in &scc {
             claimed.insert(c);
         }
-        // The cycle's BINDING SCOPE — the single non-lambda Let/Letrec that prebinds
+        // The cycle's BINDING SCOPE: the single `Begin`/`Let`/`Letrec` that prebinds
         // every member's capture cell (the `begin_cell_regions` key, recorded in
         // `alloc_hir` for each cell). Its scope-exit post-dominates every DIRECT
         // (binding-scoped) use of the members — they are bound there — so freeing the
-        // cycle's own allocation reference there is sound and prompt. It is strictly
-        // tighter than the allocation-site enclosing post-dominator (which excludes
-        // the binding node from its own ancestor stack, dragging a top-level cycle's
-        // drop up to the file Begin, i.e. program teardown); the binding-scope drop
-        // frees a discarded cycle promptly instead (pinned by
+        // cycle's own allocation reference there is sound and prompt. The
+        // allocation-site enclosing post-dominator excludes the binding node from its
+        // own ancestor stack, which drags a top-level cycle's drop up to the file
+        // `Begin`, that is, program teardown. The binding-scope drop is strictly tighter
+        // and frees a discarded cycle promptly (pinned by
         // `closure_cycle_discarded_release_is_prompt`, src/runtime/tests/ownership/).
-        // A FOREIGN capture of a member (a closure outside the
-        // SCC that holds it) is a cross-region reference INTO the merged arena, RC-counted
-        // — increfed when the capturing closure is built (`incref_cross_region_refs`, which
-        // also records the outgoing edge) and released by the free-time cascade walking that
-        // recorded edge when the capturer's region frees — so it
-        // survives the single decref until its capturer dies: the binding-scope drop
-        // never frees a still-referenced arena. Members spanning >1 binding scope are
-        // never a real SCC — exactly one letrec binds a mutual cycle — and refuse.
-        // Computed before the member gates below, which consult the body's tail.
+        // A FOREIGN capture of a member (a closure outside the SCC that holds it) is a
+        // cross-region reference INTO the merged arena, and RC-counted. The capturing
+        // closure's build increfs it (`incref_cross_region_refs`, which also records the
+        // outgoing edge), and the free-time cascade releases it along that edge when
+        // the capturer's region frees. So the binding-scope drop never frees a
+        // still-referenced arena. Members spanning >1 binding scope are never a real
+        // SCC — exactly one letrec binds a mutual cycle — and refuse. Computed before
+        // the member gates below, which consult the body's tail.
         let cell_scopes: FxHashSet<HirId> = scc
             .iter()
             .filter_map(|c| cell_of.get(c))
@@ -230,14 +229,14 @@ pub(crate) fn compute_closure_cycle_merges(
         let tail = scope_tail.get(&binding_scope);
         let exits_frame = tail.is_some_and(|t| t.exits_frame);
 
-        // The members the letrec HANDS OUT (docs/impl/region/letrec.md § "Drop site —
-        // following a handed-out member"). Foreign capture is RC-counted, so the
-        // letrec's own value is the one uncounted way a member leaves the binding scope
-        // — and only when the body does not leave the frame itself, where that value is
-        // the frame's own result and its mint is inside the body. An enclosing
-        // consumer's binding then names the member's region directly (a `Var`/`DerefCell`
-        // read mints nothing), which is both why the binding-scope release is too early
-        // and why counting that binding as a second holder measures the wrong thing.
+        // The members the letrec HANDS OUT (docs/impl/region/letrec.md). Foreign
+        // capture is RC-counted, so the letrec's own value is the one uncounted way a
+        // member leaves the binding scope. That holds only when the body does not leave
+        // the frame itself; if it does, the value is the frame's own result and its mint
+        // is inside the body. An enclosing consumer's binding names the member's region
+        // directly (a `Var`/`DerefCell` read mints nothing). That makes the binding-scope
+        // release too early, and makes that binding the wrong thing to count as a
+        // second holder.
         let hands_out: FxHashSet<Region> = if exits_frame {
             FxHashSet::default()
         } else {
@@ -260,7 +259,7 @@ pub(crate) fn compute_closure_cycle_merges(
         //
         // Sole-heldness is WAIVED for a handed-out member. It is a proxy for "no second
         // name reaches this member", asked because a release pinned at the binding scope
-        // cannot see past itself; where the release instead follows the value out, the
+        // cannot see past itself. Where the release instead follows the value out, the
         // adopted point is computed over every holder's last use and is the real thing.
         // Cells and members the letrec does not hand out keep the proxy.
         let mut members: Vec<Region> = Vec::with_capacity(scc.len() * 2);
@@ -287,15 +286,15 @@ pub(crate) fn compute_closure_cycle_merges(
             continue;
         }
         // Where the arena's single `DecrefRegion` fires. With nothing handed out that is
-        // the binding scope. With a member handed out it must FOLLOW THE VALUE: the
+        // the binding scope. With a member handed out it must FOLLOW THE VALUE. The
         // member's region already carries the release point the last-use rule computed
         // over every holder, so adopting it as the arena's adds no release the program
-        // did not have — it only widens what the one release covers, to members whose
-        // uses all sit inside a scope that point post-dominates. Admitted when the
-        // handed-out members agree on one point (one arena carries one release) that
-        // lies OUTSIDE the binding scope and post-dominates it; a point inside means the
-        // value never actually left, and anything else the reading cannot place keeps
-        // the Shared baseline.
+        // did not have. It only widens what the one release covers, to members whose
+        // uses all sit inside a scope that point post-dominates. The handed-out members
+        // must agree on one point, since one arena carries one release. A point OUTSIDE
+        // the binding scope must post-dominate it. A point inside means the value never
+        // actually left, and the binding scope stays the drop site. Anything else the
+        // reading cannot place keeps the Shared baseline.
         let drop_site = if hands_out.is_empty() {
             binding_scope
         } else {
@@ -326,14 +325,13 @@ pub(crate) fn compute_closure_cycle_merges(
             }
         };
         // Eligibility gate: LETREC-SUBTREE CONTAINMENT, decided structurally over the
-        // scope tree (never a bare numeric compare — region/adopt.md § The lifetime
-        // obligation the root carries). Every member's allocation site must lie within
-        // the binding-scope letrec's own subtree: a cell's site IS the letrec node, a
-        // closure's Lambda is an init descendant — so the binding scope is a structural
-        // ancestor-or-self of every member by construction, and a region reaching the
-        // SCC from OUTSIDE that subtree (a reused binding identity naming a foreign
-        // lambda) refuses the cycle. The drop site is that scope or a node
-        // post-dominating it, so it inherits the property.
+        // scope tree, never by a bare numeric compare (docs/impl/region/adopt.md). Every
+        // member's allocation site must lie within the binding scope's own subtree. A
+        // cell's site IS the binding scope, and a closure's Lambda is an init
+        // descendant, so the binding scope is an ancestor-or-self of every member by
+        // construction. A region reaching the SCC from OUTSIDE that subtree (a reused
+        // binding identity naming a foreign lambda) refuses the cycle. The drop site is
+        // that scope or a node post-dominating it, so it inherits the property.
         let contained = members.iter().all(|m| {
             alloc_hir
                 .get(m)
@@ -342,24 +340,23 @@ pub(crate) fn compute_closure_cycle_merges(
         if !contained {
             continue;
         }
-        // Tail gate: every tail call in the letrec BODY (never inside a nested
-        // lambda — those run in their own activations) must have a release channel
-        // for the merged arena's binding-scope drop, which a frame-replacing
-        // `TailCall` strands as dead code. A MEMBER callee rides the existing
-        // stranded-cycle deferral (`stranded_cycle_bindings` → `tail_callee_defers_release`,
-        // `lir/lower/binding.rs`). A NON-member callee rides the explicit
-        // `deferred_release_slot` (recorded below) — admissible only when the callee is
-        // resolvable (a site to key the deferred release at) AND nothing collides with
-        // that deferred release. What collides is a cycle member flowing into the tail
-        // call BY-MOVE (`(g od)`): the new activation owns the member as a parameter
-        // and releases it, decrefing the arena a SECOND time (a double-free), where a
-        // member stored into a fresh aggregate then passed is RC-counted and (after
-        // ANF) a temp argument, so it is admitted. That collision needs a callee which
-        // REPLACES the frame, so a callee `may_replace_frame` reads out — an immutable
-        // binding whose compile-time constant is a native — carries the members in: it
-        // borrows its arguments, and the frame it keeps runs the live binding-scope
-        // drop. Any tail call failing both channels refuses the cycle to Shared (the
-        // always-legal baseline).
+        // Tail gate: every tail call in the letrec BODY must have a release channel
+        // for the merged arena's binding-scope drop, which a frame-replacing `TailCall`
+        // strands as dead code. A tail call inside a nested lambda runs in its own
+        // activation and is not asked. A MEMBER callee rides the existing stranded-cycle
+        // deferral (`stranded_cycle_bindings` → `tail_callee_defers_release`, in the
+        // lowerer). A NON-member callee rides the explicit `deferred_release_slot`
+        // (recorded below). That is admissible only when the callee is resolvable (a site
+        // to key the deferred release at) AND nothing collides with that deferred
+        // release. What collides is a cycle member flowing into the tail call BY-MOVE
+        // (`(g od)`): the new activation owns the member as a parameter and releases
+        // it, decrefing the arena a SECOND time. A member stored into a fresh aggregate
+        // and then passed is RC-counted, and (after ANF) a temp argument, so it is
+        // admitted. The collision needs a callee that REPLACES the frame. A callee
+        // `may_replace_frame` rules out — an immutable binding whose compile-time
+        // constant is a native — may carry the members in: it borrows its arguments,
+        // and the frame it keeps runs the live binding-scope drop. Any tail call failing
+        // both channels refuses the cycle to Shared (the always-legal baseline).
         let sites = tail.map(|t| &t.sites);
         let is_member = |b: crate::hir::Binding| -> bool {
             info.binding_source_regions
@@ -382,18 +379,17 @@ pub(crate) fn compute_closure_cycle_merges(
         if strands {
             continue;
         }
-        // The RETURN-FUNDED admission's ordering requirement (docs/impl/region/letrec.md
-        // § The frontier gate). A returned member's arena may be released only AFTER the
-        // mint that funds the caller's reference, and one structural fact settles that
-        // for every channel at once: the letrec BODY must hand the value over itself —
-        // every tail exit of it leaves the frame. A `Return` mints where it stands,
-        // inside the body, ahead of the binding-scope `DecrefRegion` the lowerer emits
-        // at the `Letrec` node; a tail call to a closure replaces the frame, so that
-        // drop is dead and the release rides a deferral `trampoline_loop` runs at the
-        // recursion's normal completion, after the callee's `Return`; a tail call to a
-        // native keeps the frame but mints at the call site (the post-`TailCall`
-        // fall-through retain, or `lower_return`'s where ANF named the result), also
-        // inside the body.
+        // The RETURN-FUNDED admission's ordering requirement (docs/impl/region/letrec.md).
+        // A returned member's arena may be released only AFTER the mint that funds the
+        // caller's reference. One structural fact settles that for every channel at
+        // once: the letrec BODY must hand the value over itself, so every tail exit of
+        // it leaves the frame. A `Return` mints where it stands, inside the body, ahead
+        // of the `DecrefRegion` the lowerer emits at the binding scope. A tail call to a
+        // closure replaces the frame, so that drop is dead, and the release rides a
+        // deferral `trampoline_loop` runs at the recursion's normal completion, after
+        // the callee's `Return`. A tail call to a native keeps the frame but mints at the
+        // call site (the post-`TailCall` fall-through retain, or `lower_return`'s where
+        // ANF named the result), also inside the body.
         //
         // A body that falls out to a bare VALUE hands the letrec's value to an
         // ENCLOSING consumer instead, so no mint stands inside the body. The order then
@@ -416,10 +412,10 @@ pub(crate) fn compute_closure_cycle_merges(
                     .collect()
             })
             .unwrap_or_default();
-        // Numeric shadow of the structural ancestry: the binding scope has the highest
+        // Numeric shadow of the structural ancestry. The binding scope has the highest
         // post-order index in its subtree, so it dominates every member's allocation (a
-        // cell's alloc HirId IS that node; a closure's is a strict descendant), and a
-        // drop site that post-dominates the scope from outside sequences after it again.
+        // cell's alloc HirId IS that node; a closure's is a strict descendant). A drop
+        // site that post-dominates the scope from outside sequences after it again.
         // A future drift to a body-internal drop point detonates here in debug rather
         // than as a guardfree stale deref.
         #[cfg(debug_assertions)]
@@ -453,11 +449,15 @@ pub(crate) fn compute_closure_cycle_merges(
     out
 }
 
-/// Collect each `Lambda`'s closure region (`alloc_region`) → its HirId.
+/// Collect each `Lambda`'s closure region (`alloc_region`) → its HirId. A closure
+/// joined into a container's region is left out: no merge may release a region
+/// every joining site shares a count on (docs/impl/region/colocation.md).
 fn collect_closures(hir: &Hir, info: &RegionInfo, out: &mut FxHashMap<Region, HirId>) {
     if matches!(hir.kind, HirKind::Lambda { .. }) {
         if let Some(&r) = info.alloc_region.get(&hir.id) {
-            out.insert(r, hir.id);
+            if !info.join_regions.contains(&r) {
+                out.insert(r, hir.id);
+            }
         }
     }
     hir.for_each_child(|c| collect_closures(c, info, out));
@@ -467,7 +467,7 @@ fn collect_closures(hir: &Hir, info: &RegionInfo, out: &mut FxHashMap<Region, Hi
 /// `r == closure_r` self-edge and restricting to closure regions. Mirrors
 /// `capture_containment_edges`' live-region filter but admits the self-edge that scan
 /// drops. The self-edge is redundant for a genuine mutual cycle (the sibling edges
-/// already close the SCC); it matters only for the mixed shape — a
+/// already close the SCC). It matters only for the mixed shape: a
 /// self-recursive member a sibling ALSO captures, a size-1 SCC whose retained
 /// (sibling-owned) cell the merge collapses via this self-edge
 /// (`compute_closure_cycle_merges`).

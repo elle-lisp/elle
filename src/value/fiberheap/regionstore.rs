@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-29
 //! Region table: maps a physical region id → RegionEntry (RegionPool + RC).
 //!
 //! `RegionStore` lives on `FiberHeap` and owns the `PagePool` (per-thread
@@ -13,9 +13,9 @@
 //!
 //! ## Cascading frees
 //!
-//! When a region is freed, mutable collections in it may reference objects
-//! in other regions. `teardown_and_cascade` walks collection contents and
-//! decrefs each referenced region. This is a worklist, not recursion.
+//! When a region is freed, its recorded outgoing edges name the regions its
+//! contents reference, and `free_region_set` decrefs each of them. This is a
+//! worklist, not recursion.
 //!
 //! docs/impl/region/ownership.md
 //! docs/impl/region/model.md
@@ -28,15 +28,14 @@ use crate::value::region_slice::RegionSlice;
 use crate::value::Value;
 use rustc_hash::FxHashMap;
 
-/// How a live region is reclaimed — a **typestate** (docs/impl/region/ownership.md
-/// § "The runtime: a reclamation typestate"), not an `(rc, owner)` pair. A region
-/// is reclaimed *exactly one way*, and the two ways are mutually exclusive
-/// variants, so **owned-and-RC'd** — a region carrying both a live count and an
-/// owner, where the count could independently free a region the owner will also
-/// subtree-drop (a double-free) — is unrepresentable by construction. `adopt_region`
-/// *moves* a region from `Counted` into `Owned`, consuming the count; once `Owned`
-/// there is no `u32` left to decrement, so a stray decref is a structural no-op, not
-/// a guard the decref path must remember to apply.
+/// How a live region is reclaimed — a **typestate** (docs/impl/region/ownership.md),
+/// not an `(rc, owner)` pair. A region is reclaimed *exactly one way*, and the
+/// two ways are mutually exclusive variants, so **owned-and-RC'd** — a region
+/// carrying both a live count and an owner, where the count could independently free
+/// a region the owner will also subtree-drop (a double-free) — is unrepresentable by
+/// construction. `adopt_region` *moves* a region from `Counted` into `Owned`, consuming
+/// the count; once `Owned` there is no `u32` left to decrement, so a stray decref is a
+/// structural no-op, not a guard the decref path must remember to apply.
 enum Reclaim {
     /// Shared / baseline: a cross-region reference count, starting at 1 (the scope
     /// ref). `decref` frees the region when it reaches 0.
@@ -59,34 +58,49 @@ struct RegionEntry {
     /// node of a deep subtree is itself `Owned` *and* has `owned_children`.
     owned_children: Vec<RuntimeRegion>,
     /// Outgoing cross-region reference edges from this region: `target → count`
-    /// (docs/impl/region/ownership.md § "The outgoing edge table"). The *content*
-    /// edges — a `Value` in this region's heap objects pointing into another
-    /// region — recorded at creation (the alloc funnel + the mutable-store seam +
-    /// the fiber terminal-signal funnel) so reclamation walks this table
-    /// (O(edges)) instead of scanning page contents. **Universal**: present on
-    /// every region, `Owned` and `Counted` alike (an Owned region carries it for
-    /// its cascade-on-drop but has no count). Mirrors exactly what
-    /// `find_object_cross_refs` would find — same self/reserved-id filter — which
-    /// the `#[cfg(debug_assertions)]` equivalence oracle in `free_region_set`
-    /// asserts at every free. Distinct from the incoming RC (`Reclaim::Counted`),
-    /// which also counts owner/transfer/borrow references the cascade never walks.
+    /// (docs/impl/region/ownership.md). The *content* edges — a `Value` in this
+    /// region's heap objects pointing into another region — recorded at creation
+    /// (the alloc funnel + the mutable-store seam + the fiber terminal-signal
+    /// funnel) so reclamation walks this table (O(edges)) instead of scanning page
+    /// contents. **Universal**: present on every region, `Owned` and `Counted` alike
+    /// (an Owned region carries it for its cascade-on-drop but has no count). Mirrors
+    /// exactly what `find_object_cross_refs` would find — same self/reserved-id filter
+    /// — which the `#[cfg(debug_assertions)]` equivalence oracle in `free_region_set`
+    /// asserts at every free. Distinct from the incoming RC (`Reclaim::Counted`), which
+    /// also counts owner/transfer/borrow references the cascade never walks.
     outgoing: FxHashMap<RuntimeRegion, u32>,
-    /// Incoming content edges: `source → count`, the exact mirror of every
-    /// source's `outgoing` entry for this region (docs/impl/region/ownership.md
-    /// § "The incoming edge table and the external-reference rescue"). Maintained
-    /// in lockstep by `record_outgoing`/`unrecord_outgoing` and by the subtree
-    /// drop's frontier walk (a dying source's footprint is removed from each live
-    /// target), so for a live region it lists precisely the live-or-currently-
-    /// dying regions whose heap contents reference it. This is what lets a
-    /// subtree drop enforce external uniqueness at the drop itself: a member
-    /// still referenced from outside the dying set is rescued to `Counted`
-    /// instead of torn down under the live reference. Content edges only — the
-    /// RC count's transfer/borrow references are balanced by compiler-emitted
-    /// decrefs and are not mirrored here.
+    /// Incoming content edges: `source → count`, the exact mirror of every source's
+    /// `outgoing` entry for this region (docs/impl/region/ownership.md). Maintained in
+    /// lockstep by `record_outgoing`/`unrecord_outgoing` and by the subtree drop's
+    /// frontier walk (a dying source's footprint is removed from each live target), so
+    /// for a live region it lists precisely the live-or-currently-dying regions whose
+    /// heap contents reference it. This is what lets a subtree drop enforce external
+    /// uniqueness at the drop itself: a member still referenced from outside the dying
+    /// set is rescued to `Counted` instead of torn down under the live reference. Content
+    /// edges only — the RC count's transfer/borrow references are balanced by
+    /// compiler-emitted decrefs and are not mirrored here.
     incoming: FxHashMap<RuntimeRegion, u32>,
+    /// Whether a site joined this region instead of minting its own
+    /// (docs/impl/region/colocation.md). The count then belongs to every site that
+    /// joined, so no adopt may take it: [`RegionStore::adopt_region`] leaves a
+    /// joined region `Counted`.
+    joined: bool,
 }
 
 impl RegionEntry {
+    /// A fresh `Counted(1)` entry over `pool`: the birth reference, no owner, no
+    /// edges.
+    fn new(pool: RegionPool) -> Self {
+        RegionEntry {
+            pool,
+            reclaim: Reclaim::Counted(1),
+            owned_children: Vec::new(),
+            outgoing: FxHashMap::default(),
+            incoming: FxHashMap::default(),
+            joined: false,
+        }
+    }
+
     /// The region's independent reference count: the live count when `Counted`, and
     /// `0` when `Owned` — an owned region carries no count of its own (it is
     /// reclaimed by its owner's subtree drop). This is the single read path for RC,
@@ -100,8 +114,7 @@ impl RegionEntry {
 }
 
 /// A mint receipt: the physical id a mint handed out, plus the generation that
-/// id carried at that moment (docs/impl/region/model.md § "Physical id
-/// recycling").
+/// id carried at that moment (docs/impl/region/model.md).
 ///
 /// It is the only key [`RegionStore::recycle_unmaterialized`] accepts, and its
 /// fields are private to this module, so a caller cannot ask the store to
@@ -125,6 +138,59 @@ impl RegionMint {
     }
 }
 
+/// One reference a join took on a region that already existed
+/// (docs/impl/region/colocation.md). The site holding it gives it back where a
+/// fresh mint's reference would be released.
+///
+/// Only the heap builds one, from a join the store admitted, so a holder cannot
+/// name a reference no join took.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct JoinedRegion {
+    region: RuntimeRegion,
+}
+
+impl JoinedRegion {
+    /// Wrap the reference a join the store admitted just took.
+    #[inline]
+    pub(in crate::value::fiberheap) fn taken(region: RuntimeRegion) -> Self {
+        JoinedRegion { region }
+    }
+
+    /// The region the join took its reference on.
+    #[inline]
+    pub(crate) fn region(self) -> RuntimeRegion {
+        self.region
+    }
+}
+
+/// The region a call slot resolved to: a fresh mint, which comes back to the
+/// free list if the call allocates nothing, or a join, which the call gives
+/// back if its result does not live there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CallRegion {
+    Minted(RegionMint),
+    Joined(JoinedRegion),
+}
+
+impl CallRegion {
+    /// The region the call allocates into.
+    #[inline]
+    pub(crate) fn region(self) -> RuntimeRegion {
+        match self {
+            CallRegion::Minted(m) => m.region(),
+            CallRegion::Joined(j) => j.region(),
+        }
+    }
+
+    /// Whether the call allocates into a region it joined. Only the declaration
+    /// oracle, a debug-build check, asks.
+    #[cfg(debug_assertions)]
+    #[inline]
+    pub(crate) fn is_joined(self) -> bool {
+        matches!(self, CallRegion::Joined(_))
+    }
+}
+
 /// Region table on FiberHeap.
 pub(crate) struct RegionStore {
     /// Indexed by physical region id (mortal `RuntimeRegion`s, id ≥ 2).
@@ -136,24 +202,22 @@ pub(crate) struct RegionStore {
     /// unassigned/immediate sentinel and id 1 is reserved, so minting starts at 2.
     next_physical: u32,
     /// Physical ids available for reissue. Two paths return an id here, and
-    /// between them every minted id comes back (docs/impl/region/model.md
-    /// § "Physical id recycling"): `free_runtime_region_pages`, when a region's
-    /// pages are torn down, and `recycle_unmaterialized`, when a mint ends
-    /// without ever allocating into its id. Reusing them keeps the `regions` Vec
-    /// bounded by the max *concurrently-live* region count even though
-    /// allocation mints a fresh region per execution.
+    /// between them every minted id comes back (docs/impl/region/model.md):
+    /// `free_runtime_region_pages`, when a region's pages are torn down, and
+    /// `recycle_unmaterialized`, when a mint ends without ever allocating into its
+    /// id. Reusing them keeps the `regions` Vec bounded by the max *concurrently-live*
+    /// region count even though allocation mints a fresh region per execution.
     ///
-    /// An id appears here at most once. A duplicate would be handed to two mints
-    /// before either materialized — `new_runtime_region` rejects only an id that
-    /// is already *live* — aliasing two logical regions onto one physical id.
+    /// An id appears here at most once. A duplicate would be handed to two mints before
+    /// either materialized — `new_runtime_region` rejects only an id that is already
+    /// *live* — aliasing two logical regions onto one physical id.
     free_physical: Vec<u32>,
-    /// Per-physical-id generation counter (docs/impl/region/generations.md § "Region
-    /// generations"), indexed like `regions`. Bumped on every path that
-    /// returns an id's pages (RC-zero free, wholesale teardown); a recycled
-    /// id mints its next region at the bumped generation. Each claimed page
-    /// is stamped with its region's generation, and debug-build `region_of`
-    /// compares stamp to counter — a mismatch is a stale deref, caught at
-    /// the deref site instead of surfacing as a wrong read later.
+    /// Per-physical-id generation counter (docs/impl/region/generations.md), indexed
+    /// like `regions`. Bumped on every path that returns an id's pages (RC-zero
+    /// free, wholesale teardown); a recycled id mints its next region at the bumped
+    /// generation. Each claimed page is stamped with its region's generation, and
+    /// debug-build `region_of` compares stamp to counter — a mismatch is a stale deref,
+    /// caught at the deref site instead of surfacing as a wrong read later.
     generations: Vec<u32>,
     /// Process-unique identity of this store, stamped into every page header
     /// it claims. Scopes the generation check: generations from two
@@ -161,25 +225,23 @@ pub(crate) struct RegionStore {
     /// store's page (worker thread reading a parent-heap value) is never
     /// generation-compared.
     store_id: u32,
-    /// Active mint log for a *closed allocation scope* (macro expansion —
-    /// docs/impl/region/rules.md § "Macro expansion — a closed allocation
-    /// scope"). When `Some`, every id `new_runtime_region` mints is recorded
-    /// with the generation it is about to be stamped at, so the scope's
-    /// reclaim pass can balance each surviving region's unexplained references
-    /// — and a recycled id (freed-and-reminted mid-scope) is distinguished
-    /// from its earlier incarnation by generation. `None` outside such a scope
-    /// (the common case: one branch on the mint path).
+    /// Active mint log for a *closed allocation scope*, a macro expansion
+    /// (docs/impl/region/macroscope.md). When `Some`, every id `new_runtime_region`
+    /// mints is recorded with the generation it is about to be stamped at, so the scope's
+    /// reclaim pass can balance each surviving region's unexplained references — and
+    /// a recycled id (freed-and-reminted mid-scope) is distinguished from its earlier
+    /// incarnation by generation. `None` outside such a scope (the common case: one
+    /// branch on the mint path).
     mint_log: Option<Vec<(u32, u32)>>,
     /// Where each id was last minted, keyed by physical region id — the
     /// `--trace=arena` attribution `arena/dump` prints beside a region's tags
-    /// (docs/impl/region/diagnostics.md § "Naming the code that minted a
-    /// region"). A tag census says a retained region holds a string; this says
-    /// which function made it.
+    /// (docs/impl/region/diagnostics.md). A tag census says a retained region holds a
+    /// string; this says which function made it.
     ///
-    /// Empty unless that trace bit is set: `note_mint_site` is the only writer
-    /// and its callers gate on the bit, so an untraced run pays one `is_empty`
-    /// read at dump time and nothing at mint time. Bounded by the id
-    /// high-water mark, since a recycled id overwrites its entry.
+    /// Empty unless that trace bit is set: `note_mint_site` is the only writer and its
+    /// callers gate on the bit, so an untraced run pays one `is_empty` read at dump time
+    /// and nothing at mint time. Bounded by the id high-water mark, since a recycled id
+    /// overwrites its entry.
     mint_sites: std::collections::HashMap<u32, std::rc::Rc<str>>,
     /// This instance's trace cell (a clone of the heap's), handed to each
     /// `RegionPool` at creation so the `PAGES` page-claim gate reads its own
@@ -202,6 +264,7 @@ mod alloc;
 mod free;
 mod hydrate;
 mod introspect;
+mod join;
 mod mintscope;
 mod ownership;
 mod pointer;
@@ -212,7 +275,7 @@ mod refcount;
 static NEXT_STORE_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
 
 /// Upper bound on a physically-plausible region id, the `ensure_raw` backstop's
-/// tripwire (docs/impl/region/generations.md § "Region generations"). The region
+/// tripwire (docs/impl/region/generations.md). The region
 /// table is indexed by id and bounded by the max *concurrently-live* regions —
 /// every minted id returns to `free_physical`, and static-slot ids are bounded by
 /// the compiler's region-slot count — so a real id stays far below this. An id

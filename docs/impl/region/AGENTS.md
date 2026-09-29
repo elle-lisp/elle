@@ -11,6 +11,7 @@ Up: [..](../AGENTS.md)
 - [bindings.md](bindings.md) — **Reassigned mutable bindings are 1-slot containers** Implementation-facing: how the solver and lowerer handle a binding that is reassigned over its lifetime.
 - [cells.md](cells.md) — **Capture cells** How a captured binding's cell is realized, what a read through one borrows, and where the cell's own release lands.
 - [clique.md](clique.md) — **What a region-effect declaration buys** What the solver derives from a declared `RegionEffect`.
+- [colocation.md](colocation.md) — **Colocation** Which values share a region, the one rule that keeps sharing sound, and the patterns that apply it.
 - [compensate.md](compensate.md) — **Per-arm compensation** The releases a branch adds one per arm, each funded by a retain on its own node.
 - [ctx.md](ctx.md) — **NativeCtx — explicit allocation: every value names its region and heap** Implementation-facing.
 - [diagnostics.md](diagnostics.md) — **Region diagnostics and validation** Implementation-facing: the instruments that tell correct from broken, and the test scaffolding that keeps the region rules honest.
@@ -18,6 +19,7 @@ Up: [..](../AGENTS.md)
 - [errors.md](errors.md) — **Rich errors — one region-coherent struct routine + `rich_error!`** Implementation-facing.
 - [generations.md](generations.md) — **Region generations: stale derefs detonate in debug builds** The per-region generation counter and page stamps that turn a stale region deref into a debug-build panic at the deref site.
 - [letrec.md](letrec.md) — **The letrec closure-cycle merge** Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
+- [macroscope.md](macroscope.md) — **Macro expansion — a closed allocation scope** How a macro expansion frees every region its transformer made, by balancing references the transformer never released.
 - [mechanism.md](mechanism.md) — **The mechanism** The RC-instruction machinery the [rules](rules.md) constrain: how each instruction names its region, and when a static slot may stand in.
 - [merging.md](merging.md) — **Merging** Merging puts two solver regions in one physical region, freed by one `DecrefRegion`, when the two values share a lifetime.
 - [model.md](model.md) — **Region representation — id-spaces, per-execution model, layout** Implementation-facing.

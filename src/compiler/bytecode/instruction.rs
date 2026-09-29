@@ -1,3 +1,8 @@
+// audited: 2026-09-29
+//! The bytecode opcode set, and the checked decode from an opcode byte.
+//!
+//! docs/impl/bytecode.md
+
 /// Bytecode instruction set
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -30,10 +35,12 @@ pub enum Instruction {
     /// offset 0 = top, offset 1 = second from top, etc.
     DupN,
 
-    /// Function call (arg_count)
+    /// Function call. Operands: u16 arg count, u32 result region slot.
     Call,
 
-    /// Tail call (arg_count)
+    /// Tail call. Operands: u16 arg count, u32 result region slot, u8
+    /// defer-callee-release flag, u32 deferred-release slot (`0` for none), then
+    /// a u8 count of borrowed-argument slots and one u16 slot each.
     TailCall,
 
     /// Return from function
@@ -48,10 +55,10 @@ pub enum Instruction {
     /// Jump if true (offset i32)
     JumpIfTrue,
 
-    /// Create closure (const_idx, num_upvalues)
+    /// Create closure. Operands: u32 region slot, u16 const_idx, u16 num_captures.
     MakeClosure,
 
-    /// Pair cell construction
+    /// Pair cell construction. Operand: u32 region slot.
     Pair,
 
     /// First operation
@@ -60,16 +67,18 @@ pub enum Instruction {
     /// Rest operation
     Rest,
 
-    /// Array construction (size)
+    /// @array construction. Operands: u32 region slot, u8 element count.
     MakeArrayMut,
 
-    /// Array ref (index)
+    /// @array ref. No operands. Pops the index, pops the @array, pushes the
+    /// element.
     ArrayMutRef,
 
-    /// Array set (index)
+    /// @array set. No operands. Pops the value, the index and the @array,
+    /// checks their types, and pushes the value. It stores nothing.
     ArrayMutSet,
 
-    /// Integer-only arithmetic (`docs/impl/bytecode.md` § Arithmetic)
+    /// Integer-only arithmetic (docs/impl/bytecode.md)
     AddInt,
     SubInt,
     MulInt,
@@ -114,8 +123,9 @@ pub enum Instruction {
     True,
     False,
 
-    /// Wrap value in a capture cell for shared mutable access (Phase 4)
-    /// Pops value from stack, wraps it in a capture cell, pushes the cell
+    /// Wrap a value in a capture cell for shared mutable access. Operands: u32
+    /// region slot, u8 mutated flag, u64 name symbol. Pops the value, wraps it
+    /// in a capture cell, and pushes the cell.
     MakeCapture,
 
     /// Unwrap a capture cell to get its value
@@ -125,7 +135,7 @@ pub enum Instruction {
     UpdateCapture,
 
     /// Emit a signal (suspends execution). Operand: signal bits
-    /// (docs/impl/bytecode.md § "Signal-bits operands").
+    /// (docs/impl/bytecode.md).
     /// `(emit :yield val)` emits SIG_YIELD; `(emit :io val)` emits SIG_IO.
     Emit,
 
@@ -186,9 +196,11 @@ pub enum Instruction {
     /// Pops value, pops array, pushes array with value appended.
     ArrayMutPush,
     /// Call function with elements of an array as arguments (for splice).
+    /// Operands: u32 result region slot, u32 args region slot.
     /// Pops args array, pops function, calls function with array elements.
     CallArrayMut,
     /// Tail call with elements of an array as arguments (for splice).
+    /// Operands: u32 result region slot, u32 args region slot.
     /// Pops args array, pops function, tail calls with array elements.
     TailCallArrayMut,
 
@@ -208,8 +220,7 @@ pub enum Instruction {
     IsSetMut,
 
     /// Check that a closure's signal satisfies a bound.
-    /// Operand: `allowed_bits`, signal bits
-    /// (docs/impl/bytecode.md § "Signal-bits operands").
+    /// Operand: `allowed_bits`, signal bits (docs/impl/bytecode.md).
     /// Pops the value from the stack. If it's a closure whose
     /// `signal.bits & !allowed_bits != 0`, signals `:error`.
     /// Non-closures pass silently.
@@ -225,7 +236,7 @@ pub enum Instruction {
     /// Convert float → int (truncation). Pops value, pushes int. Identity on ints.
     FloatToInt,
 
-    // === New intrinsic opcodes ===
+    // === Intrinsic opcodes ===
     /// Not-equal comparison
     Ne,
     /// Bitwise complement
@@ -264,16 +275,18 @@ pub enum Instruction {
     IntrPush,
     /// @array pop (pops @array, pushes popped value)
     IntrPop,
-    /// Mutable → immutable copy
+    /// Mutable → immutable copy. Operand: u32 region slot.
     IntrFreeze,
-    /// Immutable → mutable copy
+    /// Immutable → mutable copy. Operand: u32 region slot.
     IntrThaw,
     /// Bitwise tag+payload equality (pops b, pops a, pushes bool)
     Identical,
 
-    /// Arity-checked function call (arg_count). Compiler verified arity.
+    /// Arity-checked function call, with the operands of `Call`. Compiler
+    /// verified arity.
     CallChecked,
-    /// Arity-checked tail call (arg_count). Compiler verified arity.
+    /// Arity-checked tail call, with the operands of `TailCall`. Compiler
+    /// verified arity.
     TailCallChecked,
 
     /// Append string to @string (pops value, pops string, pushes string)
@@ -281,25 +294,26 @@ pub enum Instruction {
     /// Append byte to @bytes (pops value, pops bytes, pushes bytes)
     IntrBytesPush,
 
-    /// Increment the reference count of a region.
-    /// Operand: u32 region_id.
-    /// Emitted when a value in region A is stored into a structure in
-    /// region B — region A must outlive region B's free point.
+    /// Increment the reference count of a region named by its slot.
+    /// Operand: u32 region slot, resolved through the current activation's
+    /// region map; an unmapped slot is skipped. Emitted where the lowerer names
+    /// the retained region by its static slot: a store of a value in region A
+    /// into a structure in region B, a cross-region capture, a coalesced retain.
     IncrefRegion,
 
-    /// Decrement the reference count of a region.
-    /// Operand: u32 region_id.
+    /// Decrement the reference count of a region named by its slot.
+    /// Operand: u32 region slot, resolved and cleared through the current
+    /// activation's region map; an unmapped slot is skipped.
     /// Decrements RC; when RC hits 0, the region's pages are freed and
     /// cascade decrefs fire for any cross-region references found in
-    /// the region's contents. The sole region-demise bytecode.
+    /// the region's contents.
     DecrefRegion,
 
     /// Decrement the reference count of the region of the value on
     /// top of the operand stack. No operand. Pops the value and
-    /// calls `region_of` + `decref_region` at runtime. Used by the
-    /// caller at a Call-result region's decref_point when the compile-time
-    /// region ID doesn't match the runtime region of the actual
-    /// returned value.
+    /// calls `result_region_of` + `decref_region` at runtime; an immediate is
+    /// skipped. The lowerer emits it where it releases a region by the value
+    /// rather than by the slot, such as a call result's decref_point.
     DecrefValueRegion,
 
     /// Decrement the reference count of the region of the value on top of
@@ -308,17 +322,18 @@ pub enum Instruction {
     /// see through a `CaptureCell` wrapper — it frees the CELL's own region.
     /// Emitted at a captured (env-allocated) binding's `decref_point` to
     /// release the per-value env cell `populate_env` minted for it (the
-    /// owned-binding release for capture cells; docs/impl/region/rules.md Rule 8).
+    /// owned-binding release for capture cells; docs/impl/region/rules.md).
     /// `DecrefValueRegion` would unwrap to the inner value's region instead —
     /// freeing a caller-owned region and leaking the cell.
     DecrefCellRegion,
 
     /// Increment the reference count of the region of the value on
-    /// top of the operand stack. No operand. Pops the value and calls
-    /// `region_of` + `incref_region` at runtime (skipping region 0).
-    /// The mirror of `DecrefValueRegion`; emitted at a function's tail
-    /// value so the callee hands the caller one owning reference to the
-    /// result's runtime region.
+    /// top of the operand stack. No operand. Peeks the value, leaving it on the
+    /// stack, and increments the region `result_region_of` names; an immediate
+    /// is skipped. The mirror of `DecrefValueRegion`. The lowerer emits it at a
+    /// function's tail value, so the callee hands the caller one owning
+    /// reference to the result's runtime region, and at any retain it names by
+    /// the value rather than by the slot.
     IncrefValueRegion,
 
     /// Adopt the region of one value into another's Owned subtree (the
@@ -326,8 +341,9 @@ pub enum Instruction {
     /// (top) then `parent` — resolves each to its runtime region via
     /// `result_region_of`, and calls `RegionStore::adopt_region(parent_region,
     /// child_region)`, freezing the child's RC so it is reclaimed only by the
-    /// parent's subtree drop (docs/impl/region/ownership.md § "Adoption and subtree
-    /// drop"). Emitted by the ownership forest; realized on the
+    /// parent's subtree drop (docs/impl/region/ownership.md). A joined region
+    /// stays `Counted` (docs/impl/region/colocation.md). Emitted by the
+    /// ownership forest; realized on the
     /// interpreter and the JIT (`elle_jit_adopt_region`).
     AdoptRegion,
 
@@ -338,15 +354,15 @@ pub enum Instruction {
     /// `CaptureCell` operand is NOT unwrapped — its OWN region is used), and calls
     /// `RegionStore::adopt_region`. This is the only ownership cut that can name a
     /// capture cell's own region, letting the forest reclaim a cell↔closure clique
-    /// as a unit (docs/impl/region/adopt.md § "The capture adopt"). Emitted by the
+    /// as a unit (docs/impl/region/adopt.md). Emitted by the
     /// ownership forest; realized on the interpreter (`handle_adopt_cell_region`)
     /// and the JIT (`elle_jit_adopt_cell_region`).
     AdoptCellRegion,
 
     /// Debug-only region-coalescing oracle (the `AssertRegionMatches` LIR
     /// instruction). Operand: u32 region slot. Peeks the value on top of the
-    /// operand stack (does NOT pop — it is the return value), resolves the slot
-    /// through the current `activation_region_map`, and under `debug_assertions`
+    /// operand stack (does NOT pop — the next instruction reads it), resolves the
+    /// slot through the current activation's region map, and under `debug_assertions`
     /// panics if the slot's physical region differs from `region_of(value)`. In
     /// release builds it reads the slot operand and does nothing; the lowerer
     /// emits it only under `debug_assertions`, so release bytecode never carries
@@ -376,14 +392,24 @@ pub enum Instruction {
     /// region via `result_region_of`, lazily mints the activation's pages-less
     /// owner node, and calls `RegionStore::adopt_region(node, child_region)` —
     /// freezing the child's RC so it is reclaimed only by the node's subtree
-    /// drop at the activation's normal completion (docs/impl/region/owner.md
-    /// § "Owner nodes — an activation as a forest root"). An immediate child
+    /// drop at the activation's normal completion (docs/impl/region/owner.md).
+    /// A child region that is already `Owned` keeps its owner. An immediate child
     /// (no region) adopts nothing and mints no node. Realized on the
     /// interpreter and the JIT (`elle_jit_adopt_into_activation`).
     AdoptIntoActivation,
 
+    /// Record a pending join for the next value mint of a region slot
+    /// (docs/impl/region/colocation.md). Operand: u32 region slot. Pops the
+    /// partner value and records its runtime region and generation on the fiber;
+    /// an immediate partner records nothing. The next allocation-slot or
+    /// call-slot mint takes the record. A mint of that slot joins the partner's
+    /// region when the region is still live and `Counted`, and a mint of another
+    /// slot drops the record. Realized on the interpreter and the JIT
+    /// (`elle_jit_join_region`).
+    JoinRegion,
+
     /// Materialize a heap literal — a string, or quoted compound data (list /
-    /// array / nested structure) — into a fresh per-activation region. Operands:
+    /// array / nested structure) — into the region its slot resolves to. Operands:
     /// u32 region slot, u32 template byte length, then that many bytes encoding a
     /// recursive `ConstTemplate` inline in the instruction stream (the immutable
     /// template — plain data kept in the reclaimable bytecode). Resolves the slot

@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Register and slot allocation, instruction emission, and block management for
 //! the LIR lowerer.
 //!
@@ -7,7 +7,7 @@
 use super::*;
 
 /// Short, stable name for an allocating `LirInstr` variant — used only
-/// in the `--trace=rc:emit` lines to disambiguate which kind of alloc
+/// in the `[trace:rc:emit]` lines to disambiguate which kind of alloc
 /// was stamped on a phantom region's HirId.
 fn instr_kind_name(instr: &LirInstr) -> &'static str {
     match instr {
@@ -62,9 +62,7 @@ impl<'a> Lowerer<'a> {
             // local_index is relative to locally-defined vars (after param locals)
             let local_index = self.current_func.num_locals - self.num_local_params;
             // Record EVERY env-celled local, at any index. The mask is unbounded
-            // (`CaptureMask`), so a celled slot >= 64 is named precisely
-            // instead of relying on a conservative >=64 fallback that also
-            // celled — and leaked — uncaptured high locals.
+            // (`CaptureMask`), so a celled slot >= 64 is named precisely.
             if env_celled {
                 self.current_func
                     .capture_locals_mask
@@ -80,9 +78,10 @@ impl<'a> Lowerer<'a> {
         };
         self.current_func.num_locals += 1;
         self.binding_to_slot.insert(binding, slot);
-        // Track the slot of a fn-local reassigned mutable binding so
-        // `emit_decrefs_for` never nil-stamps it mid-scope (the reassigned-loop-
-        // counter clobber — see `reassigned_local_slots`). A `false` env_celled
+        // Track the slot of a fn-local reassigned mutable binding in
+        // `reassigned_local_slots`, so `emit_decrefs_for` never nil-stamps it
+        // mid-scope: the slot holds the binding's own live value for its whole
+        // scope. A `false` env_celled
         // binding takes a plain stack slot; a captured one is a cell released by
         // `DecrefCellRegion`, not the value route, so it need not be tracked.
         if !env_celled
@@ -120,9 +119,9 @@ impl<'a> Lowerer<'a> {
         let slot = self.allocate_slot_routed(binding, false);
         self.compiled_cell_bindings.insert(binding);
         // One region PER cell (`begin_cell_regions`): emitting every cell of a
-        // scope against one region slot orphans all but the last minted physical
-        // region — the shared-slot capture-cell leak (docs/impl/region/model.md,
-        // "one allocation execution per slot between drops").
+        // scope against one region slot would orphan all but the last minted
+        // physical region, because a slot names one allocation execution between
+        // drops (docs/impl/region/model.md).
         let region = self.cell_region_for(binding);
         let nil_reg = self.emit_const(LirConst::Nil)?;
         let cell_reg = self.fresh_reg();
@@ -181,7 +180,9 @@ impl<'a> Lowerer<'a> {
     /// bearing variant is constructed with its `region: StaticRegion` field
     /// already set — there is no "build with no region, stamp later" window in
     /// which an allocation could exist without a region. Panics if the solver
-    /// assigned no region (Rule 1: every allocation must have one).
+    /// assigned no region: every allocation must have one
+    /// (docs/impl/region/rules.md). An admitted append site gets its
+    /// `JoinRegion` first.
     pub(super) fn emit_alloc(&mut self, build: impl FnOnce(StaticRegion) -> LirInstr) {
         let region = self.alloc_region_id().unwrap_or_else(|| {
             panic!(
@@ -189,7 +190,27 @@ impl<'a> Lowerer<'a> {
                 self.current_hir_id
             )
         });
+        self.emit_join_for_current(region);
         self.emit_alloc_with_slot(region, build);
+    }
+
+    /// Emit the `JoinRegion` an admitted append site owes, immediately before
+    /// its allocation (docs/impl/region/colocation.md): a read of the container,
+    /// then the pending join that this allocation's mint of `region` consumes.
+    /// Nothing may run between the two, because a mint of another slot drops the
+    /// join. A container with no slot to read skips the join, and the allocation
+    /// mints fresh, which is always legal.
+    fn emit_join_for_current(&mut self, region: StaticRegion) {
+        let Some(container) = self
+            .current_hir_id
+            .and_then(|id| self.region_info.joins.get(&id).copied())
+        else {
+            return;
+        };
+        let span = self.current_span;
+        if let Ok(partner) = self.lower_var(&container, &span) {
+            self.emit(LirInstr::JoinRegion { region, partner });
+        }
     }
 
     /// `emit_alloc` with an explicitly named solver region instead of the
@@ -197,8 +218,7 @@ impl<'a> Lowerer<'a> {
     /// allocations at one HirId: one capture cell per binding of a scope, keyed
     /// by binding in `begin_cell_regions`, since N allocations against one slot
     /// orphan all but the last minted physical region
-    /// (docs/impl/region/model.md, "one allocation execution per slot between
-    /// drops").
+    /// (docs/impl/region/model.md).
     pub(super) fn emit_alloc_in(
         &mut self,
         region: crate::hir::region::Region,
@@ -240,8 +260,8 @@ impl<'a> Lowerer<'a> {
     /// The solver-minted region for `binding`'s pre-allocated capture cell at
     /// the CURRENT node (`begin_cell_regions[current_hir_id]`). Panics if the
     /// solver registered no cell for the binding — the walk's Begin/Let/Letrec
-    /// arms must mirror the lowerer's MakeCaptureCell conditions exactly
-    /// (Rule 1: every allocation has a region).
+    /// arms must mirror the lowerer's MakeCaptureCell conditions exactly, since
+    /// every allocation has a region (docs/impl/region/rules.md).
     pub(super) fn cell_region_for(
         &self,
         binding: crate::hir::Binding,
@@ -274,8 +294,8 @@ impl<'a> Lowerer<'a> {
         self.region_info.single_cell_region_of(binding)
     }
 
-    /// Look up the region for the current HIR node and return the u16
-    /// index into the function's region_table.
+    /// Look up the region for the current HIR node and return its static
+    /// region slot (see [`Self::static_slot`]).
     pub(super) fn alloc_region_id(&mut self) -> Option<StaticRegion> {
         let hir_id = self.current_hir_id?;
         let region = *self.region_info.alloc_region.get(&hir_id)?;
@@ -321,12 +341,12 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Mint a fresh static region slot for a synthetic allocation that region
-    /// inference does not track — the caller pairs the `MaterializeConst`/alloc
-    /// with its own `DecrefRegion` to free it. Recorded in the function's
-    /// `region_table` like any solver slot, so every tier (interpreter, JIT)
-    /// resolves it to a fresh physical region per activation and the matching
-    /// `DecrefRegion` reclaims it. Used by the string PATTERN literal, whose
-    /// compare-string is materialized, read once, and freed in place.
+    /// inference does not track. Recorded in the function's `region_table`
+    /// like any solver slot, so every tier (interpreter, JIT) resolves it to a
+    /// fresh physical region per activation. Two sites use one: the string
+    /// PATTERN literal, whose compare-string is materialized, read once, and
+    /// freed by the caller's own `DecrefRegion`; and the splice args array,
+    /// whose release the call instruction carries.
     pub(super) fn fresh_managed_region(&mut self) -> StaticRegion {
         let slot = new_static_region();
         self.current_func.region_table.push(slot);

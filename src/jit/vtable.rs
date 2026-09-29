@@ -1,7 +1,8 @@
-// audited: 2026-09-13
-// docs/impl/jit.md
+// audited: 2026-09-29
 //! `RuntimeHelpers`: one pre-declared Cranelift `FuncId` per `extern "C"`
 //! runtime helper, so a translator emits a call without re-declaring.
+//!
+//! docs/impl/jit.md
 //!
 //! The two halves each live in a submodule: `symbols` registers every
 //! `elle_jit_*` name with the JIT linker, and `helpers` declares each one's
@@ -18,7 +19,7 @@
 //!   value_binary: (atag, apay, btag, bpay) -> (tag, payload) = 4 params, 2 returns
 //!   value_unary_vm: (tag, payload, vm) -> (tag, payload)     = 3 params, 2 returns
 //!   value_binary_vm: (atag, apay, btag, bpay, vm) -> (tag, payload) = 5 params, 2 returns
-//!   call: (ftag, fpay, args_ptr, nargs, vm) -> (tag, payload) = 5 params, 2 returns
+//!   call: (ftag, fpay, args_ptr, nargs, vm, region_id) -> (tag, payload) = 6 params, 2 returns
 
 use cranelift_module::FuncId;
 
@@ -29,10 +30,11 @@ pub(crate) use symbols::register_symbols;
 
 /// Pre-declared runtime helper function IDs.
 ///
-/// Each field maps to a `#[no_mangle] extern "C"` function in `runtime.rs`
-/// or `dispatch.rs` / `data.rs` / `suspend.rs`. The IDs are declared in the
-/// JITModule at construction time so that `FunctionTranslator` can reference
-/// them without re-declaring on every function compilation.
+/// Each field maps to a `#[no_mangle] extern "C"` function in `runtime`, or one
+/// that `dispatch` defines or re-exports from `calls`, `data` and `suspend`.
+/// `declare_helpers` declares the IDs in the JITModule at construction time, so
+/// `FunctionTranslator` can reference them without re-declaring on every
+/// function compilation.
 pub(crate) struct RuntimeHelpers {
     pub(crate) add: FuncId,
     pub(crate) sub: FuncId,
@@ -60,7 +62,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) rest: FuncId,
     pub(crate) make_array: FuncId,
     /// Materialize a heap literal (string, or quoted compound data) into the
-    /// current alloc region from a JIT-code-owned `ConstTemplate`. See
+    /// region passed to it, from a JIT-code-owned `ConstTemplate`. See
     /// `dispatch::elle_jit_materialize_const`.
     pub(crate) materialize_const: FuncId,
     pub(crate) is_nil: FuncId,
@@ -90,12 +92,12 @@ pub(crate) struct RuntimeHelpers {
     #[allow(dead_code)]
     pub(crate) is_truthy: FuncId,
     pub(crate) make_capture: FuncId,
-    /// Capture cell minted into its OWN fresh per-execution region (JIT-prologue
-    /// env path; mirrors the interpreter's `env_value_region`). See
+    /// Capture cell in a value region of its own (JIT-prologue env path;
+    /// mirrors the interpreter's `env_value_region`). See
     /// `dispatch::elle_jit_make_capture_owned`.
     pub(crate) make_capture_owned: FuncId,
-    /// Variadic rest list with per-cons fresh regions (JIT-prologue env path;
-    /// mirrors the interpreter's `args_to_list`). See
+    /// Variadic rest list, every cons in one value region (JIT-prologue env
+    /// path; mirrors the interpreter's `args_to_list`). See
     /// `dispatch::elle_jit_collect_rest_list`.
     pub(crate) collect_rest_list: FuncId,
     pub(crate) load_capture_cell: FuncId,
@@ -108,12 +110,14 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) pop_param_frame: FuncId,
     pub(crate) call_array: FuncId,
     pub(crate) tail_call_array: FuncId,
-    #[allow(dead_code)] // infrastructure for future JIT MakeClosure support
+    // Read only by the `MakeClosure` arm, which `compile` never reaches.
+    #[allow(dead_code)]
     pub(crate) make_closure: FuncId,
     pub(crate) jit_yield: FuncId,
     pub(crate) jit_yield_through_call: FuncId,
     pub(crate) has_signal: FuncId,
-    #[allow(dead_code)] // JIT region infrastructure — wired incrementally
+    // No-op helpers: the translator emits no call to these four.
+    #[allow(dead_code)]
     pub(crate) region_enter: FuncId,
     #[allow(dead_code)]
     pub(crate) region_exit: FuncId,
@@ -126,6 +130,9 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) decref_value_region: FuncId,
     pub(crate) decref_cell_region: FuncId,
     pub(crate) incref_value_region: FuncId,
+    /// Record a pending join for the next mint of a static slot — the
+    /// `JoinRegion` instruction's JIT helper, mirroring `handle_join_region`.
+    pub(crate) join_region: FuncId,
     /// Link a child value's region as Owned by a parent value's region — the
     /// `AdoptRegion` instruction's JIT helper, mirroring `handle_adopt_region`.
     pub(crate) adopt_region: FuncId,
@@ -152,7 +159,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) resolve_alloc_region: FuncId,
     /// The mint-or-reuse variant of `resolve_alloc_region`, selected at emit time
     /// for a slot in `LirFunction.merged_slots` (builder-idiom merge;
-    /// docs/impl/region/merging.md § Merging).
+    /// docs/impl/region/merging.md).
     pub(crate) resolve_alloc_region_merged: FuncId,
     #[allow(dead_code)]
     pub(crate) rotate_pools: FuncId,
@@ -160,7 +167,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) incref: FuncId,
     #[allow(dead_code)]
     pub(crate) decref: FuncId,
-    // New intrinsic helpers
+    // Intrinsic helpers
     pub(crate) is_empty: FuncId,
     pub(crate) is_bool: FuncId,
     pub(crate) is_int: FuncId,

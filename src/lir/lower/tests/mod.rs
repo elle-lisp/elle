@@ -1,3 +1,8 @@
+// audited: 2026-09-29
+//! The lowerer's unit tests, one module per subject, and the fixtures they share.
+//!
+//! docs/impl/region/mechanism.md
+
 use super::*;
 use crate::syntax::Span;
 
@@ -176,7 +181,7 @@ fn allocates_or_calls(func: &LirFunction) -> bool {
     flat_instrs(func).into_iter().any(|i| i.region().is_some())
 }
 
-/// Pin the C0 emit contract at a coalesced site: under `debug_assertions` the
+/// Pin the emit contract at a coalesced site: under `debug_assertions` the
 /// lowerer emits `AssertRegionMatches { region_id }` immediately before the
 /// coalesced `IncrefRegion { region_id }`, naming the SAME slot; in release it
 /// emits no oracle at all.
@@ -230,5 +235,6 @@ fn builder_pair_slots(module: &crate::lir::LirModule) -> Vec<StaticRegion> {
 // ── Themed test submodules ───────────────────────────────────────
 mod basics;
 mod coalesce;
+mod join;
 mod merge;
 mod release;

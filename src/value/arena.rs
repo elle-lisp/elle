@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-09-29
 //! Arena allocation layer.
 //!
 //! docs/impl/region/rules.md
@@ -95,8 +95,8 @@ pub unsafe fn drop_heap(_value: Value) {}
 ///
 /// This is the funnel every runtime RC decision reads a value's region
 /// through, so it carries the debug-build stale-deref generation check
-/// (docs/impl/region/generations.md § "Region generations"): a value whose region was freed
-/// panics here deterministically instead of yielding a recycled id.
+/// (docs/impl/region/generations.md): a value whose region was freed panics here
+/// deterministically instead of yielding a recycled id.
 pub fn region_of(heap: &FiberHeap, val: Value) -> Option<RuntimeRegion> {
     if !val.is_heap() {
         return None;
@@ -178,7 +178,7 @@ pub enum EscapeSite {
     /// external to the region system — no free-time cascade balances it — so
     /// this retain IS the message's reference while it rides the buffer;
     /// `release_received_message` lowers it as the receive takes the message
-    /// out (docs/impl/region/effects.md § `Sends`).
+    /// out (docs/impl/region/effects.md).
     ChanSend,
     /// A yielded / suspended value escapes into `fiber.signal`.
     SuspendEscape,
@@ -194,7 +194,7 @@ pub enum EscapeSite {
     /// or `fiber/refuse`. The payload belongs to the CALLER, whose own reference
     /// answers the caller's argument release alone — no raise minted a delivery
     /// for it. This retain is that delivery, and whichever consumer the injected
-    /// error reaches releases it (docs/impl/region/effects.md § `Delivers`).
+    /// error reaches releases it (docs/impl/region/effects.md).
     AbortDelivery,
     /// A child fiber's set-once terminal result, park-retained until the fiber
     /// is freed (released by the signal scan — asymmetric by Rule 7).
@@ -203,29 +203,25 @@ pub enum EscapeSite {
     /// call. The primitive never returns, so its `Return` mint never runs and
     /// the resume value takes the place of the result the continuation's
     /// compiler-emitted release consumes — this retain is that missing mint
-    /// (docs/impl/region/park.md § "A delivery into a replayed frame carries
-    /// one owning reference").
+    /// (docs/impl/region/park.md).
     ResumeDelivery,
     /// A value a host keeps reading past the run that produced it, registered
     /// as a process root while the host holds no owning reference to hand over
     /// (`RootRef::Mint`). The registry is external to the region system in the
     /// way a channel buffer is — no free-time cascade reaches it — so this
     /// retain IS the root's reference, and the teardown sweep's decref lowers
-    /// it (docs/impl/region/rules.md § "The program value is the host's to
-    /// release").
+    /// it (docs/impl/region/rules.md).
     ProcessRoot,
     /// A heap value in a child fiber's inherited dynamic-parameter baseline,
     /// retained at the seed until the fiber is freed (released by the Fiber
     /// content scan's baseline walk — the terminal-signal shape;
-    /// docs/impl/region/park.md § "A child's inherited parameter baseline is
-    /// a counted holder").
+    /// docs/impl/region/park.md).
     ParamBaseline,
     /// An operand of a submitted I/O operation, retained by the pending table
     /// for as long as the operation is in flight. The table is runtime-side
     /// state no free-time cascade reaches — the position a channel buffer is in
     /// — so this retain IS the operand's reference while the operation runs;
-    /// the entry's disposal lowers it (`OperandHold`, src/io/AGENTS.md
-    /// § "A submitted operation holds the values its completion reads").
+    /// the entry's disposal lowers it (`OperandHold`, docs/impl/io-inflight.md).
     IoSubmit,
 }
 
@@ -298,10 +294,24 @@ pub fn decref_region(heap: &mut FiberHeap, id: Option<RuntimeRegion>) {
     heap.decref_region(r);
 }
 
-/// Track a store into a mutable collection.
-pub fn rebind_stored_element(heap: &mut FiberHeap, old: Value, new: Value) {
-    let old_r = region_of(heap, old);
-    let new_r = region_of(heap, new);
+/// The region a store of `val` into `container` counts: `val`'s own region,
+/// unless that is the container's. A reference from a region to itself is counted
+/// by neither half of the store funnel, exactly as the allocation scan and the
+/// free cascade skip it (docs/impl/region/rules.md, Rule 5). An immediate has no
+/// region to count.
+fn counted_store_region(heap: &FiberHeap, container: Value, val: Value) -> Option<RuntimeRegion> {
+    let r = region_of(heap, val)?;
+    if region_of(heap, container) == Some(r) {
+        None
+    } else {
+        Some(r)
+    }
+}
+
+/// Track a store that replaces `old` with `new` inside `container`.
+pub fn rebind_stored_element(heap: &mut FiberHeap, container: Value, old: Value, new: Value) {
+    let old_r = counted_store_region(heap, container, old);
+    let new_r = counted_store_region(heap, container, new);
     if old_r == new_r {
         return;
     }
@@ -309,8 +319,8 @@ pub fn rebind_stored_element(heap: &mut FiberHeap, old: Value, new: Value) {
     decref_region(heap, old_r);
 }
 
-/// Track adding a value to a mutable collection.
-pub fn incref_inserted_element(heap: &mut FiberHeap, val: Value) {
+/// Track adding `val` to `container`.
+pub fn incref_inserted_element(heap: &mut FiberHeap, container: Value, val: Value) {
     let r = region_of(heap, val);
     if crate::config::get().has_trace("rc") && val.is_heap() {
         eprintln!(
@@ -323,13 +333,14 @@ pub fn incref_inserted_element(heap: &mut FiberHeap, val: Value) {
         !val.is_heap() || r.is_some(),
         "incref_inserted_element: heap value has no region — page header missing or corrupt"
     );
-    incref_for_escape(heap, r, EscapeSite::MutableStore);
+    let counted = counted_store_region(heap, container, val);
+    incref_for_escape(heap, counted, EscapeSite::MutableStore);
 }
 
-/// Track removing a value from a mutable collection.
-pub fn decref_removed_element(heap: &mut FiberHeap, val: Value) {
-    let r = region_of(heap, val);
-    decref_region(heap, r);
+/// Track removing `val` from `container`.
+pub fn decref_removed_element(heap: &mut FiberHeap, container: Value, val: Value) {
+    let counted = counted_store_region(heap, container, val);
+    decref_region(heap, counted);
 }
 
 mod mutate;
@@ -355,12 +366,10 @@ pub unsafe fn deref(value: Value) -> &'static HeapObject {
     // If you hit this in debug, walk back to find what freed the region
     // while a Value still referenced it.
     // The first 8-byte block of the payload is dumped so a UAF panic
-    // shows what's actually at the slot: all-zero distinguishes "the
-    // region died and the page pool blanked its body" (docs/impl/
-    // region/model.md § "Page recycling") from stale-data (slot reused
-    // for a different HeapObject with its own discriminant bits in
-    // place). Without it the variant
-    // reported by `type_name()` is misleading — a zero-filled page
+    // shows what's actually at the slot: all-zero is a slot `--trace=scrub`
+    // blanked when its region died (docs/impl/region/model.md), anything else
+    // is a slot a later region reused for its own object. Without it the
+    // variant reported by `type_name()` is misleading — a zero-filled slot
     // reads as whichever variant Rust's enum repr assigns to the
     // all-zero discriminant.
     // Compute the diagnostic only on mismatch — keep the happy path (every
