@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! One level of fiber resumption: the swap in and out, and what it funds.
 //!
 //! The abort that injects an error at the suspension point instead is here too.
@@ -290,6 +290,10 @@ impl VM {
             if result.bits.intersects(SIG_ERROR) {
                 let payload = self.fiber.signal.map_or(Value::NIL, |(_, v)| v);
                 self.fiber.delivery.park_error(result.site, payload);
+            }
+            if !result.site.parks_frame() {
+                self.fiber.suspended = Some(Vec::new());
+                return result.bits;
             }
             let frame = BytecodeFrame::suspend(
                 result.code,

@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! Replaying a fiber's suspended frame chain: each frame's stack, region map and
 //! dues are restored before its body is re-entered.
 //!
@@ -317,7 +317,11 @@ impl VM {
                             );
                         }
                         let mut error_park = None;
-                        if !exec.bits.intersects(SIG_HALT) && self.fiber.suspended.is_none() {
+                        if !exec.site.parks_frame() {
+                            error_park = Some(exec.site);
+                            self.fiber.suspended = Some(Vec::new());
+                        } else if !exec.bits.intersects(SIG_HALT) && self.fiber.suspended.is_none()
+                        {
                             // `from_ip` does not pop, so the activation's remap
                             // (mutated by this resumed execution) is still on
                             // top. Carry it forward to the re-suspend frame,
