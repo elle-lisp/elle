@@ -91,7 +91,7 @@
 //!    so the `SIG_SWITCH` trampoline is driven inside your scope — see the
 //!    SIG_SWITCH section above.
 
-use crate::value::fiber::{ParamDepth, TailSquelch};
+use crate::value::fiber::{ParamDepth, RaiseSite, TailSquelch};
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
 use std::rc::Rc;
 
@@ -156,11 +156,11 @@ impl VM {
     /// Close out an activation whose dispatch loop exited at `exit`, answering
     /// its `ExecResult`.
     ///
-    /// On a signal: a squelch the activation's tail calls accumulated turns the
-    /// signal into an error, an error runs the abandoned-frame walk when
-    /// `walk_abandoned` says the frame is abandoned, and the operand stack
-    /// leaves in the result. On a clean return: the activation discharges what
-    /// it owes.
+    /// On a signal: a squelch the activation's tail calls accumulated ends the
+    /// activation with an error ([`Self::end_refused_activation`]), an error
+    /// runs the abandoned-frame walk when `walk_abandoned` says the frame is
+    /// abandoned, and the operand stack leaves in the result. On a clean
+    /// return: the activation discharges what it owes.
     ///
     /// `walk_abandoned` — run the releases this activation still owes when it
     /// leaves by an **error** (docs/impl/region/mechanism.md § "An abandoned
@@ -186,17 +186,10 @@ impl VM {
             self.release_activation_dues();
             return ExecResult::ended(exit, code, env, vec![], self.fiber.current_closure);
         }
-        // A squelch/attune boundary turns the signal into an error this
-        // activation never catches, so this exit IS the error exit and is
-        // written as one — a second arm would be a second place to keep the
-        // abandonment accounting in step (docs/impl/region/mechanism.md § "A
-        // squelch boundary abandons frames the same way, so it runs the same
-        // walk").
-        let exit = if self.enforce_squelch(exit.bits, tail_squelch.mask, tail_squelch.depth) {
-            Exit::at(SIG_ERROR, exit.ip)
-        } else {
-            exit
-        };
+        let parked = self.fiber.suspended.is_some();
+        if self.enforce_squelch(exit.bits, tail_squelch.mask, tail_squelch.depth) {
+            return self.end_refused_activation(code, env, exit.ip, parked);
+        }
         let bits = exit.bits;
         // The frame's locals are still on the stack, and an error leaves
         // through the signal machinery without running the rest of its
@@ -213,6 +206,28 @@ impl VM {
         }
         let stack = std::mem::take(&mut self.fiber.stack).into_vec();
         ExecResult::ended(exit, code, env, stack, self.fiber.current_closure)
+    }
+
+    /// Close out an activation whose tail call a squelch boundary refused at
+    /// `ip`, with an error at [`RaiseSite::TailRefused`]. `parked` says whether
+    /// the refused code parked the activation's frame
+    /// (docs/impl/region/unwind.md § "A squelch boundary abandons frames the
+    /// same way, so it runs the same walk").
+    fn end_refused_activation(
+        &mut self,
+        code: crate::value::Code,
+        env: Rc<Vec<Value>>,
+        ip: usize,
+        parked: bool,
+    ) -> ExecResult {
+        if !parked {
+            let payload = self.fiber.signal.map(|(_, v)| v).unwrap_or(Value::NIL);
+            self.release_abandoned_frame(&code, payload);
+        }
+        self.release_activation_dues();
+        self.fiber.stack.clear();
+        let exit = Exit::raised(SIG_ERROR, ip, RaiseSite::TailRefused);
+        ExecResult::ended(exit, code, env, vec![], self.fiber.current_closure)
     }
 
     /// Drop the `parameterize` frames a call pushed above `depth` and left
