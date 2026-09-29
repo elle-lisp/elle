@@ -64,7 +64,9 @@ abandoned-frame walk, and the `JitCtx` slot in the prologue, use the same
 method directly.
 
 `FunctionBuilder::finalize` takes the target's frontend configuration, which the
-module holds. The translator passes `module.target_config()`.
+module holds. `finalize_function` ([translate.rs](../../src/jit/translate.rs))
+takes the builder and the module and passes `module.target_config()`, so no
+caller builds the configuration.
 
 ## Arithmetic: the tag-check diamond, and skipping it
 
