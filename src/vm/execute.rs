@@ -59,9 +59,8 @@
 //! is later resumed by the *outer* trampoline — that is, OUTSIDE the
 //! re-entrant caller's scope. An `arena/allocs` measurement would then answer
 //! with the resumed child's value instead of `(result . net)` and never finish
-//! the thunk (`tests/elle/arena.lisp` "arena/allocs measures a thunk that
-//! resumes a fiber"; the `fiber-spawn-10` scenario in
-//! `tests/elle/resource.lisp`).
+//! the thunk (`tests/impl/arena.lisp`, the thunk that resumes a fiber under
+//! "arena/allocs"; the `fiber-spawn-10` scenario in `tests/impl/resource.lisp`).
 //!
 //! `VM::run_thunk_to_completion` is the safe entry point: it drives
 //! `SIG_SWITCH` to completion exactly as the root loop does, so a nested
@@ -162,11 +161,10 @@ impl VM {
     /// abandoned, and the operand stack leaves in the result. On a clean
     /// return: the activation discharges what it owes.
     ///
-    /// `walk_abandoned` — run the releases this activation still owes when it
-    /// leaves by an **error** (docs/impl/region/mechanism.md § "An abandoned
-    /// frame runs the releases it still owes"). False where the frame is not
-    /// abandoned: a fiber body whose entrant parks it for the restarts system,
-    /// and the resume entry, whose frame the caller manages and may re-park.
+    /// `walk_abandoned` — run the releases this activation still owes when it leaves by
+    /// an **error** (docs/impl/region/mechanism.md). False where the frame is not
+    /// abandoned: a fiber body whose entrant parks it for the restarts system, and the
+    /// resume entry, whose frame the caller manages and may re-park.
     fn end_activation(
         &mut self,
         code: crate::value::Code,
@@ -179,7 +177,7 @@ impl VM {
             // Normal completion: discharge what this activation owes — the
             // decrefs its frame-replacing tail calls left dead, and its owner
             // node, whose single decref subtree-drops every member the
-            // activation adopted (docs/impl/region/owner.md § "Owner nodes").
+            // activation adopted (docs/impl/region/owner.md).
             // One clean-break discipline for both: a frame-replacing tail call
             // keeps the activation alive to the recursion's completion here,
             // and so keeps everything it owes.
@@ -197,8 +195,7 @@ impl VM {
         // locals travel out in the result. The releases this activation took
         // over from a frame-replacing tail call are owed on the same question
         // and have no table to be read off, their emitting instruction having
-        // died with the replaced frame (docs/impl/region/owner.md § "What an
-        // abandoned frame owes, it owes the deferred set too").
+        // died with the replaced frame (docs/impl/region/owner.md).
         if walk_abandoned && bits.intersects(SIG_ERROR) {
             let payload = self.fiber.signal.map(|(_, v)| v).unwrap_or(Value::NIL);
             self.release_abandoned_frame(&code, payload);
@@ -256,9 +253,8 @@ impl VM {
     /// A tail call BUILT in compiled code strands its releases on an activation
     /// that pops its own dues slot at the tail-call sentinel, so it leaves them
     /// on `pending_tail_deferrals` for the activation that runs the callee
-    /// (docs/impl/region/relocate.md § "A channel built in compiled code hands
-    /// its release forward"). That callee's activation opens here, so this is
-    /// where the hand-off is collected.
+    /// (docs/impl/region/relocate.md). That callee's activation opens here, so
+    /// this is where the hand-off is collected.
     fn open_activation(&mut self) {
         self.push_activation_region_map();
         if !self.pending_tail_deferrals.is_empty() {
@@ -276,7 +272,7 @@ impl VM {
     /// both (cross-yield remap preservation — docs/impl/region/model.md). A
     /// suspend handler that parked a frame already took the dues (this reads
     /// default); a pause with no frame of its own (fuel) leaves them here
-    /// (docs/impl/region/owner.md § "Owner nodes").
+    /// (docs/impl/region/owner.md).
     ///
     /// `entry_depth` is how many region-remap frames the fiber held before the
     /// activation opened. Every activation the body entered — interpreted or
@@ -385,8 +381,7 @@ impl VM {
         // Whether THIS activation's frame is parked on an error exit is the
         // entrant's to say, and only `do_fiber_first_resume` says yes; taking the
         // one-shot here leaves every body this one calls answering no
-        // (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
-        // it still owes").
+        // (docs/impl/region/mechanism.md).
         let parks_error_frame = std::mem::take(&mut self.pending_error_park);
         let param_depth = self.fiber.param_depth();
         #[cfg(debug_assertions)]

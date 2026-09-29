@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! `vm/config` and `vm/config-set` over the VM's runtime configuration, and
 //! the `arena/allocs` measurement.
 //!
@@ -281,8 +281,8 @@ impl VM {
     /// that spawns and resumes fibers is measured to completion — the resume's
     /// allocations fall between the two snapshots and `(result . net)` carries
     /// the thunk's real result, not the resumed child's value
-    /// (`tests/elle/arena.lisp`, the `fiber-spawn-10` scenario in
-    /// `tests/elle/resource.lisp`). The thunk must still be non-*yielding* (it
+    /// (`tests/impl/arena.lisp`, the `fiber-spawn-10` scenario in
+    /// `tests/impl/resource.lisp`). The thunk must still be non-*yielding* (it
     /// must not suspend its own caller). Returns `(SIG_OK, pair(result, net))`
     /// on success, or `(SIG_ERROR, err)` / the propagated signal on failure.
     pub(super) fn handle_arena_allocs(

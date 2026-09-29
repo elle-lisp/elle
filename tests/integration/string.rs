@@ -1,7 +1,8 @@
-// @string type tests
+// audited: 2026-09-29
+// The `@string` display form and its character indexing, which need the Rust
+// API to read the result.
 //
-// Display formatting and byte-level Unicode tests that require Rust APIs.
-// Basic operation tests migrated to tests/elle/string.lisp.
+// docs/strings.md
 
 use crate::common::eval_source;
 

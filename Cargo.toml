@@ -4,6 +4,7 @@ members = [
     "elle-plugin",
     "demos/embedding",
     "demos/myplugin",
+    "rig",
 ]
 resolver = "2"
 

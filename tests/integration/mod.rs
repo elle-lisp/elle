@@ -87,9 +87,6 @@ mod sys_args {
 mod meta {
     include!("meta.rs");
 }
-mod elle_scripts {
-    include!("elle_scripts.rs");
-}
 mod dump_cli {
     include!("dump_cli.rs");
 }
@@ -229,8 +226,8 @@ mod dashboards {
 mod corpus_targets {
     include!("corpus_targets.rs");
 }
-mod budget {
-    include!("budget.rs");
+mod suites {
+    include!("suites.rs");
 }
 mod capacity {
     include!("capacity.rs");

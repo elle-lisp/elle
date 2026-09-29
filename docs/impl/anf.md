@@ -1,6 +1,6 @@
 # The ANF lift
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 Which values the ANF lift names with a synthetic binding, and why each name lands on the node it does.
 
@@ -122,7 +122,7 @@ the mint whether or not its value is returned, because its binding's release
 runs either way.
 
 Pinned by `hir::anf::tests::positions` and by
-[region-resume-value-operand.lisp](../../tests/elle/region-resume-value-operand.lisp).
+[region-resume-value-operand.lisp](../../tests/impl/region-resume-value-operand.lisp).
 
 ## Idempotence
 

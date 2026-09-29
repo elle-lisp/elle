@@ -17,10 +17,9 @@
 // gate. These tests are the standing check on it.
 //
 // The argument for the shape the second test pins — one Smoke job and one Rust
-// Tests job per platform, never both in one — is in docs/analysis/ci.md
-// § "Why each platform has two test jobs".
+// Tests job per platform, never both in one — is in docs/analysis/ci.md.
 
-use crate::common::workflow_jobs as jobs;
+use crate::common::{runs_target, workflow_jobs as jobs};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
@@ -89,7 +88,7 @@ fn all_checks_waits_for_every_job() {
         .collect();
 
     // A parse that matched nothing would assert nothing. The workflow has run
-    // well over five jobs since the platform tiers landed.
+    // well over five jobs.
     assert!(
         defined.len() > 5,
         "found only {} jobs in {}; the parse is broken, not the workflow",
@@ -142,7 +141,7 @@ fn all_checks_fails_on_every_job_it_waits_for() {
 // both costs the sum. The pull request waits for the slowest job, which makes
 // any such job the wall clock for its whole platform. Splitting the pair into
 // two jobs trades runner minutes for that wall clock — the argument is in
-// docs/analysis/ci.md § "Why each platform has two test jobs".
+// docs/analysis/ci.md.
 //
 // The counter-factual: before the split, `macos` and `aarch64` each ran
 // `make smoke` and then `cargo test`, and every other gate stayed green while
@@ -165,12 +164,11 @@ fn no_job_serializes_the_corpus_and_the_rust_suite() {
 }
 
 // The `plugins/` submodule is a separate workspace, and until this job existed
-// no CI job checked it out. #997 changed six `elle_api!` signatures and stopped
-// 17 plugins from compiling, at about 90 call sites, and every gate stayed
-// green — the break was found by hand (#1023). Plugins take `elle-plugin` by
-// path, so a source break never reaches a load and the ABI version guard cannot
-// see it; only a job that compiles the submodule can. The argument is in
-// docs/analysis/ci.md § "The plugins job".
+// no CI job checked it out. A change to the `elle_api!` signatures stopped 17
+// plugins from compiling, at about 90 call sites, and every gate stayed green.
+// Plugins take `elle-plugin` by path, so a source break never reaches a load and
+// the ABI version guard cannot see it; only a job that compiles the submodule
+// can. The argument is in docs/analysis/ci.md.
 //
 // The counter-factual: this is the state main was in. Delete the job, or leave
 // it building a `plugins/` it never checked out, and an ABI change breaks every
@@ -213,7 +211,7 @@ fn a_job_builds_every_plugin_in_the_submodule() {
 // job builds `--release`. So a corpus job without
 // `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` drives the whole corpus with those
 // checks compiled out, and reports green over what they would have caught. The
-// argument is in docs/analysis/ci.md § "What each job builds".
+// argument is in docs/analysis/ci.md.
 //
 // The trap: a green corpus job is not evidence the checks ran. `macOS Smoke`
 // was the only job setting the flag, so both Linux backends ran blind and the
@@ -241,11 +239,12 @@ fn each_io_backend_has_a_linux_corpus_job_with_debug_assertions() {
         workflow_path().display()
     );
 
-    // `smoke-nouring` is the thread-pool target; every other smoke target takes
-    // the backend `create_platform_backend` picks, which on Linux is io_uring.
+    // `smoke-pool` builds without the `uring` feature, so it is the thread-pool
+    // target; every other smoke target builds the backend a Linux build carries,
+    // which is io_uring.
     let (pool, uring): (Vec<_>, Vec<_>) = corpus
         .iter()
-        .partition(|(_, body)| body.contains("make smoke-nouring"));
+        .partition(|(_, body)| runs_target(body, "smoke-pool"));
 
     for (backend, group) in [("thread-pool", &pool), ("io_uring", &uring)] {
         let covered: Vec<&String> = group
@@ -342,8 +341,7 @@ fn recipe(makefile: &str, target: &str) -> String {
 // reader of the `cfg` arms that platform takes. Nothing local compiles them, so
 // the arm's first reader is a runner and the report lands after the push.
 // `make crosscheck` is the local gate, and it is only a gate over the targets
-// it names — the argument is in docs/analysis/ci.md § "The cross-checks mirror
-// a local target".
+// it names — the argument is in docs/analysis/ci.md.
 //
 // The counter-factual: the Android job ran for months against a `crosscheck`
 // that compiled the macOS arms alone. A `not(target_os = "linux")` arm reaching
@@ -396,5 +394,123 @@ fn no_two_jobs_share_a_cache_key() {
     assert!(
         !seen.is_empty(),
         "no job names a shared-key; the parse is broken, not the workflow"
+    );
+}
+
+/// Each build CI makes, as the make target that builds it and runs the language
+/// suite on it, and what the build is.
+const BUILDS: &[(&str, &str)] = &[
+    ("smoke-lang", "the default build"),
+    ("smoke-nojit", "the build with no JIT"),
+    ("smoke-pool", "the thread-pool I/O build"),
+    ("smoke-mlir", "the MLIR build"),
+    ("smoke-noffi", "the build with no features"),
+];
+
+// A build is one implementation, and the language suite is what every
+// implementation must pass (docs/spec.md). The set of builds a job runs it on is
+// therefore the whole tier coverage: no flag adds a tier back. The argument is in
+// docs/analysis/ci.md.
+//
+// The counter-factual: drop the No-JIT job, and the interpreter alone is a
+// runtime no gate runs. Every other job compiles hot functions, so a defect
+// that only the interpreter shows reaches main green.
+#[test]
+fn every_build_runs_the_language_suite_in_a_job() {
+    let text = workflow_text();
+    let all = jobs(&text);
+    for (target, build) in BUILDS {
+        assert!(
+            all.iter().any(|(_, body)| runs_target(body, target)),
+            "no job in {} runs `make {target}`, so {build} never runs the \
+             language suite",
+            workflow_path().display()
+        );
+    }
+}
+
+// The implementation suite runs on the rig beside the default build, and again
+// on the thread-pool build's rig, where the worker threads some of its files
+// count exist. `make smoke` runs it too, on the platforms whose Smoke job runs
+// that target.
+#[test]
+fn the_implementation_suite_runs_on_a_linux_job() {
+    let text = workflow_text();
+    let impl_jobs: Vec<String> = jobs(&text)
+        .into_iter()
+        .filter(|(_, body)| body.contains("runs-on: ubuntu"))
+        .filter(|(_, body)| runs_target(body, "smoke-impl"))
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        !impl_jobs.is_empty(),
+        "no Linux job runs `make smoke-impl`, so the implementation suite runs \
+         only on the platforms whose Smoke job runs `make smoke`"
+    );
+}
+
+// The rig is a workspace crate with tests of its own: what it reads from a
+// sidecar, what it refuses, and the recursions that need a mode. `cargo test
+// --test '*'` runs the root package's tests alone, so a Rust Tests job that
+// stops there never builds the rig's.
+//
+// The counter-factual: a sidecar key the rig starts ignoring runs every file
+// that names it under the defaults, and the implementation suite reports a
+// pass. Only the rig's own tests would see it.
+#[test]
+fn every_rust_test_job_runs_the_rigs_tests() {
+    let text = workflow_text();
+    let rust_jobs: Vec<(String, String)> = jobs(&text)
+        .into_iter()
+        .filter(|(_, body)| body.contains("cargo test --test '*'"))
+        .collect();
+    assert!(
+        rust_jobs.len() > 1,
+        "found {} Rust test jobs in {}; the parse is broken, not the workflow",
+        rust_jobs.len(),
+        workflow_path().display()
+    );
+    for (name, body) in rust_jobs {
+        assert!(
+            body.contains("cargo test -p elle-rig"),
+            "job `{name}` runs the Rust suite and not `cargo test -p elle-rig`, \
+             so the rig's tests run nowhere on its platform"
+        );
+    }
+}
+
+// The scrub profile zeroes each released page, and the panic that reads the
+// zeros is `#[cfg(debug_assertions)]`, so the pass needs both
+// (docs/impl/region/diagnostics.md). macOS is the runner where stale reads
+// surface as wedges on the thread-pool backend, which is why the pass runs
+// there.
+//
+// The counter-factual: the macOS job used to set `ELLE_TEST_FLAGS`, a variable
+// the suite passes no longer read. A job that sets a variable nothing reads
+// runs green and scrubs nothing.
+#[test]
+fn the_macos_smoke_job_runs_the_scrub_profile() {
+    let text = workflow_text();
+    let (name, body) = jobs(&text)
+        .into_iter()
+        .find(|(_, body)| body.contains("runs-on: macos") && runs_target(body, "smoke"))
+        .expect("no macOS job runs `make smoke`");
+    let profile = "tests/impl/profiles/scrub.toml";
+    assert!(
+        crate::common::repo_root().join(profile).exists(),
+        "{profile} is gone"
+    );
+    let line = body
+        .lines()
+        .find(|line| runs_target(line, "smoke"))
+        .unwrap_or_default();
+    assert!(
+        line.contains(&format!("IMPL_PROFILES={profile}")),
+        "job `{name}` runs `make smoke` without the scrub profile:\n  {}",
+        line.trim()
+    );
+    assert!(
+        body.contains("CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS"),
+        "job `{name}` scrubs pages in a build that cannot panic on reading one"
     );
 }
