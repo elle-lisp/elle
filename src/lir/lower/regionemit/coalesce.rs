@@ -1,27 +1,27 @@
-// audited: 2026-09-14
-//! Whether a value's region can be named by a static slot, or is a runtime
-//! fact the emission has to read off the value itself.
+// audited: 2026-09-29
+//! Whether a static slot can name a value's region, or the emission has to read the region off the value.
+//!
 //! docs/impl/region/mechanism.md
 
 use super::*;
 
 impl<'a> Lowerer<'a> {
     /// The static region **slot** to coalesce a value's mint onto, or `None` to
-    /// stay value-resolved (docs/impl/region/mechanism.md § "Compile-time region
-    /// selection (coalescing)"). Layers the lowering-time runtime-population guard
-    /// over `coalescible_solver_region`'s solver-fact class logic: the region's
-    /// slot must already be mapped (`region_to_table`) AND stamped by an allocation
-    /// **emitted in this function** (`emitted_alloc_regions`), so the activation
-    /// map populates it at runtime.
+    /// stay value-resolved (docs/impl/region/mechanism.md). Layers the
+    /// lowering-time runtime-population guard over `coalescible_solver_region`'s
+    /// solver-fact class logic: the region's slot must already be mapped
+    /// (`region_to_table`) AND stamped by an allocation **emitted in this
+    /// function** (`emitted_alloc_regions`), so the activation map populates it at
+    /// runtime.
     ///
     /// The class predicate alone is not sufficient: a value whose region is
     /// statically nameable yet allocated in *another* activation — an immutable
     /// captured upvalue, or a cross-thread/fiber value in a process-shared region
-    /// (e.g. a `sys/spawn-vm` thunk returning a captured string, living in a
+    /// (for example a `sys/spawn-vm` thunk returning a captured string, living in a
     /// shared region) — passes the class check but has no slot stamped in *this*
     /// function. A slot-resolved `IncrefRegion` against it resolves to `None` at
     /// runtime and its cascade frees a live region (the mis-coalesce the
-    /// `AssertRegionMatches` oracle catches; tests/elle/concurrency.lisp). This is
+    /// `AssertRegionMatches` oracle catches; tests/lang/concurrency.lisp). This is
     /// the same phantom-region guard `emit_decref_region` applies on the decref
     /// side. The slot is *read*, never minted: the owning allocation already
     /// minted it in program order, so a `region_to_table` miss means "not
@@ -53,7 +53,7 @@ impl<'a> Lowerer<'a> {
     /// a captured upvalue), a reassign-suppressed region
     /// (`suppressed_decref_regions`), a reassigned 1-slot-container value region
     /// (`mutated_binding_value_regions`, which also catches a returned `Var`
-    /// aliasing a store target — escape.md divergence 2), or a value a fn-local
+    /// aliasing a store target — docs/impl/escape.md), or a value a fn-local
     /// 1-slot container holds (`cell_stored_regions`).
     ///
     /// That last class is a runtime fact even though its allocation site names a
@@ -61,8 +61,7 @@ impl<'a> Lowerer<'a> {
     /// store's producer release *unmaps* that slot, so a mint emitted later — the
     /// `Return` handing the final content out — would resolve the slot to nothing
     /// and the equivalence oracle detonates
-    /// (docs/impl/region/bindings.md § "A value a 1-slot container holds is a
-    /// runtime fact"; `coalescible_refuses_a_cell_stored_value`).
+    /// (docs/impl/region/bindings.md; `coalescible_refuses_a_cell_stored_value`).
     ///
     /// A returned `Var` whose `binding_source_regions` names *more than one*
     /// region is a branch-dependent mix — not statically nameable — so it is

@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Whether a tail call's callee closure dies at the call, so the new
 //! activation must take over the release the frame replacement strands.
 //!
@@ -8,7 +8,7 @@
 use super::*;
 
 impl<'a> Lowerer<'a> {
-    /// Does this tail call's callee CLOSURE die at the call node — i.e. is it a
+    /// Does this tail call's callee CLOSURE die at the call node — that is, is it a
     /// per-call local closure whose `DecrefRegion` the solver placed here, which
     /// the frame-replacing `TailCall` then strands as dead code? If so, the new
     /// activation must TAKE OVER that release (run it when it completes) to
@@ -36,13 +36,6 @@ impl<'a> Lowerer<'a> {
     ///   must not be freed by the new activation. This reads the one escape
     ///   analysis every consumer reads, in place of the region-level
     ///   `suppressed_decref_regions` proxy.
-    ///
-    /// Like `tail_arg_is_borrowed`, the deferred release is **transitional value-RC machinery**:
-    /// the ownership forest reclaims a non-escaping per-call callee as part
-    /// of the activation's Owned subtree (dropped as a unit — no stranded decref to
-    /// supply), so this predicate is subsumed there, not preserved. Its lasting
-    /// contribution is reading `EscapeInfo`, the analysis that drives the forest's
-    /// Owned/Shared classification.
     pub(super) fn tail_callee_defers_release(&self, func: &Hir) -> bool {
         let Some(call_id) = self.current_hir_id else {
             return false;
@@ -122,23 +115,23 @@ impl<'a> Lowerer<'a> {
         // carrying the message. The crossing is a node of the same body, so it runs
         // first; a crossing INSIDE the recursion suspends, and a suspending exit
         // abandons the trampoline's whole deferred set — an over-keep, never a second
-        // release (docs/impl/selfrec.md § "The deferral needs no escape gate").
+        // release (docs/impl/selfrec.md).
         if let HirKind::Var(b) = &func.kind {
             if self.stranded_self_bindings.contains(b) {
                 // Invariant: a stranded self-recursive binding is CELL-FREE
-                // (`!needs_capture()`; the strand sites in `binding.rs` both gate on
-                // it, docs/impl/selfrec.md § the cell-free gate). A sibling-captured
+                // (`!needs_capture()`; the strand sites in `binding/define.rs` and
+                // `binding/let.rs` both gate on it, docs/impl/selfrec.md). A sibling-captured
                 // (`needs_capture`) member's closure region is released by its forward
                 // cell's cascade; deferring its release here decrefs that region a SECOND time,
                 // under the still-live cell — the captured-self-tail double-free
-                // (tests/elle/region-selfrec-captured-tail-release.lisp). Asserting at
+                // (tests/impl/region-selfrec-captured-tail-release.lisp). Asserting at
                 // the CONSUMER catches any future strand path that skips the gate,
                 // turning that UAF into a loud panic at the seam.
                 debug_assert!(
                     !self.arena.get(*b).needs_capture(),
                     "stranded self-recursive binding {b:?} is needs_capture: its forward \
                      cell already releases the closure region, so a tail-call deferred release would \
-                     double-free it (see docs/impl/selfrec.md § the cell-free gate)"
+                     double-free it (see docs/impl/selfrec.md)"
                 );
                 return true;
             }
@@ -159,7 +152,7 @@ impl<'a> Lowerer<'a> {
             // onto the arena, so that mint raises the arena's own count. The merge
             // admits a returned cycle only where every tail exit of the letrec body is
             // a member call, which is what makes this deferral the arena's sole release
-            // (docs/impl/region/letrec.md § The frontier gate). A member reaches this
+            // (docs/impl/region/letrec.md). A member reaches this
             // marking only through an ADMITTED merge, so the gate never re-argues
             // admission; it is kept whole so both ends of the channel state the same
             // premise.
@@ -173,8 +166,7 @@ impl<'a> Lowerer<'a> {
             // The relocation must leave that release where it is, the call being
             // about to enter the very closure it would free, so the exemption's
             // premise that the new activation takes it over is only true if this
-            // channel runs it (docs/impl/region/mechanism.md § "What the exemption
-            // keeps, a channel must still run").
+            // channel runs it (docs/impl/region/relocate.md).
             //
             // The escape gate is the FIBER frontier alone, by the same ordering
             // argument the two channels above make: this deferral is a decref that

@@ -1,20 +1,21 @@
-// audited: 2026-09-14
+// audited: 2026-09-29
 //! What a node emits for the references its own stores take.
+//!
+//! docs/impl/region/mechanism.md
+//! docs/impl/region/ownership.md
 //!
 //! The cross-region incref, the ownership adopt that stands in for one, and the
 //! region frees a tail-call site defers to itself.
-//! docs/impl/region/mechanism.md
-//! docs/impl/region/ownership.md
 
 use super::*;
 
 impl<'a> Lowerer<'a> {
     /// Emit `AdoptRegion(parent, child)` for an interior owned-subtree edge: load
     /// both values from their binding slots and link the child's runtime region
-    /// into the parent's Owned subtree (docs/impl/region/ownership.md § "Adoption and
-    /// subtree drop"). A missing slot for an endpoint (no value-resolved home)
-    /// skips the adopt — the regions then stay independently RC'd, the always-legal
-    /// fallback (the frozen-RC contract makes the skip correctness-neutral).
+    /// into the parent's Owned subtree (docs/impl/region/ownership.md). A missing
+    /// slot for an endpoint (no value-resolved home) skips the adopt — the regions
+    /// then stay independently RC'd, the always-legal fallback (the frozen-RC
+    /// contract makes the skip correctness-neutral).
     fn emit_adopt_region(
         &mut self,
         child: crate::hir::region::Region,
@@ -51,18 +52,16 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    /// Emit `AdoptIntoActivation` for each member of a capture-back-edge SCC:
-    /// load the member's value from its binding slot and adopt its runtime
-    /// region into the executing activation's owner node
-    /// (docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge
-    /// SCC"). The adopt transfers ownership only; the free is the node's release
-    /// at the activation's completion. A member with no slot is skipped — its
-    /// region stays `Counted` and, its decref being suppressed, over-kept to
-    /// teardown: a bounded fallback, never a double-free. Slots are deduped so
-    /// two member regions resolving to one slot (a branch-dependent union)
-    /// adopt once, keeping the runtime's one-adoption assert unreachable (the
-    /// admission's pairwise-distinct-holder gate makes both cases unreachable
-    /// in practice; this is the emit-side belt).
+    /// Emit `AdoptIntoActivation` for each member of a capture-back-edge SCC: load the
+    /// member's value from its binding slot and adopt its runtime region into the
+    /// executing activation's owner node (docs/impl/region/owner.md). The adopt
+    /// transfers ownership only; the free is the node's release at the activation's
+    /// completion. A member with no slot is skipped — its region stays `Counted` and,
+    /// its decref being suppressed, over-kept to teardown: a bounded fallback, never a
+    /// double-free. Slots are deduped so two member regions resolving to one slot (a
+    /// branch-dependent union) adopt once, keeping the runtime's one-adoption assert
+    /// unreachable (the admission's pairwise-distinct-holder gate makes both cases
+    /// unreachable in practice; this is the emit-side belt).
     pub(in crate::lir::lower) fn emit_adopt_into_activation(
         &mut self,
         members: &[crate::hir::region::Region],
@@ -95,7 +94,7 @@ impl<'a> Lowerer<'a> {
         // becomes an `AdoptRegion` (parent adopts the child's region; no RC),
         // emitted here in place of the edge's `IncrefRegion`. `owned_adopt_edges`
         // is empty for a shape that stays Shared, so this is then inert
-        // (docs/impl/region/ownership.md § "Adoption and subtree drop").
+        // (docs/impl/region/ownership.md).
         let adopt_edges = self
             .region_info
             .owned_adopt_edges
@@ -105,12 +104,11 @@ impl<'a> Lowerer<'a> {
         for &(child, parent) in &adopt_edges {
             self.emit_adopt_region(child, parent);
         }
-        // O(1) lookup into the site-indexed map built in
-        // `with_region_info` (was a linear scan of every cross-region ref
-        // per node — O(n²) over a large compilation unit). Each entry is an
-        // edge `(source, target)`: `source` is the region the incref names,
-        // `target` rides along so a post-merge intra-region self-edge can be
-        // detected (`is_merge_self_edge`) and dropped (transform 2, below).
+        // O(1) lookup into the site-indexed map built in `with_region_info`. Each
+        // entry is an edge `(source, target)`: `source` is the region the incref
+        // names, `target` rides along so a post-merge intra-region self-edge can
+        // be detected (`is_merge_self_edge`) and dropped (self-edge elimination,
+        // below).
         let refs: Vec<_> = match self.increfs_by_site.get(&hir_id) {
             Some(edges) => edges.clone(),
             None => return,
@@ -124,7 +122,7 @@ impl<'a> Lowerer<'a> {
         // TARGET's free-time cascade, which fires once per scope while a loop
         // stores every iteration. Pinned by
         // `reassign_toplevel_prior_release_is_bounded` and the fn-local leak
-        // faces in `region-fn-local-cell-drop-leak.lisp`.
+        // faces in `tests/impl/region-fn-local-cell-drop-leak.lisp`.
         if self.region_info.drop_on_overwrite_sites.contains(&hir_id) {
             return;
         }
@@ -141,18 +139,17 @@ impl<'a> Lowerer<'a> {
             // region mints in the activation map), so a slot-based
             // `IncrefRegion` against it resolves to nothing and the edge's
             // balancing decref — the store target's free-time cascade — then
-            // steals a live reference (the call-result-arg clique UAF,
-            // tests/elle/region-native-clique-callresult-uaf.lisp). At a HARD
+            // steals a live reference
+            // (tests/impl/region-native-clique-callresult-uaf.lisp). At a HARD
             // edge site (a declared native uncounted-store effect —
-            // docs/impl/region/effects.md "Hard edges") incref by VALUE instead, the
-            // exact mirror of `emit_decrefs_for`'s call-result branch: load
-            // the value from its binding slot and retain the runtime region
-            // it actually lives in. Opaque user-fn sites keep the slot path
-            // (the no-op — a real incref there never balances
-            // when the callee stores through the runtime funnel;
-            // region-userfn-clique-callresult-noleak.lisp). Cell phantom
-            // placeholders keep the slot path too (their `region_to_slot`
-            // entry is an upvalue index, not a local slot).
+            // docs/impl/region/effects.md) incref by VALUE instead, the exact
+            // mirror of `emit_decrefs_for`'s call-result branch: load the value
+            // from its binding slot and retain the runtime region it actually
+            // lives in. Opaque user-fn sites keep the slot path (the no-op — a
+            // real incref there never balances when the callee stores through the
+            // runtime funnel; tests/impl/region-userfn-clique-callresult-noleak.lisp).
+            // Cell phantom placeholders keep the slot path too (their
+            // `region_to_slot` entry is an upvalue index, not a local slot).
             if hard_site
                 && self.region_info.call_result_regions.contains(&src)
                 && !self.region_info.cell_release_regions.contains(&src)
@@ -172,12 +169,11 @@ impl<'a> Lowerer<'a> {
                 // unpopulated-slot `IncrefRegion` this replaces.
                 continue;
             }
-            // Self-edge elimination (transform 2; docs/impl/region/mechanism.md
-            // § "Self-edge elimination"). A builder-idiom merge collapses this
-            // `src → dst` store edge's endpoints onto one region (they share a
-            // `merged_root`), making it an intra-region self-edge. The free-time
-            // cascade skips a region's references into itself
-            // (`regionpool/introspect.rs`, `rid != own_id`), so its
+            // Self-edge elimination (docs/impl/region/mechanism.md). A builder-idiom
+            // merge collapses this `src → dst` store edge's endpoints onto one
+            // region (they share a `merged_root`), making it an intra-region
+            // self-edge. The free-time cascade skips a region's references into
+            // itself (`regionpool/introspect.rs`, `rid != own_id`), so its
             // `IncrefRegion(root)` would have no balancing decref — keeping it leaks
             // the merged region. Drop it. This is the emission counterpart of
             // `static_slot`'s canonicalization and `emit_decrefs_for`'s child-decref
