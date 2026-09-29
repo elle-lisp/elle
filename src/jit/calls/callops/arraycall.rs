@@ -1,7 +1,8 @@
 // audited: 2026-09-29
-// docs/impl/jit.md
-// docs/impl/region/relocate.md
 //! Array-call, closure-construction, tail-call, and env-building JIT entry points.
+//!
+//! docs/impl/jit.md
+//! docs/impl/region/relocate.md
 
 use super::*;
 
@@ -10,8 +11,7 @@ use super::*;
 /// `args_region` is the args array's own static slot: the array is the calling
 /// convention's, so the call that consumes it reclaims it, on this tier exactly
 /// as on the interpreter's (`VM::release_splice_args`,
-/// docs/impl/region/mechanism.md § "A spliced call's arguments come out of an
-/// array the convention owns").
+/// docs/impl/region/mechanism.md).
 #[no_mangle]
 pub extern "C" fn elle_jit_call_array(
     func_tag: u64,
@@ -197,7 +197,7 @@ pub extern "C" fn elle_jit_make_closure(
 /// callee. `execute_bytecode_saving_stack` returns such a frame in
 /// `ExecResult.stack` rather than in `fiber.suspended`; dropping it loses the
 /// callee's state and resume injects nil as the call's return value
-/// (`tests/elle/fuel-jit-preempt.lisp`). The suspend arm leaves the parked frame
+/// (`tests/impl/fuel-jit-preempt.lisp`). The suspend arm leaves the parked frame
 /// in `fiber.suspended` and returns YIELD_SENTINEL; the compiled caller then
 /// appends its own frame via `elle_jit_yield_through_call`. Every JIT site that
 /// runs an interpreter callee through `execute_bytecode_saving_stack` — the
@@ -216,7 +216,7 @@ pub(super) fn interp_exec_result_to_jit_value(
             !had_inner_stack || !frames.is_empty(),
             "JIT→interpreter fallback dropped a fuel/signal-suspended callee's \
              inner frame; resume would inject nil for the call result \
-             (tests/elle/fuel-jit-preempt.lisp)"
+             (tests/impl/fuel-jit-preempt.lisp)"
         );
         vm.fiber.suspended = Some(frames);
         return YIELD_SENTINEL;
@@ -403,9 +403,9 @@ fn jit_tail_call_inner(
         // Hand both stranded releases to the activation that runs the callee. This
         // activation is the compiled caller's, and it pops its own dues slot on the
         // way out with the sentinel, so recording there would drop them
-        // (docs/impl/region/relocate.md § "A channel built in compiled code hands
-        // its release forward"). Written after the pending call is set, so a path
-        // that fails earlier leaves nothing for another activation's push to take.
+        // (docs/impl/region/relocate.md). Written after the pending call is set, so
+        // a path that fails earlier leaves nothing for another activation's push to
+        // take.
         vm.pending_tail_deferrals
             .extend(arena.into_iter().chain(callee));
 
