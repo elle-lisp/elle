@@ -1,11 +1,12 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## The transferred-returned-cycle shapes (docs/impl/region/owner.md § "Owner
 ## nodes" — "The transferred returned subtree") run soundly on the default
 ## baseline: a producer hands an a<->b cycle across the return (or
 ## fiber-terminal) frontier and the consumer discards or reads it. On the
-## flag-off baseline the discarded cycles leak (the oracle's `returned-cycle`
-## probe pins the rate); this file pins VALUE correctness and is the
-## guardfree subject for the shapes on both tiers.
+## flag-off baseline the discarded cycles leak (the `returned-cycle` probe in
+## tests/elle/probe/direct.lisp pins the rate); this file pins VALUE
+## correctness and is the guardfree subject for the shapes on both tiers.
 (defn cyc-mk []
   (let [a @[]
         b @[]]
@@ -56,4 +57,4 @@
       (fiber/resume f)
       (fiber/cancel f :dead)
       (fiber/status f))))
-(assert (= (run-cancel) :error) "a cancelled consumer fiber reads :error")
+(assert (= (run-cancel) :dead) "a cancelled consumer fiber reads :dead")

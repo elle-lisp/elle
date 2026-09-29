@@ -287,7 +287,8 @@ impl VM {
             // park"). A handler that parked its own frame under SIG_ERROR — a
             // denial of `:error` — never reaches here.
             if result.bits.intersects(SIG_ERROR) {
-                self.fiber.delivery.park_error(result.site);
+                let payload = self.fiber.signal.map_or(Value::NIL, |(_, v)| v);
+                self.fiber.delivery.park_error(result.site, payload);
             }
             let frame = BytecodeFrame::suspend(
                 result.code,
@@ -332,7 +333,8 @@ impl VM {
     ) -> SignalBits {
         let replay = self.replay_suspended(frames, resume_value);
         if let Some(site) = replay.error_park {
-            self.fiber.delivery.park_error(site);
+            let payload = self.fiber.signal.map_or(Value::NIL, |(_, v)| v);
+            self.fiber.delivery.park_error(site, payload);
         }
         replay.bits
     }

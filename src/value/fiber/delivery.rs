@@ -213,7 +213,7 @@ impl Delivery {
     /// (`do_fiber_first_resume`, `do_fiber_subsequent_resume`, the abort's
     /// `FiberResume` replay), and a parent a child's error stopped at its
     /// `fiber/resume` call (`finish_fiber_resume`).
-    pub(crate) fn park_error(&mut self, site: RaiseSite) {
+    pub(crate) fn park_error(&mut self, site: RaiseSite, _payload: Value) {
         self.assert_consumed();
         self.resume_unfunded = site.owes_mint();
     }
