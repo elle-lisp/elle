@@ -83,6 +83,29 @@
          (get (retained (fn [] (collect 1 2 3 4 5 6 7 8))) 0) 1)
 (at-most "a rest list of four arguments, pages per call"
          (claims (fn [] (collect 1 2 3 4))) 1.0)
+
+# A compiled callee collects its own rest list in its JIT entry, and an
+# interpreted caller reaches that entry. Top-level forms run interpreted, so
+# the call below reaches the entry once `collect` is compiled; `retained` above
+# does not reach it. `(jit/rejections)` drains the worker, so `collect` is
+# compiled before the call under any JIT policy. Under `--jit=off` the call
+# measures the interpreter's list again.
+(var warm 0)
+(while (%lt warm 50)
+  (collect 1 2)
+  (assign warm (%add warm 1)))
+(jit/rejections)
+(when (not (= (vm/config :jit) :off))
+  (assert (jit? collect)
+          "precondition: `collect` must be compiled, else the call below measures the interpreter's list"))
+# The trap: measured across two top-level `def`s, the same call reads one
+# region under either tier, so the measure sits inside one `let`.
+(let [before (arena/region-count)
+      xs (collect 1 2 3 4 5 6 7 8)
+      grew (%sub (arena/region-count) before)]
+  (exactly "a rest list an interpreted caller hands a compiled callee, regions"
+           grew 1)
+  (length xs))
 (exactly "a &keys struct, regions" (get (retained (fn [] (keyed :a 1 :b 2))) 0)
          1)
 (exactly "a native's result, (range 1000), regions"
