@@ -145,6 +145,18 @@ symmetric with its unpark; the node and the deferred set a park moves are
   it out ([mechanism.md](mechanism.md) § "A squelch boundary abandons frames the same way, so
   it runs the same walk").
 
+  **A host that refuses a park ends it the same way.** `eval`, `import`, the
+  `compile/*-module` setup runs, `compile/run-on :jit` and the root driver run code on the
+  current fiber, and none can hold a suspension of it, so each answers one with an error at
+  its own call. The refused park has no reader and no install, as at a squelch boundary, and
+  the frames it parked never run again. So the host ends it through the same chokepoint
+  (`VM::refuse_hosted_park`, over `discard_suspended_frames`): the frames' owed releases
+  run, and the park's references are released. The host's error then leaves by the
+  ordinary error exit, which parks the fiber's own frame at the host's call, so a restart
+  answers that call and never replays the refused code. Pinned by
+  `tests/elle/host-refusal.lisp` and `tests/elle/jit-run-on-refused-park.lisp`, and gauged
+  by `tests/elle/region-host-refusal.lisp`.
+
   **Two records decide it, because neither answers on its own.** The **ledger** says the
   delivery retain has no reader — a fact only the site that took the retain knows, and one no
   reading of a signal slot recovers, so that site writes the payload beside the retain
@@ -351,8 +363,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   `park_primitive(bits, payload)` (a suspending primitive or io park),
   `park_denial(bits, payload)` (a capability denial: a primitive park whose payload also
   has no body reference), `park_emit(bits, payload)` (an `Emit` park, which owes no
-  resume mint), `park_error(site)` (an error park, which owes a resume mint for a `Call`
-  site and none for an `Emit` site), `record_mint(payload)` (a raise minted the
+  resume mint), `park_error(site, payload)` (an error park, which owes a resume mint for a
+  `Call` site and none for an `Emit` site, and leaves standing the funding of a denial park
+  recorded for the same payload), `record_mint(payload)` (a raise minted the
   payload's delivery), `raise_in_park(payload)` (an in-place abort or refusal: the mint
   is recorded, the displaced payload's records leave with it, and the park keeps its
   resume funding), and `install_abort(payload)` (an abort that replays a `FiberResume`
@@ -368,10 +381,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   it has not run yet); and `discharge()`, where the park is over with no delivery to
   fund: `take_parked_state` consuming the park of a fiber that can never run again,
   `kill_fiber` ending any park a cancel finds, the squelch/abort discard chokepoint
-  (`discard_suspended_frames`), and
-  `VM::abandon_hosted_park` — the seam every host that drives a thunk on the current
-  fiber (`eval`, `import`, `arena/allocs`, `compile/run-on`, the root driver) crosses
-  when it refuses a suspend-class signal it cannot host and the fiber runs on. After a
+  (`discard_suspended_frames`), which a host that refuses a park crosses as well, and
+  `VM::abandon_hosted_park`, where a host hands a thunk's suspension on as its own call's
+  park (`arena/allocs`, `compile/run-on :bytecode`) and the thunk's park ends. After a
   discharge no funding survives, so a later park starts from nothing and a later
   (invalid) resume of a killed fiber mints nothing. The gated read is
   `mint_names(payload)` for the abandoned-frame walk and the parked frame's discharge —

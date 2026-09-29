@@ -186,6 +186,18 @@ The object limit (`arena/set-object-limit`) refuses the allocation past it and
 raises for the call that asked, whose result is not a value. A restart answers
 that call, as it answers any other.
 
+A host that runs code on the current fiber cannot hold a suspension of that
+code. `eval`, `import` and `compile/run-on :jit` each refuse one with an error
+at their own call. The suspended code is dropped, and a restart answers the
+host's call:
+
+```lisp
+(def hosted
+  (fiber/new (fn [] (list :got (eval '(begin (yield 1) :inner)))) |:yield :error|))
+(assert (= (get (fiber/resume hosted) :error) :eval-error))
+(assert (= (fiber/resume hosted 41) (list :got 41)))   # 41 answers the eval
+```
+
 ## Terminal vs. Resumable Signals
 
 Whether a caught signal is terminal or resumable is a **handler decision**,
