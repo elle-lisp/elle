@@ -158,7 +158,9 @@ impl VM {
     /// way").
     ///
     /// The refused signal is the one in the fiber's slot, which this takes
-    /// out; the host builds its error afterwards. `depth` is the parameter
+    /// out; the host builds its error afterwards. The refusal may release the
+    /// refused payload, so a host that describes the payload reads it before
+    /// it asks. `depth` is the parameter
     /// depth at the host's entry. A no-op for anything but a park (see
     /// [`Self::is_park`]).
     pub(crate) fn refuse_hosted_park(&mut self, bits: SignalBits, depth: ParamDepth) {

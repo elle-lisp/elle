@@ -182,27 +182,18 @@ impl VM {
 
             // Not squelched: this host refuses the park and raises at its own
             // call. The park is `post_signal`, for the reason the squelch check
-            // above names.
+            // above names. The refusal may release the payload, so the message
+            // reads it first.
+            let msg = match post_signal {
+                Some((bits, val)) => format!(
+                    "closure yielded under compile/run-on (signal {}, value type {})",
+                    bits,
+                    val.type_name()
+                ),
+                None => "closure yielded under compile/run-on".to_string(),
+            };
             self.refuse_held_park(yield_bits, post_signal, depth);
-
-            if let Some((bits, val)) = post_signal {
-                return (
-                    SIG_ERROR,
-                    rejected(
-                        self,
-                        "jit",
-                        format!(
-                            "closure yielded under compile/run-on (signal {}, value type {})",
-                            bits,
-                            val.type_name()
-                        ),
-                    ),
-                );
-            }
-            return (
-                SIG_ERROR,
-                rejected(self, "jit", "closure yielded under compile/run-on"),
-            );
+            return (SIG_ERROR, rejected(self, "jit", msg));
         }
 
         // Any other signal set during execution wins over the return value.
