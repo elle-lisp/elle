@@ -1,8 +1,8 @@
 (elle/epoch 13)
-# audited: 2026-09-28
+# audited: 2026-09-29
 ## elle test — turning an outcome into rows: the label a form is known by, what
-## analysis finds in it, the status a payload classifies to, and one row per
-## (form × tier).
+## analysis finds in it, the status a payload classifies to, and one result row
+## per form.
 ## docs/test-store.md
 ##
 ## A fragment of one module (see store.lisp).
@@ -30,9 +30,9 @@
   (let [v (get payload key)]
     (if (= v nil) nil (string v))))
 
-# ── classify one tier's [ok? payload] into a row ─────────────────────
-# pass  — the closure returned a value (held in :value for divergence checking).
-# skip  — a loud gate fired (:gated) or the tier rejected this form (:ineligible).
+# ── classify one [ok? payload] into a row ──────────────────────────────
+# pass  — the closure returned a value.
+# skip  — a loud gate fired (:gated), or the form trapped (exit 0).
 # fail  — any other error; capture the assert payload (:syntax/:actual/:expected).
 (defn classify [r]
   (let [ok (get r 0)
@@ -44,7 +44,7 @@
                   raw
                   (struct :error :error :message (string raw)))]
     (if ok
-      (struct :status :pass :ok true :value raw)
+      (struct :status :pass :ok true)
       (let [err (get payload :error)]
         (if (= err :gated)
           (struct :status :skip :ok false :reason (field-str payload :reason))
@@ -59,15 +59,11 @@
             (if (= err :timeout)
               (struct :status :timeout :ok false
                       :reason (field-str payload :message))
-              (if (and (= err :tier-rejected)
-                       (= (get payload :reason) :ineligible))
-                (struct :status :skip :ok false
-                        :reason (field-str payload :message))
-                (struct :status :fail :ok false :sig (sig-of payload)
-                        :reason (field-str payload :message)
-                        :syn (field-str payload :syntax)
-                        :act (field-str payload :actual)
-                        :exp (field-str payload :expected))))))))))
+              (struct :status :fail :ok false :sig (sig-of payload)
+                      :reason (field-str payload :message)
+                      :syn (field-str payload :syntax)
+                      :act (field-str payload :actual)
+                      :exp (field-str payload :expected)))))))))
 
 # ── what analysis says about a form (docs/test-store.md) ─────────────
 # The function a form's source is analyzed as. A file's top level and a
@@ -158,8 +154,7 @@
                 (get row :index) (get row :label) (get row :src) (get row :caps)
                 (get row :touches) (get row :signal)]))
 
-# Insert one (form × tier) result row and return its rowid (so assets can
-# reference it).
+# Insert one result row and return its rowid (so assets can reference it).
 (defn insert-result [conn run-id h tier-str c]
   (sqlite:exec conn
                "INSERT INTO result (run_id, form_hash, tier, status, reason, signal, syntax, expected, actual) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"
@@ -167,84 +162,33 @@
                 (get c :syn) (get c :exp) (get c :act)])
   (last-rowid conn))
 
-# Run a form on every active tier, inserting one row per tier and attaching the
-# file's captured `dumps` (a list of [kind addr size codec]) as assets to each.
-# `exec-fn` is (fn [tier-keyword out-path err-path] -> {:result :stdout :stderr});
-# the per-form path closes over a MAIN-compiled thunk (exec-thunk-capture), the
-# whole-file path closes over the file's syntax (exec-source-capture). Returns
-# [statuses pass-pairs]: the per-tier status strings, and [[tier-str value]...]
-# for the tiers that returned a value (divergence candidates).
-(defn run-tiers [conn run-id h exec-fn tiers dumps statuses pass-pairs]
-  (if (empty? tiers)
-    [statuses pass-pairs]
-    (let [tp (first tiers)
-          tk (get tp 0)
-          ts (get tp 1)
-          base (string scratch-dir "/" run-id "_" h "_" ts)
-          cap (exec-fn tk (string base ".out") (string base ".err"))
+# Record ONE thunk under the form identity ROW carries: insert its `form` row,
+# run it once, and insert one `worker` result with the file's captured `dumps`
+# (a list of [kind addr size codec]) and its output as assets. `exec-fn` is
+# (fn [out-path err-path] -> {:result :stdout :stderr}): the per-form path
+# closes over a MAIN-compiled thunk (exec-thunk-capture), the whole-file path
+# over the file's syntax (exec-source-capture). Returns [status].
+(defn record-thunk [conn run-id row exec-fn dumps]
+  (let [h (get row :hash)
+        base (string scratch-dir "/" run-id "_" h)]
+    (insert-form conn row)
+    (let [cap (exec-fn (string base ".out") (string base ".err"))
           c (note-timeout-stacks (note-last-output (classify (get cap :result))
                                  cap))
-          rid (insert-result conn run-id h ts c)]
+          rid (insert-result conn run-id h :worker c)]
       (insert-assets conn rid dumps)
       (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
-      (run-tiers conn run-id h exec-fn (rest tiers) dumps
-                 (concat statuses [(get c :status)])
-                 (if (get c :ok)
-                   (concat pass-pairs [[ts (get c :value)]])
-                   pass-pairs)))))
-
-# Are all of these values equal to the first? (Divergence = NOT all equal.)
-(defn all-equal? [x xs]
-  (if (empty? xs)
-    true
-    (and (= x (first xs)) (all-equal? x (rest xs)))))
-
-# Render the passing tiers' values for the synthetic diverge row's reason.
-(defn render-pairs [pairs]
-  (if (empty? pairs)
-    ""
-    (let [p (first pairs)
-          one (string (get p 0) "=" (string (get p 1)))]
-      (if (empty? (rest pairs))
-        one
-        (string one " " (render-pairs (rest pairs)))))))
-
-# Record ONE thunk under the form identity ROW carries: insert its `form` row
-# and run it across every active tier (divergence appended as a synthetic
-# tier='*' row). Shared by the per-form path (record-form-result) and the
-# whole-file path (the legacy multi-form mode runs one thunk for the file).
-# `diverge?` enables the synthetic tier='*' divergence row. The per-form path
-# (record-form-result) forces ONE form onto each backend, so distinct values are
-# a real cross-tier disagreement — diverge? true. The whole-file path runs an
-# imperative SCRIPT under each JIT policy, whose side effects (pids, timestamps)
-# differ run-to-run, so a value difference is NOT a bug — diverge? false.
-(defn record-thunk [conn run-id row exec-fn dumps tiers diverge?]
-  (let [h (get row :hash)]
-    (insert-form conn row)
-    (let [tr (run-tiers conn run-id h exec-fn tiers dumps [] [])
-          statuses (get tr 0)
-          pass-pairs (get tr 1)
-          vals (map (fn [pp] (get pp 1)) pass-pairs)]
-      (if (and diverge? (> (length pass-pairs) 1)
-               (not (all-equal? (first vals) (rest vals))))
-        (begin
-          (sqlite:exec conn
-                       "INSERT INTO result (run_id, form_hash, tier, status, reason) VALUES (?1,?2,?3,?4,?5)"
-                       [run-id h (keyword "*") :diverge
-                        (render-pairs pass-pairs)])
-          (concat statuses [:diverge]))
-        statuses))))
+      [(get c :status)])))
 
 (defn record-form-result [conn run-id row thunk dumps]
-  (record-thunk conn run-id row (fn [tk o e] (exec-thunk-capture tk thunk o e))
-                dumps active-tiers true))
+  (record-thunk conn run-id row (fn [o e] (exec-thunk-capture thunk o e)) dumps))
 
 # Iterate the [idx thunk] entries from compile/barrier-module. `forms` is the
 # file's source forms (unevaluated, epoch-dropped) indexed the same way, so
 # entry idx → forms[idx] supplies each test form's label/hash/src. def/var
 # setup forms produce no entry (they ran eagerly during the compile pass).
 # `profile` is the file's, which for the one-form-per-file corpus shape is the
-# form's own (docs/test-store.md § What analysis says about a form).
+# form's own (docs/test-store.md).
 (defn process-entries [conn run-id origin file forms profile entries dumps acc]
   (if (empty? entries)
     acc
@@ -259,7 +203,7 @@
                        dumps (concat acc statuses)))))
 
 # A file that won't compile (or whose setup faults) has no test forms to run:
-# record ONE file-level failure (a `vm` row joined to a synthetic form row whose
+# record ONE file-level failure (a `worker` row joined to a synthetic form row whose
 # `file` is the offending file, so SQL selection by file still finds it).
 (defn record-file-error [conn run-id origin file payload dumps profile]
   (let [msg (field-str payload :message)
@@ -269,7 +213,7 @@
     (insert-form conn row)
     (sqlite:exec conn
                  "INSERT INTO result (run_id, form_hash, tier, status, reason, signal) VALUES (?1,?2,?3,?4,?5,?6)"
-                 [run-id h :vm :fail msg (sig-of payload)])
+                 [run-id h :worker :fail msg (sig-of payload)])
     # Attach whatever artifacts compiled (a non-compiling file often still
     # parses to an `ast`), so even a file-level failure has a queryable record.
     (insert-assets conn (last-rowid conn) dumps)
@@ -280,7 +224,7 @@
 # site. The compile aborts before any test thunk is built, so there are no
 # per-form results to record; we mirror record-file-error but as a SKIP (the
 # dependency is absent, not broken). One file-level row (form_index -1), counted
-# in n_skip, leaves the gate exit at 0. See docs/test-runner.md § Gating.
+# in n_skip, leaves the gate exit at 0. See docs/test-runner.md.
 (defn record-file-gated [conn run-id origin file payload dumps profile]
   (let [reason (field-str payload :reason)
         row (file-row "file-gated" origin file "file-level gated"
@@ -289,7 +233,7 @@
     (insert-form conn row)
     (sqlite:exec conn
                  "INSERT INTO result (run_id, form_hash, tier, status, reason, signal) VALUES (?1,?2,?3,?4,?5,?6)"
-                 [run-id h :vm :skip reason ":gated"])
+                 [run-id h :worker :skip reason ":gated"])
     (insert-assets conn (last-rowid conn) dumps)
     [:skip]))
 
@@ -311,12 +255,11 @@
       (record-file-error conn run-id origin file (get out 1) dumps profile))))
 
 # A legacy multi-form file is one imperative script: compile it as a single
-# whole-file thunk (compile/whole-module) and run that ONE thunk per tier, in
-# source order, in isolation — matching a direct run. The per-form barrier (which
+# whole-file thunk (compile/whole-module) and run that ONE thunk once, in source
+# order, in isolation — matching a direct run. The per-form barrier (which
 # hoists def/var eagerly ahead of the bare-expression test forms) reorders such a
-# script (read-before-write) and re-runs shared mutations per tier; one thunk
-# eliminates that. The file is its own form: src = the file, label = the first
-# assert message anywhere in it. See docs/test-runner.md § Multi-form files.
+# script (read-before-write); one thunk eliminates that. The file is its own form: src = the file, label = the first
+# assert message anywhere in it. See docs/test-runner.md.
 # Compile ONCE in the main VM to detect a compile error or a top-level :gated
 # (dispatch-compiled records the file-level error/skip row) — but DON'T run that
 # thunk. For execution we ship the file's parsed SYNTAX to a worker that
@@ -332,11 +275,10 @@
                            (record-thunk conn run-id
                            (form-row-of origin file 0 (if msg msg "") src
                                         profile)
-                           (fn [tk o e]
-                             (exec-source-capture tk read-forms name o e)) dumps
-                           whole-file-policies false))))))
+                           (fn [o e] (exec-source-capture read-forms name o e))
+                           dumps))))))
 
-# Compile SRC and run its test forms per tier. A single-form file/snippet (the
+# Compile SRC and run its test forms. A single-form file/snippet (the
 # durable corpus shape) uses the per-form barrier (compile/barrier-module); a
 # legacy MULTI-form file is wrapped as one whole-file thunk (process-whole). A
 # compile/setup error becomes one file-level failure.
@@ -360,8 +302,8 @@
 # behind. The file is the unit here — a process cannot be given one form of it
 # — and it is identified by the hash of its source, the same identity the
 # whole-file path uses. So an isolated result and an in-process one are two
-# tiers of one form rather than two forms that never meet in a query.
-# See docs/test-runner.md § Isolation.
+# results of one form rather than two forms that never meet in a query.
+# See docs/test-runner.md.
 (defn process-file-isolated [conn run-id file flags]
   (let [[read-ok? src] (protect (slurp file))]
     (if (not read-ok?)
