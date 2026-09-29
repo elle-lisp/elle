@@ -33,9 +33,23 @@ pub enum RaiseSite {
     #[default]
     Call,
     /// A raise with no result position: an instruction that produces no value,
-    /// or the object limit between two instructions. A restart continues after
-    /// it and delivers nothing.
+    /// or an object-limit refusal from outside the frame, raised before its
+    /// first instruction. A restart continues after it and delivers nothing.
     NoResult,
+}
+
+impl RaiseSite {
+    /// Whether a restart delivers its value into the raise's result position:
+    /// the frame parks with `push_resume_value` set.
+    pub fn delivers(self) -> bool {
+        self != RaiseSite::NoResult
+    }
+
+    /// Whether the delivery mints the reference the continuation's release of
+    /// the restart value consumes.
+    pub fn owes_mint(self) -> bool {
+        self == RaiseSite::Call
+    }
 }
 
 /// The funding record of a fiber's current park. One instance rides each
@@ -100,15 +114,16 @@ pub struct Delivery {
     /// and its region resolved, never structurally read, and the counted edge for
     /// the same value is `Fiber::signal`'s.
     undelivered: Option<(SignalBits, Value)>,
-    /// Whether this fiber's innermost suspension is a PRIMITIVE call, whose
-    /// resume value therefore arrives owing one reference. A parked frame
-    /// re-enters at its suspending call's continuation, which runs that call's
-    /// compiler-emitted result release; a bytecode callee funds that reference
-    /// with its `Return` mint, but a primitive that suspends never returns, so
-    /// the delivery mints it instead (docs/impl/region/park.md § "A delivery
-    /// into a replayed frame carries one owning reference"). Rides the fiber
-    /// rather than the frame because a tail suspend's park is built later and
-    /// elsewhere, by a driver that never saw the primitive.
+    /// Whether the resume value of this fiber's innermost park arrives owing one
+    /// reference: a park at a PRIMITIVE call, or an error park at a `Call` site.
+    /// A parked frame re-enters at its call's continuation, which runs that
+    /// call's compiler-emitted result release; a bytecode callee funds that
+    /// reference with its `Return` mint, but a primitive that suspends never
+    /// returns and a raising call never produced its result, so the delivery
+    /// mints it instead (docs/impl/region/park.md § "A delivery into a replayed
+    /// frame carries one owning reference"). Rides the fiber rather than the
+    /// frame because a tail suspend's park is built later and elsewhere, by a
+    /// driver that never saw the primitive.
     resume_unfunded: bool,
 }
 
@@ -132,8 +147,8 @@ impl Delivery {
     /// The compiler funds this continuation itself — the emit's own decref_point
     /// balances the release past the suspend — so the park owes no resume mint,
     /// and the record is the escape retain's alone. Never reached by a TERMINAL
-    /// emit: an error raise parks nothing and records its mint instead, and a
-    /// halt takes no retain at all.
+    /// emit: an error raise records its mint, and the fiber boundary parks it
+    /// through [`Self::park_error`]; a halt takes no retain at all.
     pub(crate) fn park_emit(&mut self, bits: SignalBits, payload: Value) {
         self.assert_consumed();
         self.record_park(bits, payload);
@@ -191,35 +206,35 @@ impl Delivery {
     /// An error park: the fiber stopped on a raise, and a restart delivers into
     /// the raising call's result position. A `Call` site produced no result, so
     /// the resume value owes the `ResumeDelivery` mint; an `Emit` site's
-    /// continuation funds its own release (docs/impl/region/park.md § "A restart
-    /// delivers into an error park"). Caller: the fiber boundary, where the
-    /// error exit built the park.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "no caller outside the ledger tests")
-    )]
-    pub(crate) fn park_error(&mut self, _site: RaiseSite) {
-        todo!("park_error")
+    /// continuation funds its own release, and a `NoResult` site takes no
+    /// resume value at all (docs/impl/region/park.md § "A restart delivers into
+    /// an error park"). The raise's own mint record stands: it names the parked
+    /// payload. Callers: the fiber boundary where the error exit built the park
+    /// (`do_fiber_first_resume`, `do_fiber_subsequent_resume`, the abort's
+    /// `FiberResume` replay), and a parent a child's error stopped at its
+    /// `fiber/resume` call (`finish_fiber_resume`).
+    pub(crate) fn park_error(&mut self, site: RaiseSite) {
+        self.assert_consumed();
+        self.resume_unfunded = site.owes_mint();
     }
 
     /// An injected `fiber/abort` / `fiber/refuse` raised in place over the
     /// current park: the injection's mint is recorded, the displaced payload's
     /// records leave with it, and the park keeps its resume funding, because a
     /// restart still delivers into the parked call's result. Caller:
-    /// `do_fiber_abort`.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "no caller outside the ledger tests")
-    )]
-    pub(crate) fn raise_in_park(&mut self, _payload: Value) {
-        todo!("raise_in_park")
+    /// `do_fiber_abort`, for a fiber parked in its own bytecode.
+    pub(crate) fn raise_in_park(&mut self, payload: Value) {
+        self.minted = Some(payload);
+        self.bodyless = None;
+        self.undelivered = None;
     }
 
-    /// An abort injection installed its payload over the park: the injection's
-    /// mint is recorded, the displaced park's payload records leave with its
-    /// payload, and no resume value is owed — an abort delivers none (the
-    /// replayed frame re-enters with `SIG_ERROR` set and leaves before the
-    /// parked call's result release). Caller: `do_fiber_abort`.
+    /// An abort injection installed its payload where no bytecode park takes
+    /// it: a `FiberResume` park, whose replay delivers the aborted sub-fiber's
+    /// result and is funded by the injection's own mint, or a fiber that never
+    /// started. The injection's mint is recorded, the displaced park's payload
+    /// records leave with its payload, and no resume mint is owed. Caller:
+    /// `do_fiber_abort`.
     pub(crate) fn install_abort(&mut self, payload: Value) {
         self.minted = Some(payload);
         self.bodyless = None;

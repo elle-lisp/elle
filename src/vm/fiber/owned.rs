@@ -1,3 +1,4 @@
+// audited: 2026-09-28
 //! What an abandoned frame chain owed, and the teardown of a terminal fiber.
 //!
 //! [`release_parked_dues`] is the shared half: a chain nothing can re-enter owes
@@ -141,40 +142,52 @@ pub(crate) fn release_fiber_owned(
     super::release_discarded_signal(heap, parked_signal);
 }
 
-/// The hard-kill teardown `fiber/cancel` (of a new/parked fiber) and
-/// `fiber/abort` (of a not-yet-started one) route through: set the terminal
-/// error state, drop the parked chain, and free everything the fiber owned.
-/// The take runs under the fiber borrow; the release after it is dropped
-/// ([`take_fiber_owned`]). Unlike an ordinary `:error` promotion — which keeps
-/// the fiber resumable — a hard kill consumes the chain, so nothing it owned can
-/// ever be replayed.
+/// The hard-kill teardown `fiber/cancel` (of a new, paused or errored fiber,
+/// left `:dead`) and `fiber/abort` (of a not-yet-started one, left `:error`)
+/// route through: set the caller's `status`, drop the parked chain, and free
+/// everything the fiber owned. The take runs under the fiber borrow; the
+/// release after it is dropped ([`take_fiber_owned`]). A hard kill consumes the
+/// chain, so nothing it owned can ever be replayed, and the ledger is
+/// discharged with it: a restartable error park's resume funding has no
+/// delivery left to fund.
 ///
 /// The kill PARKS `error_value` as the fiber's terminal signal (read later via
 /// `fiber/value`), so it owes the same park-retain + recorded content edge the
-/// completion path takes (`do_fiber_resume` step 6a): the fiber's free releases
+/// completion path takes (`with_child_fiber` step 6a): the fiber's free releases
 /// the payload's region exactly once through the recorded edge, and the debug
 /// equivalence oracle asserts the table matches the content scan. Without the
 /// pair, a heap payload in a live foreign region is an unrecorded edge AND an
 /// over-free at the fiber's free
-/// (`runtime::tests::ownership::fnode::fiber_kill_park_retains_terminal_payload`).
+/// (`runtime::tests::ownership::fnode::kill::fiber_kill_park_retains_terminal_payload`).
 /// The retain precedes [`release_fiber_owned`], whose cascade could otherwise
 /// free a payload that lived in the fiber's owned set.
+///
+/// A fiber stopped on an error holds a terminal signal the kill replaces, so
+/// that signal's park-retain and edge are released as it is displaced
+/// (`release_displaced_terminal_signal`), after the new payload's are taken,
+/// so a payload the two share never reaches zero in between
+/// (`runtime::tests::ownership::fnode::kill::fiber_kill_releases_displaced_error_signal`).
 pub(crate) fn kill_fiber(
     heap: &mut crate::value::fiberheap::FiberHeap,
     handle: &FiberHandle,
     fiber_value: Value,
     error_value: Value,
+    status: FiberStatus,
 ) {
     let signal = Some((SIG_ERROR, error_value));
-    let owned = handle.with_mut(|fiber| {
+    let (owned, displaced) = handle.with_mut(|fiber| {
         // Take BEFORE installing the terminal error: the take releases the OLD
         // parked signal's SuspendEscape retain (a yielded io request / denial
-        // payload the kill supersedes) — replacing first would strand it.
+        // payload the kill supersedes) — replacing first would strand it. A
+        // TERMINAL signal stays in the slot through the take, and leaves here.
         let owned = take_fiber_owned(fiber);
-        fiber.status = FiberStatus::Error;
+        let displaced = fiber.signal.take();
+        fiber.delivery.discharge();
+        fiber.status = status;
         fiber.signal = signal;
-        owned
+        (owned, displaced)
     });
     super::refcount::record_terminal_signal_park(heap, fiber_value, &signal);
+    super::release_displaced_terminal_signal(heap, fiber_value, displaced);
     release_fiber_owned(heap, owned);
 }

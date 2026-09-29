@@ -1,3 +1,4 @@
+// audited: 2026-09-28
 //! What one activation owes the region system when it ends.
 //!
 //! Two obligations, one life. The **owner node** is the pages-less forest root
@@ -20,12 +21,10 @@ use crate::hir::region::RuntimeRegion;
 /// (one entry per activation frame, parallel to `activation_region_maps`) and
 /// MOVED into `BytecodeFrame::activation_dues` for the duration of a park.
 ///
-/// `Clone` exists because `BytecodeFrame` is cloneable, and a clone duplicates
-/// obligations: two records naming one region release it twice. The clone sites
-/// are the frame-chain hand-offs that drop the original in the same breath
-/// (`resume_suspended` re-parking the frames it did not reach), never a way to
-/// hold the same dues in two live places.
-#[derive(Debug, Default, Clone)]
+/// Not `Clone`, and neither are the frames that carry it: a clone would
+/// duplicate obligations, two records naming one region releasing it twice.
+/// Every hand-off of a parked chain moves it.
+#[derive(Debug, Default)]
 pub struct ActivationDues {
     /// The activation's owner node — the forest root minted lazily on the first
     /// `AdoptIntoActivation`, whose single decref subtree-drops every member the

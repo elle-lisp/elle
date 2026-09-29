@@ -1,7 +1,8 @@
-// audited: 2026-09-23
-// docs/impl/vm.md
+// audited: 2026-09-28
 //! The interpreter's inner loop: decode one opcode, route it, and check what
 //! the handler left on the fiber.
+//!
+//! docs/impl/vm.md
 
 use super::*;
 
@@ -76,13 +77,78 @@ impl VM {
         }
     }
 
+    /// Take the placeholder a raising instruction left in its result position,
+    /// and answer the raise's site (docs/impl/vm.md § "The error exit").
+    ///
+    /// An instruction with a result pushes one placeholder in place of it when
+    /// it raises, and the pop leaves that position empty for a restart's value.
+    /// `CheckSignalBound` and `PushParamFrame` produce no value, so they push
+    /// none, and a restart delivers nothing to them. Popping for one of those
+    /// would take a live operand instead, and the debug check names that case: a
+    /// placeholder is `nil` (or the empty list a rest-destructure leaves), and
+    /// it sits above the frame's locals.
+    fn take_raise_placeholder(
+        &mut self,
+        instr: Instruction,
+        code: &crate::value::Code,
+    ) -> crate::value::fiber::RaiseSite {
+        use crate::value::fiber::RaiseSite;
+        if matches!(
+            instr,
+            Instruction::CheckSignalBound | Instruction::PushParamFrame
+        ) {
+            return RaiseSite::NoResult;
+        }
+        #[cfg(debug_assertions)]
+        {
+            let floor = self.current_frame_base() + code.reserved_locals();
+            debug_assert!(
+                self.fiber.stack.len() > floor,
+                "VM bug: {instr:?} raised with no placeholder above the frame's \
+                 {} local slot(s)",
+                code.reserved_locals(),
+            );
+        }
+        #[cfg(not(debug_assertions))]
+        let _ = code;
+        let placeholder = self.fiber.stack.pop();
+        debug_assert!(
+            placeholder.is_some_and(|v| v.is_nil() || v == Value::EMPTY_LIST),
+            "VM bug: {instr:?} raised with {placeholder:?} in its result position \
+             where a placeholder belongs",
+        );
+        RaiseSite::Call
+    }
+
+    /// Take the result of the instruction whose allocation the object limit
+    /// refused (docs/impl/vm.md § "The error exit"). Every instruction that
+    /// allocates pushes one result, and the refusal leaves it as no value — a
+    /// `nil` where the heap refused the object, or a structure holding one —
+    /// so a restart answers the instruction in its place.
+    fn take_refused_result(&mut self, code: &crate::value::Code) {
+        #[cfg(debug_assertions)]
+        {
+            let floor = self.current_frame_base() + code.reserved_locals();
+            debug_assert!(
+                self.fiber.stack.len() > floor,
+                "VM bug: the object limit refused an allocation, but no result sits \
+                 above the frame's {} local slot(s)",
+                code.reserved_locals(),
+            );
+        }
+        #[cfg(not(debug_assertions))]
+        let _ = code;
+        self.fiber.stack.pop();
+    }
+
     /// Inner execution loop that handles all instructions.
     ///
     /// Takes `Rc` references to bytecode and constants so that yield and
     /// call handlers can capture them cheaply (Rc clone, not data copy).
     /// Derefs to slices for individual instruction handlers.
     ///
-    /// Returns `(SignalBits, ip)` — the signal and the IP at exit.
+    /// Returns the `Exit`: the signal, the IP at exit, and where an error was
+    /// raised.
     ///
     /// The per-instruction routing is `dispatch_instruction` (see `opcodes`);
     /// this body is just the harness around it: the pre-decode signal and
@@ -93,7 +159,9 @@ impl VM {
         code: &crate::value::Code,
         closure_env: &Rc<Vec<Value>>,
         start_ip: usize,
-    ) -> (SignalBits, usize) {
+    ) -> crate::vm::execute::Exit {
+        use crate::value::fiber::RaiseSite;
+        use crate::vm::execute::Exit;
         let mut ip = start_ip;
         let mut instr_ip = start_ip;
 
@@ -129,19 +197,26 @@ impl VM {
         // region is kept live through the recursion by the tail-call deferred release, so
         // the value LoadSelf reads is never stale).
 
+        // Whether an instruction of this frame has run, which decides whose
+        // allocation a refusal by the object limit was (below).
+        let mut ran_instruction = false;
         loop {
             // Check for pre-existing error signal (e.g., from previous Call)
             if let Some((bits, _)) = self.fiber.signal {
                 if bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT) {
                     self.record_error_loc(locations, instr_ip);
-                    return (bits, ip);
+                    return Exit::at(bits, ip);
                 }
             }
 
-            // Check for allocation limit violation from previous instruction.
-            // The error flag is stored on the current FiberHeap (always installed
-            // after chunk 1). Temporarily remove the limit so the error struct
-            // can be allocated.
+            // Check for an allocation the object limit refused since the last
+            // check. The error flag is stored on the heap. Temporarily remove
+            // the limit so the error struct can be allocated. A refusal by this
+            // frame's previous instruction left that instruction's result as no
+            // value, so the raise is that instruction's, and a restart answers
+            // it. A refusal before this frame ran anything — a callee's
+            // environment, built before its first instruction — has no result
+            // position here (docs/impl/vm.md § "The error exit").
             if let Some((count, limit)) = self.heap().take_alloc_error() {
                 let saved_limit = self.heap().set_object_limit(None);
                 let err = self.escaping_error(
@@ -154,7 +229,13 @@ impl VM {
                 self.heap().set_object_limit(saved_limit);
                 self.fiber.signal = Some((SIG_ERROR, err));
                 self.record_error_loc(locations, instr_ip);
-                return (SIG_ERROR, ip);
+                let site = if ran_instruction {
+                    self.take_refused_result(code);
+                    RaiseSite::Call
+                } else {
+                    RaiseSite::NoResult
+                };
+                return Exit::raised(SIG_ERROR, ip, site);
             }
 
             if ip >= bc.len() {
@@ -202,25 +283,40 @@ impl VM {
                 &mut ip,
                 instr_ip,
             ) {
-                // The dominant error exit: a handler that raises (or that
-                // propagates a callee's raise) returns the signal here rather
-                // than falling through to the post-handler check below, so this
-                // is where most errors get the location of the form that
-                // raised them.
-                let (exit_bits, _) = exit;
+                // The exit a handler returns directly: an `Emit`, a tail or
+                // spliced call's raise, a suspend. A handler that returns here
+                // leaves nothing in the result position, so there is nothing
+                // to pop.
+                let (exit_bits, exit_ip) = exit;
                 if exit_bits.intersects(SIG_ERROR) || exit_bits.intersects(SIG_HALT) {
                     self.record_error_loc(locations, instr_ip);
                 }
-                return exit;
+                let site = if instr == Instruction::Emit {
+                    RaiseSite::Emit
+                } else {
+                    RaiseSite::Call
+                };
+                return Exit::raised(exit_bits, exit_ip, site);
             }
 
-            // Check for error signal set by this instruction's handler
+            // The dominant error exit: a handler that raises sets the signal,
+            // pushes its placeholder, and falls through to here, so this is
+            // where most errors get the location of the form that raised them.
             if let Some((bits, _)) = self.fiber.signal {
                 if bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT) {
                     self.record_error_loc(locations, instr_ip);
-                    return (bits, ip);
+                    let site = if bits.intersects(SIG_ERROR) {
+                        self.take_raise_placeholder(instr, code)
+                    } else {
+                        RaiseSite::Call
+                    };
+                    return Exit::raised(bits, ip, site);
                 }
             }
+
+            // The instruction ran to completion in this frame, so an
+            // allocation the object limit refuses from here on is its.
+            ran_instruction = true;
         }
     }
 }

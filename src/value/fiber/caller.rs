@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-28
 //! A caller paused in its fiber while its interpreted callee runs on the same
 //! dispatch loop, and what completing the call needs.
 //!
@@ -17,8 +17,9 @@ pub struct CallSite {
     /// The callee's squelch mask. A suspending signal it names becomes a
     /// `signal-violation` error at this call.
     pub squelch_mask: SignalBits,
-    /// The callee was declared `silence`d, so any signal leaving it is a
-    /// programmer error that aborts the process.
+    /// The callee's signal is silent, declared or inferred, so any signal
+    /// leaving it breaks that claim, and the call aborts the process with a
+    /// diagnostic.
     pub silent: bool,
     /// The callee's name, for the silence diagnostic.
     pub name: Option<&'static str>,
@@ -56,6 +57,10 @@ pub struct PausedCaller {
     pub call_ip: usize,
     /// The caller's operand stack, locals included.
     pub stack: Vec<Value>,
+    /// How many parameter frames the fiber held at the call. A callee that
+    /// leaves by an error is abandoned, and the `parameterize` frames it pushed
+    /// leave with it (docs/signals/primitives.md § "Where a restart lands").
+    pub param_depth: usize,
     /// The caller's executing-closure register.
     pub closure: Value,
 }
