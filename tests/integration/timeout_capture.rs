@@ -1,14 +1,17 @@
-// A form killed by the per-test deadline keeps what it printed. `timeout …
-// join: deadline exceeded` names the budget, not the call the form was in when
-// the budget ran out; the form's own output is the only account of that, and it
-// is already written when the form wedges. See docs/test-runner.md § CAS asset
-// capture.
+// audited: 2026-09-28
+// What a form killed by its deadline leaves behind: its output, and a photograph of every thread.
+// docs/test-runner.md
+// docs/testing.md
 //
-// The fixture prints one known line and then waits far past the deadline, both
-// in a single form — the runner's unit is the form, so a print in a form of its
-// own would belong to a result that never timed out. `size` on the asset row is
-// the UNCOMPRESSED byte length, so the exact line is pinned without
-// decompressing the CAS entry.
+// `timeout … join: deadline exceeded` names the budget, not the call the form
+// was in when the budget ran out. The form's own output is one account of that,
+// and it is already written when the form wedges. `size` on the asset row is the
+// UNCOMPRESSED byte length, so the exact line is pinned without decompressing
+// the CAS entry.
+//
+// Each fixture prints and waits far past the deadline in a single form. The
+// runner's unit is the form, so a print in a form of its own would belong to a
+// result that never timed out.
 
 use std::process::Command;
 
@@ -24,13 +27,21 @@ const MARKER_BYTES: usize = MARKER.len() + 1;
 /// Run `elle test` over a fixture that prints `MARKER` and then wedges.
 /// Returns the runner's own output, the DB path, and the scratch dir.
 fn run_wedged_fixture(tag: &str) -> (String, std::path::PathBuf, crate::common::ScratchDir) {
+    run_wedged_form(
+        tag,
+        &format!("(begin (eprintln \"{}\") (ev/sleep 600))\n", MARKER),
+    )
+}
+
+/// Run `elle test` over a fixture holding `form`, which must wedge past a
+/// two-second budget. Returns what `run_wedged_fixture` returns.
+fn run_wedged_form(
+    tag: &str,
+    form: &str,
+) -> (String, std::path::PathBuf, crate::common::ScratchDir) {
     let dir = crate::common::ScratchDir::new(tag);
     let fixture = dir.join("wedge.lisp");
-    std::fs::write(
-        &fixture,
-        format!("(begin (eprintln \"{}\") (ev/sleep 600))\n", MARKER),
-    )
-    .unwrap();
+    std::fs::write(&fixture, form).unwrap();
     let db = dir.join("s.db");
 
     let out = Command::new(elle_binary())
@@ -130,5 +141,94 @@ fn a_timed_out_form_leaves_no_capture_files_behind() {
         left.is_empty(),
         "the wedged form's capture files must not outlive the run, found: {:?}",
         left
+    );
+}
+
+/// How many OS threads the photograph fixture parks before it wedges.
+const SLEEPERS: usize = 100;
+
+/// True when this box has the sampler the runner photographs with: `sample`
+/// ships with macOS, and `eu-stack` comes with elfutils.
+fn has_sampler() -> bool {
+    cfg!(target_os = "macos")
+        || Command::new("eu-stack")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+}
+
+/// The thread headers in a photograph: `TID 123:` from `eu-stack`, and
+/// `611 Thread_123 …` from `sample`, whose first word is a sample count.
+fn thread_headers(photo: &str) -> usize {
+    photo
+        .lines()
+        .filter(|line| {
+            line.starts_with("TID ")
+                || line
+                    .split_whitespace()
+                    .nth(1)
+                    .is_some_and(|w| w.starts_with("Thread_"))
+        })
+        .count()
+}
+
+/// The photograph is for the one thread that wedged, and the runner cannot
+/// know which thread that is. So it prints every thread whole.
+///
+/// The counter-factual: a photograph cut at a fixed length keeps the threads the
+/// sampler lists first. On macOS those were the JIT compiler threads, whose deep
+/// stacks filled the cut before the wedged worker was reached. The fixture parks
+/// `SLEEPERS` threads, which no fixed cut of the old size can hold.
+///
+/// A box with no sampler prints no photograph, and the timeout is still recorded.
+#[test]
+fn a_timed_out_form_photographs_every_thread_whole() {
+    let (runner_output, _db, _dir) = run_wedged_form(
+        "timeout-capture-photograph",
+        &format!(
+            "(begin (each _ in (range 0 {}) (os/spawn-vm (fn [] (time/sleep 600)))) (ev/sleep 600))\n",
+            SLEEPERS
+        ),
+    );
+
+    assert!(
+        runner_output.contains("join: deadline exceeded"),
+        "the fixture must be recorded as a timeout, got:\n{}",
+        runner_output
+    );
+
+    let start = runner_output.find("── threads at the deadline");
+    if !has_sampler() {
+        assert!(
+            start.is_none(),
+            "a box with no sampler must print no photograph, got:\n{}",
+            runner_output
+        );
+        return;
+    }
+
+    let start = start.unwrap_or_else(|| {
+        panic!(
+            "this box has a sampler, so a timeout must print a photograph, got:\n{}",
+            runner_output
+        )
+    });
+    let photo = &runner_output[start..];
+    let photo = &photo[..photo.find("── end threads").unwrap_or(photo.len())];
+
+    let tail: Vec<&str> = photo.lines().rev().take(8).collect();
+    assert!(
+        !photo.contains("…truncated"),
+        "the photograph must be printed whole, got {} bytes ending:\n{}",
+        photo.len(),
+        tail.into_iter().rev().collect::<Vec<_>>().join("\n")
+    );
+    let headers = thread_headers(photo);
+    assert!(
+        headers >= SLEEPERS,
+        "the photograph must list every thread: {} parked, {} listed",
+        SLEEPERS,
+        headers
     );
 }
