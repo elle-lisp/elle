@@ -1,9 +1,12 @@
-// DEFENSE: Integration tests that require Rust-specific APIs
+// audited: 2026-09-29
+// The core behaviors a script cannot check: an undefined-variable error's text, and `halt`.
 //
-// Tests that can be expressed in pure Elle have been migrated to
-// tests/elle/core.lisp. The tests below remain because they need:
-// - Error message substring matching
-// - halt primitive (terminates the VM, can't test in a script)
+// docs/errors.md
+// docs/signals/fibers.md
+//
+// tests/lang/core.lisp holds the rest. These need the error string, or they end
+// the VM that a script would read its result from.
+
 use crate::common::eval_source;
 use elle::Value;
 
@@ -13,7 +16,7 @@ use elle::Value;
 
 #[test]
 fn test_undefined_variable_error_shows_name() {
-    // Issue #300: error message should show the variable name, not a SymbolId
+    // The message names the variable, not a raw symbol id.
     eval_source("nonexistent-foo", |result| {
         assert!(result.is_err());
         let err = result.unwrap_err();

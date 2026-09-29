@@ -96,9 +96,6 @@ mod trace_compile {
 mod trace_cli {
     include!("trace_cli.rs");
 }
-mod flip_cli {
-    include!("flip_cli.rs");
-}
 mod tier_cli {
     include!("tier_cli.rs");
 }
