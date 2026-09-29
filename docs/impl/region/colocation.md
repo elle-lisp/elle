@@ -243,13 +243,22 @@ lowerer's join emission and the runtime need no change.
 ## Finding the next target
 
 The gauges say how much a shape costs. To find which code claims the pages,
-build the `profiling` profile and count calls to `RegionPool::add_page` by
-caller:
+count the calls to `RegionPool::add_page` by the code path that made them:
 
 ```sh
 make page-claims ARGS="tests/elle/traits.lisp"
 ```
 
-The target runs the binary under callgrind with the callers of `add_page`
-separated, and [scripts/page-claims](../../../scripts/page-claims) ranks the
-call paths. The top entries are the next patterns to realize.
+`ARGS` is what the profiled `elle` runs, so `ARGS="test tests/elle/traits.lisp"`
+profiles the corpus runner instead. The target builds the `profiling` profile
+and runs [run.lisp](../../../tools/pageclaims/run.lisp), which runs that `elle`
+under callgrind with the callers of `add_page` separated.
+[rank.lisp](../../../tools/pageclaims/rank.lisp) sums the claims of each call
+path, and `run.lisp` prints the total, then the paths with the most claims first.
+
+A path is the first `DEPTH` frames above `add_page`, 3 unless set. It skips
+the frames that only move an allocation toward a page: the region store, the
+page pool, the heap's allocation entry points and the value builders. So two
+constructors that reach the pool from one caller share a path, and a path
+names the code that chose to allocate. `TOP` sets how many paths print (20
+unless set). The top entries are the next patterns to realize.
