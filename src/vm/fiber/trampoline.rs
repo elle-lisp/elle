@@ -152,7 +152,7 @@ impl VM {
                     // error park").
                     if bits.intersects(SIG_ERROR) {
                         let (parent_handle, _) = fiber_stack.last().unwrap();
-                        parent_handle.with_mut(|f| f.delivery.park_error(RaiseSite::Call));
+                        parent_handle.with_mut(|f| f.delivery.park_error(RaiseSite::Call, value));
                     }
 
                     // For uncaught suspending signals (e.g. SIG_IO), build

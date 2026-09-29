@@ -1,12 +1,15 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 # ── Capability enforcement tests ───────────────────────────────────────
 #
 # Tests for the "capabilities down" model: fiber/new :deny, fiber/caps,
 # and runtime enforcement of withheld capabilities.
 #
-# Note: arithmetic ops (+, -, etc.) are compiled to specialized bytecode
-# instructions that bypass call_inner. Use non-specialized primitives
+# Note: arithmetic (+, -, etc.) is stdlib closures over %-intrinsic
+# instructions, and no capability gate sees an instruction. Use primitives
 # like `length`, `type-of`, `first` for enforcement tests.
+#
+# docs/signals/capabilities.md
 
 # ── Phase 1: Infrastructure ───────────────────────────────────────────
 
@@ -107,6 +110,27 @@
     (assert (= (fiber/status outer) :dead) "outer completes normally")
     (assert (= (result :error) :capability-denied)
             "inner denial as return value")))
+
+# A denial of :error parks under the :error bit, and in tail position the
+# driver the call unwinds to builds its frame. It is still a denial: the resume
+# value answers the denied call. The counter-factual reads the park as a raise
+# and records an error park over the denial's own funding, which the delivery
+# ledger rejects as an unconsumed park (a panic in a debug build).
+(let [f (fiber/new (fn [] (length "hello")) |:error| :deny |:error|)]
+  (assert (= (get (fiber/resume f) :error) :capability-denied)
+          "a tail denial of :error parks")
+  (assert (= (fiber/status f) :paused) "and the fiber waits")
+  (assert (= (fiber/resume f 5) 5) "the resume value answers the denied call"))
+
+# The same denial reached by a replay: the body yields, and its tail call is
+# denied once the resume replays it.
+(let [f (fiber/new (fn []
+                     (yield 1)
+                     (length "hello")) |:error :yield| :deny |:error|)]
+  (assert (= (fiber/resume f) 1) "the body yields")
+  (assert (= (get (fiber/resume f) :error) :capability-denied)
+          "the replayed tail call is denied")
+  (assert (= (fiber/resume f 5) 5) "and the resume answers it"))
 
 # No-deny fibers work exactly as before
 (let [f (fiber/new (fn [] (length "hello")) |:error|)]
