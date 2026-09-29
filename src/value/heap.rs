@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Heap-allocated value types for the tagged-union value system.
 //!
 //! docs/impl/values.md
@@ -292,8 +292,9 @@ pub enum HeapObject {
         traits: Value,
     },
 
-    /// Opaque external object from a plugin.
-    /// Holds an arbitrary Rust value with a type name for Elle-side identity.
+    /// External object from a plugin or the runtime: an arbitrary Rust value
+    /// with a type name for Elle-side identity. Opaque to the region scan
+    /// unless built by `ExternalObject::holding`.
     External { obj: ExternalObject, traits: Value },
 
     /// Dynamic parameter (Racket-style). Each parameter has a unique id
@@ -344,8 +345,8 @@ pub enum HeapObject {
 /// scheduler in the meantime. `sys/thread-state` peeks `result` first (a
 /// finished thread needs no wait) and otherwise hands back a fresh
 /// `chan/receiver` over `done_rx` for the caller to select on. These are
-/// plain `Send` fields (like `result`) — not heap `Value`s — so they need
-/// no GC tracing.
+/// plain `Send` fields (like `result`) — not heap `Value`s — so they carry
+/// no region edge.
 #[derive(Clone)]
 pub struct ThreadHandle {
     /// The result of the spawned thread execution, wrapped in `SendBundle` for Send.
@@ -388,11 +389,33 @@ impl PartialEq for ThreadHandle {
     }
 }
 
-/// Opaque external object for plugin-provided types.
+/// The heap values an external's payload holds. A payload type that holds any
+/// declares them here, and the region scan counts each one as it counts an
+/// immutable container's contents (docs/impl/region/rules.md Rule 5).
+pub trait HeldValues {
+    /// Call `f` on every heap value the payload holds. The set is fixed when
+    /// the external is built, because the scan at allocation and the scan at
+    /// free must see the same values.
+    fn each_held(&self, f: &mut dyn FnMut(&Value));
+}
+
+/// External object for a plugin-provided or runtime type.
 /// Holds a type name (for Elle-side identity) and an arbitrary Rust value.
 pub struct ExternalObject {
     pub type_name: &'static str,
     pub data: Rc<dyn Any>,
+}
+
+impl ExternalObject {
+    /// An external whose payload the region scan cannot see into.
+    pub fn opaque(type_name: &'static str, data: Rc<dyn Any>) -> Self {
+        ExternalObject { type_name, data }
+    }
+
+    /// An external whose payload declares the heap values it holds.
+    pub fn holding<T: Any + HeldValues>(type_name: &'static str, data: T) -> Self {
+        Self::opaque(type_name, Rc::new(data))
+    }
 }
 
 impl Clone for ExternalObject {

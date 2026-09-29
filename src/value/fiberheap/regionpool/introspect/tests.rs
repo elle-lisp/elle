@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Unit tests (`super` is the parent impl module).
 
 use super::*;
@@ -11,11 +11,11 @@ use crate::value::heap::{HeapObject, HeapTag, Pair};
 /// truth the pin asserts against.
 struct Channels {
     /// Variant content (elements, cell, env, constants, default, …)
-    /// carries the region-2 value; the scan must report region 2.
+    /// carries `v2`; the scan must report `v2`'s region.
     content: bool,
-    /// The `traits` field carries the region-4 value; the scan must
-    /// report region 4. (Only `ClosureTemplate` and the value-free
-    /// variants lack a traits field.)
+    /// The `traits` field carries `vt`; the scan must report `vt`'s
+    /// region. (Only `ClosureTemplate` and the value-free variants lack a
+    /// traits field.)
     traits: bool,
 }
 
@@ -223,18 +223,14 @@ fn obj_with_value_in_every_channel(
             traits_only,
         ),
         HeapTag::External => (
-            // The Rc<dyn Any> payload is opaque BY CONSTRUCTION — a
-            // plugin storing region Values inside it hides them from the
-            // scan (docs/impl/region/diagnostics.md § Validation names this boundary).
-            // Traits is the only visible channel.
+            // A payload that declares what it holds is scanned as a
+            // container is. An undeclared payload is opaque, which
+            // `an_opaque_external_reports_only_its_traits` pins.
             HeapObject::External {
-                obj: crate::value::heap::ExternalObject {
-                    type_name: "scan-pin",
-                    data: Rc::new(0u8),
-                },
+                obj: crate::value::heap::ExternalObject::holding("scan-pin", HoldsOne(v2)),
                 traits: vt,
             },
-            traits_only,
+            both,
         ),
         HeapTag::Parameter => (
             HeapObject::Parameter {
@@ -287,6 +283,15 @@ fn obj_with_value_in_every_channel(
             },
         ),
     })
+}
+
+/// An external payload holding one heap value, which it declares.
+struct HoldsOne(Value);
+
+impl crate::value::heap::HeldValues for HoldsOne {
+    fn each_held(&self, f: &mut dyn FnMut(&Value)) {
+        f(&self.0)
+    }
 }
 
 /// Every `HeapTag`, for iteration. Completeness here forces nothing:
@@ -407,4 +412,34 @@ fn exhaustive_scan_finds_cross_region_refs_in_every_variant() {
             }
         }
     }
+}
+
+/// An external built without a declaration hides its payload from the scan,
+/// whatever the payload holds (docs/impl/region/diagnostics.md § Validation).
+/// Only its `traits` edge is visible.
+///
+/// The trap: the scan cannot downcast a `dyn Any`, so a value an undeclared
+/// payload holds is invisible to it. Such a payload must keep its values alive
+/// some other way, as the subprocess handle does by sharing their region.
+#[test]
+fn an_opaque_external_reports_only_its_traits() {
+    let mut store = RegionStore::default();
+    let r2 = store.new_runtime_region();
+    let v2 = store.alloc_obj(r2, HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+    let rt = store.new_runtime_region();
+    let vt = store.alloc_obj(rt, HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+    let own = store.new_runtime_region();
+    store.alloc_obj(own, HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+
+    let obj = HeapObject::External {
+        obj: crate::value::heap::ExternalObject::opaque("scan-pin", std::rc::Rc::new(HoldsOne(v2))),
+        traits: vt,
+    };
+    let mut refs = Vec::new();
+    RegionPool::find_object_cross_refs(&obj, own.get(), store.page_size(), &|_, _| true, &mut refs);
+    assert_eq!(
+        refs,
+        vec![rt.get()],
+        "an opaque external reports its traits edge and nothing its payload holds",
+    );
 }

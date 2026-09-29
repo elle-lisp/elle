@@ -239,3 +239,98 @@ fn test_bytes_to_string_in_place_empty() {
         assert_eq!(string_val.with_string(|s| s.len()).unwrap(), 0);
     });
 }
+
+// ── What a request holds ─────────────────────────────────────────────────
+
+/// A value born in a region of its own on `h`, standing in for a port, a
+/// buffer, a payload or a result struct: the request never reads it here.
+fn value_in_own_region(
+    h: &mut crate::value::fiberheap::FiberHeap,
+) -> (crate::hir::region::RuntimeRegion, Value) {
+    let region = h.new_runtime_region();
+    let value = crate::primitives::ctx::Alloc::with_region(region, h).bytes(vec![0u8; 8]);
+    (region, value)
+}
+
+/// A request holds its port and the value its operation names until its own
+/// region frees.
+///
+/// The trap: the request keeps those values as `Value`s inside an external's
+/// payload, and a `Value` is a bare pointer. While the fiber that asked is
+/// parked, its frame holds them. A fiber that relays that fiber's request can
+/// release it first, and its discharge then frees the port and the payload
+/// under the request the relay is about to raise (docs/impl/region/park.md).
+///
+/// The counter-factual: with no count of the request's own, the releases below
+/// free the regions the values were born in, and `region_generation` moves.
+#[test]
+fn a_request_holds_the_values_it_names() {
+    type Shape = fn(Value) -> PortOp;
+    let shapes: [(&str, Shape); 7] = [
+        ("read-line", |v| PortOp::ReadLine { buffer: v }),
+        ("read", |v| PortOp::Read {
+            count: 8,
+            buffer: v,
+        }),
+        ("read-exact", |v| PortOp::ReadExact {
+            count: 8,
+            buffer: v,
+        }),
+        ("write", |v| PortOp::Write { data: v }),
+        ("accept", |v| PortOp::Accept {
+            options: SocketOptions::default(),
+            encoding: crate::port::Encoding::Binary,
+            accept_port: v,
+        }),
+        ("send-to", |v| PortOp::SendTo {
+            addr: "127.0.0.1".to_string(),
+            port_num: 9,
+            data: v,
+        }),
+        ("recv-from", |v| PortOp::RecvFrom {
+            count: 8,
+            result: v,
+        }),
+    ];
+    for (label, shape) in shapes {
+        let heap = crate::value::arena::leaked_test_heap();
+        // SAFETY: the heap is leaked for the process.
+        let h = unsafe { &mut *heap };
+        let (port_region, port) = value_in_own_region(h);
+        let (operand_region, operand) = value_in_own_region(h);
+        let request_region = h.new_runtime_region();
+        IoRequest::new(
+            &crate::primitives::ctx::Alloc::with_region(request_region, h),
+            shape(operand).into(),
+            port,
+        );
+        let port_born = h.region_generation(port_region.get());
+        let operand_born = h.region_generation(operand_region.get());
+
+        h.decref_region(port_region);
+        h.decref_region(operand_region);
+        assert_eq!(
+            h.region_generation(port_region.get()),
+            port_born,
+            "{label}: the port was freed under the request that names it",
+        );
+        assert_eq!(
+            h.region_generation(operand_region.get()),
+            operand_born,
+            "{label}: the operand was freed under the request that names it",
+        );
+
+        // The request's counts were what held them, and they go with it.
+        h.decref_region(request_region);
+        assert_ne!(
+            h.region_generation(port_region.get()),
+            port_born,
+            "{label}: the request's free must let its port go",
+        );
+        assert_ne!(
+            h.region_generation(operand_region.get()),
+            operand_born,
+            "{label}: the request's free must let its operand go",
+        );
+    }
+}

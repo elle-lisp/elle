@@ -152,6 +152,108 @@
                    (check-round src dir relayed-tail "relayed-tail" i)
                    (assign i (%add i 1)))))
 
+# ── the relay that releases its child first ──────────────────────────────────
+# The relaying body binds the child's request and has no use for the child
+# after the resume that answered it, so it releases the child there, before it
+# raises the request. The child's discharge then runs the releases its frames
+# owed: the payload it built, and the port it opened. The request names both,
+# so the request must hold them itself (docs/impl/region/rules.md Rule 5).
+#
+# The counter-factual: without that hold, the relay raises a request whose port
+# and payload lie in freed pages. `churn` claims those pages again before the
+# raise, so the write fails or sends another value's bytes. Under
+# `--trace=guardfree` the submit faults instead.
+
+(defn churn []
+  (def @kept @[])
+  (def @i 0)
+  (while (%lt i 64)
+    (push kept (string "churn " i))
+    (assign i (%add i 1)))
+  (length kept))
+
+# The payload is born in the child; the port is the caller's.
+(defn write-payload [out n]
+  (fn []
+    (port/write out (string "payload " n))
+    :written))
+
+# The port and the payload are both born in the child, which parks first on
+# the open and then on the write.
+(defn open-and-write [dst n]
+  (fn []
+    (let [out (port/open dst :write)]
+      (port/write out (string "payload " n))
+      (port/close out)
+      :written)))
+
+# The `let` form: the child's last use is the resume that answers the write.
+(defn relay-let [body]
+  (let [f (fiber/new body |:io|)
+        q (fiber/resume f)]
+    (churn)
+    (emit :io q)))
+
+# The `def` form of the same relay.
+(defn relay-def [body]
+  (def f (fiber/new body |:io|))
+  (def q (fiber/resume f))
+  (churn)
+  (emit :io q))
+
+# Both forms again, relaying the child's open first so that the request bound
+# for the write names a port the child opened.
+(defn relay-let-second [body]
+  (let [f (fiber/new body |:io|)
+        opened (emit :io (fiber/resume f))
+        q (fiber/resume f opened)]
+    (churn)
+    (emit :io q)))
+
+(defn relay-def-second [body]
+  (def f (fiber/new body |:io|))
+  (def opened (emit :io (fiber/resume f)))
+  (def q (fiber/resume f opened))
+  (churn)
+  (emit :io q))
+
+(defn check-release-round [dir n]
+  (each [label relay] [["relay-let" relay-let] ["relay-def" relay-def]]
+    (let [dst (path/join dir (string label "-" n ".out"))
+          out (port/open dst :write)]
+      (assert (= (relay (write-payload out n)) (length (string "payload " n)))
+              (string label ": a relayed write did not complete"))
+      (port/close out)
+      (assert (= (file/read dst) (string "payload " n))
+              (string label ": a relayed write sent other bytes: "
+                      (file/read dst)))))
+  (each [label relay] [["relay-let-second" relay-let-second]
+                       ["relay-def-second" relay-def-second]]
+    (let [dst (path/join dir (string label "-" n ".out"))]
+      (assert (= (relay (open-and-write dst n)) (length (string "payload " n)))
+              (string label ": a relayed write did not complete"))
+      (assert (= (file/read dst) (string "payload " n))
+              (string label ": a relayed write sent other bytes: "
+                      (file/read dst))))))
+
+(with-temp-dir dir
+               (let [dst (path/join dir "top.out")
+                     out (port/open dst :write)]
+                 (def @i 0)
+                 (while (%lt i rounds)
+                   (check-release-round dir i)
+                   (assign i (%add i 1)))
+                 # The same relay written as the block's own `def` bindings,
+                 # with no function around them.
+                 (def f (fiber/new (write-payload out "top") |:io|))
+                 (def q (fiber/resume f))
+                 (churn)
+                 (emit :io q)
+                 (port/close out)
+                 (assert (= (file/read dst) "payload top")
+                         (string "a relay written at the top of a block sent "
+                                 "other bytes: " (file/read dst)))))
+
 # ── the leak face ────────────────────────────────────────────────────────────
 # A relay must not answer by releasing nothing at any io install. The child's
 # own install still owes its request the release, so a relayed timer must stay
@@ -186,5 +288,17 @@
 (bounded? twice-d "a timer relayed twice")
 (bounded? dynamic-d "a timer relayed through the emit primitive")
 (bounded? tail-d "a timer relayed through a tail emit")
+
+# A request's counts on its port and payload go with the request. A request
+# whose free kept them would leave the payload's region behind every round, so
+# a relay that releases its child first must stay as bounded as the others.
+(defn measure-released [out]
+  (measure (fn [] (relay-let (write-payload out 0))) 30 window))
+
+(with-temp-dir dir
+               (let [out (port/open (path/join dir "gauge.out") :write)]
+                 (bounded? (measure-released out)
+                           "a write relayed after its child is released")
+                 (port/close out)))
 
 (println "region-io-relay-uaf: ok")
