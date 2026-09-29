@@ -1,15 +1,15 @@
-// audited: 2026-09-21
-// The boot-image corpus gate: the flag `elle test` honours, and the target
-// that points the corpus at an image.
+// audited: 2026-09-29
+// The boot-image gate: the flag `elle test` honours, and the target that runs
+// the language suite from an image.
 //
 // docs/impl/image/boot.md
 // docs/analysis/ci.md
 //
 // Both halves fail quietly, which is why they are pinned here. `elle test`
 // partitions its argv: a flag it does not know is not refused, it is handed to
-// the runner as a corpus path. And the gate target is shell text nothing
-// compiles, so a target that drops the flag runs the corpus on an ordinary
-// source boot and reports exactly the green a hydrated run reports.
+// the runner as a file path. And the gate target is shell text nothing
+// compiles, so a target that drops the flag runs the language suite on an
+// ordinary source boot and reports exactly the green a hydrated run reports.
 
 use crate::common::{make_dry_run, make_var};
 use std::process::Command;
@@ -32,7 +32,8 @@ fn gate_recipe() -> String {
         .unwrap_or_else(|| panic!("`make --dry-run {GATE}` failed; no such target"))
 }
 
-/// Every `--boot-image=` value the gate's recipe names.
+/// Every `--boot-image=` value the gate's recipe names. A value that closes a
+/// quoted argument, such as `--isolate '--boot-image=DIR'`, ends before the quote.
 fn boot_image_values(recipe: &str) -> Vec<String> {
     recipe
         .split("--boot-image=")
@@ -41,6 +42,7 @@ fn boot_image_values(recipe: &str) -> Vec<String> {
             rest.split_whitespace()
                 .next()
                 .unwrap_or_default()
+                .trim_end_matches(['\'', '"'])
                 .to_string()
         })
         .collect()
@@ -48,10 +50,11 @@ fn boot_image_values(recipe: &str) -> Vec<String> {
 
 // The flag has to survive `elle test`'s argv partition. The runner is an Elle
 // program handed everything the partition does not claim, so an unclaimed
-// `--boot-image=DIR` becomes a corpus path: the run then fails on a file that
+// `--boot-image=DIR` becomes a file path: the run then fails on a file that
 // is not there, and nothing ever hydrates. The counter-factual is the whole
-// gate — point the corpus at an image through a flag the runner swallows, and
-// every batch boots from source under a target that says otherwise.
+// gate — point the language suite at an image through a flag the runner
+// swallows, and every batch boots from source under a target that says
+// otherwise.
 #[test]
 fn the_runner_boots_from_the_image_its_flag_names() {
     let dir = crate::common::ScratchDir::new("boot-image-runner");
@@ -93,39 +96,40 @@ fn the_runner_boots_from_the_image_its_flag_names() {
         stderr
             .lines()
             .any(|l| l.starts_with("[trace:boot]") && l.contains("image-hydrate")),
-        "`elle test {flag}` booted without hydrating the image, so the corpus \
+        "`elle test {flag}` booted without hydrating the image, so the language suite \
          under the gate would run on a source boot: {stderr}"
     );
 }
 
 // A gate that greens whatever it is given gates nothing. The target names one
-// directory, fills it, and hands the same one to every corpus batch; a recipe
+// directory, fills it, and hands the same one to every suite batch; a recipe
 // that names two directories fills one and reads the other, which is a source
 // boot with extra steps.
 #[test]
-fn the_gate_target_points_the_corpus_at_one_image_directory() {
+fn the_gate_target_points_the_language_suite_at_one_image_directory() {
     let recipe = gate_recipe();
     let values = boot_image_values(&recipe);
     assert!(
         !values.is_empty(),
-        "`make {GATE}` names no `--boot-image=`, so it runs the corpus on a \
+        "`make {GATE}` names no `--boot-image=`, so it runs the language suite on a \
          source boot:\n{recipe}"
     );
     let first = &values[0];
     assert!(
         values.iter().all(|v| v == first),
         "`make {GATE}` names more than one boot-image directory, so the one it \
-         fills is not the one the corpus reads: {values:?}"
+         fills is not the one the language suite reads: {values:?}"
     );
     assert!(
         first.contains('/'),
-        "`make {GATE}` points the corpus at `{first}` rather than at a \
+        "`make {GATE}` points the language suite at `{first}` rather than at a \
          directory of its own"
     );
 
-    // The runner is what the corpus batches go through, and it is the process
-    // whose boot the flag decides. A recipe carrying the flag anywhere else
-    // proves nothing about the run that matters.
+    // Every suite batch goes through the runner, which hands each file's child
+    // its flags, and the child is the process whose boot the flag decides. A
+    // recipe carrying the flag anywhere else proves nothing about the run that
+    // matters.
     let elle = make_var("ELLE", &[]).expect("`make print-ELLE` did not run");
     let runner = format!("{elle} test");
     let batches: Vec<&str> = recipe
@@ -134,12 +138,12 @@ fn the_gate_target_points_the_corpus_at_one_image_directory() {
         .collect();
     assert!(
         !batches.is_empty(),
-        "`make {GATE}` never runs `{runner}`, so it does not run the corpus:\n{recipe}"
+        "`make {GATE}` never runs `{runner}`, so it does not run the language suite:\n{recipe}"
     );
     for line in batches {
         assert!(
             line.contains("--boot-image="),
-            "a corpus batch in `make {GATE}` runs without the flag, so those \
+            "a suite batch in `make {GATE}` runs without the flag, so those \
              files boot from source: {line}"
         );
     }
@@ -148,14 +152,14 @@ fn the_gate_target_points_the_corpus_at_one_image_directory() {
 // The trap `make check-wasm` already guards, in the boot image's shape: a
 // binary that ignores `--boot-image=` accepts it and boots from source, and an
 // image every start refuses is replaced and refused again. Either way the
-// corpus passes and the gate reports a hydration that never happened. So the
+// suite passes and the gate reports a hydration that never happened. So the
 // target asks for the boot mark and fails without it.
 //
 // The counter-factual: drop the proof, break hydration in the loader, and this
-// gate stays green while every other corpus job also stays green — nothing in
+// gate stays green while every other suite job also stays green — nothing in
 // the workflow boots from an image.
 #[test]
-fn the_gate_target_proves_the_image_hydrated_before_it_runs_the_corpus() {
+fn the_gate_target_proves_the_image_hydrated_before_it_runs_the_language_suite() {
     let recipe = gate_recipe();
     assert!(
         recipe.contains("--trace=boot"),
