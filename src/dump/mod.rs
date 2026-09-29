@@ -1,22 +1,23 @@
-// audited: 2026-09-17
+// audited: 2026-09-29
 //! In-process rendering of the compiler's `--dump` artifacts.
 //!
-//! `elle --dump=KIND` (see `main.rs::run_dump`) runs the compiler up to a stage
+//! docs/test-runner.md
+//!
+//! `elle --dump=KIND` (`run_dump`, src/program/dump.rs) runs the compiler up to a stage
 //! and prints the artifact to stdout, then exits. The agent-first test runner
 //! (`src/test`, docs/test-runner.md) needs those same artifacts *in
 //! process* — captured per form and written to the on-disk CAS — so the agent
 //! can query the LIR of a failing form without re-running `--dump=lir`.
 //!
 //! This module is the single source of truth for the artifact *bodies* (the
-//! text under each `;; ── kind ──` banner). `main.rs` prints the banner and then
+//! text under each `;; ── kind ──` banner). `run_dump` prints the banner and then
 //! the body produced here; the `compile/dumps` primitive
 //! (`primitives::compile`, dispatched in `vm::signal`) returns the bodies as a
 //! struct of `{kind => string}`. Keeping both paths on these functions means the
 //! captured artifact is byte-identical to what `--dump` prints.
 //!
-//! Rendering mirrors `run_dump` exactly so the `tests/integration/dump_cli.rs`
-//! markers (`block0:`, `←`, `→`, `capture_params_mask=`, `eligible=`, …) are
-//! preserved.
+//! So the markers tests/integration/dump_cli.rs reads (`block0:`, `←`, `→`,
+//! `capture_params_mask=`, `eligible=`, …) are the ones the runner captures.
 
 mod escape;
 pub use escape::escape_module;
@@ -28,8 +29,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 
 /// The dump kinds `render_all` attempts, in pipeline order. `git`/SPIR-V (mlir-
-/// gated) and the runtime `stats` view are intentionally out of v1 (see
-/// docs/test-runner.md § CAS asset capture).
+/// gated) and the runtime statistics are left out (docs/test-runner.md).
 pub const KINDS: &[&str] = &[
     "ast", "fhir", "defuse", "regions", "hir", "lir", "cfg", "dfa", "jit", "escape",
 ];
@@ -132,9 +132,9 @@ pub fn render_ast(contents: &str, source_name: &str) -> Result<String, String> {
     Ok(s)
 }
 
-/// HIR overview — per function: a header line plus its pre-expansion syntax.
-/// Mirrors `main.rs::run_dump`'s `hir` branch (closure tag is `closure[i-1]`
-/// across the `once(entry).chain(closures)` enumeration).
+/// HIR overview — per function: a header line and, where known, the source span
+/// it was written at (the closure tag is `closure[i-1]` across the
+/// `once(entry).chain(closures)` enumeration).
 pub fn hir_module(module: &LirModule) -> String {
     let mut s = String::new();
     for (i, f) in std::iter::once(&module.entry)
@@ -159,8 +159,7 @@ pub fn hir_module(module: &LirModule) -> String {
     s
 }
 
-/// LIR — blocks, instructions, and terminators per function. Mirrors
-/// `main.rs::print_lir_function`.
+/// LIR — blocks, instructions, and terminators per function.
 pub fn lir_module(module: &LirModule) -> String {
     let mut s = String::new();
     lir_function(&mut s, "entry", &module.entry);
@@ -187,7 +186,7 @@ fn lir_function(s: &mut String, tag: &str, f: &crate::lir::LirFunction) {
     let _ = writeln!(s);
 }
 
-/// CFG — block successor edges per function. Mirrors `main.rs::print_cfg_function`.
+/// CFG — block successor edges per function.
 pub fn cfg_module(module: &LirModule) -> String {
     let mut s = String::new();
     cfg_function(&mut s, "entry", &module.entry);
@@ -240,7 +239,7 @@ fn dfa_function(s: &mut String, tag: &str, f: &crate::lir::LirFunction) {
 }
 
 /// JIT — per-function eligibility (a polymorphic `propagates` mask is
-/// ineligible). Mirrors `main.rs::print_jit_candidates`.
+/// ineligible).
 pub fn jit_module(module: &LirModule) -> String {
     let mut s = String::new();
     let mut report = |tag: &str, f: &crate::lir::LirFunction| {

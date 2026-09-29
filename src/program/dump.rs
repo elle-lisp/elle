@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-29
 //! `--dump=STAGE[,STAGE,...]`: run the compiler up to each requested stage,
 //! print the artifact, and exit without executing.
 //!
@@ -9,8 +9,8 @@
 //!
 //! docs/config.md
 
-use elle::pipeline::CompileCtx;
-use elle::SymbolTable;
+use crate::pipeline::CompileCtx;
+use crate::SymbolTable;
 
 /// Implementation of `--dump=...`. Each requested stage prints a banner
 /// followed by the artifact. Stages run in pipeline order (git, ast, hir,
@@ -22,14 +22,14 @@ pub(super) fn run_dump(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
 ) -> Result<(), String> {
-    use elle::config::dump_bits;
-    let cfg = elle::config::get();
+    use crate::config::dump_bits;
+    let cfg = crate::config::get();
 
     // AST — parsed syntax forms (cheapest stage; no analyzer needed).
     let needs_ast = cfg.dump.contains("ast");
     if needs_ast {
         println!(";; ── ast ────────────────────────────────────────────────────");
-        let ast = elle::dump::render_ast(contents, source_name).map_err(|e| {
+        let ast = crate::dump::render_ast(contents, source_name).map_err(|e| {
             eprintln!("{}", e);
             e
         })?;
@@ -43,7 +43,7 @@ pub(super) fn run_dump(
     if cfg.dump.contains("fhir") {
         println!(";; ── fhir (functionalized HIR) ──────────────────────────────");
         let (hir, arena) =
-            elle::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
+            crate::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
                 |e| {
                     eprintln!("{}", e);
                     e
@@ -51,39 +51,39 @@ pub(super) fn run_dump(
             )?;
         println!(
             "{}",
-            elle::hir::display::display_hir(&hir, &arena, Some(symbols))
+            crate::hir::display::display_hir(&hir, &arena, Some(symbols))
         );
     }
 
     if cfg.dump.contains("defuse") {
         println!(";; ── defuse (HIR dataflow) ──────────────────────────────────");
         let (hir, arena) =
-            elle::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
+            crate::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
                 |e| {
                     eprintln!("{}", e);
                     e
                 },
             )?;
-        let info = elle::hir::analyze_dataflow(&hir);
+        let info = crate::hir::analyze_dataflow(&hir);
         print!(
             "{}",
-            elle::hir::format_dataflow(&info, &arena, Some(symbols))
+            crate::hir::format_dataflow(&info, &arena, Some(symbols))
         );
     }
 
     if cfg.dump.contains("regions") {
         println!(";; ── regions (Tofte-Talpin region inference) ─────────────────");
         let (hir, arena) =
-            elle::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
+            crate::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
                 |e| {
                     eprintln!("{}", e);
                     e
                 },
             )?;
-        let info = elle::hir::analyze_regions(&hir, &arena);
+        let info = crate::hir::analyze_regions(&hir, &arena);
         print!(
             "{}",
-            elle::hir::format_regions(&info, &arena, Some(symbols))
+            crate::hir::format_regions(&info, &arena, Some(symbols))
         );
     }
 
@@ -97,7 +97,7 @@ pub(super) fn run_dump(
         return Ok(());
     }
 
-    let module = elle::pipeline::compile_file_to_lir(contents, symbols, cctx, source_name, 0)
+    let module = crate::pipeline::compile_file_to_lir(contents, symbols, cctx, source_name, 0)
         .map_err(|e| {
             eprintln!("{}", e);
             e
@@ -105,27 +105,27 @@ pub(super) fn run_dump(
 
     if cfg.dump.contains("hir") {
         println!(";; ── hir ────────────────────────────────────────────────────");
-        print!("{}", elle::dump::hir_module(&module));
+        print!("{}", crate::dump::hir_module(&module));
     }
 
     if cfg.dump.contains("lir") {
         println!(";; ── lir ────────────────────────────────────────────────────");
-        print!("{}", elle::dump::lir_module(&module));
+        print!("{}", crate::dump::lir_module(&module));
     }
 
     if cfg.dump.contains("cfg") {
         println!(";; ── cfg ────────────────────────────────────────────────────");
-        print!("{}", elle::dump::cfg_module(&module));
+        print!("{}", crate::dump::cfg_module(&module));
     }
 
     if cfg.dump.contains("dfa") {
         println!(";; ── dfa ────────────────────────────────────────────────────");
-        print!("{}", elle::dump::dfa_module(&module));
+        print!("{}", crate::dump::dfa_module(&module));
     }
 
     if cfg.dump.contains("jit") {
         println!(";; ── jit ────────────────────────────────────────────────────");
-        print!("{}", elle::dump::jit_module(&module));
+        print!("{}", crate::dump::jit_module(&module));
     }
 
     if cfg.dump.contains("git") {
@@ -139,18 +139,18 @@ pub(super) fn run_dump(
         // classification-aware region info — same inputs `render_all` feeds
         // `escape_module`, so the CLI and `compile/dumps :escape` agree.
         let (hir, arena) =
-            elle::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
+            crate::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
                 |e| {
                     eprintln!("{}", e);
                     e
                 },
             )?;
-        let pc = elle::lir::intrinsics::PrimitiveClassification::new(cctx.primitive_meta());
-        let rinfo = elle::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
-        let escape = elle::hir::analyze_escape(&hir, &arena, &pc.call_classification);
+        let pc = crate::lir::intrinsics::PrimitiveClassification::new(cctx.primitive_meta());
+        let rinfo = crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
+        let escape = crate::hir::analyze_escape(&hir, &arena, &pc.call_classification);
         print!(
             "{}",
-            elle::dump::escape_module(&hir, &arena, &escape, &rinfo, &module, Some(symbols))
+            crate::dump::escape_module(&hir, &arena, &escape, &rinfo, &module, Some(symbols))
         );
     }
 
@@ -160,7 +160,7 @@ pub(super) fn run_dump(
 
 /// Dump SPIR-V disassembly for each GPU-eligible closure. The "git" keyword
 /// names this stage (a shorthand; it's the GPU codegen output).
-fn print_spirv_module(module: &elle::lir::LirModule) {
+fn print_spirv_module(module: &crate::lir::LirModule) {
     print_spirv_function("entry", &module.entry);
     for (i, f) in module.closures.iter().enumerate() {
         print_spirv_function(&format!("closure[{}]", i), f);
@@ -168,7 +168,7 @@ fn print_spirv_module(module: &elle::lir::LirModule) {
 }
 
 #[cfg(feature = "mlir")]
-fn print_spirv_function(tag: &str, f: &elle::lir::LirFunction) {
+fn print_spirv_function(tag: &str, f: &crate::lir::LirFunction) {
     let name = f.name.as_deref().unwrap_or("<anon>");
     println!("; {} {}", tag, name);
     if !f.is_gpu_eligible() {
@@ -178,7 +178,7 @@ fn print_spirv_function(tag: &str, f: &elle::lir::LirFunction) {
     }
     // Workgroup size of 1 is a safe default for dump purposes — users
     // selecting a workgroup size do so via vm/config at runtime.
-    match elle::mlir::lower_to_spirv(f, 1) {
+    match crate::mlir::lower_to_spirv(f, 1) {
         Ok(bytes) => {
             println!(";   SPIR-V ({} bytes):", bytes.len());
             // Words are 32-bit in SPIR-V. Print as hex, 8 words per line.
@@ -205,7 +205,7 @@ fn print_spirv_function(tag: &str, f: &elle::lir::LirFunction) {
 }
 
 #[cfg(not(feature = "mlir"))]
-fn print_spirv_function(tag: &str, f: &elle::lir::LirFunction) {
+fn print_spirv_function(tag: &str, f: &crate::lir::LirFunction) {
     let name = f.name.as_deref().unwrap_or("<anon>");
     println!("; {} {}", tag, name);
     println!(";   (SPIR-V dump requires the `mlir` feature)");

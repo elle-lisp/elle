@@ -1,6 +1,7 @@
 // audited: 2026-09-29
-// docs/impl/wasm.md
 //! Tail-call preparation host function: `rt_prepare_tail_call`.
+//!
+//! docs/impl/wasm.md
 //!
 //! Isolated because it owns the env-stack reset / rebuild dance and the
 //! tail-position fiber-resume handling that distinguishes it from `rt_call`.
@@ -168,7 +169,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 let region = heap.new_runtime_region();
                 let mut ctx = caller.data().native_ctx(vm, region, heap);
                 let (bits, result) = native_fn(&mut ctx, &args);
-                let (bits, result) = caller.data_mut().maybe_execute_io(bits, result);
+                let (bits, result) = caller.data_mut().settle_native_signal(bits, result);
                 // A tail-position `(fiber/resume …)` returns SIG_RESUME just like a
                 // non-tail one; drive the fiber host-side here exactly as `rt_call`
                 // does. Without this the tail call returns the fiber itself

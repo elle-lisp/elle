@@ -1,7 +1,8 @@
-// audited: 2026-09-21
-// docs/impl/wasm.md
+// audited: 2026-09-29
 //! The WASM backend's tests, one file per subject, over the LIR fixtures and
 //! evaluation helpers they share.
+//!
+//! docs/impl/wasm.md
 
 use super::emit::{emit_module, emit_single_closure};
 use crate::lir::testkit::LirFixture;
@@ -19,6 +20,7 @@ mod fibers;
 mod frame;
 mod gate;
 mod gauge;
+mod query;
 mod stdlib;
 mod toplevel;
 

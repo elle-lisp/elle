@@ -27,7 +27,7 @@ pub(super) fn run_semver_subcommand(sub_args: Vec<String>) -> i32 {
     rt.vm().user_args = sub_args;
 
     let (vm, symbols, cctx) = rt.parts();
-    match crate::run_source(SEMVER_RUNNER, "src/semver", vm, symbols, cctx) {
+    match elle::program::run_source(SEMVER_RUNNER, "src/semver", vm, symbols, cctx) {
         Ok(_) => 0,
         Err(_) => 2,
     }

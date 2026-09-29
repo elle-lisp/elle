@@ -10,12 +10,16 @@ publish = false
 name = "elle-rig"
 path = "src/main.rs"
 
+[dependencies]
+elle = { path = "..", default-features = false }
+toml = "0.9"
+
 # The rig is built against the features `elle` is built with. Each one names
 # the build the rig hosts (rig/overview.md).
 [features]
 default = ["jit", "ffi", "uring"]
-jit = []
-ffi = []
-uring = []
-mlir = []
-wasm = []
+jit = ["elle/jit"]
+ffi = ["elle/ffi"]
+uring = ["elle/uring"]
+mlir = ["elle/mlir"]
+wasm = ["elle/wasm"]

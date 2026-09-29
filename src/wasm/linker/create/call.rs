@@ -1,6 +1,7 @@
 // audited: 2026-09-29
-// docs/impl/wasm.md
 //! Primary call-dispatch host functions: `call_primitive` and `rt_call`.
+//!
+//! docs/impl/wasm.md
 //!
 //! Grouped together because both resolve a callable and drive it host-side,
 //! sharing the fiber-resume (`SIG_RESUME`) handoff to `resume::handle_fiber_resume`.
@@ -24,7 +25,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
          -> (i64, i64, i64) {
             let args = read_args_from_memory(&mut caller, args_ptr, nargs);
             let (bits, result) = caller.data_mut().call_primitive(prim_id as u32, &args);
-            let (bits, result) = caller.data_mut().maybe_execute_io(bits, result);
+            let (bits, result) = caller.data_mut().settle_native_signal(bits, result);
             let (tag, payload) = caller.data_mut().value_to_wasm(result);
             (tag, payload, bits.raw() as i64)
         },
@@ -35,7 +36,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
     //
     // `suspended` is the word emitted code branches on. It is computed here, once,
     // by `signals::dispatch::is_suspending` — never inferred from a bit of
-    // `signal`. See docs/impl/wasm.md § rt_call.
+    // `signal` (docs/impl/wasm.md).
     linker.func_wrap(
         "elle",
         "rt_call",
@@ -75,7 +76,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 // call's own signal and is classified by the shared rule, like
                 // every other signal a native raises here — never by a test on
                 // the denied bits, which is what `signalled` exists to prevent
-                // (docs/impl/wasm.md § rt_call). Where the fiber then comes to
+                // (docs/impl/wasm.md). Where the fiber then comes to
                 // rest is its own mask's answer, `resume/route.rs`.
                 if let Some((blocked, payload)) =
                     crate::wasm::host::capability_denial(
@@ -108,7 +109,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                         result
                     );
                 }
-                let (bits, result) = caller.data_mut().maybe_execute_io(bits, result);
+                let (bits, result) = caller.data_mut().settle_native_signal(bits, result);
 
                 // Handle SIG_PROPAGATE: fiber/propagate re-raises a child's caught
                 // signal. Convert it to the child's (bits, value) so the body
@@ -190,7 +191,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 }
             } else {
                 // A callable collection (struct/array/set/string/bytes indexed
-                // by a key, e.g. `(request :op)`) — or, failing that, the
+                // by a key, for example `(request :op)`) — or, failing that, the
                 // `cannot call` type error. See `run_collection_call`.
                 crate::wasm::linker::run_collection_call(&mut caller, func_val, &args, "rt_call")
             }
