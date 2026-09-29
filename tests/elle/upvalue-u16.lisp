@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 # Regression test: upvalue indices must be u16, not u8.
 #
 # When a closure captures more than 255 variables, indices above 255
@@ -11,7 +12,8 @@
 #   "VM bug: Cannot mutate non-lbox closure environment variables"
 
 (def m
-  ((fn []  # Generate enough defs to push total capture count past 255.
+  ((fn []
+     # Generate enough defs to push total capture count past 255.
      # Each (def dN N) adds one binding to the closure environment.
      (def d0 0)
      (def d1 1)

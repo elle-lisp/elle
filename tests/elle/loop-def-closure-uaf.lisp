@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## tests/elle/loop-def-closure-uaf.lisp
 ##
 ## Regression: a closure bound by `def`/`let` BEFORE a loop and called
@@ -26,7 +27,8 @@
   (def @helper (fn [x] (* x 2)))
   (def @i 0)
   (def @sum 0)
-  (while (< i 5)  ## Churn the slab each iteration so a freed closure's slot is reused,
+  (while (< i 5)
+    ## Churn the slab each iteration so a freed closure's slot is reused,
     ## surfacing the use-after-free as a tag/object mismatch rather than
     ## silently reading stale-but-intact memory.
     (let [junk @{:a i :b (* i i) :c [i i i]}]

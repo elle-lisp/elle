@@ -26,7 +26,7 @@ Up: [..](../AGENTS.md)
 - [lir.md](lir.md) — **LIR — Low-level IR** LIR is an SSA-form intermediate representation with virtual registers, basic blocks, and explicit control flow.
 - [memory.md](memory.md) — **The region memory model** The mission of the region system, the map of its documents, the settled invariants, and the leak classes that name the open frontier.
 - [mlir.md](mlir.md) — **MLIR Backend (more...)**
-- [reader.md](reader.md) — **Reader** The reader transforms source text into syntax trees.
+- [reader.md](reader.md) — **Reader** The reader transforms source text into syntax trees, from s-expressions, Lua, JavaScript, Python or literate markdown.
 - [selfrec.md](selfrec.md) — **Self-recursion: the executing-closure mechanism (no cell)** How a self-recursive closure refers to itself without a forward cell, and is reclaimed by ordinary region RC.
 - [spirv.md](spirv.md) — **SPIR-V Backend** Two paths turn Elle into SPIR-V compute kernels for Vulkan: the MLIR compiler path, and a hand-written emitter in pure Elle.
 - [stdlib-cache.md](stdlib-cache.md) — **Standard Library Disk Cache** `stdlib.lisp` (~2900 lines) is recompiled on every process start.

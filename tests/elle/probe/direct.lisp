@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 13)
+# audited: 2026-09-28
 # The direct-loop rows for scope reclamation, branch compensation, collections, strings and cells — one per-op thunk each.
 #
 # docs/impl/region/diagnostics.md
@@ -20,7 +20,8 @@
     (fn [j]
       (when (%not (%int? j)) (error :j))
       (let [f (fn [x] (%add x j))]
-        (f 1))) 0]  # Per-path branch compensation (src/hir/region/infer/compensate.rs). A value
+        (f 1))) 0]
+   # Per-path branch compensation (src/hir/region/infer/compensate.rs). A value
    # live-in to a branch but used in only ONE arm is freed on the used path by its
    # in-arm decref AND on every other path by a compensating release at the dead
    # arm's head, so it reclaims on every path — not only the one reaching its last
@@ -40,7 +41,8 @@
     (fn [j]
       (let [op (string "v" j)]
         (if (number? j) (if (%lt j 999999) 1 (string? op)) 9))) 0]
-   ["branch-error-arg" (fn [j] (check-arg (string "op" j) j)) 0]  # Comparison builtins reclaim: `check-comparable`'s op-name is an interned
+   ["branch-error-arg" (fn [j] (check-arg (string "op" j) j)) 0]
+   # Comparison builtins reclaim: `check-comparable`'s op-name is an interned
    # keyword (no per-call alloc), and were it a heap string the compensation above
    # would still reclaim it — its uses sit only in the cold error arms.
    ["cmp-gt" (fn [j] (> j 0)) 0] ["cmp-lt" (fn [j] (< j 0)) 0]
@@ -52,7 +54,8 @@
    ["fiber-resume"
     (fn [j]
       (let [f (fiber/new (fn [] 7) 2)]
-        (fiber/resume f))) 0]  # The fiber value installers (`fiber/resume`/`abort`/`cancel`/`emit`) declare
+        (fiber/resume f))) 0]
+   # The fiber value installers (`fiber/resume`/`abort`/`cancel`/`emit`) declare
    # `Delivers`: the install into another fiber's signal slot counts its own
    # reference at runtime, so no arg clique. A `Mixed` declaration charges one
    # never-balancing `IncrefRegion` per heap-argument pair, which only a HEAP
@@ -108,7 +111,8 @@
    # release lands in the last arm and every earlier one strands the whole
    # accumulator. Undeclared, like `rest-array-copy`, so a regression trips the
    # completeness gate loudly rather than being absorbed as declared scratch.
-   ["reverse" (fn [j] (reverse [1 2 3])) 0]  # `(rest array)` copies the tail into a fresh immutable array; its call-result
+   ["reverse" (fn [j] (reverse [1 2 3])) 0]
+   # `(rest array)` copies the tail into a fresh immutable array; its call-result
    # region reclaims on discard (rate 0). The trait-dispatched `Sequence:rest`
    # native allocates the slice into the outer `rest` call's OWN region (the
    # `dispatch_native_call` fresh-result invariant — a fresh native result lives
@@ -151,7 +155,8 @@
    ["to-array" (fn [j] (->array (list 1 2 3))) 0]
    ["to-list" (fn [j] (->list [1 2 3])) 0]
    ["freeze" (fn [j] (freeze @[1 2 3])) 0]
-   ["slice" (fn [j] (slice [1 2 3 4] 1 3)) 0]  # trailing nil keeps the body's value a discarded STATEMENT, matching the
+   ["slice" (fn [j] (slice [1 2 3 4] 1 3)) 0]
+   # trailing nil keeps the body's value a discarded STATEMENT, matching the
    # original while-loop (where the alloc is never the loop's tail value)
    ["keys-values"
     (fn [j]
@@ -170,7 +175,8 @@
    ["push-churn"
     (fn [j]
       (let [items @[]]
-        (push items {:k j}))) 0]  # The capture-back-edge cycle: a container captured by a closure it holds
+        (push items {:k j}))) 0]
+   # The capture-back-edge cycle: a container captured by a closure it holds
    # (`m ⊇ c` store, `c ⊇ m` capture). Per-region RC cannot collect the m↔c
    # cycle, and no region root can own it (the captured member's live decref
    # over-extends past the closure). The activation-owner cut reclaims the
@@ -189,7 +195,8 @@
           (push m c)
           (c)
           (push root m)
-          nil))) 0]  # The transferred returned cycle: a helper builds an a<->b cycle and hands
+          nil))) 0]
+   # The transferred returned cycle: a helper builds an a<->b cycle and hands
    # its root back across the return frontier; the consumer discards it.
    # Per-region RC cannot collect the cycle (the interior back-edge outlives
    # every release) and no region root can own it (the root crosses the
@@ -215,7 +222,8 @@
    ["trim" (fn [j] (string/trim "  x  ")) 0]
    ["replace" (fn [j] (string/replace "hello" "l" "r")) 0]
    ["num-to-str" (fn [j] (number->string j)) 0] ["read" (fn [j] (read "42")) 0]
-   ["call-chain" (fn [j] (helper-f (helper-g (helper-h j)))) 0]  # A fresh heap
+   ["call-chain" (fn [j] (helper-f (helper-g (helper-h j)))) 0]
+   # A fresh heap
    # value (`helper-g` result) stored into a cons via `(pair … …)` — a CLOSED
    # control for the cons-store containment accounting. The alloc funnel
    # (`alloc_in_region` → `incref_cross_region_refs`) is the sole containment
@@ -229,7 +237,8 @@
     (fn [j]
       (let [a (helper-h j)]
         (let [b (helper-g a)]
-          b))) 0]  # `each` over a statically-typed collection reclaims: the literal array's
+          b))) 0]
+   # `each` over a statically-typed collection reclaims: the literal array's
    # `(match (type-of seq) …)` off-array arms are pruned (src/hir/typeinfer/prune.rs), so
    # seq lives only in the live arm. `each-manual` is the equivalent indexed loop.
    ["each-array"
@@ -242,7 +251,8 @@
         (def @k 0)
         (while (%lt k 3)
           (get a k)
-          (assign k (%add k 1))))) 0]  # A CURSOR walked over a cons chain, whose cell's INIT carries a second
+          (assign k (%add k 1))))) 0]
+   # A CURSOR walked over a cons chain, whose cell's INIT carries a second
    # name: `xs` holds the chain head for the whole call. A cell donates its init
    # only where it is that value's sole holder, so the alias costs the donation —
    # and the cell counts the init instead, keeping the container model and the
@@ -261,7 +271,8 @@
         (while (not (empty? r))
           (assign n (%add n 1))
           (assign r (rest r)))
-        n)) 0]  # The same walk with the alias taken AFTER the cell binding: `keep` is a
+        n)) 0]
+   # The same walk with the alias taken AFTER the cell binding: `keep` is a
    # whole-value read of the container, so it takes a counted reference of its
    # own and the cell keeps its donation (docs/impl/region/reads.md).
    # `list-cursor` directly above is the same walk with the alias taken BEFORE,

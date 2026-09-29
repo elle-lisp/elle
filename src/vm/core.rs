@@ -132,7 +132,7 @@ pub struct VM {
     /// unavailable" and error or skip name resolution.
     pub(crate) symbols_ptr: *mut crate::symbol::SymbolTable,
     /// The current fiber holding all per-execution state:
-    /// operand stack, call frames, exception handlers, fiber state.
+    /// operand stack, call frames, signal and fiber state.
     pub fiber: Fiber,
     /// Handle to the current fiber's FiberHandle, if it came from a
     /// `fiber/new` allocation. `None` for the root fiber (which lives
@@ -277,13 +277,14 @@ pub struct VM {
     /// Cached Expander for runtime `eval`. Avoids re-loading the prelude
     /// on every eval call. Taken out during eval, put back after.
     pub eval_expander: Option<crate::syntax::Expander>,
-    /// User-provided command-line arguments, from everything after `--`
-    /// in the argv passed to the elle binary. Empty if no `--` was given.
-    /// Set by `main.rs` before the file-execution loop. Read by `sys/args`.
+    /// The program's own command-line arguments: everything after the source
+    /// file, after `-`, or after `--`, or the arguments of the `elle test` and
+    /// `elle semver` subcommands. Empty when none follow. Set with
+    /// `source_arg` before the program runs. Read by `sys/args`.
     pub user_args: Vec<String>,
-    /// The source argument: the script file path, `"-"` for stdin, or `""`
-    /// in REPL mode. Set by `main.rs` at the same point as `user_args`.
-    /// Read by `sys/argv`. Empty string means REPL mode.
+    /// The source argument: the script file path, `"-"` for stdin, `"<eval>"`
+    /// for `--eval:` expressions with no file, `"<test>"` or `"<semver>"` for a
+    /// subcommand, or `""` in REPL mode. Read by `sys/argv`.
     pub source_arg: String,
     /// Lazy WASM compilation tier. When `--wasm=N`, hot closures are
     /// compiled to per-closure WASM modules and dispatched through Wasmtime.

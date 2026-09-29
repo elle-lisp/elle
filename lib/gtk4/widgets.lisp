@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## lib/gtk4/widgets.lisp — Per-widget constructors and signal wiring
 ##
 ## Each make-* function creates a GTK widget, applies props, connects
@@ -209,11 +210,13 @@
       (make-widget win-handle props ptr :spin-button)))
 
   (defn make-combo-box (win-handle props items)
-    (let* [id props:id  # Items may come as a :items prop (a list of strings) — the build DSL
+    (let* [id props:id
+           # Items may come as a :items prop (a list of strings) — the build DSL
            # routes bare-string children to `text`, so they can't reach here.
            # Prefer the prop; fall back to any non-string children passed in.
            items (or props:items items)
-           count (length items)  # Build the model by appending each item through the :string
+           count (length items)
+           # Build the model by appending each item through the :string
            # marshalling (same path as gtk-label-new) rather than hand-rolling a
            # char** with ffi/pin'd byte buffers: those pins aren't retained, so
            # gtk_string_list_new read freed/garbage memory → tofu in the dropdown.

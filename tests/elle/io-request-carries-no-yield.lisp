@@ -1,10 +1,12 @@
-(elle/epoch 12)
-## signals/io-request-carries-no-yield — an I/O request raises `|:io|` alone,
-## so a `|:yield|` mask does not catch it.
+(elle/epoch 13)
+# audited: 2026-09-28
+## An I/O request raises `|:io|` alone, so a `|:yield|` mask does not catch it.
+## tests/AGENTS.md
+## docs/signals/protocol.md
 ##
-## `:yield` means one thing: the cooperative suspension `(yield v)` raises. It
-## used to be OR-ed onto every scheduler-bound request as well, which made a
-## mask naming it unable to say which of the two it wanted.
+## `:yield` means one thing: the cooperative suspension `(yield v)` raises. A
+## scheduler-bound request does not carry it, so a mask naming `:yield` asks
+## for that suspension and nothing else.
 ##
 ## THE TRAP: an I/O request suspends its fiber, so it looks like it ought to
 ## carry `:yield`. Suspension does not come from that bit — it comes from
@@ -25,7 +27,7 @@
           (string "an io request raises |:io| alone — got " (fiber/bits f))))
 
 # The generator shape the whole rule exists to protect: `port/lines`,
-# `tls/lines`, and the SSE streams in lib/http.lisp all mask `|:yield|` around a
+# `tls/lines`, and the SSE streams in lib/http/sse.lisp all mask `|:yield|` around a
 # body that does I/O. The `(yield v)` must be caught here; the I/O must not be,
 # or it never reaches the scheduler and the read never completes.
 (let [g (fiber/new (fn []

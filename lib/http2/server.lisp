@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-14
+(elle/epoch 13)
+# audited: 2026-09-28
 ## lib/http2/server.lisp — HTTP/2 server connection handler
 ##
 ## Loaded via:
@@ -128,7 +128,8 @@
       (reader:read-loop sess :on-headers (mk-on-headers handler on-error)
                         :on-goaway (fn [sess payload]
                                      (sess:write-queue:put :shutdown)
-                                     true))  # Let the writer drain what is queued, but not past its grace:
+                                     true))
+      # Let the writer drain what is queued, but not past its grace:
       # a client that stopped reading parks it inside port/write, and a
       # plain join would hold this connection fiber and its socket for
       # as long as that client stays away.

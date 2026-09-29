@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 # ── A keyword the runtime coins can be spelled ────────────────────────
 #
 # A keyword IS its name hash. A spelling the Rust runtime coins from a
@@ -157,3 +158,20 @@
         "the unknown-signal message spells the signal it rejected")
 (assert (not (string/contains? (get signal-failure :message) "#<keyword"))
         "the unknown-signal message shows no hash")
+
+# ── The kind of an error the VM raises ────────────────────────────────
+#
+# The VM builds its own errors through an allocator that holds no memo, so
+# only the vocabulary can spell their kinds. A `silence`d parameter handed a
+# closure that may raise is one: nothing proves `x` a number, so `+` may
+# raise, and the bound check refuses the closure at run time.
+
+(defn silenced-map [f xs]
+  (silence f)
+  (map f xs))
+
+(def [bounded? violation] (protect (silenced-map (fn [x] (+ x 1)) [1 2])))
+
+(assert (not bounded?) "a closure that may raise breaks the silence bound")
+(assert (not (unspelled? violation)) "a silence violation spells its kind")
+(assert (encodes? violation) "a silence violation encodes as JSON")

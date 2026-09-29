@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-22
+(elle/epoch 13)
+# audited: 2026-09-28
 ## elle test — turning an outcome into rows: the label a form is known by, what
 ## analysis finds in it, the status a payload classifies to, and one row per
 ## (form × tier).
@@ -36,7 +36,8 @@
 # fail  — any other error; capture the assert payload (:syntax/:actual/:expected).
 (defn classify [r]
   (let [ok (get r 0)
-        raw (get r 1)  # A failure payload is normally a typed-error struct, but a worker can
+        raw (get r 1)
+        # A failure payload is normally a typed-error struct, but a worker can
         # hand back a bare unsendable object (an io-request, a fiber) as the
         # "error" — coerce anything non-struct so classify never faults the run.
         payload (if (struct? raw)
@@ -46,7 +47,8 @@
       (struct :status :pass :ok true :value raw)
       (let [err (get payload :error)]
         (if (= err :gated)
-          (struct :status :skip :ok false :reason (field-str payload :reason))  # A trapped (exit): exit 0 is an opt-out (skip), any other code a fail.
+          (struct :status :skip :ok false :reason (field-str payload :reason))
+          # A trapped (exit): exit 0 is an opt-out (skip), any other code a fail.
           # See sys/trap-exit! — the runner traps exit so a test can't truncate
           # the run; this records what the test asked for.
           (if (= err :exited)
@@ -267,7 +269,8 @@
     (insert-form conn row)
     (sqlite:exec conn
                  "INSERT INTO result (run_id, form_hash, tier, status, reason, signal) VALUES (?1,?2,?3,?4,?5,?6)"
-                 [run-id h :vm :fail msg (sig-of payload)])  # Attach whatever artifacts compiled (a non-compiling file often still
+                 [run-id h :vm :fail msg (sig-of payload)])
+    # Attach whatever artifacts compiled (a non-compiling file often still
     # parses to an `ast`), so even a file-level failure has a queryable record.
     (insert-assets conn (last-rowid conn) dumps)
     [:fail]))
@@ -314,12 +317,13 @@
 # script (read-before-write) and re-runs shared mutations per tier; one thunk
 # eliminates that. The file is its own form: src = the file, label = the first
 # assert message anywhere in it. See docs/test-runner.md § Multi-form files.
-(defn process-whole [conn run-id origin file name src forms profile dumps]  # Compile ONCE in the main VM to detect a compile error or a top-level :gated
-  # (dispatch-compiled records the file-level error/skip row) — but DON'T run that
-  # thunk. For execution we ship the file's parsed SYNTAX to a worker that
-  # compiles + runs it with its own stdlib (exec-source-capture), so a file whose
-  # forms `import` a yielding module (sync/redis/http2/process/grpc/subprocess)
-  # shares one scheduler with the worker's ev/run. read-forms is sendable syntax.
+# Compile ONCE in the main VM to detect a compile error or a top-level :gated
+# (dispatch-compiled records the file-level error/skip row) — but DON'T run that
+# thunk. For execution we ship the file's parsed SYNTAX to a worker that
+# compiles + runs it with its own stdlib (exec-source-capture), so a file whose
+# forms `import` a yielding module (sync/redis/http2/process/grpc/subprocess)
+# shares one scheduler with the worker's ev/run. read-forms is sendable syntax.
+(defn process-whole [conn run-id origin file name src forms profile dumps]
   (let [out (protect (compile/whole-module src name))]
     (dispatch-compiled conn run-id origin file out dumps profile
                        (fn [entries]

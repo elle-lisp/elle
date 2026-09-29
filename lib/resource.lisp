@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## lib/resource.lisp — Deterministic resource consumption measurement.
 ##
 ## Measures discrete, deterministic counters (allocation counts, symbol table
@@ -32,7 +33,8 @@
   # reported peak reflects only the thunk.
   (def calibration-base (arena/count))
   (arena/reset-peak)
-  (arena/allocs (fn [] nil))  # Subtract 1: the calibration allocates its own noop closure which
+  (arena/allocs (fn [] nil))
+  # Subtract 1: the calibration allocates its own noop closure which
   # the real measure doesn't (the thunk is passed in, not created).
   (def peak-overhead (- (arena/peak) calibration-base 1))
 

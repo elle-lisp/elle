@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-28
 //! Suspension and call-frame types: a parked bytecode execution point, a step in
 //! a fiber's replay chain, and the frames a stack trace uses.
 //!
@@ -11,17 +11,18 @@ use std::rc::Rc;
 
 /// A suspended bytecode execution point.
 ///
-/// Captures everything needed to resume bytecode execution: the bytecode,
-/// constants pool, closure environment, instruction pointer, and operand
-/// stack state. Used for both signal-based suspension (`fiber/signal`) and
-/// yield-based suspension (`yield` instruction).
+/// Captures everything needed to resume bytecode execution: the code object,
+/// closure environment, instruction pointer, and operand stack state. An
+/// `emit` instruction, a suspending primitive call (a dynamic `emit`, an I/O
+/// request, a capability denial) and a fuel pause each park one, and a suspend
+/// parks one more for each caller it leaves.
 ///
 /// `stack` always captures the full operand stack at the moment of suspension.
-/// For yield suspension, `ip` points past the `Yield` instruction and the
-/// resume value needs to be pushed as the result of the `(yield ...)` expression.
-/// For instruction-pause suspension (fuel, signal), `ip` points at the paused
-/// instruction and the stack is already complete — no extra value is pushed.
-/// The `push_resume_value` field encodes which case applies.
+/// After a fuel pause, `ip` points at the paused instruction and the stack is
+/// already complete — no extra value is pushed. Otherwise `ip` points past the
+/// instruction that suspended, and resume pushes the resume value as that
+/// instruction's result. The `push_resume_value` field encodes which case
+/// applies.
 #[derive(Debug, Clone)]
 pub struct BytecodeFrame {
     /// Code object to resume executing (bytecode + constants + location map +
@@ -36,11 +37,11 @@ pub struct BytecodeFrame {
     pub stack: Vec<Value>,
     /// Whether to push `current_value` onto the stack before resuming.
     ///
-    /// `true` for yield frames and caller frames: the resume value is the
-    /// "return value" of the suspended operation (the yield expression result,
-    /// or the return value of a call).  `false` for fuel-pause and
-    /// signal-pause frames: the instruction at `ip` re-executes from scratch
-    /// with the stack exactly as saved — no extra value is injected.
+    /// `true` for every frame but a fuel pause: the resume value is the
+    /// "return value" of the suspended operation (the `emit`, the primitive
+    /// call, or the call a caller frame waits on). `false` for a fuel pause:
+    /// the instruction at `ip` re-executes from scratch with the stack exactly
+    /// as saved — no extra value is injected.
     pub push_resume_value: bool,
     /// This activation's static→physical region remap at the moment of
     /// suspension (docs/regions/semantics.md — every value its own region). A yield
@@ -134,7 +135,7 @@ impl BytecodeFrame {
 /// Snapshot the uncounted region borrows a suspended bytecode frame's
 /// `activation_region_map` holds: for each live `(slot, region)`, record
 /// `(slot, region, establish-generation)`. The suspended-frame analogue of
-/// `record_param_borrows` (the cross-fiber param snapshot, `src/vm/fiber.rs`);
+/// `record_param_borrows` (the cross-fiber param snapshot, `src/vm/fiber/param.rs`);
 /// the recorded generation lets `resume_suspended`'s `first_stale_borrow`
 /// confirm the region has not been freed since the fiber parked.
 ///

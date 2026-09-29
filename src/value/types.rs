@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-28
 //! The value system's small standing types: symbol identity, arity, and the
 //! signature every primitive has.
 //!
@@ -121,7 +121,7 @@ impl fmt::Display for Arity {
 ///
 /// All primitives return (signal_bits, value):
 /// - (SIG_OK, value) → push value onto stack
-/// - (SIG_ERROR, condition_value) → set fiber.current_exception
+/// - (SIG_ERROR, condition_value) → set `fiber.signal`
 /// - (SIG_YIELD, value) → store in fiber.signal, suspend
 /// - (SIG_RESUME, fiber_value) → VM does fiber swap
 ///
@@ -138,8 +138,8 @@ pub type PrimFn = fn(
     &[Value],
 ) -> (crate::value::fiber::SignalBits, Value);
 
-/// A reference to a static primitive definition. Stored in HeapObject::NativeFn
-/// so the VM can access signal metadata at call time for capability enforcement.
+/// The static primitive definition resolved from a native-fn immediate. The VM
+/// reads its signal metadata at call time for capability enforcement.
 pub type NativeFn = &'static crate::primitives::def::PrimitiveDef;
 
 #[cfg(test)]

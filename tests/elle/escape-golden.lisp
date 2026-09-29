@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-16
+(elle/epoch 13)
+# audited: 2026-09-28
 # escape-golden.lisp — the behaviour-preservation oracle for the escape
 # consolidation (docs/impl/escape.md).
 #
@@ -71,7 +71,8 @@
         escape (render)]
     (assert (string? escape)
             (string "no :escape snapshot for " path
-                    " — did it stop compiling?"))  # Structural sanity (the renderer's contract): all five sections are always
+                    " — did it stop compiling?"))
+    # Structural sanity (the renderer's contract): all five sections are always
     # present. This guards a FIRST capture from blessing a malformed snapshot —
     # the comparison below only catches drift once a golden exists.
     (each section sections
@@ -88,7 +89,8 @@
                       (string (snapdiff:drift-message r) "\n  for " path
                               "\n  rendered dump kept at " got-path
                               "\n  if intended, delete " snap-path
-                              " and re-run to re-capture")))  # A stale .got from an earlier failure would read as evidence about a
+                              " and re-run to re-capture")))
+            # A stale .got from an earlier failure would read as evidence about a
             # tree that is now clean.
             (when (path/exists? got-path) (file/delete got-path))))
         (begin

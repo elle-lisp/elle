@@ -1,6 +1,12 @@
 # reader
 
-Lexing and parsing. Transforms source text into `Syntax` trees or `Value` trees.
+<!-- audited: 2026-09-28 -->
+
+Lexing and parsing: source text becomes `Syntax` trees, or `Value` trees for an embedder.
+
+[docs/impl/reader.md](../../docs/impl/reader.md) holds the design, and
+[docs/impl/lexicon.md](../../docs/impl/lexicon.md) holds the epoch-gated
+lexicon.
 
 ## Responsibility
 
@@ -18,34 +24,36 @@ Does NOT:
 
 | Type | Purpose |
 |------|---------|
-| `Lexer` | Tokenizes input string under a `Lexicon` (epoch-gated rules, `docs/impl/lexicon.md`) |
-| `Token` | Token variants (LParen, Int, Symbol, Pipe, AtPipe, etc.) |
-| `SourceLoc` | Line/column position |
-| `Reader` | Parses tokens to `Value` |
+| `Lexer` | Tokenizes input string under a `Lexicon` |
+| `Token`, `OwnedToken` | The borrowed and owned token sets, generated from one declaration in [token.rs](token.rs) |
+| `SourceLoc` | File, line and column |
+| `Reader` | Parses tokens to `Value`; `read_str` is its one caller in `src/` |
 | `SyntaxReader` | Parses tokens to `Syntax` |
 
 ## Entry points
 
 ```rust
-// Parse to Value (legacy)
+// Parse to Value, for an embedder. Nothing in src/ calls it.
 let value = read_str(source, runtime.heap(), &mut symbols)?;
 
-// Parse to Syntax (preferred)
-let syntax = read_syntax(source, source_name)?;
+// Parse one form to Syntax, born in `arena`
+let syntax = read_syntax(arena, source, source_name)?;
 
 // Parse multiple forms
-let forms = read_syntax_all(source, source_name)?;
+let forms = read_syntax_all(arena, source, source_name)?;
+
+// Parse multiple forms, dispatching on the file extension
+let forms = read_syntax_all_for(arena, source, source_name)?;
 
 // Parse multiple forms under the current epoch, whatever the text declares
-let forms = read_syntax_all_current(source, source_name)?;
+let forms = read_syntax_all_current(arena, source, source_name)?;
 ```
 
 Each entry point prescans the source for its `(elle/epoch N)` declaration
-and lexes under `Lexicon::for_epoch(N)` (`docs/impl/lexicon.md`).
-`prescanned_epoch_for` reports that choice without reading, so the pipeline
-can check it against the declaration in the tree.
-`read_syntax_all_current` is the one exception, and the REPL is its one
-caller: prompt input is always current-epoch, so a pasted declaration
+and lexes under `Lexicon::for_epoch(N)`. `prescanned_epoch_for` reports that
+choice without reading, so the pipeline can check it against the declaration
+in the tree. `read_syntax_all_current` is the one exception, and the REPL is
+its one caller: prompt input is always current-epoch, so a pasted declaration
 cannot change how the prompt lexes.
 
 `shebang_len` gives the byte length of a leading `#!` line. Everything that
@@ -76,9 +84,9 @@ Syntax / Value tree
 
 ## Dependents
 
-- `pipeline.rs` - uses `read_syntax`
-- `repl.rs` - uses `read_str`
-- `main.rs` - file execution
+- `pipeline/` - compiles through `read_syntax`, `read_syntax_all` and `read_syntax_all_for`
+- `repl/read.rs` - reads prompt input through `read_syntax_all_current`
+- `primitives/read.rs` - the `read` primitive
 
 ## Delimiters
 
@@ -86,20 +94,22 @@ The lexer recognizes these delimiters (characters that cannot appear in symbol n
 
 | Delimiter | Token | Purpose |
 |-----------|-------|---------|
-| `(` `)` | `LParen`, `RParen` | List forms |
-| `[` `]` | `LBracket`, `RBracket` | Array literals (immutable) |
-| `{` `}` | `LBrace`, `RBrace` | Struct literals (immutable) |
+| `(` `)` | `LeftParen`, `RightParen` | List forms |
+| `[` `]` | `LeftBracket`, `RightBracket` | Array literals (immutable) |
+| `{` `}` | `LeftBrace`, `RightBrace` | Struct literals (immutable) |
 | `\|` | `Pipe` | Set literal delimiter |
-| `@[` | `AtBracket` | @array literal prefix (mutable) |
-| `@{` | `AtBrace` | @struct literal prefix (mutable) |
 | `@\|` | `AtPipe` | @set literal prefix (mutable) |
+| `@` | `ListSugar` | Before `[`, `{` or `"`: the mutable form of that literal |
+| `b[` | `BytesBracket` | Bytes literal |
+| `@b[` | `AtBytesBracket` | @bytes literal (mutable) |
 | `'` | `Quote` | Quote reader macro |
 | `` ` `` | `Quasiquote` | Quasiquote reader macro |
 | `,` | `Unquote` | Unquote reader macro (inside quasiquote) |
+| `,;` | `UnquoteSplicing` | Unquote-splicing reader macro |
 | `;` | `Splice` | Splice reader macro |
-| `:` | `Colon` | Keyword prefix; also `:@name` for mutable type keywords |
-| `@` | `At` | Mutable collection prefix (when not followed by `[`, `{`, or `\|`) |
-| `#` | `Comment` | Line comment (now emitted as a token) |
+| `#` | `Comment` | Line comment |
+
+A `:` that starts a token makes a `Keyword`; it has no token of its own.
 
 ## Keyword syntax
 
@@ -115,15 +125,16 @@ The `@` in `:@name` is consumed by the lexer and prepended to the keyword name.
 
 - `|...|` reads as `SyntaxKind::Set(RegionSlice<Syntax>)` — immutable set literal
 - `@|...|` reads as `SyntaxKind::SetMut(RegionSlice<Syntax>)` — mutable set literal
-- Inside a list `(...)`, `[...]`, `{...}`, or `@{...}`, a bare `|` starts a
-  nested set literal (delegates to `read_set`), producing a `SyntaxKind::Set`
-  node. `|` is purely a set delimiter in all contexts.
+- Inside any collection, a bare `|` starts a nested set literal, producing a
+  `SyntaxKind::Set` node. `|` is purely a set delimiter in all contexts.
 
 ## Invariants
 
 1. **Shebang lines are stripped.** `#!` at start of input is ignored.
 
-2. **Empty input returns error.** Not `Ok(Nil)`. Check before parsing.
+2. **Empty input to a one-form entry point is an error.** `read_str` and
+   `read_syntax` return `Err("No input")`, not `Ok(Nil)`. The `_all` entry
+   points return an empty `Vec`.
 
 3. **`SourceLoc` is 1-indexed.** Line 1, column 1 is the first character.
 
@@ -136,19 +147,22 @@ The `@` in `:@name` is consumed by the lexer and prepended to the keyword name.
 
 6. **`|` is a delimiter for set literals.** `|1 2 3|` is lexed as `Pipe`, elements,
    `Pipe` (for immutable sets). `@|1 2 3|` is lexed as `AtPipe`, elements, `Pipe`
-   (for mutable sets). Inside lists, `|` starts a nested set literal (delegates
-   to `read_set`), producing a `SyntaxKind::Set` node. `|` is purely a set
-   delimiter in all contexts. It cannot appear in symbol names.
+   (for mutable sets). It cannot appear in symbol names.
 
 7. **`:@name` keywords are valid.** The lexer recognizes `:@` as a keyword
    prefix variant. The `@` is consumed and prepended to the keyword name.
 
 8. **The epoch declaration selects the lexicon.** `(elle/epoch N)` at the top
    of a source unit decides how that unit tokenizes, before any token is
-   produced (`docs/impl/lexicon.md`). An epoch this compiler has no lexicon
-   for is a read error, not a parse that guesses.
+   produced. An epoch this compiler has no lexicon for is a read error, not a
+   parse that guesses.
 
-9. **Comments are tokens.** `#` line comments are emitted as `Token::Comment(String)`
-   by the lexer. Both `SyntaxReader` and `Reader` skip comment tokens during
-   parsing — they do not appear in the output tree. The formatter collects
-   them separately via `lex_with_comments()` for comment preservation.
+9. **Comments are tokens.** The lexer emits `#` line comments as
+   `Token::Comment(String)`. Both `SyntaxReader` and `Reader` skip them, so
+   they do not appear in the output tree. The formatter collects them through
+   `lex_for_format()` in
+   [formatter/comments.rs](../formatter/comments.rs).
+
+10. **A collection that fails leaves no open form behind.** The unterminated
+    message names the outermost collection still open, so a reader that
+    reads again after an error must not count the failed one.

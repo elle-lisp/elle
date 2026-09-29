@@ -8,7 +8,6 @@
 pub mod arithmetic;
 pub mod call;
 pub mod capture;
-// Note: jit_entry is not pub — it only adds impl VM methods
 pub mod closure;
 pub mod comparison;
 pub mod control;
@@ -19,6 +18,7 @@ pub mod env;
 pub mod eval;
 pub mod execute;
 pub mod fiber;
+// Not pub: jit_entry only adds `impl VM` methods.
 #[cfg(feature = "jit")]
 mod jit_entry;
 pub mod literals;
@@ -27,6 +27,7 @@ mod mlir_entry;
 pub(crate) mod native_stack;
 pub mod parameters;
 pub mod run_on;
+mod scheduled;
 pub mod signal;
 pub mod stack;
 pub mod types;
@@ -37,9 +38,8 @@ mod wasm_entry;
 pub use crate::value::fiber::CallFrame;
 pub use core::VM;
 
-use crate::compiler::bytecode::{Bytecode, Instruction};
-use crate::pipeline::CompileCtx;
-use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_SWITCH};
+use crate::compiler::bytecode::Bytecode;
+use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_SWITCH};
 use std::rc::Rc;
 
 impl VM {
@@ -52,12 +52,12 @@ impl VM {
     /// single allocation), freed value-based by the consumer's `DecrefValueRegion`
     /// at the result's last use — the native-call result discipline. A *fresh*
     /// mint, never a region a tail-call is already freeing (a result born there
-    /// would be freed under its reader — region-native-tail-return-uaf).
+    /// would be freed under its reader).
     ///
     /// Test-only: the VM error/result chokepoint ([`escaping_error`],
-    /// [`set_error`], [`error_extra`], [`escaping_match_fail`]) builds through a
-    /// `NativeCtx::new(self.heap())`, which mints+owns exactly such a fresh region
-    /// and exposes the `ctx.*` allocation surface; this bare mint survives only for
+    /// [`set_error`], [`error_extra`], [`escaping_match_fail`]) builds through an
+    /// `Alloc::new(self.heap())`, which mints+owns exactly such a fresh region
+    /// and exposes the `ctx.*` allocation surface; this bare mint exists only for
     /// the pin tests that assert the contract.
     ///
     /// [`escaping_error`]: Self::escaping_error
@@ -80,7 +80,7 @@ impl VM {
     /// The VM-scope rich-error routine (docs/impl/region/errors.md): build
     /// `{:error :kind :message msg …extra}` in a fresh result region,
     /// freed value-based by the consumer's `DecrefValueRegion`. Same name as
-    /// [`NativeCtx::error_extra`](crate::primitives::ctx::Alloc::error_extra)
+    /// [`Alloc::error_extra`](crate::primitives::ctx::Alloc::error_extra)
     /// so `rich_error!` is uniform over `ctx` and `self`. The `extra` field
     /// values must be born in the same region — immediates (keywords/ints) or
     /// pass-throughs (incref'd by `alloc`'s content scan); a VM site has no
@@ -101,8 +101,8 @@ impl VM {
         ctx.match_fail(val)
     }
 
-    /// Set an error signal on the current fiber, the error value built through a
-    /// `NativeCtx` over the VM's heap (docs/impl/region/ctx.md), which mints and
+    /// Set an error signal on the current fiber, the error value built through an
+    /// `Alloc` over the VM's heap (docs/impl/region/ctx.md), which mints and
     /// owns its own fresh result region. The error escapes as the fiber's signal
     /// payload and is freed value-based by the consumer's `DecrefValueRegion`.
     pub(crate) fn set_error(&mut self, kind: &str, msg: impl Into<String>) {
@@ -114,26 +114,24 @@ impl VM {
     /// Check arity and set error signal if mismatch.
     /// Returns true if arity is OK, false if there's a mismatch.
     pub(crate) fn check_arity(&mut self, arity: &crate::value::Arity, arg_count: usize) -> bool {
-        let mismatch = match arity {
-            crate::value::Arity::Exact(n) if arg_count != *n => {
-                Some(format!("expected {} arguments, got {}", n, arg_count))
-            }
-            crate::value::Arity::AtLeast(n) if arg_count < *n => Some(format!(
-                "expected at least {} arguments, got {}",
-                n, arg_count
-            )),
-            crate::value::Arity::Range(min, max) if arg_count < *min || arg_count > *max => Some(
-                format!("expected {}-{} arguments, got {}", min, max, arg_count),
-            ),
-            _ => None,
-        };
-
-        if let Some(msg) = mismatch {
-            let err = self.escaping_error("arity-error", msg);
-            self.fiber.signal = Some((SIG_ERROR, err));
-            return false;
+        if arity.matches(arg_count) {
+            return true;
         }
-        true
+
+        let msg = match arity {
+            crate::value::Arity::Exact(n) => {
+                format!("expected {} arguments, got {}", n, arg_count)
+            }
+            crate::value::Arity::AtLeast(n) => {
+                format!("expected at least {} arguments, got {}", n, arg_count)
+            }
+            crate::value::Arity::Range(min, max) => {
+                format!("expected {}-{} arguments, got {}", min, max, arg_count)
+            }
+        };
+        let err = self.escaping_error("arity-error", msg);
+        self.fiber.signal = Some((SIG_ERROR, err));
+        false
     }
 
     /// Execute a code-object blueprint with an optional closure environment.
@@ -151,9 +149,8 @@ impl VM {
     ) -> Result<Value, String> {
         // The blueprint carries the function's region tables with the rest of
         // its payload: the builder-idiom merge set the alloc dispatch
-        // mint-or-reuses (docs/impl/region/merging.md § Merging), and the two
-        // release tables an error exit walks (docs/impl/region/mechanism.md
-        // § "An abandoned frame runs the releases it still owes").
+        // mint-or-reuses (docs/impl/region/merging.md), and the two release
+        // tables an error exit walks (docs/impl/region/mechanism.md).
         let code = crate::value::ClosureTemplate::for_proto(self.heap(), proto).code();
         self.execute_code(code, closure_env)
     }
@@ -258,8 +255,8 @@ impl VM {
                 // Everything that is not an error, a halt, or the switch
                 // trampoline arrives here with no handler left to run, and one
                 // report answers for all of it: `:yield` is not privileged
-                // among the bits that reach the root (docs/signals/protocol.md
-                // § "Reaching the root"). The keywords are what the author of
+                // among the bits that reach the root (docs/signals/protocol.md).
+                // The keywords are what the author of
                 // the emitting call can act on; the mask alone is not. The
                 // refused park is abandoned with its host.
                 self.abandon_hosted_park(bits);
@@ -274,7 +271,7 @@ impl VM {
         // the owner node (one tolerant decref → subtree drop over node +
         // adopted members) and whatever a top-level tail call deferred — at the
         // program's completion, the root counterpart of `trampoline_loop`'s
-        // normal-break release (docs/impl/region/owner.md § "Owner nodes"). Runs
+        // normal-break release (docs/impl/region/owner.md). Runs
         // on every root exit — a finished program has no resumable state at this
         // boundary, so an error exit releases identically.
         if at_root {
@@ -283,160 +280,6 @@ impl VM {
         self.root_exit_depth = self.fiber.stack.len();
         self.fiber.stack = saved_stack;
         self.fiber.current_closure = saved_closure;
-        result
-    }
-
-    /// Handle a SIG_SWITCH signal: execute the pending fiber resume
-    /// and resume the caller with the result. Returns the new signal bits.
-    fn handle_sig_switch(&mut self) -> SignalBits {
-        let pending = self
-            .pending_fiber_resume
-            .take()
-            .expect("VM bug: SIG_SWITCH without pending_fiber_resume");
-        let caller_frames = self.fiber.suspended.take().unwrap_or_default();
-        self.fiber.signal.take();
-        if self
-            .runtime_config
-            .has_trace_bit(crate::config::trace_bits::FIBER)
-        {
-            eprintln!(
-                "[handle_sig_switch] caller_frames={} fiber_status={:?}",
-                caller_frames.len(),
-                pending.handle.with(|f| f.status),
-            );
-        }
-
-        let (result_bits, result_value) =
-            self.do_fiber_resume(&pending.handle, pending.fiber_value);
-
-        let mask = pending.handle.with(|f| f.mask);
-
-        self.finalize_if_halted(&pending.handle, result_bits);
-        if result_bits.intersects(SIG_ERROR) {
-            pending
-                .handle
-                .with_mut(|f| f.status = crate::value::FiberStatus::Error);
-        }
-
-        if self.absorbs(&pending.handle, mask, result_bits, result_value) {
-            self.fiber.child = None;
-            self.fiber.child_value = None;
-            self.resume_suspended(caller_frames, result_value)
-        } else {
-            self.fiber.signal = Some((result_bits, result_value));
-
-            // Rebuild fiber.suspended for uncaught signals: the outer code
-            // (execute_scheduled, execute_proto) needs the suspension chain
-            // to resume after handling the signal (e.g., SIG_IO → sync I/O).
-            // Prepend a FiberResume frame so resume_suspended can re-enter
-            // the child fiber when the signal is handled.
-            if !result_bits.intersects(SIG_ERROR) && !result_bits.intersects(SIG_HALT) {
-                let fiber_resume_frame = SuspendedFrame::FiberResume {
-                    handle: pending.handle.clone(),
-                    fiber_value: pending.fiber_value,
-                };
-                let mut frames = vec![fiber_resume_frame];
-                frames.extend(caller_frames);
-                self.fiber.suspended = Some(frames);
-            }
-
-            result_bits
-        }
-    }
-
-    /// Execute user bytecode under the async scheduler.
-    ///
-    /// Wraps the bytecode in a thunk and calls `(ev/run thunk)` to
-    /// install the async scheduler. The thunk carries the bytecode's
-    /// inferred signal so fiber scheduling and shared allocator
-    /// provisioning work correctly.
-    ///
-    /// Falls back to direct execution if stdlib isn't loaded yet.
-    pub fn execute_scheduled(
-        &mut self,
-        bytecode: &Bytecode,
-        cctx: &CompileCtx,
-    ) -> Result<Value, String> {
-        let ev_run = match cctx.lookup_stdlib_value(crate::value::SymbolId::of("ev/run")) {
-            Some(v) => v,
-            None => return self.execute(bytecode),
-        };
-
-        // The entry thunk's blueprint is the program's own: it runs the top-level
-        // bytecode, so it carries the real program's location table, nested-lambda
-        // blueprints, and builder-idiom merge metadata (docs/impl/region/merging.md
-        // § Merging). Without them the top-level merge would diverge from the
-        // unit/embedding paths, which carry it. Empty unless a merge fired.
-        let thunk_proto = Rc::new(bytecode.clone().into_proto());
-
-        let call_region = crate::lir::lower::new_static_region();
-        // The synthetic `Call` below is hand-encoded bytecode, so the slot is
-        // written as its raw wire-format `u32` (the one legit `.get()` site —
-        // a bytecode encoder).
-        let call_region_slot = call_region.get();
-        let synthetic_bc = vec![
-            Instruction::LoadConst as u8,
-            0,
-            0,
-            Instruction::LoadConst as u8,
-            0,
-            1,
-            Instruction::Call as u8,
-            0,
-            1, // arg_count = 1 (u16be)
-            (call_region_slot >> 24) as u8,
-            (call_region_slot >> 16) as u8,
-            (call_region_slot >> 8) as u8,
-            (call_region_slot & 0xff) as u8, // region_id (u32be)
-            Instruction::Return as u8,
-        ];
-
-        // The entry thunk gets a runtime region of its own, minted from the heap.
-        // The static slot baked into the synthetic `Call` above is a compile-time
-        // name from a different id-space (docs/impl/region/model.md § id-spaces):
-        // read as a physical id it names whichever live region already answers to
-        // that number, so the thunk would land among another value's objects and
-        // the mint's creation claim would never be taken. A mint takes that claim
-        // here, and the release after the run balances it.
-        let entry_region = self.heap().new_runtime_region();
-        // Build the entry thunk as an ordinary allocation into `entry_region`
-        // (mortal) — reclaimed by the termination sweep. The synthetic
-        // `(ev/run thunk)` bytecode has no MakeClosure of its own; the real
-        // program's nested lambdas ride on the thunk blueprint's child_protos and
-        // resolve when `ev/run` calls the thunk. The thunk names its region
-        // explicitly and the wrapper's allocating opcodes resolve their own
-        // static region slots.
-        let thunk = {
-            let heap = self.heap();
-            let template = crate::value::closure::materialize(heap, &thunk_proto, entry_region);
-            crate::value::build::closure(
-                heap,
-                crate::value::Closure::new(
-                    crate::value::TemplateRef::region(template),
-                    crate::value::region_slice::RegionSlice::empty(),
-                    SignalBits::EMPTY,
-                ),
-                entry_region,
-            )
-        };
-        let synthetic_constants = vec![thunk, ev_run];
-        // The synthetic `(ev/run thunk)` wrapper has no allocations and no releases
-        // of its own; the real program's tables ride the thunk blueprint and
-        // resolve when `ev/run` calls the thunk.
-        let wrapper = crate::value::TemplateProto::new(
-            synthetic_bc,
-            crate::value::Arity::Exact(0),
-            synthetic_constants,
-        );
-        let result = self.execute_proto(&Rc::new(wrapper), None);
-        // The run is over, so this is the entry thunk's point of demise (Rule 4,
-        // docs/impl/region/rules.md): the wrapper's hand-encoded bytecode carries
-        // no `DecrefRegion` to fire, so the balance for the mint above is here.
-        // The result of `(ev/run thunk)` lives in the fresh region that call
-        // minted, never in this one, so the release cannot reach the value being
-        // returned. It runs on the error exit too — a failed run owes the same
-        // balance as a completed one.
-        self.heap().decref_region(entry_region);
         result
     }
 }

@@ -1,3 +1,9 @@
+// audited: 2026-09-28
+//! VM core tests for runtime invariants and error paths.
+//!
+//! docs/impl/vm.md
+//! docs/impl/region/errors.md
+
 use super::*;
 
 #[test]
@@ -82,4 +88,35 @@ fn signal_bits_operand_round_trips_the_user_range() {
     let mut ip = 0;
     assert_eq!(vm.read_signal_bits(&bc.instructions, &mut ip), bits);
     assert_eq!(ip, 8, "reading a signal-bits operand advances 8 bytes");
+}
+
+#[test]
+fn check_arity_uses_the_arity_rules_and_sets_the_error_keyword() {
+    let mut vm = VM::new();
+
+    for (arity, count) in [
+        (crate::value::Arity::Exact(2), 2),
+        (crate::value::Arity::AtLeast(2), 3),
+        (crate::value::Arity::Range(1, 3), 2),
+    ] {
+        assert!(vm.check_arity(&arity, count));
+        assert!(vm.fiber.signal.is_none());
+    }
+
+    for (arity, count) in [
+        (crate::value::Arity::Exact(2), 1),
+        (crate::value::Arity::AtLeast(2), 1),
+        (crate::value::Arity::Range(1, 3), 0),
+        (crate::value::Arity::Range(1, 3), 4),
+    ] {
+        assert!(!vm.check_arity(&arity, count));
+        let (bits, error) = vm.fiber.signal.take().expect("arity mismatch signal");
+        assert!(bits.intersects(crate::value::SIG_ERROR));
+        let fields = error.as_struct().expect("arity error is a struct");
+        let kind =
+            crate::value::sorted_struct_get(fields, &crate::value::TableKey::keyword("error"))
+                .copied()
+                .expect("arity error has an :error field");
+        assert_eq!(kind, crate::value::Value::keyword("arity-error"));
+    }
 }

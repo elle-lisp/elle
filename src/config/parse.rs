@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-28
 //! `Config::parse`: turn an argv into a `Config` and the positional arguments
 //! left over. Every flag `elle --help` lists is recognized here.
 //!
@@ -145,6 +145,13 @@ impl Config {
                     for kw in rest.split(',') {
                         let kw = kw.trim();
                         if !kw.is_empty() {
+                            if !TRACE_KEYWORDS.contains(&kw) {
+                                return Err(format!(
+                                    "--trace: unknown keyword '{}'. Valid: {}",
+                                    kw,
+                                    TRACE_KEYWORDS.join(", ")
+                                ));
+                            }
                             config.trace_keywords.push(kw.to_string());
                         }
                     }

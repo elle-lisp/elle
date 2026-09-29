@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## lib/contract.lisp — Compositional validation system for function boundaries.
 ##
 ## Loaded via:
@@ -57,8 +58,9 @@
    - struct?   → struct shape validator (validates declared keys; extra keys ignored)
    - other     → signals :type-error"
     (cond
-      (fn? expr)  # Wrap a raw predicate: truthy = pass, falsy = fail.
-      # Use protect to treat thrown errors as failures (e.g. odd? on non-integer).
+      (fn? expr)
+        # Wrap a raw predicate: truthy = pass, falsy = fail.
+        # Use protect to treat thrown errors as failures (e.g. odd? on non-integer).
         (let [desc (string expr)]
           (make-validator (fn [value]
                             (let [[ok result] (protect (expr value))]
@@ -69,8 +71,9 @@
                                  :got (type-of value)}))) desc))
       (validator? expr)  # Already a compiled validator — pass through unchanged.
        expr
-      (struct? expr)  # Struct shape: compile each declared key's validator recursively.
-      # Extra keys in the value are allowed (open-world).
+      (struct? expr)
+        # Struct shape: compile each declared key's validator recursively.
+        # Extra keys in the value are allowed (open-world).
         # Missing keys pass nil to the sub-validator (nil will typically fail).
         (let* [shape-keys (keys expr)
                compiled-shape (let [s @{}]

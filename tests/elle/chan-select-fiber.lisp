@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 # Channel/select × fiber scheduler interaction tests.
 #
 # Regression cover for: chan/select must not park the OS thread, because the
@@ -101,7 +102,8 @@
 # ============================================================================
 
 (let [[tx rx] (chan)
-      _ (sys/spawn-vm (fn []  # Small synchronous sleep so the parent definitely
+      _ (sys/spawn-vm (fn []
+                        # Small synchronous sleep so the parent definitely
                         # parks first.  ev/sleep requires a scheduler — we
                         # don't have one on the spawned OS thread.
                         (time/sleep 0.02)
@@ -217,7 +219,8 @@
 (let [[tx rx] (chan)
       victim (ev/spawn (fn [] (chan/select @[rx] 60000)))]
   (ev/sleep 0.02)
-  (ev/abort victim)  # The aborted fiber should be done now.  A fresh chan/select on the
+  (ev/abort victim)
+  # The aborted fiber should be done now.  A fresh chan/select on the
   # same channel must work — confirms the WakeList wasn't left with a
   # dangling fd that would mis-fire or cause errors.
   (let [_ (ev/spawn (fn [] (chan/send tx :after-abort)))

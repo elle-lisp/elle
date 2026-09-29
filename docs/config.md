@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Elle exposes a runtime configuration system reachable from both CLI flags and
 Elle code. All debug/trace flags, JIT policies, and WASM policies are
@@ -97,6 +97,9 @@ Available trace keywords:
 | `:residue` | Teardown leak dump: the surviving regions and their cross-region edges (string-traced, no bit) |
 | `:park` | Park and resume diagnostics: every suspended-frame park and every frame replay, with the frame's shape (string-traced, no bit) |
 | `:syncjit` | Compile with Cranelift on the VM thread instead of the background worker (string-traced, no bit) |
+
+The CLI rejects unknown keywords and lists valid names in the error. Elle code
+can still set unknown trace keywords for forward compatibility.
 
 Trace output format: `[trace:KEYWORD] message` on stderr, for easy
 grep filtering.

@@ -1,8 +1,8 @@
-(elle/epoch 12)
-# Sync primitives tests
-#
-# Tests for lib/sync.lisp: futex, lock, semaphore, condvar, rwlock,
-# barrier, latch, once, queue, monitor.
+(elle/epoch 13)
+# audited: 2026-09-28
+# lib/sync.lisp's primitives: futex, lock, semaphore, condvar, rwlock, barrier, latch, once, queue, monitor.
+# tests/AGENTS.md
+# docs/concurrency.md
 
 (def sync ((import-file "lib/sync.lisp")))
 
@@ -92,7 +92,8 @@
   (defn sem-worker []
     (sem:acquire)
     (put active 0 (inc (active 0)))
-    (when (> (active 0) (max-active 0)) (put max-active 0 (active 0)))  # yield to let other fibers run
+    (when (> (active 0) (max-active 0)) (put max-active 0 (active 0)))
+    # Yield, to let the other fibers run.
     (ev/join (ev/spawn (fn [] nil)))
     (put active 0 (dec (active 0)))
     (sem:release))
@@ -145,27 +146,28 @@
 # 5. Read-write lock
 # ============================================================================
 
+# Two readers hold the lock at once. r1 keeps its read lock until r2 has
+# acquired one too. A lock that admits one reader at a time blocks r2's
+# acquire while r1 waits for it, so the join reaches its deadline. A yield
+# between acquire and release proves nothing here: the scheduler runs one
+# reader to completion before it starts the other.
 (let [rw (sync:make-rwlock)
-      log @[]]
+      held (sync:make-latch)
+      both (sync:make-latch)]
   (let [r1 (ev/spawn (fn []
                        (rw:read-acquire)
-                       (push log :r1-in)
-                       (ev/join (ev/spawn (fn [] nil)))  # yield
-                       (push log :r1-out)
-                       (rw:read-release)))
+                       (held:open)
+                       (both:wait)
+                       (rw:read-release)
+                       :r1))
         r2 (ev/spawn (fn []
+                       (held:wait)
                        (rw:read-acquire)
-                       (push log :r2-in)
-                       (ev/join (ev/spawn (fn [] nil)))  # yield
-                       (push log :r2-out)
-                       (rw:read-release)))]
-    (ev/join [r1 r2])  # Both readers should have been in simultaneously
-    (let [r1-in (find-index (fn [x] (= x :r1-in)) log)
-          r2-in (find-index (fn [x] (= x :r2-in)) log)
-          r1-out (find-index (fn [x] (= x :r1-out)) log)
-          r2-out (find-index (fn [x] (= x :r2-out)) log)]
-      (assert (and (not (nil? r1-in)) (not (nil? r2-in)))
-              "5a: both readers entered"))))
+                       (both:open)
+                       (rw:read-release)
+                       :r2))]
+    (assert (= (ev/timeout 5 (fn [] (ev/join [r1 r2]))) [:r1 :r2])
+            "5a: two readers hold the lock at the same time")))
 
 # Writer excludes readers
 (let [rw (sync:make-rwlock)
@@ -195,11 +197,14 @@
   (let [a (ev/spawn (fn [] (barrier-worker :a)))
         b (ev/spawn (fn [] (barrier-worker :b)))
         c (ev/spawn (fn [] (barrier-worker :c)))]
-    (ev/join [a b c])  # All :before entries should come before all :after entries
+    (ev/join [a b c])
     (let [befores (filter (fn [x] (= :before (first x))) log)
           afters (filter (fn [x] (= :after (first x))) log)]
       (assert (= 3 (length befores)) "6a: all fibers reached barrier")
-      (assert (= 3 (length afters)) "6b: all fibers passed barrier"))))
+      (assert (= 3 (length afters)) "6b: all fibers passed barrier")
+      # No fiber passes the barrier before every fiber has reached it.
+      (assert (= (find-index (fn [x] (= :after (first x))) log) 3)
+              "6c: every :before entry precedes every :after entry"))))
 
 # ============================================================================
 # 7. Latch
@@ -301,7 +306,8 @@
   (q:put :a)
   (q:close)
   (assert (q:closed?) "9h: queue reports closed")
-  (assert (nil? (q:put :b)) "9i: put on closed queue returns nil")  # take drains remaining items
+  (assert (nil? (q:put :b)) "9i: put on closed queue returns nil")
+  # take drains remaining items
   (assert (= :a (q:take)) "9j: take drains remaining item after close")
   (assert (nil? (q:take)) "9k: take returns nil when closed and empty"))
 
@@ -387,10 +393,8 @@
 # waiter; under a colliding key it wakes whichever waiter is first in the
 # shared park slot (instance A's), which re-checks its own unchanged value
 # and re-parks, so B's waiter is never woken.  That lost wakeup deadlocks
-# any program that imports sync (or a sync-using module like lib/fserver)
-# more than once — e.g. an orchestrator whose simulator, trader, and main
-# fiber each import the server module separately.  Futex keys must be
-# process-globally unique.
+# any program that imports sync, or a module that uses sync, more than
+# once. Futex keys must be process-globally unique.
 #
 # Tested at the futex layer so the main fiber never parks (it only
 # set+wakes); the waiters that stay parked are aborted at teardown.
@@ -408,12 +412,14 @@
               (fxB:wait :b)
               (push log :B-woke)))
   (ev/sleep 0.05)  # let waiter B reach its park
+
   # Wake ONLY fxB, the proper way (change value, then wake the key).
   (fxB:set :b2)
   (fxB:wake 1)
   (ev/sleep 0.1)  # let the woken waiter run
   (assert (= [:B-woke] (freeze log))
-          "11a: waking instance-B futex wakes B's waiter, not A's (cross-instance futex keys must be unique)")  # Drain waiter A so it does not orphan into teardown.
+          "11a: waking instance-B futex wakes B's waiter, not A's (cross-instance futex keys must be unique)")
+  # Drain waiter A so it does not orphan into teardown.
   (fxA:set :a2)
   (fxA:wake 1)
   (ev/sleep 0.05))

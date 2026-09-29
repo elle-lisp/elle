@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-20
+(elle/epoch 13)
+# audited: 2026-09-28
 ## elle test — reading a run back: the tally, the problem list, the warning
 ## about a predecessor that never finished, and raw SQL.
 ## docs/test-store.md
@@ -168,7 +168,8 @@
 # partial all-pass result set must never read as green. To stderr, so it never
 # mingles with --query's stdout or a test's captured output.
 (defn print-summary [conn run-id]
-  (let [meta (run-meta conn run-id)  # The DB is a SESSION: it accumulates every run. Show which run this is of
+  (let [meta (run-meta conn run-id)
+        # The DB is a SESSION: it accumulates every run. Show which run this is of
         # how many, so the persistent history is visible (query `run` for the rest).
         nruns (get (get (sqlite:query conn "SELECT count(*) AS c FROM run") 0)
                    :c)

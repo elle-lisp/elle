@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 # tests/modules/captured-return.lisp — fixture for
 # tests/elle/region-captured-return-move-uaf.lisp.
 #
@@ -9,7 +10,8 @@
 # call site in the caller's unit and is NOT inlined — the cross-unit no-inline
 # condition the captured-return UAF requires.
 (fn [&named cfg]
-  (def stored cfg)  # `fetch` RETURNS `stored`, so it escapes via the return facet; `fetch`
+  (def stored cfg)
+  # `fetch` RETURNS `stored`, so it escapes via the return facet; `fetch`
   # itself escapes because the sibling methods below capture it and are returned in the module
   # struct. Escape (the authority) marks `stored` returned, so the region solver treats
   # fetch's return as an ESCAPE under the move convention (docs/impl/region/bindings.md).

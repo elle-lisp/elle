@@ -1,5 +1,7 @@
-(elle/epoch 12)
-## lib/compress.lisp — Gzip, zlib, deflate, and zstd via FFI
+(elle/epoch 13)
+# audited: 2026-09-28
+## Gzip, zlib, raw deflate and zstd compression, through FFI calls into libz and libzstd.
+## docs/libraries.md
 ##
 ## Usage:
 ##   (def z ((import "std/compress")))
@@ -74,18 +76,21 @@
            out-buf (ffi/malloc out-size)
            in-pin (ffi/pin input)]
       (each i in (range Z_STREAM_SIZE)
-        (ffi/write (ptr/add stream i) :u8 0))  ## deflateInit2(stream, level, Z_DEFLATED=8, windowBits, memLevel=8, Z_DEFAULT_STRATEGY=0)
+        (ffi/write (ptr/add stream i) :u8 0))
+      ## deflateInit2(stream, level, Z_DEFLATED=8, windowBits, memLevel=8, Z_DEFAULT_STRATEGY=0)
       (let [rc (z-deflateInit2 stream level 8 window-bits 8 0 ZLIB_VERSION
                                Z_STREAM_SIZE)]
         (unless (= rc Z_OK)
           (ffi/free stream)
           (ffi/free out-buf)
           (error {:error :compress-error
-                  :message (string "deflateInit2 failed: " rc)})))  ## Set input
-      (ffi/write stream :ptr in-pin)  # next_in = 0
-      (ffi/write (ptr/add stream 8) :u32 in-len)  # avail_in = 8
-      (ffi/write (ptr/add stream 24) :ptr out-buf)  # next_out = 24
-      (ffi/write (ptr/add stream 32) :u32 out-size)  # avail_out = 32
+                  :message (string "deflateInit2 failed: " rc)})))
+      ## Set the input and output buffers, at the z_stream offsets above.
+      (ffi/write stream :ptr in-pin)  # next_in, offset 0
+      (ffi/write (ptr/add stream 8) :u32 in-len)  # avail_in, offset 8
+      (ffi/write (ptr/add stream 24) :ptr out-buf)  # next_out, offset 24
+      (ffi/write (ptr/add stream 32) :u32 out-size)  # avail_out, offset 32
+
       ## Compress
       (let [rc (z-deflate stream Z_FINISH)]
         (unless (= rc Z_STREAM_END)
@@ -117,9 +122,11 @@
         (unless (= rc Z_OK)
           (ffi/free stream)
           (error {:error :compress-error
-                  :message (string "inflateInit2 failed: " rc)})))  ## Set input
+                  :message (string "inflateInit2 failed: " rc)})))
+      ## Set input
       (ffi/write stream :ptr in-pin)
-      (ffi/write (ptr/add stream 8) :u32 in-len)  ## Decompress in a loop, growing output buffer as needed
+      (ffi/write (ptr/add stream 8) :u32 in-len)
+      ## Decompress in a loop, growing output buffer as needed
       (def @buf-size (max out-size 256))
       (def @out-buf (ffi/malloc buf-size))
       (def @total-out 0)
@@ -134,7 +141,8 @@
             (match rc
               1 (assign done true)  # Z_STREAM_END
               0
-                (when (zero? (ffi/read (ptr/add stream 32) :u32))  ## Output buffer full, grow
+                ## The output buffer is full, so grow it.
+                (when (zero? (ffi/read (ptr/add stream 32) :u32))
                   (let* [new-size (* buf-size 2)
                          new-buf (ffi/malloc new-size)]
                     (each i in (range total-out)

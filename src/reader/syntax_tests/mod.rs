@@ -1,4 +1,6 @@
-//! Tests for SyntaxReader
+// audited: 2026-09-28
+//! Tests for SyntaxReader: the shared lexing helpers, and one module per subject.
+//! docs/impl/reader.md
 
 use super::*;
 use crate::reader::Lexer;
@@ -48,5 +50,6 @@ fn lex_columns(input: &str) -> (Vec<OwnedToken>, Vec<SourceLoc>, Vec<usize>, Vec
     (tokens, locs, lens, offs)
 }
 
+mod errors;
 mod lexing;
 mod parsing;

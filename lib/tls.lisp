@@ -1,42 +1,20 @@
-(elle/epoch 12)
-## lib/tls.lisp — TLS client and server for Elle
+(elle/epoch 13)
+# audited: 2026-09-28
+## TLS connections over TCP ports, with the elle-tls plugin's state machine driven from Elle.
+## lib/tls.md
 ##
-## TLS client and server using the elle-tls plugin for state machine management.
-## All socket I/O is async via native TCP ports and the fiber scheduler.
-##
-## Dependencies:
-##   - elle-tls plugin loaded via (import "plugin/tls")
-##   - tcp/connect, tcp/accept from net primitives
-##   - port/read, port/write from stream primitives  (port/read returns
-##     bytes for TCP ports — TCP streams use binary encoding in this runtime)
-##   - ev/spawn from scheduler
-##   - port/close for TCP port lifecycle
-##
-## Usage:
-##   (def tls-plugin (import "plugin/tls"))
-##   (def tls ((import "std/tls") tls-plugin))
-##   (let [[conn (tls:connect "example.com" 443)]]
+## The file's closure takes the plugin struct and returns the export struct:
+##   (def tls ((import "std/tls") (import "plugin/tls")))
+##   (let [conn (tls:connect "example.com" 443)]
 ##     (defer (tls:close conn) ...))
 ##
-## The file exports a function that accepts the plugin struct and returns the
-## public API struct. The plugin struct is closed over so all public
-## functions can call plugin primitives without naming them globally.
-##
-## API change from spec: the entry point takes the plugin struct as argument.
-## Load with: (def tls ((import "std/tls") tls-plugin))
-##
-## tls-conn shape:
-##   {:tcp port :tls tls-state}
-##   :tcp — the underlying TcpStream port
-##   :tls — the TlsState ExternalObject from the elle-tls plugin
+## A tls-conn is {:tcp port :tls tls-state}: the TCP port, and the TlsState
+## external from the elle-tls plugin. Every read and write goes through the
+## TCP port and the fiber scheduler, so each function here runs inside a
+## scheduler context.
 
-## ── The entry-point thunk ───────────────────────────────────────────────────
-##
-## The file's last expression is a function that accepts the plugin struct
-## and returns the public API. Call it like:
-##   (def tls ((import "std/tls") tls-plugin))
-
-(fn [plugin]  ## Extract plugin primitives from the struct so they can be called
+(fn [plugin]
+  ## Extract plugin primitives from the struct so they can be called
   ## as local bindings. Plugin primitives are not resolvable by name
   ## at compile time — they must be accessed through the struct.
   (def process-fn (get plugin :process))
@@ -58,10 +36,12 @@
        - After every tls/process call, drain and send outgoing bytes.
          TLS 1.3 may produce post-handshake messages at any time.
        - Check handshake-complete? AFTER sending outgoing — the server
-         needs to receive our Finished before it considers us ready."  # Pump the state machine with empty bytes to generate the initial
+         needs to receive our Finished before it considers us ready."
+    # Pump the state machine with empty bytes to generate the initial
     # ClientHello (client side) or enter the wait state (server side).
     (process-fn tls (bytes))
-    (forever  # INVARIANT: Send any queued ciphertext before doing anything else.
+    (forever
+      # INVARIANT: Send any queued ciphertext before doing anything else.
       # This must happen on the first iteration for ClientHello (client side)
       # and after every subsequent process call.
       (let [out (get-outgoing-fn tls)]
@@ -102,7 +82,8 @@
            tcp-port (tcp/connect hostname port-num)  # async; resolves hostname
            tls (client-state-fn hostname opts)]
       (let [[ok? result] (protect (tls-handshake tcp-port tls))]
-        (unless ok?  # Handshake failed. Close TCP port before re-raising.
+        (unless ok?
+          # Handshake failed. Close TCP port before re-raising.
           # Do not attempt to send close_notify — the connection is broken.
           (port/close tcp-port)
           (error result))
@@ -138,16 +119,20 @@
      Must be called inside a scheduler context."
     (let [tls conn:tls
           port conn:tcp]
-      (forever  # Check buffered plaintext first — avoid a network round-trip if data is ready.
+      (forever
+        # Check buffered plaintext first: it saves a network round-trip.
         (let [buffered (read-plaintext-fn tls n)]
-          (when (> (length buffered) 0) (break buffered)))  # Plaintext buffer empty — read from network.
-        # Use 16384 to match TLS max record size.
+          (when (> (length buffered) 0) (break buffered)))
+        # The plaintext buffer is empty, so read from the network. 16384 is
+        # the TLS maximum record size.
         (let [data (port/read port 16384)]
-          (when (nil? data)  # TCP closed. process-fn may have buffered plaintext from
+          (when (nil? data)
+            # TCP closed. process-fn may have buffered plaintext from
             # a segment that also contained close_notify. One final drain.
             (let [final (read-plaintext-fn tls n)]
               (break (if (> (length final) 0) final nil))))
-          (process-fn tls data)  # INVARIANT: Send outgoing after every tls/process.
+          (process-fn tls data)
+          # INVARIANT: Send outgoing after every tls/process.
           # TLS 1.3 post-handshake messages (NewSessionTicket, KeyUpdate) must
           # be sent or the connection stalls.
           (let [out (get-outgoing-fn tls)]
@@ -162,20 +147,26 @@
     (let [tls conn:tls
           port conn:tcp
           chunks @[]]
-      (forever  # Scan for newline in the buffered plaintext — do NOT drain yet.
+      (forever
+        # Scan the buffered plaintext for a newline, without draining it.
         (let [idx (plaintext-indexof-fn tls 10)]
-          (when (not (nil? idx))  # Found a newline at position idx.
+          (when (not (nil? idx))
+            # Found a newline at position idx.
             # Drain exactly (idx + 1) bytes — up to and including the newline.
             (let [line-bytes (read-plaintext-fn tls (+ idx 1))]
-              (push chunks (string line-bytes))  # Remainder (bytes after the newline) stays in the plaintext buffer
+              (push chunks (string line-bytes))
+              # Remainder (bytes after the newline) stays in the plaintext buffer
               # for the next tls/read-line call.
-              (break (apply concat chunks)))))  # No newline in buffer yet — read more from network.
+              (break (apply concat chunks)))))
+        # No newline in the buffer yet, so read more from the network.
         (let [data (port/read port 16384)]
-          (when (nil? data)  # EOF. Return whatever we have accumulated, or nil if nothing.
+          # At EOF, return what has accumulated, or nil if nothing has.
+          (when (nil? data)
             (let [remaining (get-plaintext-fn tls)]
               (when (> (length remaining) 0) (push chunks (string remaining)))
               (break (if (> (length chunks) 0) (apply concat chunks) nil))))
-          (process-fn tls data)  # INVARIANT: Send outgoing after every tls/process.
+          (process-fn tls data)
+          # INVARIANT: Send outgoing after every tls/process.
           (let [out (get-outgoing-fn tls)]
             (when (> (length out) 0) (port/write port out)))))))  # async
 
@@ -188,15 +179,19 @@
           chunks @[]]
       (forever
         (let [data (port/read port 16384)]
-          (when (nil? data)  # EOF. Drain any remaining plaintext and return accumulated data.
+          # At EOF, drain any remaining plaintext and return what has
+          # accumulated.
+          (when (nil? data)
             (let [remaining (get-plaintext-fn tls)]
               (when (> (length remaining) 0) (push chunks remaining)))
             (break (if (> (length chunks) 0)
                      (apply concat (freeze chunks))
                      (bytes))))
-          (process-fn tls data)  # INVARIANT: Send outgoing after every tls/process.
+          (process-fn tls data)
+          # INVARIANT: Send outgoing after every tls/process.
           (let [out (get-outgoing-fn tls)]
             (when (> (length out) 0) (port/write port out)))  # async
+
           # Accumulate any newly decrypted plaintext.
           (let [pt (get-plaintext-fn tls)]
             (when (> (length pt) 0) (push chunks pt)))))))

@@ -6,7 +6,7 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [http.md](http.md) — **http** HTTP/1.1 client and server over TCP, in one file of pure Elle, with HTTPS and compression as opt-in module arguments.
+- [http.md](http.md) — **http** HTTP/1.1 client and server over TCP in pure Elle, with HTTPS and compression as opt-in module arguments.
 - [http2.md](http2.md) — **http2** HTTP/2 client and server (RFC 9113 + RFC 7541), over TLS with ALPN or as cleartext h2c.
 - [irc.md](irc.md) — **irc** IRCv3 client with capability negotiation, SASL PLAIN and message tags, over plain TCP or TLS.
 - [overview.md](overview.md) — **lib** Reusable Elle modules, one closure each: `(import "std/name")` gives you the closure, and calling it returns the struct of exports.
@@ -17,8 +17,10 @@ Up: [..](../AGENTS.md)
 ## Directories
 
 - [aws/](aws/AGENTS.md) — Elle AWS Client
+- [dns/](dns/AGENTS.md) — (empty)
 - [git/](git/AGENTS.md) — (empty)
 - [gtk4/](gtk4/AGENTS.md) — (empty)
+- [http/](http/AGENTS.md) — The submodules behind [http.lisp](../http.lisp): URLs, transports, the wire format, chunked bodies and server-sent events.
 - [http2/](http2/AGENTS.md) — The submodules behind [http2.lisp](../http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
 - [process/](process/AGENTS.md) — The submodules behind [process.lisp](../process.lisp): the scheduler in four parts, the primitives, and one file per behavior.
 - [rdf/](rdf/AGENTS.md) — (empty)

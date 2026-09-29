@@ -1,31 +1,26 @@
 # Runtime Signals
 
+<!-- audited: 2026-09-28 -->
+
 The runtime uses fiber signals for internal coordination. These are
 distinct from user-level error handling.
 
-## Built-in signals
+## Runtime signals and capability bits
+
+[protocol.md](signals/protocol.md) owns bits 0 to 10 and the user-defined
+range. This document owns bits 11 to 17.
 
 ```text
 Signal     Bit   Purpose
 ───────────────────────────────────────────
-:error      0    Error propagation
-:yield      1    Coroutine yield
-:debug      2    Debugger breakpoints
-:ffi        4    FFI callbacks
-:halt       8    Fiber termination
-:io         9    Async I/O request
-:exec      11    Subprocess execution
+:exec      11    Subprocess capability
 :fuel      12    Instruction budget exhaustion
-:switch    13    Context switch
-:wait      14    Blocking wait
-:gpu       15    GPU hardware dispatch
-:os-signal 16    POSIX signal send/raise
-:fs        17    Filesystem access
+switch     13    VM-internal fiber switch trampoline; no keyword
+:wait      14    Structured-concurrency wait request
+:gpu       15    GPU hardware dispatch capability
+:os-signal 16    POSIX signal send/raise capability
+:fs        17    Filesystem access capability
 ```
-
-Bits 18–31 are reserved for future runtime signals. User-defined signals
-(via `(signal :keyword)`) get bits 32–63 — see
-[signals/protocol.md](signals/protocol.md).
 
 ## Fuel budgets
 
@@ -44,14 +39,15 @@ the fiber pauses with a `:fuel` signal.
 
 ## SIG_QUERY
 
-`SIG_QUERY` requests introspection from a fiber without disrupting
-its execution. Used by `arena/count`, `arena/stats`, and other
-introspection primitives.
+A primitive returns `SIG_QUERY` to ask the running VM a question that only
+the VM can answer, such as `arena/stats`, `arena/allocs` or `vm/config`.
+[query.rs](../src/vm/signal/query.rs) lists every operation.
 
 ## SIG_EXEC
 
-Signals subprocess completion. Used by the async scheduler when a
-`subprocess/exec` process finishes.
+`:exec` is a capability bit. A subprocess request carries it beside `:io`:
+`:io` routes the request to the scheduler, and `:exec` is the bit a fiber's
+mask or `:deny` names to allow or refuse spawning.
 
 ---
 

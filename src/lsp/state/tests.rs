@@ -1,4 +1,7 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-09-28
+//! Unit tests for the LSP compiler state (`super` is the parent impl module).
+//! src/lsp/AGENTS.md
+//! docs/impl/reader.md
 
 use super::*;
 
@@ -152,8 +155,10 @@ fn test_compile_syntax_error_has_location() {
             diag.location.is_some(),
             "parse error diagnostic should have a location"
         );
+        // An unterminated form is reported where the outermost open
+        // collection starts, not at the innermost one (docs/impl/reader.md).
         let loc = diag.location.as_ref().unwrap();
         assert_eq!(loc.line, 1);
-        assert_eq!(loc.col, 4);
+        assert_eq!(loc.col, 1);
     });
 }

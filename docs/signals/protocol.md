@@ -1,13 +1,18 @@
 # Signal Protocol
 
-## The Signal Protocol
+<!-- audited: 2026-09-28 -->
 
-### Signal Types
+How a signal is encoded, carried, caught and reported: the bits, the payload, propagation, I/O requests and the registry.
 
-Signal types are bit positions in a 64-bit bitfield (`SignalBits` is `u64`).
-The lower 32 bits are reserved for the runtime; the upper 32 bits are
-available for user-defined signals. Within the runtime's 32 bits, the
-first 18 are allocated:
+[inference.md](inference.md) owns what the compiler infers about signals and
+the forms that bound it (`silence`, `muffle`, `squelch`).
+[fibers.md](fibers.md) owns the fiber that carries a signal.
+
+## Signal Types
+
+Signal types are bit positions in a 64-bit bitfield (`SignalBits` wraps a
+`u64`). The lower 32 bits are reserved for the runtime; the upper 32 bits are
+available for user-defined signals. The runtime allocates bits 0 to 17:
 
 | Bit | Name | Value | Meaning |
 |-----|------|-------|---------|
@@ -18,7 +23,7 @@ first 18 are allocated:
 | 3 | resume | 8 | VM-internal: fiber resume request |
 | 4 | ffi | 16 | Calls foreign code |
 | 5 | propagate | 32 | VM-internal: propagate caught signal |
-| 6 | abort | :error + terminal | VM-internal: graceful fiber termination |
+| 6 | — | 64 | Unused |
 | 7 | query | 128 | VM-internal: read VM state |
 | 8 | halt | 256 | Graceful VM termination |
 | 9 | io | 512 | I/O request to scheduler |
@@ -27,105 +32,90 @@ first 18 are allocated:
 | 18–31 | reserved | — | Future runtime signals |
 | 32–63 | user | — | User-defined signal types |
 
-Bit 0 is special: "ok" means no bits are set. A normal return has an empty
-signal bitfield.
+`abort`, the VM-internal graceful fiber termination, has no bit of its own. It
+is `error` and `terminal` together, value 1025.
+
+"ok" means no bits are set. A normal return has an empty signal bitfield.
 
 The resume signal is how `fiber/resume` works — the primitive signals
 the VM to perform the actual context switch.
 
-### Signal Values
+## Signal Values
 
-A signal carries a type (which bit) and a payload (an Elle Value). The
-return from `run()` is:
+A signal carries a type (its bits) and a payload (an Elle value). The VM's
+execution functions return the bits, and the payload waits on the fiber:
 
+```rust
+pub signal: Option<(SignalBits, Value)>
 ```
-signal_bits: SignalBits
-```
 
-Where `signal_bits == 0` means normal return with the result on the fiber's
-operand stack. Non-zero `signal_bits` means something happened that may require
-handling — the signal value is stored in `fiber.signal` (the canonical location).
+Empty bits mean a normal return, and the payload is the returned value. The
+fast path is therefore one branch on the bits. Non-empty bits mean something
+happened that may require handling.
 
 **Signal payloads are arbitrary Values.** Any value can be an error payload,
 a yield value, or a user-defined signal payload. There is no Condition type
 or exception hierarchy. Pattern matching on the payload replaces hierarchy
 checks — the handler inspects the signal value and dispatches accordingly.
 
-At the Rust level, the signal is stored on the fiber:
+## Signal Composition
 
-```rust
-pub signal: Option<(SignalBits, Value)>
-```
-
-The `run()` function returns only the `SignalBits`. The value is stored on the
-fiber's `signal` field — the canonical location. The fast path (normal return)
-is `bits == 0`, which is a single branch.
-
-### Signal Composition
-
-**`SignalBits` is a pure bitmask. Every bit is independent and orthogonal.**
-There are no "types" of signals — only bits. The VM and schedulers check for
-individual bits using `intersects()`, never with equality. Any combination of
-bits is valid and meaningful — the caller decides what the combination means.
+**`SignalBits` is a pure bitmask.** Every bit is independent, any combination
+of bits is valid, and the catcher decides what a combination means.
 
 `intersects()` asks whether the two sets share **at least one** bit. It is
 symmetric, and it is true for a partial overlap: `(A|B).intersects(B|C)` holds.
 It is not a subset test. `SignalBits` has no subset test, because no caller
 wants one — a mask catches a compound signal on any shared bit, and there is
 no exception. `covers()` is the routing question a fiber mask asks, and it is
-`intersects()` plus the empty-signal case; see `docs/signals/capabilities.md`
-for what that means for a mask.
+`intersects()` plus the empty-signal case; see
+[capabilities.md](capabilities.md) for what that means for a mask.
 
-Examples of valid composed signals:
+Examples of composed signals:
 
 - `|:yield|` — suspend, return a value to the caller
 - `|:io|` — request I/O; the scheduler catches the bit and services the request
 - `|:io :error|` — I/O error; a scheduler might log it and halt
-- `|:io :error :halt|` — I/O error, halt the VM; the scheduler interprets all
-  three bits
-- `|:yield :audit|` — suspend AND emit an audit signal; a monitoring fiber
-  catches both
-
-No bit has a predetermined relationship with any other bit. The design makes
-no pre-determinations on how bits are mixed. Users and schedulers define the
-semantics of combinations.
+- `|:yield :audit|` — suspend AND emit a user-defined audit signal; a
+  monitoring fiber catches both
 
 **Fiber masks work the same way.** A fiber mask like `|:yield :io|` catches
 fibers that have either bit set. The mask is a bitmask, not an enum.
 
 **User-defined signals (bits 32–63) compose freely** with built-in bits. A
 user-defined signal can be combined with `:yield`, `:error`, `:io`, or any
-other bit. Bits 0–31 are reserved for the runtime.
+other bit.
 
-### Terminal vs Resumable Signals
+## Terminal vs Resumable Signals
 
-**Whether a signal is terminal or resumable is a handler decision, not a
-signal property.** The handler catches the signal and either resumes the child
-(resumable) or doesn't (terminal). The same signal type can be handled
-resumably in one context and terminally in another, depending on the handler's
-choice.
+A signal carrying `:terminal` passes every mask, and `:halt` cannot be
+resumed. For every other signal, ending the child or resuming it is the
+handler's decision, not a property of the signal. The handler catches the
+signal and either resumes the child or does not, so the same signal can be
+resumable in one context and terminal in another.
 
-### Propagation
+## Propagation
 
 Signal propagation (Janet model):
 
-1. Child fiber emits signal: stores value in `child.signal`, sets status → Suspended
-2. `run()` returns signal bits to the parent
-3. Parent checks: `child.mask & bits != 0`?
-   (The child's mask records what signals the parent should catch from it)
-    - **Caught**: Parent handles the signal. Child is suspended and
+1. The child fiber emits a signal: it stores the value in `child.signal`, and
+   its status becomes `:paused`.
+2. The execution functions return the signal bits to the parent.
+3. The parent asks whether the child's mask covers the bits. The child's mask
+   records which signals the parent catches from it.
+    - **Caught**: Parent handles the signal. Child is paused and
       reachable via parent's `child` pointer.
-    - **Not caught**: Parent also suspends (entire chain freezes).
+    - **Not caught**: Parent also pauses (entire chain freezes).
       Signal propagates up until caught or reaches root.
 4. Handler walks `child` chain to find originator. Every fiber in the
-   chain is suspended and inspectable via `fiber/value`.
+   chain is paused and inspectable via `fiber/value`.
 
 This is O(1) dispatch — a single AND operation. No handler chain traversal.
 When a handler catches a signal, it can walk the fiber chain to inspect the
-propagation path. Every fiber in the chain is suspended and can be resumed
+propagation path. Every fiber in the chain is paused and can be resumed
 independently for non-unwinding recovery.
 
-### Reaching the root
+## Reaching the root
 
 The root of the program is where propagation stops. `:error` and `:halt`
 have answers there: the error prints with the location of the form that
@@ -145,223 +135,26 @@ user-defined keyword at the root means no fiber masked it.
 One message answers for every bit. Nothing caught the signal, and that is
 the whole condition, so `:yield` gets no report of its own.
 
-### The Fiber Structure
-
-```
-Fiber {
-    stack: SmallVec<[Value# 256]>           -- operand stack
-    frames: Vec<Frame>                       -- call frames (closure + ip + base)
-    status: FiberStatus                      -- New/Alive/Suspended/Dead/Error
-    mask: SignalBits                          -- which signals parent catches
-    parent: Option<WeakFiberHandle>          -- weak back-pointer (avoids Rc cycles)
-    child: Option<FiberHandle>               -- most recently resumed child
-    closure: Rc<Closure>                     -- the closure this fiber wraps
-    env: Option<HashMap<u32, Value>>         -- dynamic bindings (future)
-    signal: Option<(SignalBits, Value)>       -- signal payload or return value
-    suspended: Option<Vec<SuspendedFrame>>   -- frames for resumption
-    call_depth: usize                        -- stack overflow detection
-    call_stack: Vec<CallFrame>               -- for stack traces
-}
-```
-
-The closure carries its signal bits. The fiber's mask determines which
-signals it catches from children. There is no `signals` field on the Fiber
-— signals are a compile-time property of the closure, not the fiber.
-
-See `docs/fibers.md` for the full Fiber, SuspendedFrame, and FiberHandle
-documentation.
-
-
-
-## The Signal System
-
-### Signal Bits (Static)
-
-A signal (static) is a set of signal types that a function might emit. Represented
-as a bitfield (same type as signal bits).
-
-```
-type SignalBits = SignalBits  -- same bitfield type, same bit positions
-```
-
-Operations:
-
-- **Combine**: `a | b` (union — a block's signal is the union of its parts)
-- **Check**: `actual & ~permitted == 0` (subset — are all actual signals permitted?)
-- **Silent**: `bits == 0` (no signals)
-- **Has**: `bits & YIELD != 0` (membership test)
-
-### Compile-Time Inference
-
-The compiler walks the AST and infers signals:
-
-- A literal is silent (no bits)
-- A primitive has known signal bits (declared at registration)
-- A call's signal is the callee's signal combined with the call overhead
-- A `begin` block's signal is the union of its children
-- A lambda's body signal is stored on the lambda but the lambda itself is silent
-- A handler that catches signal X removes bit X from the enclosed expression's
-  signal
-
-### Parametric Polymorphism
-
-Higher-order functions propagate their arguments' signals. `map`'s signal is
-"whatever `f` does, plus my own base signals." The compile-time
-representation:
-
-```
-Signal {
-    bits: SignalBits,           -- from own body
-    propagates: u32,            -- bitmask of parameter indices
-}
-```
-
-Resolved signal at a call site:
-
-```
-call_signal = f.bits | union(signal(arg[i]) for i in 0..param_count if (propagates & (1 << i)) != 0)
-```
-
-If the compiler can see the concrete argument (e.g., it's the `+` primitive),
-it can resolve the polymorphism statically and potentially prove the call site
-has fewer signals than the general case.
-
-**Note**: Signal bounds on parameters (constraining what signals callbacks may
-have) are deferred to a future phase. When needed, they'll be tracked in the
-analysis environment, not on the Signal struct itself — keeping Signal as a
-simple Copy pair.
-
-### Signal Restrictions
-
-The programmer can restrict signals on functions using `silence` (compile-time total suppression):
-
-```lisp
-# Require the function body to be completely silent
-(defn select [flag a b]
-  (silence)
-  (if flag a b))
-```
-
-And signal bounds on parameters:
-
-```lisp
-(defn fast-map (f xs)
-  (silence f)   # f must be completely silent
-  (map f xs))
-```
-
-These are compile-time contracts. The system enforces them statically and at runtime.
-
-### Compile-time Signal Absorption with muffle
-
-`muffle` absorbs specific signals from a function body, allowing `silence` functions to contain operations that declare those signals:
-
-```lisp
-# Arithmetic declares :error but we know inputs are numeric
-(defn fast-add [x y]
-  (silence)
-  (muffle :error)
-  (+ x y))
-
-# Muffle a set of signals
-(defn fast-square [x]
-  (silence)
-  (muffle |:error|)
-  (* x x))
-```
-
-The function's external signal excludes muffled bits — callers see it as silent. Runtime enforcement (vm/call.rs) aborts if a muffled signal actually fires.
-
-`muffle` also works without `silence`, subtracting the muffled bits from the inferred signal:
-
-```lisp
-# Body infers {:error}, muffle removes it → external signal is silent
-(defn add-quiet [x y]
-  (muffle :error)
-  (+ x y))
-```
-
-| Form | Scope | Effect |
-|------|-------|--------|
-| `(silence)` | whole body | body must be fully silent (compile error otherwise) |
-| `(silence f)` | parameter | `f` must be silent when passed |
-| `(muffle :error)` | specific signal | absorb `:error` from body; abort if it fires |
-
-### Signal Enforcement with squelch
-
-`squelch` is a **closure transform primitive** with both runtime
-enforcement and compile-time signal inference:
-
-```lisp
-(defn f [] (yield 42))
-
-# squelch a single signal
-(def safe-f (squelch f :yield))
-
-# squelch multiple signals with a set
-(def f2 (squelch f |:yield :io|))
-```
-
-At runtime, when a squelched closure is called, if it emits a squelched
-signal, a `signal-violation` error is raised instead. Non-squelched
-signals pass through normally. Errors are never affected by squelch.
-
-Four bit classes cross every boundary untouched, whatever the mask
-names: `:error`, `:halt`, the `:switch` trampoline, and the pause bits
-(`:fuel`). A pause is the VM's own suspension, injected at a charge
-site under whatever code runs there, and the metering parent owns it —
-so a boundary has nothing to enforce and `(squelch f :fuel)` is inert.
-The exemption removes the pause bits alone: a compound signal that
-carries a pause plus a squelched user bit still raises the violation
-for the user bit.
-
-At compile time, when both arguments are statically known, the analyzer
-computes the resulting signal using the same algebra as the runtime
-`effective_signal()`. This enables `(silence)` on functions that call
-squelched closures. See [inference.md](inference.md) for details.
-
-**Signature:** `(squelch closure signals)`
-- **First argument:** must be a closure
-- **Second argument:** signal keyword or set of keywords
-- **Returns:** a new closure with the squelch mask applied
-- **Signal:** `Signal::errors()` (can error on bad arguments, otherwise silent)
-- **Arity:** `Exact(2)` — closure + keyword or set
-
-**Error cases:**
-- `(squelch f)` with no mask → arity error
-- `(squelch non-closure :yield)` → type error
-- `(squelch f :unknown-signal)` → error (signal not registered)
-
-
-
 ## I/O Signals
 
 ### I/O and the Scheduler
 
-I/O signals use the `:io` bit (bit 9). A fiber performing I/O signals
-`:yield` and `:io` because it wants to both suspend AND request I/O
-handling. The bits compose freely.
-
-**Signal constructors**:
-- `Signal::io()` — function may perform I/O
-- `Signal::io_errors()` — function may perform I/O and may error
-
-**Predicate**: `may_io()` — check if signal includes I/O
+I/O signals use the `:io` bit (bit 9). Every port, socket and file primitive
+that reaches the scheduler has the signal `Signal::io_yields_errors()`, which
+is `:io` and `:error`. `may_io()` asks whether a signal includes `:io`.
 
 ### Stream Primitives and I/O Requests
 
 Stream primitives (`port/read-line`, `port/read`, `port/read-all`,
-`port/write`, `port/flush`) have signal `io_errors()`. They do not
-perform I/O themselves. Instead, they:
+`port/write`, `port/flush`) do not perform I/O themselves. Instead, they:
 
 1. Build an `IoRequest` (typed descriptor of the I/O operation)
 2. Return `(|:io|, request)` to raise the request
 3. Let the scheduler catch the fiber on the `:io` bit and dispatch the
    `IoRequest` payload to a backend
 
-The backend (`AsyncBackend`) performs the actual I/O and returns
-`(|:ok|, result)` or `(|:error|, error)`. The scheduler resumes the fiber
-with the result.
+The backend (`AsyncBackend`) performs the actual I/O and answers a result or
+an error. The scheduler resumes the fiber with the result.
 
 ### `:io` does not imply `:yield`
 
@@ -371,9 +164,9 @@ all, not from any particular bit: `signals::dispatch::is_suspending` parks on
 anything that is neither empty, nor an error, nor a halt, and the VM and the
 WASM tier both ask it.
 
-So `:yield` means one thing, the cooperative suspension `(yield v)` raises and
-a `|:yield|` mask catches. Bundling it onto I/O requests made it mean two, and
-a mask naming it could no longer say which one it wanted:
+So `:yield` means one thing: the cooperative suspension `(yield v)` raises and
+a `|:yield|` mask catches. A request that carried it too would be caught by
+every generator's mask on its way to the scheduler:
 
 - `|:io|` — an I/O request
 - `|:yield|` — a generator yielding a value
@@ -381,16 +174,18 @@ a mask naming it could no longer say which one it wanted:
 - `|:io :audit|` — an I/O request that also emits an audit signal
 
 This is what lets a generator masked `|:yield|` do I/O in its body:
-`port/lines` (`src/stdlib.lisp`), `tls/lines` (`lib/tls.lisp`), and the SSE
-streams in `lib/http.lisp` all have that shape. Their `(yield line)` is caught
-by the consumer; their `port/read-line` raises `|:io|`, which the mask does not
-name, so it travels out to the scheduler. Pinned by
-`tests/elle/io-request-carries-no-yield.lisp`.
-
+`port/lines` ([stdlib.lisp](../../src/stdlib.lisp)), `tls/lines`
+([tls.lisp](../../lib/tls.lisp)), and the SSE streams in
+[sse.lisp](../../lib/http/sse.lisp) all have that shape. Their `(yield line)`
+is caught by the consumer; their `port/read-line` raises `|:io|`, which the
+mask does not name, so it travels out to the scheduler. Pinned by
+[io-request-carries-no-yield.lisp](../../tests/elle/io-request-carries-no-yield.lisp).
 
 ## Signal Registry
 
-The signal registry maps signal keywords to bit positions. Built-in signals occupy bits 0–17; bits 18–31 are runtime-reserved; user-defined signals use bits 32–63.
+The signal registry maps signal keywords to bit positions. Built-in signals
+occupy bits 0–17; bits 18–31 are runtime-reserved; user-defined signals use
+bits 32–63.
 
 ### Built-in Signals
 
@@ -402,11 +197,20 @@ The signal registry maps signal keywords to bit positions. Built-in signals occu
 | `:ffi` | 4 | Calls foreign code |
 | `:halt` | 8 | Graceful VM termination |
 | `:io` | 9 | I/O request to scheduler |
+| `:exec` | 11 | Subprocess capability |
+| `:fuel` | 12 | Instruction budget exhaustion |
+| `:wait` | 14 | Structured concurrency wait request |
+| `:gpu` | 15 | GPU dispatch capability |
+| `:os-signal` | 16 | POSIX signal send and raise capability |
+| `:fs` | 17 | Filesystem capability |
 
-Bits 3, 5–7 are VM-internal (resume, propagate, query). Bits 10–14 are
-VM-internal (terminal, exec, fuel, switch, wait). Bits 15–17 name
-capabilities (gpu, os-signal, fs) and bits 18–31 are reserved for future
-runtime signals — see [../runtime.md](../runtime.md).
+Bits 3, 5, 7, 10 and 13 are VM-internal and carry no keyword: resume,
+propagate, query, terminal and the fiber-switch trampoline. Bit 6 is unused.
+[runtime.md](../runtime.md) owns the runtime bits.
+
+```lisp
+(assert (= (get (signals) :fs) 17) "the registry names the filesystem bit")
+```
 
 ### User-Defined Signals
 

@@ -1,6 +1,6 @@
 # elle fmt
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Opinionated code formatter for Elle. One canonical style.
 
@@ -305,5 +305,20 @@ own.
 
 - Inline comments: 2 spaces before `#`, stay on the same line.
 - Block comments: own line, indented with surrounding code.
+- A block comment that explains a form starts on its own line above that form,
+  never at the end of the line before it.
 - A trailing comment ends its line, and that line break does not add a blank
   line before the next form.
+- A comment line directly below a trailing comment reads as the continuation
+  of that comment. When it starts a new subject, put a blank line above it.
+  The build fails on the joined shape
+  ([joined_comments.rs](../tests/integration/joined_comments.rs)).
+
+```lisp
+(def queue @[])
+(push queue :first)  # the job that runs first
+
+# The second job waits for the first.
+(push queue :second)
+(assert (= (length queue) 2))
+```

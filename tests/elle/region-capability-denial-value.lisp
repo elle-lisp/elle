@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 # tests/elle/region-capability-denial-value.lisp
 #
 # Counterfactual for a use-after-free in the capability-denial path
@@ -35,7 +36,8 @@
                          (println "should be blocked")
                          1)) |:error :io| :deny |:io|)]
     (fiber/resume f)
-    (assert (= (fiber/status f) :paused) "fiber pauses after :io denial")  # Read several fields — each derefs the payload struct that the buggy
+    (assert (= (fiber/status f) :paused) "fiber pauses after :io denial")
+    # Read several fields — each derefs the payload struct that the buggy
     # path had already freed.
     (let [val (fiber/value f)]
       (assert (= :capability-denied (get val :error))

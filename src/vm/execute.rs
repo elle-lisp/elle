@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-28
 // docs/impl/vm.md
 // docs/impl/region/relocate.md
 //! Bytecode execution entry points, the tail-call trampoline, and the opening
@@ -30,21 +30,19 @@
 //! Each re-entry nests on the Rust stack, so it halts with `:stack-overflow`
 //! rather than enter while less than `native_stack::REENTRY_RESERVE` is left.
 //!
-//! ### Yield from inner execution
+//! ### A suspend from inner execution
 //!
-//! If the inner closure yields (`SIG_YIELD`), `execute_bytecode_saving_stack`
-//! returns `SIG_YIELD` to its caller. The saved outer stack is restored, but
-//! the fiber is now suspended mid-inner-execution. **This is a bug in any
-//! caller that does not handle `SIG_YIELD`.** Current callers that call
-//! user-provided closures (`eval`, `arena/allocs`) do not handle yield —
-//! they propagate the signal upward, which will confuse the outer execution
-//! context. Closures passed to these primitives must be non-yielding (Pure
-//! signal). This is not currently enforced at the call site.
+//! If the inner closure suspends (a yield, an I/O request),
+//! `execute_bytecode_saving_stack` returns the suspending bits with the outer
+//! stack restored. No host resumes the inner continuation, so each refuses
+//! the suspend: `eval`, `import` and the test-setup loader report an error,
+//! and `arena/allocs` returns the signal from its own call. Each first calls
+//! `VM::abandon_hosted_park`, because the refused park is dead.
 //!
 //! ### Nested `fiber/resume` — the SIG_SWITCH obligation
 //!
-//! A thunk that calls `fiber/resume` is NOT "yielding" in the sense above —
-//! it does not suspend its own caller — yet it still needs special handling.
+//! A thunk that calls `fiber/resume` does not suspend its own caller, yet it
+//! still needs special handling.
 //! User code always runs inside a fiber (the async scheduler resumes the
 //! program in one), so `current_fiber_handle` is `Some` throughout. A
 //! `fiber/resume` reached with an enclosing fiber does NOT run the child
@@ -56,8 +54,8 @@
 //! the current fiber must be one too. If it is not, the `SIG_SWITCH` unwinds
 //! straight out of `execute_bytecode_saving_stack` and the thunk's continuation
 //! is later resumed by the *outer* trampoline — i.e. OUTSIDE the re-entrant
-//! caller's scope. For `arena/allocs` that meant the measurement returned the
-//! resumed child's value instead of `(result . net)` and never finished the
+//! caller's scope. An `arena/allocs` measurement would then answer with the
+//! resumed child's value instead of `(result . net)` and never finish the
 //! thunk (`tests/elle/arena.lisp` "arena/allocs measures a thunk that resumes
 //! a fiber"; the `fiber-spawn-10` scenario in `tests/elle/resource.lisp`).
 //!
@@ -78,8 +76,8 @@
 //! 1. Read `fiber.signal` immediately after return to get the result.
 //! 2. Check `exec_result.bits` for `SIG_ERROR` and `SIG_HALT` before using
 //!    the result.
-//! 3. Do NOT call it with a closure that may yield unless you handle
-//!    `SIG_YIELD` in the return value.
+//! 3. If the closure may suspend, refuse the suspending bits and call
+//!    `VM::abandon_hosted_park`, as the section above describes.
 //! 4. Do NOT assume `fiber.signal` is unchanged after the call.
 //! 5. The inner execution runs on the SAME fiber — same heap, same
 //!    parameter frames. It is not isolated.

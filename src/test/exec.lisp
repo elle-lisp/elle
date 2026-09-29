@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-21
+(elle/epoch 13)
+# audited: 2026-09-28
 ## elle test — running one test: worker isolation, output capture, the
 ## per-form deadline, and the tiers this build carries.
 ## docs/test-runner.md
@@ -122,6 +122,9 @@
 # `$PPID` inside `sh` is this process — the runner has no pid of its own to
 # pass. Both samplers bound their own runtime (`sample` by its duration
 # argument), so neither can wedge the run that is already in trouble.
+#
+# The photograph is printed whole. The runner cannot tell which thread wedged,
+# and a cut at any length drops the threads the sampler happens to list last.
 (defn photograph-threads []
   "A native backtrace of every thread in this process, or nil when the box has
    no sampler. `sample` is macOS's and always present there; `eu-stack` covers
@@ -132,10 +135,7 @@
     (when ok?
       (let [[read-ok? out] (protect (string (port/read-all (get proc :stdout))))]
         (protect (subprocess/wait proc))
-        (when (and read-ok? (> (length out) 0))
-          (if (> (length out) 20000)
-            (concat (slice out 0 20000) "\n…truncated")
-            out))))))
+        (when (and read-ok? (> (length out) 0)) out)))))
 
 (defn jit-frame-addrs [shot]
   "The unique `[0x…]` addresses on the photograph's `???` lines — the JIT
@@ -233,7 +233,8 @@
                                       (capture-run tier thunk out-path err-path)))))
                                   (form-budget)))]
     (if (get outcome 0)
-      (get outcome 1)  # The worker spawn/join failed. If the thunk simply can't cross into a
+      (get outcome 1)
+      # The worker spawn/join failed. If the thunk simply can't cross into a
       # worker (unsendable capture), run it IN-PROCESS — no isolation, no
       # timeout, but it runs (docs/test-runner.md § Isolation). Any other
       # thread-error (e.g. a worker panic) stays a recorded fail.
@@ -311,7 +312,8 @@
                                       w-out w-err thunk out-path err-path))))
                                   (form-budget)))]
     (if (get outcome 0)
-      (get outcome 1)  # Unsendable RESULT (an orphan fiber, an io-request, …) can't cross back
+      (get outcome 1)
+      # Unsendable RESULT (an orphan fiber, an io-request, …) can't cross back
       # through os/join. Fall back to running IN-PROCESS — no isolation, no
       # timeout — compiling the same syntax against the MAIN stdlib and running
       # under the runner's own ev/run + *stdout*/*stderr* (all main-consistent),

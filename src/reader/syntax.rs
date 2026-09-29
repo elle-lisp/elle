@@ -1,3 +1,4 @@
+// audited: 2026-09-28
 //! Parser that produces Syntax nodes instead of Value
 //!
 //! This parser is symbol-table-free and preserves source spans on every node.
@@ -5,21 +6,20 @@
 //! - Intern symbols (leaves them as strings)
 //! - Desugar quote forms to lists
 //!
-//! This is a parallel implementation to the existing Value-producing parser.
+//! `Reader` in parser.rs parses the same tokens to `Value`.
+//! docs/impl/reader.md
 
 use super::token::{OwnedToken, SourceLoc};
 use crate::syntax::{Span, Syntax, SyntaxArena, SyntaxKind};
+
+mod collections;
 
 /// A lexed token together with everything the syntax parser needs in order to
 /// span it: its source location, its source byte length, and its start byte
 /// offset.
 ///
-/// This collapses what used to be four parallel `Vec`s — `tokens`, `locations`,
-/// `lengths`, `byte_offsets`, all indexed by a single `pos` with nothing
-/// keeping their lengths in agreement — into one `Vec<LexedToken>`. That makes
-/// the agreement structural: each token carries its own three companions, so
-/// they can no longer fall out of sync, be indexed past one another, or be
-/// supplied in mismatched counts to the reader's internals.
+/// Each token carries its own three companions, so they cannot fall out of
+/// sync or be indexed past one another inside the reader.
 struct LexedToken {
     token: OwnedToken,
     loc: SourceLoc,
@@ -31,12 +31,57 @@ struct LexedToken {
 /// reachable past the end of the stream. One source character.
 const DEFAULT_TOKEN_LEN: usize = 1;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OpenFormKind {
+    List,
+    Array,
+    Struct,
+    Set,
+    Bytes,
+}
+
+impl OpenFormKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Array => "array",
+            Self::Struct => "struct",
+            Self::Set => "set",
+            Self::Bytes => "bytes literal",
+        }
+    }
+
+    fn delimiter(self) -> &'static str {
+        match self {
+            Self::List => "paren",
+            Self::Array | Self::Bytes => "bracket",
+            Self::Struct => "brace",
+            Self::Set => "|",
+        }
+    }
+
+    fn delimiter_plural(self) -> &'static str {
+        match self {
+            Self::List => "parens",
+            Self::Array | Self::Bytes => "brackets",
+            Self::Struct => "braces",
+            Self::Set => "pipes",
+        }
+    }
+}
+
+struct OpenForm {
+    kind: OpenFormKind,
+    loc: SourceLoc,
+}
+
 pub struct SyntaxReader {
     tokens: Vec<LexedToken>,
     pos: usize,
+    open_forms: Vec<OpenForm>,
     /// Where the nodes this reader builds are born. A field rather than a
     /// per-call argument: one source parses into one arena
-    /// (docs/impl/syntax.md § "Where a node lives").
+    /// (docs/impl/syntax.md).
     arena: SyntaxArena,
 }
 
@@ -45,8 +90,8 @@ impl SyntaxReader {
     /// is the single point where the four columns meet — and the only place a
     /// length mismatch between them could matter. A position absent from
     /// `locations`/`lengths`/`byte_offsets` (only possible if a caller passes
-    /// ragged columns) falls back to the same defaults the old per-field
-    /// accessors used.
+    /// ragged columns) falls back to the start location, a one-character
+    /// length, and offset 0.
     fn from_columns(
         tokens: Vec<OwnedToken>,
         locations: Vec<SourceLoc>,
@@ -67,6 +112,7 @@ impl SyntaxReader {
         SyntaxReader {
             tokens,
             pos: 0,
+            open_forms: Vec::new(),
             arena,
         }
     }
@@ -77,7 +123,7 @@ impl SyntaxReader {
         lengths: Vec<usize>,
         arena: SyntaxArena,
     ) -> Self {
-        // No byte offsets supplied: every token defaults to offset 0, as before.
+        // No byte offsets supplied: every token defaults to offset 0.
         Self::from_columns(tokens, locations, lengths, Vec::new(), arena)
     }
 
@@ -97,7 +143,7 @@ impl SyntaxReader {
 
     fn current_location(&self) -> SourceLoc {
         // At or past the end, fall back to the last token's location (or the
-        // start sentinel for an empty stream), as before.
+        // start sentinel for an empty stream).
         self.tokens
             .get(self.pos)
             .or_else(|| self.tokens.last())
@@ -135,6 +181,44 @@ impl SyntaxReader {
         let token = self.tokens.get(self.pos).map(|t| t.token.clone());
         self.pos += 1;
         token
+    }
+
+    fn unterminated_collection(&self) -> String {
+        let first = self
+            .open_forms
+            .first()
+            .expect("unterminated collection without an open form");
+        let depth = self.open_forms.len();
+        let same_delimiter = self
+            .open_forms
+            .iter()
+            .all(|form| form.kind.delimiter() == first.kind.delimiter());
+
+        let detail = if !same_delimiter {
+            format!("{depth} closing delimiters needed")
+        } else if first.kind == OpenFormKind::List {
+            format!(
+                "{depth} closing paren{} needed",
+                if depth == 1 { "" } else { "s" }
+            )
+        } else if depth == 1 {
+            format!("missing closing {}", first.kind.delimiter())
+        } else {
+            format!("{depth} closing {} needed", first.kind.delimiter_plural())
+        };
+
+        format!(
+            "{}: unterminated {} ({detail})",
+            first.loc.position(),
+            first.kind.name()
+        )
+    }
+
+    fn open_form(&mut self, kind: OpenFormKind, loc: &SourceLoc) {
+        self.open_forms.push(OpenForm {
+            kind,
+            loc: loc.clone(),
+        });
     }
 
     /// Build a span from byte offsets and source location.
@@ -286,335 +370,6 @@ impl SyntaxReader {
                 Err(format!("{}: unexpected closing bracket", loc.position()))
             }
             OwnedToken::RightBrace => Err(format!("{}: unexpected closing brace", loc.position())),
-        }
-    }
-
-    fn read_set(&mut self, start_loc: &SourceLoc, start_boff: usize) -> Result<Syntax, String> {
-        self.advance(); // skip opening |
-        let mut elements = Vec::new();
-
-        loop {
-            match self.current() {
-                None => {
-                    return Err(format!(
-                        "{}: unterminated set literal (missing closing |)",
-                        start_loc.position()
-                    ));
-                }
-                Some(OwnedToken::Pipe) => {
-                    let end = self.current_byte_offset() + self.current_length();
-                    self.advance();
-                    let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(
-                        SyntaxKind::Set(self.arena.nodes(&elements)),
-                        span,
-                    ));
-                }
-                Some(OwnedToken::Comment(_)) => {
-                    self.advance();
-                    continue;
-                }
-                _ => elements.push(self.read()?),
-            }
-        }
-    }
-
-    fn read_set_mut(&mut self, start_loc: &SourceLoc, start_boff: usize) -> Result<Syntax, String> {
-        self.advance(); // skip opening @|
-        let mut elements = Vec::new();
-
-        loop {
-            match self.current() {
-                None => {
-                    return Err(format!(
-                        "{}: unterminated mutable set literal (missing closing |)",
-                        start_loc.position()
-                    ));
-                }
-                Some(OwnedToken::Pipe) => {
-                    let end = self.current_byte_offset() + self.current_length();
-                    self.advance();
-                    let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(
-                        SyntaxKind::SetMut(self.arena.nodes(&elements)),
-                        span,
-                    ));
-                }
-                Some(OwnedToken::Comment(_)) => {
-                    self.advance();
-                    continue;
-                }
-                _ => elements.push(self.read()?),
-            }
-        }
-    }
-
-    fn read_bytes(&mut self, start_loc: &SourceLoc, start_boff: usize) -> Result<Syntax, String> {
-        self.advance(); // skip b[
-        let mut elements = Vec::new();
-        loop {
-            match self.current() {
-                None => {
-                    return Err(format!(
-                        "{}: unterminated bytes literal (missing closing ])",
-                        start_loc.position()
-                    ));
-                }
-                Some(OwnedToken::RightBracket) => {
-                    let end = self.current_byte_offset() + self.current_length();
-                    self.advance();
-                    let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(
-                        SyntaxKind::Bytes(self.arena.nodes(&elements)),
-                        span,
-                    ));
-                }
-                Some(OwnedToken::Comment(_)) => {
-                    self.advance();
-                    continue;
-                }
-                _ => elements.push(self.read()?),
-            }
-        }
-    }
-
-    fn read_bytes_mut(
-        &mut self,
-        start_loc: &SourceLoc,
-        start_boff: usize,
-    ) -> Result<Syntax, String> {
-        self.advance(); // skip @b[
-        let mut elements = Vec::new();
-        loop {
-            match self.current() {
-                None => {
-                    return Err(format!(
-                        "{}: unterminated @bytes literal (missing closing ])",
-                        start_loc.position()
-                    ));
-                }
-                Some(OwnedToken::RightBracket) => {
-                    let end = self.current_byte_offset() + self.current_length();
-                    self.advance();
-                    let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(
-                        SyntaxKind::BytesMut(self.arena.nodes(&elements)),
-                        span,
-                    ));
-                }
-                Some(OwnedToken::Comment(_)) => {
-                    self.advance();
-                    continue;
-                }
-                _ => elements.push(self.read()?),
-            }
-        }
-    }
-
-    fn read_list(&mut self, start_loc: &SourceLoc, start_boff: usize) -> Result<Syntax, String> {
-        self.advance(); // skip (
-        let mut elements: Vec<Syntax> = Vec::new();
-        // Track the innermost unclosed opening delimiter for better error messages
-        let mut innermost_unclosed: Option<SourceLoc> = None;
-
-        loop {
-            match self.current() {
-                None => {
-                    // Point at innermost unclosed paren if we have one, else the outermost
-                    let point_at = innermost_unclosed.as_ref().unwrap_or(start_loc);
-                    let depth = 1 + elements
-                        .iter()
-                        .filter(|e| matches!(&e.kind, SyntaxKind::List(_)))
-                        .count()
-                        .min(1); // approximate depth
-                    return Err(format!(
-                        "{}: unterminated list ({} closing paren{} needed)",
-                        point_at.position(),
-                        depth,
-                        if depth > 1 { "s" } else { "" }
-                    ));
-                }
-                Some(OwnedToken::RightParen) => {
-                    let end = self.current_byte_offset() + self.current_length();
-                    self.advance();
-                    let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(
-                        SyntaxKind::List(self.arena.nodes(&elements)),
-                        span,
-                    ));
-                }
-                Some(OwnedToken::Comment(_)) => {
-                    self.advance();
-                    continue;
-                }
-                Some(OwnedToken::Pipe) => {
-                    let set_loc = self.current_location();
-                    let set_boff = self.current_byte_offset();
-                    elements.push(self.read_set(&set_loc, set_boff)?);
-                    continue;
-                }
-                Some(OwnedToken::LeftParen) => {
-                    // Track this as potentially the innermost unclosed paren
-                    innermost_unclosed = Some(self.current_location());
-                    elements.push(self.read()?);
-                }
-                _ => elements.push(self.read()?),
-            }
-        }
-    }
-
-    fn read_array(&mut self, start_loc: &SourceLoc, start_boff: usize) -> Result<Syntax, String> {
-        self.advance(); // skip [
-        let mut elements = Vec::new();
-
-        loop {
-            match self.current() {
-                None => {
-                    return Err(format!(
-                        "{}: unterminated tuple (missing closing bracket)",
-                        start_loc.position()
-                    ));
-                }
-                Some(OwnedToken::RightBracket) => {
-                    let end = self.current_byte_offset() + self.current_length();
-                    self.advance();
-                    let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(
-                        SyntaxKind::Array(self.arena.nodes(&elements)),
-                        span,
-                    ));
-                }
-                Some(OwnedToken::Comment(_)) => {
-                    self.advance();
-                    continue;
-                }
-                Some(OwnedToken::Pipe) => {
-                    let set_loc = self.current_location();
-                    let set_boff = self.current_byte_offset();
-                    elements.push(self.read_set(&set_loc, set_boff)?);
-                    continue;
-                }
-                _ => elements.push(self.read()?),
-            }
-        }
-    }
-
-    fn read_struct(&mut self, start_loc: &SourceLoc, start_boff: usize) -> Result<Syntax, String> {
-        self.advance(); // skip {
-        let mut elements = Vec::new();
-
-        loop {
-            match self.current() {
-                None => {
-                    return Err(format!(
-                        "{}: unterminated struct (missing closing brace)",
-                        start_loc.position()
-                    ));
-                }
-                Some(OwnedToken::RightBrace) => {
-                    let end = self.current_byte_offset() + self.current_length();
-                    self.advance();
-                    let span = self.make_span(start_boff, end, start_loc);
-                    return Ok(Syntax::new(
-                        SyntaxKind::Struct(self.arena.nodes(&elements)),
-                        span,
-                    ));
-                }
-                Some(OwnedToken::Comment(_)) => {
-                    self.advance();
-                    continue;
-                }
-                Some(OwnedToken::Pipe) => {
-                    let set_loc = self.current_location();
-                    let set_boff = self.current_byte_offset();
-                    elements.push(self.read_set(&set_loc, set_boff)?);
-                    continue;
-                }
-                _ => elements.push(self.read()?),
-            }
-        }
-    }
-
-    fn read_list_sugar(
-        &mut self,
-        start_loc: &SourceLoc,
-        start_boff: usize,
-    ) -> Result<Syntax, String> {
-        self.advance(); // skip @
-
-        match self.current() {
-            Some(OwnedToken::LeftBracket) => {
-                // @[...] produces an array literal
-                self.advance(); // skip [
-                let mut elements = Vec::new();
-
-                loop {
-                    match self.current() {
-                        None => {
-                            return Err(format!(
-                                "{}: unterminated array literal",
-                                start_loc.position()
-                            ));
-                        }
-                        Some(OwnedToken::RightBracket) => {
-                            let end = self.current_byte_offset() + self.current_length();
-                            self.advance();
-                            let span = self.make_span(start_boff, end, start_loc);
-                            return Ok(Syntax::new(
-                                SyntaxKind::ArrayMut(self.arena.nodes(&elements)),
-                                span,
-                            ));
-                        }
-                        Some(OwnedToken::Comment(_)) => {
-                            self.advance();
-                            continue;
-                        }
-                        _ => elements.push(self.read()?),
-                    }
-                }
-            }
-            Some(OwnedToken::LeftBrace) => {
-                // @{...} produces a table literal
-                self.advance(); // skip {
-                let mut elements = Vec::new();
-
-                loop {
-                    match self.current() {
-                        None => {
-                            return Err(format!(
-                                "{}: unterminated table literal",
-                                start_loc.position()
-                            ));
-                        }
-                        Some(OwnedToken::RightBrace) => {
-                            let end = self.current_byte_offset() + self.current_length();
-                            self.advance();
-                            let span = self.make_span(start_boff, end, start_loc);
-                            return Ok(Syntax::new(
-                                SyntaxKind::StructMut(self.arena.nodes(&elements)),
-                                span,
-                            ));
-                        }
-                        Some(OwnedToken::Comment(_)) => {
-                            self.advance();
-                            continue;
-                        }
-                        _ => elements.push(self.read()?),
-                    }
-                }
-            }
-            Some(OwnedToken::String(s)) => {
-                // @"..." is a mutable string literal
-                let string_val = self.arena.text(s);
-                let end = self.current_byte_offset() + self.current_length();
-                self.advance(); // skip the string token
-                let span = self.make_span(start_boff, end, start_loc);
-                Ok(Syntax::new(SyntaxKind::StringMut(string_val), span))
-            }
-            _ => Err(format!(
-                "{}: @ must be followed by [...], {{...}}, |...|, or \"...\"",
-                start_loc.position()
-            )),
         }
     }
 }

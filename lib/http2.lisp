@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-14
+(elle/epoch 13)
+# audited: 2026-09-28
 ## lib/http2.lisp — HTTP/2 client and server for Elle
 ##
 ## Plain h2c (cleartext):
@@ -309,7 +309,8 @@
       (each sid in (keys sess:streams)
         (when-let [s (get sess:streams sid)] (protect (s:data-queue:close))))
       (session:send-goaway sess sess:last-stream-id C:err-no-error)
-      (session:close-writer sess :grace grace)  # Abort reader before closing transport — the reader may have a pending
+      (session:close-writer sess :grace grace)
+      # Abort reader before closing transport — the reader may have a pending
       # read on the socket (started by fuel preemption or concurrent sub-fiber).
       # Closing the fd while a read is in-flight causes partial-read errors.
       (when sess:reader-fiber

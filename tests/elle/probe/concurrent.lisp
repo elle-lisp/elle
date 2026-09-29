@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-19
+(elle/epoch 13)
+# audited: 2026-09-28
 # The direct-loop rows whose drive crosses a fiber: closures, protect and defer, the park families, the emit and error deliveries.
 #
 # docs/impl/region/diagnostics.md
@@ -17,7 +17,8 @@
    ["protect-while"
     (fn [j]
       (let [[ok v] (protect ((fn [] j)))]
-        v)) 0]  # `defer` on its ordinary SUCCESS path — the twin of `protect-while`
+        v)) 0]
+   # `defer` on its ordinary SUCCESS path — the twin of `protect-while`
    # above. Same inner fiber, same resume; the whole difference is the trailing
    # `if`, which reads the fiber with `fiber/value` in the arm taken here and with
    # `fiber/propagate` in the arm that is not. Declaring `fiber/propagate` `Mixed`
@@ -34,7 +35,8 @@
     (fn [j]
       (defer
         (length [1 2])
-        ((fn [] j)))) 0]  # The other arm, and the control.
+        ((fn [] j)))) 0]
+   # The other arm, and the control.
    # `defer-error` raises in the body, so the arm it drives is the PROPAGATE arm —
    # the one that held the branch's only release under `Mixed`, and so the one that
    # correctly stays closed under `defer-while`'s counterfactual. It is what tells a
@@ -127,7 +129,8 @@
     (fn [j]
       (let [f (fiber/new (fn [] (ap-before-body j)) |:yield|)]
         (fiber/resume f)
-        (fiber/cancel f :dead))) 0]  # A parked fiber hard-killed by `fiber/cancel` reclaims fully: the kill
+        (fiber/cancel f :dead))) 0]
+   # A parked fiber hard-killed by `fiber/cancel` reclaims fully: the kill
    # frees everything the fiber owns (owner nodes, the parked signal's park
    # escape retain), and no carrier retain pins the fiber region
    # (docs/impl/region/park.md).
@@ -138,7 +141,8 @@
                            9) |:yield|)]
         (fiber/resume f)
         (fiber/cancel f :dead)
-        (fiber/status f))) 0]  # `fiber/abort` of a PARKED fiber. `fiber/abort` is a
+        (fiber/status f))) 0]
+   # `fiber/abort` of a PARKED fiber. `fiber/abort` is a
    # native tail call here, and its fiber argument is a captured upvalue — a BORROWED
    # tail argument, for which the frame mints a fresh owning reference so the callee
    # has one to release. The abort leaves by SIG_ABORT, which reaches neither consumer
@@ -155,7 +159,8 @@
                            (yield j)
                            9) |:yield|)]
         (fiber/resume f)
-        (protect (fiber/abort f "boom")))) 0]  # An abandoned park through the DYNAMIC
+        (protect (fiber/abort f "boom")))) 0]
+   # An abandoned park through the DYNAMIC
    # emit path: a first argument the compiler cannot read as a keyword set falls
    # through to the `emit` primitive, so the park is an ordinary call rather than the
    # `Emit` terminator and the body reference the discharge stands in for comes from
@@ -194,7 +199,8 @@
       (let [f (fiber/new (fn []
                            (emit emit-sig (string "v" j))
                            9) |:yield|)]
-        (fiber/resume f))) 0]  # The same operation raising a TERMINAL signal, where
+        (fiber/resume f))) 0]
+   # The same operation raising a TERMINAL signal, where
    # the reference the tail call holds answers to a different consumer: the payload's
    # DELIVERY, released by whoever catches the signal. The exit consumes its
    # borrowed-argument retains — the block that would have consumed them is abandoned,
@@ -242,7 +248,8 @@
     (fn [j]
       (let [f (fiber/new (fn [] (emit emit-error-sig (string "v" j))) |:error|)]
         (fiber/resume f)
-        (fiber/resume f))) 0]  # The same raise OFF TAIL POSITION, where the site
+        (fiber/resume f))) 0]
+   # The same raise OFF TAIL POSITION, where the site
    # takes the retain instead of the call's argument convention and the exit leaves
    # it standing for the continuation past the call (docs/impl/region/park.md
    # § "What yields is the emit OPERATION, not the `Emit` node"). CLOSED controls
@@ -269,7 +276,8 @@
                            (emit emit-error-sig (string "v" j))
                            9) |:error|)]
         (fiber/resume f)
-        (fiber/resume f))) 0]  # An emit-raised error's payload keeps
+        (fiber/resume f))) 0]
+   # An emit-raised error's payload keeps
    # every frame-owed release: `(error v)` mints the payload's delivery itself (the
    # `EmitEscape` retain the resumer's release of the resume result consumes), so the
    # raise records the mint and the abandoned-frame walk and the parked frame's
@@ -321,7 +329,8 @@
     (fn [j]
       (try
         (get j :k)
-        (catch e nil))) 0]  # The two fiber-crossing DELIVERIES, both CLOSED
+        (catch e nil))) 0]
+   # The two fiber-crossing DELIVERIES, both CLOSED
    # controls (undeclared, like `rest-array-copy`) so a regression to open trips
    # the completeness gate loudly rather than being absorbed under F2. Each
    # gauges a mint's ARITY rather than its presence: withhold the mint and the

@@ -1,7 +1,10 @@
+// audited: 2026-09-28
 //! `CheckSignalBound` opcode body.
 //!
 //! Split out of the dispatch match: formatting a `restrict` violation from the
 //! global registry is verbose enough to crowd the routing.
+//!
+//! docs/impl/vm.md
 
 use super::*;
 
@@ -15,7 +18,11 @@ impl VM {
     #[inline]
     pub(super) fn handle_check_signal_bound(&mut self, bc: &[u8], ip: &mut usize) {
         let allowed_bits = self.read_signal_bits(bc, ip);
-        let val = self.fiber.stack.pop().unwrap_or(Value::NIL);
+        let val = self
+            .fiber
+            .stack
+            .pop()
+            .expect("VM bug: Stack underflow on CheckSignalBound");
         if let Some(closure) = val.as_closure() {
             let signal_bits = closure.signal().bits;
             let excess = signal_bits.subtract(allowed_bits);
@@ -36,3 +43,6 @@ impl VM {
         // signal bound check. Only closures carry signal metadata.
     }
 }
+
+#[cfg(test)]
+mod tests;

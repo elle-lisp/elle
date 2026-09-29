@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## MQTT plugin integration tests
 ## Tests the mqtt plugin (.so loaded via import-file)
 
@@ -102,7 +103,8 @@
 
 ## ── mqtt/feed + mqtt/poll — synthetic CONNACK ────────────────────
 
-(let* [st (state-fn)  # CONNACK packet: 20 02 00 00
+(let* [st (state-fn)
+       # CONNACK packet: 20 02 00 00
        # byte 0: 0x20 = CONNACK, byte 1: 0x02 = remaining length
        # byte 2: 0x00 = no session present, byte 3: 0x00 = accepted
        connack (bytes 32 2 0 0)
@@ -117,7 +119,8 @@
 
 ## ── mqtt/feed + mqtt/poll — synthetic PUBLISH ────────────────────
 
-(let* [st (state-fn)  # Build a PUBLISH packet for topic "t" with payload "hi"
+(let* [st (state-fn)
+       # Build a PUBLISH packet for topic "t" with payload "hi"
        # 0x30 = PUBLISH QoS 0, remaining len = 2(topic len) + 1(topic) + 2(payload) = 5
        pub-bytes (bytes 48 5 0 1 116 104 105)
        count (feed-fn st pub-bytes)]

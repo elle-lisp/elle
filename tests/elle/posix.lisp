@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 # POSIX signal tests
 #
 # Covers sending, watching, capability gating, refcount-driven mask
@@ -93,7 +94,8 @@
 (let [r (os/sig-watch |:sigusr1|)]
   (os/sig-send (sys/pid) :sigusr1)
   (os/sig-send (sys/pid) :sigusr1)
-  (ev/sleep 0.05)  # Kernel may coalesce identical signals from the same sender, so
+  (ev/sleep 0.05)
+  # Kernel may coalesce identical signals from the same sender, so
   # we assert at least one event arrived (could be 1 or 2).
   (let [evs (ev/join (ev/spawn (fn [] (bounded-next r "test 5"))))]
     (eprintln "test 5: events=" evs)
@@ -157,8 +159,9 @@
 # then verify the integer signum (10 on Linux, 30 on macOS) is accepted.
 # Round-trip via the keyword form below to stay platform-portable.
 (let [r (os/sig-watch |:sigusr1|)]
-  (let [[ok? _] (protect ((fn []  # Re-query the integer at runtime by sending the
-                          # keyword first, then asserting the integer form
+  (let [[ok? _] (protect ((fn []
+                            # Re-query the integer at runtime by sending the
+                            # keyword first, then asserting the integer form
                             # is accepted on the same kernel.
                             (os/sig-send (sys/pid) :sigusr1))))]
     (assert ok? "10a: keyword signum accepted"))  # Drain so the queued signal doesn't fire when we close.

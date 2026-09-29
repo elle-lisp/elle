@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## tests/elle/stdin-longline.lisp
 ##
 ## A line on STDIN longer than the buffer `port/read-line` reserves is
@@ -72,40 +73,45 @@
     true (error {:error :test-skip
                  :message "cannot find elle binary in ./target/"})))
 
-(def scratch (file/mktempdir))
-(def inner-path (path/join scratch "stdin-longline-inner.lisp"))
-(def input-path (path/join scratch "stdin-longline-input.txt"))
-(file/write inner-path inner-script)
+(def @scratch-path nil)
+(with-temp-dir scratch (assign scratch-path scratch)
+               (def inner-path (path/join scratch "stdin-longline-inner.lisp"))
+               (def input-path (path/join scratch "stdin-longline-input.txt"))
+               (file/write inner-path inner-script)
 
-## The long line, then a short one. The second line is what proves the
-## overshoot was framed rather than merely delivered: a converter that
-## mislays the remainder loses it or replays part of the first line here.
-(file/write input-path (concat long-line "\ntail\n"))
+               ## The long line, then a short one. The second line is what proves the
+               ## overshoot was framed rather than merely delivered: a converter that
+               ## mislays the remainder loses it or replays part of the first line here.
+               (file/write input-path (concat long-line "\ntail\n"))
 
-(def result
-  (subprocess/system "sh"
-                     ["-c"
-                      (string "cat '" input-path "' | '" elle-bin "' '"
-                              inner-path "'")]))
+               (def result
+                 (subprocess/system "sh"
+                                    ["-c"
+                                     (string "cat '" input-path "' | '" elle-bin
+                                     "' '" inner-path "'")]))
 
-(assert (= result:exit 0)
-        (string "subprocess exited " result:exit ": " result:stderr))
+               (assert (= result:exit 0)
+                       (string "subprocess exited " result:exit ": "
+                               result:stderr))
 
-(def lines (string/split (string/trim result:stdout) "\n"))
-(def reported-length (get lines 0))
-(def byte-verdict (get lines 1))
-(def next-line (get lines 2))
+               (def lines (string/split (string/trim result:stdout) "\n"))
+               (def reported-length (get lines 0))
+               (def byte-verdict (get lines 1)) (def next-line (get lines 2))
 
-(assert (= reported-length (string line-size))
-        (string "the whole line is answered: got " reported-length " of "
-                (string line-size)))
-(println "  1. a stdin line past its buffer is answered whole")
+               (assert (= reported-length (string line-size))
+                       (string "the whole line is answered: got "
+                               reported-length " of " (string line-size)))
+               (println "  1. a stdin line past its buffer is answered whole")
 
-(assert (= byte-verdict "same") "and byte for byte, not merely the right length")
-(println "  2. and byte for byte")
+               (assert (= byte-verdict "same")
+                       "and byte for byte, not merely the right length")
+               (println "  2. and byte for byte")
 
-(assert (= next-line "tail")
-        (string "the next read resumes after the newline: got " next-line))
-(println "  3. the read after it frames the stream correctly")
+               (assert (= next-line "tail")
+                       (string "the next read resumes after the newline: got "
+                               next-line))
+               (println "  3. the read after it frames the stream correctly"))
 
+(assert (not (path/exists? scratch-path))
+        (string "temporary directory remains: " scratch-path))
 (println "stdin-longline: ok")

@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## Acceptance tests for `elle test` — the agent-first runner (docs/test-runner.md).
 ##
 ## These DRIVE the runner as a subprocess and assert on the SQLite session DB it
@@ -176,7 +177,8 @@
                           "FROM form WHERE form.file LIKE '%multi.lisp'"))]
     (assert (= (get (get res 0) :c) 1)
             (string "multi: a multi-form file is ONE form, got "
-                    (get (get res 0) :c) " distinct forms")))  # the single form passes on vm; under per-form slicing the read-before-write
+                    (get (get res 0) :c) " distinct forms")))
+  # the single form passes on vm; under per-form slicing the read-before-write
   # reorder would make "ordered read-after-write" fail with snap=0
   (let [res (rows r:db
                   (string "SELECT result.status AS status, form.label AS label "
@@ -403,7 +405,8 @@
 (let [r (run-test "target/rt-gated-setup.db" @[(fixture "gated-setup.lisp")])]
   (assert (= r:exit 0)
           (string "gated-setup: a gated setup skips (not fails); exit " r:exit
-                  " — stderr: " r:err))  # Whole-file mode: the gate runs INSIDE the file's single thunk, so the vm row
+                  " — stderr: " r:err))
+  # Whole-file mode: the gate runs INSIDE the file's single thunk, so the vm row
   # is a runtime :gated skip carrying the reason (idx 0, the whole-file form) —
   # not the old eager-setup file-level skip (idx -1).
   (let [res (rows r:db

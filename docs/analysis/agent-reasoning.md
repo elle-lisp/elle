@@ -1,6 +1,6 @@
 # Agent Reasoning in Elle
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Elle is designed to be easily reasoned about by AI coding assistants. This guide explains how agents should approach code understanding, analysis, and refactoring in Elle.
 
@@ -91,19 +91,19 @@ Don't edit text directly. Use the compile-safe tools:
 
 **Rename a function and all references:**
 ```text
-compile_rename(path: "lib/http.lisp", old_name: "request-handler", new_name: "handle-request")
+compile_rename(path: "lib/http.lisp", old_name: "do-request", new_name: "request-once")
 ```
 This respects lexical scope—shadowed bindings are left alone.
 
 **Extract a code region into its own function:**
 ```text
-compile_extract(path: "lib/http.lisp", from: "process-request", start_line: 10, end_line: 25, name: "validate-headers")
+compile_extract(path: "lib/http.lisp", from: "send-request", start_line: 165, end_line: 168, name: "read-response")
 ```
 The tool computes free variables (which become parameters) and infers the extracted function's signal.
 
 **Check if functions can run in parallel:**
 ```text
-compile_parallelize(path: "lib/process.lisp", functions: ["worker1", "worker2", "worker3"])
+compile_parallelize(path: "lib/http.lisp", functions: ["compress-gzip", "compress-zlib", "compress-zstd"])
 ```
 This verifies no shared mutable captures would cause data races.
 

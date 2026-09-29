@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 ## tests/elle/ev-run-teardown.lisp
 ##
 ## Regression test for ev/run "program-completion teardown".
@@ -121,7 +122,8 @@
                                       (ev/run (fn []
                                         (ev/spawn (fn []
                                           (ev/sleep 10.0)  ## parks on a timer far past program end
-                                          (println "  BUG: timer orphan resumed")))  ## Let the orphan submit its timer
+                                          (println "  BUG: timer orphan resumed")))
+                                        ## Let the orphan submit its timer
                                         ## (land in `pending`).
                                         (ev/sleep 0.02)
                                         :program-done)))))
