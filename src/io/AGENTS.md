@@ -109,7 +109,7 @@ port, or nil) and `exit()` (the record the waiters read and clone) read it
 back. `Display` prints `#<subprocess 12345>`, and `Drop` calls `try_wait()` on a
 child nothing has reaped, to reap zombies.
 
-The ports are heap `Value`s an external holds, which no alloc-time scan and no free-time cascade enumerates ([region rules](../../docs/impl/region/rules.md), Rule 5). They need no count because `spawn_to_subprocess` builds them and the handle at one `Birthplace`, so they share a region and are freed together or not at all.
+The handle is an opaque external, so no alloc-time scan and no free-time cascade enumerates the ports it holds ([region rules](../../docs/impl/region/rules.md), Rule 5). They need no count because `spawn_to_subprocess` builds them and the handle at one `Birthplace`, so they share a region and are freed together or not at all.
 
 ### ExitRecord
 
@@ -172,7 +172,7 @@ Typed thread-pool submission and completion:
 
 ### ConnectAddr
 
-Enum: `Tcp { addr, port }` or `Unix { path }`. `Tcp.addr` is a **parsed
+Enum: `Tcp { addr, port, options, encoding }` or `Unix { path, options, encoding }`. `Tcp.addr` is a **parsed
 `std::net::IpAddr`** — connect is IP-only at the backend. The `tcp/connect-ip`
 primitive parses the IP and builds this; hostname resolution is the stdlib
 `tcp/connect` wrapper's job (`sys/resolve` → `tcp/connect-ip` per address), so
@@ -182,7 +182,7 @@ the backend never runs a blocking getaddrinfo fallback.
 
 Struct: `{ op: IoOp, port: Value, bound: Bound }`. The `Bound` holds the call's
 `:timeout` for each kernel operation and its `:deadline` for the whole call
-([I/O deadlines](../../docs/io/timeout.md)).
+([I/O deadlines](../../docs/io/timeout.md)). A request is an `ExternalObject::holding` external that declares its `port` and the buffer, payload, accept port or result struct its `PortOp` names, so its region counts each of them until it frees. A fiber that relays a child's request can release the child before it raises the request, and the request's own counts keep those values ([region rules](../../docs/impl/region/rules.md), Rule 5).
 
 ### Completion
 

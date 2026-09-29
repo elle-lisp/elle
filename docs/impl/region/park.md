@@ -137,7 +137,12 @@ symmetric with its unpark; the node and the deferred set a park moves are
   `FiberResume` deliveries, or the abort's descent into the inner fiber. A fiber that
   relays with `(emit :io v)` builds a park of its own, and its record names no
   runtime-built payload. So one park owes one release, however many fibers stand
-  between it and the scheduler. Gauged by
+  between it and the scheduler. A relay can also outlive the child it relays for. A
+  body that binds the child's request and has no further use for the child releases
+  the child first. The free-path discharge then runs the releases the child's frames
+  owed, including those of the port and the payload the request names. The
+  request holds those values through counts of its own, so it reaches the scheduler
+  whole ([rules.md](rules.md) Rule 5, declared external contents). Gauged by
   [region-denial-park.lisp](../../../tests/impl/region-denial-park.lisp) and
   [region-io-park.lisp](../../../tests/impl/region-io-park.lisp) per install, and by
   [region-capability-denial-resume-leak.lisp](../../../tests/impl/region-capability-denial-resume-leak.lisp)
@@ -145,7 +150,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   [region-denial-park-uaf.lisp](../../../tests/impl/region-denial-park-uaf.lisp) and
   [region-io-park-uaf.lisp](../../../tests/impl/region-io-park-uaf.lisp), whose `protect` witnesses pass
   a park on, and by [region-io-relay-uaf.lisp](../../../tests/impl/region-io-relay-uaf.lisp), whose
-  relays raise the request again.
+  relays raise the request again, some after they release the child.
 - **A boundary ends a park with no reader and no install, so it owes both references.** A
   `squelch`/`attune` violation is the third way a park can end, and it is neither of the two
   the rules above are written for. No resumer reads the payload out of `fiber.signal`, so the
