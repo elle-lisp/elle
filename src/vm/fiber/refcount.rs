@@ -3,9 +3,8 @@
 //!
 //! Park-retains on terminal results, and the symmetric releases when a parked
 //! signal is replaced at a resume or discarded with an unrunnable fiber. These
-//! balance the
-//! `find_object_cross_refs` Fiber arm's free-time cascade against the retains
-//! taken while a fiber holds a `signal` value across a park.
+//! balance the `find_object_cross_refs` Fiber arm's free-time cascade against
+//! the retains taken while a fiber holds a `signal` value across a park.
 //!
 //! docs/impl/region/park.md
 
@@ -33,17 +32,18 @@ pub(super) fn incref_signal_region(
 /// Take the park-retain and record the `fiber → signal` content edge for a
 /// TERMINAL signal a tier's execution driver installs directly into
 /// `fiber.signal` — the shared form of the VM's `with_child_fiber` step-6a
-/// bookkeeping (child.rs). The symmetric release is the free-time signal scan
-/// (a terminal fiber is read via `fiber/value`, not resumed) or, for a resumable
-/// `:error` / re-resumed fiber, [`release_displaced_terminal_signal`] at the next
-/// resume. A no-op for `None`, a NON-terminal signal (a yield value / io request,
-/// whose escape retain the resume path proper governs), or an immediate payload —
-/// exactly the conditions under which the park owes a retain and edge.
+/// bookkeeping (src/vm/fiber/child.rs). The symmetric release is the free-time
+/// signal scan (a terminal fiber is read via `fiber/value`, not resumed) or, for
+/// a resumable `:error` / re-resumed fiber, [`release_displaced_terminal_signal`]
+/// at the next resume. A no-op for `None`, a NON-terminal signal (a yield value /
+/// io request, whose escape retain the resume path proper governs), or an
+/// immediate payload — exactly the conditions under which the park owes a retain
+/// and edge.
 ///
 /// The WASM tier's `handle_fiber_resume` installs a fiber's parked/terminal
 /// signal outside the VM's fiber driver, so it must call this to keep the
 /// host-side outgoing-edge table balanced against `prim_fiber_resume`'s release
-/// (pinned by `tests/elle/fiber-error-resume.lisp` under `--wasm=full`).
+/// (pinned by `tests/lang/fiber-error-resume.lisp` under `--wasm=full`).
 pub(crate) fn record_terminal_signal_park(
     heap: &mut crate::value::fiberheap::FiberHeap,
     fiber_value: Value,
@@ -83,8 +83,7 @@ pub(crate) fn is_terminal_signal(bits: SignalBits) -> bool {
 /// for it: a yielded payload's *delivery* reference is separately consumed by the
 /// resumer's release of the resume result, and a payload the body borrows rather
 /// than allocates is given a body reference of its own at the `Emit`
-/// (docs/impl/region/park.md § "A fiber body owns one
-/// reference of every value it yields"). Distinct from
+/// (docs/impl/region/park.md). Distinct from
 /// [`release_displaced_bodyless_payload`], which answers for the ONE payload a
 /// displaced park has no body reference for; at a discard there is no install to
 /// owe that release and no body to double-release against
@@ -112,7 +111,7 @@ pub(crate) fn release_discarded_signal(
 /// so the scan never sees it: without this release the recorded table keeps
 /// the dead edge (the free-time equivalence oracle detonates on the drift),
 /// and each re-park stacks another — the free cascade then over-releases the
-/// payload region (the `region-fiber-park-symmetry.lisp` restart face).
+/// payload region (the restart face of tests/impl/region-fiber-park-symmetry.lisp).
 ///
 /// A no-op for `None`, a NON-terminal parked signal (a yield value, whose escape
 /// retain the resumed body consumes; a runtime-built payload, which
@@ -152,8 +151,7 @@ pub(crate) fn release_displaced_terminal_signal(
 /// on a fiber that never runs again, this stands in for on one that does:
 /// `fiber/resume`'s delivery and `fiber/abort` / `fiber/refuse`'s injected error
 /// each replace the payload in the slot, and each owes it one release
-/// (docs/impl/region/park.md § "A payload the RUNTIME built is released by the
-/// install that displaces it").
+/// (docs/impl/region/park.md).
 ///
 /// Only the ledger says which parks those are. The classifier that built the
 /// park recorded the payload (`park_denial`, `park_request`), because the slot
@@ -184,7 +182,7 @@ pub(crate) fn release_displaced_terminal_signal(
 /// the suspend hands back, and the `SuspendEscape` is consumed here. Standing
 /// down on a resume value sharing the region leaves the second reference with no
 /// consumer at all, and the region survives with its buffer and its request —
-/// one per read. `tests/elle/region-io-read-strand.lisp` bounds the rate and
+/// one per read. `tests/impl/region-io-read-strand.lisp` bounds the rate and
 /// pins that the buffer still outlives this release. A denial's resume value
 /// read back out of the payload is the same case.
 ///
@@ -215,8 +213,7 @@ pub(crate) fn release_displaced_bodyless_payload(
 
 /// Release everything a park is left with when a `squelch`/`attune` boundary
 /// ends it — the one end of a park that is neither a resume nor an install
-/// (docs/impl/region/park.md § "A boundary ends a park with no reader and no
-/// install, so it owes both references").
+/// (docs/impl/region/park.md).
 ///
 /// Two references stand on a park's payload and each answers to a seam this exit
 /// cuts. The **delivery** — the `EmitEscape` / `SuspendEscape` retain the park
