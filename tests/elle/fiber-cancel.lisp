@@ -154,6 +154,23 @@
     (assert (= (get err :error) :cancelled) "the join raises the cancel payload")
     (assert (= (get err :by) :killer) "the payload is the canceller's own")))
 
+# The process scheduler routes its sub-fibers the same way. The counter-factual
+# is a sub-fiber join that reads :dead alone and answers success.
+(def process ((import "std/process")))
+(def @process-join nil)
+(process:start (fn []
+                 (let* [victim (ev/spawn (fn []
+                          (ev/sleep 0.2)
+                          :never))
+                        killer (ev/spawn (fn []
+                          (fiber/cancel victim {:error :cancelled})))]
+                   (ev/join killer)
+                   (assign process-join (protect (ev/join victim))))))
+(assert (not (first process-join))
+        "a cancelled sub-fiber of a process joins as a failure")
+(assert (= :cancelled (get (get process-join 1) :error))
+        "carrying the cancel payload")
+
 ## ── propagate re-raises a caught signal ─────────────────────────────
 
 (let [[ok? _] (protect ((fn []
