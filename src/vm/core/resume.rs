@@ -108,7 +108,7 @@ impl VM {
                     // the RUNTIME built there is owed the release its body has
                     // none for, exactly as at `fiber/resume` itself
                     // (docs/impl/region/park.md).
-                    crate::vm::fiber::release_displaced_denial_payload(self.heap(), handle);
+                    crate::vm::fiber::release_displaced_bodyless_payload(self.heap(), handle);
                     handle.with_mut(|f| {
                         f.signal = Some((SIG_OK, current_value));
                     });

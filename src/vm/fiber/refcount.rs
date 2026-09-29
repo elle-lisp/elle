@@ -85,8 +85,8 @@ pub(crate) fn is_terminal_signal(bits: SignalBits) -> bool {
 /// than allocates is given a body reference of its own at the `Emit`
 /// (docs/impl/region/park.md § "A fiber body owns one
 /// reference of every value it yields"). Distinct from
-/// [`release_displaced_io_request`], which answers for the ONE payload a
-/// discharged park has no body reference for; at a discard there is no install to
+/// [`release_displaced_bodyless_payload`], which answers for the ONE payload a
+/// displaced park has no body reference for; at a discard there is no install to
 /// owe that release and no body to double-release against
 /// (docs/impl/region/park.md).
 /// A no-op for `None` or an immediate.
@@ -115,8 +115,8 @@ pub(crate) fn release_discarded_signal(
 /// payload region (the `region-fiber-park-symmetry.lisp` restart face).
 ///
 /// A no-op for `None`, a NON-terminal parked signal (a yield value, whose escape
-/// retain the resumed body consumes; an io request, which
-/// [`release_displaced_io_request`] below answers for), or an immediate payload —
+/// retain the resumed body consumes; a runtime-built payload, which
+/// [`release_displaced_bodyless_payload`] below answers for), or an immediate payload —
 /// mirroring exactly the conditions under which the park took the retain and
 /// recorded the edge.
 pub(crate) fn release_displaced_terminal_signal(
@@ -138,50 +138,66 @@ pub(crate) fn release_displaced_terminal_signal(
     crate::value::arena::decref_region(heap, Some(sig_r));
 }
 
-/// Release the reference a parked CAPABILITY-DENIAL payload leaves stranded when
-/// an install displaces it from `fiber.signal`.
+/// Release the reference a parked RUNTIME-BUILT payload leaves stranded when an
+/// install displaces it from `fiber.signal`.
 ///
 /// A park leaves two references on its payload's region: the **delivery**, which
 /// the resumer's release of the resume result consumes, and the **body's own**,
-/// released by the continuation past the suspend. A denial has no second one —
-/// the denial path builds the `{:error :capability-denied …}` struct itself, so
-/// the body never names it and no `decref_point` names its region. What the
-/// discard discharge ([`release_discarded_signal`]) stands in for on a fiber that
-/// never runs again, this stands in for on one that does: `fiber/resume`'s
-/// delivery and `fiber/abort` / `fiber/refuse`'s injected error each replace the
-/// payload in the slot, and each owes it one release
-/// (docs/impl/region/park.md § "A payload the RUNTIME
-/// built is released by the install that displaces it").
+/// released by the continuation past the suspend. Two parks have no second one,
+/// because the runtime built the payload and the body never named it: a
+/// capability denial's `{:error :capability-denied …}` struct, and the
+/// `IoRequest` a yielding io op (`ev/sleep`, `port/read`, …) returns. No
+/// `decref_point` names either region, so the reference the allocation left
+/// stands. What the discard discharge ([`release_discarded_signal`]) stands in for
+/// on a fiber that never runs again, this stands in for on one that does:
+/// `fiber/resume`'s delivery and `fiber/abort` / `fiber/refuse`'s injected error
+/// each replace the payload in the slot, and each owes it one release
+/// (docs/impl/region/park.md § "A payload the RUNTIME built is released by the
+/// install that displaces it").
+///
+/// Only the ledger says which parks those are. The classifier that built the
+/// park recorded the payload (`park_denial`, `park_request`), because the slot
+/// cannot tell: a denial parks under the withheld capability's bits, the bits an
+/// `(emit :fs v)` of a body-allocated value parks under, and a fiber that relays
+/// a child's io park with `(emit :io v)` parks the child's own `IoRequest` under
+/// `SIG_IO`. Both of those are body-owned, and a release here frees the value
+/// under every holder that outlives the fiber.
 ///
 /// Call this BEFORE the install, from every site that replaces another fiber's
 /// parked signal — `fiber/resume`, the abort/refuse injection, and the three
-/// `FiberResume` deliveries that reach an inner fiber directly, which is the
-/// route a `protect`ed body's denial takes. The record is read and TAKEN under
-/// one fiber borrow and the release runs against the heap afterwards, so heap
-/// mutation never overlaps fiber access; taking is the receipt, so a later
-/// install cannot release the same reference. Releasing only what the record
-/// bit-identically names is the other half — a record left over from an earlier
-/// park no longer names what is in the slot, and an `(emit :fs v)` under the same
-/// withheld bits is a body-allocated payload this must never touch.
+/// `FiberResume` deliveries that reach an inner fiber directly. The record lives
+/// on the fiber that parked, so those three are the route a `protect`ed body's
+/// park takes, and the outer fiber that only passes it on releases nothing. The
+/// record is read and TAKEN under one fiber borrow and the release runs against
+/// the heap afterwards, so heap mutation never overlaps fiber access; taking is
+/// the receipt, so a later install cannot release the same reference. Releasing
+/// only what the record bit-identically names is the other half — a record left
+/// over from an earlier park no longer names what is in the slot. Only a payload
+/// the record claims is dereferenced.
 ///
-/// A resume value read back OUT of the payload shares its region and still owes
-/// this release — the child's continuation releases the denied call's RESULT,
-/// which the delivery's own `ResumeDelivery` mint funds. A no-op for a fiber with
-/// no record, a record that no longer names the parked signal, or an immediate
-/// payload.
+/// **Every install owes it, the resume included.** A `Fresh` io op
+/// (`port/read`, `accept`) mints ONE region for the call and builds both the
+/// request and the completion buffer in it, then hands that buffer back as the
+/// resume value — so the resume is the one install that finds the region still
+/// live. It owes the release all the same, because the two references answer to
+/// different consumers: the `Fresh` mint is consumed by the release of the value
+/// the suspend hands back, and the `SuspendEscape` is consumed here. Standing
+/// down on a resume value sharing the region leaves the second reference with no
+/// consumer at all, and the region survives with its buffer and its request —
+/// one per read. `tests/elle/region-io-read-strand.lisp` bounds the rate and
+/// pins that the buffer still outlives this release. A denial's resume value
+/// read back out of the payload is the same case.
 ///
-/// Runs beside [`release_displaced_io_request`], never in place of it: the two
-/// name disjoint payloads, this one whatever the record names and that one an
-/// `IoRequest`, which a denial's struct never is. Neither needs to know whether
-/// the other fired, but this one runs SECOND, because its decref may be the
-/// payload's last and the io arm reads the parked value to reach its verdict.
-/// This one never does: the record is compared to the slot bit-wise
-/// (`bit_identical`), and only a payload the record claims is dereferenced.
+/// **In flight is no reason to wait.** An abort reaches a fiber whose request
+/// the scheduler already submitted, and a `Fresh` op's completion buffer lives in
+/// that very region. The pending entry increfs each value its completion reads
+/// and decrefs when the entry is disposed (docs/impl/region/rules.md Rule 8, the
+/// submitted-I/O-operand escape site), so the region is counted for the
+/// operation's whole lifetime and this decref drops the suspend retain alone.
 ///
-/// The record is the delivery ledger's (`park_denial` writes it, this take
-/// consumes it; docs/impl/region/park.md § "A park names its funding in the
-/// delivery ledger").
-pub(crate) fn release_displaced_denial_payload(
+/// A no-op for a fiber with no record, a record that no longer names the parked
+/// signal, or an immediate payload.
+pub(crate) fn release_displaced_bodyless_payload(
     heap: &mut crate::value::fiberheap::FiberHeap,
     handle: &crate::value::fiber::FiberHandle,
 ) {
@@ -195,72 +211,6 @@ pub(crate) fn release_displaced_denial_payload(
     };
     let region = crate::value::arena::region_of(heap, payload);
     crate::value::arena::decref_region(heap, region);
-}
-
-/// Release the reference a parked runtime-built payload leaves stranded when an
-/// install displaces it from `fiber.signal`.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn release_displaced_bodyless_payload(
-    heap: &mut crate::value::fiberheap::FiberHeap,
-    handle: &crate::value::fiber::FiberHandle,
-) {
-    let parked = handle.with(|fiber| fiber.signal);
-    release_displaced_io_request(heap, parked);
-    release_displaced_denial_payload(heap, handle);
-}
-
-/// Release the `SuspendEscape` an io op left on its IoRequest's region when an
-/// install displaces that request from `fiber.signal`.
-///
-/// A yielding io op (`ev/sleep`, `port/read`, …) returns its `IoRequest` with
-/// `SIG_IO`, whereupon the suspend adds a
-/// [`SuspendEscape`](crate::value::arena::EscapeSite::SuspendEscape) retain so the
-/// scheduler can read the request out of `fiber.signal`. The request is the
-/// RUNTIME's value: the native built it, the body never named it, and no
-/// `decref_point` names its region — so the continuation past the suspend
-/// releases nothing for it and the suspend retain is what the allocation leaves
-/// behind. Whatever ends the park owes that release, exactly as it does for a
-/// capability denial's payload
-/// (docs/impl/region/park.md § "A payload the RUNTIME
-/// built is released by the install that displaces it"): the resume that
-/// delivers a completion, and the injected error `fiber/abort` / `fiber/refuse`
-/// raise at the fiber's own suspension point.
-///
-/// **Every install owes it, the resume included.** A `Fresh` io op
-/// (`port/read`, `accept`) mints ONE region for the call and builds both the
-/// request and the completion buffer in it, then hands that buffer back as the
-/// resume value — so the resume is the one install that finds the region still
-/// live. It owes the release all the same, because the two references answer to
-/// different consumers: the `Fresh` mint is consumed by the release of the value
-/// the suspend hands back, and the `SuspendEscape` is consumed here. Standing
-/// down on a resume value sharing the region leaves the second reference with no
-/// consumer at all, and the region survives with its buffer and its request —
-/// one per read. `tests/elle/region-io-read-strand.lisp` bounds the rate and
-/// pins that the buffer still outlives this release.
-///
-/// **In flight is no reason to wait.** An abort reaches a fiber whose request
-/// the scheduler already submitted, and a `Fresh` op's completion buffer lives in
-/// that very region. The pending entry increfs each value its completion reads
-/// and decrefs when the entry is disposed (docs/impl/region/rules.md Rule 8, the
-/// submitted-I/O-operand escape site), so the region is counted for the
-/// operation's whole lifetime and this decref drops the suspend retain alone.
-///
-/// Gated on `SIG_IO`. A user `(yield v)` / `(emit …)` value is **body-owned** —
-/// the resumed body itself releases the reference it held across the suspend, and
-/// the resumer's release of the resume result consumes the delivery reference —
-/// so releasing it here would double-free. The other runtime-built park payload,
-/// a capability denial's struct, parks under the withheld capability's bits and
-/// so cannot be told from that `(emit …)` by its bits at all; it is released by
-/// [`release_displaced_denial_payload`], off the classifier's record. The two run
-/// side by side and name disjoint payloads — see the reading below.
-/// A no-op for a non-io signal, an immediate / `None` value, or a region-0 value.
-pub(crate) fn release_displaced_io_request(
-    heap: &mut crate::value::fiberheap::FiberHeap,
-    parked: Option<(SignalBits, Value)>,
-) {
-    if let Some(region) = io_request_region(heap, parked) {
-        crate::value::arena::decref_region(heap, Some(region));
-    }
 }
 
 /// Release everything a park is left with when a `squelch`/`attune` boundary
@@ -277,9 +227,9 @@ pub(crate) fn release_displaced_io_request(
 /// the reference its allocation left, since no `decref_point` names its region;
 /// for a body-allocated payload the body's own, which the abandoned frames'
 /// release tables run instead. So this releases the delivery for every park and
-/// the install's half for the two runtime-built shapes, reusing the readings the
-/// installs share so the three sites cannot come to disagree about which parks
-/// are which.
+/// the install's half for the two runtime-built shapes, off the same ledger
+/// record the installs take, so the sites cannot come to disagree about which
+/// parks are which.
 ///
 /// Two records decide it together, because neither answers on its own. The
 /// LEDGER says the park's delivery retain has no reader — a fact only the site
@@ -290,75 +240,35 @@ pub(crate) fn release_displaced_io_request(
 /// parked one in a local. Releasing on the ledger alone would need every route
 /// out of a park to clear the record; comparing the two bit-wise needs no such
 /// argument, and a record left over from a park some other route ended names a
-/// payload this exit is not looking at (the gate `release_displaced_denial_payload`
-/// makes for the same reason). Taking the record is the second receipt, so two
-/// boundaries over one park release one set of references.
+/// payload this exit is not looking at (the gate
+/// [`release_displaced_bodyless_payload`] makes for the same reason). Taking the
+/// record is the second receipt, so two boundaries over one park release one set
+/// of references.
 ///
-/// Order matters within the payload's own accounting: the io arm dereferences
-/// the parked value to reach its verdict, so it runs before either decref that
-/// could be the region's last. A no-op for a fiber with no live park, and for an
+/// The payload's region is resolved once, before either decref, because either
+/// may be the region's last. A no-op for a fiber with no live park, and for an
 /// exit whose signal the ledger does not name.
 pub(crate) fn release_abandoned_park(
     heap: &mut crate::value::fiberheap::FiberHeap,
     delivery: &mut crate::value::fiber::Delivery,
     live: Option<(SignalBits, Value)>,
 ) {
-    let Some(parked) = delivery.take_undelivered() else {
+    let Some((_, payload)) = delivery.take_undelivered() else {
         return;
     };
-    let (_, payload) = parked;
     if !live.is_some_and(|(_, v)| v.bit_identical(payload)) {
         return;
     }
-    // What the install would have owed, in the two readings the installs use.
-    release_displaced_io_request(heap, Some(parked));
-    if let Some(recorded) = delivery
+    let region = crate::value::arena::region_of(heap, payload);
+    // What the install would have owed.
+    if delivery
         .take_bodyless()
-        .filter(|r| r.bit_identical(payload))
+        .is_some_and(|r| r.bit_identical(payload))
     {
-        let region = crate::value::arena::region_of(heap, recorded);
         crate::value::arena::decref_region(heap, region);
     }
     // What the reader would have consumed.
-    let region = crate::value::arena::region_of(heap, payload);
     crate::value::arena::decref_region(heap, region);
-}
-
-/// The region a park's `IoRequest` lives in, or `None` where the park owes this
-/// accounting nothing — no park at all, a payload some other holder answers for,
-/// or an immediate. One reading of "which parks are io parks", so the release and
-/// the resume's skip below cannot come to disagree about it.
-///
-/// **The payload's TYPE is the reading, not the `SIG_IO` bit alone.** `:io` is a
-/// withheld capability like any other, so a fiber denied `:io` parks its denial
-/// struct under the same bit — and that payload belongs to the ledger record
-/// (`release_displaced_denial_payload`), which is written on the fiber that was
-/// denied. An install reaching a fiber that merely relays the park, the outer
-/// fiber of a `protect`ed denial, finds no record there and would claim the
-/// struct on the bit alone; releasing it here and at the record's own install
-/// frees it under the mediator. An `IoRequest` is a value only an io primitive
-/// builds, so asking for one makes the two readings name disjoint payloads
-/// instead of asking every install to order them.
-///
-/// The bits decide before the payload is touched at all, and the region is taken
-/// before the type is read. A park under other bits belongs to whoever does own
-/// its accounting, and reading its payload is a deref this arm cannot justify —
-/// one whose region may already be gone. `region_of` answers that case with the
-/// generation stamp's stale-read panic; `as_external` would read the freed page,
-/// so it goes second.
-fn io_request_region(
-    heap: &mut crate::value::fiberheap::FiberHeap,
-    parked: Option<(SignalBits, Value)>,
-) -> Option<crate::hir::region::RuntimeRegion> {
-    let (bits, value) = parked?;
-    if !bits.intersects(crate::value::SIG_IO) {
-        return None;
-    }
-    let region = crate::value::arena::region_of(heap, value)?;
-    value
-        .as_external::<crate::io::request::IoRequest>()
-        .is_some()
-        .then_some(region)
 }
 
 #[cfg(test)]

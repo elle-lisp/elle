@@ -62,6 +62,37 @@ impl VM {
         self.fiber.delivery.record_mint(payload);
     }
 
+    /// Record a suspending primitive's park in the delivery ledger — the Call
+    /// and tail Suspend arms here and their JIT twin, which differ only in who
+    /// builds the frame.
+    ///
+    /// Every such park owes its resume value a mint, because the primitive never
+    /// returns. What it owes its payload is the question only this site can
+    /// answer (docs/impl/region/park.md § "A payload the RUNTIME built is
+    /// released by the install that displaces it"). An io op's `IoRequest` is
+    /// one the op built, and no body reference stands on it, so the install that
+    /// displaces it owes a release. The `emit` primitive relaying a child's io
+    /// park parks that same request under the same bits, but as one of its own
+    /// ARGUMENTS, which the body owns; a release there frees the child's
+    /// request under the child. The identity test tells them apart, as it does
+    /// for a raised payload ([`Self::mint_raised_argument_delivery`]).
+    pub(crate) fn park_suspending_primitive(
+        &mut self,
+        bits: SignalBits,
+        payload: Value,
+        args: &[Value],
+    ) {
+        let built = payload
+            .as_external::<crate::io::request::IoRequest>()
+            .is_some()
+            && !args.iter().any(|a| a.bit_identical(payload));
+        if built {
+            self.fiber.delivery.park_request(bits, payload);
+        } else {
+            self.fiber.delivery.park_primitive(bits, payload);
+        }
+    }
+
     /// Handle signal bits returned by a primitive in a Call position.
     ///
     /// Returns `None` to continue the dispatch loop, or `Some(bits)` to
@@ -71,7 +102,7 @@ impl VM {
         &mut self,
         bits: SignalBits,
         value: Value,
-        _args: &[Value],
+        args: &[Value],
         code: &crate::value::Code,
         closure_env: &Rc<Vec<Value>>,
         ip: &mut usize,
@@ -144,8 +175,9 @@ impl VM {
                 // record too: the retain above has no consumer where a boundary
                 // ends the park, and the boundary cannot read the signal slot
                 // for it (§ "A boundary ends a park with no reader and no
-                // install").
-                self.fiber.delivery.park_primitive(bits, value);
+                // install"). An io op's request rides it once more, as the
+                // payload the install that displaces it owes a release.
+                self.park_suspending_primitive(bits, value, args);
                 let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
                 let activation_region_map = self
                     .fiber
@@ -187,7 +219,7 @@ impl VM {
         &mut self,
         bits: SignalBits,
         value: Value,
-        _args: &[Value],
+        args: &[Value],
     ) -> SignalBits {
         if !bits.is_empty() {
             etrace!(
@@ -238,7 +270,7 @@ impl VM {
                 // post-`TailCall` block, whose result release the missing `Return`
                 // mint would have funded. The payload rides the record too (see
                 // the Call-position arm).
-                self.fiber.delivery.park_primitive(bits, value);
+                self.park_suspending_primitive(bits, value, args);
                 self.fiber.signal = Some((bits, value));
                 bits
             }

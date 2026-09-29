@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! `fiber/abort` and `fiber/refuse`: raise an error at a paused fiber's own
 //! suspension point, through one shared injection.
 //!
@@ -36,16 +36,11 @@ fn inject_error_at_suspension(
     // raising at the suspension point displaces it exactly as a resume would
     // (docs/impl/region/park.md § "A payload the
     // RUNTIME built is released by the install that displaces it"). Two parks
-    // are that shape and each has its own reading — a capability denial's
-    // payload by the classifier's record, a yielding io op's `IoRequest` by the
-    // payload's own type — so the two name disjoint payloads and both run. The
-    // io arm goes first because it is the one that READS the parked value to
-    // decide, and the denial arm's release may have been the payload's last.
-    // The resume's `Fresh`-op skip does not travel here: an injected error is
-    // not a delivery, so an error value living in the request's region owes this
+    // are that shape — a capability denial's struct and a yielding io op's
+    // `IoRequest` — and the classifier that built the park recorded the payload
+    // in the ledger. An error value living in the request's region owes this
     // release all the same.
-    crate::vm::fiber::release_displaced_io_request(ctx.heap_mut(), parked);
-    crate::vm::fiber::release_displaced_denial_payload(ctx.heap_mut(), handle);
+    crate::vm::fiber::release_displaced_bodyless_payload(ctx.heap_mut(), handle);
     handle.with_mut(|fiber| {
         fiber.signal = Some((SIG_ERROR, error_value));
         // The park the payload-named records described is over, and the strand
