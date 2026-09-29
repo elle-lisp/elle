@@ -141,6 +141,19 @@ body's call to that callee instead
 (assert (= (fiber/resume early 41) (list :got 41)))   # the call to first-run answers
 ```
 
+The `parameterize` bindings those callee frames made go with them, so the body
+runs on with its own:
+
+```lisp
+(def depth (make-parameter 0))
+(defn bound-raise [] (parameterize ((depth 9)) (+ 1 (get nil :x))))
+(def scoped
+  (fiber/new (fn [] (parameterize ((depth 5)) (list (bound-raise) (depth))))
+             |:error|))
+(fiber/resume scoped)
+(assert (= (fiber/resume scoped 41) (list 41 5)))   # the callee's 9 is gone
+```
+
 An `:error` fiber restarts at the raising call too. When a child's error
 passes its parent, the parent stops at its own `fiber/resume` call, and a
 restart of the parent answers that call.
@@ -160,7 +173,6 @@ nowhere. A `parameterize` that raised binds nothing, so its body runs with
 the bindings around it:
 
 ```lisp
-(def depth (make-parameter 0))
 (def not-a-parameter 42)
 (def unbound
   (fiber/new (fn []
