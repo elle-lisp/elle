@@ -1,4 +1,8 @@
-//! Type conversion primitives
+// audited: 2026-09-29
+//! The type conversion primitives: number to integer or float, string to number, and any value to string.
+//!
+//! docs/types.md
+
 use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -64,12 +68,12 @@ primitive! {
         category: "conversion",
         example: "(string \"count: \" 42) #=> \"count: 42\"",
         aliases: &["any->string", "symbol->string"],
-        // `string` READS its arguments and returns a FRESH string (every path now
+        // `string` READS its arguments and returns a FRESH string (every path
         // allocates in the call's own region — see `prim_to_string_single`); it never
         // STORES an argument. `Mixed` would tell the escape analysis it may store
         // every heap arg (the mutual clique), emitting an arg escape-incref the native
         // never balances — one leaked region per heap arg
-        // (tests/elle/region-string-concat-leak.lisp). `Fresh` is the truthful effect.
+        // (tests/impl/region-string-concat-leak.lisp). `Fresh` is the truthful effect.
         effect: RegionEffect::Fresh,
     }
     "number->string" => prim_number_to_string {

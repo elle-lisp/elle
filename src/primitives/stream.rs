@@ -1,12 +1,13 @@
-//! audited: 2026-09-23
+// audited: 2026-09-29
 //! Stream primitives — yield SIG_IO with IoRequest descriptors.
+//!
+//! docs/io.md
+//! docs/impl/io-inflight.md
 //!
 //! These primitives do not perform I/O themselves. They build an
 //! IoRequest and return (SIG_IO, request), which suspends
 //! the fiber. The scheduler catches SIG_IO and dispatches to a backend.
-//!
-//! docs/io.md
-//! docs/impl/io-inflight.md
+//! `tests/lang/prim-stream.lisp` pins them.
 
 use crate::io::request::{IoRequest, PortOp};
 use crate::port::Port;
@@ -231,8 +232,9 @@ primitive! {
         aliases: &["port/read-line"],
         // Fresh: resumes with the read buffer pre-minted in this call's ctx
         // region (filled in place, `bytes_to_string_in_place` keeps it in-region)
-        // or nil at EOF. Yields → oracle-exempt; guarded by the io-pass solver
-        // test + region-io-effect-pass.lisp.
+        // or nil at EOF. Yields → oracle-exempt; guarded by
+        // `io_yield_pass_tightenings_drop_the_mixed_hard_edge` and
+        // tests/impl/region-io-effect-pass.lisp.
         effect: RegionEffect::Fresh,
     }
     "port/read" => prim_stream_read {
@@ -245,7 +247,8 @@ primitive! {
         aliases: &["stream/read"],
         // Fresh: resumes with the read buffer pre-minted in this call's ctx
         // region (filled in place) or nil at EOF; the `count==0` SIG_OK path
-        // returns fresh empty bytes (oracle-checked). See region-io-effect-pass.lisp.
+        // returns fresh empty bytes (oracle-checked). See
+        // tests/impl/region-io-effect-pass.lisp.
         effect: RegionEffect::Fresh,
     }
     "port/read-exact" => prim_stream_read_exact {
@@ -293,9 +296,10 @@ primitive! {
         // short-circuit returns `Value::int(0)` directly; the io completion
         // returns `Value::int(result_code)`), so the result is always an
         // immediate. `Immediate` records no may-store edges — `port/write`
-        // takes two heap args (port + data) but stores neither, so the `Mixed`
-        // arg clique only leaked the data region per call. Pinned by
-        // region-port-write-effect.lisp (resumed value) and effects.rs
+        // takes two heap args (port + data) but stores neither, so a `Mixed` arg
+        // clique would leak the data region per call. Pinned by
+        // tests/impl/region-port-write-effect.lisp (resumed value) and
+        // src/hir/region/infer/tests/declared.rs
         // `port_write_declares_immediate_no_arg_clique` (no clique). The result
         // side is oracle-checked on the `SIG_OK` empty-write path; the yield
         // path is oracle-exempt.
@@ -313,5 +317,3 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
 }
-
-// Tests migrated to tests/elle/prim-stream.lisp

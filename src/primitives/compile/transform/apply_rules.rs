@@ -1,5 +1,6 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 //! `compile/apply-rules` — the rewrite edit engine driven by rules as data.
+//!
 //! docs/analysis/portrait.md
 
 use std::collections::BTreeMap;
@@ -23,8 +24,8 @@ fn field_int(fields: Fields<'_>, key: &str) -> Option<i64> {
 
 /// `(compile/apply-rules source rules)` → `{:source :count :reports}`.
 ///
-/// docs/analysis/portrait.md § "Rule-driven rewriting" is the
-/// specification; tests/elle/compile-apply-rules.lisp pins it.
+/// docs/analysis/portrait.md is the specification;
+/// tests/lang/compile-apply-rules.lisp pins it.
 pub(crate) fn prim_compile_apply_rules(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],

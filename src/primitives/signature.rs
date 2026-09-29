@@ -1,6 +1,8 @@
-// audited: 2026-09-21
-// The fn/signature primitive: one struct describing how a function is called.
-// docs/functions.md
+// audited: 2026-09-29
+//! The `fn/signature` primitive: one struct describing how a function is called.
+//!
+//! docs/functions.md
+
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -21,8 +23,8 @@ fn arity_shape(arity: Arity, num_params: usize) -> (usize, usize, bool) {
 
 /// (fn/signature f) — the declared shape of a function.
 ///
-/// docs/functions.md § "fn/signature" is the specification; the struct's
-/// field set is pinned by tests/elle/fn-signature.lisp.
+/// docs/functions.md is the specification; the struct's
+/// field set is pinned by tests/lang/fn-signature.lisp.
 pub(crate) fn prim_fn_signature(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],

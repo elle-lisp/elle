@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Thread primitives: `sys/spawn`, `sys/spawn-vm`, `sys/thread-state`,
 //! `sys/thread-id`, and `sys/unique`.
 //!
@@ -139,7 +139,7 @@ static UNIQUE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU
 /// The identity-only alternative to `gensym`: a coordination key (a futex key,
 /// a correlation id) needs uniqueness and hashability, not a name, and an
 /// integer interns nothing into the symbol table.
-/// `tests/elle/sync-keys.lisp` pins that property for the sync constructors.
+/// `tests/impl/sync-keys.lisp` pins that property for the sync constructors.
 pub(crate) fn prim_unique(
     _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     _args: &[Value],

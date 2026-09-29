@@ -1,7 +1,9 @@
-//! Keyword argument extraction helpers for primitives.
+// audited: 2026-09-29
+//! The keyword arguments the I/O primitives take: `:timeout` alone, or the socket options a connect accepts.
 //!
-//! Provides `extract_keyword_timeout` for parsing optional `:timeout ms`
-//! keyword arguments from primitive arg slices.
+//! docs/io.md
+//!
+//! `tests/lang/prim-kwarg.lisp` pins them.
 
 use crate::io::request::SocketOptions;
 use crate::port::Encoding;
@@ -23,7 +25,7 @@ pub(crate) struct ConnectKwargs {
 
 /// Scan args starting at `start` for keyword-value pairs.
 ///
-/// Currently recognizes `:timeout ms` (non-negative integer).
+/// Recognizes only `:timeout ms` (non-negative integer).
 /// Returns `Ok(None)` if `:timeout` is absent.
 /// Returns `Err` on bad keyword, missing value, or bad type.
 pub(crate) fn extract_keyword_timeout(
@@ -109,7 +111,8 @@ pub(crate) fn extract_keyword_timeout(
     Ok(timeout)
 }
 
-/// Extract connect keyword arguments: `:timeout`, `:sndbuf`, `:rcvbuf`, `:nodelay`, `:keepalive`.
+/// Extract connect keyword arguments: `:timeout`, `:sndbuf`, `:rcvbuf`, `:nodelay`,
+/// `:keepalive` and `:encoding`.
 ///
 /// Returns `ConnectKwargs` with parsed socket options.
 pub(crate) fn extract_connect_kwargs(
@@ -299,5 +302,3 @@ fn extract_bool(
         )),
     }
 }
-
-// Tests migrated to tests/elle/prim-kwarg.lisp
