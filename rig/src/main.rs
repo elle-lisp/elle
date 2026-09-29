@@ -1,5 +1,5 @@
 // audited: 2026-09-29
-//! The rig's entry point: read the sidecar and the profile, then run the program through `elle::program`.
+//! The rig's entry point: answer a subcommand, or read the sidecar and the profile and run the program through `elle::program`.
 //!
 //! rig/overview.md
 
@@ -62,6 +62,11 @@ fn program_file(remaining: &[String]) -> Option<&str> {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // elle's subcommands answer here as they do under `elle`, before any rig
+    // flag is read, so a program that runs its own executable runs unchanged.
+    if let Some(code) = elle::program::subcommand(&args) {
+        std::process::exit(code);
+    }
     let rig = RigArgs::split(args).unwrap_or_else(|e| refuse(&e));
     let (mut config, remaining) =
         elle::config::Config::parse(&rig.elle_args).unwrap_or_else(|e| refuse(&e));
