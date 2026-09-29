@@ -1,6 +1,6 @@
 # src
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 Core interpreter and compiler crate. Implements the full Elle pipeline from source to bytecode execution.
 
@@ -19,8 +19,8 @@ Provide the complete Elle implementation:
 | File | Purpose |
 |------|---------|
 | [lib.rs](lib.rs) | Public API exports, crate documentation |
-| [main.rs](main.rs) | CLI entry point (REPL, file execution, and the fmt, lint, lsp, rewrite, test, and semver subcommands) |
-| [program.rs](program.rs) | The run path `elle` and `elle-rig` share (`elle::program`): run a file or a source string, and format a gated exit and an error |
+| [main.rs](main.rs) | CLI entry point: the fmt, lint, lsp, rewrite, image, test and semver subcommands, and a program handed to `elle::program` |
+| [program.rs](program.rs) | The run path `elle` and `elle-rig` share (`elle::program`): one `Runtime` driven from a file, `-e`, stdin or the REPL, with the gated-exit line and the error report |
 | [arithmetic.rs](arithmetic.rs) | Unified arithmetic operations (shared by VM and primitives) |
 | [plugin.rs](plugin.rs) | Dynamic plugin loading for `.so` cdylib crates |
 | [path.rs](path.rs) | UTF-8 path operations (wraps camino, path-clean, pathdiff) |
@@ -89,6 +89,7 @@ Source locations flow through the entire pipeline: Syntax spans → HIR spans �
 ## Dependents
 
 - `main.rs` — CLI entry point
+- `rig/` — `elle-rig`, which runs a program through `elle::program`
 - `repl.rs` — Interactive REPL
 - `tests/` — Comprehensive test suite
 - `plugins/` — Dynamically-loaded plugin crates

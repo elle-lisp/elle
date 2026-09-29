@@ -1,6 +1,12 @@
 # pipeline
 
-Compilation entry points: source text → bytecode or HIR.
+<!-- audited: 2026-09-29 -->
+
+Compilation entry points: source text to bytecode, or to HIR for a reader that wants the analysis alone.
+
+[docs/pipeline.md](../../docs/pipeline.md) owns the entry points: their
+signatures, which VM each expands macros on, the `Expander` each clones, and
+the fixpoint loop.
 
 ## Responsibility
 
@@ -10,7 +16,7 @@ Orchestrate the full compilation pipeline:
 - Analyzer: expanded Syntax → HIR (binding resolution, signal inference)
 - Lowerer: HIR → LIR (register allocation, basic blocks)
 - Emitter: LIR → Bytecode (instruction encoding)
-- VM: Bytecode → Value (execution)
+- VM: Bytecode → Value (the `eval` family only)
 
 Does NOT:
 - Parse source (that's `reader`)
@@ -18,19 +24,6 @@ Does NOT:
 - Analyze bindings (that's `hir`)
 - Generate code (that's `lir` and `compiler`)
 - Execute bytecode (that's `vm`)
-
-## Interface
-
-| Function | Purpose |
-|----------|---------|
-| `compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String>` | Compile a single expression to bytecode. Returns `CompileResult` with bytecode. |
-| `compile_file(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String>` | **PRIMARY FILE ENTRY POINT.** Compile a file as a single synthetic letrec. All top-level forms are analyzed together, enabling mutual recursion. Returns a single `CompileResult`. |
-| `analyze(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<AnalyzeResult, String>` | Analyze a single expression to HIR (no bytecode). Used by linter and LSP. |
-| `analyze_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<AnalyzeResult, String>` | **PRIMARY FILE ENTRY POINT.** Analyze a file as a single synthetic letrec (no bytecode). Used by linter and LSP for file-level analysis. |
-| `eval(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>` | Compile and execute a single expression. Returns the result value. |
-| `eval_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>` | **PRIMARY FILE ENTRY POINT.** Compile and execute a file as a single synthetic letrec. Returns the value of the last expression. |
-| `eval_all(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>` | Convenience wrapper: compiles via `compile_file` (single letrec) then executes. Returns the value of the last form. Used by test helpers. |
-| `eval_syntax(syntax: Syntax, expander: &mut Expander, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>` | Compile and execute a pre-parsed Syntax tree. Used internally by macro expansion. |
 
 ## Data flow
 
@@ -103,45 +96,36 @@ Properties:
 
 ## Dependents
 
-- `main.rs` — CLI file execution uses `eval_file`
-- `primitives/modules.rs` — module loading uses `eval_file`
-- `primitives/module_init.rs` — stdlib loading uses `compile_all` (internal)
-- `lsp/state.rs` — file analysis uses `analyze_file`
-- `lint/cli.rs` — linting uses `analyze_file`
+- `program.rs` — file, stdin and `-e` execution use `compile_file`
+- `primitives/modules.rs` — `import-file` uses `compile_file`
+- `primitives/module_init.rs` — the stdlib load uses `compile_file`
+- `repl/` — each prompt form compiles through `compile_file_repl`
+- `lsp/state.rs` and `lint/cli.rs` — file analysis uses `analyze_file`
 - `tests/common/mod.rs` — test helpers use `eval_all`
 
 ## Invariants
 
 1. **`compile` and `eval` are single-form entry points.** They parse a single
-    expression, expand it, analyze it, and compile/execute it. Used for macro
-    body evaluation. The REPL compiles each form individually via
-    `compile_file` and injects def bindings into the compilation cache
-    between forms.
+   expression, expand it, analyze it, and compile or execute it.
 
-2. **`compile_file`, `analyze_file`, `eval_file` are file-level entry points.**
-    They parse all top-level forms, expand them, classify them, and analyze
-    them as a single synthetic letrec via `Analyzer.analyze_file_letrec`.
-    Used for file execution, module loading, linting, and LSP.
+2. **`compile_file`, `analyze_file` and `eval_file` are file-level entry
+   points.** They parse all top-level forms, expand them, classify them, and
+   analyze them as a single synthetic letrec via
+   `Analyzer.analyze_file_letrec`.
 
 3. **`eval_all` delegates to `compile_file`.** It compiles the source as a
-    single letrec then executes it. Used by test helpers.
+   single letrec, then executes it. Test helpers use it.
 
-4. **`compile_all` is internal (`pub(crate)`).** Used only by `init_stdlib`
-    to compile stdlib forms as independent top-level defs. Not part of the public API.
+4. **Primitives are pre-bound in file-level analysis.** `Analyzer.bind_primitives`
+   wraps the file's letrec in an outer scope containing all registered primitives.
+   This enables compile-time checks (for example, `(set + 42)` is an error) and
+   signal/arity tracking via `Binding` identity.
 
-5. **Primitives are pre-bound in file-level analysis.** `Analyzer.bind_primitives`
-    wraps the file's letrec in an outer scope containing all registered primitives.
-    This enables compile-time checks (e.g., `(set + 42)` is an error) and
-    signal/arity tracking via `Binding` identity.
+5. **File return value is the last expression.** If the last form is a `def`/`var`,
+   the file returns the binding's name. If the last form is a bare expression,
+   the file returns the expression's value. For empty files, the return value
+   is `nil`. Modules return their last expression (typically a closure of exports).
 
-6. **File return value is the last expression.** If the last form is a `def`/`var`,
-    the file returns the binding's name. If the last form is a bare expression,
-    the file returns the expression's value. For empty files, the return value
-    is `nil`. Modules return their last expression (typically a closure of exports).
-
-7. **Macro expansion is cached.** The `cache` module maintains a thread-local
-    `Expander` and `VM` for macro expansion. This avoids re-parsing the prelude
-    and re-initializing the VM on every compilation. Callers access the VM
-    via `with_compilation_cache(|vm, expander, meta| { ... })` — the `RefCell`
-    borrow is held for the duration of the closure, so re-entrancy is caught
-    by the type system (runtime borrow panic) rather than convention.
+6. **Macro expansion runs on the instance's `CompileCtx`.** Its macro VM and a
+   clone of its `Expander`, which already holds the prelude, expand every form,
+   so no compile parses the prelude again (docs/pipeline.md).

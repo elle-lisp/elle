@@ -298,13 +298,14 @@ fn a_running_file_reads_the_jit_setting() {
 }
 
 /// `(vm/config :wasm)` reads the policy keyword, so a running file proves the
-/// sidecar's `wasm` reached the VM.
+/// sidecar's `wasm` reached the VM. `println` shows a keyword without its
+/// colon.
 #[cfg(feature = "wasm")]
 #[test]
 fn a_running_file_reads_the_wasm_policy() {
-    assert_eq!(running(Some("wasm = \"off\"\n"), ":wasm"), ":off");
-    assert_eq!(running(Some("wasm = \"full\"\n"), ":wasm"), ":full");
-    assert_eq!(running(Some("wasm = 5\n"), ":wasm"), ":lazy");
+    assert_eq!(running(Some("wasm = \"off\"\n"), ":wasm"), "off");
+    assert_eq!(running(Some("wasm = \"full\"\n"), ":wasm"), "full");
+    assert_eq!(running(Some("wasm = 5\n"), ":wasm"), "lazy");
 }
 
 #[test]
