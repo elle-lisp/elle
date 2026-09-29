@@ -1,12 +1,15 @@
 (elle/epoch 13)
-# audited: 2026-09-28
-## The transferred-returned-cycle shapes (docs/impl/region/owner.md § "Owner
-## nodes" — "The transferred returned subtree") run soundly on the default
-## baseline: a producer hands an a<->b cycle across the return (or
-## fiber-terminal) frontier and the consumer discards or reads it. On the
-## flag-off baseline the discarded cycles leak (the `returned-cycle` probe in
-## tests/elle/probe/direct.lisp pins the rate); this file pins VALUE
-## correctness and is the guardfree subject for the shapes on both tiers.
+# audited: 2026-09-29
+# A cycle a producer returns across the return or fiber frontier stays whole for a reading consumer and frees nothing live.
+# docs/impl/region/owner.md
+#
+# A producer hands an a<->b cycle across the return (or fiber-terminal)
+# frontier, and the consumer discards or reads it. The transfer cut makes the
+# consuming activation the cycle's owner. The `returned-cycle` probe in
+# tests/impl/probe/direct.lisp pins the reclaim rate; this file pins value
+# correctness. The sidecar arms guardfree, so a release that frees a member a
+# live frame still holds faults at the read.
+
 (defn cyc-mk []
   (let [a @[]
         b @[]]
@@ -22,8 +25,9 @@
     nil)
   (assign n (%add n 1)))
 
-# A READ consumer (refused by the cut's discard gate; must stay correct on
-# the RC baseline): the returned root holds exactly its cycle partner.
+# A READ consumer. The cut's discard gate refuses it, so the cycle stays on
+# per-region reference counting, and the returned root still holds exactly its
+# cycle partner.
 (defn cyc-rd []
   (let [a @[]
         b @[]]
@@ -45,7 +49,7 @@
   (assign k (%add k 1)))
 
 # A parked-then-cancelled consumer fiber calling the producer — the teardown
-# face (the kill frees whatever the parked activation owned, flag-on).
+# face: the kill frees whatever the parked activation owned.
 (defn run-cancel []
   (let [f (fiber/new (fn []
                        (begin

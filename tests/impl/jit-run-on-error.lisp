@@ -1,7 +1,6 @@
 (elle/epoch 13)
 # audited: 2026-09-29
 # An error a closure raises under `compile/run-on :jit` reaches the caller as that error.
-#
 # docs/impl/differential.md
 #
 # Compiled code leaves an `(error …)` through the yield side exit, as it

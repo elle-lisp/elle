@@ -1,7 +1,7 @@
 (elle/epoch 13)
 # audited: 2026-09-29
-# A compiled function whose tail call suspends parks its continuation at the
-# tail call, and the resume runs the block after it (docs/impl/region/park.md).
+# A compiled function whose tail call suspends parks its continuation at the tail call, and the resume runs the block after it.
+# docs/impl/region/park.md
 #
 # The trap: the function's value is right either way. A compiled frame that
 # returns at the tail call instead of parking hands the resume value to its
@@ -10,12 +10,15 @@
 # heap argument of every suspended call stays live. Only a gauge sees that.
 #
 # The counter-factual for the gauge's other side is a block that runs twice, or
-# a park that releases a value its caller still holds. Each face therefore reads
-# its argument after the resume, and `--trace=guardfree` faults on a freed one.
+# a park that releases a value its caller still holds. Each face therefore
+# reads its argument after the resume, and
+# region-jit-tail-suspend-guardfree.lisp runs this file with guardfree armed,
+# which faults on a freed one.
 #
-# The interpreter parks the continuation itself, so the vm tier passes from the
-# start. The jit tier drains its compiles before it measures: the functions
-# below must be compiled when the gauge runs.
+# The interpreter parks the continuation itself. The gauge waits for the JIT's
+# compiles before it measures, so the functions below run compiled in the
+# window. region-jit-tail-suspend-syncjit.lisp runs this file with each
+# function compiled on its first call, on the VM thread.
 
 # ── the compiled tail calls ─────────────────────────────────────────────────
 # Each makes a suspending native call in tail position, with a heap argument

@@ -1,4 +1,7 @@
-//! Behavioral correctness of self-recursion across control-flow boundaries.
+// audited: 2026-09-29
+//! A self-recursive local function recurses as itself across a yield, a tail call, a hand-off as a value, and each entry boundary.
+//!
+//! docs/impl/selfrec.md
 //!
 //! A self-recursive local function must recurse to *itself* — the same body,
 //! carrying its own captured environment — regardless of what boundary the
@@ -15,9 +18,10 @@
 //! neither the leak gauge nor the use-after-free oracle can see it. Only an
 //! assertion on the computed value catches it. Each program below returns a
 //! single integer that is a tight function of correct self-recursion, so a
-//! cross-wired or stale self-reference yields a different integer. The
-//! `tests/elle/recur-after-{yield,tail-call}.lisp` and `recur-as-value.lisp`
-//! corpus files are the cross-tier (VM/JIT) and `--trace=guardfree` peers.
+//! cross-wired or stale self-reference yields a different integer. Every build
+//! runs the language suite's peers, tests/lang/recur-after-yield.lisp,
+//! tests/lang/recur-after-tail-call.lisp and tests/lang/recur-as-value.lisp,
+//! and their `-guardfree` wrappers in tests/impl run them with guardfree armed.
 //!
 //! The recursion bodies use raw `%`-ops. Call-site argument forwarding proves a
 //! function's parameters only when the binding is used exclusively in callee

@@ -1,14 +1,15 @@
 (elle/epoch 13)
 # audited: 2026-09-29
-# ── A process keeps its spawner's denial ──────────────────────────────
+# A process keeps the withheld set of the fiber that spawned it, and its scheduler refuses a denied call.
+# docs/process-scheduler.md
 #
 # `process:spawn`, `spawn-link` and `spawn-monitor` create the new process's
 # fiber in the fiber that calls them, so the process carries that fiber's
 # withheld set. The process scheduler refuses a denied call from a process and
-# from a sub-fiber a process spawns (docs/process-scheduler.md).
+# from a sub-fiber a process spawns.
 #
-# Counterfactual: when the scheduler creates the process fiber itself, from a
-# command naming the closure, the process takes the scheduler's authority and
+# The counter-factual: when the scheduler creates the process fiber itself, from
+# a command naming the closure, the process takes the scheduler's authority and
 # the write lands. A sandbox inside a process escapes through any spawn.
 #
 # Each sandbox here runs inside a process and denies :fs. Its mask names only

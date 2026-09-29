@@ -217,9 +217,6 @@ mod plugins {
 mod runner_budget {
     include!("runner_budget.rs");
 }
-mod dashboards {
-    include!("dashboards.rs");
-}
 mod corpus_targets {
     include!("corpus_targets.rs");
 }

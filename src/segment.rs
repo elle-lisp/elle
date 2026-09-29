@@ -1,4 +1,7 @@
-//! Unicode grapheme segmentation seam.
+// audited: 2026-09-29
+//! Unicode grapheme segmentation: the vendored UAX #29 table generations and the `(unicode! …)` pre-scan.
+//!
+//! docs/strings.md
 //!
 //! String semantics — `length`, `get`, `slice`, iteration — count UAX #29
 //! extended grapheme clusters, so the segmentation tables are part of the
@@ -8,11 +11,11 @@
 //! mid-run table change would corrupt their framing.
 //!
 //! G17 is the crates.io `unicode-segmentation` dependency pinned in
-//! Cargo.toml. G16 is a frozen vendored copy under `segment/g16/`.
+//! Cargo.toml. G16 is a frozen vendored copy under src/segment/g16/.
 //! Rolling the newest generation means bumping the Cargo pin, adding the
 //! previous tables as a new vendored module, extending [`Generation`],
-//! and updating the tests here plus tests/elle/{grapheme,unicode}.lisp
-//! and docs/strings.md.
+//! and updating the tests here, tests/lang/grapheme.lisp,
+//! tests/lang/unicode.lisp and docs/strings.md.
 
 mod g16;
 
@@ -178,7 +181,7 @@ mod tests {
     /// so each generation's table version is part of the language spec.
     /// When this fails, a dependency bump changed the newest tables:
     /// vendor the previous tables as a new generation and update
-    /// Generation, tests/elle/{grapheme,unicode}.lisp, and
+    /// Generation, tests/lang/grapheme.lisp, tests/lang/unicode.lisp and
     /// docs/strings.md together.
     #[test]
     fn newest_matches_dep() {

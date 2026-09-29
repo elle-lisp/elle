@@ -1,6 +1,7 @@
 (elle/epoch 13)
-# audited: 2026-09-28
-# A restart delivers into an error park, and owes what the raise site left unfunded.
+# audited: 2026-09-29
+# A restart delivers into an error park, and owes what the raise site left unfunded: the soundness face.
+# docs/impl/region/park.md
 #
 # A fiber stopped on an error parks just past the raising call. The restart
 # value takes that call's result, and the continuation releases it like any
@@ -8,19 +9,17 @@
 # release of the value. Every other raise — a primitive, an instruction, a
 # callee, a raise in a replayed frame, an injected refusal over a denial park,
 # and a child's error that stops its parent at the parent's `fiber/resume` —
-# produced no result, so the delivery must mint.
-# Without it the continuation releases a reference the resumer still owns,
-# and the value dies under every holder that outlives the restart.
+# produced no result, so the delivery must mint. Without it the continuation
+# releases a reference the resumer still owns, and the value dies under every
+# holder that outlives the restart.
 #
 # Each face restarts with a FRESH string, keeps it in the fiber's result, and
 # compares it against an equal string built afterwards. Where the freed page
 # was recycled the compare fails on any run; where it was not, the read is
-# stale but mapped — so this file is pinned under `--trace=guardfree`
-# (`region_fiber_restart_uaf`), which unmaps the page and faults on it. The
-# `emit` and abort-at-a-yield faces need no delivery mint and are the
-# controls: the same program, one path already funded.
-#
-# docs/impl/region/park.md
+# stale but mapped, so the sidecar arms guardfree, which unmaps the page and
+# faults on it. The `emit` and abort-at-a-yield faces need no delivery mint and
+# are the controls: the same program, one path already funded. The leak face
+# is region-fiber-restart.lisp.
 
 (defn raise-now []
   (+ 100 (error :boom)))

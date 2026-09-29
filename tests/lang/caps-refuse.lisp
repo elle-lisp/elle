@@ -1,6 +1,7 @@
 (elle/epoch 13)
-# audited: 2026-09-28
+# audited: 2026-09-29
 # `fiber/refuse` raises the refusal at a denied child's own call, and the child lives on.
+# docs/signals/capabilities.md
 #
 # A mediator that resumes a denied fiber with an ordinary value tells the
 # child the call SUCCEEDED and returned that value. For agent-written code
@@ -11,18 +12,16 @@
 # where its `protect` catches it. The contract this file pins is that a
 # refusal is not a termination — the child survives and may be refused
 # again — because that is what makes refusal usable in a session that
-# keeps running. `handle_fiber_abort_signal` forces :error only where the
-# child lets the error pass; a refactor that forced it unconditionally would
-# take the whole mechanism away, and every assertion here would still be about
-# a fiber that merely died in the right order.
+# keeps running. A refused child stops :error only where it lets the error
+# pass. The counter-factual stops every refused child :error, and every
+# assertion here would then be about a fiber that merely died in the right
+# order.
 #
 # The trap: this cannot be written against `:deny |:error|`. The child's
 # own `protect` runs primitives that declare `:error`, so denying that bit
 # breaks the recovery path the refusal is delivered into and the fiber
 # stops :error no matter what. `:fs` is the narrow bit a mediator actually
-# withholds (see tests/elle/caps-fs.lisp).
-#
-# docs/signals/capabilities.md
+# withholds (see tests/lang/caps-fs.lisp).
 
 (defn read-plus-100 [p]
   (+ 100 (file/read p)))

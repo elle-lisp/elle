@@ -1,4 +1,7 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-09-29
+//! `classify` answers each signal shape with its action, and `is_suspending` agrees with it on every shape.
+//!
+//! docs/signals/protocol.md
 
 use super::*;
 use crate::value::fiber::{SIG_DEBUG, SIG_IO, SIG_OK, SIG_YIELD};
@@ -72,11 +75,11 @@ fn is_suspending_agrees_with_classify_on_every_shape() {
     // them drifting — and a drift is silent: the tier parks a caller the
     // interpreter would have let return, or vice versa.
     //
-    // COUNTER-FACTUAL: `is_suspending` first read "not empty, not error, not
-    // halt", which sends SIG_QUERY to Suspend where classify sends it to Query.
-    // Under --wasm=full that parked the caller of `vm/config` and
-    // `list-primitives` forever instead of reporting them unsupported
-    // (tests/elle/{trace,unicode,vm}.lisp).
+    // COUNTER-FACTUAL: an `is_suspending` that reads "not empty, not error, not
+    // halt" sends SIG_QUERY to Suspend where classify sends it to Query. The
+    // full-module wasm tier then parks every caller of `vm/config` and
+    // `list-primitives` forever: tests/lang/unicode.lisp, tests/impl/trace.lisp
+    // and tests/impl/vm.lisp each make such a call.
     let user_bit = SignalBits::from_bit(32);
     let shapes = [
         SIG_OK,

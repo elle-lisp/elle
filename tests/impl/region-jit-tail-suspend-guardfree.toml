@@ -1,0 +1,2 @@
+jit = "eager"
+trace = ["syncjit", "guardfree"]
