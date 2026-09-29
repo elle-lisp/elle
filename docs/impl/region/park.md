@@ -81,16 +81,22 @@ symmetric with its unpark; the node and the deferred set a park moves are
   therefore the discharge's on a fiber that never runs again, and the DISPLACING install's
   on one that does: `fiber/resume`'s delivery and `fiber/abort` / `fiber/refuse`'s injected
   error each replace the payload in the slot, and each owes it a release as it does.
-  Which parks are that shape is read two ways, because the bits answer for neither on
-  their own. An io park is a `SIG_IO` park whose payload IS an `IoRequest`, a value only
-  an io primitive builds, and `release_displaced_io_request` releases the region that
-  payload lives in. A denial parks under the WITHHELD capability's bits,
-  which say nothing about who built the payload and are indistinguishable from an
-  `(emit :fs v)` of a body-allocated value — so the classifier records the payload in the
-  ledger (`park_denial`, an uncounted marker compared bit-wise like the mint record) and
-  `release_displaced_denial_payload` releases exactly what the record names, taking it
-  (`take_bodyless`) as the receipt. Both readings run at every install, and neither asks
-  what the other did.
+
+  **Only the site that builds a park knows who built its payload.** The signal slot
+  cannot say. A denial parks under the WITHHELD capability's bits, and an
+  `(emit :fs v)` of a body-allocated value parks under the same bits. An io op parks an
+  `IoRequest` under `SIG_IO`, and a fiber that relays a child's io park with
+  `(emit :io v)` parks the same request under the same bit. That relay is an `Emit`
+  park of a borrowed value: `lower_emit` mints its body reference, and its continuation
+  releases it. So the classifier records a runtime-built payload in the ledger as it
+  parks it: `park_denial` for a denial, and `park_request` for a suspending primitive
+  whose payload is an `IoRequest` and none of the call's arguments. A dynamic
+  `(emit bits v)` is the one suspending primitive that parks an argument. It records
+  `park_primitive`, because its body owns `v` as an `Emit` node's body does. The record
+  is an uncounted marker, compared bit-wise like the mint record.
+  `release_displaced_bodyless_payload` releases exactly what the record names, and takes
+  the record (`take_bodyless`) as the receipt. An install that finds no record releases
+  nothing.
 
   **A shared region exempts no install.** A `Fresh` io op (`port/read`, `accept`) mints
   ONE region for the call and builds both the request and the completion buffer in it,
@@ -115,20 +121,20 @@ symmetric with its unpark; the node and the deferred set a park moves are
   no more. `tests/elle/grpc.lisp`'s `with-server` teardown is the full-scheduler shape,
   and the `region_fiber_abort_io_protect_uaf` fixture the minimal one.
 
-  **The bits collide on one denial, and each reading refuses it on its own.** `:io` is
-  a withheld capability like any other, so a fiber denied `:io` parks under `SIG_IO` and
-  the bit alone hands that one park to both readings, where one reference is owed and
-  not two. Ordering the two calls does not settle it, because the record is written on
-  the fiber that WAS denied and an install can reach a fiber that merely relays the
-  park — the outer fiber of a `protect`ed denial, whose slot holds the same payload and
-  whose ledger holds nothing. There the io arm would find no record to defer to. So the
-  refusal is each reading's own: a denial's payload is a struct and never an
-  `IoRequest`, so the io arm has no claim on it wherever the install lands. Gauged by
-  `tests/elle/region-denial-park.lisp` and `tests/elle/region-io-park.lisp` per install,
-  and by `tests/elle/region-capability-denial-resume-leak.lisp` per denial position;
-  pinned guardfree by `tests/elle/region-denial-park-uaf.lisp` and
-  `tests/elle/region-io-park-uaf.lisp`, whose `:io` witnesses are the collision, direct
-  and relayed.
+  **The record lives on the fiber that parked, and so does the release.** An install
+  can reach a fiber that only passes a park on: the outer fiber of a `protect`ed body,
+  which awaits the inner one through a `FiberResume` frame. Its slot holds the same
+  payload and its ledger holds nothing, so its install releases nothing. The install
+  that reaches the parking fiber runs the release: `fiber/resume` on that fiber, the two
+  `FiberResume` deliveries, or the abort's descent into the inner fiber. A fiber that
+  relays with `(emit :io v)` builds a park of its own, and its record names no
+  runtime-built payload. So one park owes one release, however many fibers stand
+  between it and the scheduler. Gauged by `tests/elle/region-denial-park.lisp` and
+  `tests/elle/region-io-park.lisp` per install, and by
+  `tests/elle/region-capability-denial-resume-leak.lisp` per denial position. Pinned
+  guardfree by `tests/elle/region-denial-park-uaf.lisp` and
+  `tests/elle/region-io-park-uaf.lisp`, whose `protect` witnesses pass a park on, and by
+  `tests/elle/region-io-relay-uaf.lisp`, whose relays raise the request again.
 - **A boundary ends a park with no reader and no install, so it owes both references.** A
   `squelch`/`attune` violation is the third way a park can end, and it is neither of the two
   the rules above are written for. No resumer reads the payload out of `fiber.signal`, so the
@@ -137,9 +143,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   reaching the fiber boundary by the one route out of the driving loop that a boundary cuts.
   And no install replaces the payload in the slot, so a payload the RUNTIME built keeps the
   reference its allocation left besides. The boundary therefore owes two decrefs where each
-  neighbouring seam owes one, and it runs the readings above to tell them apart: the io arm
-  and the denial record for a runtime-built payload, then one further decref for the
-  delivery, which a body-allocated payload owes exactly as an `IoRequest` does. A body's OWN
+  neighbouring seam owes one, and it reads the ledger to tell them apart: the `bodyless`
+  record for a runtime-built payload, then one further decref for the delivery, which a
+  body-allocated payload owes exactly as a runtime-built one does. A body's OWN
   reference is the one thing the boundary does not owe — the abandoned frames' release tables
   name it, and the payload is exempted from those tables only where a fiber's result carries
   it out ([mechanism.md](mechanism.md) § "A squelch boundary abandons frames the same way, so
@@ -160,15 +166,15 @@ symmetric with its unpark; the node and the deferred set a park moves are
   **Two records decide it, because neither answers on its own.** The **ledger** says the
   delivery retain has no reader — a fact only the site that took the retain knows, and one no
   reading of a signal slot recovers, so that site writes the payload beside the retain
-  (`park_primitive` / `park_denial` / `park_emit`, next to the `bodyless` record already
-  there). The **enforcement site** says which park this exit ends, and it must: two sites reach
-  `squelch_violation` through `invoke_closure_jit`, which restores the CALLER's signal before
-  asking the boundary's question and holds the parked one in a local, so a chokepoint reading
-  the slot releases a live caller's value there. Comparing the two bit-wise is what makes the
+  (`park_primitive` / `park_request` / `park_denial` / `park_emit`, next to the
+  `bodyless` record). The **enforcement site** says which park this exit ends, and it
+  must: two sites reach `squelch_violation` through `invoke_closure_jit`, which restores
+  the CALLER's signal before asking the boundary's question and holds the parked one in a
+  local, so a chokepoint reading the slot releases a live caller's value there. Comparing the two bit-wise is what makes the
   release safe without a claim about every route out of a park: a record left over from a park
   some other host ended (`VM::abandon_hosted_park`'s subject) names a payload this exit is not
   looking at, and the next park overwrites it. That is the gate
-  `release_displaced_denial_payload` makes for the same reason, and it is why the ledger's
+  `release_displaced_bodyless_payload` makes for the same reason, and it is why the ledger's
   `assert_consumed` net covers the resume funding alone — a payload-named record needs no
   route-completeness argument. Taking the record is the second receipt, so two boundaries over
   one park release one set of references. Gauged by
@@ -246,9 +252,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   for the parent to mediate — and none can be told from an `Emit` park at the
   delivery, where the frame is already built and, for a tail suspend, was built by a
   driver that never saw the primitive. So the classifier records the shape in the
-  ledger (`Fiber::delivery`, `park_primitive`) and `do_fiber_resume_single` takes it
-  with the parked signal (`take_resume_funding`), minting one `ResumeDelivery` retain
-  on every route into the fiber. What needs no mint is an `Emit` park, whose resume
+  ledger (`Fiber::delivery`: `park_primitive`, `park_request`, `park_denial`) and
+  `do_fiber_resume_single` takes it with the parked signal (`take_resume_funding`),
+  minting one `ResumeDelivery` retain on every route into the fiber. What needs no mint is an `Emit` park, whose resume
   block mints in bytecode (above). Pinned by
   `tests/elle/region-primitive-resume-uaf.lisp`.
 
@@ -364,21 +370,22 @@ symmetric with its unpark; the node and the deferred set a park moves are
   value owes a mint at the delivery. One record carries all three — `Fiber::delivery`
   (`src/value/fiber/delivery.rs`), whose fields are private to its module — so a park
   names its funding through a method or not at all. The park writes are
-  `park_primitive(bits, payload)` (a suspending primitive or io park),
-  `park_denial(bits, payload)` (a capability denial: a primitive park whose payload also
-  has no body reference), `park_emit(bits, payload)` (an `Emit` park, which owes no
-  resume mint), `park_error(site, payload)` (an error park, which owes a resume mint for a
-  `Call` site and none for an `Emit` site, and leaves standing the funding of a denial park
-  recorded for the same payload), `record_mint(payload)` (a raise minted the
-  payload's delivery), `raise_in_park(payload)` (an in-place abort or refusal: the mint
-  is recorded, the displaced payload's records leave with it, and the park keeps its
-  resume funding), and `install_abort(payload)` (an abort that replays a `FiberResume`
+  `park_primitive(bits, payload)` (a suspending primitive whose payload the body owns: a
+  dynamic `emit`), `park_request(bits, payload)` (an io op: a primitive park whose request
+  has no body reference), `park_denial(bits, payload)` (a capability denial: a primitive
+  park whose payload has no body reference either), `park_emit(bits, payload)` (an `Emit`
+  park, which owes no resume mint), `park_error(site, payload)` (an error park, which owes
+  a resume mint for a `Call` site and none for an `Emit` site, and leaves standing the
+  funding of a denial park recorded for the same payload), `record_mint(payload)` (a raise
+  minted the payload's delivery), `raise_in_park(payload)` (an in-place abort or refusal:
+  the mint is recorded, the displaced payload's records leave with it, and the park keeps
+  its resume funding), and `install_abort(payload)` (an abort that replays a `FiberResume`
   chain or finds no park: the mint is recorded and no resume value is owed). The
   consume seams are
   `take_resume_funding()` at each tier's one delivery funnel (`do_fiber_resume_single`,
   the WASM `handle_fiber_resume`), which clears the mint record with the parked signal
   and answers whether to mint the `ResumeDelivery` retain; `take_bodyless()`, run by
-  `release_displaced_denial_payload` at every install that replaces the parked signal —
+  `release_displaced_bodyless_payload` at every install that replaces the parked signal —
   taking is the receipt, so a second install releases nothing; `displace()`, where the
   trampoline's `FiberResume` short-circuit replaces the parked payload without
   delivering it (the unfunded flag survives a displace, because the funnel that consumes
