@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 // Guardfree pins for the fiber frontier: parks, resumes, squelch boundaries and the compiled tier.
 //
 // docs/analysis/testing.md
@@ -231,6 +231,21 @@ fn region_squelch_unwind_uaf() {
 fn region_boundary_park_uaf() {
     run_elle_script_with_args(
         "region-boundary-park-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
+// Guard — a host that refuses a park ends it the way a boundary does, and that
+// release may be the payload's last (docs/impl/region/park.md § "A host that
+// refuses a park ends it the same way"). `compile/run-on :jit` refuses an io
+// park and a yield of a fresh string. A host that reads the payload after it
+// refuses, to describe it in its error, reads a freed page. The corpus run
+// catches that only where the page is reused first, as on macOS. Guardfree
+// faults on it everywhere.
+#[test]
+fn jit_run_on_refused_park_uaf() {
+    run_elle_script_with_args(
+        "jit-run-on-refused-park",
         &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
     );
 }
