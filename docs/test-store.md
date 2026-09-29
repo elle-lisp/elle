@@ -1,6 +1,6 @@
 # The test runner store
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-29 -->
 
 Where `elle test` keeps a run, what every run and result records, and the
 queries that read them back.
@@ -149,8 +149,8 @@ prerequisite.
 
 Per **run** (one `elle test` invocation): wall time, peak RSS, user/sys CPU
 (`getrusage`), the `HEAD` commit, whether the working tree is dirty, a tree hash,
-the worktree the run ran in, the elle build version/profile/host, the boot
-fingerprint (§ The boot fingerprint), the full
+the worktree the run ran in, the elle build version/profile/host, the runner's
+process id, the boot fingerprint (§ The boot fingerprint), the full
 `argv`, the tier set, and the working-tree files that differ from `HEAD` with
 their content hashes (the "hash of changed files").
 
@@ -359,10 +359,11 @@ over `gauge`.
 CREATE TABLE run (                  -- one row per `elle test` invocation
   id INTEGER PRIMARY KEY, started_at TEXT,
   run_key TEXT,                     -- the run's identity across stores; UNIQUE, so an import repeats safely
-  finished_at TEXT,                 -- stamped at completion; NULL = the run was KILLED mid-flight
+  finished_at TEXT,                 -- stamped at completion; NULL = killed, or still running
   git_commit TEXT, git_dirty INT, tree_hash TEXT, worktree TEXT,  -- the code state this run ran against
   boot_fingerprint INT,             -- the binary and the boot sources, hashed
   elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, tiers TEXT,
+  pid INT,                          -- the runner's process on `host`; tells a live run from a killed one
   selection TEXT,                   -- the filter predicate; NULL = full run (the gate)
   n_selected INT,                   -- files + -e forms planned; written at insert
   n_pass INT, n_fail INT, n_skip INT, n_diverge INT, n_timeout INT,  -- aggregated at completion only
@@ -421,7 +422,7 @@ The runner creates
   (`wall_ms`/`max_rss_kb`/`cpu_user_ms`/`cpu_sys_ms`), which are deferred. So a
   resource query is design-only until they land; a `SELECT` of a deferred
   column errors with `no such column`. A session DB written before the
-  code-state, fingerprint or key columns existed gains them by `ALTER TABLE`,
+  code-state, fingerprint, key or pid columns existed gains them by `ALTER TABLE`,
   with NULL for every run recorded until then.
 - `form` is written without `line`, `col` and `session`: a form's location and
   an ad-hoc form's session id are deferred, and each reads NULL. The three
