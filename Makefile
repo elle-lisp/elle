@@ -617,7 +617,7 @@ MLIR_ENV    := LLVM_SYS_220_PREFIX=$(MLIR_PREFIX) \
 # compiling one: `cargo doc` will happily render a call whose signature moved
 # under it. Nothing else builds doctests — `test` passes `--lib` and
 # `--test '*'`, both of which exclude them.
-qa: crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfmt, workspace clippy, rustdoc, doctests
+qa: audit crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfmt, workspace clippy, rustdoc, doctests
 	cargo fmt --check
 	$(MLIR_ENV) cargo clippy --workspace --all-targets --all-features -- -D warnings
 	$(MLIR_ENV) RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items
