@@ -45,6 +45,11 @@ and `wasm` only in a build that carries the WebAssembly backend. A file with no
 sidecar prints the build's defaults: `jit = 10` and `trace = []` in the default
 build.
 
+The rig also answers `elle`'s subcommands — `elle-rig test`, `elle-rig semver`,
+`elle-rig fmt` — through the same library code `elle` calls. A program that runs
+`(elle/executable)` with a subcommand, as the semver tool's tests do, therefore
+runs under the rig unchanged. A subcommand reads no sidecar and no profile.
+
 ## The sidecar
 
 A file configures the rig through a TOML file beside it with the same stem:
@@ -106,5 +111,5 @@ the rig of the `wasm` build twice: under each file's sidecar, then under
 `make elle-rig` builds the rig beside `elle`, against the same features.
 `cargo build --release -p elle-rig` does the same by hand. `make elle-wasm`
 builds both with the `wasm` feature. The rig carries no code of its own beyond
-reading the sidecar: the run path it drives is the library's `elle::program`,
-which `elle` drives too.
+reading the sidecar: the run path and the subcommands it drives are the
+library's `elle::program`, which `elle` drives too.
