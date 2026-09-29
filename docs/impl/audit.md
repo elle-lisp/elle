@@ -1,6 +1,6 @@
 # The audit queue
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-29 -->
 
 Every file carries the day it last met the documentation policy, and the queue
 names what to read next by what a stale file costs.
@@ -75,7 +75,10 @@ all, which is the correct answer for a file whose staleness costs nothing.
 | `scripts/audit --policy` | every file stamped before the policy's own stamp |
 | `scripts/audit --root DIR` | treat DIR as the repository root |
 
-`make audit` runs the first form.
+`make audit` runs the first form, and `make qa` runs `make audit` before its
+other checks. The report and `--next` show the head of the ranked queue and
+exit 0 however long the queue is. A reader that stops early must not fail the
+script, because a failing report fails `make qa`.
 
 `--staged` with no paths reads the staged list from git. Given paths, it checks
 those instead, which is what lets the gate be tested without staging anything.
