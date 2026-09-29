@@ -1,10 +1,9 @@
-// audited: 2026-09-28
-//! Dynamic parameter-frame opcode bodies.
+// audited: 2026-09-29
+//! The `PushParamFrame` opcode body: install a `parameterize` frame of (parameter, value) pairs.
 //!
 //! docs/parameters.md
 //!
-//! Split out of the dispatch match because building a `parameterize` frame is
-//! long enough to obscure the surrounding opcode routing.
+//! It lives outside the dispatch match, which only routes to it.
 
 use super::*;
 
@@ -28,7 +27,7 @@ impl VM {
     /// execution is entirely healthy. Gating the push on it skips a frame
     /// whose balanced pop still runs, and that pop then consumes the frame
     /// below — an enclosing `parameterize`'s, or the fiber's seeded parameter
-    /// baseline (pinned by `tests/elle/param-frame-balance.lisp`).
+    /// baseline (pinned by `tests/lang/param-frame-balance.lisp`).
     #[inline]
     pub(super) fn handle_push_param_frame(&mut self, bc: &[u8], ip: &mut usize) {
         let count = bc[*ip] as usize;

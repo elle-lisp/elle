@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Dispatching a native call: the result region it mints, the pass-through
 //! retain it hands the caller, and the declaration oracle over both.
 //!
@@ -15,21 +15,17 @@ impl VM {
     /// cache), so each execution mints its own fresh physical region —
     /// never cached.
     ///
-    /// `_static_id` is intentionally unused under unoptimized Tofte-Talpin
-    /// (every call result gets its own fresh region, period). It is NOT dead
-    /// code: the slot is the solver's per-call result-region *assignment*,
-    /// carried end-to-end (emitter → bytecode → both dispatch tiers). Region
-    /// **merging** is exactly the feature that makes this
-    /// function resolve `_static_id` to a possibly-*shared* physical region
-    /// instead of always minting fresh. Keep it wired; the `StaticRegion`
-    /// newtype already guards the static-vs-runtime confusion bug
-    /// (`dispatch_native_call`'s doc). Do not "scrub" it as vestigial.
+    /// `_static_id` is unused: every call result gets its own fresh region. The
+    /// slot is still the solver's per-call result-region *assignment*, carried
+    /// end to end (emitter → bytecode → both dispatch tiers), and the
+    /// `StaticRegion` newtype keeps it from being compared with a runtime id
+    /// (`dispatch_native_call`'s doc).
     ///
     /// The mint is **tracked**: the region is minted before the callee runs,
     /// because the callee may allocate its result into it, and a callee that
     /// returns an immediate or a value borrowed from an argument allocates
     /// nothing. The receipt lets the dispatcher return that id to the free list
-    /// (docs/impl/region/model.md § "Physical id recycling"); a call that does
+    /// (docs/impl/region/model.md); a call that does
     /// allocate leaves the id live and the recycle no-ops.
     #[inline]
     pub(crate) fn new_runtime_region_for_call_slot(
@@ -40,9 +36,9 @@ impl VM {
         self.note_region_mint(mint.region(), "call result", Some(_static_id));
         mint
     }
-    /// Close out a call-result mint: return its id to the free list unless the
-    /// call materialized the region (docs/impl/region/model.md § "Physical id
-    /// recycling"). The shared tail of both call dispatchers.
+    /// Close out a call-result mint: return its id to the free list unless the call
+    /// materialized the region (docs/impl/region/model.md). The shared tail of both
+    /// call dispatchers.
     #[inline]
     pub(crate) fn release_unused_call_region(&mut self, mint: RegionMint) {
         self.heap().recycle_unmaterialized_region(mint);
@@ -71,7 +67,7 @@ impl VM {
     /// `StaticRegion` newtype on `region_id` keeps a static slot from being
     /// compared here, where it would never match a freshly minted runtime id and
     /// would leak one region per native call
-    /// (`tests/elle/region-native-result-leak.lisp`).
+    /// (`tests/impl/region-native-result-leak.lisp`).
     pub(crate) fn dispatch_native_call(
         &mut self,
         def: &'static crate::primitives::def::PrimitiveDef,
@@ -108,7 +104,7 @@ impl VM {
             // own is fatal in a spawned worker, whose result region also holds the
             // live reconstructed closure + captures: they would be freed out from
             // under execution when this result's `DecrefValueRegion` drops that
-            // region to 0 (tests/elle/spawn-config-region.lisp).
+            // region to 0 (tests/impl/spawn-config-region.lisp).
             if crate::signals::dispatch::classify(bits, &value)
                 == crate::signals::dispatch::SignalAction::Query
             {
@@ -120,7 +116,7 @@ impl VM {
                 (bits, value)
             }
         };
-        // The declaration oracle (docs/impl/region/effects.md "Native region effects"):
+        // The declaration oracle (docs/impl/region/effects.md):
         // in debug builds, check the declared RegionEffect's result-side
         // claim against where the result actually lives, on every normally-
         // completing native call. A mis-declared primitive panics
@@ -188,15 +184,15 @@ impl VM {
         // retain in-place — necessarily BEFORE releasing the container's reference,
         // or a sole-owned element would be freed under the returned Value
         // (`arena::pop_with_decref`). Retaining again here would double-count (one
-        // leaked region per op — the `raw-pop` oracle probe).
+        // leaked region per op — the `raw-pop` probe in tests/impl/probe/store.lisp).
         // AND EXCEPT a `result_minted` native (`import`, the `compile/*-module`
         // test loaders): its result was produced by compiled code run on this VM,
         // so it left that code through the return convention already carrying the
         // one owed reference the caller's release consumes — and the declarant
         // supplies that reference itself on any path that did not run a thunk
         // (`import`'s plugin-cache retain). Retaining again here is the same
-        // double-count — one stranded region graph per call (the
-        // `import-result` oracle probe).
+        // double-count — one stranded region graph per call (the `import-result`
+        // probe in tests/impl/probe/native.lisp).
         // AND ONLY for a value the native returns as a RESULT. The retain funds
         // the caller's `DecrefValueRegion` on the call result, and that release
         // targets the call result — so a value the native returns as a SIGNAL
@@ -210,8 +206,9 @@ impl VM {
         // caller's result slot, which the handler stamps `nil`. Retaining any of
         // them here strands one region per call — a parked-then-discarded fiber's
         // whole region graph (docs/impl/region/park.md;
-        // the `multi-resume`/`yield-discard` oracle probes), or the emitted value
-        // of every `fiber/emit` (`region-fiber-install-clique-leak.lisp`). This is
+        // the `multi-resume`/`yield-discard` probes in tests/impl/probe/concurrent.lisp),
+        // or the emitted value of every `fiber/emit`
+        // (tests/impl/region-fiber-install-clique-leak.lisp). This is
         // the same exemption the declaration oracle above makes for a
         // signal-carrying return, stated on the accounting side.
         let is_result = crate::signals::dispatch::classify(bits, &value)

@@ -1,6 +1,8 @@
-// audited: 2026-09-19
-//! Rest-parameter collection: the `&` list, the `&keys`/`&named` structs,
-//! and the release a collector takes over from a moved argument.
+// audited: 2026-09-29
+//! Rest-parameter collection: the `&` list, the `&keys`/`&named` structs, and the release a collector takes over.
+//!
+//! docs/impl/region/mechanism.md
+//! docs/named-args.md
 
 use crate::value::Value;
 
@@ -52,9 +54,8 @@ impl VM {
 
     /// Release the moved-in reference of each collected arg on a MOVE call
     /// (`own_params = false`), for every collector kind — `&`, `&keys`, `&named`
-    /// alike (docs/impl/region/mechanism.md § "A collector parameter takes the
-    /// moved reference over itself"; rate pinned by
-    /// `tests/elle/region-collector-arg-move.lisp`). Released ONLY for a value that
+    /// alike (docs/impl/region/mechanism.md; rate pinned by
+    /// `tests/impl/region-collector-arg-move.lisp`). Released ONLY for a value that
     /// appears exactly once across ALL arg positions (`all_args`) — an aliased value
     /// shares one transferred reference a fixed slot / earlier member already
     /// consumes, so a second release would over-free (leak-safe: never mis-free).
@@ -67,9 +68,8 @@ impl VM {
     /// step is linear in the argument count. Counting per rest arg instead —
     /// rescanning `all_args` for each — is quadratic, and every comparison is a
     /// `region_of` page-header walk, so a large `(apply f xs)` in tail position
-    /// pays it in full (`tests/elle/apply-tail-linear.lisp`,
-    /// docs/regions/performance.md § "Passing arguments costs one pass over
-    /// them").
+    /// pays it in full (`tests/impl/apply-tail-linear.lisp`,
+    /// docs/regions/performance.md).
     ///
     /// Counting first and releasing second gives the same answers as
     /// interleaving them. A release here can only FREE regions (its own and
@@ -104,8 +104,8 @@ impl VM {
     ///
     /// This mints a per-value region (see `env_value_region`) and routes
     /// `args_to_struct_static`'s construction into it, so the collected
-    /// `&keys`/`&named` struct is releasable on its own (region-env-leak.lisp
-    /// witness (e) pins this). Returns `None` (with the error already set on the
+    /// `&keys`/`&named` struct is releasable on its own
+    /// (tests/impl/region-env-leak.lisp witness (e) pins this). Returns `None` (with the error already set on the
     /// fiber) on bad keyword args, releasing the now-unused region.
     pub(super) fn collect_struct_in_own_region(
         fiber: &mut crate::value::Fiber,
@@ -125,7 +125,7 @@ impl VM {
         // (docs/impl/region/generations.md). The error is instead set AFTER the
         // alloc-region bracket closes, so it is born in its own durable region
         // (`heap.new_runtime_region()`) — like every other param-binding error
-        // (e.g. `check_arity`) — which survives until the fiber dies.
+        // (for example `check_arity`) — which survives until the fiber dies.
         let built = Self::args_to_struct_static(heap, args, valid_keys, symbols, sr);
         match built {
             Ok(v) => Some(v),
@@ -194,8 +194,7 @@ impl VM {
             // Error-message spelling. The rejected key is one the caller
             // wrote, so it is the instance memo that holds its name — a
             // message built without one names a hash the author has to
-            // decode (docs/impl/symbol.md § "Reading a name, and not reading
-            // one").
+            // decode (docs/impl/symbol.md).
             let spell = || {
                 crate::value::keyword::resolve_keyword_name(symbols, key)
                     .map(|n| format!(":{}", n))

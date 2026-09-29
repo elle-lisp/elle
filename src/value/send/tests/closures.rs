@@ -146,9 +146,8 @@ fn test_send_bundle_patches_closure_value_const_in_lir() {
 fn closure_round_trips_preserving_frame_release_tables() {
     // `frame_release_slots`/`frame_release_regions` are the table an error
     // exit walks to run the releases the abandoned frame still owed
-    // (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
-    // it still owes"). A closure keeps its body across the boundary, so it
-    // keeps that obligation: reconstruct it with empty tables and every
+    // (docs/impl/region/mechanism.md). A closure keeps its body across the
+    // boundary, so it keeps that obligation: reconstruct it with empty tables and every
     // region an erroring worker frame owed is stranded.
     crate::value::arena::with_test_region(|| {
         let heap_ptr = crate::value::arena::leaked_test_heap();

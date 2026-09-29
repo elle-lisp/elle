@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-29
 //! Rebuilding a non-yield-suspended interpreter callee's inner frame, shared by
 //! the interpreter call path and the JIT→interpreter fallback.
 //!
@@ -16,8 +16,8 @@ impl VM {
     /// callee and can suspend must reconstruct that frame, or the callee's state
     /// is lost and resume injects nil as the call's return value. Shared by the
     /// interpreter's `complete_call` and the JIT→interpreter fallback
-    /// (`elle_jit_call`), which otherwise drifted (the JIT twin dropped the
-    /// frame — `tests/elle/fuel-jit-preempt.lisp`).
+    /// (`elle_jit_call`), so the two cannot drift apart
+    /// (`tests/impl/fuel-jit-preempt.lisp` pins the JIT side).
     ///
     /// The `frames.is_empty()` guard leaves a deeper yield's already-parked chain
     /// untouched. `push_resume_value` is false for a fuel pause (the interrupted
