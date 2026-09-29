@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 13)
+# audited: 2026-09-29
 # Structured concurrency inside processes: sub-fibers, the join, select, abort and futex waits, and relayed I/O.
 # lib/process/overview.md
 # docs/process-scheduler.md
@@ -201,6 +201,12 @@
           (cond
             (not (= 0 (bit/and bits 1)))  # SIG_ERROR
              (complete-sub-fiber fiber :error)
+            # A denial the sub-fiber carries from its spawner: refused, as
+            # ev/run's scheduler refuses it.
+            (fiber/denied? fiber)
+              (begin
+                (fiber/refuse fiber (fiber/value fiber))
+                (after-resume fiber pid))
             (not (= 0 (bit/and bits 512)))  # SIG_IO
             (let [id (forward-io (fiber/value fiber))]
               (if (and (array? id) (= (first id) :error))

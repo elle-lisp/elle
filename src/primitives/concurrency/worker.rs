@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! The `sys/spawn` worker: stack sizing, the fresh VM it stands up, and the
 //! completion channel it answers on.
 //!
@@ -120,12 +120,10 @@ pub(super) fn spawn_closure_impl(
     // Moved into the worker thread beside the generation: a worker's stdlib is a
     // stdlib, so it caches too, and it must cache where its parent was told to.
     let stdlib_cache = ctx.stdlib_cache();
-    // Capabilities flow down across a thread, as they do across a fiber
-    // (docs/signals/capabilities.md § Transitivity). The worker runs in a fresh
-    // VM whose root fiber is what the capability gate reads, so without this the
-    // spawned closure runs with an empty withheld set — and a sandboxed fiber
-    // escapes every denial by spawning a thread.
-    let withheld = ctx.vm().fiber.withheld;
+    // The worker takes the calling fiber's withheld set, as a fiber takes its
+    // creator's (docs/signals/capabilities.md). The capability gate reads the
+    // worker VM's root fiber, which starts with nothing withheld.
+    let withheld = ctx.withheld();
 
     // Size the worker's stack to the main thread's (see `worker_stack_size`):
     // the worker compiles arbitrary Elle, and the frontend recurses deep — the

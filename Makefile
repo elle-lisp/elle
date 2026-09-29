@@ -367,7 +367,17 @@ WASM_SKIP := -e eval.lisp -e eval-env.lisp -e wasm-tier-error-signal.lisp
 # fails the gate loud. Divergence is a within-file, cross-tier property, so
 # batching by file does not weaken it, and every batch appends to the one session
 # DB that `--query`/`--summary` read (docs/testing.md § Reading a run).
-CORPUS_BATCH ?= 25
+#
+# macOS gets a smaller batch than everything else; docs/analysis/ci.md § "Corpus
+# batch size" owns the argument. HOST_OS is overridable so that
+# tests/integration/capacity.rs can present a platform the suite is not running
+# on.
+HOST_OS ?= $(shell uname -s)
+ifeq ($(HOST_OS),Darwin)
+  CORPUS_BATCH ?= 10
+else
+  CORPUS_BATCH ?= 25
+endif
 
 # The files are dealt to the batches in hash-of-name order, not alphabetically.
 # Sibling files share a name prefix and a subject, and a subject's files cost
@@ -617,7 +627,7 @@ MLIR_ENV    := LLVM_SYS_220_PREFIX=$(MLIR_PREFIX) \
 # compiling one: `cargo doc` will happily render a call whose signature moved
 # under it. Nothing else builds doctests — `test` passes `--lib` and
 # `--test '*'`, both of which exclude them.
-qa: crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfmt, workspace clippy, rustdoc, doctests
+qa: audit crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfmt, workspace clippy, rustdoc, doctests
 	cargo fmt --check
 	$(MLIR_ENV) cargo clippy --workspace --all-targets --all-features -- -D warnings
 	$(MLIR_ENV) RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items

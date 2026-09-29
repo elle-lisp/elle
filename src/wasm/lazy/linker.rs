@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 //! The tiered linker: host functions for a standalone per-closure module,
 //! with `rt_call` dispatching back into the VM for bytecode callees.
 //!
@@ -66,7 +66,7 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
                 let vm = caller.data().vm;
                 let heap = unsafe { &mut *(*caller.data().vm).heap_ptr };
                 let region = heap.new_runtime_region();
-                let mut ctx = crate::primitives::ctx::NativeCtx::with_region_vm(region, heap, vm);
+                let mut ctx = caller.data().inner.native_ctx(vm, region, heap);
                 let (bits, result) = native_fn(&mut ctx, &args);
                 let (bits, result) = caller.data_mut().inner.maybe_execute_io(bits, result);
                 let (tag, payload) = caller.data_mut().inner.value_to_wasm(result);

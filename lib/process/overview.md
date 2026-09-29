@@ -1,6 +1,6 @@
 # process
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-29 -->
 
 The submodules behind [process.lisp](../process.lisp): the scheduler in four parts, the primitives, and one file per behavior.
 
@@ -28,6 +28,12 @@ closure that takes the parts before it and returns a struct:
 ```text
 core  →  waits (core)  →  commands (core)  →  scheduler (core, waits, commands)
 ```
+
+The scheduler also imports [primitives.lisp](primitives.lisp) for
+`process-fiber`, the fiber each process runs in. The spawn primitives build
+that fiber in the process that calls them, and the scheduler builds the first
+process's fiber in the caller of `start` or `run`. Either way, a process
+withholds what its creator withholds.
 
 Core owns every container the parts share: the process table, the ready and
 waiting queues, the timers, the pending forwarded I/O and the futex parks.

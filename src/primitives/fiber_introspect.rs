@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Fiber introspection and management primitives.
 //!
 //! docs/impl/region/park.md
@@ -11,12 +11,13 @@
 //! - fiber/propagate: Propagate caught signal preserving child chain
 //! - fiber/cancel (cancel): Hard-kill a fiber without unwinding
 //! - fiber/abort (abort): Inject error and resume for graceful unwinding
-//! - fiber?: Type predicate
+//! - fiber/refuse: Raise an error at a paused fiber's own call site
+//! - fiber/caps: The capabilities a fiber still holds
 
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
 use crate::value::fiber::{
-    FiberStatus, SignalBits, SIG_ABORT, SIG_ERROR, SIG_OK, SIG_PROPAGATE, SIG_QUERY, SIG_TERMINAL,
+    FiberStatus, SignalBits, SIG_ABORT, SIG_ERROR, SIG_OK, SIG_PROPAGATE, SIG_TERMINAL,
 };
 use crate::value::types::Arity;
 use crate::value::Value;
@@ -340,22 +341,19 @@ pub(crate) fn prim_fiber_abort(
 /// Returns the active capabilities of the current or specified fiber as a
 /// keyword set. Capabilities are `~withheld & CAP_MASK`.
 ///
-/// 0 args: queries the current fiber via SIG_QUERY.
+/// 0 args: the calling fiber's set, which `ctx` carries on every tier.
 /// 1 arg: reads the specified fiber's withheld field directly.
 pub(crate) fn prim_fiber_caps(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    if args.is_empty() {
-        // 0-arg form: query current fiber via SIG_QUERY
-        return (
-            SIG_QUERY,
-            ctx.pair(Value::keyword("fiber/caps"), Value::NIL),
-        );
-    }
-    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/caps", "fiber");
-
-    let caps = handle.with(|fiber| crate::signals::CAP_MASK.subtract(fiber.withheld));
+    let withheld = if args.is_empty() {
+        ctx.withheld()
+    } else {
+        let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/caps", "fiber");
+        handle.with(|fiber| fiber.withheld)
+    };
+    let caps = crate::signals::CAP_MASK.subtract(withheld);
     let registry = crate::signals::registry::global_registry().lock().unwrap();
     let keywords = registry.bits_to_keywords(caps, ctx.vm().symbols());
     (SIG_OK, ctx.set(keywords.into_iter().collect()))
@@ -444,7 +442,7 @@ primitive! {
         effect: RegionEffect::Opaque,
     }
     "fiber/caps" => prim_fiber_caps {
-        signal: Signal::query_errors(),
+        signal: Signal::errors(),
         arity: Arity::Range(0, 1),
         doc: "Get the fiber's active capabilities as a keyword set",
         params: &["fiber?"],

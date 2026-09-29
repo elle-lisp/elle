@@ -1,6 +1,6 @@
 # WASM Backend
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-29 -->
 
 The WASM backend compiles Elle programs to WebAssembly and runs them under
 Wasmtime, over the same front end the bytecode VM uses.
@@ -204,9 +204,16 @@ non-empty answer denies the call instead of running it.
 
 Four host paths reach a native, and all four ask: `rt_call`,
 `rt_prepare_tail_call`, the `call_primitive` import, and the tiered linker's own
-`rt_call`. The host holds the driving VM (`ElleHost::vm`), so it reads the same
-`fiber.withheld` the interpreter and the JIT read, and it builds the denial
-through the shared `VM::build_denial_payload`.
+`rt_call`. This tier never installs the fiber it drives as `vm.fiber`, so the
+host reads the driven fiber's withheld set off its own stack of driven fibers
+(`DrivenFiber`, [host.rs](../../src/wasm/host.rs)), and reads `vm.fiber` only
+for top-level code. It builds the denial through the shared
+`VM::build_denial_payload`.
+
+The native's `NativeCtx` carries that same set, so a fiber the native creates and
+a thread it spawns inherit the driven fiber's denials, not the top-level fiber's.
+A resume adds the resumer's set to the fiber it drives, as `with_child_fiber`
+does on the VM. [capabilities.md](../signals/capabilities.md) states both rules.
 
 The denial travels back as the call's own signal, classified by the same
 `is_suspending` rule as any other — never by a test on the denied bits. Where
@@ -358,9 +365,11 @@ one — 0.133 interns memory-operation flags per function (see
 
 ## Full-module coverage and its two teardown/lowering invariants
 
-The full-module tier runs the whole corpus under `make smoke-wasm` except
-`eval.lisp`/`eval-env.lisp` (dynamic compilation is not a WASM backend feature —
-`WASM_SKIP` in the Makefile). Two invariants that this tier — and only this tier —
+The full-module tier runs the whole corpus under `make smoke-wasm` except the
+three files `WASM_SKIP` in the Makefile names. `eval.lisp` and `eval-env.lisp`
+need dynamic compilation, which the WASM backend lacks, and
+`wasm-tier-error-signal.lisp` forces the tiered backend, which needs the bytecode
+VM underneath it. Two invariants that this tier — and only this tier —
 must uphold are worth calling out, because each is invisible on the VM/JIT path
 and each is pinned by a specific corpus file run under `--wasm=full`.
 

@@ -1,6 +1,6 @@
 # WASM Backend
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-29 -->
 
 LIR → WASM emission via `wasm-encoder`, execution via Wasmtime.
 
@@ -159,9 +159,12 @@ tests/elle/wasm-protect-suspend.lisp.
 
 **The capability gate.** Every host path that reaches a native — `rt_call`,
 `rt_prepare_tail_call`, the `call_primitive` import, and the tiered linker's own
-`rt_call` — calls `ElleHost::capability_denial` before it runs the primitive, so
+`rt_call` — calls `host::capability_denial` before it runs the primitive, so
 this tier denies a withheld primitive exactly as the interpreter and the JIT do.
-See [wasm.md](../../docs/impl/wasm.md).
+Each path then builds the native's ctx with `ElleHost::native_ctx`, which
+carries the driven fiber's withheld set, so a fiber or thread the native starts
+inherits it. `handle_fiber_resume` adds the resumer's set to the fiber it
+drives. See [wasm.md](../../docs/impl/wasm.md).
 
 **Signal handling in `rt_call`.** `rt_call` intercepts three fiber signals from a
 native call's return: `SIG_RESUME` (`fiber/resume` → `handle_fiber_resume`),
@@ -233,7 +236,8 @@ efficient within a single WASM instance.
 ## What this tier does not do
 
 - `eval` — dynamic module compilation, which no WASM path has. The Makefile's
-  `WASM_SKIP` keeps `eval.lisp`/`eval-env.lisp` out of `make smoke-wasm`.
+  `WASM_SKIP` keeps `eval.lisp`/`eval-env.lisp` out of `make smoke-wasm`, beside
+  `wasm-tier-error-signal.lisp`, which forces the tiered backend.
 - Tiered mode creates a `Store` per cross-closure call
   (`call_precached_closure`), so such a call costs a store setup.
 - `call_primitive` is imported and never called: the module declaration lists

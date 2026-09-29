@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 // docs/impl/wasm.md
 //! Fiber resume chain: drive suspended WASM closures through yield-resume cycles.
 //!
@@ -206,14 +206,19 @@ pub(super) fn handle_fiber_resume(
         }
     };
 
+    // The resumer is the fiber whose body called `fiber/resume`: the driven one
+    // on top of the stack, or `vm.fiber` at top level.
+    let resumer_withheld = caller.data().calling_withheld(caller.data().vm);
     let (closure, resume_value, status, unfunded, withheld) = fiber_handle.with_mut(|fiber| {
         let closure = fiber.closure.clone();
         let resume_value = fiber.signal.take().map(|(_, v)| v).unwrap_or(Value::NIL);
         let status = fiber.status;
-        // Read here, with the fiber already in hand, and push it onto the drive
-        // stack below: the capability gate tests a native call against the
-        // fiber whose body is running, and this tier installs no fiber on the
-        // VM for it to read (`wasm::host::DrivenFiber`).
+        // A resume adds the resumer's withheld set, as `with_child_fiber` does
+        // on the VM. The result is read here, with the fiber already in hand,
+        // and pushed onto the drive stack below: the capability gate tests a
+        // native call against the fiber whose body is running, and this tier
+        // installs no fiber on the VM for it to read (`wasm::host::DrivenFiber`).
+        fiber.withheld |= resumer_withheld;
         let withheld = fiber.withheld;
         // The park's funding travels with the parked signal, taken through the
         // same delivery funnel the VM's fiber driver uses

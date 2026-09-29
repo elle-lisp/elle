@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! `SIG_QUERY` dispatch: the questions a primitive asks the running VM.
 //!
 //! docs/runtime.md
@@ -19,7 +19,6 @@ impl VM {
     /// - (:"doc" . name) — return formatted documentation for a primitive
     /// - (:"global?" . symbol) — always false (no runtime globals exist)
     /// - (:"fiber/self" . _) — return the currently executing fiber, or nil
-    /// - (:"fiber/caps" . _) — the capabilities the current fiber holds, as a set
     /// - (:"list-primitives" . category) — sorted primitive names, all when nil
     /// - (:"primitive-meta" . name) — return struct with primitive metadata
     /// - (:"arena/stats" . nil-or-fiber) — the 8-field stats struct of this
@@ -117,12 +116,6 @@ impl VM {
                 }
             }
             "fiber/self" => (SIG_OK, self.current_fiber_value.unwrap_or(Value::NIL)),
-            "fiber/caps" => {
-                let caps = crate::signals::CAP_MASK.subtract(self.fiber.withheld);
-                let registry = crate::signals::registry::global_registry().lock().unwrap();
-                let keywords = registry.bits_to_keywords(caps, self.symbols());
-                (SIG_OK, ctx.set(keywords.into_iter().collect()))
-            }
             "list-primitives" => {
                 // arg is nil (no filter) or a keyword/string category name
                 let category_filter: Option<String> = if arg.is_nil() {

@@ -1,6 +1,6 @@
 # Processes
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-29 -->
 
 [lib/process.lisp](../lib/process.lisp) provides Erlang-style concurrent
 processes built on Elle's fiber scheduler. Processes have mailboxes, links,
@@ -306,6 +306,7 @@ processes to run.
 | `spawn fn` | Start new process |
 | `spawn-link fn` | Start linked (crash propagation) |
 | `spawn-monitor fn` | Start monitored; returns `[pid ref]` |
+| `process-fiber fn` | The fiber a process runs `fn` in, built in the calling fiber |
 | `send pid msg` | Send message |
 | `recv` | Block until message arrives |
 | `recv-match pred` | Receive first matching message |
