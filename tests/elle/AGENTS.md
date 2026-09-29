@@ -1,6 +1,6 @@
 # tests/elle
 
-<!-- audited: 2026-09-11 -->
+<!-- audited: 2026-09-29 -->
 
 The Elle corpus: one self-contained `.lisp` program per subject, each asserting
 what the language does and exiting non-zero when an assertion fails.
@@ -27,7 +27,7 @@ that says which kind of test a thing wants.
 ## Shape
 
 ```lisp
-(elle/epoch 12)
+(elle/epoch 13)
 # What this file pins, and the trap or counter-factual behind it.
 
 (assert (= (+ 1 2) 3) "addition")
@@ -51,7 +51,7 @@ One file at a time, `elle tests/elle/NAME.lisp` runs it as a plain program.
 
 [tests/integration/elle_scripts.rs](../integration/elle_scripts.rs) pins the
 few files that need a process-global mode the runner cannot vary per file — the
-page-guard oracle, the I/O backend, a backend toggle paired with the adaptive
+page-guard oracle, the JIT's compile schedule, a backend toggle paired with the adaptive
 JIT. A file that needs no such mode does not go there, because the runner
 already runs it under more policies than one subprocess call would.
 
