@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! Pins the configuration: per-instance trace cells, the tier a build starts, the
 //! refused flags and the page size.
 //!
@@ -202,6 +202,7 @@ fn a_removed_flag_is_an_unknown_option() {
         "--anf=off",
         "--no-uring",
         "--stats",
+        "--flip=on",
     ] {
         let err = parse_args(&[flag, "prog.lisp"]).unwrap_err();
         assert!(
