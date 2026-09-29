@@ -1,34 +1,35 @@
-(elle/epoch 12)
-# What a call costs in PAGES — the third heap dimension
-# (docs/impl/region/model.md § "Page recycling"; docs/regions/performance.md
-# § "A call into a variadic stdlib operator allocates").
+(elle/epoch 13)
+# audited: 2026-09-29
+# What a call costs in PAGES, the heap dimension the object and region gauges cannot see.
+# docs/impl/region/model.md
+# docs/regions/performance.md
 #
 # Regions never share pages (Rule 6), so a shape's page count is not its object
 # count: three regions holding one object each own three pages. `arena/count`
-# and `arena/region-count` cannot see that, and a shape can be perfectly
-# leak-free by both and still claim a page on every call. `arena/page-claims`
-# is the gauge for the page dimension — monotonic, never decremented on
-# release, and Immediate, so sampling it allocates nothing and does not perturb
-# the measurement.
+# and `arena/region-count` cannot see that, and a shape can be leak-free by both
+# and still claim a page on every call. `arena/page-claims` is the gauge for the
+# page dimension. It is monotonic, never decremented on release, and Immediate,
+# so sampling it allocates nothing and does not perturb the measurement.
 #
 # Every bound below is a CEILING, so the file is shrink-only: a shape that gets
 # cheaper stays green, and only a shape that claims MORE pages per call than it
 # does today goes red. Three groups:
 #
 #   - the free shapes (0 pages): an intrinsic, a fixed-arity call, and a
-#     variadic call whose rest list is empty. These are exact — a ceiling of
+#     variadic call whose rest list is empty. These are exact: a ceiling of
 #     zero admits nothing.
 #   - the rest-list shapes: a variadic callee collects its rest arguments into
-#     a cons chain, and every cons is born in its own region, which owns a
-#     page. So the count is the number of rest arguments.
+#     a cons chain, and the whole chain is born in one region, which owns a
+#     page. So the count is one, however many rest arguments there are
+#     (docs/impl/region/colocation.md, Construction).
 #   - the stdlib arithmetic wrappers, which are variadic Elle functions with a
-#     `letrec` in the body: the rest conses plus the closure.
+#     `letrec` in the body: the rest list plus the closure.
 #
-# The recycle side of the same contract — that claiming a page costs a
-# free-list pop and no kernel call, that the blank-body debt is paid at release
-# over the bytes the region wrote, and that a cached page keeps the stamp the
-# stale-deref check reads — is pinned in Rust, by `pagepool::tests` and
-# `regionpool::tests::teardown_blanks_the_page_body_and_keeps_the_header`.
+# The recycle side of the same contract is pinned in Rust. A claim is a
+# free-list pop that touches no page byte
+# (`pagepool::tests::claiming_a_recycled_page_touches_no_page_byte`), and a
+# released page keeps the stamp the stale-deref check reads
+# (`regionpool::tests::teardown_returns_a_page_that_still_names_its_region`).
 
 (def window 4000)
 
@@ -52,7 +53,7 @@
   x)
 
 (defn vnop [& xs]
-  "Variadic: the arguments are collected into a rest list, one cons each."
+  "Variadic: the arguments are collected into a rest list, one region for the list."
   xs)
 
 # the gauge-live discriminator ─────────────────────────────────────────────────
@@ -102,14 +103,14 @@
 (at-most fixed-d 0 "a fixed-arity call")
 (at-most cmp-d 0 "(< a b), whose rest list is empty at two arguments")
 
-# rest-list shapes: one page per rest argument.
+# rest-list shapes: one page per rest list.
 (at-most rest1-d 1 "a variadic call with one rest argument")
-(at-most rest2-d 2 "a variadic call with two rest arguments")
+(at-most rest2-d 1 "a variadic call with two rest arguments")
 
-# the arithmetic wrappers: the rest conses plus the body's letrec closure.
-(at-most add2-d 3 "(+ a b)")
-(at-most add3-d 4 "(+ a b c)")
-(at-most mul2-d 3 "(* a b)")
+# the arithmetic wrappers: the rest list plus the body's letrec closure.
+(at-most add2-d 2 "(+ a b)")
+(at-most add3-d 2 "(+ a b c)")
+(at-most mul2-d 2 "(* a b)")
 (at-most sub2-d 2 "(- a b), whose first operand is a fixed parameter")
 
 # The pages a loop claims are RECYCLED, not accumulated: the region dies at the

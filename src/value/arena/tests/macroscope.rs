@@ -1,7 +1,8 @@
-// audited: 2026-09-14
-// What a macro scope's open and close owe each other: the transient region's
-// physical id comes back, and comes back once.
+// audited: 2026-09-29
+// What a macro scope's open and close owe each other: the arena its value mints
+// join, and the physical id that comes back once.
 //
+// docs/impl/region/macroscope.md
 // docs/impl/region/model.md
 
 use super::*;
@@ -24,7 +25,7 @@ fn a_scope_that_wraps_nothing_returns_its_transient_id() {
     // process raises the largest id by one for good.
     let mut heap = FiberHeap::new();
     let scope = begin_macro_scope(&mut heap);
-    let transient = scope.arg_region();
+    let transient = scope.arena();
 
     reclaim_macro_scope(&mut heap, scope);
 
@@ -49,7 +50,7 @@ fn a_scope_that_wrapped_an_argument_books_its_transient_id_once() {
     // sees it.
     let mut heap = FiberHeap::new();
     let scope = begin_macro_scope(&mut heap);
-    let transient = scope.arg_region();
+    let transient = scope.arena();
     alloc_in_region(&mut heap, wrapped(), transient);
 
     reclaim_macro_scope(&mut heap, scope);
@@ -102,12 +103,12 @@ fn a_reissued_transient_carries_an_ordinary_region() {
     // here instead of somewhere far away.
     let mut heap = FiberHeap::new();
     let first = begin_macro_scope(&mut heap);
-    let transient = first.arg_region();
+    let transient = first.arena();
     reclaim_macro_scope(&mut heap, first);
 
     let second = begin_macro_scope(&mut heap);
-    assert_eq!(second.arg_region(), transient, "the id is reissued");
-    let val = alloc_in_region(&mut heap, wrapped(), second.arg_region());
+    assert_eq!(second.arena(), transient, "the id is reissued");
+    let val = alloc_in_region(&mut heap, wrapped(), second.arena());
     assert_eq!(region_of(&heap, val), Some(transient));
 
     reclaim_macro_scope(&mut heap, second);
@@ -115,5 +116,88 @@ fn a_reissued_transient_carries_an_ordinary_region() {
         region_rc(&heap, transient),
         0,
         "the reclaim balances the wrapped argument's own reference",
+    );
+}
+
+#[test]
+fn a_value_mint_inside_the_scope_joins_the_arena() {
+    // An expansion's allocation slots, native call results and environment
+    // values all mint through `new_value_region`. Inside the scope each of them
+    // lands in the one arena, so the close has one region to balance instead of
+    // a page per value.
+    let mut heap = FiberHeap::new();
+    let scope = begin_macro_scope(&mut heap);
+    let arena = scope.arena();
+
+    let first = heap.new_value_region();
+    let second = heap.new_value_region();
+    assert_eq!(
+        first, arena,
+        "a value mint inside the scope joins the arena"
+    );
+    assert_eq!(second, arena, "every value mint joins the same arena");
+
+    reclaim_macro_scope(&mut heap, scope);
+}
+
+#[test]
+fn every_joined_value_lives_until_the_close_frees_the_arena() {
+    // Each join takes a reference its site releases as usual. One site here
+    // releases its own; the other is a tail result the transformer never
+    // releases. The arena keeps both values until the close, which balances
+    // the reference left standing and the scope's own.
+    let mut heap = FiberHeap::new();
+    let scope = begin_macro_scope(&mut heap);
+    let arena = scope.arena();
+
+    let released_at = heap.new_value_region();
+    let released = alloc_in_region(&mut heap, wrapped(), released_at);
+    let returned_at = heap.new_value_region();
+    let returned = alloc_in_region(&mut heap, wrapped(), returned_at);
+    assert_eq!(region_of(&heap, released), Some(arena));
+    assert_eq!(region_of(&heap, returned), Some(arena));
+
+    heap.decref_region(released_at);
+    assert_eq!(
+        region_rc(&heap, arena),
+        2,
+        "the scope's own reference and the unreleased join keep the arena",
+    );
+
+    reclaim_macro_scope(&mut heap, scope);
+    assert_eq!(region_rc(&heap, arena), 0, "the close frees the arena");
+}
+
+#[test]
+fn a_plain_mint_inside_the_scope_stays_fresh() {
+    // A process root, the root region and a code payload region outlive the
+    // expansion, and each mints through `new_runtime_region` directly. None of
+    // them may land in an arena the close frees.
+    let mut heap = FiberHeap::new();
+    let scope = begin_macro_scope(&mut heap);
+    let arena = scope.arena();
+
+    assert_ne!(heap.new_runtime_region(), arena);
+
+    reclaim_macro_scope(&mut heap, scope);
+}
+
+#[test]
+fn a_value_mint_after_the_close_is_fresh() {
+    let mut heap = FiberHeap::new();
+    let scope = begin_macro_scope(&mut heap);
+    let inside = heap.new_value_region();
+    alloc_in_region(&mut heap, wrapped(), inside);
+    reclaim_macro_scope(&mut heap, scope);
+
+    let first = heap.new_value_region();
+    alloc_in_region(&mut heap, wrapped(), first);
+    let second = heap.new_value_region();
+    alloc_in_region(&mut heap, wrapped(), second);
+    assert_ne!(first, second, "no arena outlives its scope");
+    assert_eq!(
+        region_rc(&heap, first),
+        1,
+        "a fresh region holds its birth reference and nothing else",
     );
 }

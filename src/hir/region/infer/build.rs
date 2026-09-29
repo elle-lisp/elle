@@ -1,4 +1,4 @@
-// audited: 2026-09-15
+// audited: 2026-09-29
 //! Assembling `RegionInfo` from the walk's outputs, and marking which of its
 //! fields a later post-pass fills.
 //!
@@ -146,6 +146,9 @@ impl RegionInference {
             // after `region_data` decref_points are final (the seed's
             // coincident-decref_point gate reads them). Empty here.
             merged_parent: HashMap::new(),
+            // Populated by the append seed in `analyze_regions_with`. Empty here.
+            joins: HashMap::new(),
+            join_regions: FxHashSet::default(),
             closure_cycle_members: FxHashSet::default(),
             // Populated by the `region::infer::merge` closure-cycle post-pass in
             // `analyze_regions_with` (the non-member body-tail release sites). Empty here.

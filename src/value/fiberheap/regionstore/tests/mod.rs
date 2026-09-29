@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-29
 // Re-exports what the region store's own scope holds, plus the two fixtures
 // every themed file below builds a region from.
 //
@@ -20,6 +20,7 @@ mod adopt;
 mod edges;
 mod forest;
 mod generations;
+mod join;
 mod recycle;
 mod refcount;
 mod reparent;

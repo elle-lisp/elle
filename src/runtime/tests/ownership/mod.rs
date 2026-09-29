@@ -1,5 +1,7 @@
-//! Runtime tests for the ownership forest, split by cut family. Shared growth
-//! harness + discriminator live here; each submodule holds one family of pins.
+// audited: 2026-09-29
+//! Runtime tests for the ownership forest, one submodule per cut family, and the growth harness they share.
+//!
+//! docs/impl/region/ownership.md
 use super::*;
 
 mod anode;
@@ -11,9 +13,6 @@ mod owner;
 mod selfrec;
 mod subtree;
 
-/// A closure over hand-emitted bytecode, for driving a fiber body no production
-/// lowering can build yet. The zero-arity template wraps the bytecode +
-/// constants exactly as a compiled thunk would.
 /// A child fiber over a body of hand-emitted bytecode, plus its heap value.
 ///
 /// The code object's header and the fiber value are built through one `Alloc`
@@ -123,19 +122,21 @@ pub(super) fn mid_run_discriminator(rt: Runtime, gauge: &str) -> i64 {
 }
 
 /// The built-in live-growth discriminator now that the ownership forest is
-/// unconditional and every reclaimable cycle below reads bounded: a single mutable
-/// `@array` that holds ITSELF (`a ⊇ a`). This is the degenerate mutable self-cycle —
-/// per-region RC cannot collect it (the self-reference keeps the count at 1), and the
-/// forest's cycle cuts do not reclaim it: MERGE needs static-slot members, the
-/// co-owned group free needs a ≥2-member mutual cycle, and no container holds it. So
-/// re-run in the discarded top-level harness it leaks exactly one region per run. A
-/// near-zero SUBJECT growth is real reclamation ONLY beside a positive discriminator
-/// growth (else the gauge is dead and every "bounded" reading void). It is a deliberate
-/// uncollectable shape — the single-region face of the class-8 boundary
-/// (docs/impl memory model § "Closing every residual"); if a future cut reclaims a
-/// self-referential mutable region, this discriminator (and the gauge-live preconditions
-/// that read it) go red, forcing a re-choice.
-pub(super) const LEAK_DISCRIMINATOR: &str = "(begin (let [a (@array)] (%array-push a a) nil) nil)";
+/// unconditional and every reclaimable cycle below reads bounded: an `@array`
+/// holding a fiber whose closure captures the array. Per-region RC cannot collect
+/// the cycle, and no forest cut reclaims one through a fiber, whose region is
+/// never a forest member (docs/impl/region/adopt.md). So re-run in the discarded
+/// top-level harness it leaks every run. A near-zero SUBJECT growth is real
+/// reclamation ONLY beside a positive discriminator growth (else the gauge is dead and every "bounded"
+/// reading void). It is a deliberate uncollectable shape; if a future cut
+/// reclaims it, this discriminator (and the gauge-live preconditions that read
+/// it) go red, forcing a re-choice.
+///
+/// A single `@array` that holds itself is no discriminator: a reference from a
+/// region to itself is counted nowhere (docs/impl/region/rules.md, Rule 5), so
+/// the array frees at its last release.
+pub(super) const LEAK_DISCRIMINATOR: &str =
+    "(begin (let [a (@array)] (%array-push a (fiber/new (fn [] a) 0)) nil) nil)";
 
 /// Per-run live-region growth of [`LEAK_DISCRIMINATOR`] over the shared harness.
 /// Positive by construction — the gauge-live precondition for the bounded subject

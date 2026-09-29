@@ -1,9 +1,9 @@
-// audited: 2026-09-14
+// audited: 2026-09-29
 //! Expands one macro call by running its transformer closure on the VM and
 //! deep-copying the result back to owned `Syntax`.
 //!
 //! docs/macros.md
-//! docs/impl/region/rules.md
+//! docs/impl/region/macroscope.md
 //! docs/impl/region/model.md
 //!
 //! On first invocation, the macro body `(fn (params...) template)` is compiled
@@ -25,7 +25,7 @@
 //! origin identifiers lose it, recovering their use-site scope sets exactly.
 //! A template binder therefore carries the intro scope while inbound
 //! identifiers do not, so under the subset resolution rule the binder cannot
-//! capture them (`tests/integration/macro_hygiene.rs`). `datum->syntax`
+//! capture them (tests/elle/hygiene.lisp). `datum->syntax`
 //! (scope_exempt) opts a node out of both operations — the deliberate-capture
 //! escape hatch.
 //!
@@ -34,7 +34,7 @@
 //! the root FiberHeap via `alloc()` and reclaimed only at teardown
 //! (`release_cached_transformers`). The one-time compilation cost stays resident.
 //! Phase 2 (closure call + result conversion) is a CLOSED ALLOCATION SCOPE
-//! (docs/impl/region/rules.md § "Macro expansion — a closed allocation scope"):
+//! (docs/impl/region/macroscope.md):
 //! a per-call mint log records every region the transformer mints, and after the
 //! result is deep-copied to owned Syntax the scope is reclaimed by balancing each
 //! survivor's unexplained references. The scope also owns the transient region
@@ -64,7 +64,7 @@ use crate::vm::VM;
 /// These are **ordinary mortal allocations** born in the per-expansion transient
 /// `region` the scope mints (docs/impl/region/ctx.md — the region is named
 /// explicitly as an argument). That region is part of the expansion's closed
-/// allocation scope (docs/impl/region/rules.md), so the wrapped args are
+/// allocation scope (docs/impl/region/macroscope.md), so the wrapped args are
 /// reclaimed with the rest of the transformer's scratch once the result is
 /// deep-copied to owned Syntax. Only the heap cases (`String`, compound
 /// `_ => syntax`) take the region; the atom cases are immediates with no region,
@@ -102,12 +102,10 @@ impl Expander {
     ///
     /// The compiled closure lives in a solver-assigned region from the nested
     /// compilation; that region is NEVER freed by dropping the `Value` (`Copy`,
-    /// no `Drop`). Whoever owns the surviving cache entry owns the region —
-    /// which is why prelude/core transformers are pre-compiled ONCE into the
-    /// persistent compilation-cache master (`precompile_transformers`) and
-    /// released at teardown (`release_cached_transformers`), instead of being
-    /// re-compiled into each per-compile `Expander` clone and orphaned when the
-    /// clone drops (the corpus-OOM per-compile leak).
+    /// no `Drop`). Whoever owns the surviving cache entry owns the region. The
+    /// cache cell is an `Rc` every clone of the expander shares, so a transformer
+    /// compiled during one compile serves every later compile of the instance,
+    /// and teardown releases it once (`release_cached_transformers`).
     /// NativeFn allocations inside the body (quasiquote `Value::syntax` wrappers,
     /// string literals) survive as that closure's bytecode constants, so they
     /// must share its region, not a transient one.
@@ -272,8 +270,8 @@ impl Expander {
         // two without tracking provenance through the transformer.
         let intro_scope = self.fresh_intro_scope();
 
-        // Macro expansion is a CLOSED ALLOCATION SCOPE (docs/impl/region/rules.md
-        // § "Macro expansion — a closed allocation scope"): the transformer's
+        // Macro expansion is a CLOSED ALLOCATION SCOPE
+        // (docs/impl/region/macroscope.md): the transformer's
         // entire `Value` output is deep-copied to owned `Syntax` below, so every
         // region it mints — the arg-wrap region, the constructed output tree, and
         // the scratch its constructors discard internally — is dead afterward.
@@ -284,7 +282,7 @@ impl Expander {
         // This expansion's transient arg region: the Rust-side argument wrapping
         // below allocates into it. The scope mints it and the reclaim closes it,
         // so it is covered whether or not anything was wrapped into it.
-        let region_id = scope.arg_region();
+        let region_id = scope.arena();
         // The expansion's heap, reached through the VM's raw `heap_ptr` (a `Copy`
         // pointer that holds no borrow), so the `stamp` closure stays `Fn + Copy`
         // — it captures the pointer, not a `&mut VM` — and the `.map(stamp)` reuse

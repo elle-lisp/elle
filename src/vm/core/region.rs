@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-09-29
 //! Resolving a compiler region slot to the physical region this activation
 //! allocates into, drops, or hands a spliced call.
 //!
@@ -9,6 +9,7 @@ use super::*;
 
 mod abandoned;
 mod dues;
+mod join;
 mod natives;
 
 // Gated where `VM`'s own re-export is, and for the reason given there: the
@@ -18,22 +19,18 @@ pub(crate) use abandoned::FrameLocals;
 
 impl VM {
     /// Record where a just-minted region came from, for `--trace=arena`
-    /// (docs/impl/region/diagnostics.md § "Naming the code that minted a
-    /// region"). `arena/dump` prints it beside the region's tags, so a region a
-    /// residue window reports as retained names the Elle code that made it.
+    /// (docs/impl/region/diagnostics.md). `arena/dump` prints it beside the region's
+    /// tags, so a region a residue window reports as retained names the Elle code that
+    /// made it.
     ///
-    /// The site is the running function and the place it was called from — the
-    /// same two facts a stack-trace line carries, read from the innermost
-    /// `CallFrame`. `what` names the mint kind and, for a mint the compiler
-    /// assigned a slot, that slot: `--dump=regions` on the running function maps
-    /// `rN` back to the allocation node, which the call site alone cannot do
-    /// when a function allocates in several places.
+    /// The site is the running function and the place it was called from — the same
+    /// two facts a stack-trace line carries, read from the innermost `CallFrame`. `kind`
+    /// names the mint and, for a mint the compiler assigned a slot, `slot` names it:
+    /// `--dump=regions` on the running function maps `rN` back to the allocation node,
+    /// which the call site alone cannot do when a function allocates in several places.
     ///
-    /// Off by default and one relaxed atomic load then: the string is built only
-    /// while the bit is set.
-    /// `kind` names the mint; `slot` is the compiler's region slot where the mint
-    /// has one. Nothing is formatted unless the bit is set, so the allocation path
-    /// pays one relaxed atomic load in an ordinary run.
+    /// Off by default: nothing is formatted unless the bit is set, so the allocation
+    /// path pays one relaxed atomic load in an ordinary run.
     #[inline]
     pub(crate) fn note_region_mint(
         &mut self,
@@ -118,7 +115,7 @@ impl VM {
         phys
     }
     /// Resolve a static region slot for an allocation, honoring builder-idiom
-    /// **merging** (docs/impl/region/merging.md § Merging).
+    /// **merging** (docs/impl/region/merging.md).
     ///
     /// For a slot NOT in `merged_slots` this is exactly
     /// [`Self::runtime_region_for_alloc_slot`] — mint a fresh physical region
@@ -155,7 +152,7 @@ impl VM {
     /// `runtime_region_for_alloc_slot_maybe_merged`. The single `DecrefRegion` at the
     /// merged root's `decref_point` clears the slot each loop iteration
     /// (`take_runtime_region_for_drop_slot`), preserving per-iteration uniqueness.
-    /// (docs/impl/region/merging.md § Merging, mint-or-reuse.)
+    /// (docs/impl/region/merging.md, mint-or-reuse.)
     #[inline]
     pub(crate) fn runtime_region_for_merged_alloc_slot(
         &mut self,
@@ -174,7 +171,7 @@ impl VM {
     /// Resolve a static slot to the physical region it currently maps to in this
     /// activation, WITHOUT minting or clearing — the read a closure-cycle
     /// merged-arena tail-call deferred release needs (`TailCall::deferred_release_slot`,
-    /// docs/impl/region/letrec.md § The letrec closure-cycle merge).
+    /// docs/impl/region/letrec.md).
     ///
     /// Unlike [`Self::take_runtime_region_for_drop_slot`] this leaves the mapping
     /// in place: the arena is handed to the completing activation's
@@ -209,8 +206,7 @@ impl VM {
     }
     /// Claim a spliced call's args array — the array the calling convention built
     /// for this call and no binding of the program names
-    /// (docs/impl/region/mechanism.md § "A spliced call's arguments come out of
-    /// an array the convention owns").
+    /// (docs/impl/region/mechanism.md).
     ///
     /// The claim is split from the free ([`Self::release_splice_args`]) because
     /// the two answer to different moments. Taking the slot must happen BEFORE the

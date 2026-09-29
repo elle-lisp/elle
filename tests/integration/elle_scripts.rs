@@ -2,12 +2,14 @@
 // Elle scripts that must run under a PROCESS-GLOBAL runtime mode the `elle test`
 // harness cannot vary per file.
 //
+// docs/testing.md
+// docs/test-runner.md
+//
 // The corpus under tests/elle/ is owned by the agent-first runner (`elle test`,
 // via `make smoke`/`smoke-elle`): it compiles and runs EVERY tests/elle/*.lisp
 // once per JIT policy (`:off`→`vm`, `:eager`→`jit`) plus per-tier divergence for
 // single-form files — strictly more than a one-off `elle FILE` run. So a plain
-// "run this .lisp and assert exit 0" test here is pure duplication; those have
-// been removed (see docs/testing.md, docs/test-runner.md).
+// "run this .lisp and assert exit 0" test here would be pure duplication.
 //
 // What the harness CANNOT do is set a process-global mode for one file: the
 // page-guard UAF oracle (`--trace=guardfree`), the JIT's compile schedule
@@ -59,6 +61,9 @@ fn run_elle_file_with_args(script: &str, extra_args: &[&str]) {
 
 mod captures {
     include!("elle_scripts/captures.rs");
+}
+mod colocation {
+    include!("elle_scripts/colocation.rs");
 }
 mod containers {
     include!("elle_scripts/containers.rs");

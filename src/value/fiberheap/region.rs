@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-29
 //! `FiberHeap` region-allocator surface.
 //!
 //! Everything that allocates into, reference-counts, adopts, or inspects the
@@ -76,22 +76,28 @@ impl FiberHeap {
     /// Mint a fresh **runtime** region id — a real, pages-owning region in the
     /// per-heap `RegionStore`, minted per allocation execution (recycled on
     /// free). The runtime counterpart of a compile-time `new_static_region`
-    /// slot; the two id-spaces are distinct (see docs/impl/region/model.md § id-spaces).
+    /// slot; the two id-spaces are distinct (docs/impl/region/model.md).
     pub fn new_runtime_region(&mut self) -> RuntimeRegion {
         self.region_store.new_runtime_region()
     }
 
-    /// Mint a fresh runtime region id together with the receipt that returns it
-    /// if nothing allocates into it — the mint for a caller that may end without
-    /// materializing its region (docs/impl/region/model.md § "Physical id
-    /// recycling"). Pair with [`Self::recycle_unmaterialized_region`].
+    /// The region a VM value mint allocates into: a fresh region, or the open
+    /// macro scope's arena, joined (docs/impl/region/colocation.md).
+    pub fn new_value_region(&mut self) -> RuntimeRegion {
+        self.new_runtime_region()
+    }
+
+    /// Mint a fresh runtime region id together with the receipt that returns
+    /// it if nothing allocates into it — the mint for a caller that may end
+    /// without materializing its region (docs/impl/region/model.md). Pair with
+    /// [`Self::recycle_unmaterialized_region`].
     pub(crate) fn new_runtime_region_tracked(&mut self) -> RegionMint {
         self.region_store.new_runtime_region_tracked()
     }
 
     /// Return a minted id to the free list if the mint never materialized it.
     /// A no-op when the id names a live region, or when it lived and died since
-    /// the mint (docs/impl/region/model.md § "Physical id recycling").
+    /// the mint (docs/impl/region/model.md).
     pub(crate) fn recycle_unmaterialized_region(&mut self, mint: RegionMint) {
         self.region_store.recycle_unmaterialized(mint);
     }
@@ -118,7 +124,7 @@ impl FiberHeap {
     }
 
     /// Record an outgoing content edge `src → dst` — the mutable-store seam's and
-    /// fiber-signal funnel's hook into the §"The outgoing edge table" recorded table
+    /// fiber-signal funnel's hook into the recorded outgoing edge table
     /// (docs/impl/region/ownership.md). `src` is the container/fiber's region, `dst` the
     /// stored value's; an immediate value (no region, `None`) or absent source is a
     /// no-op, and the reserved/self filter lives in `RegionStore::record_outgoing`.
@@ -142,7 +148,7 @@ impl FiberHeap {
 
     /// Whether a region is currently an Owned forest member — the
     /// `AdoptIntoActivation` handlers' idempotence check (a re-delivered region
-    /// keeps its first owner; docs/impl/region/owner.md § "Owner nodes").
+    /// keeps its first owner; docs/impl/region/owner.md).
     pub fn region_is_owned(&self, id: RuntimeRegion) -> bool {
         self.region_store.region_is_owned(id)
     }
@@ -155,29 +161,28 @@ impl FiberHeap {
         self.region_store.reclaim_root(id)
     }
 
-    /// Link `child`'s region as an Owned member of `parent`'s region's subtree —
-    /// the runtime `AdoptRegion` of the ownership forest (docs/impl/region/ownership.md
-    /// § "Adoption and subtree drop"). Delegates to the region store, which freezes
-    /// the child's RC so it is reclaimed only by `parent`'s subtree drop.
+    /// Link `child`'s region as an Owned member of `parent`'s region's
+    /// subtree — the runtime `AdoptRegion` of the ownership forest
+    /// (docs/impl/region/ownership.md). Delegates to the region store, which freezes the
+    /// child's RC so it is reclaimed only by `parent`'s subtree drop.
     pub fn adopt_region(&mut self, parent: RuntimeRegion, child: RuntimeRegion) {
         self.region_store.adopt_region(parent, child);
     }
 
-    /// Hand every owned child of `from` to `to` — the ownership-transfer primitive
-    /// of the forest (docs/impl/region/ownership.md § "The runtime: a reclamation
-    /// typestate"). Move-only: each child is re-stamped to record `to` as its
-    /// owner, so one set-drop at `to`'s demise reclaims them all.
+    /// Hand every owned child of `from` to `to` — the ownership-transfer primitive of
+    /// the forest (docs/impl/region/ownership.md). Move-only: each child is re-stamped
+    /// to record `to` as its owner, so one set-drop at `to`'s demise reclaims them all.
     pub fn reparent_owned_children(&mut self, from: RuntimeRegion, to: RuntimeRegion) {
         self.region_store.reparent_owned_children(from, to);
     }
 
-    /// Extract `child`'s region from its owner's subtree — the moves-out
-    /// counterpart of `adopt_region` (docs/impl/region/ownership.md § "Adoption and
-    /// subtree drop"). A `moves_out` funnel (`%pop`) removing an element that was
-    /// adopted into its container's Owned subtree calls this so the element — now
-    /// the call's escaping result — is no longer reclaimed by the container's
-    /// subtree drop. Moves `child` from `Owned` to `Counted(1)` (the caller's one
-    /// reference); a `Counted`/absent child is a no-op (the ordinary RC path).
+    /// Extract `child`'s region from its owner's subtree — the moves-out counterpart
+    /// of `adopt_region` (docs/impl/region/ownership.md). A `moves_out` funnel (`%pop`)
+    /// removing an element that was adopted into its container's Owned subtree calls
+    /// this so the element — now the call's escaping result — is no longer reclaimed
+    /// by the container's subtree drop. Moves `child` from `Owned` to `Counted(1)`
+    /// (the caller's one reference); a `Counted`/absent child is a no-op (the ordinary
+    /// RC path).
     pub fn extract_owned_region(&mut self, child: RuntimeRegion) {
         self.region_store.extract_owned_region(child);
     }
@@ -192,8 +197,7 @@ impl FiberHeap {
     }
 
     /// Open a closed-scope mint log around a macro expansion
-    /// (docs/impl/region/rules.md § "Macro expansion — a closed allocation
-    /// scope"). Pair with `reclaim_macro_scope`.
+    /// (docs/impl/region/macroscope.md). Pair with `reclaim_macro_scope`.
     pub fn begin_region_mint_log(&mut self) {
         self.region_store.begin_mint_log();
     }
@@ -206,7 +210,7 @@ impl FiberHeap {
         self.alloc_count -= freed;
     }
 
-    /// Install a hydrated image region (docs/impl/image.md § Hydration):
+    /// Install a hydrated image region (docs/impl/image.md):
     /// adopt the mapped pages, rebuild the object bookkeeping from the index
     /// (`base`-relative offsets), and account the objects like any other
     /// allocation. Returns the minted `Counted` region — rc 1, the caller's
@@ -229,7 +233,7 @@ impl FiberHeap {
     }
 
     /// The page layouts and live objects of one region, for the image dumper
-    /// (docs/impl/image.md § Dumping). `None` for an absent region.
+    /// (docs/impl/image.md). `None` for an absent region.
     pub(crate) fn region_pool(&self, id: RuntimeRegion) -> Option<&super::regionpool::RegionPool> {
         self.region_store.region_pool(id)
     }
@@ -246,8 +250,8 @@ impl FiberHeap {
     }
 
     /// Region id stamped on the page `ptr` points into (0 = no region page),
-    /// with the debug-build stale-deref generation check (docs/impl/region/generations.md
-    /// § "Region generations"). The backend of `arena::region_of`.
+    /// with the debug-build stale-deref generation check
+    /// (docs/impl/region/generations.md). The backend of `arena::region_of`.
     pub fn region_of_ptr(&self, ptr: *const ()) -> u32 {
         self.region_store.region_of_ptr(ptr)
     }
@@ -258,20 +262,19 @@ impl FiberHeap {
     }
 
     /// The recorded outgoing edges of a region as `(target, count)` pairs — the
-    /// test view of the §"The outgoing edge table" recorded table, for the
+    /// test view of the recorded outgoing edge table, for the
     /// mutable-store-seam tests that operate through a `FiberHeap`.
     #[cfg(test)]
     pub fn outgoing_edges(&self, id: RuntimeRegion) -> Vec<(u32, u32)> {
         self.region_store.outgoing_edges(id)
     }
 
-    /// Current generation of a physical region id (docs/impl/region/generations.md
-    /// § "Region generations"). The companion to `region_of_ptr` for the
-    /// uncounted-borrow check: a reference that snapshots `(region, generation)`
-    /// where it is established dangles once this value moves (the region's pages
-    /// were freed since the snapshot). Unlike `region_of_ptr`, this reads no page
-    /// header, so it is safe to call after the borrowed value's region was freed
-    /// — it never derefs the (possibly stale) value.
+    /// Current generation of a physical region id (docs/impl/region/generations.md). The
+    /// companion to `region_of_ptr` for the uncounted-borrow check: a reference that
+    /// snapshots `(region, generation)` where it is established dangles once this value
+    /// moves (the region's pages were freed since the snapshot). Unlike `region_of_ptr`,
+    /// this reads no page header, so it is safe to call after the borrowed value's region
+    /// was freed — it never derefs the (possibly stale) value.
     pub fn generation_raw(&self, id: u32) -> u32 {
         self.region_store.generation_raw(id)
     }
@@ -297,7 +300,7 @@ impl FiberHeap {
     }
 
     /// Entries in this heap's region table — what the table costs resident, in
-    /// slots (docs/impl/region/model.md § "Physical id recycling").
+    /// slots (docs/impl/region/model.md).
     pub fn region_table_len(&self) -> usize {
         self.region_store.region_table_len()
     }
@@ -335,7 +338,7 @@ impl FiberHeap {
 
     /// How many times this heap has freed the region filed under `id` — the
     /// counter that tells one incarnation of a recycled id from the next
-    /// (docs/impl/region/generations.md § "Region generations").
+    /// (docs/impl/region/generations.md).
     ///
     /// Read it beside a region id to record where a value lives, and read it
     /// again later to ask whether that region is still the one it was: a
