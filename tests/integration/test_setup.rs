@@ -1,6 +1,6 @@
 // audited: 2026-09-29
-// The `compile/*-module` queries run a test file's setup module on the calling
-// fiber, and each names itself in the error it raises for that setup.
+// The `compile/*-module` queries run a test setup module on the calling fiber,
+// and each names itself in the error that setup raises.
 //
 // docs/test-runner.md
 

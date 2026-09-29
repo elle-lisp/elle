@@ -1,6 +1,6 @@
 // audited: 2026-09-29
 //! Which suspending primitive parks a payload with no body reference: an io op's
-//! request, which the op built, and never an argument the call was handed.
+//! own request, never an argument the call was handed.
 //!
 //! docs/impl/region/park.md
 
