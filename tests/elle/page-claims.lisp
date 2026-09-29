@@ -14,7 +14,8 @@
 # first call, and the ranking below would read 2 where it must read 5.
 
 (def {:rank rank} ((import-file "tools/pageclaims/rank.lisp")))
-(def {:options options} ((import-file "tools/pageclaims/options.lisp")))
+(def {:options options :commands commands}
+  ((import-file "tools/pageclaims/options.lisp")))
 
 (defn reader [lines]
   "A read-line thunk over LINES: the next line on each call, then nil."
@@ -138,5 +139,27 @@
 (assert (refused? ["--depth" "0"]) "a path has at least one frame")
 (assert (refused? ["--top" "0"]) "at least one path prints")
 (assert (refused? ["--depth"]) "an option with no value is refused")
+
+# ── commands ────────────────────────────────────────────────────────────────
+# The trap: the profiled elle shares the stdlib cache under $TMPDIR with every
+# other elle, and a store by one binary removes the others' files. Profiled
+# against that cache, one program read 4175 page claims on one run and 1729 on
+# the next. So both commands name a cache inside the run's own directory, and
+# the warm-up fills it before callgrind runs.
+
+(def planned (commands given "/scratch"))
+(assert (= (get planned :out) "/scratch/callgrind.out")
+        "callgrind writes into the run's directory")
+(assert (= (get planned :empty) "/scratch/empty.lisp")
+        "the warm-up runs an empty program from the run's directory")
+(assert (= (get planned :warm)
+           ["x/elle" "--cache=/scratch/cache" "/scratch/empty.lisp"])
+        "the warm-up fills the run's own cache, outside callgrind")
+(assert (= (get planned :profile)
+           ["valgrind" "--tool=callgrind" "--dump-instr=no"
+            "--separate-callers12=*add_page*"
+            "--callgrind-out-file=/scratch/callgrind.out" "x/elle"
+            "--cache=/scratch/cache" "test" "--jit=off" "a.lisp"])
+        "the profiled elle reads that cache, and then takes its own arguments")
 
 (println "page-claims: ok")

@@ -7,4 +7,8 @@
   "Stub: every argument belongs to the profiled elle."
   {:depth 0 :top 0 :elle "" :args args})
 
-(fn [] {:options options})
+(defn commands [opts dir]
+  "Stub: plans nothing."
+  {:out "" :empty "" :warm [] :profile []})
+
+(fn [] {:options options :commands commands})
