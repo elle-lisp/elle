@@ -1,4 +1,9 @@
-//! Port primitives — lifecycle management for file descriptors.
+// audited: 2026-09-29
+//! The port primitives: open, close, query and seek the port a file descriptor stands behind.
+//!
+//! docs/io.md
+//!
+//! `tests/lang/prim-ports.lisp` pins them.
 
 use crate::io::request::{IoOp, IoRequest};
 use crate::port::{Direction, Encoding, Port, PortKind};
@@ -141,5 +146,3 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
 }
-
-// Tests migrated to tests/elle/prim-ports.lisp

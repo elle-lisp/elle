@@ -1,11 +1,14 @@
+// audited: 2026-09-29
 //! Unit tests for the JSON serializer's keyword handling.
+//!
+//! docs/impl/symbol.md
 //!
 //! A keyword IS a name hash; the spelling comes from the calling instance's
 //! memo or from the static vocabulary (docs/impl/symbol.md). JSON has no
 //! rendering for a hash — `:0xcbf2…` would read back as a different name — so
 //! a spelling neither source carries is a refusal, and the refusal has to say
 //! which value it could not spell. Everything else in this module is covered
-//! by `tests/elle/prim-json.lisp` and `tests/elle/keyword-spelling.lisp`.
+//! by `tests/lang/prim-json.lisp` and `tests/lang/keyword-spelling.lisp`.
 
 use super::{serialize_value, serialize_value_pretty};
 use crate::symbol::SymbolTable;

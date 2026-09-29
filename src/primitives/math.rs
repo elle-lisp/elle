@@ -1,4 +1,9 @@
+// audited: 2026-09-29
 //! Math primitives: transcendental functions, constants, and IEEE-754 helpers.
+//!
+//! docs/cookbook/primitives.md
+//!
+//! `tests/lang/prim-math.lisp` pins them.
 //!
 //! Handlers split by shape: uniform number→float ops in `unary`, everything
 //! with bespoke argument handling (log/pow/fmod/atan2, constants, f32 bitcasts)
@@ -276,5 +281,3 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
 }
-
-// Tests migrated to tests/elle/prim-math.lisp

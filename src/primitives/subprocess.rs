@@ -1,6 +1,5 @@
-//! audited: 2026-09-17
-//! The process primitives: `sys/*` over this process, and `subprocess/*` over
-//! a child.
+// audited: 2026-09-29
+//! The process primitives: `sys/*` over this process, and `subprocess/*` over a child.
 //!
 //! docs/subprocess.md
 
@@ -275,7 +274,7 @@ primitive! {
         // primitive — a per-call leak. Pinned by
         // `subprocess_exec_declares_opaque_no_arg_clique`
         // (src/hir/region/infer/tests/declared.rs). Yielding, so the
-        // result side is oracle-exempt. (docs/impl/region/effects.md § Opaque.)
+        // result side is oracle-exempt (docs/impl/region/effects.md).
         effect: RegionEffect::Opaque,
     }
     "subprocess/wait" => prim_subprocess_wait {
@@ -327,5 +326,5 @@ primitive! {
     }
 }
 
-// The `sys/*` surface is asserted in tests/elle/prim-subprocess.lisp, and the
-// `subprocess/*` surface in tests/elle/subprocess.lisp.
+// The `sys/*` surface is asserted in tests/lang/prim-subprocess.lisp, and the
+// `subprocess/*` surface in tests/lang/subprocess.lisp.

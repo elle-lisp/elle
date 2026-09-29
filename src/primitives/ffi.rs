@@ -1,4 +1,9 @@
-//! FFI type resolution helpers and tests
+// audited: 2026-09-29
+//! The helpers the FFI primitives share: resolve a type descriptor, and extract a pointer address.
+//!
+//! docs/ffi.md
+//!
+//! `tests/lang/prim-ffi.lisp` pins the primitives built on them.
 
 use crate::ffi::types::TypeDesc;
 use crate::primitives::ctx::NativeCtx;
@@ -85,5 +90,3 @@ pub(crate) fn extract_pointer_addr(
         ),
     ))
 }
-
-// Tests migrated to tests/elle/prim-ffi.lisp
