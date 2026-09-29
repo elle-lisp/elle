@@ -139,7 +139,7 @@ impl VM {
             }
         };
 
-        self.execute_test_setup(ctx, result)
+        self.execute_test_setup(ctx, result, prim)
     }
     /// `(compile/whole-module-syntax forms name)` — like `dispatch_whole_module`,
     /// but compiles from a list of already-parsed syntax values (shipped from
@@ -245,16 +245,17 @@ impl VM {
             }
         };
 
-        self.execute_test_setup(ctx, result)
+        self.execute_test_setup(ctx, result, "compile/whole-module-syntax")
     }
     /// Execute a compiled test-setup module on this VM (preserving the caller's
     /// stack) and return its `[index thunk]` accumulator. Shared by the
     /// source-text (`dispatch_test_module`) and syntax (`dispatch_whole_module_syntax`)
-    /// compile paths.
+    /// compile paths. `prim` names the calling primitive for error messages.
     pub(super) fn execute_test_setup(
         &mut self,
         ctx: &mut crate::primitives::ctx::Alloc,
         result: crate::pipeline::CompileResult,
+        prim: &str,
     ) -> (SignalBits, Value) {
         // The blueprint carries the module body's builder-idiom merge metadata
         // (mint-or-reuse; docs/impl/region/merging.md § Merging) with the rest of
@@ -293,7 +294,7 @@ impl VM {
                     SIG_ERROR,
                     ctx.error(
                         "barrier-error",
-                        format!("compile/whole-module-syntax: unexpected signal {}", other),
+                        format!("{}: unexpected signal {}", prim, other),
                     ),
                 )
             }
