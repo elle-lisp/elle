@@ -1,6 +1,6 @@
 # tests/common
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 Shared test helpers for the Elle test suite.
 
@@ -111,8 +111,10 @@ This is safe because:
 
 | File | Content |
 |------|---------|
-| `mod.rs` | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, the Makefile readers (`make_var`, `make_dry_run`, `make_dry_run_with`, `make_expand`, `makefile`), the suite readers (`repo_root`, `suite`, `suite_files`, `declared_deadline`, `wide_patterns`), the workflow readers (`workflow_files`, `workflow_jobs`, `runs_target`), `paint_stack`, and `ScratchDir` |
-| `documents.rs` | the documents `make doctest` runs (`doctest_documents`) and the documents it must run (`covered_documents`), for `doctest.rs` and `doctest_scope.rs` |
+| [mod.rs](mod.rs) | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, `paint_stack`, and `ScratchDir`; it re-exports the readers of `repo.rs` and `workflows.rs` |
+| [repo.rs](repo.rs) | the Makefile readers (`make_var`, `make_dry_run`, `make_dry_run_with`, `make_expand`, `makefile`) and the suite readers (`repo_root`, `suite`, `suite_files`, `declared_deadline`, `wide_patterns`) |
+| [workflows.rs](workflows.rs) | the workflow readers (`workflow_files`, `workflow_jobs`, `runs_target`) |
+| [documents.rs](documents.rs) | the documents `make doctest` runs (`doctest_documents`) and the documents it must run (`covered_documents`), for `doctest.rs` and `doctest_scope.rs` |
 
 ### Reading the Makefile
 
