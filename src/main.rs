@@ -47,7 +47,7 @@ fn run_file(
         msg
     })?;
 
-    // Strip shebang if present (e.g., #!/usr/bin/env elle)
+    // Strip a shebang line (for example, #!/usr/bin/env elle)
     if contents.starts_with("#!") {
         contents = contents.lines().skip(1).collect::<Vec<_>>().join("\n");
     }
@@ -85,23 +85,60 @@ fn test_runner_source() -> String {
     src
 }
 
+/// Split a subcommand's argv into elle's own flags — `--trace=`, `--boot-image=`
+/// and `--dump=stats`, which configure the VM the subcommand runs on — and the
+/// subcommand's. Each `(flag, n)` in `takes_values` keeps the `n` arguments after
+/// it, whatever they spell.
+pub(crate) fn split_own_flags(
+    args: Vec<String>,
+    takes_values: &[(&str, usize)],
+) -> (Vec<String>, Vec<String>) {
+    let mut own = Vec::new();
+    let mut rest = Vec::new();
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        if let Some((_, n)) = takes_values.iter().find(|(flag, _)| *flag == arg) {
+            rest.push(arg);
+            rest.extend(args.by_ref().take(*n));
+        } else if arg.starts_with("--trace=")
+            || arg.starts_with("--boot-image=")
+            || arg == "--dump=stats"
+        {
+            own.push(arg);
+        } else {
+            rest.push(arg);
+        }
+    }
+    (own, rest)
+}
+
+/// The runner's flags that take values (src/test/main.lisp).
+const RUNNER_VALUE_FLAGS: &[(&str, usize)] = &[
+    ("--db", 1),
+    ("--timeout", 1),
+    ("--wide", 1),
+    ("--wide-timeout", 1),
+    ("--isolate", 1),
+    ("--host", 1),
+    ("--corpus", 1),
+    ("--import", 1),
+    ("--query", 1),
+    ("--promote", 2),
+];
+
 /// `elle test ...` — set up a full VM and run the embedded runner with the
 /// post-`test` arguments exposed to it as the program argv (via `(sys/argv)`).
 /// The runner calls `(os/exit ...)` itself with the gate code; the Ok/Err
 /// mapping here is the fallback if it returns without exiting.
 fn run_test_subcommand(sub_args: Vec<String>) -> i32 {
-    // Split off the global config flags (`--trace=...`, `--boot-image=...`,
-    // `--stats`) so the embedded runner's VM (and the off-VM free-log /
-    // page-claim histogram) honour them; the rest become the runner's argv.
-    // The runner itself does not interpret these, so without this they would
-    // be slurped as corpus file paths. (Runner-owned `--summary`/`--query`/…
-    // stay in `sub_args`.) `--boot-image=` boots this instance from an image,
-    // which is how the corpus is compiled against a hydrated stdlib
-    // (docs/impl/image/boot.md).
-    let (config_flags, sub_args): (Vec<String>, Vec<String>) =
-        sub_args.into_iter().partition(|a| {
-            a.starts_with("--trace=") || a.starts_with("--boot-image=") || a == "--stats"
-        });
+    // Split off elle's own flags (`--trace=...`, `--boot-image=...`,
+    // `--dump=stats`) so the embedded runner's VM (and the off-VM free-log /
+    // page-claim histogram) honour them; the rest become the runner's argv. A
+    // runner flag's value is the runner's even when it spells one of elle's
+    // flags: `--isolate '--trace=scrub'` hands the flag to each child, not to
+    // this VM. `--boot-image=` boots this instance from an image, which is how
+    // a suite is compiled against a hydrated stdlib (docs/impl/image/boot.md).
+    let (config_flags, sub_args) = split_own_flags(sub_args, RUNNER_VALUE_FLAGS);
     let (config, _rest) = elle::config::Config::parse(&config_flags).unwrap_or_else(|e| {
         eprintln!("elle test: {}", e);
         std::process::exit(1);
@@ -300,30 +337,24 @@ fn main() {
 
     // Interpreter mode — needs VM setup
 
-    // --help and --version answer before VM init, so they still answer in a
-    // tree whose stdlib or plugin is broken — which is when somebody asks.
-    //
-    // The scan stops where `Config::parse` stops reading flags: at `--`. Past
-    // it every argument belongs to the program, so a script carries a --help
-    // or a --version of its own the way it already carries a --jit.
-    let own_flags = match args.iter().position(|a| a == "--") {
-        Some(i) => &args[..i],
-        None => &args[..],
-    };
-    if own_flags.iter().any(|a| a == "--help" || a == "-h") {
-        print_help();
-        return;
-    }
-    if own_flags.iter().any(|a| a == "--version") {
-        println!("{}", elle::BANNER);
-        return;
-    }
-
     let (mut config, remaining_args) =
         elle::config::Config::parse(&args[1..]).unwrap_or_else(|e| {
             eprintln!("elle: {}", e);
             std::process::exit(1);
         });
+
+    // --help and --version answer before VM init, so they still answer in a
+    // tree whose stdlib or plugin is broken — which is when somebody asks. They
+    // are elle's only before the program name, where `Config::parse` stops, so a
+    // script carries a --help or a --version of its own.
+    if config.help {
+        print_help();
+        return;
+    }
+    if config.version {
+        println!("{}", elle::BANNER);
+        return;
+    }
 
     // Trap POSIX signals at startup, before any thread spawn. This
     // installs sigaction handlers for TERM/INT/QUIT/HUP (clean exit),
@@ -461,7 +492,7 @@ fn main() {
 
     // Graceful exit on every path: run the principled teardown sweep explicitly
     // (so it happens before any `process::exit`, which would skip `rt`'s Drop)
-    // and surface its observable result under `--stats`.
+    // and surface its observable result under `--dump=stats`.
     let report = rt.teardown();
     if stats {
         eprintln!(

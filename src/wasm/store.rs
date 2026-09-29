@@ -168,18 +168,13 @@ fn hex_name(key: &[u8]) -> String {
 
 /// Create a Wasmtime Engine with tail-call support.
 ///
-/// Cranelift optimizes at `OptLevel::Speed` when the JIT is enabled, and not at
-/// all (`OptLevel::None`, a faster compile) when it is off.
+/// Cranelift optimizes the module at `OptLevel::Speed`. A `wasm` build runs no
+/// JIT, so the JIT's policy has nothing to say about this tier.
 pub fn create_engine() -> Result<Engine> {
     let mut config = Config::new();
     config.wasm_tail_call(true);
     config.wasm_multi_value(true);
-
-    if !crate::config::get().jit_enabled() {
-        config.cranelift_opt_level(OptLevel::None);
-    } else {
-        config.cranelift_opt_level(OptLevel::Speed);
-    }
+    config.cranelift_opt_level(OptLevel::Speed);
 
     // Disk-backed compilation cache: reuses compiled machine code across runs.
     // Keyed on WASM bytecode content, so stdlib compilation is amortized.

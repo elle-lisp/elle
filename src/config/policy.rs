@@ -1,4 +1,7 @@
-//! Compilation policies (JIT, WASM, MLIR) parsed from CLI flags.
+// audited: 2026-09-29
+//! The compilation policies of the three optimizing tiers, and the one each build starts with.
+//!
+//! docs/config.md
 
 // ── JIT policy ────────────────────────────────────────────────────
 
@@ -9,13 +12,26 @@ pub enum JitPolicy {
     Off,
     /// Compile on first call.
     Eager,
-    /// Compile after N calls (default: threshold=10).
+    /// Compile after N calls.
     Adaptive { threshold: usize },
-    /// Defer to an Elle closure stored on the VM (see `vm/config`).
-    Custom,
 }
 
 impl JitPolicy {
+    /// The policy a build starts with: adaptive at ten calls where the JIT is
+    /// the build's tier, and off where the build carries none or another
+    /// (docs/config.md).
+    pub fn build_default() -> Self {
+        if cfg!(all(
+            feature = "jit",
+            not(feature = "mlir"),
+            not(feature = "wasm")
+        )) {
+            JitPolicy::Adaptive { threshold: 10 }
+        } else {
+            JitPolicy::Off
+        }
+    }
+
     /// Whether JIT is enabled at all.
     pub fn enabled(&self) -> bool {
         !matches!(self, JitPolicy::Off)
@@ -28,29 +44,13 @@ impl JitPolicy {
             JitPolicy::Off => usize::MAX,
             JitPolicy::Eager => 0,
             JitPolicy::Adaptive { threshold } => *threshold,
-            JitPolicy::Custom => 0,
         }
     }
 
-    /// Keyword representation for Elle.
-    pub fn keyword(&self) -> &'static str {
-        match self {
-            JitPolicy::Off => "off",
-            JitPolicy::Eager => "eager",
-            JitPolicy::Adaptive { .. } => "adaptive",
-            JitPolicy::Custom => "custom",
-        }
-    }
-
-    /// Parse from a keyword string.
-    pub fn from_keyword(s: &str) -> Option<JitPolicy> {
-        match s {
-            "off" => Some(JitPolicy::Off),
-            "eager" => Some(JitPolicy::Eager),
-            "adaptive" => Some(JitPolicy::Adaptive { threshold: 10 }),
-            "custom" => Some(JitPolicy::Custom),
-            _ => None,
-        }
+    /// What `(vm/config :jit)` reads: nil when off, 0 when eager, the count
+    /// otherwise.
+    pub fn reading(&self) -> Option<usize> {
+        self.enabled().then(|| self.threshold())
     }
 }
 
@@ -68,20 +68,12 @@ pub enum WasmPolicy {
 }
 
 impl WasmPolicy {
+    /// What `(vm/config :wasm)` reads in a `wasm` build.
     pub fn keyword(&self) -> &'static str {
         match self {
             WasmPolicy::Off => "off",
             WasmPolicy::Full => "full",
             WasmPolicy::Lazy { .. } => "lazy",
-        }
-    }
-
-    pub fn from_keyword(s: &str) -> Option<WasmPolicy> {
-        match s {
-            "off" => Some(WasmPolicy::Off),
-            "full" => Some(WasmPolicy::Full),
-            "lazy" => Some(WasmPolicy::Lazy { threshold: 10 }),
-            _ => None,
         }
     }
 }
@@ -90,21 +82,29 @@ impl WasmPolicy {
 
 /// MLIR compilation policy for GPU-eligible functions.
 ///
-/// Independent of the JIT policy. When the `mlir` feature is compiled in,
-/// GPU-eligible functions are compiled through MLIR → LLVM. This policy
-/// controls when that compilation happens. Functions not eligible for
-/// MLIR fall through to the Cranelift JIT regardless.
+/// When the `mlir` feature is compiled in, GPU-eligible functions are compiled
+/// through MLIR → LLVM, and this policy controls when that compilation happens.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MlirPolicy {
-    /// MLIR disabled — GPU-eligible functions fall through to JIT.
+    /// MLIR disabled.
     Off,
     /// Compile on first eligible call.
     Eager,
-    /// Compile after N calls (default: threshold=10).
+    /// Compile after N calls.
     Adaptive { threshold: usize },
 }
 
 impl MlirPolicy {
+    /// The policy a build starts with: adaptive at ten calls where MLIR is the
+    /// build's tier, and off everywhere else (docs/config.md).
+    pub fn build_default() -> Self {
+        if cfg!(all(feature = "mlir", not(feature = "wasm"))) {
+            MlirPolicy::Adaptive { threshold: 10 }
+        } else {
+            MlirPolicy::Off
+        }
+    }
+
     /// Whether MLIR compilation is enabled at all.
     pub fn enabled(&self) -> bool {
         !matches!(self, MlirPolicy::Off)
@@ -120,22 +120,9 @@ impl MlirPolicy {
         }
     }
 
-    /// Keyword representation for Elle.
-    pub fn keyword(&self) -> &'static str {
-        match self {
-            MlirPolicy::Off => "off",
-            MlirPolicy::Eager => "eager",
-            MlirPolicy::Adaptive { .. } => "adaptive",
-        }
-    }
-
-    /// Parse from a keyword string.
-    pub fn from_keyword(s: &str) -> Option<MlirPolicy> {
-        match s {
-            "off" => Some(MlirPolicy::Off),
-            "eager" => Some(MlirPolicy::Eager),
-            "adaptive" => Some(MlirPolicy::Adaptive { threshold: 10 }),
-            _ => None,
-        }
+    /// What `(vm/config :mlir)` reads: nil when off, 0 when eager, the count
+    /// otherwise.
+    pub fn reading(&self) -> Option<usize> {
+        self.enabled().then(|| self.threshold())
     }
 }

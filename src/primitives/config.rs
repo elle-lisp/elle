@@ -1,12 +1,7 @@
-//! `vm/config` primitive for runtime configuration access.
+// audited: 2026-09-29
+//! `vm/config` and `vm/config-set` over the VM's runtime configuration, and the tier predicates.
 //!
-//! Provides Elle-level access to the VM's RuntimeConfig via SIG_QUERY.
-//! - `(vm/config)` — returns the full config as a struct
-//! - `(vm/config :trace)` — returns the trace keyword set
-//! - `(vm/config :jit)` — returns the JIT policy keyword
-//! - `(vm/config :wasm)` — returns the WASM policy keyword
-//! - `(put (vm/config) :trace |:call :signal|)` — sets trace keywords
-//! - `(put (vm/config) :jit :eager)` — sets JIT policy
+//! docs/config.md
 
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
@@ -33,9 +28,7 @@ pub(crate) fn prim_vm_config(
 
 /// `(vm/config-set key value)` — set a runtime configuration field.
 ///
-/// This is the internal setter called from struct `put` dispatch.
-/// The analyzer rewrites `(put (vm/config) :trace ...)` to this.
-/// For now, we use SIG_QUERY for both read and write.
+/// The VM applies it (`handle_vm_config_set`) and raises what it refuses.
 pub(crate) fn prim_vm_config_set(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -102,7 +95,8 @@ primitive! {
         signal: Signal::query_errors(),
         arity: Arity::Range(0, 1),
         doc: "Read runtime configuration. No args returns the full config struct. \
-              Pass a keyword (:trace, :jit, :wasm, :stats) to read a specific field.",
+              Pass a keyword (:jit, :mlir, :trace, :stats, :max-depth, :unicode) to \
+              read one field; a tier threshold reads nil when the tier is off.",
         params: &["key?"],
         category: "meta",
         example: "(vm/config :jit)",
@@ -111,10 +105,12 @@ primitive! {
     "vm/config-set" => prim_vm_config_set {
         signal: Signal::query_errors(),
         arity: Arity::Exact(2),
-        doc: "Set a runtime configuration field. Use (put (vm/config) :key value) instead.",
+        doc: "Set a runtime configuration field: :jit or :mlir to a positive \
+              threshold, :trace to a keyword set, :max-depth to a positive integer. \
+              Raises on a field or a value it refuses.",
         params: &["key", "value"],
         category: "meta",
-        example: "(vm/config-set :jit :eager)",
+        example: "(vm/config-set :trace |:call|)",
         effect: RegionEffect::Fresh,
     }
 }

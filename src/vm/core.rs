@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
 //!
@@ -24,7 +24,7 @@ use std::sync::Arc;
 use crate::jit::{JitCode, JitRejectionInfo};
 
 /// A `jit_cache` entry: the compiled code plus the pin that keeps the keyed
-/// bytecode alive (docs/impl/jit.md § "Cache identity"). The pin makes the
+/// bytecode alive (docs/impl/jit.md). The pin makes the
 /// raw-address key sound: bytecode lives in a code object's payload, and the
 /// pinned code object holds that payload's region, so the address cannot be
 /// reused by a different function while this entry lives.
@@ -63,7 +63,7 @@ pub(crate) struct TailCallInfo {
 
 /// A non-tail call to an interpreted closure, handed from `call_inner` to
 /// `run_dispatch`, which pauses the caller in the fiber and runs the callee on
-/// the same dispatch loop (docs/impl/vm.md § "Non-tail calls").
+/// the same dispatch loop (docs/impl/vm.md).
 pub(crate) struct PendingCall {
     pub code: crate::value::Code,
     pub env: Rc<Vec<Value>>,
@@ -168,12 +168,12 @@ pub struct VM {
     /// the fiber's first resume, the measured-thunk entry, the macro-transformer
     /// call, the FFI callback trampoline, the WASM host's bytecode fallback, and
     /// the spawned-worker body — or the body's `LoadSelf` resolves a
-    /// self-reference to `NIL` (docs/impl/vm.md § The executing-closure
-    /// register; `handle_load_self` debug-asserts the register is populated). A
-    /// `NIL` (untracked) entry is legal only for a body that is not a closure
-    /// instance — a top-level program, module body, or eval'd form. An
-    /// interpreted non-tail call names its callee in `PendingCall` instead. `NIL`
-    /// between calls; never read except by the immediately following entry.
+    /// self-reference to `NIL` (docs/impl/vm.md; `handle_load_self` debug-asserts
+    /// the register is populated). A `NIL` (untracked) entry is legal only for a
+    /// body that is not a closure instance — a top-level program, module body, or
+    /// eval'd form. An interpreted non-tail call names its callee in
+    /// `PendingCall` instead. `NIL` between calls; never read except by the
+    /// immediately following entry.
     pub(crate) pending_entry_closure: Value,
     /// One-shot "the activation about to start takes these releases over", set by
     /// a tail call BUILT in compiled code and taken by the activation that runs
@@ -181,19 +181,18 @@ pub struct VM {
     /// `tail_call_inner` records a deferral on the activation slot it stands in,
     /// which the callee reuses; a compiled caller pops that slot at the tail-call
     /// sentinel, so its deferrals travel here instead
-    /// (docs/impl/region/relocate.md § "A channel built in compiled code hands its
-    /// release forward"). Written only once the pending tail call is set, and every
-    /// sentinel consumer enters the callee through that one entry; empty between
-    /// calls.
+    /// (docs/impl/region/relocate.md). Written only once the pending tail call is
+    /// set, and every sentinel consumer enters the callee through that one entry;
+    /// empty between calls.
     pub(crate) pending_tail_deferrals: Vec<RuntimeRegion>,
     /// One-shot "the caller parks this activation's frame on an error exit", set
     /// immediately before entering a body via `execute_bytecode_saving_stack`,
     /// which takes it (resetting to `false`) at entry. A parked frame is
     /// replayable — the restarts system resumes an `:error` fiber into it — so the
     /// releases it still owes stay owed and the abandoned-frame walk must not run
-    /// them (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
-    /// it still owes"). `do_fiber_first_resume` is the one entrant that parks an
-    /// error frame; taken at entry, so the frames that body CALLS still walk.
+    /// them (docs/impl/region/mechanism.md). `do_fiber_first_resume` is the one
+    /// entrant that parks an error frame; taken at entry, so the frames that body
+    /// CALLS still walk.
     pub(crate) pending_error_park: bool,
     /// One-shot parent-wiring override for the next `with_child_fiber`.
     /// Set by the trampoline descent in `do_fiber_resume` from
@@ -213,7 +212,7 @@ pub struct VM {
     pub(crate) root_exit_depth: usize,
     /// The instruction the interpreter is executing, as `--trace=arena` reports
     /// it: the running function's name and the source location of the
-    /// instruction itself (docs/impl/region/diagnostics.md § `--trace=arena`).
+    /// instruction itself (docs/impl/region/diagnostics.md).
     ///
     /// Written only while that trace bit is set — the dispatch loop reads the
     /// bit once per frame into a local, so an ordinary run pays one predictable
@@ -246,7 +245,7 @@ pub struct VM {
     /// own `exit`, on a VM with the trap unset, still terminates the process).
     pub(crate) exit_trapped: bool,
     /// JIT code cache: bytecode pointer → pinned entry (see `JitCacheEntry`
-    /// and docs/impl/jit.md § "Cache identity"). Write through
+    /// and docs/impl/jit.md). Write through
     /// `install_jit_code`; read through `jit_code_for`.
     #[cfg(feature = "jit")]
     pub jit_cache: FxHashMap<*const u8, JitCacheEntry>,
@@ -255,7 +254,7 @@ pub struct VM {
     pub(crate) jit_worker: Option<crate::jit::worker::JitWorker>,
     /// Compilations in flight on the worker, keyed by bytecode address. The
     /// value pins the keyed allocation from submission until the result
-    /// installs (docs/impl/jit.md § "Cache identity"); the pin then moves
+    /// installs (docs/impl/jit.md); the pin then moves
     /// into `jit_cache` or `jit_rejections`.
     #[cfg(feature = "jit")]
     pub(crate) jit_pending: FxHashMap<usize, crate::value::ClosureTemplate>,
@@ -264,7 +263,7 @@ pub struct VM {
     pub docs: HashMap<String, Doc>,
     /// JIT rejection log: bytecode pointer → rejection info.
     /// Records first rejection per closure template. Used by
-    /// `(jit/rejections)` primitive and `--stats` CLI flag.
+    /// `(jit/rejections)` primitive and `--dump=stats`.
     #[cfg(feature = "jit")]
     pub jit_rejections: FxHashMap<*const u8, JitRejectionInfo>,
     /// Per-template count of background JIT compilations submitted.
@@ -294,7 +293,7 @@ pub struct VM {
     #[cfg(feature = "wasm")]
     pub(crate) wasm_rejections: FxHashMap<*const u8, ()>,
     /// Whether MLIR compilation is enabled (runtime gate).
-    /// Controlled by `--mlir=` CLI flag and `(vm/config-set :mlir ...)`.
+    /// Set at construction from the MLIR policy the run starts with.
     #[cfg(feature = "mlir")]
     pub(crate) mlir_enabled: bool,
     /// MLIR compilation cache for GPU-eligible functions.
@@ -393,8 +392,9 @@ impl VM {
         self.gated_exit_reason.take()
     }
 
-    /// Record a closure call and return whether it's "hot" (called N+ times,
-    /// where N is `jit_hotness_threshold`, default 10, set via `--jit=N`).
+    /// Record a closure call and return whether it is hot: called at least the
+    /// JIT threshold's number of times (ten by default; `(vm/config-set :jit N)`
+    /// sets it).
     pub fn record_closure_call(&mut self, bytecode_ptr: *const u8) -> bool {
         let count = self.closure_call_counts.entry(bytecode_ptr).or_insert(0);
         *count += 1;
@@ -436,8 +436,7 @@ impl VM {
 
     /// The operand depth the last root body left at its exit. The stack
     /// `execute_code` hands back cannot show it, because the body ran on a
-    /// stack of its own (docs/impl/vm.md § "Every body starts on an empty
-    /// operand stack").
+    /// stack of its own (docs/impl/vm.md).
     pub fn root_exit_depth(&self) -> usize {
         self.root_exit_depth
     }

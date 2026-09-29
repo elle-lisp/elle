@@ -23,6 +23,10 @@ impl VM {
     }
 
     /// Handle `(vm/config)` read — returns config struct or specific field.
+    ///
+    /// A tier threshold reads nil when the tier is off, 0 when it compiles on
+    /// the first call, and the count otherwise. `:wasm` exists only in a build
+    /// that carries the WebAssembly backend (docs/config.md).
     pub(super) fn dispatch_vm_config_read(
         &self,
         ctx: &mut crate::primitives::ctx::Alloc,
@@ -31,59 +35,36 @@ impl VM {
         use crate::value::TableKey;
         use std::collections::BTreeMap;
 
-        let rc = &self.runtime_config;
+        const FIELDS: &[&str] = &[
+            "jit",
+            "mlir",
+            #[cfg(feature = "wasm")]
+            "wasm",
+            "trace",
+            "stats",
+            "debug-bytecode",
+            "unicode",
+            "max-depth",
+        ];
 
         if arg.is_nil() {
-            // Full config struct
             let mut map = BTreeMap::new();
-            map.insert(
-                TableKey::from_value(&Value::keyword("jit")).unwrap(),
-                Value::keyword(rc.jit.keyword()),
-            );
-            map.insert(
-                TableKey::from_value(&Value::keyword("wasm")).unwrap(),
-                Value::keyword(rc.wasm.keyword()),
-            );
-            map.insert(
-                TableKey::from_value(&Value::keyword("mlir")).unwrap(),
-                Value::keyword(rc.mlir.keyword()),
-            );
-            map.insert(
-                TableKey::from_value(&Value::keyword("trace")).unwrap(),
-                self.trace_keywords(ctx),
-            );
-            map.insert(
-                TableKey::from_value(&Value::keyword("stats")).unwrap(),
-                Value::bool(rc.stats),
-            );
-            map.insert(
-                TableKey::from_value(&Value::keyword("debug-bytecode")).unwrap(),
-                Value::bool(rc.debug_bytecode),
-            );
-            map.insert(
-                TableKey::from_value(&Value::keyword("flip")).unwrap(),
-                Value::bool(crate::config::flip_enabled()),
-            );
-            map.insert(
-                TableKey::from_value(&Value::keyword("unicode")).unwrap(),
-                self.unicode_version_value(ctx),
-            );
-            map.insert(
-                TableKey::from_value(&Value::keyword("max-depth")).unwrap(),
-                Self::max_depth_value(rc.max_depth),
-            );
+            for field in FIELDS {
+                let value = self.config_field(ctx, field).expect("a listed field");
+                map.insert(
+                    TableKey::from_value(&Value::keyword(field)).expect("a keyword key"),
+                    value,
+                );
+            }
             (SIG_OK, ctx.struct_from(map))
         } else if let Some(kw) = self.keyword_spelling(arg) {
-            match kw.as_str() {
-                "jit" => (SIG_OK, Value::keyword(rc.jit.keyword())),
-                "wasm" => (SIG_OK, Value::keyword(rc.wasm.keyword())),
-                "mlir" => (SIG_OK, Value::keyword(rc.mlir.keyword())),
-                "trace" => (SIG_OK, self.trace_keywords(ctx)),
-                "stats" => (SIG_OK, Value::bool(rc.stats)),
-                "flip" => (SIG_OK, Value::bool(crate::config::flip_enabled())),
-                "unicode" => (SIG_OK, self.unicode_version_value(ctx)),
-                "max-depth" => (SIG_OK, Self::max_depth_value(rc.max_depth)),
-                _ => (
+            match FIELDS
+                .contains(&kw.as_str())
+                .then(|| self.config_field(ctx, &kw))
+                .flatten()
+            {
+                Some(value) => (SIG_OK, value),
+                None => (
                     SIG_ERROR,
                     ctx.error(
                         "argument-error",
@@ -94,6 +75,28 @@ impl VM {
         } else {
             type_error!(ctx, arg, "vm/config", "keyword or nil")
         }
+    }
+
+    /// The value `(vm/config :field)` reads, or `None` for a field this build
+    /// does not have.
+    fn config_field(&self, ctx: &mut crate::primitives::ctx::Alloc, field: &str) -> Option<Value> {
+        let rc = &self.runtime_config;
+        let threshold = |reading: Option<usize>| match reading {
+            Some(n) => Value::int(i64::try_from(n).unwrap_or(i64::MAX)),
+            None => Value::NIL,
+        };
+        Some(match field {
+            "jit" => threshold(rc.jit.reading()),
+            "mlir" => threshold(rc.mlir.reading()),
+            #[cfg(feature = "wasm")]
+            "wasm" => Value::keyword(rc.wasm.keyword()),
+            "trace" => self.trace_keywords(ctx),
+            "stats" => Value::bool(rc.stats),
+            "debug-bytecode" => Value::bool(rc.debug_bytecode),
+            "unicode" => self.unicode_version_value(ctx),
+            "max-depth" => Self::max_depth_value(rc.max_depth),
+            _ => return None,
+        })
     }
 
     /// The depth cap as an Elle integer. The setter admits only positive
@@ -113,167 +116,132 @@ impl VM {
     }
 
     /// Handle `(vm/config-set key value)` — mutates the VM's RuntimeConfig.
+    ///
+    /// Every refusal raises: the error comes back as `SIG_ERROR`, so a program
+    /// that sets a field it may not set stops rather than reading the error
+    /// struct as a result (docs/config.md).
     pub(super) fn handle_vm_config_set(
         &mut self,
         ctx: &mut crate::primitives::ctx::Alloc,
         arg: Value,
-    ) -> Value {
-        let pair = match arg.as_pair() {
-            Some(c) => c,
-            None => return ctx.error("type-error", "vm/config-set: expected (key . value)"),
-        };
-        let key = pair.first;
-        let val = pair.rest;
+    ) -> (SignalBits, Value) {
+        match self.config_set(arg) {
+            Ok(()) => (SIG_OK, Value::NIL),
+            Err((kind, msg)) => (SIG_ERROR, ctx.error(kind, msg)),
+        }
+    }
 
-        let kw = match self.keyword_spelling(key) {
-            Some(k) => k,
-            None => {
-                return ctx.error(
-                    "type-error",
-                    format!(
-                        "vm/config-set: key must be a keyword, got {}",
-                        key.type_name()
-                    ),
-                )
-            }
-        };
+    fn config_set(&mut self, arg: Value) -> Result<(), (&'static str, String)> {
+        let pair = arg.as_pair().ok_or((
+            "type-error",
+            "vm/config-set: expected (key . value)".to_string(),
+        ))?;
+        let (key, val) = (pair.first, pair.rest);
+        let kw = self.keyword_spelling(key).ok_or_else(|| {
+            (
+                "type-error",
+                format!(
+                    "vm/config-set: key must be a keyword, got {}",
+                    key.type_name()
+                ),
+            )
+        })?;
 
         match kw.as_str() {
             "jit" => {
-                if let Some(closure) = val.as_closure() {
-                    // `Custom` records only that a closure was given;
-                    // nothing dispatches through the closure.
-                    let _ = closure;
-                    self.runtime_config.jit = crate::config::JitPolicy::Custom;
-                } else if let Some(policy_kw) = self.keyword_spelling(val) {
-                    match crate::config::JitPolicy::from_keyword(&policy_kw) {
-                        Some(policy) => {
-                            self.runtime_config.jit = policy;
-                        }
-                        None => {
-                            return ctx.error(
-                                "argument-error",
-                                format!("vm/config-set :jit: unknown policy :{}", policy_kw),
-                            )
-                        }
-                    }
-                } else {
-                    return ctx.error(
-                        "type-error",
-                        format!(
-                            "vm/config-set :jit: expected keyword or closure, got {}",
-                            val.type_name()
-                        ),
-                    );
-                }
-                Value::NIL
-            }
-            "wasm" => {
-                if let Some(policy_kw) = self.keyword_spelling(val) {
-                    match crate::config::WasmPolicy::from_keyword(&policy_kw) {
-                        Some(policy) => {
-                            self.runtime_config.wasm = policy;
-                        }
-                        None => {
-                            return ctx.error(
-                                "argument-error",
-                                format!("vm/config-set :wasm: unknown policy :{}", policy_kw),
-                            )
-                        }
-                    }
-                } else {
-                    return ctx.error(
-                        "type-error",
-                        format!(
-                            "vm/config-set :wasm: expected keyword, got {}",
-                            val.type_name()
-                        ),
-                    );
-                }
-                Value::NIL
+                let threshold = Self::threshold_arg(&kw, val, self.runtime_config.jit.enabled())?;
+                self.runtime_config.jit = crate::config::JitPolicy::Adaptive { threshold };
             }
             "mlir" => {
-                if let Some(policy_kw) = self.keyword_spelling(val) {
-                    match crate::config::MlirPolicy::from_keyword(&policy_kw) {
-                        Some(policy) => {
-                            #[cfg(feature = "mlir")]
-                            {
-                                self.mlir_enabled = policy.enabled();
-                            }
-                            self.runtime_config.mlir = policy;
-                        }
-                        None => {
-                            return ctx.error(
-                                "argument-error",
-                                format!("vm/config-set :mlir: unknown policy :{}", policy_kw),
-                            )
-                        }
-                    }
-                } else {
-                    return ctx.error(
-                        "type-error",
-                        format!(
-                            "vm/config-set :mlir: expected keyword, got {}",
-                            val.type_name()
-                        ),
-                    );
-                }
-                Value::NIL
+                let threshold = Self::threshold_arg(&kw, val, self.runtime_config.mlir.enabled())?;
+                self.runtime_config.mlir = crate::config::MlirPolicy::Adaptive { threshold };
             }
             "trace" => {
-                // Accept a set of keywords
-                if let Some(set) = val.as_set() {
-                    let mut keywords = std::collections::HashSet::new();
-                    for v in set.iter() {
-                        if let Some(k) = self.keyword_spelling(*v) {
-                            keywords.insert(k);
-                        }
-                    }
-                    self.runtime_config.set_trace(keywords);
-                } else {
-                    return ctx.error(
+                let set = val.as_set().ok_or_else(|| {
+                    (
                         "type-error",
                         format!(
                             "vm/config-set :trace: expected set, got {}",
                             val.type_name()
                         ),
-                    );
-                }
-                Value::NIL
+                    )
+                })?;
+                let keywords = set
+                    .iter()
+                    .filter_map(|v| self.keyword_spelling(*v))
+                    .collect();
+                self.runtime_config.set_trace(keywords);
             }
-            "stats" => {
-                self.runtime_config.stats = val.is_truthy();
-                Value::NIL
-            }
+            "stats" => self.runtime_config.stats = val.is_truthy(),
             "max-depth" => match val.as_int() {
                 Some(n) if n > 0 => {
                     self.runtime_config.max_depth = usize::try_from(n).unwrap_or(usize::MAX);
-                    Value::NIL
                 }
-                Some(n) => ctx.error(
-                    "argument-error",
-                    format!("vm/config-set :max-depth: expected a positive integer, got {n}"),
-                ),
-                None => ctx.error(
-                    "type-error",
-                    format!(
-                        "vm/config-set :max-depth: expected integer, got {}",
-                        val.type_name()
-                    ),
-                ),
+                Some(n) => {
+                    return Err((
+                        "argument-error",
+                        format!("vm/config-set :max-depth: expected a positive integer, got {n}"),
+                    ))
+                }
+                None => {
+                    return Err((
+                        "type-error",
+                        format!(
+                            "vm/config-set :max-depth: expected integer, got {}",
+                            val.type_name()
+                        ),
+                    ))
+                }
             },
-            // Legacy: flip is always off (no-op). Accept for compat.
-            "flip" => Value::NIL,
-            "unicode" => ctx.error(
-                "argument-error",
-                "vm/config-set :unicode: the Unicode generation is fixed at VM construction",
-            ),
-            _ => ctx.error(
-                "argument-error",
-                format!("vm/config-set: unknown field :{}", kw),
-            ),
+            "unicode" => {
+                return Err((
+                    "argument-error",
+                    "vm/config-set :unicode: the Unicode generation is fixed at VM construction"
+                        .to_string(),
+                ))
+            }
+            _ => {
+                return Err((
+                    "argument-error",
+                    format!("vm/config-set: unknown field :{}", kw),
+                ))
+            }
         }
+        Ok(())
     }
+
+    /// A tier threshold a program may set: a positive integer, for a tier this
+    /// run has on. The type is checked first, so a keyword is a type error
+    /// whether or not the tier is on.
+    fn threshold_arg(
+        field: &str,
+        val: Value,
+        tier_on: bool,
+    ) -> Result<usize, (&'static str, String)> {
+        let n = val.as_int().ok_or_else(|| {
+            (
+                "type-error",
+                format!(
+                    "vm/config-set :{field}: expected a positive integer, got {}",
+                    val.type_name()
+                ),
+            )
+        })?;
+        if n < 1 {
+            return Err((
+                "argument-error",
+                format!("vm/config-set :{field}: expected a positive integer, got {n}"),
+            ));
+        }
+        if !tier_on {
+            return Err((
+                "argument-error",
+                format!("vm/config-set :{field}: this run has no {field} tier to set"),
+            ));
+        }
+        Ok(usize::try_from(n).unwrap_or(usize::MAX))
+    }
+
     /// Handle `arena/allocs` — snapshot count, call thunk, snapshot again.
     ///
     /// Runs the thunk through [`VM::run_thunk_to_completion`] (re-entrant VM
