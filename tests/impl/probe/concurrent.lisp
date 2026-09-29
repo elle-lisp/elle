@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-28
+# audited: 2026-09-29
 # The direct-loop rows whose drive crosses a fiber: closures, protect and defer, the park families, the emit and error deliveries.
 #
 # docs/impl/region/diagnostics.md
@@ -18,19 +18,18 @@
     (fn [j]
       (let [[ok v] (protect ((fn [] j)))]
         v)) 0]
-   # `defer` on its ordinary SUCCESS path — the twin of `protect-while`
-   # above. Same inner fiber, same resume; the whole difference is the trailing
-   # `if`, which reads the fiber with `fiber/value` in the arm taken here and with
+   # `defer` on its ordinary SUCCESS path — the twin of `protect-while` above. Same
+   # inner fiber, same resume; the whole difference is the trailing `if`, which
+   # reads the fiber with `fiber/value` in the arm taken here and with
    # `fiber/propagate` in the arm that is not. Declaring `fiber/propagate` `Mixed`
    # seeds that fiber on escape's store facet, the branch-arm release window
    # declines, and the branch's only release stays in the untaken arm — 2 regions
    # and 3 objects stranded per evaluation, so a loop whose body is wrapped in
-   # `defer` grows without bound (docs/impl/region/effects.md § `Opaque`, "The
-   # child-chain WIRING is `Opaque` too"). `protect-while` has no such arm and reads
-   # 0 whatever the declaration says, which is what makes it the pair-control here
-   # and not the gauge. Both are CLOSED controls (undeclared, like
-   # `rest-array-copy`), so a regression to open trips the completeness gate loudly
-   # instead of being absorbed under F2.
+   # `defer` grows without bound (docs/impl/region/effects.md). `protect-while` has
+   # no such arm and reads 0 whatever the declaration says, which is what makes it
+   # the pair-control here and not the gauge. Both are CLOSED controls (undeclared,
+   # like `rest-array-copy`), so a regression to open trips the completeness gate
+   # loudly instead of being absorbed under F2.
    ["defer-while"
     (fn [j]
       (defer
@@ -142,16 +141,15 @@
         (fiber/resume f)
         (fiber/cancel f :dead)
         (fiber/status f))) 0]
-   # `fiber/abort` of a PARKED fiber. `fiber/abort` is a
-   # native tail call here, and its fiber argument is a captured upvalue — a BORROWED
-   # tail argument, for which the frame mints a fresh owning reference so the callee
-   # has one to release. The abort leaves by SIG_ABORT, which reaches neither consumer
-   # of that retain (a frame-replacing closure callee's owned-param release, or the
-   # post-`TailCall` fall-through the native's normal completion runs), so the signal
-   # exit consumes it itself (docs/impl/region/mechanism.md § "What the fall-through
-   # owes, a signal exit owes too"). The stranded reference was the fiber's own, which
-   # pinned the body closure and the parked frame's payload behind it. A CLOSED control
-   # now, beside `denied-discard`, whose residual was the args array the denied
+   # `fiber/abort` of a PARKED fiber. `fiber/abort` is a native tail call here, and its
+   # fiber argument is a captured upvalue — a BORROWED tail argument, for which the
+   # frame mints a fresh owning reference so the callee has one to release. The abort
+   # leaves by SIG_ABORT, which reaches neither consumer of that retain (a
+   # frame-replacing closure callee's owned-param release, or the post-`TailCall`
+   # fall-through the native's normal completion runs), so the signal exit consumes it
+   # itself (docs/impl/region/mechanism.md). The stranded reference was the fiber's own,
+   # which pinned the body closure and the parked frame's payload behind it. A CLOSED
+   # control, beside `denied-discard`, whose residual was the args array the denied
    # `(println …)` built for its own spliced call.
    ["abort-discard"
     (fn [j]
@@ -160,24 +158,20 @@
                            9) |:yield|)]
         (fiber/resume f)
         (protect (fiber/abort f "boom")))) 0]
-   # An abandoned park through the DYNAMIC
-   # emit path: a first argument the compiler cannot read as a keyword set falls
-   # through to the `emit` primitive, so the park is an ordinary call rather than the
-   # `Emit` terminator and the body reference the discharge stands in for comes from
-   # the call rather than from `lower_emit` (docs/impl/region/park.md § "What yields
-   # is the emit OPERATION, not the `Emit` node"). Each gauges the reference's ARITY,
+   # An abandoned park through the DYNAMIC emit path: a first argument the compiler cannot read as a
+   # keyword set falls through to the `emit` primitive, so the park is an ordinary call rather than
+   # the `Emit` terminator and the body reference the discharge stands in for comes from the call
+   # rather than from `lower_emit` (docs/impl/region/park.md). Each gauges the reference's ARITY,
    # not its presence — withholding it over-frees, which no leak gauge sees and
-   # `tests/elle/region-dynamic-emit-borrow-uaf.lisp` reports. The four must stay
-   # together: the two witnesses differ only in POSITION, which decides where the
-   # reference comes from — a non-tail park mints one at the payload argument, a tail
-   # park already has the borrowed-argument retain and the suspending exit leaves it
-   # standing (docs/impl/region/mechanism.md § "What the fall-through owes, a signal
-   # exit owes too") — and each has a control that removes one ingredient:
-   # `emit-lit-discard` takes the literal path with the same borrow, and
-   # `emit-dyn-fresh` takes the dynamic path with a payload the body allocates, where
-   # nothing is owed and a mint would strand one per park. CLOSED controls
-   # (undeclared, like `rest-array-copy`), so a regression to open trips the
-   # completeness gate loudly rather than being absorbed under F2.
+   # `tests/impl/region-dynamic-emit-borrow-uaf.lisp` reports. The four must stay together: the two
+   # witnesses differ only in POSITION, which decides where the reference comes from — a non-tail
+   # park mints one at the payload argument, a tail park already has the borrowed-argument retain
+   # and the suspending exit leaves it standing (docs/impl/region/signalexit.md) — and each has a
+   # control that removes one ingredient: `emit-lit-discard` takes the literal path with the same
+   # borrow, and `emit-dyn-fresh` takes the dynamic path with a payload the body allocates, where
+   # nothing is owed and a mint would strand one per park. CLOSED controls (undeclared, like
+   # `rest-array-copy`), so a regression to open trips the completeness gate loudly rather than
+   # being absorbed under F2.
    ["emit-dyn-discard"
     (fn [j]
       (let [f (fiber/new (fn []
@@ -200,17 +194,16 @@
                            (emit emit-sig (string "v" j))
                            9) |:yield|)]
         (fiber/resume f))) 0]
-   # The same operation raising a TERMINAL signal, where
-   # the reference the tail call holds answers to a different consumer: the payload's
-   # DELIVERY, released by whoever catches the signal. The exit consumes its
-   # borrowed-argument retains — the block that would have consumed them is abandoned,
-   # and an `:error` fiber's restart replays it — so it mints the delivery and records
-   # it, the pair `handle_emit` performs on the literal path
-   # (docs/impl/region/mechanism.md § "What the fall-through owes, a signal exit owes
-   # too"). CLOSED controls (undeclared, like `rest-array-copy`), so a regression to
-   # open trips the completeness gate loudly rather than being absorbed under F2.
-   # Each reads the mint's ARITY: withholding it over-frees, which no leak gauge sees
-   # and tests/elle/region-dynamic-emit-terminal-uaf.lisp reports. The six must stay
+   # The same operation raising a TERMINAL signal, where the reference the tail call
+   # holds answers to a different consumer: the payload's DELIVERY, released by
+   # whoever catches the signal. The exit consumes its borrowed-argument retains — the
+   # block that would have consumed them is abandoned, and an `:error` fiber's restart
+   # replays it — so it mints the delivery and records it, the pair `handle_emit`
+   # performs on the literal path (docs/impl/region/signalexit.md). CLOSED controls
+   # (undeclared, like `rest-array-copy`), so a regression to open trips the
+   # completeness gate loudly rather than being absorbed under F2. Each reads the
+   # mint's ARITY: withholding it over-frees, which no leak gauge sees and
+   # tests/impl/region-dynamic-emit-terminal-uaf.lisp reports. The six must stay
    # together, because only the gaps between them separate the mint from the record.
    # `emit-dyn-error-fresh` allocates its payload in the body, so the frame's own
    # reference is what the record reclaims and a mint per reference reads 1;
@@ -249,20 +242,19 @@
       (let [f (fiber/new (fn [] (emit emit-error-sig (string "v" j))) |:error|)]
         (fiber/resume f)
         (fiber/resume f))) 0]
-   # The same raise OFF TAIL POSITION, where the site
-   # takes the retain instead of the call's argument convention and the exit leaves
-   # it standing for the continuation past the call (docs/impl/region/park.md
-   # § "What yields is the emit OPERATION, not the `Emit` node"). CLOSED controls
-   # (undeclared, like `rest-array-copy`). What each reads is where that retain's one
-   # consumer is: `emit-dyn-error-discard` above resumes once, so no replay arrives
-   # and the frames' own release table is the only route to it — the face that goes
-   # open by one region per op if the site's stash stops recording there, or if the
-   # raise stops recording its mint. `emit-dyn-stmt-error-restart` resumes twice, so
-   # the replay runs that release instead, and `emit-dyn-stmt-error-fresh` allocates
-   # its payload in the body, where the site mints nothing and the body's own release
-   # is what the two routes carry. All three read the mint's ARITY: withholding it
+   # The same raise OFF TAIL POSITION, where the site takes the retain instead of the
+   # call's argument convention and the exit leaves it standing for the continuation
+   # past the call (docs/impl/region/park.md). CLOSED controls (undeclared, like
+   # `rest-array-copy`). What each reads is where that retain's one consumer is:
+   # `emit-dyn-error-discard` above resumes once, so no replay arrives and the
+   # frames' own release table is the only route to it — the face that goes open by
+   # one region per op if the site's stash stops recording there, or if the raise
+   # stops recording its mint. `emit-dyn-stmt-error-restart` resumes twice, so the
+   # replay runs that release instead, and `emit-dyn-stmt-error-fresh` allocates its
+   # payload in the body, where the site mints nothing and the body's own release is
+   # what the two routes carry. All three read the mint's ARITY: withholding it
    # over-frees, which no leak gauge sees and
-   # tests/elle/region-dynamic-emit-statement-uaf.lisp reports.
+   # tests/impl/region-dynamic-emit-statement-uaf.lisp reports.
    ["emit-dyn-stmt-error-restart"
     (fn [j]
       (let [f (fiber/new (fn []
@@ -281,11 +273,10 @@
    # every frame-owed release: `(error v)` mints the payload's delivery itself (the
    # `EmitEscape` retain the resumer's release of the resume result consumes), so the
    # raise records the mint and the abandoned-frame walk and the parked frame's
-   # discharge stop exempting the payload's region (docs/impl/region/mechanism.md
-   # § "An abandoned frame runs the releases it still owes"). CLOSED controls
+   # discharge stop exempting the payload's region (docs/impl/region/mechanism.md). CLOSED controls
    # (undeclared, like `rest-array-copy`), so a regression to open trips the
    # completeness gate loudly rather than being absorbed under F2; the soundness
-   # complement is tests/elle/region-error-payload-uaf.lisp. The faces are distinct
+   # complement is tests/impl/region-error-payload-uaf.lisp. The faces are distinct
    # consumers of the recorded mint and must stay together: `error-payload` raises
    # in the try's own body frame, which is PARKED for the restarts system, so its
    # release runs at the free-path discharge; `error-payload-helper` raises in a
@@ -301,8 +292,8 @@
    # `error-payload` — only the non-tail call leaves a callee frame for the walk.
    # Its pin is CROSS-TIER at 0: both tiers walk the abandoned frame, the compiled
    # one off the tables its prologue materialized and the locals it spills at the
-   # exit, so the rate agrees under --jit=off and --jit=eager. The compiled face
-   # has its own gauge in tests/elle/region-jit-error-unwind.lisp.
+   # exit, so the rate agrees with the JIT off and eager. The compiled face
+   # has its own gauge in tests/impl/region-jit-error-unwind.lisp.
    ["error-payload"
     (fn [j]
       (try
@@ -335,8 +326,8 @@
    # the completeness gate loudly rather than being absorbed under F2. Each
    # gauges a mint's ARITY rather than its presence: withhold the mint and the
    # crossing over-frees, which is a soundness failure no leak gauge can see and
-   # `--trace=guardfree` reports (`region_primitive_resume_uaf`,
-   # `region_fiber_propagate_uaf` in tests/integration/elle_scripts.rs); mint
+   # `--trace=guardfree` reports (tests/impl/region-primitive-resume-uaf.lisp,
+   # tests/impl/region-fiber-propagate-uaf.lisp); mint
    # more than one and the surplus is a reference no release answers, which is
    # what these rates catch.
    #
@@ -358,7 +349,7 @@
    # `propagate-none` is that raise with no propagate in it, and it is a scalar 0
    # rather than the baseline a differential would subtract — the raising body's
    # own reference to the payload it allocated is released by the abandoned
-   # frame's release-table walk (§ `error-payload*` above), so there is nothing
+   # frame's release-table walk (the `error-payload*` row above), so there is nothing
    # left for a depth difference to hide behind.
    ["propagate-none" (fn [j] (pg-none j)) 0]
    ["propagate-one" (fn [j] (pg-one j)) 0]

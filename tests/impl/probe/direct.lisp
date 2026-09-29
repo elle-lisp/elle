@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-28
+# audited: 2026-09-29
 # The direct-loop rows for scope reclamation, branch compensation, collections, strings and cells — one per-op thunk each.
 #
 # docs/impl/region/diagnostics.md
@@ -62,7 +62,7 @@
    # payload arms — an immediate one leaves the pair unformed and measures nothing
    # either way. The control for the class (docs/impl/region/effects.md); the
    # four installers' inline faces are pinned by
-   # tests/elle/region-fiber-install-clique-leak.lisp.
+   # tests/impl/region-fiber-install-clique-leak.lisp.
    ["fiber-deliver"
     (fn [j]
       (let [f (fiber/new (fn []
@@ -133,7 +133,7 @@
    ["distinct" (fn [j] (distinct [1 2 1 3])) 0]
    # `take`/`drop` are CLOSED controls for the PER-PATH return frontier
    # (docs/impl/region/compensate.md;
-   # tests/elle/region-return-arm-escape-leak.lisp). Both are `letrec` walks whose
+   # tests/impl/region-return-arm-escape-leak.lisp). Both are `letrec` walks whose
    # base case returns a heap value while the recursive arm holds its
    # `decref_point`. Without the per-path frontier the returning arm carries a
    # return mint and no release, and each call strands what it hands back —
@@ -156,8 +156,8 @@
    ["to-list" (fn [j] (->list [1 2 3])) 0]
    ["freeze" (fn [j] (freeze @[1 2 3])) 0]
    ["slice" (fn [j] (slice [1 2 3 4] 1 3)) 0]
-   # trailing nil keeps the body's value a discarded STATEMENT, matching the
-   # original while-loop (where the alloc is never the loop's tail value)
+   # trailing nil keeps the body's value a discarded STATEMENT, as in a
+   # while-loop body, where the alloc is never the loop's tail value
    ["keys-values"
     (fn [j]
       (keys {:a 1 :b 2})

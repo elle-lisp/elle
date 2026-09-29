@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-23
+# audited: 2026-09-29
 # Discarded call results and break escapes, the branch-arm release window in each of its faces, and the frame-exit rows.
 #
 # docs/impl/region/diagnostics.md
@@ -97,9 +97,10 @@
 # region (3 cons cells) strands on every arm that is not the one naming it last,
 # unless the single release is anchored where every arm reaches it. Undeclared,
 # like `rest-array-copy`, so a regression trips the completeness gate loudly
-# rather than being absorbed as a declared strand. Their counterfactual and the two
-# window boundaries are `tests/elle/region-branch-arm-window.lisp`; the soundness
-# complement is `region-branch-arm-window-uaf.lisp`.
+# rather than being absorbed as a declared strand. Their counterfactual and the
+# window boundaries are `tests/impl/region-branch-arm-window.lisp` and
+# `tests/impl/region-branch-arm-tailcall.lisp`; the soundness complement is
+# `region-branch-arm-window-uaf.lisp`.
 # `branch-arm-tailcall-sibling` is the third: the same window over a branch whose
 # OTHER arm leaves through a frame-replacing closure tail call. Declining such a
 # branch whole strands the argument on the arm driven here, once per call of the
@@ -175,7 +176,7 @@
 # `param-used-arm`, so a regression trips the completeness gate loudly rather
 # than being absorbed as a declared strand. The
 # per-shape rows and the arm-not-taken / guard / nested-loop faces are
-# `tests/elle/region-match-bind-loop.lisp`; the soundness complement is
+# `tests/impl/region-match-bind-loop.lisp`; the soundness complement is
 # `region-match-bind-loop-uaf.lisp`.
 (pin (measure-core "struct-match"
                    (fn [b]
@@ -230,7 +231,8 @@
 # Undeclared, like `param-used-arm`, so a regression trips the
 # completeness gate loudly rather than being absorbed as declared scratch. The
 # counterfactual and the boundary rows live in
-# `tests/elle/region-tail-frame-exit.lisp`; the soundness complement is
+# `tests/impl/region-tail-frame-exit.lisp` and its `-capture` and `-letrec`
+# siblings; the soundness complement is
 # `region-tail-frame-exit-uaf.lisp`.
 (pin (measure-core "tail-frame-exit-unused"
                    (fn [b]
@@ -361,8 +363,9 @@
 # jumped over — so it is re-anchored to the block by the same pin
 # (docs/impl/region/anchors.md). Its control `break-skipped-nobreak` runs the same
 # body with the break unreachable, isolating the skip from the shape; it opens if
-# the window pin regresses. Both boundaries the window stops at — a loop or a lambda nested
-# inside it — are gauged by tests/elle/region-break-skip.lisp, not here.
+# the window pin regresses. The three boundaries the window stops at — a loop or
+# a lambda nested inside it, and a frame-replacing tail call on the block's
+# fall-through — are gauged by tests/impl/region-break-skip.lisp, not here.
 (pin (measure-core "break-skipped"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))

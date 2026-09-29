@@ -1,16 +1,15 @@
 (elle/epoch 12)
-# audited: 2026-09-08
+# audited: 2026-09-29
 # The injected abort delivery: one row per route its payload's mint is consumed on, plus the tail-position pair.
 #
 # docs/impl/region/diagnostics.md
 # ── The injected abort delivery ───────────────────────────────────────
-# `fiber/abort` installs a payload the CALLER owns, whose one reference answers
-# the caller's ARGUMENT release and nothing else. So the injection mints the
-# delivery — once, at the seam every route leaves through — and exactly one
-# further release consumes it as a RESULT (docs/impl/region/effects.md
-# § `Delivers`). Which release that is depends on where the injected error
-# stops, and the routes are gauged apart because a mint keyed on the route
-# rather than on the injection funds two of them twice.
+# `fiber/abort` installs a payload the CALLER owns, whose one reference answers the
+# caller's ARGUMENT release and nothing else. So the injection mints the delivery —
+# once, at the seam every route leaves through — and exactly one further release
+# consumes it as a RESULT (docs/impl/region/effects.md). Which release that is depends
+# on where the injected error stops, and the routes are gauged apart because a mint
+# keyed on the route rather than on the injection funds two of them twice.
 #
 # Nine CLOSED controls (undeclared, like `rest-array-copy`), one per route and
 # per recorded mint:
@@ -135,17 +134,17 @@
 # `fiber/abort` in tail position is a NATIVE tail call that leaves by a signal,
 # but an ABSORBED outcome is the carrier's answer rather than an exit: the frame
 # is still there, so it falls through to the post-`TailCall` block and runs the
-# owned-argument releases that block holds (docs/impl/region/mechanism.md § "A
-# carrier that comes back with a result never left the frame"). A closed control
-# now. The counter-factual — reading the answer as an exit — strands the fiber
-# argument, the closure behind it, and the payload: three regions, of which an
-# IMMEDIATE payload removes one and a payload an enclosing binding owns removes
-# none. That is the discriminator against `abort-mask-caught-literal` below,
-# whose whole strand IS the payload, and it is why the two must stay a pair.
+# owned-argument releases that block holds (docs/impl/region/signalexit.md). A
+# closed control. The counter-factual — reading the answer as an exit — strands
+# the fiber argument, the closure behind it, and the payload: three regions, of
+# which an IMMEDIATE payload removes one and a payload an enclosing binding owns
+# removes none. That is the discriminator against `abort-mask-caught-literal`
+# below, whose whole strand IS the payload, and it is why the two must stay a
+# pair.
 #
-# It reads 0 on every tier, and did so under `--jit=eager` before the fall-through
-# landed: a compiled frame reaches the same releases through its own
-# post-`TailCall` block, so the strand was interpreter machinery alone.
+# It reads 0 on every tier. A compiled frame reaches the same releases through
+# its own post-`TailCall` block, so the strand it guards is interpreter
+# machinery alone.
 (pin (measure-core "abort-tail-result"
                    (stmt-run (fn []
                                (let [f (ab-mk-caught)]
@@ -167,7 +166,7 @@
 # back), the payload is a literal materialized in the aborting frame, and that
 # frame consumes the result — and `abort-mask-caught-bound` is the pair-control
 # that removes the second, the same abort over a payload an enclosing binding
-# owns, whose own release then covers it. A closed control now.
+# owns, whose own release then covers it. A closed control.
 #
 # It is NOT `abort-tail-result` seen smaller, and the two must stay a pair because
 # resemblance is all there is to go on otherwise: both need the result in tail

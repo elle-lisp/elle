@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-23
+# audited: 2026-09-29
 # The physical-id dimension no other gauge shows, and the remove/rebind half of the mutable-store funnel.
 #
 # docs/impl/region/diagnostics.md
@@ -25,8 +25,8 @@
 #
 # These are CLOSED controls (undeclared, like `rest-array-copy`), so a regression
 # to open trips the completeness gate loudly. Read them against the id
-# discriminator in tests/elle/oracle.lisp: an id gauge that cannot move reads 0
-# for all five.
+# discriminator in probe/gauge.lisp: an id gauge that cannot move reads 0 for
+# all five.
 (def id-hold [1 2 3])
 (println "── folded suite: physical-id recycling ──")
 (pin (measure-core "id-const-compare" (stmt-run (fn [] (< 1 2))) ids-gauge 100 6
