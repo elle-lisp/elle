@@ -174,6 +174,12 @@ impl Delivery {
         self.record_park(bits, payload);
     }
 
+    /// A yielding io op parked the `IoRequest` it built.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn park_request(&mut self, bits: SignalBits, request: Value) {
+        self.park_primitive(bits, request);
+    }
+
     /// Record the park whose escape retain no reader has consumed, where there
     /// was a retain to take. An immediate payload lives in no region, so
     /// `incref_for_escape` did nothing at the park and there is nothing here for

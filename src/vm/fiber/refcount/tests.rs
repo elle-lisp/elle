@@ -1,8 +1,10 @@
+// audited: 2026-09-29
 //! Which parks owe their payload a release at an install, and which must be
 //! left to the resumed body.
 
 use super::*;
 use crate::value::arena::{alloc_in_fresh_region, region_rc};
+use crate::value::fiber::Delivery;
 use crate::value::heap::{HeapObject, Pair};
 use crate::value::{Closure, Fiber, FiberHandle, SIG_IO, SIG_YIELD};
 use std::rc::Rc;
@@ -19,26 +21,15 @@ fn payload(
 }
 
 /// An `IoRequest` on a region of its own — the payload a yielding io op parks,
-/// and the one thing the io arm answers for. A `Sleep` because it is the portless
-/// op: nothing else in the request has to be built for the type to be right.
+/// and the one a relaying fiber parks again.
 fn io_request(
     heap: &mut crate::value::fiberheap::FiberHeap,
 ) -> (Value, crate::hir::region::RuntimeRegion) {
-    use crate::value::heap::ExternalObject;
-    let obj = HeapObject::External {
-        obj: ExternalObject {
-            type_name: "io-request",
-            data: Rc::new(crate::io::request::IoRequest {
-                op: crate::io::request::IoOp::Sleep {
-                    duration: std::time::Duration::from_secs(1),
-                },
-                port: Value::NIL,
-                timeout: None,
-            }),
-        },
-        traits: Value::NIL,
-    };
-    alloc_in_fresh_region(heap, obj)
+    let region = heap.new_runtime_region();
+    let request = crate::io::request::IoRequest::test_sleep(
+        &crate::primitives::ctx::Alloc::with_region(region, heap),
+    );
+    (request, region)
 }
 
 /// A fiber whose body never runs still names a code object; the instance's
@@ -49,21 +40,18 @@ fn test_closure() -> Rc<Closure> {
     crate::value::fiber::noop_closure(unsafe { &mut *heap })
 }
 
-/// A fiber parked on `parked` under `bits`, with `record` as its denial record.
-/// The blocked bits of a real denial are the WITHHELD capability's, which is why
-/// they are not `SIG_IO` in most faces below.
-fn parked_fiber(bits: SignalBits, parked: Value, record: Option<Value>) -> FiberHandle {
+/// A fiber parked on `parked` under `bits`, whose ledger `park` writes as the
+/// site that built the park would.
+fn fiber_parked(bits: SignalBits, parked: Value, park: impl FnOnce(&mut Delivery)) -> FiberHandle {
     let handle = FiberHandle::new(Fiber::new(test_closure(), SignalBits::ALL));
     handle.with_mut(|f| {
         f.signal = Some((bits, parked));
-        if let Some(payload) = record {
-            f.delivery.park_denial(bits, payload);
-        }
+        park(&mut f.delivery);
     });
     handle
 }
 
-// -- release_displaced_denial_payload: the record names what the install owes --
+// -- release_displaced_bodyless_payload: the record names what the install owes --
 
 /// A capability denial's park has no body reference, so the install that
 /// displaces it releases the one the payload is left with. The blocked bits are
@@ -73,10 +61,10 @@ fn parked_fiber(bits: SignalBits, parked: Value, record: Option<Value>) -> Fiber
 fn a_recorded_denial_park_is_released_by_the_install() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
     let (p, rid) = payload(&mut heap);
-    let handle = parked_fiber(SIG_YIELD, p, Some(p));
+    let handle = fiber_parked(SIG_YIELD, p, |d| d.park_denial(SIG_YIELD, p));
     let before = region_rc(&heap, rid);
 
-    release_displaced_denial_payload(&mut heap, &handle);
+    release_displaced_bodyless_payload(&mut heap, &handle);
 
     assert_eq!(
         region_rc(&heap, rid),
@@ -94,10 +82,10 @@ fn a_record_that_no_longer_names_the_parked_signal_releases_nothing() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
     let (parked, rid) = payload(&mut heap);
     let (stale, _) = payload(&mut heap);
-    let handle = parked_fiber(SIG_YIELD, parked, Some(stale));
+    let handle = fiber_parked(SIG_YIELD, parked, |d| d.park_denial(SIG_YIELD, stale));
     let before = region_rc(&heap, rid);
 
-    release_displaced_denial_payload(&mut heap, &handle);
+    release_displaced_bodyless_payload(&mut heap, &handle);
 
     assert_eq!(
         region_rc(&heap, rid),
@@ -116,10 +104,10 @@ fn a_record_that_no_longer_names_the_parked_signal_releases_nothing() {
 fn an_unrecorded_park_under_the_same_bits_releases_nothing() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
     let (p, rid) = payload(&mut heap);
-    let handle = parked_fiber(SIG_YIELD, p, None);
+    let handle = fiber_parked(SIG_YIELD, p, |_| {});
     let before = region_rc(&heap, rid);
 
-    release_displaced_denial_payload(&mut heap, &handle);
+    release_displaced_bodyless_payload(&mut heap, &handle);
 
     assert_eq!(
         region_rc(&heap, rid),
@@ -138,12 +126,12 @@ fn an_unrecorded_park_under_the_same_bits_releases_nothing() {
 fn the_record_is_taken_so_a_second_install_releases_nothing() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
     let (p, rid) = payload(&mut heap);
-    let handle = parked_fiber(SIG_YIELD, p, Some(p));
+    let handle = fiber_parked(SIG_YIELD, p, |d| d.park_denial(SIG_YIELD, p));
 
-    release_displaced_denial_payload(&mut heap, &handle);
+    release_displaced_bodyless_payload(&mut heap, &handle);
     let after_first = region_rc(&heap, rid);
 
-    release_displaced_denial_payload(&mut heap, &handle);
+    release_displaced_bodyless_payload(&mut heap, &handle);
 
     assert_eq!(
         region_rc(&heap, rid),
@@ -152,52 +140,39 @@ fn the_record_is_taken_so_a_second_install_releases_nothing() {
     );
 }
 
-/// A fiber denied `:io` parks under `SIG_IO`, the very bit a yielding io op's
-/// request park carries, so the bits alone would hand one park to both readings.
-/// The record answers and the io arm stands down, because the payload is a
-/// struct rather than an `IoRequest` — one reference is owed, not one per
-/// reading.
-///
-/// The trap: the record lives on the fiber that was DENIED, and an install can
-/// reach a fiber that merely relays the park (the outer fiber of a `protect`ed
-/// denial), where there is no record to ask. So the exclusion cannot be an
-/// ordering between the two calls — it has to be each reading's own, which is
-/// what the type test buys. Ordering instead frees the struct under the mediator
-/// on exactly that route.
+/// A fiber denied `:io` parks its denial struct under `SIG_IO`, the bit an io
+/// op's request parks under. The record names the struct, and one reference is
+/// owed. Counter-factual: a second reading keyed on the bit releases the struct
+/// again and frees it under the mediator.
 #[test]
-fn an_io_denial_answers_to_the_record_and_not_to_the_io_arm() {
+fn an_io_denial_owes_the_install_one_release() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
     let (p, rid) = payload(&mut heap);
-    let handle = parked_fiber(SIG_IO, p, Some(p));
+    let handle = fiber_parked(SIG_IO, p, |d| d.park_denial(SIG_IO, p));
     let before = region_rc(&heap, rid);
 
-    release_displaced_io_request(&mut heap, Some((SIG_IO, p)));
-    let after_io_arm = region_rc(&heap, rid);
-    release_displaced_denial_payload(&mut heap, &handle);
+    release_displaced_bodyless_payload(&mut heap, &handle);
 
-    assert_eq!(
-        after_io_arm, before,
-        "a denial payload is not an IoRequest — the io arm has no claim on it",
-    );
     assert_eq!(
         region_rc(&heap, rid),
         before - 1,
-        "the collision owes ONE reference, and it is the record's",
+        "a denial under the io bit owes ONE reference, and it is the record's",
     );
 }
 
-// -- release_displaced_io_request: the io arm, on a park's own IoRequest --
+// -- release_displaced_bodyless_payload: an io op's request, and a relay's --
 
-/// An io park's request is the runtime's value, so whatever ends the park owes
-/// the reference the allocation left. The injection `fiber/abort` and
-/// `fiber/refuse` share reaches this arm with no resume value at all.
+/// An io op's request is the runtime's value, so whatever ends the park owes the
+/// reference the allocation left. The injection `fiber/abort` and
+/// `fiber/refuse` share reaches this release with no resume value at all.
 #[test]
-fn a_displaced_io_request_is_released() {
+fn an_io_op_park_is_released_by_the_install() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
     let (request, rid) = io_request(&mut heap);
+    let handle = fiber_parked(SIG_IO, request, |d| d.park_request(SIG_IO, request));
     let before = region_rc(&heap, rid);
 
-    release_displaced_io_request(&mut heap, Some((SIG_IO, request)));
+    release_displaced_bodyless_payload(&mut heap, &handle);
 
     assert_eq!(
         region_rc(&heap, rid),
@@ -206,54 +181,96 @@ fn a_displaced_io_request_is_released() {
     );
 }
 
-/// The counter-factual for the io gate: a `yield`/`emit` payload is body-owned.
-/// The resumed body releases the reference it held across the suspend, so a
-/// decref here would free the value under every holder that outlives the fiber.
+/// A fiber that relays a child's io park with `(emit :io v)` parks the child's
+/// request under `SIG_IO`, so the bits and the payload's type are an io op's.
+/// The relay is an `Emit` park of a borrowed value, whose body owns a
+/// reference, so the install that answers it owes the request nothing.
+/// Counter-factual: a reading keyed on the bit and the type releases the child's
+/// region once per relaying fiber, and frees the child's port and buffers under
+/// it (`tests/elle/region-io-relay-uaf.lisp`).
 #[test]
-fn a_non_io_park_releases_nothing() {
+fn a_relayed_io_request_owes_the_relaying_install_nothing() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
-    let (p, rid) = payload(&mut heap);
+    let (request, rid) = io_request(&mut heap);
+    let handle = fiber_parked(SIG_IO, request, |d| d.park_emit(SIG_IO, request));
     let before = region_rc(&heap, rid);
 
-    release_displaced_io_request(&mut heap, Some((SIG_YIELD, p)));
+    release_displaced_bodyless_payload(&mut heap, &handle);
 
     assert_eq!(
         region_rc(&heap, rid),
         before,
-        "the io arm answers for io requests alone",
+        "a relay's request is body-owned — the relaying install owes it nothing",
     );
 }
 
-/// The trap: the bits must be read BEFORE the payload is dereferenced. A park
-/// this arm has no claim on is one whose region another holder may already have
-/// released, and `region_of` answers such a value with a stale-deref panic rather
-/// than with `None`. Reading the value first turns every non-io park into that
-/// panic once its region is gone.
+/// The same relay through the `emit` primitive, whose keyword the compiler
+/// cannot read: a primitive park of the call's own argument, which records no
+/// payload to release.
 #[test]
-fn a_non_io_park_is_answered_without_dereferencing_its_payload() {
+fn a_dynamic_emit_of_a_request_owes_the_install_nothing() {
+    let mut heap = crate::value::fiberheap::FiberHeap::new();
+    let (request, rid) = io_request(&mut heap);
+    let handle = fiber_parked(SIG_IO, request, |d| d.park_primitive(SIG_IO, request));
+    let before = region_rc(&heap, rid);
+
+    release_displaced_bodyless_payload(&mut heap, &handle);
+
+    assert_eq!(
+        region_rc(&heap, rid),
+        before,
+        "a dynamic emit's payload is body-owned like a literal emit's",
+    );
+}
+
+/// A fiber that only passes an io park on — the outer fiber of a `protect`ed
+/// body — holds the request in its slot and nothing in its ledger. The release
+/// is owed at the install on the fiber that parked. Counter-factual: releasing
+/// here as well releases the request once per fiber it crosses.
+#[test]
+fn a_fiber_that_passes_an_io_park_on_owes_its_install_nothing() {
+    let mut heap = crate::value::fiberheap::FiberHeap::new();
+    let (request, rid) = io_request(&mut heap);
+    let handle = fiber_parked(SIG_IO, request, |_| {});
+    let before = region_rc(&heap, rid);
+
+    release_displaced_bodyless_payload(&mut heap, &handle);
+
+    assert_eq!(
+        region_rc(&heap, rid),
+        before,
+        "the release belongs to the install on the fiber whose ledger names it",
+    );
+}
+
+/// The trap: the install asks the ledger, never the payload. A park no record
+/// names may hold a value whose region another holder already released, and
+/// reading it is a stale deref — the generation stamp's panic in a debug build.
+#[test]
+fn an_unrecorded_park_is_answered_without_dereferencing_its_payload() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
     let (p, rid) = payload(&mut heap);
     crate::value::arena::decref_region(&mut heap, Some(rid));
+    let handle = fiber_parked(SIG_IO, p, |_| {});
 
-    release_displaced_io_request(&mut heap, Some((SIG_YIELD, p)));
+    release_displaced_bodyless_payload(&mut heap, &handle);
 }
 
 // -- release_abandoned_park: the boundary owes what no seam consumed --
 
 /// A boundary ends a park with no reader and no install, so both of the park's
 /// references are its to release: the delivery retain the park took, and the one
-/// the runtime's own allocation left. Counter-factual: running only the install's
-/// reading — which is what a boundary reusing `release_displaced_io_request`
-/// alone would do — leaves the request's region at rc 1 for good, one region and
-/// one object per squelched io op (elle-lisp/elle#1031).
+/// the runtime's own allocation left. Counter-factual: releasing the delivery
+/// alone leaves the request's region at rc 1 for good, one region and one object
+/// per squelched io op (elle-lisp/elle#1031).
 #[test]
 fn a_boundary_releases_both_of_an_io_parks_references() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
     let (request, rid) = io_request(&mut heap);
     crate::value::arena::incref_region(&mut heap, Some(rid));
-    let mut delivery = crate::value::fiber::Delivery::new();
+    let mut delivery = Delivery::new();
     let live = Some((SIG_IO, request));
-    delivery.park_primitive(SIG_IO, request);
+    delivery.park_request(SIG_IO, request);
     let before = region_rc(&heap, rid);
 
     release_abandoned_park(&mut heap, &mut delivery, live);
@@ -273,7 +290,7 @@ fn a_boundary_releases_one_reference_of_a_body_allocated_park() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
     let (p, rid) = payload(&mut heap);
     crate::value::arena::incref_region(&mut heap, Some(rid));
-    let mut delivery = crate::value::fiber::Delivery::new();
+    let mut delivery = Delivery::new();
     let live = Some((SIG_YIELD, p));
     delivery.park_emit(SIG_YIELD, p);
     let before = region_rc(&heap, rid);
@@ -287,15 +304,37 @@ fn a_boundary_releases_one_reference_of_a_body_allocated_park() {
     );
 }
 
+/// A relay's `(emit :io v)` squelched at a boundary is a body-owned park under
+/// the io bit. Its request owes the boundary the delivery alone; the relaying
+/// body's reference is its frames' to release. Counter-factual: a reading keyed
+/// on the bit and the type releases it twice.
+#[test]
+fn a_boundary_releases_one_reference_of_a_relayed_io_park() {
+    let mut heap = crate::value::fiberheap::FiberHeap::new();
+    let (request, rid) = io_request(&mut heap);
+    crate::value::arena::incref_region(&mut heap, Some(rid));
+    let mut delivery = Delivery::new();
+    let live = Some((SIG_IO, request));
+    delivery.park_emit(SIG_IO, request);
+    let before = region_rc(&heap, rid);
+
+    release_abandoned_park(&mut heap, &mut delivery, live);
+
+    assert_eq!(
+        region_rc(&heap, rid),
+        before - 1,
+        "a relayed request's only unconsumed reference is the delivery retain",
+    );
+}
+
 /// A denial park is runtime-built like an io request, and its second reference
-/// is named by the ledger's own record rather than by the payload's type. The
-/// record is TAKEN, so the io arm and this one cannot both claim it.
+/// is named by the same ledger record an io op's request writes.
 #[test]
 fn a_boundary_releases_both_of_a_denial_parks_references() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
     let (p, rid) = payload(&mut heap);
     crate::value::arena::incref_region(&mut heap, Some(rid));
-    let mut delivery = crate::value::fiber::Delivery::new();
+    let mut delivery = Delivery::new();
     let live = Some((SIG_IO, p));
     delivery.park_denial(SIG_IO, p);
     let before = region_rc(&heap, rid);
@@ -316,9 +355,9 @@ fn a_second_boundary_over_the_same_fiber_releases_nothing() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
     let (request, rid) = io_request(&mut heap);
     crate::value::arena::incref_region(&mut heap, Some(rid));
-    let mut delivery = crate::value::fiber::Delivery::new();
+    let mut delivery = Delivery::new();
     let live = Some((SIG_IO, request));
-    delivery.park_primitive(SIG_IO, request);
+    delivery.park_request(SIG_IO, request);
 
     release_abandoned_park(&mut heap, &mut delivery, live);
     let after_first = region_rc(&heap, rid);
@@ -338,7 +377,7 @@ fn a_boundary_with_no_park_releases_nothing() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
     let (p, rid) = payload(&mut heap);
     let live = Some((SIG_YIELD, p));
-    let mut delivery = crate::value::fiber::Delivery::new();
+    let mut delivery = Delivery::new();
     let before = region_rc(&heap, rid);
 
     release_abandoned_park(&mut heap, &mut delivery, live);
@@ -358,7 +397,7 @@ fn a_record_that_does_not_name_the_exits_park_releases_nothing() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
     let (stale, stale_rid) = payload(&mut heap);
     let (live_payload, _) = payload(&mut heap);
-    let mut delivery = crate::value::fiber::Delivery::new();
+    let mut delivery = Delivery::new();
     delivery.park_emit(SIG_YIELD, stale);
     let before = region_rc(&heap, stale_rid);
 
@@ -377,7 +416,7 @@ fn a_record_that_does_not_name_the_exits_park_releases_nothing() {
 /// A `Fresh` io op (`port/read`, `accept`) builds its completion buffer in the
 /// request's OWN region and hands that buffer back as the resume value. A second
 /// value on the region is not a second consumer of the suspend retain: the
-/// buffer's holders release what they took, and this arm is the retain's only
+/// buffer's holders release what they took, and the install is the retain's only
 /// consumer. An install that stands down on the shared region leaves the retain
 /// standing for good — the region survives with its buffer and its request, once
 /// per read (`tests/elle/region-io-read-strand.lisp` bounds the rate).
@@ -390,9 +429,10 @@ fn an_io_park_is_released_though_its_resume_value_shares_its_region() {
     let (request, rid) = io_request(&mut heap);
     let _completion = heap.alloc_in_region(cons(), rid);
     crate::value::arena::incref_region(&mut heap, Some(rid));
+    let handle = fiber_parked(SIG_IO, request, |d| d.park_request(SIG_IO, request));
     let before = region_rc(&heap, rid);
 
-    release_displaced_io_request(&mut heap, Some((SIG_IO, request)));
+    release_displaced_bodyless_payload(&mut heap, &handle);
 
     assert_eq!(
         region_rc(&heap, rid),

@@ -55,7 +55,7 @@ pub extern "C" fn elle_jit_call(
         let region = crate::hir::region::StaticRegion::new(region_id)
             .expect("JIT region slot is nonzero — emitter invariant");
         let (bits, value) = vm.dispatch_native_call(def, args_slice, region);
-        return jit_handle_primitive_signal(vm, bits, value);
+        return jit_handle_primitive_signal(vm, bits, value, args_slice);
     }
 
     // Dispatch to parameter (dynamic binding lookup)
