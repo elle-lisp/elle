@@ -13,7 +13,7 @@ use crate::hir::region::RuntimeRegion;
 use crate::value::heap::HeapObject;
 use crate::value::Value;
 
-use super::regionstore::RegionMint;
+use super::regionstore::{CallRegion, JoinedRegion, RegionMint};
 use super::FiberHeap;
 
 impl FiberHeap {
@@ -81,10 +81,87 @@ impl FiberHeap {
         self.region_store.new_runtime_region()
     }
 
-    /// The region a VM value mint allocates into: a fresh region, or the open
-    /// macro scope's arena, joined (docs/impl/region/colocation.md).
+    /// The region a VM value mint allocates into: the open macro scope's arena,
+    /// joined, or else a fresh region (docs/impl/region/colocation.md). Either way
+    /// the caller holds one reference and releases it as it would a fresh one.
+    ///
+    /// The VM's allocation slots and environment values mint here. A region that
+    /// must outlive a macro scope — a process root, the root region, a code
+    /// payload region — mints through [`Self::new_runtime_region`] instead.
     pub fn new_value_region(&mut self) -> RuntimeRegion {
-        self.new_runtime_region()
+        match self.join_scope_arena() {
+            Some(arena) => arena,
+            None => self.new_runtime_region(),
+        }
+    }
+
+    /// The region a native or collection call allocates its result into: the
+    /// open macro scope's arena, joined, or else a tracked fresh mint. The call
+    /// settles it with [`Self::settle_call_region`].
+    pub(crate) fn new_call_region(&mut self) -> CallRegion {
+        match self.join_scope_arena() {
+            Some(arena) => CallRegion::Joined(JoinedRegion::taken(arena)),
+            None => CallRegion::Minted(self.new_runtime_region_tracked()),
+        }
+    }
+
+    /// Settle a call's region once the call has returned. A fresh mint nothing
+    /// allocated into goes back to the free list.
+    ///
+    /// A join stands for the caller's reference to `unfunded`, the value the call
+    /// hands back with no reference of its own, when that value lives in the
+    /// joined region. Otherwise the join gives its reference back: the value lives
+    /// elsewhere, is an immediate, or the native funded it itself, and nothing
+    /// downstream would release the joined region.
+    pub(crate) fn settle_call_region(&mut self, call: CallRegion, unfunded: Option<Value>) {
+        match call {
+            CallRegion::Minted(mint) => self.recycle_unmaterialized_region(mint),
+            CallRegion::Joined(joined) => {
+                let lives_there = unfunded.is_some_and(|v| {
+                    crate::value::arena::region_of(self, v) == Some(joined.region())
+                });
+                if !lives_there {
+                    self.decref_region(joined.region());
+                }
+            }
+        }
+    }
+
+    /// Join `region` if it is still the incarnation that carried `generation`
+    /// (docs/impl/region/colocation.md). `None` refuses, and the caller mints
+    /// fresh.
+    pub(crate) fn join_value_region(
+        &mut self,
+        region: RuntimeRegion,
+        generation: u32,
+    ) -> Option<JoinedRegion> {
+        if self.region_store.generation_raw(region.get()) != generation {
+            return None;
+        }
+        self.region_store.join(region).map(JoinedRegion::taken)
+    }
+
+    /// Make `arena` the region every value mint joins until
+    /// [`Self::close_scope_arena`] (docs/impl/region/macroscope.md). Scopes do not
+    /// nest.
+    pub(crate) fn open_scope_arena(&mut self, arena: RegionMint) {
+        debug_assert!(
+            self.scope_arena.is_none(),
+            "a macro scope arena opened inside another"
+        );
+        self.scope_arena = Some(arena);
+    }
+
+    /// End the open scope arena, so value mints are fresh again.
+    pub(crate) fn close_scope_arena(&mut self) {
+        self.scope_arena = None;
+    }
+
+    /// Join the open scope arena, materializing it on first use. Its birth
+    /// reference is the scope's own, so the join takes a reference of its own.
+    fn join_scope_arena(&mut self) -> Option<RuntimeRegion> {
+        let arena = self.scope_arena?;
+        self.region_store.join_minted(arena)
     }
 
     /// Mint a fresh runtime region id together with the receipt that returns

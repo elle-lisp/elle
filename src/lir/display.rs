@@ -1,6 +1,7 @@
-// audited: 2026-09-06
-// src/lir/AGENTS.md
+// audited: 2026-09-29
 //! Compact human-readable display for LIR instructions and terminators.
+//!
+//! src/lir/AGENTS.md
 //!
 //! The Debug format is verbose Rust struct syntax. This module provides
 //! a compact format designed for CFG visualization:
@@ -337,6 +338,9 @@ impl fmt::Display for LirInstr {
             LirInstr::AssertRegionMatches { region_id, src } => {
                 write!(f, "assert-region-matches {region_id} {src}")
             }
+            LirInstr::JoinRegion { region, partner } => {
+                write!(f, "join-region {region} partner={partner}")
+            }
             // === Dynamic Parameters ===
             LirInstr::PushParamFrame { pairs } => {
                 write!(f, "push-param-frame(")?;
@@ -352,7 +356,7 @@ impl fmt::Display for LirInstr {
             LirInstr::IsSet { dst, src } => write!(f, "{} = is-set {}", dst, src),
             LirInstr::IsSetMut { dst, src } => write!(f, "{} = is-set-mut {}", dst, src),
 
-            // New type predicates
+            // Type predicates
             LirInstr::IsEmpty { dst, src } => write!(f, "{} ← empty?({})", dst, src),
             LirInstr::IsBool { dst, src } => write!(f, "{} ← bool?({})", dst, src),
             LirInstr::IsInt { dst, src } => write!(f, "{} ← int?({})", dst, src),

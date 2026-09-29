@@ -80,9 +80,27 @@ struct RegionEntry {
     /// edges only — the RC count's transfer/borrow references are balanced by
     /// compiler-emitted decrefs and are not mirrored here.
     incoming: FxHashMap<RuntimeRegion, u32>,
+    /// Whether a site joined this region instead of minting its own
+    /// (docs/impl/region/colocation.md). The count then belongs to every site that
+    /// joined, so no adopt may take it: [`RegionStore::adopt_region`] leaves a
+    /// joined region `Counted`.
+    joined: bool,
 }
 
 impl RegionEntry {
+    /// A fresh `Counted(1)` entry over `pool`: the birth reference, no owner, no
+    /// edges.
+    fn new(pool: RegionPool) -> Self {
+        RegionEntry {
+            pool,
+            reclaim: Reclaim::Counted(1),
+            owned_children: Vec::new(),
+            outgoing: FxHashMap::default(),
+            incoming: FxHashMap::default(),
+            joined: false,
+        }
+    }
+
     /// The region's independent reference count: the live count when `Counted`, and
     /// `0` when `Owned` — an owned region carries no count of its own (it is
     /// reclaimed by its owner's subtree drop). This is the single read path for RC,
@@ -117,6 +135,59 @@ impl RegionMint {
     #[inline]
     pub(crate) fn region(self) -> RuntimeRegion {
         self.region
+    }
+}
+
+/// One reference a join took on a region that already existed
+/// (docs/impl/region/colocation.md). The site holding it gives it back where a
+/// fresh mint's reference would be released.
+///
+/// Only the heap builds one, from a join the store admitted, so a holder cannot
+/// name a reference no join took.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct JoinedRegion {
+    region: RuntimeRegion,
+}
+
+impl JoinedRegion {
+    /// Wrap the reference a join the store admitted just took.
+    #[inline]
+    pub(in crate::value::fiberheap) fn taken(region: RuntimeRegion) -> Self {
+        JoinedRegion { region }
+    }
+
+    /// The region the join took its reference on.
+    #[inline]
+    pub(crate) fn region(self) -> RuntimeRegion {
+        self.region
+    }
+}
+
+/// The region a call slot resolved to: a fresh mint, which comes back to the
+/// free list if the call allocates nothing, or a join, which the call gives
+/// back if its result does not live there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CallRegion {
+    Minted(RegionMint),
+    Joined(JoinedRegion),
+}
+
+impl CallRegion {
+    /// The region the call allocates into.
+    #[inline]
+    pub(crate) fn region(self) -> RuntimeRegion {
+        match self {
+            CallRegion::Minted(m) => m.region(),
+            CallRegion::Joined(j) => j.region(),
+        }
+    }
+
+    /// Whether the call allocates into a region it joined. Only the declaration
+    /// oracle, a debug-build check, asks.
+    #[cfg(debug_assertions)]
+    #[inline]
+    pub(crate) fn is_joined(self) -> bool {
+        matches!(self, CallRegion::Joined(_))
     }
 }
 

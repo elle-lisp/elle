@@ -73,38 +73,43 @@ impl VM {
         self.heap().note_region_mint_site(id.get(), site.into());
     }
 
-    /// Resolve a static region slot to a **fresh** physical region for an
-    /// allocation that has a matching compiler-emitted `DecrefRegion` at its
-    /// decref_point (Pair, arrays, structs, closures, capture cells).
+    /// Resolve a static region slot to the physical region one allocation
+    /// execution allocates into, for an allocation that has a matching
+    /// compiler-emitted `DecrefRegion` at its decref_point (pairs, arrays, structs,
+    /// closures, capture cells).
     ///
-    /// Tofte-Talpin (docs/impl/region/merging.md): **every allocation execution gets
-    /// its own physical region, period** — merging is the only thing that may
-    /// collapse regions onto a shared slot, and a merged slot routes through
+    /// **Every allocation execution takes a reference of its own.** It is a fresh
+    /// region, or a join: the region a pending join names, or the open macro
+    /// scope's arena (docs/impl/region/colocation.md). A merged slot shares a
+    /// region the other way, and routes through
     /// `runtime_region_for_alloc_slot_maybe_merged` / `_for_merged_alloc_slot`
-    /// instead of here. So this mints a fresh region on every call and stores
-    /// `slot → physical` in the current activation frame *for the matching
-    /// `DecrefRegion` to find* (`take_runtime_region_for_drop_slot` reads then clears
-    /// it); it does **not** return a cached region.
+    /// instead of here (docs/impl/region/merging.md). This stores `slot → physical`
+    /// in the current activation frame *for the matching `DecrefRegion` to find*
+    /// (`take_runtime_region_for_drop_slot` reads then clears it); it does **not**
+    /// return a cached region.
     ///
-    /// Returning the cached entry would let a *re-executed* slot reuse the prior
-    /// region — commingling distinct values in one region (Rule 6) — and, when
-    /// the slot's `DecrefRegion` is dead (a tail-moved alloc whose decref lands
-    /// past the `TailCall`, so `take_runtime_region_for_drop_slot` never clears
-    /// the slot), every iteration of a tail-recursive body would pile into one
-    /// never-cleared region. A `while` loop is unaffected: its reachable
-    /// `DecrefRegion` clears the slot each iteration, so the map was already
-    /// empty at the next alloc. Overwriting a still-mapped entry is sound — that
-    /// entry can only survive a previous alloc when its `DecrefRegion` was dead,
-    /// so its region was already going to leak; orphaning the stale mapping
+    /// Returning the cached entry would let a *re-executed* slot reuse the prior region
+    /// under the prior execution's one reference, and, when the slot's `DecrefRegion`
+    /// is dead (a tail-moved alloc whose decref lands past the `TailCall`, so
+    /// `take_runtime_region_for_drop_slot` never clears the slot), every iteration of
+    /// a tail-recursive body would pile into one never-cleared region. A `while` loop
+    /// is unaffected: its reachable `DecrefRegion` clears the slot each iteration, so
+    /// the map was already empty at the next alloc. Overwriting a still-mapped entry is
+    /// sound — that entry can only survive a previous alloc when its `DecrefRegion`
+    /// was dead, so its region was already going to leak; orphaning the stale mapping
     /// changes nothing.
     #[inline]
     pub(crate) fn runtime_region_for_alloc_slot(
         &mut self,
         static_id: StaticRegion,
     ) -> RuntimeRegion {
-        // Each alloc slot mints a fresh region per execution. (There is no
-        // slot-0 case: the operand is a `StaticRegion`, always ≥ 1.)
-        let phys = self.heap().new_runtime_region();
+        // One reference per execution: a join, or a fresh (or arena-joined)
+        // value mint. (There is no slot-0 case: the operand is a `StaticRegion`,
+        // always ≥ 1.)
+        let phys = match self.take_pending_join(static_id) {
+            Some(joined) => joined.region(),
+            None => self.heap().new_value_region(),
+        };
         let gen = self.heap().generation_raw(phys.get());
         self.note_region_mint(phys, "alloc", Some(static_id));
         self.fiber

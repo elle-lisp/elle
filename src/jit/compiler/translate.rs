@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 // docs/impl/jit.md
 //! The prologue: what a compiled function does with its six parameters before
 //! the first LIR block runs.
@@ -90,8 +90,8 @@ impl JitCompiler {
         // layout). Its address is threaded to the intrinsic fast-path helpers so
         // they resolve the VM from the bundle, keeping the VM dependency explicit so
         // two embedded instances on one thread each reach their own VM
-        // (docs/impl/region/ctx.md "JIT intrinsic helpers reach the VM through a
-        // JitCtx"). The heap axis grows this slot with a heap capability.
+        // (docs/impl/region/ctx.md). The heap axis grows this slot with a heap
+        // capability.
         let jit_ctx_slot =
             builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
                 cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
@@ -110,7 +110,7 @@ impl JitCompiler {
         translator.emit_push_region_map(&mut builder)?;
 
         if is_list_variadic {
-            // --- Variadic entry: load required+optional params, then cons list for rest ---
+            // --- Variadic entry: load required+optional params, then the rest list ---
             let required = lir.arity.fixed_params();
             // num_params includes the rest param slot — subtract 1 for non-rest count
             let non_rest_params = lir.num_params.saturating_sub(1);
@@ -192,12 +192,11 @@ impl JitCompiler {
                 }
             }
 
-            // Collect args[non_rest_params..nargs] into the rest list. Each cons
-            // is minted in its OWN fresh per-execution region with ownership
-            // transfer down the chain — `elle_jit_collect_rest_list`, the JIT
-            // analog of the interpreter's `args_to_list` (src/vm/env/rest.rs). Each
-            // cons owning its own per-execution region keeps the rest list's
-            // regions independent of a JIT->JIT callee's. docs/impl/region/rules.md.
+            // Collect args[non_rest_params..nargs] into the rest list, one value
+            // region for the whole list — `elle_jit_collect_rest_list`, the JIT
+            // analog of the interpreter's `args_to_list` (src/vm/env/rest.rs). The
+            // region is the list's own, never a JIT->JIT callee's inherited one
+            // (docs/impl/region/colocation.md).
             let rest_var_idx = arg_var_base + non_rest_params as u32;
             let start_const = builder.ins().iconst(I32, non_rest_params as i64);
             let nargs_i32 = builder.ins().ireduce(I32, nargs);
@@ -224,8 +223,6 @@ impl JitCompiler {
             } else {
                 translator.def_var_pair(&mut builder, rest_var_idx, rest_tag, rest_payload);
             }
-
-            // NOTE: cons_loop_head is NOT sealed here — sealed by seal_all_blocks() below.
         } else {
             // --- Non-variadic entry: load args directly (16 bytes each) ---
             let required = lir.arity.fixed_params() as u32;
@@ -315,9 +312,8 @@ impl JitCompiler {
 
         // Materialize the abandoned-frame release tables (constants) and reserve
         // the locals scratch every error exit spills into
-        // (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
-        // it still owes"). After `init_locally_defined_vars`, so the spill at an
-        // exit reads locals that are already defined.
+        // (docs/impl/region/unwind.md). After `init_locally_defined_vars`, so the
+        // spill at an exit reads locals that are already defined.
         translator.emit_abandoned_tables(&mut builder);
 
         // Allocate shared spill slot for emit/call sites (if any).

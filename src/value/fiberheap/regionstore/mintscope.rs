@@ -1,11 +1,16 @@
+// audited: 2026-09-29
+//! The closed-scope mint log a macro expansion opens, and the close that balances
+//! the references its transformer never released.
+//!
+//! docs/impl/region/macroscope.md
+
 use super::*;
 
 impl RegionStore {
-    /// Open a closed-scope mint log (docs/impl/region/rules.md § "Macro
-    /// expansion — a closed allocation scope"). Every region minted until the
-    /// matching `reclaim_mint_scope` is recorded. The scope does not nest:
-    /// macro transformer bodies are compiled code that does not re-enter the
-    /// expander, so a transformer call mints no nested scope.
+    /// Open a closed-scope mint log (docs/impl/region/macroscope.md). Every region minted
+    /// until the matching `reclaim_mint_scope` is recorded. The scope does not nest:
+    /// macro transformer bodies are compiled code that does not re-enter the expander,
+    /// so a transformer call mints no nested scope.
     pub fn begin_mint_log(&mut self) {
         debug_assert!(
             self.mint_log.is_none(),

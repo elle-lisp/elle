@@ -1,16 +1,11 @@
-// audited: 2026-09-23
-//! Call and TailCall instruction handlers.
-//!
-//! Handles:
-//! - Native function calls (routes to signal dispatch in signal.rs)
-//! - Closure calls: the environment is built here, then the callee goes to
-//!   `run_dispatch`, which runs it on the caller's dispatch loop
-//! - Tail call optimization
-//! - `call_closure`, the re-entry macro transformers and trait methods use
-//!
-//! Environment building (closure env population, parameter binding) lives in `env.rs`.
+// audited: 2026-09-29
+//! The Call and TailCall handlers, the collection-call dispatch, and `call_closure` for macro and trait re-entry.
 //!
 //! docs/impl/vm.md
+//!
+//! A native call's signal goes to `signal.rs`, and `env.rs` builds a closure's
+//! environment. A closure callee then goes to `run_dispatch`, which runs it on
+//! the caller's dispatch loop.
 
 use crate::hir::region::StaticRegion;
 use crate::primitives::access::resolve_index;
@@ -19,10 +14,6 @@ use crate::value::{
     sorted_struct_get, BytecodeFrame, SignalBits, SuspendedFrame, TableKey, Value, SIG_ERROR,
     SIG_FUEL, SIG_HALT, SIG_OK,
 };
-// SmallVec was tried here but benchmarks showed no improvement over Vec
-// for the common 0-8 arg case. The inline storage (64 bytes) touches a
-// full cache line regardless of arg count, and the is-inline branch on
-// every push adds overhead that cancels out the allocation savings.
 use std::rc::Rc;
 
 use super::core::VM;
@@ -33,9 +24,9 @@ mod inner;
 impl VM {
     /// Handle the Call instruction.
     ///
-    /// Pops the function and arguments from the stack, calls the function,
-    /// and pushes the result. Handles native functions, VM-aware functions,
-    /// and closures with proper environment setup.
+    /// Pops the function and arguments from the stack and calls the function
+    /// through `call_inner`, which handles natives, parameters, closures and
+    /// callable collections.
     ///
     /// Returns `Some(SignalBits)` if execution should return immediately,
     /// or `None` if the dispatch loop should continue.
@@ -57,6 +48,9 @@ impl VM {
             .pop()
             .expect("VM bug: Stack underflow on Call");
 
+        // A `Vec`, not a `SmallVec`: for 0 to 8 arguments the 64-byte inline
+        // storage touches a full cache line anyway, and its is-inline branch on
+        // every push costs what the saved allocation gains.
         let mut args = Vec::with_capacity(arg_count);
         for _ in 0..arg_count {
             args.push(
@@ -175,9 +169,8 @@ impl VM {
         let deferred_release_slot = StaticRegion::new(self.read_u32(bytecode, ip));
         // The borrowed-argument stash slots. Decoded unconditionally so `ip`
         // stays aligned; a SIGNAL exit consumes their retains
-        // (docs/impl/region/mechanism.md § "What the fall-through owes, a signal
-        // exit owes too") and the normal fall-through ignores them — it runs the
-        // block's own `DecrefValueRegion`s.
+        // (docs/impl/region/signalexit.md) and the normal fall-through ignores
+        // them — it runs the block's own `DecrefValueRegion`s.
         let borrowed_count = self.read_u8(bytecode, ip) as usize;
         let mut borrowed_arg_slots = Vec::with_capacity(borrowed_count);
         for _ in 0..borrowed_count {
@@ -255,11 +248,10 @@ impl VM {
             return Some(SIG_ERROR);
         };
 
-        // Splice/apply tail call (`TailCallArrayMut`): the closure-callee deferred
-        // release and the closure-cycle merged-arena release slot are not wired through this
-        // path yet — `false`/`None` keep today's behaviour (no regression). The
-        // common `(f …)` tail call uses `TailCall`, which carries both — and the
-        // borrowed-argument stash list with them.
+        // `TailCallArrayMut` carries no closure-callee deferred release, no
+        // closure-cycle merged-arena release slot and no borrowed-argument stash
+        // list, so it passes `false`, `None` and `&[]`. The `(f …)` tail call
+        // uses `TailCall`, which carries all three.
         let bits = self.tail_call_inner(func, args, checked, region_id, false, None, &[], true);
         // The array's reclaim, on the one path every outcome of this call passes
         // through: a frame-replacing closure callee never arrives at the block
@@ -275,20 +267,21 @@ impl VM {
     /// `(str i)` / …) with the same per-execution region routing and pass-through
     /// retain a native primitive gets via [`VM::dispatch_native_call`].
     ///
-    /// A collection-call is morally a native: it returns either a value it
-    /// allocated fresh (a `(str i)` single-grapheme string), which lands in this
-    /// call's minted `alloc_region`, or a co-located / stored element it borrows
-    /// from the collection's region (an immutable array/struct element shares the
-    /// container's region pages; a mutable container's stored value has its own
-    /// region kept alive only by the container's stored reference). The borrowed
-    /// case is a Rule-5 native-result pass-through (docs/impl/region/rules.md): without an
-    /// incref the caller's `DecrefValueRegion` cascade-frees the element under its
-    /// consumer's borrow — the call-index UAF family (region-array-element-uaf,
-    /// region-struct-call-index-uaf, region-mut-collection-call-index-uaf). The
-    /// fresh case lives in `alloc_region` and is skipped — its alloc incref
-    /// (rc=1) is already the caller's single owning reference, exactly as in
-    /// `dispatch_native_call`. An immediate result (`(b i)` int, `(s v)` bool, a
-    /// `nil` default) has no region, so the incref no-ops.
+    /// A collection call behaves as a native. It returns either a value it
+    /// allocated (a `(str i)` single-grapheme string), which lands in this call's
+    /// `alloc_region`, or an element it borrows from the collection. An immutable
+    /// array or struct element shares the container's region pages; a mutable
+    /// container's stored value has its own region, which the container's stored
+    /// reference keeps alive.
+    ///
+    /// The borrowed case is a Rule-5 native-result pass-through
+    /// (docs/impl/region/rules.md). Without the incref, the caller's
+    /// `DecrefValueRegion` frees the element while its consumer still borrows it
+    /// (`tests/elle/region-array-element-uaf.lisp`). A result in `alloc_region`
+    /// takes no incref: the call region's own reference is already the caller's
+    /// one owning reference, as in `dispatch_native_call`. An immediate result
+    /// (`(b i)` int, `(s v)` bool, a `nil` default) has no region, so the incref
+    /// does nothing.
     ///
     /// Shared verbatim by the interpreter (`call_inner` / `tail_call_inner`) and
     /// the JIT (`elle_jit_call` / `elle_jit_tail_call`) so both tiers account
@@ -300,12 +293,11 @@ impl VM {
         args: &[Value],
         region_id: StaticRegion,
     ) -> Option<Result<Value, (&'static str, String)>> {
-        let mint = self.new_runtime_region_for_call_slot(region_id);
-        let alloc_region = mint.region();
+        let call = self.new_runtime_region_for_call_slot(region_id);
+        let alloc_region = call.region();
         let result = {
             // The ctx is the explicit capability `call_collection` allocates
-            // through, minted from this call's fresh region exactly as
-            // `dispatch_native_call`.
+            // through, built on this call's region as in `dispatch_native_call`.
             let mut ctx = crate::primitives::ctx::Alloc::with_region(alloc_region, unsafe {
                 &mut *self.heap_ptr
             });
@@ -323,9 +315,10 @@ impl VM {
             }
         }
         // A borrowed element or an immediate result left this call's region
-        // unallocated, so its id goes back to the free list — the same close-out
-        // `dispatch_native_call` makes.
-        self.release_unused_call_region(mint);
+        // unallocated, so a fresh id goes back to the free list and a join gives
+        // its reference back — the same close-out `dispatch_native_call` makes.
+        let unfunded = result.as_ref().and_then(|r| r.as_ref().ok()).copied();
+        self.settle_call_region(call, unfunded);
         result
     }
 

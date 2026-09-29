@@ -1,4 +1,7 @@
+// audited: 2026-09-29
 //! Variable-reference lowering — the `HirKind::Var` arm of `lower_expr`.
+//!
+//! docs/impl/lir.md
 //!
 //! Split out because resolving a binding (immutable-value inline, self-closure
 //! `LoadSelf`, upvalue vs. local slot, capture-cell unwrap) is its own concern
@@ -7,7 +10,11 @@
 use super::*;
 
 impl<'a> Lowerer<'a> {
-    pub(super) fn lower_var(&mut self, binding: &Binding, span: &Span) -> Result<Reg, String> {
+    pub(in crate::lir::lower) fn lower_var(
+        &mut self,
+        binding: &Binding,
+        span: &Span,
+    ) -> Result<Reg, String> {
         // Check immutable_values first — primitive bindings and immutable
         // globals with literal values are compiled to LoadConst without
         // needing a slot allocation.

@@ -1,4 +1,7 @@
+// audited: 2026-09-29
 //! The registers an instruction or terminator writes and reads.
+//!
+//! src/lir/AGENTS.md
 //!
 //! The single answer to that question for the whole crate: the WASM register
 //! allocator and its liveness analysis walk these, and so does the test fixture
@@ -97,6 +100,7 @@ pub fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::DecrefCellRegion { .. }
         | LirInstr::IncrefValueRegion { .. }
         | LirInstr::AssertRegionMatches { .. }
+        | LirInstr::JoinRegion { .. }
         | LirInstr::AdoptRegion { .. }
         | LirInstr::AdoptCellRegion { .. }
         | LirInstr::AdoptIntoActivation { .. }
@@ -266,12 +270,14 @@ pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         LirInstr::DecrefValueRegion { src, .. } => f(*src),
         LirInstr::DecrefCellRegion { src } => f(*src),
         LirInstr::IncrefValueRegion { src } => f(*src),
-        // The oracle peeks `src` (the return value the slot is claimed to
-        // name); record the use so liveness keeps it alive across the check.
+        // The oracle peeks `src` (the value the slot is claimed to name);
+        // record the use so liveness keeps it alive across the check.
         LirInstr::AssertRegionMatches { src, .. } => f(*src),
+        // The join reads the partner to name the region the next mint joins.
+        LirInstr::JoinRegion { partner, .. } => f(*partner),
         // The ownership-forest ops load their operand values (the handler pops
         // them to drive the adopt / group free); record those uses so liveness
-        // keeps them alive even though this backend never executes the op.
+        // keeps them alive even on WASM, which runs the op as a no-op.
         LirInstr::AdoptRegion { parent, child } | LirInstr::AdoptCellRegion { parent, child } => {
             f(*parent);
             f(*child);

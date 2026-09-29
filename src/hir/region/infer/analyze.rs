@@ -1,10 +1,11 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! The region-inference pipeline: the walk, then every post-pass that decides
-//! where a release lands. The order is the point — each pass reads answers the
-//! ones before it settled.
+//! where a release lands.
 //!
 //! docs/impl/region/rules.md
 //! docs/impl/region/mechanism.md
+//!
+//! The order is the point: each pass reads answers the ones before it settled.
 
 use super::letrec::classify_letrec_callees;
 use super::*;
@@ -31,19 +32,21 @@ pub fn analyze_regions_with(
     let user_imm = classify_letrec_callees(hir, arena, &call_class);
     call_class.user_immediates = user_imm;
 
-    // Authoritative escape facts over the canonical HIR. The MODULE-SCOPE half of
-    // the reassign 1-slot-container gate below reads this (its **return facet**,
-    // `binding_escapes_via_return`) for its not-returned check, instead of
-    // recomputing escape from region signals — the one escape analysis every
-    // consumer reads. Computed here, before `call_class` is moved into the
-    // inference; `analyze_escape` needs the declared native effects
-    // (`call_class.effects`) for its store facet, already populated.
+    // Authoritative escape facts over the canonical HIR: the one escape analysis
+    // every consumer reads. The MODULE-SCOPE half of the reassign 1-slot-container
+    // gate below reads its **return facet** (`binding_escapes_via_return`) for its
+    // not-returned check, instead of recomputing escape from region signals.
+    // Computed here, before `call_class` is moved into the inference;
+    // `analyze_escape` needs the declared native effects (`call_class.effects`) for
+    // its store facet, already populated.
     let escape_info = crate::hir::analyze_escape(hir, arena, &call_class);
 
-    // The transferred-returned-subtree cut reads the call classification AFTER
-    // the walk consumes it — the declared effects gate its consumer sites (an
-    // `Immediate`-native read is harmless) and the fiber symbols name its fiber
-    // face. Snapshot it here, before the move into the inference.
+    // The append seed and the transferred-returned-subtree cut read the call
+    // classification AFTER the walk consumes it. The seed reads the declared
+    // effects and return types of the natives a container meets. The cut's
+    // consumer sites are gated by the declared effects (an `Immediate`-native
+    // read is harmless), and the fiber symbols name its fiber face. Snapshot it
+    // here, before the move into the inference.
     let transfer_call_class = call_class.clone();
 
     let mut ri = RegionInference::new(arena, call_class);
@@ -80,16 +83,16 @@ pub fn analyze_regions_with(
     info.captured_reassigned_bindings = captured_reassigns;
 
     // Mutated-slot backstop for RE-STORABLE compiled capture cells. A mutable
-    // captured binding's cell content is repointed over time (its RC is owned
-    // by `handle_update_capture`, not the 1-slot-container maps), but a
+    // captured binding's cell content is repointed over time, and
+    // `handle_update_capture` counts it, not the 1-slot-container maps. A
     // whole-value read through the cell can still be solved to the CELL's own
-    // compiled region (the Begin pre-pass CaptureCell insertion into
-    // `binding_regions[b]`). That region names the cell, not whatever content
-    // the cell holds at read time, so a static route against it — a coalesced
-    // return/store retain — resolves the slot against repointed content (the
-    // `AssertRegionMatches` mis-coalesce on a `(deref-cell x)` tail read of a
-    // mutated `(var x …)`). Poison exactly the cell regions so
-    // `coalescible_solver_region` refuses and such reads stay value-resolved.
+    // compiled region, which a scope arm inserts into `binding_regions[b]`. That
+    // region names the cell, not whatever content the cell holds at read time. A
+    // static route against it, such as a coalesced return or store retain, would
+    // resolve the slot against repointed content, and `AssertRegionMatches` would
+    // fail on a `(deref-cell x)` tail read of a mutated `(var x …)`. Poison
+    // exactly the cell regions so `coalescible_solver_region` refuses and such
+    // reads stay value-resolved.
     // Keyed on `is_restorable_capture_cell`, the re-store predicate, which the
     // binding's declaration decides; `captured_reassigned_bindings` holds only
     // the bindings the walk saw written, so a declared-mutable cell with no
@@ -106,11 +109,8 @@ pub fn analyze_regions_with(
         }
     }
 
-    // Populate `region_data.decref_point` from per-HirId last-use analysis.
-    // For each region r, `decref_point` is the maximum `last_use[alloc_id]`
-    // over all allocation sites that resolved to r. Under unique-per-alloc each
-    // region has exactly one contributing alloc_id; the max is kept so the
-    // result stays correct should any region ever gather more than one.
+    // Def-use facts over the canonical HIR. The reassign gate, the last-use
+    // analysis and the `decref_point` passes below all read them (see `decref`).
     let mut du = DefUseBuilder::new();
     du.walk(hir);
 
@@ -141,12 +141,12 @@ pub fn analyze_regions_with(
     let last_use_info = compute_last_use(hir, &du.uses, &order);
 
     // Escape's answer to the COUNT question, projected onto regions: which regions
-    // this frame holds alone for as long as it lives. Recorded once here because two
-    // mechanisms owe exactly this admission — the branch-arm release window below
-    // and the lowerer's frame-exit release at a tail call — and both of them make
-    // a release fire on a path where none fired before (region/window.md,
-    // region/relocate.md). Computed before the decref passes so it reads the
-    // escape facts, not any placement they go on to change.
+    // this frame holds alone for as long as it lives. Two mechanisms owe exactly
+    // this admission: the branch-arm release window below, and the lowerer's
+    // frame-exit release at a tail call. Both make a release fire on a path where
+    // none fired before (docs/impl/region/window.md, docs/impl/region/relocate.md),
+    // so it is recorded once, here. Computed before the decref passes so it reads
+    // the escape facts, not any placement they go on to change.
     info.frame_held_regions = super::escape::frame_held_regions(
         &escape_info,
         arena,
@@ -159,12 +159,11 @@ pub fn analyze_regions_with(
     // owned parameters, where this compilation can resolve the callee at all.
     info.tail_callee_facts = super::escape::tail_callee_facts(hir, &frame_replacing_tail_calls);
 
-    // Which regions a value-routed release can NAME — the releases the frame-exit
-    // relocation is able to replicate into a branch arm, and so the regions the
+    // Which regions a value-routed release can NAME. Those are the releases the
+    // frame-exit relocation can replicate into a branch arm, and so the regions the
     // branch-arm window may anchor when an arm leaves through a frame-replacing
-    // callee (region/window.md § "An arm that leaves through a callee takes a
-    // replica, not the anchor"). Recorded here, beside the other admission the
-    // window owes, because the mirror of the lowerer's `region_to_slot` reads
+    // callee (docs/impl/region/window.md). Recorded here, beside the other admission
+    // the window owes, because the mirror of the lowerer's `region_to_slot` reads
     // `binder_init_sites` — which the walk holds and the decref passes do not.
     info.value_routed_regions =
         super::escape::value_routed_regions(arena, &info, &reassigns.binder_init_sites);
@@ -190,12 +189,12 @@ pub fn analyze_regions_with(
     let last_use = &last_use_info.per_node;
 
     // Per-path branch compensation (`region::infer::compensate`), the counted route for
-    // every region the branch-arm window above declined: a region whose single
-    // `decref_point` sits inside a conditional arm is freed there on the used
-    // path but leaks on the sibling arms; add a compensating release at each dead
+    // every region the branch-arm window above declined. A region whose single
+    // `decref_point` sits inside a conditional arm is freed there on the used path
+    // but leaks on the sibling arms, so add a compensating release at each dead
     // sibling arm's head. Reads the FINAL `region_data` (the decref_point post-passes
-    // above) and the exclusion sets, so it runs after them. Independent of the merge
-    // seed below (a merge child is excluded), but placed before it for locality.
+    // above) and the exclusion sets, so it runs after them. It runs before the merge
+    // seeds below, so the merge-child exclusion it applies reads an empty forest.
     let branch_comp = super::compensate::compute_branch_compensation(
         hir,
         &info,
@@ -211,30 +210,28 @@ pub fn analyze_regions_with(
     info.branch_arm_decrefs = branch_comp.tail;
     info.container_release_sites = branch_comp.container_release_sites.into_iter().collect();
 
-    // The builder-idiom merge seed (docs/impl/region/merging.md § Merging). Its
-    // coincident-decref_point gate reads the final `region_data`, so it follows
-    // every decref_point post-pass above. The lowerer consumes the
-    // resulting `merged_parent` forest through `static_slot`'s `merged_root`
-    // canonicalization (one slot per merge tree); an empty forest leaves it the
-    // identity, i.e. the unmerged baseline.
+    // The append seed (docs/impl/region/colocation.md): the allocations that join
+    // the region of the container they are pushed into. It runs before the merge
+    // seeds and the ownership forest, which leave every join region alone.
+    let joins = super::join::compute_joins(hir, arena, &info, &transfer_call_class);
+    info.joins = joins.sites;
+    info.join_regions = joins.regions;
+
+    // The builder-idiom merge seed (docs/impl/region/merging.md). Its lifetime gate
+    // reads the final `region_data`, so it follows every decref_point post-pass
+    // above. The lowerer consumes the resulting `merged_parent` forest through
+    // `static_slot`'s `merged_root` canonicalization (one slot per merge tree). An
+    // empty forest leaves it the identity, that is, the unmerged baseline.
     info.merged_parent = super::merge::compute_merges(hir, arena, &info, &escape_info, &order);
 
-    // The letrec closure-cycle merge (docs/impl/region/letrec.md § The letrec
-    // closure-cycle merge): a self/mutual
+    // The letrec closure-cycle merge (docs/impl/region/letrec.md): a self/mutual
     // recursive closure SCC and its prebound capture cells collapse onto one arena,
     // extending the same `merged_parent` forest and riding the same `merged_root`
-    // canonicalization as the builder-idiom seed. Unconditional (not flag-gated), so it
-    // lands on every tier. The single `DecrefRegion` fires at the root region's
-    // `decref_point`, set here to the merge's own `drop_site` (region/adopt.md § The
-    // lifetime obligation the root carries). That is normally the cycle's binding scope
-    // — the `letrec` that prebinds the members' capture cells — whose scope-exit
-    // post-dominates every direct use of the members (they are bound there), while a
-    // foreign capture of a member is RC-counted and outlives the single decref. Where
-    // the letrec hands a member OUT it is instead the release point that member's own
-    // region already carries, so the arena follows the value past the binding scope
-    // rather than being taken to zero under it (region/letrec.md § "Drop site —
-    // following a handed-out member"). Runs after the builder seed (it shares the map)
-    // and before the ownership pass (so `is_merged` excludes these members).
+    // canonicalization as the builder-idiom seed. Unconditional (not flag-gated), so
+    // it lands on every tier. The single `DecrefRegion` fires at the root region's
+    // `decref_point`, set here to the merge's own `drop_site` (see
+    // `ClosureCycleMerge::drop_site`). Runs after the builder seed (it shares the
+    // map) and before the ownership pass (so `is_merged` excludes these members).
     for cm in super::merge::compute_closure_cycle_merges(hir, arena, &info, &escape_info, &order) {
         for &m in &cm.members {
             // The member set (roots included) feeds `tail_callee_defers_release`' refusal
@@ -246,11 +243,11 @@ pub fn analyze_regions_with(
             }
         }
         // A NON-member body tail (a native `%add`, a redefined `+`, a foreign `g`)
-        // strands the binding-scope drop past the frame-replacing `TailCall`; the
-        // lowerer keys `deferred_release_slot = static_slot(root)` at each such site so a
-        // closure callee's frame replacement is balanced by the activation-completion
-        // adopt (region/letrec.md § The letrec closure-cycle merge). A member tail
-        // keeps its own `stranded_cycle_bindings` channel and is not recorded here.
+        // strands the binding-scope drop past the frame-replacing `TailCall`. The
+        // lowerer keys `deferred_release_slot = static_slot(root)` at each such site,
+        // so the activation-completion release balances a closure callee's frame
+        // replacement (docs/impl/region/letrec.md). A member tail keeps its own
+        // `stranded_cycle_bindings` channel and is not recorded here.
         for &site in &cm.tail_release_sites {
             info.cycle_tail_release.insert(site, cm.root);
         }
@@ -261,8 +258,8 @@ pub fn analyze_regions_with(
     }
 
     // Ownership forest: adopt edges, the transferred-returned-subtree cut, the
-    // co-owned-cycle cut, and the activation-owner cut. Runs LAST, after the
-    // final `region_data` and the merge seeds above (see `adopt`).
+    // co-owned-cycle cut, and the activation-owner cut. Runs after the final
+    // `region_data`, the append seed and the merge seeds above (see `adopt`).
     adopt::apply_ownership(
         &mut info,
         hir,
@@ -273,11 +270,9 @@ pub fn analyze_regions_with(
     );
 
     // Which `Emit` sites yield a payload their own body releases nowhere, so the
-    // lowerer can mint the body's missing reference there (docs/impl/region/park.md
-    // § "A fiber body owns one reference of every value it yields"). Runs after
-    // every decref_point post-pass and both merge seeds: the
-    // question is where a region's release lands, and a merged child's release is
-    // its root's.
+    // lowerer can mint the body's missing reference there (docs/impl/region/park.md).
+    // Runs after every decref_point post-pass and both merge seeds: the question is
+    // where a region's release lands, and a merged child's release is its root's.
     info.borrowed_emit_payloads = super::yieldborrow::compute_borrowed_emit_payloads(hir, &info);
 
     // The other half of the same symmetry: which `Emit` sites receive a resume value

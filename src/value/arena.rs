@@ -294,10 +294,24 @@ pub fn decref_region(heap: &mut FiberHeap, id: Option<RuntimeRegion>) {
     heap.decref_region(r);
 }
 
+/// The region a store of `val` into `container` counts: `val`'s own region,
+/// unless that is the container's. A reference from a region to itself is counted
+/// by neither half of the store funnel, exactly as the allocation scan and the
+/// free cascade skip it (docs/impl/region/rules.md, Rule 5). An immediate has no
+/// region to count.
+fn counted_store_region(heap: &FiberHeap, container: Value, val: Value) -> Option<RuntimeRegion> {
+    let r = region_of(heap, val)?;
+    if region_of(heap, container) == Some(r) {
+        None
+    } else {
+        Some(r)
+    }
+}
+
 /// Track a store that replaces `old` with `new` inside `container`.
-pub fn rebind_stored_element(heap: &mut FiberHeap, _container: Value, old: Value, new: Value) {
-    let old_r = region_of(heap, old);
-    let new_r = region_of(heap, new);
+pub fn rebind_stored_element(heap: &mut FiberHeap, container: Value, old: Value, new: Value) {
+    let old_r = counted_store_region(heap, container, old);
+    let new_r = counted_store_region(heap, container, new);
     if old_r == new_r {
         return;
     }
@@ -306,7 +320,7 @@ pub fn rebind_stored_element(heap: &mut FiberHeap, _container: Value, old: Value
 }
 
 /// Track adding `val` to `container`.
-pub fn incref_inserted_element(heap: &mut FiberHeap, _container: Value, val: Value) {
+pub fn incref_inserted_element(heap: &mut FiberHeap, container: Value, val: Value) {
     let r = region_of(heap, val);
     if crate::config::get().has_trace("rc") && val.is_heap() {
         eprintln!(
@@ -319,13 +333,14 @@ pub fn incref_inserted_element(heap: &mut FiberHeap, _container: Value, val: Val
         !val.is_heap() || r.is_some(),
         "incref_inserted_element: heap value has no region — page header missing or corrupt"
     );
-    incref_for_escape(heap, r, EscapeSite::MutableStore);
+    let counted = counted_store_region(heap, container, val);
+    incref_for_escape(heap, counted, EscapeSite::MutableStore);
 }
 
 /// Track removing `val` from `container`.
-pub fn decref_removed_element(heap: &mut FiberHeap, _container: Value, val: Value) {
-    let r = region_of(heap, val);
-    decref_region(heap, r);
+pub fn decref_removed_element(heap: &mut FiberHeap, container: Value, val: Value) {
+    let counted = counted_store_region(heap, container, val);
+    decref_region(heap, counted);
 }
 
 mod mutate;

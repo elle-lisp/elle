@@ -1,12 +1,13 @@
-// audited: 2026-09-19
-// docs/impl/vm.md
-// docs/impl/bytecode.md
+// audited: 2026-09-29
 //! The bytecode dispatch match: one decoded instruction routed to its handler.
 //!
-//! Extracted from the inner execution loop so the loop root stays a thin
-//! fuel/signal/decode harness. `dispatch_instruction` is the single arm of that
-//! harness. The opcodes whose whole effect is on the operand stack are handled
-//! in scalar.rs, and the arm that routes there names every one of them.
+//! docs/impl/vm.md
+//! docs/impl/bytecode.md
+//!
+//! The inner execution loop stays a thin fuel/signal/decode harness, and
+//! `dispatch_instruction` is its single arm. The opcodes whose whole effect is
+//! on the operand stack are handled in scalar.rs, and the arm that routes there
+//! names every one of them.
 //!
 //! `#[inline]` is what keeps the cost down: the loop is hot and the match must
 //! fold back into the caller, so the harness's fall-through and the handlers
@@ -17,14 +18,14 @@
 //! check and continue. `ip` is advanced in place; `instr_ip` is the opcode's
 //! start (for error-location attribution).
 //!
-//! Fuel is charged inline in the branch/call arms via `charge_fuel` — the
-//! single opcode match is the one place that inspects the instruction, so the
+//! Fuel is charged inline in the backward-jump and call arms via `charge_fuel`.
+//! The opcode match is the one place that inspects the instruction, so the
 //! accounting stays on the same jump table as dispatch (no separate pre-match).
 
 use super::*;
 
 impl VM {
-    /// Charge one unit of fuel for a branch/call opcode. Returns `Some(exit)`
+    /// Charge one unit of fuel for a backward jump or a call. Returns `Some(exit)`
     /// when fuel is exhausted — the caller must propagate it out of the dispatch
     /// loop — and `None` after decrementing. `resume_ip` must be the opcode start
     /// (`instr_ip`), so a fuel-yielded fiber re-runs the whole opcode on resume.
@@ -43,8 +44,8 @@ impl VM {
     }
 
     // The arg list is the inner loop's live context (bytecode/const slices, the
-    // Rc handles call/yield capture, the in/out `ip`), threaded in wholesale so
-    // the match stays a verbatim extraction of the old inline body.
+    // Rc handles call/yield capture, the in/out `ip`), threaded in whole so each
+    // arm reads the same names the loop holds.
     #[allow(clippy::too_many_arguments)]
     #[inline]
     pub(super) fn dispatch_instruction(
@@ -406,6 +407,10 @@ impl VM {
                 region::handle_assert_region_matches(self, bc, ip);
             }
 
+            Instruction::JoinRegion => {
+                region::handle_join_region(self, bc, ip);
+            }
+
             // Dynamic parameter frame management
             Instruction::PushParamFrame => {
                 self.handle_push_param_frame(bc, ip);
@@ -415,12 +420,9 @@ impl VM {
             }
             Instruction::IntrFreeze => {
                 // IntrFreeze allocates a fresh immutable container
-                // holding the source's entries. The lowerer's
-                // emit_alloc assigns it a region (so a matching
-                // DecrefRegion fires at scope exit); the runtime
-                // must alloc into that same region or the decref
-                // hits an empty slot and the phantom-region
-                // debug_assert panics.
+                // holding the source's entries, into the slot the
+                // lowerer's `emit_alloc` assigned, so that slot's
+                // `DecrefRegion` at scope exit releases it.
                 let region = self.read_static_region(bc, ip);
                 let region_id =
                     self.runtime_region_for_alloc_slot_maybe_merged(region, code.merged_slots());

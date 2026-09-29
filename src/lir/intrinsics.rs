@@ -1,4 +1,7 @@
-//! Intrinsic operation mapping for operator specialization.
+// audited: 2026-09-29
+//! The primitive classification the lowerer and the region solver read: intrinsic operators and the funnel sets.
+//!
+//! docs/impl/region/effects.md
 //!
 //! Maps known primitive operator SymbolIds to specialized LIR instructions
 //! (BinOp, CmpOp, UnaryOp) so the lowerer can emit them directly instead
@@ -30,6 +33,11 @@ pub(crate) fn build_intrinsics() -> FxHashMap<SymbolId, IntrinsicOp> {
     map
 }
 
+/// The symbols of `names`, a set the classification tests membership in.
+fn symbol_set(names: &[&str]) -> rustc_hash::FxHashSet<SymbolId> {
+    names.iter().map(|name| SymbolId::of(name)).collect()
+}
+
 /// All primitive property sets needed by the Lowerer, built once.
 pub struct PrimitiveClassification {
     pub intrinsics: FxHashMap<SymbolId, IntrinsicOp>,
@@ -45,7 +53,7 @@ impl PrimitiveClassification {
         // removals (`%del`) or byte-copy pushes (`%string-push`/`%bytes-push`),
         // which are `Funnel` too but do not raise a stored value's RC. See
         // `CallClassification::retaining_store_funnels`.
-        let retaining_store_funnels = [
+        let retaining_store_funnels = symbol_set(&[
             "%put",
             "%put-struct",
             "%put-struct-mut",
@@ -56,10 +64,7 @@ impl PrimitiveClassification {
             "%push-array-mut",
             "%add-set",
             "%add-set-mut",
-        ]
-        .iter()
-        .map(|name| SymbolId::of(name))
-        .collect();
+        ]);
 
         // The BYTE-COPY store funnels — `Funnel` ops that COPY the pushed value's
         // bytes into the container rather than retaining its region
@@ -71,10 +76,13 @@ impl PrimitiveClassification {
         // per-arm release there is the value's ACTUAL last-use release (not a redundant
         // strand, not a double-free — the `%del` in-body decref hazard the compensation
         // excludes does NOT apply). See `CallClassification::bytecopy_store_funnels`.
-        let bytecopy_store_funnels = ["%string-push", "%string-push-mut", "%bytes-push"]
-            .iter()
-            .map(|name| SymbolId::of(name))
-            .collect();
+        let bytecopy_store_funnels =
+            symbol_set(&["%string-push", "%string-push-mut", "%bytes-push"]);
+
+        // The APPEND store funnels: the retaining stores that add a value to a
+        // mutable `@array` and take nothing out. The append seed admits a value
+        // pushed at one of these (`CallClassification::append_store_funnels`).
+        let append_store_funnels = symbol_set(&["%array-push", "%push-array-mut"]);
 
         // The moves-out ∩ PassThrough natives (`%pop`/`%pop-array*`): a non-fresh
         // element removed from a container, escape-retained in-body — so its tail
@@ -108,7 +116,7 @@ impl PrimitiveClassification {
         // arg0; escape adds a read-result → container-contents flow edge so a value
         // read back out and escaped is refused adoption into the container's subtree
         // (`CallClassification::container_read_funnels`).
-        let container_read_funnels = [
+        let container_read_funnels = symbol_set(&[
             "first",
             "rest",
             "get",
@@ -119,10 +127,7 @@ impl PrimitiveClassification {
             "%pop",
             "%pop-string",
             "%pop-bytes",
-        ]
-        .iter()
-        .map(|name| SymbolId::of(name))
-        .collect();
+        ]);
 
         let call_classification = crate::hir::CallClassification {
             intrinsic_ops: intrinsics.keys().copied().collect(),
@@ -130,6 +135,7 @@ impl PrimitiveClassification {
             ret_types: meta.ret_types.iter().map(|(k, v)| (*k, *v)).collect(),
             embeds: meta.embeds.iter().map(|(k, v)| (*k, *v)).collect(),
             retaining_store_funnels,
+            append_store_funnels,
             bytecopy_store_funnels,
             container_read_funnels,
             moves_out_passthrough,
@@ -142,10 +148,7 @@ impl PrimitiveClassification {
             // compiles to a call on it, and that call parks and yields exactly as
             // the `Emit` terminator does (`CallClassification::emit_natives`).
             // Ordinary code reaches it through the alias, so both belong here.
-            emit_natives: ["fiber/emit", "emit"]
-                .iter()
-                .map(|name| SymbolId::of(name))
-                .collect(),
+            emit_natives: symbol_set(&["fiber/emit", "emit"]),
             ..Default::default()
         };
         PrimitiveClassification {

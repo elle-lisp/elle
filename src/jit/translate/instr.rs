@@ -1,15 +1,20 @@
-// audited: 2026-09-19
-// src/jit/AGENTS.md
+// audited: 2026-09-29
 //! Translating one LIR instruction to Cranelift IR.
 //!
-//! One exhaustive match over the instruction set. Each arm reads its operands as
+//! src/jit/AGENTS.md
+//!
+//! The translation is a chain of matches. This file takes constants, locals,
+//! captures, arithmetic, pairs, arrays and capture cells, and passes every other
+//! instruction to `calls`, then `async_ops`, `predicates` and `regionops`. The
+//! five matches together cover the instruction set, so the wildcard arm of
+//! `regionops`, the tail, is unreachable. Each arm reads its operands as
 //! (tag, payload) variable pairs and defines the destination the same way.
 
 use super::*;
 
 impl<'a> FunctionTranslator<'a> {
-    /// Translate a single LIR instruction.
-    /// Returns true if the instruction emitted a terminator (e.g., TailCall).
+    /// Translate a single LIR instruction. Returns true when the instruction
+    /// ended the block with a `return`, as `TailCallArrayMut` does.
     pub(crate) fn translate_instr(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -41,13 +46,11 @@ impl<'a> FunctionTranslator<'a> {
                 region,
             } => {
                 // A heap literal (string, or quoted compound data) is an ordinary
-                // allocation, NOT a baked pointer: own the recursive template for
-                // the JIT code's lifetime (the native code reads it on every
-                // execution to build a FRESH structure), then materialize into
-                // this literal's own resolved region — passed explicitly to the
-                // helper, exactly like List/MakeArrayMut. The helper recurses in
-                // Rust, so one call materializes the whole structure into the
-                // resolved region.
+                // allocation, NOT a baked pointer. The JIT code owns the recursive
+                // template for its lifetime, and the native code reads it on every
+                // execution to build a FRESH structure. The helper takes this
+                // literal's resolved region explicitly, like List/MakeArrayMut, and
+                // recurses in Rust, so one call builds the whole structure there.
                 self.templates.push(Box::new(template.clone()));
                 let tmpl = self.templates.last().expect("just pushed");
                 let ptr = builder
@@ -435,3 +438,4 @@ impl<'a> FunctionTranslator<'a> {
 mod async_ops;
 mod calls;
 mod predicates;
+mod regionops;

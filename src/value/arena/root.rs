@@ -4,7 +4,6 @@
 //! docs/impl/region/rules.md
 //! docs/impl/region/macroscope.md
 //! docs/impl/region/template.md
-//! docs/impl/region/model.md
 
 use super::*;
 use crate::value::fiberheap::regionstore::RegionMint;
@@ -105,37 +104,38 @@ pub(crate) fn root_region(heap: &mut FiberHeap) -> RuntimeRegion {
     r
 }
 
-/// One open macro-expansion scope: the transient region the expansion wraps its
-/// arguments into, held as the mint receipt that returns the region's physical
-/// id (docs/impl/region/model.md).
+/// One open macro-expansion scope: the arena its value mints join, held as the
+/// mint receipt that returns the arena's physical id (docs/impl/region/macroscope.md).
 ///
 /// The open hands this out rather than a bare `RuntimeRegion`, so the expander
 /// cannot name the region without also holding what closes it. The close is
 /// [`reclaim_macro_scope`], which consumes the scope.
-#[must_use = "an unreclaimed macro scope strands the transient region's id and \
-              leaves the transformer's scratch holding unbalanced references"]
+#[must_use = "an unreclaimed macro scope strands the arena's id and leaves the \
+              transformer's scratch holding unbalanced references"]
 pub struct MacroScope {
     arena: RegionMint,
 }
 
 impl MacroScope {
-    /// The region this expansion's wrapped arguments are born in.
+    /// The arena: the region the wrapped arguments are born in and every value
+    /// mint joins while the scope is open.
     pub fn arena(&self) -> RuntimeRegion {
         self.arena.region()
     }
 }
 
-/// Open a macro-expansion allocation scope (docs/impl/region/macroscope.md). Every region
-/// minted until the matching [`reclaim_macro_scope`] is recorded so its dead scratch can
-/// be reclaimed by RC.
+/// Open a macro-expansion allocation scope (docs/impl/region/macroscope.md). Every
+/// region minted until the matching [`reclaim_macro_scope`] is recorded, so its dead
+/// scratch can be reclaimed by RC.
 ///
-/// The transient argument region is minted here, inside the log, so the reclaim covers
-/// it like any other region the expansion mints.
+/// The arena is minted here, inside the log, so the reclaim covers it like any other
+/// region the expansion mints. It stays unmaterialized until the first allocation
+/// into it, and that first allocation takes its birth reference: the scope's own.
 pub fn begin_macro_scope(heap: &mut FiberHeap) -> MacroScope {
     heap.begin_region_mint_log();
-    MacroScope {
-        arena: heap.new_runtime_region_tracked(),
-    }
+    let arena = heap.new_runtime_region_tracked();
+    heap.open_scope_arena(arena);
+    MacroScope { arena }
 }
 
 /// Close the scope opened by [`begin_macro_scope`] and reclaim the transformer's
@@ -156,13 +156,15 @@ pub fn begin_macro_scope(heap: &mut FiberHeap) -> MacroScope {
 /// owner: teardown for a process root, the death of the last blueprint packed
 /// into it for a payload region.
 ///
-/// The transient argument region's physical id comes back here, and the recycle
-/// runs FIRST so it reads the region as the expansion left it. An expansion that
-/// wrapped nothing left it unmaterialized, and no teardown can ever return an id
-/// that names no region; one that wrapped an argument left a live region the
-/// reclaim below frees, whose own teardown books the id, so the recycle reads it
-/// live and pushes nothing (docs/impl/region/model.md).
+/// The arena closes first, so no mint during the reclaim joins it. Its physical
+/// id comes back here, and the recycle runs before the reclaim so it reads the
+/// arena as the expansion left it. An expansion that allocated nothing left it
+/// unmaterialized, and no teardown can ever return an id that names no region.
+/// One that allocated left a live region the reclaim below frees, whose own
+/// teardown books the id, so the recycle reads it live and pushes nothing
+/// (docs/impl/region/model.md).
 pub fn reclaim_macro_scope(heap: &mut FiberHeap, scope: MacroScope) {
+    heap.close_scope_arena();
     heap.recycle_unmaterialized_region(scope.arena);
     let mut protected = heap.process_roots_snapshot();
     if let Some(root) = heap.root_region_slot() {

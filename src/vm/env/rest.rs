@@ -1,6 +1,9 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Rest-parameter collection: the `&` list, the `&keys`/`&named` structs,
 //! and the release a collector takes over from a moved argument.
+//!
+//! docs/impl/region/colocation.md
+//! docs/impl/region/relocate.md
 
 use crate::value::Value;
 
@@ -10,23 +13,24 @@ use super::env_value_region;
 impl VM {
     /// Collect values into an Elle list (pair chain terminated by EMPTY_LIST).
     ///
-    /// One region per cons, with ownership transfer down the chain so a single
-    /// release of the HEAD cascade-frees the whole list (every value its own
-    /// region — see `env_value_region`). Built tail→head: each new cons points
-    /// at the prior head via its `rest`, so `alloc_in_region`'s cross-region
-    /// scan increfs the prior head's region (rc 1→2). We then drop our minting
-    /// reference on that prior head (rc 2→1), leaving it owned solely by the new
-    /// cons's edge. Only the final head keeps its minting rc=1 — the one owning
-    /// reference the owned-params move carries into the callee (or releases).
-    /// Freeing the head then cascades head→cons₂→…→tail, each rc 1→0.
+    /// The whole list is one region: one operation builds it, and every cons is reachable
+    /// only through the head (docs/impl/region/colocation.md). Built tail→head,
+    /// each new cons points at the prior head in the same region, a reference no ledger
+    /// counts. The region's one reference is the one the owned-params move carries into
+    /// the callee (or releases), and that release frees the whole list. A tail handed
+    /// out of the callee keeps the region, and every cons with it, for as long as the
+    /// tail lives. An empty rest list is the immediate `()` and mints nothing.
     pub(super) fn args_to_list(
         args: &[Value],
         heap: &mut crate::value::fiberheap::FiberHeap,
     ) -> Value {
         use crate::value::heap::{HeapObject, HeapTag, Pair};
+        if args.is_empty() {
+            return Value::EMPTY_LIST;
+        }
+        let cons_region = env_value_region(heap);
         let mut list = Value::EMPTY_LIST;
         for arg in args.iter().rev() {
-            let cons_region = env_value_region(heap);
             let traits = crate::primitives::traitregistry::default_traits_for(heap, HeapTag::Pair);
             let obj = HeapObject::Pair(Pair {
                 first: *arg,
@@ -34,26 +38,17 @@ impl VM {
                 traits,
             });
             // `alloc_in_region` → `alloc_obj` increfs every cross-region ref in
-            // the object: the prior head (this cons's `rest`) and any heap
-            // `first`. Both are balanced by the free-time cascade.
-            let new_cons = heap.alloc_in_region(obj, cons_region);
-            // Drop the minting ref on the prior head now that `new_cons` pins it
-            // via `rest`. Guarded on a genuine cross-region edge (the first
-            // cons's `rest` is EMPTY_LIST — no region).
-            if let Some(prior) = crate::value::arena::region_of(heap, list) {
-                if prior != cons_region {
-                    heap.decref_region(prior);
-                }
-            }
-            list = new_cons;
+            // the object: a heap `first` in another region. The `rest` is the
+            // prior cons in this same region, which the scan skips; both halves
+            // of that are balanced by the free-time cascade.
+            list = heap.alloc_in_region(obj, cons_region);
         }
         list
     }
 
     /// Release the moved-in reference of each collected arg on a MOVE call
     /// (`own_params = false`), for every collector kind — `&`, `&keys`, `&named`
-    /// alike (docs/impl/region/mechanism.md § "A collector parameter takes the
-    /// moved reference over itself"; rate pinned by
+    /// alike (docs/impl/region/relocate.md; rate pinned by
     /// `tests/elle/region-collector-arg-move.lisp`). Released ONLY for a value that
     /// appears exactly once across ALL arg positions (`all_args`) — an aliased value
     /// shares one transferred reference a fixed slot / earlier member already
@@ -68,8 +63,7 @@ impl VM {
     /// rescanning `all_args` for each — is quadratic, and every comparison is a
     /// `region_of` page-header walk, so a large `(apply f xs)` in tail position
     /// pays it in full (`tests/elle/apply-tail-linear.lisp`,
-    /// docs/regions/performance.md § "Passing arguments costs one pass over
-    /// them").
+    /// docs/regions/performance.md).
     ///
     /// Counting first and releasing second gives the same answers as
     /// interleaving them. A release here can only FREE regions (its own and
@@ -194,8 +188,7 @@ impl VM {
             // Error-message spelling. The rejected key is one the caller
             // wrote, so it is the instance memo that holds its name — a
             // message built without one names a hash the author has to
-            // decode (docs/impl/symbol.md § "Reading a name, and not reading
-            // one").
+            // decode (docs/impl/symbol.md).
             let spell = || {
                 crate::value::keyword::resolve_keyword_name(symbols, key)
                     .map(|n| format!(":{}", n))

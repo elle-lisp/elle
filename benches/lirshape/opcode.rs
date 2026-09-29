@@ -1,10 +1,10 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 //! One opcode byte per `LirInstr` variant.
 //!
 //! docs/impl/image/measurements.md
 //!
-//! Its own file because the enum has 88 variants, and the prototype's node
-//! carries the variant as a byte: a backend that matches on 88 opcodes
+//! Its own file because the enum has 89 variants, and the prototype's node
+//! carries the variant as a byte: a backend that matches on 89 opcodes
 //! branches as the shipped translator does, where a coarser encoding would
 //! flatter the read.
 
@@ -76,32 +76,33 @@ pub fn opcode(i: &LirInstr) -> u8 {
         LirInstr::FreeRegionGroup { .. } => 58,
         LirInstr::AdoptIntoActivation { .. } => 59,
         LirInstr::AssertRegionMatches { .. } => 60,
-        LirInstr::PushParamFrame { .. } => 61,
-        LirInstr::PopParamFrame => 62,
-        LirInstr::CheckSignalBound { .. } => 63,
-        LirInstr::IsEmpty { .. } => 64,
-        LirInstr::IsBool { .. } => 65,
-        LirInstr::IsInt { .. } => 66,
-        LirInstr::IsFloat { .. } => 67,
-        LirInstr::IsString { .. } => 68,
-        LirInstr::IsKeyword { .. } => 69,
-        LirInstr::IsSymbolCheck { .. } => 70,
-        LirInstr::IsBytes { .. } => 71,
-        LirInstr::IsBox { .. } => 72,
-        LirInstr::IsClosure { .. } => 73,
-        LirInstr::IsFiber { .. } => 74,
-        LirInstr::TypeOf { .. } => 75,
-        LirInstr::Length { .. } => 76,
-        LirInstr::Get { .. } => 77,
-        LirInstr::Put { .. } => 78,
-        LirInstr::Del { .. } => 79,
-        LirInstr::Has { .. } => 80,
-        LirInstr::IntrPush { .. } => 81,
-        LirInstr::IntrStringPush { .. } => 82,
-        LirInstr::IntrBytesPush { .. } => 83,
-        LirInstr::Pop { .. } => 84,
-        LirInstr::Freeze { .. } => 85,
-        LirInstr::Thaw { .. } => 86,
-        LirInstr::Identical { .. } => 87,
+        LirInstr::JoinRegion { .. } => 61,
+        LirInstr::PushParamFrame { .. } => 62,
+        LirInstr::PopParamFrame => 63,
+        LirInstr::CheckSignalBound { .. } => 64,
+        LirInstr::IsEmpty { .. } => 65,
+        LirInstr::IsBool { .. } => 66,
+        LirInstr::IsInt { .. } => 67,
+        LirInstr::IsFloat { .. } => 68,
+        LirInstr::IsString { .. } => 69,
+        LirInstr::IsKeyword { .. } => 70,
+        LirInstr::IsSymbolCheck { .. } => 71,
+        LirInstr::IsBytes { .. } => 72,
+        LirInstr::IsBox { .. } => 73,
+        LirInstr::IsClosure { .. } => 74,
+        LirInstr::IsFiber { .. } => 75,
+        LirInstr::TypeOf { .. } => 76,
+        LirInstr::Length { .. } => 77,
+        LirInstr::Get { .. } => 78,
+        LirInstr::Put { .. } => 79,
+        LirInstr::Del { .. } => 80,
+        LirInstr::Has { .. } => 81,
+        LirInstr::IntrPush { .. } => 82,
+        LirInstr::IntrStringPush { .. } => 83,
+        LirInstr::IntrBytesPush { .. } => 84,
+        LirInstr::Pop { .. } => 85,
+        LirInstr::Freeze { .. } => 86,
+        LirInstr::Thaw { .. } => 87,
+        LirInstr::Identical { .. } => 88,
     }
 }

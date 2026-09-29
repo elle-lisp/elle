@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Call-classification input to region inference.
 //!
 //! Which calls return immediates, and the per-primitive region effects and
@@ -61,6 +61,12 @@ pub struct CallClassification {
     /// raised, the invariant `region::infer::compensate` needs to place a per-arm decref
     /// that cannot over-free. Populated by `PrimitiveClassification::new`.
     pub retaining_store_funnels: FxHashSet<SymbolId>,
+    /// SymbolIds of the APPEND store funnels (`%array-push`/`%push-array-mut`): the
+    /// retaining stores that add a value to a mutable `@array` and take nothing out.
+    /// The append seed (`region::infer::join`) admits a fresh value pushed at such a
+    /// site into its container's region (docs/impl/region/colocation.md). Populated
+    /// by `PrimitiveClassification::new`.
+    pub append_store_funnels: FxHashSet<SymbolId>,
     /// SymbolIds of the BYTE-COPY store funnels (`%string-push`/`%string-push-mut`/
     /// `%bytes-push`) — `Funnel` ops that copy the pushed value's bytes rather than
     /// retaining its region. Neither retaining (no member incref) nor removing (no
@@ -112,11 +118,9 @@ pub struct CallClassification {
     pub fiber_resume: Option<SymbolId>,
     /// The SymbolIds the **emit primitive** answers to. A first argument the
     /// compiler cannot read as a keyword set compiles to an ordinary call on it
-    /// rather than to the `Emit` terminator (docs/signals/emit.md § "Dynamic
-    /// emit"), and such a call parks and yields exactly as the terminator does —
-    /// so the borrowed-payload reading must recognize it structurally
-    /// (docs/impl/region/park.md § "What yields is the emit OPERATION, not the
-    /// `Emit` node"). A set rather than one id because the primitive is reachable
+    /// rather than to the `Emit` terminator (docs/signals/emit.md), and such a call
+    /// parks and yields exactly as the terminator does — so the borrowed-payload
+    /// reading must recognize it structurally (docs/impl/region/park.md). A set rather than one id because the primitive is reachable
     /// under its canonical name and its alias, and ordinary code uses the alias.
     /// Empty under the default classification, which disables the reading.
     pub emit_natives: FxHashSet<SymbolId>,

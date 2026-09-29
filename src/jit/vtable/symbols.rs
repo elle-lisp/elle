@@ -1,10 +1,8 @@
-// audited: 2026-09-13
-// docs/impl/jit.md
+// audited: 2026-09-29
 //! One `builder.symbol` line per `elle_jit_*` helper: the address the JIT
 //! linker resolves each name to.
 //!
-//! Split from the vtable root because this list and the `RuntimeHelpers`
-//! struct beside it grow independently — a name here, a `FuncId` there.
+//! docs/impl/jit.md
 
 use cranelift_jit::JITBuilder;
 
@@ -46,7 +44,7 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         runtime::elle_jit_is_truthy as *const u8,
     );
 
-    // Data structure, lbox, call, and yield helpers
+    // Data, capture-cell, call, yield and region helpers (dispatch.rs)
     builder.symbol("elle_jit_pair", dispatch::elle_jit_pair as *const u8);
     builder.symbol("elle_jit_first", dispatch::elle_jit_first as *const u8);
     builder.symbol("elle_jit_rest", dispatch::elle_jit_rest as *const u8);
@@ -243,6 +241,10 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         dispatch::elle_jit_incref_value_region as *const u8,
     );
     builder.symbol(
+        "elle_jit_join_region",
+        dispatch::elle_jit_join_region as *const u8,
+    );
+    builder.symbol(
         "elle_jit_adopt_region",
         dispatch::elle_jit_adopt_region as *const u8,
     );
@@ -288,7 +290,7 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
     );
     builder.symbol("elle_jit_incref", dispatch::elle_jit_incref as *const u8);
     builder.symbol("elle_jit_decref", dispatch::elle_jit_decref as *const u8);
-    // New intrinsic helpers
+    // Intrinsic helpers (runtime.rs)
     builder.symbol("elle_jit_is_empty", runtime::elle_jit_is_empty as *const u8);
     builder.symbol("elle_jit_is_bool", runtime::elle_jit_is_bool as *const u8);
     builder.symbol("elle_jit_is_int", runtime::elle_jit_is_int as *const u8);

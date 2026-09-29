@@ -5,6 +5,7 @@
 use super::*;
 
 mod anode;
+mod cellfree;
 mod fnode;
 mod frame;
 mod jit;
@@ -44,8 +45,8 @@ pub(super) fn child_fiber(
 /// count delta. The shared steady-state harness every discarded-shape reclamation
 /// pin below uses — the ownership forest is unconditional, so there is no flag to
 /// vary; a shape reads bounded iff the forest reclaims it. `without_stdlib` keeps
-/// the measurement to region count; the trustworthy UAF oracle is full-stdlib
-/// `--trace=guardfree` (the elle corpus).
+/// the measurement to region count; the use-after-free oracle is the full-stdlib
+/// `--trace=guardfree` corpus.
 pub(super) fn steady_region_growth(src: &str) -> i64 {
     use crate::pipeline::compile_file_repl;
     let mut rt = Runtime::without_stdlib();
@@ -121,16 +122,17 @@ pub(super) fn mid_run_discriminator(rt: Runtime, gauge: &str) -> i64 {
     mid_run_growth(rt, "(def @acc nil)", "(assign acc (%pair n acc))", gauge)
 }
 
-/// The built-in live-growth discriminator now that the ownership forest is
-/// unconditional and every reclaimable cycle below reads bounded: an `@array`
-/// holding a fiber whose closure captures the array. Per-region RC cannot collect
-/// the cycle, and no forest cut reclaims one through a fiber, whose region is
-/// never a forest member (docs/impl/region/adopt.md). So re-run in the discarded
-/// top-level harness it leaks every run. A near-zero SUBJECT growth is real
-/// reclamation ONLY beside a positive discriminator growth (else the gauge is dead and every "bounded"
-/// reading void). It is a deliberate uncollectable shape; if a future cut
-/// reclaims it, this discriminator (and the gauge-live preconditions that read
-/// it) go red, forcing a re-choice.
+/// The built-in live-growth discriminator: an `@array` holding a fiber whose
+/// closure captures the array. Per-region RC cannot collect the cycle, and no
+/// forest cut reclaims one through a fiber, whose region is never a forest member
+/// (docs/impl/region/adopt.md). So re-run in the discarded top-level harness it
+/// leaks every run.
+///
+/// A near-zero SUBJECT growth is real reclamation ONLY beside a positive
+/// discriminator growth; otherwise the gauge is dead and every "bounded" reading
+/// is void. The shape is uncollectable on purpose. If a later cut reclaims it,
+/// this discriminator and the gauge-live preconditions that read it go red, and
+/// a new one has to be chosen.
 ///
 /// A single `@array` that holds itself is no discriminator: a reference from a
 /// region to itself is counted nowhere (docs/impl/region/rules.md, Rule 5), so

@@ -1,11 +1,13 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Capture-cell (box) operations for JIT-compiled code.
 //!
+//! docs/impl/region/colocation.md
+//!
 //! These mint and access the `CaptureCell`s that back mutable captured locals,
-//! plus the rest-arg list builder. The `_owned` and `collect_rest_list`
-//! prologue paths deliberately mint their OWN per-execution region rather than
-//! allocating into the caller's inherited region — see each function's WHY for
-//! the Rule-6/Rule-8 leak/use-after-free they avoid.
+//! plus the rest-arg list builder. The `_owned` and `collect_rest_list` prologue
+//! paths mint through `new_value_region`, as the interpreter's env values do,
+//! rather than allocating into the caller's inherited region — see each
+//! function's WHY for the Rule-6/Rule-8 leak/use-after-free they avoid.
 
 use super::region_of_raw;
 use crate::jit::value::JitValue;
@@ -37,10 +39,11 @@ pub extern "C" fn elle_jit_make_capture(
     ))
 }
 
-/// Create a CaptureCell in its OWN fresh per-execution region — the JIT-prologue
-/// analog of the interpreter's `populate_env`/`push_param` capture-cell path
-/// (`env_value_region` mints a fresh `new_runtime_region`, `alloc_in_region`
-/// builds the cell there; src/vm/env.rs). The prologue must use THIS, not
+/// Create a CaptureCell in a value region of its own — the JIT-prologue analog of
+/// the interpreter's `populate_env`/`push_param` capture-cell path
+/// (`env_value_region` mints through `new_value_region`, which joins an open
+/// macro scope's arena, and `alloc_in_region` builds the cell there;
+/// src/vm/env.rs). The prologue must use THIS, not
 /// `elle_jit_make_capture` (which builds the cell in the region slot it is
 /// handed): on a JIT->JIT call the callee inherits the caller's region, so a cell
 /// allocated there commingles with it (docs/impl/region/rules.md Rule 6) and its
@@ -54,7 +57,7 @@ pub extern "C" fn elle_jit_make_capture_owned(tag: u64, payload: u64, vm: *mut (
     // The driving instance's heap, reached through the threaded vm pointer
     // (docs/impl/region/ctx.md).
     let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
-    let region = heap.new_runtime_region();
+    let region = heap.new_value_region();
     JitValue::from_value(crate::value::build::capture_cell(
         heap,
         val,
@@ -64,13 +67,13 @@ pub extern "C" fn elle_jit_make_capture_owned(tag: u64, payload: u64, vm: *mut (
 }
 
 /// Build a rest-arg list from `args[start..nargs]`, the JIT-prologue analog of
-/// the interpreter's `VM::args_to_list` (src/vm/env/rest.rs): EACH cons is born in
-/// its OWN fresh per-execution region, built tail→head so each new cons pins the
-/// prior head via its `rest` (whose region `alloc_obj` increfs), and the minting
-/// reference on that prior head is then dropped — leaving the chain owned solely
-/// head→…→tail so freeing the head cascades the whole list. The prologue must
-/// use THIS, not an inline `elle_jit_pair` cons-loop (which allocs into the
-/// caller's current region — the same Rule-6/Rule-8 defect as the capture cells).
+/// the interpreter's `VM::args_to_list` (src/vm/env/rest.rs): the whole list is
+/// one value region, minted once through `new_value_region`. Built tail→head,
+/// each new cons points at the prior head in the same region, a reference no
+/// ledger counts, so the region's one reference is the list's and its release
+/// frees every cons. The prologue must use THIS, not an inline `elle_jit_pair`
+/// cons-loop (which allocs into the caller's current region — the same
+/// Rule-6/Rule-8 defect as the capture cells).
 #[no_mangle]
 pub extern "C" fn elle_jit_collect_rest_list(
     args_ptr: *const Value,
@@ -86,11 +89,11 @@ pub extern "C" fn elle_jit_collect_rest_list(
     }
     // This instance's own heap, via the threaded vm pointer.
     let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
+    let cons_region = heap.new_value_region();
     let mut i = nargs;
     while i > start {
         i -= 1;
         let arg = unsafe { *args_ptr.add(i as usize) };
-        let cons_region = heap.new_runtime_region();
         let traits = crate::primitives::traitregistry::default_traits_for(heap, HeapTag::Pair);
         let obj = HeapObject::Pair(Pair {
             first: arg,
@@ -98,18 +101,10 @@ pub extern "C" fn elle_jit_collect_rest_list(
             traits,
         });
         // `alloc_in_region` → `alloc_obj` increfs every cross-region ref in the
-        // object: the prior head (this cons's `rest`) and any heap `first`. Both
-        // are balanced by the free-time cascade.
-        let new_cons = heap.alloc_in_region(obj, cons_region);
-        // Drop the minting ref on the prior head now that `new_cons` pins it via
-        // `rest` — leaving it owned solely by the new cons's edge. EMPTY_LIST has
-        // no region (the first cons's `rest`), so `region_of` no-ops there.
-        if let Some(prior) = crate::value::arena::region_of(heap, list) {
-            if prior != cons_region {
-                heap.decref_region(prior);
-            }
-        }
-        list = new_cons;
+        // object: a heap `first` in another region. The `rest` is the prior cons
+        // in this same region, which the scan skips; both halves of that are
+        // balanced by the free-time cascade.
+        list = heap.alloc_in_region(obj, cons_region);
     }
     JitValue::from_value(list)
 }

@@ -1,7 +1,8 @@
-// audited: 2026-09-19
-// docs/impl/jit.md
+// audited: 2026-09-29
 //! One Cranelift signature per `elle_jit_*` runtime helper, declared into the
 //! module before any function is translated.
+//!
+//! docs/impl/jit.md
 
 use cranelift_codegen::ir::types::{I32, I64};
 use cranelift_codegen::ir::{AbiParam, Signature};
@@ -13,8 +14,9 @@ use crate::jit::JitError;
 
 /// Declare all runtime helper functions in the JITModule, returning their FuncIds.
 ///
-/// All helpers take/return Values as (tag: I64, payload: I64) pairs.
-/// vm pointers are plain I64. array/count args are plain I64.
+/// All helpers take and return Values as (tag: I64, payload: I64) pairs. VM,
+/// `JitCtx` and array pointers are plain I64. Region ids and static slots are
+/// I32.
 pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, JitError> {
     // Helper: make a signature
     fn make_sig(
@@ -64,8 +66,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     // frame-replacing tail call strands — `defer_callee` (0/1, the callee closure's
     // own region) and `arena_slot` (0 for none, else the merged closure-cycle
     // arena's static slot). Both reach the helper because a compiled caller cannot
-    // record them on its own dues (docs/impl/region/relocate.md § "A channel built
-    // in compiled code hands its release forward").
+    // record them on its own dues (docs/impl/region/relocate.md).
     let tail_call_sig = make_sig(
         module,
         &[I64, I64, I64, I64, I64, I32, I32, I32],
@@ -93,8 +94,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     let make_closure_sig = make_sig(module, &[I64, I64, I64, I32, I64], &[I64, I64]);
     // call_array: (func_tag, func_payload, arr_tag, arr_payload, vm, region_id,
     // args_region) -> (tag, payload). `args_region` is the args array's own slot,
-    // which the helper takes to reclaim the array (docs/impl/region/mechanism.md
-    // § "A spliced call's arguments come out of an array the convention owns").
+    // which the helper takes to reclaim the array (docs/impl/region/mechanism.md).
     let call_array_sig = make_sig(module, &[I64, I64, I64, I64, I64, I32, I32], &[I64, I64]);
     // cons: (car_tag, car_pay, cdr_tag, cdr_pay, region, vm) -> (tag, payload).
     // The trailing vm pointer names the heap the cons cell is born on.
@@ -239,6 +239,13 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
             "elle_jit_incref_value_region",
             &make_sig(module, &[I64, I64, I64], &[]),
         )?,
+        // join_region: (partner_tag, partner_payload, vm, slot) -> () — the
+        // partner is value-resolved, the slot a static operand.
+        join_region: declare(
+            module,
+            "elle_jit_join_region",
+            &make_sig(module, &[I64, I64, I64, I32], &[]),
+        )?,
         // adopt_region: (parent_tag, parent_payload, child_tag, child_payload, vm)
         // -> () — both operands are value-resolved (no static slot), mirroring
         // `IncrefValueRegion`/`DecrefValueRegion`.
@@ -301,7 +308,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         rotate_pools: declare(module, "elle_jit_rotate_pools", &vm_to_void)?,
         incref: declare(module, "elle_jit_incref", &value_unary)?,
         decref: declare(module, "elle_jit_decref", &value_unary)?,
-        // New intrinsic helpers
+        // Intrinsic helpers
         is_empty: declare(module, "elle_jit_is_empty", &value_unary)?,
         is_bool: declare(module, "elle_jit_is_bool", &value_unary)?,
         is_int: declare(module, "elle_jit_is_int", &value_unary)?,
@@ -317,11 +324,9 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         // value_unary_vm: the trailing slot carries this activation's JitCtx,
         // resolved to the VM whose Unicode generation segments the string arms.
         length: declare(module, "elle_jit_length", &value_unary_vm)?,
-        // get/pop allocate nothing through a PrimFn and read no VM state, so they
-        // take no `JitCtx`. The rest run `PrimFn` bodies and resolve their VM from
-        // the threaded `JitCtx` (trailing I64), keeping the VM dependency explicit
-        // (docs/impl/region/ctx.md "JIT intrinsic helpers reach the VM through a
-        // JitCtx").
+        // `get` reads no VM state, so it takes no `JitCtx`. `put` through `pop`
+        // resolve their VM from the threaded `JitCtx` (the trailing I64), which
+        // keeps the VM dependency explicit (docs/impl/region/ctx.md).
         get: declare(module, "elle_jit_get", &value_binary)?,
         put: declare(module, "elle_jit_put", &put_ctx_sig)?,
         del: declare(module, "elle_jit_del", &value_binary_vm)?,
@@ -330,11 +335,11 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         intr_string_push: declare(module, "elle_jit_string_push", &value_binary_vm)?,
         intr_bytes_push: declare(module, "elle_jit_bytes_push", &value_binary_vm)?,
         pop: declare(module, "elle_jit_pop", &value_unary_vm)?,
-        // freeze/thaw: (tag, payload, region: I32, jit_ctx) -> (tag, payload). The
-        // I32 region is the emitter-resolved physical SLOT region (these are
-        // `IntrinsicOp::allocates` ops with a `DecrefRegion(slot)`), threaded so
-        // the fresh copy is born in that region; the trailing `jit_ctx` carries
-        // the VM whose heap it is born on.
+        // freeze/thaw: (tag, payload, region: I32, jit_ctx) -> (tag, payload).
+        // These are `IntrinsicOp::allocates` ops with a `DecrefRegion(slot)`, so
+        // the I32 is the emitter-resolved physical region of that slot, and the
+        // fresh copy is born in it. The trailing `jit_ctx` carries the VM whose
+        // heap it is born on.
         freeze: declare(module, "elle_jit_freeze", &freeze_ctx_sig)?,
         thaw: declare(module, "elle_jit_thaw", &freeze_ctx_sig)?,
         identical: declare(module, "elle_jit_identical", &value_binary)?,

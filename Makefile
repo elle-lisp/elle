@@ -3,7 +3,7 @@
        smoke-wasm smoke-mlir \
        doctest doctest-list myplugin elle-wasm check-wasm elle-mlir elle-noffi plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding \
-       fmt fmt-check audit agents agents-check
+       fmt fmt-check audit agents agents-check page-claims
 
 .DEFAULT_GOAL := all
 
@@ -251,6 +251,15 @@ agents:  ## Write each directory's AGENTS.md from its documents' call-outs
 
 agents-check:  ## Fail when a committed AGENTS.md is stale
 	@./scripts/agents --check
+
+# ARGS is what the profiled elle runs; DEPTH and TOP shape the ranking
+# (docs/impl/region/colocation.md). Needs valgrind.
+DEPTH ?= 3
+TOP   ?= 20
+page-claims:  ## Rank the code paths that claim region pages: ARGS="FILE" [DEPTH=3] [TOP=20]
+	cargo build --profile profiling -p elle
+	./target/profiling/elle tools/pageclaims/run.lisp -- --depth $(DEPTH) --top $(TOP) \
+		--elle ./target/profiling/elle $(ARGS)
 
 # ── Format ─────────────────────────────────────────────────────────
 

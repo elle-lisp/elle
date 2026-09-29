@@ -1,6 +1,7 @@
-// audited: 2026-09-19
-// src/lir/AGENTS.md
-//! Emitting the operator, region-refcount and parameter-frame instructions.
+// audited: 2026-09-29
+//! Emitting the operator, predicate, capture-cell, splice, region and parameter-frame instructions.
+//!
+//! src/lir/AGENTS.md
 //!
 //! Each arm brings its operands to the top of the simulated stack, emits an
 //! opcode, and records the stack effect. `intrinsics` takes the chain tail.
@@ -10,8 +11,8 @@ use super::*;
 mod intrinsics;
 
 impl Emitter {
-    /// Operator, predicate, region-refcount, and collection-op instruction
-    /// emission (chain tail from `emit_instr`).
+    /// Operator, predicate, capture-cell, splice, region and parameter-frame
+    /// instruction emission (the chain tail of `emit_instr_destructure`).
     pub(super) fn emit_instr_ops(&mut self, instr: &LirInstr) {
         match instr {
             LirInstr::BinOp {
@@ -27,8 +28,8 @@ impl Emitter {
                 self.ensure_binary_on_top(*lhs, *rhs);
                 // Four operations have an integer-only opcode, which reads both
                 // operands without testing a tag. The rest have one opcode each:
-                // `Rem` was never specialized, and the bitwise handlers already
-                // read integers (docs/impl/lir.md).
+                // `Rem` has no integer-only opcode, and the bitwise handlers
+                // already read integers (docs/impl/lir.md).
                 let int_proven = proof.is_int();
                 let instr = match op {
                     BinOp::Add if int_proven => Instruction::AddInt,
@@ -204,8 +205,8 @@ impl Emitter {
                 self.ensure_on_top(*value);
                 self.bytecode.emit(Instruction::UpdateCapture);
                 // Unlike the other stores, UpdateCapture pushes the value
-                // back after popping it and the cell — lower_set reads it,
-                // so there is no auto-pop here.
+                // back after popping it and the cell, so `value` stays live on
+                // the simulated stack and there is no auto-pop here.
                 self.pop(); // value (consumed by UpdateCapture, re-pushed)
                 self.pop(); // cell (consumed by UpdateCapture)
                 self.push_reg(*value);
@@ -213,7 +214,7 @@ impl Emitter {
 
             LirInstr::LoadResumeValue { dst } => {
                 // The resume value is already on the operand stack
-                // (pushed by the VM's resume_continuation).
+                // (pushed by the VM's `resume_suspended`).
                 // The stack simulation already has the pre-yield state.
                 // Just register the resume value.
                 self.push_reg(*dst);
@@ -313,8 +314,8 @@ impl Emitter {
 
             LirInstr::IncrefValueRegion { src } => {
                 // Unlike DecrefValueRegion, retain does NOT consume the
-                // value: it is the function's result and must remain on
-                // top for the caller. The handler peeks rather than pops,
+                // value: the next instruction reads it, such as the `Return`
+                // of a function's result. The handler peeks rather than pops,
                 // so the stack model is unchanged (`src` stays live).
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IncrefValueRegion);
@@ -336,7 +337,7 @@ impl Emitter {
                 // shape to `AdoptRegion`, but the handler resolves both operands with
                 // `region_of` (NOT `result_region_of`), so a `CaptureCell` child's OWN
                 // region is adopted — the cell↔closure containment
-                // (docs/impl/region/adopt.md § "The capture adopt").
+                // (docs/impl/region/adopt.md).
                 self.ensure_binary_on_top(*parent, *child);
                 self.bytecode.emit(Instruction::AdoptCellRegion);
                 self.pop(); // child
@@ -348,7 +349,7 @@ impl Emitter {
                 // node): bring the child value to the top, emit the op, and
                 // consume it. The handler resolves the child's runtime region
                 // and links it into the current activation's lazily-minted
-                // owner node (docs/impl/region/owner.md § "Owner nodes").
+                // owner node (docs/impl/region/owner.md).
                 self.ensure_on_top(*child);
                 self.bytecode.emit(Instruction::AdoptIntoActivation);
                 self.pop(); // child
@@ -378,6 +379,17 @@ impl Emitter {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::AssertRegionMatches);
                 self.bytecode.emit_u32(region_id.get());
+            }
+
+            LirInstr::JoinRegion { region, partner } => {
+                // The join reads the partner to name the region the next mint of
+                // `region` joins, then drops it: the handler pops the partner and
+                // records the pending join. The slot rides as a u32 operand, like
+                // `IncrefRegion`'s.
+                self.ensure_on_top(*partner);
+                self.bytecode.emit(Instruction::JoinRegion);
+                self.bytecode.emit_u32(region.get());
+                self.pop();
             }
 
             LirInstr::DecrefRegion { region_id } => {

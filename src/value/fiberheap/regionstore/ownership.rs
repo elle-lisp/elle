@@ -1,11 +1,10 @@
-//! audited: 2026-09-16
+// audited: 2026-09-29
 //! The ownership forest: adoption, ownership queries, and transfer.
 //!
 //! An `Owned` region is reclaimed only by its owner's subtree drop, never by a
-//! count of its own (docs/impl/region/ownership.md § "Adoption and subtree
-//! drop"). These primitives move regions between `Counted` and `Owned` and
-//! re-home whole subtrees while keeping the forest's forward/back edges
-//! consistent — the structural guarantee that makes "owned-and-RC'd"
+//! count of its own (docs/impl/region/ownership.md). These primitives move regions
+//! between `Counted` and `Owned` and re-home whole subtrees while keeping the forest's
+//! forward/back edges consistent — the structural guarantee that makes "owned-and-RC'd"
 //! unrepresentable.
 
 use super::*;
@@ -17,7 +16,7 @@ const MAX_OWNER_DEPTH: usize = 64;
 
 impl RegionStore {
     /// Link `child` as an Owned member of `parent`'s subtree — the runtime
-    /// `AdoptRegion` (docs/impl/region/ownership.md § "Adoption and subtree drop").
+    /// `AdoptRegion` (docs/impl/region/ownership.md).
     /// **Moves** `child` from `Counted` into `Owned`, *consuming* its reference
     /// count: from here the child is reclaimed only by `parent`'s subtree drop
     /// (`free_runtime_region_pages`), never by its own RC reaching zero — there is
@@ -26,6 +25,13 @@ impl RegionStore {
     ///
     /// A region is adopted **at most once**, which the assert below enforces.
     ///
+    /// A **joined** region is never adopted (docs/impl/region/colocation.md): its
+    /// count belongs to every site that joined it. The append seed keeps its joins
+    /// out of the forest, so the one adopt that names a joined region is a macro
+    /// transformer's, into its scope's arena. The refusal leaves the arena
+    /// `Counted`, and a reference the adopt stood in for is one the scope's close
+    /// balances.
+    ///
     /// Both regions are `ensure`d so the edge survives even if neither has
     /// allocated yet (a conditional alloc that never executed leaves an empty but
     /// present `Counted(1)` entry, exactly as the baseline RC path tolerates).
@@ -33,11 +39,14 @@ impl RegionStore {
         self.ensure(parent);
         self.ensure(child);
         let c = self.regions[child.get() as usize].as_mut().unwrap();
+        if c.joined {
+            return;
+        }
         debug_assert!(
             matches!(c.reclaim, Reclaim::Counted(_)),
             "region {child} adopted while already Owned — a region has at most one \
              owner; owned-and-RC'd is unrepresentable, so a double adoption is a bug \
-             (docs/impl/region/ownership.md § 'The runtime: a reclamation typestate')",
+             (docs/impl/region/ownership.md)",
         );
         // A fiber's region is never a forest member: the forest is rooted at
         // fibers, whose aliases (the scheduler's parent/child chain, the
@@ -45,16 +54,14 @@ impl RegionStore {
         // freezing its RC would leave every such read's retain inert. The
         // compile-time refusal is `ownership::inputs::not_ownable` over
         // `RegionInfo::fiber_result_regions`; this is its runtime backstop
-        // (docs/impl/region/adopt.md § "The fiber member — refused at the class
-        // level").
+        // (docs/impl/region/adopt.md).
         debug_assert!(
             !c.pool
                 .live_objects()
                 .any(|o| matches!(o, crate::value::heap::HeapObject::Fiber { .. })),
             "region {child} adopted while holding a live Fiber object — a fiber's \
              region is never a member of a region-rooted Owned subtree \
-             (docs/impl/region/adopt.md § 'The fiber member — refused at the class \
-             level')",
+             (docs/impl/region/adopt.md)",
         );
         c.reclaim = Reclaim::Owned { owner: parent };
         self.regions[parent.get() as usize]
@@ -82,11 +89,10 @@ impl RegionStore {
     /// `Counted`, otherwise the ancestor whose subtree drop reclaims it.
     ///
     /// A retain on an `Owned` region holds nothing — it has no count left to
-    /// raise (§ [`Self::adopt_region`]). A seam outside the region system that
+    /// raise ([`Self::adopt_region`]). A seam outside the region system that
     /// must keep a value alive therefore counts against this instead: the root
     /// is `Counted`, so a reference on it does stop the subtree drop that would
-    /// take the member. The pending table is that seam (docs/impl/io-inflight.md § "A
-    /// hold retains what reclamation listens to").
+    /// take the member. The pending table is that seam (docs/impl/io-inflight.md).
     ///
     /// The walk is bounded rather than trusting termination: `adopt_region`
     /// gives each region at most one owner and `reparent_owned_children` moves
@@ -110,29 +116,27 @@ impl RegionStore {
             false,
             "ownership chain from region {id} is longer than {MAX_OWNER_DEPTH} — \
              a region has at most one owner, so the forest cannot be this deep \
-             (docs/impl/region/ownership.md § 'The runtime: a reclamation typestate')",
+             (docs/impl/region/ownership.md)",
         );
         cur
     }
 
     /// Extract `child` from its owner's subtree — the moves-out counterpart of
-    /// [`Self::adopt_region`] (docs/impl/region/ownership.md § "Adoption and subtree
-    /// drop"). When a `moves_out` funnel (`%pop`) removes an element that was
-    /// adopted into its container's Owned subtree, the element LEAVES the container
-    /// and becomes the call's result — so it must no longer be reclaimed by the
-    /// container's subtree drop. **Moves** `child` from `Owned` back to `Counted`
-    /// and unlinks it from its owner's `owned_children`. The forward/back edges
-    /// stay consistent (the child recorded
-    /// its owner; we remove it from exactly that owner's set). A `Counted` child is
-    /// left untouched (an idempotent no-op): a non-adopted element takes the
-    /// ordinary RC moves-out path (escape-retain + un-record + decref), not this.
+    /// [`Self::adopt_region`] (docs/impl/region/ownership.md). When a `moves_out` funnel
+    /// (`%pop`) removes an element that was adopted into its container's Owned subtree,
+    /// the element LEAVES the container and becomes the call's result — so it must
+    /// no longer be reclaimed by the container's subtree drop. **Moves** `child` from
+    /// `Owned` back to `Counted` and unlinks it from its owner's `owned_children`. The
+    /// forward/back edges stay consistent (the child recorded its owner; we remove it
+    /// from exactly that owner's set). A `Counted` child is left untouched (an idempotent
+    /// no-op): a non-adopted element takes the ordinary RC moves-out path (escape-retain,
+    /// un-record and decref), not this.
     ///
     /// The rebuilt count is **1 + the recorded external incoming edges**. The 1 is
-    /// this move itself: on an Owned region `incref` is inert, so the escape-retain
-    /// the Counted path would take cannot establish the caller's reference here.
-    /// The child's own subtree's back-edges are excluded from the sum, as they are
-    /// at the drop-time rescue — docs/impl/region/ownership.md § "The incoming edge
-    /// table and the external-reference rescue".
+    /// this move itself: on an Owned region `incref` is inert, so the escape-retain the
+    /// Counted path would take cannot establish the caller's reference here. The child's
+    /// own subtree's back-edges are excluded from the sum, as they are at the drop-time
+    /// rescue (docs/impl/region/ownership.md).
     pub(crate) fn extract_owned_region(&mut self, child: RuntimeRegion) {
         let owner = match self
             .regions
@@ -175,16 +179,14 @@ impl RegionStore {
     }
 
     /// Hand `from`'s whole direct `owned_children` set to `to` — the ownership-
-    /// **transfer** primitive of the forest (docs/impl/region/ownership.md § "The
-    /// runtime: a reclamation typestate"). Each child is re-stamped
-    /// `Owned { owner: to }` and the set is appended to `to`'s children: a move,
-    /// never a copy, so the forest's forward/back edges stay consistent (the
-    /// subtree-drop walk debug-asserts them) and no child gains a second owner.
-    /// Neither endpoint's own reclaim mode changes and no count is created or
-    /// consumed — the children were `Owned` and stay `Owned`; only the owner whose
-    /// demise reclaims them changes. A self-reparent, an absent `from`, or an
-    /// empty child set is a no-op (`to` is not even `ensure`d, so a transfer of
-    /// nothing mints nothing).
+    /// **transfer** primitive of the forest (docs/impl/region/ownership.md). Each child
+    /// is re-stamped `Owned { owner: to }` and the set is appended to `to`'s children:
+    /// a move, never a copy, so the forest's forward/back edges stay consistent (the
+    /// subtree-drop walk debug-asserts them) and no child gains a second owner. Neither
+    /// endpoint's own reclaim mode changes and no count is created or consumed — the
+    /// children were `Owned` and stay `Owned`; only the owner whose demise reclaims them
+    /// changes. A self-reparent, an absent `from`, or an empty child set is a no-op (`to`
+    /// is not even `ensure`d, so a transfer of nothing mints nothing).
     pub(crate) fn reparent_owned_children(&mut self, from: RuntimeRegion, to: RuntimeRegion) {
         if from == to {
             return;
@@ -209,7 +211,7 @@ impl RegionStore {
                 matches!(entry.reclaim, Reclaim::Owned { owner } if owner == from),
                 "reparent_owned_children({from} -> {to}): child {child} does not \
                  record {from} as its owner — forward/back edge inconsistency \
-                 (docs/impl/region/ownership.md § 'The runtime: a reclamation typestate')",
+                 (docs/impl/region/ownership.md)",
             );
             entry.reclaim = Reclaim::Owned { owner: to };
         }

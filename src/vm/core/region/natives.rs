@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Dispatching a native call: the result region it mints, the pass-through
 //! retain it hands the caller, and the declaration oracle over both.
 //!
@@ -6,53 +6,46 @@
 //! docs/impl/region/ctx.md
 
 use super::*;
-use crate::value::fiberheap::regionstore::RegionMint;
+use crate::value::fiberheap::regionstore::CallRegion;
 
 impl VM {
-    /// Resolve a static region slot for a *call result* (a native's fresh
-    /// result region, or a closure-call setup region). These are freed
-    /// value-based by `DecrefValueRegion` (no `DecrefRegion` to clear a
-    /// cache), so each execution mints its own fresh physical region —
-    /// never cached.
+    /// Resolve the static region slot of a *call result*: the region a native or
+    /// collection call allocates its result into. The value-based
+    /// `DecrefValueRegion` releases it, so nothing caches it.
     ///
-    /// `_static_id` is intentionally unused under unoptimized Tofte-Talpin
-    /// (every call result gets its own fresh region, period). It is NOT dead
-    /// code: the slot is the solver's per-call result-region *assignment*,
-    /// carried end-to-end (emitter → bytecode → both dispatch tiers). Region
-    /// **merging** is exactly the feature that makes this
-    /// function resolve `_static_id` to a possibly-*shared* physical region
-    /// instead of always minting fresh. Keep it wired; the `StaticRegion`
-    /// newtype already guards the static-vs-runtime confusion bug
-    /// (`dispatch_native_call`'s doc). Do not "scrub" it as vestigial.
-    ///
-    /// The mint is **tracked**: the region is minted before the callee runs,
-    /// because the callee may allocate its result into it, and a callee that
-    /// returns an immediate or a value borrowed from an argument allocates
-    /// nothing. The receipt lets the dispatcher return that id to the free list
-    /// (docs/impl/region/model.md § "Physical id recycling"); a call that does
-    /// allocate leaves the id live and the recycle no-ops.
+    /// A pending join for `static_id` puts the call in the partner's region, and
+    /// an open macro scope puts it in the scope's arena
+    /// (docs/impl/region/colocation.md). Otherwise the mint is fresh and
+    /// **tracked**: it happens before the callee runs, because the callee may
+    /// allocate its result into it, and a callee that returns an immediate or a
+    /// borrowed value allocates nothing (docs/impl/region/model.md). The
+    /// dispatcher settles either kind with [`Self::settle_call_region`].
     #[inline]
     pub(crate) fn new_runtime_region_for_call_slot(
         &mut self,
-        _static_id: StaticRegion,
-    ) -> RegionMint {
-        let mint = self.heap().new_runtime_region_tracked();
-        self.note_region_mint(mint.region(), "call result", Some(_static_id));
-        mint
+        static_id: StaticRegion,
+    ) -> CallRegion {
+        let call = match self.take_pending_join(static_id) {
+            Some(joined) => CallRegion::Joined(joined),
+            None => self.heap().new_call_region(),
+        };
+        self.note_region_mint(call.region(), "call result", Some(static_id));
+        call
     }
-    /// Close out a call-result mint: return its id to the free list unless the
-    /// call materialized the region (docs/impl/region/model.md § "Physical id
-    /// recycling"). The shared tail of both call dispatchers.
+    /// Settle a call's region once the call has returned: a fresh id nothing
+    /// allocated into goes back to the free list, and a join the result did not
+    /// use gives its reference back. `unfunded` is the value the caller holds
+    /// with no reference of its own. The shared tail of both call dispatchers.
     #[inline]
-    pub(crate) fn release_unused_call_region(&mut self, mint: RegionMint) {
-        self.heap().recycle_unmaterialized_region(mint);
+    pub(crate) fn settle_call_region(&mut self, call: CallRegion, unfunded: Option<Value>) {
+        self.heap().settle_call_region(call, unfunded);
     }
     /// Dispatch a native primitive call with per-execution region routing and
     /// the "pass-through retain", shared verbatim by the interpreter
     /// (`call_inner` / `tail_call_inner`) and the JIT (`elle_jit_call` /
     /// `elle_jit_tail_call`).
     ///
-    /// Mints this call's fresh result region, runs the primitive with that
+    /// Resolves this call's result region, runs the primitive with that
     /// region as its `NativeCtx` alloc target (so fresh allocations land in it), then
     /// hands the caller exactly one owning reference to the result's runtime
     /// region whenever the result lives in a *different* region than this call
@@ -78,8 +71,8 @@ impl VM {
         args: &[Value],
         region_id: StaticRegion,
     ) -> (SignalBits, Value) {
-        let mint = self.new_runtime_region_for_call_slot(region_id);
-        let alloc_region = mint.region();
+        let call = self.new_runtime_region_for_call_slot(region_id);
+        let alloc_region = call.region();
         let (bits, value) = {
             // The native-call capability: this call's fresh result region, the
             // VM's heap, and the driving VM itself, so the primitive can reach
@@ -135,7 +128,7 @@ impl VM {
         {
             let result_region =
                 crate::value::arena::region_of(unsafe { &mut *self.heap_ptr }, value);
-            // `fresh`: the result lives in the region this call just minted.
+            // `fresh`: the result lives in the region this call allocates into.
             let fresh = result_region == Some(alloc_region);
             use crate::primitives::def::RegionEffect;
             match def.effect {
@@ -160,13 +153,16 @@ impl VM {
                         alloc_region,
                     )
                 }
+                // A joined call allocates into a region that already holds values, so
+                // a pass-through result can live there too (docs/impl/region/colocation.md).
                 RegionEffect::PassThrough => assert!(
-                    !fresh,
+                    !fresh || call.is_joined(),
                     "primitive `{}` declares RegionEffect::PassThrough but \
                      returned a value freshly allocated in this call's own \
                      region {:?} (declaration oracle; docs/impl/region/effects.md \"Native \
                      region effects\")",
-                    def.name, alloc_region,
+                    def.name,
+                    alloc_region,
                 ),
                 RegionEffect::Funnel
                 | RegionEffect::Mixed
@@ -224,10 +220,13 @@ impl VM {
             );
         }
         // A primitive that returned an immediate or a borrowed value never
-        // allocated into this call's region, so its id names nothing and goes
-        // back to the free list. Runs after the pass-through retain, which reads
-        // `alloc_region` to decide whether the result is fresh.
-        self.release_unused_call_region(mint);
+        // allocated into this call's region, so a fresh id goes back to the free
+        // list and a join gives its reference back. A `moves_out`/`result_minted`
+        // result carries a reference the native supplied, so no join stands for
+        // it. Runs after the pass-through retain, which reads `alloc_region` to
+        // decide whether the result is fresh.
+        let unfunded = (!is_result || !(def.moves_out || def.result_minted)).then_some(value);
+        self.settle_call_region(call, unfunded);
         (bits, value)
     }
 }

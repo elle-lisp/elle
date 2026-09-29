@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Bytecode disassembly: decode each instruction's operands into one line.
 //!
 //! docs/impl/bytecode.md
@@ -172,29 +172,14 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             Instruction::IntToFloat | Instruction::FloatToInt => {
                 // No operands — pop one, push one
             }
-            Instruction::IncrefRegion if i + 3 < instructions.len() => {
-                let region_id = u32::from_be_bytes([
-                    instructions[i],
-                    instructions[i + 1],
-                    instructions[i + 2],
-                    instructions[i + 3],
-                ]);
-                line.push_str(&format!(" (region={})", region_id));
-                i += 4;
-            }
-            Instruction::DecrefRegion if i + 3 < instructions.len() => {
-                let region_id = u32::from_be_bytes([
-                    instructions[i],
-                    instructions[i + 1],
-                    instructions[i + 2],
-                    instructions[i + 3],
-                ]);
-                line.push_str(&format!(" (region={})", region_id));
-                i += 4;
-            }
-            // The coalescing oracle carries one u32 slot operand, like
-            // Incref/DecrefRegion — skip it so the stream stays aligned.
-            Instruction::AssertRegionMatches if i + 3 < instructions.len() => {
+            // The instructions that carry one u32 region-slot operand: the
+            // slot-resolved refcounts, the coalescing oracle, and the join.
+            Instruction::IncrefRegion
+            | Instruction::DecrefRegion
+            | Instruction::AssertRegionMatches
+            | Instruction::JoinRegion
+                if i + 3 < instructions.len() =>
+            {
                 let region_id = u32::from_be_bytes([
                     instructions[i],
                     instructions[i + 1],
@@ -205,8 +190,7 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 i += 4;
             }
             // Both signal-bits operands are eight bytes, big-endian —
-            // `Bytecode::emit_signal_bits` writes them (docs/impl/bytecode.md
-            // § "Signal-bits operands").
+            // `Bytecode::emit_signal_bits` writes them (docs/impl/bytecode.md).
             Instruction::Emit if i + 7 < instructions.len() => {
                 let raw = u64::from_be_bytes(instructions[i..i + 8].try_into().expect("8 bytes"));
                 line.push_str(&format!(" (signal_bits=0x{:016x})", raw));

@@ -1,5 +1,5 @@
-// audited: 2026-09-23
-//! The JIT's region helpers: each mirrors one arm of the interpreter's region dispatch in src/vm/dispatch/region.rs.
+// audited: 2026-09-29
+//! The JIT's region helpers: each does what the interpreter does for one region instruction or activation boundary.
 //!
 //! docs/impl/region/mechanism.md
 //! docs/impl/region/ownership.md
@@ -28,40 +28,42 @@ pub extern "C" fn elle_jit_region_rotate() -> JitValue {
 
 /// Push a fresh per-activation region-remap frame on JIT function entry.
 ///
-/// The JIT analog of the interpreter's `execute_bytecode_saving_stack` pushing
-/// an `activation_region_map` (src/vm/execute.rs). Emitted in every compiled
-/// function's Cranelift prologue so the body's per-execution alloc regions
+/// The JIT twin of the interpreter's `VM::open_activation` (src/vm/execute.rs).
+/// Every compiled function's prologue emits it, so the body's alloc regions
 /// (`elle_jit_resolve_alloc_region`) and slot-resolved `DecrefRegion`s
 /// (`elle_jit_decref_region`) resolve against THIS activation's slot→phys map,
-/// not the caller's. Covers every entry path (interpreter→JIT and JIT-to-JIT)
-/// because it is part of the compiled function. docs/impl/region/rules.md Rule 4
-/// ("per activation").
+/// not the caller's. It covers every entry path, interpreter→JIT and JIT-to-JIT,
+/// because it is part of the compiled function. The map is per activation
+/// (docs/impl/region/rules.md).
 #[no_mangle]
 pub extern "C" fn elle_jit_push_region_map(vm: *mut ()) {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     vm.push_activation_region_map();
 }
 
-/// Pop the current region-remap frame. Emitted before every `return` in a
-/// compiled function (normal return, tail-call-sentinel return, yield/Emit
-/// side-exit AFTER the suspend captured the map, error return). Like the
-/// interpreter's `pop_activation_region_map`, this only drops the lookup table —
-/// it never decrefs entries (freeing happens via `DecrefRegion`/owned-param
-/// releases; a tail-moved arg's ownership transfers to the callee).
+/// Pop the current region-remap frame.
+///
+/// A compiled function emits it before every `return`: the normal return, the
+/// tail-call-sentinel return, the error return, and the yield/Emit side-exit
+/// after the suspend captured the map. It calls `VM::pop_activation_region_map`,
+/// which drops the lookup table and never decrefs an entry. `DecrefRegion` and
+/// the owned-param releases do the freeing, and a tail-moved argument's
+/// ownership moves to the callee.
 #[no_mangle]
 pub extern "C" fn elle_jit_pop_region_map(vm: *mut ()) {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     vm.pop_activation_region_map();
 }
 
-/// Resolve (mint + record in the current activation's slot→phys map) this
-/// allocation's per-slot physical region and return its raw id
-/// (docs/impl/region/ctx.md). The emitter passes the returned id straight to
-/// the alloc helper (`elle_jit_pair`, `_make_array`, …) as its explicit region
-/// argument. Mirrors the interpreter's `runtime_region_for_alloc_slot` feeding
-/// the handler an explicit `region_id`.
-/// `runtime_region_for_alloc_slot` records slot→phys so the matching
-/// `DecrefRegion(slot)` and any cross-yield resume still resolve the region.
+/// Resolve this allocation's per-slot physical region and return its raw id
+/// (docs/impl/region/ctx.md).
+///
+/// `VM::runtime_region_for_alloc_slot` mints a fresh region or takes a pending
+/// join, and records slot→phys in the current activation's map. The matching
+/// `DecrefRegion(slot)` and any cross-yield resume read that record. The
+/// emitter passes the returned id straight to the alloc helper (`elle_jit_pair`,
+/// `_make_array`, …) as its explicit region argument, as the interpreter hands
+/// its handler an explicit `region_id`.
 #[no_mangle]
 pub extern "C" fn elle_jit_resolve_alloc_region(vm: *mut (), slot: u32) -> u32 {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
@@ -70,15 +72,14 @@ pub extern "C" fn elle_jit_resolve_alloc_region(vm: *mut (), slot: u32) -> u32 {
     vm.runtime_region_for_alloc_slot(static_id).get()
 }
 
-/// Resolve a **merged** slot's per-execution physical region with mint-or-reuse —
-/// the builder-idiom merge runtime (docs/impl/region/merging.md). The
-/// emitter calls this instead of `elle_jit_resolve_alloc_region` for a slot it
-/// found in `LirFunction.merged_slots` at compile time, so the first member (the
-/// child) mints `R` and a later member (the parent) reuses it: both land in one
-/// region freed by the single `DecrefRegion`. Without this the JIT would mint fresh
-/// for every member and diverge from the interpreter's region count (the merge tree
-/// stays leak-free either way — the parent's cascade frees the orphaned child — but
-/// the tiers must agree on physical-region identity).
+/// Resolve a **merged** slot's per-execution physical region with mint-or-reuse,
+/// the builder-idiom merge runtime (docs/impl/region/merging.md).
+///
+/// The emitter calls this instead of `elle_jit_resolve_alloc_region` for a slot
+/// it finds in `LirFunction.merged_slots` at compile time. The first member (the
+/// child) mints `R` and a later member (the parent) reuses it, so both land in
+/// one region that the single `DecrefRegion` frees. The two tiers must agree on
+/// which physical region each member lives in.
 #[no_mangle]
 pub extern "C" fn elle_jit_resolve_alloc_region_merged(vm: *mut (), slot: u32) -> u32 {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
@@ -116,11 +117,11 @@ pub extern "C" fn elle_jit_incref_region(vm: *mut (), slot: u32) {
 
 /// Decrement (drop the initial reference of) the region named by a static slot.
 ///
-/// The JIT analog of the interpreter's `DecrefRegion` arm
-/// (`handle_decref_region`): resolve the slot through the current activation map
-/// (`take_runtime_region_for_drop_slot` — which also CLEARS the slot so the next
-/// loop iteration re-mints), then strict-decref the resolved physical region.
-/// `None` (a conditional alloc that never executed this activation) is a benign
+/// The JIT twin of the interpreter's `handle_decref_region`. It resolves the
+/// slot through the current activation map with
+/// `take_runtime_region_for_drop_slot`, which also CLEARS the slot so the next
+/// loop iteration re-mints. Then it strict-decrefs the resolved physical region.
+/// An unmapped slot (a conditional alloc that never ran this activation) is a
 /// no-op. The slot is never read as a physical region id: a live runtime region
 /// sharing the slot's small id would be the one released.
 #[no_mangle]
@@ -136,13 +137,13 @@ pub extern "C" fn elle_jit_decref_region(vm: *mut (), slot: u32) {
 
 /// Release a value's runtime region (the `DecrefValueRegion` instruction).
 ///
-/// Mirrors the interpreter's `DecrefValueRegion` arm EXACTLY: uses
-/// `result_region_of` (NOT `region_of`) so a value bound through a compiled
-/// `MakeCaptureCell` is unwrapped one level — the release targets the inner
-/// call-result's region, while the cell's own region is freed by its compiled
-/// `DecrefRegion`. Using `region_of` here decrefs the cell's region a second
-/// time, a double free. Consumes the one
-/// owning reference the callee handed back via `IncrefValueRegion`.
+/// Mirrors the interpreter's `handle_decref_value_region` EXACTLY. It uses
+/// `result_region_of` (NOT `region_of`), so a value bound through a compiled
+/// `MakeCaptureCell` is unwrapped one level: the release targets the inner
+/// call-result's region, and the cell's own compiled `DecrefRegion` frees the
+/// cell's region. With `region_of` here, the cell's region takes a second
+/// decref, a double free. The release consumes the one owning reference the
+/// callee handed back through `IncrefValueRegion`.
 #[no_mangle]
 pub extern "C" fn elle_jit_decref_value_region(tag: u64, payload: u64, vm: *mut ()) {
     let value = Value { tag, payload };
@@ -156,9 +157,10 @@ pub extern "C" fn elle_jit_decref_value_region(tag: u64, payload: u64, vm: *mut 
 }
 
 /// Release a capture cell's OWN runtime region (the `DecrefCellRegion`
-/// instruction). Uses `region_of` (NOT `result_region_of`): frees the per-value
-/// env cell `populate_env` minted, never unwrapping to the inner value's
-/// caller-owned region. Mirrors the interpreter's `DecrefCellRegion` arm.
+/// instruction). It uses `region_of` (NOT `result_region_of`): it frees the
+/// per-value env cell `populate_env` minted, and never unwraps to the inner
+/// value's caller-owned region. Mirrors the interpreter's
+/// `handle_decref_cell_region`.
 #[no_mangle]
 pub extern "C" fn elle_jit_decref_cell_region(tag: u64, payload: u64, vm: *mut ()) {
     let value = Value { tag, payload };
@@ -169,9 +171,9 @@ pub extern "C" fn elle_jit_decref_cell_region(tag: u64, payload: u64, vm: *mut (
 }
 
 /// Increment the reference count of a value's region (the `IncrefValueRegion`
-/// instruction). Mirrors the interpreter's arm: `result_region_of` (unwrap a
-/// capture cell), the return-value handoff the caller's `DecrefValueRegion`
-/// consumes.
+/// instruction). Mirrors the interpreter's `handle_incref_value_region`: it
+/// resolves with `result_region_of`, which unwraps a capture cell. The caller's
+/// `DecrefValueRegion` consumes this return-value handoff.
 #[no_mangle]
 pub extern "C" fn elle_jit_incref_value_region(tag: u64, payload: u64, vm: *mut ()) {
     let value = Value { tag, payload };
@@ -180,8 +182,20 @@ pub extern "C" fn elle_jit_incref_value_region(tag: u64, payload: u64, vm: *mut 
     crate::value::arena::incref_for_escape(heap, r, crate::value::arena::EscapeSite::ReturnValue);
 }
 
-/// No-op helpers, like the scope-mark ones above: the vtable declares and
-/// registers them, and the translator emits no call to either.
+/// Record the pending join the next mint of `slot` consumes (the `JoinRegion`
+/// instruction, docs/impl/region/colocation.md). Mirrors the interpreter's
+/// `handle_join_region`.
+#[no_mangle]
+pub extern "C" fn elle_jit_join_region(tag: u64, payload: u64, vm: *mut (), slot: u32) {
+    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    let Some(static_id) = crate::hir::region::StaticRegion::new(slot) else {
+        return;
+    };
+    vm.set_pending_join(static_id, Value { tag, payload });
+}
+
+/// No-op helpers, like the four at the top of this file: the vtable declares
+/// and registers them, and the translator emits no call to either.
 #[no_mangle]
 pub extern "C" fn elle_jit_incref(tag: u64, payload: u64) -> JitValue {
     let _val = crate::value::Value { tag, payload };
@@ -195,14 +209,15 @@ pub extern "C" fn elle_jit_decref(tag: u64, payload: u64) -> JitValue {
 }
 
 /// Link the child value's region as an Owned member of the parent value's
-/// region — the `AdoptRegion` instruction. Mirrors the interpreter's
-/// `handle_adopt_region` arm (src/vm/dispatch/region.rs): resolve both values to
-/// their runtime regions (`result_region_of`, which unwraps a capture cell to the
-/// inner value), and adopt — freezing the child's RC so it is reclaimed only by
-/// the parent's subtree drop. An immediate operand (no region) or a self-edge
-/// (same region) is a no-op. Unlike the interpreter arm, the parent and child
-/// arrive as explicit Value pairs (the compiled code loaded them into SSA
-/// registers purely to drive this adopt), not popped off an operand stack.
+/// region, the `AdoptRegion` instruction.
+///
+/// Mirrors the interpreter's `handle_adopt_region` (src/vm/dispatch/region.rs).
+/// It resolves both values with `result_region_of`, which unwraps a capture cell
+/// to the inner value. The adopt freezes the child's RC, so only the parent's
+/// subtree drop reclaims it; `adopt_region` leaves a joined region `Counted`
+/// (docs/impl/region/colocation.md). An immediate operand (no region) or a
+/// self-edge (same region) is a no-op. The parent and child arrive as explicit
+/// Value pairs that the compiled code loaded only to drive this adopt.
 #[no_mangle]
 pub extern "C" fn elle_jit_adopt_region(
     parent_tag: u64,
@@ -230,16 +245,16 @@ pub extern "C" fn elle_jit_adopt_region(
 }
 
 /// Link the child value's region as an Owned member of the parent value's
-/// region, resolving BOTH operands with `region_of` — NOT `result_region_of` —
-/// the `AdoptCellRegion` instruction. Mirrors the interpreter's
-/// `handle_adopt_cell_region` arm: a `CaptureCell` operand's OWN region is
-/// adopted (never unwrapped to its content), which is what lets the forest own a
-/// capture cell's arena and reclaim a local recursive/letrec closure clique as a
-/// unit (docs/impl/region/adopt.md). This is the
-/// `region_of`-adopt counterpart of `elle_jit_adopt_region`, exactly as
-/// `elle_jit_decref_cell_region` is the `region_of` counterpart of
-/// `elle_jit_decref_value_region`. An immediate operand (no region) or a self-edge
-/// (same region) is a no-op.
+/// region, resolving BOTH operands with `region_of`, NOT `result_region_of`:
+/// the `AdoptCellRegion` instruction.
+///
+/// Mirrors the interpreter's `handle_adopt_cell_region`. It adopts a
+/// `CaptureCell` operand's OWN region and never unwraps it to its content. That
+/// lets the forest own a capture cell's arena and reclaim a local
+/// recursive/letrec closure clique as a unit (docs/impl/region/adopt.md). It is
+/// the `region_of` counterpart of `elle_jit_adopt_region`, as
+/// `elle_jit_decref_cell_region` is of `elle_jit_decref_value_region`. An
+/// immediate operand (no region) or a self-edge (same region) is a no-op.
 #[no_mangle]
 pub extern "C" fn elle_jit_adopt_cell_region(
     parent_tag: u64,
@@ -266,17 +281,17 @@ pub extern "C" fn elle_jit_adopt_cell_region(
     }
 }
 
-/// Adopt the child value's region into the CURRENT activation's owner node —
-/// the `AdoptIntoActivation` instruction. Mirrors the interpreter's
-/// `handle_adopt_into_activation` arm (src/vm/dispatch/region.rs): resolve the
-/// child to its runtime region (`result_region_of`, which unwraps a capture
-/// cell), lazily mint the activation's pages-less owner node, and adopt —
-/// freezing the child's RC so the node's subtree drop at the activation's
-/// normal completion is its sole demise (docs/impl/region/owner.md). An
-/// immediate child (no region)
-/// adopts nothing and mints no node. The child arrives as an explicit Value
-/// pair (compiled code loads it purely to drive the adopt), not popped off an
-/// operand stack.
+/// Adopt the child value's region into the CURRENT activation's owner node,
+/// the `AdoptIntoActivation` instruction.
+///
+/// Mirrors the interpreter's `handle_adopt_into_activation`
+/// (src/vm/dispatch/region.rs). It resolves the child with `result_region_of`,
+/// which unwraps a capture cell, lazily mints the activation's pages-less owner
+/// node, and adopts. The adopt freezes the child's RC, so the node's subtree
+/// drop at the activation's normal completion is its sole demise
+/// (docs/impl/region/owner.md). An immediate child (no region) adopts nothing
+/// and mints no node. The child arrives as an explicit Value pair that the
+/// compiled code loads only to drive the adopt.
 #[no_mangle]
 pub extern "C" fn elle_jit_adopt_into_activation(child_tag: u64, child_payload: u64, vm: *mut ()) {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
@@ -300,33 +315,34 @@ pub extern "C" fn elle_jit_adopt_into_activation(child_tag: u64, child_payload: 
 }
 
 /// Free the current activation's owner node at the compiled function's normal
-/// completion — the JIT twin of the interpreter trampoline's clean-break
-/// release (`VM::release_activation_dues`). Emitted on the `Return` path
-/// (before the region-map pop) of a function whose LIR carries
-/// `AdoptIntoActivation`; a function that cannot mint a node never pays the
-/// call.
+/// completion: the JIT twin of the interpreter trampoline's clean-break
+/// release (`VM::release_activation_dues`).
+///
+/// The `Return` path emits it before the region-map pop, in a function whose
+/// LIR carries `AdoptIntoActivation`. A function that cannot mint a node never
+/// pays the call.
 #[no_mangle]
 pub extern "C" fn elle_jit_release_activation_dues(vm: *mut ()) {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     vm.release_activation_dues();
 }
 
-/// Run the releases a COMPILED activation abandoned by an **error** still owed —
-/// the compiled entry to the same walk the interpreter reaches through
-/// `VM::release_abandoned_frame` (docs/impl/region/unwind.md).
+/// Run the releases still owed by a COMPILED activation that an **error**
+/// abandoned. This is the compiled entry to the walk the interpreter reaches
+/// through `VM::release_abandoned_frame` (docs/impl/region/unwind.md).
 ///
-/// `slots` and `regions` are the function's two release tables, materialized once
-/// by the compiled prologue: the value routes' local slots and the slot routes'
-/// static region ids. `locals` is the frame's local slots spilled in slot order,
-/// so `locals[s]` is what `LoadLocal s` reads. The slot route needs no spill —
-/// its receipt is the activation region map, which the prologue pushed and this
-/// call reads ahead of the matching pop.
+/// `slots` and `regions` are the function's two release tables, which the
+/// compiled prologue materializes once: the value routes' local slots and the
+/// slot routes' static region ids. `locals` is the frame's local slots spilled
+/// in slot order, so `locals[s]` is what `LoadLocal s` reads. The slot route
+/// needs no spill. Its receipt is the activation region map, which the prologue
+/// pushed and this call reads ahead of the matching pop.
 ///
-/// The payload is read off `fiber.signal`, which the raise has already installed:
-/// the callee's error at the post-call exit, this frame's own emitted value at
-/// the `Emit` exit. Only an **error** abandons the frame, so a signal without
-/// `SIG_ERROR` walks nothing — the post-call exception check also fires on a
-/// halt, which the interpreter's trampoline likewise declines to walk.
+/// The helper reads the payload off `fiber.signal`, which the raise has already
+/// installed: the callee's error at the post-call exit, or this frame's own
+/// emitted value at the `Emit` exit. Only an **error** abandons the frame, so a
+/// signal without `SIG_ERROR` walks nothing. The post-call exception check also
+/// fires on a halt, which the interpreter's trampoline does not walk either.
 ///
 /// # Safety
 /// `slots` must point at `num_slots` contiguous `u16`s, `regions` at
@@ -367,14 +383,16 @@ pub extern "C" fn elle_jit_release_abandoned_frame(
     };
 }
 
-/// Free a co-owned region group as one unit — the `FreeRegionGroup` instruction.
-/// Mirrors the interpreter's `handle_free_region_group` arm
-/// (src/vm/dispatch/region.rs): `members_ptr` points at `count` member Values the
-/// compiled code spilled to a stack slot (exactly as `elle_jit_push_param_frame`
-/// takes its pairs); each is resolved to its runtime region (`result_region_of`)
-/// and the whole set is freed together, so interior member↔member references
-/// reclaim with the group and only genuinely-Shared frontier references cascade.
-/// An immediate member (no region) is skipped; an empty/null set is a no-op.
+/// Free a co-owned region group as one unit, the `FreeRegionGroup` instruction.
+///
+/// Mirrors the interpreter's `handle_free_region_group`
+/// (src/vm/dispatch/region.rs). `members_ptr` points at `count` member Values
+/// that the compiled code spilled to a stack slot, as it does for
+/// `elle_jit_push_param_frame`'s pairs. The helper resolves each member with
+/// `result_region_of` and frees the whole set together. Interior member↔member
+/// references reclaim with the group, and only Shared frontier references
+/// cascade. An immediate member (no region) is skipped; an empty or null set is
+/// a no-op.
 #[no_mangle]
 pub extern "C" fn elle_jit_free_region_group(members_ptr: *const Value, count: u64, vm: *mut ()) {
     let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
