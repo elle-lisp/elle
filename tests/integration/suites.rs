@@ -15,6 +15,7 @@ use std::collections::BTreeSet;
 
 const EAGER: &str = "tests/impl/profiles/jit-eager.toml";
 const SCRUB: &str = "tests/impl/profiles/scrub.toml";
+const WASM_FULL: &str = "tests/impl/profiles/wasm-full.toml";
 const ACCEPTANCE: &str = "tests/runner/acceptance.lisp";
 
 /// One `elle test` batch pass: the files it deals out, and the command each
@@ -170,11 +171,57 @@ fn a_named_profile_runs_the_language_suite_on_the_rig() {
     assert_eq!(scrub[0].host(), Some(make_expand("ELLE_RIG").as_str()));
 }
 
+/// Whether `WASM_SKIP` leaves `path` out of the wasm build's passes. Each
+/// pattern is a substring of a path, the way `grep -v -e` reads it.
+fn wasm_skipped(path: &str) -> bool {
+    make_expand("WASM_SKIP")
+        .split_whitespace()
+        .filter(|word| *word != "-e")
+        .any(|pattern| path.contains(pattern))
+}
+
+// The wasm build's rig runs the implementation suite with each file compiled
+// whole to one module, less the files `WASM_SKIP` names. The three files the
+// test names pin invariants only the full-module tier has to uphold
+// (docs/impl/wasm.md, src/wasm/mod.rs).
+//
+// The counter-factual: a `smoke-wasm` that runs only the language suite leaves
+// every one of those files off the tier it pins, and nothing reports it.
+#[test]
+fn smoke_wasm_runs_the_implementation_suite_on_the_wasm_rig() {
+    let passes = passes("smoke-wasm", &[]);
+    let rig: Vec<&Pass> = passes.iter().filter(|p| p.host().is_some()).collect();
+    assert_eq!(rig.len(), 1, "one wasm pass runs on the rig");
+    let pass = rig[0];
+    assert_eq!(pass.host(), Some(make_expand("ELLE_RIG").as_str()));
+    assert_eq!(
+        pass.isolate(),
+        format!("--profile {WASM_FULL}"),
+        "the wasm rig pass compiles each file whole to one module"
+    );
+    let want: BTreeSet<String> = implementation()
+        .into_iter()
+        .filter(|path| !wasm_skipped(path))
+        .collect();
+    assert_eq!(
+        pass.files, want,
+        "the wasm rig pass runs every implementation file `WASM_SKIP` keeps"
+    );
+    for pin in [
+        "tests/impl/region-capture-cell-loop-uaf.lisp",
+        "tests/impl/region-termination-sweep.lisp",
+        "tests/impl/region-eval-quoted-data-leak.lisp",
+    ] {
+        assert!(pass.files.contains(pin), "the wasm rig pass leaves out {pin}");
+    }
+}
+
 // A profile a pass names and nothing holds reads as no file at all: the rig
 // refuses it, and the pass fails every file for a reason that is not the test.
 #[test]
 fn every_profile_a_pass_names_exists() {
-    for pass in passes("smoke-impl", &[&format!("IMPL_PROFILES={SCRUB}")]) {
+    let named = passes("smoke-impl", &[&format!("IMPL_PROFILES={SCRUB}")]);
+    for pass in named.into_iter().chain(passes("smoke-wasm", &[])) {
         if let Some(path) = pass.isolate().strip_prefix("--profile ") {
             assert!(
                 crate::common::repo_root().join(path).exists(),
@@ -258,6 +305,7 @@ fn each_variant_build_carries_the_features_its_name_promises() {
         ("elle-nojit", "--no-default-features --features ffi,uring"),
         ("elle-pool", "--no-default-features --features jit,ffi"),
         ("elle-mlir", "--features mlir"),
+        ("elle-wasm", "--features wasm"),
     ] {
         let line = build_line(target);
         assert!(
@@ -276,6 +324,11 @@ fn each_variant_build_carries_the_features_its_name_promises() {
          builds it"
     );
     assert!(build_line("elle-rig").contains("-p elle-rig"));
+    assert!(
+        build_line("elle-wasm").contains("-p elle-rig"),
+        "the wasm build's rig runs the implementation suite, so `make elle-wasm` \
+         builds it"
+    );
 }
 
 // The boot image's gate runs the language suite on an instance that hydrates
