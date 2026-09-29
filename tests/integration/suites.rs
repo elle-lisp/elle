@@ -180,39 +180,60 @@ fn wasm_skipped(path: &str) -> bool {
         .any(|pattern| path.contains(pattern))
 }
 
-// The wasm build's rig runs the implementation suite with each file compiled
-// whole to one module, less the files `WASM_SKIP` names. The three files the
-// test names pin invariants only the full-module tier has to uphold
-// (docs/impl/wasm.md, src/wasm/mod.rs).
+// The wasm build's rig runs the implementation suite twice. The first pass reads
+// each file's sidecar, as every rig does; the tiered backend's files run there,
+// because each forces its closures onto the tier itself.
 //
-// The counter-factual: a `smoke-wasm` that runs only the language suite leaves
-// every one of those files off the tier it pins, and nothing reports it.
+// The counter-factual: a `smoke-wasm` with no such pass leaves
+// tests/impl/wasm-tier-error-signal.lisp on no wasm build at all, since the
+// full-module pass skips it.
 #[test]
 fn smoke_wasm_runs_the_implementation_suite_on_the_wasm_rig() {
     let passes = passes("smoke-wasm", &[]);
-    let rig: Vec<&Pass> = passes.iter().filter(|p| p.host().is_some()).collect();
-    assert_eq!(rig.len(), 1, "one wasm pass runs on the rig");
-    let pass = rig[0];
-    assert_eq!(pass.host(), Some(make_expand("ELLE_RIG").as_str()));
+    let base: Vec<&Pass> = passes
+        .iter()
+        .filter(|p| p.host().is_some() && p.isolate().is_empty())
+        .collect();
+    assert_eq!(base.len(), 1, "one wasm rig pass reads each file's sidecar");
+    assert_eq!(base[0].host(), Some(make_expand("ELLE_RIG").as_str()));
     assert_eq!(
-        pass.isolate(),
-        format!("--profile {WASM_FULL}"),
-        "the wasm rig pass compiles each file whole to one module"
+        base[0].files,
+        implementation(),
+        "the wasm rig's sidecar pass runs the whole implementation suite"
     );
+}
+
+// The second wasm rig pass compiles each file whole to one module, less the
+// files `WASM_SKIP` names. The three files the test names pin invariants only
+// the full-module tier has to uphold (docs/impl/wasm.md, src/wasm/mod.rs).
+//
+// The counter-factual: a `smoke-wasm` that runs only the language suite on the
+// full-module tier leaves every one of those files off the tier it pins, and
+// nothing reports it.
+#[test]
+fn smoke_wasm_runs_the_implementation_suite_under_the_wasm_full_profile() {
+    let passes = passes("smoke-wasm", &[]);
+    let full: Vec<&Pass> = passes
+        .iter()
+        .filter(|p| p.isolate() == format!("--profile {WASM_FULL}"))
+        .collect();
+    assert_eq!(full.len(), 1, "one wasm rig pass compiles each file whole");
+    let pass = full[0];
+    assert_eq!(pass.host(), Some(make_expand("ELLE_RIG").as_str()));
     let want: BTreeSet<String> = implementation()
         .into_iter()
         .filter(|path| !wasm_skipped(path))
         .collect();
     assert_eq!(
         pass.files, want,
-        "the wasm rig pass runs every implementation file `WASM_SKIP` keeps"
+        "the wasm-full pass runs every implementation file `WASM_SKIP` keeps"
     );
     for pin in [
         "tests/impl/region-capture-cell-loop-uaf.lisp",
         "tests/impl/region-termination-sweep.lisp",
         "tests/impl/region-eval-quoted-data-leak.lisp",
     ] {
-        assert!(pass.files.contains(pin), "the wasm rig pass leaves out {pin}");
+        assert!(pass.files.contains(pin), "the wasm-full pass leaves out {pin}");
     }
 }
 
