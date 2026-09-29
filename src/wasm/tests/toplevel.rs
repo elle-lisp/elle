@@ -1,15 +1,15 @@
-// audited: 2026-09-06
-// docs/impl/wasm.md
+// audited: 2026-09-29
 //! Top-level `def` semantics, which must match the VM.
+//!
+//! docs/impl/wasm.md
 //!
 //! A file's top level uses sequential shadowing, so redefining a top-level
 //! `def` is a redefinition (the RHS sees the previous binding), not an error —
-//! a language feature the corpus relies on (tests/elle/def-shadow.lisp). The
-//! naive full-module wrap put the whole user body in one `(fn [] …)`, making
-//! those defs a fn-body letrec* where a duplicate binding is rejected, so
-//! def-shadow/numeric/… failed to compile under `--wasm=full`.
+//! a language feature the corpus relies on (tests/lang/def-shadow.lisp).
+//! Wrapping the whole user body in one `(fn [] …)` would make those defs a
+//! fn-body letrec* where a duplicate binding is rejected.
 //!
-//! `build_full_source` now branches on `has_toplevel_redefinition`: a program
+//! `build_full_source` branches on `has_toplevel_redefinition`: a program
 //! that redefines a top-level name is restructured (definitions at the file top
 //! level, expression runs under `ev/run`; `build_scheduled_toplevel`) to match
 //! the VM; every other program keeps the single-thunk wrap, which preserves
@@ -35,8 +35,8 @@ fn wasm_full_allows_toplevel_def_redefinition() {
 
 // The single-wrap-preserves-`eval` behavior (a non-redefining program whose
 // top-level def RHS calls `eval`, which traps in the entry function but works in
-// a closure) is pinned by tests/elle/region-termination-sweep.lisp and
-// tests/elle/region-eval-quoted-data-leak.lisp under `--wasm=full`, not a unit
+// a closure) is pinned by tests/impl/region-termination-sweep.lisp and
+// tests/impl/region-eval-quoted-data-leak.lisp under `--wasm=full`, not a unit
 // test here: `eval`'s wasm compile-context teardown segfaults the in-process
 // test harness on drop, though it is clean under the CLI's process exit.
 
@@ -47,9 +47,9 @@ fn wasm_full_interleaved_defs_and_expression_runs_emit() {
     // suspending closure — followed by a short entry. Closures emit before the
     // entry, and a suspending closure leaves resume continuations pointing into
     // ITS blocks; the entry must reset that state or emit_cfg slices the entry's
-    // own shorter block at a stale offset and panics (src/wasm/controlflow.rs,
-    // was tests/elle/bug-propagate-free-at.lisp under --wasm=full). The trailing
-    // (length (pairs …)) is 0 — an immediate, safe to return per `eval`'s caveat.
+    // own shorter block at a stale offset and panics (src/wasm/controlflow.rs).
+    // tests/lang/bug-propagate-free-at.lisp under --wasm=full is the file-level
+    // face. The trailing (length (pairs …)) is 0.
     assert_eq!(
         eval_with_stdlib(
             "(def s @{:a (or nil {})})\n\
