@@ -289,7 +289,10 @@ Key methods:
 - `execute_bytecode_from_ip`: Executes from a given IP with the code object (`&Code`)
 - `execute_bytecode_saving_stack`: Saves/restores caller's stack, handles tail calls
 - `run_thunk_to_completion`: `execute_bytecode_saving_stack` + the `SIG_SWITCH` drain loop — the safe entry for re-entrant callers running a thunk on the current fiber (`eval`, `import`, `arena/allocs`, test-setup module loader)
-- `resume_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and errors
+- `replay_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and
+  errors, and answers a `Replay` naming the error park it built; a fiber
+  boundary records that park in the delivery ledger. `resume_suspended` is the
+  same replay for a driver that records no park (`handle_sig_switch`)
 - `with_child_fiber` ([child.rs](fiber/child.rs)): Shared swap protocol for
   fiber resume and abort. Swaps the child fiber into `vm.fiber`, wires the
   parent/child chain, runs the body, then swaps back. No heap swap is
