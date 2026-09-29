@@ -284,8 +284,9 @@ impl VM {
             let push_resume_value = !result.bits.intersects(SIG_FUEL) && result.site.delivers();
             // This exit built an error park, so it records what a restart owes
             // (docs/impl/region/park.md § "A restart delivers into an error
-            // park"). A handler that parked its own frame under SIG_ERROR — a
-            // denial of `:error` — never reaches here.
+            // park"). A denial of `:error` in call position parks its own frame
+            // and never reaches here; in tail position it does, and the ledger
+            // keeps the denial's funding for its payload.
             if result.bits.intersects(SIG_ERROR) {
                 let payload = self.fiber.signal.map_or(Value::NIL, |(_, v)| v);
                 self.fiber.delivery.park_error(result.site, payload);

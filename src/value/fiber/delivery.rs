@@ -209,11 +209,19 @@ impl Delivery {
     /// continuation funds its own release, and a `NoResult` site takes no
     /// resume value at all (docs/impl/region/park.md § "A restart delivers into
     /// an error park"). The raise's own mint record stands: it names the parked
-    /// payload. Callers: the fiber boundary where the error exit built the park
+    /// payload.
+    ///
+    /// A capability denial of `:error` also exits under `SIG_ERROR`, and in tail
+    /// position the driver builds its frame. That park is the denial's own, so a
+    /// bodyless record naming `payload` means its funding stands untouched.
+    /// Callers: the fiber boundary where the error exit built the park
     /// (`do_fiber_first_resume`, `do_fiber_subsequent_resume`, the abort's
     /// `FiberResume` replay), and a parent a child's error stopped at its
     /// `fiber/resume` call (`finish_fiber_resume`).
-    pub(crate) fn park_error(&mut self, site: RaiseSite, _payload: Value) {
+    pub(crate) fn park_error(&mut self, site: RaiseSite, payload: Value) {
+        if self.bodyless.is_some_and(|b| b.bit_identical(payload)) {
+            return;
+        }
         self.assert_consumed();
         self.resume_unfunded = site.owes_mint();
     }
