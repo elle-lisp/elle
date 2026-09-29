@@ -39,7 +39,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   post-`TailCall` ip through `elle_jit_yield_through_call`, as a compiled `Call` site parks
   at its resume ip ([jit.md](../jit.md)). Returning at the call instead strands every
   release in the block: an owned parameter's, a borrowed argument's retain, the result's.
-  Gauged and pinned guardfree by `tests/elle/region-jit-tail-suspend.lisp`.
+  Gauged by [region-jit-tail-suspend.lisp](../../../tests/impl/region-jit-tail-suspend.lisp); its
+  `-syncjit` and `-guardfree` wrappers run it compiled from each function's first call,
+  the second with guardfree armed.
 - **The parked signal's escape retain has a release on every path.** A suspending signal's
   payload is retained once as it escapes into `fiber.signal` (`EmitEscape` for
   `yield`/`emit`, `SuspendEscape` for a yielding io op or a capability denial). The resume
@@ -169,8 +171,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   run, and the park's references are released. The host's error then leaves by the
   ordinary error exit, which parks the fiber's own frame at the host's call, so a restart
   answers that call and never replays the refused code. Pinned by
-  `tests/elle/host-refusal.lisp` and `tests/elle/jit-run-on-refused-park.lisp`, and gauged
-  by `tests/elle/region-host-refusal.lisp`.
+  [host-refusal.lisp](../../../tests/lang/host-refusal.lisp) and
+  [jit-run-on-refused-park.lisp](../../../tests/impl/jit-run-on-refused-park.lisp), and gauged by
+  [region-host-refusal.lisp](../../../tests/impl/region-host-refusal.lisp).
 
   **Two records decide it, because neither answers on its own.** The **ledger** says the
   delivery retain has no reader — a fact only the site that took the retain knows, and one no
@@ -301,10 +304,10 @@ symmetric with its unpark; the node and the deferred set a park moves are
   keeps that park's funding (`raise_in_park`): a primitive or denial park still
   owes the mint, and an emit park or a fuel pause does not. And a parent that a
   child's error passes is parked at its `fiber/resume` call, which is a `Call`
-  site. Pinned by `tests/elle/region-fiber-restart-uaf.lisp` under
-  `--trace=guardfree`, with the leak gauge in `tests/elle/region-fiber-restart.lisp`;
-  the tail denial of `:error`, first run and replay, by `tests/elle/caps.lisp`
-  and `value::fiber::delivery::tests`.
+  site. Pinned guardfree by [region-fiber-restart-uaf.lisp](../../../tests/impl/region-fiber-restart-uaf.lisp),
+  with the leak gauge in [region-fiber-restart.lisp](../../../tests/impl/region-fiber-restart.lisp); the
+  tail denial of `:error`, first run and replay, by [caps.lisp](../../../tests/lang/caps.lisp) and
+  `value::fiber::delivery::tests`.
 - **A propagated signal is a fresh park, and owes its own delivery reference.**
   `fiber/propagate` installs the child's parked payload as the propagating fiber's own
   `signal`. That fiber's resumer then reads the payload as its resume result and runs the
