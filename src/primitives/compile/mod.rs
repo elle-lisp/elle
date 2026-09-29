@@ -1,5 +1,7 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 //! Compiler-as-library primitives: analyze Elle source and query the results.
+//!
+//! docs/analysis/portrait.md
 //!
 //! The `compile/analyze` primitive runs the full analysis pipeline (reader →
 //! expander → analyzer) and returns an opaque handle.  Other `compile/*`
@@ -67,13 +69,13 @@ pub(super) fn kw(name: &str) -> TableKey {
 
 // ── Analysis handle ────────────────────────────────────────────────────
 
+/// (byte_offset, byte_len) of a name token in source text.
+pub(super) type NameSpan = (usize, usize);
+
 /// Opaque handle wrapping the result of `analyze_file`.
 ///
 /// Stored as `ctx.external("analysis", AnalysisHandle)`.  Query
 /// primitives downcast the External to access the fields.
-/// (byte_offset, byte_len) of a name token in source text.
-pub(super) type NameSpan = (usize, usize);
-
 pub struct AnalysisHandle {
     pub hir: Hir,
     pub arena: BindingArena,
@@ -108,16 +110,6 @@ pub struct CallGraphData {
     /// Functions that call no user-defined functions.
     pub leaves: Vec<String>,
 }
-
-// ── Signal map builder ─────────────────────────────────────────────────
-
-// ── Call graph builder ─────────────────────────────────────────────────
-
-// ── Binding spans builder ──────────────────────────────────────────────
-
-// ── HIR search helpers ────────────────────────────────────────────────
-
-// ── Value conversion helpers ───────────────────────────────────────────
 
 // ── Extract the handle from an argument ────────────────────────────────
 
@@ -349,7 +341,7 @@ primitive! {
     "compile/run-on" => prim_compile_run_on {
         signal: Signal::query_errors(),
         arity: Arity::AtLeast(2),
-        doc: "Force-dispatch a closure on a specific tier (:bytecode, :jit, :mlir-cpu). Used by lib/differential.lisp to verify tier agreement. Returns the result, or signals :tier-rejected if the tier doesn't accept the closure.",
+        doc: "Force-dispatch a closure on a specific tier (:bytecode, :jit, :mlir-cpu). Returns the result, or signals :tier-rejected if the tier doesn't accept the closure.",
         params: &["tier", "f"],
         category: "compile",
         example: r#"(compile/run-on :bytecode (fn [a b] (+ a b)) 3 4)"#,
@@ -358,7 +350,7 @@ primitive! {
         // dispatch reads the closure, and the Elle code it runs stores only
         // through the runtime-counted funnel, exactly as an opaque user fn does.
         // Unbounded result + no store is `Opaque` — no arg clique
-        // (docs/impl/region/effects.md § Opaque).
+        // (docs/impl/region/effects.md).
         effect: RegionEffect::Opaque,
     }
     "compile/barrier-module" => prim_compile_barrier_module {
@@ -373,14 +365,14 @@ primitive! {
         // reference to either argument Value. So nothing is stored; what the
         // thunk run makes unbounded is the RESULT, which `result_minted` below
         // already accounts for at dispatch. `Opaque`, not `Mixed`
-        // (docs/impl/region/effects.md § Opaque).
+        // (docs/impl/region/effects.md).
         effect: RegionEffect::Opaque,
         result_minted: true,
     }
     "compile/whole-module" => prim_compile_whole_module {
         signal: Signal::query_errors(),
         arity: Arity::Exact(2),
-        doc: "Compile a file (SOURCE, NAME) as ONE whole-file thunk (legacy multi-form test mode): whole-module analysis (epoch + letrec bindings), then return a mutable array with a single [0 thunk] pair whose 0-arg thunk runs every top-level form (def/var and expressions alike) in source order. Unlike compile/barrier-module it does not hoist def/var eagerly or slice expressions per form — so an imperative script runs in order, once per tier, in isolation, matching a direct file run. Signals on a compile failure. Powers `elle test` for multi-form files (src/test).",
+        doc: "Compile a file (SOURCE, NAME) as ONE whole-file thunk (legacy multi-form test mode): whole-module analysis (epoch + letrec bindings), then return a mutable array with a single [0 thunk] pair whose 0-arg thunk runs every top-level form (def/var and expressions alike) in source order. Unlike compile/barrier-module it does not hoist def/var eagerly or slice expressions per form — so an imperative script runs in order, in isolation, matching a direct file run. Signals on a compile failure. Powers `elle test` for multi-form files (src/test).",
         params: &["source", "name"],
         category: "compile",
         example: r#"(compile/whole-module "(def x 1)\n(assert (= x 1) \"ok\")" "<eval>")"#,
@@ -425,7 +417,7 @@ primitive! {
         // into fresh strings, so nothing is stored; the struct is minted by the
         // query dispatch rather than in this call's own region, so the result is
         // unbounded. `Opaque` — the table's clean face, pinned at 0 by
-        // tests/elle/region-compile-clique-leak.lisp.
+        // tests/impl/region-compile-clique-leak.lisp.
         effect: RegionEffect::Opaque,
     }
 }
