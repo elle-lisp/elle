@@ -159,6 +159,15 @@ impl VM {
             self.fiber.signal = Some(sig);
         }
 
+        // An error or halt wins over the sentinel. Compiled code leaves an
+        // `(error …)` through the yield side exit, as it leaves any emit, so
+        // the sentinel alone does not say the closure suspended.
+        if let Some((bits, val)) = post_signal {
+            if bits.intersects(SIG_ERROR) || bits.intersects(crate::value::SIG_HALT) {
+                return (bits, val);
+            }
+        }
+
         if result_jv == crate::jit::YIELD_SENTINEL {
             // Squelch enforcement on the suspension the sentinel reports. The
             // signal is on `post_signal`, not `fiber.signal` — the caller's
@@ -200,10 +209,11 @@ impl VM {
             );
         }
 
-        // Error or halt set during execution wins over the return value.
+        // Any other signal set during execution wins over the return value.
         if let Some((bits, val)) = post_signal {
-            // Squelch enforcement for non-yield signals — same predicate, same
-            // reason for not routing through `enforce_squelch`.
+            // Squelch enforcement for a signal the sentinel did not report —
+            // same predicate, same reason for not routing through
+            // `enforce_squelch`.
             let squelched = crate::signals::squelched_bits(bits, closure.squelch_mask);
             if !squelched.is_empty() {
                 return (
