@@ -1,7 +1,7 @@
 // audited: 2026-09-29
-// docs/impl/jit.md
-//! Where a closure call meets the JIT: the hotness counter, the code cache, and
-//! the trampolines back into the interpreter.
+//! Where a closure call meets the JIT: the hotness counter, the code cache, and the trampolines back into the interpreter.
+//!
+//! docs/impl/jit.md
 //!
 //! Both tiers promote through here. The interpreter arrives at `try_jit_call`,
 //! compiled code at `profile_jit_candidate` from `elle_jit_call`, and a
@@ -21,7 +21,7 @@ impl VM {
     /// Install compiled code for the function whose bytecode is `bytecode`.
     /// The single write path into `jit_cache`: the key is derived from the
     /// bytecode here, never passed separately, and the entry pins the
-    /// bytecode so the key stays sound (docs/impl/jit.md § "Cache identity").
+    /// bytecode so the key stays sound (docs/impl/jit.md).
     pub fn install_jit_code(
         &mut self,
         template: crate::value::ClosureTemplate,
@@ -51,7 +51,7 @@ impl VM {
     ///
     /// The promotion step of a non-tail call, and the only one: the interpreter
     /// reaches it through `try_jit_call`, compiled code through `elle_jit_call`
-    /// (docs/impl/jit.md § "Function selection"). A tier that counted only its
+    /// (docs/impl/jit.md). A tier that counted only its
     /// own calls would stop promotion one level below whatever has already
     /// compiled, because a compiled caller stops reaching its callees through
     /// the other tier.
@@ -81,7 +81,7 @@ impl VM {
 
         // If hot, not already pending, and not already rejected, submit
         // background compilation. The rejection check is the negative cache
-        // (docs/impl/jit.md "Rejection tracking"): a function whose LIR the
+        // (docs/impl/jit.md): a function whose LIR the
         // JIT has rejected can only ever reproduce the identical rejection, so
         // re-submitting is pure wasted work. Under eager JIT (threshold 0,
         // every call "hot") the absence of this check re-submits un-jit'able
@@ -157,7 +157,7 @@ impl VM {
     /// re-submitted whichever kind it was. A refusal the translator plans for
     /// says nothing further; a Cranelift failure or an invalid-LIR result is a
     /// defect in the compiler and prints one line on stderr
-    /// (docs/impl/jit.md § "Rejection tracking"). Both the worker's results and
+    /// (docs/impl/jit.md). Both the worker's results and
     /// the synchronous compile come through here, so a flag meant to show a
     /// codegen failure cannot be the one place that swallows it.
     ///
@@ -350,8 +350,8 @@ impl VM {
                     // A non-yield suspend (fuel) leaves the tail callee's inner
                     // frame in exec_result.stack, not fiber.suspended; park it so
                     // resume re-enters the callee — a tail-recursive interpreter
-                    // callee (e.g. `fold`) otherwise loses its accumulator across
-                    // preemption (tests/elle/fuel-jit-preempt.lisp).
+                    // callee (for example `fold`) otherwise loses its accumulator across
+                    // preemption (tests/impl/fuel-jit-preempt.lisp).
                     let mut frames = self.fiber.suspended.take().unwrap_or_default();
                     self.park_suspended_callee_frame(&mut frames, eb, exec_result);
                     self.fiber.suspended = Some(frames);

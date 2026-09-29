@@ -62,10 +62,9 @@ impl VM {
         // suspends never returns and a raise never completes, so the resume
         // value stands in for the result. Without the retain the continuation
         // consumes a reference the resumer still owns, and the value is freed
-        // under every holder that outlives the resume (docs/impl/region/park.md
-        // § "A delivery into a replayed frame carries one owning reference";
-        // `tests/elle/region-primitive-resume-uaf.lisp`,
-        // `tests/elle/region-fiber-restart-uaf.lisp`). `region_of` no-ops an
+        // under every holder that outlives the resume (docs/impl/region/park.md;
+        // `tests/impl/region-primitive-resume-uaf.lisp`,
+        // `tests/impl/region-fiber-restart-uaf.lisp`). `region_of` no-ops an
         // immediate.
         if unfunded {
             let heap = unsafe { &mut *self.heap_ptr };
@@ -88,8 +87,7 @@ impl VM {
             let flat = super::flatten_param_frames(&self.fiber.param_frames);
             #[cfg(debug_assertions)]
             let borrows = super::record_param_borrows(&flat, self.heap());
-            // The seeded baseline is a counted holder (docs/impl/region/park.md
-            // § "A child's inherited parameter baseline is a counted holder"):
+            // The seeded baseline is a counted holder (docs/impl/region/park.md):
             // retain each heap entry and record the fiber → value edge; the
             // fiber object's free releases them through the baseline walk.
             super::retain_param_baseline(unsafe { &mut *self.heap_ptr }, child_value, &flat);
@@ -195,7 +193,7 @@ impl VM {
                     "stale param-snapshot borrow on resume: parameter {pid} holds a \
                      value in region {r}, which was freed since this fiber inherited \
                      it — an uncounted cross-fiber borrow outlived its region \
-                     (docs/impl/region/generations.md § 'Uncounted-borrow check')"
+                     (docs/impl/region/generations.md)"
                 );
             }
         }
@@ -213,7 +211,7 @@ impl VM {
     /// First resume of a New fiber — build env and execute closure bytecode.
     ///
     /// The `resume_value` is passed as the closure's argument when the
-    /// closure expects a parameter (e.g., a signal parameter). For
+    /// closure expects a parameter (for example a signal parameter). For
     /// zero-parameter closures, no arguments are passed.
     ///
     /// Uses execute_bytecode_saving_stack (not execute_bytecode_inner) because
@@ -251,8 +249,7 @@ impl VM {
         // This entrant PARKS the body's frame on an error exit (below) so the
         // restarts system can replay it, which replays the releases among its
         // remaining instructions — so the abandoned-frame walk must not run them
-        // (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
-        // it still owes").
+        // (docs/impl/region/mechanism.md).
         self.pending_error_park = true;
         let result = self.execute_bytecode_saving_stack(&closure.template.code(), &env_rc);
 
@@ -276,17 +273,16 @@ impl VM {
             // scratch (args on the stack, nothing extra to push). A raise with no
             // result position: continue past it, the resume value going nowhere.
             // All other signals (SIG_ERROR, user-defined, etc.): the instruction at
-            // result.ip expects the signal's "return value" on the stack (e.g.
-            // Return needs a value to pop), so push it.
-            // What the body's activation owed rode out of the popped activation in
-            // `result.activation_dues` (moved, beside the region map) —
-            // park it so the resumed body's completion frees it.
+            // result.ip expects the signal's "return value" on the stack (for
+            // example Return needs a value to pop), so push it. What the body's
+            // activation owed rode out of the popped activation in
+            // `result.activation_dues` (moved, beside the region map) — park it so
+            // the resumed body's completion frees it.
             let push_resume_value = !result.bits.intersects(SIG_FUEL) && result.site.delivers();
             // This exit built an error park, so it records what a restart owes
-            // (docs/impl/region/park.md § "A restart delivers into an error
-            // park"). A denial of `:error` in call position parks its own frame
-            // and never reaches here; in tail position it does, and the ledger
-            // keeps the denial's funding for its payload.
+            // (docs/impl/region/park.md). A denial of `:error` in call position
+            // parks its own frame and never reaches here; in tail position it
+            // does, and the ledger keeps the denial's funding for its payload.
             if result.bits.intersects(SIG_ERROR) {
                 let payload = self.fiber.signal.map_or(Value::NIL, |(_, v)| v);
                 self.fiber.delivery.park_error(result.site, payload);
@@ -355,7 +351,7 @@ impl VM {
     /// For a `Bytecode` park the fiber is stopped in its own code, where
     /// nothing in it can catch: the error is raised in place, and the chain
     /// stays parked for a restart, which answers the call the fiber waits on
-    /// (docs/impl/region/park.md § "A restart delivers into an error park").
+    /// (docs/impl/region/park.md).
     ///
     /// A fiber that never started takes the error as its value.
     pub(super) fn do_fiber_abort(
@@ -402,16 +398,14 @@ impl VM {
                     // THIS fiber that owns a reference to the payload funds
                     // nothing, and the abandoned-frame walk and the parked
                     // frame's discharge must stop exempting the payload's region
-                    // (docs/impl/region/mechanism.md § "An abandoned frame runs
-                    // the releases it still owes"). The replay below delivers the
+                    // (docs/impl/region/unwind.md). The replay below delivers the
                     // inner fiber's result, funded by that same mint rather than
-                    // by a resume mint (docs/impl/region/park.md § "A delivery
-                    // into a replayed frame carries one owning reference").
+                    // by a resume mint (docs/impl/region/park.md).
                     vm.fiber.delivery.install_abort(error_value);
                     let inner_handle = handle.clone();
                     let inner_value = *fiber_value;
 
-                    // Abort the inner fiber (e.g. protect child blocked on I/O).
+                    // Abort the inner fiber (for example a protect child blocked on I/O).
                     // Store the error on the inner fiber so do_fiber_abort picks it up.
                     // The install displaces the inner fiber's park, so a payload
                     // the RUNTIME built there is owed its release first — the
@@ -463,7 +457,7 @@ impl VM {
                         // of the four consumers that mint answers for, and it
                         // takes no retain of its own. Pinned by
                         // `region_fiber_abort_io_protect_uaf`;
-                        // tests/elle/grpc.lisp is the full-scheduler witness.
+                        // tests/lang/grpc.lisp is the full-scheduler witness.
                         vm.replay_at_boundary(remaining, inner_result)
                     }
                 }

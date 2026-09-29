@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-29
 //! Counter-factual tests for the two uncounted region borrows that carry a
 //! recorded generation, and for the panic a stale one raises.
 //!
@@ -73,7 +73,7 @@ fn record_param_borrows_snapshots_heap_bindings_only() {
 /// The suspended-frame borrow check: the recorded-generation analogue of the
 /// param-snapshot one, for the uncounted region references a `BytecodeFrame`'s
 /// `activation_region_map` holds across park/resume
-/// (docs/impl/region/generations.md § "Two borrow shapes"). `record_region_borrows`
+/// (docs/impl/region/generations.md). `record_region_borrows`
 /// snapshots each `(slot, region, generation)` at suspend; the shared
 /// `first_stale_borrow` flags any whose region's generation has since moved — a
 /// region freed while the fiber was parked.
@@ -115,13 +115,13 @@ fn suspended_frame_region_borrow_detects_freed_region() {
 /// be snapshotted as a borrow: the activation never owned the recycled
 /// incarnation, so recording it would forge a live borrow and trip the resume
 /// check when that unrelated incarnation is freed (the stale-suspended-frame
-/// false positive; docs/impl/region/generations.md § "Uncounted-borrow check").
+/// false positive; docs/impl/region/generations.md).
 ///
-/// Counterfactual: stamping the entry with the id's CURRENT generation (what the
-/// pre-fix snapshot did) records `(slot, r, current_gen)`, and `first_stale_borrow`
-/// then trips the instant the recycled incarnation is freed — a panic on a region
-/// the parked activation never held. Recording the establish-generation and
-/// skipping the mismatched entry is what makes the snapshot honest.
+/// Counterfactual: stamping the entry with the id's CURRENT generation records
+/// `(slot, r, current_gen)`, and `first_stale_borrow` then trips the instant the
+/// recycled incarnation is freed — a panic on a region the parked activation
+/// never held. Recording the establish-generation and skipping the mismatched
+/// entry is what makes the snapshot honest.
 #[test]
 fn stale_leftover_map_entry_is_not_snapshotted_as_a_borrow() {
     let mut heap = FiberHeap::new();
@@ -245,8 +245,8 @@ fn a_slot_with_no_slot_routed_release_is_not_a_borrow() {
 /// reader cannot run.
 ///
 /// Counter-factual: assert only that the message holds the slot and the region,
-/// and the pre-existing message passes unchanged. The function name and the
-/// source location are what the assertions below add.
+/// and a message without the function name or the source location passes. Those
+/// two are what the assertions below add.
 #[test]
 fn stale_borrow_message_names_the_parked_site() {
     let mut heap = FiberHeap::new();
@@ -254,8 +254,8 @@ fn stale_borrow_message_names_the_parked_site() {
 
     let site = ParkSite {
         function: Some("drain-body"),
-        at: Some(SourceLoc::new("tests/elle/http.lisp", 214, 7)),
-        start: Some(SourceLoc::new("tests/elle/http.lisp", 200, 1)),
+        at: Some(SourceLoc::new("tests/lang/http.lisp", 214, 7)),
+        start: Some(SourceLoc::new("tests/lang/http.lisp", 200, 1)),
         ip: 61,
         frame: 1,
         frames: 3,
@@ -271,7 +271,7 @@ fn stale_borrow_message_names_the_parked_site() {
         "the parked activation's function must be named: {msg}",
     );
     assert!(
-        msg.contains("tests/elle/http.lisp:214:7"),
+        msg.contains("tests/lang/http.lisp:214:7"),
         "the resume point's own source location must be named: {msg}",
     );
     assert!(

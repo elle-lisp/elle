@@ -1,6 +1,7 @@
 // audited: 2026-09-29
-//! Which parks owe their payload a release at an install, and which must be
-//! left to the resumed body.
+//! Which parks owe their payload a release at an install, and which must be left to the resumed body.
+//!
+//! docs/impl/region/park.md
 
 use super::*;
 use crate::value::arena::{alloc_in_fresh_region, region_rc};
@@ -187,7 +188,7 @@ fn an_io_op_park_is_released_by_the_install() {
 /// reference, so the install that answers it owes the request nothing.
 /// Counter-factual: a reading keyed on the bit and the type releases the child's
 /// region once per relaying fiber, and frees the child's port and buffers under
-/// it (`tests/elle/region-io-relay-uaf.lisp`).
+/// it (`tests/impl/region-io-relay-uaf.lisp`).
 #[test]
 fn a_relayed_io_request_owes_the_relaying_install_nothing() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
@@ -262,7 +263,7 @@ fn an_unrecorded_park_is_answered_without_dereferencing_its_payload() {
 /// references are its to release: the delivery retain the park took, and the one
 /// the runtime's own allocation left. Counter-factual: releasing the delivery
 /// alone leaves the request's region at rc 1 for good, one region and one object
-/// per squelched io op (elle-lisp/elle#1031).
+/// per squelched io op.
 #[test]
 fn a_boundary_releases_both_of_an_io_parks_references() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
@@ -419,7 +420,7 @@ fn a_record_that_does_not_name_the_exits_park_releases_nothing() {
 /// buffer's holders release what they took, and the install is the retain's only
 /// consumer. An install that stands down on the shared region leaves the retain
 /// standing for good — the region survives with its buffer and its request, once
-/// per read (`tests/elle/region-io-read-strand.lisp` bounds the rate).
+/// per read (`tests/impl/region-io-read-strand.lisp` bounds the rate).
 ///
 /// The second reference below stands for the resume value's own holder, which is
 /// what makes the release safe: it drops the retain, not the buffer.
