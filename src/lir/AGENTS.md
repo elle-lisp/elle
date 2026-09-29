@@ -12,10 +12,11 @@ heap literals and `LoadSelf`.
 
 ## Size
 
-[types/instr.rs](types/instr.rs) is past the 500-line reading budget and
-carries no audit stamp, so it sits in the queue. The file is one enum, and Rust
-gives no way to split one; bringing it inside the budget means nesting a group
-of variants into a sub-enum, which rewrites every exhaustive match in the
+[types/instr.rs](types/instr.rs) is past the 500-line reading budget, so it
+carries no audit stamp and is exempt from the audit queue by name
+([docs/impl/audit.md](../../docs/impl/audit.md)). The file is one enum, and
+Rust gives no way to split one; bringing it inside the budget means nesting a
+group of variants into a sub-enum, which rewrites every exhaustive match in the
 crate. That is its own change, not a rider on whatever touches the file next.
 
 A match over the instruction set splits where an enum cannot:
