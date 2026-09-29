@@ -102,10 +102,11 @@
                            (fn [] (protect (os/sig-send (sys/pid) :sigchld))))
                   "os/sig-send" :os-signal) "a denied signal send is refused")
 
-# The gate reads a native library's extension, so no library need exist.
+# The gate reads a native library's extension, so no library need exist. The
+# payload names the canonical primitive, `import`, which `import-file` aliases.
 (assert (refused? (spawned |:ffi|
                            (fn [] (protect (import-file "nonexistent.so"))))
-                  "import-file" :ffi) "a denied native import is refused")
+                  "import" :ffi) "a denied native import is refused")
 
 (assert (refused? (spawned |:gpu| (fn [] (protect (git (fn [x] x))))) "git" :gpu)
         "a denied SPIR-V compile is refused")
