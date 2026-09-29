@@ -1,3 +1,8 @@
+// audited: 2026-09-29
+//! The `%`-intrinsic bodies over data: the type predicates, the collection reads and writes, and freeze and thaw.
+//!
+//! docs/intrinsics.md
+
 use super::*;
 
 pub(super) fn prim_nil_q(
@@ -261,7 +266,7 @@ pub(super) fn prim_pop(
         // Popping an empty container is an argument error, not a type error — the
         // container's type is fine, its length is not. Aligned with the other two
         // pop-empty paths (`seq::mutate::seq_pop`, `vm::types::intrinsic`) and the
-        // `pop empty @array` error-keyword pin in `tests/elle/errors.lisp`.
+        // `pop empty @array` error-keyword pin in `tests/lang/errors.lisp`.
         return (SIG_ERROR, ctx.error("argument-error", "pop: empty @array"));
     }
     (
@@ -321,7 +326,7 @@ pub(crate) fn prim_bytes_push(
     // the exact mirror of %string-push bulk-appending a string (string concat ==
     // UTF-8 byte concat). Read the source into an owned buffer FIRST (like
     // prim_string_push) so we never hold an @bytes RefCell borrow across a
-    // mutation of `collection`, which may be the same @bytes (e.g. (append b b)).
+    // mutation of `collection`, which may be the same @bytes (for example `(append b b)`).
     let src: Vec<u8> = if let Some(i) = value.as_int() {
         vec![i as u8]
     } else if let Some(data) = value.as_bytes() {
