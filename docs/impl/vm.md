@@ -60,12 +60,17 @@ pops that placeholder. A fiber stopped on an error therefore parks with
 nothing in the raising call's result position, and a restart pushes the
 resume value there.
 
-Three raises have no result position. A `silence` bound on a parameter
+Two instructions produce no value: a `silence` bound on a parameter
 (`CheckSignalBound`) and a `parameterize` of a value that is not a parameter
-(`PushParamFrame`) are instructions that produce no value, so they raise
-without a placeholder. The object limit raises between two instructions,
-after the allocating one pushed its result. The fiber parks without taking
-a resume value there, and a restart continues after the raise.
+(`PushParamFrame`). They raise without a placeholder, the fiber parks without
+taking a resume value, and a restart continues after the raise.
+
+The object limit refuses the allocation past it, and the loop raises for the
+instruction that asked, right after it ran. That instruction's result is not
+a value, so the exit takes it off the stack as it takes a placeholder, and a
+restart answers the allocating instruction. An allocation made outside the
+frame's own instructions, such as a callee's environment, trips the limit
+before the frame's first instruction runs. That raise has no result position.
 
 The exit also carries the raise site, `RaiseSite`, out to the fiber
 boundary. An `Emit` raise is `Emit`, because its continuation funds its own

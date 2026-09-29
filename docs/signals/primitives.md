@@ -166,11 +166,10 @@ restart of the parent answers that call.
 ```
 
 A raise with no result has nothing to answer. A `silence` bound on a
-parameter, a `parameterize` of a value that is not a parameter, and the
-object limit (`arena/set-object-limit`) each raise where no call result is
-waiting. A restart continues after the raise, and the recovery value goes
-nowhere. A `parameterize` that raised binds nothing, so its body runs with
-the bindings around it:
+parameter and a `parameterize` of a value that is not a parameter each raise
+where no call result is waiting. A restart continues after the raise, and the
+recovery value goes nowhere. A `parameterize` that raised binds nothing, so
+its body runs with the bindings around it:
 
 ```lisp
 (def not-a-parameter 42)
@@ -182,6 +181,10 @@ the bindings around it:
 (assert (= (get (fiber/resume unbound) :error) :type-error))
 (assert (= (fiber/resume unbound :ignored) (list :a :x 5)))
 ```
+
+The object limit (`arena/set-object-limit`) refuses the allocation past it and
+raises for the call that asked, whose result is not a value. A restart answers
+that call, as it answers any other.
 
 ## Terminal vs. Resumable Signals
 

@@ -255,12 +255,12 @@ symmetric with its unpark; the node and the deferred set a park moves are
   fiber boundary, and the boundary records it in the ledger (`park_error`). An
   `Emit` raise (`(error v)`) owes nothing, because its continuation funds its own
   release of the resume value, as for any emit park (§ "A resume value crosses
-  counted, or not at all", below). A raise with no result position (`NoResult`) —
-  an instruction that produces no value, or the object limit between two
-  instructions — parks without taking the resume value, so it owes nothing
-  either ([vm.md](../vm.md)). Every other raise is a `Call` site — a
-  primitive, an instruction, a callee — whose result was never produced, so nothing
-  mints for it and the delivery mints `ResumeDelivery`, as for a suspending
+  counted, or not at all", below). A raise with no result position (`NoResult`),
+  an instruction that produces no value, parks without taking the resume value,
+  so it owes nothing either ([vm.md](../vm.md)). Every other raise is a `Call`
+  site — a primitive, an instruction, a callee, the object limit's refusal —
+  whose result was never produced, so nothing mints for it and the delivery
+  mints `ResumeDelivery`, as for a suspending
   primitive. Two parks meet this rule without a raise of their own. An injected
   `fiber/abort` / `fiber/refuse` error raises in place over the park it finds, so it
   keeps that park's funding (`raise_in_park`): a primitive or denial park still
