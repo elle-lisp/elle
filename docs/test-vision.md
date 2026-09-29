@@ -23,8 +23,10 @@ Six products test this repository today:
   `elle test --isolate` runs a file the same way and records the child's status,
   signal and output ([test-runner](test-runner.md)); what these files still wait
   on is a profile that selects them.
-- The Makefile runs five more corpus passes: per-file vm, per-file jit,
-  nouring, mlir, wasm — each with its own skip and timeout lists.
+- The Makefile runs five more corpus passes outside the runner: per-file vm,
+  per-file jit, the no-features build, nouring, and whole-file wasm — each with
+  its own skip and timeout lists. The mlir build runs the corpus through the
+  runner alone, which puts every form on the mlir-cpu tier.
 
 The runner's thesis is "capture everything once; query forever", and the data
 now survives the run that produced it. The DB lives in the state directory, so

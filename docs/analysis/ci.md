@@ -20,7 +20,7 @@ renamed heading breaks the site generator.
 | Boot Image Tests | ubuntu | `smoke-boot-image` — the corpus booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, then property tests | 16 |
 | Thread-Pool I/O Tests | ubuntu | The corpus on the thread-pool I/O backend | — |
-| MLIR Tests | ubuntu | `smoke-mlir` | — |
+| MLIR Tests | ubuntu | `smoke-mlir` — the corpus through `elle test`, with the mlir-cpu tier | — |
 | WASM Build | ubuntu | `check-wasm` — the feature compiles, the tier boots | — |
 | Plugin Tests | ubuntu | Builds the `plugins/` submodule, asserts its artifacts, runs its corpus | — |
 | AArch64 Smoke | ubuntu-arm | `make smoke` | — |
