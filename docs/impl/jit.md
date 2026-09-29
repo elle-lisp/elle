@@ -51,14 +51,15 @@ parameter frame, and the locals and operands a suspend saves. Each writes a
 `Value` as two words into a slot it sized itself.
 
 `store_value_slot` ([translate.rs](../../src/jit/translate.rs)) is the one site
-that writes such a `Value`. It takes the slot and the `Value`'s index, and
-places the tag and the payload from `size_of` and `offset_of` on `Value`, as
-`load_value_slot` does for a read.
+that writes such a `Value`. It takes the slot, the `Value`'s index, and the two
+halves, and places the tag and the payload from `size_of` and `offset_of` on
+`Value`, as `load_value_slot` does for a read.
 
 Cranelift has no `stack_store` instruction. The builder method that keeps the
 name takes the pointer type, emits a `stack_addr`, and stores through that
-address with the flag `notrap` and no `aligned`. The JIT declares its slots
-with one-byte alignment, so it cannot claim more. The two tables of the
+address with the flag `notrap` and no `aligned`. The JIT passes `I64` as the
+pointer type, as it does for every `stack_addr`. It declares its slots with
+one-byte alignment, so it cannot claim more. The two tables of the
 abandoned-frame walk, and the `JitCtx` slot in the prologue, use the same
 method directly.
 
