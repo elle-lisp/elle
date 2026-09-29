@@ -1,4 +1,7 @@
-// Tests migrated to tests/elle/value-repr.lisp
+// audited: 2026-09-29
+//! A scalar `Value` decodes from its wire form to itself or to an error, never to a panic or to another value.
+//!
+//! docs/impl/stdlib-cache.md
 
 use super::*;
 
@@ -15,10 +18,9 @@ fn invalid_scalar_tag_is_an_error_not_a_panic() {
 /// A symbol `Value`'s payload is its name's hash, the same number in every
 /// process, so the scalar wire form carries it as it stands.
 ///
-/// The trap this replaced: while the payload was a per-process table index,
-/// persisting it bound the constant to whatever symbol held that index in the
-/// loading process, so this path had to refuse. The counter-factual now is a
-/// round-trip that returns a *different* symbol — and it would be silent,
+/// The counter-factual: a payload that was a per-process table index would bind
+/// the constant to whatever symbol held that index in the loading process. The
+/// round-trip would return a *different* symbol, and it would be silent,
 /// because both sides are only integers.
 #[test]
 fn symbol_value_round_trips_as_its_name_hash() {
