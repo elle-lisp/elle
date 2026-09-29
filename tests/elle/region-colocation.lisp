@@ -110,11 +110,29 @@
 (exactly "a returned letrec pair, regions" (get (retained mutual) 0) 1)
 
 # ── Scope arena: a macro expansion ──────────────────────────────────────────
-# A bare eval compiles and runs with no transformer. The difference between it
-# and an eval whose form expands a macro is what the expansion claims.
+# Each macro form is measured against the form it expands to, written out by
+# hand: both compile and run the same code, so the difference is what the
+# expansion claims. A transformer's values fill one arena, whose pages grow
+# 4 KiB, 8 KiB, and so on, and the expansion copies its result into the syntax
+# of the compilation unit. The `when` transformer builds about 16 values, one
+# page. The `case` transformer builds about 42, two pages, and its larger result
+# takes one more page of syntax. Each ceiling leaves one page of slack for the
+# claims an eval's own compilation makes on some calls and not on others.
 
-(def bare (claims (fn [] (eval '(%add 1 2)))))
+(def when-expanded
+  (claims (fn []
+            (eval '(if true
+                     (begin
+                       1)
+                     nil)))))
 (def with-when (claims (fn [] (eval '(when true 1)))))
+(def case-expanded
+  (claims (fn []
+            (eval '(let [x 1]
+                     (let [g x]
+                       (if (= g 1)
+                         :a
+                         (if (= g 2) :b (if (= g 3) :c :d)))))))))
 (def with-case
   (claims (fn []
             (eval '(let [x 1]
@@ -125,8 +143,10 @@
                        :d))))))
 
 (println "scope arena")
-(at-most "a (when …) expansion, extra pages per eval" (- with-when bare) 2.0)
-(at-most "a (case …) expansion, extra pages per eval" (- with-case bare) 2.0)
+(at-most "a (when …) expansion, extra pages per eval"
+         (- with-when when-expanded) 2.0)
+(at-most "a (case …) expansion, extra pages per eval"
+         (- with-case case-expanded) 4.0)
 
 # ── Append-only container ───────────────────────────────────────────────────
 
