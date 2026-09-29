@@ -1,138 +1,13 @@
 // audited: 2026-09-29
-//! The `compile/*` queries that run code on this VM: `compile/run-on`'s tier
-//! dispatch, the test-module compilations, and `compile/dumps`.
+//! The `compile/*` queries that compile a test file or dump its stages, and
+//! run the setup module of a test file on this VM.
 //!
 //! docs/test-runner.md
-//! docs/impl/differential.md
 //! docs/impl/region/park.md
 
 use super::*;
 
 impl VM {
-    /// Force-dispatch a closure on a specific tier.
-    ///
-    /// `arg` is a list `(tier closure arg1 arg2 ...)`. Routes to the
-    /// matching `invoke_closure_*` method on `VM`.
-    pub(super) fn dispatch_compile_run_on(
-        &mut self,
-        ctx: &mut crate::primitives::ctx::Alloc,
-        arg: Value,
-    ) -> (SignalBits, Value) {
-        let parts = match arg.list_to_vec_in(ctx.heap_mut()) {
-            Ok(v) => v,
-            Err(e) => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!("compile/run-on: malformed args list ({})", e),
-                    ),
-                )
-            }
-        };
-
-        if parts.len() < 2 {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "arity-error",
-                    "compile/run-on: expected (tier closure & args), got fewer than 2 parts",
-                ),
-            );
-        }
-
-        let tier_kw = match self.keyword_spelling(parts[0]) {
-            Some(k) => k,
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!(
-                            "compile/run-on: tier must be a keyword, got {}",
-                            parts[0].type_name()
-                        ),
-                    ),
-                )
-            }
-        };
-
-        let closure_val = parts[1];
-        let closure = match closure_val.as_closure() {
-            Some(c) => c.clone(),
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!(
-                            "compile/run-on: target must be a closure, got {}",
-                            closure_val.type_name()
-                        ),
-                    ),
-                )
-            }
-        };
-
-        let call_args: Vec<Value> = parts[2..].to_vec();
-
-        // Set the active tier on the VM for the duration of the forced-tier call
-        // (saved and restored, so nested `compile/run-on` and the surrounding
-        // "bytecode" default both hold). A `&mut VM`-borrowing guard would conflict
-        // with the `invoke_closure_*` call below, so this is an explicit
-        // save/replace/restore on the field.
-        match tier_kw.as_str() {
-            "bytecode" => {
-                let prev = std::mem::replace(&mut self.active_tier, "bytecode");
-                let r = self.invoke_closure_bytecode(closure_val, &closure, &call_args);
-                self.active_tier = prev;
-                r
-            }
-            "jit" => {
-                let prev = std::mem::replace(&mut self.active_tier, "jit");
-                let r = self.invoke_closure_jit(closure_val, &closure, &call_args);
-                self.active_tier = prev;
-                r
-            }
-            #[cfg(feature = "wasm")]
-            "wasm" => {
-                let prev = std::mem::replace(&mut self.active_tier, "wasm");
-                let r = self.invoke_closure_wasm(closure_val, &closure, &call_args);
-                self.active_tier = prev;
-                r
-            }
-            #[cfg(not(feature = "wasm"))]
-            "wasm" => crate::rich_error!(
-                ctx,
-                "tier-rejected",
-                "compile/run-on :wasm requires --features wasm",
-                tier = Value::keyword("wasm"),
-                reason = Value::keyword("feature-disabled"),
-            ),
-            #[cfg(feature = "mlir")]
-            "mlir-cpu" => {
-                let prev = std::mem::replace(&mut self.active_tier, "mlir-cpu");
-                let r = self.invoke_closure_mlir_cpu(closure_val, &closure, &call_args);
-                self.active_tier = prev;
-                r
-            }
-            #[cfg(not(feature = "mlir"))]
-            "mlir-cpu" => crate::rich_error!(
-                ctx,
-                "tier-rejected",
-                "compile/run-on :mlir-cpu requires --features mlir",
-                tier = Value::keyword("mlir-cpu"),
-                reason = Value::keyword("feature-disabled"),
-            ),
-            other => crate::rich_error!(
-                ctx,
-                "tier-rejected",
-                format!("compile/run-on: unknown tier :{}", other),
-                tier = parts[0],
-                reason = Value::keyword("unknown-tier"),
-            ),
-        }
-    }
     /// Handle `(compile/barrier-module source name)` — compile the file in the
     /// per-form fault-barrier test mode and execute its setup module, returning
     /// the `[index thunk]` accumulator. See `compile_barrier_module` and
@@ -158,7 +33,8 @@ impl VM {
     }
     /// Handle `(compile/whole-module source name)` — compile the file as ONE
     /// whole-file thunk and execute its setup module, returning the `[0 thunk]`
-    /// accumulator. Mirrors `dispatch_barrier_module`; the legacy multi-form path.
+    /// accumulator. Mirrors `dispatch_barrier_module`; the runner compiles a
+    /// file of several forms this way.
     pub(super) fn dispatch_whole_module(
         &mut self,
         ctx: &mut crate::primitives::ctx::Alloc,
@@ -269,8 +145,8 @@ impl VM {
     /// but compiles from a list of already-parsed syntax values (shipped from
     /// another VM) instead of a source string. The worker that receives the
     /// shipped syntax runs this against ITS OWN symbol table + stdlib, so a file's
-    /// runtime `import`s and the worker's `ev/run` scheduler agree on the dynamic
-    /// scheduler parameters (the dual-stdlib `*spawn*` identity fix).
+    /// runtime `import`s and the worker's `ev/run` scheduler read the same
+    /// dynamic scheduler parameters, such as `*spawn*`.
     pub(super) fn dispatch_whole_module_syntax(
         &mut self,
         ctx: &mut crate::primitives::ctx::Alloc,
