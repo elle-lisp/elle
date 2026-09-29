@@ -1,7 +1,8 @@
-// audited: 2026-09-21
-// docs/impl/wasm.md
+// audited: 2026-09-29
 //! What a fiber's OWN mask decides about the outcome its body produced, and the
 //! bookkeeping that installing the resulting signal owes.
+//!
+//! docs/impl/wasm.md
 //!
 //! Split from the chain driver beside it because the two answer different
 //! questions. `resume.rs` decides which frame runs next; this decides what the
@@ -20,8 +21,9 @@ use crate::wasm::outcome::CallOutcome;
 /// (`record_terminal_signal_park`). `handle_fiber_resume` drives fiber bodies
 /// outside the VM loop and would otherwise set `fiber.signal` with no
 /// bookkeeping, so the host outgoing-edge table drifts from the symmetric release
-/// `prim_fiber_resume` runs at the next resume — an over-free / unrecorded-edge
-/// panic pinned by `tests/elle/fiber-error-resume.lisp` under `--wasm=full`.
+/// `prim_fiber_resume` runs at the next resume, and that release over-frees or
+/// panics on an unrecorded edge. `tests/lang/fiber-error-resume.lisp` under
+/// `--wasm=full` pins it.
 pub(super) fn install_signal(
     caller: &mut Caller<'_, ElleHost>,
     fiber_handle: &crate::value::FiberHandle,
@@ -43,9 +45,9 @@ pub(super) fn install_signal(
 ///
 /// - A `SIG_ERROR` the fiber's mask does NOT cover → the fiber goes `:error` and
 ///   the error is returned as the signal, so the resumer's body re-raises it and
-///   the RESUMER's mask is checked one level up the resume chain — the piece the
-///   WASM tier's nested-`handle_fiber_resume` recursion otherwise skipped, which
-///   left an uncaught `(emit :error …)` wrongly `:paused`.
+///   the RESUMER's mask is checked one level up the resume chain. Without this
+///   step the nested `handle_fiber_resume` recursion leaves an uncaught
+///   `(emit :error …)` `:paused`.
 /// - A `SIG_WAIT`/`SIG_IO` suspension the fiber's mask does NOT cover → PROPAGATE
 ///   it to the resumer, parked (so the resumer's `fiber/resume` SuspendingCall
 ///   captures a continuation and the wait reaches the scheduler) and carrying the
@@ -56,14 +58,14 @@ pub(super) fn install_signal(
 ///   trampoline's uncaught-suspend arm that builds a `FiberResume` frame on the
 ///   parent (src/vm/fiber/trampoline.rs); it is what makes `protect`/`defer`/
 ///   `with` around a suspending body work. Pinned by
-///   tests/elle/wasm-protect-suspend.lisp.
+///   tests/lang/wasm-protect-suspend.lisp.
 /// - Anything else (a covered `SIG_ERROR`/`SIG_WAIT`/`SIG_IO`, a plain yield, a
 ///   masked io request the scheduler drives explicitly) → the fiber pauses and
 ///   the value flows back to the resumer as a normal result (signal 0), so the
 ///   scheduler's parked-signal io detection is untouched.
 ///
 /// The fiber keeps its suspension frames in every case — an `:error` fiber is
-/// resumable via the restarts system (tests/elle/fiber-error-resume.lisp), and a
+/// resumable via the restarts system (tests/lang/fiber-error-resume.lisp), and a
 /// propagated fiber must replay its frames when the parent re-drives it.
 pub(super) fn route_emit(
     caller: &mut Caller<'_, ElleHost>,
@@ -91,8 +93,8 @@ pub(super) fn route_emit(
     // An uncaught scheduler suspension (wait/io the mask does not cover) must
     // propagate to the resumer so the scheduler drives it — the resumer's mask,
     // one level up, decides where it is finally caught. `bits` is the fiber's
-    // own signal, in the vocabulary the VM checks; the tier no longer mixes a
-    // transport bit into it.
+    // own signal, in the vocabulary the VM checks; the tier mixes no transport
+    // bit into it.
     let is_scheduler_suspend =
         bits.intersects(crate::signals::SIG_IO.union(crate::signals::SIG_WAIT));
     let stack_len = caller.data().fiber_id_stack.len();
@@ -137,8 +139,8 @@ pub(super) fn route_emit(
 /// call) through this fiber's OWN mask. A `SIG_ERROR` this mask covers is CAUGHT:
 /// the fiber pauses holding it and the value flows back as a normal result
 /// (signal 0), so the resumer continues — the WASM analogue of the VM
-/// trampoline's caught arm. Anything else keeps the prior propagate behavior:
-/// the fiber goes `:error` and `raw_signal` is re-returned to unwind further.
+/// trampoline's caught arm. Anything else propagates: the fiber goes `:error`,
+/// and `bits` is re-returned to unwind further.
 pub(super) fn route_error(
     caller: &mut Caller<'_, ElleHost>,
     fiber_handle: &crate::value::FiberHandle,
