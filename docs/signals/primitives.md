@@ -198,6 +198,25 @@ host's call:
 (assert (= (fiber/resume hosted 41) (list :got 41)))   # 41 answers the eval
 ```
 
+A `squelch` boundary refuses a suspension the same way, at the call to the
+squelched closure. Either refusal drops the `parameterize` bindings the refused
+code made, with its frames, so the code around the call runs on with its own:
+
+```lisp
+(defn bound-yield [] (parameterize ((depth 9)) (yield 1) :inner))
+(def squelched
+  (fiber/new (fn [] (list :got ((squelch bound-yield :yield)) (depth)))
+             |:yield :error|))
+(assert (= (get (fiber/resume squelched) :error) :signal-violation))
+(assert (= (fiber/resume squelched 41) (list :got 41 0)))   # the 9 is gone
+
+(def evaluated
+  (fiber/new (fn [] (list :got (eval '(bound) {'bound bound-yield}) (depth)))
+             |:yield :error|))
+(assert (= (get (fiber/resume evaluated) :error) :eval-error))
+(assert (= (fiber/resume evaluated 41) (list :got 41 0)))
+```
+
 ## Terminal vs. Resumable Signals
 
 Whether a caught signal is terminal or resumable is a **handler decision**,
