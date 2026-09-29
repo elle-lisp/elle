@@ -62,10 +62,11 @@ A rest list is one region, however many arguments it collects:
 ```lisp
 (defn collect [& xs] xs)
 
-(def before (arena/region-count))
-(def collected (collect 1 2 3 4 5 6 7 8))
-(assert (= (- (arena/region-count) before) 1)
-        "eight collected arguments occupy one region")
+(let [xs (collect 1 2 3 4 5 6 7 8)
+      home (arena/region-of xs)]
+  (assert (all? (fn [tail] (= (arena/region-of tail) home))
+                [(rest xs) (rest (rest xs)) (rest (rest (rest xs)))])
+          "every cons of the list shares the head's region"))
 ```
 
 A value you push into a container you built, and never take anything out of,
@@ -80,10 +81,10 @@ is born in the container's region:
     (assign k (+ k 1)))
   out)
 
-(def before-pairs (arena/region-count))
-(def built (pairs 1000))
-(assert (= (- (arena/region-count) before-pairs) 1)
-        "a thousand pushed pairs share the container's region")
+(let [built (pairs 1000)
+      home (arena/region-of built)]
+  (assert (all? (fn [pair] (= (arena/region-of pair) home)) built)
+          "a thousand pushed pairs share the container's region"))
 ```
 
 The same builder with a `pop` anywhere in it keeps one region per pair. A
