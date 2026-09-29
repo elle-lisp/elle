@@ -1,5 +1,8 @@
+// audited: 2026-09-28
 //! The ledger's transitions: each park write, each consume seam, and the
 //! debug net for a park shape wired without a consume.
+//!
+//! docs/impl/region/park.md
 
 use super::*;
 use crate::value::{SIG_IO, SIG_YIELD};
@@ -236,4 +239,94 @@ fn an_immediate_park_records_nothing() {
         d.take_undelivered().is_none(),
         "a payload in no region took no retain, so no seam owes it a release",
     );
+}
+
+// -- the error park: a restart delivers into the raising call's result --
+
+/// An `Emit` raise's continuation funds its own release of the resume value, so
+/// the park owes none. Counter-factual: minting here strands the restart value of
+/// every restarted `(error v)`, one region per restart.
+#[test]
+fn an_emit_error_park_owes_no_resume_mint() {
+    let mut d = Delivery::new();
+    d.park_error(RaiseSite::Emit);
+    assert!(
+        !d.take_resume_funding(),
+        "an `Emit` raise's continuation funds the restart value itself",
+    );
+}
+
+/// Every other raise produced no result, so the restart value arrives owing the
+/// reference the continuation's result release consumes. Counter-factual: no
+/// mint frees the restart value under every holder that outlives the restart.
+#[test]
+fn a_call_error_park_owes_one_resume_mint() {
+    let mut d = Delivery::new();
+    d.park_error(RaiseSite::Call);
+    assert!(
+        d.take_resume_funding(),
+        "a raising call's result position owes the restart value a mint",
+    );
+}
+
+/// A raise with no result position parks without taking the restart value, so
+/// the park owes no mint. Counter-factual: minting here strands one reference
+/// per restart, because no continuation releases a value it never received.
+#[test]
+fn a_no_result_error_park_owes_no_resume_mint() {
+    let mut d = Delivery::new();
+    d.park_error(RaiseSite::NoResult);
+    assert!(
+        !d.take_resume_funding(),
+        "a restart after a raise with no result delivers nothing to fund",
+    );
+}
+
+/// An injected abort or refusal raises in place over a primitive park: the
+/// frame still resumes at the denied call's result, so the park's mint stays
+/// owed, while the injection's own mint travels with the new payload and the
+/// displaced payload's records leave with it.
+#[test]
+fn a_raise_in_a_primitive_park_keeps_its_mint_and_records_the_payload() {
+    let mut d = Delivery::new();
+    d.park_denial(SIG_IO, payload());
+    d.raise_in_park(other());
+    assert!(
+        d.mint_names(other()),
+        "the injection's mint travels with its payload"
+    );
+    assert!(
+        d.bodyless().is_none(),
+        "the displaced denial record left with its payload"
+    );
+    assert!(
+        d.take_undelivered().is_none(),
+        "the displaced park's delivery record left with its payload",
+    );
+    assert!(
+        d.take_resume_funding(),
+        "the restart still delivers into the denied call's result",
+    );
+}
+
+/// The same raise over an `Emit` park owes nothing: that continuation funds its
+/// own release, whatever raised there.
+#[test]
+fn a_raise_in_an_emit_park_owes_no_resume_mint() {
+    let mut d = Delivery::new();
+    d.park_emit(SIG_YIELD, payload());
+    d.raise_in_park(other());
+    assert!(d.mint_names(other()));
+    assert!(!d.take_resume_funding());
+}
+
+/// An error park writes through the net: a route that ended the previous park
+/// without consuming its funding panics here rather than leaking a region.
+#[test]
+#[should_panic(expected = "unconsumed")]
+#[cfg(debug_assertions)]
+fn an_error_park_over_an_unconsumed_one_panics() {
+    let mut d = Delivery::new();
+    d.park_primitive(SIG_IO, payload());
+    d.park_error(RaiseSite::Call);
 }

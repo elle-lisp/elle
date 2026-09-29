@@ -1,4 +1,4 @@
-// audited: 2026-09-11
+// audited: 2026-09-28
 // Elle scripts that must run under a PROCESS-GLOBAL runtime mode the `elle test`
 // harness cannot vary per file.
 //
@@ -17,8 +17,8 @@
 // shares one process across every file's worker thread), and a guardfree UAF
 // deliberately SIGSEGVs — which would take the single-process harness down with
 // it. So the few files that must run under such a mode are pinned below, each as
-// its own subprocess `elle <flags> FILE`. (The eventual home is per-file mode
-// declarations the runner honors — docs/test-runner.md § future work.)
+// its own subprocess `elle <flags> FILE`. The plan that folds them into the
+// runner is docs/test-vision.md.
 
 use std::process::Command;
 
@@ -74,6 +74,9 @@ mod frames {
 }
 mod modes {
     include!("elle_scripts/modes.rs");
+}
+mod raises {
+    include!("elle_scripts/raises.rs");
 }
 mod syncjit {
     include!("elle_scripts/syncjit.rs");

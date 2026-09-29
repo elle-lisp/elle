@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-28
 //! The delivery ledger: how the current park's delivery references are funded.
 //!
 //! docs/impl/region/park.md
@@ -19,6 +19,24 @@
 //! is `Fiber::signal`'s.
 
 use crate::value::{SignalBits, Value};
+
+/// Where an error was raised, carried out of the dispatch loop with the exit.
+/// It says what a restart delivers into, and so what the delivery owes
+/// (docs/impl/vm.md § "The error exit").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RaiseSite {
+    /// An `Emit` raise: the restart value takes the emit's result, and the
+    /// continuation funds its own release of it.
+    Emit,
+    /// A call, or an instruction that produces a value: the restart value takes
+    /// the result the raise never produced, so the delivery mints.
+    #[default]
+    Call,
+    /// A raise with no result position: an instruction that produces no value,
+    /// or the object limit between two instructions. A restart continues after
+    /// it and delivers nothing.
+    NoResult,
+}
 
 /// The funding record of a fiber's current park. One instance rides each
 /// `Fiber` (`Fiber::delivery`); see the module doc for the model and
@@ -168,6 +186,33 @@ impl Delivery {
     /// (the mint there is the injection's, travelling with the payload).
     pub(crate) fn record_mint(&mut self, payload: Value) {
         self.minted = Some(payload);
+    }
+
+    /// An error park: the fiber stopped on a raise, and a restart delivers into
+    /// the raising call's result position. A `Call` site produced no result, so
+    /// the resume value owes the `ResumeDelivery` mint; an `Emit` site's
+    /// continuation funds its own release (docs/impl/region/park.md § "A restart
+    /// delivers into an error park"). Caller: the fiber boundary, where the
+    /// error exit built the park.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "no caller outside the ledger tests")
+    )]
+    pub(crate) fn park_error(&mut self, _site: RaiseSite) {
+        todo!("park_error")
+    }
+
+    /// An injected `fiber/abort` / `fiber/refuse` raised in place over the
+    /// current park: the injection's mint is recorded, the displaced payload's
+    /// records leave with it, and the park keeps its resume funding, because a
+    /// restart still delivers into the parked call's result. Caller:
+    /// `do_fiber_abort`.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "no caller outside the ledger tests")
+    )]
+    pub(crate) fn raise_in_park(&mut self, _payload: Value) {
+        todo!("raise_in_park")
     }
 
     /// An abort injection installed its payload over the park: the injection's

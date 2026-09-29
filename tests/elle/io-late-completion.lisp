@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 # A completion that arrives after its fiber is gone.
 #
 # The scheduler pairs a submission with the fiber that asked for it, and
@@ -6,8 +7,8 @@
 # the fiber whenever a fiber terminates by a path the scheduler did not
 # route. `fiber/abort` is such a path: it injects an error the fiber's
 # own `protect` may catch, so the fiber runs to `:dead` while its timer
-# is still in flight. `fiber/cancel` is another: it leaves the fiber in
-# `:error` with the same operation outstanding.
+# is still in flight. `fiber/cancel` is another: it leaves the fiber
+# `:dead` with the same operation outstanding.
 #
 # Delivering to such a fiber raises `fiber/resume: cannot resume
 # completed fiber` out of the event loop. That error reaches the program
@@ -21,7 +22,7 @@
 # holding it keeps a worker and a descriptor out for the life of the
 # loop. `:io` in `ev/report` is what makes that visible.
 #
-# See docs/scheduler.md § "Completion delivery".
+# See docs/scheduler.md.
 
 # A deadline no operation here can reach.
 (def deadline 5)
@@ -69,8 +70,7 @@
                          :never))]
   (ev/sleep settle)
   (protect (fiber/cancel victim {:error :external}))
-  (assert (= (fiber/status victim) :error)
-          "the hard kill left the victim in :error")
+  (assert (= (fiber/status victim) :dead) "the hard kill left the victim :dead")
   (ev/sleep outlive)
   (let [[ok? _] (ev/join-protected victim)]
     (assert (not ok?) "the killed victim joins as a failure")))

@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 13)
+# audited: 2026-09-28
 # The fiber value installers declare `Delivers`, not `Mixed`.
 #
 # `fiber/resume`, `fiber/abort`, `fiber/cancel` and `fiber/emit` each hand a
@@ -118,9 +119,9 @@
                   " (the emitted value's SuspendEscape retain is its only reference)")))
 
 # ── Correctness: a delivered payload outlives the caller's reference ─────
-# The clique incref used to pin every payload region for the process's life, so
-# these reads could not distinguish a live seam from a leak. Each one drops the
-# caller's own binding and then reads the payload back out of the fiber.
+# The trap: a clique incref pins every payload region for the life of the
+# process, so a read alone cannot tell a live seam from a leak. Each case below
+# drops the caller's own binding and then reads the payload back out of the fiber.
 
 # The resumed body sees the delivered value.
 (let [f (fiber/new (fn [] (+ (yield 1) 10)) |:yield|)]
@@ -136,7 +137,7 @@
   (fiber/cancel f [1 2 3])
   (assert (= (fiber/value f) [1 2 3])
           "fiber/cancel parks its payload as the killed fiber's terminal value")
-  (assert (= (fiber/status f) :error) "a cancelled fiber is :error"))
+  (assert (= (fiber/status f) :dead) "a cancelled fiber is :dead"))
 
 # An abort of an already-dead fiber hands back a value read OUT of its fiber
 # argument — the result-alias face of the unbounded result side.
@@ -153,3 +154,13 @@
   (fiber/resume f)
   (assert (= (fiber/value f) [1 2 3])
           "fiber/emit's payload survives the emitting activation's release"))
+
+# An abort of a :new fiber stores a HEAP payload as the fiber's terminal value
+# and answers it: the fiber never ran, so there is no suspension point to raise
+# at, and the value passes through.
+(let* [f (fiber/new (fn () "never-reached") 1)
+       v (fiber/abort f [:k :reason])]
+  (assert (= (fiber/status f) :error) "abort of a :new fiber leaves it :error")
+  (assert (= v [:k :reason])
+          "abort of a :new fiber passes the heap value through")
+  (assert (= (fiber/value f) [:k :reason]) "and holds it as the fiber's value"))
