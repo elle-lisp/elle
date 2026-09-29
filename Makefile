@@ -606,8 +606,8 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 # own process that has to start, run as a whole program, and EXIT, under a
 # wall-clock `TIMEOUT`. Program teardown, process-global config and anything
 # wall-clock-sensitive are only reachable the second way, which is why the PR
-# workflow's "VM+JIT Tests" job gates on those two targets. A `make smoke` that
-# skipped them was weaker than the gate it exists to predict.
+# workflow's "VM+JIT Tests" job gates on all three targets. A `make smoke` that
+# skipped the per-file passes was weaker than the gate it exists to predict.
 smoke: smoke-elle smoke-vm smoke-jit doctest embedding semver-check  ## Run the elle test corpus (runner + per-file VM and JIT passes) + docs + embedding + surface gate
 	@echo "=== all smoke tests passed ==="
 
@@ -630,13 +630,15 @@ qa: audit crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfm
 	$(MLIR_ENV) RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items
 	$(MLIR_ENV) cargo test --workspace --doc
 
-test: smoke smoke-nouring qa  ## Rust unit + integration tests + QA (fmt/clippy/crosscheck/rustdoc) after smoke
+# `qa` goes first: it takes about two minutes and the corpus about thirty, so a
+# formatting or clippy failure stops the gate before the corpus starts.
+test: qa smoke smoke-nouring  ## QA (fmt/clippy/crosscheck/rustdoc), then smoke and smoke-nouring, then Rust unit + integration tests
 	$(MLIR_ENV) cargo test --workspace --lib --all-features
 	cargo test --test '*' -- --skip property
 
 # Compile the arms a Linux gate never reaches. There are two of them, and the
 # workflow checks both — so this target checks both, or a branch discovers the
-# second one in CI (see the note above `test`).
+# second one in CI.
 #
 # macOS is the io_uring blind spot: a binding the thread-pool backend never
 # reads stays invisible until the Mac runner reports it, so this arm runs

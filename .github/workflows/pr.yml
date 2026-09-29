@@ -141,6 +141,10 @@ jobs:
       # `create_platform_backend` picks on Linux; `nouring` below is the pool.
       # See docs/analysis/ci.md § "What each job builds".
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
+      # `smoke-elle` records every form's verdict here; the per-file passes
+      # record nothing (docs/analysis/ci.md § "A corpus job's results leave the
+      # runner").
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -154,10 +158,21 @@ jobs:
         run: make elle
       - name: make doctest
         run: make doctest
+      - name: make smoke-elle
+        run: make smoke-elle
       - name: make smoke-vm
         run: make smoke-vm
       - name: make smoke-jit
         run: make smoke-jit
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-tests
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
 
   # The corpus booted from an image rather than from core.lisp, prelude.lisp
   # and stdlib.lisp. `--boot-image=` is off by default (docs/impl/image/boot.md
