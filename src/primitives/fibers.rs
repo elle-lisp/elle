@@ -5,7 +5,8 @@
 //!
 //! Core fiber operations: creation, resumption, signaling, status, and
 //! value extraction. Introspection and management primitives (bits, mask,
-//! parent, child, propagate, cancel, fiber?) are in `fiber_introspect.rs`.
+//! parent, child, propagate, cancel, abort, refuse, caps) are in
+//! `fiber_introspect.rs`, and `fiber?` is in `introspection.rs`.
 //!
 //! Signal-bits resolution lives in `resolve`; fuel (instruction-budget) ops
 //! live in `fuel`. Both are re-exported so the `primitive!` table below — and

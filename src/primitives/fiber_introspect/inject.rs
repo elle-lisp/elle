@@ -34,12 +34,10 @@ fn inject_error_at_suspension(
     // A park whose payload the RUNTIME built is what this install does answer
     // for: the child's continuation releases nothing for such a value, and
     // raising at the suspension point displaces it exactly as a resume would
-    // (docs/impl/region/park.md § "A payload the
-    // RUNTIME built is released by the install that displaces it"). Two parks
-    // are that shape — a capability denial's struct and a yielding io op's
-    // `IoRequest` — and the classifier that built the park recorded the payload
-    // in the ledger. An error value living in the request's region owes this
-    // release all the same.
+    // (docs/impl/region/park.md). Two parks are that shape — a capability
+    // denial's struct and a yielding io op's `IoRequest` — and the classifier
+    // that built the park recorded the payload in the ledger. An error value
+    // living in the request's region owes this release all the same.
     crate::vm::fiber::release_displaced_bodyless_payload(ctx.heap_mut(), handle);
     handle.with_mut(|fiber| {
         fiber.signal = Some((SIG_ERROR, error_value));
@@ -60,8 +58,8 @@ fn inject_error_at_suspension(
     // error. One reference, one
     // consumer, four routes — minting here, at the seam all four leave through,
     // is what keeps any of them from having to recognize itself
-    // (docs/impl/region/effects.md § `Delivers`;
-    // `tests/elle/region-fiber-abort-delivery-uaf.lisp` carries a face per
+    // (docs/impl/region/effects.md;
+    // `tests/impl/region-fiber-abort-delivery-uaf.lisp` carries a face per
     // route). `region_of` no-ops an immediate payload.
     let heap = ctx.heap_mut();
     let region = crate::value::arena::region_of(heap, error_value);
