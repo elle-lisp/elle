@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 13)
+# audited: 2026-09-29
 # The process primitives: each one yields a command to the scheduler, so it runs only inside a process.
 # docs/processes.md
 
@@ -13,12 +13,20 @@
   (yield [:recv-timeout ticks]))
 (defn self []
   (yield [:self]))
+(defn process-fiber [closure]
+  "The fiber a process runs closure in. The spawn primitives build it in the
+   calling fiber, so the new process withholds what its spawner withholds. The
+   mask names each signal the process scheduler serves, and each bit a
+   capability denial raises, which the scheduler refuses
+   (docs/process-scheduler.md)."
+  (fiber/new closure
+             |:yield :error :fuel :io :exec :wait :ffi :gpu :os-signal :fs|))
 (defn spawn [closure]
-  (yield [:spawn closure]))
+  (yield [:spawn (process-fiber closure)]))
 (defn spawn-link [closure]
-  (yield [:spawn-link closure]))
+  (yield [:spawn-link (process-fiber closure)]))
 (defn spawn-monitor [closure]
-  (yield [:spawn-monitor closure]))
+  (yield [:spawn-monitor (process-fiber closure)]))
 (defn link [pid]
   "Link to pid. Raises {:error :noproc} when pid has exited and the caller
    neither traps exits nor was linked to it."
@@ -64,6 +72,7 @@
    :recv-match recv-match
    :recv-timeout recv-timeout
    :self self
+   :process-fiber process-fiber
    :spawn spawn
    :spawn-link spawn-link
    :spawn-monitor spawn-monitor

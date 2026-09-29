@@ -1,14 +1,16 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 13)
+# audited: 2026-09-29
 # The process scheduler: runs process fibers in rounds, forwards their I/O, and tears down orphans.
 # lib/process/overview.md
 # docs/processes.md
 # docs/process-scheduler.md
 #
-# Signal mask: |:yield :error :fuel :io :exec :wait| — the scheduler catches
-# all six. :exec is a capability bit for subprocess operations. :wait carries
-# structured concurrency (ev/spawn, ev/join, ev/select) inside processes.
+# A process fiber's mask is `process-fiber`'s, in primitives.lisp. :yield
+# carries the commands, :wait structured concurrency inside a process, and
+# :io the I/O this scheduler forwards. :exec, :ffi, :gpu, :os-signal and :fs
+# carry a capability denial here, and the scheduler refuses it.
 
+(def primitives ((import "std/process/primitives")))
 (def make-core (import "std/process/core"))
 (def make-waits (import "std/process/waits"))
 (def make-commands (import "std/process/commands"))
@@ -54,6 +56,13 @@
           # Error
           (not (= 0 (bit/and bits 1)))
             (core:process-exit pid [:error (fiber/value f)])
+
+          # A denial the process carries from its spawner. The scheduler did
+          # not impose it, so it refuses the call at the process's call site.
+          (fiber/denied? f)
+            (begin
+              (fiber/refuse f (fiber/value f))
+              (dispatch-signal pid f))
 
           # Fuel exhaustion — re-queue for next round, mark fuel-only
           (not (= 0 (bit/and bits 4096))) (begin
@@ -234,9 +243,9 @@
       # Parameterize *spawn* so that ev/spawn inside any process or
       # sub-fiber registers fibers with THIS scheduler. Spawn the init
       # process inside the parameterize too — fibers capture their parameter
-      # environment at creation time.
+      # environment at creation time, and their withheld set with it.
       (parameterize ((*spawn* waits:spawn-fn))
-        (core:spawn init)
+        (core:spawn (primitives:process-fiber init))
         (while (has-work?)
           (core:tick)
           (core:fire-timers)
@@ -304,7 +313,7 @@
            :trapping (get p :trapping)})))
 
     {:run sched-run
-     :spawn core:spawn
+     :spawn (fn [closure] (core:spawn (primitives:process-fiber closure)))
      :inject sched-inject
      :process-info sched-process-info}))
 

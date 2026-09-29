@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 13)
+# audited: 2026-09-29
 # The process table of one scheduler: mailboxes, links, monitors, exits, timers.
 # lib/process/overview.md
 # docs/processes.md
@@ -44,9 +44,10 @@
   (def futex-parked @{})  # futex key → @[@{:waiter :val :expected}]
   (def fresh-ref (make-ref-gen))
 
-  (defn spawn [closure]
-    (let [pid (length procs)
-          fiber (fiber/new closure |:yield :error :fuel :io :exec :wait|)]
+  (defn spawn [fiber]
+    "Register fiber as a new process and queue it. The caller builds the
+     fiber with `process-fiber`, in the fiber that asks for the process."
+    (let [pid (length procs)]
       (push procs
             @{:pid pid
               :fiber fiber

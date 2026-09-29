@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 // docs/impl/wasm.md
 //! Tail-call preparation host function: `rt_prepare_tail_call`.
 //!
@@ -166,7 +166,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 let vm = caller.data().vm;
                 let heap = unsafe { &mut *caller.data().heap_ptr() };
                 let region = heap.new_runtime_region();
-                let mut ctx = crate::primitives::ctx::NativeCtx::with_region_vm(region, heap, vm);
+                let mut ctx = caller.data().native_ctx(vm, region, heap);
                 let (bits, result) = native_fn(&mut ctx, &args);
                 let (bits, result) = caller.data_mut().maybe_execute_io(bits, result);
                 // A tail-position `(fiber/resume …)` returns SIG_RESUME just like a

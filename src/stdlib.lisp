@@ -1396,6 +1396,14 @@
    its own program: did this fiber stop because it failed?"
   (let [s (fiber/status f)]
     (or (= s :error) (not (= 0 (bit/and (fiber/bits f) 1))))))
+(defn fiber/denied? [f]
+  "True when `f` is paused on a capability denial: it called a primitive it
+   withholds, and the call did not run. `(fiber/value f)` is the denial
+   payload, a struct whose :error is :capability-denied. Answer the call with
+   `fiber/resume` or `fiber/refuse` (docs/signals/capabilities.md)."
+  (and (= (fiber/status f) :paused)
+       (let [v (fiber/value f)]
+         (and (struct? v) (= (get v :error) :capability-denied)))))
 
 ## ── Arena introspection ─────────────────────────────────────────────
 
@@ -1871,8 +1879,15 @@
 ## ── Spawn ───────────────────────────────────────────────────────────
 
 (defn ev/spawn [closure]
-  "Spawn a closure in a new fiber managed by the current scheduler."
-  (let [fiber (fiber/new closure |:error :io :exec :wait|)]
+  "Spawn a closure in a new fiber managed by the current scheduler.
+   The fiber withholds what the calling fiber withholds, and the scheduler
+   refuses a denied call at the fiber's own call site
+   (docs/signals/capabilities.md)."
+  # :io, :wait and :error are the scheduler's protocol. :exec, :ffi, :gpu,
+  # :os-signal and :fs are there so a denial of any of them reaches the
+  # scheduler, which refuses it.
+  (let [fiber (fiber/new closure
+                         |:error :io :exec :wait :ffi :gpu :os-signal :fs|)]
     ((*spawn*) fiber)))
 
 ## ── Async scheduler ─────────────────────────────────────────────────
@@ -2186,6 +2201,12 @@
             (cond
               (not (= 0 (bit/and bits 1)))  # SIG_ERROR
                (complete-fiber fiber :error)
+              # A denial the fiber carries from its spawner. The scheduler did
+              # not impose it, so it refuses the call rather than answer it.
+              (fiber/denied? fiber)
+                (begin
+                  (fiber/refuse fiber (fiber/value fiber))
+                  (handle-fiber-after-resume fiber))
               (not (= 0 (bit/and bits 512)))  # SIG_IO
               (let [[ok? result] (protect (io/submit backend (fiber/value fiber)
                     fiber))]
@@ -2992,6 +3013,7 @@
    :fiber/dead? fiber/dead?
    :fiber/error? fiber/error?
    :fiber/done? fiber/done?
+   :fiber/denied? fiber/denied?
    :new? fiber/new?
    :alive? fiber/alive?
    :paused? fiber/paused?

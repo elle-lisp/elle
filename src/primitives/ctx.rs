@@ -1,10 +1,11 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 //! Allocation capabilities for native code (docs/impl/region/ctx.md).
 //! `Alloc` carries a call's region and heap; `NativeCtx` wraps it with the
 //! driving VM. A native cannot allocate without being handed one, so every
 //! value names the region it is born in.
 
 use crate::hir::region::RuntimeRegion;
+use crate::value::fiber::SignalBits;
 use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::HeapObject;
 use crate::value::region_slice::RegionSlice;
@@ -176,6 +177,11 @@ pub struct NativeCtx<'h> {
     /// pointer relies on).
     vm: *mut VM,
     _vm: PhantomData<&'h mut VM>,
+    /// The calling fiber's withheld set, where the VM's own fiber is not the
+    /// calling fiber. `None` reads `vm.fiber`, which is the calling fiber on
+    /// the interpreter and the JIT. The WASM tier drives a fiber without
+    /// installing it on the VM, so its sites pass the driven fiber's set.
+    withheld: Option<SignalBits>,
 }
 
 impl<'h> Deref for NativeCtx<'h> {
@@ -207,6 +213,24 @@ impl<'h> NativeCtx<'h> {
             alloc: Alloc::with_region(region, heap),
             vm,
             _vm: PhantomData,
+            withheld: None,
+        }
+    }
+
+    /// [`with_region_vm`](Self::with_region_vm) for a caller whose calling
+    /// fiber is not `vm.fiber`: the WASM host, which drives a fiber's body
+    /// without installing the fiber on the VM. `withheld` is that fiber's set,
+    /// and [`withheld`](Self::withheld) answers with it.
+    #[cfg(feature = "wasm")]
+    pub(crate) fn with_region_vm_withheld(
+        region: RuntimeRegion,
+        heap: &'h mut FiberHeap,
+        vm: *mut VM,
+        withheld: SignalBits,
+    ) -> Self {
+        NativeCtx {
+            withheld: Some(withheld),
+            ..Self::with_region_vm(region, heap, vm)
         }
     }
 
@@ -223,6 +247,7 @@ impl<'h> NativeCtx<'h> {
             alloc: Alloc::with_region(region, heap),
             vm: vm_ptr,
             _vm: PhantomData,
+            withheld: None,
         }
     }
 
@@ -238,6 +263,14 @@ impl<'h> NativeCtx<'h> {
         // lifetime to it. The VM and the heap are disjoint allocations, so the
         // `&mut VM` here and a `&mut FiberHeap` from `self.alloc` never overlap.
         unsafe { &mut *self.vm }
+    }
+
+    /// The withheld set of the calling fiber: the capabilities a fiber this
+    /// native creates, or a thread it spawns, must lack as well
+    /// (docs/signals/capabilities.md).
+    #[inline]
+    pub fn withheld(&self) -> SignalBits {
+        self.withheld.unwrap_or_else(|| self.vm().fiber.withheld)
     }
 
     /// This instance's display memo, for a message that has to show a name.

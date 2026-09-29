@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 //! Fiber lifecycle primitives.
 //!
 //! docs/impl/region/park.md
@@ -34,8 +34,9 @@ pub(crate) use resolve::{emit_required_bits, resolve_signal_bits};
 /// which signals the parent catches when resuming this fiber.
 ///
 /// Optional `:deny` keyword arg withholds capabilities from the fiber.
-/// The child's `withheld` is the union of the explicit deny bits and the
-/// parent's withheld (propagated at resume time by the VM).
+/// The child's `withheld` starts as the union of the explicit deny bits and
+/// the creating fiber's set, and each resume adds the resumer's
+/// (docs/signals/capabilities.md).
 pub(crate) fn prim_fiber_new(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -87,7 +88,7 @@ pub(crate) fn prim_fiber_new(
     // The closure VALUE rides along so the first resume can install it as the
     // body's executing-closure register (see `Fiber::closure_value`).
     fiber.closure_value = args[0];
-    fiber.withheld = deny_bits;
+    fiber.withheld = deny_bits | ctx.withheld();
 
     // Snapshot the creating fiber's dynamic parameter bindings into the child at
     // CREATION time — Racket-style thread-parameterization: the child observes

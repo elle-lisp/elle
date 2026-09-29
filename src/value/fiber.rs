@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! Fiber types for the Elle runtime.
 //!
 //! A fiber is an independent execution context: it owns its operand stack,
@@ -222,7 +222,8 @@ pub struct Fiber {
     /// performing the corresponding operations. When a primitive's signal bits
     /// overlap with `withheld & CAP_MASK`, the primitive is blocked and a
     /// denial signal is emitted instead. Default: empty (full access).
-    /// Transitive: `child.withheld = parent.withheld | deny_bits`.
+    /// Transitive: `fiber/new` sets `creator.withheld | deny_bits`, and each
+    /// resume ORs in the resumer's set (docs/signals/capabilities.md).
     pub withheld: SignalBits,
     /// Native iterator state for trait-based :iter fibers.
     /// When set, fiber/resume pulls the next value from here instead of

@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 // docs/impl/wasm.md
 //! Wasmtime host state and primitive dispatch: everything the compiled module
 //! reaches across the boundary for.
@@ -225,6 +225,33 @@ impl ElleHost {
         self.fiber_id_stack.last().map(|f| f.withheld)
     }
 
+    /// The withheld set of the fiber whose body is running: the driven fiber,
+    /// else `vm.fiber` for top-level code. The VM arrives as a parameter for the
+    /// reason [`capability_denial`] gives.
+    pub(in crate::wasm) fn calling_withheld(&self, vm: *mut crate::vm::VM) -> SignalBits {
+        self.current_withheld()
+            .unwrap_or_else(|| unsafe { (*vm).fiber.withheld })
+    }
+
+    /// The `NativeCtx` a native called from compiled code runs under. It
+    /// carries the calling fiber's withheld set, because `vm.fiber` is not that
+    /// fiber on this tier, and a fiber or thread the native starts inherits it.
+    /// `region` is the call's fresh result region, minted by the caller so it
+    /// can also reach `call_plugin`.
+    pub(in crate::wasm) fn native_ctx<'h>(
+        &self,
+        vm: *mut crate::vm::VM,
+        region: crate::hir::region::RuntimeRegion,
+        heap: &'h mut crate::value::fiberheap::FiberHeap,
+    ) -> crate::primitives::ctx::NativeCtx<'h> {
+        crate::primitives::ctx::NativeCtx::with_region_vm_withheld(
+            region,
+            heap,
+            vm,
+            self.calling_withheld(vm),
+        )
+    }
+
     /// Push a suspension frame for the current fiber (appends to back).
     pub fn push_suspension_frame(&mut self, frame: WasmSuspensionFrame) {
         let id = self.current_fiber_id();
@@ -357,7 +384,7 @@ impl ElleHost {
         // VM comes from the host (`self.vm`), so a re-entrant primitive reaches it
         // through `ctx.vm()` (docs/impl/region/ctx.md).
         let region = heap.new_runtime_region();
-        let mut ctx = crate::primitives::ctx::NativeCtx::with_region_vm(region, heap, self.vm);
+        let mut ctx = self.native_ctx(self.vm, region, heap);
         if std::ptr::fn_addr_eq(def.func, crate::plugin_api::PLUGIN_SENTINEL) {
             crate::plugin_api::call_plugin(def, &mut ctx, args, region)
         } else {
@@ -415,9 +442,8 @@ impl WasmEnvHost for ElleHost {
 ///
 /// The fiber asked is the one the HOST is driving, not `vm.fiber`. This tier
 /// runs a resumed fiber's body without installing it on the VM, so the VM's own
-/// fiber stays the top-level one throughout and its withheld set answers for
-/// nobody (`ElleHost::current_withheld`). Reading `vm.fiber` instead gates every
-/// call against the empty set, which is the whole defect wearing a gate.
+/// fiber stays the top-level one throughout and answers only for top-level code
+/// (`ElleHost::calling_withheld`).
 ///
 /// The VM arrives as a parameter rather than off `ElleHost::vm`, because the
 /// tiered host owns its own `vm` pointer and leaves the `ElleHost` it wraps with
@@ -436,9 +462,8 @@ pub(in crate::wasm) fn capability_denial(
     def: &'static PrimitiveDef,
     args: &[Value],
 ) -> Option<(SignalBits, Value)> {
+    let blocked = crate::vm::VM::capability_blocked_for(host.calling_withheld(vm), def, args);
     let vm = unsafe { &mut *vm };
-    let withheld = host.current_withheld().unwrap_or(vm.fiber.withheld);
-    let blocked = crate::vm::VM::capability_blocked_for(withheld, def, args);
     if blocked.is_empty() {
         return None;
     }

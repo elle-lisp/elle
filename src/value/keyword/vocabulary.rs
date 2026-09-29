@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! The keyword vocabulary: every spelling the Rust runtime mints from a fixed
 //! string.
 //!
@@ -161,7 +161,6 @@ pub(crate) static VOCABULARY: &[&str] = &[
     // Capability / feature gating
     "capability-denied",
     "feature-disabled",
-    "fiber/caps",
     // Signal names the registry pre-registers. A signal a program declares at
     // run time cannot be listed here; it is learned where the registry is read
     // (docs/impl/symbol.md § "The display memo").
