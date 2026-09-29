@@ -142,7 +142,7 @@ the whole process shares, and its teardown is not a backend's.
 
 - [io_copies.rs](../../tests/io_copies.rs) counts the Rust heap bytes a read,
   a write and a `read-all` allocate on the platform's own backend: the ring on
-  Linux, and the pool on a Mac or in a build with the `no-uring` feature. The
+  Linux, and the pool on a Mac or in a build without the `uring` feature. The
   count must not grow with the bytes moved, except for the one copy `read-all`
   makes.
 - `a_write_hands_the_kernel_the_payload_where_it_lies`

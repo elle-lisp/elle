@@ -149,16 +149,18 @@ tracks the runner.
 
 ### Corpus batch size
 
-`elle test` runs the corpus in batches of `CORPUS_BATCH` files, one process per
-batch. Each process keeps the compiled module and the region heap of every file
-in its batch until it exits. The batch size therefore bounds the peak memory of
-one process.
+The suite targets deal each suite into batches of `CORPUS_BATCH` files, one
+`elle test` process per batch, and run `$(JOBS)` batches side by side. Each
+file runs as its own child, so a batch bounds how many files one runner process
+records, not the memory those files use.
 
-The default is 25 files. `macOS Smoke` and `AArch64 Smoke` use 10. A 25-file
-batch stalled on macOS: [region-eval-return-leak](../../tests/elle/region-eval-return-leak.lisp)
-hit its deadline with `join: deadline exceeded`, and the same run passed on
-Linux and AArch64. The smaller batch then shortened the macOS job's wall clock
-a great deal.
+The default is 25 files. `macOS Smoke` and `AArch64 Smoke` use 10. That choice
+was measured when a batch ran all its files inside the runner process: a
+25-file batch stalled on macOS, where
+[region-eval-return-leak](../../tests/impl/region-eval-return-leak.lisp) hit
+its deadline with `join: deadline exceeded`, and the same run passed on Linux
+and AArch64. The smaller batch shortened the macOS job's wall clock a great
+deal. Measure again before you change it.
 
 AArch64 Smoke takes the same batch to shorten its wall clock too. It never
 stalled, and this document records no measurement of the effect there. Read the
