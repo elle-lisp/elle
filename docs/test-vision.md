@@ -1,6 +1,6 @@
 # One test system
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-29 -->
 
 The plan that folds every test product into `elle test`, keeps the results,
 and states what a run may skip.
@@ -13,9 +13,10 @@ Six products test this repository today:
   ([test-store](test-store.md)).
 - [oracle.lisp](../tests/elle/oracle.lisp) and
   [plumb.lisp](../tests/elle/plumb.lisp) measure leak rates. The Makefile runs
-  them outside the corpus, under hand-set timeouts. Each verdict they report
-  through the measurement channel lands in the session DB
-  ([test-store](test-store.md)), so a rate's history is a query.
+  each one through `elle test --isolate` beside every corpus pass, under a
+  hand-set budget. Each verdict they report through the measurement channel
+  lands in the session DB ([test-store](test-store.md)), so a rate's history
+  is a query.
 - [escape-golden.lisp](../tests/elle/escape-golden.lisp) pins escape snapshots.
 - `tests/integration/elle_scripts.rs` runs the files that need a process-global
   flag (`--trace=guardfree`, `--no-uring`), each as a cargo-driven subprocess.
@@ -163,8 +164,9 @@ the CI habit of reading failures out of logs.
 
 1. Persistence: in. The state directory, the `run` identity columns, the CI
    artifact upload and `--import`.
-2. Profiles that select a flag set; fold in the guardfree family, the oracle,
-   plumb, and the per-file passes. Child-process isolation is in.
+2. Profiles that select a flag set; fold in the guardfree family and the
+   per-file passes. Child-process isolation is in, and the oracle and plumb run
+   through it.
 3. Derived budgets.
 4. The coverage gate (elle-lisp/elle#1144), then the runtime-structure gauges
    (elle-lisp/elle#1143, elle-lisp/elle#1135). The measurement channel is in.

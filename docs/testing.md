@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-29 -->
 
 Elle has two test systems:
 
@@ -50,9 +50,11 @@ You read results from the run itself — never by hand-writing SQLite.
 
 ## The agent-first runner (`elle test`)
 
-The runner compiles and runs the **whole corpus in one process**, recording every
-`(form × tier)` result into a **SQLite DB** plus a filesystem CAS for
-artifacts. The thesis (see [docs/test-cli.md](test-cli.md)): *capture
+The runner compiles and runs every file it is given in one process, recording
+every `(form × tier)` result into a **SQLite DB** plus a filesystem CAS for
+artifacts. The Makefile hands it the corpus in batches of `CORPUS_BATCH` files,
+one process per batch, which bounds the memory of one process
+([docs/analysis/ci.md](analysis/ci.md) § Corpus batch size). The thesis (see [docs/test-cli.md](test-cli.md)): *capture
 everything once; query forever* — so an agent issues SQL against the stored run
 instead of re-running with `--dump`/`--trace`.
 
@@ -117,6 +119,11 @@ row per verdict, so a leak rate's history across commits is a query rather than
 scrollback ([docs/test-store.md](test-store.md) § Measurements). Run the same
 file directly and it prints its dashboard and records nothing, exactly as
 before.
+
+That is how the Makefile runs the two dashboards. Every target that runs the
+corpus through `elle test` also runs each dashboard as an isolated child, once
+under `--jit=off` and once under `--jit=eager`. Each dashboard gets its own
+budget, `ORACLE_TIMEOUT` or `PLUMB_TIMEOUT`, as `--timeout`.
 
 ### Statuses
 
@@ -293,9 +300,10 @@ A run killed mid-flight (OOM, signal) is recorded honestly: its `run` row's
 partial tally (computed from `result` rows — the stored counters are written
 only at completion), and the next `elle test` warns about it. An all-pass
 result set from a truncated run is partial coverage, not green
-(see [docs/test-runner.md](test-runner.md) § Run honesty). The warning names
-the worktree of the run it warns about, so a sibling checkout's run is not read
-as this one's kill.
+(see [docs/test-runner.md](test-runner.md) § Run honesty). A run that is still
+working leaves the same NULL, so the views ask whether its process is alive:
+`--summary` then reads `STILL RUNNING (pid P)`, and the next `elle test` prints
+one line naming the pid instead of the kill warning.
 
 ## Correctness the leak and UAF oracles cannot see
 
@@ -361,9 +369,12 @@ name needs no table and no formatting at all — use
 
 ## Known gaps
 
-- **No cross-file parallelism yet** — the runner maps over files sequentially
-  (parallelism is per-form within a file), so a full corpus run is minutes, not
-  seconds. Fanning out across files (single SQLite writer) is the next perf step.
+- **No parallelism yet** — the runner runs one form at a time: it joins each
+  form's worker before it starts the next, file after file. A full corpus run
+  therefore keeps about one core busy and takes minutes. Running batches side
+  by side does not help: the batches share one session DB, and on a 4-core CI
+  runner four at once took longer than one at a time. Fanning out inside one
+  runner (single SQLite writer) is the next perf step.
 - **Multi-form files don't get per-tier *divergence*** — they run under each JIT
   policy (vm/jit) but aren't value-diffed across tiers. Real cross-tier divergence
   needs the corpus migrated to one-form-per-file (the durable shape).
