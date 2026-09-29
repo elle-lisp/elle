@@ -280,6 +280,12 @@ fn each_variant_runs_the_language_suite_on_its_own_build() {
 
 // The build with no features cannot compile a file that calls an `ffi/`
 // primitive, so its pass leaves those out and runs every other language file.
+// Nor can it run the runner, whose store reaches SQLite through FFI, so the
+// runner is the default build and each child is the no-features binary.
+//
+// The counter-factual for the host: with none, the runner is whatever `ELLE`
+// names. If that is the no-features binary the pass dies importing its store,
+// and if it is the default build the pass tests the default build twice.
 #[test]
 fn smoke_noffi_runs_the_language_suite_without_the_ffi_files() {
     let passes = passes("smoke-noffi", &[]);
@@ -293,7 +299,22 @@ fn smoke_noffi_runs_the_language_suite_without_the_ffi_files() {
          files are a handful"
     );
     assert_eq!(pass.isolate(), "");
-    assert_eq!(pass.host(), None);
+    let noffi = make_expand("ELLE_NOFFI");
+    assert_ne!(
+        noffi,
+        make_expand("ELLE"),
+        "the no-features binary is a file of its own, beside the runner's build"
+    );
+    assert_eq!(
+        pass.host(),
+        Some(noffi.as_str()),
+        "each language file runs as a child of the no-features build"
+    );
+    let build = make_dry_run("elle-noffi").expect("dry run");
+    assert!(
+        build.contains(&noffi),
+        "`make elle-noffi` leaves nothing at {noffi}, where the pass looks:\n{build}"
+    );
 }
 
 // The thread-pool build's rig runs the implementation suite too: some of its
