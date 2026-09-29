@@ -34,6 +34,12 @@ symmetric with its unpark; the node and the deferred set a park moves are
   resume replays it — running exactly the releases the fall-through would have. Parking an
   empty chain instead ("the result is the child's result") strands every owned tail arg —
   one region per nested drained fiber (the `fiber-nested` probe).
+  Compiled code parks the same continuation. A compiled tail call whose callee suspended
+  gets `YIELD_SENTINEL` back with a suspending signal set, and parks its own frame at the
+  post-`TailCall` ip through `elle_jit_yield_through_call`, as a compiled `Call` site parks
+  at its resume ip ([jit.md](../jit.md)). Returning at the call instead strands every
+  release in the block: an owned parameter's, a borrowed argument's retain, the result's.
+  Gauged and pinned guardfree by `tests/elle/region-jit-tail-suspend.lisp`.
 - **The parked signal's escape retain has a release on every path.** A suspending signal's
   payload is retained once as it escapes into `fiber.signal` (`EmitEscape` for
   `yield`/`emit`, `SuspendEscape` for a yielding io op or a capability denial). The resume

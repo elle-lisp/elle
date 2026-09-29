@@ -232,9 +232,12 @@ first, and treats an error or a halt as one: `run_jit`, and the
 
 A call whose callee suspended is the other way out. The check after the call
 finds the callee's signal and calls `elle_jit_yield_through_call`, which parks
-this frame at the call's resume ip behind the callee's frames. The emitter
-records each emit's and each call's resume ip and operand stack during LIR
-emission, and these two helpers read them.
+this frame at the call's resume ip behind the callee's frames. A tail call
+parks the same way at the ip past the tail call, where the interpreter's
+fall-through block starts, so the resume runs the releases the frame still owed
+([park.md](region/park.md)). The emitter records each emit's resume ip, and each
+call's and each tail call's, with the operand stack at that point, during LIR
+emission. These two helpers read them.
 
 ## CLI flags
 
