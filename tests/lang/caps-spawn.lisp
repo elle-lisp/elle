@@ -1,18 +1,18 @@
 (elle/epoch 13)
 # audited: 2026-09-29
-# ── A spawned fiber keeps its spawner's denial ────────────────────────
+# A fiber `ev/spawn` creates keeps its spawner's denial, and the scheduler refuses its denied calls.
+# docs/signals/capabilities.md
 #
 # `ev/spawn` creates a fiber in the calling fiber and hands it to the scheduler,
 # which resumes it. The fiber carries its creator's withheld set, and the
-# scheduler refuses a denied call with the denial payload
-# (docs/signals/capabilities.md).
+# scheduler refuses a denied call with the denial payload.
 #
-# Counterfactual, one per half. With the withheld set flowing only at resume,
-# the spawned fiber takes the scheduler's empty set, so the write lands and
-# `(fiber/caps)` lists :fs. With the inheritance but no refusal, a denial the
-# spawned fiber's mask names falls to the scheduler's catch-all and is resumed
-# with nil, which the fiber reads as the call's return: `protect` reports
-# `[true nil]` for a subprocess that never ran.
+# The counter-factual, one per half. With the withheld set flowing only at
+# resume, the spawned fiber takes the scheduler's empty set, so the write lands
+# and `(fiber/caps)` lists :fs. With the inheritance but no refusal, a denial
+# the spawned fiber's mask names falls to the scheduler's catch-all and is
+# resumed with nil, which the fiber reads as the call's return: `protect`
+# reports `[true nil]` for a subprocess that never ran.
 #
 # The sandbox's own mask names only :error. A denial that escapes the scheduler
 # therefore reaches the root as an unhandled signal and fails the file, rather
@@ -90,8 +90,9 @@
 # ── Every bit a denial can carry reaches the scheduler ────────────────
 
 # The spawned fiber's mask must name each bit, or the denial propagates past
-# the scheduler instead of being refused. :exec is the one the mask named
-# before, and it is the case that shows a refusal apart from a nil resume.
+# the scheduler instead of being refused. :exec is the case that shows a
+# refusal apart from a nil resume. tests/impl/caps-spawn-gpu.lisp holds the
+# :gpu case, whose one gated call is an extension of this implementation.
 (assert (refused? (spawned |:exec|
                            (fn []
                              (protect (subprocess/exec "/bin/sh" ["-c" "true"]))))
@@ -107,9 +108,6 @@
 (assert (refused? (spawned |:ffi|
                            (fn [] (protect (import-file "nonexistent.so"))))
                   "import" :ffi) "a denied native import is refused")
-
-(assert (refused? (spawned |:gpu| (fn [] (protect (git (fn [x] x))))) "git" :gpu)
-        "a denied SPIR-V compile is refused")
 
 # ── An unrestricted spawner withholds nothing ─────────────────────────
 

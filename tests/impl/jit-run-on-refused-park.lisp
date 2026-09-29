@@ -1,7 +1,6 @@
 (elle/epoch 13)
-# audited: 2026-09-28
+# audited: 2026-09-29
 # A suspension `compile/run-on :jit` refuses ends its park.
-#
 # docs/impl/region/park.md
 #
 # The forced JIT tier cannot host a suspension, so it answers a park with a
@@ -14,6 +13,11 @@
 # then leaves the protect fiber from tail position, the driver builds its error
 # park, and the delivery ledger rejects an unconsumed park (a panic in a debug
 # build). A release build would mint a resume reference that nothing releases.
+#
+# The refusal may be the payload's last release, and a host that reads the
+# payload afterwards, to describe it in its error, reads a freed page. A run
+# catches that only where the page is reused first, as on macOS, so the
+# sidecar arms guardfree, which faults on it everywhere.
 
 (def _jit-available
   (let [[ok? v] (protect (compile/run-on :jit (fn [] 0)))]

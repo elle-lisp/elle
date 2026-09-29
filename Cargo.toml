@@ -38,8 +38,8 @@ tempfile = "3"
 # slice count clusters). This exact pin is generation G17 in
 # src/segment.rs; G16 is a frozen vendored copy at src/segment/g16/.
 # Bumping the pin rolls the newest generation: update Generation, the
-# tests in src/segment.rs, tests/elle/{grapheme,unicode}.lisp, and
-# docs/strings.md together.
+# tests in src/segment.rs, tests/lang/grapheme.lisp, tests/lang/unicode.lisp
+# and docs/strings.md together.
 unicode-segmentation = "=1.13.2"
 crossbeam-channel = "0.5"
 
@@ -77,6 +77,9 @@ mlir = ["melior"]
 # Run I/O on the thread pool on Linux too, the backend every other platform
 # runs (INSTALL.md). An `--all-features` build takes it.
 no-uring = []
+# io_uring on Linux. Without it, and on every other platform, I/O goes through
+# the thread pool (docs/config.md).
+uring = []
 
 [profile.dev.package."*"]
 opt-level = 3

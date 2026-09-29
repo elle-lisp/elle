@@ -1,23 +1,22 @@
 (elle/epoch 13)
-# audited: 2026-09-28
-# A restart answers the call that raised.
+# audited: 2026-09-29
+# A restart answers the call that raised, for every raise site, and continues past a raise that has no result.
+# docs/signals/primitives.md
 #
 # A fiber stopped on an error parks just past the raising call, and
-# `fiber/resume` restarts it there: the resume value takes that call's
-# result, and the frames that called it run on. This file pins that for
-# every raise site — `error`, a primitive, an instruction, a callee, an
-# injected abort, a child's error that escaped into its parent, and the object
-# limit — and pins the raises with no result, which a restart continues past.
-# Most cases stop a caught (:paused) fiber, and one stops an uncaught (:error)
-# one.
+# `fiber/resume` restarts it there: the resume value takes that call's result,
+# and the frames that called it run on. This file pins that for every raise
+# site — `error`, a primitive, an instruction, a callee, an injected abort, and
+# a child's error that escaped into its parent — and pins the raises with no
+# result, which a restart continues past. Most cases stop a caught (:paused)
+# fiber, and one stops an uncaught (:error) one.
+# tests/impl/fiber-restart-object-limit.lisp holds the object limit's face.
 #
 # Two counter-factuals. A primitive or an instruction that raises pushes a nil
 # where its result goes. A park that keeps the nil makes a restart push the
 # resume value on top of it, and the call's consumer reads the nil. And a
 # replay that drops the frames outside a raising frame makes the restart answer
 # the inner call and end the fiber with that value.
-#
-# docs/signals/primitives.md
 
 # ── The raise site ────────────────────────────────────────────────────
 
@@ -198,25 +197,5 @@
   (assert (= :type-error (get (fiber/resume f) :error)) "parameterize raises")
   (assert (= (list :a :x 5) (fiber/resume f :ignored))
           "the restart runs the body with the bindings around it"))
-
-# ── The object limit ──────────────────────────────────────────────────
-
-# The limit refuses the allocation past it: the call that asked gets nil back
-# from the heap, and the loop raises for that call right after it. A restart
-# answers the call. The counter-factual is a restart that continues after the
-# call and binds its nil. The trap: the limit is heap-wide, so the fiber lifts
-# it itself, and the resumer allocates nothing between the raise and the
-# restart.
-(def over-limit
-  (fiber/new (fn []
-               (arena/set-object-limit (+ (arena/count) 3))
-               (let [xs (list 1 2 3 4 5 6 7 8)]
-                 (arena/set-object-limit nil)
-                 (list :got xs))) |:error|))
-(def limit-error (fiber/resume over-limit))
-(def limit-restart (fiber/resume over-limit :ignored))
-(assert (= :allocation-error (get limit-error :error)) "the object limit raises")
-(assert (= (list :got :ignored) limit-restart)
-        "the restart answers the call whose allocation the limit refused")
 
 (println "fiber-restart: OK")

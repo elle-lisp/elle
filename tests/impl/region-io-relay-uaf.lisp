@@ -1,23 +1,22 @@
 (elle/epoch 13)
 # audited: 2026-09-29
-# A fiber that relays a child's io park with `(emit :io v)` owns its reference
-# to `v`, so the install that answers the relay owes the request no release
-# (docs/impl/region/park.md).
+# A fiber that relays a child's io park with `(emit :io v)` owns its reference to `v`, so the install owes the request nothing.
+# docs/impl/region/park.md
 #
 # The trap: the relaying fiber parks under `SIG_IO`, and its payload IS an
-# `IoRequest`. Both readings that mark a park as runtime-built see exactly what a
-# yielding io op leaves. The request lives in the child's region, and so does
-# what the op answers into: the port `port/open` fills, the buffer a read fills.
-# Each install that takes the relay for an io park releases that region once
-# more, so the child reads its port and its lines out of a freed region.
+# `IoRequest`. Both readings that mark a park as runtime-built see exactly what
+# a yielding io op leaves. The request lives in the child's region, and so does
+# what the op answers into: the port `port/open` fills, the buffer a read
+# fills. Each install that takes the relay for an io park releases that region
+# once more, so the child reads its port and its lines out of a freed region.
 #
 # The counter-factual: a child whose later reads come back whole looks correct
 # while the region is freed, because nothing has reused the pages yet. The
 # witnesses below therefore run on after the relay: they close the port, open
 # another, write, and read the file back. A freed request then reaches the
 # scheduler as some other value — a write sends the display text of a stale
-# heap object, or the submit refuses a request whose port is no port. Under
-# `--trace=guardfree` the first stale read faults instead.
+# heap object, or the submit refuses a request whose port is no port. The
+# sidecar arms guardfree, so the first stale read faults instead.
 
 # ── the relays ───────────────────────────────────────────────────────────────
 # The relaying body catches the child's io park, raises the same request to its

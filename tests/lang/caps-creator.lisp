@@ -1,15 +1,15 @@
 (elle/epoch 13)
 # audited: 2026-09-29
-# ── A fiber takes its creator's withheld set ──────────────────────────
+# A fiber takes the withheld set of the fiber that creates it, before anything resumes it.
+# docs/signals/capabilities.md
 #
 # `fiber/new` gives a fiber the withheld set of the fiber that creates it, and
-# each resume adds the resumer's (docs/signals/capabilities.md).
-# This file pins the creator's half with no scheduler involved: a fiber made
-# inside a sandbox and resumed from outside it.
+# each resume adds the resumer's. This file pins the creator's half with no
+# scheduler involved: a fiber made inside a sandbox and resumed from outside it.
 #
-# Counterfactual: with the withheld set flowing only at resume, the fiber takes
-# the empty set of the unrestricted fiber that resumes it. It then reads the
-# file its creator could not, and `(fiber/caps made)` lists :fs.
+# The counter-factual: with the withheld set flowing only at resume, the fiber
+# takes the empty set of the unrestricted fiber that resumes it. It then reads
+# the file its creator could not, and `(fiber/caps made)` lists :fs.
 
 (defn make-inside [deny body]
   "A fiber that code denied `deny` creates, handed back unresumed."

@@ -13,19 +13,19 @@ fn test_async_backend_new() {
     assert!(backend.is_ok());
 }
 
-/// A Linux binary built with the `no-uring` feature takes the thread pool, the
-/// platform a Mac runs, whether or not the ring would open.
+/// A Linux binary built without the `uring` feature takes the thread pool, the
+/// backend a Mac runs, whether or not the ring would open.
 ///
 /// The counter-factual: a feature the backend never reads builds, passes every
-/// other test here, and leaves the Thread-Pool I/O job running the whole corpus
-/// on the ring it exists to avoid.
-#[cfg(all(target_os = "linux", feature = "no-uring"))]
+/// other test here, and leaves the Thread-Pool I/O job running both suites on
+/// the ring it exists to avoid.
+#[cfg(all(target_os = "linux", not(feature = "uring")))]
 #[test]
-fn a_no_uring_build_takes_the_thread_pool() {
+fn a_build_without_uring_takes_the_thread_pool() {
     let backend = AsyncBackend::new().expect("a backend");
     assert!(
         !backend.is_uring(),
-        "a no-uring build came up on io_uring, so its corpus run never reaches the pool"
+        "a build without uring came up on io_uring, so its suites never reach the pool"
     );
 }
 

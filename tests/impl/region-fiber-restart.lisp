@@ -1,29 +1,28 @@
 (elle/epoch 13)
-# audited: 2026-09-28
-# A restart delivers into an error park, and owes what the raise site left unfunded.
+# audited: 2026-09-29
+# A restart delivers into an error park, and owes what the raise site left unfunded: the leak gauge.
+# docs/impl/region/park.md
 #
 # The delivery mints one reference for a restart into a `Call` site — a
 # primitive, an instruction, a callee, a replayed frame, a refusal or abort
 # over a primitive park, a parent a child's error stopped — and none for an
 # `Emit` site, whose continuation funds its own. A missing mint is a
-# use-after-free, which tests/elle/region-fiber-restart-uaf.lisp catches. A mint
-# the continuation does not consume is a leak: one restart value's region per
-# cycle, which this file gauges. The obvious fix, minting for every error
-# park, strands the restart value of every `error` raise and of every abort
-# at a yield — the two emit faces below.
+# use-after-free, which tests/impl/region-fiber-restart-uaf.lisp catches. A
+# mint the continuation does not consume is a leak: one restart value's region
+# per cycle, which this file gauges. The obvious fix, minting for every error
+# park, strands the restart value of every `error` raise and of every abort at
+# a yield — the two emit faces below.
 #
-# A fiber cancelled on an error is the other face here. The kill displaces
-# the terminal error it finds, and that error's park retain has no other
-# release once the slot is overwritten.
+# A fiber cancelled on an error is the other face here. The kill displaces the
+# terminal error it finds, and that error's park retain has no other release
+# once the slot is overwritten.
 #
 # This file is the LEAK gauge — an `arena/count` delta over a fixed window,
 # which must be BOUNDED for every face.
 #
 # Each body uses the raising call's result directly as an element of the array
-# it returns, the shape a program writes. The yield face is the control for that
-# shape: a resume value in that position is released with the array.
-#
-# docs/impl/region/park.md
+# it returns, the shape a program writes. The yield face is the control for
+# that shape: a resume value in that position is released with the array.
 
 (def window 400)
 

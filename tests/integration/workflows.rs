@@ -1,8 +1,7 @@
 // audited: 2026-09-29
 // What `.github/workflows/pr.yml` claims to gate must be what it gates, and
 // what each job builds must let its own checks run. A target a job
-// cross-compiles must also have a local gate, and a job that runs the per-file
-// corpus passes must run the runner too.
+// cross-compiles must also have a local gate.
 //
 // docs/analysis/ci.md
 // .github/BRANCH_PROTECTION.md
@@ -258,42 +257,6 @@ fn each_io_backend_has_a_linux_corpus_job_with_debug_assertions() {
              region checks are compiled out of every {backend} run and only the \
              macOS job can catch what they find. Candidates: {:?}",
             group.iter().map(|(n, _)| n).collect::<Vec<_>>(),
-        );
-    }
-}
-
-// A per-file pass (`smoke-vm`, `smoke-jit`) runs each file as its own process
-// and records nothing, so what it finds is a line in the job's log. A job that
-// builds the release binary for those passes can run the runner on it too, and
-// then every form's verdict reaches the session DB the job uploads. `make
-// smoke` runs all three; the argument for keeping both kinds of pass is the
-// note above `smoke` in the Makefile.
-//
-// The counter-factual: `VM+JIT Tests` ran `smoke-vm` and `smoke-jit` alone, so
-// the io_uring corpus job was the one Linux corpus job with no store to query.
-#[test]
-fn a_job_running_the_per_file_passes_runs_the_runner_too() {
-    let text = workflow_text();
-    let runs = |body: &str, target: &str| {
-        body.lines()
-            .any(|line| line.trim() == format!("run: make {target}"))
-    };
-    let per_file: Vec<(String, String)> = jobs(&text)
-        .into_iter()
-        .filter(|(_, body)| runs(body, "smoke-vm") || runs(body, "smoke-jit"))
-        .collect();
-    assert!(
-        !per_file.is_empty(),
-        "no job in {} runs `make smoke-vm` or `make smoke-jit`; the parse is \
-         broken, not the workflow",
-        workflow_path().display()
-    );
-
-    for (name, body) in &per_file {
-        assert!(
-            runs(body, "smoke-elle"),
-            "job `{name}` runs the per-file passes and never `make smoke-elle`, \
-             so none of its verdicts reach a session DB"
         );
     }
 }

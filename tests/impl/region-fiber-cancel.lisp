@@ -1,19 +1,17 @@
 (elle/epoch 13)
-# audited: 2026-09-28
-# ── The terminal-fiber teardown, exercised in a loop ──
+# audited: 2026-09-29
+# Hard-killing fibers in a loop frees nothing a live frame still counts on.
+# docs/impl/region/owner.md
 #
 # `fiber/cancel` of a parked or stopped fiber and `fiber/abort` of a
 # not-yet-started one are hard kills: both route through `kill_fiber`
 # (src/vm/fiber/owned.rs), which consumes the parked chain and frees everything
 # the fiber owns. The node-freeing half is pinned Rust-side, where a test can
 # read a member's generation (the `runtime::tests::ownership::fnode::kill`
-# tests). This file pins the other side on the production path: killing fibers
-# in a loop frees nothing a live frame still counts on. `region_fiber_cancel_uaf`
-# runs it under `--trace=guardfree`, which turns an over-release into a fault.
-# The kill's region residue is gauged by the `cancel-discard` probe in
-# tests/elle/probe/concurrent.lisp, not here.
-#
-# docs/impl/region/owner.md
+# tests). This file pins the other side on the production path. The sidecar
+# arms guardfree, which turns an over-release into a fault. The kill's region
+# residue is gauged by the `cancel-discard` probe in
+# tests/impl/probe/concurrent.lisp, not here.
 
 (defn park-and-cancel []
   (let [f (fiber/new (fn []

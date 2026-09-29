@@ -1,7 +1,6 @@
 (elle/epoch 13)
-# audited: 2026-09-28
+# audited: 2026-09-29
 # A park a host refuses owes what a boundary's park owes.
-#
 # docs/impl/region/park.md
 #
 # `eval` cannot hold a suspension of the code it runs, so it refuses one with

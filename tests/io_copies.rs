@@ -1,15 +1,13 @@
-//! audited: 2026-09-29
-//! A stream read or write on the platform's own backend stages none of its
-//! bytes on the Rust heap.
+// audited: 2026-09-29
+//! A stream read or write on the platform's own backend stages none of its bytes on the Rust heap.
 //!
 //! docs/impl/io-bytes.md
 //
 // Its own binary: the gauge is the global allocator, one counter for the whole
-// process (docs/analysis/testing.md § "Process-global state needs its own
-// binary"). The platform's own backend is the ring on Linux and the thread pool
-// on a Mac or in a build with the `no-uring` feature, and the counter counts
-// every thread, so a pool worker that reads into a `Vec` of its own is caught
-// as surely as a copy on the scheduler.
+// process (docs/analysis/testing.md). The platform's own backend is the ring on
+// Linux and the thread pool on a Mac or in a build without the `uring` feature,
+// and the counter counts every thread, so a pool worker that reads into a `Vec`
+// of its own is caught as surely as a copy on the scheduler.
 //
 // The counter-factual is the copy each limit forbids. Staged through a `Vec`,
 // the ring measured 2.9 bytes per byte for a read, 3.0 for a read after a

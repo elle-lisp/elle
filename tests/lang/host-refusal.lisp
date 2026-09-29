@@ -1,10 +1,7 @@
 (elle/epoch 13)
-# audited: 2026-09-28
-# A host that refuses a suspension raises at its own call, and a restart
-# answers that call.
-#
+# audited: 2026-09-29
+# A host that refuses a suspension raises at its own call, and a restart answers that call.
 # docs/signals/primitives.md
-# docs/impl/region/park.md
 #
 # `eval` and `import` run code on the current fiber and cannot hold a
 # suspension of it, so each answers one with an error. The fiber stops at the
