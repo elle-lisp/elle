@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-29
 //! Reference-count tests: what a decref frees, how far a cascade reaches, and
 //! what a release that ran twice reports.
 //!
@@ -368,7 +368,7 @@ fn deep_cascade_chain_does_not_overflow_stack() {
     // `free_region_set`), NOT native recursion — otherwise a chain of a few
     // thousand links overflows the stack. This is the region-store shape behind
     // the `(apply concat <thousands-of-chunks>)` and deep-list/nested-structure
-    // programs (tests/elle/region-deep-chain.lisp): each link is one more
+    // programs (tests/impl/region-deep-chain.lisp): each link is one more
     // frontier decref, and a recursive cascade spends one stack frame per link.
     //
     // N is chosen well past a worker thread's default stack: a recursive

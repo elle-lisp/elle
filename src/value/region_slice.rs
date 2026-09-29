@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-29
 //! `RegionSlice`: a `(ptr, len)` view into data owned by a region.
 //!
 //! docs/impl/region/model.md
@@ -19,13 +19,13 @@
 //! *different* region is a cross-region reference and must incref the backing's
 //! region (see `find_object_cross_refs`). Sharing one without that edge frees
 //! the backing out from under a live holder. The canonical trap is
-//! `squelch`/`attune` (src/primitives/meta.rs), which build a new closure that
-//! shares the source closure's env `RegionSlice` — its backing stays in the
-//! source's region (the protect+squelch+nested-yield UAF, fixed by the Closure
-//! arm of `find_object_cross_refs`). The second instance was `with-traits`
-//! (src/primitives/traits.rs), whose metadata-only clone copied the `(ptr,
-//! len)` pair for the slice-backed immutables — freed-page reads once the
-//! source died (tests/elle/region-withtraits-slice-uaf.lisp). The rule for
+//! `squelch`/`attune` (src/primitives/meta/syntaxops.rs), which build a new
+//! closure that shares the source closure's env `RegionSlice` — its backing
+//! stays in the source's region, and the Closure arm of `find_object_cross_refs`
+//! records the edge (tests/lang/signals.lisp). A `with-traits` clone
+//! (src/primitives/traits.rs) that copied the `(ptr, len)` pair for the
+//! slice-backed immutables would read freed pages once the source died
+//! (tests/impl/region-withtraits-slice-uaf.lisp). The rule for
 //! clones: copy the payload into the clone's own region
 //! (`arena::alloc_region_slice`); only the closure-env share pays the
 //! explicit-edge price instead.
@@ -199,7 +199,7 @@ impl<'a, T: 'static> IntoIterator for &'a RegionSlice<T> {
 /// The promise is kept at the one construction point — `SyntaxArena::text`,
 /// which copies a `&str` — so every read is a plain `from_utf8_unchecked`.
 /// It exists so a region-resident node can hold a name or a literal without a
-/// Rust-heap `String` (docs/impl/syntax.md § "The node"), and it carries the
+/// Rust-heap `String` (docs/impl/syntax.md), and it carries the
 /// same aliasing rule as the slice it wraps: a copy points at the SAME bytes
 /// in the SAME region, so a holder in another region must copy rather than
 /// share (see this module's docs).
