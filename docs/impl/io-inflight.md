@@ -1,6 +1,6 @@
 # An operation in flight
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 What a submitted I/O operation holds and owns, and how it ends when the fiber that asked is gone.
 
@@ -205,17 +205,18 @@ the completion builds nothing for.
 ## An operation whose fiber is gone has no reader
 
 A cancel is something a caller must remember to issue, and one caller cannot: a
-fiber that terminates by a path the scheduler did not route. `fiber/cancel`
-leaves such a fiber `:error` with its operation still submitted. Nothing marks
+fiber that ends by a path the scheduler did not route. `fiber/cancel` leaves
+such a fiber `:dead` with its operation still submitted. Nothing marks
 the id, and the scheduler finds out when it next looks at that fiber — which is
 after the completion has been assembled, because assembling happens inside
 `io/wait`.
 
 So the reader-gone question is not asked of the canceller alone. Every entry
 records **the fiber that asked**, which `io/submit` is handed at the call site
-([stdlib.lisp](../../src/stdlib.lisp)), and a completion asks that fiber what became of it. A fiber
-in a terminal state — `:dead` or `:error` — is one no result can reach, so the
-entry is retired unread, exactly as a cancelled one is.
+([stdlib.lisp](../../src/stdlib.lisp)), and a completion asks that fiber what became of it. No
+result can reach a fiber that is `:dead` or `:error`: a restart of an `:error`
+fiber answers the call with the resume value. So the entry is retired unread,
+exactly as a cancelled one is.
 
 The fiber is a sound thing to ask because the entry holds it — see above — so it
 is there to be asked for as long as the operation is.
@@ -259,17 +260,17 @@ in the program is left to make that event happen.
 
 The backend therefore ends these operations itself.
 `PendingTable::orphaned_to_stop` reports the in-flight ids whose asking fiber
-has reached a terminal state, and every drain asks each of them to stop before
+is `:dead` or `:error`, and every drain asks each of them to stop before
 it waits. The ask goes through the stop pipe on the pool and through
 `IORING_OP_ASYNC_CANCEL` on the ring, the two halves `io/cancel` also uses. The
 operation completes with `-ECANCELED`, `take` reports it `Orphaned`, and the
 entry is retired and answered as above.
 
-Asking the fiber rather than its memory is what keeps an unwinding fiber out of
-this. `fiber/abort` resumes a fiber to unwind, and that unwinding can suspend
-and be resumed again (see [fiber primitives](../signals/primitives.md)),
-so such a fiber is `:paused` and still has a result to come back for. It reaches
-a terminal state when it is genuinely finished, and not before.
+Asking the fiber rather than its memory is what keeps an aborted fiber that
+still runs out of this. `fiber/abort` raises at the fiber's suspension point,
+and a `protect` or `defer` that sees the error runs code that can suspend again
+(see [fiber primitives](../signals/primitives.md)). Such a fiber is `:paused`
+and still has a result to come back for, so its operation runs on.
 
 The ask is deliberately not a cancel. A cancel marks the id, and a marked id
 falls silent; this one must answer, because the scheduler still holds the
