@@ -1,8 +1,9 @@
 // audited: 2026-09-29
-// Which corpus targets run the corpus through `elle test` alone, as read from what `make` would run.
+// How the corpus targets run the corpus, and when `make test` reaches it, as read from what `make` would run.
 //
 // docs/testing.md
 // docs/analysis/ci.md
+// docs/analysis/testing.md
 //
 // A target that runs the corpus one process per file, beside or instead of the
 // runner, records nothing: every verdict it reaches is a line in a CI log. The
@@ -58,6 +59,29 @@ fn smoke_mlir_runs_the_corpus_through_the_runner_alone() {
 #[test]
 fn smoke_nouring_runs_the_corpus_through_the_runner_alone() {
     runs_the_corpus_through_the_runner_alone("smoke-nouring");
+}
+
+// `qa` takes about two minutes and the corpus about thirty. The counter-factual:
+// `test` listed `smoke` first, so a formatting or clippy failure surfaced half
+// an hour into the run, after the corpus it had nothing to do with.
+#[test]
+fn make_test_runs_qa_before_the_corpus() {
+    let elle = make_expand("ELLE");
+    let recipe = recipe("test");
+    let first = |what: &str, found: &dyn Fn(&str) -> bool| {
+        recipe
+            .lines()
+            .position(found)
+            .unwrap_or_else(|| panic!("`make test` never runs {what}:\n{recipe}"))
+    };
+    let fmt = first("`cargo fmt --check`", &|line| line.contains("cargo fmt --check"));
+    let runner = first("the runner", &|line| line.contains(&format!("{elle} test")));
+    let per_file = first("a per-file pass", &|line| line.contains("parallel "));
+    assert!(
+        fmt < runner && fmt < per_file,
+        "`make test` runs the corpus before `qa`: `cargo fmt --check` is line {fmt}, \
+         the runner line {runner}, the first per-file pass line {per_file}"
+    );
 }
 
 // The pool is a build, not a flag. A target that ran the default binary would
