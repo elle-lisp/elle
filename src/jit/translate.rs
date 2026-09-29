@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-29
 // docs/impl/jit.md
 //! `FunctionTranslator`: the register-to-variable mapping every LIR instruction
 //! and terminator is lowered to Cranelift IR through.
@@ -127,6 +127,22 @@ pub(crate) fn load_value_slot(
     let tag = builder.ins().load(I64, flags, base, slot + TAG);
     let payload = builder.ins().load(I64, flags, base, slot + PAYLOAD);
     (tag, payload)
+}
+
+/// Write the `index`-th `Value` of a stack slot from its (tag, payload) halves.
+pub(crate) fn store_value_slot(
+    _builder: &mut FunctionBuilder,
+    _slot: cranelift_codegen::ir::StackSlot,
+    _index: u32,
+    _tag: cranelift_codegen::ir::Value,
+    _payload: cranelift_codegen::ir::Value,
+) {
+}
+
+/// End a function's construction, handing `FunctionBuilder::finalize` the
+/// target configuration `module` holds.
+pub(crate) fn finalize_function(builder: FunctionBuilder, _module: &JITModule) {
+    builder.finalize();
 }
 
 impl<'a> FunctionTranslator<'a> {

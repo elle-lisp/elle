@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 // docs/impl/jit.md
 //! The prologue: what a compiled function does with its six parameters before
 //! the first LIR block runs.
@@ -381,7 +381,7 @@ impl JitCompiler {
         }
 
         builder.seal_all_blocks();
-        builder.finalize();
+        finalize_function(builder, translator.module);
 
         Ok((translator.closure_protos, translator.templates))
     }
