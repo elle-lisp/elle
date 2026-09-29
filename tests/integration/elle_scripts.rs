@@ -72,6 +72,9 @@ mod fibers {
 mod frames {
     include!("elle_scripts/frames.rs");
 }
+mod io {
+    include!("elle_scripts/io.rs");
+}
 mod modes {
     include!("elle_scripts/modes.rs");
 }
