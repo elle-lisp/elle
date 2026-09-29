@@ -1,7 +1,8 @@
-// audited: 2026-09-19
-// docs/impl/wasm.md
+// audited: 2026-09-29
 //! LIR → WASM emission: the module's shape, the emitter's state, and what
 //! drives one function body after another.
+//!
+//! docs/impl/wasm.md
 //!
 //! Converts a `LirFunction` into WASM module bytes using `wasm-encoder`.
 //! Each LIR register maps to two WASM locals (tag: i64, payload: i64).
@@ -43,7 +44,7 @@ pub struct EmitResult {
 /// share linear memory — args grow up from `ARGS_BASE`, envs up from
 /// `env_stack_base` — so the env stack must clear the widest such region or a
 /// wide call's args overwrite a live closure env (a >128-field struct literal is
-/// a >256-arg call to the `struct` primitive; `call-u16.lisp` and
+/// a >256-arg call to the `struct` primitive; tests/lang/call-u16.lisp and
 /// `wasm::tests::frame::wasm_full_wide_call_from_closure_preserves_env` pin it).
 ///
 /// A conservative over-estimate: it need not track each emitter's exact byte
@@ -132,7 +133,7 @@ pub fn emit_module(
 /// imports are panic stubs (src/wasm/lazy/linker.rs) and whose funcref table has a
 /// single entry, so every shape whose execution would reach one of them is
 /// refused here rather than detonated at runtime
-/// (src/wasm/AGENTS.md § "Constraints on per-closure compilation"):
+/// (src/wasm/AGENTS.md):
 ///
 /// - `TailCall`/`TailCallArrayMut` — `return_call_indirect` needs callee
 ///   funcref-table indices and `rt_prepare_tail_call`;
@@ -229,7 +230,6 @@ pub(super) struct WasmEmitter {
     pub yield_state_map: HashMap<usize, u32>,
     pub call_state_map: HashMap<(usize, usize), u32>,
     pub reg_to_slot: HashMap<Reg, u32>,
-    pub env_lbox_mask: u64,
     pub current_num_captures: u16,
     pub known_int: std::collections::HashSet<Reg>,
     /// Module's closure list for MakeClosure metadata lookup.
@@ -277,7 +277,6 @@ impl WasmEmitter {
             call_state_map: HashMap::new(),
             current_table_idx: 0,
             reg_to_slot: HashMap::new(),
-            env_lbox_mask: 0,
             current_num_captures: 0,
             known_int: std::collections::HashSet::new(),
             module_closures: None,
@@ -318,7 +317,7 @@ impl WasmEmitter {
         // 2: rt_call. The fourth result is `suspended`: whether the caller must
         // park. It is a separate word from `signal` because which signals park
         // is the interpreter's rule (`signals::dispatch::is_suspending`), not a
-        // bit the emitter can test — see docs/impl/wasm.md § rt_call.
+        // bit the emitter can test (docs/impl/wasm.md).
         types.ty().function(
             [
                 ValType::I64,
