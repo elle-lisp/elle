@@ -8,7 +8,7 @@ judges, records and re-pins; nothing else carries a number.
 This document is the specification. The instrument, the ledger and the
 direct-run gate are built, as [the guide](../lib/ratchet.md) shows, and so is
 the runner's side: the rows, the `missing` gate, the summary and `--repin`.
-The two leak dashboards and the first two residue tests are producers with
+The two leak dashboards and the first three residue tests are producers with
 ledgers of their own. Every producer past those is proposed.
 
 ## What a ratchet is
@@ -19,20 +19,22 @@ ceiling on the objects a request leaves behind. A canary pins the allocations a
 loop makes. Each pin is the reading the tree gave on the day somebody accepted
 it, and a change that moves the reading the wrong way fails.
 
-Four producers are on the ratchet: the leak dashboards
+Five producers are on the ratchet: the leak dashboards
 [oracle.lisp](../tests/impl/oracle.lisp) and
 [plumb.lisp](../tests/impl/plumb.lisp), over
 [tests/ledger/oracle.lisp](../tests/ledger/oracle.lisp) and
 [tests/ledger/plumb.lisp](../tests/ledger/plumb.lisp), and the residue tests
-[h2-stress-scoped.lisp](../tests/impl/h2-stress-scoped.lisp) and
-[region-page-recycle.lisp](../tests/impl/region-page-recycle.lisp), over
-[tests/ledger/h2-stress-scoped.lisp](../tests/ledger/h2-stress-scoped.lisp)
+[h2-stress-scoped.lisp](../tests/impl/h2-stress-scoped.lisp),
+[region-page-recycle.lisp](../tests/impl/region-page-recycle.lisp) and
+[region-macro-id-recycle.lisp](../tests/impl/region-macro-id-recycle.lisp),
+over
+[tests/ledger/h2-stress-scoped.lisp](../tests/ledger/h2-stress-scoped.lisp),
+[tests/ledger/region-page-recycle.lisp](../tests/ledger/region-page-recycle.lisp)
 and
-[tests/ledger/region-page-recycle.lisp](../tests/ledger/region-page-recycle.lisp).
-The tree still holds the pattern by hand in at least seven places:
+[tests/ledger/region-macro-id-recycle.lisp](../tests/ledger/region-macro-id-recycle.lisp).
+The tree still holds the pattern by hand in at least six places:
 
-- [region-macro-id-recycle.lisp](../tests/impl/region-macro-id-recycle.lisp),
-  [region-collector-arg-move.lisp](../tests/impl/region-collector-arg-move.lisp)
+- [region-collector-arg-move.lisp](../tests/impl/region-collector-arg-move.lisp)
   and [resource.lisp](../tests/impl/resource.lisp), each with a window, a
   gauge-live gate and a ceiling of its own.
 - [gauge.rs](../src/wasm/tests/gauge.rs) under the WASM tier, and the
@@ -349,6 +351,12 @@ reads differently on one of those is a tiered row.
   rather than accumulated. The estimator's discarded first block is the
   warm-up the file's window helper ran by hand. Its ledger pins the page count
   each shape claims per call, and the byte growth at 0.
+- [region-macro-id-recycle.lisp](../tests/impl/region-macro-id-recycle.lisp)
+  drives each expansion through `rate` on the id gauge, and the all-atom
+  `when` on the object and the region count as well: the dimension the file
+  says those two gauges cannot see, read in the one drive. The settling cost
+  its `settle` ceiling allowed for lands in the estimator's discarded first
+  block, or in the interval of a rate it barely moves. Every pin is 0.
 
 **The runner**, as above.
 
