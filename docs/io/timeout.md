@@ -13,14 +13,17 @@ Every call that waits takes two optional named arguments:
 
 - `:timeout` is a duration in seconds, an integer or a float. It bounds each
   wait the call makes.
-- `:deadline` is a reading of `(clock/monotonic)`: the seconds since this
-  process started. It bounds the whole call, however many waits it makes.
+- `:deadline` is a reading of `(clock/monotonic)`: the seconds since its first
+  reading in this process. It bounds the whole call, however many waits it
+  makes.
 
 A call that names neither waits as long as it takes, and `nil` names neither.
-A call may name both, and then each wait ends at whichever comes first. A
-deadline that has already passed allows no wait at all: the call answers what
-is ready now, or it ends as a timed-out call ends. The clock is one clock for
-the whole process, so a deadline read on one thread bounds a call on another.
+A bound further off than the clock can count bounds nothing, so that call waits
+as long as it takes too. A call may name both, and then each wait ends at
+whichever comes first. A deadline that has already passed allows no wait at
+all: the call answers what is ready now, or it ends as a timed-out call ends.
+The clock is one clock for the whole process, so a deadline read on one thread
+bounds a call on another.
 
 ```lisp
 (defn timed-out? [thunk]
