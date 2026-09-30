@@ -37,6 +37,7 @@ heap and region explicitly through `arena`.
 | [regionstore/pointer.rs](regionstore/pointer.rs) | Pointer → region classification: the ownership-validated page-base walk behind every runtime RC decision |
 | [regionstore/introspect.rs](regionstore/introspect.rs) | Read-only counts, byte totals, cross-ref and edge dumps behind the `arena/*` diagnostics and the free-time equivalence oracle |
 | [regionstore/free.rs](regionstore/free.rs) | `free_runtime_region_pages` / `free_region_group` → the four-phase `free_region_set`: subtree / set drop over `owned_children`, frontier from the recorded `outgoing` table, and the `#[cfg(debug_assertions)]` edge-table equivalence oracle |
+| [regionstore/rescue.rs](regionstore/rescue.rs) | The drop-time rescue: a member still referenced from outside the dying subtree returns to `Counted`, with its own subtree, instead of being torn down |
 | [regionstore/mintscope.rs](regionstore/mintscope.rs) | closed allocation-scope mint log (macro expansion): `begin_mint_log` / `reclaim_mint_scope` RC-balance the scratch DAG by `rc − in_degree` (an `Owned` survivor is left to its owner's drop) |
 | [regionstore/counters.rs](regionstore/counters.rs) | The reclamation counters behind the `arena/*` frees, adopts, rescues, extracts, reparents and owned gauges |
 | [regionpool.rs](regionpool.rs) | `RegionPool`: dual-ended pages, object and data cursors, page claim and release |
@@ -61,8 +62,9 @@ until the `size_tag` magic + log2 matches — O(1) region attribution. The
 magic matters: a smaller sub-alignment of a *large* page lands mid-page on
 object data, where a bare `log2` byte could coincidentally match a smaller
 size and be read as a garbage header (a 584 GB `ensure_raw` blowup in
-[oracle.lisp](../../../tests/impl/oracle.lisp)). The magic makes that ~`1/2^32`; the authoritative resolver,
-`RegionStore::region_of_ptr`, additionally requires the matched region to
+[oracle.lisp](../../../tests/impl/oracle.lisp)). The magic makes that
+~`1/2^32`; the authoritative resolver, `RegionStore::region_of_ptr`,
+additionally requires the matched region to
 *own* the pointer, so a mid-page coincidence never wins over the true base.
 
 ## Region generations
