@@ -38,6 +38,29 @@
                 "JOIN form ON form.hash = result.form_hash "
                 "WHERE form.file LIKE '%" file "'")))
 
+# The tiers the runner records for a single form: every tier this build
+# carries, probed the way the runner probes them (docs/test-runner.md).
+# `:bytecode` is recorded as `vm`.
+(defn carried? [tier]
+  (let [[ok? err] (protect (compile/run-on tier (fn [] 1)))]
+    (or ok? (not (= (get err :reason) :feature-disabled)))))
+(defn tier-label [tier]
+  (if (= tier :bytecode) "vm" (string tier)))
+(def form-tiers
+  (map tier-label (filter carried? [:bytecode :jit :wasm :mlir-cpu])))
+(def jit? (carried? :jit))
+
+# The tiers the runner records for a whole-file script: the JIT off, and the
+# JIT eager where the build carries it.
+(def script-tiers (if jit? ["vm" "jit"] ["vm"]))
+
+(defn tier-list [tiers]
+  "TIERS sorted and joined, so two lists of tier names compare as strings."
+  (string/join (sort (map string tiers)) ","))
+
+(defn row-tiers [res]
+  (tier-list (map (fn [row] row:tier) res)))
+
 (with-temp-dir dir
                # Invoke `elle test --db DB EXTRA...` against an existing session DB.
                (defn elle-test [db extra]
@@ -49,10 +72,10 @@
                (defn run-test [name extra]
                  (elle-test (path/join dir (string "rt-" name ".db")) extra))
 
-               # ── Scenario 1: a file runs once, on the build's runtime ──────────────────
-               # The runner records one `worker` row per file. The counter-factual is the
-               # runner this replaced, which ran each file on every tier and recorded a row
-               # per tier.
+               # ── Scenario 1: a form runs on every tier the build carries ───────────────
+               # One row per tier, and the run names the tiers it probed. The
+               # counter-factual is a runner that runs each file once, on the build's
+               # runtime, and records one row.
                (eprintln "scenario: pass")
                (let [r (run-test "pass" @[(fixture "pass.lisp")])]
                  (assert (= r:exit 0)
@@ -60,13 +83,19 @@
                                  " — stderr: " r:err))
                  (let [res (select-results r:db "pass.lisp"
                        "result.tier AS tier, result.status AS status")]
-                   (assert (= (length res) 1)
-                           (string "pass: one row per file, got " (length res)))
-                   (let [row (get res 0)]
-                     (assert (= row:tier "worker")
-                             (string "pass: tier " row:tier))
+                   (assert (= (row-tiers res) (tier-list form-tiers))
+                           (string "pass: one row per tier "
+                                   (tier-list form-tiers) ", got "
+                                   (row-tiers res)))
+                   (each row res
                      (assert (= row:status "pass")
-                             (string "pass: status " row:status)))))
+                             (string "pass: tier " row:tier " status "
+                                     row:status))))
+                 (let [run (rows r:db "SELECT tiers FROM run")]
+                   (assert (= (tier-list (string/split (get (get run 0) :tiers)
+                              ",")) (tier-list form-tiers))
+                           (string "pass: run.tiers is "
+                                   (get (get run 0) :tiers)))))
 
                # ── Scenario 2: a failing form — status, signal, and assert-macro payload ─
                (eprintln "scenario: fail + assert payload")
@@ -78,9 +107,16 @@
                                "result.signal AS signal, "
                                "result.syntax AS syntax, "
                                "result.expected AS expected, "
-                               "result.actual AS actual, " "form.label AS label"))]
-                   (assert (= (length res) 1) "fail: expected one result row")
-                   (let [row (get res 0)]
+                               "result.actual AS actual, "
+                               "form.label AS label, " "result.tier AS tier"))]
+                   (assert (= (row-tiers res) (tier-list form-tiers))
+                           (string "fail: one row per tier, got "
+                                   (row-tiers res)))
+                   (each row res
+                     (assert (= row:status "fail")
+                             (string "fail: tier " row:tier " status="
+                                     row:status)))
+                   (let [row (get (filter (fn [row] (= row:tier "vm")) res) 0)]
                      (assert (= row:status "fail")
                              (string "fail: status=" row:status))
                      (assert (= row:signal ":failed-assertion")
@@ -108,13 +144,55 @@
                        (string "result.tier AS tier, "
                                "result.status AS status, "
                                "result.reason AS reason"))]
-                   (assert (= (length res) 1)
-                           (string "gated: one row, got " (length res)))
-                   (let [row (get res 0)]
+                   (assert (= (row-tiers res) (tier-list form-tiers))
+                           (string "gated: one row per tier, got "
+                                   (row-tiers res)))
+                   (each row res
                      (assert (= row:status "skip")
-                             (string "gated: status " row:status))
+                             (string "gated: tier " row:tier " status "
+                                     row:status))
                      (assert (= row:reason "needs a widget")
-                             (string "gated: reason=" row:reason)))))
+                             (string "gated: tier " row:tier " reason="
+                                     row:reason)))))
+
+               # ── Scenario 3b: tiers that disagree record a `diverge` row ────────────────
+               # diverge.lisp returns a value that names its tier. Each tier's row passes,
+               # and one more row on tier `*` records the disagreement, renders each
+               # tier's value, and fails the run. A build with no JIT has no second value
+               # to disagree with. The counter-factual is a runner that compares nothing,
+               # which reports this run green.
+               (eprintln "scenario: divergence")
+               (let [r (run-test "diverge" @[(fixture "diverge.lisp")])
+                     res (select-results r:db "diverge.lisp"
+                     (string "result.tier AS tier, " "result.status AS status, "
+                             "result.reason AS reason"))
+                     diverged (filter (fn [row] (= row:status "diverge")) res)]
+                 (if jit?
+                   (begin
+                     (assert (not (= r:exit 0))
+                             (string "diverge: a divergence gates the run; exit "
+                                     r:exit))
+                     (assert (= (length diverged) 1)
+                             (string "diverge: expected one diverge row, got "
+                                     (length diverged)))
+                     (let [row (get diverged 0)]
+                       (assert (= row:tier "*")
+                               (string "diverge: the row is on tier *, got "
+                                       row:tier))
+                       (assert (string/contains? row:reason "vm=vm-value")
+                               (string "diverge: reason=" row:reason))
+                       (assert (string/contains? row:reason "jit=jit-value")
+                               (string "diverge: reason=" row:reason)))
+                     (let [run (rows r:db "SELECT n_diverge AS d FROM run")]
+                       (assert (= (get (get run 0) :d) 1)
+                               (string "diverge: run.n_diverge is "
+                                       (get (get run 0) :d)))))
+                   (begin
+                     (assert (= r:exit 0)
+                             (string "diverge: one tier cannot disagree; exit "
+                                     r:exit " — stderr: " r:err))
+                     (assert (empty? diverged)
+                             "diverge: one tier recorded a divergence"))))
 
                # ── Scenario 4: ad-hoc `-e` form persists in the session as origin=:adhoc ─
                (eprintln "scenario: ad-hoc persistence")
@@ -160,7 +238,8 @@
                # multi.lisp is the counter-factual for per-form slicing, which hoisted
                # `def`/`var` ahead of the bare-expression forms so `(def snap (get cell 0))`
                # ran before the `(put cell 0 …)` write and read pre-write garbage. As one
-               # thunk the write precedes the read, and the file is one form with one row.
+               # thunk the write precedes the read, and the file is one form with a row per
+               # JIT policy.
                (eprintln "scenario: multi-form whole-file (ordered)")
                (let [r (run-test "multi" @[(fixture "multi.lisp")])]
                  (assert (= r:exit 0)
@@ -175,11 +254,10 @@
                  (let [res (select-results r:db "multi.lisp"
                        (string "result.tier AS tier, "
                                "result.status AS status, " "form.label AS label"))]
-                   (assert (= (length res) 1)
-                           (string "multi: one row, got " (length res)))
-                   (let [row (get res 0)]
-                     (assert (= row:tier "worker")
-                             (string "multi: tier " row:tier))
+                   (assert (= (row-tiers res) (tier-list script-tiers))
+                           (string "multi: one row per JIT policy, got "
+                                   (row-tiers res)))
+                   (each row res
                      (assert (= row:status "pass")
                              (string "multi: expected pass, got " row:status
                                      " (per-form slicing reorders read before write)"))
@@ -197,11 +275,12 @@
                                  r:exit " — stderr: " r:err))
                  (let [res (select-results r:db "atomic.lisp"
                        (string "result.status AS status, "
-                               "result.signal AS signal, " "form.label AS label"))]
-                   (assert (= (length res) 1)
-                           (string "atomic: expected exactly ONE result, got "
-                                   (length res)))
-                   (let [row (get res 0)]
+                               "result.signal AS signal, "
+                               "form.label AS label, " "result.tier AS tier"))]
+                   (assert (= (row-tiers res) (tier-list script-tiers))
+                           (string "atomic: one result per JIT policy, got "
+                                   (row-tiers res)))
+                   (each row res
                      (assert (= row:status "fail")
                              (string "atomic: expected fail, got " row:status))
                      (assert (= row:signal ":failed-assertion")
@@ -211,21 +290,24 @@
                              (string "atomic: label is the FIRST assert message, got "
                                      row:label)))))
 
-               # ── Scenario 6c: the runner sets no JIT policy ─────────────────────────────
-               # policy.lisp asserts that `(vm/config :jit)` reads the build's default. A
-               # runner that forced the JIT off or made it eager would read nil or 0, and
-               # the file fails.
-               (eprintln "scenario: the runner sets no JIT policy")
+               # ── Scenario 6c: the runner sets each JIT policy it records ────────────────
+               # policy.lisp asserts that `(vm/config :jit)` reads nil or 0. A runner that
+               # labelled its rows `vm` and `jit` without setting the policy leaves the
+               # build's threshold, and the file fails under both.
+               (eprintln "scenario: whole-file per-policy sets the JIT policy")
                (let [r (run-test "policy" @[(fixture "policy.lisp")])]
                  (assert (= r:exit 0)
-                         (string "policy: the file runs under the build's own policy; exit="
+                         (string "policy: the file observes the policy the runner set; exit="
                                  r:exit " stderr: " r:err))
                  (let [res (select-results r:db "policy.lisp"
-                       "result.status AS status")]
-                   (assert (= (length res) 1)
-                           (string "policy: one row, got " (length res)))
-                   (assert (= (get (get res 0) :status) "pass")
-                           "policy: expected pass")))
+                       "result.tier AS tier, result.status AS status")]
+                   (assert (= (row-tiers res) (tier-list script-tiers))
+                           (string "policy: one row per JIT policy, got "
+                                   (row-tiers res)))
+                   (each row res
+                     (assert (= row:status "pass")
+                             (string "policy: tier " row:tier " status "
+                                     row:status)))))
 
                # ── Scenario 7: a file that won't compile is one file-level failure ───────
                (eprintln "scenario: compile error is file-level")
@@ -285,11 +367,11 @@
                                    "JOIN result ON result.id = asset.result_id "
                                    "JOIN form ON form.hash = result.form_hash "
                                    "WHERE form.file LIKE '%print.lisp' "
-                                   "AND result.tier = 'worker' "
+                                   "AND result.tier = 'vm' "
                                    "AND asset.kind = '" kind "' LIMIT 1"))]
                      (assert (> (length res) 0)
                              (string "print: expected a '" kind
-                                     "' asset on the worker row"))
+                                     "' asset on the vm row"))
                      (let [row (get res 0)
                            cas (path/join dir "cas" row:hash)]
                        (assert (= row:codec "zstd")
@@ -337,11 +419,11 @@
                  (let [res (select-results r:db "gated-setup.lisp"
                        (string "result.status AS status, "
                                "result.reason AS reason, "
-                               "form.form_index AS idx"))]
-                   (assert (= (length res) 1)
-                           (string "gated-setup: expected one row, got "
-                                   (length res)))
-                   (let [row (get res 0)]
+                               "form.form_index AS idx, " "result.tier AS tier"))]
+                   (assert (= (row-tiers res) (tier-list script-tiers))
+                           (string "gated-setup: one row per JIT policy, got "
+                                   (row-tiers res)))
+                   (each row res
                      (assert (= row:status "skip")
                              (string "gated-setup: expected skip, got "
                                      row:status))
