@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 // The runner reads every heap gauge on its own heap and on its test code's heaps, per file.
 //
 // docs/test-gauges.md
@@ -55,13 +55,31 @@ const KINDS: &[&str] = &[
 /// owned subtree, and the container's release frees it.
 const ADOPTS: &str = "(let [c (@array)]\n  (push c (array 1 2))\n  (length c))\n";
 
+/// A two-form file whose shared setup gates: it runs as one whole-file form,
+/// and the gate ends each policy's run before the assert.
+const GATED: &str = "(def ok (gate! false \"an absent dependency\" true))\n\
+                     (assert ok \"never reached\")\n";
+
+/// A file that fails to compile: the name it calls is bound nowhere.
+const UNCOMPILED: &str = "(bound-nowhere 1)\n(assert true \"never reached\")\n";
+
 /// Run `elle test` over `files` (name, source) in one process, with `extra`
-/// flags. Returns the runner's own stderr, the session DB, and the scratch dir
-/// that owns both.
+/// flags, and require the run to gate green. Returns the runner's own stderr,
+/// the session DB, and the scratch dir that owns both.
 fn run_files(
     tag: &str,
     files: &[(&str, &str)],
     extra: &[&str],
+) -> (String, std::path::PathBuf, crate::common::ScratchDir) {
+    run_files_gating(tag, files, extra, true)
+}
+
+/// `run_files`, requiring the run to gate green when `green` and red otherwise.
+fn run_files_gating(
+    tag: &str,
+    files: &[(&str, &str)],
+    extra: &[&str],
+    green: bool,
 ) -> (String, std::path::PathBuf, crate::common::ScratchDir) {
     let dir = crate::common::ScratchDir::new(tag);
     let db = dir.join("s.db");
@@ -81,9 +99,11 @@ fn run_files(
         .env_remove("RUST_MIN_STACK")
         .output()
         .expect("run elle test");
-    assert!(
+    assert_eq!(
         out.status.success(),
-        "a corpus of passing forms must gate green; stderr:\n{}",
+        green,
+        "the run must gate {}; stderr:\n{}",
+        if green { "green" } else { "red" },
         String::from_utf8_lossy(&out.stderr)
     );
     (String::from_utf8_lossy(&out.stderr).into_owned(), db, dir)
@@ -264,6 +284,61 @@ fn an_isolated_file_records_no_test_heap_rows() {
     assert!(
         rows.contains(&format!(":runner {}", KINDS.len())) && rows.contains(":test 0"),
         "an isolated file wants one runner row per gauge and no test row, got:\n{rows}"
+    );
+}
+
+/// A file's shared setup runs inside its whole-file form, so a gate there ends
+/// a run the worker's readings already bracket: a skip, and the test rows.
+///
+/// The counter-factual: a runner that took a gate for a form that never ran
+/// would drop these readings, and the file would read as never measured.
+#[test]
+fn a_file_that_gates_in_its_shared_setup_records_its_test_heap_rows() {
+    let (_stderr, db, _dir) = run_files("gauge-gated", &[("gated.lisp", GATED)], &[]);
+
+    let results = query(
+        &db,
+        "SELECT sum(CASE WHEN status = 'skip' THEN 1 ELSE 0 END) AS skips, \
+         sum(CASE WHEN status = 'skip' THEN 0 ELSE 1 END) AS others \
+         FROM result WHERE run_id = (SELECT max(id) FROM run)",
+    );
+    assert!(
+        results.contains(":others 0") && !results.contains(":skips 0"),
+        "the gate must skip the whole-file form under every policy, got:\n{results}"
+    );
+    let rows = rows_per_kind(&db, "test");
+    for kind in KINDS {
+        assert!(
+            rows.contains(&format!(":kind \"{kind}\"")),
+            "the gated file wants a test-heap row on the {kind} gauge, got:\n{rows}"
+        );
+    }
+    assert_eq!(
+        rows.matches(":n 1").count(),
+        KINDS.len(),
+        "the gated file wants one test-heap row per gauge, got:\n{rows}"
+    );
+}
+
+/// A file that fails to compile runs no form, so no worker read its heap.
+#[test]
+fn a_file_that_fails_to_compile_records_no_test_heap_rows() {
+    let (_stderr, db, _dir) = run_files_gating(
+        "gauge-uncompiled",
+        &[("uncompiled.lisp", UNCOMPILED)],
+        &[],
+        false,
+    );
+
+    let rows = query(
+        &db,
+        "SELECT sum(CASE WHEN heap = 'runner' THEN 1 ELSE 0 END) AS runner, \
+         sum(CASE WHEN heap = 'test' THEN 1 ELSE 0 END) AS test \
+         FROM gauge WHERE run_id = (SELECT max(id) FROM run)",
+    );
+    assert!(
+        rows.contains(&format!(":runner {}", KINDS.len())) && rows.contains(":test 0"),
+        "a file that fails to compile wants runner rows and no test row, got:\n{rows}"
     );
 }
 
