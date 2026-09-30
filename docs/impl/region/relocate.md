@@ -424,8 +424,6 @@ An **owned** call (`own_params = true`, the ordinary non-tail call) is not this
 case at all: the caller keeps its reference and releases it at the argument's own
 last use, so releasing here would over-free.
 
-[tests/impl/region-collector-arg-move.lisp](../../../tests/impl/region-collector-arg-move.lisp)
-reads the rate for each collector kind against a positional-parameter control,
-and [tests/ledger/region-collector-arg-move.lisp](../../../tests/ledger/region-collector-arg-move.lisp)
-pins each one.
+[tests/impl/region-collector-arg-move.lisp](../../../tests/impl/region-collector-arg-move.lisp) pins the rate for each collector kind
+against a positional-parameter control.
 

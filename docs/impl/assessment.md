@@ -78,15 +78,11 @@ of its own. A block-local accumulator is not genuine growth — it frees at the
 block's return; only a module-level sink is.
 
 **The h2 per-request rate reads zero.**
-[h2-stress-scoped.lisp](../../tests/impl/h2-stress-scoped.lisp) reads it at
-two request counts, and
-[tests/ledger/h2-stress-scoped.lisp](../../tests/ledger/h2-stress-scoped.lisp)
-pins each reading at 0; the merge-inherits-its-entry and break-relocation
+[h2-stress-scoped.lisp](../../tests/impl/h2-stress-scoped.lisp) pins it at
+two request counts; the merge-inherits-its-entry and break-relocation
 mechanisms keep it there ([region/replicate.md](region/replicate.md)). The
 subject stays live even at zero, and without a dashboard probe: it is where
-the last measured defects on this mechanism came from, and the instrument's
-live-growth rows are what say a green pin is the loop reclaiming rather than
-the gauge dying.
+the last measured defects on this mechanism came from.
 
 **Direct gauges live outside the dashboards**, all of the ledger's own kind:
 [region-error-unwind.lisp](../../tests/impl/region-error-unwind.lisp) (the error exit's release tables),

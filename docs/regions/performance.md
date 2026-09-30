@@ -61,11 +61,8 @@ VM instruction and claims none.
 That is the price of the wrapper's polymorphism, its runtime type checks, and
 its `:error` signal — and it is the reason
 [docs/intrinsics.md](../intrinsics.md) tells you to reach for `%add` in a hot
-loop and for `+` everywhere else.
-[region-page-recycle.lisp](../../tests/impl/region-page-recycle.lisp) reads
-the per-call page count and
-[tests/ledger/region-page-recycle.lisp](../../tests/ledger/region-page-recycle.lisp)
-pins it, so the number above is measured rather than asserted.
+loop and for `+` everywhere else. [region-page-recycle.lisp](../../tests/impl/region-page-recycle.lisp) pins
+the per-call page count, so the number above is measured rather than asserted.
 
 ## Passing arguments costs one pass over them
 

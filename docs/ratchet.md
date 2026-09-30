@@ -8,8 +8,8 @@ judges, records and re-pins; nothing else carries a number.
 This document is the specification. The instrument, the ledger and the
 direct-run gate are built, as [the guide](../lib/ratchet.md) shows, and so is
 the runner's side: the rows, the `missing` gate, the summary and `--repin`.
-The two leak dashboards and the first four residue tests are producers with
-ledgers of their own. Every producer past those is proposed.
+A producer is on the ratchet when `tests/ledger` holds a file for it. The
+producers under § The producers are proposed.
 
 ## What a ratchet is
 
@@ -19,38 +19,11 @@ ceiling on the objects a request leaves behind. A canary pins the allocations a
 loop makes. Each pin is the reading the tree gave on the day somebody accepted
 it, and a change that moves the reading the wrong way fails.
 
-Six producers are on the ratchet: the leak dashboards
-[oracle.lisp](../tests/impl/oracle.lisp) and
-[plumb.lisp](../tests/impl/plumb.lisp), over
-[tests/ledger/oracle.lisp](../tests/ledger/oracle.lisp) and
-[tests/ledger/plumb.lisp](../tests/ledger/plumb.lisp), and the residue tests
-[h2-stress-scoped.lisp](../tests/impl/h2-stress-scoped.lisp),
-[region-page-recycle.lisp](../tests/impl/region-page-recycle.lisp),
-[region-macro-id-recycle.lisp](../tests/impl/region-macro-id-recycle.lisp)
-and
-[region-collector-arg-move.lisp](../tests/impl/region-collector-arg-move.lisp),
-over
-[tests/ledger/h2-stress-scoped.lisp](../tests/ledger/h2-stress-scoped.lisp),
-[tests/ledger/region-page-recycle.lisp](../tests/ledger/region-page-recycle.lisp),
-[tests/ledger/region-macro-id-recycle.lisp](../tests/ledger/region-macro-id-recycle.lisp)
-and
-[tests/ledger/region-collector-arg-move.lisp](../tests/ledger/region-collector-arg-move.lisp).
-The tree still holds the pattern by hand in at least five places:
-
-- [resource.lisp](../tests/impl/resource.lisp), with a canary and a ceiling
-  per scenario.
-- [gauge.rs](../src/wasm/tests/gauge.rs) under the WASM tier, and the
-  shrink-only pins in the guardfree fixtures.
-- The runner's own heap gauges ([test-store](test-store.md) § The runner's
-  own gauges), recorded per file and pinned nowhere.
-- [The audit queue](impl/audit.md), whose count of unstamped files should only
-  fall and which nothing holds to that.
-
-Three more are wanted: a bound on what the runner costs itself per file, a
-bound on what `valgrind` reports for a fixed set of programs, and the audit
-counts above.
-
 ## What the copies get wrong
+
+A ratchet written by hand is a pin as a literal in the test, a window helper
+beside it, and a "shrink-only" comment over both. Every such copy gets the
+same four things wrong.
 
 **The bound is prose.** A pin is a literal in a source file, and "shrink-only"
 is a comment beside it. Nothing fails when a pin is raised. Lowering one is a
@@ -317,56 +290,11 @@ ends with `report` and no other assertion.
 
 ## The producers
 
-**The dashboards.** [oracle.lisp](../tests/impl/oracle.lisp) and
-[plumb.lisp](../tests/impl/plumb.lisp) are producers over
-[tests/ledger/oracle.lisp](../tests/ledger/oracle.lisp) and
-[tests/ledger/plumb.lisp](../tests/ledger/plumb.lisp). Each holds its probe
-families and nothing else: a row table is `[label probe]`, each family drives
-its rows through `rate` or `drive`, and the rate a row is held to is its
-ledger row. A control is a row with no class, and the root a regression of it
-would reopen rides the row as `:root`. Which probes read the region gauge
-beside the object count is the drive's `:on`, and the ledger's `:regions`
-rows hold it there: a drive that drops the second gauge leaves a `missing`
-row, and one that adds it an `unledgered` reading. The instrument's
-live-growth rows are the discriminators, the oracle's sub-integer self-test
-is a growth floor of its own, and the over-free counter is one `read` pinned
-at 0. [Assessment](impl/assessment.md) reads the burndown from the ledgers:
-the `:class :defect` rows, of which both hold none.
-
-**The residue tests.** Each corpus file with a window and a ceiling replaces
-its helper with `delta` or `rate` and its ceiling with a ledger pin, and gains
-a history and a discriminator it no longer writes: the instrument's
-live-growth row is the gauge-live gate each file wrote by hand. The
-implementation suite runs each file as an isolated child of the rig, plain
-and with the JIT eager, so each subject lands twice per run against one row,
-and the thread-pool and MLIR builds run it on their rigs too. A subject that
-reads differently on one of those is a tiered row.
-
-- [h2-stress-scoped.lisp](../tests/impl/h2-stress-scoped.lisp) drives the
-  sequential request loop through `delta` at two request counts, on the object
-  and the region count. A residue that grows faster than the request count
-  reads differently at the two, and a one-off reads as a fraction that
-  shrinks with the count. Its ledger pins all four readings at 0.
-- [region-page-recycle.lisp](../tests/impl/region-page-recycle.lisp) drives
-  each call shape through `rate` on the page gauge, and the `(+ a b)` shape on
-  the byte gauge as well, the reading that says a loop's pages are recycled
-  rather than accumulated. The estimator's discarded first block is the
-  warm-up the file's window helper ran by hand. Its ledger pins the page count
-  each shape claims per call, and the byte growth at 0.
-- [region-macro-id-recycle.lisp](../tests/impl/region-macro-id-recycle.lisp)
-  drives each expansion through `rate` on the id gauge, and the all-atom
-  `when` on the object and the region count as well: the dimension the file
-  says those two gauges cannot see, read in the one drive. The settling cost
-  its `settle` ceiling allowed for lands in the estimator's discarded first
-  block, or in the interval of a rate it barely moves. Every pin is 0.
-- [region-collector-arg-move.lisp](../tests/impl/region-collector-arg-move.lisp)
-  drives each collector shape through `rate` on the object and the region
-  count, with the B-invariance check standing in for the two counts the file
-  drove by hand: a residue that is not a per-call rate voids the row instead
-  of fitting under a ceiling. The aliased shapes pin at 1 per call, the
-  reference the declined release leaves standing; every other shape pins at
-  0; and the callee that keeps what it collects is a growth floor, the
-  collector path's own proof that the gauges see it.
+The producers proposed here are the ones the design has to specify because
+nothing else does: each reads a number no test reads today. A test that
+already measures joins the ratchet by importing the instrument and committing
+its ledger, and needs no paragraph here; what it reads is that test's header,
+and why its rows are what they are is its ledger's comments.
 
 **The runner**, as above.
 
@@ -408,9 +336,12 @@ is one pull request. The first four are in.
    already say. The counter-factual is the dashboards' own: every row reads
    what it read before the move.
 5. **The residue tests, the runner's own gauges, the audit queue, valgrind.**
-   One producer per pull request, each with its ledger. The counter-factual is
-   the ledger itself: committed ahead of the producer, every row of it is
-   `missing` until the producer reads it.
+   One producer per pull request, each with its ledger. A residue test
+   replaces its window helper with `rate` or `delta`, its ceiling with a row,
+   and its gauge-live gate with the instrument's live-growth row; a gauge it
+   kept for its own sake is a growth floor. The counter-factual is the ledger
+   itself: committed ahead of the producer, every row of it is `missing` until
+   the producer reads it.
 
 ## Decisions this document takes
 
