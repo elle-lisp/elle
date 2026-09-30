@@ -14,7 +14,7 @@ run records.
 ## The gauges
 
 A gauge is a primitive that answers one integer for the heap it runs on. Every
-one is Immediate ([diagnostics](impl/region/diagnostics.md)), so a reading
+one is Immediate ([diagnostics](impl/region/diagnostics.md)), so a call
 allocates nothing and cannot move the number it reports. The runner reads these,
 in this order:
 
@@ -53,8 +53,8 @@ The runner reads the same gauges on two heaps. The `heap` column of each
   file: the compile, the syntax it holds, and the rows it writes.
 - `test` — the heaps the test code runs on. Every worker thread has its own VM
   and its own heap, so the runner cannot read one from outside. Instead each
-  worker reads every gauge right before its form's tiered call and right after
-  it, and hands the differences back with the form's result.
+  worker reads every gauge around its form's tiered call, and hands the
+  readings back with the form's result.
 
 A store written before the `heap` column existed gains it by `ALTER TABLE`. Its
 rows read NULL there, which means `runner`: every row it holds was the
@@ -72,13 +72,22 @@ file. Read back, the chain is exact: a file's `reading` plus the next file's
 ### The test heap: a difference per run, summed per file
 
 A worker's readings bracket one run of one form on one tier, and nothing else.
-The worker's own start and its scheduler fall outside them. The runner adds the
-differences of every run of a file's forms, on every tier. It then writes one
-`test` row per gauge for the file, with the sum as `delta` and NULL as
-`reading`. A worker heap lives for one run, so a reading of it has nothing to
-chain to.
+The worker's own start and its scheduler fall outside them.
 
-Some runs hand back no difference, and a file records only what came back:
+A reading is a loop in Elle, and the loop allocates. Between two readings of one
+gauge lie the rest of the first loop and the start of the second, which together
+cost one whole reading. So the worker reads three times: twice in a row, then
+the call, then once more. Every reading costs the same, so the first pair
+measures that cost. The runner charges the run the second difference less the
+first. The runner computes the differences, so after the call the worker only
+reads.
+
+The runner adds the charges of every run of a file's forms, on every tier. It
+then writes one `test` row per gauge for the file, with the sum as `delta` and
+NULL as `reading`. A worker heap lives for one run, so a reading of it has
+nothing to chain to.
+
+Some runs hand back no readings, and a file records only what came back:
 
 - A run that misses its deadline hands back nothing. The runner abandons the
   worker, and its readings with it.
