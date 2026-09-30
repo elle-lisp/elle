@@ -1,6 +1,6 @@
 # The test runner's heap gauges
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 What each file of an `elle test` run cost the runner's own heap, and the heaps its test code ran on.
 
@@ -58,8 +58,8 @@ The runner reads the same gauges on two heaps. The `heap` column of each
   file: the compile, the syntax it holds, and the rows it writes.
 - `test` — the heaps the test code runs on. Every worker thread has its own VM
   and its own heap, so the runner cannot read one from outside. Instead each
-  worker reads every gauge around its form's tiered call, and hands the
-  readings back with the form's result.
+  worker reads every gauge around its run of the form, and hands the readings
+  back with the form's result.
 
 A store written before the `heap` column existed gains it by `ALTER TABLE`. Its
 rows read NULL there, which means `runner`: every row it holds was the
@@ -98,13 +98,18 @@ Some runs hand back no readings, and a file records only what came back:
   worker, and its readings with it.
 - A file run under `--isolate` records no `test` row at all. The child is a
   separate process, and its heap ends with it.
-- A file that fails to compile, or that gates in its shared setup, runs no form
-  and records no `test` row.
+- A file that fails to compile runs no form and records no `test` row.
 
-A form whose closure cannot be sent to a worker runs in the runner's own
-process instead ([test-runner](test-runner.md)). Its readings still bracket the
-form alone, so they land in the `test` rows. The runner's window for that file
-contains them too.
+A file whose shared setup gates is measured like any other. Its setup runs
+inside its whole-file form, under each JIT policy ([test-runner](test-runner.md)),
+so the gate ends a run the worker's readings already bracket. The file records
+a `skip` per policy and its `test` rows.
+
+A form that cannot cross to a worker, or whose value cannot cross back, runs in
+the runner's own process instead ([test-runner](test-runner.md)). A worker run
+whose value could not come back hands back nothing. The run in the runner's
+process still brackets the form alone, so its readings land in the `test` rows.
+The runner's window for that file contains them too.
 
 So a file with no `test` rows was not measured, and a `test` row that reads 0
 was measured and did not move.
