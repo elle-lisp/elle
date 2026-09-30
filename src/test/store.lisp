@@ -275,14 +275,14 @@
 
 # ── the heap gauges (docs/test-gauges.md) ──────────────────────────
 # Every gauge the runner reads, as [kind reader]. Each primitive is Immediate,
-# so a reading allocates nothing and cannot move the number it reports. One
-# list, because the runner's sampling, the workers' readings and the growers
-# query in the views all have to agree about which gauges there are.
+# so a call allocates nothing and cannot move the number it reports. One list,
+# because the runner's sampling, the workers' readings and the growers query in
+# the views all have to agree about which gauges there are.
 #
 # The runner reads them on two heaps. Its own heap sees what it does per file:
 # the compile, the syntax it holds, and the rows it writes. A worker thread has
 # its own VM and heap, so each worker reads the same list around its form's
-# tiered call and hands back the differences (gauges-around).
+# tiered call and hands back the readings (gauges-around).
 (def heap-gauges
   [["objects" (fn [] (arena/count))] ["regions" (fn [] (arena/region-count))]
    ["pages" (fn [] (arena/page-claims))]
@@ -312,43 +312,52 @@
     prev))
 
 # ── a worker's readings: the test heap ───────────────────────────────
-# A reading lands in slots allocated before it, one per gauge, so the reading
-# itself allocates nothing its own numbers would include. The two readings run
-# the same code, so whatever that code leaves live shows in both and cancels.
+# Every reading lands in slots allocated before the first, one per gauge. The
+# reading loop still costs something, and the same every time, so a reading
+# taken right after another measures that cost (gauge-charge). The counter is
+# `%add`: the `+` wrapper allocates its arguments on every call.
 (defn gauge-slots []
   (let [@slots @[]]
     (each g in heap-gauges
       (push slots 0))
     slots))
 
-(defn read-gauges-at [slots i]
-  (when (< i (length heap-gauges))
-    (put slots i ((get (get heap-gauges i) 1)))
-    (read-gauges-at slots (+ i 1))))
+(defn read-gauges [slots]
+  (var i 0)
+  (each g in heap-gauges
+    (put slots i ((get g 1)))
+    (assign i (%add i 1))))
 
 (defn gauges-around [thunk]
-  "Call THUNK and answer [its-value differences]: each gauge's change across
-   the call, in list order."
-  (let [before (gauge-slots)
+  "Call THUNK and answer [its-value readings]. READINGS are three readings of
+   every gauge: two back to back before the call, then one after it. The
+   worker computes nothing after the call; the runner does (gauge-charge)."
+  (let [warm (gauge-slots)
+        before (gauge-slots)
         after (gauge-slots)]
-    (read-gauges-at before 0)
+    (read-gauges warm)
+    (read-gauges before)
     (let [v (thunk)]
-      (read-gauges-at after 0)
-      [v
-       (map (fn [i] (- (get after i) (get before i)))
-            (->list (range (length heap-gauges))))])))
+      (read-gauges after)
+      [v [warm before after]])))
+
+(defn gauge-charge [readings i]
+  "What the call cost gauge I: its change across the call, less the change a
+   reading alone makes."
+  (let [[warm before after] readings]
+    (- (- (get after i) (get before i)) (- (get before i) (get warm i)))))
 
 # The test heap's sums for the file in hand, one per gauge in list order, or
 # nil while no run of the file has handed any back. A file whose runs all came
 # back empty records no test rows, which says it was not measured.
 (def @test-gauge-sums nil)
 
-(defn add-test-gauges [diffs]
-  "Add one run's differences to the file's sums."
+(defn add-test-gauges [readings]
+  "Add one run's charges to the file's sums."
   (when (= test-gauge-sums nil) (assign test-gauge-sums (gauge-slots)))
   (var i 0)
-  (each d in diffs
-    (put test-gauge-sums i (+ (get test-gauge-sums i) d))
+  (each g in heap-gauges
+    (put test-gauge-sums i (+ (get test-gauge-sums i) (gauge-charge readings i)))
     (assign i (+ i 1))))
 
 (defn test-gauge-mark [conn run-id file]

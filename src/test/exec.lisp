@@ -86,20 +86,20 @@
 # stderr] back through os/join.
 #
 # Run the tiered call with *stdout*/*stderr* rebound to temp files, returning
-# {:result [ok? payload] :stdout S :stderr S :cpu-us N :gauges DIFFS}. DIFFS is
-# each heap gauge's change across the tiered call alone (docs/test-gauges.md),
-# so the CPU clock reads outside the gauges' window. Assumes a scheduler is
-# running (port I/O yields): the worker supplies its own via ev/run; the
-# in-process fallback relies on the runner's top-level ev/run.
+# {:result [ok? payload] :stdout S :stderr S :cpu-us N :gauges READINGS}.
+# READINGS are the heap gauges read around the tiered call alone
+# (gauges-around), so the CPU clock reads outside the gauges' window. Assumes a
+# scheduler is running (port I/O yields): the worker supplies its own via
+# ev/run; the in-process fallback relies on the runner's top-level ev/run.
 (defn capture-run [tier thunk out-path err-path]
   (let [op (port/open out-path :write)
         ep (port/open err-path :write)]
     (sys/trap-exit! true)
     (let [t0 (clock/cpu)
-          [v diffs] (parameterize ((*stdout* op)
-                                   (*stderr* ep))
-                      (gauges-around (fn []
-                                       (protect (compile/run-on tier thunk)))))
+          [v readings] (parameterize ((*stdout* op)
+                                      (*stderr* ep))
+                         (gauges-around (fn []
+                                          (protect (compile/run-on tier thunk)))))
           cpu (cpu-us-since t0)]
       (sys/trap-exit! false)
       (port/close op)
@@ -108,7 +108,7 @@
             se (slurp err-path)]
         (file/delete out-path)
         (file/delete err-path)
-        (struct :result v :stdout so :stderr se :cpu-us cpu :gauges diffs)))))
+        (struct :result v :stdout so :stderr se :cpu-us cpu :gauges readings)))))
 
 (defn last-output-line [text]
   "The last non-empty line of `text`, or nil when it has none. Long lines are
@@ -284,10 +284,10 @@
                  ep (port/open err-path :write)]
              (sys/trap-exit! true)
              (let [t0 (clock/cpu)
-                   [v diffs] (parameterize ((out-param op)
-                                            (err-param ep))
-                               (gauges-around (fn []
-                                                (protect (join (spawn thunk))))))
+                   [v readings] (parameterize ((out-param op)
+                                               (err-param ep))
+                                  (gauges-around (fn []
+                                                   (protect (join (spawn thunk))))))
                    cpu (cpu-us-since t0)]
                (sys/trap-exit! false)
                (port/close op)
@@ -297,7 +297,7 @@
                  (file/delete out-path)
                  (file/delete err-path)
                  (struct :result v :stdout so :stderr se :cpu-us cpu
-                         :gauges diffs)))))))
+                         :gauges readings)))))))
 
 # The setting that puts the JIT back where `(vm/config :jit)` read it: nil is
 # off, 0 is eager, and a count is the threshold (JitPolicy::reading in
