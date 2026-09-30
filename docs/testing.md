@@ -410,6 +410,7 @@ name needs no table and no formatting at all — use
 - [docs/test-store.md](test-store.md) — where a run is stored, what it records, and the schema.
 - [docs/test-cli.md](test-cli.md) — why the runner exists, its command line, and what is still design.
 - [docs/test-vision.md](test-vision.md) — the plan that folds every test product into `elle test`.
+- [docs/ratchet.md](ratchet.md) — the design that puts every pinned measurement in one ledger `elle test` judges.
 - [tests/AGENTS.md](../tests/AGENTS.md) — Rust test categories, helpers, fixtures.
 - [docs/analysis/testing.md](analysis/testing.md) — the decision tree.
 - [docs/threads.md](threads.md) — worker threads, `os/spawn`, the scheduler the runner ships into workers.
