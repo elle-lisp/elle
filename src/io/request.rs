@@ -398,15 +398,17 @@ impl IoRequest {
         Self::bounded(ctx, IoOp::PollFd { fd, events }, Value::NIL, bound)
     }
 
-    /// Record the fiber whose park raised this request. Only the park of the
-    /// op that built the request stamps it. A relay parks on the request as
-    /// one of its own arguments and stamps nothing.
+    /// Record the fiber whose park raised this request. Only the fiber whose op
+    /// built the request stamps it. A relay parks on the request as one of its
+    /// own arguments and stamps nothing. A host that hands a thunk's park on as
+    /// its own call's park stamps it again, from the same fiber.
     pub(crate) fn stamp_parker(&self, parker: crate::value::WeakFiberHandle) {
-        let first = self.parker.set(parker).is_ok();
-        debug_assert!(
-            first,
-            "an io request is stamped by the one park that built it"
-        );
+        if let Err(parker) = self.parker.set(parker) {
+            debug_assert!(
+                self.parker.get().is_some_and(|first| first.ptr_eq(&parker)),
+                "an io request is stamped by the one fiber whose op built it"
+            );
+        }
     }
 
     /// Whether the park that raised `request`, this request's own value,
