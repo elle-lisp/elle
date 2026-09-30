@@ -3,15 +3,13 @@
 ## sdl/wait-event-timeout gives SDL its seconds as whole milliseconds, rounded up, and refuses a wait SDL cannot count.
 ## lib/sdl3/window.lisp
 ##
-## The conversion lives in std/sdl3/event, which loads without libSDL3, so
-## this file runs wherever FFI does. sdl3-wait.lisp drives a real wait.
+## The conversion lives in std/sdl3/event, which loads on every build, with
+## or without libSDL3 and FFI. sdl3-wait.lisp drives a real wait.
 ##
 ## The counter-factual is a ceiling of seconds × 1000. In binary floating
 ## point, 2.007 × 1000 is 2007.0000000000002, and its ceiling waits 2008 ms.
 
-(def event
-  (let [r (protect ((import "std/sdl3/event")))]
-    (gate! (get r 0) "sdl3-timeout: FFI is unavailable" (get r 1))))
+(def event ((import "std/sdl3/event")))
 
 (defn assert-ms [seconds expected]
   "Assert that a wait of `seconds` is `expected` whole milliseconds."
