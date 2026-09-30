@@ -1,118 +1,109 @@
-(elle/epoch 12)
-## Match Expression Tests
-##
-## Migrated from tests/property/matching.rs (behavioral property tests).
-## Tests wildcard patterns, match in expression position, guards, and or-patterns.
+(elle/epoch 14)
+# audited: 2026-09-30
+# match tries its arms in order and answers the body of the first whose pattern fits: literals, wildcards and bindings.
+# docs/match.md
+#
+# match-structures.lisp covers arrays, lists, pairs and structs, match-guards.lisp
+# the guards, match-or.lisp the or-patterns, and match-reachability.lisp the
+# arms the compiler rejects and the values no arm takes.
 
+# ── Literals match by equality ──────────────────────────────────────
 
-# ============================================================================
-# Wildcard catches all values
-# ============================================================================
+(assert (= (match 5
+             5 "five"
+             _ nil) "five") "an int literal matches an equal int")
+(assert (= (match "hello"
+             "hello" "matched"
+             _ "no") "matched") "a string literal matches an equal string")
+(assert (= (match :foo
+             :foo "matched"
+             _ "no") "matched") "a keyword literal matches the same keyword")
+(assert (= (match :bar
+             :foo "matched"
+             _ "no") "no") "a keyword literal does not match another keyword")
+(assert (= (match nil
+             nil "empty"
+             _ nil) "empty") "the nil pattern matches nil")
+(assert (= (match (list)
+             nil "empty"
+             _ "not-nil") "not-nil")
+        "the nil pattern does not match the empty list")
+(assert (= (match true
+             true :t
+             false :f) :t) "a boolean literal matches true")
+(assert (= (match false
+             true :yes
+             false :no) :no) "a boolean literal matches false")
+(assert (= (match :c
+             :a 1
+             :b 2
+             :c 3
+             :d 4
+             _ 0) 3) "among many literal arms, the equal one answers")
+
+# ── Arms are tried in order ─────────────────────────────────────────
+
+(assert (= (match 5
+             5 :first
+             x :second) :first) "an earlier arm that fits wins over a later one")
+(assert (= (match 1
+             1 "one"
+             2 "two"
+             3 "three"
+             _ nil) "one") "the first arm answers its value")
+(assert (= (match 2
+             1 "one"
+             2 "two"
+             3 "three"
+             _ nil) "two")
+        "a later arm answers when the earlier ones do not fit")
+(assert (= (match 99
+             1 "one"
+             2 "two"
+             _ "other") "other") "the wildcard answers when no literal fits")
+
+# ── Wildcards and bindings ──────────────────────────────────────────
 
 (assert (= (match 42
-             _ :caught) :caught) "wildcard catches positive int")
+             _ :caught) :caught) "the wildcard catches a positive int")
 (assert (= (match -1000
-             _ :caught) :caught) "wildcard catches negative int")
+             _ :caught) :caught) "the wildcard catches a negative int")
 (assert (= (match 0
-             _ :caught) :caught) "wildcard catches zero")
+             _ :caught) :caught) "the wildcard catches zero")
+(assert (= (match "hello"
+             _ "matched") "matched") "the wildcard catches a string")
+(assert (= (match 42
+             x (+ x 1)) 43) "a bare symbol binds the value")
+(assert (= (match 42
+             1 :one
+             x x) 42) "a bare symbol is a catch-all")
 
-# ============================================================================
-# Match result in call position
-# ============================================================================
+# ── The chosen body is an expression ────────────────────────────────
 
+(assert (= (match 10
+             10 (* 2 3)
+             _ nil) 6) "the chosen arm's body is evaluated")
 (assert (= (+ 1
               (match 42
                 42 42
-                _ 0)) 43) "match result in call: exact match")
-(assert (= (+ 1
-              (match 99
-                99 99
-                _ 0)) 100) "match result in call: another exact match")
+                _ 0)) 43) "match answers a value in argument position")
 (assert (= (+ 1
               (match 7
                 7 7
-                _ 0)) 8) "match result in call: small value")
+                _ 0)) 8)
+        "match answers a value in argument position: another value")
 
-# ============================================================================
-# Guard sees binding
-# ============================================================================
-
-(assert (= (match 5
-             x when
-             (> x 0) :pos
-             x when
-             (< x 0) :neg
-             _ :zero) :pos) "guard sees binding: positive")
-(assert (= (match -3
-             x when
-             (> x 0) :pos
-             x when
-             (< x 0) :neg
-             _ :zero) :neg) "guard sees binding: negative")
-(assert (= (match 0
-             x when
-             (> x 0) :pos
-             x when
-             (< x 0) :neg
-             _ :zero) :zero) "guard sees binding: zero")
-
-# ============================================================================
-# Or-pattern membership
-# ============================================================================
-
-(assert (= (match 1
-             (or 1 3 5 7 9) :odd
-             (or 0 2 4 6 8) :even
-             _ :out) :odd) "or-pattern: 1 is odd")
-(assert (= (match 2
-             (or 1 3 5 7 9) :odd
-             (or 0 2 4 6 8) :even
-             _ :out) :even) "or-pattern: 2 is even")
-(assert (= (match 0
-             (or 1 3 5 7 9) :odd
-             (or 0 2 4 6 8) :even
-             _ :out) :even) "or-pattern: 0 is even")
-(assert (= (match 9
-             (or 1 3 5 7 9) :odd
-             (or 0 2 4 6 8) :even
-             _ :out) :odd) "or-pattern: 9 is odd")
-(assert (= (match 4
-             (or 1 3 5 7 9) :odd
-             (or 0 2 4 6 8) :even
-             _ :out) :even) "or-pattern: 4 is even")
-
-# ============================================================================
-# Or-pattern guard retry
-#
-# On a guarded arm, a failed guard retries the remaining alternatives of the
-# same or-pattern, re-binding and re-testing before the match moves on to the
-# next arm (docs/match.md § Guards). The guard here uses `=`, which may
-# suspend, so lowering takes the sequential path — the path that must retry
-# alternatives, not just the decision-tree path.
-# ============================================================================
-
-# alt 1 binds x to the head (:a) and the guard fails; alt 2 retries with x
-# bound to the tail (5) and passes.
-(assert (= (match (pair :a 5)
-             (or (x . _) (_ . x)) when
-             (= x 5) x
-             _ :none) 5) "or-guard retry: second alternative satisfies guard")
-
-# head is the satisfying side: alt 1 passes on the first try, no retry.
-(assert (= (match (pair 5 :b)
-             (or (x . _) (_ . x)) when
-             (= x 5) x
-             _ :none) 5) "or-guard retry: first alternative satisfies guard")
-
-# neither side satisfies the guard: every alternative's guard fails, so the
-# arm is abandoned and the catch-all runs.
-(assert (= (match (pair 1 2)
-             (or (x . _) (_ . x)) when
-             (= x 5) x
-             _ :none) :none) "or-guard retry: no alternative satisfies guard")
-
-# three alternatives, only the last satisfies the guard.
-(assert (= (match [1 2 7]
-             (or [a _ _] [_ a _] [_ _ a]) when
-             (= a 7) a
-             _ :none) 7) "or-guard retry: third alternative satisfies guard")
+# A match inside a loop body answers once per pass. The accumulator is a
+# top-level mutable reassigned on each pass, the shape
+# tests/impl/region-toplevel-mutable-reassign.lisp pins.
+(def @test-result (list))
+(each i (list 1 2 3)
+  (assign
+    test-result
+    (pair (match i
+            1 :one
+            2 :two
+            3 :three
+            _ :other) test-result)))
+(assert (= (reverse test-result) (list :one :two :three))
+        "a match in a loop answers on every pass")

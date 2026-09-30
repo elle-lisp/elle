@@ -1,9 +1,7 @@
-(elle/epoch 12)
-## Match Reachability and No-Match Semantics
-##
-## Unreachable arms — arms the decision tree proves no value can reach —
-## are compile-time errors. A match with no catch-all compiles; an
-## unmatched value raises a runtime :match-error carrying the value.
+(elle/epoch 14)
+# audited: 2026-09-30
+# An arm no value can reach fails to compile, and a value no arm takes raises a :match-error that carries it.
+# docs/match.md
 
 # ============================================================================
 # Unreachable arms are compile-time errors
@@ -166,13 +164,25 @@
   (assert (= (get err :error) :match-error) "single-arm error kind")
   (assert (= (get err :value) 2) "single-arm error carries the value"))
 
-# bool arms on a non-bool scrutinee raise (was the silent-nil hole)
+# a guarded catch-all may end a match: it compiles, and a passing guard answers
+(assert (= (match 42
+             x when
+             (> x 0) :pos) :pos) "a guarded catch-all as the last arm compiles")
+
+# a failed guard on the last arm falls through to :match-error
+(let [[ok? err] (protect (match -1
+                           x when
+                           (> x 0) :pos))]
+  (assert (not ok?) "a failed guard with no arm after it raises")
+  (assert (= (get err :error) :match-error) "the failed-guard error kind"))
+
+# bool arms on a non-bool scrutinee raise
 (let [[ok? err] (protect (match 5
                            true 1
                            false 2))]
   (assert (not ok?) "bool arms on non-bool scrutinee raise")
-  (assert (= (get err :error) :match-error) "bool-hole error kind")
-  (assert (= (get err :value) 5) "bool-hole error carries the value"))
+  (assert (= (get err :error) :match-error) "the bool-arm error kind")
+  (assert (= (get err :value) 5) "the bool-arm error carries the value"))
 
 # structural no-match carries the whole scrutinee
 (let [[ok? err] (protect (match (list 1 2)
