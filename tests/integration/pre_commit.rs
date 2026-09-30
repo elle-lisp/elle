@@ -174,8 +174,14 @@ impl Drop for Repo {
     }
 }
 
-fn stderr(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
+/// What a command wrote, stdout then stderr. `git commit` reports "nothing to
+/// commit" on stdout, and the hook reports a refusal on stderr.
+fn transcript(out: &Output) -> String {
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    )
 }
 
 #[test]
@@ -185,7 +191,11 @@ fn a_plain_commit_stages_the_reformatted_file() {
     r.must(&["add", "f.lisp"]);
 
     let out = r.commit(&[]);
-    assert!(out.status.success(), "the commit failed: {}", stderr(&out));
+    assert!(
+        out.status.success(),
+        "the commit failed: {}",
+        transcript(&out)
+    );
     assert_eq!(r.head("f.lisp"), formatted(UNTIDY));
     assert_ne!(r.head("f.lisp"), UNTIDY, "the fixture must need formatting");
     assert_eq!(r.read("f.lisp"), r.head("f.lisp"));
@@ -201,7 +211,11 @@ fn commit_all_stages_the_reformatted_file() {
     r.write("f.lisp", UNTIDY);
 
     let out = r.commit(&["-a"]);
-    assert!(out.status.success(), "the commit failed: {}", stderr(&out));
+    assert!(
+        out.status.success(),
+        "the commit failed: {}",
+        transcript(&out)
+    );
     assert_eq!(r.head("f.lisp"), formatted(UNTIDY));
     r.assert_index_at_head();
 }
@@ -216,7 +230,11 @@ fn a_plain_commit_migrates_an_older_epoch() {
     r.must(&["add", "f.lisp"]);
 
     let out = r.commit(&[]);
-    assert!(out.status.success(), "the commit failed: {}", stderr(&out));
+    assert!(
+        out.status.success(),
+        "the commit failed: {}",
+        transcript(&out)
+    );
     let head = r.head("f.lisp");
     assert!(
         head.contains("(pair 1 2)") && !head.contains("elle/epoch 9"),
@@ -236,7 +254,11 @@ fn a_partial_commit_of_a_formatted_file_goes_through() {
     r.write("f.lisp", &tidy);
 
     let out = r.commit(&["--", "f.lisp"]);
-    assert!(out.status.success(), "the commit failed: {}", stderr(&out));
+    assert!(
+        out.status.success(),
+        "the commit failed: {}",
+        transcript(&out)
+    );
     assert_eq!(r.head("f.lisp"), tidy);
     r.assert_index_at_head();
 }
@@ -254,9 +276,9 @@ fn a_partial_commit_the_hook_reformats_is_refused_and_formatted_on_disk() {
         "the hook must refuse a partial commit it reformatted"
     );
     assert!(
-        stderr(&out).contains("f.lisp"),
+        transcript(&out).contains("f.lisp"),
         "the refusal names the file: {}",
-        stderr(&out)
+        transcript(&out)
     );
     assert_eq!(r.must(&["rev-parse", "HEAD"]), before, "nothing committed");
     assert_eq!(
@@ -272,7 +294,9 @@ fn a_partial_commit_never_leaves_the_real_index_behind_head() {
     // Running the same commit again takes the file the hook formatted, and
     // the real index agrees with what landed.
     let r = Repo::new("partial-again");
-    r.seed("f.lisp", &formatted(TIDY));
+    // The seed differs from the formatted change, or the second attempt has
+    // nothing to commit.
+    r.seed("f.lisp", &formatted(OTHER));
     r.write("f.lisp", UNTIDY);
 
     let first = r.commit(&["--", "f.lisp"]);
@@ -283,7 +307,7 @@ fn a_partial_commit_never_leaves_the_real_index_behind_head() {
     assert!(
         second.status.success(),
         "the second attempt commits the formatted file: {}",
-        stderr(&second)
+        transcript(&second)
     );
     assert_eq!(r.head("f.lisp"), formatted(UNTIDY));
     assert_eq!(r.read("f.lisp"), r.head("f.lisp"));
@@ -323,9 +347,9 @@ fn a_partial_commit_refuses_an_index_the_generator_rewrote() {
         "the hook must refuse a partial commit that leaves the regenerated index out"
     );
     assert!(
-        stderr(&out).contains("AGENTS.md"),
+        transcript(&out).contains("AGENTS.md"),
         "the refusal names the index: {}",
-        stderr(&out)
+        transcript(&out)
     );
     r.assert_index_at_head();
 
@@ -333,7 +357,7 @@ fn a_partial_commit_refuses_an_index_the_generator_rewrote() {
     assert!(
         out.status.success(),
         "naming the index commits it: {}",
-        stderr(&out)
+        transcript(&out)
     );
     assert_eq!(r.head("AGENTS.md"), "new\n");
     r.assert_index_at_head();
@@ -353,7 +377,7 @@ fn a_partial_commit_of_an_unformatted_rust_file_is_refused() {
         "src/lib.rs",
         "//! Scratch.\n\n/// One.\npub fn one() -> u32 {\n    1\n}\n",
     );
-    let untidy = "//! Scratch.\n\n/// One.\npub fn one()->u32{ 1 }\n";
+    let untidy = "//! Scratch.\n\n/// Two.\npub fn two()->u32{ 2 }\n";
     r.write("src/lib.rs", untidy);
 
     let out = r.commit(&["--", "src/lib.rs"]);
@@ -368,7 +392,7 @@ fn a_partial_commit_of_an_unformatted_rust_file_is_refused() {
     assert!(
         out.status.success(),
         "the second attempt commits the formatted file: {}",
-        stderr(&out)
+        transcript(&out)
     );
     assert_eq!(r.read("src/lib.rs"), r.head("src/lib.rs"));
     r.assert_index_at_head();
