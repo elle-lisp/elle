@@ -1,6 +1,6 @@
 # The test runner store
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 Where `elle test` keeps a run, what every run and result records, and the
 queries that read them back.
@@ -95,32 +95,29 @@ repeating that import is a no-op as well.
 
 An agent rarely starts with a file; it probes: `elle test -e '(assert (= (foo)
 42))'`. That form runs like any other and is **persisted into the index as an
-ad-hoc form** — same syntax-hash identity, tagged `origin=:adhoc` and stamped
-with the session. For the rest of the session it is part of the suite: a plain
-`elle test` re-runs it, `--rerun-failed` includes it, every query sees it. It is
-*not* in git — it has no file.
+ad-hoc form** — same syntax-hash identity, with `origin` set to `:adhoc`. Every
+query sees it. It is *not* in git — it has no file, so no later run scans it
+again.
 
-When an ad-hoc test earns its keep, `elle test --promote <id> [file]` renders its
-syntax to text and appends it to a `.lisp` file. Now it is durable: in git,
-diffable, distributed, and re-derived as a durable form on the next scan. The
-motion from throwaway probe to permanent regression test is one command, and
-identity is preserved across it because both sides key on the same syntax hash.
+When an ad-hoc test earns its keep, `elle test --promote <hash> <name>` renders
+its syntax into `<corpus>/<name>.lisp`. Now it is durable: in git, diffable,
+distributed, and re-derived as a durable form on the next scan. The motion from
+throwaway probe to permanent regression test is one command, and identity is
+preserved across it because both sides key on the same syntax hash.
 
-Ad-hoc forms vanish when `--prune adhoc` clears them. Either way they are
-ephemeral by construction, while durable forms always re-derive from the
-corpus.
+An ad-hoc form stays in the index until `elle test --reset` removes the whole
+store. Durable forms always re-derive from the corpus.
 
 ### The durable corpus is a flat set, classified by query
 
-Tests are stored **one form per file** — file == test == syntax hash —
+The design stores tests **one form per file** — file == test == syntax hash —
 addressable, with their own blame and history, movable and promotable as atoms.
 There is **no directory hierarchy**, and filesystem order is treated as
 **semantically void**. This is the same argument made twice:
 
-- *Order* is not a property of an isolated test. The runner owns execution order
-  — by hash, by failure-recency, or randomized to surface hidden inter-test
-  coupling — and records the order it used, so an order-dependent failure
-  reproduces. Nothing about sequence belongs in a path.
+- *Order* is not a property of an isolated test. Execution order belongs to the
+  runner — by hash, by failure-recency, or randomized to surface hidden
+  inter-test coupling. Nothing about sequence belongs in a path.
 - *Category* is not single-valued either. A form that does `(chan/send …)`
   inside `(fiber/new …)` while catching a signal is a channel test *and* a fiber
   test *and* a signal test. A directory forces one bucket and discards the rest;
@@ -132,8 +129,8 @@ There is **no directory hierarchy**, and filesystem order is treated as
 What promotion assigns is therefore a **name**, not a **place**: `touches
 chan/send` + the derived label → `bounded-send-full.lisp`. A human *reads* the
 failing test, and that legibility is the one need the index can't derive away —
-order and hierarchy both can. Names are suggested from analysis and confirmed
-with context at promotion.
+order and hierarchy both can. `--promote` takes the name from its caller;
+suggesting one from analysis is design ([test-cli](test-cli.md)).
 
 Directories can be added later as a thin, non-authoritative reading-aid for
 humans browsing the repo without the index handy — they never become the source
@@ -150,13 +147,13 @@ prerequisite.
 
 ## What gets captured
 
-Per **run** (one `elle test` invocation): wall time, peak RSS, user/sys CPU
-(`getrusage`), the `HEAD` commit, whether the working tree is dirty, a tree hash,
-the worktree the run ran in, the elle build version/profile/host, the runner's
-process id, the boot fingerprint (§ The boot fingerprint), the full `argv`,
-where its results ran (`tiers`, [test-runner](test-runner.md)), and the
-working-tree files that differ from `HEAD` with
-their content hashes (the "hash of changed files").
+Per **run** (one `elle test` invocation): the `HEAD` commit, whether the working
+tree is dirty, a tree hash, the worktree the run ran in, the elle build
+version/profile/host, the runner's process id, the boot fingerprint (§ The boot
+fingerprint), the full `argv`, and where its results ran (`tiers`,
+[test-runner](test-runner.md)). The design adds wall time, peak RSS and
+user/sys CPU (`getrusage`), and the working-tree files that differ from `HEAD`
+with their content hashes; none of them is captured yet (§ Schema).
 
 The code-state columns are what makes a result belong to something. Without
 them a row says a form failed and cannot say against which commit, on which
@@ -175,10 +172,10 @@ Outside a repository each of those is NULL, which is the honest answer: the run
 happened, and nothing names the code it ran against.
 
 Per **result**: status, reason, expected/actual and predicate syntax (from the
-`assert` macro, [test-runner](test-runner.md)), the emitted signal on failure,
-wall time, and **CPU time** — the delta of `(clock/cpu)` read across the
-form's evaluation. A result's `tier` names where it ran
-([test-runner](test-runner.md)).
+`assert` macro, [test-runner](test-runner.md)), and the emitted signal on
+failure. A result's `tier` names where it ran ([test-runner](test-runner.md)).
+The design adds wall time and **CPU time** — the delta of `(clock/cpu)` read
+across the form's evaluation; neither is captured yet (§ Schema).
 
 > CPU delta, not fuel. Fuel (`SIG_FUEL`) is specific to the `std/process`
 > scheduler, is not consumed by Elle's default root scheduler, and essentially
@@ -187,19 +184,17 @@ form's evaluation. A result's `tier` names where it ran
 > deterministic, so regression queries on it compare distributions/thresholds,
 > not exact equality; for that, prefer many runs (which we keep) over one.
 
-Per **asset**: for every result the runner captures the full `--dump`
-artifact set (`ast, fhir, defuse, regions, escape, hir, lir, cfg, dfa, jit`),
-`--dump=stats`, and stdout/stderr — written to the filesystem CAS
-([test-runner](test-runner.md)), deduped by hash, so identical artifacts across
-runs cost one file.
-`--trace` is captured **only for failing forms** (too large for the
-always-set), likewise to the CAS. History is **kept indefinitely**; pruning is
-explicit only (`elle test --prune`), except ad-hoc forms (§ Ad-hoc tests).
+Per **asset**: the runner captures each result's stdout and stderr into the
+filesystem CAS ([test-runner](test-runner.md)), deduped by hash, so identical
+output across runs costs one file. History is **kept indefinitely**: nothing
+prunes it, and `elle test --reset` removes the whole store.
 
-> **Temporarily**, the `--dump` artifact set is **not** captured
-> ([test-runner](test-runner.md) § CAS asset capture) — it OOMs the corpus run
-> and does not dedup. stdout/stderr are still captured per result;
-> `--dump` capture returns once the region leak it exposes is fixed.
+> The design also captures the full `--dump` artifact set (`ast, fhir, defuse,
+> regions, escape, hir, lir, cfg, dfa, jit`) and `--dump=stats` per result, and
+> `--trace` for failing forms only. None of them is captured
+> ([test-runner](test-runner.md) § CAS asset capture): the `--dump` pass OOMs
+> the corpus run and does not dedup, and it returns once the region leak it
+> exposes is fixed.
 
 ## The boot fingerprint
 
