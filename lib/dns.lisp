@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 14)
+# audited: 2026-09-30
 ## A DNS client (RFC 1035) in pure Elle: nameservers, queries with retries, and CNAME chains.
 ## lib/overview.md
 ##
@@ -54,7 +54,7 @@
 (def @next-txid 1)
 
 (defn gen-txid []
-  "Generate a monotonically increasing 16-bit transaction ID."
+  "Return the next 16-bit transaction ID: they count up and wrap after 0xffff."
   (let [id next-txid]
     (assign next-txid (bit/and (+ id 1) 0xffff))
     id))
@@ -69,8 +69,11 @@
          sock (udp/bind "0.0.0.0" 0)]
     (defer
       (port/close sock)
-      (udp/send-to sock packet server 53 :timeout timeout)
-      (let* [[ok? result] (protect (udp/recv-from sock 512 :timeout timeout))]
+      (udp/send-to sock packet server 53
+                   :timeout (if-let [ms timeout] (/ ms 1000.0) nil))
+      (let* [[ok? result] (protect (udp/recv-from sock 512
+                                   :timeout (if-let [ms timeout] (/ ms 1000.0)
+                                   nil)))]
         (unless ok?
           (error {:error :dns-timeout
                   :reason :query-timeout
@@ -172,7 +175,7 @@
    Options:
      :server  — nameserver IP (default: from /etc/resolv.conf)
      :timeout — per-query timeout in ms (default: 3000)
-     :retries — retry count per query (default: 2)"
+     :retries — how many times to send each query (default: 2)"
   (let* [srv (or server (first (read-nameservers)))
          tmo (or timeout DEFAULT-TIMEOUT)
          ret (or retries DEFAULT-RETRIES)
@@ -190,7 +193,7 @@
    Options:
      :server  — nameserver IP (default: from /etc/resolv.conf)
      :timeout — per-query timeout in ms (default: 3000)
-     :retries — retry count per query (default: 2)"
+     :retries — how many times to send each query (default: 2)"
   (let* [srv (or server (first (read-nameservers)))
          tmo (or timeout DEFAULT-TIMEOUT)
          ret (or retries DEFAULT-RETRIES)]
