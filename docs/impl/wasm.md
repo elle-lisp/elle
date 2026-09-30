@@ -370,15 +370,16 @@ a newer fix, raise that floor in the same change as the pin.
 
 ## Full-module coverage and its two teardown/lowering invariants
 
-`make smoke-wasm` runs both suites on a `wasm` build. It runs the language suite
-under `elle --wasm=full`, less the files the Makefile's `WASM_SKIP` names:
-dynamic compilation (`eval`) is not a WASM backend feature. It runs the
-implementation suite on the build's rig twice ([rig](../../rig/overview.md)):
-under each file's sidecar, then under the profile
-[wasm-full.toml](../../tests/impl/profiles/wasm-full.toml) less `WASM_SKIP`. The
-first pass is where the tiered backend's files run: each forces its closures
-onto the tier with `compile/run-on :wasm`, and skips itself on a build without
-the backend.
+`make smoke-wasm` runs both suites on a `wasm` build, `elle-wasm` and its rig
+`elle-rig-wasm` ([bins](../../bins/overview.md)). It runs the language suite
+through `elle test` on `elle-wasm` ([testing](../testing.md)). It runs the
+implementation suite on the rig under each file's sidecar
+([rig](../../rig/overview.md)), which is where the tiered backend's files run:
+each forces its closures onto the tier with `compile/run-on :wasm`, and skips
+itself on a build without the backend. It then runs both suites on the rig
+under the profile [wasm-full.toml](../../tests/impl/profiles/wasm-full.toml),
+less the files the Makefile's `WASM_SKIP` names: dynamic compilation (`eval`)
+is not a WASM backend feature.
 
 Two invariants that the full-module tier — and only this tier — must uphold are
 worth calling out, because each is invisible on the VM/JIT path and each is
@@ -427,17 +428,17 @@ passes below do not gate CI while the tier carries no production workloads.
 # Build gate: feature compiles, tier boots (the CI gate)
 make check-wasm
 
-# Both suites on a wasm build: the language suite under --wasm=full, and the
-# implementation suite on the wasm rig, then again under the wasm-full profile
+# Both suites on a wasm build: the language suite on elle-wasm, the
+# implementation suite on its rig, then both suites under the wasm-full profile
 make smoke-wasm
 
 # Individual tests
-elle --wasm=full tests/lang/arithmetic.lisp
-elle-rig --profile tests/impl/profiles/wasm-full.toml tests/impl/region-capture-cell-loop-uaf.lisp
+elle-wasm --wasm=full tests/lang/arithmetic.lisp
+elle-rig-wasm --profile tests/impl/profiles/wasm-full.toml tests/impl/region-capture-cell-loop-uaf.lisp
 
 # Tiered backend tests, on the wasm build's rig
-elle-rig tests/impl/wasm-tier.lisp
-elle-rig tests/impl/wasm-tier-error-signal.lisp
+elle-rig-wasm tests/impl/wasm-tier.lisp
+elle-rig-wasm tests/impl/wasm-tier-error-signal.lisp
 
 # Rust-side WASM tests — the feature is off by default, so name it
 cargo test -p elle --lib --features wasm wasm::

@@ -72,8 +72,9 @@ their instruments.
 `make smoke-impl` runs every file here as its own child of `elle test --host
 elle-rig`, so each verdict lands in the session store. It then runs the
 suites once more under each profile the pass names. `make smoke-pool` runs the
-files here again on the thread-pool build's rig, and `make smoke-wasm` on the
-`wasm` build's rig. A file that reads a resource only one build has gates
+files here again on the thread-pool build's rig, `make smoke-mlir` on the MLIR
+build's rig, and `make smoke-wasm` on the `wasm` build's rig. A file that reads
+a resource only one build has gates
 itself on the others. A new file is picked up by being here; there is nothing
 to register.
 
