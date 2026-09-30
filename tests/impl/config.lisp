@@ -23,13 +23,16 @@
         (string "(vm/config :jit) reads nil, the build's 10, or the rig's eager 0; got "
                 initial-jit))
 
-# The type is checked before the build: a keyword is the wrong type whether or
-# not this build carries the tier. The counter-factual is the policy keyword
-# API, where :off and :eager were the settings a program chose.
-(assert (= (raised (fn [] (vm/config-set :jit :off))) :type-error)
+# :off and :eager are the runner's, and this file runs as a program of its own,
+# so both are refused as arguments this process may not give. Any other keyword
+# names no policy at all, which is the wrong type. The counter-factual is the
+# policy keyword API, where :off and :eager were settings every program chose.
+(assert (= (raised (fn [] (vm/config-set :jit :off))) :argument-error)
         "a program cannot turn the JIT off")
-(assert (= (raised (fn [] (vm/config-set :jit :eager))) :type-error)
+(assert (= (raised (fn [] (vm/config-set :jit :eager))) :argument-error)
         "a program cannot make the JIT eager")
+(assert (= (raised (fn [] (vm/config-set :jit :later))) :type-error)
+        "a keyword other than :off or :eager is no policy")
 (assert (= (raised (fn [] (vm/config-set :jit 2.5))) :type-error)
         "a threshold is an integer")
 
@@ -56,7 +59,7 @@
 (def mlir (vm/config :mlir))
 (assert (or (nil? mlir) (and (integer? mlir) (>= mlir 0)))
         (string "(vm/config :mlir) reads nil or a threshold; got " mlir))
-(assert (= (raised (fn [] (vm/config-set :mlir :eager))) :type-error)
+(assert (= (raised (fn [] (vm/config-set :mlir :eager))) :argument-error)
         "a program cannot make the MLIR tier eager")
 (when (nil? mlir)
   (assert (= (raised (fn [] (vm/config-set :mlir 5))) :argument-error)

@@ -1,5 +1,5 @@
 // audited: 2026-09-29
-// What each suite target runs: the language suite with no flag, the
+// What each suite target runs: the language suite in-process with no flag, the
 // implementation suite on the rig, and each profile's files.
 //
 // docs/testing.md
@@ -26,13 +26,11 @@ struct Pass {
 }
 
 impl Pass {
-    /// The child flags the pass gives each file: what `--isolate` quotes.
-    fn isolate(&self) -> &str {
-        let (_, rest) = self
-            .command
-            .split_once("--isolate '")
-            .unwrap_or_else(|| panic!("a suite pass runs each file as its own child:\n{}", self.command));
-        rest.split_once('\'').map(|(flags, _)| flags).unwrap_or("")
+    /// The child flags the pass gives each file, what `--isolate` quotes; `None`
+    /// for a pass that runs its files inside the runner.
+    fn isolate(&self) -> Option<&str> {
+        let (_, rest) = self.command.split_once("--isolate '")?;
+        Some(rest.split_once('\'').map(|(flags, _)| flags).unwrap_or(""))
     }
 
     /// The program each child runs under, when the pass names one.
@@ -77,8 +75,8 @@ fn implementation() -> BTreeSet<String> {
     set(suite("tests/impl"))
 }
 
-/// Assert that `pass` runs the language suite as a user runs it: every file,
-/// on the build itself, with no flag.
+/// Assert that `pass` runs the language suite through the runner of the build
+/// itself: every file, in-process, with no flag.
 fn assert_plain_language_pass(target: &str, pass: &Pass) {
     assert_eq!(
         pass.files,
@@ -87,22 +85,29 @@ fn assert_plain_language_pass(target: &str, pass: &Pass) {
     );
     assert_eq!(
         pass.isolate(),
-        "",
-        "`make {target}` hands every language file a flag, so the suite runs a \
-         runtime no user runs"
+        None,
+        "`make {target}` runs each language file as its own child, where the \
+         runner cannot run it on each tier and no differential runs"
     );
     assert_eq!(
         pass.host(),
         None,
         "`make {target}` runs the language suite on another program than the build"
     );
+    assert!(
+        !pass.command.contains("--trace") && !pass.command.contains("--profile"),
+        "`make {target}` hands the runner a mode, so the suite runs a runtime no \
+         user runs:\n  {}",
+        pass.command
+    );
 }
 
-// The language suite runs the user build as shipped. Each file is its own
-// process with no flag, which is how a user runs a program.
+// The language suite runs the user build as shipped, inside the runner, which
+// runs each file on every tier the build carries (docs/test-runner.md).
 //
-// The counter-factual: a pass that isolated each file under `--trace=scrub`, or
-// under the rig, reports a green language suite for a runtime no user runs.
+// The counter-factual: a pass that isolates each file as `elle FILE` runs it
+// once, on whatever the runtime picks, and no disagreement between tiers is
+// ever recorded.
 #[test]
 fn smoke_lang_runs_every_language_file_with_no_flag() {
     let passes = passes("smoke-lang", &[]);
@@ -128,7 +133,11 @@ fn smoke_impl_runs_the_implementation_suite_on_the_rig() {
         "the first pass of `make smoke-impl` is the implementation suite and \
          the runner's acceptance test"
     );
-    assert_eq!(base.isolate(), "", "each sidecar alone sets its file's mode");
+    assert_eq!(
+        base.isolate(),
+        Some(""),
+        "each sidecar alone sets its file's mode"
+    );
     assert_eq!(
         base.host(),
         Some(make_expand("ELLE_RIG").as_str()),
@@ -144,7 +153,7 @@ fn smoke_impl_runs_both_suites_under_the_eager_profile() {
     let passes = passes("smoke-impl", &[]);
     let eager: Vec<&Pass> = passes
         .iter()
-        .filter(|p| p.isolate() == format!("--profile {EAGER}"))
+        .filter(|p| p.isolate() == Some(format!("--profile {EAGER}").as_str()))
         .collect();
     assert_eq!(eager.len(), 1, "one pass runs the eager profile");
     let want: BTreeSet<String> = lang().union(&implementation()).cloned().collect();
@@ -164,10 +173,14 @@ fn a_named_profile_runs_the_language_suite_on_the_rig() {
     let passes = passes("smoke-impl", &[&var]);
     let scrub: Vec<&Pass> = passes
         .iter()
-        .filter(|p| p.isolate() == format!("--profile {SCRUB}"))
+        .filter(|p| p.isolate() == Some(format!("--profile {SCRUB}").as_str()))
         .collect();
     assert_eq!(scrub.len(), 1, "one pass runs the named profile");
-    assert_eq!(scrub[0].files, lang(), "a named profile runs the language suite");
+    assert_eq!(
+        scrub[0].files,
+        lang(),
+        "a named profile runs the language suite"
+    );
     assert_eq!(scrub[0].host(), Some(make_expand("ELLE_RIG").as_str()));
 }
 
@@ -192,7 +205,7 @@ fn smoke_wasm_runs_the_implementation_suite_on_the_wasm_rig() {
     let passes = passes("smoke-wasm", &[]);
     let base: Vec<&Pass> = passes
         .iter()
-        .filter(|p| p.host().is_some() && p.isolate().is_empty())
+        .filter(|p| p.host().is_some() && p.isolate() == Some(""))
         .collect();
     assert_eq!(base.len(), 1, "one wasm rig pass reads each file's sidecar");
     assert_eq!(base[0].host(), Some(make_expand("ELLE_RIG").as_str()));
@@ -216,7 +229,7 @@ fn smoke_wasm_runs_the_implementation_suite_under_the_wasm_full_profile() {
     let passes = passes("smoke-wasm", &[]);
     let full: Vec<&Pass> = passes
         .iter()
-        .filter(|p| p.isolate() == format!("--profile {WASM_FULL}"))
+        .filter(|p| p.isolate() == Some(format!("--profile {WASM_FULL}").as_str()))
         .collect();
     assert_eq!(full.len(), 1, "one wasm rig pass compiles each file whole");
     let pass = full[0];
@@ -234,7 +247,10 @@ fn smoke_wasm_runs_the_implementation_suite_under_the_wasm_full_profile() {
         "tests/impl/region-termination-sweep.lisp",
         "tests/impl/region-eval-quoted-data-leak.lisp",
     ] {
-        assert!(pass.files.contains(pin), "the wasm-full pass leaves out {pin}");
+        assert!(
+            pass.files.contains(pin),
+            "the wasm-full pass leaves out {pin}"
+        );
     }
 }
 
@@ -244,7 +260,10 @@ fn smoke_wasm_runs_the_implementation_suite_under_the_wasm_full_profile() {
 fn every_profile_a_pass_names_exists() {
     let named = passes("smoke-impl", &[&format!("IMPL_PROFILES={SCRUB}")]);
     for pass in named.into_iter().chain(passes("smoke-wasm", &[])) {
-        if let Some(path) = pass.isolate().strip_prefix("--profile ") {
+        if let Some(path) = pass
+            .isolate()
+            .and_then(|flags| flags.strip_prefix("--profile "))
+        {
             assert!(
                 crate::common::repo_root().join(path).exists(),
                 "a pass names the profile {path}, which does not exist"
@@ -299,7 +318,11 @@ fn smoke_noffi_runs_the_language_suite_without_the_ffi_files() {
         "the no-features pass leaves out {skipped} language files; the FFI \
          files are a handful"
     );
-    assert_eq!(pass.isolate(), "");
+    assert_eq!(
+        pass.isolate(),
+        Some(""),
+        "each no-features child runs with no flag"
+    );
     let noffi = make_expand("ELLE_NOFFI");
     assert_ne!(
         noffi,
@@ -326,7 +349,7 @@ fn smoke_pool_runs_the_implementation_suite_on_the_pool_rig() {
     let rig: Vec<&Pass> = passes.iter().filter(|p| p.host().is_some()).collect();
     assert_eq!(rig.len(), 1, "one pool pass runs on the rig");
     assert_eq!(rig[0].files, implementation());
-    assert_eq!(rig[0].isolate(), "");
+    assert_eq!(rig[0].isolate(), Some(""));
 }
 
 /// The `cargo build` line `make TARGET` runs.
@@ -383,7 +406,7 @@ fn smoke_boot_image_runs_the_language_suite_from_the_image() {
     assert_eq!(passes[0].files, lang());
     assert_eq!(
         passes[0].isolate(),
-        format!("--boot-image={}", make_expand("BOOT_IMAGE_DIR")),
+        Some(format!("--boot-image={}", make_expand("BOOT_IMAGE_DIR")).as_str()),
         "each file boots from the stored image"
     );
 }
@@ -403,7 +426,16 @@ fn smoke_runs_both_suites() {
         .unwrap_or("")
         .split_whitespace()
         .collect();
-    for want in ["smoke-lang", "smoke-impl", "doctest", "embedding", "semver-check"] {
-        assert!(deps.contains(&want), "`make smoke` does not run {want}: {line}");
+    for want in [
+        "smoke-lang",
+        "smoke-impl",
+        "doctest",
+        "embedding",
+        "semver-check",
+    ] {
+        assert!(
+            deps.contains(&want),
+            "`make smoke` does not run {want}: {line}"
+        );
     }
 }
