@@ -64,23 +64,25 @@
   # ── this instrument ───────────────────────────────────────────────
   # The producer is the path this program was started with; a program with
   # none — a form in a worker thread, an -e snippet — prints and judges
-  # nothing. The rows are that producer's, from the ledger directory.
+  # nothing. The rows are that producer's, from the ledger directory, and nil
+  # when no ledger file names the producer: such a program prints and judges
+  # nothing too, and the first row written for it is what starts the gate.
   (def root (elle/root))
   (def producer (led:producer-of (sys/argv) root))
   (def ledger-dir (led:ledger-dir root))
   (def rows
     (if (and producer ledger-dir (file/exists? ledger-dir))
       (let [l (get (led:load-dir ledger-dir) producer)]
-        (if l (get l :rows) @{}))
-      @{}))
+        (if l (get l :rows) nil))
+      nil))
   (def @readings @[])
   (def @void-axes @{})
   (def @proven @{})
 
   (defn settle! [reading]
-    "Judge one reading when there is a producer to judge for, print its line,
+    "Judge one reading when there is a ledger to judge it by, print its line,
      and keep it for the report."
-    (let [r (if producer (led:judge-with rows void-axes reading) reading)]
+    (let [r (if rows (led:judge-with rows void-axes reading) reading)]
       (println (led:render-reading r))
       (push readings r)
       r))
@@ -197,35 +199,18 @@
       (settle! {:subject subject :axis :time :value (/ m c) :half 0 :unit "x"})))
 
   # ── the report ────────────────────────────────────────────────────
-  (defn missing-rows []
-    "Every row of this producer that got no reading."
-    (let [@seen @{}
-          @out @[]]
-      (each r in readings
-        (put seen (led:row-key (get r :subject) (get r :axis)) true))
-      (each k in (keys rows)
-        (when (not (get seen k)) (push out (get rows k))))
-      out))
-
-  (defn describe-bound [r]
-    (case (get r :kind)
-      :pin (string "pinned " (get r :bound))
-      :floor (string "floor " (get r :bound))
-      :ceiling (string "ceiling " (get r :bound))
-      "no row"))
-
   (defn describe [r]
     (string (string (get r :verdict)) "  " (get r :subject) "  "
             (string (get r :axis)) "  " (get r :value) " ±" (get r :half) " "
-            (get r :unit) "  " (describe-bound r)
+            (get r :unit) "  " (led:describe-bound (get r :kind) (get r :bound))
             (if (get r :why) (string "  " (get r :why)) "")))
 
   (defn report []
     "Fail once, naming every reading that is not ok and every row left
-     unread. A program with no producer has nothing to judge, and returns."
-    (when producer
+     unread. A program with no ledger has nothing to judge, and returns."
+    (when rows
       (let [bad (filter (fn [r] (not= (get r :verdict) :ok)) readings)
-            missing (missing-rows)
+            missing (led:unread rows readings)
             lines (concat (map describe bad)
                           (map (fn [row]
                                  (string "missing  " (get row :subject) "  "

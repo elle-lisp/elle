@@ -312,9 +312,9 @@ reading that is neither `ok` nor unjudged:
 
 ```
 412 readings · 409 ok · 1 regression · 1 stale · 1 missing
-  regression  tests/impl/oracle.lisp  reduce  objects  1.31 ±0.12 objects/op  pinned 1.002
-  stale       tests/impl/plumb.lisp   ev-abort  regions  0.0 ±0.03 regions/op  pinned 1
-  missing     tests/impl/oracle.lisp  fiber-nested  regions
+  regression  tests/impl/oracle.lisp  [process]  reduce  objects  1.31 ±0.12 objects/op  pinned 1.002
+  stale  tests/impl/plumb.lisp  [process]  ev-abort  regions  0.0 ±0.03 regions/op  pinned 1
+  missing  tests/impl/oracle.lisp  [process]  fiber-nested  regions
 ```
 
 The rest is a query. The summary is a reading aid, and every number in it comes

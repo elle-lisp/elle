@@ -176,10 +176,11 @@
 # :cpu-us :gauges}), and its wall time is taken here, from handing the form over
 # to having its answer. The per-form path closes over a MAIN-compiled thunk
 # (exec-thunk-capture), the whole-file path over the file's syntax
-# (exec-source-capture). Returns [statuses pass-pairs]: the per-tier status
+# (exec-source-capture). `file` is the form's, and names the ledger its
+# readings are judged by. Returns [statuses pass-pairs]: the per-tier status
 # strings, and [[tier-str value]...] for the tiers that returned a value
 # (divergence candidates).
-(defn run-tiers [conn run-id h exec-fn tiers dumps statuses pass-pairs]
+(defn run-tiers [conn run-id h file exec-fn tiers dumps statuses pass-pairs]
   (if (empty? tiers)
     [statuses pass-pairs]
     (let [tp (first tiers)
@@ -196,7 +197,8 @@
       (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
       # A run that missed its deadline hands back no readings, and adds none.
       (when (get cap :gauges) (add-test-gauges (get cap :gauges)))
-      (run-tiers conn run-id h exec-fn (rest tiers) dumps
+      (record-readings conn run-id rid file (get cap :stdout) (get c :status))
+      (run-tiers conn run-id h file exec-fn (rest tiers) dumps
                  (concat statuses [(get c :status)])
                  (if (get c :ok)
                    (concat pass-pairs [[ts (get c :value)]])
@@ -230,7 +232,7 @@
 (defn record-thunk [conn run-id row exec-fn dumps tiers diverge?]
   (let [h (get row :hash)]
     (insert-form conn row)
-    (let [tr (run-tiers conn run-id h exec-fn tiers dumps [] [])
+    (let [tr (run-tiers conn run-id h (get row :file) exec-fn tiers dumps [] [])
           statuses (get tr 0)
           pass-pairs (get tr 1)
           vals (map (fn [pp] (get pp 1)) pass-pairs)]
@@ -385,9 +387,8 @@
             row (form-row-of file file 0 (if msg msg "") src
                              (form-profile src file))
             h (get row :hash)
-            sink (measurement-sink run-id h)
             budget (form-budget)
-            cap (run-child (child-argv flags file) budget (measurement-env sink))
+            cap (run-child (child-argv flags file) budget)
             c (classify-child cap budget)]
         # The label is scavenged from the source, and a file the child will
         # reject as unreadable has none to give — the child's own status is
@@ -398,9 +399,8 @@
         (insert-form conn row)
         (let [rid (insert-result conn run-id h :process c cap)]
           (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
-          # A dashboard reports its verdicts through the channel named in the
-          # child's environment; every other file writes nothing there.
-          (record-measurements conn run-id rid sink))
+          (record-readings conn run-id rid file (get cap :stdout)
+                           (get c :status)))
         [(get c :status)]))))
 
 (defn process-eval [conn run-id expr]

@@ -67,7 +67,7 @@
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS asset (result_id INTEGER, kind TEXT, hash TEXT, size INTEGER, codec TEXT)")
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS measurement (run_id INTEGER, result_id INTEGER, subject TEXT, axis TEXT, value REAL, unit TEXT, verdict TEXT)")
+               "CREATE TABLE IF NOT EXISTS measurement (run_id INTEGER, result_id INTEGER, subject TEXT, axis TEXT, value REAL, half REAL, unit TEXT, bound REAL, kind TEXT, verdict TEXT)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS gauge (id INTEGER PRIMARY KEY, run_id INTEGER, file TEXT, heap TEXT, kind TEXT, delta INTEGER, reading INTEGER)")
   (sqlite:exec conn
@@ -91,6 +91,11 @@
   # A gauge row recorded before the heap column existed was the runner's, and
   # reads NULL there (docs/test-gauges.md).
   (ensure-column conn "gauge" "heap" "TEXT")
+  # A reading recorded before it carried its interval and the row it met keeps
+  # NULL for each (docs/test-store.md § Measurements).
+  (ensure-column conn "measurement" "half" "REAL")
+  (ensure-column conn "measurement" "bound" "REAL")
+  (ensure-column conn "measurement" "kind" "TEXT")
   # What makes a run the same run in two stores, so an import of one artifact
   # lands it once (docs/test-store.md § The run key). SQLite holds every NULL
   # distinct under a unique index, so a run recorded before the key existed
@@ -227,51 +232,6 @@
     (begin
       (insert-asset conn result-id (first dumps))
       (insert-assets conn result-id (rest dumps)))))
-
-# ── the measurement channel (docs/test-store.md § Measurements) ───────
-# A dashboard reports each verdict as one JSON object per line, appended to the
-# file ELLE_TEST_MEASUREMENTS names. The runner names one file per isolated
-# child and reads it back when the child exits, so a rate becomes a row a query
-# can read across commits instead of prose that scrolled past.
-#
-# The child process is what makes the variable safe to set: the environment is
-# process-global, so a per-form value would race between workers sharing one.
-(def measurement-var "ELLE_TEST_MEASUREMENTS")
-
-(defn measurement-sink [run-id h]
-  (string scratch-dir "/" run-id "_" h ".measurements"))
-
-# The child's environment: this process's, plus the sink. `:env` REPLACES the
-# environment rather than adding to it, so the whole of ours has to go through
-# — a child with no PATH, HOME or TMPDIR is a different test.
-(defn measurement-env [sink]
-  (put (sys/env) measurement-var sink))
-
-# Insert one reported verdict. A record with no subject is not a measurement,
-# so it is dropped rather than stored as a row of nulls nothing can join.
-(defn insert-measurement [conn run-id result-id rec]
-  (if (get rec :subject)
-    (sqlite:exec conn
-                 "INSERT INTO measurement (run_id, result_id, subject, axis, value, unit, verdict) VALUES (?1,?2,?3,?4,?5,?6,?7)"
-                 [run-id result-id (get rec :subject) (get rec :axis)
-                  (get rec :value) (get rec :unit) (get rec :verdict)])
-    nil))
-
-# Read the channel a child wrote and record every verdict against its result.
-# A file that is not there is the ordinary case — most files are not dashboards
-# — and a line that will not parse is skipped rather than failing the run: the
-# child's own status is the verdict, and a malformed record must not turn a
-# measured run into a failed one. The sink is deleted either way; the rows are
-# the durable copy.
-(defn record-measurements [conn run-id result-id sink]
-  (let [[ok? text] (protect (slurp sink))]
-    (when ok?
-      (each line in (string/split text "\n")
-        (when (> (length (string/trim line)) 0)
-          (let [[parsed? rec] (protect (json/parse line :keys :keyword))]
-            (when parsed? (insert-measurement conn run-id result-id rec)))))
-      (protect (file/delete sink))))
-  nil)
 
 # ── the heap gauges (docs/test-gauges.md) ──────────────────────────
 # Every gauge the runner reads, as [kind reader]. Each primitive is Immediate,

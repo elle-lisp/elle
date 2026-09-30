@@ -30,7 +30,8 @@
 (def asset-columns ["result_id" "kind" "hash" "size" "codec"])
 
 (def measurement-columns
-  ["run_id" "result_id" "subject" "axis" "value" "unit" "verdict"])
+  ["run_id" "result_id" "subject" "axis" "value" "half" "unit" "bound" "kind"
+   "verdict"])
 
 (def gauge-columns ["run_id" "file" "heap" "kind" "delta" "reading"])
 

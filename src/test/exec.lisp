@@ -379,23 +379,24 @@
     (let [[ok? b] (protect (port/read-all p))]
       (if ok? (string b) ""))))
 
-# Run one child to its end, or to the deadline. Returns {:status INT-OR-NIL
-# :stdout S :stderr S :wall-ms N :cpu-us N :max-rss-kb N} — nil status means
-# the budget ran out and the child was killed. The cost is spawn to reap, and
-# the child's total from subprocess/rusage (docs/test-store.md). A deadline
-# can land in the moment a wait has already reaped the child, so the recorded
-# status is consulted before the timeout is believed; a reap is kept on the
-# subprocess, never spent (docs/subprocess.md).
+# Run one child to its end, or to the deadline, under this process's own
+# environment. Returns {:status INT-OR-NIL :stdout S :stderr S :wall-ms N
+# :cpu-us N :max-rss-kb N} — nil status means the budget ran out and the child
+# was killed. The cost is spawn to reap, and the child's total from
+# subprocess/rusage (docs/test-store.md). A deadline can land in the moment a
+# wait has already reaped the child, so the recorded status is consulted before
+# the timeout is believed; a reap is kept on the subprocess, never spent
+# (docs/subprocess.md).
 #
 # The child is THIS binary unless `--host` names another, never whatever `elle` a
 # PATH lookup finds: a run has to say something about the build under test, and
 # a different build would make it say nothing. (sys/argv) cannot answer — under
 # a subcommand its head is the subcommand's own source name — so the binary
 # reports its own path.
-(defn run-child [argv budget-ms env]
+(defn run-child [argv budget-ms]
   (let [t0 (clock/monotonic)
         child (subprocess/exec (if host-program host-program (elle/executable))
-                               argv {:stdin :null :env env})
+                               argv {:stdin :null})
         out-f (ev/spawn (fn [] (drain (get child :stdout))))
         err-f (ev/spawn (fn [] (drain (get child :stderr))))
         waited (ev/timeout (/ (float budget-ms) 1000.0)

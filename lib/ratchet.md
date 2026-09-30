@@ -26,7 +26,8 @@ and its ledger under `tests/ledger` in the tree the binary was built in.
 `ELLE_LEDGER` names another directory, which is how a test hands a producer a
 ledger of its own. A program started with no path, such as a form inside a
 worker thread, has no producer: it prints every reading without a verdict and
-leaves the judging to the runner.
+leaves the judging to the runner. So does a producer no ledger file names yet;
+the first row written for it is what starts the gate.
 
 ## A reading is a number from anywhere
 
