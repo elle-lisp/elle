@@ -57,10 +57,7 @@ impl RegionStore {
         let owner = self.regions[parent.get() as usize].as_mut().unwrap();
         // An owner that holds no object — an owner node, or a region nothing has
         // allocated into — has no page its member could share.
-        self.counters.adopts += 1;
-        if owner.pool.obj_count() == 0 {
-            self.counters.adopts_into_empty += 1;
-        }
+        self.counters.count_adopt(owner.pool.obj_count() == 0);
         owner.owned_children.push(child);
     }
 
@@ -162,7 +159,7 @@ impl RegionStore {
             .map(|(_, &n)| n)
             .sum();
         entry.reclaim = Reclaim::Counted(1 + external);
-        self.counters.extracts += 1;
+        self.counters.count_extract();
         if let Some(owner_entry) = self
             .regions
             .get_mut(owner.get() as usize)
@@ -198,7 +195,7 @@ impl RegionStore {
         if children.is_empty() {
             return;
         }
-        self.counters.reparents += children.len() as u64;
+        self.counters.count_reparents(children.len() as u64);
         self.ensure(to);
         for &child in &children {
             let entry = self.regions[child.get() as usize]

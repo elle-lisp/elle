@@ -23,6 +23,11 @@ macro_rules! counter_primitive {
 counter_primitive!(prim_region_frees, region_frees);
 counter_primitive!(prim_page_frees, page_frees);
 counter_primitive!(prim_object_frees, object_frees);
+counter_primitive!(prim_one_page_frees, one_page_frees);
+counter_primitive!(prim_empty_frees, empty_frees);
+counter_primitive!(prim_one_object_frees, one_object_frees);
+counter_primitive!(prim_few_object_frees, few_object_frees);
+counter_primitive!(prim_many_object_frees, many_object_frees);
 counter_primitive!(prim_adopts, adopts);
 counter_primitive!(prim_adopts_into_empty, adopts_into_empty);
 counter_primitive!(prim_owned_frees, owned_frees);
@@ -66,6 +71,51 @@ primitive! {
         category: "debug",
         example: "(debug/arena-object-frees)",
         aliases: &["arena/object-frees"],
+        effect: RegionEffect::Immediate,
+    }
+    "debug/arena-one-page-frees" => prim_one_page_frees {
+        ret: RetType::Int,
+        signal: Signal::errors(),
+        doc: "Return the freed regions that held one page or none (monotonic).",
+        category: "debug",
+        example: "(debug/arena-one-page-frees)",
+        aliases: &["arena/one-page-frees"],
+        effect: RegionEffect::Immediate,
+    }
+    "debug/arena-empty-frees" => prim_empty_frees {
+        ret: RetType::Int,
+        signal: Signal::errors(),
+        doc: "Return the freed regions that held no object (monotonic).",
+        category: "debug",
+        example: "(debug/arena-empty-frees)",
+        aliases: &["arena/empty-frees"],
+        effect: RegionEffect::Immediate,
+    }
+    "debug/arena-one-object-frees" => prim_one_object_frees {
+        ret: RetType::Int,
+        signal: Signal::errors(),
+        doc: "Return the freed regions that held one object (monotonic).",
+        category: "debug",
+        example: "(debug/arena-one-object-frees)",
+        aliases: &["arena/one-object-frees"],
+        effect: RegionEffect::Immediate,
+    }
+    "debug/arena-few-object-frees" => prim_few_object_frees {
+        ret: RetType::Int,
+        signal: Signal::errors(),
+        doc: "Return the freed regions that held two to four objects (monotonic).",
+        category: "debug",
+        example: "(debug/arena-few-object-frees)",
+        aliases: &["arena/few-object-frees"],
+        effect: RegionEffect::Immediate,
+    }
+    "debug/arena-many-object-frees" => prim_many_object_frees {
+        ret: RetType::Int,
+        signal: Signal::errors(),
+        doc: "Return the freed regions that held five objects or more (monotonic).",
+        category: "debug",
+        example: "(debug/arena-many-object-frees)",
+        aliases: &["arena/many-object-frees"],
         effect: RegionEffect::Immediate,
     }
     "debug/arena-adopts" => prim_adopts {
