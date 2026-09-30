@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -24,11 +24,11 @@ renamed heading breaks the site generator.
 | MLIR Tests | ubuntu | `doctest`, `smoke-mlir` — the language suite on the MLIR build, the implementation suite on its rig | — |
 | WASM Build | ubuntu | `check-wasm` — the feature compiles, the tier boots | — |
 | Plugin Tests | ubuntu | Builds the `plugins/` submodule, asserts its artifacts, runs its corpus | — |
-| AArch64 Smoke | ubuntu-arm | `make smoke` | — |
+| AArch64 Smoke | ubuntu-arm | Each pass of `make smoke`, one step each | — |
 | AArch64 Rust Tests | ubuntu-arm | Integration tests, then property tests | 8 |
 | AArch64 No-Features | ubuntu-arm | `smoke-noffi` — the language suite on a build with no features, under the default build's runner | — |
 | Android Cross-Check | ubuntu | `cargo check` for `aarch64-linux-android` | — |
-| macOS Smoke | macos | clippy, then `make smoke` with the scrub profile | — |
+| macOS Smoke | macos | clippy, then each pass of `make smoke`, one step each, with the scrub profile | — |
 | macOS Rust Tests | macos | Integration tests, then property tests | 8 |
 | All Checks Passed | ubuntu | The one status check branch protection requires | — |
 
@@ -55,8 +55,8 @@ build and each file's child on the no-features binary, `ELLE_NOFFI`, through
 
 The implementation suite runs where the default build runs: `Default Build
 Tests`, `AArch64 Smoke` and `macOS Smoke` each build the rig beside `elle`, and
-`make smoke` runs both suites. `Thread-Pool I/O Tests` runs the implementation
-suite on the pool build's rig too, because some resources of this
+each runs `smoke-lang` and `smoke-impl`. `Thread-Pool I/O Tests` runs the
+implementation suite on the pool build's rig too, because some resources of this
 implementation exist only on the pool: a file that counts worker threads reads
 zero on io_uring and gates itself there. `MLIR Tests` runs it on the MLIR
 build's rig, the one rig that carries the MLIR tier.
@@ -76,6 +76,11 @@ So each platform splits them: a Smoke job for the corpus, a Rust Tests job for
 slower of the pair instead of the sum. The split doubles the runner minutes the
 platform spends and roughly halves the wall clock, which is the trade the merge
 gate cares about.
+
+A Smoke job runs each pass of `make smoke` as a step of its own, not `make
+smoke` itself, so a failed step names the pass that failed. Each pass runs
+once. A `make smoke` step after the job's `doctest` step would run the doctests
+twice.
 
 Each job caches under its own key — set explicitly with
 `Swatinem/rust-cache`'s `shared-key` where a job wants a stable one, and taken
