@@ -148,7 +148,7 @@ primitive! {
     "time/sleep" => prim_sleep {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Sleep for the specified number of seconds (blocks the thread)",
+        doc: "Sleep for the specified number of seconds (blocks the thread). Refuses a duration that is negative, not finite, or longer than the clock can count.",
         params: &["seconds"],
         category: "time",
         example: "(time/sleep 1.5)",

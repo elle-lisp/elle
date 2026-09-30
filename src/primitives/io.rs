@@ -418,7 +418,7 @@ primitive! {
     "ev/sleep" => prim_ev_sleep {
         signal: Signal::io_yields_errors(),
         arity: Arity::Exact(1),
-        doc: "Async sleep — yields to the scheduler for the specified duration in seconds",
+        doc: "Async sleep — yields to the scheduler for the specified duration in seconds. Refuses a duration that is negative, not finite, or longer than the clock can count.",
         params: &["seconds"],
         category: "scheduler",
         example: "(ev/sleep 0.5)",
