@@ -287,7 +287,7 @@ DEAL_CORPUS := LC_ALL=C awk 'BEGIN { for (i = 0; i < 256; i++) ord[sprintf("%c",
 # reaches the runner through this and nowhere else:
 # tests/integration/run_artifacts.rs reads the targets that call it to know
 # which CI jobs record runs. The pass is one line, because
-# tests/integration/suites.rs reads its files and its flags off one line of
+# tests/common/passes.rs reads its files and its flags off one line of
 # `make --dry-run`.
 #
 # $(1) the files   $(2) the runner's flags, such as `--host PROGRAM --isolate

@@ -3,9 +3,10 @@
 //!
 //! tests/AGENTS.md
 //!
-//! Three children hold the readers the repository's own tests share: `repo`
-//! reads the Makefile and the two suites, `workflows` the CI workflow files, and
-//! `documents` the list of documents `make doctest` runs.
+//! Four children hold the readers the repository's own tests share: `repo`
+//! reads the Makefile and the two suites, `passes` the suite passes a target
+//! runs, `workflows` the CI workflow files, and `documents` the list of
+//! documents `make doctest` runs.
 //!
 //! Every helper drives a [`Runtime`] (`elle::runtime`), the one per-instance
 //! owner of the heap, `VM`, `SymbolTable`, and per-instance `CompileCtx`. There
@@ -19,9 +20,12 @@ use elle::runtime::{Runtime, RuntimeCore};
 use elle::{compile_file, eval_all, Value};
 
 pub mod documents;
+mod passes;
 mod repo;
 mod workflows;
 
+#[allow(unused_imports)]
+pub use passes::*;
 #[allow(unused_imports)]
 pub use repo::*;
 #[allow(unused_imports)]

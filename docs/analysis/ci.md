@@ -129,7 +129,7 @@ arrives after the push rather than before it. The Android job has run since
 #752, and the local target arrived later covering macOS alone — so an
 Android-only break compiled everywhere a developer could look.
 
-`tests/integration/workflows.rs` is the standing check that every target a job
+`tests/integration/crosscheck.rs` is the standing check that every target a job
 cross-compiles is a target `make crosscheck` compiles too.
 
 ### Runner capacity

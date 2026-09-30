@@ -54,6 +54,9 @@ mod time_elapsed {
 mod deps {
     include!("deps.rs");
 }
+mod bins {
+    include!("bins.rs");
+}
 mod argv_cli {
     include!("argv_cli.rs");
 }
@@ -211,6 +214,12 @@ mod bytecode_doc {
 mod workflows {
     include!("workflows.rs");
 }
+mod crosscheck {
+    include!("crosscheck.rs");
+}
+mod change_filter {
+    include!("change_filter.rs");
+}
 mod plugins {
     include!("plugins.rs");
 }
@@ -222,6 +231,9 @@ mod corpus_targets {
 }
 mod suites {
     include!("suites.rs");
+}
+mod variants {
+    include!("variants.rs");
 }
 mod capacity {
     include!("capacity.rs");

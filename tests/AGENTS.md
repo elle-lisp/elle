@@ -97,9 +97,9 @@ carries its own docstring. The ones a new test reaches for first:
   borrows with `rt.parts()`.
 - **`ScratchDir::new(tag)`** — a unique directory under the platform temp
   root, removed when it drops.
-- **`make_var`, `make_dry_run`, `workflow_jobs`** — what the Makefile and the
-  workflows say, for the tests that check them (`common/repo.rs`,
-  `common/workflows.rs`).
+- **`make_var`, `make_dry_run`, `passes`, `workflow_jobs`** — what the
+  Makefile, a suite target and the workflows say, for the tests that check them
+  (`common/repo.rs`, `common/passes.rs`, `common/workflows.rs`).
 
 ```rust
 use crate::common::eval_source;
