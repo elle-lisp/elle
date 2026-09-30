@@ -34,3 +34,13 @@
         "time/sleep refuses a negative float")
 (assert (= (error-kind (fn () (time/sleep (/ 1.0 0.0)))) :argument-error)
         "time/sleep refuses an infinite duration")
+
+# ── It refuses a duration longer than the clock can count ───────────
+# The trap: 1e300 seconds does not fit a Rust Duration, and the conversion
+# that assumed it would panicked, so the process died where no protect could
+# catch it. The int path took any non-negative int and slept that long.
+
+(assert (= (error-kind (fn () (time/sleep 1e300))) :argument-error)
+        "time/sleep refuses a float the clock cannot count")
+(assert (= (error-kind (fn () (time/sleep 9223372036854775807))) :argument-error)
+        "time/sleep refuses an int the clock cannot count")
