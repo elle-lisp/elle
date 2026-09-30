@@ -5,13 +5,12 @@
 //! docs/impl/io-inflight.md
 
 use crate::io::pool::{BufferHandle, BufferPool};
-use crate::io::request::{ConnectAddr, PortOp};
+use crate::io::request::{Bound, ConnectAddr, PortOp};
 use crate::io::types::PortKey;
 use crate::port::PortKind;
 use crate::value::Value;
 use std::os::unix::io::{OwnedFd, RawFd};
 use std::rc::Rc;
-use std::time::Duration;
 
 /// What kind of operation a worker ran, reported beside the id so the entry
 /// that id resolves through can be checked against it
@@ -75,16 +74,16 @@ pub(crate) enum PendingOp {
         /// completion counts `filled + result_code`. Zero for ops that move
         /// no payload.
         filled: usize,
-        /// The request's timeout, carried so a resubmission can re-arm the
+        /// The request's bound, carried so a resubmission can re-arm the
         /// `LinkTimeout` that bounds it. A payload too large for one syscall
-        /// completes over several SQEs, and `:timeout` means "give up after
-        /// this long" for each of them rather than for the first alone.
-        /// `None` leaves the operation unbounded.
+        /// completes over several SQEs, and each of them waits no longer than
+        /// the bound allows when it is armed: its own `:timeout`, cut short by
+        /// the call's `:deadline` (docs/io/timeout.md).
         ///
         /// Only the io_uring backend re-arms a `LinkTimeout`; the thread pool
         /// bounds the op in the worker, so on that platform every submit site
         /// still fills this field and nothing reads it back.
-        timeout: Option<Duration>,
+        bound: Bound,
     },
     /// Connect to a remote address.
     Connect {
@@ -154,7 +153,7 @@ pub(crate) enum PendingOp {
 impl PendingOp {
     /// An operation on an existing port, filed with nothing transferred yet.
     ///
-    /// `timeout` is the request's own, carried so a resubmission re-arms the
+    /// `bound` is the request's own, carried so a resubmission re-arms the
     /// bound the first submission had.
     pub(crate) fn port(
         op: PortOp,
@@ -162,7 +161,7 @@ impl PendingOp {
         port: Value,
         descriptor: Option<Rc<OwnedFd>>,
         buffer_handle: Option<BufferHandle>,
-        timeout: Option<Duration>,
+        bound: Bound,
     ) -> PendingOp {
         PendingOp::Port {
             op,
@@ -173,7 +172,7 @@ impl PendingOp {
             listener_kind: None,
             lent: Vec::new(),
             filled: 0,
-            timeout,
+            bound,
         }
     }
 
@@ -341,16 +340,16 @@ impl PendingOp {
         }
     }
 
-    /// The request's timeout, for a backend re-arming the bound on a
-    /// resubmission. `None` for ops that carry no deadline.
+    /// The request's bound, for a backend re-arming it on a resubmission.
+    /// No bound for ops that carry none.
     ///
     /// Only `io::uring::drain` calls this, so the allow is narrowed to the
     /// platforms that compile that module out rather than blanket `dead_code`.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    pub(in crate::io) fn timeout(&self) -> Option<Duration> {
+    pub(in crate::io) fn bound(&self) -> Bound {
         match self {
-            PendingOp::Port { timeout, .. } => *timeout,
-            _ => None,
+            PendingOp::Port { bound, .. } => *bound,
+            _ => Bound::NONE,
         }
     }
 

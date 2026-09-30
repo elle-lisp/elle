@@ -1,10 +1,11 @@
+// audited: 2026-09-30
 //! `CompletionHub` accounting tests.
 //!
 //! The hub is the one channel every background worker feeds. These tests pin
 //! the combined `in_flight` invariant the single-channel design rests on: +1
 //! per worker submit, −1 once per `RawCompletion` reaped at the drain site, and
-//! nothing else touches the counter (so a cancel — which only removes the
-//! pending entry — cannot double-decrement). They use a zero-length
+//! nothing else touches the counter (so a cancel, which only marks the id,
+//! cannot double-decrement). They use a zero-length
 //! `PoolOp::Sleep` and `PoolOp::Task` because those need no file descriptor, so
 //! the hub is exercised on any platform without a real I/O resource.
 
@@ -15,7 +16,7 @@ use std::time::Duration;
 /// A sleep's duration is its bound, so a zero-length one is a worker that
 /// finishes at once. No stop pipe: these tests never cancel.
 fn instant() -> Bounds {
-    Bounds::new(Some(Duration::ZERO), None)
+    Bounds::new(crate::io::request::Bound::per_op(Duration::ZERO), None)
 }
 
 #[test]
@@ -99,8 +100,8 @@ fn hub_drains_a_burst_without_leaking_in_flight() {
     );
 }
 
-/// A reaped completion the caller discards (the cancellation shape: the
-/// pending entry is gone, so the cook fn returns `None`) still decrements the
+/// A reaped completion the caller discards (the cancellation shape: the id
+/// is marked, so the cook fn returns `None`) still decrements the
 /// counter exactly once. The hub has no cancel path of its own, so there is no
 /// second decrement to race — the invariant holds by construction. This test
 /// stands in for that: reaping without cooking leaves `in_flight` at zero.

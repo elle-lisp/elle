@@ -1,5 +1,5 @@
-//! audited: 2026-09-20
-//! Unit tests (`super` is the parent impl module).
+//! audited: 2026-09-30
+//! The mock backend: seeded reads, injected errors, latency, cancellation, and the log of what was submitted.
 //!
 //! src/io/AGENTS.md
 
@@ -12,11 +12,7 @@ fn test_mock_read() {
         let mock = MockBackend::new();
         mock.seed_read(b"hello world".to_vec());
 
-        let req = IoRequest {
-            op: PortOp::ReadAll.into(),
-            port: Value::NIL,
-            timeout: None,
-        };
+        let req = IoRequest::unbounded(PortOp::ReadAll.into(), Value::NIL);
         let id = mock
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
@@ -35,14 +31,13 @@ fn test_mock_write() {
     crate::value::arena::with_test_region(|| {
         let h = crate::primitives::ctx::TestHeap::new();
         let mock = MockBackend::new();
-        let req = IoRequest {
-            op: PortOp::Write {
+        let req = IoRequest::unbounded(
+            PortOp::Write {
                 data: h.ctx().string("test data"),
             }
             .into(),
-            port: Value::NIL,
-            timeout: None,
-        };
+            Value::NIL,
+        );
         let id = mock
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
@@ -61,11 +56,7 @@ fn test_mock_error_injection() {
         let mock = MockBackend::new();
         mock.inject_error(5); // EIO
 
-        let req = IoRequest {
-            op: PortOp::ReadAll.into(),
-            port: Value::NIL,
-            timeout: None,
-        };
+        let req = IoRequest::unbounded(PortOp::ReadAll.into(), Value::NIL);
         mock.submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
 
@@ -83,19 +74,11 @@ fn test_mock_call_log() {
         mock.seed_read(b"data".to_vec());
 
         let _ = mock.submit(
-            &IoRequest {
-                op: PortOp::ReadAll.into(),
-                port: Value::NIL,
-                timeout: None,
-            },
+            &IoRequest::unbounded(PortOp::ReadAll.into(), Value::NIL),
             crate::io::pending::Submitter::for_test(),
         );
         let _ = mock.submit(
-            &IoRequest {
-                op: PortOp::Flush.into(),
-                port: Value::NIL,
-                timeout: None,
-            },
+            &IoRequest::unbounded(PortOp::Flush.into(), Value::NIL),
             crate::io::pending::Submitter::for_test(),
         );
 
@@ -109,14 +92,13 @@ fn test_mock_eof_no_data() {
     crate::value::arena::with_test_region(|| {
         let h = crate::primitives::ctx::TestHeap::new();
         let mock = MockBackend::new();
-        let req = IoRequest {
-            op: PortOp::ReadLine {
+        let req = IoRequest::unbounded(
+            PortOp::ReadLine {
                 buffer: h.ctx().bytes(vec![0u8; 64]),
             }
             .into(),
-            port: Value::NIL,
-            timeout: None,
-        };
+            Value::NIL,
+        );
         mock.submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
         let completions = mock.poll();
@@ -131,21 +113,13 @@ fn test_mock_monotonic_ids() {
     let mock = MockBackend::new();
     let id1 = mock
         .submit(
-            &IoRequest {
-                op: PortOp::Flush.into(),
-                port: Value::NIL,
-                timeout: None,
-            },
+            &IoRequest::unbounded(PortOp::Flush.into(), Value::NIL),
             crate::io::pending::Submitter::for_test(),
         )
         .unwrap();
     let id2 = mock
         .submit(
-            &IoRequest {
-                op: PortOp::Flush.into(),
-                port: Value::NIL,
-                timeout: None,
-            },
+            &IoRequest::unbounded(PortOp::Flush.into(), Value::NIL),
             crate::io::pending::Submitter::for_test(),
         )
         .unwrap();
@@ -158,11 +132,7 @@ fn test_mock_latency_poll_before_deadline() {
     mock.set_latency(Duration::from_millis(100));
 
     mock.submit(
-        &IoRequest {
-            op: PortOp::Flush.into(),
-            port: Value::NIL,
-            timeout: None,
-        },
+        &IoRequest::unbounded(PortOp::Flush.into(), Value::NIL),
         crate::io::pending::Submitter::for_test(),
     )
     .unwrap();
@@ -178,11 +148,7 @@ fn test_mock_latency_wait() {
     mock.set_latency(Duration::from_millis(10));
 
     mock.submit(
-        &IoRequest {
-            op: PortOp::Flush.into(),
-            port: Value::NIL,
-            timeout: None,
-        },
+        &IoRequest::unbounded(PortOp::Flush.into(), Value::NIL),
         crate::io::pending::Submitter::for_test(),
     )
     .unwrap();
@@ -199,11 +165,7 @@ fn test_mock_latency_wait_timeout() {
     mock.set_latency(Duration::from_secs(10)); // very long
 
     mock.submit(
-        &IoRequest {
-            op: PortOp::Flush.into(),
-            port: Value::NIL,
-            timeout: None,
-        },
+        &IoRequest::unbounded(PortOp::Flush.into(), Value::NIL),
         crate::io::pending::Submitter::for_test(),
     )
     .unwrap();
@@ -220,11 +182,7 @@ fn test_mock_cancel() {
 
     let id = mock
         .submit(
-            &IoRequest {
-                op: PortOp::Flush.into(),
-                port: Value::NIL,
-                timeout: None,
-            },
+            &IoRequest::unbounded(PortOp::Flush.into(), Value::NIL),
             crate::io::pending::Submitter::for_test(),
         )
         .unwrap();
@@ -240,13 +198,12 @@ fn test_mock_cancel() {
 fn test_mock_sleep_uses_duration() {
     let mock = MockBackend::new();
     // Default latency is zero, but Sleep should use its own duration
-    let req = IoRequest {
-        op: IoOp::Sleep {
+    let req = IoRequest::unbounded(
+        IoOp::Sleep {
             duration: Duration::from_millis(10),
         },
-        port: Value::NIL,
-        timeout: None,
-    };
+        Value::NIL,
+    );
     mock.submit(&req, crate::io::pending::Submitter::for_test())
         .unwrap();
 

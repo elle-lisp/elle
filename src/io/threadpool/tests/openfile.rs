@@ -1,3 +1,8 @@
+// audited: 2026-09-30
+//! Opening a file on a pool worker: the descriptor it reports, and the bound on a fifo nobody reads.
+//!
+//! src/io/AGENTS.md
+
 use super::super::*;
 use super::file_path;
 
@@ -89,10 +94,9 @@ impl Drop for Fifo {
 /// Opening a fifo for writing waits for a reader — and the caller's `:timeout`
 /// is what ends that wait.
 ///
-/// `port/open` documents the deadline (`(port/open "fifo" :read :timeout
-/// 5000)`), and this is the direction where the wait actually happens: POSIX
-/// blocks a write-side open until a reader opens the other end, which it need
-/// never do.
+/// `port/open` takes a `:timeout` for this wait, and this is the direction
+/// where the wait actually happens: POSIX blocks a write-side open until a
+/// reader opens the other end, which it need never do.
 #[test]
 fn opening_a_fifo_for_writing_reports_the_callers_timeout() {
     use std::time::{Duration, Instant};
@@ -108,7 +112,10 @@ fn opening_a_fifo_for_writing_reports_the_callers_timeout() {
             flags: libc::O_WRONLY | libc::O_CLOEXEC,
             mode: 0o666,
         },
-        Bounds::new(Some(Duration::from_millis(200)), None),
+        Bounds::new(
+            crate::io::request::Bound::per_op(Duration::from_millis(200)),
+            None,
+        ),
     )
     .unwrap();
 
@@ -144,7 +151,10 @@ fn opening_a_fifo_for_writing_succeeds_when_a_reader_arrives() {
             flags: libc::O_WRONLY | libc::O_CLOEXEC,
             mode: 0o666,
         },
-        Bounds::new(Some(Duration::from_secs(10)), None),
+        Bounds::new(
+            crate::io::request::Bound::per_op(Duration::from_secs(10)),
+            None,
+        ),
     )
     .unwrap();
 

@@ -1,4 +1,4 @@
-//! audited: 2026-09-20
+//! audited: 2026-09-30
 //! A descriptor number stays out of the OS's hands while an operation names it,
 //! even after the value that owned it is gone.
 //!
@@ -76,11 +76,7 @@ fn a_port_freed_with_its_fibers_regions_keeps_its_descriptor_number() {
                 crate::value::fiber::test_fiber_in_region(heap, FiberStatus::Paused);
             let id = backend
                 .submit(
-                    &IoRequest {
-                        op: PortOp::ReadAll.into(),
-                        port,
-                        timeout: None,
-                    },
+                    &IoRequest::unbounded(PortOp::ReadAll.into(), port),
                     crate::io::pending::Submitter::new(heap_ptr, fiber),
                 )
                 .unwrap();
@@ -176,11 +172,7 @@ fn a_watcher_freed_with_its_fibers_regions_keeps_its_descriptor_number() {
 
         let id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::WatchNext,
-                    port: watcher_val,
-                    timeout: None,
-                },
+                &IoRequest::unbounded(IoOp::WatchNext, watcher_val),
                 crate::io::pending::Submitter::new(heap_ptr, fiber),
             )
             .unwrap();

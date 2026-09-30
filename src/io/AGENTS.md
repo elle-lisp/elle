@@ -133,7 +133,7 @@ shape. Every variant carries a `buffer_handle` — `Option<BufferHandle>` on
 `Port`, which has operations that reserve no buffer — and the rest of each
 variant is what that operation alone must remember:
 
-- `Port { op, port_key, port, descriptor, buffer_handle, listener_kind, lent, filled, timeout }` — operation on an existing port (stream I/O, accept, datagram, shutdown). `descriptor` is this operation's share of the number it names — see [descriptors and workers](../../docs/impl/io-descriptor.md). `listener_kind` is `Some(PortKind)` for Accept only. `lent` is the remainder the port handed to a read — see [where a stream operation's bytes live](../../docs/impl/io-bytes.md).
+- `Port { op, port_key, port, descriptor, buffer_handle, listener_kind, lent, filled, bound }` — operation on an existing port (stream I/O, accept, datagram, shutdown). `descriptor` is this operation's share of the number it names — see [descriptors and workers](../../docs/impl/io-descriptor.md). `listener_kind` is `Some(PortKind)` for Accept only. `lent` is the remainder the port handed to a read — see [where a stream operation's bytes live](../../docs/impl/io-bytes.md).
 - `Connect { addr, buffer_handle, connect_fd, port }` — creates a new port on completion. `connect_fd` starts as `Some(fd)` for io_uring (pre-created socket) or `None` for thread pool (set on completion).
 - `Open { path, buffer_handle, port }` — creates a new port on completion; `path` is kept for the error message.
 - `Sleep { buffer_handle }` — portless timer.
@@ -149,7 +149,7 @@ variant is what that operation alone must remember:
 Typed thread-pool submission and completion:
 
 - `PoolOp` — one variant per operation the pool runs. Each carries exactly the data that operation needs (fd, buffers, addresses, or closures) and nothing about waiting: a typed submission.
-- `Bounds` — how long an operation may wait and how `io/cancel` ends it, passed alongside the `PoolOp` to every `CompletionHub::submit`. Three constructors, and a submission must pick one: `CompletionHub::bounds(id, timeout)` pairs the caller's deadline with a fresh stop pipe, `Bounds::prompt()` says the syscalls wait on nothing outside this process, and `Bounds::uninterruptible()` says the syscall cannot be stopped once entered. Because the bound is an argument rather than a field, a variant cannot forget it. The `Bounds` own the stop pipe's read end and close it with themselves, so a submission no worker runs — a refused `Builder::spawn`, a path the kernel rejects — disposes of the pipe by being dropped.
+- `Bounds` — how long an operation may wait and how `io/cancel` ends it, passed alongside the `PoolOp` to every `CompletionHub::submit`. Three constructors, and a submission must pick one: `CompletionHub::bounds(id, bound)` pairs the caller's bound with a fresh stop pipe, `Bounds::prompt()` says the syscalls wait on nothing outside this process, and `Bounds::uninterruptible()` says the syscall cannot be stopped once entered. Because the bound is an argument rather than a field, a variant cannot forget it. The `Bounds` own the stop pipe's read end and close it with themselves, so a submission no worker runs — a refused `Builder::spawn`, a path the kernel rejects — disposes of the pipe by being dropped.
 - `OpBound` — what a worker runs under: it holds the descriptor non-blocking for the operation's lifetime and turns the declared `Bounds` into waits. `OpBound::new(fd, ..)` for an operation that reads or writes `fd`, `OpBound::watching(fd, ..)` for one that only polls a descriptor somebody else owns, `OpBound::detached(..)` for one with no descriptor at all.
 - `PoolCompletion { id, kind, result_code, data }` — typed completion from a thread-pool worker. `kind` is the `OpKind` the worker ran, checked against the entry the id resolves through — see [an operation in flight](../../docs/impl/io-inflight.md).
 - `RawCompletion` — `Pool(PoolCompletion)` | `Stdin(StdinCompletion)`. The single
@@ -180,7 +180,9 @@ the backend never runs a blocking getaddrinfo fallback.
 
 ### IoRequest
 
-Struct: `{ op: IoOp, port: Value, timeout: Option<Duration> }`.
+Struct: `{ op: IoOp, port: Value, bound: Bound }`. The `Bound` holds the call's
+`:timeout` for each kernel operation and its `:deadline` for the whole call
+([I/O deadlines](../../docs/io/timeout.md)).
 
 ### Completion
 
@@ -211,8 +213,8 @@ output is canonically shortened.
 **io_uring:** a `LinkTimeout` SQE follows the operation SQE with the `IO_LINK` flag, so the kernel cancels the operation when the timeout fires first. The operation's CQE then carries `result = -ECANCELED` (errno 125). The timeout's own CQE carries a high-bit tag (`id | (1 << 63)`) and completion processing skips it.
 
 **Thread pool:** `OpBound` ([opbound.rs](threadpool/opbound.rs)) takes the descriptor
-non-blocking and waits in `poll(2)` for readiness, for the caller's `:timeout`,
-or for the stop pipe. § "Operation timeouts" holds the mechanism, and
+non-blocking and waits in `poll(2)` for readiness, for the caller's bound, or
+for the stop pipe. § "Operation timeouts" holds the mechanism, and
 [an operation in flight](../../docs/impl/io-inflight.md) the cancellation half.
 
 ## I/O Cancellation
@@ -350,8 +352,8 @@ the invariant. See [io](../../docs/io.md) and [port-shortwrite.lisp](../../tests
 
 ## Operation timeouts
 
-A request's `:timeout` bounds each kernel operation, not the whole call. Most
-calls are one operation and the distinction does not arise. It arises for every
+A request's `:timeout` bounds each kernel operation, and its `:deadline` bounds
+the whole call. Most calls are one operation and the distinction does not arise. It arises for every
 call that loops: `Write` until the payload is gone, `ReadExact` until its count,
 `ReadAll` until EOF, `ReadLine` until a newline. For those, a peer that has
 stalled must trip the deadline while one that is merely slow must not — a
@@ -367,7 +369,7 @@ Each backend carries the bound its own way:
 
 | Backend | Mechanism | Expiry |
 |---------|-----------|--------|
-| io_uring | `push_resubmit` re-arms a `LinkTimeout` on every resubmission; `PendingOp::Port.timeout` carries the duration | `ECANCELED` |
+| io_uring | `push_resubmit` re-arms a `LinkTimeout` on every resubmission, for what `PendingOp::Port.bound` allows at that moment | `ECANCELED` |
 | thread pool | `OpBound` holds the fd in non-blocking mode for the operation and waits for readiness in `poll(2)`, re-armed after every transfer | `ETIMEDOUT` |
 
 `complete_port_op` maps both errnos to the `:timeout` error kind.

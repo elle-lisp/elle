@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-30
 //! The endings a pool operation reaches with nobody cancelling it: a close on
 //! the port beneath it, its own deadline, and a retirement.
 //!
@@ -66,16 +66,15 @@ fn closing_a_listener_ends_its_parked_pool_accept() {
         );
         let accept_id = backend
             .submit(
-                &IoRequest {
-                    op: PortOp::Accept {
+                &IoRequest::unbounded(
+                    PortOp::Accept {
                         options: Default::default(),
                         encoding: crate::port::Encoding::Binary,
                         accept_port: accept_port_val,
                     }
                     .into(),
-                    port: listener_port,
-                    timeout: None,
-                },
+                    listener_port,
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -96,11 +95,7 @@ fn closing_a_listener_ends_its_parked_pool_accept() {
         // parked accept must then complete too — as an error, within a bound.
         let close_id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::Close,
-                    port: listener_port,
-                    timeout: None,
-                },
+                &IoRequest::unbounded(IoOp::Close, listener_port),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -168,8 +163,8 @@ fn a_pool_connect_reports_its_own_deadline_as_a_timeout() {
         let started = std::time::Instant::now();
         let connect_id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::Connect {
+                &IoRequest::unbounded(
+                    IoOp::Connect {
                         addr: crate::io::request::ConnectAddr::Tcp {
                             addr: "127.0.0.1".parse().unwrap(),
                             port: bound_port,
@@ -177,9 +172,11 @@ fn a_pool_connect_reports_its_own_deadline_as_a_timeout() {
                             encoding: crate::port::Encoding::Binary,
                         },
                     },
-                    port: connect_port,
-                    timeout: Some(std::time::Duration::from_millis(200)),
-                },
+                    connect_port,
+                )
+                .within(crate::io::request::Bound::per_op(
+                    std::time::Duration::from_millis(200),
+                )),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -283,16 +280,15 @@ fn a_retired_accept_closes_the_connection_it_took() {
 
             backend
                 .submit(
-                    &IoRequest {
-                        op: PortOp::Accept {
+                    &IoRequest::unbounded(
+                        PortOp::Accept {
                             options: Default::default(),
                             encoding: Encoding::Binary,
                             accept_port,
                         }
                         .into(),
-                        port: listener_port,
-                        timeout: None,
-                    },
+                        listener_port,
+                    ),
                     crate::io::pending::Submitter::detached(heap_ptr),
                 )
                 .unwrap();

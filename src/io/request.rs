@@ -208,7 +208,7 @@ pub enum IoOp {
         events: u32,
     },
     /// Park a fiber on a `chan/wait-ready` wake fd until any sender
-    /// signals it or `timeout` (carried in `IoRequest.timeout`) elapses.
+    /// signals it or its bound (`IoRequest.bound`) passes.
     /// Portless.  The guard owns the eventfd / pipe2 fds and the Arc
     /// clones of each receiver's `WakeList`; its Drop deregisters and
     /// closes when the op completes, is cancelled, or never makes it
@@ -266,27 +266,48 @@ impl From<PortOp> for IoOp {
 pub struct IoRequest {
     pub op: IoOp,
     pub port: Value,
-    pub timeout: Option<Duration>,
+    /// How long the operation may wait (docs/io/timeout.md).
+    pub bound: Bound,
 }
 
 impl IoRequest {
+    /// A request for `op` on `port` that may wait as long as it takes.
+    pub fn unbounded(op: IoOp, port: Value) -> IoRequest {
+        IoRequest {
+            op,
+            port,
+            bound: Bound::NONE,
+        }
+    }
+
+    /// The same request, waiting no longer than `bound` allows.
+    pub fn within(self, bound: Bound) -> IoRequest {
+        IoRequest { bound, ..self }
+    }
+
     /// Create an IoRequest Value (ExternalObject "io-request"), born in `ctx`'s
     /// region — the requesting native call's own region on its instance heap. It
     /// escapes to the io backend as the primitive's yielded result, freed
     /// value-based.
     #[allow(clippy::new_ret_no_self)]
     pub fn new(ctx: &crate::primitives::ctx::Alloc, op: IoOp, port: Value) -> Value {
-        ctx.external(
-            "io-request",
-            IoRequest {
-                op,
-                port,
-                timeout: None,
-            },
-        )
+        Self::bounded(ctx, op, port, Bound::NONE)
     }
 
-    /// Create an IoRequest with a timeout, born in `ctx`'s region.
+    /// Create an IoRequest that waits no longer than `bound` allows, born in
+    /// `ctx`'s region.
+    #[allow(clippy::new_ret_no_self)]
+    pub fn bounded(
+        ctx: &crate::primitives::ctx::Alloc,
+        op: IoOp,
+        port: Value,
+        bound: Bound,
+    ) -> Value {
+        ctx.external("io-request", IoRequest::unbounded(op, port).within(bound))
+    }
+
+    /// Create an IoRequest bounded by `timeout` for each operation, born in
+    /// `ctx`'s region.
     #[allow(clippy::new_ret_no_self)]
     pub fn with_timeout(
         ctx: &crate::primitives::ctx::Alloc,
@@ -294,20 +315,13 @@ impl IoRequest {
         port: Value,
         timeout: Option<Duration>,
     ) -> Value {
-        ctx.external("io-request", IoRequest { op, port, timeout })
+        Self::bounded(ctx, op, port, Bound::new(timeout, None))
     }
 
     /// Create a portless IoRequest (e.g., Sleep), born in `ctx`'s region.
     #[allow(clippy::new_ret_no_self)]
     pub fn portless(ctx: &crate::primitives::ctx::Alloc, op: IoOp) -> Value {
-        ctx.external(
-            "io-request",
-            IoRequest {
-                op,
-                port: Value::NIL,
-                timeout: None,
-            },
-        )
+        Self::new(ctx, op, Value::NIL)
     }
 
     /// A portless one-second `Sleep`, born in `ctx`'s region: the request a
@@ -352,6 +366,17 @@ impl IoRequest {
         Self::portless(ctx, IoOp::PollFd { fd, events })
     }
 
+    /// Poll a raw fd for no longer than `bound` allows, born in `ctx`'s region.
+    #[allow(clippy::new_ret_no_self)]
+    pub fn poll_fd_within(
+        ctx: &crate::primitives::ctx::Alloc,
+        fd: std::os::unix::io::RawFd,
+        events: u32,
+        bound: Bound,
+    ) -> Value {
+        Self::bounded(ctx, IoOp::PollFd { fd, events }, Value::NIL, bound)
+    }
+
     /// Poll a raw fd with a timeout, born in `ctx`'s region.
     #[allow(clippy::new_ret_no_self)]
     pub fn poll_fd_with_timeout(
@@ -360,14 +385,7 @@ impl IoRequest {
         events: u32,
         timeout: Duration,
     ) -> Value {
-        ctx.external(
-            "io-request",
-            IoRequest {
-                op: IoOp::PollFd { fd, events },
-                port: Value::NIL,
-                timeout: Some(timeout),
-            },
-        )
+        Self::poll_fd_within(ctx, fd, events, Bound::per_op(timeout))
     }
 }
 

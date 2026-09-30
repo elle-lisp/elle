@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-30
 //! The pool operations that park with no peer, and what ends them.
 //!
 //! Each of these waits for an event that may never arrive: a child that never
@@ -10,7 +10,7 @@
 //!
 //! `assert_cancel_retires` (in `mod.rs`) is the shared assertion: the worker
 //! comes back and the `pending` entry goes, within a bounded number of waits.
-//! Its twins for the socket calls live in `net.rs`.
+//! Its twins for the socket calls live in `netcancel.rs`.
 //!
 //! `io_uring` runs most of these in the kernel, so the cancellation tests build
 //! a thread-pool backend explicitly rather than taking the platform default.
@@ -48,10 +48,10 @@ impl Drop for Fifo {
 
 /// A cancelled subprocess wait must END on the thread-pool backend.
 ///
-/// `subprocess/wait` on a child that never exits is the shape: `waitpid(pid,
-/// .., 0)` holds the worker for the child's whole life. `ev/timeout` around a
-/// wait is how a supervisor gives a stuck child a deadline, and the cancel it
-/// issues has to reach the worker.
+/// `subprocess/wait` on a child that never exits is the shape: a blocking
+/// `wait4(pid, .., 0, ..)` holds the worker for the child's whole life.
+/// `ev/timeout` around a wait is how a supervisor gives a stuck child a
+/// deadline, and the cancel it issues has to reach the worker.
 #[test]
 fn a_cancelled_pool_process_wait_ends_rather_than_being_abandoned() {
     crate::value::arena::with_test_region(|| {
@@ -68,11 +68,7 @@ fn a_cancelled_pool_process_wait_ends_rather_than_being_abandoned() {
         let backend = AsyncBackend::new_thread_pool().unwrap();
         let id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::ProcessWait,
-                    port: handle,
-                    timeout: None,
-                },
+                &IoRequest::unbounded(IoOp::ProcessWait, handle),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -103,14 +99,13 @@ fn a_cancelled_pool_poll_fd_ends_rather_than_being_abandoned() {
         let backend = AsyncBackend::new_thread_pool().unwrap();
         let id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::PollFd {
+                &IoRequest::unbounded(
+                    IoOp::PollFd {
                         fd: pipe.read_fd,
                         events: libc::POLLIN as u32,
                     },
-                    port: Value::NIL,
-                    timeout: None,
-                },
+                    Value::NIL,
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -140,14 +135,13 @@ fn a_pool_poll_fd_does_not_touch_the_descriptor_it_watches() {
         let backend = AsyncBackend::new_thread_pool().unwrap();
         let id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::PollFd {
+                &IoRequest::unbounded(
+                    IoOp::PollFd {
                         fd: pipe.read_fd,
                         events: libc::POLLIN as u32,
                     },
-                    port: Value::NIL,
-                    timeout: None,
-                },
+                    Value::NIL,
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -185,11 +179,7 @@ fn a_cancelled_pool_watch_next_ends_rather_than_being_abandoned() {
         let backend = AsyncBackend::new_thread_pool().unwrap();
         let id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::WatchNext,
-                    port: watcher_val,
-                    timeout: None,
-                },
+                &IoRequest::unbounded(IoOp::WatchNext, watcher_val),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -222,8 +212,8 @@ fn a_cancelled_pool_open_of_a_fifo_ends_rather_than_being_abandoned() {
         );
         let id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::Open {
+                &IoRequest::unbounded(
+                    IoOp::Open {
                         path: fifo.0.clone(),
                         flags: libc::O_WRONLY | libc::O_CLOEXEC,
                         mode: 0o666,
@@ -231,8 +221,7 @@ fn a_cancelled_pool_open_of_a_fifo_ends_rather_than_being_abandoned() {
                         encoding: Encoding::Binary,
                     },
                     port,
-                    timeout: None,
-                },
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -283,11 +272,7 @@ fn a_cancelled_operation_delivers_no_completion_on_either_backend() {
             let id =
                 backend
                     .submit(
-                        &IoRequest {
-                            op: PortOp::ReadAll.into(),
-                            port,
-                            timeout: None,
-                        },
+                        &IoRequest::unbounded(PortOp::ReadAll.into(), port),
                         crate::io::pending::Submitter::detached(
                             crate::value::arena::leaked_test_heap(),
                         ),
@@ -352,14 +337,16 @@ fn a_poll_fd_that_reaches_its_deadline_reports_no_events_on_either_backend() {
             let id =
                 backend
                     .submit(
-                        &IoRequest {
-                            op: IoOp::PollFd {
+                        &IoRequest::unbounded(
+                            IoOp::PollFd {
                                 fd: pipe.read_fd,
                                 events: libc::POLLIN as u32,
                             },
-                            port: Value::NIL,
-                            timeout: Some(Duration::from_millis(200)),
-                        },
+                            Value::NIL,
+                        )
+                        .within(crate::io::request::Bound::per_op(
+                            Duration::from_millis(200),
+                        )),
                         crate::io::pending::Submitter::detached(
                             crate::value::arena::leaked_test_heap(),
                         ),

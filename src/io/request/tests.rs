@@ -1,4 +1,4 @@
-//! audited: 2026-09-20
+//! audited: 2026-09-30
 //! What a request carries, what the submit path's copy of it keeps, and the
 //! in-place fills a completion makes through its buffers.
 //!
@@ -25,18 +25,18 @@ fn test_io_request_not_port() {
 }
 
 #[test]
-fn test_io_request_with_timeout() {
+fn a_request_carries_the_bound_it_was_built_with() {
     crate::primitives::ctx::with_test_ctx(|ctx| {
         let timeout = Some(Duration::from_millis(5000));
         let buf = ctx.bytes(vec![0u8; 64]);
-        let req = IoRequest::with_timeout(
+        let req = IoRequest::bounded(
             ctx,
             PortOp::ReadLine { buffer: buf }.into(),
             Value::NIL,
-            timeout,
+            Bound::new(timeout, None),
         );
         let extracted = req.as_external::<IoRequest>().unwrap();
-        assert_eq!(extracted.timeout, timeout);
+        assert_eq!(extracted.bound, Bound::new(timeout, None));
     });
 }
 

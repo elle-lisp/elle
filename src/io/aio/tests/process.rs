@@ -9,11 +9,7 @@ use crate::io::request::{reaped_child, zombie_child, SUBPROCESS};
 /// Submit a wait on `handle` through `backend`.
 fn submit_wait(backend: &AsyncBackend, handle: Value) -> Result<SubmissionId, String> {
     backend.submit(
-        &IoRequest {
-            op: IoOp::ProcessWait,
-            port: handle,
-            timeout: None,
-        },
+        &IoRequest::unbounded(IoOp::ProcessWait, handle),
         crate::io::pending::Submitter::for_test(),
     )
 }

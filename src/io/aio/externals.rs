@@ -31,7 +31,7 @@ impl AsyncBackend {
                     // A watcher on a directory nothing touches waits forever,
                     // so the read carries a stop pipe. `fs/watch` names no
                     // deadline, so the stop is the whole bound.
-                    let bounds = d.hub.bounds(d.id, None);
+                    let bounds = d.hub.bounds(d.id, Bound::NONE);
                     d.hub.submit(d.id, PoolOp::WatchRead { fd }, bounds)
                 }
             },
@@ -86,13 +86,13 @@ impl AsyncBackend {
                         // at all must not open a pipe it will never hand over.
                         #[cfg(any(target_os = "linux", target_os = "android"))]
                         {
-                            let bounds = d.hub.bounds(d.id, None);
+                            let bounds = d.hub.bounds(d.id, Bound::NONE);
                             d.hub
                                 .submit(d.id, PoolOp::SigfdRead { fd, trace }, bounds)?;
                         }
                         #[cfg(target_os = "macos")]
                         {
-                            let bounds = d.hub.bounds(d.id, None);
+                            let bounds = d.hub.bounds(d.id, Bound::NONE);
                             d.hub.submit(
                                 d.id,
                                 PoolOp::KqSigRead {
@@ -142,7 +142,7 @@ impl AsyncBackend {
         path: &str,
         flags: i32,
         mode: u32,
-        timeout: Option<Duration>,
+        bound: Bound,
         port: Value,
     ) -> Result<SubmissionId, String> {
         let c_path = std::ffi::CString::new(path)
@@ -151,7 +151,7 @@ impl AsyncBackend {
         self.submit_op(
             0,
             |d| {
-                let bounds = d.hub.bounds(d.id, timeout);
+                let bounds = d.hub.bounds(d.id, bound);
                 d.hub.submit(
                     d.id,
                     PoolOp::Open {
@@ -274,7 +274,7 @@ impl AsyncBackend {
                     // A child that never exits waits forever, so the wait
                     // carries a stop pipe. `subprocess/wait` names no deadline,
                     // so the stop is the whole bound.
-                    let bounds = d.hub.bounds(d.id, None);
+                    let bounds = d.hub.bounds(d.id, Bound::NONE);
                     d.hub.submit(
                         d.id,
                         PoolOp::ProcessWait {

@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-30
 // src/io/AGENTS.md
 //! A cancelled pool operation ends rather than being abandoned — one test for
 //! each operation that can wait on a peer who never comes.
@@ -14,11 +14,6 @@ use super::*;
 ///
 /// Closing a listener under a parked accept is how a program reaches the state
 /// `assert_cancel_retires` describes: an entry whose worker is gone for good.
-///
-/// Built on `new_thread_pool` rather than `AsyncBackend::new` on purpose: on a
-/// Linux host with io_uring the default backend is the ring, and this property
-/// would go unchecked on every dev box while only CI (and every non-Linux
-/// build, which has no other arm) ran the code it is about.
 #[test]
 fn a_cancelled_pool_accept_ends_rather_than_being_abandoned() {
     crate::value::arena::with_test_region(|| {
@@ -67,16 +62,15 @@ fn a_cancelled_pool_accept_ends_rather_than_being_abandoned() {
         );
         let accept_id = backend
             .submit(
-                &IoRequest {
-                    op: PortOp::Accept {
+                &IoRequest::unbounded(
+                    PortOp::Accept {
                         options: Default::default(),
                         encoding: crate::port::Encoding::Binary,
                         accept_port: accept_port_val,
                     }
                     .into(),
-                    port: listener_port,
-                    timeout: None,
-                },
+                    listener_port,
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -129,17 +123,16 @@ fn a_cancelled_pool_recvfrom_ends_rather_than_being_abandoned() {
         let backend = AsyncBackend::new_thread_pool().unwrap();
         let recv_id = backend
             .submit(
-                &IoRequest {
+                &IoRequest::unbounded(
                     // The pool worker receives into its own buffer, so the
                     // destination struct a fiber would pass is not needed here.
-                    op: PortOp::RecvFrom {
+                    PortOp::RecvFrom {
                         count: 64,
                         result: Value::NIL,
                     }
                     .into(),
-                    port: sock_port,
-                    timeout: None,
-                },
+                    sock_port,
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -160,11 +153,11 @@ fn a_cancelled_pool_recvfrom_ends_rather_than_being_abandoned() {
 /// `EPIPE` for a reason that has nothing to do with cancellation, and the test
 /// would then pass with the stop pipe taken away again.
 ///
-/// Counter-factual: with the write submitted under `Bounds::new(timeout, None)`,
-/// `OpBound::new` finds neither a deadline nor a stop to enforce and leaves the
-/// descriptor blocking, so the worker sits inside `write(2)` where no poll and no
-/// stop can reach it. `assert_cancel_retires` then fails on the worker that never
-/// comes back.
+/// Counter-factual: with the write submitted under `Bounds::new(bound, None)`,
+/// the caller's unbounded wait and no stop pipe, `OpBound::new` finds nothing
+/// to enforce and leaves the descriptor blocking, so the worker sits inside
+/// `write(2)` where no poll and no stop can reach it. `assert_cancel_retires`
+/// then fails on the worker that never comes back.
 #[test]
 fn a_cancelled_pool_write_ends_rather_than_being_abandoned() {
     crate::value::arena::with_test_region(|| {
@@ -214,14 +207,13 @@ fn a_cancelled_pool_write_ends_rather_than_being_abandoned() {
         let data = h.ctx().bytes(vec![b'x'; 4 << 20]);
         let write_id = backend
             .submit(
-                &IoRequest {
+                &IoRequest::unbounded(
                     // No `:timeout`: the deadline is the ending this test must
                     // not be able to reach for. Cancellation is the only one
                     // left, and it is the one under test.
-                    op: PortOp::Write { data }.into(),
+                    PortOp::Write { data }.into(),
                     port,
-                    timeout: None,
-                },
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -258,8 +250,8 @@ fn a_cancelled_pool_tcp_connect_ends_rather_than_being_abandoned() {
         );
         let connect_id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::Connect {
+                &IoRequest::unbounded(
+                    IoOp::Connect {
                         addr: crate::io::request::ConnectAddr::Tcp {
                             addr: "127.0.0.1".parse().unwrap(),
                             port: bound_port,
@@ -267,9 +259,8 @@ fn a_cancelled_pool_tcp_connect_ends_rather_than_being_abandoned() {
                             encoding: crate::port::Encoding::Binary,
                         },
                     },
-                    port: connect_port,
-                    timeout: None,
-                },
+                    connect_port,
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -367,17 +358,16 @@ fn a_cancelled_pool_unix_connect_ends_rather_than_being_abandoned() {
         );
         let connect_id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::Connect {
+                &IoRequest::unbounded(
+                    IoOp::Connect {
                         addr: crate::io::request::ConnectAddr::Unix {
                             path: path.clone(),
                             options: Default::default(),
                             encoding: crate::port::Encoding::Binary,
                         },
                     },
-                    port: connect_port,
-                    timeout: None,
-                },
+                    connect_port,
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();

@@ -39,27 +39,34 @@ impl Bound {
     /// This bound, taking `timeout` for each operation when it names no
     /// timeout of its own. A port's own `:timeout` reaches a call this way.
     pub fn or_timeout(self, timeout: Option<Duration>) -> Bound {
-        let _ = timeout;
-        self
+        Bound {
+            timeout: self.timeout.or(timeout),
+            ..self
+        }
     }
 
     /// Whether a wait under this bound ends on its own.
     pub fn is_bounded(&self) -> bool {
-        false
+        self.timeout.is_some() || self.until.is_some()
     }
 
     /// The instant a wait that starts at `now` must end by: the earlier of
     /// `now + timeout` and the deadline. `None` when neither bounds it. A
     /// timeout too long to add to `now` bounds nothing.
     pub fn next_end(&self, now: Instant) -> Option<Instant> {
-        let _ = now;
-        None
+        let by_timeout = self.timeout.and_then(|t| now.checked_add(t));
+        match (by_timeout, self.until) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
     }
 
     /// How long a wait that starts now may take. `Some(Duration::ZERO)` once
     /// the deadline has passed, which is a wait that only polls.
     pub fn next_wait(&self) -> Option<Duration> {
-        None
+        let now = Instant::now();
+        self.next_end(now)
+            .map(|end| end.saturating_duration_since(now))
     }
 }
 

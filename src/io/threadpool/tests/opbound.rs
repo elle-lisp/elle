@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 //! The per-operation bound, on a descriptor that carries no socket options.
 //!
 //! docs/impl/io-inflight.md
@@ -43,9 +43,12 @@ impl Drop for Pipe {
     }
 }
 
-/// Bounds carrying a deadline of `ms` and nothing to stop them.
+/// Bounds carrying a timeout of `ms` and nothing to stop them.
 fn timed(ms: u64) -> Bounds {
-    Bounds::new(Some(Duration::from_millis(ms)), None)
+    Bounds::new(
+        crate::io::request::Bound::per_op(Duration::from_millis(ms)),
+        None,
+    )
 }
 
 /// True when `fd` is in non-blocking mode.
@@ -67,7 +70,7 @@ fn write_to_a_pipe_nobody_reads_returns_at_its_deadline() {
     hub.submit(
         SubmissionId::from_raw(1),
         PoolOp::write(pipe.write_fd, payload),
-        Bounds::new(Some(Duration::from_millis(200)), None),
+        timed(200),
     )
     .unwrap();
 
@@ -100,7 +103,7 @@ fn read_from_a_pipe_nobody_writes_returns_at_its_deadline() {
     hub.submit(
         SubmissionId::from_raw(2),
         PoolOp::read(pipe.read_fd, 1024),
-        Bounds::new(Some(Duration::from_millis(200)), None),
+        timed(200),
     )
     .unwrap();
 
@@ -174,7 +177,10 @@ fn a_descriptor_that_was_already_non_blocking_stays_that_way() {
 #[test]
 fn a_pause_ends_at_once_when_the_operation_is_stopped() {
     let stop = open_stop_pipe().expect("a stop pipe");
-    let bound = OpBound::detached(Bounds::new(None, Some(stop.read_fd)));
+    let bound = OpBound::detached(Bounds::new(
+        crate::io::request::Bound::NONE,
+        Some(stop.read_fd),
+    ));
     let byte = 1u8;
     assert_eq!(
         unsafe { libc::write(stop.write_fd, &byte as *const u8 as *const libc::c_void, 1) },

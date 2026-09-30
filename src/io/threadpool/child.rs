@@ -33,7 +33,7 @@ const CHILD_MAX_PACE: Duration = Duration::from_millis(50);
 /// The exit code travels in `data` rather than in the result code, so a
 /// non-zero exit cannot be read as a negative errno.
 pub(super) fn process_wait(bound: OpBound, pid: u32, exit: ExitRecord) -> (i32, Vec<u8>) {
-    let deadline = bound.timeout().map(|t| std::time::Instant::now() + t);
+    let deadline = bound.end();
     let mut pace = CHILD_FIRST_PACE;
     loop {
         match exit.reap(pid) {

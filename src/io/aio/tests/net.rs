@@ -1,19 +1,18 @@
-// audited: 2026-09-05
+// audited: 2026-09-30
 // src/io/AGENTS.md
 //! Accept and connect on the platform's default backend, including both in
-//! flight on one ring at once.
+//! flight on one backend at once.
 
 use super::*;
 
-/// Regression test: wait() must not return 0 completions when an accept
-/// SQE is in-flight and a connection arrives within the timeout window.
+/// A timed wait() returns the accept's completion when a connection arrives
+/// inside its window.
 ///
-/// wait() loops until at least one completion arrives or the deadline passes,
-/// so a spurious early return from submit_with_args() (EINTR or spurious
-/// wakeup) cannot make it report 0 completions while the accept is still
-/// in flight.
+/// The trap: the ring's `submit_with_args` can return early on `EINTR`, and a
+/// wait that took that for the end of its window would report no completions
+/// while the accept is still in flight.
 #[test]
-fn test_accept_wait_does_not_return_zero_completions_spuriously() {
+fn a_timed_wait_returns_the_accept_a_peer_arrives_for() {
     crate::value::arena::with_test_region(|| {
         let h = crate::primitives::ctx::TestHeap::new();
         use std::os::unix::io::FromRawFd;
@@ -75,23 +74,22 @@ fn test_accept_wait_does_not_return_zero_completions_spuriously() {
         );
         let accept_id = backend
             .submit(
-                &IoRequest {
-                    op: PortOp::Accept {
+                &IoRequest::unbounded(
+                    PortOp::Accept {
                         options: Default::default(),
                         encoding: crate::port::Encoding::Binary,
                         accept_port: accept_port_val,
                     }
                     .into(),
-                    port: listener_port,
-                    timeout: None,
-                },
+                    listener_port,
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
-        // Use a barrier so the connect happens only after we're about to call wait().
-        // This maximises the chance that wait() sees 0 completions on the first
-        // drain and must block — the scenario where the spurious-return bug fires.
+        // A barrier, so the connect happens only once wait() is about to run.
+        // That makes wait() see no completion on its first drain and block,
+        // which is the wait under test.
         let barrier = Arc::new(Barrier::new(2));
         let barrier2 = barrier.clone();
         let handle = std::thread::spawn(move || {
@@ -100,13 +98,11 @@ fn test_accept_wait_does_not_return_zero_completions_spuriously() {
         });
 
         barrier.wait(); // release the connector thread
-                        // wait() must return exactly 1 completion — the accept.
-                        // If it returns 0, the bug is confirmed.
         let completions = backend.wait(5000).unwrap();
         assert_eq!(
             completions.len(),
             1,
-            "wait() returned {} completions — expected 1 (spurious early return bug)",
+            "wait() returned {} completions — expected the accept's one",
             completions.len()
         );
         assert_eq!(completions[0].id, accept_id);
@@ -116,7 +112,7 @@ fn test_accept_wait_does_not_return_zero_completions_spuriously() {
 }
 
 #[test]
-fn test_accept_via_uring() {
+fn an_accept_completes_when_a_peer_connects() {
     crate::value::arena::with_test_region(|| {
         let h = crate::primitives::ctx::TestHeap::new();
         use std::os::unix::io::FromRawFd;
@@ -185,16 +181,15 @@ fn test_accept_via_uring() {
                 String::new(),
             ),
         );
-        let accept_req = IoRequest {
-            op: PortOp::Accept {
+        let accept_req = IoRequest::unbounded(
+            PortOp::Accept {
                 options: Default::default(),
                 encoding: crate::port::Encoding::Binary,
                 accept_port: accept_port_val,
             }
             .into(),
-            port: listener_port,
-            timeout: None,
-        };
+            listener_port,
+        );
         let accept_id = backend
             .submit(&accept_req, crate::io::pending::Submitter::for_test())
             .unwrap();
@@ -235,7 +230,7 @@ fn test_accept_via_uring() {
 }
 
 #[test]
-fn test_connect_via_uring() {
+fn a_connect_completes_when_the_listener_accepts() {
     crate::value::arena::with_test_region(|| {
         let h = crate::primitives::ctx::TestHeap::new();
         // Create a TCP listener via std
@@ -261,8 +256,8 @@ fn test_connect_via_uring() {
                 format!("127.0.0.1:{}", bound_addr.port()),
             ),
         );
-        let connect_req = IoRequest {
-            op: IoOp::Connect {
+        let connect_req = IoRequest::unbounded(
+            IoOp::Connect {
                 addr: crate::io::request::ConnectAddr::Tcp {
                     addr: "127.0.0.1".parse().unwrap(),
                     port: bound_addr.port(),
@@ -270,9 +265,8 @@ fn test_connect_via_uring() {
                     encoding: crate::port::Encoding::Binary,
                 },
             },
-            port: connect_port,
-            timeout: None,
-        };
+            connect_port,
+        );
         let connect_id = backend
             .submit(&connect_req, crate::io::pending::Submitter::for_test())
             .unwrap();
@@ -294,7 +288,7 @@ fn test_connect_via_uring() {
     });
 }
 
-/// Accept + connect on the same io_uring ring — the scheduler scenario.
+/// Accept and connect in flight on one backend at once — the scheduler's case.
 /// One fiber does tcp/accept, another does tcp/connect, both SQEs on
 /// the same ring. Both completions must arrive.
 #[test]
@@ -303,7 +297,7 @@ fn test_accept_and_connect_concurrent() {
         let h = crate::primitives::ctx::TestHeap::new();
         use std::os::unix::io::FromRawFd;
 
-        // Create a non-blocking TCP listener via libc
+        // A TCP listener via libc
         let listener_fd = unsafe {
             let fd = tcp_listener_socket();
             assert!(fd >= 0);
@@ -360,16 +354,15 @@ fn test_accept_and_connect_concurrent() {
         );
         let accept_id = backend
             .submit(
-                &IoRequest {
-                    op: PortOp::Accept {
+                &IoRequest::unbounded(
+                    PortOp::Accept {
                         options: Default::default(),
                         encoding: crate::port::Encoding::Binary,
                         accept_port: accept_port_val,
                     }
                     .into(),
-                    port: listener_port,
-                    timeout: None,
-                },
+                    listener_port,
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -385,8 +378,8 @@ fn test_accept_and_connect_concurrent() {
         );
         let connect_id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::Connect {
+                &IoRequest::unbounded(
+                    IoOp::Connect {
                         addr: crate::io::request::ConnectAddr::Tcp {
                             addr: "127.0.0.1".parse().unwrap(),
                             port: bound_port,
@@ -394,9 +387,8 @@ fn test_accept_and_connect_concurrent() {
                             encoding: crate::port::Encoding::Binary,
                         },
                     },
-                    port: connect_port,
-                    timeout: None,
-                },
+                    connect_port,
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();

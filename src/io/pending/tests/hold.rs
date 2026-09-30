@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-30
 //! What a hold retains while its operation is in flight, and when it lets go.
 //!
 //! docs/impl/io-inflight.md
@@ -228,7 +228,7 @@ fn a_cancelled_entry_keeps_what_the_kernel_addresses() {
         Value::NIL,
         None,
         None,
-        None,
+        crate::io::request::Bound::NONE,
     );
     table.insert(id(1), read, Submitter::detached(heap));
     table.mark_cancelled(id(1));

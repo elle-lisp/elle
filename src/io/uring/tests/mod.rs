@@ -1,4 +1,4 @@
-//! audited: 2026-09-29
+//! audited: 2026-09-30
 //! The ring's own paths, driven without a backend: a signal read, the
 //! short-write resubmission, and the linked timeout.
 //!
@@ -252,11 +252,11 @@ fn short_write_resubmits_until_the_payload_is_gone() {
             PortOp::Write { data },
             PortKey::Fd(write_fd, crate::port::PortId::fresh()),
             Value::NIL,
-            // The pipe below owns the descriptor for the whole test, so there
+            // The socket pair above owns the descriptor for the whole test, so there
             // is no port for a share to come from.
             None,
             Some(buf_handle),
-            None,
+            crate::io::request::Bound::NONE,
         ),
         crate::io::pending::Submitter::for_test(),
     );

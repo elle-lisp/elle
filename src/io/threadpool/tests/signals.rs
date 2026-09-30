@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 //! The signal reads on the thread pool: the mask they leave, the signal they return, the close that drains.
 //!
 //! docs/posix-signals.md
@@ -52,7 +52,10 @@ fn the_macos_signal_read_blocks_again_what_it_unblocked() {
 /// it waits for, so the deadline is only there to make a regression a failed
 /// assertion rather than a child that hangs until the parent's own timeout.
 fn watch_bounds() -> Bounds {
-    Bounds::new(Some(std::time::Duration::from_secs(5)), None)
+    Bounds::new(
+        crate::io::request::Bound::per_op(std::time::Duration::from_secs(5)),
+        None,
+    )
 }
 
 /// Outcome of running a forked child to completion (or killing it on timeout).
@@ -402,7 +405,7 @@ fn stopped_sig_read_child_logic() -> i32 {
     let id = SubmissionId::from_raw(1);
     // No deadline, exactly as `submit_sig_next` builds it: the stop pipe is the
     // whole bound, so this measures the stop and nothing else.
-    let bounds = pool.bounds(id, None);
+    let bounds = pool.bounds(id, crate::io::request::Bound::NONE);
     #[cfg(any(target_os = "linux", target_os = "android"))]
     let submit = pool.submit(
         id,

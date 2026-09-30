@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-30
 //! The socket and datagram submissions: accept, send-to, receive-from and
 //! shutdown.
 //!
@@ -37,7 +37,12 @@ impl AsyncBackend {
                     match platform {
                         #[cfg(target_os = "linux")]
                         PlatformBackend::Uring(ring) => {
-                            crate::io::uring::submit_uring_accept(ring, id, fd, request.timeout)?;
+                            crate::io::uring::submit_uring_accept(
+                                ring,
+                                id,
+                                fd,
+                                request.bound.next_wait(),
+                            )?;
                         }
                         PlatformBackend::ThreadPool => {
                             let _ = buffer_pool;
@@ -46,7 +51,7 @@ impl AsyncBackend {
                             // carries: the caller's deadline, and the stop pipe
                             // `hub.stop` writes — neither of which can reach a
                             // thread already inside `accept(2)`.
-                            let bounds = hub.bounds(id, request.timeout);
+                            let bounds = hub.bounds(id, request.bound);
                             hub.submit(id, PoolOp::Accept { fd }, bounds)?;
                         }
                     }
@@ -69,7 +74,7 @@ impl AsyncBackend {
                                 id,
                                 fd,
                                 &full_payload,
-                                request.timeout,
+                                request.bound.next_wait(),
                                 buffer_pool,
                             )?;
                         }
@@ -101,7 +106,7 @@ impl AsyncBackend {
                             fd,
                             *count,
                             result,
-                            request.timeout,
+                            request.bound.next_wait(),
                             buffer_pool,
                         )?;
                     }
@@ -114,7 +119,7 @@ impl AsyncBackend {
                         // A datagram socket waits on a sender the same way a
                         // listener waits on a caller, so the receive carries the
                         // same two bounds as the accept above.
-                        let bounds = hub.bounds(id, request.timeout);
+                        let bounds = hub.bounds(id, request.bound);
                         hub.submit(id, PoolOp::RecvFrom { fd, size: *count }, bounds)?;
                     }
                 },
@@ -126,7 +131,7 @@ impl AsyncBackend {
                             id,
                             fd,
                             *how,
-                            request.timeout,
+                            request.bound.next_wait(),
                             buffer_pool,
                         )?;
                     }
@@ -159,7 +164,7 @@ impl AsyncBackend {
                 // § "Descriptor retirement").
                 port.fd_share(),
                 buf_handle,
-                request.timeout,
+                request.bound,
             )
             .accepting(listener_kind),
             submitter,

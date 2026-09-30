@@ -1,4 +1,4 @@
-//! audited: 2026-09-20
+//! audited: 2026-09-30
 //! What becomes of an operation whose asking fiber has gone: the answer it
 //! gets, the operands it still holds, and the sweep that ends it.
 //!
@@ -63,11 +63,7 @@ fn a_completion_is_withheld_when_the_fiber_that_asked_is_gone() {
             let data = crate::primitives::ctx::Alloc::with_region(region, heap).string("late\n");
             let id = backend
                 .submit(
-                    &IoRequest {
-                        op: PortOp::Write { data }.into(),
-                        port,
-                        timeout: None,
-                    },
+                    &IoRequest::unbounded(PortOp::Write { data }.into(), port),
                     crate::io::pending::Submitter::new(heap_ptr, fiber),
                 )
                 .unwrap();
@@ -157,11 +153,7 @@ fn a_submitted_operations_operands_outlive_the_fiber_that_asked() {
         let data = crate::primitives::ctx::Alloc::with_region(region, heap).string("held\n");
         backend
             .submit(
-                &IoRequest {
-                    op: PortOp::Write { data }.into(),
-                    port,
-                    timeout: None,
-                },
+                &IoRequest::unbounded(PortOp::Write { data }.into(), port),
                 crate::io::pending::Submitter::detached(heap_ptr),
             )
             .unwrap();
@@ -276,16 +268,15 @@ fn an_operation_that_parks_ends_when_the_fiber_that_asked_is_gone() {
 
             let id = backend
                 .submit(
-                    &IoRequest {
-                        op: PortOp::Accept {
+                    &IoRequest::unbounded(
+                        PortOp::Accept {
                             options: Default::default(),
                             encoding: Encoding::Binary,
                             accept_port,
                         }
                         .into(),
-                        port: listener,
-                        timeout: None,
-                    },
+                        listener,
+                    ),
                     crate::io::pending::Submitter::new(heap_ptr, fiber),
                 )
                 .unwrap();

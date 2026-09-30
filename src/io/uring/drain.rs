@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-30
 //! The single CQE drain: each completion resolved through its entry, then
 //! retired, resubmitted, or cooked into a `Completion`.
 //!
@@ -8,8 +8,9 @@
 use super::resubmit::{next, Next};
 use super::*;
 
-/// Push a resubmitted operation, re-arming the caller's timeout as a linked
-/// timeout SQE so the bound applies to this operation as it did to the first.
+/// Push a resubmitted operation, re-arming what the caller's bound has left as
+/// a linked timeout SQE, so the bound applies to this operation as it did to
+/// the first.
 ///
 /// Returns the `Timespec` the kernel reads when it processes the SQE. It must
 /// stay alive until `ring.submit()` hands the queue over, so the caller holds
@@ -164,7 +165,7 @@ pub(crate) fn drain_cqes(
         // or its EOF, a write to the end of its payload — would otherwise be
         // unbounded from its second SQE on, and a peer that goes quiet would
         // hang an operation that asked for a timeout.
-        let timeout = op.timeout();
+        let timeout = op.bound().next_wait();
         pending.restore(id, op);
         link_timeouts.extend(push_resubmit(ring, id, sqe, timeout));
     }

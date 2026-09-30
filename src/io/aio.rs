@@ -1,4 +1,4 @@
-//! audited: 2026-09-29
+//! audited: 2026-09-30
 //! `AsyncBackend`: the state an in-flight operation is tracked through, and the
 //! platform that runs it.
 //!
@@ -11,7 +11,7 @@ use crate::io::completion;
 use crate::io::pending::{OpKind, PendingOp, PendingTable, Taken};
 use crate::io::pool::BufferPool;
 use crate::io::request::{
-    ConnectAddr, IoOp, IoRequest, PortOp, ProcessHandle, SpawnRequest, TaskFn,
+    Bound, ConnectAddr, IoOp, IoRequest, PortOp, ProcessHandle, SpawnRequest, TaskFn,
 };
 use crate::io::threadpool::{
     Bounds, CompletionHub, PoolCompletion, PoolOp, RawCompletion, StdinOpKind, StdinThread,
@@ -408,7 +408,7 @@ impl AsyncBackendInner {
                 Some(buf_handle),
                 // The stdin worker owns its own blocking read; nothing here
                 // resubmits through the ring, so there is no link to re-arm.
-                None,
+                Bound::NONE,
             ),
             self.submitter,
         );

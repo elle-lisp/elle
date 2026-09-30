@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-30
 //! Worker reuse, and the two costs it must not bring with it.
 //!
 //! A finished operation gives its worker back to the crew rather than ending
@@ -189,7 +189,7 @@ fn parked_operations_do_not_delay_the_next_submission() {
     for id in 1..=PARKED {
         let id = SubmissionId::from_raw(id);
         // A stop pipe and no deadline: nothing but `stop` ends these.
-        let bounds = hub.bounds(id, None);
+        let bounds = hub.bounds(id, crate::io::request::Bound::NONE);
         hub.submit(id, PoolOp::read(read_fd, 16), bounds)
             .expect("the pool must accept a parking submission");
     }

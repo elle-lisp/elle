@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-30
 //! A write read from its payload, a remainder given back to its port, and a
 //! teardown that waits for a worker.
 //!
@@ -88,11 +88,8 @@ fn submit(
 ) -> SubmissionId {
     backend
         .submit(
-            &IoRequest {
-                op: op.into(),
-                port,
-                timeout,
-            },
+            &IoRequest::unbounded(op.into(), port)
+                .within(crate::io::request::Bound::new(timeout, None)),
             crate::io::pending::Submitter::for_test(),
         )
         .unwrap()
