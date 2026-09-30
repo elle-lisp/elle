@@ -97,6 +97,9 @@
   (assert (not ok?) "a keepalive that is not a number errors"))
 (let [[ok? _] (protect ((fn () (io/backend :async -1))))]
   (assert (not ok?) "a negative keepalive errors"))
+(let [[ok? err] (protect ((fn () (io/backend :async 1e300))))]
+  (assert (and (not ok?) (= (get err :error) :argument-error))
+          "a keepalive longer than the clock can count is refused"))
 
 # A scheduler reads the parameter when it makes its backend, so this whole
 # program's I/O runs on a crew that retires every worker at once.
@@ -332,3 +335,11 @@
 
 (let [[ok? _] (protect ((fn () (eval '(ev/sleep 1 2)))))]
   (assert (not ok?) "ev/sleep rejects two args"))
+
+# === ev/poll-fd error: a timeout longer than the clock can count ===
+# The descriptor is not open, so a poll that took the bound for none would
+# answer POLLNVAL at once rather than signal.
+
+(let [[ok? err] (protect (ev/poll-fd 100000 :read 1e300))]
+  (assert (and (not ok?) (= (get err :error) :argument-error))
+          "ev/poll-fd refuses a timeout the clock cannot count"))
