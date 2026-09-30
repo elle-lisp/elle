@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-30
 // What a form killed by its deadline leaves behind: its output, and a photograph of every thread.
 // docs/test-runner.md
 // docs/testing.md
@@ -13,6 +13,7 @@
 // runner's unit is the form, so a print in a form of its own would belong to a
 // result that never timed out.
 
+use crate::common::query;
 use std::process::Command;
 
 fn elle_binary() -> &'static str {
@@ -64,17 +65,6 @@ fn run_wedged_form(
         String::from_utf8_lossy(&out.stderr)
     );
     (combined, db, dir)
-}
-
-/// Query `db` and return the rendered rows.
-fn query(db: &std::path::Path, sql: &str) -> String {
-    let out = Command::new(elle_binary())
-        .args(["test", "--query", sql])
-        .arg("--db")
-        .arg(db)
-        .output()
-        .expect("query the session DB");
-    String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
 #[test]
@@ -179,7 +169,7 @@ fn thread_headers(photo: &str) -> usize {
 /// The counter-factual: a photograph cut at a fixed length keeps the threads the
 /// sampler lists first. On macOS those were the JIT compiler threads, whose deep
 /// stacks filled the cut before the wedged worker was reached. The fixture parks
-/// `SLEEPERS` threads, which no fixed cut of the old size can hold.
+/// `SLEEPERS` threads, which a cut sized for a few threads cannot hold.
 ///
 /// A box with no sampler prints no photograph, and the timeout is still recorded.
 #[test]

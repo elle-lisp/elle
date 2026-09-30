@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 // A file can have its own process: what a child's exit status becomes in the
 // store, and that the run goes on after one of them dies.
 //
@@ -9,6 +9,7 @@
 // written yet goes with it. Each test below reads a row that could not exist
 // under the shared-process runner.
 
+use crate::common::query;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -34,17 +35,6 @@ fn isolate(db: &Path, flags: &str, timeout_ms: u64, paths: &[PathBuf]) -> std::p
         .env_remove("RUST_MIN_STACK")
         .output()
         .expect("run elle test --isolate")
-}
-
-/// The rendered rows of `sql` against `db`.
-fn query(db: &Path, sql: &str) -> String {
-    let out = Command::new(elle_binary())
-        .args(["test", "--query", sql])
-        .arg("--db")
-        .arg(db)
-        .output()
-        .expect("query the session DB");
-    String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
 /// Every result of the latest run, with the file it belongs to.
@@ -125,11 +115,7 @@ fn an_aborting_file_is_recorded_and_the_run_completes() {
 fn a_nonzero_exit_is_a_fail_naming_the_code() {
     let dir = crate::common::ScratchDir::new("isolate-exit");
     let db = dir.join("s.db");
-    let path = fixture(
-        &dir,
-        "exits.lisp",
-        "(elle/epoch 12)\n(os/exit 3)\n",
-    );
+    let path = fixture(&dir, "exits.lisp", "(elle/epoch 12)\n(os/exit 3)\n");
 
     let out = isolate(&db, "", 30000, &[path]);
     assert!(!out.status.success(), "a non-zero child gates the run");

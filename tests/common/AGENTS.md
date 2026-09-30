@@ -1,6 +1,6 @@
 # tests/common
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 Shared test helpers for the Elle test suite.
 
@@ -15,13 +15,15 @@ Provide canonical eval and setup functions so test files don't need to copy-past
 - Readers of the two Elle suites, of the Makefile, of the suite passes a target
   runs and of the workflow files, for the tests that check what CI runs, how it
   dimensions a run, and what it keeps
+- A reader of an `elle test` session store, for the tests that check what a
+  run records
 
 Does NOT:
 - Run tests (that's the test harness)
 - Define test cases (that's individual test files)
 - Manage test fixtures (that's `tests/fixtures/`)
 
-Every helper drives a `Runtime` (`elle::runtime`), the one per-instance owner of the heap, `VM`, `SymbolTable`, and per-instance `CompileCtx`. The compile state each eval names is the instance's own (`rt.parts()`), so two test instances never share stdlib exports or REPL definitions. `Runtime` also points the VM at its own symbol table and `CompileCtx`, so executed code that resolves through the VM sees this instance's state.
+Every eval drives a `Runtime` (`elle::runtime`), the one per-instance owner of the heap, `VM`, `SymbolTable`, and per-instance `CompileCtx`. The compile state each eval names is the instance's own (`rt.parts()`), so two test instances never share stdlib exports or REPL definitions. `Runtime` also points the VM at its own symbol table and `CompileCtx`, so executed code that resolves through the VM sees this instance's state.
 
 ## Key functions
 
@@ -116,6 +118,7 @@ This is safe because:
 | [passes.rs](passes.rs) | the suite passes a target runs (`Pass`, `passes`), the two suites as sets (`lang_files`, `impl_files`), and `assert_plain_language_pass`, for `suites.rs` and `variants.rs` |
 | [workflows.rs](workflows.rs) | the workflow readers (`workflow_files`, `workflow_jobs`, `runs_target`) |
 | [documents.rs](documents.rs) | the documents `make doctest` runs (`doctest_documents`) and the documents it must run (`covered_documents`), for `doctest.rs` and `doctest_scope.rs` |
+| [store.rs](store.rs) | the session-store readers (`query`, `scalar`), for the tests that drive `elle test` and read back what it recorded |
 
 ### Reading the Makefile
 
@@ -155,6 +158,11 @@ a job that runs it. **`runs_target(body, target)`** asks whether a job runs one
 make target, and not a longer one it prefixes. `workflows.rs` asks what the gate
 waits for and `run_artifacts.rs` asks what a suite job leaves behind, so the
 reading lives here rather than twice.
+
+### Reading a session store
+
+**`query(db, sql)`** answers the rows `elle test --query` prints, and
+**`scalar(db, sql)`** the one integer a query aliases `c`.
 
 ## Invariants
 

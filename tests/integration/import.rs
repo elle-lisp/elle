@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 // A run recorded in another store joins local history — once, with the code
 // state it ran against and the bytes its assets name.
 //
@@ -9,6 +9,7 @@
 // key a second import of one artifact appends every run again, and the history
 // then reads as twice the runs rather than as one run seen twice.
 
+use crate::common::{query, scalar};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -73,47 +74,24 @@ fn import(db: &Path, src: &Path) -> std::process::Output {
         .expect("run elle test --import")
 }
 
-/// The rendered rows of `sql` against `db`.
-fn query(db: &Path, sql: &str) -> String {
-    let out = Command::new(elle_binary())
-        .args(["test", "--query", sql])
-        .arg("--db")
-        .arg(db)
-        .output()
-        .expect("query a session DB");
-    assert!(
-        out.status.success(),
-        "the query failed: {sql}\nstderr:\n{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-/// One integer a query rendered under the alias `c`.
-fn scalar(db: &Path, sql: &str) -> i64 {
-    let rows = query(db, sql);
-    let at = rows
-        .find(":c ")
-        .unwrap_or_else(|| panic!("no `c` column in:\n{rows}"));
-    let digits: String = rows[at + 3..]
-        .chars()
-        .take_while(|c| c.is_ascii_digit() || *c == '-')
-        .collect();
-    digits
-        .parse()
-        .unwrap_or_else(|e| panic!("`c` is not a number ({e}) in:\n{rows}"))
-}
-
 fn rows_in(db: &Path, table: &str) -> i64 {
     scalar(db, &format!("SELECT count(*) AS c FROM {table}"))
 }
 
 /// The whole store, as the counts an import has to reproduce.
 fn census(db: &Path) -> Vec<(&'static str, i64)> {
-    ["run", "form", "result", "asset", "measurement", "gauge", "changed_file"]
-        .iter()
-        .map(|t| (*t, rows_in(db, t)))
-        .collect()
+    [
+        "run",
+        "form",
+        "result",
+        "asset",
+        "measurement",
+        "gauge",
+        "changed_file",
+    ]
+    .iter()
+    .map(|t| (*t, rows_in(db, t)))
+    .collect()
 }
 
 #[test]
@@ -251,7 +229,10 @@ fn an_imported_asset_brings_its_bytes() {
         );
         seen += 1;
     }
-    assert!(seen > 0, "the source CAS held nothing, so nothing was proven");
+    assert!(
+        seen > 0,
+        "the source CAS held nothing, so nothing was proven"
+    );
 }
 
 /// An asset and a measurement name a result by its row id, and the ids of two

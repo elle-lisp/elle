@@ -9,6 +9,7 @@
 // this build" with nothing. A timeout that fails in one CI job and nowhere else
 // is then a guess.
 
+use crate::common::{query, scalar};
 use std::path::Path;
 use std::process::Command;
 
@@ -45,32 +46,6 @@ fn run_green(dir: &crate::common::ScratchDir, db: &Path, src: &str, extra: &[&st
         "the fixture must gate green; stderr:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-}
-
-/// One integer a query renders under the alias `c`.
-fn scalar(db: &Path, sql: &str) -> i64 {
-    let out = Command::new(elle_binary())
-        .args(["test", "--query", sql])
-        .arg("--db")
-        .arg(db)
-        .output()
-        .expect("query the session DB");
-    let rows = String::from_utf8_lossy(&out.stdout).into_owned();
-    assert!(
-        out.status.success(),
-        "the query failed: {sql}\nstderr:\n{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let at = rows
-        .find(":c ")
-        .unwrap_or_else(|| panic!("no `c` column in:\n{rows}"));
-    let digits: String = rows[at + 3..]
-        .chars()
-        .take_while(|c| c.is_ascii_digit() || *c == '-')
-        .collect();
-    digits
-        .parse()
-        .unwrap_or_else(|e| panic!("`c` is not a number ({e}) in:\n{rows}"))
 }
 
 /// How many of the latest run's rows satisfy `cond`, and how many there are.
@@ -240,21 +215,7 @@ fn an_isolated_child_records_its_total_and_an_import_keeps_it() {
 fn a_store_from_before_max_rss_kb_gains_the_column() {
     let dir = crate::common::ScratchDir::new("cost-migrate");
     let db = dir.join("s.db");
-    let out = Command::new(elle_binary())
-        .args([
-            "test",
-            "--query",
-            "ALTER TABLE result DROP COLUMN max_rss_kb",
-        ])
-        .arg("--db")
-        .arg(&db)
-        .output()
-        .expect("drop the column");
-    assert!(
-        out.status.success(),
-        "the store must have had a max_rss_kb column to drop; stderr:\n{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    query(&db, "ALTER TABLE result DROP COLUMN max_rss_kb");
 
     run_green(&dir, &db, "(assert true \"ok\")\n", &["--isolate", ""]);
     let (costed, rows) = latest(&db, "max_rss_kb > 0");
