@@ -346,22 +346,27 @@
 # Compile SRC and run its test forms per tier. A single-form file/snippet (the
 # durable corpus shape) uses the per-form barrier (compile/barrier-module); a
 # legacy MULTI-form file is wrapped as one whole-file thunk (process-whole). A
-# compile/setup error becomes one file-level failure.
+# read, compile or setup error becomes one file-level failure.
 (defn process-source [conn run-id origin file name src]
-  (let [forms (test-forms src)
-        dumps (capture-dumps src name)
-        profile (form-profile src name)]
-    (if (> (length forms) 1)
-      (process-whole conn run-id origin file name src forms profile dumps)
-      (dispatch-compiled conn run-id origin file
-                         (protect (compile/barrier-module src name)) dumps
-                         profile
-                         (fn [entries]
-                           (process-entries conn run-id origin file forms
-                           profile entries dumps []))))))
+  (let [[read-ok? forms] (protect (test-forms src))]
+    (if (not read-ok?)
+      (record-file-error conn run-id origin file forms [] no-profile)
+      (let [dumps (capture-dumps src name)
+            profile (form-profile src name)]
+        (if (> (length forms) 1)
+          (process-whole conn run-id origin file name src forms profile dumps)
+          (dispatch-compiled conn run-id origin file
+                             (protect (compile/barrier-module src name)) dumps
+                             profile
+                             (fn [entries]
+                               (process-entries conn run-id origin file forms
+                               profile entries dumps []))))))))
 
 (defn process-file [conn run-id file]
-  (process-source conn run-id file file file (slurp file)))
+  (let [[read-ok? src] (protect (slurp file))]
+    (if read-ok?
+      (process-source conn run-id file file file src)
+      (record-file-error conn run-id file file src [] no-profile))))
 
 # Run FILE as its own process under FLAGS and record what the child left
 # behind. The file is the unit here — a process cannot be given one form of it
