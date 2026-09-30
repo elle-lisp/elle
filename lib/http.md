@@ -1,6 +1,6 @@
 # http
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 HTTP/1.1 client and server over TCP in pure Elle, with HTTPS and compression as opt-in module arguments.
 
@@ -83,7 +83,9 @@ event's `:id` and the `Last-Event-ID` of the next reconnect.
 
 1. Header keys are lowercase keywords after parsing.
 2. `http:respond` always sets Content-Length.
-3. `defer` closes every connection, so an error never leaks one.
+3. A one-shot request and each served connection close their transport in a
+   `defer`, so an error never leaks one. A keep-alive session from
+   `http:connect` stays open until `http:close`.
 4. `http:serve` answers a handler error with 500 and keeps serving.
 5. `https://` needs `:tls` at module init, and signals
    `:http-error :tls-not-configured` without it.
@@ -96,4 +98,5 @@ event's `:id` and the `Last-Event-ID` of the next reconnect.
 
 ```bash
 elle tests/lang/http.lisp
+elle tests/lang/http-sse.lisp
 ```
