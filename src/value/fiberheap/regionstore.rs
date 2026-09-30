@@ -191,10 +191,15 @@ pub(crate) struct RegionStore {
     /// class alone: a release that frees a region a live value still points into
     /// leaves this flat, the ledger being balanced until something reads the page.
     over_frees: u32,
+    /// How this store's regions have ended (docs/impl/region/diagnostics.md). The
+    /// free path and the forest primitives count here; the `arena/*` reclamation
+    /// gauges read it.
+    counters: counters::ReclaimCounters,
 }
 
 mod alloc;
 mod counters;
+pub(crate) use counters::ReclaimCounters;
 mod free;
 mod hydrate;
 mod introspect;
@@ -249,6 +254,7 @@ impl RegionStore {
             mint_sites: std::collections::HashMap::new(),
             trace,
             over_frees: 0,
+            counters: counters::ReclaimCounters::default(),
         }
     }
 

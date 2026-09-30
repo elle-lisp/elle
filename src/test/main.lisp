@@ -240,10 +240,12 @@
     (if isolate-flags
       (process-file-isolated conn run-id f isolate-flags)
       (process-file conn run-id f)))
-  (gauge-mark conn run-id gauge-prev f))
+  (gauge-mark conn run-id gauge-prev f)
+  (test-gauge-mark conn run-id f))
 (each e in (get opts :eval)
   (process-eval conn run-id e)
-  (gauge-mark conn run-id gauge-prev "<eval>"))
+  (gauge-mark conn run-id gauge-prev "<eval>")
+  (test-gauge-mark conn run-id "<eval>"))
 
 (def nfail (count-status conn run-id :fail))
 (def npass (count-status conn run-id :pass))
