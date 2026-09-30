@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-30
 //! The I/O subsystem's root: the backend trait, a completion and the region it builds
 //! its answer in.
 //!
@@ -46,6 +46,7 @@ use crate::io::request::IoRequest;
 use crate::value::heap::TableKey;
 use crate::value::Value;
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 /// Build an error string of the form `"{context}: {os-error}"` from the
 /// current `errno` (via `std::io::Error::last_os_error`). Centralises the
@@ -371,7 +372,10 @@ pub(crate) trait IoBackend {
         submitter: crate::io::pending::Submitter,
     ) -> Result<SubmissionId, String>;
     fn poll(&self) -> Vec<Completion>;
-    fn wait(&self, timeout_ms: i64) -> Result<Vec<Completion>, String>;
+    /// Block until some completion arrives or `timeout` passes, and answer the
+    /// completions so far. `None` waits as long as it takes; a zero timeout
+    /// polls.
+    fn wait(&self, timeout: Option<Duration>) -> Result<Vec<Completion>, String>;
     fn cancel(&self, id: SubmissionId) -> Result<(), String>;
     /// Cancel and drain every in-flight kernel op, and let go of every region
     /// this backend still holds: the ones its filed operations retain, and the

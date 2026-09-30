@@ -82,7 +82,7 @@ fn a_pool_read_exact_counts_the_remainder_the_port_already_holds() {
             .unwrap();
         let mut line_done = false;
         for _ in 0..40 {
-            for c in backend.wait(50).unwrap() {
+            for c in backend.wait(TICK).unwrap() {
                 if c.id == line_id {
                     line_done = true;
                 }
@@ -111,7 +111,7 @@ fn a_pool_read_exact_counts_the_remainder_the_port_already_holds() {
         // Bounded, because the property under test is that this terminates.
         let mut exact = None;
         for _ in 0..80 {
-            for c in backend.wait(50).unwrap() {
+            for c in backend.wait(TICK).unwrap() {
                 if c.id == exact_id {
                     exact = Some(c);
                 }
@@ -178,9 +178,10 @@ fn a_pool_text_read_exact_counts_the_remainder_in_clusters() {
             }
         });
 
-        // A pipe port, because the stream constructors fix the encoding at
-        // Binary and the encoding is the whole point here. What the runner
-        // reads is a descriptor either way; the counting unit is what differs.
+        // A pipe port, because the stream constructors build a port with the
+        // Binary encoding and the encoding is the whole point here. What the
+        // runner reads is a descriptor either way; the counting unit is what
+        // differs.
         let port = h.ctx().external(
             "port",
             Port::new_pipe(
@@ -206,7 +207,7 @@ fn a_pool_text_read_exact_counts_the_remainder_in_clusters() {
             .unwrap();
         let mut line_done = false;
         for _ in 0..40 {
-            for c in backend.wait(50).unwrap() {
+            for c in backend.wait(TICK).unwrap() {
                 if c.id == line_id {
                     line_done = true;
                 }
@@ -235,7 +236,7 @@ fn a_pool_text_read_exact_counts_the_remainder_in_clusters() {
 
         let mut exact = None;
         for _ in 0..80 {
-            for c in backend.wait(50).unwrap() {
+            for c in backend.wait(TICK).unwrap() {
                 if c.id == exact_id {
                     exact = Some(c);
                 }

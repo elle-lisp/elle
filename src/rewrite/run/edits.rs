@@ -1,9 +1,11 @@
-// audited: 2026-09-21
+// audited: 2026-09-30
 // The edit collectors behind `elle rewrite`: one per migration rule kind, each
 // turning a rule into byte-span edits over the source text.
 // docs/epochs.md
 
 use super::*;
+use crate::epoch::rules::TimeArg;
+use crate::epoch::seconds::{wrap_ends, Millis, Seconds, Written};
 
 /// Scan source for removed symbols and return an error listing them.
 pub(super) fn check_removals(
@@ -232,8 +234,7 @@ pub(super) fn try_match_replace<'a>(
 }
 
 /// Collect edits that spell every named reader shorthand out as its form:
-/// `;x` becomes `(splice x)` (docs/impl/lexicon.md § "Desugaring a reader
-/// shorthand").
+/// `;x` becomes `(splice x)` (docs/impl/lexicon.md).
 ///
 /// Each shorthand yields two edits rather than one span over the whole
 /// `<prefix><form>` text. A single span would have to build its replacement
@@ -363,3 +364,136 @@ mod flatten;
 pub(crate) use flatten::{
     collect_bracket_edits, collect_flatten_clause_edits, collect_flatten_edits,
 };
+
+/// Collect the edits that rewrite each millisecond duration a call named in
+/// `millis` gave as a `:timeout` in seconds (docs/epochs.md).
+///
+/// The edits are token-level, like the renames: a literal is replaced where
+/// it stands, an argument that meant no bound is deleted with the space before
+/// it, and an expression is wrapped by one insertion at each end. The two
+/// insertions leave the expression's own bytes to the other edits, so a rename
+/// inside it still lands. A quoted form is data and is left as written.
+pub(super) fn collect_millis_edits(
+    src: SourceText<'_>,
+    millis: &HashMap<&str, TimeArg>,
+) -> Result<Vec<Edit>, String> {
+    if millis.is_empty() {
+        return Ok(Vec::new());
+    }
+    let tokens = src.code_tokens()?;
+    let mut edits = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        match &tokens[i].0 {
+            Token::Quote if i + 1 < tokens.len() => {
+                i = skip_one_form(&tokens, i);
+                continue;
+            }
+            Token::LeftParen => {
+                if let Some((Token::Symbol(head), _, _)) = tokens.get(i + 1) {
+                    if let Some(place) = millis.get(head) {
+                        edits.extend(millis_call_edits(&tokens, i, *place));
+                    }
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    Ok(edits)
+}
+
+/// The edits for one call whose `(` is `tokens[open]`. None when the call does
+/// not have the shape `place` names, or does not close.
+fn millis_call_edits(
+    tokens: &[(Token<'_>, usize, usize)],
+    open: usize,
+    place: TimeArg,
+) -> Vec<Edit> {
+    // Each argument as the index of its first token and the index past its last.
+    let mut args: Vec<(usize, usize)> = Vec::new();
+    let mut pos = open + 2;
+    while pos < tokens.len() && !matches!(tokens[pos].0, Token::RightParen) {
+        let end = skip_one_form(tokens, pos);
+        if end > tokens.len() {
+            return Vec::new();
+        }
+        args.push((pos, end));
+        pos = end;
+    }
+    if pos >= tokens.len() {
+        return Vec::new();
+    }
+    let start_of = |(first, _): (usize, usize)| tokens[first].1;
+    let end_of = |(_, past): (usize, usize)| tokens[past - 1].1 + tokens[past - 1].2;
+    let shape = |(first, past): (usize, usize)| -> Millis {
+        if past != first + 1 {
+            return Millis::Expr;
+        }
+        match tokens[first].0 {
+            Token::Integer(n) => Millis::Int(n),
+            Token::Float(x) => Millis::Float(x),
+            Token::Nil => Millis::Nil,
+            _ => Millis::Expr,
+        }
+    };
+    // The edits that write `value` anew, with `keyword` before it.
+    let write = |value: (usize, usize), written: Written, keyword: &str| match written {
+        Written::Literal(seconds) => vec![Edit {
+            byte_offset: start_of(value),
+            byte_len: end_of(value) - start_of(value),
+            replacement: format!("{keyword}{seconds}"),
+        }],
+        Written::Wrap(template) => {
+            let (before, after) = wrap_ends(template);
+            vec![
+                Edit {
+                    byte_offset: start_of(value),
+                    byte_len: 0,
+                    replacement: format!("{keyword}{before}"),
+                },
+                Edit {
+                    byte_offset: end_of(value),
+                    byte_len: 0,
+                    replacement: after.to_string(),
+                },
+            ]
+        }
+    };
+    match place {
+        TimeArg::Keyword => {
+            let Some(at) = args.iter().position(
+                |&(first, past)| matches!(tokens[first].0, Token::Keyword("timeout") if past == first + 1),
+            ) else {
+                return Vec::new();
+            };
+            let Some(&value) = args.get(at + 1) else {
+                return Vec::new();
+            };
+            match Seconds::of(shape(value), place) {
+                Seconds::Write(written) => write(value, written, ""),
+                Seconds::Keep | Seconds::Drop => Vec::new(),
+            }
+        }
+        TimeArg::Last { arity, .. } => {
+            if args.len() != arity {
+                return Vec::new();
+            }
+            let value = args[arity - 1];
+            match Seconds::of(shape(value), place) {
+                Seconds::Keep => Vec::new(),
+                Seconds::Drop => {
+                    // From the end of what precedes the argument — the head
+                    // symbol for a call of one argument — to its own end.
+                    let before = tokens[value.0 - 1].1 + tokens[value.0 - 1].2;
+                    vec![Edit {
+                        byte_offset: before,
+                        byte_len: end_of(value) - before,
+                        replacement: String::new(),
+                    }]
+                }
+                Seconds::Write(written) => write(value, written, ":timeout "),
+            }
+        }
+    }
+}

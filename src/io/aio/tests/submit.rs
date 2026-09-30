@@ -40,7 +40,7 @@ fn submit_pending(backend: &AsyncBackend, req: &IoRequest, label: &str) -> Submi
 /// it consumed the pending entry the submission filed.
 fn expect_completion(backend: &AsyncBackend, id: SubmissionId, label: &str) -> Completion {
     let mut completions = backend
-        .wait(-1)
+        .wait(None)
         .unwrap_or_else(|e| panic!("{label}: wait failed: {e}"));
     assert_eq!(
         completions.len(),

@@ -1,5 +1,8 @@
-//! audited: 2026-09-21
-//! Unit tests (`super` is the parent impl module).
+//! audited: 2026-09-30
+//! Unit tests for `Port`: what each constructor builds, its display, its own timeout, and the descriptor shares it hands out.
+//!
+//! docs/io.md
+//! docs/impl/io-descriptor.md
 
 use super::*;
 use std::fs::File;
@@ -11,7 +14,6 @@ fn test_with_fd_file_port() {
     let fd: OwnedFd = file.into();
     let port = Port::new_file(fd, Direction::Read, Encoding::Text, "/dev/null".to_string());
 
-    // with_fd should return Some
     let result = port.with_fd(|fd| {
         use std::os::unix::io::AsRawFd;
         fd.as_raw_fd()
@@ -83,16 +85,16 @@ fn test_tcp_listener_display() {
 #[test]
 fn test_port_timeout_default_none() {
     let p = Port::new_tcp_stream(devnull_fd(), "x".into());
-    assert_eq!(p.timeout_ms(), None);
+    assert_eq!(p.timeout(), None);
 }
 
 #[test]
 fn test_port_timeout_get_set() {
     let p = Port::new_tcp_stream(devnull_fd(), "x".into());
-    p.set_timeout_ms(Some(5000));
-    assert_eq!(p.timeout_ms(), Some(5000));
-    p.set_timeout_ms(None);
-    assert_eq!(p.timeout_ms(), None);
+    p.set_timeout(Some(Duration::from_secs(5)));
+    assert_eq!(p.timeout(), Some(Duration::from_secs(5)));
+    p.set_timeout(None);
+    assert_eq!(p.timeout(), None);
 }
 
 #[test]
@@ -195,8 +197,7 @@ fn a_socket_display_names_the_encoding_it_has() {
 /// This is what keeps a number out of circulation while a worker still holds it
 /// — a number reissued under a running worker gets read by that worker, and its
 /// bytes reach no fiber. The port must report closed at once even so, because
-/// that is what Elle promised the caller. See docs/impl/io-descriptor.md § "Descriptor
-/// retirement".
+/// that is what Elle promised the caller (docs/impl/io-descriptor.md).
 ///
 /// The trap: `F_GETFD` on a number a test just gave up says nothing on its own.
 /// The suite shares a process and runs in parallel, so another thread can be

@@ -81,13 +81,14 @@ impl std::fmt::Debug for TaskFn {
 /// `AsyncBackend::submit` without reaching a backend, so they stay on [`IoOp`].
 #[derive(Debug, Clone)]
 pub enum PortOp {
-    /// Read one line (up to `\n`). Returns bytes or nil (EOF).
+    /// Read one line (up to `\n`). Returns a string, or nil at EOF.
     /// The buffer is pre-allocated on the fiber's heap.
     ReadLine {
         /// Pre-allocated LBytes buffer on the fiber's heap (64KB).
         buffer: Value,
     },
-    /// Read up to `count` bytes. Returns bytes or nil (EOF).
+    /// Read up to `count` units: characters on a text port, bytes on a binary
+    /// one. Returns a string or bytes, or nil at EOF.
     /// The buffer is pre-allocated on the fiber's heap.
     Read {
         count: usize,
@@ -295,7 +296,9 @@ impl IoRequest {
     }
 
     /// Create an IoRequest that waits no longer than `bound` allows, born in
-    /// `ctx`'s region.
+    /// `ctx`'s region. A request on a port with a `:timeout` of its own takes
+    /// that timeout for each operation when `bound` names none
+    /// (docs/io/timeout.md).
     #[allow(clippy::new_ret_no_self)]
     pub fn bounded(
         ctx: &crate::primitives::ctx::Alloc,
@@ -303,19 +306,11 @@ impl IoRequest {
         port: Value,
         bound: Bound,
     ) -> Value {
+        let bound = match port.as_external::<Port>() {
+            Some(p) => bound.or_timeout(p.timeout()),
+            None => bound,
+        };
         ctx.external("io-request", IoRequest::unbounded(op, port).within(bound))
-    }
-
-    /// Create an IoRequest bounded by `timeout` for each operation, born in
-    /// `ctx`'s region.
-    #[allow(clippy::new_ret_no_self)]
-    pub fn with_timeout(
-        ctx: &crate::primitives::ctx::Alloc,
-        op: IoOp,
-        port: Value,
-        timeout: Option<Duration>,
-    ) -> Value {
-        Self::bounded(ctx, op, port, Bound::new(timeout, None))
     }
 
     /// Create a portless IoRequest (e.g., Sleep), born in `ctx`'s region.
@@ -363,7 +358,7 @@ impl IoRequest {
         fd: std::os::unix::io::RawFd,
         events: u32,
     ) -> Value {
-        Self::portless(ctx, IoOp::PollFd { fd, events })
+        Self::poll_fd_within(ctx, fd, events, Bound::NONE)
     }
 
     /// Poll a raw fd for no longer than `bound` allows, born in `ctx`'s region.
@@ -375,17 +370,6 @@ impl IoRequest {
         bound: Bound,
     ) -> Value {
         Self::bounded(ctx, IoOp::PollFd { fd, events }, Value::NIL, bound)
-    }
-
-    /// Poll a raw fd with a timeout, born in `ctx`'s region.
-    #[allow(clippy::new_ret_no_self)]
-    pub fn poll_fd_with_timeout(
-        ctx: &crate::primitives::ctx::Alloc,
-        fd: std::os::unix::io::RawFd,
-        events: u32,
-        timeout: Duration,
-    ) -> Value {
-        Self::poll_fd_within(ctx, fd, events, Bound::per_op(timeout))
     }
 }
 

@@ -154,7 +154,7 @@ fn test_mock_latency_wait() {
     .unwrap();
 
     // Wait should sleep until deadline and return the completion
-    let completions = mock.wait(-1).unwrap();
+    let completions = mock.wait(None).unwrap();
     assert_eq!(completions.len(), 1);
     Completion::discard_all(completions);
 }
@@ -171,7 +171,7 @@ fn test_mock_latency_wait_timeout() {
     .unwrap();
 
     // Wait with short timeout — should return empty
-    let completions = mock.wait(5).unwrap();
+    let completions = mock.wait(Some(Duration::from_millis(5))).unwrap();
     assert!(completions.is_empty());
 }
 
@@ -190,7 +190,7 @@ fn test_mock_cancel() {
     mock.cancel(id).unwrap();
 
     // Nothing should be pending
-    let completions = mock.wait(0).unwrap();
+    let completions = mock.wait(Some(Duration::ZERO)).unwrap();
     assert!(completions.is_empty());
 }
 
@@ -212,7 +212,7 @@ fn test_mock_sleep_uses_duration() {
     assert!(completions.is_empty());
 
     // Wait should return after the sleep duration
-    let completions = mock.wait(-1).unwrap();
+    let completions = mock.wait(None).unwrap();
     assert_eq!(completions.len(), 1);
     Completion::discard_all(completions);
 }

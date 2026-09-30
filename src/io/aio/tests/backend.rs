@@ -115,7 +115,7 @@ fn test_submit_and_wait_read() {
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
 
-        let completions = backend.wait(-1).unwrap();
+        let completions = backend.wait(None).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         assert!(completions[0].result.is_ok());
@@ -144,7 +144,7 @@ fn test_submit_and_wait_write() {
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
 
-        let completions = backend.wait(-1).unwrap();
+        let completions = backend.wait(None).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         assert!(completions[0].result.is_ok());
@@ -172,8 +172,7 @@ fn test_completion_into_value_success() {
         let v = c.into_value(&ctx);
         // The struct is born in the REAPING call's own region, so the array
         // `io/wait` collects it into and the struct share one region and one
-        // release (docs/impl/region/ctx.md § "A helper reached from inside a
-        // call allocates through THAT call's ctx").
+        // release (docs/impl/region/ctx.md).
         assert_eq!(
             crate::value::arena::region_of(h.heap(), v),
             Some(ctx.test_region()),
@@ -222,7 +221,7 @@ fn test_completion_into_value_error() {
 #[test]
 fn test_wait_timeout_zero_returns_empty() {
     let backend = AsyncBackend::new().unwrap();
-    let completions = backend.wait(0).unwrap();
+    let completions = backend.wait(Some(Duration::ZERO)).unwrap();
     assert!(completions.is_empty());
 }
 

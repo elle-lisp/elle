@@ -100,7 +100,7 @@ Enum of port types (10 variants):
 A running subprocess — the value Elle sees as a `subprocess`, stored as an external under the `SUBPROCESS` type name. Fields:
 - `pid: u32` — process ID
 - `child: RefCell<Child>` — the spawned child, kept so an unreaped one can be reaped on drop
-- `exit: ExitRecord` — where the child's exit status is kept once somebody reaps it. See § "A reap is never wasted"
+- `exit: ExitRecord` — where the child's exit status is kept once somebody reaps it; "A reap is never wasted" below says why
 - `stdio: [Value; 3]` — the stdin, stdout and stderr ports, or `Value::NIL` where the disposition asked for no pipe
 
 `new(pid, child)` builds a handle with no ports, and `with_stdio([Value; 3])`
@@ -137,7 +137,7 @@ variant is what that operation alone must remember:
 - `Connect { addr, buffer_handle, connect_fd, port }` — creates a new port on completion. `connect_fd` starts as `Some(fd)` for io_uring (pre-created socket) or `None` for thread pool (set on completion).
 - `Open { path, buffer_handle, port }` — creates a new port on completion; `path` is kept for the error message.
 - `Sleep { buffer_handle }` — portless timer.
-- `ProcessWait { buffer_handle, handle_val, siginfo, exit }` — waiting for subprocess exit via IORING_OP_WAITID. `siginfo` is a heap-allocated `siginfo_t` filled by the kernel; released in completion processing or by `retire`. Null on the thread-pool path, where the worker reports the exit code itself. `exit` is a clone of the handle's `ExitRecord`, so the completion reaps through it without dereferencing `handle_val` — see § "A reap is never wasted".
+- `ProcessWait { buffer_handle, handle_val, siginfo, exit }` — waiting for subprocess exit via IORING_OP_WAITID. `siginfo` is a heap-allocated `siginfo_t` filled by the kernel; released in completion processing or by `retire`. Null on the thread-pool path, where the worker reports the exit code itself. `exit` is a clone of the handle's `ExitRecord`, so the completion reaps through it without dereferencing `handle_val`; "A reap is never wasted" below says why.
 - `Task { buffer_handle }` — background task running on thread pool.
 - `Resolve { buffer_handle }` — getaddrinfo(3) on the thread pool.
 - `WatchNext { watcher, buffer_handle }` / `SigNext { receiver, buffer_handle }` — a read on the inotify / signalfd descriptor the external owns. Both are operands, so the entry's hold keeps the external — and therefore the descriptor it owns — for the read's lifetime; see [descriptors and workers](../../docs/impl/io-descriptor.md).
@@ -204,9 +204,10 @@ output is canonically shortened.
 | `io/backend` | errors | Create an I/O backend (`:async`, or `:mock` for tests), with an optional worker keepalive |
 | `io/submit` | errors | Submit async I/O request, return submission ID |
 | `io/reap` | errors | Non-blocking poll for completions (returns array) |
-| `io/wait` | errors | Blocking wait for completions with timeout (returns array) |
+| `io/wait` | errors | Wait for completions until one arrives or its `:timeout` or `:deadline` passes (returns array) |
 | `io/cancel` | errors | Cancel a pending async I/O operation by submission ID |
-| `ev/sleep` | error, yield, io | Async sleep (in [time.rs](../primitives/time.rs)) |
+| `ev/sleep` | errors, yield, io | Async sleep (in [io.rs](../primitives/io.rs)) |
+| `ev/poll-fd` | errors, yield, io | Wait for a raw descriptor to become ready (in [io.rs](../primitives/io.rs)) |
 
 ## Timeout Handling
 
@@ -214,7 +215,7 @@ output is canonically shortened.
 
 **Thread pool:** `OpBound` ([opbound.rs](threadpool/opbound.rs)) takes the descriptor
 non-blocking and waits in `poll(2)` for readiness, for the caller's bound, or
-for the stop pipe. § "Operation timeouts" holds the mechanism, and
+for the stop pipe. "Operation timeouts" below holds the mechanism, and
 [an operation in flight](../../docs/impl/io-inflight.md) the cancellation half.
 
 ## I/O Cancellation
@@ -352,16 +353,9 @@ the invariant. See [io](../../docs/io.md) and [port-shortwrite.lisp](../../tests
 
 ## Operation timeouts
 
-A request's `:timeout` bounds each kernel operation, and its `:deadline` bounds
-the whole call. Most calls are one operation and the distinction does not arise. It arises for every
-call that loops: `Write` until the payload is gone, `ReadExact` until its count,
-`ReadAll` until EOF, `ReadLine` until a newline. For those, a peer that has
-stalled must trip the deadline while one that is merely slow must not — a
-per-call deadline would satisfy the first and break the second.
-
-`Accept`, `RecvFrom` and both connects are single operations, and the bound
-matters to them most: each waits on a peer that may never appear, so the
-deadline is the only thing that ends them. A `connect` measures its deadline
+[I/O deadlines](../../docs/io/timeout.md) owns what `:timeout` and `:deadline`
+mean. A request carries both in its `Bound`, and every wait a backend arms asks
+the `Bound` how long it may last at that moment. A `connect` measures its bound
 across its retries, because one connect is one operation however many times the
 kernel makes the worker ask.
 
@@ -457,7 +451,7 @@ The ports and the handle are built at the completion's `Birthplace` — one regi
 
 **`AsyncBackend::submit_process_wait()`** (in [externals.rs](aio/externals.rs)) — Submits subprocess wait via `IORING_OP_WAITID` (Linux 6.7+), or on the thread pool. Fast path: if the handle's `ExitRecord` already holds a status, returns an immediate completion. Otherwise, allocates a `siginfo_t` buffer, submits the SQE, and stores the pending operation — with a clone of the record in both the `PoolOp` and the `PendingOp`.
 
-**`child::process_wait()`** (in [child.rs](../../src/io/threadpool/child.rs)) — the thread-pool half. `ExitRecord::reap` asks with `wait4(pid, .., WNOHANG, ..)` and returns either way, and `pace_retry` waits between asks with the stop pipe visible — starting at a millisecond and growing to fifty, so a child that exits at once is reported at once while a long-running one costs few wakeups. A blocking wait would hold the worker for the child's whole life, where neither `io/cancel` nor a deadline can reach it. Asking through the record is what keeps a reap this worker's cancellation discards — see § "A reap is never wasted". Pinned by [process.rs](../../src/io/threadpool/tests/process.rs).
+**`child::process_wait()`** (in [child.rs](../../src/io/threadpool/child.rs)) — the thread-pool half. `ExitRecord::reap` asks with `wait4(pid, .., WNOHANG, ..)` and returns either way, and `pace_retry` waits between asks with the stop pipe visible — starting at a millisecond and growing to fifty, so a child that exits at once is reported at once while a long-running one costs few wakeups. A blocking wait would hold the worker for the child's whole life, where neither `io/cancel` nor a deadline can reach it. Asking through the record is what keeps a reap this worker's cancellation discards ("A reap is never wasted" above). Pinned by [process.rs](../../src/io/threadpool/tests/process.rs).
 
 **`submit_uring_process_wait()`** (in [ops.rs](uring/ops.rs)) — Low-level io_uring submission for `IORING_OP_WAITID`, with `WEXITED | WNOWAIT`. Requires Linux 6.7+; older kernels return `-EINVAL` (errno 22) in the CQE. The kernel fills the `siginfo_t` buffer on child exit and leaves the child unreaped; completion processing reaps it through `ExitRecord::reap`.
 

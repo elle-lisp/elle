@@ -21,9 +21,9 @@ use super::*;
 /// until a later tick, while the bridged wait blocks on the ring until the
 /// eventfd fires at ~250 ms and returns the completion.
 ///
-/// `wait(5000)` uses a bounded timeout, not `-1`: a deaf bridge then surfaces
-/// as an empty return after 5 s rather than an infinite hang that would wedge
-/// the whole `cargo test` run.
+/// `wait(PATIENCE)` is bounded rather than `wait(None)`: a deaf bridge then
+/// surfaces as an empty return after 5 s rather than an infinite hang that
+/// would wedge the whole `cargo test` run.
 #[test]
 fn a_pool_task_wakes_the_rings_single_wait() {
     crate::value::arena::with_test_region(|| {
@@ -40,7 +40,7 @@ fn a_pool_task_wakes_the_rings_single_wait() {
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
 
-        let completions = backend.wait(5000).unwrap();
+        let completions = backend.wait(PATIENCE).unwrap();
         assert_eq!(
             completions.len(),
             1,

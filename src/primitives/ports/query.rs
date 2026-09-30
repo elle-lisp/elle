@@ -1,9 +1,14 @@
+// audited: 2026-09-30
+//! The port primitives that read or change a port's settings: its options, path, encoding and position.
+//!
+//! docs/io.md
+//! docs/io/timeout.md
+
 use super::*;
 
-/// (port/set-options port :timeout ms) → nil
+/// (port/set-options port :timeout s) → nil
 ///
-/// Set port options. Currently only :timeout is recognized.
-/// Pass nil to clear the timeout.
+/// `:timeout` is the one option (docs/io/timeout.md).
 pub(super) fn prim_port_set_options(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -12,75 +17,20 @@ pub(super) fn prim_port_set_options(
         Ok(p) => p,
         Err(e) => return e,
     };
-
-    let remaining = &args[1..];
-    if !remaining.len().is_multiple_of(2) {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "arity-error",
-                "port/set-options: keyword arguments must be key-value pairs",
-            ),
-        );
-    }
-
-    let mut i = 0;
-    while i < remaining.len() {
-        let key = &remaining[i];
-        let val = &remaining[i + 1];
-
-        match ctx.keyword_spelling(*key).as_deref() {
-            Some("timeout") => {
-                if val.is_nil() {
-                    port.set_timeout_ms(None);
-                } else {
-                    match val.as_int() {
-                        Some(ms) if ms >= 0 => {
-                            port.set_timeout_ms(Some(ms as u64));
-                        }
-                        Some(ms) => {
-                            return (
-                                SIG_ERROR,
-                                ctx.error(
-                                    "value-error",
-                                    format!(
-                                        "port/set-options: :timeout must be non-negative, got {}",
-                                        ms
-                                    ),
-                                ),
-                            );
-                        }
-                        None => {
-                            return (
-                                SIG_ERROR,
-                                ctx.error(
-                                    "type-error",
-                                    format!(
-                                        "port/set-options: :timeout value must be integer or nil, got {}",
-                                        val.type_name()
-                                    ),
-                                ),
-                            );
-                        }
-                    }
-                }
-            }
-            Some(other) => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "value-error",
-                        format!("port/set-options: unknown option :{}", other),
-                    ),
-                );
-            }
-            None => {
-                return type_error!(ctx, key, "port/set-options", "keyword");
-            }
+    let mut timeout = None;
+    let named = each_keyword(args, 1, "port/set-options", ctx, |key, val, ctx| {
+        if key != "timeout" {
+            return Ok(false);
         }
-        i += 2;
+        timeout = Some(timeout_arg(val, "port/set-options", ctx)?);
+        Ok(true)
+    });
+    if let Err(e) = named {
+        return e;
     }
-
+    if let Some(timeout) = timeout {
+        port.set_timeout(timeout);
+    }
     (SIG_OK, Value::NIL)
 }
 

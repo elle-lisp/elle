@@ -1,11 +1,12 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 //! Network primitives — TCP and UDP.
 //!
 //! docs/io.md
+//! docs/io/timeout.md
 //!
-//! `tests/lang/prim-net.lisp` pins them.
+//! tests/lang/prim-net.lisp pins them.
 //!
-//! Unix domain socket primitives are in `unix.rs`.
+//! Unix domain socket primitives are in src/primitives/unix.rs.
 //!
 //! Listener/bind primitives are synchronous (no SIG_IO) because they
 //! complete immediately. Accept/connect/send/recv/shutdown yield SIG_IO
@@ -15,7 +16,7 @@ use crate::io::request::{ConnectAddr, IoOp, IoRequest, PortOp};
 use crate::port::{Direction, Port, PortKind};
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
-use crate::primitives::kwarg::{extract_connect_kwargs, extract_keyword_timeout};
+use crate::primitives::kwarg::{extract_bound, extract_connect_kwargs};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK};
 use crate::value::types::Arity;

@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-30
 //! Epoch-based migration system.
 //!
 //! docs/epochs.md
@@ -12,7 +12,7 @@
 //! # File format
 //!
 //! ```lisp
-//! (elle/epoch 13)
+//! (elle/epoch 14)
 //! (def x 10)
 //! ```
 //!
@@ -32,6 +32,7 @@
 //! ```
 
 pub mod rules;
+pub mod seconds;
 pub mod transform;
 
 pub use rules::CURRENT_EPOCH;

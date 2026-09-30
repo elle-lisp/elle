@@ -1,9 +1,11 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 //! The select primitives: poll a set of receivers, or park the fiber until one is ready.
 //!
 //! docs/threads.md
+//! docs/io/timeout.md
 
 use super::*;
+use crate::primitives::kwarg::extract_bound;
 
 /// `(chan/try-select receivers)` — non-blocking poll over receivers.
 ///
@@ -62,11 +64,11 @@ pub(in crate::primitives::chan) fn prim_chan_try_select(
     }
 }
 
-/// `(chan/wait-ready receivers)` / `(chan/wait-ready receivers timeout-ms)`
+/// `(chan/wait-ready receivers &named timeout deadline)`
 ///
 /// Park the current fiber until any receiver in `receivers` is signaled
-/// by a `chan/send` (or sender/receiver close), or until `timeout-ms`
-/// elapses.  Three possible returns:
+/// by a `chan/send` (or sender/receiver close), or until its bound passes
+/// (docs/io/timeout.md).  Three possible returns:
 ///
 /// - `[:ready index msg]` — fast path: after registering the wake fd in
 ///   every receiver's `WakeList`, a final `try_select` saw a value
@@ -76,10 +78,10 @@ pub(in crate::primitives::chan) fn prim_chan_try_select(
 /// - `[:disconnected]` — same fast path, but the ready receiver was
 ///   disconnected.
 /// - `nil` — the primitive yielded; the fiber was parked on the wake
-///   fd until POLLIN or timeout fired.  Caller must follow up with
+///   fd until POLLIN or the bound fired.  Caller must follow up with
 ///   `chan/try-select` to actually pick a ready receiver (and re-park
-///   with the remaining timeout if the wake turned out to be spurious;
-///   the Lisp `chan/select` wrapper handles this).
+///   if the wake turned out to be spurious; the Lisp `chan/select`
+///   wrapper handles this).
 ///
 /// Allocates one wake fd (eventfd on Linux, pipe2 elsewhere) and
 /// registers it in every receiver's `WakeList`.  A successful
@@ -92,26 +94,11 @@ pub(in crate::primitives::chan) fn prim_chan_wait_ready(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    // Parse timeout before any allocation so a bad timeout cleans up
-    // nothing.  nil/missing means wait forever.
-    let timeout = if args.len() == 2 && !args[1].is_nil() {
-        match args[1].as_int() {
-            Some(ms) if ms >= 0 => Some(Duration::from_millis(ms as u64)),
-            Some(ms) => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "value-error",
-                        format!("chan/wait-ready: timeout must be non-negative, got {}", ms),
-                    ),
-                );
-            }
-            None => {
-                return type_error!(ctx, args[1], "chan/wait-ready", "integer for timeout");
-            }
-        }
-    } else {
-        None
+    // Parse the bound before any allocation so a bad bound cleans up
+    // nothing.  No bound means wait forever.
+    let bound = match extract_bound(args, 1, "chan/wait-ready", ctx) {
+        Ok(b) => b,
+        Err(e) => return e,
     };
 
     match with_receivers(&args[0], "chan/wait-ready", ctx, |recvs, ctx| {
@@ -200,24 +187,16 @@ pub(in crate::primitives::chan) fn prim_chan_wait_ready(
             }
         };
 
+        let guard = ChanSelectGuard::new(poll_fd, wake_fd, wake_lists, trace);
         if let Some(result) = recheck {
-            let _guard = ChanSelectGuard {
-                poll_fd,
-                wake_fd,
-                wake_lists,
-                trace: trace.clone(),
-            };
+            // Nothing parks, so the guard's drop deregisters the wake fd and
+            // closes the pair now.
+            drop(guard);
             return (SIG_OK, result);
         }
 
-        let guard = ChanSelectGuard {
-            poll_fd,
-            wake_fd,
-            wake_lists,
-            trace,
-        };
         let cell = ChanSelectGuardCell::new(guard);
-        let req = IoRequest::with_timeout(ctx, IoOp::ChanSelectPark(cell), Value::NIL, timeout);
+        let req = IoRequest::bounded(ctx, IoOp::ChanSelectPark(cell), Value::NIL, bound);
         (SIG_IO, req)
     }) {
         Ok(v) => v,

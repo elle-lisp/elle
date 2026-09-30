@@ -105,7 +105,7 @@ fn test_async_submit_spawn_echo() {
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
-        let completions = backend.wait(-1).unwrap();
+        let completions = backend.wait(None).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         let val = completions[0].result.as_ref().expect("spawn failed");
@@ -149,7 +149,7 @@ fn test_async_open_regular_file_returns_port() {
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
-        let completions = backend.wait(-1).unwrap();
+        let completions = backend.wait(None).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         assert!(
@@ -171,8 +171,7 @@ fn test_async_open_regular_file_returns_port() {
 }
 
 /// A backend dropped with an io_uring op still in flight leaves the kernel
-/// holding no write pointer into a buffer it is about to free
-/// (docs/io.md § "Backend teardown").
+/// holding no write pointer into a buffer it is about to free (docs/io.md).
 ///
 /// The trap: the hazard is the kernel's, not this process's, so it cannot be
 /// observed directly — a freed slot the kernel later writes shows up as
@@ -258,7 +257,7 @@ fn test_async_open_nonexistent_path_errors() {
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
-        let completions = backend.wait(-1).unwrap();
+        let completions = backend.wait(None).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         assert!(
@@ -302,7 +301,7 @@ fn test_async_open_with_timeout_succeeds_on_regular_file() {
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
-        let completions = backend.wait(-1).unwrap();
+        let completions = backend.wait(None).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         // Regular file opens instantly — should succeed before the 5s timeout.

@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-30
 //! `AsyncBackend`'s cancel, poll and wait — what the scheduler drives the
 //! backend with, on either platform.
 //!
@@ -13,9 +13,9 @@ impl AsyncBackend {
     /// stop** is platform-specific: io_uring takes `IORING_OP_ASYNC_CANCEL`
     /// (its own CQE is high-bit tagged and skipped; the operation's own CQE
     /// arrives with `-ECANCELED`), while a pool worker is asked through its stop
-    /// pipe (docs/impl/io-inflight.md § "The stop pipe"). **Marking the id** is shared:
-    /// the operation's completion, whenever it arrives, retires the entry
-    /// instead of building a result nobody would read.
+    /// pipe (docs/impl/io-inflight.md). **Marking the id** is shared: the
+    /// operation's completion, whenever it arrives, retires the entry instead of
+    /// building a result nobody would read.
     ///
     /// The `pending` entry stays either way. The worker's `RawCompletion` still
     /// decrements the hub's `in_flight` at the drain site and still releases the
@@ -50,9 +50,9 @@ impl AsyncBackend {
         inner.completions.drain(..).collect()
     }
 
-    /// Blocking wait for completions.
-    /// `timeout_ms`: negative = wait forever, 0 = poll, positive = wait up to N ms.
-    pub(crate) fn wait(&self, timeout_ms: i64) -> Result<Vec<Completion>, String> {
+    /// Block until some completion arrives or `timeout` passes. `None` waits
+    /// as long as it takes; a zero timeout polls.
+    pub(crate) fn wait(&self, timeout: Option<Duration>) -> Result<Vec<Completion>, String> {
         let mut inner = self.inner.borrow_mut();
         // The requesting instance's heap (constant per backend); every completion
         // value the harvest builds is born on it. Captured as a `Copy` pointer so
@@ -66,14 +66,8 @@ impl AsyncBackend {
             return Ok(inner.completions.drain(..).collect());
         }
 
-        // Nothing buffered — block on the platform's waitable.
-        let timeout = if timeout_ms < 0 {
-            None
-        } else {
-            Some(timeout_ms as u64)
-        };
-
-        // Destructure for independent borrows of each field.
+        // Nothing buffered — block on the platform's waitable. Destructure for
+        // independent borrows of each field.
         {
             let AsyncBackendInner {
                 ref mut platform,
@@ -115,9 +109,10 @@ impl AsyncBackend {
                     // rescue cap — src/io/AGENTS.md invariant 8.
                     if hub.in_flight() > 0 {
                         let waited = match timeout {
-                            None => hub.recv_blocking(None),
-                            Some(0) => None, // poll mode — already drained above
-                            Some(ms) => hub.recv_blocking(Some(Duration::from_millis(ms))),
+                            // Poll mode: `drain_ready` above already took what
+                            // was there.
+                            Some(t) if t.is_zero() => None,
+                            t => hub.recv_blocking(t),
                         };
                         if let Some(rc) = waited {
                             let id = SubmissionId::from_raw(match &rc {

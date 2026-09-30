@@ -38,7 +38,7 @@ fn test_async_submit_process_wait_uring() {
 
         let backend = AsyncBackend::new().unwrap();
         let id = submit_wait(&backend, handle_val).expect("a wait submits on either platform");
-        let completions = backend.wait(5000).unwrap();
+        let completions = backend.wait(PATIENCE).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         let answer = match &completions[0].result {
@@ -69,8 +69,9 @@ fn test_async_submit_process_wait_uring() {
 /// The failure is arranged with a child this process never spawned, so the
 /// worker's `wait4` finds no child of its own and returns `ECHILD` — the same
 /// shape any lost child produces. A child this process DID spawn and reap would
-/// answer from the record instead, which is the whole point of § "A reap is
-/// never wasted"; the pid below belongs to nobody, so there is nothing to hold.
+/// answer from the record instead, because a reap is never wasted
+/// (src/io/AGENTS.md); the pid below belongs to nobody, so there is nothing to
+/// hold.
 #[test]
 fn a_failed_pool_process_wait_names_wait4() {
     crate::value::arena::with_test_region(|| {
@@ -87,7 +88,7 @@ fn a_failed_pool_process_wait_names_wait4() {
         let backend = AsyncBackend::new_thread_pool().unwrap();
         let id = submit_wait(&backend, handle_val).unwrap();
 
-        let completions = backend.wait(5000).unwrap();
+        let completions = backend.wait(PATIENCE).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         let err = completions[0]
@@ -137,7 +138,7 @@ fn a_cancelled_wait_that_reaped_the_child_answers_the_next_wait() {
         // status the record's to keep rather than the completion's to carry.
         for _ in 0..40 {
             assert!(
-                backend.wait(50).unwrap().is_empty(),
+                backend.wait(TICK).unwrap().is_empty(),
                 "a cancelled wait must deliver no completion",
             );
             if !backend.has_pending() {
@@ -147,7 +148,7 @@ fn a_cancelled_wait_that_reaped_the_child_answers_the_next_wait() {
         assert!(!backend.has_pending(), "the cancelled wait never retired");
 
         let again = submit_wait(&backend, handle).unwrap();
-        let completions = backend.wait(5000).unwrap();
+        let completions = backend.wait(PATIENCE).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, again);
         let value = match &completions[0].result {
@@ -184,7 +185,7 @@ fn a_wait_on_a_held_status_files_no_operation() {
 
         let backend = AsyncBackend::new_thread_pool().unwrap();
         submit_wait(&backend, handle).unwrap();
-        let reaped = backend.wait(5000).unwrap();
+        let reaped = backend.wait(PATIENCE).unwrap();
         assert_eq!(reaped.len(), 1, "the first wait reaps");
         Completion::discard_all(reaped);
 
@@ -300,7 +301,7 @@ fn a_cancelled_uring_wait_leaves_the_child_for_the_next_wait() {
         backend.cancel(cancelled).unwrap();
         for _ in 0..40 {
             assert!(
-                backend.wait(50).unwrap().is_empty(),
+                backend.wait(TICK).unwrap().is_empty(),
                 "a cancelled wait must deliver no completion",
             );
             if !backend.has_pending() {
@@ -310,7 +311,7 @@ fn a_cancelled_uring_wait_leaves_the_child_for_the_next_wait() {
         assert!(!backend.has_pending(), "the cancelled wait never retired");
 
         let again = submit_wait(&backend, handle).unwrap();
-        let completions = backend.wait(5000).unwrap();
+        let completions = backend.wait(PATIENCE).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, again);
         let answer = match &completions[0].result {

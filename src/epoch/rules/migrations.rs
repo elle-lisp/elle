@@ -1,9 +1,9 @@
-// audited: 2026-09-23
+// audited: 2026-09-30
 //! Every registered migration, ordered by epoch: the data one epoch bump adds.
 //!
 //! docs/epochs.md
 
-use super::{LexicalChange, Migration, MigrationRule};
+use super::{LexicalChange, Migration, MigrationRule, TimeArg};
 
 /// All registered migrations, ordered by epoch.
 ///
@@ -263,5 +263,71 @@ pub(super) static MIGRATIONS: &[Migration] = &[
                       other escape; each escape whose meaning moved becomes the text epoch 12 \
                       read from it",
         }],
+    },
+    Migration {
+        epoch: 14,
+        summary: "durations in seconds: every call that waits takes :timeout in seconds, \
+                  beside a new :deadline",
+        rules: &[
+            MigrationRule::MillisToSeconds {
+                symbols: &[
+                    "port/read",
+                    "port/read-line",
+                    "port/read-exact",
+                    "port/read-all",
+                    "port/write",
+                    "port/flush",
+                    "port/open",
+                    "port/open-bytes",
+                    "port/set-options",
+                    "stream/read",
+                    "stream/write",
+                    "stream/flush",
+                    "tcp/accept",
+                    "tcp/connect",
+                    "tcp/connect-ip",
+                    "unix/accept",
+                    "unix/connect",
+                    "udp/send-to",
+                    "udp/recv-from",
+                ],
+                arg: TimeArg::Keyword,
+            },
+            MigrationRule::MillisToSeconds {
+                symbols: &["sys/join", "os/join", "chan/select", "chan/wait-ready"],
+                arg: TimeArg::Last {
+                    arity: 2,
+                    negative_unbounded: false,
+                },
+            },
+            MigrationRule::MillisToSeconds {
+                symbols: &["io/wait"],
+                arg: TimeArg::Last {
+                    arity: 2,
+                    negative_unbounded: true,
+                },
+            },
+            MigrationRule::MillisToSeconds {
+                symbols: &["ev/step"],
+                arg: TimeArg::Last {
+                    arity: 1,
+                    negative_unbounded: true,
+                },
+            },
+            MigrationRule::MillisToSeconds {
+                symbols: &["ev/shutdown"],
+                arg: TimeArg::Last {
+                    arity: 1,
+                    negative_unbounded: false,
+                },
+            },
+            // `(ev/step)` did not wait, and a step with no bound now does.
+            MigrationRule::Replace {
+                symbol: "ev/step",
+                arity: 0,
+                template: "(ev/step :timeout 0)",
+            },
+        ],
+        lexical: &[],
     },
 ];

@@ -75,7 +75,7 @@ fn a_completion_is_withheld_when_the_fiber_that_asked_is_gone() {
 
             let mut delivered = Vec::new();
             for _ in 0..40 {
-                delivered.extend(backend.wait(50).unwrap());
+                delivered.extend(backend.wait(TICK).unwrap());
                 if !backend.has_pending() && backend.workers() == 0 {
                     break;
                 }
@@ -171,7 +171,7 @@ fn a_submitted_operations_operands_outlive_the_fiber_that_asked() {
 
         // Draining disposes of the entry, which is what lets the hold go.
         for _ in 0..40 {
-            Completion::discard_all(backend.wait(50).unwrap());
+            Completion::discard_all(backend.wait(TICK).unwrap());
             if !backend.has_pending() && backend.workers() == 0 {
                 break;
             }
@@ -292,7 +292,7 @@ fn an_operation_that_parks_ends_when_the_fiber_that_asked_is_gone() {
 
             let mut delivered = Vec::new();
             for _ in 0..40 {
-                delivered.extend(backend.wait(50).unwrap());
+                delivered.extend(backend.wait(TICK).unwrap());
                 if !backend.has_pending() && backend.workers() == 0 {
                     break;
                 }

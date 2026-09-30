@@ -1,18 +1,34 @@
+// audited: 2026-09-30
+//! The clocks a program reads, the thread sleep, and the instant a `:deadline` reading names.
+//!
+//! docs/io/timeout.md
+
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
 use std::sync::OnceLock;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 static PROCESS_EPOCH: OnceLock<Instant> = OnceLock::new();
 
+/// The instant `(clock/monotonic)` counts from: its first reading in this
+/// process, shared by every thread.
 fn process_epoch() -> &'static Instant {
     PROCESS_EPOCH.get_or_init(Instant::now)
 }
 
-/// Returns seconds elapsed since process start (monotonic clock)
+/// The instant a `(clock/monotonic)` reading names, for a `:deadline`.
+///
+/// A reading before the epoch names the epoch, which has passed. `None` for a
+/// reading further off than the clock can count.
+pub(crate) fn instant_at(reading: f64) -> Option<Instant> {
+    let since = Duration::try_from_secs_f64(reading.max(0.0)).ok()?;
+    process_epoch().checked_add(since)
+}
+
+/// Returns seconds elapsed since the clock's epoch (monotonic clock)
 /// (clock/monotonic)
 pub(crate) fn prim_clock_monotonic(
     _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -81,7 +97,7 @@ pub(crate) fn prim_sleep(
                 ),
             );
         }
-        std::thread::sleep(std::time::Duration::from_secs(n as u64));
+        std::thread::sleep(Duration::from_secs(n as u64));
         (SIG_OK, Value::NIL)
     } else if let Some(f) = args[0].as_float() {
         if f < 0.0 || !f.is_finite() {
@@ -93,7 +109,7 @@ pub(crate) fn prim_sleep(
                 ),
             );
         }
-        std::thread::sleep(std::time::Duration::from_secs_f64(f));
+        std::thread::sleep(Duration::from_secs_f64(f));
         (SIG_OK, Value::NIL)
     } else {
         (
@@ -110,7 +126,7 @@ pub(crate) fn prim_sleep(
 primitive! {
     "clock/monotonic" => prim_clock_monotonic {
         signal: Signal::errors(),
-        doc: "Return seconds elapsed since process start (monotonic clock)",
+        doc: "Return seconds elapsed on the monotonic clock since its first reading in this process",
         category: "clock",
         example: "(clock/monotonic)",
         effect: RegionEffect::Immediate,

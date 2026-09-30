@@ -393,28 +393,11 @@ activation ends.
 
 ## Channel select wake protocol
 
-**Location:** `src/primitives/chan.rs` and `src/primitives/chan/prims.rs`, with the public wrapper in `stdlib.lisp`.
-
-`chan/select` cannot use crossbeam's blocking `Select::select_timeout`: that
-parks the OS thread the fiber scheduler runs on, starving any `ev/spawn`'d
-producer fiber that would have unblocked the select. Instead the chan
-primitives carry a per-channel waker layer on top of crossbeam:
-
-- Each channel's sender and receiver halves share an `Arc<WakeList>`
-  containing `(Mutex<Vec<RawFd>>, AtomicBool)`. The atomic is a fast-path
-  skip: if no fiber is selecting, `chan/send` does not even acquire the
-  mutex.
-- `chan/wait-ready` allocates a wake fd (`eventfd(2)` on Linux, `pipe2(2)`
-  on other Unix) and registers `poll_fd` in every candidate receiver's
-  `WakeList`. The fd is owned by a `ChanSelectGuard`; its `Drop`
-  deregisters, signals `wake_fd` (so any worker thread parked in
-  `poll(2)` returns before we close the fd), and closes the fd(s).
-- `chan/send` (and `chan/close{,recv}`), after a successful `try_send`,
-  loads the atomic; if non-zero, locks and `write(fd, &1u64)` to every
-  registered wake fd. Cross-thread sends from `sys/spawn` Just Work —
-  the write is thread-safe and the scheduler thread observes POLLIN via
-  the same `IORING_OP_POLL_ADD` (or thread-pool `poll(2)`) it uses for
-  `ev/poll-fd`.
+**Location:** [chan.rs](chan.rs), [chan/prims.rs](chan/prims.rs) and
+[chan/wake.rs](chan/wake.rs), with the public wrapper in [stdlib.lisp](../stdlib.lisp). The
+header of [chan/wake.rs](chan/wake.rs) says why a select parks on a wake fd
+rather than on crossbeam's blocking select. The doc comments on `WakeList` and
+`ChanSelectGuard` there say how each fd is registered, signalled and closed.
 
 Three primitives back the Lisp `chan/select`:
 
@@ -426,7 +409,7 @@ Three primitives back the Lisp `chan/select`:
   cross-thread race between the wrapper's first `chan/try-select` and
   the register. Returns `[:ready i v]` (post-register fast hit, no
   yield), `[:disconnected]`, or returns `SIG_IO` carrying an
-  `IoOp::ChanSelectPark(ChanSelectGuardCell)`. The IoRequest's timeout
+  `IoOp::ChanSelectPark(ChanSelectGuardCell)`. The request's bound
   flows through to a linked `LinkTimeout` SQE on uring or to the
   thread-pool `poll(2)` timeout.
 - `chan/select` (Lisp wrapper in `stdlib.lisp`) — runs `chan/try-select`

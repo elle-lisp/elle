@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-30
 //! The ring's blocking wait: one `io_uring_enter` for ring CQEs and the hub's
 //! bridge alike, then the drain.
 //!
@@ -9,7 +9,7 @@ use super::*;
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn wait_uring(
     ring: &mut io_uring::IoUring,
-    timeout: Option<u64>,
+    timeout: Option<Duration>,
     pending: &mut PendingTable,
     buffer_pool: &mut BufferPool,
     fd_states: &mut HashMap<PortKey, FdState>,
@@ -28,11 +28,11 @@ pub(crate) fn wait_uring(
     let mut eventfd_fired = false;
     // Block until at least one CQE is available (or timeout).
     match timeout {
-        Some(0) => {} // poll only — no wait
-        Some(ms) => {
+        Some(t) if t.is_zero() => {} // poll only — no wait
+        Some(t) => {
             let ts = io_uring::types::Timespec::new()
-                .sec(ms / 1000)
-                .nsec(((ms % 1000) * 1_000_000) as u32);
+                .sec(t.as_secs())
+                .nsec(t.subsec_nanos());
             let args = io_uring::types::SubmitArgs::new().timespec(&ts);
             loop {
                 match ring.submitter().submit_with_args(1, &args) {

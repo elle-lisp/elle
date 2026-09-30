@@ -332,8 +332,8 @@ impl crate::io::IoBackend for AsyncBackend {
         self.poll()
     }
 
-    fn wait(&self, timeout_ms: i64) -> Result<Vec<Completion>, String> {
-        self.wait(timeout_ms)
+    fn wait(&self, timeout: Option<Duration>) -> Result<Vec<Completion>, String> {
+        self.wait(timeout)
     }
 
     fn workers(&self) -> usize {

@@ -1,4 +1,8 @@
-//! Unix domain socket primitives.
+// audited: 2026-09-30
+//! Unix domain socket primitives: listen, accept, connect and shutdown.
+//!
+//! docs/io.md
+//! docs/io/timeout.md
 
 use crate::io::request::{ConnectAddr, IoOp, IoRequest, PortOp};
 use crate::port::{Direction, Port, PortKind};
@@ -92,7 +96,8 @@ pub(crate) fn prim_unix_listen(
     (SIG_OK, ctx.external("port", p))
 }
 
-/// (unix/accept listener [:sndbuf n] [:rcvbuf n] [:keepalive bool] [:timeout ms]) → stream-port
+/// (unix/accept listener [:sndbuf n] [:rcvbuf n] [:keepalive bool]
+///                        [:encoding :text|:binary] [:timeout s] [:deadline t]) → stream-port
 pub(crate) fn prim_unix_accept(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -109,7 +114,7 @@ pub(crate) fn prim_unix_accept(
     let encoding = kwargs.encoding.unwrap_or(crate::port::Encoding::Binary);
     (
         SIG_IO,
-        IoRequest::with_timeout(
+        IoRequest::bounded(
             ctx,
             PortOp::Accept {
                 options: kwargs.options,
@@ -126,13 +131,13 @@ pub(crate) fn prim_unix_accept(
             }
             .into(),
             port_val,
-            kwargs.timeout,
+            kwargs.bound,
         ),
     )
 }
 
 /// (unix/connect path [:sndbuf n] [:rcvbuf n] [:keepalive bool]
-///                    [:encoding :text|:binary] [:timeout ms]) → stream-port
+///                    [:encoding :text|:binary] [:timeout s] [:deadline t]) → stream-port
 ///
 /// `:encoding` controls the resulting stream port's mode.  Default is
 /// `:binary` (Unix-domain stream sockets are byte streams).  Pass
@@ -161,7 +166,7 @@ pub(crate) fn prim_unix_connect(
     );
     (
         SIG_IO,
-        IoRequest::with_timeout(
+        IoRequest::bounded(
             ctx,
             IoOp::Connect {
                 addr: ConnectAddr::Unix {
@@ -171,7 +176,7 @@ pub(crate) fn prim_unix_connect(
                 },
             },
             port_val,
-            kwargs.timeout,
+            kwargs.bound,
         ),
     )
 }

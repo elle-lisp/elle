@@ -1,6 +1,7 @@
 // audited: 2026-09-30
-// src/io/AGENTS.md
 //! The per-operation bound a thread-pool worker runs its syscalls under.
+//!
+//! src/io/AGENTS.md
 //!
 //! Two types, one for each side of the handover. [`Bounds`] is what a
 //! submission declares: the caller's bound and a stop pipe. [`OpBound`] is
@@ -238,14 +239,11 @@ impl OpBound {
         loop {
             let timeout_ms = match deadline {
                 None => -1,
+                // Round up, so a remainder under a millisecond sleeps rather
+                // than spins. A bound that has passed leaves zero, a poll that
+                // still answers what is ready (docs/io/timeout.md).
                 Some(at) => {
                     let left = at.saturating_duration_since(Instant::now());
-                    if left.is_zero() {
-                        return (Wake::TimedOut, 0);
-                    }
-                    // Round up: a remainder under a millisecond is still time
-                    // the caller granted, and rounding it away would report a
-                    // timeout the caller did not ask for.
                     let ms = left.as_micros().div_ceil(1000);
                     ms.min(libc::c_int::MAX as u128) as libc::c_int
                 }
@@ -274,7 +272,12 @@ impl OpBound {
                 return (Wake::Ready, pfds[0].revents);
             }
             if ret == 0 {
-                return (Wake::TimedOut, 0);
+                // The clock decides expiry, not the poll: its timeout counts
+                // whole milliseconds.
+                match deadline {
+                    Some(at) if Instant::now() < at => continue,
+                    _ => return (Wake::TimedOut, 0),
+                }
             }
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
             if errno == libc::EINTR {

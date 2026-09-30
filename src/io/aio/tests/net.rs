@@ -1,7 +1,8 @@
 // audited: 2026-09-30
-// src/io/AGENTS.md
 //! Accept and connect on the platform's default backend, including both in
 //! flight on one backend at once.
+//!
+//! src/io/AGENTS.md
 
 use super::*;
 
@@ -98,7 +99,7 @@ fn a_timed_wait_returns_the_accept_a_peer_arrives_for() {
         });
 
         barrier.wait(); // release the connector thread
-        let completions = backend.wait(5000).unwrap();
+        let completions = backend.wait(PATIENCE).unwrap();
         assert_eq!(
             completions.len(),
             1,
@@ -203,7 +204,7 @@ fn an_accept_completes_when_a_peer_connects() {
         });
 
         // Wait for the accept completion
-        let completions = backend.wait(5000).unwrap();
+        let completions = backend.wait(PATIENCE).unwrap();
         assert_eq!(
             completions.len(),
             1,
@@ -272,7 +273,7 @@ fn a_connect_completes_when_the_listener_accepts() {
             .unwrap();
 
         // Wait for the connect completion
-        let completions = backend.wait(5000).unwrap();
+        let completions = backend.wait(PATIENCE).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, connect_id);
         assert!(
@@ -396,7 +397,7 @@ fn test_accept_and_connect_concurrent() {
         // Collect completions — may arrive in 1 or 2 wait calls.
         let mut all = Vec::new();
         for _ in 0..5 {
-            let cs = backend.wait(2000).unwrap();
+            let cs = backend.wait(Some(Duration::from_millis(2000))).unwrap();
             all.extend(cs);
             if all.len() >= 2 {
                 break;

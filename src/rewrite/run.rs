@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-30
 //! CLI entry point for `elle rewrite`.
 //!
 //! docs/epochs.md
@@ -9,8 +9,9 @@ use super::rule::{RenameSymbol, RewriteRule};
 use super::text::SourceText;
 use crate::epoch::rules::{
     collapsed_renames, desugar_rules_in_range, flatten_clause_rules_in_range,
-    flatten_rules_in_range, lexical_changes_in_range, removals_in_range, replace_rules_in_range,
-    unwrap_rules_in_range, Lexicon, CURRENT_EPOCH,
+    flatten_rules_in_range, lexical_changes_in_range, migrations_in_range, millis_rules_in_range,
+    removals_in_range, replace_rules_in_range, unwrap_rules_in_range, Lexicon, MigrationRule,
+    CURRENT_EPOCH,
 };
 use crate::epoch::{check_declared_lexicon, detect_epoch_in_source};
 use crate::reader::{shebang_len, Token};
@@ -119,6 +120,13 @@ pub fn run(args: &[String]) -> i32 {
                     "  flatten-clauses: {} (parenthesized → flat pairs)",
                     names.join(", ")
                 );
+            }
+            for migration in migrations_in_range(0, CURRENT_EPOCH) {
+                for rule in migration.rules {
+                    if let MigrationRule::MillisToSeconds { symbols, arg } = rule {
+                        println!("  seconds: {} ({})", symbols.join(", "), arg);
+                    }
+                }
             }
             for shorthand in desugar_rules_in_range(0, CURRENT_EPOCH) {
                 println!(
@@ -291,6 +299,13 @@ pub(crate) fn rewrite_file(
     let rules: Vec<&dyn RewriteRule> = rename_rule.iter().map(|r| r as &dyn RewriteRule).collect();
     let mut edits = collect_edits(text, &rules)?;
 
+    // Durations in milliseconds become `:timeout` in seconds. Token-level
+    // like the renames, so the structural filter below governs both.
+    let millis = file_epoch
+        .map(|epoch| millis_rules_in_range(epoch, CURRENT_EPOCH))
+        .unwrap_or_default();
+    edits.extend(collect_millis_edits(text, &millis)?);
+
     // Spell out every reader shorthand whose spelling this file's epoch still
     // had. Runs before the respelling because the two divide the same tokens:
     // a shorthand a rule owns has no spelling left to respell to.
@@ -309,8 +324,8 @@ pub(crate) fn rewrite_file(
     )?);
     edits.extend(desugar_edits);
 
-    // Merge all structural edits (unwrap + replace + flatten), filtering out
-    // rename edits that fall within their spans.
+    // Merge all structural edits (unwrap + replace + flatten), filtering out the
+    // token edits that fall within their spans.
     let structural_edits: Vec<Edit> = replace_edits
         .into_iter()
         .chain(unwrap_edits)
@@ -395,7 +410,7 @@ fn print_help() {
     println!("Examples:");
     println!("  elle rewrite script.lisp");
     println!("  elle rewrite --check src/*.lisp");
-    println!("  elle rewrite --dry-run examples/");
+    println!("  elle rewrite --dry-run lib/*.lisp");
 }
 
 #[cfg(test)]

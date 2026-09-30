@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 //! I/O a compiled module asks for at the top level, with no scheduler to take
 //! it: the backend it reaches and the answer it reads back.
 //!
@@ -41,7 +41,7 @@ impl ElleHost {
                     request,
                     crate::io::pending::Submitter::detached(self.heap_ptr()),
                 ) {
-                    if let Ok(completions) = async_be.0.wait(-1) {
+                    if let Ok(completions) = async_be.0.wait(None) {
                         if let Some(answer) = inline_answer(completions) {
                             return answer;
                         }
@@ -82,7 +82,7 @@ impl ElleHost {
             request,
             crate::io::pending::Submitter::detached(self.heap_ptr()),
         ) {
-            if let Ok(completions) = backend.0.wait(-1) {
+            if let Ok(completions) = backend.0.wait(None) {
                 if let Some(answer) = inline_answer(completions) {
                     return answer;
                 }

@@ -65,7 +65,7 @@ fn read_exactly(fd: RawFd, n: usize) -> Vec<u8> {
 fn completion_for(backend: &AsyncBackend, id: SubmissionId) -> Completion {
     for _ in 0..200 {
         let mut found = None;
-        for c in backend.wait(50).unwrap() {
+        for c in backend.wait(TICK).unwrap() {
             if c.id == id && found.is_none() {
                 found = Some(c);
             } else {
@@ -272,7 +272,7 @@ fn a_read_that_ends_unanswered_gives_the_port_its_remainder_back() {
 
             // Let the cancelled read's completion arrive before the backend goes.
             for _ in 0..40 {
-                Completion::discard_all(backend.wait(50).unwrap());
+                Completion::discard_all(backend.wait(TICK).unwrap());
                 if !backend.has_pending() && backend.workers() == 0 {
                     break;
                 }
@@ -286,9 +286,9 @@ fn a_read_that_ends_unanswered_gives_the_port_its_remainder_back() {
 /// region, so the heap does not free the buffer under it.
 ///
 /// The ring drains its kernel operations at teardown for this reason
-/// (docs/io.md § "Backend teardown"). A pool worker that reads into the
-/// caller's buffer is in the same position, and the teardown must stop it and
-/// take its completion before it returns.
+/// (docs/io.md). A pool worker that reads into the caller's buffer is in the
+/// same position, and the teardown must stop it and take its completion before
+/// it returns.
 ///
 /// The counter-factual: a teardown that drains only the ring returns with the
 /// worker still parked on the silent pipe below, holding the buffer's address.

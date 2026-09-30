@@ -1,4 +1,7 @@
-//! Edit types and application.
+// audited: 2026-09-30
+//! A byte-span edit to source text, and the one function that applies a set of them.
+//!
+//! docs/epochs.md
 
 /// A source edit: replace bytes at [byte_offset..byte_offset+byte_len] with replacement.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,8 +13,12 @@ pub(crate) struct Edit {
 
 /// Apply edits to source text. Sorts back-to-front so byte offsets remain valid.
 /// Returns Err if any edits overlap.
+///
+/// An insertion and a replacement may start at one offset — a wrap opening
+/// where a renamed symbol stands. The replacement applies first, so the
+/// insertion lands before its new text rather than inside it.
 pub(crate) fn apply_edits(source: &str, edits: &mut [Edit]) -> Result<String, String> {
-    edits.sort_by_key(|e| std::cmp::Reverse(e.byte_offset));
+    edits.sort_by_key(|e| std::cmp::Reverse((e.byte_offset, e.byte_len)));
 
     // Check for overlaps (edits are now sorted descending by offset)
     for window in edits.windows(2) {

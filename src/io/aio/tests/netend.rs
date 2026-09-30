@@ -102,7 +102,7 @@ fn closing_a_listener_ends_its_parked_pool_accept() {
 
         let mut accept_completion = None;
         for _ in 0..40 {
-            for c in backend.wait(50).unwrap() {
+            for c in backend.wait(TICK).unwrap() {
                 if c.id == accept_id {
                     accept_completion = Some(c);
                 } else {
@@ -183,7 +183,7 @@ fn a_pool_connect_reports_its_own_deadline_as_a_timeout() {
 
         let mut completions = Vec::new();
         for _ in 0..40 {
-            completions.extend(backend.wait(200).unwrap());
+            completions.extend(backend.wait(Some(Duration::from_millis(200))).unwrap());
             if !completions.is_empty() {
                 break;
             }
@@ -305,7 +305,7 @@ fn a_retired_accept_closes_the_connection_it_took() {
             heap.decref_region(region);
 
             for _ in 0..40 {
-                Completion::discard_all(backend.wait(50).unwrap());
+                Completion::discard_all(backend.wait(TICK).unwrap());
                 if !backend.has_pending() && backend.workers() == 0 {
                     break;
                 }
