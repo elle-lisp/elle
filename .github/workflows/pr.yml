@@ -31,7 +31,7 @@ jobs:
           CHANGED=$(git diff --name-only "$BASE" HEAD)
           echo "Changed files:"
           echo "$CHANGED"
-          if echo "$CHANGED" | grep -qE '\.(rs|lisp)$|^Cargo\.|^Makefile$|^\.cargo/'; then
+          if echo "$CHANGED" | grep -qE '\.(rs|lisp)$|(^|/)Cargo\.|^Makefile$|^\.cargo/'; then
             SOURCE=true
           else
             SOURCE=false
@@ -345,7 +345,7 @@ jobs:
       - name: make elle-mlir
         run: make elle-mlir
       - name: make doctest
-        run: make doctest
+        run: make doctest ELLE=./target/release/elle-mlir
       - name: make smoke-mlir
         run: make smoke-mlir
       - name: Upload the session store
@@ -372,8 +372,7 @@ jobs:
       # The wasm tier carries no production workloads (docs/impl/wasm.md,
       # docs/impl/memory.md), so its suites do not gate PRs. What must stay
       # green anyway: the feature compiles, and the full-module tier boots.
-      # Restore `make smoke-wasm` here (plus the GNU parallel install it needs)
-      # when the tier is brought back up.
+      # Restore `make smoke-wasm` here when the tier is brought back up.
       - name: make check-wasm
         run: make check-wasm
 

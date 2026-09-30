@@ -47,6 +47,13 @@ CARGO_OUT = target/$(if $(findstring --release,$(CARGO_PROFILE)),release,debug)
 # follows `ELLE` unless named.
 ELLE_RIG ?= $(dir $(ELLE))elle-rig
 
+# The WASM and MLIR builds, each with its rig: binaries of their own beside
+# `elle`, which stays the default build (bins/overview.md).
+ELLE_WASM     ?= $(CARGO_OUT)/elle-wasm
+ELLE_RIG_WASM ?= $(CARGO_OUT)/elle-rig-wasm
+ELLE_MLIR     ?= $(CARGO_OUT)/elle-mlir
+ELLE_RIG_MLIR ?= $(CARGO_OUT)/elle-rig-mlir
+
 # `find` is told to be quiet about a missing root, so a root that moves drops
 # silently out of the format gate rather than failing it. The pin that every
 # Elle source in the tree stays reachable from this list is
@@ -217,8 +224,7 @@ ELLE_NOFFI ?= $(CARGO_OUT)/elle-noffi
 # needs the bytecode VM underneath; the wasm rig's sidecar pass runs them.
 WASM_SKIP := -e eval.lisp -e eval-env.lisp -e wasm-tier-error-signal.lisp \
              -e wasm-tier.lisp
-WASM_LANG_FILES = $(shell printf '%s\n' $(LANG_FILES) | grep -v $(WASM_SKIP))
-WASM_FULL_FILES = $(shell printf '%s\n' $(IMPL_FILES) | grep -v $(WASM_SKIP))
+WASM_FULL_FILES = $(shell printf '%s\n' $(LANG_FILES) $(IMPL_FILES) | grep -v $(WASM_SKIP))
 
 # Some suite files spend most of the runner's default budget on work the case
 # needs: the h2 families drive hundreds of requests or streams over one
@@ -290,10 +296,16 @@ DEAL_CORPUS := LC_ALL=C awk 'BEGIN { for (i = 0; i < 256; i++) ord[sprintf("%c",
 # tests/common/passes.rs reads its files and its flags off one line of
 # `make --dry-run`.
 #
+# The runner is the build the target runs its suites on: `elle`, or a variant's
+# own binary where its target sets `SUITE_ELLE`. A target-specific `ELLE` would
+# lose to an `ELLE=` on the command line, which is what every CI job passes.
+#
 # $(1) the files   $(2) the runner's flags, such as `--host PROGRAM --isolate
 # 'FLAGS'`. No argument may contain a comma: `$(call)` splits on them.
+SUITE_ELLE = $(ELLE)
+
 define RUN_SUITE
-	@printf '%s\n' $(1) | $(DEAL_CORPUS) | xargs -P $(JOBS) -n $(CORPUS_BATCH) $(ELLE) test $(2) $(WIDE_FLAGS) || { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md)"; exit 1; }
+	@printf '%s\n' $(1) | $(DEAL_CORPUS) | xargs -P $(JOBS) -n $(CORPUS_BATCH) $(SUITE_ELLE) test $(2) $(WIDE_FLAGS) || { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md)"; exit 1; }
 endef
 
 # The language suite under one rig profile. The blank line before `endef` ends
@@ -379,13 +391,18 @@ smoke-pool: elle-pool  ## Both suites on the thread-pool I/O backend (what every
 	@echo "=== the implementation suite, on the thread-pool build's rig ==="
 	$(call RUN_SUITE,$(IMPL_FILES),--host $(ELLE_RIG) --isolate '')
 
-elle-mlir:  ## Build elle with the MLIR tier (for smoke-mlir)
-	@echo "=== build elle with MLIR ==="
-	cargo build $(CARGO_PROFILE) -p elle --features mlir -q
+elle-mlir:  ## Build elle-mlir and elle-rig-mlir, the MLIR build (for smoke-mlir)
+	@echo "=== build elle and its rig with MLIR ==="
+	cargo build $(CARGO_PROFILE) --manifest-path bins/mlir/Cargo.toml --target-dir target -q
 
-smoke-mlir: elle-mlir  ## The language suite on the MLIR build
+# The MLIR build's rig is the one rig that carries the MLIR tier, so the
+# implementation suite's MLIR files run there.
+smoke-mlir: SUITE_ELLE = $(ELLE_MLIR)
+smoke-mlir: elle-mlir  ## Both suites on the MLIR build
 	@echo "=== the language suite, MLIR build ==="
 	$(call RUN_SUITE,$(LANG_FILES),)
+	@echo "=== the implementation suite, on the MLIR build's rig ==="
+	$(call RUN_SUITE,$(IMPL_FILES),--host $(ELLE_RIG_MLIR) --isolate '')
 
 # The no-features binary is copied beside the build, and the default build then
 # rebuilt in its place, so the runner is always a build that has FFI.
@@ -399,9 +416,9 @@ smoke-noffi: elle-noffi  ## The language suite on a build with no features, less
 	@echo "=== the language suite, no features ==="
 	$(call RUN_SUITE,$(NOFFI_FILES),--host $(ELLE_NOFFI) --isolate '')
 
-elle-wasm:  ## Build elle and its rig with the WASM backend (for check-wasm/smoke-wasm)
+elle-wasm:  ## Build elle-wasm and elle-rig-wasm, the WASM build (for check-wasm/smoke-wasm)
 	@echo "=== build elle and its rig with WASM ==="
-	cargo build $(CARGO_PROFILE) -p elle -p elle-rig --features wasm -q
+	cargo build $(CARGO_PROFILE) --manifest-path bins/wasm/Cargo.toml --target-dir target -q
 
 # The CI gate for the wasm backend while the tier carries no production
 # workloads: the feature still compiles, and the full-module tier still boots —
@@ -410,27 +427,26 @@ elle-wasm:  ## Build elle and its rig with the WASM backend (for check-wasm/smok
 # gate that gated nothing. Suite coverage on this tier is smoke-wasm.
 check-wasm: elle-wasm  ## Build the WASM backend and boot one module through it
 	@echo "=== wasm boot check ==="
-	@out=$$(timeout 300s $(ELLE) --wasm=full tests/lang/arithmetic.lisp 2>&1); code=$$?; \
+	@out=$$(timeout 300s $(ELLE_WASM) --wasm=full tests/lang/arithmetic.lisp 2>&1); code=$$?; \
 	printf '%s\n' "$$out"; \
 	[ $$code -eq 0 ] || { echo "FAILED: wasm boot (exit $$code)"; exit 1; }; \
 	printf '%s\n' "$$out" | grep -q '\[wasm\]' \
 		|| { echo "FAILED: wasm boot ran without engaging the wasm tier"; exit 1; }
 
 # Both suites on the wasm build (docs/impl/wasm.md). The language suite runs
-# under `--wasm=full`, one process per file. The implementation suite runs on
-# the build's rig twice: under each file's sidecar, where the tiered backend's
-# files run, then with each file compiled whole to one module.
+# inside the runner of `elle-wasm`, as on every build. The implementation suite
+# runs on the build's rig under each file's sidecar, where the tiered backend's
+# files run. Both suites then run on the rig with each file compiled whole to
+# one module.
 smoke-wasm: JOBS = $(WASM_JOBS)
+smoke-wasm: SUITE_ELLE = $(ELLE_WASM)
 smoke-wasm: elle-wasm  ## Both suites on the WASM build
-	@echo "=== the language suite, each file compiled whole to one module ==="
-	@printf '%s\n' $(WASM_LANG_FILES) | \
-		parallel -j $(WASM_JOBS) --tag \
-			'timeout 300s $(ELLE) --wasm=full {}' \
-		|| { echo "FAILED: the language suite under --wasm=full"; exit 1; }
-	@echo "=== the implementation suite, on the wasm build's rig ==="
-	$(call RUN_SUITE,$(IMPL_FILES),--host $(ELLE_RIG) --isolate '')
-	@echo "=== the implementation suite, each file compiled whole to one module ==="
-	$(call RUN_SUITE,$(WASM_FULL_FILES),--host $(ELLE_RIG) --isolate '--profile $(WASM_FULL_PROFILE)')
+	@echo "=== the language suite, WASM build ==="
+	$(call RUN_SUITE,$(LANG_FILES),)
+	@echo "=== the implementation suite, on the WASM build's rig ==="
+	$(call RUN_SUITE,$(IMPL_FILES),--host $(ELLE_RIG_WASM) --isolate '')
+	@echo "=== both suites, each file compiled whole to one module ==="
+	$(call RUN_SUITE,$(WASM_FULL_FILES),--host $(ELLE_RIG_WASM) --isolate '--profile $(WASM_FULL_PROFILE)')
 
 # A literate doc is one whole program: the scheduler docs (processes.md,
 # threads.md) run a dozen process systems in sequence, which is minutes of
