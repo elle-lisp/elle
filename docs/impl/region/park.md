@@ -159,7 +159,10 @@ symmetric with its unpark; the node and the deferred set a park moves are
   a request whose values may already be freed. Counting them from the request would
   hold every one past the release its frame owns, on every request, for a shape
   almost no program takes. So the park stamps the request with the fiber that parked
-  on it (`park_suspending_primitive`). `io/submit` accepts the request only while
+  on it (`park_suspending_primitive`). A host that hands a thunk's park on as its own
+  call's park (`VM::abandon_hosted_park`) parks the same request again on the same
+  fiber, so one fiber may stamp a request twice, and a second fiber never does.
+  `io/submit` accepts the request only while
   that fiber still holds it as its parked signal with its frames suspended. Every
   route out of a park changes one of those two, so the check needs no record of its
   own. A stale request raises `state-error` before the submit reads any value it
