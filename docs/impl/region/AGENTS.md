@@ -12,7 +12,7 @@ Up: [..](../AGENTS.md)
 - [cells.md](cells.md) — **Capture cells** How a captured binding's cell is realized, what a read through one borrows, and where the cell's own release lands.
 - [clique.md](clique.md) — **What a region-effect declaration buys** What the solver derives from a declared `RegionEffect`.
 - [compensate.md](compensate.md) — **Per-arm compensation** The releases a branch adds one per arm, each funded by a retain on its own node.
-- [ctx.md](ctx.md) — **NativeCtx — explicit allocation: every value names its region and heap** Implementation-facing.
+- [ctx.md](ctx.md) — **NativeCtx — explicit allocation: every value names its region and heap** A native allocates only through a capability it is handed, which names its region.
 - [diagnostics.md](diagnostics.md) — **Region diagnostics and validation** Implementation-facing: the instruments that tell correct from broken, and the test scaffolding that keeps the region rules honest.
 - [effects.md](effects.md) — **Native region effects: declared, not guessed** How each primitive declares its region behavior, and what each `RegionEffect` variant claims.
 - [errors.md](errors.md) — **Rich errors — one region-coherent struct routine + `rich_error!`** Implementation-facing.

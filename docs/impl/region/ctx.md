@@ -1,9 +1,10 @@
 # NativeCtx — explicit allocation: every value names its region and heap
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
-Implementation-facing. Native code allocates only through a capability it is
-handed. The `PrimFn` signature carries a `&mut NativeCtx`; that ctx owns the
+A native allocates only through a capability it is handed, which names its region.
+
+The `PrimFn` signature carries a `&mut NativeCtx`; that ctx owns the
 call's region and carries heap access, so a primitive that allocates must use the
 capability, and a primitive handed no other region cannot allocate anywhere but
 its own call's region.
@@ -130,7 +131,8 @@ Invariants:
   of the result are unchanged.
 - `dispatch_query` (the in-dispatch `SIG_QUERY` answer) builds its answer through
   the same ctx, preserving "the answer is born in the call's own region"
-  (built at the dispatch site, `vm/core/region.rs`).
+  (built at the dispatch site,
+  [natives.rs](../../../src/vm/core/region/natives.rs)).
 - The JIT's `elle_jit_call` / `elle_jit_tail_call` route through
   `VM::dispatch_native_call`, so both tiers share its single bytecode-dispatch
   ctx construction and get identical region accounting for free.
@@ -149,7 +151,7 @@ So a helper building a piece of a native's result takes the call's `&Alloc` and
 allocates through it. One region carries the whole result, one release reclaims
 it, and the `Fresh` declaration the primitive makes ([effects.md](effects.md))
 is true of the members as well as the aggregate. Two helpers sit on this seam:
-`traitregistry::call_method_fn` (below) and `io::Completion::to_value`, whose
+`traitregistry::call_method_fn` (below) and `io::Completion::into_value`, whose
 structs `io/wait` / `io/reap` collect into the array they return. The reference
 is the test: [region-io-completion-leak.lisp](../../../tests/impl/region-io-completion-leak.lisp) measures a pumped io
 loop bounded, and
@@ -186,11 +188,11 @@ closure, a module load). It resolves the call's own driving VM, so two embedded
 instances on one thread each read their own VM state — pinned by
 `two_instances_read_their_own_vm_args` ([lifecycle.rs](../../../src/runtime/tests/lifecycle.rs)).
 
-The one caller with no ctx is the **FFI callback trampoline** (`ffi/callback.rs`),
+The one caller with no ctx is the **FFI callback trampoline**
+([callback.rs](../../../src/ffi/callback.rs)),
 invoked by C with nothing to thread. It captures its VM explicitly at registration
 (`create_callback`, reached from `prim_ffi_callback` which has `ctx.vm()`), storing
-a `*mut VM` in `CallbackData` (synthetic re-entry: it captures its VM at
-registration, since C threads none).
+a `*mut VM` in `CallbackData`.
 
 Three pieces of *per-VM* state are `VM` fields (so two instances never collide),
 reached as `ctx.vm().field`:
@@ -241,14 +243,14 @@ bundle carrying the driving VM. The compiled function's prologue
 parameter, and the intrinsic emit sites thread its address as the helper's last
 argument; the helper resolves the VM from it and builds the `NativeCtx`
 (`run_alloc_intrinsic` for the allocating intrinsics, `boundary_vm`/`with_region_vm`
-for the others). `run_alloc_intrinsic` ([types.rs](../../../src/vm/types.rs)) — the one body shared by
+for the others). `run_alloc_intrinsic` ([intrinsic.rs](../../../src/vm/types/intrinsic.rs)) — the one body shared by
 the interpreter intrinsic handlers and the JIT helpers — takes the VM explicitly, so
 the VM is named on both tiers. `JitCtx` is `#[repr(C)]` with the VM at offset
 0, matching the prologue's raw store; the heap axis extends the same bundle with a
 heap capability, threaded the same way, so the allocating intrinsics name their heap
 too without another ABI change. Pinned by `jit_intrinsics_use_threaded_vm`
-([tests.rs](../../../src/jit/dispatch/tests.rs)): each intrinsic helper runs correctly off the
-threaded `JitCtx`.
+([copies.rs](../../../src/jit/dispatch/tests/copies.rs)): each intrinsic helper runs
+correctly off the threaded `JitCtx`.
 
 ## The `ctx.*` allocation surface
 
@@ -343,7 +345,7 @@ stdlib exports + REPL value bindings), and the file→signal projection cache. A
 compile names its instance's `CompileCtx` or it does not compile.
 
 An instance's three capabilities — the `VM`, the `SymbolTable`, and the
-`CompileCtx` — are owned together by a **`RuntimeCore`** ([runtime.rs](../../../src/runtime.rs)), which
+`CompileCtx` — are owned together by a **`RuntimeCore`** ([core.rs](../../../src/runtime/core.rs)), which
 hands them out as the disjoint borrows `parts() -> (&mut VM, &mut SymbolTable,
 &mut CompileCtx)` that the pipeline entry points
 (`compile`/`compile_file`/`eval`/`analyze`/`execute_scheduled`) thread
@@ -378,5 +380,6 @@ stdlib/REPL definitions stay invisible to another.)
 - The declaration oracle ([effects.md](effects.md)) polices result
   regions: a body that allocates its result into the wrong region panics in
   debug, naming the primitive.
-- `--trace=guardfree` over the region suite is the UAF oracle for every change to
-  the dispatch/ctx path.
+- The `guardfree` trace keyword faults on a read of a freed region. An
+  implementation-suite file whose sidecar arms it runs under it on the rig
+  ([overview.md](../../../rig/overview.md)).
