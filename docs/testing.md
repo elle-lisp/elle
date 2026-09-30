@@ -6,7 +6,7 @@ The two test suites, what each one claims, the builds that run them, and how a
 run is read.
 
 Elle has a language suite and an implementation suite
-([spec](spec.md) § Two suites):
+([spec](spec.md)):
 
 1. **The language suite** — `.lisp` files under
    [tests/lang](../tests/lang/overview.md). Each asserts what the language
@@ -38,7 +38,7 @@ specification is [docs/test-runner.md](test-runner.md), with
 | `elle test --query 'SQL'` | Run ad-hoc SQL |
 
 A run prints a tally, a line per failure, and what it cost the runner's own
-heap — all to stderr:
+heap and the heaps its test code ran on — all to stderr:
 
 ```
 elle test · run 7 of 7 · commit a1b2c3d (dirty)
@@ -46,21 +46,23 @@ elle test · run 7 of 7 · commit a1b2c3d (dirty)
 2 problems (query the DB for full detail):
   fail     tests/lang/foo.lisp:12  [process]  expected 42, got 41
   timeout  tests/lang/subprocess.lisp  [process]  child exceeded the 60000 ms budget
-runner heap · objects +9021 · regions +28104 · pages +112
-  objects +4510  regions +14052  pages +56  tests/lang/a.lisp
+runner heap · objects +9021 · regions +28104 · pages +112 · region-frees +40211 · …
+  objects +4510  regions +14052  pages +56  region-frees +20105  …  tests/lang/a.lisp
+test heap · objects +3 · regions +2 · pages +610 · region-frees +598 · adopts +2 · …
+  objects +2  regions +1  pages +400  region-frees +392  adopts +2  …  tests/lang/keep.lisp
 ```
 
 The commit line names the code the tally describes. A run outside a
-repository prints the run number alone. The `runner heap` block is the run's
-account of what it cost itself, file by file
-([docs/test-store.md](test-store.md) § The runner's own gauges).
+repository prints the run number alone. The `runner heap` and `test heap`
+blocks are the run's account of what each file cost, on every gauge
+([docs/test-gauges.md](test-gauges.md)).
 
 You read results from the run itself — never by hand-writing SQLite.
 
 ## A build is an implementation
 
 A build carries one optimizing tier and no flag that chooses another
-([config](config.md) § Builds). CI builds the default
+([config](config.md)). CI builds the default
 (JIT) build, a build with no JIT, a thread-pool I/O build, an MLIR build, a
 build with no features, and the default build on AArch64 and macOS, and each
 runs `make smoke-lang` ([ci](analysis/ci.md)). A file that passes on one build
@@ -84,7 +86,7 @@ so an agent issues SQL against the stored run instead of re-running with
 - **The suites are the source of truth, in git.** The DB is a derived index
   living outside the repo, in the state directory: `$ELLE_STATE`, else
   `$XDG_STATE_HOME/elle`, else `$HOME/.local/state/elle`
-  ([docs/test-store.md](test-store.md) § Run history is state). Run history
+  ([docs/test-store.md](test-store.md)). Run history
   is a record, so it does not live with the caches a rebuild regenerates.
   `--db PATH` moves the database, its CAS, and its scratch files together.
 - **The DB tracks all runs.** Each invocation appends a `run` row; `--summary`
@@ -94,8 +96,8 @@ so an agent issues SQL against the stored run instead of re-running with
 
 The unit is the **file**, compiled the way every real Elle program is — Source →
 Reader → … → Bytecode → VM, with whole-module analysis — not `read`+`eval`'d
-form-by-form. The tiers a file runs on are [docs/test-runner.md](test-runner.md)
-§ Tiers.
+form-by-form. [docs/test-runner.md](test-runner.md) names the tiers a file
+runs on.
 
 Test code is untrusted, so each file runs in a **worker thread** with its own VM,
 bounded by the budget its path earned — `--timeout MS` (default 60000), or
@@ -118,7 +120,7 @@ program teardown, and a fault in one file kills one child rather than the run.
 A child that dies on a signal is a `fail` naming the signal and the run
 continues; an exit code is a `fail` naming the code; a child over its budget
 is killed and recorded `timeout`. Its stdout and stderr become assets either
-way ([docs/test-runner.md](test-runner.md) § Isolation).
+way ([docs/test-runner.md](test-runner.md)).
 
 ```sh
 elle test --isolate '' tests/lang/closures.lisp
@@ -130,8 +132,8 @@ reports a verdict through it — [oracle.lisp](../tests/impl/oracle.lisp) and
 [plumb.lisp](../tests/impl/plumb.lisp) do, through
 [estimator.lisp](../tests/impl/lib/estimator.lisp) — lands one `measurement`
 row per verdict, so a leak rate's history across commits is a query rather than
-scrollback ([docs/test-store.md](test-store.md) § Measurements). Run the same
-file directly and it prints its dashboard and records nothing.
+scrollback ([docs/test-store.md](test-store.md)). Run the same file directly
+and it prints its dashboard and records nothing.
 
 That is how the Makefile runs the two dashboards. They belong to the
 implementation suite, so every pass over that suite runs each one as an
@@ -167,7 +169,7 @@ label.
 ```
 
 An implementation test that needs a mode names it in a sidecar beside it
-([rig](../rig/overview.md) § The sidecar).
+([rig](../rig/overview.md)).
 
 ### Gating, not skip-lists
 
@@ -184,7 +186,7 @@ reasoned `skip` (and a direct `elle FILE` run exits 0 cleanly):
 
 Name a plugin through `import`, not through an `import-file` path. `import`
 resolves `plugin/X` against the running binary's own build profile
-([modules.md](modules.md) § "Module search path"); a written-out
+([modules.md](modules.md)); a written-out
 `target/release/…` names a file only a release build has, so under a debug
 binary that test gates itself out and reports nothing.
 
@@ -219,8 +221,9 @@ A performance gate is an implementation test: the language promises a result,
 not its cost. A test that pins a *cost* — a bulk copy against a per-byte copy, a
 linear pass against a quadratic one — cannot assert a wall-clock number. The
 runner shares its machine, so a bound wide enough to survive a stall is wider
-than the regression it exists to catch. `tests/impl/bytes-linear.lisp` failed
-at 0.5055s against a 0.5 bound, on a commit that costs 0.003s on a quiet box.
+than the regression it exists to catch.
+[bytes-linear.lisp](../tests/impl/bytes-linear.lisp) failed at 0.5055s against
+a 0.5 bound, on a commit that costs 0.003s on a quiet box.
 
 Measure a **control** instead. Pick an operation of the same size, in the same
 process, that runs the path the regression cannot reach, and require the
@@ -236,9 +239,10 @@ Two rules keep the ratio steady:
 - **Build the operands outside the timed thunk.** `length` on a string counts
   graphemes, so a loop that re-reads it times the walk instead of the work.
 
-The two worked examples are `tests/impl/bytes-linear.lisp`, which gates a
-binary append against the same-size text append, and
-`tests/impl/concat-linear.lisp`, which gates a string concat against the
+The two worked examples are [bytes-linear.lisp](../tests/impl/bytes-linear.lisp),
+which gates a binary append against the same-size text append, and
+[concat-linear.lisp](../tests/impl/concat-linear.lisp), which gates a string
+concat against the
 same-size bytes concat.
 
 A **timeout** test is the other case, and it keeps its absolute bound. There
@@ -253,14 +257,14 @@ teardown, glibc would later run the destructor — at worker thread exit — int
 unmapped code, killing the process with SIGSEGV in `__nptl_deallocate_tsd`.
 
 This is closed by construction: FFI library mappings are owned **process-globally**
-and **never `dlclose`d** (`src/ffi/registry.rs`; the same discipline plugins use),
+and **never `dlclose`d** ([registry.rs](../src/ffi/registry.rs); the same discipline plugins use),
 so a worker that uses an FFI library and exits is always safe — the destructor runs
 against still-mapped code. No per-worker teardown is required. A program may attach
 an *optional, explicit* ordered teardown to a library with `(ffi/on-unload lib
-"sym")` and run them with `(ffi/run-teardowns)` (`lib/git.lisp`'s `git:shutdown`, for example);
+"sym")` and run them with `(ffi/run-teardowns)` ([git.lisp](../lib/git.lisp)'s `git:shutdown`, for example);
 these are graceful cleanup the program triggers when its worker threads have
 quiesced, never run automatically and never required for safety. Pinned by
-`tests/integration/ffi_worker.rs` (a worker that loads a TLS-destructor fixture and
+[ffi_worker.rs](../tests/integration/ffi_worker.rs) (a worker that loads a TLS-destructor fixture and
 exits without teardown exits cleanly).
 
 ## Reading a run
@@ -275,7 +279,7 @@ elle test --query \
 
 The schema (`run`, `form`, `result`, `asset`, `measurement`, `gauge`,
 `changed_file`) is documented in
-[docs/test-store.md](test-store.md) § Schema (with the v1 implemented-subset
+[docs/test-store.md](test-store.md) (with the v1 implemented-subset
 note — the `run` resource columns are deferred). Each `run` row names the code
 it ran against — commit, dirty flag, tree hash, worktree — and the binary and
 machine that ran it, so a result belongs to something and the killed-run
@@ -283,20 +287,21 @@ warning names the checkout it warns about. Captured stdout/stderr
 live in the CAS at `<db-dir>/cas/<hash>`, referenced by `asset` rows. `--dump`
 artifact capture (the LIR-as-a-hash-lookup path) is currently **omitted** — it
 OOMs the corpus run and does not dedup
-([docs/test-runner.md](test-runner.md) § CAS asset capture) — so
+([docs/test-runner.md](test-runner.md)) — so
 today only stdout/stderr assets exist; the LIR of a failing form still needs a
 re-run until that capture is re-enabled.
 
-What a run cost the runner's own heap is recorded per file, in objects,
-regions and pages, and the summary names the files that grew it most. A leak
-per compiled file used to reach us as an OOM kill and a batch size; now it
-reaches us as a file name and a number
-([docs/test-store.md](test-store.md) § The runner's own gauges).
+What a run cost the runner's own heap, and the heaps its test code ran on, is
+recorded per file on every gauge, and the summary names the files that grew
+each heap most. A leak per compiled file used to reach us as an OOM kill and a
+batch size; now it reaches us as a file name and a number
+([docs/test-gauges.md](test-gauges.md)).
 
 ```sh
 elle test --query \
   "SELECT file, sum(delta) AS regions FROM gauge
-   WHERE kind = 'regions' GROUP BY file ORDER BY regions DESC LIMIT 10"
+   WHERE kind = 'regions' AND heap = 'runner'
+   GROUP BY file ORDER BY regions DESC LIMIT 10"
 ```
 
 A form that misses its deadline prints a native backtrace of every thread in
@@ -318,7 +323,7 @@ A run killed mid-flight (OOM, signal) is recorded honestly: its `run` row's
 partial tally (computed from `result` rows — the stored counters are written
 only at completion), and the next `elle test` warns about it. An all-pass
 result set from a truncated run is partial coverage, not green
-(see [docs/test-runner.md](test-runner.md) § Run honesty). A run that is still
+(see [docs/test-runner.md](test-runner.md)). A run that is still
 working leaves the same NULL, so the views ask whether its process is alive:
 `--summary` then reads `STILL RUNNING (pid P)`, and the next `elle test` prints
 one line naming the pid instead of the kill warning.
@@ -346,20 +351,22 @@ The runtime carries the executing function's identity across each of these. If t
 identity goes stale, the recursion silently continues as a *different* closure (or with
 a *different* captured environment) and returns a plausible wrong value — invisible to
 both oracles above. So this correctness is pinned **behaviorally**, by value
-assertions, not by a memory gauge: the `tests/lang/recur-after-yield.lisp`,
-`recur-after-tail-call.lisp`, and `recur-as-value.lisp` language tests (run on
-every build), with deterministic peers in `src/runtime/tests/selfrec.rs`. Each
-asserts a result that is only correct if the self-identity survived the
-boundary, so a stale self-reference flips the assertion red. They are the
-regression guard for any change to how a self-reference is resolved or how an
-activation is carried across yield, tail call, or value handoff.
+assertions, not by a memory gauge: the
+[recur-after-yield.lisp](../tests/lang/recur-after-yield.lisp),
+[recur-after-tail-call.lisp](../tests/lang/recur-after-tail-call.lisp), and
+[recur-as-value.lisp](../tests/lang/recur-as-value.lisp) language tests (run on
+every build), with deterministic peers in
+[selfrec.rs](../src/runtime/tests/selfrec.rs). Each asserts a result that is
+only correct if the self-identity survived the boundary, so a stale
+self-reference flips the assertion red. They are the regression guard for any
+change to how a self-reference is resolved or how an activation is carried
+across yield, tail call, or value handoff.
 
 The **order of two correctly-counted releases** is the other hazard of this kind, and
 it needs a third detector rather than a behavioral pin. A captured binding's value and
 its env cell are two regions addressed by one env index; the value's release loads the
 box raw and unwraps it, so it reads the page the box's release frees
-([docs/impl/region/cells.md](impl/region/cells.md) § "A cell's release lands at
-or after every release routed through that cell"). Emit the two in the wrong order and
+([docs/impl/region/cells.md](impl/region/cells.md)). Emit the two in the wrong order and
 both counts are still right: nothing leaks, so the leak oracle reads flat, and no count
 reaches zero early, so guardfree unmaps nothing to fault on. What catches it is a
 debug-only walk of every finished block
