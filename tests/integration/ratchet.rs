@@ -439,13 +439,21 @@ fn producer_source(path: &Path) -> String {
     out
 }
 
+/// Every corpus file on the ratchet: the leak dashboards, and each residue
+/// test that moved its window and its ceiling into a ledger.
+const PRODUCERS: &[&str] = &[
+    "tests/impl/oracle.lisp",
+    "tests/impl/plumb.lisp",
+    "tests/impl/h2-stress-scoped.lisp",
+];
+
 #[test]
-fn each_leak_dashboard_is_a_ledgered_producer() {
+fn each_producer_on_the_ratchet_has_a_ledger() {
     let producers: Vec<String> = ledgers().into_iter().map(|l| l.producer).collect();
-    for dashboard in ["tests/impl/oracle.lisp", "tests/impl/plumb.lisp"] {
+    for want in PRODUCERS {
         assert!(
-            producers.iter().any(|p| p == dashboard),
-            "tests/ledger holds a ledger for {dashboard}; producers: {producers:?}"
+            producers.iter().any(|p| p == want),
+            "tests/ledger holds a ledger for {want}; producers: {producers:?}"
         );
     }
 }
