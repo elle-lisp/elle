@@ -1,6 +1,6 @@
 # The runner's acceptance tests
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 Two Elle programs that drive `elle test` as a subprocess and assert on the
 session DB each run writes.
@@ -15,8 +15,8 @@ of that contract, so change the design document before an assertion.
   JIT policy, atomic, in a worker and in-process.
 - [acceptance.lisp](acceptance.lisp) holds the rest: ad-hoc forms and their
   promotion, a file that will not compile, the captured output, the timeout, a
-  gated shared setup, an unsendable capture, the printed summary, and the
-  `--host` child.
+  gated shared setup, a form whose value cannot leave its worker, the printed
+  summary, and the `--host` child.
 
 Both splice [lib/harness.lisp](lib/harness.lisp), the helpers that start a run
 and read its DB.

@@ -1,5 +1,5 @@
 (elle/epoch 13)
-## audited: 2026-09-29
+## audited: 2026-09-30
 ## Acceptance tests for `elle test`: each scenario drives the runner as a
 ## subprocess and asserts on the session DB it writes. The per-tier scenarios
 ## are tiers.lisp.
@@ -193,26 +193,39 @@
                            (string "gated-setup: n_skip must count the gated file, got "
                                    (get (get run 0) :s)))))
 
-               # ── Scenario 12: a form capturing an UNSENDABLE value runs in-process ─────
-               # A thunk that closes over a value which cannot cross os/spawn (here a
-               # fiber) raises a serialization :thread-error on spawn. The runner re-runs
-               # it in-process instead of recording a spurious fail.
-               (eprintln "scenario: unsendable capture runs in-process")
+               # ── Scenario 12: a form whose value cannot leave its worker runs in-process ─
+               # unsendable.lisp is one form, so it takes the per-form path, and its value
+               # is a fiber, which os/join cannot hand back. The runner re-runs the form
+               # in-process instead of recording the join's :thread-error as a fail. The
+               # counter-factual: a fixture of two forms takes the whole-file path, whose
+               # value is the last form's, and passes with no fallback at all.
+               (eprintln "scenario: a per-form value that cannot leave its worker")
+               (let [forms (filter (fn [f]
+                                     (not (and (list? f)
+                                     (= (first f) (quote elle/epoch)))))
+                                   (read-all (slurp (fixture "unsendable.lisp"))))]
+                 (assert (= (length forms) 1)
+                         (string "unsendable: the fixture must be one form, so it takes "
+                                 "the per-form path; it holds " (length forms))))
                (let [r (run-test "unsendable" @[(fixture "unsendable.lisp")])]
                  (assert (= r:exit 0)
                          (string "unsendable: the in-process fallback passes the run; exit "
                                  r:exit " — stderr: " r:err))
                  (let [res (select-results r:db "unsendable.lisp"
-                       (string "result.status AS status, "
-                               "result.signal AS signal, " "form.label AS label"))]
-                   (assert (> (length res) 0) "unsendable: expected result rows")
+                       (string "result.tier AS tier, result.status AS status, "
+                               "result.signal AS signal"))]
+                   (assert (= (row-tiers res) (tier-list form-tiers))
+                           (string "unsendable: one row per tier the build carries, got "
+                                   (row-tiers res)))
                    (each row res
                      (assert (not (= row:signal ":thread-error"))
-                             (string "unsendable: form '" row:label
-                                     "' is still a :thread-error (fallback missing)"))
-                     (assert (= row:status "pass")
-                             (string "unsendable: form '" row:label "' got "
-                                     row:status)))))
+                             (string "unsendable: tier " row:tier
+                                     " is still a :thread-error (fallback missing)"))
+                     (assert (not (= row:status "fail"))
+                             (string "unsendable: tier " row:tier " failed")))
+                   (assert (= (get (get (filter (fn [row] (= row:tier "vm")) res)
+                                        0) :status) "pass")
+                           "unsendable: the vm tier runs the form and passes")))
 
                # ── Scenario 13: a run RENDERS its results ─────────────────────────────────
                # Every run prints a tally to stderr, plus a problem line per non-pass form.
