@@ -24,38 +24,51 @@ fn runs(line: &str, program: &str) -> bool {
 
 // The counter-factual: a target that runs a per-file pass beside the runner,
 // one `elle FILE` per file under `parallel` and `timeout`. Every file still
-// gates, and nothing it finds reaches the session DB.
+// gates, and nothing it finds reaches the session DB. `smoke-wasm` ran its
+// language suite that way.
 #[test]
 fn every_suite_target_runs_the_binary_through_the_runner_alone() {
-    let elle = make_expand("ELLE");
-    let rig = make_expand("ELLE_RIG");
-    for target in [
-        "smoke-lang",
-        "smoke-impl",
-        "smoke-nojit",
-        "smoke-pool",
-        "smoke-mlir",
-        "smoke-noffi",
+    let programs: Vec<String> = ["ELLE", "ELLE_WASM", "ELLE_MLIR"]
+        .into_iter()
+        .map(make_expand)
+        .collect();
+    let rigs: Vec<String> = ["ELLE_RIG", "ELLE_RIG_WASM", "ELLE_RIG_MLIR"]
+        .into_iter()
+        .map(make_expand)
+        .collect();
+    for (target, runner) in [
+        ("smoke-lang", "ELLE"),
+        ("smoke-impl", "ELLE"),
+        ("smoke-nojit", "ELLE"),
+        ("smoke-pool", "ELLE"),
+        ("smoke-mlir", "ELLE_MLIR"),
+        ("smoke-noffi", "ELLE"),
+        ("smoke-wasm", "ELLE_WASM"),
     ] {
         let recipe = recipe(target);
-        let runner: Vec<&str> = recipe
+        let elle = make_expand(runner);
+        let runs_test: Vec<&str> = recipe
             .lines()
             .filter(|line| line.contains(&format!("{elle} test")))
             .collect();
         assert!(
-            !runner.is_empty(),
+            !runs_test.is_empty(),
             "`make {target}` never runs `{elle} test`:\n{recipe}"
         );
         for line in recipe.lines() {
-            assert!(
-                !runs(line, &elle) || line.contains(&format!("{elle} test")),
-                "`make {target}` runs the binary outside the runner, so what it \
-                 finds reaches no session DB:\n  {line}"
-            );
-            assert!(
-                !runs(line, &rig) || line.contains("--host"),
-                "`make {target}` runs the rig outside the runner:\n  {line}"
-            );
+            for program in &programs {
+                assert!(
+                    !runs(line, program) || line.contains(&format!("{program} test")),
+                    "`make {target}` runs {program} outside the runner, so what \
+                     it finds reaches no session DB:\n  {line}"
+                );
+            }
+            for rig in &rigs {
+                assert!(
+                    !runs(line, rig) || line.contains("--host"),
+                    "`make {target}` runs the rig outside the runner:\n  {line}"
+                );
+            }
             assert!(
                 !runs(line, "parallel"),
                 "`make {target}` hands files to `parallel`, one process per file \

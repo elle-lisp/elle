@@ -12,9 +12,9 @@ Provide canonical eval and setup functions so test files don't need to copy-past
 - Proptest configuration respecting `PROPTEST_CASES` env var
 - A scratch directory under the platform temp root, removed on drop
 - The documents `make doctest` runs, and the documents it must run
-- Readers of the two Elle suites, of the Makefile and of the workflow files,
-  for the tests that check what CI runs, how it dimensions a run, and what it
-  keeps
+- Readers of the two Elle suites, of the Makefile, of the suite passes a target
+  runs and of the workflow files, for the tests that check what CI runs, how it
+  dimensions a run, and what it keeps
 
 Does NOT:
 - Run tests (that's the test harness)
@@ -111,8 +111,9 @@ This is safe because:
 
 | File | Content |
 |------|---------|
-| [mod.rs](mod.rs) | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, `paint_stack`, and `ScratchDir`; it re-exports the readers of `repo.rs` and `workflows.rs` |
+| [mod.rs](mod.rs) | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, `paint_stack`, and `ScratchDir`; it re-exports the readers of `repo.rs`, `passes.rs` and `workflows.rs` |
 | [repo.rs](repo.rs) | the Makefile readers (`make_var`, `make_dry_run`, `make_dry_run_with`, `make_expand`, `makefile`) and the suite readers (`repo_root`, `suite`, `suite_files`, `declared_deadline`, `wide_patterns`) |
+| [passes.rs](passes.rs) | the suite passes a target runs (`Pass`, `passes`), the two suites as sets (`lang_files`, `impl_files`), and `assert_plain_language_pass`, for `suites.rs` and `variants.rs` |
 | [workflows.rs](workflows.rs) | the workflow readers (`workflow_files`, `workflow_jobs`, `runs_target`) |
 | [documents.rs](documents.rs) | the documents `make doctest` runs (`doctest_documents`) and the documents it must run (`covered_documents`), for `doctest.rs` and `doctest_scope.rs` |
 

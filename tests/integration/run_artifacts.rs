@@ -211,17 +211,27 @@ fn no_two_jobs_upload_under_one_artifact_name() {
 /// the runner through `RUN_SUITE` and nowhere else. A target invoking
 /// `$(ELLE) test` directly would record runs that no job is asked to upload,
 /// and every check here would pass over it.
+///
+/// `RUN_SUITE` runs `$(SUITE_ELLE) test`, the binary of the build a target
+/// runs its suites on. A direct call names that variable or one of the
+/// binaries it can name, so the scan reads for all of them.
 #[test]
 fn only_run_suite_drives_the_runner() {
     let makefile = makefile();
     assert!(
-        makefile.contains("$(ELLE) test"),
+        makefile.contains("$(SUITE_ELLE) test"),
         "no recipe invokes the runner; this test is reading for the wrong string"
     );
 
+    let runners = [
+        "$(SUITE_ELLE) test",
+        "$(ELLE) test",
+        "$(ELLE_WASM) test",
+        "$(ELLE_MLIR) test",
+    ];
     let direct: Vec<String> = rules(&makefile)
         .into_iter()
-        .filter(|(_, (_, recipe))| recipe.contains("$(ELLE) test"))
+        .filter(|(_, (_, recipe))| runners.iter().any(|runner| recipe.contains(runner)))
         .map(|(name, _)| name)
         .collect();
     assert!(
