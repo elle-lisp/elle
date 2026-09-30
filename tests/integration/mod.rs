@@ -271,6 +271,9 @@ mod pre_commit {
 mod toolchains {
     include!("toolchains.rs");
 }
+mod ratchet {
+    include!("ratchet.rs");
+}
 
 // `allocator.rs` is absent from the list above and does not compile. It calls
 // FiberHeap methods the region-ownership model retired — `alloc`, `mark`,
