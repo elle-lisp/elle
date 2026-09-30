@@ -52,8 +52,10 @@ Two execution modes:
 
 - **Tiered** (`--wasm=N`): compiles individual hot closures
   to WASM on demand during bytecode VM execution. Complements the VM
-  rather than replacing it. Currently limited to leaf functions
-  (no closures, tail calls, or yield).
+  rather than replacing it. A closure runs on the tier from its Nth call, so
+  `--wasm=1` compiles it on the first; the tier counts the calls itself,
+  because a `wasm` build has no JIT tier to share a count with. Currently
+  limited to leaf functions (no closures, tail calls, or yield).
 
 ### Pipeline (full-module)
 
@@ -469,7 +471,7 @@ the fallback on both cached paths.
 | Flag | Effect |
 |------|--------|
 | `--wasm=full` | Full-module WASM backend |
-| `--wasm=N` | Tiered WASM compilation (threshold N-1) |
+| `--wasm=N` | Tiered WASM compilation, each closure from its Nth call |
 | `--cache=path` | Disk cache for compiled WASM modules |
 | `--debug-wasm` | Print host call traces to stderr |
 | `--wasm-dump` | Write WASM bytes to `/dev/shm/elle-wasm-dump.wasm` |

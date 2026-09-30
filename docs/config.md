@@ -162,14 +162,15 @@ A `wasm` build takes `--wasm=`; no other build accepts the flag.
 ```bash
 elle --wasm=off script.lisp         # disable WASM (default)
 elle --wasm=full script.lisp        # compile everything upfront
-elle --wasm=lazy script.lisp        # per-function lazy compilation
+elle --wasm=3 script.lisp           # compile each closure on its third call
+elle --wasm=lazy script.lisp        # the same, on the eleventh call
 ```
 
-| Policy | CLI | Old CLI | Behavior |
-|--------|-----|---------|----------|
-| Off | `--wasm=off` | `--wasm=0` | WASM disabled (default) |
-| Full | `--wasm=full` | `--wasm=full` | Full-module compilation |
-| Lazy | `--wasm=lazy` | `--wasm=N` | Per-function lazy compilation |
+| Policy | CLI | Behavior |
+|--------|-----|----------|
+| Off | `--wasm=off`, `--wasm=0` | WASM disabled (default) |
+| Full | `--wasm=full` | Full-module compilation |
+| Lazy | `--wasm=N`, `--wasm=lazy` | Each closure compiled from its Nth call; `lazy` is N = 11 |
 
 ### Boot image
 

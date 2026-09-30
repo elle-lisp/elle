@@ -67,7 +67,7 @@ trace = ["guardfree"]
 |---|---|---|
 | `jit` | `"off"`, `"eager"`, or a positive integer | The interpreter alone; compile on the first call; or compile after that many calls |
 | `mlir` | the same | The MLIR tier's policy, in a build that carries it |
-| `wasm` | `"off"`, `"full"`, or a positive integer | The WebAssembly backend's policy, in a build that carries it, read as `--wasm=` reads it: off; the whole program as one module; or each closure after that many calls |
+| `wasm` | `"off"`, `"full"`, or a positive integer | The WebAssembly backend's policy, in a build that carries it, read as `--wasm=` reads it: off; the whole program as one module; or each closure from that call on |
 | `trace` | an array of trace keywords | The build's trace keywords (`TRACE_KEYWORDS`), `guardfree` and `scrub` among them |
 
 The rig refuses a sidecar and runs nothing when the sidecar has a key the rig
