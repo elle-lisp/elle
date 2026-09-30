@@ -6,3 +6,5 @@
 ["answer" :count 42]
 ["dropped struct" :objects 0]
 ["dropped struct rate" :objects 0]
+["driven loop" :objects 0]
+["statement drop" :objects 0]

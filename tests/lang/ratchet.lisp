@@ -128,6 +128,43 @@
 (assert (= bare:half 0) "half defaults to 0 when the line omits it")
 (assert (nil? bare:verdict) "and a line nobody judged carries no verdict")
 
+# ── a drive: the rate over a run-block of the caller's own ────────────
+# The counter-factual: a tail recursion performs its b ops in one call, a
+# fiber is drained after b yields, and a strand needs its op run as a
+# discarded statement. No per-op thunk expresses those, so each dashboard
+# kept a private estimator for the shape. This file has no ledger, so every
+# reading here is printed unjudged and read back off the struct.
+(def @kept @[])
+(defn keep-n [b]
+  (when (%not (%int? b)) (error :b))
+  (def @i 0)
+  (while (%lt i b)
+    (push kept {:x i})
+    (assign i (%add i 1))))
+(defn drop-n [b]
+  (when (%not (%int? b)) (error :b))
+  (def @i 0)
+  (while (%lt i b)
+    {:x i}
+    (assign i (%add i 1))))
+(def driven (get (r:drive "kept loop" keep-n :block 50 :min 4 :max 10) 0))
+(assert (= driven:subject "kept loop") "a drive's reading names its subject")
+(assert (= driven:axis :objects) "on the default gauge")
+(assert (< 0.5 driven:value) "and reads the growth the run-block makes, per op")
+(def dropped (get (r:drive "dropped loop" drop-n :block 50 :min 4 :max 10) 0))
+(assert (= dropped:value 0.0) "a loop that drops its structs reads 0")
+(def two
+  (r:drive "two gauges" drop-n :on [r:objects r:regions] :block 50 :min 4
+           :max 10))
+(assert (= (length two) 2) "one reading per gauge in :on")
+(assert (= (get (get two 1) :axis) :regions) "in the order given")
+(def stmt
+  (get (r:drive "dropped statement" (r:stmt-run (fn [] {:y 1})) :block 50 :min 4
+                :max 10) 0))
+(assert (= stmt:subject "dropped statement")
+        "stmt-run makes a run-block of a thunk")
+(assert (= stmt:value 0.0) "and a struct dropped as a statement costs nothing")
+
 # ── the re-pin: a bound's token moves, and nothing else in the file ──
 # The counter-factual: a re-pin that rewrote the row's line would drop the
 # comment above it and undo the wrapping `elle fmt` gave a long row, so the
