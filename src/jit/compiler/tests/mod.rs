@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-29
 // docs/impl/jit.md
 //! What the solo-compilation gate accepts and rejects, and what the compiled
 //! entry it produces records about itself.
@@ -12,6 +12,7 @@ use crate::value::Arity;
 mod blueprint;
 mod clif;
 mod regions;
+mod stores;
 
 fn make_simple_lir() -> LirFunction {
     // Create a simple function that returns its first argument

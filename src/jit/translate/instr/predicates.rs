@@ -1,3 +1,7 @@
+// audited: 2026-09-29
+// docs/impl/jit.md
+//! Lowering the region-count, type-test, data-access and parameter-frame instructions.
+
 use super::*;
 
 impl<'a> FunctionTranslator<'a> {
@@ -51,10 +55,9 @@ impl<'a> FunctionTranslator<'a> {
                 // Free the CELL's own region via `region_of` (NOT
                 // `result_region_of`): `elle_jit_decref_cell_region`, mirroring
                 // the interpreter's `DecrefCellRegion` arm. `DecrefValueRegion`
-                // (below/above) uses `result_region_of` to unwrap a capture cell
-                // to the inner value — the two must not be conflated, or a
-                // cell-wrapped call result double-frees (the redis eager-JIT
-                // crash). Inc6 region_of/result_region_of reconciliation.
+                // uses `result_region_of` to unwrap a capture cell to the inner
+                // value. The two must not be conflated, or a cell-wrapped call
+                // result frees its region twice.
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("DecrefCellRegion without vm pointer".to_string())
@@ -153,9 +156,7 @@ impl<'a> FunctionTranslator<'a> {
                         ));
                     for (i, member_reg) in members.iter().enumerate() {
                         let (mt, mp) = self.use_var_pair(builder, member_reg.0);
-                        let base = (i * 16) as i32;
-                        builder.ins().stack_store(mt, slot, base);
-                        builder.ins().stack_store(mp, slot, base + 8);
+                        store_value_slot(builder, slot, i as u32, mt, mp);
                     }
                     let ptr = builder.ins().stack_addr(I64, slot, 0);
                     let cnt = builder.ins().iconst(I64, count as i64);
@@ -198,11 +199,8 @@ impl<'a> FunctionTranslator<'a> {
                     for (i, (param_reg, val_reg)) in pairs.iter().enumerate() {
                         let (pt, pp) = self.use_var_pair(builder, param_reg.0);
                         let (vt, vp) = self.use_var_pair(builder, val_reg.0);
-                        let base = i * 2 * 16;
-                        builder.ins().stack_store(pt, slot, base as i32);
-                        builder.ins().stack_store(pp, slot, (base + 8) as i32);
-                        builder.ins().stack_store(vt, slot, (base + 16) as i32);
-                        builder.ins().stack_store(vp, slot, (base + 24) as i32);
+                        store_value_slot(builder, slot, (2 * i) as u32, pt, pp);
+                        store_value_slot(builder, slot, (2 * i + 1) as u32, vt, vp);
                     }
                     let pairs_ptr = builder.ins().stack_addr(I64, slot, 0);
                     let count_val = builder.ins().iconst(I64, count as i64);

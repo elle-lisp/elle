@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-09-29
 // docs/impl/jit.md
 //! `JitCompiler`: the Cranelift module a compile owns, and the two entry points
 //! that drive one `LirFunction` through it.
@@ -22,7 +22,7 @@ use crate::lir::{Label, LirFunction};
 use crate::value::Arity;
 
 use super::code::JitCode;
-use super::translate::{load_value_slot, FunctionTranslator};
+use super::translate::{finalize_function, load_value_slot, FunctionTranslator};
 use super::vtable::{self, RuntimeHelpers};
 use super::JitError;
 

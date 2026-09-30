@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 // docs/impl/jit.md
 //! The prologue: what a compiled function does with its six parameters before
 //! the first LIR block runs.
@@ -98,7 +98,7 @@ impl JitCompiler {
                 std::mem::size_of::<crate::jit::JitCtx>() as u32,
                 0,
             ));
-        builder.ins().stack_store(vm_ptr, jit_ctx_slot, 0);
+        builder.ins().stack_store(I64, vm_ptr, jit_ctx_slot, 0);
         let jit_ctx_ptr = builder.ins().stack_addr(I64, jit_ctx_slot, 0);
         translator.jit_ctx_ptr = Some(jit_ctx_ptr);
 
@@ -381,7 +381,7 @@ impl JitCompiler {
         }
 
         builder.seal_all_blocks();
-        builder.finalize();
+        finalize_function(builder, translator.module);
 
         Ok((translator.closure_protos, translator.templates))
     }

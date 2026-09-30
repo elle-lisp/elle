@@ -1,3 +1,6 @@
+// audited: 2026-09-29
+// docs/impl/jit.md
+// docs/impl/region/mechanism.md
 //! Prologue plumbing: region-map push/pop, local-variable init, per-slot
 //! alloc-region resolution, and the `JitCtx` capability-bundle accessor.
 //!
@@ -34,9 +37,8 @@ impl<'a> FunctionTranslator<'a> {
         for i in 0..num_locally_defined {
             let base = self.local_var_base + i;
             let mask_bit = i.saturating_sub(nlp);
-            // Precise at any index: only genuinely captured locals get a cell.
-            // No `mask_bit >= 64` fallback (which celled — and leaked — every
-            // uncaptured high local; the JIT prologue mirrors the interpreter).
+            // Precise at any index: only a captured local gets a cell, as in the
+            // interpreter's prologue.
             let needs_capture = i >= nlp && capture_locals_mask.is_set(mask_bit as usize);
             if needs_capture {
                 // Prologue env cell → its OWN fresh per-execution region
@@ -116,7 +118,7 @@ impl<'a> FunctionTranslator<'a> {
                 let c = builder
                     .ins()
                     .iconst(cranelift_codegen::ir::types::I16, *slot as i64);
-                builder.ins().stack_store(c, table, (i * 2) as i32);
+                builder.ins().stack_store(I64, c, table, (i * 2) as i32);
             }
             self.abandoned_slots_table = Some(table);
             // The value route reads slot `s` out of `locals[s]`, so the scratch
@@ -139,7 +141,7 @@ impl<'a> FunctionTranslator<'a> {
             ));
             for (i, region) in regions.iter().enumerate() {
                 let c = builder.ins().iconst(I32, region.get() as i64);
-                builder.ins().stack_store(c, table, (i * 4) as i32);
+                builder.ins().stack_store(I64, c, table, (i * 4) as i32);
             }
             self.abandoned_regions_table = Some(table);
         }
@@ -177,10 +179,7 @@ impl<'a> FunctionTranslator<'a> {
             Some(spill) => {
                 for i in 0..self.lir.num_locals as u32 {
                     let (tag, payload) = self.use_var_pair(builder, self.local_var_base + i);
-                    builder.ins().stack_store(tag, spill, (i * 16) as i32);
-                    builder
-                        .ins()
-                        .stack_store(payload, spill, (i * 16 + 8) as i32);
+                    store_value_slot(builder, spill, i, tag, payload);
                 }
                 (
                     builder.ins().stack_addr(I64, spill, 0),
@@ -250,9 +249,7 @@ impl<'a> FunctionTranslator<'a> {
     /// per-slot physical region through this activation's region map and return its
     /// raw id (I32), to be passed directly to the alloc helper as its `region`
     /// argument.
-    // `pub(super)` (was private in the translate root): sibling `instr`
-    // submodules call this; a private item on a sibling module is not visible
-    // to them, so widen to the minimal `translate`-scoped visibility.
+    // `pub(super)`: the sibling `instr` submodules call this.
     pub(super) fn emit_resolve_alloc_region(
         &mut self,
         builder: &mut FunctionBuilder,

@@ -42,6 +42,32 @@ It emits both halves of a `Value` — tag at `+0`, payload at `+8` — so the
 16-byte stride is written once, from `size_of`/`offset_of` rather than as a
 literal.
 
+## Stores into stack slots
+
+The JIT hands the runtime a pointer to consecutive `Value`s in a stack slot in
+several places: the arguments of a call and of a tail call, the elements of an
+array, the captures of a closure, the members of a region group, the pairs of a
+parameter frame, and the locals and operands a suspend saves. Each writes a
+`Value` as two words into a slot it sized itself.
+
+`store_value_slot` ([translate.rs](../../src/jit/translate.rs)) is the one site
+that writes such a `Value`. It takes the slot, the `Value`'s index, and the two
+halves, and places the tag and the payload from `size_of` and `offset_of` on
+`Value`, as `load_value_slot` does for a read.
+
+Cranelift has no `stack_store` instruction. The builder method that keeps the
+name takes the pointer type, emits a `stack_addr`, and stores through that
+address with the flag `notrap` and no `aligned`. The JIT passes `I64` as the
+pointer type, as it does for every `stack_addr`. It declares its slots with
+one-byte alignment, so it cannot claim more. The two tables of the
+abandoned-frame walk, and the `JitCtx` slot in the prologue, use the same
+method directly.
+
+`FunctionBuilder::finalize` takes the target's frontend configuration, which the
+module holds. `finalize_function` ([translate.rs](../../src/jit/translate.rs))
+takes the builder and the module and passes `module.target_config()`, so no
+caller builds the configuration.
+
 ## Arithmetic: the tag-check diamond, and skipping it
 
 A binary operation, a comparison and a negation each compile to a diamond

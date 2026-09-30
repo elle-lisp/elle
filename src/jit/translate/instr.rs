@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 // src/jit/AGENTS.md
 //! Translating one LIR instruction to Cranelift IR.
 //!
@@ -306,10 +306,7 @@ impl<'a> FunctionTranslator<'a> {
                         ));
                     for (i, elem_reg) in elements.iter().enumerate() {
                         let (et, ep) = self.use_var_pair(builder, elem_reg.0);
-                        let tag_offset = (i * 16) as i32;
-                        let payload_offset = (i * 16 + 8) as i32;
-                        builder.ins().stack_store(et, slot, tag_offset);
-                        builder.ins().stack_store(ep, slot, payload_offset);
+                        store_value_slot(builder, slot, i as u32, et, ep);
                     }
                     let elements_addr = builder.ins().stack_addr(I64, slot, 0);
                     let count = builder.ins().iconst(I64, elements.len() as i64);

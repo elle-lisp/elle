@@ -286,10 +286,7 @@ impl<'a> FunctionTranslator<'a> {
             ));
             for (i, arg_reg) in args.iter().enumerate() {
                 let (at, ap) = self.use_var_pair(builder, arg_reg.0);
-                let tag_offset = (i * 16) as i32;
-                let payload_offset = (i * 16 + 8) as i32;
-                builder.ins().stack_store(at, slot, tag_offset);
-                builder.ins().stack_store(ap, slot, payload_offset);
+                store_value_slot(builder, slot, i as u32, at, ap);
             }
             let args_addr = builder.ins().stack_addr(I64, slot, 0);
             let nargs = builder.ins().iconst(I64, args.len() as i64);
