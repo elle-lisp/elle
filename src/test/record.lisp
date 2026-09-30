@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-29
+# audited: 2026-09-30
 ## elle test — turning an outcome into rows: the label a form is known by, what
 ## analysis finds in it, the status a payload classifies to, and one row per
 ## (form × tier).
@@ -172,10 +172,11 @@
 # file's captured `dumps` (a list of [kind addr size codec]) as assets to each.
 # `exec-fn` is (fn [tier-keyword out-path err-path] -> {:result :stdout :stderr});
 # the per-form path closes over a MAIN-compiled thunk (exec-thunk-capture), the
-# whole-file path closes over the file's syntax (exec-source-capture). Returns
+# whole-file path closes over the file's syntax (exec-source-capture). `file`
+# is the form's, and names the ledger its readings are judged by. Returns
 # [statuses pass-pairs]: the per-tier status strings, and [[tier-str value]...]
 # for the tiers that returned a value (divergence candidates).
-(defn run-tiers [conn run-id h exec-fn tiers dumps statuses pass-pairs]
+(defn run-tiers [conn run-id h file exec-fn tiers dumps statuses pass-pairs]
   (if (empty? tiers)
     [statuses pass-pairs]
     (let [tp (first tiers)
@@ -188,7 +189,8 @@
           rid (insert-result conn run-id h ts c)]
       (insert-assets conn rid dumps)
       (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
-      (run-tiers conn run-id h exec-fn (rest tiers) dumps
+      (record-readings conn run-id rid file (get cap :stdout) (get c :status))
+      (run-tiers conn run-id h file exec-fn (rest tiers) dumps
                  (concat statuses [(get c :status)])
                  (if (get c :ok)
                    (concat pass-pairs [[ts (get c :value)]])
@@ -222,7 +224,7 @@
 (defn record-thunk [conn run-id row exec-fn dumps tiers diverge?]
   (let [h (get row :hash)]
     (insert-form conn row)
-    (let [tr (run-tiers conn run-id h exec-fn tiers dumps [] [])
+    (let [tr (run-tiers conn run-id h (get row :file) exec-fn tiers dumps [] [])
           statuses (get tr 0)
           pass-pairs (get tr 1)
           vals (map (fn [pp] (get pp 1)) pass-pairs)]
@@ -372,9 +374,8 @@
             row (form-row-of file file 0 (if msg msg "") src
                              (form-profile src file))
             h (get row :hash)
-            sink (measurement-sink run-id h)
             budget (form-budget)
-            cap (run-child (child-argv flags file) budget (measurement-env sink))
+            cap (run-child (child-argv flags file) budget)
             c (classify-child cap budget)]
         # The label is scavenged from the source, and a file the child will
         # reject as unreadable has none to give — the child's own status is
@@ -385,9 +386,8 @@
         (insert-form conn row)
         (let [rid (insert-result conn run-id h :process c)]
           (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
-          # A dashboard reports its verdicts through the channel named in the
-          # child's environment; every other file writes nothing there.
-          (record-measurements conn run-id rid sink))
+          (record-readings conn run-id rid file (get cap :stdout)
+                           (get c :status)))
         [(get c :status)]))))
 
 (defn process-eval [conn run-id expr]

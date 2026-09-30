@@ -1,7 +1,7 @@
 (elle/epoch 13)
-# audited: 2026-09-29
+# audited: 2026-09-30
 ## The instrument the leak dashboards share: the gauges, the estimator, the
-## ledger, and the channel each verdict is reported through.
+## ledger, and the line each reading is printed as.
 ## docs/impl/region/diagnostics.md
 ## docs/test-store.md
 ##
@@ -332,15 +332,11 @@
           (if (nil? root) (push unclassified label) (put roots-seen root true)))
         :open))))
 
-# ── The measurement channel ───────────────────────────────────────────
-# Every verdict is reported as well as printed: one JSON object per line,
-# appended to the file ELLE_TEST_MEASUREMENTS names. Unset, the channel is
-# closed and nothing is written.
-#
-# Read once, into a binding: the variable cannot change under a running
-# process, and a dashboard reports a few hundred times.
-(def measurement-sink (sys/env "ELLE_TEST_MEASUREMENTS"))
-
+# ── The reading line ──────────────────────────────────────────────────
+# Every verdict is printed as a reading as well: one `measure` line per
+# reading, which the runner reads out of the captured stdout and records
+# (docs/ratchet.md). The dashboards have no ledger yet, so the runner records
+# these unjudged; the verdict this file decided stays on the dashboard line.
 (defn subject-of [label]
   "A probe's label without the `@axis` suffix `measure-2` gives its second
    reading. The suffix is a rendering — the axis is a column of its own — so
@@ -348,21 +344,13 @@
   (get (string/split label "@") 0))
 
 (defn report-measurement [r verdict]
-  "Append one verdict to the channel, or do nothing when it is closed. Appended
-   rather than rewritten, because every probe reports through here and the file
-   accumulates a dashboard's whole run. Best-effort under `protect`: a
-   dashboard's verdicts are what it exists to produce, and an unwritable sink
-   must not turn a measured run into a failed one."
-  (when measurement-sink
-    (protect (let [p (port/open measurement-sink :append)]
-               (port/write p
-                           (string (json/serialize {:subject (subject-of (get r
-                                   :label))
-                                   :axis (get r :axis)
-                                   :value (get r :rate)
-                                   :unit (get r :unit)
-                                   :verdict (string verdict)}) "\n"))
-               (port/close p))))
+  "Print one reading's line."
+  (println "measure "
+           (json/serialize {:subject (subject-of (get r :label))
+                            :axis (get r :axis)
+                            :value (get r :rate)
+                            :half (get r :half)
+                            :unit (get r :unit)}))
   nil)
 
 (defn show [r]

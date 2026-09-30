@@ -253,6 +253,9 @@ mod joined_comments {
 mod test_setup {
     include!("test_setup.rs");
 }
+mod ratchet {
+    include!("ratchet.rs");
+}
 
 // `allocator.rs` is absent from the list above and does not compile. It calls
 // FiberHeap methods the region-ownership model retired — `alloc`, `mark`,

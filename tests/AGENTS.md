@@ -1,6 +1,6 @@
 # Tests
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 Where each kind of test lives, the helpers they share, and how to add one.
 
@@ -19,6 +19,7 @@ tests/
 ├── lang/               # The language suite: what every implementation must do
 ├── impl/               # The implementation suite's Elle half, run on the rig
 ├── runner/             # The `elle test` runner's own acceptance tests and fixtures
+├── ledger/             # The ratchet's bounds: one data file per producer (docs/ratchet.md)
 ├── modules/            # Modules the integration tests import
 ├── property/           # Property-based tests (proptest)
 ├── integration/        # Full-pipeline and repository tests
