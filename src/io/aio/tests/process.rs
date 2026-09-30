@@ -1,4 +1,4 @@
-//! audited: 2026-09-20
+//! audited: 2026-09-30
 //! `subprocess/wait` through the async backend.
 //!
 //! src/io/AGENTS.md
@@ -65,20 +65,20 @@ fn test_async_submit_process_wait_uring() {
 /// A failed process wait names the syscall the platform actually called.
 ///
 /// One completion arm serves both backends, and they call different things:
-/// `IORING_OP_WAITID` on the ring, `waitpid(2)` in the pool worker
+/// `IORING_OP_WAITID` on the ring, `wait4(2)` in the pool worker
 /// (`src/io/threadpool/child.rs`). The trap: a report that names `waitid` on a
 /// platform that has no `waitid` call in the path sends its reader looking for
 /// code that is not there.
 ///
 /// The failure is arranged with a child this process never spawned, so the
-/// worker's `waitpid` finds no child of its own and returns `ECHILD` — the same
+/// worker's `wait4` finds no child of its own and returns `ECHILD` — the same
 /// shape any lost child produces. A child this process DID spawn and reap would
 /// answer from the record instead, which is the whole point of § "A reap is
 /// never wasted"; the pid below belongs to nobody, so there is nothing to hold.
 #[test]
-fn a_failed_pool_process_wait_names_waitpid() {
+fn a_failed_pool_process_wait_names_wait4() {
     crate::value::arena::with_test_region(|| {
-        // Already reaped by `reaped_child`, so the pool worker's own `waitpid`
+        // Already reaped by `reaped_child`, so the pool worker's own `wait4`
         // has no child left — and the stand-in's `ProcessHandle` carries an
         // empty record, because nothing in this process reaped through one.
         let pid = reaped_child().id();
@@ -101,8 +101,8 @@ fn a_failed_pool_process_wait_names_waitpid() {
         let msg = error_message(err);
         Completion::discard_all(completions);
         assert!(
-            msg.contains("waitpid failed"),
-            "the pool's process wait must name waitpid, the call it makes; got {msg:?}",
+            msg.contains("wait4 failed"),
+            "the pool's process wait must name wait4, the call it makes; got {msg:?}",
         );
     });
 }
@@ -122,7 +122,7 @@ fn a_failed_pool_process_wait_names_waitpid() {
 /// the entry is still in flight.
 ///
 /// The counter-factual: with the retired entry dropping the status instead of
-/// keeping it, the second wait finds no child and fails with `waitpid failed:
+/// keeping it, the second wait finds no child and fails with `wait4 failed:
 /// errno 10 (No child processes)`.
 #[test]
 fn a_cancelled_wait_that_reaped_the_child_answers_the_next_wait() {
@@ -175,7 +175,7 @@ fn a_cancelled_wait_that_reaped_the_child_answers_the_next_wait() {
 ///
 /// The answer alone would not pin this: an operation that did go out would find
 /// the same record and report the same status. What is pinned is that nothing
-/// is submitted — no pending entry, no worker, no `waitpid` — for a child there
+/// is submitted — no pending entry, no worker, no `wait4` — for a child there
 /// is nothing left to reap.
 #[test]
 fn a_wait_on_a_held_status_files_no_operation() {
@@ -223,7 +223,7 @@ fn a_wait_on_a_held_status_files_no_operation() {
 /// Built at the entry rather than run: the window is a scheduling accident on
 /// the ring, and nothing in a test can make two `waitid`s collide on demand.
 /// The counter-factual is the arm below it — without the record the same
-/// completion comes back as "waitpid failed: errno 10".
+/// completion comes back as "wait4 failed: errno 10".
 #[test]
 fn a_wait_that_finds_no_child_answers_from_the_record() {
     crate::value::arena::with_test_region(|| {
@@ -243,7 +243,7 @@ fn a_wait_that_finds_no_child_answers_from_the_record() {
             crate::io::pending::PendingOp::ProcessWait {
                 buffer_handle: pool.alloc(0),
                 handle_val: Value::NIL,
-                // The pool shape: the worker calls `waitpid` itself, so the
+                // The pool shape: the worker calls `wait4` itself, so the
                 // kernel filled no `siginfo_t` for this entry.
                 siginfo: std::ptr::null_mut(),
                 exit,
@@ -275,16 +275,20 @@ fn a_wait_that_finds_no_child_answers_from_the_record() {
     });
 }
 
-/// The same guarantee on the ring, where the kernel reaps rather than a worker.
+/// The same guarantee on the ring, where a cancelled wait reaps nothing.
 ///
-/// The status arrives in the `siginfo_t` the CQE fills, and a cancelled entry
-/// is retired rather than cooked — so the retire is what has to read it out.
+/// The ring asks with `WNOWAIT`, so the kernel reports the exit and leaves the
+/// child for the completion to reap. A cancelled entry is retired rather than
+/// cooked, so the child is still there for the next wait to reap. The
+/// counter-factual is a ring wait that reaps in the kernel and a retire that
+/// drops what it reaped: the next wait then fails with `ECHILD`.
+///
 /// Skipped where there is no ring, and on a kernel without
 /// `IORING_OP_WAITID`: that one reaps nothing, so both waits report the
 /// `EINVAL` it answers with.
 #[test]
 #[cfg(target_os = "linux")]
-fn a_cancelled_uring_wait_that_reaped_the_child_answers_the_next_wait() {
+fn a_cancelled_uring_wait_leaves_the_child_for_the_next_wait() {
     crate::value::arena::with_test_region(|| {
         let backend = AsyncBackend::new().unwrap();
         if !backend.is_uring() {
@@ -324,7 +328,7 @@ fn a_cancelled_uring_wait_that_reaped_the_child_answers_the_next_wait() {
                 if msg.contains("errno 22") {
                     return; // kernel < 6.7: nothing was ever reaped
                 }
-                panic!("the status the cancelled wait reaped was lost: {msg}");
+                panic!("the cancelled wait left no child for the next wait: {msg}");
             }
         };
         assert_eq!(
