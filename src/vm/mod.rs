@@ -85,7 +85,12 @@ impl VM {
     /// so `rich_error!` is uniform over `ctx` and `self`. The `extra` field
     /// values must be born in the same region — immediates (keywords/ints) or
     /// pass-throughs (incref'd by `alloc`'s content scan); a VM site has no
-    /// `string` of its own to misplace.
+    /// `string` of its own to misplace. Its one caller is a tier's refusal, so a
+    /// build with no optional tier leaves it unused.
+    #[cfg_attr(
+        not(any(feature = "jit", feature = "wasm", feature = "mlir")),
+        allow(dead_code)
+    )]
     pub(crate) fn error_extra(
         &mut self,
         kind: &str,

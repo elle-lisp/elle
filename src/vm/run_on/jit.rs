@@ -1,19 +1,13 @@
 // audited: 2026-09-29
-//! `compile/run-on :jit` — force Cranelift JIT execution.
-//!
-//! Both variants live here: the real entry point under `--features jit`, and
-//! the always-rejecting stub when the feature is off, so callers can invoke
-//! `invoke_closure_jit` unconditionally.
+//! `compile/run-on :jit` — force Cranelift JIT execution, in a build with the
+//! `jit` feature.
 //!
 //! docs/impl/jit.md
 //! docs/impl/region/park.md
 
 use super::rejected;
-#[cfg(feature = "jit")]
-use crate::value::SIG_OK;
-use crate::value::{SignalBits, Value, SIG_ERROR};
+use crate::value::{SignalBits, Value, SIG_ERROR, SIG_OK};
 use crate::vm::core::VM;
-#[cfg(feature = "jit")]
 use std::sync::Arc;
 
 impl VM {
@@ -21,7 +15,6 @@ impl VM {
     ///
     /// Force-compiles the closure if it's not already cached; rejects
     /// with `:tier-rejected` if it has no LIR or the JIT compiler refuses.
-    #[cfg(feature = "jit")]
     pub fn invoke_closure_jit(
         &mut self,
         closure_val: Value,
@@ -214,19 +207,5 @@ impl VM {
         }
 
         (SIG_OK, result_jv.to_value())
-    }
-
-    /// Stub when JIT feature is disabled — always rejects with `:tier-rejected`.
-    #[cfg(not(feature = "jit"))]
-    pub fn invoke_closure_jit(
-        &mut self,
-        _closure_val: Value,
-        _closure: &crate::value::Closure,
-        _args: &[Value],
-    ) -> (SignalBits, Value) {
-        (
-            SIG_ERROR,
-            rejected(self, "jit", "JIT feature not compiled in"),
-        )
     }
 }
