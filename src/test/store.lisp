@@ -311,8 +311,7 @@
 # ── a worker's readings: the test heap ───────────────────────────────
 # Every reading lands in slots allocated before the first, one per gauge. The
 # reading loop still costs something, and the same every time, so a reading
-# taken right after another measures that cost (gauge-charge). The counter is
-# `%add`: the `+` wrapper allocates its arguments on every call.
+# taken right after another measures that cost (gauge-charge).
 (defn gauge-slots []
   (let [@slots @[]]
     (each g in heap-gauges
@@ -323,7 +322,7 @@
   (var i 0)
   (each g in heap-gauges
     (put slots i ((get g 1)))
-    (assign i (%add i 1))))
+    (assign i (+ i 1))))
 
 (defn gauges-around [thunk]
   "Call THUNK and answer [its-value readings]. READINGS are three readings of
