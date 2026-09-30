@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-29
 //! Control flow lowering: the tail-argument ownership predicates, intrinsic
 //! specialization, `eval`, `emit`, and the call path. `and`/`or` and `match`
 //! lower in the submodules beside it.
@@ -299,14 +299,16 @@ impl<'a> Lowerer<'a> {
 
         self.start_new_block(resume_label);
 
-        // The balancing release, first in the continuation the resume replays —
-        // and, for a fiber nobody resumes again, the one the discharge stands in
-        // for. The slot is written on every execution of this `Emit`, so a park
-        // inside a loop reads its own iteration's value and needs no nil-stamp.
+        // The balancing release, first in the continuation the resume replays.
+        // For a fiber nobody resumes again, the discharge stands in for it while
+        // the park holds its payload. An abort that raises in place over the
+        // park, or a squelch boundary that discards it, takes the payload out of
+        // the signal slot, and then only the walk can reach this release. So it
+        // is a recorded value route: the nil stamp is the receipt that keeps a
+        // restart's replay and the walk from both running it
+        // (docs/impl/region/unwind.md).
         if let Some(slot) = borrow_slot {
-            let val_reg = self.fresh_reg();
-            self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
-            self.emit(LirInstr::DecrefValueRegion { src: val_reg });
+            self.emit_recorded_slot_value_release(slot);
         }
 
         let dst = self.fresh_reg();
