@@ -19,15 +19,15 @@ it, and a change that moves the reading the wrong way fails.
 
 The tree holds the pattern in at least eleven places, each written by hand:
 
-- [oracle.lisp](../tests/elle/oracle.lisp) and
-  [plumb.lisp](../tests/elle/plumb.lisp), over
-  [estimator.lisp](../tests/elle/lib/estimator.lisp) and the classification in
-  [ledger.lisp](../tests/elle/probe/ledger.lisp).
-- [h2-stress-scoped.lisp](../tests/elle/h2-stress-scoped.lisp),
-  [region-page-recycle.lisp](../tests/elle/region-page-recycle.lisp),
-  [region-macro-id-recycle.lisp](../tests/elle/region-macro-id-recycle.lisp),
-  [region-collector-arg-move.lisp](../tests/elle/region-collector-arg-move.lisp)
-  and [resource.lisp](../tests/elle/resource.lisp), each with a window, a
+- [oracle.lisp](../tests/impl/oracle.lisp) and
+  [plumb.lisp](../tests/impl/plumb.lisp), over
+  [estimator.lisp](../tests/impl/lib/estimator.lisp) and the classification in
+  [ledger.lisp](../tests/impl/probe/ledger.lisp).
+- [h2-stress-scoped.lisp](../tests/impl/h2-stress-scoped.lisp),
+  [region-page-recycle.lisp](../tests/impl/region-page-recycle.lisp),
+  [region-macro-id-recycle.lisp](../tests/impl/region-macro-id-recycle.lisp),
+  [region-collector-arg-move.lisp](../tests/impl/region-collector-arg-move.lisp)
+  and [resource.lisp](../tests/impl/resource.lisp), each with a window, a
   gauge-live gate and a ceiling of its own.
 - [gauge.rs](../src/wasm/tests/gauge.rs) under the WASM tier, and the
   shrink-only pins in the guardfree fixtures.
@@ -115,7 +115,7 @@ producer, each under the reading budget. A file opens with the producer it
 answers for, then one row per line:
 
 ```text
-{:producer "tests/elle/plumb.lisp"}
+{:producer "tests/impl/plumb.lisp"}
 ["objects gauge (live-growth)" :objects :floor 0.5 :class :growth]
 ["regions gauge (live-growth)" :regions :floor 0.5 :class :growth]
 ["io-yield ev/sleep" :objects 0]
@@ -144,11 +144,13 @@ The options:
 | Option | Meaning |
 |--------|---------|
 | `:class :growth` | the shape must grow by design; the row is a floor, and a floor that fails voids every other row on its axis from this producer |
-| `:class :defect ROOT` | an open leak under the named root; the split headline counts these |
+| `:class :defect` | an open leak, under the root `:root` names; the split headline counts these |
 | `:better :higher` | a larger reading is the better side; the default is `:lower` |
 | `:slack N` | the reading may sit this far past the pin on either side before it is judged; the default is 0 |
-| `:tier :jit` | the row answers for one tier; a subject with no tiered row is held to one bound on every tier |
 | `:note "…"` | one sentence for the reader, kept when the tool rewrites the row |
+
+One bound holds on every tier. A subject that reads differently under the JIT
+gets a `:tier` option when one is needed, and nothing needs one yet.
 
 A row with no class is a control: a shape the tree reclaims, pinned at what it
 reads. The slack is for a subject the machine makes noisy, a wall-clock ratio
@@ -157,9 +159,10 @@ already carries as `half`. Nor is it a resolution. A rate's resolution is the
 epsilon the producer measures it to, and a producer that wants to see a tenth
 of an object per operation measures to a tenth.
 
-Comments sit on lines of their own. A row is one line, so the tool that moves
-a bound rewrites that line and touches nothing else, and a comment survives
-every re-pin. `elle fmt` formats a ledger file like any other.
+Comments sit on lines of their own. The tool that moves a bound rewrites the
+bound's token inside the row's brackets and touches nothing else, so a comment
+survives every re-pin, and so does the wrapping `elle fmt` gives a long row.
+`elle fmt` formats a ledger file like any other.
 
 ### The judge
 
@@ -182,10 +185,11 @@ measured to a wide epsilon passes a pin it straddles, and only a rate measured
 tightly enough to clear the pin can fail it. What the instrument can see is
 what the gate can hold.
 
-A void reading is one the instrument refuses to stand behind: a rate whose
-B-invariance check found it block-dependent, or any reading on an axis whose
-growth row failed. The message names the cause and the rows it voids, once,
-here. Today each dashboard writes that sentence itself.
+A void reading is one the instrument refuses to stand behind. That is a rate
+whose B-invariance check found it block-dependent, a growth row that read
+flat, or any later reading on an axis whose growth row read flat. The message
+names the cause and the rows it voids, once, here. Today each dashboard writes
+that sentence itself.
 
 `missing` is what closes elle-lisp/elle#1144. The ledger names every subject
 and axis the tree claims to measure, and a run that reports none of a claimed
@@ -218,9 +222,9 @@ The summary counts readings by verdict and lists every one that is not `ok`:
 
 ```text
 412 readings · 409 ok · 1 regression · 1 stale · 1 missing
-  regression  tests/elle/oracle.lisp  reduce  objects  1.31 ±0.12 objects/op  pinned 1.002
-  stale       tests/elle/plumb.lisp   ev-abort  regions  0.0 ±0.03 regions/op  pinned 1
-  missing     tests/elle/oracle.lisp  fiber-nested  regions
+  regression  tests/impl/oracle.lisp  reduce  objects  1.31 ±0.12 objects/op  pinned 1.002
+  stale       tests/impl/plumb.lisp   ev-abort  regions  0.0 ±0.03 regions/op  pinned 1
+  missing     tests/impl/oracle.lisp  fiber-nested  regions
 ```
 
 The gate fails on any verdict but `ok`, exactly as it fails on a form.
@@ -250,8 +254,14 @@ per-file rows in `gauge` keep saying which file.
 with its own readings and its own copy of the ledger, resolved for the running
 program. The producer is the path the program was started with, the first
 element of `(sys/argv)`, which is the same path the runner records for the
-form. The ledger directory is found the way `std/` is found: under the
-repository root the binary sits in.
+form. The ledger directory is `tests/ledger` under `(elle/root)`, the module
+resolution root `std/` already resolves against, and `ELLE_LEDGER` names
+another one.
+
+A form the runner runs in a worker thread was started with no path, so it has
+no producer. The instrument then prints every reading without a bound or a
+verdict, and the runner judges them. A direct run and an isolated child both
+know their path, so both judge as they go.
 
 | Export | What it does |
 |--------|--------------|
@@ -321,7 +331,7 @@ whole contract, so that step adds a parser and no second channel.
 
 ## What this deletes
 
-- The estimator's private copy under `tests/elle/lib/`.
+- The estimator's private copy under `tests/impl/lib/`.
 - The classification tables and their gate in `probe/ledger.lisp`.
 - The discriminator blocks in `probe/gauge.lisp` and `plumb.lisp`.
 - The `check` and `report` runner in every dashboard.
@@ -337,10 +347,11 @@ Each phase lands as documentation, then a failing test, then code, and each
 is one pull request.
 
 1. **The library and the ledger.** `lib/ratchet.lisp` with `rate`, `delta`,
-   `read`, `report`, the gauges, the judge and the row reader; `tests/ledger/`
-   with a ledger for `measure-channel.lisp`, which becomes the library's own
-   fixture. The counter-factual: a reading past its pin fails a direct run,
-   and a reading past it the better way fails as stale.
+   `read`, `report`, the gauges, the judge and the row reader, and
+   `(elle/root)`; `tests/ledger/` with a ledger for [the guide](../lib/ratchet.md),
+   which is the library's own fixture. The counter-factual: a reading past its
+   pin fails a direct run, and a reading past it the better way fails as
+   stale.
 2. **The runner reads the line.** `src/test/ledger.lisp` parses stdout for
    every form and child, writes the rows, adds `missing`, prints the summary
    and gates. The channel and the old verdicts go. The counter-factual: a
