@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 // The tier a build starts, read back out of a running VM, and the flags a user
 // build no longer has.
 //
@@ -100,16 +100,22 @@ fn a_program_lowers_the_threshold_through_vm_config() {
 
 #[test]
 fn a_program_cannot_turn_the_jit_off() {
-    // The JIT compiles adaptively; no program chooses another policy. A keyword
-    // is the wrong type and a count below one names no threshold.
-    assert_eq!(
-        run(
-            &[],
-            "(let [[ok? err] (protect (vm/config-set :jit :off))] \
-               (println ok? \" \" (get err :error)))"
-        ),
-        "false type-error"
-    );
+    // The JIT compiles adaptively; no program chooses another policy. Only the
+    // `elle test` process may turn a tier off or make it eager, and a count
+    // below one names no threshold.
+    for policy in [":off", ":eager"] {
+        assert_eq!(
+            run(
+                &[],
+                &format!(
+                    "(let [[ok? err] (protect (vm/config-set :jit {policy}))] \
+                       (println ok? \" \" (get err :error)))"
+                )
+            ),
+            "false argument-error",
+            "a program outside elle test must be refused {policy}"
+        );
+    }
     assert_eq!(
         run(
             &[],
