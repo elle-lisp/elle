@@ -179,15 +179,6 @@ is a correctness defect, not a tuning knob.
    this list is complete. The escape sites, exhaustively:
    - *immutable contents* — `alloc_obj` scans the new object and increfs each
      region its fields point into;
-   - *declared external contents* — an `External` whose payload type declares
-     the values it holds (`HeldValues`, built through `ExternalObject::holding`)
-     is scanned as an immutable container is: `alloc_obj` increfs each declared
-     value's region, and the free cascade decrefs it. An `IoRequest` declares
-     its port and the buffer, payload, accept port or result struct its
-     operation names. The request needs its own count because it can outlive
-     the frame that holds those values. A fiber that relays a child's io park
-     can bind the request, release the child, and only then raise it
-     ([what a park retains](park.md));
    - *mutable store* — `push`/`put`/`add`/`%put`/`insert` incref the stored
      value's region; `pop`/`del`/`remove` decref it. This entry is **statically
      complete**: the raw `RefCell` accessors for the `Value`-bearing mutable
@@ -203,8 +194,10 @@ is a correctness defect, not a tuning knob.
      named: `HeapObject`'s fields are still `pub` for construction and the
      deep-copy machinery (a direct field match could bypass the seam — don't;
      the accessor channel is the one closed here), and an `External`'s
-     `Rc<dyn Any>` payload that declares no held values is opaque to both
-     scan and seam;
+     `Rc<dyn Any>` payload is opaque to both scan and seam. An `IoRequest`
+     names values in other regions through that channel and counts none of
+     them: it is spent only while the park that raised it stands
+     ([what a park retains](park.md));
    - *native call result pass-through* — `first`/`rest`/`get` and friends return a
      value from another region; the call increfs it (a "new reference" in the
      CPython-C-API sense), and the caller's `DecrefValueRegion` consumes it;

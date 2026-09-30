@@ -224,7 +224,7 @@ The field is **invisible to structural equality, ordering, and hashing**:
 | `Fiber` | fiber — FiberHandle (Rc) cloned on `with-traits` |
 | `Syntax` | syntax object — the inline node is `Copy`, so `with-traits` copies it |
 | `ManagedPointer` | managed FFI pointer — Cell<Option<usize>> cloned on `with-traits` |
-| `External` | plugin or runtime object — Rc<dyn Any> cloned on `with-traits`; opaque to the region scan unless built by `ExternalObject::holding`, which declares the values it holds |
+| `External` | opaque plugin or runtime object — Rc<dyn Any> cloned on `with-traits`; the region scan never sees into its payload |
 | `Parameter` | dynamic parameter |
 | `ThreadHandle` | thread handle — Arc<Mutex<...>> cloned on `with-traits` |
 

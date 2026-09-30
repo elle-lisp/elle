@@ -365,7 +365,7 @@ primitive! {
     "io/submit" => prim_io_submit {
         signal: Signal::errors(),
         arity: Arity::Range(2, 3),
-        doc: "Submit an I/O request to an async backend. Optional third arg is the fiber the result is for, which the backend asks about before it assembles a completion. Returns submission ID.",
+        doc: "Submit an I/O request to an async backend. Optional third arg is the fiber the result is for, which the backend asks about before it assembles a completion. Returns submission ID. A request is good only while the fiber whose operation built it still waits on it; once that fiber has been resumed past the operation or released, the submit raises :state-error and runs nothing.",
         params: &["backend", "request", "fiber?"],
         category: "io",
         example: "(io/submit backend request)",

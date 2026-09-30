@@ -189,13 +189,10 @@ with a cross-region `Value` in every channel it has (contents and `traits`
 alike) and the scan must report the edge; variants with no channel must
 report none. The construction is an exhaustive `match` — a new variant does
 not compile without a scan decision, and a wrong decision fails the pin, not
-review (Rule 7's "complete and symmetric" made mechanical). An `External`
-has two forms. One built through `ExternalObject::holding` declares the values
-its payload holds, and the scan reports each of them; the pin builds that form.
-Any other `External` payload is opaque: a plugin that stores region `Value`s
-inside one hides them from the scan, and the object participates only through
-its `traits` edge (`an_opaque_external_reports_only_its_traits` pins that
-boundary). This same scan is, in debug builds,
+review (Rule 7's "complete and symmetric" made mechanical). Known boundary:
+an `External`'s `Rc<dyn Any>` payload is opaque by construction. A payload that
+stores region `Value`s hides them from the scan, and the `External` takes part
+only through its `traits` edge. This same scan is, in debug builds,
 the **edge-table equivalence oracle**'s reference (above): its exhaustiveness over
 every variant is what makes the recorded-`outgoing`-vs-scan assertion at free a
 *complete* check, not a partial one — a content edge the scan can see but the
