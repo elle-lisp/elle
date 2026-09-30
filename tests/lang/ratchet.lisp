@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-29
+# audited: 2026-09-30
 # The ratchet's judge, row reader and line reader, as the pure functions the
 # library and the runner share (docs/ratchet.md).
 #
@@ -33,7 +33,7 @@
 (assert (= ceiling-row:root :f1a) "and the root")
 (assert (= ceiling-row:note "why") "and the note")
 
-(assert (nil? (r:parse-row (first (read-all "{:producer \"x\"}"))))
+(assert (nil? (r:parse-row (first (read-all "(producer \"x\")"))))
         "the header is not a row")
 (assert (nil? (r:parse-row (first (read-all "(elle/epoch 13)"))))
         "and neither is the epoch declaration")

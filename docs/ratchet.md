@@ -1,6 +1,6 @@
 # The ratchet
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 One library measures, one committed ledger holds every bound, and `elle test`
 judges, records and re-pins; nothing else carries a number.
@@ -111,11 +111,11 @@ mechanism `SKIP (gated):` uses today ([test-runner](test-runner.md)).
 ### The ledger
 
 The ledger is a directory of Elle data files, `tests/ledger/`, one file per
-producer, each under the reading budget. A file opens with the producer it
-answers for, then one row per line:
+producer, each under the reading budget. A file opens with the epoch
+declaration every Elle file carries, then the producer it answers for as
+`(producer "tests/impl/plumb.lisp")`, then one row per line:
 
 ```text
-{:producer "tests/impl/plumb.lisp"}
 ["objects gauge (live-growth)" :objects :floor 0.5 :class :growth]
 ["regions gauge (live-growth)" :regions :floor 0.5 :class :growth]
 ["io-yield ev/sleep" :objects 0]

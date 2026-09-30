@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 // A producer judges every reading against the ledger, and a direct run is the
 // whole gate for that producer.
 //
@@ -39,7 +39,7 @@ impl Bench {
         std::fs::write(
             ledger.join("producer.lisp"),
             format!(
-                "(elle/epoch 13)\n{{:producer {}}}\n{rows}\n",
+                "(elle/epoch 13)\n(producer {})\n{rows}\n",
                 json_string(producer.to_str().expect("utf-8 path"))
             ),
         )

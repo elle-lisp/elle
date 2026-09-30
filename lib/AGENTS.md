@@ -11,7 +11,7 @@ Up: [..](../AGENTS.md)
 - [irc.md](irc.md) — **irc** IRCv3 client with capability negotiation, SASL PLAIN and message tags, over plain TCP or TLS.
 - [overview.md](overview.md) — **lib** Reusable Elle modules, one closure each: `(import "std/name")` gives you the closure, and calling it returns the struct of exports.
 - [process.md](process.md) — **process** Erlang-style processes on fibers: message passing, links, monitors, timers, named registration, and OTP-shaped behaviors above them.
-- [ratchet.md](ratchet.md) — **ratchet (more...)**
+- [ratchet.md](ratchet.md) — **ratchet** Measure a shape, print one reading line per subject, and judge each reading against the committed ledger.
 - [redis.md](redis.md) — **redis** Redis client speaking RESP2 over TCP, in one file of pure Elle with no plugin behind it.
 - [tls.md](tls.md) — **tls** TLS 1.2 and 1.3 client and server: the `elle-tls` plugin runs the state machine, and Elle code moves every byte.
 
