@@ -240,7 +240,7 @@ efficient within a single WASM instance.
 ## What this tier does not do
 
 - `eval` — dynamic module compilation, which no WASM path has. The Makefile's
-  `WASM_SKIP` keeps [eval.lisp](../../tests/lang/eval.lisp)/[eval-env.lisp](../../tests/lang/eval-env.lisp) out of `make smoke-wasm`.
+  `WASM_SKIP` keeps [eval.lisp](../../tests/lang/eval.lisp)/[eval-env.lisp](../../tests/lang/eval-env.lisp) out of the full-module pass of `make smoke-wasm`.
 - Tiered mode creates a `Store` per cross-closure call
   (`call_precached_closure`), so such a call costs a store setup.
 - `call_primitive` is imported and never called: the module declaration lists

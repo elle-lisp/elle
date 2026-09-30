@@ -182,6 +182,7 @@ Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabiliti
 | `src/stdlib.lisp` | Standard library (loaded at startup) |
 | `tests/` | The language suite (`tests/lang/`), the implementation suite (`tests/impl/`), and the Rust unit, integration and property tests |
 | `rig/` | The rig: `elle-rig`, the executable the implementation suite runs on |
+| `bins/` | The WASM and MLIR builds as binaries of their own, each with its rig ([bins/overview.md](bins/overview.md)) |
 | `benches/` | Criterion benchmarks and the `lirshape` harness |
 | `docs/` | Design documents and guides |
 | `demos/` | Demo applications (conway, docgen, mandelbrot, etc.) |

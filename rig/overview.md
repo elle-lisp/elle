@@ -89,8 +89,8 @@ same rules. The implementation suite uses three, under
   function compiled on its first call.
 - [scrub.toml](../tests/impl/profiles/scrub.toml), on macOS, runs the language suite
   with each released page zeroed.
-- [wasm-full.toml](../tests/impl/profiles/wasm-full.toml) runs the implementation
-  suite on the rig of a `wasm` build, with each file compiled whole to one
+- [wasm-full.toml](../tests/impl/profiles/wasm-full.toml) runs both suites on
+  the rig of a `wasm` build, with each file compiled whole to one
   WebAssembly module ([wasm](../docs/impl/wasm.md)).
 
 A profile's `jit`, `mlir` and `wasm` replace the sidecar's, and its `trace`
@@ -103,13 +103,16 @@ instead of this `elle` ([test-runner](../docs/test-runner.md)), so every
 verdict lands in the session store. The `Makefile` target `smoke-impl` runs the
 implementation suite through `elle test --host target/release/elle-rig`, then
 one pass per profile. The target `smoke-wasm` runs the implementation suite on
-the rig of the `wasm` build twice: under each file's sidecar, then under
-`wasm-full.toml` less the files `WASM_SKIP` names.
+`elle-rig-wasm`, the rig of the `wasm` build, under each file's sidecar. It then
+runs both suites there under `wasm-full.toml`, less the files `WASM_SKIP`
+names. The target `smoke-mlir` runs the implementation suite on
+`elle-rig-mlir`, the rig of the MLIR build.
 
 ## Building it
 
 `make elle-rig` builds the rig beside `elle`, against the same features.
-`cargo build --release -p elle-rig` does the same by hand. `make elle-wasm`
-builds both with the `wasm` feature. The rig carries no code of its own beyond
+`cargo build --release -p elle-rig` does the same by hand. `make elle-wasm` and
+`make elle-mlir` build a variant and its rig as binaries of their own
+([bins](../bins/overview.md)). The rig carries no code of its own beyond
 reading the sidecar: the run path and the subcommands it drives are the
 library's `elle::program`, which `elle` drives too.

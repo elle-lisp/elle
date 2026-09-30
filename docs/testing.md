@@ -69,7 +69,9 @@ and fails on another has found a defect in the build that fails.
 The implementation suite runs on the default build and its rig. It adds what
 no build ships: both suites with every function compiled on its first call,
 and on macOS the language suite with each released page scrubbed. It also runs
-on the thread-pool build's rig, where the worker threads it counts exist.
+on the thread-pool build's rig, where the worker threads it counts exist, and on
+the MLIR build's rig, the one rig that carries the MLIR tier
+([bins](../bins/overview.md)).
 
 ## The agent-first runner (`elle test`)
 

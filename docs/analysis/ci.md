@@ -21,7 +21,7 @@ renamed heading breaks the site generator.
 | Boot Image Tests | ubuntu | `smoke-boot-image` — the language suite booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, then property tests | 16 |
 | Thread-Pool I/O Tests | ubuntu | `smoke-pool` — both suites on a build without `uring` and its rig | — |
-| MLIR Tests | ubuntu | `doctest`, `smoke-mlir` — the language suite on the MLIR build | — |
+| MLIR Tests | ubuntu | `doctest`, `smoke-mlir` — the language suite on the MLIR build, the implementation suite on its rig | — |
 | WASM Build | ubuntu | `check-wasm` — the feature compiles, the tier boots | — |
 | Plugin Tests | ubuntu | Builds the `plugins/` submodule, asserts its artifacts, runs its corpus | — |
 | AArch64 Smoke | ubuntu-arm | `make smoke` | — |
@@ -58,8 +58,10 @@ Tests`, `AArch64 Smoke` and `macOS Smoke` each build the rig beside `elle`, and
 `make smoke` runs both suites. `Thread-Pool I/O Tests` runs the implementation
 suite on the pool build's rig too, because some resources of this
 implementation exist only on the pool: a file that counts worker threads reads
-zero on io_uring and gates itself there. `tests/integration/workflows.rs` is
-the standing check that every implementation keeps its job.
+zero on io_uring and gates itself there. `MLIR Tests` runs it on the MLIR
+build's rig, the one rig that carries the MLIR tier.
+`tests/integration/workflows.rs` is the standing check that every
+implementation keeps its job.
 
 ### Why each platform has two test jobs
 
@@ -83,8 +85,9 @@ runs.
 
 ### What each job builds
 
-Every job that drives the Makefile builds `--release` and runs
-`target/release/elle`, on every platform. The Makefile picks that under
+Every job that drives the Makefile builds `--release` and runs its binaries
+from `target/release`, on every platform: `elle` and `elle-rig`, or a variant's
+own ([bins](../../bins/overview.md)). The Makefile picks that under
 `ifdef GITHUB_ACTIONS`, which is set on all GitHub runners, so the macOS and
 AArch64 Smoke jobs are release runs exactly as the x86_64 ones are. The Rust
 Tests jobs build the dev profile, also on every platform, because `cargo test`
