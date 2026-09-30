@@ -363,12 +363,11 @@ fn a_partial_commit_refuses_an_index_the_generator_rewrote() {
     r.assert_index_at_head();
 }
 
-#[test]
-fn a_partial_commit_of_an_unformatted_rust_file_is_refused() {
-    // The Rust path runs `cargo fmt` over the workspace, so the scratch
-    // repository has to be a crate. Its first commit carries a formatted
-    // crate so that clippy and rustdoc have nothing to object to.
-    let r = Repo::new("partial-rust");
+/// A scratch repository that is a crate. The Rust gates run clippy and rustdoc
+/// over the workspace, so a commit of a `.rs` file needs one. Its first commit
+/// is formatted, so that clippy and rustdoc have nothing to object to.
+fn crate_repo(tag: &str) -> Repo {
+    let r = Repo::new(tag);
     r.seed(
         "Cargo.toml",
         "[package]\nname = \"scratch\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n",
@@ -377,7 +376,16 @@ fn a_partial_commit_of_an_unformatted_rust_file_is_refused() {
         "src/lib.rs",
         "//! Scratch.\n\n/// One.\npub fn one() -> u32 {\n    1\n}\n",
     );
-    let untidy = "//! Scratch.\n\n/// Two.\npub fn two()->u32{ 2 }\n";
+    r
+}
+
+/// A crate root that rustfmt reformats.
+const UNTIDY_RS: &str = "//! Scratch.\n\n/// Two.\npub fn two()->u32{ 2 }\n";
+
+#[test]
+fn a_partial_commit_of_an_unformatted_rust_file_is_refused() {
+    let r = crate_repo("partial-rust");
+    let untidy = UNTIDY_RS;
     r.write("src/lib.rs", untidy);
 
     let out = r.commit(&["--", "src/lib.rs"]);
@@ -385,7 +393,11 @@ fn a_partial_commit_of_an_unformatted_rust_file_is_refused() {
         !out.status.success(),
         "the hook must refuse a partial commit it reformatted"
     );
-    assert_ne!(r.read("src/lib.rs"), untidy, "cargo fmt ran on disk");
+    assert_ne!(
+        r.read("src/lib.rs"),
+        untidy,
+        "the hook formatted the file on disk"
+    );
     r.assert_index_at_head();
 
     let out = r.commit(&["--", "src/lib.rs"]);
@@ -396,4 +408,87 @@ fn a_partial_commit_of_an_unformatted_rust_file_is_refused() {
     );
     assert_eq!(r.read("src/lib.rs"), r.head("src/lib.rs"));
     r.assert_index_at_head();
+}
+
+#[test]
+fn a_plain_commit_leaves_an_unstaged_change_unstaged() {
+    // The counter-factual: format the working copy and `git add` it, and the
+    // commit sweeps in every hunk the author left unstaged.
+    let r = Repo::new("unstaged");
+    r.seed("f.lisp", &formatted(TIDY));
+    r.write("f.lisp", UNTIDY);
+    r.must(&["add", "f.lisp"]);
+    let working = format!("{UNTIDY}(def extra   1)\n");
+    r.write("f.lisp", &working);
+
+    let out = r.commit(&[]);
+    assert!(
+        out.status.success(),
+        "the commit failed: {}",
+        transcript(&out)
+    );
+    assert_eq!(
+        r.head("f.lisp"),
+        formatted(UNTIDY),
+        "the commit takes the staged content, formatted, and nothing else"
+    );
+    r.assert_index_at_head();
+    assert_eq!(
+        r.read("f.lisp"),
+        formatted(&working),
+        "the working copy keeps its unstaged change, formatted"
+    );
+}
+
+#[test]
+fn a_plain_commit_leaves_an_unstaged_rust_change_unstaged() {
+    let r = crate_repo("unstaged-rust");
+    r.write("src/lib.rs", UNTIDY_RS);
+    r.must(&["add", "src/lib.rs"]);
+    r.write(
+        "src/lib.rs",
+        &format!("{UNTIDY_RS}\n/// Three.\npub fn three()->u32{{ 3 }}\n"),
+    );
+
+    let out = r.commit(&[]);
+    assert!(
+        out.status.success(),
+        "the commit failed: {}",
+        transcript(&out)
+    );
+    let head = r.head("src/lib.rs");
+    assert!(
+        head.contains("pub fn two() -> u32 {") && !head.contains("three"),
+        "the commit takes the staged content, formatted, and nothing else: {head:?}"
+    );
+    r.assert_index_at_head();
+    assert!(
+        r.read("src/lib.rs").contains("pub fn three() -> u32 {"),
+        "the working copy keeps its unstaged change, formatted: {:?}",
+        r.read("src/lib.rs")
+    );
+}
+
+#[test]
+fn a_file_elle_fmt_cannot_read_is_refused() {
+    // The counter-factual: `elle fmt f && git add f` skips the file on a
+    // failure, and the commit lands it exactly as the author left it.
+    let r = Repo::new("unreadable");
+    r.write("f.lisp", "(defn f [x]\n  (+ x 1)\n");
+    r.must(&["add", "f.lisp"]);
+
+    let out = r.commit(&[]);
+    assert!(
+        !out.status.success(),
+        "the hook must refuse a file its formatter cannot read"
+    );
+    assert!(
+        transcript(&out).contains("f.lisp"),
+        "the refusal names the file: {}",
+        transcript(&out)
+    );
+    assert!(
+        !r.git(&["cat-file", "-e", "HEAD:f.lisp"]).status.success(),
+        "nothing committed"
+    );
 }
