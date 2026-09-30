@@ -1,6 +1,7 @@
 //! audited: 2026-09-30
-//! What a request carries, what the submit path's copy of it keeps, and the
-//! in-place fills a completion makes through its buffers.
+//! What a request carries, what the submit path's copy of it keeps, when it
+//! may still be spent, and the in-place fills a completion makes through its
+//! buffers.
 //!
 //! src/io/AGENTS.md
 
@@ -240,97 +241,110 @@ fn test_bytes_to_string_in_place_empty() {
     });
 }
 
-// ── What a request holds ─────────────────────────────────────────────────
+// ── Whether a request may still be spent ─────────────────────────────────
+//
+// A request counts neither its port nor its operand: both belong to the parked
+// frames of the fiber whose op built it, so it is spent only while that park
+// stands (docs/impl/region/park.md). The park stamps the request with the
+// fiber, and the submit asks the fiber.
 
-/// A value born in a region of its own on `h`, standing in for a port, a
-/// buffer, a payload or a result struct: the request never reads it here.
-fn value_in_own_region(
-    h: &mut crate::value::fiberheap::FiberHeap,
-) -> (crate::hir::region::RuntimeRegion, Value) {
-    let region = h.new_runtime_region();
-    let value = crate::primitives::ctx::Alloc::with_region(region, h).bytes(vec![0u8; 8]);
-    (region, value)
+/// A fiber as an io op's park leaves it: paused, `request` in its signal slot,
+/// and a frame chain standing.
+fn parked_on(request: Value) -> crate::value::FiberHandle {
+    let heap = crate::value::arena::leaked_test_heap();
+    // SAFETY: the heap is leaked for the process.
+    let closure = crate::value::fiber::noop_closure(unsafe { &mut *heap });
+    let mut fiber = crate::value::Fiber::new(closure, crate::value::fiber::SIG_IO);
+    fiber.status = crate::value::fiber::FiberStatus::Paused;
+    fiber.signal = Some((crate::value::fiber::SIG_IO, request));
+    fiber.suspended = Some(Vec::new());
+    crate::value::FiberHandle::new(fiber)
 }
 
-/// A request holds its port and the value its operation names until its own
-/// region frees.
-///
-/// The trap: the request keeps those values as `Value`s inside an external's
-/// payload, and a `Value` is a bare pointer. While the fiber that asked is
-/// parked, its frame holds them. A fiber that relays that fiber's request can
-/// release it first, and its discharge then frees the port and the payload
-/// under the request the relay is about to raise (docs/impl/region/park.md).
-///
-/// The counter-factual: with no count of the request's own, the releases below
-/// free the regions the values were born in, and `region_generation` moves.
+/// A request stamped with a fiber parked on it, and that fiber's handle.
+fn stamped(ctx: &crate::primitives::ctx::Alloc) -> (Value, crate::value::FiberHandle) {
+    let request = IoRequest::new(ctx, PortOp::Flush.into(), Value::NIL);
+    let parker = parked_on(request);
+    request
+        .as_external::<IoRequest>()
+        .unwrap()
+        .stamp_parker(parker.downgrade());
+    (request, parker)
+}
+
+fn park_stands(request: Value) -> bool {
+    request
+        .as_external::<IoRequest>()
+        .unwrap()
+        .park_stands(request)
+}
+
+/// A request no bytecode park stamped is spent as it always was: the WASM tier
+/// raises its requests without that park, and reclaims no region while it runs.
 #[test]
-fn a_request_holds_the_values_it_names() {
-    type Shape = fn(Value) -> PortOp;
-    let shapes: [(&str, Shape); 7] = [
-        ("read-line", |v| PortOp::ReadLine { buffer: v }),
-        ("read", |v| PortOp::Read {
-            count: 8,
-            buffer: v,
-        }),
-        ("read-exact", |v| PortOp::ReadExact {
-            count: 8,
-            buffer: v,
-        }),
-        ("write", |v| PortOp::Write { data: v }),
-        ("accept", |v| PortOp::Accept {
-            options: SocketOptions::default(),
-            encoding: crate::port::Encoding::Binary,
-            accept_port: v,
-        }),
-        ("send-to", |v| PortOp::SendTo {
-            addr: "127.0.0.1".to_string(),
-            port_num: 9,
-            data: v,
-        }),
-        ("recv-from", |v| PortOp::RecvFrom {
-            count: 8,
-            result: v,
-        }),
-    ];
-    for (label, shape) in shapes {
-        let heap = crate::value::arena::leaked_test_heap();
-        // SAFETY: the heap is leaked for the process.
-        let h = unsafe { &mut *heap };
-        let (port_region, port) = value_in_own_region(h);
-        let (operand_region, operand) = value_in_own_region(h);
-        let request_region = h.new_runtime_region();
-        IoRequest::new(
-            &crate::primitives::ctx::Alloc::with_region(request_region, h),
-            shape(operand).into(),
-            port,
-        );
-        let port_born = h.region_generation(port_region.get());
-        let operand_born = h.region_generation(operand_region.get());
+fn an_unstamped_request_may_be_spent() {
+    crate::primitives::ctx::with_test_ctx(|ctx| {
+        let request = IoRequest::new(ctx, PortOp::Flush.into(), Value::NIL);
+        assert!(park_stands(request));
+    });
+}
 
-        h.decref_region(port_region);
-        h.decref_region(operand_region);
-        assert_eq!(
-            h.region_generation(port_region.get()),
-            port_born,
-            "{label}: the port was freed under the request that names it",
-        );
-        assert_eq!(
-            h.region_generation(operand_region.get()),
-            operand_born,
-            "{label}: the operand was freed under the request that names it",
-        );
+/// The shape every scheduler and every live relay submits: the fiber whose op
+/// built the request still waits on it.
+#[test]
+fn a_request_may_be_spent_while_its_fiber_waits_on_it() {
+    crate::primitives::ctx::with_test_ctx(|ctx| {
+        let (request, _parker) = stamped(ctx);
+        assert!(park_stands(request));
+    });
+}
 
-        // The request's counts were what held them, and they go with it.
-        h.decref_region(request_region);
-        assert_ne!(
-            h.region_generation(port_region.get()),
-            port_born,
-            "{label}: the request's free must let its port go",
-        );
-        assert_ne!(
-            h.region_generation(operand_region.get()),
-            operand_born,
-            "{label}: the request's free must let its operand go",
-        );
-    }
+/// A resume replaces the fiber's signal. The continuation past the op then
+/// releases the operands at their own last uses.
+///
+/// The counter-factual: an answer that looked only at whether the fiber is
+/// alive passes this request, and the relay submits a payload the resumed
+/// frames already freed.
+#[test]
+fn a_request_is_stale_once_its_fiber_parks_on_something_else() {
+    crate::primitives::ctx::with_test_ctx(|ctx| {
+        let (request, parker) = stamped(ctx);
+        parker.with_mut(|f| f.signal = Some((crate::value::fiber::SIG_YIELD, Value::int(1))));
+        assert!(!park_stands(request));
+    });
+}
+
+/// A discharge takes the frame chain: the fiber can never run again, and the
+/// releases its frames owed have run.
+///
+/// The trap: the discharge leaves the fiber object itself standing wherever a
+/// strong handle survives, such as a parent's cached child, so the handle's
+/// liveness says nothing.
+#[test]
+fn a_request_is_stale_once_its_fibers_frames_are_gone() {
+    crate::primitives::ctx::with_test_ctx(|ctx| {
+        let (request, parker) = stamped(ctx);
+        parker.with_mut(|f| f.suspended = None);
+        assert!(!park_stands(request));
+    });
+}
+
+/// A finished fiber keeps no park, whatever its signal slot still says.
+#[test]
+fn a_request_is_stale_once_its_fiber_has_finished() {
+    crate::primitives::ctx::with_test_ctx(|ctx| {
+        let (request, parker) = stamped(ctx);
+        parker.with_mut(|f| f.status = crate::value::fiber::FiberStatus::Dead);
+        assert!(!park_stands(request));
+    });
+}
+
+/// The last handle to the fiber is gone.
+#[test]
+fn a_request_is_stale_once_its_fiber_is_dropped() {
+    crate::primitives::ctx::with_test_ctx(|ctx| {
+        let (request, parker) = stamped(ctx);
+        drop(parker);
+        assert!(!park_stands(request));
+    });
 }

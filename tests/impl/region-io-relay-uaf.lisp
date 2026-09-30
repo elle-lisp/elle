@@ -152,17 +152,19 @@
                    (check-round src dir relayed-tail "relayed-tail" i)
                    (assign i (%add i 1)))))
 
-# ── the relay that releases its child first ──────────────────────────────────
-# The relaying body binds the child's request and has no use for the child
-# after the resume that answered it, so it releases the child there, before it
-# raises the request. The child's discharge then runs the releases its frames
-# owed: the payload it built, and the port it opened. The request names both,
-# so the request must hold them itself (docs/impl/region/rules.md Rule 5).
+# ── a stale request ──────────────────────────────────────────────────────────
+# A request is good only while the park that raised it stands
+# (docs/impl/region/park.md). Each relay below raises the child's request after
+# that park is over: the child released at its last use, the request carried
+# out of the function that held the child, or the child resumed past the
+# write. The raise fails with `:state-error`, and the write never runs.
 #
-# The counter-factual: without that hold, the relay raises a request whose port
-# and payload lie in freed pages. `churn` claims those pages again before the
-# raise, so the write fails or sends another value's bytes. Under
-# `--trace=guardfree` the submit faults instead.
+# The counter-factual: nothing counts the port or the payload from the
+# request, so an unchecked raise submits a request whose values lie in freed
+# pages. `churn` claims those pages again before the raise, so the write fails
+# or sends another value's bytes. Under `--trace=guardfree` the submit faults
+# instead. A relay that the check let through would also leave bytes in the
+# file, which each round reads back empty.
 
 (defn churn []
   (def @kept @[])
@@ -187,72 +189,127 @@
       (port/close out)
       :written)))
 
+# Each relay answers with what its raise of the stale request did: the pair
+# `protect` makes of it.
+
 # The `let` form: the child's last use is the resume that answers the write.
 (defn relay-let [body]
   (let [f (fiber/new body |:io|)
         q (fiber/resume f)]
     (churn)
-    (emit :io q)))
+    (protect (emit :io q))))
 
 # The `def` form of the same relay.
 (defn relay-def [body]
   (def f (fiber/new body |:io|))
   (def q (fiber/resume f))
   (churn)
-  (emit :io q))
+  (protect (emit :io q)))
 
-# Both forms again, relaying the child's open first so that the request bound
-# for the write names a port the child opened.
+# The same relay, raising through the `emit` primitive: a keyword in a
+# parameter is no literal.
+(defn relay-let-kw [body kw]
+  (let [f (fiber/new body |:io|)
+        q (fiber/resume f)]
+    (churn)
+    (protect (emit kw q))))
+
+(defn relay-let-dynamic [body]
+  (relay-let-kw body :io))
+
+# Both binding forms again, relaying the child's open first so that the request
+# bound for the write names a port the child opened.
 (defn relay-let-second [body]
   (let [f (fiber/new body |:io|)
         opened (emit :io (fiber/resume f))
         q (fiber/resume f opened)]
     (churn)
-    (emit :io q)))
+    (protect (emit :io q))))
 
 (defn relay-def-second [body]
   (def f (fiber/new body |:io|))
   (def opened (emit :io (fiber/resume f)))
   (def q (fiber/resume f opened))
   (churn)
-  (emit :io q))
+  (protect (emit :io q)))
 
-(defn check-release-round [dir n]
-  (each [label relay] [["relay-let" relay-let] ["relay-def" relay-def]]
+# The request leaves the function that held the child, by return.
+(defn grab [body]
+  (let [f (fiber/new body |:io|)]
+    (fiber/resume f)))
+
+(defn relay-returned [body]
+  (let [q (grab body)]
+    (churn)
+    (protect (emit :io q))))
+
+# The request leaves by a store into a container the caller holds.
+(defn stash [box body]
+  (let [f (fiber/new body |:io|)]
+    (push box (fiber/resume f))
+    nil))
+
+(defn relay-stored [body]
+  (let [box @[]]
+    (stash box body)
+    (churn)
+    (protect (emit :io (get box 0)))))
+
+# The child is answered without its write running, and runs to its end. The
+# fiber is still reachable, which is why a check on its lifetime alone would
+# pass this raise: its frames released the payload when the write returned.
+(defn relay-resumed [body]
+  (let [f (fiber/new body |:io|)
+        q (fiber/resume f)]
+    (fiber/resume f 0)
+    (churn)
+    (let [raised (protect (emit :io q))]
+      (assert (= (fiber/status f) :dead) "the resumed child ran to its end")
+      raised)))
+
+(defn refused? [raised label]
+  (let [[ok? err] raised]
+    (assert (not ok?) (string label ": a stale request was spent"))
+    (assert (= (get err :error) :state-error)
+            (string label ": a stale request raised " err))))
+
+(defn check-stale-round [dir n]
+  (each [label relay] [["relay-let" relay-let] ["relay-def" relay-def]
+                       ["relay-let-dynamic" relay-let-dynamic]
+                       ["relay-returned" relay-returned]
+                       ["relay-stored" relay-stored]
+                       ["relay-resumed" relay-resumed]]
     (let [dst (path/join dir (string label "-" n ".out"))
           out (port/open dst :write)]
-      (assert (= (relay (write-payload out n)) (length (string "payload " n)))
-              (string label ": a relayed write did not complete"))
+      (refused? (relay (write-payload out n)) label)
       (port/close out)
-      (assert (= (file/read dst) (string "payload " n))
-              (string label ": a relayed write sent other bytes: "
-                      (file/read dst)))))
+      (assert (= (file/read dst) "")
+              (string label ": a stale write sent bytes: " (file/read dst)))))
   (each [label relay] [["relay-let-second" relay-let-second]
                        ["relay-def-second" relay-def-second]]
     (let [dst (path/join dir (string label "-" n ".out"))]
-      (assert (= (relay (open-and-write dst n)) (length (string "payload " n)))
-              (string label ": a relayed write did not complete"))
-      (assert (= (file/read dst) (string "payload " n))
-              (string label ": a relayed write sent other bytes: "
-                      (file/read dst))))))
+      (refused? (relay (open-and-write dst n)) label)
+      (assert (= (file/read dst) "")
+              (string label ": a stale write sent bytes: " (file/read dst))))))
 
 (with-temp-dir dir
                (let [dst (path/join dir "top.out")
                      out (port/open dst :write)]
                  (def @i 0)
                  (while (%lt i rounds)
-                   (check-release-round dir i)
+                   (check-stale-round dir i)
                    (assign i (%add i 1)))
-                 # The same relay written as the block's own `def` bindings,
-                 # with no function around them.
+                 # The `def` relay written as the block's own bindings, with no
+                 # function around them.
                  (def f (fiber/new (write-payload out "top") |:io|))
                  (def q (fiber/resume f))
                  (churn)
-                 (emit :io q)
+                 (refused? (protect (emit :io q))
+                           "a relay at the top of a block")
                  (port/close out)
-                 (assert (= (file/read dst) "payload top")
-                         (string "a relay written at the top of a block sent "
-                                 "other bytes: " (file/read dst)))))
+                 (assert (= (file/read dst) "")
+                         (string "a stale write at the top of a block sent "
+                                 "bytes: " (file/read dst)))))
 
 # ── the leak face ────────────────────────────────────────────────────────────
 # A relay must not answer by releasing nothing at any io install. The child's
@@ -289,16 +346,16 @@
 (bounded? dynamic-d "a timer relayed through the emit primitive")
 (bounded? tail-d "a timer relayed through a tail emit")
 
-# A request's counts on its port and payload go with the request. A request
-# whose free kept them would leave the payload's region behind every round, so
-# a relay that releases its child first must stay as bounded as the others.
-(defn measure-released [out]
+# A refused raise builds an error, and the relay drops it. Neither that error
+# nor the stale request may outlive the round, so a stale relay must stay as
+# bounded as the others.
+(defn measure-stale [out]
   (measure (fn [] (relay-let (write-payload out 0))) 30 window))
 
 (with-temp-dir dir
                (let [out (port/open (path/join dir "gauge.out") :write)]
-                 (bounded? (measure-released out)
-                           "a write relayed after its child is released")
+                 (bounded? (measure-stale out)
+                           "a stale request raised after its child is released")
                  (port/close out)))
 
 (println "region-io-relay-uaf: ok")

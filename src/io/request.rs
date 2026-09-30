@@ -403,6 +403,16 @@ impl IoRequest {
     ) -> Value {
         Self::bounded(ctx, IoOp::PollFd { fd, events }, Value::NIL, bound)
     }
+
+    /// Stub: records nothing yet.
+    #[allow(dead_code)]
+    pub(crate) fn stamp_parker(&self, _parker: crate::value::WeakFiberHandle) {}
+
+    /// Stub: answers that every request may be spent.
+    #[allow(dead_code)]
+    pub(crate) fn park_stands(&self, _request: Value) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

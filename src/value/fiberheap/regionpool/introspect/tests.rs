@@ -223,14 +223,14 @@ fn obj_with_value_in_every_channel(
             traits_only,
         ),
         HeapTag::External => (
-            // A payload that declares what it holds is scanned as a
-            // container is. An undeclared payload is opaque, which
-            // `an_opaque_external_reports_only_its_traits` pins.
+            // The Rc<dyn Any> payload is opaque BY CONSTRUCTION, and
+            // `an_opaque_external_reports_only_its_traits` pins what that
+            // hides. Traits is the only visible channel.
             HeapObject::External {
-                obj: crate::value::heap::ExternalObject::holding("scan-pin", HoldsOne(v2)),
+                obj: crate::value::heap::ExternalObject::opaque("scan-pin", Rc::new(0u8)),
                 traits: vt,
             },
-            both,
+            traits_only,
         ),
         HeapTag::Parameter => (
             HeapObject::Parameter {
@@ -283,15 +283,6 @@ fn obj_with_value_in_every_channel(
             },
         ),
     })
-}
-
-/// An external payload holding one heap value, which it declares.
-struct HoldsOne(Value);
-
-impl crate::value::heap::HeldValues for HoldsOne {
-    fn each_held(&self, f: &mut dyn FnMut(&Value)) {
-        f(&self.0)
-    }
 }
 
 /// Every `HeapTag`, for iteration. Completeness here forces nothing:
@@ -414,13 +405,18 @@ fn exhaustive_scan_finds_cross_region_refs_in_every_variant() {
     }
 }
 
-/// An external built without a declaration hides its payload from the scan,
-/// whatever the payload holds (docs/impl/region/diagnostics.md § Validation).
-/// Only its `traits` edge is visible.
+/// An external payload holding one heap value.
+struct HoldsOne(#[allow(dead_code)] Value);
+
+/// An external hides its payload from the scan, whatever the payload holds
+/// (docs/impl/region/diagnostics.md § Validation). Only its `traits` edge is
+/// visible.
 ///
-/// The trap: the scan cannot downcast a `dyn Any`, so a value an undeclared
-/// payload holds is invisible to it. Such a payload must keep its values alive
-/// some other way, as the subprocess handle does by sharing their region.
+/// The trap: the scan cannot downcast a `dyn Any`, so a value a payload holds
+/// is invisible to it and counts for nothing. Such a payload must keep its
+/// values alive some other way: the subprocess handle shares its ports'
+/// region, and an io request is spent only while the park that raised it
+/// stands.
 #[test]
 fn an_opaque_external_reports_only_its_traits() {
     let mut store = RegionStore::default();
