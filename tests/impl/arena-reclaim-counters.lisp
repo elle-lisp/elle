@@ -7,10 +7,12 @@
 # live one, so only a reading that must move can tell them apart.
 
 (def counters
-  [arena/region-frees arena/page-frees arena/object-frees arena/adopts
-   arena/adopts-into-empty arena/owned-frees arena/owned-free-pages
-   arena/owned-free-objects arena/owned-one-page-frees arena/rescues
-   arena/rescue-survivors arena/extracts arena/reparents arena/owned])
+  [arena/region-frees arena/page-frees arena/object-frees arena/one-page-frees
+   arena/empty-frees arena/one-object-frees arena/few-object-frees
+   arena/many-object-frees arena/adopts arena/adopts-into-empty
+   arena/owned-frees arena/owned-free-pages arena/owned-free-objects
+   arena/owned-one-page-frees arena/rescues arena/rescue-survivors
+   arena/extracts arena/reparents arena/owned])
 
 (defn forest-closes? []
   (let [ended (+ (arena/owned-frees) (arena/rescues) (arena/extracts))]
@@ -18,6 +20,18 @@
 
 (assert (forest-closes?)
         "adopts = owned-frees + rescues + extracts + owned after the stdlib load")
+
+# Every argument is a counter read, so all five readings are taken before the
+# `+` runs and nothing can free between them.
+(defn sizes-close? []
+  (= (arena/region-frees)
+     (+ (arena/empty-frees) (arena/one-object-frees) (arena/few-object-frees)
+        (arena/many-object-frees))))
+
+(assert (sizes-close?)
+        "the object buckets partition region-frees after the stdlib load")
+(assert (> (arena/region-frees) 0)
+        "the stdlib load freed regions, so the partition is not vacuous")
 
 # ── every counter is an integer, and reading one allocates nothing ────
 (each c in counters
@@ -61,10 +75,14 @@
 (def region-frees (arena/region-frees))
 (def object-frees (arena/object-frees))
 (def page-frees (arena/page-frees))
+(def one-page-frees (arena/one-page-frees))
 (churn 100)
 (assert (>= (- (arena/region-frees) region-frees) 100)
         "each discarded string's region is counted as it frees")
 (assert (>= (- (arena/object-frees) object-frees) 100) "and each one's object")
 (assert (>= (- (arena/page-frees) page-frees) 100) "and each one's page")
+(assert (>= (- (arena/one-page-frees) one-page-frees) 100)
+        "a short string's region holds one page, and frees as a one-page free")
+(assert (sizes-close?) "the object buckets still partition region-frees")
 
 (println "arena-reclaim-counters: ok")

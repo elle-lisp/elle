@@ -153,6 +153,9 @@ mod timeout_capture {
 mod runner_gauges {
     include!("runner_gauges.rs");
 }
+mod reclaim_report {
+    include!("reclaim_report.rs");
+}
 mod form_profile {
     include!("form_profile.rs");
 }
