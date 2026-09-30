@@ -15,6 +15,16 @@ pub(crate) struct ReclaimCounters {
     pub page_frees: u64,
     /// The objects those regions held.
     pub object_frees: u64,
+    /// The freed regions that held one page or none.
+    pub one_page_frees: u64,
+    /// The freed regions that held no object.
+    pub empty_frees: u64,
+    /// The freed regions that held one object.
+    pub one_object_frees: u64,
+    /// The freed regions that held two to four objects.
+    pub few_object_frees: u64,
+    /// The freed regions that held five objects or more.
+    pub many_object_frees: u64,
     /// Counted regions made members of an owner's subtree.
     pub adopts: u64,
     /// Adoptions into an owner that held no object at the adopt.

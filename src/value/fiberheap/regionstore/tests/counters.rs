@@ -34,6 +34,102 @@ fn assert_forest_closes(store: &RegionStore, when: &str) {
     );
 }
 
+/// The identity diagnostics.md states for the size counters: every freed region
+/// lands in exactly one object bucket, and a one-page free is a region free.
+fn assert_sizes_close(store: &RegionStore, when: &str) {
+    let c = store.reclaim_counters();
+    assert_eq!(
+        c.region_frees,
+        c.empty_frees + c.one_object_frees + c.few_object_frees + c.many_object_frees,
+        "{when}: the object buckets must partition region-frees, got {c:?}"
+    );
+    assert!(
+        c.one_page_frees <= c.region_frees,
+        "{when}: a one-page free is a region free, got {c:?}"
+    );
+}
+
+/// A counted region holding `n` small objects, freed by its count.
+fn free_with_objects(store: &mut RegionStore, n: usize) {
+    let r = store.new_runtime_region();
+    for _ in 0..n {
+        store.alloc_obj(r, cons_obj());
+    }
+    store.decref(r);
+}
+
+#[test]
+fn a_free_lands_in_the_bucket_of_the_objects_its_region_held() {
+    // The bucket edges: one, two and four, five. Small objects share one page.
+    let mut store = RegionStore::default();
+    for (n, bucket) in [(1, "one"), (2, "few"), (4, "few"), (5, "many")] {
+        let before = store.reclaim_counters();
+        free_with_objects(&mut store, n);
+        let after = store.reclaim_counters();
+        let moved = [
+            ("one", after.one_object_frees - before.one_object_frees),
+            ("few", after.few_object_frees - before.few_object_frees),
+            ("many", after.many_object_frees - before.many_object_frees),
+        ];
+        for (name, delta) in moved {
+            let want = if name == bucket { 1 } else { 0 };
+            assert_eq!(
+                delta, want,
+                "a region freed holding {n} objects moves the {bucket} bucket alone, \
+                 but {name} moved by {delta}"
+            );
+        }
+        assert_eq!(
+            after.empty_frees, before.empty_frees,
+            "a region with {n} objects is not an empty free"
+        );
+        assert_eq!(
+            after.one_page_frees - before.one_page_frees,
+            1,
+            "{n} small objects fit one page"
+        );
+    }
+    assert_sizes_close(&store, "after the bucket edges");
+}
+
+#[test]
+fn a_region_that_held_no_object_is_an_empty_free_of_no_page() {
+    // An owner node never allocates. Its drop frees it holding nothing, and its
+    // member holding one object on one page.
+    let mut store = RegionStore::default();
+    let node = store.new_runtime_region();
+    let child = store.new_runtime_region();
+    store.alloc_obj(child, cons_obj());
+    store.adopt_region(node, child);
+
+    store.decref(node);
+    let c = store.reclaim_counters();
+    assert_eq!(c.region_frees, 2, "the node and its member");
+    assert_eq!(c.empty_frees, 1, "the node held no object");
+    assert_eq!(c.one_object_frees, 1, "the member held one");
+    assert_eq!(
+        c.one_page_frees, 2,
+        "no page, and one page, are both one or none"
+    );
+    assert_sizes_close(&store, "after the node's drop");
+}
+
+#[test]
+fn a_region_past_one_page_is_not_a_one_page_free() {
+    let mut store = RegionStore::default();
+    let r = store.new_runtime_region();
+    while store.region_pool(r).map_or(0, |p| p.page_ranges().len()) < 2 {
+        store.alloc_obj(r, cons_obj());
+    }
+
+    store.decref(r);
+    let c = store.reclaim_counters();
+    assert_eq!(c.region_frees, 1);
+    assert_eq!(c.one_page_frees, 0, "the region held two pages");
+    assert_eq!(c.many_object_frees, 1, "two pages of objects is many");
+    assert_sizes_close(&store, "after the two-page free");
+}
+
 #[test]
 fn a_count_reaching_zero_counts_the_region_its_page_and_its_objects() {
     let mut store = RegionStore::default();
