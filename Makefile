@@ -611,11 +611,6 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 smoke: smoke-elle smoke-vm smoke-jit doctest embedding semver-check  ## Run the elle test corpus (runner + per-file VM and JIT passes) + docs + embedding + surface gate
 	@echo "=== all smoke tests passed ==="
 
-MLIR_PREFIX ?= $(HOME)/git/tmp/mlir-install
-MLIR_ENV    := LLVM_SYS_220_PREFIX=$(MLIR_PREFIX) \
-               MLIR_SYS_220_PREFIX=$(MLIR_PREFIX) \
-               TABLEGEN_220_PREFIX=$(MLIR_PREFIX)
-
 # CI documents private items too, and most of this crate is private — without
 # the flag rustdoc never resolves a link into a `pub(crate)` item, so a broken
 # one reaches CI unseen. Keep the flag here and in .github/workflows in step.
@@ -624,16 +619,19 @@ MLIR_ENV    := LLVM_SYS_220_PREFIX=$(MLIR_PREFIX) \
 # compiling one: `cargo doc` will happily render a call whose signature moved
 # under it. Nothing else builds doctests — `test` passes `--lib` and
 # `--test '*'`, both of which exclude them.
+#
+# `--all-features` builds the MLIR tier, which finds LLVM 22 through
+# `MLIR_SYS_220_PREFIX` in the environment (docs/impl/mlir.md).
 qa: audit crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfmt, workspace clippy, rustdoc, doctests
 	cargo fmt --check
-	$(MLIR_ENV) cargo clippy --workspace --all-targets --all-features -- -D warnings
-	$(MLIR_ENV) RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items
-	$(MLIR_ENV) cargo test --workspace --doc
+	cargo clippy --workspace --all-targets --all-features -- -D warnings
+	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items
+	cargo test --workspace --doc
 
 # `qa` goes first: it takes about two minutes and the corpus about thirty, so a
 # formatting or clippy failure stops the gate before the corpus starts.
 test: qa smoke smoke-nouring  ## QA (fmt/clippy/crosscheck/rustdoc), then smoke and smoke-nouring, then Rust unit + integration tests
-	$(MLIR_ENV) cargo test --workspace --lib --all-features
+	cargo test --workspace --lib --all-features
 	cargo test --test '*' -- --skip property
 
 # Compile the arms a Linux gate never reaches. There are two of them, and the
