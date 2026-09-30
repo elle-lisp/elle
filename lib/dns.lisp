@@ -24,6 +24,7 @@
 (def parse-response wire:parse-response)
 
 (def MAX-CNAME-DEPTH 8)
+(def DEFAULT-PORT 53)
 (def DEFAULT-TIMEOUT 3000)
 (def DEFAULT-RETRIES 2)
 
@@ -61,15 +62,25 @@
 
 ## ── DNS query execution ───────────────────────────────────────────────
 
-(defn do-query [server name qtype timeout]
+(defn query-options [server port timeout retries]
+  "Where and how to send each query: the options a caller named, and the
+   default for each it left nil."
+  {:server (or server (first (read-nameservers)))
+   :port (or port DEFAULT-PORT)
+   :timeout (or timeout DEFAULT-TIMEOUT)
+   :retries (or retries DEFAULT-RETRIES)})
+
+(defn do-query [opts name qtype]
   "Send a single DNS query and return the parsed response.
    Signals :dns-timeout on timeout, :dns-error on protocol errors."
-  (let* [txid (gen-txid)
+  (let* [server opts:server
+         timeout opts:timeout
+         txid (gen-txid)
          packet (build-query txid name qtype)
          sock (udp/bind "0.0.0.0" 0)]
     (defer
       (port/close sock)
-      (udp/send-to sock packet server 53
+      (udp/send-to sock packet server opts:port
                    :timeout (if-let [ms timeout] (/ ms 1000.0) nil))
       (let* [[ok? result] (protect (udp/recv-from sock 512
                                    :timeout (if-let [ms timeout] (/ ms 1000.0)
@@ -107,12 +118,13 @@
                                        name)})))
           resp)))))
 
-(defn query-with-retries [server name qtype timeout retries]
+(defn query-with-retries [opts name qtype]
   "Query with retries. Returns parsed response or signals error."
+  (def retries opts:retries)
   (def @last-err nil)
   (def @attempt 0)
   (while (< attempt retries)
-    (let [[ok? result] (protect (do-query server name qtype timeout))]
+    (let [[ok? result] (protect (do-query opts name qtype))]
       (if ok?
         (break result)
         (begin
@@ -128,7 +140,7 @@
 
 ## ── High-level resolver ───────────────────────────────────────────────
 
-(defn resolve-type [name qtype server timeout retries]
+(defn resolve-type [opts name qtype]
   "Resolve a name to records of a specific type, following CNAMEs."
   (def @current-name name)
   (def @depth 0)
@@ -141,7 +153,7 @@
               :depth depth
               :limit MAX-CNAME-DEPTH
               :message (concat "CNAME chain too deep for " name)}))
-    (let* [resp (query-with-retries server current-name qtype timeout retries)
+    (let* [resp (query-with-retries opts current-name qtype)
            answers resp:answers
            # Collect direct answers of the requested type
            direct (filter (fn [r]
@@ -177,14 +189,11 @@
      :port    — nameserver UDP port (default: 53)
      :timeout — per-query timeout in ms (default: 3000)
      :retries — how many times to send each query (default: 2)"
-  (let* [srv (or server (first (read-nameservers)))
-         tmo (or timeout DEFAULT-TIMEOUT)
-         ret (or retries DEFAULT-RETRIES)
-         a-records (let [[ok? result] (protect (resolve-type name TYPE-A srv tmo
-                         ret))]
+  (let* [opts (query-options server port timeout retries)
+         a-records (let [[ok? result] (protect (resolve-type opts name TYPE-A))]
                      (if ok? result ()))
-         aaaa-records (let [[ok? result] (protect (resolve-type name TYPE-AAAA
-                            srv tmo ret))]
+         aaaa-records (let [[ok? result] (protect (resolve-type opts name
+                            TYPE-AAAA))]
                         (if ok? result ()))]
     (concat a-records aaaa-records)))
 
@@ -196,10 +205,7 @@
      :port    — nameserver UDP port (default: 53)
      :timeout — per-query timeout in ms (default: 3000)
      :retries — how many times to send each query (default: 2)"
-  (let* [srv (or server (first (read-nameservers)))
-         tmo (or timeout DEFAULT-TIMEOUT)
-         ret (or retries DEFAULT-RETRIES)]
-    (query-with-retries srv name qtype tmo ret)))
+  (query-with-retries (query-options server port timeout retries) name qtype))
 
 ## ── Internal tests (pure, no network) ─────────────────────────────────
 
