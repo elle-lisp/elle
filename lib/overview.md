@@ -1,6 +1,6 @@
 # lib
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 Reusable Elle modules, one closure each: `(import "std/name")` gives you the closure, and calling it returns the struct of exports.
 
@@ -40,6 +40,7 @@ This table lists the modules with a guide here, and their neighbours.
 | [dns/wire.lisp](dns/wire.lisp) | The DNS wire codec: names, queries, responses | |
 | [aws.lisp](aws.lisp) | AWS client: SigV4 signing, HTTPS, service dispatch | [aws/](aws/AGENTS.md) |
 | [contract.lisp](contract.lisp) | Compositional validation for function boundaries | |
+| [ratchet.lisp](ratchet.lisp) | Measure a shape, print the reading, judge it against the ledger | [ratchet.md](ratchet.md) |
 | [lua.lisp](lua.lisp) | Lua standard library compatibility prelude; fails to compile today ([#1217](https://github.com/elle-lisp/elle/issues/1217)) | |
 | [process.lisp](process.lisp) | Erlang-style processes, GenServer, Actor, Supervisor | [process.md](process.md) |
 | [irc.lisp](irc.lisp) | IRCv3 client: CAP negotiation, SASL PLAIN, message tags | [irc.md](irc.md) |
