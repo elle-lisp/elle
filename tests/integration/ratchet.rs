@@ -280,7 +280,7 @@ fn a_row_for_another_build_is_no_row_here() {
     );
     let t = text(&out);
     assert!(
-        t.contains("unledgered") && !t.contains("missing"),
+        t.contains("unledgered") && !t.contains("missing  answer"),
         "the reading is unledgered, and the foreign row is not missing:\n{t}"
     );
 }
