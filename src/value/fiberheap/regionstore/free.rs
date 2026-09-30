@@ -377,6 +377,11 @@ impl RegionStore {
         // the now-free physical id (always ≥ 2, never a reserved id).
         let mut freed = 0;
         for (r, mut entry) in members {
+            self.counters.count_free(
+                entry.pool.page_ranges().len() as u64,
+                entry.pool.obj_count() as u64,
+                matches!(entry.reclaim, Reclaim::Owned { .. }),
+            );
             if crate::value::fiberheap::freelog::enabled() {
                 let kind = from_cascade.map_or("direct".to_string(), |s| format!("cascade({s})"));
                 crate::value::fiberheap::freelog::record_free(

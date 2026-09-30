@@ -1,6 +1,6 @@
 # primitives
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 Built-in functions. Registered into the VM at startup.
 
@@ -16,8 +16,9 @@ Implement Elle's standard library of built-in functions:
 - Introspection and debugging
 
 Does NOT:
-- Define special forms (those are in `hir/analyze/`). Note: `emit` is a special
-  form when the first argument is a literal keyword or keyword set; dynamic
+- Define special forms (those are in
+  [hir/analyze/](../hir/analyze/AGENTS.md)). Note: `emit` is a special form
+  when the first argument is a literal keyword or keyword set; dynamic
   `(emit var val)` falls through to the primitive.
 - Execute bytecode (that's `vm`)
 - Compile code (that's `compiler`, `hir`, `lir`)
@@ -47,7 +48,7 @@ Return values:
 ## Adding a primitive
 
 [primitives.md](../../docs/cookbook/primitives.md) holds the recipe. Declare
-the new primitive's `effect: RegionEffect::…` (def.rs; the spec is
+the new primitive's `effect: RegionEffect::…` ([def.rs](def.rs); the spec is
 [region effects](../../docs/impl/region/effects.md)). Every shipped table is fully declared —
 do not leave a new primitive at the `Unknown` default. The claim is
 checked forever by the declaration oracle (`dispatch_native_call`,
@@ -69,9 +70,9 @@ its result.
 
 ## Dependents
 
-- `vm/call.rs` - dispatches primitive calls, handles signal bits
-- `repl.rs` - REPL session (form-by-form eval, def persistence)
-- `runtime/` - registers primitives when an instance boots
+- [vm/call.rs](../vm/call.rs) - dispatches primitive calls, handles signal bits
+- [repl.rs](../repl.rs) - REPL session (form-by-form eval, def persistence)
+- [runtime.rs](../runtime.rs) - registers primitives when an instance boots
 
 ## Invariants
 
@@ -101,61 +102,63 @@ name)` answers for either spelling.
 
 | Module | Registers |
 |--------|-----------|
-| `allocator.rs` | `allocator/install`, `allocator/uninstall` |
-| `arena.rs` | `debug/arena-stats`, `debug/arena-count`, `debug/arena-bytes`, `debug/arena-allocs`, `debug/arena-peak`, `debug/arena-region-of`, `debug/arena-dump`, `debug/arena-region-table`, and the rest of the `debug/arena-*` family |
-| `arithmetic.rs` | nothing. `+`, `-`, `*` and their peers are stdlib closures over the `%`-intrinsics; the table here is empty and the file holds shared helpers |
-| `array.rs` | `array`, `@array`, `array/new`, `popn`, `insert`, `remove` |
-| `bitwise.rs` | `bit/and`, `bit/or`, `bit/xor`, `bit/not`, `bit/shl`, `bit/shr` |
-| `box.rs` | `box`, `unbox`, `rebox` |
-| `bytes.rs` | `bytes`, `@bytes`, `seq->hex`, `slice` |
-| `chan.rs` | `chan`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/try-select`, `chan/wait-ready` (see "Channel select wake protocol" below for the `chan/select` Lisp wrapper) |
-| `comparison.rs` | `=` (numeric-aware), `identical?` (strict), `hash`. The ordering comparisons are stdlib closures over `%lt`/`%gt`/`%le`/`%ge` |
-| `compile/` | `compile/analyze`, `compile/symbols`, `compile/captures`, `compile/call-graph`, `compile/run-on`, `compile/whole-module`, and the rest of the `compile/*` family |
-| `config.rs` | `vm/tier`, `backend?`, `vm/config`, `vm/config-set` |
-| `concurrency.rs` | `sys/spawn`, `sys/spawn-vm`, `sys/thread-state`, `sys/thread-id`, `sys/unique`; the spawn worker body is `concurrency/worker.rs` |
-| `convert.rs` | `integer`, `float`, `parse-int`, `parse-float`, `string`, `number->string` |
-| `debug.rs` | `debug/print`, `debug/trace`, `debug/memory`, `debug/symbol-count` |
-| `disassembly.rs` | `fn/disasm`, `fn/disasm-jit`, `fn/flow`, `vm/list-primitives`, `vm/primitive-meta` |
-| `display.rs` | `pp`, `describe`. The output verbs (`print`, `println`, `eprint`, `eprintln`) are stdlib closures over the ports |
-| `fiber_introspect.rs` | `fiber/bits`, `fiber/mask`, `fiber/cancel`, `fiber/child`, `fiber/parent`, `fiber/propagate`, `fiber/caps`, `fiber/abort`, `fiber/refuse` |
-| `fibers.rs` | `fiber/new`, `fiber/resume`, `fiber/emit`, `fiber/status`, `fiber/value`, `fiber/set-fuel`, `fiber/fuel`, `fiber/clear-fuel` |
-| `fileio.rs` | `file/read`, `file/write`, `file/append`, `file/delete`, `file/delete-dir`, `file/delete-dir-all`, `file/mkdir`, `file/mkdir-all`, `file/mktempdir`, `file/rename`, `file/copy`, `file/size`, `file/ls`, `file/lines`, `file/stat`, `file/lstat` |
-| `format.rs` | `string/format` — see [format/](format/AGENTS.md) |
-| `intrinsics.rs` | the `%`-intrinsics: `%add`, `%get`, `%put`, `%has?`, `%first`, `%pop` and the rest. See [intrinsics](../../docs/intrinsics.md) |
-| `introspection.rs` | `jit?`, `silent?`, `fiber?`, `fn/arity`, `fn/captures`, `fn/errors?`, `fn/bytecode-size`, `fn/gpu-eligible?`, `doc`, `vm/query`, `signals`, `jit/rejections`, `keyword` |
-| `io.rs` | `io-request?`, `io-backend?`, `io/backend`, `io/submit`, `io/workers`, `io/reap`, `io/wait`, `io/cancel`, `ev/sleep`, `ev/poll-fd` |
-| `json/` | `json/parse`, `json/serialize`, `json/pretty` |
-| `list/` | `first`, `second`, `rest`, `list`, `length`, `empty?`, `->array`, `->list` |
-| `loading.rs` | `ffi/native`, `ffi/lookup`, `ffi/on-unload`, `ffi/run-teardowns`, `ffi/signature`, `ffi/call`, `ffi/callback`, `ffi/callback-free` |
-| `logic.rs` | `and`, `or` |
-| `lstruct.rs` | `@struct`, `get`, `keys`, `values`, `has?` (the `get` body lives in `access.rs`) |
-| `math.rs` | `math/sqrt`, `math/sin`, `math/cos`, `math/tan`, `math/log`, `math/exp`, `math/pow`, `math/atan2`, `math/pi`, `math/e`, `math/inf`, `math/nan`, and the rest of the `math/*` family |
-| `memory.rs` | `ffi/size`, `ffi/align`, `ffi/malloc`, `ffi/free`, `ffi/read`, `ffi/write`, `ffi/string`, `ffi/struct`, `ffi/array`, `ptr/add`, `ptr/diff`, `ptr/to-int`, `ptr/from-int` |
-| `meta.rs` | `meta/gensym`, `meta/datum->syntax`, `meta/syntax->datum`, the `meta/syntax-*` predicates, `meta/origin`, `squelch`, `attune`, `git`, `fn/git?`, `disgit` |
-| `modules.rs` | `import` |
-| `net.rs` | `tcp/listen`, `tcp/accept`, `tcp/connect-ip`, `tcp/shutdown`, `udp/bind`, `udp/send-to`, `udp/recv-from`, `sys/resolve`, `sys/ip?` (`tcp/connect` is a stdlib wrapper over `tcp/connect-ip`) |
-| `package.rs` | `elle/version`, `elle/epoch`, `elle/info` |
-| `parameters.rs` | `parameter` |
-| `path.rs` | `path/join`, `path/parent`, `path/filename`, `path/stem`, `path/extension`, `path/with-extension`, `path/normalize`, `path/absolute`, `path/canonicalize`, `path/relative`, `path/components`, `path/absolute?`, `path/relative?`, `path/cwd`, `path/exists?`, `path/file?`, `path/dir?` |
-| `ports.rs` | `port/open`, `port/open-bytes`, `port/close`, `port/stdin`, `port/stdout`, `port/stderr`, `port?`, `port/open?`, `port/set-options`, `port/encoding`, `port/path`, `port/seek`, `port/tell` |
-| `posix.rs` | `os/sig-send`, `os/sig-raise`, `os/sig-watch`, `os/sig-next`, `os/sig-close`, `os/sig-pending`, `os/sig-mask`, `os/sig-watching` — POSIX signal send and receive. Send and raise are gated on the `:os-signal` capability (`SIG_OS_SIGNAL`); the receive primitives are async and yield `:io`. See [posix signals](../../docs/posix-signals.md) |
-| `read.rs` | `read`, `read-all` |
-| `sets.rs` | `set`, `@set`, `union`, `intersection`, `difference`, `seq->set`, `string-contains?` |
-| `sort.rs` | `sort` |
-| `stream.rs` | `port/read-line`, `port/read`, `port/read-exact`, `port/read-all`, `port/write`, `port/flush` |
-| `string.rs` | `@string`, `string/uppercase`, `string/lowercase`, `string/find`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join`, `string/repeat`, `string/size-of`, `uri-encode` |
-| `structs.rs` | `struct`, `freeze`, `deep-freeze`, `thaw`, `pairs` |
-| `subprocess.rs` | `sys/exit`, `sys/trap-exit!`, `sys/halt`, `sys/args`, `sys/argv`, `sys/pid`, `sys/env`, and the `subprocess/*` table — see [subprocess/](subprocess/AGENTS.md) |
-| `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
-| `traits.rs` | `with-traits`, `traits`, `trait/method`, `trait/op`, `trait/iterable?` |
-| `types.rs` | `type-of`, `ptr?`, `callable?` |
-| `unix.rs` | `unix/listen`, `unix/accept`, `unix/connect`, `unix/shutdown` |
-| `watch.rs` | `watch`, `watch-add`, `watch-remove`, `watch-next`, `watch-close` |
+| [allocator.rs](allocator.rs) | `allocator/install`, `allocator/uninstall` |
+| [arena.rs](arena.rs) | `debug/arena-stats`, `debug/arena-count`, `debug/arena-bytes`, `debug/arena-allocs`, `debug/arena-peak`, `debug/arena-region-of`, `debug/arena-dump`, `debug/arena-region-table`, and the rest of the `debug/arena-*` family |
+| [arena/reclaim.rs](arena/reclaim.rs) | `debug/arena-region-frees`, `debug/arena-adopts`, `debug/arena-owned`, and the rest of the reclamation gauges ([diagnostics](../../docs/impl/region/diagnostics.md)) |
+| [arithmetic.rs](arithmetic.rs) | nothing. `+`, `-`, `*` and their peers are stdlib closures over the `%`-intrinsics; the table here is empty and the file holds shared helpers |
+| [array.rs](array.rs) | `array`, `@array`, `array/new`, `popn`, `insert`, `remove` |
+| [bitwise.rs](bitwise.rs) | `bit/and`, `bit/or`, `bit/xor`, `bit/not`, `bit/shl`, `bit/shr` |
+| [box.rs](box.rs) | `box`, `unbox`, `rebox` |
+| [bytes.rs](bytes.rs) | `bytes`, `@bytes`, `seq->hex`, `slice` |
+| [chan.rs](chan.rs) | `chan`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/try-select`, `chan/wait-ready` (see "Channel select wake protocol" below for the `chan/select` Lisp wrapper) |
+| [comparison.rs](comparison.rs) | `=` (numeric-aware), `identical?` (strict), `hash`. The ordering comparisons are stdlib closures over `%lt`/`%gt`/`%le`/`%ge` |
+| [compile/](compile/mod.rs) | `compile/analyze`, `compile/symbols`, `compile/captures`, `compile/call-graph`, `compile/run-on`, `compile/whole-module`, and the rest of the `compile/*` family |
+| [config.rs](config.rs) | `vm/tier`, `backend?`, `vm/config`, `vm/config-set` |
+| [concurrency.rs](concurrency.rs) | `sys/spawn`, `sys/spawn-vm`, `sys/thread-state`, `sys/thread-id`, `sys/unique`; the spawn worker body is [concurrency/worker.rs](concurrency/worker.rs) |
+| [convert.rs](convert.rs) | `integer`, `float`, `parse-int`, `parse-float`, `string`, `number->string` |
+| [debug.rs](debug.rs) | `debug/print`, `debug/trace`, `debug/memory`, `debug/symbol-count` |
+| [disassembly.rs](disassembly.rs) | `fn/disasm`, `fn/disasm-jit`, `fn/flow`, `vm/list-primitives`, `vm/primitive-meta` |
+| [display.rs](display.rs) | `pp`, `describe`. The output verbs (`print`, `println`, `eprint`, `eprintln`) are stdlib closures over the ports |
+| [fiber_introspect.rs](fiber_introspect.rs) | `fiber/bits`, `fiber/mask`, `fiber/cancel`, `fiber/child`, `fiber/parent`, `fiber/propagate`, `fiber/caps`, `fiber/abort`, `fiber/refuse` |
+| [fibers.rs](fibers.rs) | `fiber/new`, `fiber/resume`, `fiber/emit`, `fiber/status`, `fiber/value`, `fiber/set-fuel`, `fiber/fuel`, `fiber/clear-fuel` |
+| [fileio.rs](fileio.rs) | `file/read`, `file/write`, `file/append`, `file/delete`, `file/delete-dir`, `file/delete-dir-all`, `file/mkdir`, `file/mkdir-all`, `file/mktempdir`, `file/rename`, `file/copy`, `file/size`, `file/ls`, `file/lines`, `file/stat`, `file/lstat` |
+| [format.rs](format.rs) | `string/format` — see [format/](format/AGENTS.md) |
+| [intrinsics.rs](intrinsics.rs) | the `%`-intrinsics: `%add`, `%get`, `%put`, `%has?`, `%first`, `%pop` and the rest. See [intrinsics](../../docs/intrinsics.md) |
+| [introspection.rs](introspection.rs) | `jit?`, `silent?`, `fiber?`, `fn/arity`, `fn/captures`, `fn/errors?`, `fn/bytecode-size`, `fn/gpu-eligible?`, `doc`, `vm/query`, `signals`, `jit/rejections`, `keyword` |
+| [io.rs](io.rs) | `io-request?`, `io-backend?`, `io/backend`, `io/submit`, `io/workers`, `io/reap`, `io/wait`, `io/cancel`, `ev/sleep`, `ev/poll-fd` |
+| [json/](json/AGENTS.md) | `json/parse`, `json/serialize`, `json/pretty` |
+| [list/](list/mod.rs) | `first`, `second`, `rest`, `list`, `length`, `empty?`, `->array`, `->list` |
+| [loading.rs](loading.rs) | `ffi/native`, `ffi/lookup`, `ffi/on-unload`, `ffi/run-teardowns`, `ffi/signature`, `ffi/call`, `ffi/callback`, `ffi/callback-free` |
+| [logic.rs](logic.rs) | `and`, `or` |
+| [lstruct.rs](lstruct.rs) | `@struct`, `get`, `keys`, `values`, `has?` (the `get` body lives in [access.rs](access.rs)) |
+| [math.rs](math.rs) | `math/sqrt`, `math/sin`, `math/cos`, `math/tan`, `math/log`, `math/exp`, `math/pow`, `math/atan2`, `math/pi`, `math/e`, `math/inf`, `math/nan`, and the rest of the `math/*` family |
+| [memory.rs](memory.rs) | `ffi/size`, `ffi/align`, `ffi/malloc`, `ffi/free`, `ffi/read`, `ffi/write`, `ffi/string`, `ffi/struct`, `ffi/array`, `ptr/add`, `ptr/diff`, `ptr/to-int`, `ptr/from-int` |
+| [meta.rs](meta.rs) | `meta/gensym`, `meta/datum->syntax`, `meta/syntax->datum`, the `meta/syntax-*` predicates, `meta/origin`, `squelch`, `attune`, `git`, `fn/git?`, `disgit` |
+| [modules.rs](modules.rs) | `import` |
+| [net.rs](net.rs) | `tcp/listen`, `tcp/accept`, `tcp/connect-ip`, `tcp/shutdown`, `udp/bind`, `udp/send-to`, `udp/recv-from`, `sys/resolve`, `sys/ip?` (`tcp/connect` is a stdlib wrapper over `tcp/connect-ip`) |
+| [package.rs](package.rs) | `elle/version`, `elle/epoch`, `elle/info` |
+| [parameters.rs](parameters.rs) | `parameter` |
+| [path.rs](path.rs) | `path/join`, `path/parent`, `path/filename`, `path/stem`, `path/extension`, `path/with-extension`, `path/normalize`, `path/absolute`, `path/canonicalize`, `path/relative`, `path/components`, `path/absolute?`, `path/relative?`, `path/cwd`, `path/exists?`, `path/file?`, `path/dir?` |
+| [ports.rs](ports.rs) | `port/open`, `port/open-bytes`, `port/close`, `port/stdin`, `port/stdout`, `port/stderr`, `port?`, `port/open?`, `port/set-options`, `port/encoding`, `port/path`, `port/seek`, `port/tell` |
+| [posix.rs](posix.rs) | `os/sig-send`, `os/sig-raise`, `os/sig-watch`, `os/sig-next`, `os/sig-close`, `os/sig-pending`, `os/sig-mask`, `os/sig-watching` — POSIX signal send and receive. Send and raise are gated on the `:os-signal` capability (`SIG_OS_SIGNAL`); the receive primitives are async and yield `:io`. See [posix signals](../../docs/posix-signals.md) |
+| [read.rs](read.rs) | `read`, `read-all` |
+| [sets.rs](sets.rs) | `set`, `@set`, `union`, `intersection`, `difference`, `seq->set`, `string-contains?` |
+| [sort.rs](sort.rs) | `sort` |
+| [stream.rs](stream.rs) | `port/read-line`, `port/read`, `port/read-exact`, `port/read-all`, `port/write`, `port/flush` |
+| [string.rs](string.rs) | `@string`, `string/uppercase`, `string/lowercase`, `string/find`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join`, `string/repeat`, `string/size-of`, `uri-encode` |
+| [structs.rs](structs.rs) | `struct`, `freeze`, `deep-freeze`, `thaw`, `pairs` |
+| [subprocess.rs](subprocess.rs) | `sys/exit`, `sys/trap-exit!`, `sys/halt`, `sys/args`, `sys/argv`, `sys/pid`, `sys/env`, and the `subprocess/*` table — see [subprocess/](subprocess/AGENTS.md) |
+| [time.rs](time.rs) | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
+| [traits.rs](traits.rs) | `with-traits`, `traits`, `trait/method`, `trait/op`, `trait/iterable?` |
+| [types.rs](types.rs) | `type-of`, `ptr?`, `callable?` |
+| [unix.rs](unix.rs) | `unix/listen`, `unix/accept`, `unix/connect`, `unix/shutdown` |
+| [watch.rs](watch.rs) | `watch`, `watch-add`, `watch-remove`, `watch-next`, `watch-close` |
 
-`access.rs` registers nothing of its own. It holds the polymorphic `get` and
-`put` bodies that `lstruct.rs` and `intrinsics.rs` both call, so the two tiers
-cannot drift. `get`, `keys`, `values` and `has?` also read a `subprocess`'s
-closed key set; `put` and `del` refuse one.
+[access.rs](access.rs) registers nothing of its own. It holds the polymorphic
+`get` and `put` bodies that [lstruct.rs](lstruct.rs) and
+[intrinsics.rs](intrinsics.rs) both call, so the two tiers cannot drift.
+`get`, `keys`, `values` and `has?` also read a `subprocess`'s closed key set;
+`put` and `del` refuse one.
 
 
 ## string/format primitive
@@ -165,7 +168,7 @@ named substitution modes: [format/](format/AGENTS.md).
 
 ## string/size-of primitive
 
-**Location:** `src/primitives/string.rs`
+**Location:** [string.rs](string.rs)
 
 **Signature:** `(string/size-of s)`
 
@@ -200,7 +203,7 @@ named substitution modes: [format/](format/AGENTS.md).
 
 ## Sys Primitives
 
-**Location:** `src/primitives/subprocess.rs`
+**Location:** [subprocess.rs](subprocess.rs)
 
 - `sys/args` — Returns user-provided command-line arguments as an immutable
   list of strings: the arguments that follow the source file, `-` or `--`, or
@@ -228,7 +231,7 @@ and the one boundary that checks it: [subprocess/](subprocess/AGENTS.md).
 
 ## Network Primitives
 
-**Location:** `src/primitives/net.rs`, and `src/primitives/unix.rs` for the Unix domain sockets
+**Location:** [net.rs](net.rs), and [unix.rs](unix.rs) for the Unix domain sockets
 
 **TCP primitives:**
 - `tcp/listen addr port` — synchronous, returns listener port. Binds to address:port with `SO_REUSEADDR`, listens with backlog 128.
@@ -251,7 +254,7 @@ and the one boundary that checks it: [subprocess/](subprocess/AGENTS.md).
 
 ## Keyword Argument Helper
 
-**Location:** `src/primitives/kwarg.rs`
+**Location:** [kwarg.rs](kwarg.rs)
 
 **Function:** `extract_keyword_timeout(args: &[Value], start: usize, prim_name: &str) -> Result<Option<Duration>, (SignalBits, Value)>`
 
@@ -261,7 +264,7 @@ Used by network primitives and stream primitives to parse optional timeout argum
 
 ## Port Options Primitive
 
-**Location:** `src/primitives/ports/query.rs`
+**Location:** [ports/query.rs](ports/query.rs)
 
 **Primitive:** `port/set-options port :timeout ms` (or `:timeout nil` to clear)
 
@@ -269,7 +272,7 @@ Sets port-level options. Currently supports `:timeout ms` (non-negative integer 
 
 ## port/seek and port/tell Primitives
 
-**Location:** `src/primitives/ports/query.rs`
+**Location:** [ports/query.rs](ports/query.rs)
 
 ### port/seek
 
@@ -331,7 +334,7 @@ Sets port-level options. Currently supports `:timeout ms` (non-negative integer 
 
 ## squelch Primitive
 
-**Location:** `src/primitives/meta/syntaxops.rs`
+**Location:** [meta/syntaxops.rs](meta/syntaxops.rs)
 
 **Signature:** `(squelch closure :keyword)` or `(squelch closure |:kw1 :kw2|)`
 
@@ -357,7 +360,7 @@ activation ends.
 
 ## meta/origin Primitive
 
-**Location:** `src/primitives/meta/syntaxops.rs`
+**Location:** [meta/syntaxops.rs](meta/syntaxops.rs)
 
 **Signature:** `(meta/origin f)`
 
@@ -395,7 +398,7 @@ activation ends.
 
 ## Channel select wake protocol
 
-**Location:** `src/primitives/chan.rs` and `src/primitives/chan/prims.rs`, with the public wrapper in `stdlib.lisp`.
+**Location:** [chan.rs](chan.rs) and [chan/prims.rs](chan/prims.rs), with the public wrapper in [stdlib.lisp](../stdlib.lisp).
 
 `chan/select` cannot use crossbeam's blocking `Select::select_timeout`: that
 parks the OS thread the fiber scheduler runs on, starving any `ev/spawn`'d
@@ -431,7 +434,7 @@ Three primitives back the Lisp `chan/select`:
   `IoOp::ChanSelectPark(ChanSelectGuardCell)`. The IoRequest's timeout
   flows through to a linked `LinkTimeout` SQE on uring or to the
   thread-pool `poll(2)` timeout.
-- `chan/select` (Lisp wrapper in `stdlib.lisp`) — runs `chan/try-select`
+- `chan/select` (Lisp wrapper in [stdlib.lisp](../stdlib.lisp)) — runs `chan/try-select`
   for the fast path, then loops: compute the remaining deadline,
   short-circuit if exhausted, call `chan/wait-ready`, match its result
   (`:ready` → return `[i v]`; `:disconnected` → return `[:disconnected]`;
@@ -447,7 +450,7 @@ uring.
 
 ## Stream Primitive Timeout Support
 
-**Location:** `src/primitives/stream.rs`
+**Location:** [stream.rs](stream.rs)
 
 Every stream primitive takes an optional `:timeout ms` keyword argument:
 - `port/read-line port` or `port/read-line port :timeout ms`

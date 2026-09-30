@@ -37,7 +37,7 @@ heap and region explicitly through `arena`.
 | [regionstore/pointer.rs](regionstore/pointer.rs) | Pointer → region classification: the ownership-validated page-base walk behind every runtime RC decision |
 | [regionstore/introspect.rs](regionstore/introspect.rs) | Read-only counts, byte totals, cross-ref and edge dumps behind the `arena/*` diagnostics and the free-time equivalence oracle |
 | [regionstore/free.rs](regionstore/free.rs) | `free_runtime_region_pages` / `free_region_group` → the four-phase `free_region_set`: subtree / set drop over `owned_children`, frontier from the recorded `outgoing` table, and the `#[cfg(debug_assertions)]` edge-table equivalence oracle |
-| [regionstore/rescue.rs](regionstore/rescue.rs) | The drop-time rescue: a member still referenced from outside the dying subtree returns to `Counted`, with its own subtree, instead of being torn down |
+| [regionstore/free/rescue.rs](regionstore/free/rescue.rs) | The drop-time rescue: a member still referenced from outside the dying subtree returns to `Counted`, with its own subtree, instead of being torn down |
 | [regionstore/mintscope.rs](regionstore/mintscope.rs) | closed allocation-scope mint log (macro expansion): `begin_mint_log` / `reclaim_mint_scope` RC-balance the scratch DAG by `rc − in_degree` (an `Owned` survivor is left to its owner's drop) |
 | [regionstore/counters.rs](regionstore/counters.rs) | The reclamation counters behind the `arena/*` frees, adopts, rescues, extracts, reparents and owned gauges |
 | [regionpool.rs](regionpool.rs) | `RegionPool`: dual-ended pages, object and data cursors, page claim and release |

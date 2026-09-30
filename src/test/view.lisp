@@ -127,40 +127,51 @@
 
 # ── what the run cost each heap (docs/test-gauges.md) ─────────────────
 # A leak per compiled file used to reach us as an OOM kill and a batch size,
-# with nothing naming the file. These lines are that number: the run's totals,
-# then the files that grew the runner's heap most.
+# with nothing naming the file. These lines are that number, one block per
+# heap: the run's totals, then the files that grew that heap most.
 
-# How many files the growers list names.
+# How many files each growers list names.
 (def gauge-top 5)
 
-# The gauge the list is ranked by. A region is the unit the corpus leak was
+# The gauge the lists are ranked by. A region is the unit the corpus leak was
 # measured in, and the one a per-file leak moves first.
 (def gauge-rank "regions")
+
+# The heaps a run records, in the order the summary prints them.
+(def gauge-heaps ["runner" "test"])
+
+# A row's heap. A store written before the heap column existed holds runner
+# rows alone, and they read NULL there.
+(def gauge-heap-sql "coalesce(heap, 'runner')")
 
 (defn signed [n]
   "A delta with its sign always written, so a flat window reads as a
    measurement taken rather than as one missing."
   (if (< n 0) (string n) (string "+" n)))
 
-# One row per file, one `sum(CASE …)` column per gauge named for that gauge.
-# Built from the gauge list, so a gauge added there arrives here already.
+# One row per file of one heap, one `sum(CASE …)` column per gauge named for
+# that gauge. Built from the gauge list, so a gauge added there arrives here
+# already. The names are quoted because a gauge name carries hyphens.
 (defn gauge-growers-sql []
   (string "SELECT file AS file, "
           (string/join (map (fn [k]
                               (string "sum(CASE WHEN kind = '" k
-                                      "' THEN delta END) AS " k)) (gauge-kinds))
-                       ", ")
-          " FROM gauge WHERE run_id = ?1 GROUP BY file ORDER BY " gauge-rank
-          " DESC LIMIT " gauge-top))
+                                      "' THEN delta END) AS \"" k "\""))
+                            (gauge-kinds)) ", ")
+          " FROM gauge WHERE run_id = ?1 AND " gauge-heap-sql
+          " = ?2 GROUP BY file ORDER BY \"" gauge-rank "\" DESC LIMIT "
+          gauge-top))
 
-# The run's total on one gauge, over every file it processed.
-(defn gauge-total [conn run-id kind]
+# The run's total on one gauge of one heap, over every file it processed.
+(defn gauge-total [conn run-id heap kind]
   (get (get (sqlite:query conn
-                          "SELECT coalesce(sum(delta), 0) AS d FROM gauge WHERE run_id = ?1 AND kind = ?2"
-                          [run-id kind]) 0) :d))
+                          (string "SELECT coalesce(sum(delta), 0) AS d FROM gauge WHERE run_id = ?1 AND "
+                                  gauge-heap-sql " = ?2 AND kind = ?3")
+                          [run-id heap kind]) 0) :d))
 
-(defn render-gauge-totals [conn run-id]
-  (string/join (map (fn [k] (string k " " (signed (gauge-total conn run-id k))))
+(defn render-gauge-totals [conn run-id heap]
+  (string/join (map (fn [k]
+                      (string k " " (signed (gauge-total conn run-id heap k))))
                     (gauge-kinds)) " · "))
 
 # One grower's deltas, in gauge order. A gauge the pivot left NULL reads 0.
@@ -171,11 +182,12 @@
                     (gauge-kinds)) "  "))
 
 (defn print-gauges [conn run-id]
-  (let [rows (sqlite:query conn (gauge-growers-sql) [run-id])]
-    (when (not (empty? rows))
-      (eprintln "runner heap · " (render-gauge-totals conn run-id))
-      (each r in rows
-        (eprintln "  " (render-gauge-row r) "  " (get r :file)))))
+  (each heap in gauge-heaps
+    (let [rows (sqlite:query conn (gauge-growers-sql) [run-id heap])]
+      (when (not (empty? rows))
+        (eprintln heap " heap · " (render-gauge-totals conn run-id heap))
+        (each r in rows
+          (eprintln "  " (render-gauge-row r) "  " (get r :file))))))
   nil)
 
 # Tally line + the problem rows (only when there are any). Tallies are computed
