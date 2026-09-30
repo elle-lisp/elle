@@ -128,4 +128,65 @@
 (assert (= bare:half 0) "half defaults to 0 when the line omits it")
 (assert (nil? bare:verdict) "and a line nobody judged carries no verdict")
 
+# ── the re-pin: a bound's token moves, and nothing else in the file ──
+# The counter-factual: a re-pin that rewrote the row's line would drop the
+# comment above it and undo the wrapping `elle fmt` gave a long row, so the
+# rewrite scans for the row's brackets and replaces one token.
+(def rp ((import "std/ratchet/repin")))
+
+(assert (= (rp:write-number 42.0 0) "42") "a count is the integer it is")
+(assert (= (rp:write-number 42 0) "42") "whether it arrived as one or not")
+(assert (= (rp:write-number 1.31234 0.1) "1.31")
+        "a rate is three significant figures")
+(assert (= (rp:write-number 0.047512 0.001) "0.0475") "below one as well")
+(assert (= (rp:write-number 1234.5 1) "1230") "and above a thousand")
+(assert (= (rp:write-number 0.0 0.03) "0") "a rate of nothing is 0")
+(assert (= (rp:write-number 2.0 0.03) "2") "and an integral rate drops its .0")
+
+(def ledger-text
+  (string "(elle/epoch 13)\n" "# a comment that must survive\n"
+          "(producer \"p\")\n" "[\"answer\" :count 43]\n" "[\"long subject\"\n"
+          " :count\n" " 7 :note \"wrapped by fmt\"]\n"
+          "[\"odd \\\"q\\\" ]\" :count 1]\n"))
+
+(def moved (rp:move ledger-text "answer" :count "42"))
+(assert (string/contains? moved "[\"answer\" :count 42]")
+        "the pin's token is replaced")
+(assert (string/contains? moved "# a comment that must survive\n")
+        "the comment above the row survives")
+(assert (string/contains? moved
+                          "[\"long subject\"\n :count\n 7 :note \"wrapped by fmt\"]")
+        "and every other row is byte for byte what it was")
+
+(def wrapped (rp:move ledger-text "long subject" :count "9"))
+(assert (string/contains? wrapped
+                          "[\"long subject\"\n :count\n 9 :note \"wrapped by fmt\"]")
+        "a wrapped row keeps its wrapping and moves its bound")
+
+(def odd (rp:move ledger-text "odd \"q\" ]" :count "2"))
+(assert (string/contains? odd "[\"odd \\\"q\\\" ]\" :count 2]")
+        "a subject holding a quote and a bracket is still found by its string")
+
+(assert (nil? (rp:move ledger-text "nobody" :count "1")) "no row, no move")
+
+(def adopted (rp:adopt ledger-text "[\"new\" :count 5]"))
+(assert (string/ends-with? adopted
+                           "[\"odd \\\"q\\\" ]\" :count 1]\n[\"new\" :count 5]\n")
+        "an adopted row is appended after the last row, on a line of its own")
+
+(assert (= (rp:row-for {:subject "x" :axis :count :value 42 :half 0})
+           "[\"x\" :count 42]")
+        "an unledgered reading becomes a pin at its value")
+(assert (= (rp:row-for {:subject "objects gauge (live-growth)"
+                        :axis :objects
+                        :value 1.0
+                        :half 0.0
+                        :class :growth
+                        :floor 0.5})
+           "[\"objects gauge (live-growth)\" :objects :floor 0.5 :class :growth]")
+        "and a growth reading becomes a growth floor at the floor it named")
+(assert (= (rp:row-for {:subject "say \"hi\"" :axis :ms :value 1.2345 :half 0.2})
+           "[\"say \\\"hi\\\"\" :ms 1.23]")
+        "the subject is written as a string literal, the rate to three figures")
+
 (println "ratchet: ok")
