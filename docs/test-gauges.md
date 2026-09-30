@@ -119,8 +119,8 @@ was measured and did not move.
 A delta belongs to a file rather than to a result. A `result` column
 would copy one runner number onto every row of the file, and a test-heap sum
 covers every tier of every form at once. A `measurement` row is the wrong home
-too: it carries a dashboard's verdict off the channel of an isolated child, and
-a per-file delta has no verdict to give.
+too: it carries a reading a producer printed and the verdict it earned, and a
+per-file delta has neither a producer nor a row to be judged by.
 
 ## The summary names the top growers
 

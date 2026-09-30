@@ -18,8 +18,9 @@ How a run executes is [test-runner](test-runner.md); where it is stored is
 > per-form analysis columns (`caps`, `touches`, `signal`), the on-disk CAS for
 > stdout/stderr, each result's wall time and CPU time (and an isolated child's peak
 > resident set), run honesty (a killed run reads `DID NOT COMPLETE`), `:gated`
-> skips, child-process isolation with the measurement channel it carries, the
-> merge of another store's runs, and the
+> skips, child-process isolation, the readings every form prints judged
+> against the ledger ([ratchet](ratchet.md)), `--repin`, the merge of another
+> store's runs, and the
 > `--query`/`--summary`/`--reset`/`--promote`/`-e`/`--timeout`/`--wide`/
 > `--wide-timeout`/`--budget`/`--corpus`/`--db`/`--isolate`/`--host`/`--import`
 > flags.
@@ -127,6 +128,7 @@ elle test [paths...]            # run each path, write DB
   --wide PATTERN                # a path substring whose forms take --wide-timeout (repeats)
   --wide-timeout MS             # the budget a wide path's forms get (default: --timeout)
   --budget                      # print each named path's budget in ms, then exit; no run
+  --repin                       # after the run, move the ledger to what it read (see below)
   --prune POLICY                # explicit history pruning (e.g. --prune adhoc)
   -N                            # stop after N failures (-1 = fail-fast); default: run to completion
 ```
@@ -172,6 +174,16 @@ intact, and copies the CAS bytes its assets name
 The import records no run of its own and runs no test, so it exits zero on a
 store whose runs failed. What those runs say is then a query, exactly as for a
 run recorded here.
+
+### Moving the ledger
+
+`--repin` runs the selection as usual, then edits the ledgers under
+`tests/ledger` to what the run read ([ratchet](ratchet.md)). A `stale` row
+takes its new reading, and an `unledgered` reading becomes a row. A
+`regression` is refused and left for a hand edit. The run's rows keep the
+verdicts they earned, so the store says what the ledger looked like before
+the move, and the exit code is the run's gate as it was. The tool prints
+each row it moved.
 
 ### Execution and completion
 

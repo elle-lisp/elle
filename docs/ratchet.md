@@ -6,9 +6,9 @@ One library measures, one committed ledger holds every bound, and `elle test`
 judges, records and re-pins; nothing else carries a number.
 
 This document is the specification. The instrument, the ledger and the
-direct-run gate are built, as [the guide](../lib/ratchet.md) shows. The
-runner's side — the rows, the `missing` gate, the summary and `--repin` — is
-proposed, and so is every producer past the guide.
+direct-run gate are built, as [the guide](../lib/ratchet.md) shows, and so is
+the runner's side: the rows, the `missing` gate, the summary and `--repin`.
+Every producer past the guide and the corpus fixture is proposed.
 
 ## What a ratchet is
 
@@ -213,11 +213,16 @@ CREATE TABLE measurement (
   verdict TEXT);                         -- ok|regression|stale|unledgered|missing|void
 ```
 
-After the last file it walks the ledger. A row whose producer ran to a `pass`
-and printed no reading for it becomes a `missing` row against that result. A
-producer that gated itself out has skipped, not failed to report, and its rows
-are left alone. A run with a selection can only hold the producers it ran, so
-the full gate is a `selection IS NULL` run, as it is for every other verdict.
+After each result lands as a `pass` it walks that file's ledger. A row the
+result printed no reading for becomes a `missing` row against it. A producer
+that gated itself out has skipped, not failed to report, and its rows are
+left alone. A run with a selection can only hold the producers it ran, so the
+full gate is a `selection IS NULL` run, as it is for every other verdict.
+
+A producer with no ledger file is recorded and not judged: its rows carry no
+verdict, and the gate ignores them. That is how a dashboard keeps its history
+in the table before its ledger exists, and the first row written for it is
+what starts the gate.
 
 The summary counts readings by verdict and lists every one that is not `ok`:
 
