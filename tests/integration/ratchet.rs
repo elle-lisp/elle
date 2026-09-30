@@ -445,6 +445,7 @@ const PRODUCERS: &[&str] = &[
     "tests/impl/oracle.lisp",
     "tests/impl/plumb.lisp",
     "tests/impl/h2-stress-scoped.lisp",
+    "tests/impl/region-page-recycle.lisp",
 ];
 
 #[test]
