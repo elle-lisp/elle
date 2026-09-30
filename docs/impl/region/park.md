@@ -68,7 +68,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   `decref_point` inside the emitting lambda), and `lower_emit` mints one there, an
   `IncrefValueRegion` before the suspend and a `DecrefValueRegion` first in the continuation.
   The copy the release loads is parked in a local slot of its own, the operand stack being
-  what survives a suspend. Unresolvable counts as borrowed: minting where the body already
+  what survives a suspend. The release stamps that slot nil, and the frame's release table
+  names it, so the walk runs it for a park an abort or a squelch boundary ends
+  ([unwind.md](unwind.md)). Unresolvable counts as borrowed: minting where the body already
   owns a reference strands one per abandoned park, a bounded leak, while missing one frees a
   live value. Pinned by [region-fiber-yield-borrow-uaf.lisp](../../../tests/impl/region-fiber-yield-borrow-uaf.lisp). A TERMINAL
   `:error` emit needs no compiler mint for the same invariant: its `EmitEscape` retain is

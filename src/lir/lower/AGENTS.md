@@ -1,6 +1,6 @@
 # lir/lower
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-29 -->
 
 HIR to LIR lowering: explicit control flow, binding slot allocation, capture cells, and region RC instruction emission.
 
@@ -139,7 +139,10 @@ region obligations ride on it:
 1. A suspending emit whose payload the body releases nowhere
    (`RegionInfo::borrowed_emit_payloads`) retains the payload before the
    terminator and releases it first thing in the resume block, through a slot of
-   its own ([docs/impl/region/park.md](../../../docs/impl/region/park.md)).
+   its own ([docs/impl/region/park.md](../../../docs/impl/region/park.md)). The
+   release stamps the slot nil and records it in `frame_release_slots`, so the
+   walk over an abandoned park runs it
+   ([unwind.md](../../../docs/impl/region/unwind.md)).
 2. The resume value arrives uncounted, so the lowerer mints the reference the
    body holds it by (`IncrefValueRegion`) unless the frame's return transfer
    already funds one (`RegionInfo::unfunded_resume_values`;
@@ -150,8 +153,9 @@ A **dynamic** emit, whose first argument is not a literal keyword set, has no
 `Emit` terminator: it lowers as an ordinary call to the `emit` primitive. In
 non-tail position `lower_call` ([control/call.rs](control/call.rs)) takes the
 payload's retain at the argument and releases it after the call, where the
-resume lands. In tail position the borrowed-argument retain already is that
-reference ([park.md](../../../docs/impl/region/park.md)).
+resume lands, with the same stamp and record. In tail position the
+borrowed-argument retain already is that reference
+([park.md](../../../docs/impl/region/park.md)).
 
 ## Block/Break lowering
 
