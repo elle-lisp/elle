@@ -267,7 +267,7 @@
       (protect (file/delete sink))))
   nil)
 
-# ── the runner's own gauges (docs/test-store.md § The runner's own gauges) ──
+# ── the heap gauges (docs/test-gauges.md) ──────────────────────────
 # Three gauges of the runner's OWN heap, as [kind reader]. Each primitive is
 # Immediate, so a reading allocates nothing and cannot move the number it
 # reports. One list, because the sampling here and the growers query in the

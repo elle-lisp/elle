@@ -227,7 +227,7 @@
 
 # What the runner's own heap reads before the first file. Every later reading
 # is taken at a file boundary and charged to the file that boundary closes
-# (docs/test-store.md).
+# (docs/test-gauges.md).
 (def gauge-prev (gauge-baseline))
 
 # Run every file/eval for its side effect: each writes its result rows to the DB.

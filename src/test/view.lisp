@@ -125,7 +125,7 @@
                   "  " (get m :axis) "  " (get m :value) " " (get m :unit)))))
   nil)
 
-# ── what the run cost the runner (docs/test-store.md) ──
+# ── what the run cost each heap (docs/test-gauges.md) ─────────────────
 # A leak per compiled file used to reach us as an OOM kill and a batch size,
 # with nothing naming the file. These lines are that number: the run's totals,
 # then the files that grew the runner's heap most.
