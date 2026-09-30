@@ -1,8 +1,10 @@
-//! WASM tiered compilation entry points.
+// audited: 2026-09-29
+//! Where a closure call meets the tiered WASM backend: the call count, the compile, and the dispatch.
 //!
-//! When `--wasm=N`, hot closures are compiled to per-closure WASM
-//! modules and dispatched through Wasmtime. This mirrors the JIT path
-//! in `jit_entry.rs` but targets WASM instead of Cranelift.
+//! docs/impl/wasm.md
+//!
+//! Under `--wasm=N`, a hot closure is compiled to a module of its own and
+//! dispatched through Wasmtime. The shape mirrors `jit_entry.rs`.
 
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
 
@@ -32,14 +34,17 @@ impl VM {
             return Some(self.run_wasm(bytecode_ptr, closure, args, self_val));
         }
 
-        // Check if hot enough to compile
-        // (call count already incremented by try_jit_call or record_closure_call)
-        let count = self
-            .closure_call_counts
-            .get(&bytecode_ptr)
-            .copied()
-            .unwrap_or(0);
-        if count < self.runtime_config.jit.threshold() {
+        // Count this call, and compile once the closure has run N-1 times before
+        // it, so under `--wasm=N` its Nth call is the first on the tier
+        // (docs/impl/wasm.md). The count is the tier's own: a `wasm` build has
+        // no JIT tier to keep one.
+        let crate::config::WasmPolicy::Lazy { threshold } = self.runtime_config.wasm else {
+            return None;
+        };
+        let count = self.closure_call_counts.entry(bytecode_ptr).or_insert(0);
+        let earlier_calls = *count;
+        *count += 1;
+        if earlier_calls < threshold {
             return None;
         }
 
