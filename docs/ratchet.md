@@ -74,10 +74,10 @@ A measurement is a fact. A bound is a claim. The two never live in one file.
 
 | Part | Where | What it owns |
 |------|-------|--------------|
-| The instrument | `lib/ratchet.lisp` and its submodules | gauges, the estimator, drives, the reading line, the judge |
+| The instrument | `lib/ratchet.lisp` and its submodules | gauges, the estimator, drives, the reading line, the judge, the re-pin's rewrite |
 | The reading | one line on stdout | subject, axis, value, unit, uncertainty |
 | The ledger | `tests/ledger/*.lisp`, committed | one row per (subject, axis): the bound, its kind, its class |
-| The runner | `src/test/ledger.lisp` | reading every line back, the completeness gate, history, `--repin` |
+| The runner | `src/test/ledger.lisp` and `src/test/repin.lisp` | reading every line back, the completeness gate, history, `--repin` |
 
 A producer imports the instrument, drives its shapes, and calls `report`. The
 instrument judges each reading against the ledger as it lands, prints it, and
@@ -243,6 +243,15 @@ becomes a row. It refuses a `regression`. A bound moves the worse way by a hand
 edit, which the pull request's diff then shows beside the change that needed
 it. The tool prints each row it moved. A reading it re-pins is written to three
 significant figures for a rate and as the integer it is for a count.
+
+A subject read on several tiers moves to the worst of its readings, so the
+new pin holds on every tier. An `unledgered` reading of a growth class, which
+is the instrument's own live-growth row, is adopted as a growth floor at the
+floor the instrument named; every other `unledgered` reading is adopted as a
+pin at its value. The rewrite is the instrument's, in
+[repin.lisp](../lib/ratchet/repin.lisp): it scans the ledger's text for the
+row's brackets, replaces the bound's token, and appends an adopted row after
+the last one.
 
 The `ELLE_TEST_MEASUREMENTS` channel, `measurement-sink`, `measurement-env`
 and the `closed`/`open`/`growth` verdict vocabulary are deleted. The runner
