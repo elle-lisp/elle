@@ -1,6 +1,6 @@
 // audited: 2026-09-29
-// What each suite target runs: the language suite on a build with no flag, the
-// implementation suite on the rig, and each rig profile over the files it names.
+// What each suite target runs: the language suite with no flag, the
+// implementation suite on the rig, and each profile's files.
 //
 // docs/testing.md
 // rig/overview.md
@@ -205,7 +205,8 @@ fn smoke_wasm_runs_the_implementation_suite_on_the_wasm_rig() {
 
 // The second wasm rig pass compiles each file whole to one module, less the
 // files `WASM_SKIP` names. The three files the test names pin invariants only
-// the full-module tier has to uphold (docs/impl/wasm.md, src/wasm/mod.rs).
+// the full-module tier has to uphold (docs/impl/wasm.md, src/wasm/mod.rs,
+// src/wasm/tests/toplevel.rs).
 //
 // The counter-factual: a `smoke-wasm` that runs only the language suite on the
 // full-module tier leaves every one of those files off the tier it pins, and

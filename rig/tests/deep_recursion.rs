@@ -1,6 +1,6 @@
 // audited: 2026-09-29
-// A recursion 100,000 deep completes with the JIT off and with every function
-// compiled on its first call, and the depth cap halts a runaway one in both.
+// A 100,000-deep recursion completes interpreted and compiled, and the depth cap
+// halts a runaway one in both.
 // docs/impl/vm.md
 
 mod common;

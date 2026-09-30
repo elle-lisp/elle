@@ -1,8 +1,4 @@
 // audited: 2026-09-29
-#![allow(clippy::result_large_err)]
-
-//! # Elle
-//!
 //! The Elle library: the compiler pipeline, the VM and its runtime, and the entry points an embedder or a binary drives.
 //!
 //! docs/embedding.md
@@ -11,7 +7,7 @@
 //!
 //! The recommended embedding entry point is [`Runtime`](runtime::Runtime): it
 //! installs the contexts, registers primitives, loads the stdlib, and — on drop
-//! — runs the principled, RC-driven process-teardown sweep (docs/impl/region/rules.md),
+//! — runs the RC-driven process-teardown sweep (docs/impl/region/rules.md),
 //! the same lifecycle `elle foo.lisp` and the REPL use through [`program`].
 //!
 //! ```
@@ -62,6 +58,8 @@
 //! Emitter → Bytecode → VM. The VM is stack-based for operands and
 //! register-addressed for locals; the JIT, MLIR and WebAssembly tiers compile
 //! from the LIR (AGENTS.md).
+
+#![allow(clippy::result_large_err)]
 
 // No custom global allocator. Arena pages use mmap directly (bypassing
 // the global allocator entirely), and the remaining allocations (tracking
