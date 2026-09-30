@@ -5,9 +5,10 @@
 One library measures, one committed ledger holds every bound, and `elle test`
 judges, records and re-pins; nothing else carries a number.
 
-This document is the specification. Nothing in it is built yet: every module,
-row, flag and verdict named below is proposed, and a name it marks as existing
-is one the tree has today.
+This document is the specification. The instrument, the ledger and the
+direct-run gate are built, as [the guide](../lib/ratchet.md) shows. The
+runner's side — the rows, the `missing` gate, the summary and `--repin` — is
+proposed, and so is every producer past the guide.
 
 ## What a ratchet is
 
