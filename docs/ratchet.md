@@ -8,8 +8,8 @@ judges, records and re-pins; nothing else carries a number.
 This document is the specification. The instrument, the ledger and the
 direct-run gate are built, as [the guide](../lib/ratchet.md) shows, and so is
 the runner's side: the rows, the `missing` gate, the summary and `--repin`.
-The two leak dashboards and the first residue test are producers with ledgers
-of their own. Every producer past those is proposed.
+The two leak dashboards and the first two residue tests are producers with
+ledgers of their own. Every producer past those is proposed.
 
 ## What a ratchet is
 
@@ -19,17 +19,19 @@ ceiling on the objects a request leaves behind. A canary pins the allocations a
 loop makes. Each pin is the reading the tree gave on the day somebody accepted
 it, and a change that moves the reading the wrong way fails.
 
-Three producers are on the ratchet: the leak dashboards
+Four producers are on the ratchet: the leak dashboards
 [oracle.lisp](../tests/impl/oracle.lisp) and
 [plumb.lisp](../tests/impl/plumb.lisp), over
 [tests/ledger/oracle.lisp](../tests/ledger/oracle.lisp) and
-[tests/ledger/plumb.lisp](../tests/ledger/plumb.lisp), and the residue test
-[h2-stress-scoped.lisp](../tests/impl/h2-stress-scoped.lisp) over
-[tests/ledger/h2-stress-scoped.lisp](../tests/ledger/h2-stress-scoped.lisp).
-The tree still holds the pattern by hand in at least eight places:
+[tests/ledger/plumb.lisp](../tests/ledger/plumb.lisp), and the residue tests
+[h2-stress-scoped.lisp](../tests/impl/h2-stress-scoped.lisp) and
+[region-page-recycle.lisp](../tests/impl/region-page-recycle.lisp), over
+[tests/ledger/h2-stress-scoped.lisp](../tests/ledger/h2-stress-scoped.lisp)
+and
+[tests/ledger/region-page-recycle.lisp](../tests/ledger/region-page-recycle.lisp).
+The tree still holds the pattern by hand in at least seven places:
 
-- [region-page-recycle.lisp](../tests/impl/region-page-recycle.lisp),
-  [region-macro-id-recycle.lisp](../tests/impl/region-macro-id-recycle.lisp),
+- [region-macro-id-recycle.lisp](../tests/impl/region-macro-id-recycle.lisp),
   [region-collector-arg-move.lisp](../tests/impl/region-collector-arg-move.lisp)
   and [resource.lisp](../tests/impl/resource.lisp), each with a window, a
   gauge-live gate and a ceiling of its own.
@@ -341,6 +343,12 @@ reads differently on one of those is a tiered row.
   and the region count. A residue that grows faster than the request count
   reads differently at the two, and a one-off reads as a fraction that
   shrinks with the count. Its ledger pins all four readings at 0.
+- [region-page-recycle.lisp](../tests/impl/region-page-recycle.lisp) drives
+  each call shape through `rate` on the page gauge, and the `(+ a b)` shape on
+  the byte gauge as well, the reading that says a loop's pages are recycled
+  rather than accumulated. The estimator's discarded first block is the
+  warm-up the file's window helper ran by hand. Its ledger pins the page count
+  each shape claims per call, and the byte growth at 0.
 
 **The runner**, as above.
 
