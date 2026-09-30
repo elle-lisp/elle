@@ -166,8 +166,9 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   `decref_reaches_zero`
   ([refcount.rs](../../../src/value/fiberheap/regionstore/refcount.rs)) is a
   `DecrefRegion` for a region never allocated or already freed.
-- `--dump=stats`: prints exit-time statistics, including a **page-claim size
-  histogram** — one `[stats] page-claim size=<bytes> claims=<n> bytes=<n>` line
+- `--dump=stats`: prints exit-time statistics: the reclamation counters summed
+  over the process (below), and a **page-claim size histogram** — one
+  `[stats] page-claim size=<bytes> claims=<n> bytes=<n>` line
   per size class (`size=0` = the oversized one-off bucket). It measures how often
   geometric page growth (the base page doubling up to 4 MiB) escalates past
   `base_page()` — the precondition for the only place region attribution can be
@@ -187,9 +188,9 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
 
 The gauges above say how much a heap holds. These counters say how its regions
 end: freed when a count reaches zero, dropped with an owner, rescued, extracted,
-or still owned. Each is a primitive that answers one integer for the heap it
-runs on. Each is Immediate, so a reading allocates nothing and cannot move the
-number it reports.
+or still owned. They also say what each freed region held. Each is a primitive
+that answers one integer for the heap it runs on. Each is Immediate, so a call
+allocates nothing and cannot move the number it reports.
 
 Every counter but `arena/owned` starts at 0 when the heap is made and never goes
 down. A heap's teardown frees what is left without counting it, because a
@@ -200,6 +201,11 @@ teardown is not a reclamation the program's code caused.
 | `arena/region-frees` | regions freed, by a count reaching zero, an owner's drop, or a group free |
 | `arena/page-frees` | the pages those regions held |
 | `arena/object-frees` | the objects those regions held |
+| `arena/one-page-frees` | the freed regions that held one page or none |
+| `arena/empty-frees` | the freed regions that held no object |
+| `arena/one-object-frees` | the freed regions that held one object |
+| `arena/few-object-frees` | the freed regions that held two to four objects |
+| `arena/many-object-frees` | the freed regions that held five objects or more |
 | `arena/adopts` | adoptions: a counted region made a member of an owner's subtree |
 | `arena/adopts-into-empty` | adoptions into an owner that held no object: an owner node, or a region nothing had allocated into |
 | `arena/owned-frees` | owned regions freed by their owner's drop |
@@ -245,11 +251,41 @@ frees the adopted value with it:
 (assert (= (arena/owned) owned) "and nothing is left owned")
 ```
 
+**The size counters close too.** Every freed region lands in exactly one object
+bucket, so on any heap:
+
+```lisp
+(assert (= (arena/region-frees)
+           (+ (arena/empty-frees) (arena/one-object-frees)
+              (arena/few-object-frees) (arena/many-object-frees)))
+        "every freed region lands in exactly one object bucket")
+(assert (<= (arena/one-page-frees) (arena/region-frees))
+        "a one-page free is a region free")
+```
+
+The size counters are the headroom that [merging](merging.md) and adoption work
+against. Every region claims pages of its own, so a region freed holding one
+page and one object paid a page for that object. Merging and adoption both put
+more objects in fewer regions. For the same program, a change that does either
+shows as `region-frees`, `one-page-frees` and `page-frees` falling while
+`object-frees` holds.
+
 An owned region that dies with its owner would delay nothing if it lived in its
 owner's pages. So `owned-free-pages` bounds the pages such a colocation could
 save, and `adopts-into-empty` counts the adoptions whose owner has no page to
 share. The `elle test` runner reads every counter on its own heap and on the
 heaps its test code runs on ([test-gauges](../../test-gauges.md)).
+
+**`--dump=stats` reports every counter for the whole process.** Once any
+counter moves, the process prints them all at exit, summed over every heap it
+ran: the main heap and each worker thread's. Under `elle test`, that is the
+runner's heap and every test worker's. Each counter is one
+`[stats] reclaim <name>=<n>` line, in the table's order. The last line is
+`owned`: the adoptions that had not ended at exit,
+`adopts - owned-frees - rescues - extracts`. The fields are stable, so a
+batched suite run sums them across processes. Run any program under
+`--dump=stats` before a change and after it, and the report shows the change's
+win with no change to the program.
 
 ## Validation
 

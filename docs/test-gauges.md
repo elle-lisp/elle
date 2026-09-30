@@ -26,6 +26,11 @@ in this order:
 | `region-frees` | `arena/region-frees` |
 | `page-frees` | `arena/page-frees` |
 | `object-frees` | `arena/object-frees` |
+| `one-page-frees` | `arena/one-page-frees` |
+| `empty-frees` | `arena/empty-frees` |
+| `one-object-frees` | `arena/one-object-frees` |
+| `few-object-frees` | `arena/few-object-frees` |
+| `many-object-frees` | `arena/many-object-frees` |
 | `adopts` | `arena/adopts` |
 | `adopts-into-empty` | `arena/adopts-into-empty` |
 | `owned` | `arena/owned` |
