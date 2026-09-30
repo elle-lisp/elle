@@ -1,6 +1,6 @@
 // audited: 2026-09-30
-// A producer judges every reading against the ledger, and a direct run is the
-// whole gate for that producer.
+// A producer judges every reading against the ledger, a direct run is the
+// whole gate for that producer, and a row belongs to a build.
 //
 // docs/ratchet.md
 //
@@ -10,7 +10,7 @@
 // more is a silence nobody can see. These drive a scratch producer against a
 // scratch ledger and read the verdicts off its exit status and its lines.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Output};
 
 fn elle_binary() -> &'static str {
@@ -85,7 +85,30 @@ fn lines(out: &Output) -> Vec<String> {
         .collect()
 }
 
+/// `elle -e FORM`, from the repository root.
+fn eval(form: &str) -> Output {
+    Command::new(elle_binary())
+        .args(["-e", form])
+        .current_dir(repo_root())
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .expect("run elle -e")
+}
+
+/// The instrument judging as the build it runs on.
 const IMPORT: &str = "(def r ((import \"std/ratchet\")))\n";
+
+/// The reference build's key: the default build on Linux x86_64. A row with
+/// no `:build` belongs to it, and only there is a pin two-sided.
+const REFERENCE: &str = "jit-uring-linux-x86_64";
+
+/// The instrument judging as `build`, whatever box runs the test.
+fn judging_as(build: &str) -> String {
+    format!("(def r ((import \"std/ratchet\") :build \"{build}\"))\n")
+}
+
+/// A build no box is, so the instrument judges away from every row's home.
+const ELSEWHERE: &str = "interp-pool-plan9-mips";
 
 #[test]
 fn a_reading_within_its_pin_passes_and_prints_its_line() {
@@ -141,14 +164,16 @@ fn a_reading_past_its_pin_the_worse_way_is_a_regression() {
 }
 
 #[test]
-fn a_reading_past_its_pin_the_better_way_is_stale() {
+fn a_reading_past_its_pin_the_better_way_is_stale_at_home() {
     // The trap this pins: a pin left loose is a ratchet that slipped. A later
     // regression back to 43 would pass a pin of 43, so the loose pin fails
-    // until it is moved.
+    // until it is moved. The row belongs to the reference build, and the
+    // stale side is judged there alone, so the instrument is told to judge
+    // as that build: on a macOS or an AArch64 box the same reading is ok.
     let b = Bench::new(
         "better",
         "[\"answer\" :count 43]",
-        &format!("{IMPORT}(r:read \"answer\" :count 42)\n(r:report)\n"),
+        &format!("{}(r:read \"answer\" :count 42)\n(r:report)\n", judging_as(REFERENCE)),
     );
     let out = b.run();
     assert!(
@@ -160,6 +185,190 @@ fn a_reading_past_its_pin_the_better_way_is_stale() {
     assert!(
         t.contains("stale") && t.contains("answer"),
         "the failure says stale and names the subject:\n{t}"
+    );
+}
+
+#[test]
+fn a_better_reading_on_another_build_passes_the_pin() {
+    // The counter-factual: the thread-pool and MLIR rigs run every producer
+    // in CI, and a pin two-sided everywhere fails the build that reclaims
+    // more. Away from the row's build the pin is what the ceilings were.
+    let b = Bench::new(
+        "away-better",
+        "[\"answer\" :count 43]",
+        &format!("{}(r:read \"answer\" :count 42)\n(r:report)\n", judging_as(ELSEWHERE)),
+    );
+    let out = b.run();
+    assert!(
+        out.status.success(),
+        "42 against another build's pin of 43 passes:\n{}",
+        text(&out)
+    );
+    let printed = lines(&out);
+    assert!(
+        printed[0].contains("\"bound\":43") && printed[0].contains("\"verdict\":\"ok\""),
+        "the line names the pin it passed:\n{}",
+        printed[0]
+    );
+}
+
+#[test]
+fn a_worse_reading_on_another_build_still_fails_the_pin() {
+    let b = Bench::new(
+        "away-worse",
+        "[\"answer\" :count 41]",
+        &format!("{}(r:read \"answer\" :count 42)\n(r:report)\n", judging_as(ELSEWHERE)),
+    );
+    let out = b.run();
+    assert!(
+        !out.status.success(),
+        "42 against another build's pin of 41 is a regression:\n{}",
+        text(&out)
+    );
+    assert!(text(&out).contains("regression"), "and says so:\n{}", text(&out));
+}
+
+#[test]
+fn a_build_row_pins_its_own_build_two_sided() {
+    // The row with `:build` replaces the row with none on that build, and
+    // there it is a pin in both directions.
+    let rows = "[\"answer\" :count 43]\n[\"answer\" :count 41 :build \"interp-pool-plan9-mips\"]";
+    let worse = Bench::new(
+        "own-worse",
+        rows,
+        &format!("{}(r:read \"answer\" :count 42)\n(r:report)\n", judging_as(ELSEWHERE)),
+    );
+    let out = worse.run();
+    assert!(
+        !out.status.success(),
+        "42 against the build's own pin of 41 fails:\n{}",
+        text(&out)
+    );
+    assert!(
+        lines(&out)[0].contains("\"bound\":41") && text(&out).contains("regression"),
+        "against the build's row, not the default one:\n{}",
+        text(&out)
+    );
+
+    let better = Bench::new(
+        "own-better",
+        rows,
+        &format!("{}(r:read \"answer\" :count 40)\n(r:report)\n", judging_as(ELSEWHERE)),
+    );
+    let out = better.run();
+    assert!(
+        !out.status.success() && text(&out).contains("stale"),
+        "40 against the build's own pin of 41 is stale:\n{}",
+        text(&out)
+    );
+}
+
+#[test]
+fn a_row_for_another_build_is_no_row_here() {
+    // A `:build` row applies on its build alone: elsewhere the reading is
+    // unledgered, and the row is not missing.
+    let b = Bench::new(
+        "foreign",
+        "[\"answer\" :count 42 :build \"interp-pool-plan9-mips\"]",
+        &format!("{}(r:read \"answer\" :count 42)\n(r:report)\n", judging_as(REFERENCE)),
+    );
+    let out = b.run();
+    assert!(
+        !out.status.success(),
+        "another build's row is no row for this one:\n{}",
+        text(&out)
+    );
+    let t = text(&out);
+    assert!(
+        t.contains("unledgered") && !t.contains("missing"),
+        "the reading is unledgered, and the foreign row is not missing:\n{t}"
+    );
+}
+
+#[test]
+fn the_build_key_names_the_tier_the_backend_and_the_platform() {
+    let out = eval("(def l ((import \"std/ratchet/ledger\"))) (println (l:running-build))");
+    let key = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let parts: Vec<&str> = key.split('-').collect();
+    assert_eq!(
+        parts.len(),
+        4,
+        "tier-backend-os-arch, got {key:?}:\n{}",
+        text(&out)
+    );
+    assert!(
+        ["jit", "mlir", "wasm", "interp"].contains(&parts[0]),
+        "the tier the build carries, got {key:?}"
+    );
+    assert!(
+        ["uring", "pool"].contains(&parts[1]),
+        "the I/O backend it runs, got {key:?}"
+    );
+    assert_eq!(parts[2], std::env::consts::OS, "the operating system, got {key:?}");
+    assert_eq!(parts[3], std::env::consts::ARCH, "the architecture, got {key:?}");
+}
+
+/// The build these tests run on is the reference build exactly when cargo
+/// built the default features on Linux x86_64.
+#[cfg(all(
+    target_os = "linux",
+    target_arch = "x86_64",
+    feature = "jit",
+    feature = "uring",
+    not(feature = "mlir"),
+    not(feature = "wasm")
+))]
+#[test]
+fn the_reference_build_is_the_default_build_on_linux_x86_64() {
+    let out = eval("(def l ((import \"std/ratchet/ledger\"))) (println (l:running-build))");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        REFERENCE,
+        "this box is the reference build:\n{}",
+        text(&out)
+    );
+    let out = eval("(def l ((import \"std/ratchet/ledger\"))) (println l:reference-build)");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        REFERENCE,
+        "and the ledger names it:\n{}",
+        text(&out)
+    );
+}
+
+#[test]
+fn the_rewrite_moves_the_row_of_the_build_it_is_given() {
+    // Two rows share a subject and an axis and differ by build; the rewrite
+    // must move the one the reading met and leave the other byte for byte.
+    let text_form = "(def t \"[\\\"answer\\\" :count 43]\\n[\\\"answer\\\" :count 41 :build \\\"interp-pool-plan9-mips\\\"]\\n\")";
+    let out = eval(&format!(
+        "(def rp ((import \"std/ratchet/repin\"))) {text_form} \
+         (print (rp:move t \"answer\" :count \"40\" \"interp-pool-plan9-mips\")) \
+         (print \"--\") \
+         (print (rp:move t \"answer\" :count \"40\" nil))"
+    ));
+    let printed = String::from_utf8_lossy(&out.stdout).to_string();
+    assert_eq!(
+        printed,
+        "[\"answer\" :count 43]\n[\"answer\" :count 40 :build \"interp-pool-plan9-mips\"]\n\
+         --[\"answer\" :count 40]\n[\"answer\" :count 41 :build \"interp-pool-plan9-mips\"]\n",
+        "each move touches its own build's row:\n{}",
+        text(&out)
+    );
+}
+
+#[test]
+fn an_adopted_reading_away_from_home_is_a_build_row() {
+    let out = eval(
+        "(def rp ((import \"std/ratchet/repin\"))) \
+         (println (rp:row-for {:subject \"extra\" :axis :count :value 7 :half 0} \"interp-pool-plan9-mips\")) \
+         (println (rp:row-for {:subject \"extra\" :axis :count :value 7 :half 0} nil))",
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "[\"extra\" :count 7 :build \"interp-pool-plan9-mips\"]\n[\"extra\" :count 7]\n",
+        "a reading adopted away from home names its build, and one at home does not:\n{}",
+        text(&out)
     );
 }
 
@@ -340,15 +549,7 @@ fn a_dead_gauge_voids_every_reading_on_its_axis() {
 fn a_program_with_no_path_prints_readings_and_judges_nothing() {
     // A form the runner runs in a worker thread was started with no path, so
     // it has no producer and no ledger. It prints, the runner judges.
-    let out = Command::new(elle_binary())
-        .args([
-            "-e",
-            "(def r ((import \"std/ratchet\"))) (r:read \"answer\" :count 42) (r:report)",
-        ])
-        .current_dir(repo_root())
-        .env_remove("RUST_MIN_STACK")
-        .output()
-        .expect("run elle -e");
+    let out = eval("(def r ((import \"std/ratchet\"))) (r:read \"answer\" :count 42) (r:report)");
     assert!(
         out.status.success(),
         "nothing to judge, nothing to fail:\n{}",
@@ -366,144 +567,4 @@ fn a_program_with_no_path_prints_readings_and_judges_nothing() {
         "without a bound or a verdict:\n{}",
         printed[0]
     );
-}
-
-/// One committed ledger: the producer it answers for, and the subject of every
-/// row in it.
-struct Ledger {
-    file: PathBuf,
-    producer: String,
-    subjects: Vec<String>,
-}
-
-/// The string literal opening at `text`'s first byte, unescaped.
-fn string_literal(text: &str) -> Option<String> {
-    let mut chars = text.strip_prefix('"')?.chars();
-    let mut out = String::new();
-    loop {
-        match chars.next()? {
-            '\\' => out.push(chars.next()?),
-            '"' => return Some(out),
-            c => out.push(c),
-        }
-    }
-}
-
-/// Every ledger under `tests/ledger`, read the way the row reader reads it: a
-/// `(producer "…")` header, then one `["subject" :axis …]` row per line.
-fn ledgers() -> Vec<Ledger> {
-    let dir = repo_root().join("tests/ledger");
-    let mut out = Vec::new();
-    for entry in std::fs::read_dir(&dir).expect("tests/ledger exists") {
-        let file = entry.expect("a directory entry").path();
-        if file.extension().and_then(|e| e.to_str()) != Some("lisp") {
-            continue;
-        }
-        let text = std::fs::read_to_string(&file).expect("read the ledger");
-        let mut producer = None;
-        let mut subjects = Vec::new();
-        for line in text.lines() {
-            if let Some(rest) = line.strip_prefix("(producer ") {
-                producer = string_literal(rest);
-            } else if let Some(rest) = line.strip_prefix('[') {
-                if let Some(subject) = string_literal(rest) {
-                    subjects.push(subject);
-                }
-            }
-        }
-        let producer = producer.unwrap_or_else(|| panic!("{} names no producer", file.display()));
-        out.push(Ledger {
-            file,
-            producer,
-            subjects,
-        });
-    }
-    out
-}
-
-/// The source a producer reads its subjects from: the file itself, and every
-/// file it splices with `include-file`, resolved against the including file.
-fn producer_source(path: &Path) -> String {
-    let text = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("read the producer {}: {e}", path.display()));
-    let dir = path.parent().expect("a producer has a directory");
-    let mut out = text.clone();
-    for line in text.lines() {
-        if let Some(rest) = line.trim_start().strip_prefix("(include-file ") {
-            if let Some(included) = string_literal(rest) {
-                out.push('\n');
-                out.push_str(&producer_source(&dir.join(included)));
-            }
-        }
-    }
-    out
-}
-
-/// Every corpus file on the ratchet: the leak dashboards, and each residue
-/// test that moved its window and its ceiling into a ledger.
-const PRODUCERS: &[&str] = &[
-    "tests/impl/oracle.lisp",
-    "tests/impl/plumb.lisp",
-    "tests/impl/h2-stress-scoped.lisp",
-    "tests/impl/region-page-recycle.lisp",
-    "tests/impl/region-macro-id-recycle.lisp",
-    "tests/impl/region-collector-arg-move.lisp",
-    "tests/impl/resource.lisp",
-];
-
-#[test]
-fn each_producer_on_the_ratchet_has_a_ledger() {
-    let producers: Vec<String> = ledgers().into_iter().map(|l| l.producer).collect();
-    for want in PRODUCERS {
-        assert!(
-            producers.iter().any(|p| p == want),
-            "tests/ledger holds a ledger for {want}; producers: {producers:?}"
-        );
-    }
-}
-
-#[test]
-fn every_ledger_row_names_a_subject_its_producer_reads() {
-    // The trap: a row outlives the probe that read it, and `missing` only
-    // says so once the producer runs, which for a dashboard is a minute into
-    // the implementation suite. A subject is a string literal in the
-    // producer's source, so a row whose subject appears nowhere in that
-    // source names a probe that is not there. The instrument's own
-    // live-growth rows are named by the instrument, not the producer.
-    let mut stale = Vec::new();
-    for ledger in ledgers() {
-        let source = producer_source(&repo_root().join(&ledger.producer));
-        for subject in &ledger.subjects {
-            if subject.ends_with(" gauge (live-growth)") {
-                continue;
-            }
-            let literal = format!("\"{}\"", subject.replace('\\', "\\\\").replace('"', "\\\""));
-            if !source.contains(&literal) {
-                stale.push(format!(
-                    "{} -> {:?}, which {} never names",
-                    ledger.file.display(),
-                    subject,
-                    ledger.producer
-                ));
-            }
-        }
-    }
-    assert!(
-        stale.is_empty(),
-        "ledger rows whose subject their producer never reads:\n  {}",
-        stale.join("\n  ")
-    );
-}
-
-#[test]
-fn the_root_is_the_tree_the_binary_was_built_in() {
-    let out = Command::new(elle_binary())
-        .args(["-e", "(println (elle/root))"])
-        .env_remove("RUST_MIN_STACK")
-        .output()
-        .expect("run elle -e");
-    let printed = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let got = Path::new(&printed).canonicalize().expect("the root exists");
-    let want = repo_root().canonicalize().expect("the manifest dir exists");
-    assert_eq!(got, want, "elle/root names the repository root");
 }

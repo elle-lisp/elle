@@ -274,6 +274,9 @@ mod toolchains {
 mod ratchet {
     include!("ratchet.rs");
 }
+mod ledgers {
+    include!("ledgers.rs");
+}
 
 // `allocator.rs` is absent from the list above and does not compile. It calls
 // FiberHeap methods the region-ownership model retired — `alloc`, `mark`,

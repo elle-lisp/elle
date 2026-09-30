@@ -133,6 +133,32 @@ fn every_tier_lands_the_reading_as_a_judged_row() {
 }
 
 #[test]
+fn the_run_row_records_the_build() {
+    // A row belongs to a build, so a reading's history has to say which
+    // build read it: the key `(elle/build)` names, on the run.
+    let b = Bench::new("build", Some("[\"answer\" :count 42]"));
+    b.run(&[]);
+    let build = query(
+        &b.db(),
+        "SELECT build FROM run WHERE id = (SELECT max(id) FROM run)",
+    );
+    let key = build
+        .split(":build \"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .unwrap_or_else(|| panic!("the run row carries a build key, got:\n{build}"));
+    assert_eq!(
+        key.split('-').count(),
+        4,
+        "tier-backend-os-arch, got {key:?}"
+    );
+    assert!(
+        key.ends_with(&format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)),
+        "the key ends with the platform, got {key:?}"
+    );
+}
+
+#[test]
 fn an_isolated_child_lands_its_readings_the_same_way() {
     let b = Bench::new("child", Some("[\"answer\" :count 42]"));
     let out = b.run(&["--isolate", ""]);
