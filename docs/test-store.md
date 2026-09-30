@@ -260,45 +260,53 @@ The unit is the file because the row is the file: a multi-form file is one
 whole-file form, and the durable corpus is one form per file, so a file's
 profile is its form's profile.
 
-## Measurements: a verdict a query can read
+## Measurements: a reading a query can read
 
-A dashboard measures a rate and prints it. Printed, a rate is prose: nothing
-can ask what it was three commits ago, and nothing can check the dashboard's
-coverage against a declared set. So a dashboard also *reports* each verdict,
-and the runner records it.
+A producer measures a shape and prints one `measure` line per reading, with
+the subject, the axis, the value, its interval's half-width and its unit
+([ratchet](ratchet.md)). Printed, a reading is prose: nothing can ask what it
+was three commits ago, and nothing can check the producer's coverage against
+a declared set. So the runner reads the lines back and records them.
 
-The channel is a file, and `ELLE_TEST_MEASUREMENTS` names it in the child's
-environment. The dashboard appends one JSON object per verdict:
+Stdout is the channel. The runner captures stdout for every form on every
+tier and for every isolated child, and it reads every `measure` line out of
+each capture. So a producer in a worker thread and a dashboard in its own
+process land the same way. Nothing is set in an environment, and a direct
+`elle-rig tests/impl/oracle.lisp` run prints the same lines and records
+nothing.
 
-```json
-{"subject":"io-drop","axis":"regions","value":0.0,"unit":"regions/op","verdict":"closed"}
+Each reading is judged against the ledger row for the file that printed it,
+by the same judge the producer uses in a direct run. It is written as one
+`measurement` row carrying the row's bound and kind and the verdict:
+
+| Verdict | Meaning |
+|---------|---------|
+| `ok` | within its bound |
+| `regression` | past the bound the worse way |
+| `stale` | past the bound the better way; `--repin` moves the bound |
+| `unledgered` | the producer has a ledger and this reading has no row in it |
+| `missing` | a row of the producer's ledger that this result printed no reading for |
+| `void` | the instrument refused the reading: a dead gauge, or a rate the block size moved |
+| NULL | the producer has no ledger, so the reading is recorded and not judged |
+
+The gate fails on any verdict but `ok` and NULL. A NULL says the producer is
+not ratcheted yet, which is how a dashboard keeps its history in the table
+before its ledger exists. The moment a ledger file names the producer, every
+reading it prints must have a row, and every row must get a reading.
+
+A `missing` row is written after a result lands as `pass`, one per ledger
+row that result printed no reading for, against that result. A result that
+failed already says so, and a gated one skipped rather than fell silent, so
+neither is asked for its rows.
+
+A run that recorded any reading says so, tallied by verdict, and names every
+reading that is neither `ok` nor unjudged:
+
 ```
-
-Unset, the channel is closed and the dashboard writes nothing — so a direct
-`elle-rig tests/impl/oracle.lisp` run prints its verdicts and records none, and
-the stdout rendering stays the human's copy. The runner names the file for each
-`--isolate` child ([test-runner](test-runner.md)), reads it once the child
-exits, and writes one `measurement` row per line against that child's result.
-The child process is what makes the variable safe to set: the environment is
-process-global, so a per-form value would race between workers sharing one.
-
-The axis is a property of the instrument rather than of the probe. A gauge in
-[estimator.lisp](../tests/impl/lib/estimator.lisp) names the dimension it reads
-and the unit a rate on it carries, and every probe already hands the estimator
-its gauge — so no probe declares an axis and none can declare the wrong one.
-The subject is the probe's label with the `label@axis` display suffix removed,
-so one probe read on two dimensions is one subject and two axes.
-
-The verdict recorded is the one displayed: a by-design growth probe reads
-`growth`, so `open` in this table means a defect, exactly as it does on the
-dashboard.
-
-A run that recorded any measurement says so, and names the ones that are
-neither `closed` nor `growth` — the two verdicts that are the expected answer:
-
-```
-3 measurements · 1 open · 2 closed
-  open  tests/impl/oracle.lisp  reduce  objects  1.002 objects/op
+412 readings · 409 ok · 1 regression · 1 stale · 1 missing
+  regression  tests/impl/oracle.lisp  reduce  objects  1.31 ±0.12 objects/op  pinned 1.002
+  stale       tests/impl/plumb.lisp   ev-abort  regions  0.0 ±0.03 regions/op  pinned 1
+  missing     tests/impl/oracle.lisp  fiber-nested  regions
 ```
 
 The rest is a query. The summary is a reading aid, and every number in it comes
@@ -336,9 +344,9 @@ holds, and the rows it writes.
 
 A delta belongs to the window between two boundaries rather than to a
 result, so a `result` column would copy one number onto every row of the
-file. A `measurement` row is the wrong home too: it carries a dashboard's
-verdict off the channel of an isolated child, and a per-file delta has no
-verdict to give.
+file. A `measurement` row is the wrong home too: it carries a reading a
+producer printed and the verdict it earned, and a per-file delta has neither a
+producer nor a row to be judged by.
 
 ### The summary names the top growers
 
@@ -397,12 +405,13 @@ CREATE TABLE asset (                -- artifact attached to a result; bytes live
   kind TEXT,                        -- ast|fhir|hir|lir|cfg|dfa|jit|stats|stdout|stderr|trace
   hash TEXT, size INT, codec TEXT); -- bytes at <db-dir>/cas/<hash>; codec e.g. zstd
 
-CREATE TABLE measurement (          -- one dashboard verdict, reported through the channel
+CREATE TABLE measurement (          -- one reading, judged against its ledger row
   run_id INT REFERENCES run(id),
-  result_id INT REFERENCES result(id),  -- the child whose channel carried it
-  subject TEXT, axis TEXT,          -- the probe, and the dimension it was read on
-  value REAL, unit TEXT,            -- the rate, and what one unit of it is
-  verdict TEXT);                    -- closed|open|growth|inconclusive|contaminated
+  result_id INT REFERENCES result(id),  -- the form × tier, or the child, that printed it
+  subject TEXT, axis TEXT,          -- the shape, and the dimension it was read on
+  value REAL, half REAL, unit TEXT, -- the reading, its interval's half-width, what one unit is
+  bound REAL, kind TEXT,            -- the row it met: pin|floor|ceiling; NULL when it met none
+  verdict TEXT);                    -- ok|regression|stale|unledgered|missing|void; NULL = not judged
 
 CREATE TABLE gauge (                -- what one file cost the runner's own heap
   id INTEGER PRIMARY KEY,           -- insertion order, which is boundary order
@@ -462,7 +471,8 @@ FROM result cur JOIN result base
 WHERE cur.run_id = ? AND base.run_id = ? AND cur.cpu_us > base.cpu_us * 2;
 
 -- One leak rate's history across commits, which no printed dashboard can give.
-SELECT run.git_commit AS sha, m.value AS rate, m.unit AS unit, m.verdict AS verdict
+SELECT run.git_commit AS sha, m.value AS rate, m.half AS half, m.bound AS pinned,
+       m.verdict AS verdict
 FROM measurement m JOIN run ON run.id = m.run_id
 WHERE m.subject = 'io-drop' AND m.axis = 'regions' ORDER BY m.run_id;
 

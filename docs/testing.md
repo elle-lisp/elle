@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 The two test suites, what each one claims, the builds that run them, and how a
 run is read.
@@ -125,15 +125,17 @@ elle test --isolate '' tests/lang/closures.lisp
 elle test --host target/release/elle-rig --isolate '' tests/impl/oracle.lisp
 ```
 
-An isolated child also carries the **measurement channel**: a dashboard that
-reports a verdict through it — [oracle.lisp](../tests/impl/oracle.lisp) and
-[plumb.lisp](../tests/impl/plumb.lisp) do, through
-[estimator.lisp](../tests/impl/lib/estimator.lisp) — lands one `measurement`
-row per verdict, so a leak rate's history across commits is a query rather than
-scrollback ([docs/test-store.md](test-store.md) § Measurements). Run the same
-file directly and it prints its dashboard and records nothing.
+A file that measures something prints one `measure` line per reading
+([docs/ratchet.md](ratchet.md)). The runner reads those lines out of every
+captured stdout — a form on each tier, an isolated child — judges each
+against the file's ledger, and lands one `measurement` row per reading. So a
+leak rate's history across commits is a query rather than scrollback
+([docs/test-store.md](test-store.md) § Measurements). Run the same file
+directly and it prints the same lines, judges them itself, and records
+nothing.
 
-That is how the Makefile runs the two dashboards. They belong to the
+That is how the two dashboards, [oracle.lisp](../tests/impl/oracle.lisp) and
+[plumb.lisp](../tests/impl/plumb.lisp), land their rates. They belong to the
 implementation suite, so every pass over that suite runs each one as an
 isolated child on the rig, under the wide budget that `WIDE_FAMILIES` names.
 
