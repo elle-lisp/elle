@@ -2,22 +2,26 @@
 # Pre-commit hook:
 #   1. Gate on the audit stamp: every staged file carries today's date.
 #   2. Rebuild the generated AGENTS.md indexes and stage what changed.
-#   3. Format staged .lisp files with `elle fmt` and stage them. `elle fmt`
-#      also migrates a file that declares an older epoch.
-#   4. Format staged .rs files with `cargo fmt` and stage them.
+#   3. Format the staged content of each .lisp file with `elle fmt` and stage
+#      it. `elle fmt` also migrates a file that declares an older epoch.
+#   4. Format the staged content of each .rs file with `rustfmt` and stage it.
 #   5. If staged .rs files exist, gate on clippy / rustdoc — the `make test`
 #      checks that CAN'T be auto-fixed, scoped to Rust-touching commits so
 #      Lisp-only commits don't pay the Cargo cost.
 #
 # Formatting is fixed, never gated: an unformatted file is reformatted and
 # re-staged, not rejected. CI's `make fmt-check` is the hard format gate (CI
-# can't rewrite your tree); the local hook just keeps every commit clean.
+# can't rewrite your tree); the local hook just keeps every commit clean. A
+# file the formatter cannot read refuses the commit.
+#
+# The hook formats what is staged, never the working copy, so a hunk left
+# unstaged stays out of the commit. It formats the working copy on disk as well.
 #
 # A partial commit, `git commit -- <paths>`, runs this hook against a temporary
-# index. `git add` here reaches only that index, so a staged fix would land in
-# HEAD and leave the real index holding the unfixed file, which the next commit
-# from the index would put back. In a partial commit the hook therefore leaves
-# its fixes on disk and refuses the commit, naming the files.
+# index. A change staged here reaches only that index, so it would land in HEAD
+# and leave the real index holding the unfixed file, which the next commit from
+# the index would put back. In a partial commit the hook therefore leaves its
+# fixes on disk and refuses the commit, naming the files.
 
 # ── Audit stamp ─────────────────────────────────────────────────────
 # Touch a file, audit it (DOCUMENTATION.md). Read it whole, hold it to the
@@ -45,18 +49,15 @@ if [ -n "$GIT_INDEX_FILE" ]; then
   fi
 fi
 
-# Put the hook's change to one file into the commit, or, in a partial commit,
-# hold the file for the refusal below.
+# In a partial commit, hold a file the hook changed for the refusal below and
+# answer true. Otherwise answer false, and the caller stages the change.
 refused=""
-stage() {
-  if git diff --quiet -- "$1"; then
-    return
-  fi
+held() {
   if $partial; then
     refused="$refused $1"
-  else
-    git add "$1"
+    return 0
   fi
+  return 1
 }
 
 # ── Generated indexes ───────────────────────────────────────────────
@@ -69,8 +70,41 @@ stage() {
 # so this cannot eat module knowledge that has not been converted yet.
 ./scripts/agents >/dev/null 2>&1
 for f in $(git diff --name-only --diff-filter=ACM -- '*AGENTS.md'); do
-  stage "$f"
+  held "$f" || git add "$f"
 done
+
+# ── Formatting ──────────────────────────────────────────────────────
+scratch=$(mktemp -d) || exit 1
+trap 'rm -rf "$scratch"' EXIT
+
+# format_staged FILE FORMATTER...: run the staged content of FILE through a
+# formatter that reads stdin and writes stdout, and stage the result.
+#
+# A working copy that matched the index takes the same result. One that holds
+# unstaged changes is formatted on its own, and left as it is when the
+# formatter cannot read it: the commit does not include that content.
+format_staged() {
+  f=$1
+  shift
+  if ! git show ":$f" | "$@" >"$scratch/staged"; then
+    echo "pre-commit: cannot format the staged content of $f." >&2
+    exit 1
+  fi
+  blob=$(git hash-object -w --path="$f" "$scratch/staged")
+  if [ "$blob" = "$(git rev-parse ":$f")" ]; then
+    return
+  fi
+  if git diff --quiet -- "$f"; then
+    cp "$scratch/staged" "$f"
+  elif "$@" <"$f" >"$scratch/working"; then
+    cp "$scratch/working" "$f"
+  else
+    echo "pre-commit: left the unstaged copy of $f unformatted." >&2
+  fi
+  held "$f" && return
+  mode=$(git ls-files --stage -- "$f" | cut -d' ' -f1)
+  git update-index --cacheinfo "$mode,$blob,$f"
+}
 
 # ── Lisp ────────────────────────────────────────────────────────────
 if [ -n "$ELLE" ]; then
@@ -83,21 +117,33 @@ else
   ELLE=elle
 fi
 
-staged_lisp=$(git diff --cached --name-only --diff-filter=ACM -- '*.lisp')
-for f in $staged_lisp; do
-  "$ELLE" fmt "$f" && stage "$f"
+for f in $(git diff --cached --name-only --diff-filter=ACM -- '*.lisp'); do
+  format_staged "$f" "$ELLE" fmt
 done
 
 # ── Rust ────────────────────────────────────────────────────────────
-# `cargo fmt` formats the workspace; only the files this commit already
-# touched are staged, so staged content stays in sync.
-staged_rs=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')
-if [ -n "$staged_rs" ]; then
-  cargo fmt
-  for f in $staged_rs; do
-    [ -f "$f" ] && stage "$f"
+# rustfmt reads stdin with no crate around it, so the hook names the edition
+# of the nearest Cargo.toml that declares one. Cargo's own default is 2015.
+edition_of() {
+  d=$(dirname "$1")
+  while :; do
+    if [ -f "$d/Cargo.toml" ]; then
+      e=$(sed -n 's/^edition *= *"\([0-9]*\)".*/\1/p' "$d/Cargo.toml" | head -1)
+      if [ -n "$e" ]; then
+        echo "$e"
+        return
+      fi
+    fi
+    [ "$d" = "." ] && break
+    d=$(dirname "$d")
   done
-fi
+  echo 2015
+}
+
+staged_rs=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')
+for f in $staged_rs; do
+  format_staged "$f" rustfmt --edition "$(edition_of "$f")" --emit stdout
+done
 
 # ── Refusal ─────────────────────────────────────────────────────────
 if [ -n "$refused" ]; then
