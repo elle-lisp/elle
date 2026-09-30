@@ -107,6 +107,7 @@ primitive! {
         arity: Arity::Exact(2),
         doc: "Set a runtime configuration field: :jit or :mlir to a positive \
               threshold, :trace to a keyword set, :max-depth to a positive integer. \
+              Only elle test may set :jit or :mlir to :off or :eager. \
               Raises on a field or a value it refuses.",
         params: &["key", "value"],
         category: "meta",

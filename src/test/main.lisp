@@ -217,7 +217,7 @@
 (def ident (run-identity))
 (sqlite:exec conn
              "INSERT INTO run (tiers, n_selected, git_commit, git_dirty, tree_hash, worktree, boot_fingerprint, elle_version, build_profile, host, argv, run_key, pid) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)"
-             [(if isolate-flags "process" "worker")
+             [(if isolate-flags "process" (tiers-str active-tiers))
               (+ (length (get opts :paths)) (length (get opts :eval)))
               (get ident :commit) (get ident :dirty) (get ident :tree)
               (get ident :worktree) (get ident :boot) (get ident :version)
@@ -248,19 +248,19 @@
 (def nfail (count-status conn run-id :fail))
 (def npass (count-status conn run-id :pass))
 (def nskip (count-status conn run-id :skip))
+(def ndiverge (count-status conn run-id :diverge))
 (def ntimeout (count-status conn run-id :timeout))
 
 # Counters and finished_at land in ONE statement: the completion stamp. A run
 # row without it was killed mid-flight and reads as truncated everywhere
-# (docs/test-runner.md). `n_diverge` keeps its default of 0: a run forces no
-# tier, so nothing diverges (docs/test-store.md).
+# (docs/test-runner.md).
 (sqlite:exec conn
-             "UPDATE run SET n_pass = ?1, n_fail = ?2, n_skip = ?3, n_timeout = ?4, finished_at = datetime('now') WHERE id = ?5"
-             [npass nfail nskip ntimeout run-id])
+             "UPDATE run SET n_pass = ?1, n_fail = ?2, n_skip = ?3, n_diverge = ?4, n_timeout = ?5, finished_at = datetime('now') WHERE id = ?6"
+             [npass nfail nskip ndiverge ntimeout run-id])
 # Always render the run: the tally, plus every problem row with its reason — so
 # you read results here, not by hand-writing SQLite (use --query to drill in).
 (print-summary conn run-id)
 (sqlite:close conn)
-# Gate exit: zero iff no form failed and nothing timed out.
+# Gate exit: zero iff no form failed, no tier diverged, and nothing timed out.
 # A skip is fine; a timeout (a test that never finished) gates non-zero.
-(os/exit (if (or (> nfail 0) (> ntimeout 0)) 1 0))
+(os/exit (if (or (> nfail 0) (> ndiverge 0) (> ntimeout 0)) 1 0))

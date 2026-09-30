@@ -178,9 +178,9 @@ semver-check: elle  ## Verify every versioned library surface against its commit
 # correct Elle does, and every build runs it with no flag. The implementation
 # suite, tests/impl, checks this implementation, and runs on the rig, which
 # reads the mode each file's sidecar names (rig/overview.md). Each build is an
-# implementation, so tier coverage is the set of builds that run the language
-# suite: smoke-lang on the default build, smoke-nojit, smoke-pool, smoke-mlir
-# and smoke-noffi on the others (docs/analysis/ci.md).
+# implementation, and each runs the language suite: smoke-lang on the default
+# build, smoke-nojit, smoke-pool, smoke-mlir and smoke-noffi on the others
+# (docs/analysis/ci.md).
 
 LANG_FILES := $(sort $(wildcard tests/lang/*.lisp))
 IMPL_FILES := $(sort $(wildcard tests/impl/*.lisp))
@@ -248,9 +248,8 @@ WIDE_FAMILIES   := h2-bidi- h2-load- h2-stream- h2-timeout- \
 WIDE_FLAGS      := --wide-timeout $(WIDE_TIMEOUT_MS) \
                    $(patsubst %,--wide %,$(WIDE_FAMILIES))
 
-# Files per `elle test` process. Each file runs as its own child, so a batch
-# bounds how many files one runner process records, not what they cost.
-# macOS and AArch64 get a smaller batch than everything else; docs/analysis/ci.md
+# Files per `elle test` process. macOS and AArch64 get a smaller batch than
+# everything else; docs/analysis/ci.md
 # owns the argument. HOST_OS and HOST_ARCH are overridable so that
 # tests/integration/capacity.rs can present a platform the suite is not running
 # on. The AArch64 runner says `Linux` to `uname -s`, so it is told apart by
@@ -275,12 +274,13 @@ endif
 DEAL_CORPUS := LC_ALL=C awk 'BEGIN { for (i = 0; i < 256; i++) ord[sprintf("%c", i)] = i } { h = 5381; for (i = 1; i <= length($$0); i++) h = (h * 33 + ord[substr($$0, i, 1)]) % 1000003; printf "%07d\t%s\n", h, $$0 }' | LC_ALL=C sort | cut -f2-
 
 # One suite pass: the files, dealt into batches, `$(JOBS)` runner processes side
-# by side. Each file runs as its own child — `elle FLAGS PATH`, or `PROGRAM
-# FLAGS PATH` under `--host` — so it starts, runs as a whole program and exits,
-# the only shape that covers program teardown, and a fault kills one child
-# rather than the run. Every verdict lands in the session DB, the runner's
-# default in the state directory (docs/testing.md). Concurrent runners share it:
-# a connection waits on a busy database rather than raising.
+# by side. A language pass runs its files inside the runner
+# (docs/test-runner.md). A pass whose runner flags carry `--isolate FLAGS` runs
+# each file as its own child — `elle FLAGS PATH`, or `PROGRAM FLAGS PATH` under
+# `--host` — so it starts, runs as a whole program and exits, and a fault kills
+# one child rather than the run. Every verdict lands in the session DB, the
+# runner's default in the state directory (docs/testing.md). Concurrent runners
+# share it: a connection waits on a busy database rather than raising.
 #
 # `xargs` runs every batch, and a batch that fails a file (exit 1–125) or dies
 # on a signal drives a non-zero exit, so the gate fails loud. Every recipe
@@ -290,29 +290,29 @@ DEAL_CORPUS := LC_ALL=C awk 'BEGIN { for (i = 0; i < 256; i++) ord[sprintf("%c",
 # tests/integration/suites.rs reads its files and its flags off one line of
 # `make --dry-run`.
 #
-# $(1) the files   $(2) the runner's flags, such as `--host`   $(3) each child's
-# flags. No argument may contain a comma: `$(call)` splits on them.
+# $(1) the files   $(2) the runner's flags, such as `--host PROGRAM --isolate
+# 'FLAGS'`. No argument may contain a comma: `$(call)` splits on them.
 define RUN_SUITE
-	@printf '%s\n' $(1) | $(DEAL_CORPUS) | xargs -P $(JOBS) -n $(CORPUS_BATCH) $(ELLE) test $(2) --isolate '$(3)' $(WIDE_FLAGS) || { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md)"; exit 1; }
+	@printf '%s\n' $(1) | $(DEAL_CORPUS) | xargs -P $(JOBS) -n $(CORPUS_BATCH) $(ELLE) test $(2) $(WIDE_FLAGS) || { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md)"; exit 1; }
 endef
 
 # The language suite under one rig profile. The blank line before `endef` ends
 # each expansion's line, so a `foreach` over profiles makes one pass each.
 define RUN_LANG_PROFILE
 	@echo "=== the language suite, under $(1) ==="
-	$(call RUN_SUITE,$(LANG_FILES),--host $(ELLE_RIG),--profile $(1))
+	$(call RUN_SUITE,$(LANG_FILES),--host $(ELLE_RIG) --isolate '--profile $(1)')
 
 endef
 
-smoke-lang: elle  ## The language suite on this build, each file as its own `elle FILE`
+smoke-lang: elle  ## The language suite on this build
 	@echo "=== the language suite ==="
-	$(call RUN_SUITE,$(LANG_FILES),,)
+	$(call RUN_SUITE,$(LANG_FILES),)
 
 smoke-impl: elle elle-rig  ## The implementation suite on the rig, then both suites under each rig profile
 	@echo "=== the implementation suite, on the rig ==="
-	$(call RUN_SUITE,$(IMPL_FILES) $(RUNNER_ACCEPTANCE),--host $(ELLE_RIG),)
+	$(call RUN_SUITE,$(IMPL_FILES) $(RUNNER_ACCEPTANCE),--host $(ELLE_RIG) --isolate '')
 	@echo "=== both suites, every function compiled on its first call ==="
-	$(call RUN_SUITE,$(LANG_FILES) $(IMPL_FILES),--host $(ELLE_RIG),--profile $(EAGER_PROFILE))
+	$(call RUN_SUITE,$(LANG_FILES) $(IMPL_FILES),--host $(ELLE_RIG) --isolate '--profile $(EAGER_PROFILE)')
 	$(foreach profile,$(IMPL_PROFILES),$(call RUN_LANG_PROFILE,$(profile)))
 
 # The language suite booted from an image instead of from core.lisp,
@@ -344,7 +344,7 @@ smoke-boot-image: elle  ## The language suite booted from an image (dump-boot's 
 		     echo "FAILED: the second start did not hydrate the stored image, so the suite would boot from source"; \
 		     exit 1; }
 	@echo "=== the language suite, each file booted from the image in $(BOOT_IMAGE_DIR) ==="
-	$(call RUN_SUITE,$(LANG_FILES),,--boot-image=$(BOOT_IMAGE_DIR))
+	$(call RUN_SUITE,$(LANG_FILES),--isolate '--boot-image=$(BOOT_IMAGE_DIR)')
 
 # Each variant below is a build of its own, and runs the language suite as the
 # default build does: every file, no flag. A build is its features
@@ -357,7 +357,7 @@ elle-nojit:  ## Build elle with no JIT tier (for smoke-nojit)
 
 smoke-nojit: elle-nojit  ## The language suite on the interpreter alone
 	@echo "=== the language suite, no JIT tier ==="
-	$(call RUN_SUITE,$(LANG_FILES),,)
+	$(call RUN_SUITE,$(LANG_FILES),)
 
 # The thread-pool I/O backend, on a Linux box. The default build takes the ring
 # on Linux and the pool on every other platform, so a Linux-only gate runs no
@@ -375,9 +375,9 @@ elle-pool:  ## Build elle and its rig without io_uring (for smoke-pool)
 
 smoke-pool: elle-pool  ## Both suites on the thread-pool I/O backend (what every non-Linux build runs)
 	@echo "=== the language suite, thread-pool I/O ==="
-	$(call RUN_SUITE,$(LANG_FILES),,)
+	$(call RUN_SUITE,$(LANG_FILES),)
 	@echo "=== the implementation suite, on the thread-pool build's rig ==="
-	$(call RUN_SUITE,$(IMPL_FILES),--host $(ELLE_RIG),)
+	$(call RUN_SUITE,$(IMPL_FILES),--host $(ELLE_RIG) --isolate '')
 
 elle-mlir:  ## Build elle with the MLIR tier (for smoke-mlir)
 	@echo "=== build elle with MLIR ==="
@@ -385,7 +385,7 @@ elle-mlir:  ## Build elle with the MLIR tier (for smoke-mlir)
 
 smoke-mlir: elle-mlir  ## The language suite on the MLIR build
 	@echo "=== the language suite, MLIR build ==="
-	$(call RUN_SUITE,$(LANG_FILES),,)
+	$(call RUN_SUITE,$(LANG_FILES),)
 
 # The no-features binary is copied beside the build, and the default build then
 # rebuilt in its place, so the runner is always a build that has FFI.
@@ -397,7 +397,7 @@ elle-noffi:  ## Build elle with no features beside the default build (for smoke-
 
 smoke-noffi: elle-noffi  ## The language suite on a build with no features, less the FFI files
 	@echo "=== the language suite, no features ==="
-	$(call RUN_SUITE,$(NOFFI_FILES),--host $(ELLE_NOFFI),)
+	$(call RUN_SUITE,$(NOFFI_FILES),--host $(ELLE_NOFFI) --isolate '')
 
 elle-wasm:  ## Build elle and its rig with the WASM backend (for check-wasm/smoke-wasm)
 	@echo "=== build elle and its rig with WASM ==="
@@ -428,9 +428,9 @@ smoke-wasm: elle-wasm  ## Both suites on the WASM build
 			'timeout 300s $(ELLE) --wasm=full {}' \
 		|| { echo "FAILED: the language suite under --wasm=full"; exit 1; }
 	@echo "=== the implementation suite, on the wasm build's rig ==="
-	$(call RUN_SUITE,$(IMPL_FILES),--host $(ELLE_RIG),)
+	$(call RUN_SUITE,$(IMPL_FILES),--host $(ELLE_RIG) --isolate '')
 	@echo "=== the implementation suite, each file compiled whole to one module ==="
-	$(call RUN_SUITE,$(WASM_FULL_FILES),--host $(ELLE_RIG),--profile $(WASM_FULL_PROFILE))
+	$(call RUN_SUITE,$(WASM_FULL_FILES),--host $(ELLE_RIG) --isolate '--profile $(WASM_FULL_PROFILE)')
 
 # A literate doc is one whole program: the scheduler docs (processes.md,
 # threads.md) run a dozen process systems in sequence, which is minutes of

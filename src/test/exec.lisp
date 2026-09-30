@@ -1,7 +1,8 @@
 (elle/epoch 13)
 # audited: 2026-09-29
 ## elle test — running one test: worker isolation, output capture, the
-## per-form deadline, and a file run as its own process.
+## per-form deadline, the tiers this build carries, and a file run as its own
+## process.
 ## docs/test-runner.md
 ##
 ## A fragment of one module (see store.lisp).
@@ -11,14 +12,14 @@
 ## path (epoch + whole-module analysis: shared bindings, forward references,
 ## capture/signal inference). It runs the file's def/var forms eagerly to
 ## establish the shared environment and hands back one 0-arg THUNK per test
-## form, each capturing that environment. Each thunk then runs once, on the
-## runtime this build ships, under (protect ...) in a worker. This preserves
-## the *typed* failure signal (e.g. {:error :failed-assertion ...}) —
+## form, each capturing that environment. We then run each thunk on each tier
+## via (compile/run-on TIER thunk) under (protect ...) in a worker. This
+## preserves the *typed* failure signal (e.g. {:error :failed-assertion ...}) —
 ## no eval stringification, no subprocess, no stderr scraping.
 ##
-## stdout/stderr capture: each run executes under a worker-side (ev/run ...),
-## with *stdout*/*stderr* rebound to temp files; non-empty output becomes
-## `stdout`/`stderr` assets per form. See exec-thunk-capture.
+## stdout/stderr capture: each tier run executes under a worker-side (ev/run
+## ...), with *stdout*/*stderr* rebound to temp files; non-empty output becomes
+## `stdout`/`stderr` assets per (form × tier). See exec-thunk-capture.
 ##
 ## Per-test timeout: the budget the form's path earned (--timeout MS, default
 ## 60000, or --wide-timeout for a path --wide names) bounds each form's worker
@@ -26,6 +27,18 @@
 ## non-zero. `--trace=KW` is split off by the `test` subcommand and applied to
 ## the runner's VM/free-log (e.g. `--trace=free` to attribute a UAF); the runner
 ## itself does not interpret it.
+
+# `exec-thunk` runs one thunk on a tier, fault-isolated: spawn a worker (own
+# VM), force the closure onto the tier under `protect`, and `os/join` marshals
+# back the structured [ok? payload]. The barrier lives OUTSIDE the tiered
+# closure deliberately — a fiber-based catch INSIDE a closure handed to
+# compile/run-on is rejected by the optimizing tiers (they cannot create the
+# handler closure). This probe path joins with no deadline (its closures are
+# trivial and always finish); real test forms run under exec-thunk-capture,
+# which bounds the join with `form-budget` so a hung test is recorded
+# `timeout`, not a wedge.
+(defn exec-thunk [tier thunk]
+  (os/join (os/spawn-vm (fn [] (protect (compile/run-on tier thunk))))))
 
 # Worker kind for the per-form execution (exec-thunk-capture). Default is the
 # LIGHT worker (sys/spawn-vm, primitives only, ~1.6ms): a sliced single-form
@@ -57,21 +70,21 @@
 # does (println, port/open, sockets) would yield into the void. We give the worker
 # a real runtime the cheap way: the closure we ship references `ev/run` (stdlib),
 # so the serializer drags `ev/run`'s whole closure graph into the bundle. The
-# worker runs the call under that ev/run, with `*stdout*`/`*stderr*`
+# worker runs the tiered call under that ev/run, with `*stdout*`/`*stderr*`
 # rebound to temp files; it slurps and deletes them and marshals [result stdout
 # stderr] back through os/join.
 #
-# Run the call with *stdout*/*stderr* rebound to temp files, returning
+# Run the tiered call with *stdout*/*stderr* rebound to temp files, returning
 # {:result [ok? payload] :stdout S :stderr S}. Assumes a scheduler is running
 # (port I/O yields): the worker supplies its own via ev/run; the in-process
 # fallback relies on the runner's top-level ev/run.
-(defn capture-run [thunk out-path err-path]
+(defn capture-run [tier thunk out-path err-path]
   (let [op (port/open out-path :write)
         ep (port/open err-path :write)]
     (sys/trap-exit! true)
     (let [v (parameterize ((*stdout* op)
                            (*stderr* ep))
-              (protect (thunk)))]
+              (protect (compile/run-on tier thunk)))]
       (sys/trap-exit! false)
       (port/close op)
       (port/close ep)
@@ -190,7 +203,8 @@
 
 # Recover the output of a run that never came back.
 #
-# `capture-run` slurps and deletes the redirect files once the call returns; a form killed by the join deadline never reaches that. Its output is
+# `capture-run` slurps and deletes the redirect files once the tiered call
+# returns; a form killed by the join deadline never reaches that. Its output is
 # the only account of which call it was in when the deadline struck, and the
 # form wrote it before it wedged — so read the files here and record them
 # against the timeout. Deleting them also keeps an abandoned worker from
@@ -213,10 +227,10 @@
        (let [m (string (get payload :message))]
          (or (string/contains? m "send") (string/contains? m "serialize")))))
 
-(defn exec-thunk-capture [thunk out-path err-path]
+(defn exec-thunk-capture [tier thunk out-path err-path]
   (let [outcome (protect (os/join (worker-spawn (fn []
                                     (ev/run (fn []
-                                      (capture-run thunk out-path err-path)))))
+                                      (capture-run tier thunk out-path err-path)))))
                                   (form-budget)))]
     (if (get outcome 0)
       (get outcome 1)
@@ -231,7 +245,7 @@
         # Save and restore the main VM's trace around the run to contain it
         # (worker runs are already isolated by their fresh VM).
         (let [saved-trace (vm/config :trace)
-              r (capture-run thunk out-path err-path)]
+              r (capture-run tier thunk out-path err-path)]
           (vm/config-set :trace saved-trace)
           r)
         (salvage-capture [false (get outcome 1)] out-path err-path)))))
@@ -265,6 +279,11 @@
                  (file/delete err-path)
                  (struct :result v :stdout so :stderr se)))))))
 
+# The setting that puts the JIT back where `(vm/config :jit)` read it: nil is
+# off, 0 is eager, and a count is the threshold (docs/config.md).
+(defn jit-setting [reading]
+  (if (nil? reading) :off (if (= reading 0) :eager reading)))
+
 # Whole-file (legacy multi-form) execution. Unlike exec-thunk-capture — which
 # ships a MAIN-compiled thunk — this ships the file's parsed SYNTAX (sendable via
 # os/spawn) and the worker compiles it with compile/whole-module-syntax against
@@ -276,10 +295,15 @@
 # (sync/redis/http2/process/grpc) breaks. ev/run, *stdout*, *stderr* are resolved
 # IN the worker (eval) for the same reason — they must be the worker's parameter
 # objects. Syntax compiles in the heavy worker (it runs the file's own
-# import/eval), so os/spawn (not -vm). The file runs once, on the runtime this
-# build ships, and the runner sets no policy on it (docs/test-runner.md).
-(defn exec-source-capture [forms name out-path err-path]
+# import/eval), so os/spawn (not -vm). `policy` is the JIT policy (:off /
+# :eager, see whole-file-policies): the worker sets it via (vm/config-set :jit
+# policy) before running, so the SAME file runs under bytecode and under JIT.
+# Only the process running `elle test` may set either (docs/test-runner.md).
+# The worker's VM is fresh, so the policy is isolated; the in-process fallback
+# saves and restores the main VM's policy around the run.
+(defn exec-source-capture [policy forms name out-path err-path]
   (let [outcome (protect (os/join (os/spawn (fn []
+                                    (vm/config-set :jit policy)
                                     (let [w-evrun (eval (quote ev/run))
                                       w-spawn (eval (quote ev/spawn))
                                       w-join (eval (quote ev/join))
@@ -296,12 +320,16 @@
       # through os/join. Fall back to running IN-PROCESS — no isolation, no
       # timeout — compiling the same syntax against the MAIN stdlib and running
       # under the runner's own ev/run + *stdout*/*stderr* (all main-consistent),
-      # exactly as exec-thunk-capture does for unsendable captures.
+      # exactly as exec-thunk-capture does for unsendable captures. The main VM's
+      # JIT policy is set for the run and restored after (it is shared, not fresh).
       (if (serialization-error? (get outcome 1))
-        (let [saved-trace (vm/config :trace)
+        (let [saved (jit-setting (vm/config :jit))
+              saved-trace (vm/config :trace)
               thunk (get (get (compile/whole-module-syntax forms name) 0) 1)]
+          (vm/config-set :jit policy)
           (let [r (capture-pumped ev/run ev/spawn ev/join *stdout* *stderr*
                                   thunk out-path err-path)]
+            (vm/config-set :jit saved)
             # Restore the main VM's trace too: a whole-file form that sets
             # :trace and aborts before clearing must not bleed into the runner.
             (vm/config-set :trace saved-trace)
@@ -398,3 +426,45 @@
             (struct :status :fail :sig (get note :sig)
                     :reason (get note :reason)))
           (struct :status :fail :reason (string "exit " status)))))))
+
+# ── tier set: probe which backends this build carries ────────────────
+# compile/run-on answers :tier-rejected/:feature-disabled for a tier whose
+# feature wasn't compiled in. Such a tier is dropped from the run entirely (a
+# feature the binary lacks is not a coverage gap of THIS build). A tier that is
+# present but can't run a particular form answers :ineligible — that is a
+# per-form skip (see classify), not an absent tier.
+(defn feature-disabled? [r]
+  (and (not (get r 0)) (= (get (get r 1) :error) :tier-rejected)
+       (= (get (get r 1) :reason) :feature-disabled)))
+
+(defn tier-available? [tk]
+  (not (feature-disabled? (exec-thunk tk (fn [] 0)))))
+# probe with a trivial closure
+
+# Candidate tiers as [tier-keyword tier-label]; :bytecode is recorded as :vm.
+# The label is a keyword (result.tier is keyword-typed; sqlite stores its name).
+(def candidate-tiers
+  [[:bytecode :vm] [:jit :jit] [:wasm :wasm] [:mlir-cpu :mlir-cpu]])
+
+(def active-tiers (filter (fn [p] (tier-available? (get p 0))) candidate-tiers))
+
+# A whole-file (legacy multi-form) thunk is a yielding imperative script: it runs
+# under the worker's full scheduler, NOT forced onto a backend via compile/run-on
+# (that only fits a single non-yielding form). So instead of a tier we vary the
+# JIT POLICY it runs under — :off (pure bytecode, recorded "vm") and :eager (JIT
+# every function, recorded "jit") — set per-worker via (vm/config-set :jit …).
+# :eager is included only when this build carries the JIT. Each entry is
+# [policy label].
+# No value-divergence is judged across policies (process-whole passes diverge?
+# false): a script's pids/timestamps differ run-to-run by design.
+(def whole-file-policies
+  (concat [[:off :vm]] (if (tier-available? :jit) [[:eager :jit]] [])))
+
+# Comma-joined tier labels for the run.tiers column. Labels are keywords, so
+# stringify each (`(string :vm)` → "vm").
+(defn tiers-str [tiers]
+  (if (empty? tiers)
+    ""
+    (if (empty? (rest tiers))
+      (string (get (first tiers) 1))
+      (string (string (get (first tiers) 1)) "," (tiers-str (rest tiers))))))

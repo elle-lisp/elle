@@ -18,7 +18,7 @@
                                    "r.status AS status, r.reason AS reason "
                                    "FROM result r JOIN form f ON f.hash = r.form_hash "
                                    "WHERE r.run_id = ?1 "
-                                   "AND r.status IN ('fail', 'timeout') "
+                                   "AND r.status IN ('fail', 'diverge', 'timeout') "
                                    "ORDER BY r.status, f.file") [run-id])
     (eprintln "  " (get p :status) "  " (get p :file)
               (if (get p :line) (string ":" (get p :line)) "") "  ["
@@ -193,8 +193,9 @@
         np (count-status conn run-id :pass)
         nf (count-status conn run-id :fail)
         ns (count-status conn run-id :skip)
+        nd (count-status conn run-id :diverge)
         nt (count-status conn run-id :timeout)
-        bad (+ nf nt)]
+        bad (+ nf nd nt)]
     (eprintln "")
     (if (= (get meta :trunc) 1)
       (let [sel (let [n (get meta :sel)]
@@ -210,7 +211,8 @@
                     " selected files; the tally below is partial, not green")))
       nil)
     (eprintln "elle test · run " run-id " of " nruns (commit-note meta))
-    (eprintln np " pass · " ns " skip · " nf " fail · " nt " timeout")
+    (eprintln np " pass · " ns " skip · " nf " fail · " nd " diverge · " nt
+              " timeout")
     (if (> bad 0)
       (begin
         (eprintln bad " problem" (if (= bad 1) "" "s")

@@ -6,6 +6,14 @@
 
 use super::*;
 
+/// What `vm/config-set` asks of a tier: off, compile on the first call, or
+/// compile after that many calls.
+enum TierSetting {
+    Off,
+    Eager,
+    After(usize),
+}
+
 impl VM {
     /// The trace keys as a keyword set.
     ///
@@ -149,12 +157,29 @@ impl VM {
 
         match kw.as_str() {
             "jit" => {
-                let threshold = Self::threshold_arg(&kw, val, self.runtime_config.jit.enabled())?;
-                self.runtime_config.jit = crate::config::JitPolicy::Adaptive { threshold };
+                use crate::config::JitPolicy;
+                let on = self.runtime_config.jit.enabled();
+                self.runtime_config.jit =
+                    match self.tier_arg(&kw, val, on, cfg!(feature = "jit"))? {
+                        TierSetting::Off => JitPolicy::Off,
+                        TierSetting::Eager => JitPolicy::Eager,
+                        TierSetting::After(threshold) => JitPolicy::Adaptive { threshold },
+                    };
             }
             "mlir" => {
-                let threshold = Self::threshold_arg(&kw, val, self.runtime_config.mlir.enabled())?;
-                self.runtime_config.mlir = crate::config::MlirPolicy::Adaptive { threshold };
+                use crate::config::MlirPolicy;
+                let on = self.runtime_config.mlir.enabled();
+                let policy = match self.tier_arg(&kw, val, on, cfg!(feature = "mlir"))? {
+                    TierSetting::Off => MlirPolicy::Off,
+                    TierSetting::Eager => MlirPolicy::Eager,
+                    TierSetting::After(threshold) => MlirPolicy::Adaptive { threshold },
+                };
+                // The call path reads this beside the policy.
+                #[cfg(feature = "mlir")]
+                {
+                    self.mlir_enabled = policy.enabled();
+                }
+                self.runtime_config.mlir = policy;
             }
             "trace" => {
                 let set = val.as_set().ok_or_else(|| {
@@ -208,6 +233,47 @@ impl VM {
             }
         }
         Ok(())
+    }
+
+    /// A tier setting: a positive threshold, or, in the process that runs
+    /// `elle test`, `:off` or `:eager` (docs/config.md). Any other process is
+    /// refused both as an argument error; any other keyword is no setting at
+    /// all, and reaches [`Self::threshold_arg`] as the wrong type.
+    ///
+    /// `tier_on` is whether this run has the tier on, and `carried` whether
+    /// the build compiles it in. The runner turns a tier off itself, so there a
+    /// threshold needs only `carried`: that is how it puts back what it read.
+    fn tier_arg(
+        &self,
+        field: &str,
+        val: Value,
+        tier_on: bool,
+        carried: bool,
+    ) -> Result<TierSetting, (&'static str, String)> {
+        let runner = crate::config::get().test_runner;
+        let setting = match self.keyword_spelling(val).as_deref() {
+            Some("off") => TierSetting::Off,
+            Some("eager") => TierSetting::Eager,
+            _ => {
+                return Self::threshold_arg(field, val, tier_on || (runner && carried))
+                    .map(TierSetting::After)
+            }
+        };
+        if !runner {
+            return Err((
+                "argument-error",
+                format!(
+                    "vm/config-set :{field}: only elle test turns a tier off or makes it eager"
+                ),
+            ));
+        }
+        if matches!(setting, TierSetting::Eager) && !carried {
+            return Err((
+                "argument-error",
+                format!("vm/config-set :{field}: this build carries no {field} tier"),
+            ));
+        }
+        Ok(setting)
     }
 
     /// A tier threshold a program may set: a positive integer, for a tier this

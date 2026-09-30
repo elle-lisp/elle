@@ -117,10 +117,14 @@ fn run_test(sub_args: Vec<String>) -> i32 {
     // which is how a suite is compiled against a hydrated stdlib
     // (docs/impl/image/boot.md).
     let (config_flags, sub_args) = split_own_flags(sub_args, RUNNER_VALUE_FLAGS);
-    let (config, _rest) = crate::config::Config::parse(&config_flags).unwrap_or_else(|e| {
+    let (mut config, _rest) = crate::config::Config::parse(&config_flags).unwrap_or_else(|e| {
         eprintln!("elle test: {}", e);
         std::process::exit(1);
     });
+    // The runner's workers run a whole-file script with the JIT off and with it
+    // eager, and this is the one process that may set either
+    // (docs/test-runner.md).
+    config.test_runner = true;
     crate::config::init(config);
     crate::io::init_process_signals();
 
