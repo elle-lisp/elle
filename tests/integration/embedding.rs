@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-09-30
 // The embedding surface from a host's side: register a primitive, run source,
 // read the value back, step the scheduler.
 //
@@ -154,7 +154,7 @@ fn test_step_based_execution() {
           ((get sched :spawn) f)
           (def @status :pending)
           (while (= status :pending)
-            (assign status ((get sched :step) 0)))
+            (assign status ((get sched :step) :timeout 0)))
           [status (fiber/value f)])
     "#;
 

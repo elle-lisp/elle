@@ -1,8 +1,7 @@
-(elle/epoch 12)
-# embedding.lisp — step-based scheduler test
-#
-# Exercises ev/step from Elle: create scheduler manually, spawn a fiber,
-# step until done, verify result.
+(elle/epoch 14)
+# audited: 2026-09-30
+# A scheduler made by hand runs its fibers to completion one step at a time.
+# docs/embedding.md
 
 (defn test-step-basic []
   "Step a pure-compute fiber to completion."
@@ -11,7 +10,7 @@
         f (fiber/new (fn [] (+ 21 21)) |:yield|)]
     ((get sched :spawn) f)
     (def @status :pending)
-    (while (= status :pending) (assign status ((get sched :step) 0)))
+    (while (= status :pending) (assign status ((get sched :step) :timeout 0)))
     (assert (= status :done) "step should return :done")
     (assert (= (fiber/value f) 42) "fiber result should be 42")))
 
@@ -23,7 +22,7 @@
     ((get sched :spawn) f1)
     ((get sched :spawn) f2)
     (def @status :pending)
-    (while (= status :pending) (assign status ((get sched :step) 0)))
+    (while (= status :pending) (assign status ((get sched :step) :timeout 0)))
     (assert (= (fiber/value f1) 10) "f1 result should be 10")
     (assert (= (fiber/value f2) 20) "f2 result should be 20")))
 
@@ -35,7 +34,7 @@
                        (yield)
                        1) |:yield|)]
     ((get sched :spawn) f)  # First step should process the fiber but it yields, so :pending
-    (let [r ((get sched :step) 0)]
+    (let [r ((get sched :step) :timeout 0)]
       (assert (or (= r :pending) (= r :done))
               "step should return :pending or :done"))))
 
@@ -48,7 +47,7 @@
                    (*io-backend* (get sched :backend)))
       (let [f (ev/spawn (fn [] (+ 1 2 3)))]
         (def @status :pending)
-        (while (= status :pending) (assign status (ev/step)))
+        (while (= status :pending) (assign status (ev/step :timeout 0)))
         (assert (= status :done) "ev/step should return :done")
         (assert (= (fiber/value f) 6) "fiber result should be 6")))))
 

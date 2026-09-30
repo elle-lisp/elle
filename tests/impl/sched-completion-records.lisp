@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-29
+# audited: 2026-09-30
 # What the scheduler remembers about the fibers it has finished with.
 #
 # Two records outlive a fiber's run: its status (`:ok` / `:error`) and a
@@ -139,7 +139,7 @@
                    (*shutdown* (get sched :shutdown))
                    (*io-backend* (get sched :backend)))
       (ev/spawn thunk)
-      ((get sched :step) 0)
+      ((get sched :step) :timeout 0)
       ((get sched :report)))))
 
 (let [r (step-once (fn [] (error {:error :nobody-looked})))]

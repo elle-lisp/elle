@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-09-30
 //! What each shipped primitive declares, held to what the solver then does —
 //! the real-primitive companions to the variant tests in effects.rs.
 //!
@@ -233,7 +233,7 @@ fn io_yield_pass_tightenings_drop_the_mixed_hard_edge() {
             RegionEffect::Fresh,
         ),
         ("(fiber/parent \"x\")", "fiber/parent", RegionEffect::Fresh),
-        ("(io/wait \"b\" 10)", "io/wait", RegionEffect::Fresh),
+        ("(io/wait \"b\")", "io/wait", RegionEffect::Fresh),
         // → Immediate: nil or int result.
         ("(port/flush \"p\")", "port/flush", RegionEffect::Immediate),
         ("(port/close \"p\")", "port/close", RegionEffect::Immediate),
