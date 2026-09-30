@@ -242,12 +242,16 @@
                         "a negative :timeout is refused")
                 (assert (refused? (fn [] (port/read out 64 :timeout "soon")))
                         "a :timeout that is not a number is refused")
+                (assert (refused? (fn [] (port/read out 64 :timeout 1e300)))
+                        "a :timeout longer than the clock can count is refused")
                 (assert (refused? (fn [] (port/read out 64 :deadline "soon")))
                         "a :deadline that is not a number is refused")
                 (assert (refused? (fn [] (port/set-options out :timeout -1)))
                         "port/set-options refuses a negative :timeout")
                 (assert (refused? (fn [] (port/set-options out :timeout :soon)))
-                        "port/set-options refuses a :timeout that is not a number"))))
+                        "port/set-options refuses a :timeout that is not a number")
+                (assert (refused? (fn [] (port/set-options out :timeout 1e300)))
+                        "port/set-options refuses a :timeout the clock cannot count"))))
 
 (println "  8. bad bounds are refused")
 
