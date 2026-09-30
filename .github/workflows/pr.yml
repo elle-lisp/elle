@@ -470,8 +470,14 @@ jobs:
         run: make elle
       - name: make doctest
         run: make doctest
-      - name: make smoke
-        run: make smoke
+      - name: make smoke-lang
+        run: make smoke-lang
+      - name: make smoke-impl
+        run: make smoke-impl
+      - name: make embedding
+        run: make embedding
+      - name: make semver-check
+        run: make semver-check
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
@@ -615,14 +621,20 @@ jobs:
         run: make elle
       - name: make doctest
         run: make doctest
+      - name: make smoke-lang
+        run: make smoke-lang
       # The scrub profile runs the language suite on the rig with each released
       # page zeroed: this runner is where stale reads surface as wrong-typed
       # values, wedges and segfaults, on the pool backend a Mac runs. Scrub makes
       # the first stale read panic at the deref naming its site instead of
       # failing minutes later somewhere unrelated. One memset per freed page.
       # The panic itself needs CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS, set above.
-      - name: Both suites, the language suite also under the scrub profile
-        run: make smoke IMPL_PROFILES=tests/impl/profiles/scrub.toml
+      - name: make smoke-impl, the language suite also under the scrub profile
+        run: make smoke-impl IMPL_PROFILES=tests/impl/profiles/scrub.toml
+      - name: make embedding
+        run: make embedding
+      - name: make semver-check
+        run: make semver-check
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
