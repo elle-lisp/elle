@@ -141,10 +141,12 @@ All `.lisp` files are formatted with `elle fmt`.
 | `make fmt` | Format all Elle source in-place |
 | `make fmt-check` | Verify formatting (exits 1 on diff) |
 
-A pre-commit hook in `.githooks/` formats each staged `.lisp` and `.rs` file
-and stages the result. It runs `elle fmt` without `--no-epoch`, so it also
-migrates a Lisp file that declares an older epoch and tags a file that declares
-none. After cloning, enable it with:
+A pre-commit hook in `.githooks/` formats the staged content of each `.lisp`
+and `.rs` file and stages the result. It formats the working copy on disk too.
+A change you left unstaged stays unstaged. It runs `elle fmt` without
+`--no-epoch`, so it also migrates a Lisp file that declares an older epoch and
+tags a file that declares none. When a formatter fails on a file, the hook
+refuses the commit. After cloning, enable it with:
 
 ```sh
 git config core.hooksPath .githooks
