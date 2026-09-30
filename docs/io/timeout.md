@@ -18,9 +18,9 @@ Every call that waits takes two optional named arguments:
   makes.
 
 A call that names neither waits as long as it takes, and `nil` names neither.
-A bound further off than the clock can count bounds nothing, so that call waits
-as long as it takes too. A call may name both, and then each wait ends at
-whichever comes first. A deadline that has already passed allows no wait at
+A bound further off than the clock can count is refused with an
+`:argument-error`. A call may name both, and then each wait ends at whichever
+comes first. A deadline that has already passed allows no wait at
 all: the call answers what is ready now, or it ends as a timed-out call ends.
 The clock is one clock for the whole process, so a deadline read on one thread
 bounds a call on another.
