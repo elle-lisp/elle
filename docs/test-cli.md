@@ -1,6 +1,6 @@
 # Driving the test runner
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 Why `elle test` exists, the command line it offers, what it refuses to
 offer, and what is still design.
@@ -10,13 +10,14 @@ How a run executes is [test-runner](test-runner.md); where it is stored is
 
 > Status: **partially built** — these three documents are the specification,
 > and its core is implemented in [src/test](../src/test) as the `elle test`
-> subcommand (the `smoke-lang` and `smoke-impl` gates). Built (v1): per-file
+> subcommand (the `smoke-lang` and `smoke-impl` gates). Built: per-file
 > compilation, the per-form fault barrier and the whole-file mode,
 > worker-thread isolation, the persistent SQLite
 > index (a **subset** of the schema — see the note there), the per-run code
 > state (commit, tree hash, worktree, host, build, boot fingerprint), the
 > per-form analysis columns (`caps`, `touches`, `signal`), the on-disk CAS for
-> stdout/stderr, run honesty (a killed run reads `DID NOT COMPLETE`), `:gated`
+> stdout/stderr, each result's wall time and CPU time (and an isolated child's peak
+> resident set), run honesty (a killed run reads `DID NOT COMPLETE`), `:gated`
 > skips, child-process isolation with the measurement channel it carries, the
 > merge of another store's runs, and the
 > `--query`/`--summary`/`--reset`/`--promote`/`-e`/`--timeout`/`--wide`/
@@ -25,9 +26,7 @@ How a run executes is [test-runner](test-runner.md); where it is stored is
 > Still design (not built): semantic selection
 > (`--touches`/`--caps`/`--impacted-by`/`--changed`/`--rerun-failed`/`-k`),
 > `--rust`/`--watch`/`--prune`/`-N`/`--format`, the per-run RSS/CPU capture,
-> `--dump`/`--trace` asset capture, and `changed_file` population. A section
-> marked "(v1, implemented)" / "(implemented)" / "**Resolved (v1)**" is built;
-> the rest is the target.
+> `--dump`/`--trace` asset capture, and `changed_file` population.
 
 ## The problem this solves
 
@@ -251,7 +250,7 @@ to parsing the human output — but it's expected to hold.)
 The runner is an **Elle program**, living in [src/test](../src/test) and
 surfaced as the `elle test` subcommand alongside `elle fmt`/`elle lint`. Its
 files are fragments of one module, concatenated in order by
-[main.rs](../src/main.rs) and embedded in the binary, so a run needs no source
+[subcommand.rs](../src/program/subcommand.rs) and embedded in the binary, so a run needs no source
 tree. It is built from machinery the
 language already exposes — the **file-compilation pipeline** (plus the per-form
 fault-barrier compilation mode, [test-runner](test-runner.md)),
@@ -272,15 +271,12 @@ nothing about the one under test.
 The fingerprint hashes that executable, which carries the sources it boots
 from ([test-store](test-store.md) § The boot fingerprint).
 
-## Open implementation questions (for the tests/code phases)
+## Open implementation questions
 
-- `(clock/cpu)` granularity and whether per-form deltas are meaningful once
-  the JIT has compiled a form (it may run in sub-microsecond territory).
-  Decide whether to record CPU per-form, per-file, or only run-level.
 - Concurrency: the suite targets get parallelism from `xargs -P` over batches
-  of files. The runner parallelizes across forms/files internally (worker
-  threads, [test-runner](test-runner.md)) while keeping SQLite writes
-  serialized (single writer, WAL).
+  of files. Within one run the runner joins each worker before it starts the
+  next, so its forms run one at a time. Whether to run them concurrently, with
+  the main thread still the only SQLite writer, is open.
 - The `%assert` intrinsic's elision rules: when may the analyzer drop the
   syntax-capture (provably-true predicate, assertions-disabled build) without
   changing observable behavior for tests that *expect* a failure signal?
@@ -290,11 +286,3 @@ from ([test-store](test-store.md) § The boot fingerprint).
 - `form.hash` over read Syntax with comments elided is the default; confirm the
   Syntax representation actually drops comment trivia (or strip it explicitly
   before hashing).
-- The per-form fault-barrier compilation mode: how a top-level form's signal is
-  caught and the next form resumed *within one compiled module* without nesting
-  forms in lambdas (which would break top-level binding scope). **Resolved (v1):**
-  the file is compiled once through `analyze_file_letrec`; `def`/`var` forms run
-  eagerly to establish shared bindings while each test form is reified as a thunk
-  capturing that environment; the runner runs each thunk with the fault barrier
-  *outside* the thunk. [test-runner](test-runner.md) holds the full mechanism
-  and its intentional boundaries.

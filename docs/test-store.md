@@ -174,8 +174,16 @@ happened, and nothing names the code it ran against.
 Per **result**: status, reason, expected/actual and predicate syntax (from the
 `assert` macro, [test-runner](test-runner.md)), and the emitted signal on
 failure. A result's `tier` names where it ran ([test-runner](test-runner.md)).
-The design adds wall time and **CPU time** — the delta of `(clock/cpu)` read
-across the form's evaluation; neither is captured yet (§ Schema).
+A result that a form or a child produced also records what it cost. For a form
+in a worker, `wall_ms` runs from handing the form over to having its answer,
+and `cpu_us` is the delta of `(clock/cpu)` on the thread that ran it. That
+thread's CPU leaves out the JIT's compile thread, the I/O pool and any child
+the form starts. For an `--isolate` child, `wall_ms` runs from spawn to reap,
+and `cpu_us` (user plus system) and `max_rss_kb` are its total from
+`subprocess/rusage` ([subprocess](subprocess.md)). A worker that never hands
+back its answer — a missed deadline, a panic — leaves `cpu_us` NULL. A
+file-level error or skip and a divergence row leave all three NULL, because
+nothing ran to produce them.
 
 > CPU delta, not fuel. Fuel (`SIG_FUEL`) is specific to the `std/process`
 > scheduler, is not consumed by Elle's default root scheduler, and essentially
@@ -370,7 +378,7 @@ CREATE TABLE run (                  -- one row per `elle test` invocation
   n_selected INT,                   -- files + -e forms planned; written at insert
   n_pass INT, n_fail INT, n_skip INT, n_timeout INT,  -- aggregated at completion only
   n_diverge INT,                    -- forms whose tiers disagreed; aggregated at completion
-  wall_ms INT, max_rss_kb INT, cpu_user_ms INT, cpu_sys_ms INT);   -- resource usage (v1: deferred)
+  wall_ms INT, max_rss_kb INT, cpu_user_ms INT, cpu_sys_ms INT);   -- resource usage; not created yet
 
 CREATE TABLE changed_file (         -- working tree vs HEAD at run time
   run_id INT REFERENCES run(id), path TEXT, status TEXT, blob_hash TEXT);
@@ -390,7 +398,8 @@ CREATE TABLE result (               -- one row per (form × tier × run)
   tier TEXT,                        -- vm|jit|wasm|mlir-cpu|process, or * for a divergence
   status TEXT,                      -- pass|fail|skip|timeout|diverge
   reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT,
-  wall_ms INT, cpu_us INT);       -- cpu_us = (clock/cpu) delta across the form
+  wall_ms INT, cpu_us INT,          -- what it cost (§ What gets captured)
+  max_rss_kb INT);                  -- an --isolate child's peak resident set
 
 CREATE TABLE asset (                -- artifact attached to a result; bytes live in the CAS
   result_id INT REFERENCES result(id),
@@ -417,10 +426,10 @@ The runner writes this with `lib/sqlite.lisp` (FFI to libsqlite3). The DB holds
 only metadata and hashes; artifact bytes live in the on-disk CAS, so the file
 stays small and merge/diff concerns never arise (it is gitignored regardless).
 
-**v1 implemented subset ([store.lisp](../src/test/store.lisp) `ensure-schema`).**
-The runner creates
-`form`, `result`, `asset`, `measurement` and `gauge` with the columns above;
-`run`, `result`, `form` and `changed_file` are subsets:
+**What the runner creates ([store.lisp](../src/test/store.lisp) `ensure-schema`).**
+The runner creates `result`, `asset`, `measurement` and `gauge` with the
+columns above, and a session DB written before `result.max_rss_kb` existed
+gains it by `ALTER TABLE`. `run`, `form` and `changed_file` are subsets:
 
 - `run` carries every column above except the resource ones
   (`wall_ms`/`max_rss_kb`/`cpu_user_ms`/`cpu_sys_ms`), which are deferred. So a
@@ -428,8 +437,6 @@ The runner creates
   column errors with `no such column`. A session DB written before the
   code-state, fingerprint, key or pid columns existed gains them by `ALTER TABLE`,
   with NULL for every run recorded until then.
-- `result` is written without `wall_ms` and `cpu_us`: both read NULL until
-  per-form timing lands.
 - `form` is written without `line`, `col` and `session`: a form's location and
   an ad-hoc form's session id are deferred, and each reads NULL. The three
   analysis columns are written at scan time (§ What analysis says about a
