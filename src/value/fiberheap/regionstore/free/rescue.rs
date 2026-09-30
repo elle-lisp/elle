@@ -78,8 +78,8 @@ impl RegionStore {
         }
         // Every region the fixpoint pruned survives the drop: each rescued one,
         // and the owned subtree it keeps.
-        self.counters.rescues += rescued.len() as u64;
-        self.counters.rescue_survivors += (dying_before - dying.len()) as u64;
+        self.counters
+            .count_rescue(rescued.len() as u64, (dying_before - dying.len()) as u64);
         // Unlink every rescued member from its owner FIRST: an owner that is
         // itself rescued survives, and must not re-claim the member at its own
         // later drop — and the rebuilt-count subtree walks below must see the
