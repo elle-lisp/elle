@@ -1,6 +1,6 @@
 # The relocation point and its replicas
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-30 -->
 
 How a relocation point outlives its own block, so one release covers a merge and
 every path that leaves the frame before it.
@@ -254,7 +254,8 @@ baseline. Dropping a license to replicate can only over-keep.
 Pinned by [tests/impl/region-break-loop-replica.lisp](../../../tests/impl/region-break-loop-replica.lisp)
 (the reclamation — the `cond` clause body, the release past the branch's merge,
 the `if` and bare-break controls, and the three boundaries driven as rows), the
-per-request ceilings in [tests/impl/h2-stress-scoped.lisp](../../../tests/impl/h2-stress-scoped.lisp),
+per-request pins [tests/ledger/h2-stress-scoped.lisp](../../../tests/ledger/h2-stress-scoped.lisp)
+holds for [tests/impl/h2-stress-scoped.lisp](../../../tests/impl/h2-stress-scoped.lisp),
 for requests that carry a body, the
 placement pins in `lir::lower::tests::release::breakexit`, and
 [tests/impl/region-break-loop-replica-uaf.lisp](../../../tests/impl/region-break-loop-replica-uaf.lisp)

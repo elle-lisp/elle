@@ -57,13 +57,15 @@ hold what those files read, and the suite runs none of them:
 - `profiles/` holds the rig profiles, each of which a pass applies to every
   file it runs.
 
-## The dashboards
+## The producers
 
 [oracle.lisp](oracle.lisp) measures the leak rate of each residual class, and
 [plumb.lisp](plumb.lisp) measures the I/O leak rates. Each drives a shape
 under the ratchet's gauges and prints one reading per subject, judged against
 the row its ledger under `tests/ledger` holds for it
-([ratchet](../../docs/ratchet.md)).
+([ratchet](../../docs/ratchet.md)). A residue test such as
+[h2-stress-scoped.lisp](h2-stress-scoped.lisp) is a producer the same way,
+over a ledger of its own.
 [docs/impl/region/diagnostics.md](../../docs/impl/region/diagnostics.md) owns
 the gauges they read.
 

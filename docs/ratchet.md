@@ -8,8 +8,8 @@ judges, records and re-pins; nothing else carries a number.
 This document is the specification. The instrument, the ledger and the
 direct-run gate are built, as [the guide](../lib/ratchet.md) shows, and so is
 the runner's side: the rows, the `missing` gate, the summary and `--repin`.
-The two leak dashboards are producers with ledgers of their own. Every
-producer past those is proposed.
+The two leak dashboards and the first residue test are producers with ledgers
+of their own. Every producer past those is proposed.
 
 ## What a ratchet is
 
@@ -19,15 +19,16 @@ ceiling on the objects a request leaves behind. A canary pins the allocations a
 loop makes. Each pin is the reading the tree gave on the day somebody accepted
 it, and a change that moves the reading the wrong way fails.
 
-Two producers are on the ratchet: the leak dashboards
+Three producers are on the ratchet: the leak dashboards
 [oracle.lisp](../tests/impl/oracle.lisp) and
 [plumb.lisp](../tests/impl/plumb.lisp), over
 [tests/ledger/oracle.lisp](../tests/ledger/oracle.lisp) and
-[tests/ledger/plumb.lisp](../tests/ledger/plumb.lisp). The tree still holds
-the pattern by hand in at least nine places:
+[tests/ledger/plumb.lisp](../tests/ledger/plumb.lisp), and the residue test
+[h2-stress-scoped.lisp](../tests/impl/h2-stress-scoped.lisp) over
+[tests/ledger/h2-stress-scoped.lisp](../tests/ledger/h2-stress-scoped.lisp).
+The tree still holds the pattern by hand in at least eight places:
 
-- [h2-stress-scoped.lisp](../tests/impl/h2-stress-scoped.lisp),
-  [region-page-recycle.lisp](../tests/impl/region-page-recycle.lisp),
+- [region-page-recycle.lisp](../tests/impl/region-page-recycle.lisp),
   [region-macro-id-recycle.lisp](../tests/impl/region-macro-id-recycle.lisp),
   [region-collector-arg-move.lisp](../tests/impl/region-collector-arg-move.lisp)
   and [resource.lisp](../tests/impl/resource.lisp), each with a window, a
@@ -327,10 +328,19 @@ at 0. [Assessment](impl/assessment.md) reads the burndown from the ledgers:
 the `:class :defect` rows, of which both hold none.
 
 **The residue tests.** Each corpus file with a window and a ceiling replaces
-its helper with `delta` and its ceiling with a ledger pin, and gains a history
-and a discriminator it no longer writes. They run in worker threads under both
-JIT policies, so each subject lands twice per run against one row. A subject
-that reads differently under the JIT is two tiered rows.
+its helper with `delta` or `rate` and its ceiling with a ledger pin, and gains
+a history and a discriminator it no longer writes: the instrument's
+live-growth row is the gauge-live gate each file wrote by hand. The
+implementation suite runs each file as an isolated child of the rig, plain
+and with the JIT eager, so each subject lands twice per run against one row,
+and the thread-pool and MLIR builds run it on their rigs too. A subject that
+reads differently on one of those is a tiered row.
+
+- [h2-stress-scoped.lisp](../tests/impl/h2-stress-scoped.lisp) drives the
+  sequential request loop through `delta` at two request counts, on the object
+  and the region count. A residue that grows faster than the request count
+  reads differently at the two, and a one-off reads as a fraction that
+  shrinks with the count. Its ledger pins all four readings at 0.
 
 **The runner**, as above.
 
@@ -372,7 +382,9 @@ is one pull request. The first four are in.
    already say. The counter-factual is the dashboards' own: every row reads
    what it read before the move.
 5. **The residue tests, the runner's own gauges, the audit queue, valgrind.**
-   One producer per pull request, each with its ledger.
+   One producer per pull request, each with its ledger. The counter-factual is
+   the ledger itself: committed ahead of the producer, every row of it is
+   `missing` until the producer reads it.
 
 ## Decisions this document takes
 
