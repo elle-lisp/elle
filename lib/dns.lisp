@@ -174,6 +174,7 @@
    the AAAA records. A query that fails contributes no records.
    Options:
      :server  — nameserver IP (default: from /etc/resolv.conf)
+     :port    — nameserver UDP port (default: 53)
      :timeout — per-query timeout in ms (default: 3000)
      :retries — how many times to send each query (default: 2)"
   (let* [srv (or server (first (read-nameservers)))
@@ -192,6 +193,7 @@
    qtype is an integer (1=A, 28=AAAA, 5=CNAME, etc.).
    Options:
      :server  — nameserver IP (default: from /etc/resolv.conf)
+     :port    — nameserver UDP port (default: 53)
      :timeout — per-query timeout in ms (default: 3000)
      :retries — how many times to send each query (default: 2)"
   (let* [srv (or server (first (read-nameservers)))
