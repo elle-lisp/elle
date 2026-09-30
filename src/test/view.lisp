@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-29
+# audited: 2026-09-30
 ## elle test — reading a run back: the tally, the problem list, the warning
 ## about a predecessor that never finished, and raw SQL.
 ## docs/test-store.md
@@ -85,24 +85,54 @@
   (let [w (get meta :worktree)]
     (string " (pid " (get meta :pid) (if w (string ", worktree " w) "") ")")))
 
-# ── the measurements a run recorded (docs/test-store.md) ──
-# A tally by verdict, then a line for each reading that is neither `closed` nor
-# `growth`. Those two are the expected answers — a reclaimed shape and a
-# declared growth probe — so listing them would bury the readings a reader acts
-# on under a few hundred that say nothing happened. The rest is a query.
-(defn measurement-tally [conn run-id]
-  (sqlite:query conn
-                "SELECT verdict AS verdict, count(*) AS n FROM measurement WHERE run_id = ?1 GROUP BY verdict ORDER BY verdict"
-                [run-id]))
+# ── the readings a run recorded (docs/test-store.md § Measurements) ──
+# A tally by verdict, then a line for each reading that is neither `ok` nor
+# unjudged. Those two are the expected answers — a reading within its bound,
+# and one from a producer with no ledger yet — so listing them would bury the
+# readings a reader acts on under a few hundred that say nothing happened. The
+# rest is a query.
 
-(defn render-tally [rows]
-  (if (empty? rows)
-    ""
-    (let [r (first rows)
-          one (string (get r :n) " " (get r :verdict))]
-      (if (empty? (rest rows))
-        one
-        (string one " · " (render-tally (rest rows)))))))
+# The order the tally reads in: the expected answer first, then the gating
+# verdicts as the judge names them, then the readings nothing judged.
+(def verdict-order
+  ["ok" "regression" "stale" "unledgered" "missing" "void" "unjudged"])
+
+(defn measurement-tally [conn run-id]
+  "Verdict → count for the run, with a NULL verdict under `unjudged`."
+  (let [@t @{}]
+    (each r in (sqlite:query conn
+                             "SELECT verdict AS verdict, count(*) AS n FROM measurement WHERE run_id = ?1 GROUP BY verdict"
+                             [run-id])
+      (put t
+           (let [v (get r :verdict)]
+             (if v v "unjudged")) (get r :n)))
+    t))
+
+(defn render-tally [t]
+  (string/join (map (fn [v] (string (get t v) " " v))
+                    (filter (fn [v] (get t v)) verdict-order)) " · "))
+
+# The listing's order is the tally's: `ORDER BY` a CASE over `verdict-order`,
+# so every regression is read before the first stale row.
+(defn verdict-rank-sql []
+  (string "CASE m.verdict "
+          (string/join (map (fn [i]
+                              (string "WHEN '" (get verdict-order i) "' THEN " i))
+                            (->list (range (length verdict-order)))) " ") " END"))
+
+# One reading's line: the verdict, the file and the tier, the subject and the
+# axis, then the reading with its half-width and unit, then the bound it met.
+# A missing row has no reading, so it ends at the axis.
+(defn render-measurement [m]
+  (string (get m :verdict) "  " (get m :file) "  [" (get m :tier) "]  "
+          (get m :subject) "  " (get m :axis)
+          (if (= (get m :value) nil)
+            ""
+            (let [k (get m :kind)]
+              (string "  " (get m :value) " ±" (get m :half) " " (get m :unit)
+                      "  "
+                      (ledger:describe-bound (if k (keyword k) nil)
+                      (get m :bound)))))))
 
 (defn print-measurements [conn run-id]
   (let [tally (measurement-tally conn run-id)
@@ -110,19 +140,21 @@
                                       "SELECT count(*) AS c FROM measurement WHERE run_id = ?1"
                                       [run-id]) 0) :c)]
     (when (> total 0)
-      (eprintln total " measurement" (if (= total 1) "" "s") " · "
+      (eprintln total " reading" (if (= total 1) "" "s") " · "
                 (render-tally tally))
       (each m in (sqlite:query conn
-                               (string "SELECT f.file AS file, m.subject AS subject, "
-                                       "m.axis AS axis, m.value AS value, m.unit AS unit, "
+                               (string "SELECT f.file AS file, r.tier AS tier, "
+                                       "m.subject AS subject, m.axis AS axis, "
+                                       "m.value AS value, m.half AS half, "
+                                       "m.unit AS unit, m.bound AS bound, m.kind AS kind, "
                                        "m.verdict AS verdict FROM measurement m "
                                        "JOIN result r ON r.id = m.result_id "
                                        "JOIN form f ON f.hash = r.form_hash "
                                        "WHERE m.run_id = ?1 "
-                                       "AND m.verdict NOT IN ('closed', 'growth') "
-                                       "ORDER BY m.verdict, m.subject") [run-id])
-        (eprintln "  " (get m :verdict) "  " (get m :file) "  " (get m :subject)
-                  "  " (get m :axis) "  " (get m :value) " " (get m :unit)))))
+                                       "AND m.verdict IS NOT NULL AND m.verdict != 'ok' "
+                                       "ORDER BY " (verdict-rank-sql)
+                                       ", f.file, r.tier, m.subject") [run-id])
+        (eprintln "  " (render-measurement m)))))
   nil)
 
 # ── what the run cost the runner (docs/test-store.md) ──

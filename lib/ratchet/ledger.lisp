@@ -166,6 +166,30 @@
     (let [@void-axes @{}]
       (map (fn [r] (judge-with rows void-axes r)) readings)))
 
+  (defn unread [rows readings]
+    "Every row of ROWS that no reading in READINGS answers."
+    (let [@seen @{}
+          @out @[]]
+      (each r in readings
+        (put seen (row-key (get r :subject) (get r :axis)) true))
+      (each k in (keys rows)
+        (when (not (get seen k)) (push out (get rows k))))
+      out))
+
+  (defn plain [n]
+    "A number as a row writes it: an integral float as the integer it is. A
+     bound read back from a REAL column arrives as a float either way."
+    (if (and (float? n) (= n (float (int n)))) (string (int n)) (string n)))
+
+  (defn describe-bound [kind bound]
+    "The bound a reading met, for a reader: `pinned 42`, `floor 0.5`,
+     `ceiling 8`, or `no row`."
+    (case kind
+      :pin (string "pinned " (plain bound))
+      :floor (string "floor " (plain bound))
+      :ceiling (string "ceiling " (plain bound))
+      "no row"))
+
   # ── the line ──────────────────────────────────────────────────────
   (def marker "measure ")
 
@@ -223,5 +247,8 @@
    :judge judge
    :judge-with judge-with
    :judge-all judge-all
+   :unread unread
+   :plain plain
+   :describe-bound describe-bound
    :render-reading render-reading
    :readings-in readings-in})

@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-29
+# audited: 2026-09-30
 ## elle test — the command line, the store it opens, and the run it drives.
 ## docs/test-cli.md
 ##
@@ -250,6 +250,7 @@
 (def nskip (count-status conn run-id :skip))
 (def ndiverge (count-status conn run-id :diverge))
 (def ntimeout (count-status conn run-id :timeout))
+(def nbad-readings (count-gating-readings conn run-id))
 
 # Counters and finished_at land in ONE statement: the completion stamp. A run
 # row without it was killed mid-flight and reads as truncated everywhere
@@ -261,6 +262,10 @@
 # you read results here, not by hand-writing SQLite (use --query to drill in).
 (print-summary conn run-id)
 (sqlite:close conn)
-# Gate exit: zero iff no form failed, no tier diverged, and nothing timed out.
-# A skip is fine; a timeout (a test that never finished) gates non-zero.
-(os/exit (if (or (> nfail 0) (> ndiverge 0) (> ntimeout 0)) 1 0))
+# Gate exit: zero iff no form failed, no tier diverged, nothing timed out, and
+# every judged reading is ok. A skip is fine; a timeout (a test that never
+# finished) gates non-zero, and so does a reading past its bound
+# (docs/ratchet.md § The judge).
+(os/exit (if (or (> nfail 0) (> ndiverge 0) (> ntimeout 0) (> nbad-readings 0))
+           1
+           0))

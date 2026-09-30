@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 //! elle's subcommands — `fmt`, `lint`, `lsp`, `rewrite`, `image`, `semver`, `test` — dispatched for `elle` and the rig alike.
 //!
 //! rig/overview.md
@@ -15,6 +15,7 @@ use crate::runtime::Runtime;
 /// definitions are evaluated. See docs/test-runner.md.
 const TEST_RUNNER_FRAGMENTS: &[&str] = &[
     include_str!("../test/store.lisp"),
+    include_str!("../test/ledger.lisp"),
     include_str!("../test/import.lisp"),
     include_str!("../test/exec.lisp"),
     include_str!("../test/record.lisp"),
