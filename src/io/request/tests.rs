@@ -1,7 +1,5 @@
 //! audited: 2026-09-30
-//! What a request carries, what the submit path's copy of it keeps, when it
-//! may still be spent, and the in-place fills a completion makes through its
-//! buffers.
+//! What a request and its submitted copy carry, when it may be spent, and the fills a completion makes.
 //!
 //! src/io/AGENTS.md
 
@@ -346,5 +344,39 @@ fn a_request_is_stale_once_its_fiber_is_dropped() {
         let (request, parker) = stamped(ctx);
         drop(parker);
         assert!(!park_stands(request));
+    });
+}
+
+/// `arena/allocs` and `compile/run-on :bytecode` run a thunk on the current
+/// fiber and park the thunk's request again at their own call, so the fiber
+/// that stamped the request stamps it a second time.
+///
+/// The counter-factual: a stamp that admits one park per request panics at the
+/// host's park in a debug build.
+#[test]
+fn the_fiber_that_stamped_a_request_may_stamp_it_again() {
+    crate::primitives::ctx::with_test_ctx(|ctx| {
+        let (request, parker) = stamped(ctx);
+        request
+            .as_external::<IoRequest>()
+            .unwrap()
+            .stamp_parker(parker.downgrade());
+        assert!(park_stands(request));
+    });
+}
+
+/// No park hands a request to a second fiber as one it built, so a second
+/// fiber's stamp is a VM defect, and a debug build says so where it happens.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "an io request is stamped by the one fiber whose op built it")]
+fn a_second_fiber_may_not_stamp_a_request() {
+    crate::primitives::ctx::with_test_ctx(|ctx| {
+        let (request, _parker) = stamped(ctx);
+        let other = parked_on(request);
+        request
+            .as_external::<IoRequest>()
+            .unwrap()
+            .stamp_parker(other.downgrade());
     });
 }
