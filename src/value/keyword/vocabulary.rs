@@ -317,6 +317,14 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "mlir/compile-spirv",
     "vm",
     "wasm",
+    // The build key `(elle/build)` answers: the tier a build carries, its I/O
+    // backend, and the platform (`tier` and `io` appear above)
+    "interp",
+    "uring",
+    "pool",
+    "os",
+    "arch",
+    "build",
     // Arena / memory gauges
     "arena/allocs",
     "arena/stats",

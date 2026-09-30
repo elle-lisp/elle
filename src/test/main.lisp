@@ -218,13 +218,13 @@
 # and which process to ask whether it is still working.
 (def ident (run-identity))
 (sqlite:exec conn
-             "INSERT INTO run (tiers, n_selected, git_commit, git_dirty, tree_hash, worktree, boot_fingerprint, elle_version, build_profile, host, argv, run_key, pid) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)"
+             "INSERT INTO run (tiers, n_selected, git_commit, git_dirty, tree_hash, worktree, boot_fingerprint, elle_version, build_profile, host, argv, run_key, pid, build) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"
              [(if isolate-flags "process" (tiers-str active-tiers))
               (+ (length (get opts :paths)) (length (get opts :eval)))
               (get ident :commit) (get ident :dirty) (get ident :tree)
               (get ident :worktree) (get ident :boot) (get ident :version)
               (get ident :profile) (get ident :host) (get ident :argv)
-              (get ident :key) (get ident :pid)])
+              (get ident :key) (get ident :pid) (get ident :build)])
 (def run-id (last-rowid conn))
 
 # What the runner's own heap reads before the first file. Every later reading

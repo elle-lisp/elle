@@ -16,8 +16,8 @@
 (def run-columns
   ["run_key" "started_at" "finished_at" "tiers" "selection" "n_selected"
    "git_commit" "git_dirty" "tree_hash" "worktree" "boot_fingerprint"
-   "elle_version" "build_profile" "host" "argv" "pid" "n_pass" "n_fail" "n_skip"
-   "n_diverge" "n_timeout"])
+   "elle_version" "build_profile" "host" "argv" "pid" "build" "n_pass" "n_fail"
+   "n_skip" "n_diverge" "n_timeout"])
 
 (def form-columns
   ["hash" "origin" "session" "file" "form_index" "line" "col" "label" "src"

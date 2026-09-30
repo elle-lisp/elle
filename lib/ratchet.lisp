@@ -68,12 +68,15 @@
   # nothing. The rows are that producer's, from the ledger directory, and nil
   # when no ledger file names the producer: such a program prints and judges
   # nothing too, and the first row written for it is what starts the gate.
+  # The rows are as the running build sees them, or as the build a test
+  # names with `:build` sees them (docs/ratchet.md).
   (def root (elle/root))
   (def producer (led:producer-of (sys/argv) root))
   (def ledger-dir (led:ledger-dir root))
+  (def build (or (get (struct ;opts) :build) (led:running-build)))
   (def rows
     (if (and producer ledger-dir (file/exists? ledger-dir))
-      (let [l (get (led:load-dir ledger-dir) producer)]
+      (let [l (get (led:load-dir ledger-dir build) producer)]
         (if l (get l :rows) nil))
       nil))
   (def @readings @[])
@@ -250,5 +253,6 @@
    :load-dir led:load-dir
    :ledger-dir led:ledger-dir
    :producer producer
+   :build build
    :rows rows
    :readings readings})

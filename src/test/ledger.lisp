@@ -10,12 +10,16 @@
 # the runner and a direct run of a producer reach one verdict from one function.
 (def ledger ((import "std/ratchet/ledger")))
 
+# The build this runner is, which every child of an --isolate run shares: the
+# rows are as it sees them, and a run row records it (docs/ratchet.md).
+(def running-build (ledger:running-build))
+
 # Every ledger in the directory, keyed by producer, loaded once: a ledger is a
 # committed file and a run reads it, never writes it. ELLE_LEDGER names another
 # directory, which is how a test hands the runner a ledger of its own.
 (def ledgers
   (let [dir (ledger:ledger-dir (elle/root))]
-    (if (and dir (file/exists? dir)) (ledger:load-dir dir) @{})))
+    (if (and dir (file/exists? dir)) (ledger:load-dir dir running-build) @{})))
 
 (defn rows-for [file]
   "The ledger rows of FILE keyed by `row-key`, or nil when no ledger names it.

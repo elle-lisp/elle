@@ -1,6 +1,7 @@
 // audited: 2026-09-30
 //! What this build of Elle is: version, epoch, cargo profile, the binary's
-//! fingerprint, and the root it resolves modules against.
+//! fingerprint, the tier, backend and platform it runs on, and the root it
+//! resolves modules against.
 //!
 //! docs/test-store.md
 
@@ -175,6 +176,51 @@ pub(crate) fn prim_boot_fingerprint(
     }
 }
 
+/// The tier this build carries, by the precedence docs/config.md gives the
+/// features: the WebAssembly backend, then the MLIR tier, then the JIT, and
+/// the interpreter alone where a build has none.
+fn build_tier() -> &'static str {
+    if cfg!(feature = "wasm") {
+        "wasm"
+    } else if cfg!(feature = "mlir") {
+        "mlir"
+    } else if cfg!(feature = "jit") {
+        "jit"
+    } else {
+        "interp"
+    }
+}
+
+/// The I/O backend this build runs: io_uring where the feature is on and the
+/// platform is Linux, and the thread pool everywhere else.
+fn build_io() -> &'static str {
+    if cfg!(all(feature = "uring", target_os = "linux")) {
+        "uring"
+    } else {
+        "pool"
+    }
+}
+
+/// The build a program runs on, as a struct: the tier, the I/O backend, the
+/// operating system and the architecture. A ledger row belongs to a build,
+/// and this is how the ratchet learns which one is running
+/// (docs/ratchet.md).
+pub(crate) fn prim_build(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
+    use crate::value::heap::TableKey;
+    use std::collections::BTreeMap;
+    let os = ctx.string(std::env::consts::OS);
+    let arch = ctx.string(std::env::consts::ARCH);
+    let mut fields = BTreeMap::new();
+    fields.insert(TableKey::keyword("tier"), Value::keyword(build_tier()));
+    fields.insert(TableKey::keyword("io"), Value::keyword(build_io()));
+    fields.insert(TableKey::keyword("os"), os);
+    fields.insert(TableKey::keyword("arch"), arch);
+    (SIG_OK, ctx.struct_from(fields))
+}
+
 /// Get package information
 pub(crate) fn prim_package_info(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -230,6 +276,12 @@ primitive! {
         // The hash is an integer and nil is an immediate, so the result never
         // reaches the heap (docs/impl/region/effects.md).
         effect: RegionEffect::Immediate,
+    }
+    "elle/build" => prim_build {
+        doc: "Return the build this program runs on as {:tier :io :os :arch}: the tier the build carries (:jit, :mlir, :wasm or :interp), its I/O backend (:uring or :pool), and the platform's operating system and architecture. A ledger row belongs to a build (docs/ratchet.md).",
+        category: "elle",
+        example: "(get (elle/build) :tier)",
+        effect: RegionEffect::Fresh,
     }
     "elle/info" => prim_package_info {
         doc: "Get package information (name, version, description)",

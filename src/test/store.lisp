@@ -48,7 +48,7 @@
   [["git_commit" "TEXT"] ["git_dirty" "INTEGER"] ["tree_hash" "TEXT"]
    ["worktree" "TEXT"] ["boot_fingerprint" "INTEGER"] ["elle_version" "TEXT"]
    ["build_profile" "TEXT"] ["host" "TEXT"] ["argv" "TEXT"] ["run_key" "TEXT"]
-   ["pid" "INTEGER"]])
+   ["pid" "INTEGER"] ["build" "TEXT"]])
 
 (defn ensure-code-columns [conn cols]
   (if (empty? cols)
@@ -59,7 +59,7 @@
 
 (defn ensure-schema [conn]
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, run_key TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, boot_fingerprint INTEGER, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, pid INTEGER, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0)")
+               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, run_key TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, boot_fingerprint INTEGER, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, pid INTEGER, build TEXT, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS form (hash TEXT PRIMARY KEY, origin TEXT, session TEXT, file TEXT, form_index INTEGER, line INTEGER, col INTEGER, label TEXT, src TEXT, caps TEXT, touches TEXT, signal TEXT)")
   (sqlite:exec conn
@@ -159,7 +159,7 @@
             :worktree (capture-cmd "git rev-parse --show-toplevel 2>/dev/null")
             :boot (elle/boot-fingerprint) :host host :version (elle/version)
             :profile (elle/build-profile) :argv argv :key (run-key host argv)
-            :pid (sys/pid))))
+            :pid (sys/pid) :build running-build)))
 
 # What names this run in any store that holds it (docs/test-store.md § The run
 # key). The machine, the process and the instant are what separate two runs

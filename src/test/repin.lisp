@@ -8,6 +8,12 @@
 
 (def repin ((import "std/ratchet/repin")))
 
+# The build an adopted row names: none on the reference build, whose rows
+# carry no :build, and the running build anywhere else, so a foreign reading
+# never pins the reference build (docs/ratchet.md § The runner).
+(def adopting-build
+  (if (= running-build ledger:reference-build) nil running-build))
+
 (defn worst-of [readings better]
   "The reading a pin moves to when several tiers read one subject: the one
    on the worse side, so the new pin holds on every tier."
@@ -55,13 +61,14 @@
                        " moves the worse way by hand"))
           text)
       (nil? row)
-        (let [row-text (repin:row-for r0)]
+        (let [row-text (repin:row-for r0 adopting-build)]
           (say "adopt" file r0 row-text)
           (repin:adopt text row-text))
       (any-verdict? rs :stale)
         (let [w (worst-of rs (get row :better))
               token (repin:write-number (get w :value) (get w :half))
-              moved (repin:move text (get r0 :subject) (get r0 :axis) token)]
+              moved (repin:move text (get r0 :subject) (get r0 :axis) token
+                                (get row :build))]
           (if moved
             (begin
               (say "repin" file r0

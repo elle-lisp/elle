@@ -1,13 +1,29 @@
 (elle/epoch 13)
 # audited: 2026-09-30
-## lib/ratchet/ledger.lisp — the committed bounds: a row per (subject, axis),
-## the judge that meets a reading with its row, and the reading line.
+## lib/ratchet/ledger.lisp — the committed bounds: a row per (subject, axis)
+## as one build sees them, the judge that meets a reading with its row, and
+## the reading line.
 ## docs/ratchet.md
 ##
 ## Loaded by lib/ratchet.lisp and by the runner: the one judge every verdict
 ## comes from, in a direct run and under `elle test` alike.
 
 (fn [& opts]
+  # ── builds ────────────────────────────────────────────────────────
+  # A row belongs to a build, and a row with no :build belongs to the
+  # reference build: the default build on Linux x86_64 (docs/ratchet.md).
+  (def reference-build "jit-uring-linux-x86_64")
+
+  (defn build-key [b]
+    "The key of a build struct as `(elle/build)` answers it:
+     tier-backend-os-arch."
+    (string (string (get b :tier)) "-" (string (get b :io)) "-" (get b :os) "-"
+            (get b :arch)))
+
+  (defn running-build []
+    "The key of the build this program runs on."
+    (build-key (elle/build)))
+
   # ── rows ──────────────────────────────────────────────────────────
   (defn row-key [subject axis]
     "The key a row and a reading meet on."
@@ -27,7 +43,8 @@
     "A ledger row, or nil when FORM is not one. A row is
      [subject axis bound & options]: the bound is a number (a pin), or :floor
      or :ceiling followed by one. Options default to a control with no slack,
-     whose better side is lower."
+     whose better side is lower, belonging to the reference build (:build nil).
+     :home is nil until `load-file` resolves the row against a build."
     (if (not (and (array? form) (>= (length form) 3) (string? (get form 0))
                   (keyword? (get form 1))))
       nil
@@ -38,7 +55,9 @@
                   :root nil
                   :better :lower
                   :slack 0
-                  :note nil}]
+                  :note nil
+                  :build nil
+                  :home nil}]
         (cond
           (number? third) (begin
                             (put row :kind :pin)
@@ -59,9 +78,32 @@
       (get form 1)
       nil))
 
-  (defn load-file [path]
-    "One ledger file: {:file :producer :rows}, or nil when no form in it is
-     the `(producer \"path\")` header. Rows are keyed by `row-key`."
+  (defn home? [row build]
+    "Does ROW belong to BUILD: its own :build, or none while BUILD is the
+     reference build?"
+    (let [b (get row :build)]
+      (if (nil? b) (= build reference-build) (= b build))))
+
+  (defn keep-row! [rows row build]
+    "Put ROW into ROWS as BUILD sees the ledger. A row with BUILD's own key
+     replaces the row with none; a row with none yields to BUILD's own; a row
+     of another build is no row here."
+    (let [k (row-key (get row :subject) (get row :axis))
+          b (get row :build)
+          have (get rows k)]
+      (cond
+        (= b build) (put rows k row)
+        (nil? b)
+          (when (or (nil? have) (nil? (get have :build))) (put rows k row))
+        true nil)
+      (let [kept (get rows k)]
+        (when kept (put kept :home (home? kept build))))
+      nil))
+
+  (defn load-file [path build]
+    "One ledger file as BUILD sees it: {:file :producer :rows}, or nil when no
+     form in it is the `(producer \"path\")` header. Rows are keyed by
+     `row-key`, and each carries :home."
     (let [forms (read-all (slurp path))
           @producer nil
           @rows @{}]
@@ -70,16 +112,15 @@
           (if p
             (assign producer p)
             (let [row (parse-row f)]
-              (when row
-                (put rows (row-key (get row :subject) (get row :axis)) row))))))
+              (when row (keep-row! rows row build))))))
       (if producer {:file path :producer producer :rows rows} nil)))
 
-  (defn load-dir [dir]
-    "Every ledger under DIR, keyed by producer."
+  (defn load-dir [dir build]
+    "Every ledger under DIR as BUILD sees it, keyed by producer."
     (let [@out @{}]
       (each name in (file/ls dir)
         (when (string/ends-with? name ".lisp")
-          (let [l (load-file (path/join dir name))]
+          (let [l (load-file (path/join dir name) build)]
             (when l (put out (get l :producer) l)))))
       out))
 
@@ -107,8 +148,9 @@
   # ── the judge ─────────────────────────────────────────────────────
   (defn judge [reading row]
     "The verdict of READING against ROW: :ok, :regression, :stale, :void, or
-     :unledgered when ROW is nil. A pin is two-sided and a floor or a ceiling
-     one-sided; every comparison is on the reading's whole interval."
+     :unledgered when ROW is nil. A pin is two-sided on its own build and
+     one-sided away from it (:home false); a floor or a ceiling is one-sided
+     everywhere. Every comparison is on the reading's whole interval."
     (cond
       (get reading :void) :void
       (nil? row) :unledgered
@@ -129,11 +171,13 @@
             (if (= (get row :better) :higher)
               (cond
                 (< hi (- bound s)) :regression
-                (> lo (+ bound s)) :stale
+                (> lo (+ bound s))
+                  (if (= (get row :home) false) :ok :stale)
                 true :ok)
               (cond
                 (> lo (+ bound s)) :regression
-                (< hi (- bound s)) :stale
+                (< hi (- bound s))
+                  (if (= (get row :home) false) :ok :stale)
                 true :ok))))))
 
   (defn judge-with [rows void-axes reading]
@@ -238,7 +282,11 @@
           (when r (push out r))))
       out))
 
-  {:row-key row-key
+  {:reference-build reference-build
+   :build-key build-key
+   :running-build running-build
+   :home? home?
+   :row-key row-key
    :parse-row parse-row
    :load-file load-file
    :load-dir load-dir
