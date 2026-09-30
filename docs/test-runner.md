@@ -90,7 +90,9 @@ cannot create the handler closure. A whole-file thunk does not go through
 so the file would run on the bytecode tier alone. It runs under each JIT policy
 instead (§ Tiers).
 
-**Boundaries (intentional).** Under `compile/whole-module` a runtime fault is the
+**Boundaries (intentional).** A path the runner cannot read, and a file or `-e`
+form that does not parse or compile, each become one **file-level** failure,
+and the run goes on to the next path. Under `compile/whole-module` a runtime fault is the
 file's single result (atomic). Under the per-form `compile/barrier-module`, a
 `def` *initializer* that raises aborts the eager setup and is recorded as a single
 **file-level** failure; test-form runtime failures are caught per form. With the

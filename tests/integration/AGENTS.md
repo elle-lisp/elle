@@ -1,6 +1,6 @@
 # tests/integration
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 Full-pipeline integration tests: end-to-end behavior verification.
 
@@ -29,7 +29,7 @@ check the repository rather than the language:
 | Group | Files |
 |-------|-------|
 | The documents and their policy | [agents.rs](agents.rs), [audit.rs](audit.rs), [audit_report.rs](audit_report.rs), [prose.rs](prose.rs), [paths.rs](paths.rs), [bytecode_doc.rs](bytecode_doc.rs), [doctest.rs](doctest.rs), [doctest_scope.rs](doctest_scope.rs), [rustsource.rs](rustsource.rs), [joined_comments.rs](joined_comments.rs) |
-| CI, the suites and the test runner | [workflows.rs](workflows.rs), [crosscheck.rs](crosscheck.rs), [change_filter.rs](change_filter.rs), [run_artifacts.rs](run_artifacts.rs), [suites.rs](suites.rs), [variants.rs](variants.rs), [bins.rs](bins.rs), [deps.rs](deps.rs), [corpus_targets.rs](corpus_targets.rs), [plugins.rs](plugins.rs), [runner_budget.rs](runner_budget.rs), [capacity.rs](capacity.rs), [profiles.rs](profiles.rs), [truncation.rs](truncation.rs), [runner_exit_trap.rs](runner_exit_trap.rs), [timeout_capture.rs](timeout_capture.rs), [runner_gauges.rs](runner_gauges.rs), [measurements.rs](measurements.rs), [isolation.rs](isolation.rs), [state_dir.rs](state_dir.rs), [run_identity.rs](run_identity.rs), [import.rs](import.rs), [form_profile.rs](form_profile.rs), [boot_fingerprint.rs](boot_fingerprint.rs) |
+| CI, the suites and the test runner | [workflows.rs](workflows.rs), [crosscheck.rs](crosscheck.rs), [change_filter.rs](change_filter.rs), [run_artifacts.rs](run_artifacts.rs), [suites.rs](suites.rs), [variants.rs](variants.rs), [bins.rs](bins.rs), [deps.rs](deps.rs), [corpus_targets.rs](corpus_targets.rs), [plugins.rs](plugins.rs), [runner_budget.rs](runner_budget.rs), [capacity.rs](capacity.rs), [profiles.rs](profiles.rs), [truncation.rs](truncation.rs), [runner_exit_trap.rs](runner_exit_trap.rs), [timeout_capture.rs](timeout_capture.rs), [runner_gauges.rs](runner_gauges.rs), [runner_cost.rs](runner_cost.rs), [runner_file_error.rs](runner_file_error.rs), [measurements.rs](measurements.rs), [isolation.rs](isolation.rs), [state_dir.rs](state_dir.rs), [run_identity.rs](run_identity.rs), [import.rs](import.rs), [form_profile.rs](form_profile.rs), [boot_fingerprint.rs](boot_fingerprint.rs) |
 | CLI surfaces | [argv_cli.rs](argv_cli.rs), [dump_cli.rs](dump_cli.rs), [tier_cli.rs](tier_cli.rs), [trace_cli.rs](trace_cli.rs), [version.rs](version.rs), [dispatch.rs](dispatch.rs), [repl_exit_codes.rs](repl_exit_codes.rs) |
 
 [allocator.rs](allocator.rs) sits in the directory unregistered and does not compile; the
@@ -132,9 +132,9 @@ one crate.
    `is_err()` alone passes when the run fails for a reason the test never
    meant to cover.
 
-4. **Tests are deterministic.** The same source gives the same result. No
-   randomness, and no timing dependency outside [time_property.rs](time_property.rs) and
-   [time_elapsed.rs](time_elapsed.rs).
+4. **Tests are deterministic.** The same source gives the same result, with no
+   randomness. A test that reads a clock asserts a bound the code guarantees,
+   such as a sleep or a budget that must elapse, and never an exact duration.
 
 ## Common pitfalls
 
