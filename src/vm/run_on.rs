@@ -18,6 +18,8 @@ mod bytecode;
 mod jit;
 #[cfg(feature = "mlir")]
 mod mlir;
+#[cfg(test)]
+mod tests;
 #[cfg(feature = "wasm")]
 mod wasm;
 
