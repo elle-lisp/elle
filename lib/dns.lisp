@@ -169,7 +169,7 @@
           (break nil)))))
   (freeze all-records))
 
-(defn resolve [name &named server timeout retries]
+(defn resolve [name &named server port timeout retries]
   "Resolve a domain name. Returns its record structs, the A records before
    the AAAA records. A query that fails contributes no records.
    Options:
@@ -188,7 +188,7 @@
                         (if ok? result ()))]
     (concat a-records aaaa-records)))
 
-(defn query [name qtype &named server timeout retries]
+(defn query [name qtype &named server port timeout retries]
   "Low-level: send a single DNS query and return the full parsed response.
    qtype is an integer (1=A, 28=AAAA, 5=CNAME, etc.).
    Options:
