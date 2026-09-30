@@ -1,8 +1,9 @@
-.PHONY: all elle docs docgen smoke test qa crosscheck clean space help \
-       smoke-elle smoke-boot-image smoke-vm smoke-noffi smoke-jit smoke-nouring elle-nouring \
-       smoke-wasm smoke-mlir \
-       doctest doctest-list myplugin elle-wasm check-wasm elle-mlir elle-noffi plugins plugins-all \
-       plugins-verify smoke-plugins mcp embedding \
+.PHONY: all elle elle-rig docs docgen smoke test qa crosscheck clean space help \
+       smoke-lang smoke-impl smoke-boot-image smoke-nojit smoke-pool smoke-mlir \
+       smoke-noffi smoke-wasm \
+       elle-nojit elle-pool elle-mlir elle-noffi elle-wasm check-wasm \
+       doctest doctest-list myplugin plugins plugins-all \
+       plugins-verify smoke-plugins mcp embedding semver-check \
        fmt fmt-check audit agents agents-check
 
 .DEFAULT_GOAL := all
@@ -18,13 +19,13 @@
 CORES := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 
 ifdef GITHUB_ACTIONS
-  # One corpus process per processor. GitHub gives the Linux runners four and
+  # One runner process per processor. GitHub gives the Linux runners four and
   # the macOS runner three, and re-sizes them without notice, so this is read
   # from the runner rather than written down — a constant fits the runner it was
-  # chosen on and over-subscribes the others. See docs/analysis/ci.md § "Runner
-  # capacity"; tests/integration/capacity.rs is the standing check.
+  # chosen on and over-subscribes the others. See docs/analysis/ci.md;
+  # tests/integration/capacity.rs is the standing check.
   JOBS          ?= $(CORES)
-  # Not $(CORES): the wasm pass is bounded by memory, not by processors. Each
+  # Not $(CORES): the wasm passes are bounded by memory, not by processors. Each
   # `--wasm=full` run compiles a whole module before it runs anything.
   WASM_JOBS     ?= 2
   ELLE          ?= ./target/release/elle
@@ -38,136 +39,19 @@ else
   ELLE          ?= ./target/debug/elle
   CARGO_PROFILE :=
 endif
-TIMEOUT ?= 30s
+
+# Where cargo leaves what this Makefile builds, for the profile it builds.
+CARGO_OUT = target/$(if $(findstring --release,$(CARGO_PROFILE)),release,debug)
+
+# The rig sits beside the `elle` it is built with (rig/overview.md), so it
+# follows `ELLE` unless named.
+ELLE_RIG ?= $(dir $(ELLE))elle-rig
+
 # `find` is told to be quiet about a missing root, so a root that moves drops
 # silently out of the format gate rather than failing it. The pin that every
 # Elle source in the tree stays reachable from this list is
 # tests/integration/paths.rs.
 LISP_FILES := $(shell find src/ lib/ tests/ demos/ tools/ docs/ -name '*.lisp' 2>/dev/null)
-
-# oracle.lisp is the leak-measurement instrument: a couple of hundred adaptive
-# empirical-Bernstein probes, each looping blocks of heap ops until its interval
-# converges. That is tens of seconds of CPU regardless of tier (the JIT does not
-# accelerate it — the cost is region alloc/reclaim, not bytecode interpretation),
-# which outgrows both the corpus TIMEOUT and the `elle test` per-form budget and
-# gets killed there. It runs with a wider budget instead, pulled out of every
-# batch so each other file still fails fast on a hang. The cost tracks the probe
-# COUNT, so a pass that adds probes lengthens it — read the budget from a timed
-# run, never from a number written here.
-# $(1) is the tier flags for the pass (e.g. --jit=off --mlir=off).
-ORACLE_TIMEOUT ?= 120s
-ORACLE_FILE    := tests/impl/oracle.lisp
-define RUN_ORACLE
-	@timeout $(ORACLE_TIMEOUT) $(ELLE) $(1) $(ORACLE_FILE) \
-		|| { echo "FAILED: oracle.lisp ($(1))"; exit 1; }
-endef
-
-# The io leak dashboard rides the same shape: pulled out of every batch, run
-# under its own timed budget (io probes cost wall-clock; read the number from
-# a timed run, as with ORACLE_TIMEOUT above).
-PLUMB_TIMEOUT ?= 60s
-PLUMB_FILE    := tests/impl/plumb.lisp
-define RUN_PLUMB
-	@timeout $(PLUMB_TIMEOUT) $(ELLE) $(1) $(PLUMB_FILE) \
-		|| { echo "FAILED: plumb.lisp ($(1))"; exit 1; }
-endef
-
-# One dashboard through the runner, as an isolated child under each JIT policy.
-# The runner opens the measurement channel only for an `--isolate` child, so
-# this is the shape that turns each verdict into a row (docs/testing.md). The
-# per-file passes above spell the direct runs; every `elle test` target spells
-# this one. The dashboard's own budget becomes the child's `--timeout`.
-# $(1) the dashboard file   $(2) its budget in seconds, as `120s`
-define RUN_DASHBOARD
-	@$(ELLE) test $(ELLE_TEST_FLAGS) --isolate '--jit=off' --timeout $(patsubst %s,%000,$(2)) $(1) || { echo "FAILED: the --jit=off dashboard run"; exit 1; }
-	@$(ELLE) test $(ELLE_TEST_FLAGS) --isolate '--jit=eager' --timeout $(patsubst %s,%000,$(2)) $(1) || { echo "FAILED: the --jit=eager dashboard run"; exit 1; }
-endef
-
-# Some corpus files spend most of a per-file budget on work the case needs: the
-# h2 families drive hundreds of requests or streams over one session, and
-# region-jit-io-suspend-uaf reads 20000 lines to drive one function hot enough
-# for the JIT to compile it. Cut either volume and the shape stops reaching the
-# state it pins. They fit TIMEOUT with room on an idle box, and they have been
-# killed at it on CI, where the runner is shared and slower by an order of
-# magnitude. A killed file is exit 124 — no output, no assertion message — so it
-# reads as a flaky runner rather than as a budget that was never wide enough.
-# They get a wider one, which is the bargain ORACLE_TIMEOUT already makes, in
-# per-file form: an override for the files that need it, so every other file
-# still fails fast on a hang. The pins are tests/integration/budget.rs for the
-# per-file passes and tests/integration/runner_budget.rs for the runner.
-#
-# The wider budget is a BACKSTOP, not the deadline. Each of these files carries
-# its own `deadline` and reports which request stalled and how long it waited;
-# that message is the reason to run the file, and it only ever prints if the
-# outer kill lands after it. So WIDE_TIMEOUT must stay above the LARGEST
-# in-file deadline named here, which is 120 s. Read both from a timed run rather
-# than from a number written here — remembering that a run `timeout` killed
-# reports the cap, not what the file would have cost.
-#
-# The h2 entries are family prefixes, not file names. A deadline is a property
-# of the family: every h2-bidi case gets 120 s, every h2-load case 60 s, and a
-# new sibling copies its neighbour. Naming the prefix means the new file arrives
-# with a budget above the deadline it inherited, instead of arriving under a
-# 30 s one and going unnoticed until a runner is slow enough. h2 files that
-# declare no deadline (h2-rfc9113, h2-recycle-cleanup, h2-stress-scoped) are not
-# in a family named here and keep TIMEOUT.
-#
-# Two passes read the list, so the families are named once and each pass gets
-# the spelling it needs. `WIDE_FILES` is the `grep -e` list the per-file passes
-# select with. `WIDE_FLAGS` is what the corpus pass hands `elle test`: its
-# budget is per FORM and one runner process takes a whole batch of files, so no
-# shell ever sees a path in time to choose, and the policy has to travel as
-# flags. `WIDE_TIMEOUT_MS` is the one budget in the milliseconds the runner
-# takes. tests/integration/runner_budget.rs pins all three against each other.
-WIDE_TIMEOUT    ?= 150s
-WIDE_TIMEOUT_MS := $(patsubst %s,%000,$(WIDE_TIMEOUT))
-WIDE_FAMILIES   := h2-bidi- h2-load- h2-stream- h2-timeout- \
-                   region-jit-io-suspend-uaf.lisp
-WIDE_FILES      := $(patsubst %,-e %,$(WIDE_FAMILIES))
-WIDE_FLAGS      := --wide-timeout $(WIDE_TIMEOUT_MS) \
-                   $(patsubst %,--wide %,$(WIDE_FAMILIES))
-
-# The budget for ONE corpus file: `parallel` substitutes the path into `{}` and
-# the pass's shell picks a budget, once per file. Every pass that runs the corpus
-# one file at a time spells `timeout $(FILE_TIMEOUT)` — a pass that spells
-# `timeout $(TIMEOUT)` hands the narrow budget to the two files above.
-#
-# A `case` reads better here and does not survive the trip. `parallel` runs this
-# under the platform's `/bin/sh`, which on macOS is bash 3.2, and that parser
-# ends a `$(…)` at the first `)` inside it — the one closing a case pattern. The
-# corpus then dies file by file on a syntax error rather than on anything it
-# tests. `grep` needs no parentheses, and matches the shape the skip lists above
-# already use. tests/integration/budget.rs runs the real thing under `sh`.
-FILE_TIMEOUT = $$(echo {} | grep -q $(WIDE_FILES) && echo $(WIDE_TIMEOUT) || echo $(TIMEOUT))
-
-# One corpus pass with ONE PROCESS PER FILE, under a wall-clock TIMEOUT. Each
-# file starts, runs as a whole program, and exits — the shape `elle test` never
-# takes, and the only one that covers program teardown and process-global modes.
-#
-# $(1) the pass's `grep -v` skip patterns   $(3) the pass name, for the failure
-# $(2) the elle flags for the pass          $(4) a short tag, for the joblog
-# No argument may contain a comma: `$(call)` splits on them.
-#
-# The joblog is what makes a failure readable. `parallel` reports only a COUNT
-# of failed jobs, and a file killed by `timeout` prints nothing at all — exit
-# 124, no output, no name. Without the log the gate says "a file failed" and the
-# reader has to bisect the corpus to learn which. Every non-zero row is named
-# here, with its exit status and signal, before the gate fails.
-define RUN_PER_FILE
-	@mkdir -p target
-	@rm -f target/smoke-$(4).joblog
-	@printf '%s\n' tests/elle/*.lisp \
-		| grep -v $(1) | grep -v $(ORACLE_FILE) | grep -v $(PLUMB_FILE) \
-		| parallel -j $(JOBS) --tag --joblog target/smoke-$(4).joblog \
-			'timeout $(FILE_TIMEOUT) $(ELLE) $(2) {}' \
-		|| { \
-			echo "--- files that failed the $(3) ---"; \
-			awk 'NR > 1 && ($$7 != 0 || $$8 != 0) { \
-				printf "  %s  exit=%s signal=%s  (%ss)\n", $$NF, $$7, $$8, $$4 }' \
-				target/smoke-$(4).joblog; \
-			echo "FAILED: elle tests $(3) — see target/smoke-$(4).joblog"; \
-			exit 1; }
-endef
 
 all: elle docs  ## Build everything
 
@@ -175,6 +59,9 @@ all: elle docs  ## Build everything
 
 elle:  ## Build the Elle binary
 	cargo build $(CARGO_PROFILE) -p elle
+
+elle-rig:  ## Build the rig: the Elle runtime a test configures (rig/overview.md)
+	cargo build $(CARGO_PROFILE) -p elle-rig
 
 MCP_PATCH := --config 'patch."https://github.com/elle-lisp/elle".elle-plugin.path="elle-plugin"'
 
@@ -268,12 +155,13 @@ fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
 semver-check: elle  ## Verify every versioned library surface against its committed .surface
 	$(ELLE) semver
 
+
 # ── Test ────────────────────────────────────────────────────────────
 
 # Approximate runtimes (for guidance — vary by machine):
-#   make smoke    docs + the elle test corpus (runner + per-file passes) + embedding
+#   make smoke    ~30min release: both suites, doctests, embedding, the surface gate
 #   make qa       ~2min: the PR gate's QA job (rustfmt, workspace clippy, crosscheck, rustdoc)
-#   make test     smoke + qa + rust unit/integration
+#   make test     qa + smoke + the Rust unit, integration and rig tests
 #   cargo test    ~60min full suite (unit + integration + property)
 #
 # `make test` exists to predict the PR gate, so it runs what the gate runs. A
@@ -286,104 +174,86 @@ semver-check: elle  ## Verify every versioned library surface against its commit
 # initialized it. Run it by hand after `make plugins` when a change touches
 # `elle_api!`; the `Plugin Tests` job runs it on every pull request.
 #
-# The default-build elle scripts get TWO corpus passes, because they are two
-# different tests of the same files:
-#
-#   smoke-elle  ONE `elle test` invocation, whole corpus. It drives each file's
-#               forms from inside one long-lived process under a per-form
-#               budget, covering the vm and jit policies and cross-tier
-#               divergence in that one run (see docs/testing.md).
-#   smoke-vm    One process PER FILE, `--jit=off --mlir=off`, under a wall-clock
-#   smoke-jit   TIMEOUT. Each file has to start, run as a whole program, and
-#               EXIT. Program teardown, process-global config, and anything
-#               wall-clock-sensitive are reachable only here.
-#
-# The featured builds run the SAME corpus through the runner
-# (smoke-mlir/smoke-wasm — the binary's extra tier joins the matrix and its
-# divergence rows land in the session DB). smoke-wasm adds one whole-file pass
-# in the process-global mode the runner cannot vary per file (--wasm=full).
-# smoke-noffi is the per-file shape for a build with no features, which cannot
-# host the runner: the runner's store is FFI bindings to libsqlite3 and libzstd.
+# Two suites (docs/spec.md). The language suite, tests/lang, asserts what every
+# correct Elle does, and every build runs it with no flag. The implementation
+# suite, tests/impl, checks this implementation, and runs on the rig, which
+# reads the mode each file's sidecar names (rig/overview.md). Each build is an
+# implementation, so tier coverage is the set of builds that run the language
+# suite: smoke-lang on the default build, smoke-nojit, smoke-pool, smoke-mlir
+# and smoke-noffi on the others (docs/analysis/ci.md).
 
-# The agent-first runner: ONE process, the whole corpus, ONE SQLite session DB.
-# `elle test` (docs/testing.md, docs/test-runner.md) compiles + runs every file
-# and records each (form × tier) result; the gate is its exit code. A multi-form
-# file runs under the :off JIT policy (recorded `vm`) AND :eager (recorded
-# `jit`), while single-form files run on every tier with divergence — so one
-# invocation is the whole vm/jit/differential gate. No per-pass skip list
-# applies: a test gates itself in-file (gate!/:gated) and a backend the build
-# lacks is dropped, not skip-listed. The session DB is the runner's default —
-# the state directory, which survives a reboot — so every run, make-driven or
-# not, accumulates in the one history that `--summary`/`--query` and the
-# regression-archaeology queries read. Never point a run at a private DB.
-# Concurrent runs share it safely: the connection waits on a busy database
-# rather than raising (docs/test-runner.md § Concurrent runs wait).
+LANG_FILES := $(sort $(wildcard tests/lang/*.lisp))
+IMPL_FILES := $(sort $(wildcard tests/impl/*.lisp))
 
-# Quarantine list for the gate — known HARNESS bugs (NOT test failures) get
-# parked here with a tracked reason, plus the two dashboards whose budgets a
-# batch cannot express.
-#
-# oracle.lisp and plumb.lisp are those files: each is a measurement instrument
-# whose cost is tens of seconds on any tier, close enough to the runner's
-# per-form budget that a batch running it beside 24 other files loses the race
-# and records `timeout`. `RUN_CORPUS` runs each after the batches through
-# `RUN_DASHBOARD`, an isolated child under the dashboard's own budget — so the
-# gate still covers both policies, the verdicts land in the session DB, and
-# every other file keeps failing fast on a hang.
-#
-# (Resolved: subprocess.lisp used to hang in a worker thread — children inherited
-# the worker's all-blocked signal mask across fork/exec, so SIGTERM never landed
-# and subprocess/wait wedged. Fixed by resetting the child's mask in pre_exec;
-# see src/io/request.rs reset_child_signals + docs/posix-signals.md.)
-ELLE_TEST_SKIP := $(ORACLE_FILE) $(PLUMB_FILE)
+# The runner's own acceptance test drives `elle test` itself and reads the store
+# the pass records into, so it rides the implementation suite's first pass.
+RUNNER_ACCEPTANCE := tests/runner/acceptance.lisp
 
-# Per-pass skip lists for the DIRECT-RUN tier targets only (smoke-vm/jit/noffi).
-# jit-rejections    — requires JIT active (tests rejection tracking)
-# gpu-eligible,mlir — require the MLIR tier active
-ELLE_SKIP_VM  := -e jit-rejections.lisp -e gpu-eligible.lisp -e mlir.lisp
-ELLE_SKIP_JIT := -e NOMATCH_PLACEHOLDER
+# The rig profiles (rig/overview.md). The eager profile runs both suites with
+# every function compiled on its first call. `IMPL_PROFILES` names more profiles
+# for the language suite: the macOS job sets it to tests/impl/profiles/scrub.toml.
+EAGER_PROFILE     := tests/impl/profiles/jit-eager.toml
+WASM_FULL_PROFILE := tests/impl/profiles/wasm-full.toml
+IMPL_PROFILES     ?=
 
-# FFI skip list: tests requiring the `ffi` feature (skipped when built
-# --no-default-features). These reference ffi/* primitives that are compiled out
-# of a no-features build — some as a runtime "requires `ffi` feature" error
-# (prim-ffi), others absent entirely so the file won't even compile
-# (region-ffi-callback-arg-uaf's `ffi/callback`), which a runtime gate can't
-# catch. prim-ffi is listed explicitly rather than left to the `ffi.lisp`
-# substring accidentally matching `prim-ffi.lisp`.
-ELLE_SKIP_FFI := -e ffi.lisp -e prim-ffi.lisp -e region-ffi-callback-arg-uaf.lisp \
-                 -e compress.lisp -e sqlite.lisp -e zmq.lisp -e git.lisp -e http.lisp
+# The build with no features cannot compile a file that calls an `ffi/`
+# primitive: some fail at run time with "requires `ffi` feature", and others
+# name a primitive the build does not have, so the file never compiles and no
+# gate inside it can run. The patterns are `grep -e` substrings of a path.
+ELLE_SKIP_FFI := -e ffi.lisp -e prim-ffi.lisp -e compress.lisp -e sqlite.lisp \
+                 -e zmq.lisp -e git.lisp -e http.lisp \
+                 -e git-write.lisp -e semver-check.lisp
+NOFFI_FILES = $(shell printf '%s\n' $(LANG_FILES) | grep -v $(ELLE_SKIP_FFI))
 
-# Skip list for the whole-file --wasm=full pass only (eval = dynamic
-# compilation, not in the WASM backend). The runner needs no list: a form a
-# tier cannot host is recorded :ineligible→skip per form.
-#
-# wasm-tier-error-signal drives the TIERED backend through `compile/run-on
-# :wasm`, which a whole-file `--wasm=full` compile cannot host — the forced tier
-# needs the bytecode VM underneath it. Same shape as eval: the runner records it
-# :ineligible per form, so the corpus pass still covers the file.
-WASM_SKIP := -e eval.lisp -e eval-env.lisp -e wasm-tier-error-signal.lisp
+# The no-features binary, beside the runner's build. That build cannot host the
+# runner: the runner's store reaches SQLite and zstd through FFI. So the pass
+# runs `elle test` on the default build and each child on this binary.
+ELLE_NOFFI ?= $(CARGO_OUT)/elle-noffi
 
-# One corpus pass through the agent-first runner. Shared by smoke-elle and the
-# featured-build targets: the runner probes the tiers the binary carries, so
-# the same invocation gains the mlir-cpu / wasm tier — and its divergence
-# rows — when $(ELLE) was built with that feature.
+# The files a whole-module `--wasm=full` compile cannot host. `eval` needs
+# dynamic compilation, which the WASM backend does not have. The two tiered
+# backend files force closures onto the tier with `compile/run-on :wasm`, which
+# needs the bytecode VM underneath; the wasm rig's sidecar pass runs them.
+WASM_SKIP := -e eval.lisp -e eval-env.lisp -e wasm-tier-error-signal.lisp \
+             -e wasm-tier.lisp
+WASM_LANG_FILES = $(shell printf '%s\n' $(LANG_FILES) | grep -v $(WASM_SKIP))
+WASM_FULL_FILES = $(shell printf '%s\n' $(IMPL_FILES) | grep -v $(WASM_SKIP))
+
+# Some suite files spend most of the runner's default budget on work the case
+# needs: the h2 families drive hundreds of requests or streams over one
+# session, region-jit-io-suspend-uaf reads 20000 lines to drive one function
+# hot, and the two dashboards loop a shape under a heap gauge until each
+# interval converges. They fit the default on an idle box and have been killed
+# at it on CI, where the runner is shared and slower. A killed file records
+# `timeout` and nothing else, so it reads as a flaky runner rather than as a
+# budget that was never wide enough.
 #
-# The corpus runs in BATCHES of $(CORPUS_BATCH) files per `elle test` process,
-# not one process over the whole corpus. The runner holds every file's compiled
-# module and region heap for the process's lifetime, so a single all-files
-# invocation grows without bound and is OOM-killed partway through — silently
-# truncating coverage to whatever ran before the kill. Bounding files per process
-# bounds peak memory; `xargs` runs every batch, so a batch that fails a test (exit
-# 1–125) or is OOM-killed (a signal, which halts xargs) drives a non-zero exit and
-# fails the gate loud. Divergence is a within-file, cross-tier property, so
-# batching by file does not weaken it, and every batch appends to the one session
-# DB that `--query`/`--summary` read (docs/testing.md § Reading a run).
+# They get a wider budget, named here and nowhere else, so every other file
+# still fails fast on a hang. The wider budget is a BACKSTOP, not the deadline:
+# each h2 file carries its own `deadline` and reports which request stalled,
+# and that report prints only if the runner's kill lands after it. So
+# WIDE_TIMEOUT_MS stays above the largest in-file deadline, which is 120 s.
+# Read both from a timed run rather than from a number written here.
 #
+# An h2 entry is a family prefix, not a file name: a deadline is a property of
+# the family, so a new sibling arrives with the budget its neighbours have.
+# One runner process takes a whole batch of files, so no shell sees a path in
+# time to choose; the policy travels to the runner as flags instead.
+# tests/integration/runner_budget.rs pins the list against the suites and the
+# runner.
+WIDE_TIMEOUT_MS ?= 150000
+WIDE_FAMILIES   := h2-bidi- h2-load- h2-stream- h2-timeout- \
+                   region-jit-io-suspend-uaf.lisp oracle.lisp plumb.lisp
+WIDE_FLAGS      := --wide-timeout $(WIDE_TIMEOUT_MS) \
+                   $(patsubst %,--wide %,$(WIDE_FAMILIES))
+
+# Files per `elle test` process. Each file runs as its own child, so a batch
+# bounds how many files one runner process records, not what they cost.
 # macOS and AArch64 get a smaller batch than everything else; docs/analysis/ci.md
-# § "Corpus batch size" owns the argument. HOST_OS and HOST_ARCH are overridable
-# so that tests/integration/capacity.rs can present a platform the suite is not
-# running on. The AArch64 runner says `Linux` to `uname -s`, so it is told apart
-# by `uname -m`: `aarch64` on Linux, `arm64` on a Mac.
+# owns the argument. HOST_OS and HOST_ARCH are overridable so that
+# tests/integration/capacity.rs can present a platform the suite is not running
+# on. The AArch64 runner says `Linux` to `uname -s`, so it is told apart by
+# `uname -m`: `aarch64` on Linux, `arm64` on a Mac.
 HOST_OS   ?= $(shell uname -s)
 HOST_ARCH ?= $(shell uname -m)
 ifneq ($(filter Darwin,$(HOST_OS))$(filter aarch64 arm64,$(HOST_ARCH)),)
@@ -394,129 +264,149 @@ endif
 
 # The files are dealt to the batches in hash-of-name order, not alphabetically.
 # Sibling files share a name prefix and a subject, and a subject's files cost
-# about the same, so alphabetical order gathers the whole corpus's heaviest
-# files into one or two batches and leaves the rest nearly empty. Ordering by a
-# hash of the path spreads each subject across the run, which flattens the peak
-# every batch has to fit. The hash is a plain djb2 over the path, so the order
-# is the same on every box and every run: a batch that fits today fits
-# tomorrow, and a batch that does not can be reproduced. Both stages run under
-# LC_ALL=C so the byte table and the sort do not follow the caller's locale.
+# about the same, so alphabetical order gathers the heaviest files into one or
+# two batches and leaves the rest nearly empty. Ordering by a hash of the path
+# spreads each subject across the run, which flattens the peak every batch has
+# to fit. The hash is a plain djb2 over the path, so the order is the same on
+# every box and every run: a batch that fits today fits tomorrow, and a batch
+# that does not can be reproduced. Both stages run under LC_ALL=C so the byte
+# table and the sort do not follow the caller's locale.
 DEAL_CORPUS := LC_ALL=C awk 'BEGIN { for (i = 0; i < 256; i++) ord[sprintf("%c", i)] = i } { h = 5381; for (i = 1; i <= length($$0); i++) h = (h * 33 + ord[substr($$0, i, 1)]) % 1000003; printf "%07d\t%s\n", h, $$0 }' | LC_ALL=C sort | cut -f2-
 
-# ELLE_TEST_FLAGS threads extra runner flags into every corpus batch — empty
-# by default. The macOS CI job sets `--trace=scrub` here: a released page is
-# zeroed before the pool caches it, so a read through a stale pointer panics
-# at the deref naming its site instead of surfacing minutes later as a
-# wrong-typed value or a wedge (docs/impl/region/diagnostics.md).
-ELLE_TEST_FLAGS ?=
-
-define RUN_CORPUS
-	@printf '%s\n' $(filter-out $(ELLE_TEST_SKIP),$(wildcard tests/elle/*.lisp)) \
-		| $(DEAL_CORPUS) \
-		| xargs -n $(CORPUS_BATCH) $(ELLE) test $(WIDE_FLAGS) $(ELLE_TEST_FLAGS) \
-		|| { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md § Reading a run)"; exit 1; }
-	$(call RUN_DASHBOARD,$(ORACLE_FILE),$(ORACLE_TIMEOUT))
-	$(call RUN_DASHBOARD,$(PLUMB_FILE),$(PLUMB_TIMEOUT))
+# One suite pass: the files, dealt into batches, `$(JOBS)` runner processes side
+# by side. Each file runs as its own child — `elle FLAGS PATH`, or `PROGRAM
+# FLAGS PATH` under `--host` — so it starts, runs as a whole program and exits,
+# the only shape that covers program teardown, and a fault kills one child
+# rather than the run. Every verdict lands in the session DB, the runner's
+# default in the state directory (docs/testing.md). Concurrent runners share it:
+# a connection waits on a busy database rather than raising.
+#
+# `xargs` runs every batch, and a batch that fails a file (exit 1–125) or dies
+# on a signal drives a non-zero exit, so the gate fails loud. Every recipe
+# reaches the runner through this and nowhere else:
+# tests/integration/run_artifacts.rs reads the targets that call it to know
+# which CI jobs record runs. The pass is one line, because
+# tests/integration/suites.rs reads its files and its flags off one line of
+# `make --dry-run`.
+#
+# $(1) the files   $(2) the runner's flags, such as `--host`   $(3) each child's
+# flags. No argument may contain a comma: `$(call)` splits on them.
+define RUN_SUITE
+	@printf '%s\n' $(1) | $(DEAL_CORPUS) | xargs -P $(JOBS) -n $(CORPUS_BATCH) $(ELLE) test $(2) --isolate '$(3)' $(WIDE_FLAGS) || { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md)"; exit 1; }
 endef
 
-smoke-elle: elle  ## Run the whole corpus through `elle test` (vm + jit + divergence)
-	@echo "=== elle test (vm + jit policies, cross-tier divergence) ==="
-	$(RUN_CORPUS)
+# The language suite under one rig profile. The blank line before `endef` ends
+# each expansion's line, so a `foreach` over profiles makes one pass each.
+define RUN_LANG_PROFILE
+	@echo "=== the language suite, under $(1) ==="
+	$(call RUN_SUITE,$(LANG_FILES),--host $(ELLE_RIG),--profile $(1))
 
-# The corpus booted from an image instead of from core.lisp, prelude.lisp and
-# stdlib.lisp — dump-boot's gate (docs/impl/image/boot.md). `--boot-image=` is
-# off by default and stays off while a hydrated stdlib reaches neither the JIT
-# tier nor cross-unit inlining, so nothing else in the tree boots from one.
+endef
+
+smoke-lang: elle  ## The language suite on this build, each file as its own `elle FILE`
+	@echo "=== the language suite ==="
+	$(call RUN_SUITE,$(LANG_FILES),,)
+
+smoke-impl: elle elle-rig  ## The implementation suite on the rig, then both suites under each rig profile
+	@echo "=== the implementation suite, on the rig ==="
+	$(call RUN_SUITE,$(IMPL_FILES) $(RUNNER_ACCEPTANCE),--host $(ELLE_RIG),)
+	@echo "=== both suites, every function compiled on its first call ==="
+	$(call RUN_SUITE,$(LANG_FILES) $(IMPL_FILES),--host $(ELLE_RIG),--profile $(EAGER_PROFILE))
+	$(foreach profile,$(IMPL_PROFILES),$(call RUN_LANG_PROFILE,$(profile)))
+
+# The language suite booted from an image instead of from core.lisp,
+# prelude.lisp and stdlib.lisp — dump-boot's gate (docs/impl/image/boot.md).
+# `--boot-image=` is off by default and stays off while a hydrated stdlib
+# reaches neither the JIT tier nor cross-unit inlining, so nothing else in the
+# tree boots from one.
 #
 # The directory lives under target/ rather than the temp root: an image is
 # megabytes, a store prunes the one an earlier digest left, and `make clean`
 # takes the directory with the rest of the build output. It starts empty, so
-# the first start below always pays the store the second one reads.
+# the first start below always pays the store every child then reads.
 #
 # The hydration proof is the `[trace:boot] image-hydrate` mark, and it is the
-# whole difference between this target and `smoke-elle`. A binary that ignored
+# whole difference between this target and `smoke-lang`. A binary that ignored
 # `--boot-image=` would accept it and boot from source, and an image every
-# start refuses is replaced and refused again — either way the corpus passes
-# and the gate reports a boot that never happened. Same argument as
-# `check-wasm`'s `[wasm]` marker.
+# start refuses is replaced and refused again — either way the suite passes and
+# the gate reports a boot that never happened. Same argument as `check-wasm`'s
+# `[wasm]` marker.
 BOOT_IMAGE_DIR ?= target/boot-image
 
-smoke-boot-image: ELLE_TEST_FLAGS += --boot-image=$(BOOT_IMAGE_DIR)
-smoke-boot-image: elle  ## Run the corpus booted from an image (dump-boot's gate)
+smoke-boot-image: elle  ## The language suite booted from an image (dump-boot's gate)
 	@echo "=== boot image: store one, then hydrate it ==="
 	@rm -rf "$(BOOT_IMAGE_DIR)"
 	@$(ELLE) --boot-image=$(BOOT_IMAGE_DIR) -e '(+ 1 2)' >/dev/null
 	@out=$$($(ELLE) --boot-image=$(BOOT_IMAGE_DIR) --trace=boot -e '(+ 1 2)' 2>&1 >/dev/null); \
 	printf '%s\n' "$$out" | grep 'image-hydrate' \
 		|| { printf '%s\n' "$$out"; \
-		     echo "FAILED: the second start did not hydrate the stored image, so the corpus would boot from source"; \
+		     echo "FAILED: the second start did not hydrate the stored image, so the suite would boot from source"; \
 		     exit 1; }
-	@echo "=== elle test (booted from the image in $(BOOT_IMAGE_DIR)) ==="
-	$(RUN_CORPUS)
+	@echo "=== the language suite, each file booted from the image in $(BOOT_IMAGE_DIR) ==="
+	$(call RUN_SUITE,$(LANG_FILES),,--boot-image=$(BOOT_IMAGE_DIR))
 
-smoke-vm: elle
-	@echo "=== elle tests (VM, no JIT) ==="
-	$(call RUN_PER_FILE,$(ELLE_SKIP_VM),--jit=off --mlir=off,VM-only pass (no JIT),vm)
-	$(call RUN_ORACLE,--jit=off --mlir=off)
-	$(call RUN_PLUMB,--jit=off --mlir=off)
+# Each variant below is a build of its own, and runs the language suite as the
+# default build does: every file, no flag. A build is its features
+# (docs/config.md): the interpreter alone, the thread-pool I/O backend, the
+# MLIR tier, or no features at all.
 
-elle-noffi:           ## Build elle with no features (for smoke-noffi)
-	@echo "=== build elle with no features ==="
-	cargo build $(CARGO_PROFILE) -p elle --no-default-features -q
+elle-nojit:  ## Build elle with no JIT tier (for smoke-nojit)
+	@echo "=== build elle with no JIT tier ==="
+	cargo build $(CARGO_PROFILE) -p elle --no-default-features --features ffi,uring -q
 
-smoke-noffi: elle-noffi
-	@echo "=== elle tests (VM, no features) ==="
-	$(call RUN_PER_FILE,$(ELLE_SKIP_VM) $(ELLE_SKIP_FFI),--jit=off,VM-only pass (no features),noffi)
-	$(call RUN_ORACLE,--jit=off)
-	$(call RUN_PLUMB,--jit=off)
+smoke-nojit: elle-nojit  ## The language suite on the interpreter alone
+	@echo "=== the language suite, no JIT tier ==="
+	$(call RUN_SUITE,$(LANG_FILES),,)
 
-smoke-jit: elle
-	@echo "=== elle tests (eager JIT) ==="
-	$(call RUN_PER_FILE,$(ELLE_SKIP_JIT),--jit=eager,JIT pass (eager),jit)
-	$(call RUN_ORACLE,--jit=eager)
-	$(call RUN_PLUMB,--jit=eager)
-
-# The thread-pool I/O backend, on a Linux box. `create_platform_backend` picks
-# the ring here and the pool on every other platform, so a Linux-only gate runs
-# the whole corpus against the ring and none of it against the pool. This is the
-# runtime half of the argument `crosscheck` makes below for the macOS `cfg`
-# arms: that one compiles the code a Linux build never compiles, this one runs
-# the code a Linux build never runs.
+# The thread-pool I/O backend, on a Linux box. The default build takes the ring
+# on Linux and the pool on every other platform, so a Linux-only gate runs no
+# suite against the pool. This is the runtime half of the argument `crosscheck`
+# makes below for the macOS `cfg` arms: that one compiles the code a Linux build
+# never compiles, this one runs the code a Linux build never runs. A pool-only
+# defect hangs rather than fails, so on the macOS runner alone it reads as a
+# flaky timeout rather than as the defect it is.
 #
-# Without it the pool's only sampler was the macOS job — once per PR, on the
-# slowest runner, against failure modes that hang rather than fail. A hang
-# spends the whole per-file budget, so it reads as a flaky timeout rather than
-# as the defect it is, and two pool-only defects reached main that way.
-#
-# The pool is a build, not a flag: the `no-uring` feature makes every backend
-# the binary opens a pool, the runner's own and its workers' alike, so the
-# corpus goes through `elle test` like every other recorded pass.
-elle-nouring:  ## Build elle with the no-uring feature (for smoke-nouring)
-	@echo "=== build elle with the no-uring feature ==="
-	cargo build $(CARGO_PROFILE) -p elle --features no-uring -q
+# The rig of the same build runs the implementation suite too: some of its files
+# count the pool's worker threads, which exist on no other build.
+elle-pool:  ## Build elle and its rig without io_uring (for smoke-pool)
+	@echo "=== build elle and its rig without io_uring ==="
+	cargo build $(CARGO_PROFILE) -p elle -p elle-rig --no-default-features --features jit,ffi -q
 
-smoke-nouring: elle-nouring  ## Corpus via elle test on the thread-pool backend (what every non-Linux build runs)
-	@echo "=== elle test (no-uring build: every I/O operation on the thread pool) ==="
-	$(RUN_CORPUS)
+smoke-pool: elle-pool  ## Both suites on the thread-pool I/O backend (what every non-Linux build runs)
+	@echo "=== the language suite, thread-pool I/O ==="
+	$(call RUN_SUITE,$(LANG_FILES),,)
+	@echo "=== the implementation suite, on the thread-pool build's rig ==="
+	$(call RUN_SUITE,$(IMPL_FILES),--host $(ELLE_RIG),)
 
-elle-mlir:   ## Build elle with MLIR support (for smoke-mlir)
+elle-mlir:  ## Build elle with the MLIR tier (for smoke-mlir)
 	@echo "=== build elle with MLIR ==="
 	cargo build $(CARGO_PROFILE) -p elle --features mlir -q
 
-smoke-mlir: elle-mlir  ## Corpus via elle test, with the mlir-cpu tier
-	@echo "=== elle test (mlir build: + mlir-cpu tier, cross-tier divergence) ==="
-	$(RUN_CORPUS)
+smoke-mlir: elle-mlir  ## The language suite on the MLIR build
+	@echo "=== the language suite, MLIR build ==="
+	$(call RUN_SUITE,$(LANG_FILES),,)
 
-elle-wasm:   ## Build elle with WASM support (for check-wasm/smoke-wasm)
-	@echo "=== build elle with WASM ==="
-	cargo build $(CARGO_PROFILE) -p elle --features wasm -q
+# The no-features binary is copied beside the build, and the default build then
+# rebuilt in its place, so the runner is always a build that has FFI.
+elle-noffi:  ## Build elle with no features beside the default build (for smoke-noffi)
+	@echo "=== build elle with no features ==="
+	cargo build $(CARGO_PROFILE) -p elle --no-default-features -q
+	cp $(CARGO_OUT)/elle $(ELLE_NOFFI)
+	cargo build $(CARGO_PROFILE) -p elle -q
+
+smoke-noffi: elle-noffi  ## The language suite on a build with no features, less the FFI files
+	@echo "=== the language suite, no features ==="
+	$(call RUN_SUITE,$(NOFFI_FILES),--host $(ELLE_NOFFI),)
+
+elle-wasm:  ## Build elle and its rig with the WASM backend (for check-wasm/smoke-wasm)
+	@echo "=== build elle and its rig with WASM ==="
+	cargo build $(CARGO_PROFILE) -p elle -p elle-rig --features wasm -q
 
 # The CI gate for the wasm backend while the tier carries no production
 # workloads: the feature still compiles, and the full-module tier still boots —
 # compiles a module to wasm, executes it, returns. The `[wasm]` marker is the
-# proof the tier engaged: a binary built WITHOUT the feature accepts
-# `--wasm=full` and silently runs the VM, which would green a build gate that
-# gated nothing. Full corpus coverage on this tier is smoke-wasm.
+# proof the tier engaged: a binary that ran the VM instead would green a build
+# gate that gated nothing. Suite coverage on this tier is smoke-wasm.
 check-wasm: elle-wasm  ## Build the WASM backend and boot one module through it
 	@echo "=== wasm boot check ==="
 	@out=$$(timeout 300s $(ELLE) --wasm=full tests/lang/arithmetic.lisp 2>&1); code=$$?; \
@@ -525,21 +415,27 @@ check-wasm: elle-wasm  ## Build the WASM backend and boot one module through it
 	printf '%s\n' "$$out" | grep -q '\[wasm\]' \
 		|| { echo "FAILED: wasm boot ran without engaging the wasm tier"; exit 1; }
 
-smoke-wasm: elle-wasm  ## Corpus via elle test (+ wasm tier) + whole-file --wasm=full pass
-	@echo "=== elle test (wasm build: + wasm tier, cross-tier divergence) ==="
-	$(RUN_CORPUS)
-	@echo "=== elle tests (WASM, whole-file) ==="
-	@printf '%s\n' tests/elle/*.lisp | \
-		grep -v $(WASM_SKIP) | \
+# Both suites on the wasm build (docs/impl/wasm.md). The language suite runs
+# under `--wasm=full`, one process per file. The implementation suite runs on
+# the build's rig twice: under each file's sidecar, where the tiered backend's
+# files run, then with each file compiled whole to one module.
+smoke-wasm: JOBS = $(WASM_JOBS)
+smoke-wasm: elle-wasm  ## Both suites on the WASM build
+	@echo "=== the language suite, each file compiled whole to one module ==="
+	@printf '%s\n' $(WASM_LANG_FILES) | \
 		parallel -j $(WASM_JOBS) --tag \
 			'timeout 300s $(ELLE) --wasm=full {}' \
-		|| { echo "FAILED: elle tests WASM pass (full)"; exit 1; }
+		|| { echo "FAILED: the language suite under --wasm=full"; exit 1; }
+	@echo "=== the implementation suite, on the wasm build's rig ==="
+	$(call RUN_SUITE,$(IMPL_FILES),--host $(ELLE_RIG),)
+	@echo "=== the implementation suite, each file compiled whole to one module ==="
+	$(call RUN_SUITE,$(WASM_FULL_FILES),--host $(ELLE_RIG),--profile $(WASM_FULL_PROFILE))
 
-# A literate doc is one whole program, not one corpus form: the scheduler docs
-# (processes.md, threads.md) run a dozen process systems in sequence, which is
-# minutes of debug-profile CPU — the corpus TIMEOUT kills them mid-run on any
-# debug binary. Same shape as ORACLE_TIMEOUT: a wider per-file budget, so every
-# other file still fails fast on a hang. Read the budget from a timed run.
+# A literate doc is one whole program: the scheduler docs (processes.md,
+# threads.md) run a dozen process systems in sequence, which is minutes of
+# debug-profile CPU. So a document gets a budget of its own, wider than a suite
+# file's, and every other file still fails fast on a hang. Read the budget from
+# a timed run.
 DOCTEST_TIMEOUT ?= 180s
 
 # The plugin two literate documents load. docs/cookbook/plugins.md is the
@@ -571,13 +467,13 @@ doctest-list:  ## List the documents doctest runs
 	@printf '%s\n' $(DOCTEST_DOCS)
 
 # A plugin test drives a whole library through one long program — the oxigraph
-# file loads an RDF store, the tree-sitter file parses a grammar — so the corpus
-# TIMEOUT is too narrow for it. Same shape as DOCTEST_TIMEOUT: a wider per-file
-# budget, so every file still fails fast on a hang. Read the budget from a timed
-# run, never from a number written here.
+# file loads an RDF store, the tree-sitter file parses a grammar — so it takes a
+# budget of its own. Same shape as DOCTEST_TIMEOUT: a wider per-file budget, so
+# every file still fails fast on a hang. Read the budget from a timed run, never
+# from a number written here.
 PLUGIN_TIMEOUT ?= 120s
 
-# The plugin corpus: one process per file, against the release binary and the
+# The plugin tests: one process per file, against the release binary and the
 # artifacts `plugins-verify` just asserted. Each file's `import-file` path is
 # relative to the repository root, so the run has to start here rather than in
 # the submodule.
@@ -592,7 +488,7 @@ smoke-plugins: elle plugins-verify  ## Run the plugin corpus (needs `make plugin
 			'timeout $(PLUGIN_TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: plugin tests"; exit 1; }
 
-EMBED_TARGET_DIR = $(CURDIR)/target/$(if $(findstring --release,$(CARGO_PROFILE)),release,debug)
+EMBED_TARGET_DIR = $(CURDIR)/$(CARGO_OUT)
 
 embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 	cargo build $(CARGO_PROFILE) -p elle-embed
@@ -600,15 +496,10 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 	$(MAKE) -C demos/embedding chost TARGET_DIR=$(EMBED_TARGET_DIR)
 	LD_LIBRARY_PATH=$(EMBED_TARGET_DIR) demos/embedding/chost
 
-# The two corpus passes are not the same test, so the gate runs both.
-# `smoke-elle` drives every file's forms from inside one long-lived `elle test`
-# process, under a per-form budget. `smoke-vm`/`smoke-jit` run each file as its
-# own process that has to start, run as a whole program, and EXIT, under a
-# wall-clock `TIMEOUT`. Program teardown, process-global config and anything
-# wall-clock-sensitive are only reachable the second way, which is why the PR
-# workflow's "VM+JIT Tests" job gates on all three targets. A `make smoke` that
-# skipped the per-file passes was weaker than the gate it exists to predict.
-smoke: smoke-elle smoke-vm smoke-jit doctest embedding semver-check  ## Run the elle test corpus (runner + per-file VM and JIT passes) + docs + embedding + surface gate
+
+# What a contributor runs before a push and what the merge queue runs: both
+# suites on this build, the documents, the embedding demo and the surface gate.
+smoke: smoke-lang smoke-impl doctest embedding semver-check  ## Both suites, the doctests, the embedding demo and the surface gate
 	@echo "=== all smoke tests passed ==="
 
 # CI documents private items too, and most of this crate is private — without
@@ -628,11 +519,13 @@ qa: audit crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfm
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items
 	cargo test --workspace --doc
 
-# `qa` goes first: it takes about two minutes and the corpus about thirty, so a
-# formatting or clippy failure stops the gate before the corpus starts.
-test: qa smoke smoke-nouring  ## QA (fmt/clippy/crosscheck/rustdoc), then smoke and smoke-nouring, then Rust unit + integration tests
+
+# `qa` goes first: it takes about two minutes and the suites about thirty, so a
+# formatting or clippy failure stops the gate before the suites start.
+test: qa smoke  ## QA (fmt/clippy/crosscheck/rustdoc), then smoke, then the Rust unit, integration and rig tests
 	cargo test --workspace --lib --all-features
 	cargo test --test '*' -- --skip property
+	cargo test -p elle-rig
 
 # Compile the arms a Linux gate never reaches. There are two of them, and the
 # workflow checks both — so this target checks both, or a branch discovers the

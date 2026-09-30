@@ -18,7 +18,7 @@ jobs:
     env:
       PROPTEST_CASES: 1
       RUST_TEST_THREADS: 2
-      # The corpus records every verdict in a session DB, with each result's
+      # The suites record every verdict in a session DB, with each result's
       # output in the CAS beside it. Naming the state directory here is what
       # lets the upload below name it too — the default sits under HOME, which
       # moves with the runner image. See docs/analysis/ci.md.
@@ -32,8 +32,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y parallel redis-server
           sudo systemctl start redis-server
-      - name: Build release binary
-        run: cargo build --release -p elle
+      - name: Build the release binary and its rig
+        run: cargo build --release -p elle -p elle-rig
       - name: Run smoke tests
         run: make smoke
       # Pass or fail: a red queue run is the one whose store a reader wants,
