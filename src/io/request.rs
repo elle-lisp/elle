@@ -12,11 +12,13 @@ use crate::value::Value;
 use std::cell::RefCell;
 use std::time::Duration;
 
+mod bound;
 mod buffer;
 mod process;
 mod socket;
 mod spawn;
 
+pub use bound::Bound;
 pub use socket::*;
 pub use spawn::*;
 // In-place buffer fill helpers and the process handle keep their original
