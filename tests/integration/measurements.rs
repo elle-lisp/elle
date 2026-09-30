@@ -1,6 +1,6 @@
 // audited: 2026-09-30
 // A reading a producer prints is a row: read out of every captured stdout,
-// judged against the file's ledger, and gated on.
+// judged against the file's ledger, gated on, and moved by --repin.
 //
 // docs/test-store.md
 // docs/ratchet.md
@@ -58,6 +58,11 @@ impl Bench {
 
     fn db(&self) -> PathBuf {
         self.dir.join("s.db")
+    }
+
+    /// The scratch ledger's text as it stands.
+    fn ledger(&self) -> String {
+        std::fs::read_to_string(self.dir.join("ledger/producer.lisp")).expect("read the ledger")
     }
 
     /// `elle test ARGS producer` against the scratch ledger and DB.
@@ -223,6 +228,108 @@ fn the_summary_tallies_readings_by_verdict() {
         err.contains("reading") && err.contains("ok"),
         "a run that recorded readings says so, by verdict:\n{err}"
     );
+}
+
+#[test]
+fn repin_moves_a_stale_pin_and_keeps_the_comment_above_it() {
+    // The counter-factual: a pin left loose is a ratchet that slipped, and
+    // moving it by hand is how a pin stays loose. The tool moves the token
+    // and nothing else, so the comment survives.
+    let b = Bench::new(
+        "loose",
+        Some("# the answer, pinned the day it was accepted\n[\"answer\" :count 43]"),
+    );
+    let out = b.run(&["--repin"]);
+    let err = stderr(&out);
+    assert!(
+        err.contains("repin") && err.contains("answer") && err.contains("42"),
+        "the tool prints the row it moved:\n{err}"
+    );
+    let text = b.ledger();
+    assert!(
+        text.contains("[\"answer\" :count 42]"),
+        "the pin took the new reading, got:\n{text}"
+    );
+    assert!(
+        text.contains("# the answer, pinned the day it was accepted\n"),
+        "and the comment above the row survived, got:\n{text}"
+    );
+    let again = b.run(&[]);
+    assert!(
+        again.status.success(),
+        "a run against the moved ledger gates green:\n{}",
+        stderr(&again)
+    );
+}
+
+#[test]
+fn repin_adopts_an_unledgered_reading_as_a_row() {
+    let b = Bench::new("adopt", Some("[\"answer\" :count 42]"));
+    std::fs::write(
+        &b.producer,
+        "(def r ((import \"std/ratchet\")))\n\
+         (r:read \"answer\" :count 42)\n\
+         (r:read \"extra\" :count 7)\n\
+         (r:report)\n",
+    )
+    .expect("write the producer");
+    let out = b.run(&["--repin"]);
+    assert!(
+        stderr(&out).contains("extra"),
+        "the tool prints the row it adopted:\n{}",
+        stderr(&out)
+    );
+    let text = b.ledger();
+    assert!(
+        text.contains("[\"answer\" :count 42]\n[\"extra\" :count 7]\n"),
+        "the reading is a row after the last one, got:\n{text}"
+    );
+    let again = b.run(&[]);
+    assert!(
+        again.status.success(),
+        "and the adopted row judges the next run green:\n{}",
+        stderr(&again)
+    );
+}
+
+#[test]
+fn repin_adopts_a_growth_reading_as_a_growth_floor() {
+    // The instrument's own live-growth row carries its class and its floor,
+    // so the adopted row is a floor and not a pin at 1.0.
+    let b = Bench::new("floor", Some("[\"dropped\" :objects 0]"));
+    std::fs::write(
+        &b.producer,
+        "(def r ((import \"std/ratchet\")))\n\
+         (r:delta \"dropped\" (fn [] {:x 1}) :on [r:objects] :n 50)\n\
+         (r:report)\n",
+    )
+    .expect("write the producer");
+    b.run(&["--repin"]);
+    let text = b.ledger();
+    assert!(
+        text.contains("[\"objects gauge (live-growth)\" :objects :floor 0.5 :class :growth]"),
+        "the discriminator is adopted as a growth floor, got:\n{text}"
+    );
+    let again = b.run(&[]);
+    assert!(
+        again.status.success(),
+        "and the next run gates green:\n{}",
+        stderr(&again)
+    );
+}
+
+#[test]
+fn repin_refuses_a_regression_and_leaves_the_ledger_alone() {
+    let b = Bench::new("refuse", Some("[\"answer\" :count 41]"));
+    let before = b.ledger();
+    let out = b.run(&["--repin"]);
+    assert!(!out.status.success(), "the regression still gates:\n{}", stderr(&out));
+    let err = stderr(&out);
+    assert!(
+        err.contains("refuse") && err.contains("answer"),
+        "the tool says which row it refused to move:\n{err}"
+    );
+    assert_eq!(b.ledger(), before, "and the ledger is byte for byte what it was");
 }
 
 /// The corpus fixture is a real producer with a real ledger: under the runner
