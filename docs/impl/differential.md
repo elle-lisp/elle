@@ -92,8 +92,8 @@ implementations ([spec](../spec.md) § A build is an implementation):
   each other (for example `tests/impl/string-push-value.lisp`, which pins
   JIT==VM agreement for `%string-push` on an `@string` value).
 
-The runner itself runs each file once and forces no tier
-([docs/test-runner.md](../test-runner.md) § A build is the tier set).
+The runner compares tiers as well ([docs/test-runner.md](../test-runner.md)
+§ Tiers).
 
 ## See also
 

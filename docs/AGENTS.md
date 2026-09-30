@@ -57,7 +57,7 @@ Up: [..](../AGENTS.md)
 - [supervisor.md](supervisor.md) — **Supervisors** A supervisor starts child processes, restarts each one by its policy, and gives up when they crash too often.
 - [syntax.md](syntax.md) — **Syntax** The literals and reader-level constructs of Elle source, from numbers and string escapes to quoting and collections.
 - [test-cli.md](test-cli.md) — **Driving the test runner** Why `elle test` exists, the command line it offers, what it refuses to offer, and what is still design.
-- [test-runner.md](test-runner.md) — **Agent-First Test Runner** How a run executes: each file compiled, isolated, gated and run once, its output captured, and its end recorded honestly.
+- [test-runner.md](test-runner.md) — **Agent-First Test Runner** How a run executes: each file compiled, isolated, gated, run on every tier its build carries, and recorded honestly.
 - [test-store.md](test-store.md) — **The test runner store** Where `elle test` keeps a run, what every run and result records, and the queries that read them back.
 - [test-vision.md](test-vision.md) — **One test system** The plan that folds every test product into `elle test`, keeps the results, and states what a run may skip.
 - [testing.md](testing.md) — **Testing** The two test suites, what each one claims, the builds that run them, and how a run is read.

@@ -64,7 +64,7 @@ the standing check that every implementation keeps its job.
 ### Why each platform has two test jobs
 
 The corpus and the Rust suite share no work. The corpus drives the release
-binary through `elle test`, one child per file; the Rust suite
+binary through `elle test`; the Rust suite
 builds separate test binaries under the dev profile. A job that runs both pays
 the sum of two build trees and two run times, in series, and the pull request
 waits for whichever platform does that.
@@ -131,7 +131,7 @@ cross-compiles is a target `make crosscheck` compiles too.
 
 ### Runner capacity
 
-The suites run one child per file, in `$(JOBS)` batches side by side. On CI the
+The suites run in `$(JOBS)` batches side by side. On CI the
 Makefile reads that count from the runner — `nproc`, or `getconf
 _NPROCESSORS_ONLN` where `nproc` is absent, which is every macOS runner. It does
 not write a number down.
@@ -156,9 +156,10 @@ tracks the runner.
 ### Corpus batch size
 
 The suite targets deal each suite into batches of `CORPUS_BATCH` files, one
-`elle test` process per batch, and run `$(JOBS)` batches side by side. Each
-file runs as its own child, so a batch bounds how many files one runner process
-records, not the memory those files use.
+`elle test` process per batch, and run `$(JOBS)` batches side by side. A
+language pass runs its files inside the runner process, so there a batch bounds
+the heap one runner holds. An implementation pass runs each file as its own
+child, so there a batch bounds only how many files one runner records.
 
 The default is 25 files. `macOS Smoke` and `AArch64 Smoke` use 10. That choice
 was measured when a batch ran all its files inside the runner process: a

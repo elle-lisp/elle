@@ -2,9 +2,8 @@
 
 <!-- audited: 2026-09-29 -->
 
-How a run executes: each file compiled, isolated, gated and run once, its output
-captured, and its end recorded honestly. A file runs on the runtime its build
-ships.
+How a run executes: each file compiled, isolated, gated, run on every tier its
+build carries, and recorded honestly.
 
 Why the runner exists and how to drive it is [test-cli](test-cli.md); where
 a run is stored and what each row says is [test-store](test-store.md). The
@@ -22,7 +21,7 @@ protect*.
 
 With **one form per file** ([test-store](test-store.md)), `file == test == unit`, so
 per-form granularity and file-path fidelity coincide for free: compile the file,
-run it, record one result. Isolation is inherent — separate files,
+run it, record one result per tier. Isolation is inherent — separate files,
 separate module compilations, fresh scope each — and there is no cross-file
 shared environment to manage; shared setup lives in imported modules, exactly as
 in real code.
@@ -33,7 +32,8 @@ A file that still holds several top-level forms (most of `tests/lang/*.lisp`, or
 a multi-form `-e`) is compiled as **one module** — preserving whole-module
 analysis and the file-compilation path — and **wrapped into a single whole-file
 thunk**: the file's forms become the body of one `(fn () form1 form2 … formN)`,
-which the runner runs once as a single atomic test. This is
+which the runner runs as a single atomic test under each JIT policy
+(§ Tiers). This is
 `compile/whole-module SOURCE NAME`. A single-form file or `-e` snippet (the
 durable corpus shape, [test-store](test-store.md)) is left to the per-form path
 below — for one form the two are identical.
@@ -41,7 +41,7 @@ below — for one form the two are identical.
 **Why one form, not per-form.** A legacy file is an *imperative script*: it
 allocates, mutates, reads back, and frees, with `def`/`var` and side-effecting
 bare expressions interleaved in an order the program depends on. Running it as
-one thunk runs every form **in source order, once, in isolation** —
+one thunk runs every form **in source order, once per policy, in isolation** —
 byte-for-byte what a direct `elle FILE` run does (which is what those files
 were written and verified against). Whole-module `analyze_file_letrec` still
 resolves bindings across the whole file (forward references in closure bodies
@@ -82,8 +82,13 @@ shape, but its transform wraps **all** forms (def/var and expressions alike) int
 the body of one thunk at index 0 — so the runner's execution path composes
 unchanged; there is just one entry instead of N.
 
-The catch-and-continue boundary lives **outside** the thunk: a worker fiber and
-`protect` around the call.
+The catch-and-continue boundary lives **outside** the tiered closure: a worker
+fiber and `protect` around the call. A fiber-based handler *inside* a closure
+handed to `compile/run-on` is rejected by the optimizing tiers, because the JIT
+cannot create the handler closure. A whole-file thunk does not go through
+`compile/run-on` at all: its `defn`s are `MakeClosure`s, which the JIT refuses,
+so the file would run on the bytecode tier alone. It runs under each JIT policy
+instead (§ Tiers).
 
 **Boundaries (intentional).** Under `compile/whole-module` a runtime fault is the
 file's single result (atomic). Under the per-form `compile/barrier-module`, a
@@ -117,10 +122,6 @@ instead of wedging the run. The deadline is a property of the path the form came
 from, not of the run — a path the caller named wide takes the wider budget, and
 every other path takes `--timeout` ([test-cli](test-cli.md)).
 
-The worker runs on the runtime its build ships, and the runner sets no policy
-on it. The row it records is on the `worker` tier: the name says where the file
-ran, not which backend compiled which function.
-
 **Unsendable captures fall back to in-process.** A worker receives the test
 thunk by deep-copying it across `os/spawn` (`SendBundle`). When the thunk
 captures a value that *cannot* serialize — an FFI handle (a `db:open`
@@ -128,8 +129,8 @@ connection), a compiler artifact from `compile/*`, an arena value, a fiber, an
 open file/socket port — the spawn raises a serialization `:thread-error` and the
 form could never run in a worker at all. Rather than record a spurious fail, the
 runner detects that specific error and **re-runs the same form in-process** in
-the main VM (still under `protect`, with `*stdout*`/`*stderr*` rebound for
-capture). The trade is deliberate: an in-process form gets **no fault isolation
+the main VM (still under `protect` and `compile/run-on TIER`, with
+`*stdout*`/`*stderr*` rebound for capture). The trade is deliberate: an in-process form gets **no fault isolation
 and no timeout** (a crash or hang there takes the runner with it), but these
 forms are *exactly* the ones a worker cannot host — running them unisolated
 beats not running them. Sendable forms keep the isolated, timeout-bounded
@@ -149,7 +150,13 @@ one process per path — and records it on the `process` tier. The flag string i
 split on spaces and may be empty. `--host PROGRAM` names the program each child
 runs instead of this `elle`: `elle test --host target/release/elle-rig
 --isolate ''` runs each path as `elle-rig PATH`, which reads the path's sidecar
-([rig](../rig/overview.md)). The gate targets run both suites this way.
+([rig](../rig/overview.md)). The implementation suite runs this way
+([testing](testing.md)).
+
+A child is one process and leaves one exit status, so an isolated run has no
+per-tier rows and no differential: the child runs on whatever its program and
+flags select. The language suite therefore runs in-process, where the runner
+controls the tier (§ Tiers).
 
 The child's exit status is the whole verdict, because it is the whole account a
 process leaves behind:
@@ -235,24 +242,64 @@ invisible.
 still carries `ELLE_SKIP_FFI`, for the files that call an `ffi/` primitive the
 build does not compile.
 
-## A build is the tier set — there is no tier dial
+## Tiers are intrinsic and exhaustive — never a dial
 
-A runner that ran every file on every tier would test a matrix of runtimes that
-no user runs, and a runner with a tier dial invites a run turned down to the
-one tier that passes. The runner has neither. It runs each file once, on the
-runtime its build ships, and the runtime picks each function's tier the way it
-does under `elle FILE`.
+Tier coverage is a *correctness* dimension, not a feature selector. **If we
+expose `--tiers vm,jit,…` as a knob, agents will turn it down**: run `--tiers
+vm`, see green, and declare victory while the JIT is broken. So there is no tier
+dial. Every selected form runs under every tier the build carries. The only way
+a form opts out of a tier is the loud gate `gate!` (§ Gating), recorded as
+`status=skip` with a reason.
 
-Tier coverage is the set of builds instead. A build carries one optimizing
-tier ([config](config.md) § Builds), and CI runs the language suite on each
-build ([ci](analysis/ci.md)); the language suite's claims hold on every one of
-them, so a build that answers differently has a defect. The implementation
-suite adds the modes no build ships, through rig profiles: the language suite
-with every function compiled on its first call is one of them.
+Cross-tier disagreement is its own status. When a form produces different values
+across tiers, the runner records `status=diverge`. Differential testing lives in
+the same path and the same database, never in a separate harness
+([differential](impl/differential.md)).
 
-A directed tier-parity test — one that pins a specific tier pair on a specific
-construct — is an implementation test. It lives in `tests/impl/` and calls
-`compile/run-on` explicitly ([differential](impl/differential.md)).
+- *Tier set.* The runner attempts every candidate tier (`:bytecode`, `:jit`,
+  `:wasm`, `:mlir-cpu`), and a build carries only the tiers its features compile
+  in. A tier whose feature is absent answers `compile/run-on` with
+  `:tier-rejected` and reason `:feature-disabled`. That tier is **dropped from
+  the run entirely**, with no row, because a feature the binary lacks is not a
+  coverage gap of this build. The runner probes the tier set once at startup and
+  records it in `run.tiers`.
+- *Ineligible is not failed.* A tier that is present but **cannot run a
+  particular form** answers `:tier-rejected` with reason `:ineligible`. The
+  runner records a `skip` on that tier, with the rejection message as the
+  reason: visible and counted, never a silent drop and never a `fail`.
+- *Per-tier rows stay per-tier.* Each form and tier gets its own row at its own
+  status, with `tier` one of `vm`, `jit`, `wasm` and `mlir-cpu` (`:bytecode` is
+  recorded as `vm`).
+- *One synthetic diverge row.* Divergence is judged over the tiers that
+  **returned a value**. If two or more produced *distinct* values, the runner
+  appends one row with `tier='*'`, `status='diverge'`, and a `reason` that
+  renders each tier's value (`vm=… jit=…`). The per-tier rows are left
+  untouched. A divergence counts in `run.n_diverge` and makes the run's gate
+  exit non-zero.
+
+**A whole-file script runs under each JIT policy.** A multi-form file runs as a
+scheduled script (§ Multi-form files), which `compile/run-on` cannot host. So
+the runner varies the JIT policy the file runs under: `:off`, recorded `vm`, and
+`:eager`, which compiles every function on its first call, recorded `jit`. The
+`:eager` run happens only when the build carries the JIT. The worker sets the
+policy with `(vm/config-set :jit POLICY)` before it runs the file. Its VM is
+fresh, so the policy ends with the worker. A script's values are not compared,
+because its pids and timestamps differ from run to run by design. A script
+therefore disagrees across policies only by failing under one of them.
+
+**Only the runner sets a JIT policy.** `vm/config-set :jit` takes `:off` and
+`:eager` in a process that runs `elle test`, and refuses them everywhere else
+([config](config.md)). A user build has no tier dial; the runner has one because
+the differential is its job. The rig sets a tier per file through its sidecar
+([rig](../rig/overview.md)).
+
+**Where the differential runs.** Each build's language pass is one `elle test`
+over the language suite, in-process, so every language file meets every tier
+its build carries ([testing](testing.md)). The implementation suite runs each
+file as its own child on the rig, under the file's sidecar. A directed
+tier-parity test, one that pins a specific tier pair on a specific construct,
+is an implementation test. It lives in `tests/impl/` and calls `compile/run-on`
+itself ([differential](impl/differential.md)).
 
 ### Concurrent runs wait, they do not collide
 
@@ -351,7 +398,7 @@ swap in `cas-put` once a sha256 primitive is in the core binary (the
   The timeout's `reason` carries that last line, so the problem list reads:
 
   ```
-  timeout  tests/lang/port-write-timeout.lisp  [worker]  join: deadline exceeded ·
+  timeout  tests/lang/port-write-timeout.lisp  [vm]  join: deadline exceeded ·
       last output:     · 1: write it with :timeout 500
   ```
 

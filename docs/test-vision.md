@@ -10,9 +10,8 @@ and states what a run may skip.
 Five products test this repository today:
 
 - `elle test` runs both Elle suites and records every result in a SQLite
-  session DB ([test-store](test-store.md)). The gate targets run each file as
-  its own child: `elle FILE` for the language suite, and
-  `elle-rig FILE` for the implementation suite ([testing](testing.md)).
+  session DB ([test-store](test-store.md)). The gate targets run each
+  implementation file as its own child, `elle-rig FILE` ([testing](testing.md)).
 - [oracle.lisp](../tests/impl/oracle.lisp) and
   [plumb.lisp](../tests/impl/plumb.lisp) measure leak rates. They are
   implementation tests, so they run on the rig with the rest of the

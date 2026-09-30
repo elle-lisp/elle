@@ -31,8 +31,9 @@ function has been called ten times; `vm/config` reads and sets that threshold
 A build is one implementation of Elle, and every build must pass the language
 suite ([spec](spec.md)). There is therefore no flag that chooses a tier or a
 backend. A user who wants the interpreter alone builds without the `jit`
-feature. The rig can switch the JIT off or make it eager for one implementation
-test ([rig](../rig/overview.md)); a user build cannot.
+feature. Two programs can switch a tier off or make it eager: the rig, for one
+implementation test ([rig](../rig/overview.md)), and `elle test`
+([test-runner](test-runner.md)). A user program cannot.
 
 ## CLI flags
 
@@ -244,12 +245,16 @@ holds a few hundred bytes. [impl/vm.md](impl/vm.md) owns the mechanism.
 
 `(vm/config-set :jit N)` sets the JIT threshold to the positive integer `N`,
 and `(vm/config-set :mlir N)` sets the MLIR tier's. Each refuses a build
-without that tier, and it refuses anything but a positive integer: the tier
-compiles adaptively, and no program turns it off or makes it eager.
+without that tier, and a value that is not a positive integer. Inside `elle
+test` alone, each also takes `:off` and `:eager` ([test-runner](test-runner.md)).
+Any other process refuses both with an `:argument-error`.
 
 ```lisp
 (let [[ok? err] (protect (vm/config-set :jit :off))]
   (assert (not ok?) "a program cannot turn the JIT off")
+  (assert (= (get err :error) :argument-error)))
+(let [[ok? err] (protect (vm/config-set :jit :later))]
+  (assert (not ok?) "a keyword other than :off or :eager is no policy")
   (assert (= (get err :error) :type-error)))
 ```
 

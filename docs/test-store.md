@@ -154,8 +154,8 @@ Per **run** (one `elle test` invocation): wall time, peak RSS, user/sys CPU
 (`getrusage`), the `HEAD` commit, whether the working tree is dirty, a tree hash,
 the worktree the run ran in, the elle build version/profile/host, the runner's
 process id, the boot fingerprint (§ The boot fingerprint), the full `argv`,
-where its results ran (`tiers`: `worker` for the in-process runner, `process`
-for an isolated child), and the working-tree files that differ from `HEAD` with
+where its results ran (`tiers`, [test-runner](test-runner.md)), and the
+working-tree files that differ from `HEAD` with
 their content hashes (the "hash of changed files").
 
 The code-state columns are what makes a result belong to something. Without
@@ -177,10 +177,8 @@ happened, and nothing names the code it ran against.
 Per **result**: status, reason, expected/actual and predicate syntax (from the
 `assert` macro, [test-runner](test-runner.md)), the emitted signal on failure,
 wall time, and **CPU time** — the delta of `(clock/cpu)` read across the
-form's evaluation. A result's `tier` names where it ran: `worker` for a form
-the in-process runner ran in a worker thread, `process` for an isolated child.
-The runner runs each file once and forces no backend, so the column never
-names one ([test-runner](test-runner.md) § A build is the tier set).
+form's evaluation. A result's `tier` names where it ran
+([test-runner](test-runner.md)).
 
 > CPU delta, not fuel. Fuel (`SIG_FUEL`) is specific to the `std/process`
 > scheduler, is not consumed by Elle's default root scheduler, and essentially
@@ -371,12 +369,12 @@ CREATE TABLE run (                  -- one row per `elle test` invocation
   git_commit TEXT, git_dirty INT, tree_hash TEXT, worktree TEXT,  -- the code state this run ran against
   boot_fingerprint INT,             -- the binary and the boot sources, hashed
   elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT,
-  tiers TEXT,                       -- where its results ran: worker or process
+  tiers TEXT,                       -- the probed tiers (vm,jit,…), or process
   pid INT,                          -- the runner's process on `host`; tells a live run from a killed one
   selection TEXT,                   -- the filter predicate; NULL = full run (the gate)
   n_selected INT,                   -- files + -e forms planned; written at insert
   n_pass INT, n_fail INT, n_skip INT, n_timeout INT,  -- aggregated at completion only
-  n_diverge INT,                    -- a run forces no tier, so nothing diverges: always 0
+  n_diverge INT,                    -- forms whose tiers disagreed; aggregated at completion
   wall_ms INT, max_rss_kb INT, cpu_user_ms INT, cpu_sys_ms INT);   -- resource usage (v1: deferred)
 
 CREATE TABLE changed_file (         -- working tree vs HEAD at run time
@@ -391,11 +389,11 @@ CREATE TABLE form (                 -- deduped across runs; the computer names i
   src TEXT,                         -- the form's syntax, rendered for display
   caps TEXT, touches TEXT, signal TEXT);   -- from compile/analyze (§ What analysis says about a form)
 
-CREATE TABLE result (               -- one row per (form × run)
+CREATE TABLE result (               -- one row per (form × tier × run)
   id INTEGER PRIMARY KEY, run_id INT REFERENCES run(id),
   form_hash TEXT REFERENCES form(hash),
-  tier TEXT,                        -- where it ran: worker or process
-  status TEXT,                      -- pass|fail|skip|timeout
+  tier TEXT,                        -- vm|jit|wasm|mlir-cpu|process, or * for a divergence
+  status TEXT,                      -- pass|fail|skip|timeout|diverge
   reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT,
   wall_ms INT, cpu_us INT);       -- cpu_us = (clock/cpu) delta across the form
 
