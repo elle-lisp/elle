@@ -128,6 +128,18 @@ fn prim_io_submit(
         Some(r) => r,
         None => return type_error!(ctx, args[1], "io/submit", "io-request"),
     };
+    // Before the backend reads the port or the operand: neither is counted by
+    // the request, and both may be gone once the park that raised it is over
+    // (docs/impl/region/park.md).
+    if !request.park_stands(args[1]) {
+        return (
+            SIG_ERROR,
+            ctx.error(
+                "state-error",
+                "io/submit: the fiber that raised this request no longer waits on it",
+            ),
+        );
+    }
     // Who this submission is on behalf of. The heap is the requesting instance's
     // own (the ctx's): the backend records it and builds every completion value
     // on it — immediate (spawn) or harvested on the scheduler thread — so results

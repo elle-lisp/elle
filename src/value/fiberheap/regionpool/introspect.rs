@@ -351,14 +351,14 @@ impl RegionPool {
                     check(v);
                 }
             }
-            // A payload that declares its values is a container of them; an
-            // opaque one declares none (docs/impl/region/rules.md Rule 5).
-            HeapObject::External { obj, .. } => obj.each_held(&mut check),
+            // An `External`'s payload is opaque to the scan
+            // (docs/impl/region/rules.md Rule 5).
             HeapObject::ThreadHandle { .. }
             | HeapObject::Syntax { .. }
             | HeapObject::FFISignature(_, _)
             | HeapObject::FFIType(_)
-            | HeapObject::ManagedPointer { .. } => {}
+            | HeapObject::ManagedPointer { .. }
+            | HeapObject::External { .. } => {}
         }
     }
 }

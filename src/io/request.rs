@@ -282,25 +282,18 @@ impl PortOp {
 /// - The `Value` holds the `Rc` to the `ExternalObject` containing the `Port`
 /// - The backend extracts `&Port` via `value.as_external::<Port>()`
 ///
-/// The request declares the values it names (`HeldValues`), so its region
-/// counts them until it frees. The request can outlive the frame that asked
-/// for it: a fiber that relays a child's request can release the child before
-/// it raises the request (docs/impl/region/rules.md Rule 5).
+/// The request counts neither its port nor the value its `PortOp` names. Both
+/// belong to the parked frames of the fiber whose op built it, so the request
+/// may be spent only while that park stands (docs/impl/region/park.md).
 #[derive(Debug)]
 pub struct IoRequest {
     pub op: IoOp,
     pub port: Value,
     /// How long the operation may wait (docs/io/timeout.md).
     pub bound: Bound,
-}
-
-impl crate::value::heap::HeldValues for IoRequest {
-    fn each_held(&self, f: &mut dyn FnMut(&Value)) {
-        f(&self.port);
-        if let IoOp::Port(op) = &self.op {
-            f(&op.operand());
-        }
-    }
+    /// The fiber whose park raised this request, once a park has stamped it.
+    /// Private, so a request is built only through `unbounded`.
+    parker: std::cell::OnceCell<crate::value::WeakFiberHandle>,
 }
 
 impl IoRequest {
@@ -310,6 +303,7 @@ impl IoRequest {
             op,
             port,
             bound: Bound::NONE,
+            parker: std::cell::OnceCell::new(),
         }
     }
 
@@ -342,7 +336,7 @@ impl IoRequest {
             Some(p) => bound.or_timeout(p.timeout()),
             None => bound,
         };
-        ctx.external_holding("io-request", IoRequest::unbounded(op, port).within(bound))
+        ctx.external("io-request", IoRequest::unbounded(op, port).within(bound))
     }
 
     /// Create a portless IoRequest (e.g., Sleep), born in `ctx`'s region.
@@ -404,14 +398,34 @@ impl IoRequest {
         Self::bounded(ctx, IoOp::PollFd { fd, events }, Value::NIL, bound)
     }
 
-    /// Stub: records nothing yet.
-    #[allow(dead_code)]
-    pub(crate) fn stamp_parker(&self, _parker: crate::value::WeakFiberHandle) {}
+    /// Record the fiber whose park raised this request. Only the park of the
+    /// op that built the request stamps it. A relay parks on the request as
+    /// one of its own arguments and stamps nothing.
+    pub(crate) fn stamp_parker(&self, parker: crate::value::WeakFiberHandle) {
+        let first = self.parker.set(parker).is_ok();
+        debug_assert!(
+            first,
+            "an io request is stamped by the one park that built it"
+        );
+    }
 
-    /// Stub: answers that every request may be spent.
-    #[allow(dead_code)]
-    pub(crate) fn park_stands(&self, _request: Value) -> bool {
-        true
+    /// Whether the park that raised `request`, this request's own value,
+    /// still stands: its fiber is paused with `request` in its signal slot and
+    /// its frames suspended. An unstamped request answers true.
+    pub(crate) fn park_stands(&self, request: Value) -> bool {
+        let Some(parker) = self.parker.get() else {
+            return true;
+        };
+        let Some(fiber) = parker.upgrade() else {
+            return false;
+        };
+        fiber
+            .try_with(|f| {
+                f.status == crate::value::fiber::FiberStatus::Paused
+                    && f.suspended.is_some()
+                    && f.signal.is_some_and(|(_, v)| v.bit_identical(request))
+            })
+            .unwrap_or(false)
     }
 }
 
