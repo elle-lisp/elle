@@ -29,6 +29,11 @@ worker thread, has no producer: it prints every reading without a verdict and
 leaves the judging to the runner. So does a producer no ledger file names yet;
 the first row written for it is what starts the gate.
 
+The instrument judges as the build it runs on, which `(elle/build)` names,
+and a row belongs to a build ([the design](../docs/ratchet.md)). A test that
+wants the instrument to judge as another build hands the key in:
+`((import "std/ratchet") :build "mlir-uring-linux-x86_64")`.
+
 ## A reading is a number from anywhere
 
 `read` takes a subject, an axis and a value. The unit defaults to the axis
@@ -130,6 +135,16 @@ until `elle test --repin` moves the pin.
 (def ceiling {:kind :ceiling :bound 8 :better :lower :slack 0.0})
 (assert (= (r:judge {:value 9.0 :half 0.5} ceiling) :regression) "a ceiling fails above it")
 (assert (= (r:judge {:value 8.0 :half 0.5} ceiling) :ok) "and never goes stale")
+```
+
+A row read out of a ledger carries `:home`: true on the build the row belongs
+to, where the pin is two-sided, and false on every other build, where the pin
+is one-sided and a better reading passes. A row with no `:home` is at home.
+
+```lisp
+(def away (put pin :home false))
+(assert (= (r:judge {:value 0.0 :half 0.1} away) :ok) "on another build a better reading passes the pin")
+(assert (= (r:judge {:value 1.3 :half 0.1} away) :regression) "and a worse one still fails it")
 ```
 
 `:better :higher` swaps the sides of a pin, for a count that should climb.

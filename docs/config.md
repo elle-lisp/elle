@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
@@ -34,6 +34,18 @@ backend. A user who wants the interpreter alone builds without the `jit`
 feature. Two programs can switch a tier off or make it eager: the rig, for one
 implementation test ([rig](../rig/overview.md)), and `elle test`
 ([test-runner](test-runner.md)). A user program cannot.
+
+`(elle/build)` names the build a program runs on: its tier, its I/O backend,
+its operating system and its architecture. The ratchet's ledger keys a row's
+build on it ([ratchet](ratchet.md)).
+
+```lisp
+(let [b (elle/build)]
+  (assert (keyword? b:tier) "the tier the build carries: :jit, :mlir, :wasm or :interp")
+  (assert (or (= b:io :uring) (= b:io :pool)) "the I/O backend it runs")
+  (assert (string? b:os) "the operating system")
+  (assert (string? b:arch) "and the architecture"))
+```
 
 ## CLI flags
 

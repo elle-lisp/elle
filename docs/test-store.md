@@ -149,9 +149,11 @@ prerequisite.
 
 Per **run** (one `elle test` invocation): the `HEAD` commit, whether the working
 tree is dirty, a tree hash, the worktree the run ran in, the elle build
-version/profile/host, the runner's process id, the boot fingerprint (§ The boot
-fingerprint), the full `argv`, and where its results ran (`tiers`,
-[test-runner](test-runner.md)). The design adds wall time, peak RSS and
+version/profile/host, the build's key (`build`, the tier, I/O backend,
+operating system and architecture `(elle/build)` names, which is what a
+ledger row belongs to, [ratchet](ratchet.md)), the runner's process id, the
+boot fingerprint (§ The boot fingerprint), the full `argv`, and where its
+results ran (`tiers`, [test-runner](test-runner.md)). The design adds wall time, peak RSS and
 user/sys CPU (`getrusage`), and the working-tree files that differ from `HEAD`
 with their content hashes; none of them is captured yet (§ Schema).
 
@@ -337,6 +339,7 @@ CREATE TABLE run (                  -- one row per `elle test` invocation
   git_commit TEXT, git_dirty INT, tree_hash TEXT, worktree TEXT,  -- the code state this run ran against
   boot_fingerprint INT,             -- the binary and the boot sources, hashed
   elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT,
+  build TEXT,                       -- the build's key: tier-backend-os-arch (ratchet.md)
   tiers TEXT,                       -- the probed tiers (vm,jit,…), or process
   pid INT,                          -- the runner's process on `host`; tells a live run from a killed one
   selection TEXT,                   -- the filter predicate; NULL = full run (the gate)
@@ -402,9 +405,9 @@ gains it by `ALTER TABLE`. `run`, `form` and `changed_file` are subsets:
   (`wall_ms`/`max_rss_kb`/`cpu_user_ms`/`cpu_sys_ms`), which are deferred. So a
   resource query is design-only until they land; a `SELECT` of a deferred
   column errors with `no such column`. A session DB written before the
-  code-state, fingerprint, key or pid columns existed gains them by `ALTER TABLE`,
-  with NULL for every run recorded until then. `gauge` gains `heap` the same
-  way.
+  code-state, fingerprint, key, pid or build columns existed gains them by
+  `ALTER TABLE`, with NULL for every run recorded until then. `gauge` gains
+  `heap` the same way.
 - `form` is written without `line`, `col` and `session`: a form's location and
   an ad-hoc form's session id are deferred, and each reads NULL. The three
   analysis columns are written at scan time (§ What analysis says about a

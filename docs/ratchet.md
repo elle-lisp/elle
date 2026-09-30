@@ -127,9 +127,25 @@ The options:
 | `:better :higher` | a larger reading is the better side; the default is `:lower` |
 | `:slack N` | the reading may sit this far past the pin on either side before it is judged; the default is 0 |
 | `:note "…"` | one sentence for the reader, kept when the tool rewrites the row |
+| `:build "…"` | the build the row belongs to; a row without one belongs to the reference build |
 
-One bound holds on every tier. A subject that reads differently under the JIT
-gets a `:tier` option when one is needed, and nothing needs one yet.
+A row belongs to a build. The reference build is the default build on Linux
+x86_64, the one the `Default Build Tests` job runs, and a row with no `:build`
+belongs to it. A pin is two-sided on the build it belongs to and one-sided on
+every other build: there a reading past it the worse way is a regression and
+a reading past it the better way is `ok`. So a build that reclaims more than
+the reference build passes, exactly as it passed the ceilings the ratchet
+replaced, and the pin stays tight where it was read. A build that reads worse
+than the reference build gets a row of its own with `:build`, and that row is
+two-sided there. On its build, a `:build` row replaces the row with none; on
+every other build it is no row at all.
+
+A build's key names its tier, its I/O backend, its operating system and its
+architecture, as `(elle/build)` reports them: `jit-uring-linux-x86_64` is the
+reference build, and `mlir-uring-linux-x86_64` and `jit-pool-macos-aarch64`
+are two others. The rig's profiles and a file's sidecar change how a build
+runs a file and never which build it is, so the eager pass of the
+implementation suite judges against the same rows as the plain pass.
 
 A row with no class is a control: a shape the tree reclaims, pinned at what it
 reads. The slack is for a subject the machine makes noisy, a wall-clock ratio
@@ -151,7 +167,7 @@ Every reading meets its row, and the outcome is one of six verdicts:
 |---------|---------|-------|
 | `ok` | the reading is within its bound | no |
 | `regression` | the reading moved the worse way | yes |
-| `stale` | the reading moved the better way past the slack; re-pin it | yes |
+| `stale` | the reading moved the better way past the slack, on the row's own build; re-pin it | yes |
 | `unledgered` | a reading with no row; adopt it or delete the measurement | yes |
 | `missing` | a row whose producer ran and reported nothing | yes |
 | `void` | the instrument's own check failed, so the reading says nothing | yes |
@@ -162,7 +178,9 @@ and stale when `v + h < p - s`. The sides swap under `:better :higher`. A
 floor fails when `v + h` is below it and a ceiling when `v - h` is above it. So a rate
 measured to a wide epsilon passes a pin it straddles, and only a rate measured
 tightly enough to clear the pin can fail it. What the instrument can see is
-what the gate can hold.
+what the gate can hold. The stale side is judged on the row's own build only:
+away from it a pin is a ceiling under `:better :lower` and a floor under
+`:better :higher`, and a reading past it the better way is `ok`.
 
 A void reading is one the instrument refuses to stand behind. That is a rate
 whose B-invariance check found it block-dependent, a growth row that read
@@ -223,13 +241,19 @@ it. The tool prints each row it moved. A reading it re-pins is written to three
 significant figures for a rate and as the integer it is for a count.
 
 A subject read on several tiers moves to the worst of its readings, so the
-new pin holds on every tier. An `unledgered` reading of a growth class, which
-is the instrument's own live-growth row, is adopted as a growth floor at the
-floor the instrument named; every other `unledgered` reading is adopted as a
-pin at its value. The rewrite is the instrument's, in
-[repin.lisp](../lib/ratchet/repin.lisp): it scans the ledger's text for the
-row's brackets, replaces the bound's token, and appends an adopted row after
-the last one.
+new pin holds on every tier. A `stale` row is one the running build owns, so
+the tool moves the running build's rows and no other build's. An `unledgered`
+reading of a growth class, which is the instrument's own live-growth row, is
+adopted as a growth floor at the floor the instrument named; every other
+`unledgered` reading is adopted as a pin at its value. A reading adopted on a
+build other than the reference build is adopted as a `:build` row, so a
+foreign reading never pins the reference build. The rewrite is the
+instrument's, in [repin.lisp](../lib/ratchet/repin.lisp): it scans the
+ledger's text for the row's brackets, replaces the bound's token, and appends
+an adopted row after the last one.
+
+A `run` row records the build's key, so a reading's history groups by the
+build that read it ([test-store](test-store.md)).
 
 The `ELLE_TEST_MEASUREMENTS` channel, `measurement-sink`, `measurement-env`
 and the `closed`/`open`/`growth` verdict vocabulary are deleted. The runner
@@ -251,7 +275,9 @@ program. The producer is the path the program was started with, the first
 element of `(sys/argv)`, which is the same path the runner records for the
 form. The ledger directory is `tests/ledger` under `(elle/root)`, the module
 resolution root `std/` already resolves against, and `ELLE_LEDGER` names
-another one.
+another one. The build is what `(elle/build)` reports, and a test that wants
+the instrument to judge as another build hands it one:
+`((import "std/ratchet") :build "mlir-uring-linux-x86_64")`.
 
 A form the runner runs in a worker thread was started with no path, so it has
 no producer. The instrument then prints every reading without a bound or a
@@ -347,6 +373,11 @@ is one pull request. The first four are in.
 
 - A stale pin fails the gate. The alternative is a warning, which is what a
   comment saying shrink-only is today.
+- A pin is two-sided on the build it belongs to and one-sided elsewhere. One
+  alternative judges every build two-sided against a row of its own, so a
+  better reading on any build fails until that build has a row, and a macOS
+  row can only be written from an imported CI store. The other lets a stale
+  reading pass everywhere, which is the loose pin the copies had.
 - Readings travel on stdout. The alternative keeps the environment-variable
   file, which no worker thread and no foreign producer can use.
 - The bound lives in the ledger, never in the producer. The alternative keeps
