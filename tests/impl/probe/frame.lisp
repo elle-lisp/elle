@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-08
+(elle/epoch 13)
+# audited: 2026-09-30
 # The frame-exit relocation's shapes: what a frame-replacing tail call strands, and the exemptions and channels that reclaim it.
 #
 # docs/impl/region/diagnostics.md

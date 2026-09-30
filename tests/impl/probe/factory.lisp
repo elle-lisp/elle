@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-08
+(elle/epoch 13)
+# audited: 2026-09-30
 # Call chains, a returned cycle, and the closure-as-module factories the direct-loop rows call, with the bindings they share.
 #
 # docs/impl/region/diagnostics.md

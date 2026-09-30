@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-08
+(elle/epoch 13)
+# audited: 2026-09-30
 # The activation-adopt bodies a park crosses, and the three controls that remove one ingredient each.
 #
 # docs/impl/region/diagnostics.md
@@ -51,7 +51,3 @@
         (push root m)))
     (yield j)
     j))
-# Direct-loop class. Each entry: [label (fn [j] body) rate].
-# j varies the input (faithful to the originals' loop variable i). Pins are the
-# TRUE CURRENT rate the estimator measures — cross-validated against the source
-# files' own slope, several of which are stale (the files are RED there).

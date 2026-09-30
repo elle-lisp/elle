@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 13)
+# audited: 2026-09-30
 # The injected abort delivery: one row per route its payload's mint is consumed on, plus the tail-position pair.
 #
 # docs/impl/region/diagnostics.md
@@ -11,8 +11,7 @@
 # on where the injected error stops, and the routes are gauged apart because a mint
 # keyed on the route rather than on the injection funds two of them twice.
 #
-# Nine CLOSED controls (undeclared, like `rest-array-copy`), one per route and
-# per recorded mint:
+# Nine controls at 0, one per route and per recorded mint:
 #
 #   `abort-masked`   — the fiber's mask catches, the caller releases the result;
 #   `abort-escape`   — the error leaves the fiber, an ancestor `try` absorbs it;
@@ -48,85 +47,83 @@
   (yield q)
   2)
 (println "── folded suite: injected abort delivery ──")
-(pin (measure-core "abort-masked"
-                   (stmt-run (fn []
-                               (let [f (ab-mk-masked)]
-                                 (fiber/resume f)
-                                 (fiber/abort f [1 2 3])
-                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "abort-escape"
-                   (stmt-run (fn []
-                               (let [p {:error :injected}
-                                     f (fiber/new (fn []
-                                       (yield 1)
-                                       2) |:yield|)]
-                                 (fiber/resume f)
-                                 (try
-                                   (begin
-                                     (fiber/abort f p)
-                                     nil)
-                                   (catch e nil))
-                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "abort-caught"
-                   (stmt-run (fn []
-                               (let [f (ab-mk-caught)]
-                                 (fiber/resume f)
-                                 (fiber/abort f [1 2 3])
-                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "abort-own-error"
-                   (stmt-run (fn []
-                               (let [f (fiber/new (fn []
-                                       (protect (yield 1))
-                                       (error {:own 1})) |:yield :error|)]
-                                 (fiber/resume f)
-                                 (fiber/abort f [1 2 3])
-                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "abort-reraise"
-                   (stmt-run (fn []
-                               (let [f (fiber/new (fn []
-                                       (let [r (protect (yield 1))]
-                                         (error (get r 1)))) |:yield :error|)]
-                                 (fiber/resume f)
-                                 (fiber/abort f [1 2 3])
-                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "abort-defer"
-                   (stmt-run (fn []
-                               (let [f (fiber/new (fn []
-                                       (defer
-                                         (length [1 2 3 4 5])
-                                         (yield 1)
-                                         2)) |:yield :error|)]
-                                 (fiber/resume f)
-                                 (fiber/abort f [7 8 9])
-                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "abort-held"
-                   (stmt-run (fn []
-                               (let [p {:a 1}
-                                     f (fiber/new ab-hold-then-yield
-                                     |:yield :error|)]
-                                 (fiber/resume f p)
-                                 (fiber/abort f p)
-                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "abort-other"
-                   (stmt-run (fn []
-                               (let [p {:a 1}
-                                     f (fiber/new ab-hold-then-yield
-                                     |:yield :error|)]
-                                 (fiber/resume f p)
-                                 (fiber/abort f {:b 2})
-                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "abort-aborting-frame"
-                   (stmt-run (fn []
-                               (let [f (fiber/new (fn []
-                                       (yield 1)
-                                       2) |:yield|)]
-                                 (fiber/resume f)
-                                 (try
-                                   (begin
-                                     (fiber/abort f {:e 1})
-                                     nil)
-                                   (catch e nil))
-                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "abort-masked"
+         (r:stmt-run (fn []
+                       (let [f (ab-mk-masked)]
+                         (fiber/resume f)
+                         (fiber/abort f [1 2 3])
+                         nil))))
+(r:drive "abort-escape"
+         (r:stmt-run (fn []
+                       (let [p {:error :injected}
+                             f (fiber/new (fn []
+                               (yield 1)
+                               2) |:yield|)]
+                         (fiber/resume f)
+                         (try
+                           (begin
+                             (fiber/abort f p)
+                             nil)
+                           (catch e nil))
+                         nil))))
+(r:drive "abort-caught"
+         (r:stmt-run (fn []
+                       (let [f (ab-mk-caught)]
+                         (fiber/resume f)
+                         (fiber/abort f [1 2 3])
+                         nil))))
+(r:drive "abort-own-error"
+         (r:stmt-run (fn []
+                       (let [f (fiber/new (fn []
+                               (protect (yield 1))
+                               (error {:own 1})) |:yield :error|)]
+                         (fiber/resume f)
+                         (fiber/abort f [1 2 3])
+                         nil))))
+(r:drive "abort-reraise"
+         (r:stmt-run (fn []
+                       (let [f (fiber/new (fn []
+                               (let [r (protect (yield 1))]
+                                 (error (get r 1)))) |:yield :error|)]
+                         (fiber/resume f)
+                         (fiber/abort f [1 2 3])
+                         nil))))
+(r:drive "abort-defer"
+         (r:stmt-run (fn []
+                       (let [f (fiber/new (fn []
+                               (defer
+                                 (length [1 2 3 4 5])
+                                 (yield 1)
+                                 2)) |:yield :error|)]
+                         (fiber/resume f)
+                         (fiber/abort f [7 8 9])
+                         nil))))
+(r:drive "abort-held"
+         (r:stmt-run (fn []
+                       (let [p {:a 1}
+                             f (fiber/new ab-hold-then-yield |:yield :error|)]
+                         (fiber/resume f p)
+                         (fiber/abort f p)
+                         nil))))
+(r:drive "abort-other"
+         (r:stmt-run (fn []
+                       (let [p {:a 1}
+                             f (fiber/new ab-hold-then-yield |:yield :error|)]
+                         (fiber/resume f p)
+                         (fiber/abort f {:b 2})
+                         nil))))
+(r:drive "abort-aborting-frame"
+         (r:stmt-run (fn []
+                       (let [f (fiber/new (fn []
+                               (yield 1)
+                               2) |:yield|)]
+                         (fiber/resume f)
+                         (try
+                           (begin
+                             (fiber/abort f {:e 1})
+                             nil)
+                           (catch e nil))
+                         nil))))
 # The TAIL-position face of the same abort. The nine controls above all discard
 # the abort's result; this one RETURNS it, which is the whole difference —
 # `abort-tail-discarded` is the identical body with a `nil` after the call, so
@@ -145,18 +142,17 @@
 # It reads 0 on every tier. A compiled frame reaches the same releases through
 # its own post-`TailCall` block, so the strand it guards is interpreter
 # machinery alone.
-(pin (measure-core "abort-tail-result"
-                   (stmt-run (fn []
-                               (let [f (ab-mk-caught)]
-                                 (fiber/resume f)
-                                 (fiber/abort f [1 2 3])))) count-gauge 100 6 60
-                   0.4 0.5) 0)
-(pin (measure-core "abort-tail-discarded"
-                   (stmt-run (fn []
-                               (let [f (ab-mk-caught)]
-                                 (fiber/resume f)
-                                 (fiber/abort f [1 2 3])
-                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "abort-tail-result"
+         (r:stmt-run (fn []
+                       (let [f (ab-mk-caught)]
+                         (fiber/resume f)
+                         (fiber/abort f [1 2 3])))))
+(r:drive "abort-tail-discarded"
+         (r:stmt-run (fn []
+                       (let [f (ab-mk-caught)]
+                         (fiber/resume f)
+                         (fiber/abort f [1 2 3])
+                         nil))))
 # The payload's OWN region, where one frame both allocates it and consumes the
 # abort's result. The frame owes TWO releases on that one region — the argument
 # and the result — and holds two references to fund them: its allocation's, and
@@ -179,34 +175,31 @@
   (fiber/new (fn []
                (yield 1)
                9) |:yield :error|))
-(pin (measure-core "abort-mask-caught-literal"
-                   (stmt-run (fn []
-                               (let [f (ab-mk-mask-caught)]
-                                 (fiber/resume f)
-                                 (protect (fiber/abort f "boom"))))) count-gauge
-                   100 6 60 0.4 0.5) 0)
-(pin (measure-core "abort-mask-caught-bound"
-                   (stmt-run (fn []
-                               (let [p "boom"
-                                     f (ab-mk-mask-caught)]
-                                 (fiber/resume f)
-                                 (protect (fiber/abort f p))))) count-gauge 100
-                   6 60 0.4 0.5) 0)
+(r:drive "abort-mask-caught-literal"
+         (r:stmt-run (fn []
+                       (let [f (ab-mk-mask-caught)]
+                         (fiber/resume f)
+                         (protect (fiber/abort f "boom"))))))
+(r:drive "abort-mask-caught-bound"
+         (r:stmt-run (fn []
+                       (let [p "boom"
+                             f (ab-mk-mask-caught)]
+                         (fiber/resume f)
+                         (protect (fiber/abort f p))))))
 # `fiber/refuse` shares the injection seam with `fiber/abort`
 # (`inject_error_at_suspension`) and leaves by the same `SIG_ABORT`, so it reaches
 # the absorbed-carrier fall-through by the same route and needs its own reading:
 # nothing about the seam distinguishes the two, so a change that reintroduces the
 # strand for one reintroduces it for both. The pair is the same as the abort's —
 # the result RETURNED, and the identical body with a `nil` after the call.
-(pin (measure-core "refuse-tail-result"
-                   (stmt-run (fn []
-                               (let [f (ab-mk-caught)]
-                                 (fiber/resume f)
-                                 (fiber/refuse f [1 2 3])))) count-gauge 100 6
-                   60 0.4 0.5) 0)
-(pin (measure-core "refuse-tail-discarded"
-                   (stmt-run (fn []
-                               (let [f (ab-mk-caught)]
-                                 (fiber/resume f)
-                                 (fiber/refuse f [1 2 3])
-                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "refuse-tail-result"
+         (r:stmt-run (fn []
+                       (let [f (ab-mk-caught)]
+                         (fiber/resume f)
+                         (fiber/refuse f [1 2 3])))))
+(r:drive "refuse-tail-discarded"
+         (r:stmt-run (fn []
+                       (let [f (ab-mk-caught)]
+                         (fiber/resume f)
+                         (fiber/refuse f [1 2 3])
+                         nil))))

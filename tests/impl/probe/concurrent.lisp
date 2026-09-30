@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-29
+# audited: 2026-09-30
 # The direct-loop rows whose drive crosses a fiber: closures, protect and defer, the park families, the emit and error deliveries.
 #
 # docs/impl/region/diagnostics.md
@@ -8,16 +8,16 @@
    ["closure-while"
     (fn [j]
       (let [f (fn [] j)]
-        (f))) 0]
+        (f)))]
    ["fiber-while"
     (fn [j]
       (let [f (fiber/new (fn [] j) 1)]
-        (fiber/resume f))) 0]
-   ["concat-while" (fn [j] (concat "x" (number->string j))) 0]
+        (fiber/resume f)))]
+   ["concat-while" (fn [j] (concat "x" (number->string j)))]
    ["protect-while"
     (fn [j]
       (let [[ok v] (protect ((fn [] j)))]
-        v)) 0]
+        v))]
    # `defer` on its ordinary SUCCESS path — the twin of `protect-while` above. Same
    # inner fiber, same resume; the whole difference is the trailing `if`, which
    # reads the fiber with `fiber/value` in the arm taken here and with
@@ -27,14 +27,12 @@
    # and 3 objects stranded per evaluation, so a loop whose body is wrapped in
    # `defer` grows without bound (docs/impl/region/effects.md). `protect-while` has
    # no such arm and reads 0 whatever the declaration says, which is what makes it
-   # the pair-control here and not the gauge. Both are CLOSED controls (undeclared,
-   # like `rest-array-copy`), so a regression to open trips the completeness gate
-   # loudly instead of being absorbed under F2.
+   # the pair-control here and not the gauge. Both are controls at 0.
    ["defer-while"
     (fn [j]
       (defer
         (length [1 2])
-        ((fn [] j)))) 0]
+        ((fn [] j))))]
    # The other arm, and the control.
    # `defer-error` raises in the body, so the arm it drives is the PROPAGATE arm —
    # the one that held the branch's only release under `Mixed`, and so the one that
@@ -47,21 +45,21 @@
     (fn [j]
       (protect (defer
                  (length [1 2])
-                 (error j)))) 0]
+                 (error j))))]
    ["one-shot"
     (fn [j]
       (let [f (fiber/new (fn [] j) 1)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["alloc-return"
     (fn [j]
       (let [f (fiber/new (fn [] (string "v-" j)) 1)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["fiber-nested"
     (fn [j]
       (let [f (fiber/new (fn []
                            (let [g (fiber/new (fn [] j) 1)]
                              (fiber/resume g))) 1)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["multi-resume"
     (fn [j]
       (let [f (fiber/new (fn []
@@ -70,65 +68,66 @@
                            3) |:yield|)]
         (fiber/resume f)
         (fiber/resume f)
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["protect-call"
     (fn [j]
       (let [[ok v] (protect (+ 1 2))]
-        v)) 0]
+        v))]
    ["yield-discard"
     (fn [j]
       (let [f (fiber/new (fn []
                            (yield {:x j})
                            99) |:yield|)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["never-resumed"
     (fn [j]
       (let [f (fiber/new (fn [] {:x j}) |:yield|)]
-        f)) 0]
+        f))]
    ["denied-discard"
     (fn [j]
       (let [f (fiber/new (fn [] (println "blocked")) |:error :io| :deny |:io|)]
         (fiber/resume f)
-        (get (fiber/value f) :error))) 0]
+        (get (fiber/value f) :error)))]
    # The adopt-park family and its controls — the `ap-*` defns above hold the
-   # attribution set. CLOSED controls on both dimensions (see the ledger note
-   # beside `declare-root :f2`); the region pins live in `@dual-read`.
+   # attribution set. Controls at 0 on both dimensions: the park split keys a
+   # second adopt ahead of the park, so an abandoned park's discharge frees the
+   # SCC through the parked frame's owner node (docs/impl/region/owner.md).
    ["adopt-park-drop"
     (fn [j]
       (let [f (fiber/new (fn [] (ap-adopting-body j)) |:yield|)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["adopt-park-abort"
     (fn [j]
       (let [f (fiber/new (fn [] (ap-adopting-body j)) |:yield|)]
         (fiber/resume f)
-        (protect (fiber/abort f "boom")))) 0]
+        (protect (fiber/abort f "boom"))))]
    ["adopt-park-cancel"
     (fn [j]
       (let [f (fiber/new (fn [] (ap-adopting-body j)) |:yield|)]
         (fiber/resume f)
-        (fiber/cancel f :dead))) 0]
+        (fiber/cancel f :dead)))]
    ["adopt-complete"
     (fn [j]
       (let [f (fiber/new (fn [] (ap-adopting-body j)) |:yield|)]
         (fiber/resume f)
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["adopt-nopark"
     (fn [j]
       (let [f (fiber/new (fn [] (ap-nopark-body j)) 1)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["plain-park-drop"
     (fn [j]
       (let [f (fiber/new (fn [] (ap-plain-body j)) |:yield|)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["adopt-before-park-drop"
     (fn [j]
       (let [f (fiber/new (fn [] (ap-before-body j)) |:yield|)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["adopt-before-park-cancel"
     (fn [j]
       (let [f (fiber/new (fn [] (ap-before-body j)) |:yield|)]
         (fiber/resume f)
-        (fiber/cancel f :dead))) 0]
+        (fiber/cancel f :dead)))]
    # A parked fiber hard-killed by `fiber/cancel` reclaims fully: the kill
    # frees everything the fiber owns (owner nodes, the parked signal's park
    # escape retain), and no carrier retain pins the fiber region
@@ -140,7 +139,7 @@
                            9) |:yield|)]
         (fiber/resume f)
         (fiber/cancel f :dead)
-        (fiber/status f))) 0]
+        (fiber/status f)))]
    # `fiber/abort` of a PARKED fiber. `fiber/abort` is a native tail call here, and its
    # fiber argument is a captured upvalue — a BORROWED tail argument, for which the
    # frame mints a fresh owning reference so the callee has one to release. The abort
@@ -157,7 +156,7 @@
                            (yield j)
                            9) |:yield|)]
         (fiber/resume f)
-        (protect (fiber/abort f "boom")))) 0]
+        (protect (fiber/abort f "boom"))))]
    # An abandoned park through the DYNAMIC emit path: a first argument the compiler cannot read as a
    # keyword set falls through to the `emit` primitive, so the park is an ordinary call rather than
    # the `Emit` terminator and the body reference the discharge stands in for comes from the call
@@ -169,40 +168,36 @@
    # and the suspending exit leaves it standing (docs/impl/region/signalexit.md) — and each has a
    # control that removes one ingredient: `emit-lit-discard` takes the literal path with the same
    # borrow, and `emit-dyn-fresh` takes the dynamic path with a payload the body allocates, where
-   # nothing is owed and a mint would strand one per park. CLOSED controls (undeclared, like
-   # `rest-array-copy`), so a regression to open trips the completeness gate loudly rather than
-   # being absorbed under F2.
+   # nothing is owed and a mint would strand one per park. Controls at 0.
    ["emit-dyn-discard"
     (fn [j]
       (let [f (fiber/new (fn []
                            (emit emit-sig emit-subject)
                            9) |:yield|)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["emit-dyn-tail"
     (fn [j]
       (let [f (fiber/new (fn [] (emit emit-sig emit-subject)) |:yield|)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["emit-lit-discard"
     (fn [j]
       (let [f (fiber/new (fn []
                            (emit :yield emit-subject)
                            9) |:yield|)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["emit-dyn-fresh"
     (fn [j]
       (let [f (fiber/new (fn []
                            (emit emit-sig (string "v" j))
                            9) |:yield|)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    # The same operation raising a TERMINAL signal, where the reference the tail call
    # holds answers to a different consumer: the payload's DELIVERY, released by
    # whoever catches the signal. The exit consumes its borrowed-argument retains — the
    # block that would have consumed them is abandoned, and an `:error` fiber's restart
    # replays it — so it mints the delivery and records it, the pair `handle_emit`
-   # performs on the literal path (docs/impl/region/signalexit.md). CLOSED controls
-   # (undeclared, like `rest-array-copy`), so a regression to open trips the
-   # completeness gate loudly rather than being absorbed under F2. Each reads the
-   # mint's ARITY: withholding it over-frees, which no leak gauge sees and
+   # performs on the literal path (docs/impl/region/signalexit.md). Controls at 0.
+   # Each reads the mint's ARITY: withholding it over-frees, which no leak gauge sees and
    # tests/impl/region-dynamic-emit-terminal-uaf.lisp reports. The six must stay
    # together, because only the gaps between them separate the mint from the record.
    # `emit-dyn-error-fresh` allocates its payload in the body, so the frame's own
@@ -216,36 +211,36 @@
    ["emit-dyn-tail-error"
     (fn [j]
       (let [f (fiber/new (fn [] (emit emit-error-sig emit-subject)) |:error|)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["emit-dyn-error-discard"
     (fn [j]
       (let [f (fiber/new (fn []
                            (emit emit-error-sig emit-subject)
                            9) |:error|)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["emit-lit-tail-error"
     (fn [j]
       (let [f (fiber/new (fn [] (emit :error emit-subject)) |:error|)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["emit-dyn-error-fresh"
     (fn [j]
       (let [f (fiber/new (fn [] (emit emit-error-sig (string "v" j))) |:error|)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["emit-dyn-error-repeat"
     (fn [j]
       (let [f (fiber/new (fn []
                            (let [t (set :error)]
                              (emit t t))) |:error|)]
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["emit-dyn-error-restart"
     (fn [j]
       (let [f (fiber/new (fn [] (emit emit-error-sig (string "v" j))) |:error|)]
         (fiber/resume f)
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    # The same raise OFF TAIL POSITION, where the site takes the retain instead of the
    # call's argument convention and the exit leaves it standing for the continuation
-   # past the call (docs/impl/region/park.md). CLOSED controls (undeclared, like
-   # `rest-array-copy`). What each reads is where that retain's one consumer is:
+   # past the call (docs/impl/region/park.md). Controls at 0. What each reads is
+   # where that retain's one consumer is:
    # `emit-dyn-error-discard` above resumes once, so no replay arrives and the
    # frames' own release table is the only route to it — the face that goes open by
    # one region per op if the site's stash stops recording there, or if the raise
@@ -261,22 +256,20 @@
                            (emit emit-error-sig emit-subject)
                            9) |:error|)]
         (fiber/resume f)
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    ["emit-dyn-stmt-error-fresh"
     (fn [j]
       (let [f (fiber/new (fn []
                            (emit emit-error-sig (string "v" j))
                            9) |:error|)]
         (fiber/resume f)
-        (fiber/resume f))) 0]
+        (fiber/resume f)))]
    # An emit-raised error's payload keeps
    # every frame-owed release: `(error v)` mints the payload's delivery itself (the
    # `EmitEscape` retain the resumer's release of the resume result consumes), so the
    # raise records the mint and the abandoned-frame walk and the parked frame's
-   # discharge stop exempting the payload's region (docs/impl/region/mechanism.md). CLOSED controls
-   # (undeclared, like `rest-array-copy`), so a regression to open trips the
-   # completeness gate loudly rather than being absorbed under F2; the soundness
-   # complement is tests/impl/region-error-payload-uaf.lisp. The faces are distinct
+   # discharge stop exempting the payload's region (docs/impl/region/mechanism.md). Controls
+   # at 0; the soundness complement is tests/impl/region-error-payload-uaf.lisp. The faces are distinct
    # consumers of the recorded mint and must stay together: `error-payload` raises
    # in the try's own body frame, which is PARKED for the restarts system, so its
    # release runs at the free-path discharge; `error-payload-helper` raises in a
@@ -290,7 +283,7 @@
    # `error-payload-helper` calls its raiser as a STATEMENT: a bare call in the
    # try body is a frame-replacing tail call, which lands in the parked frame like
    # `error-payload` — only the non-tail call leaves a callee frame for the walk.
-   # Its pin is CROSS-TIER at 0: both tiers walk the abandoned frame, the compiled
+   # Its row holds on both tiers at 0: both walk the abandoned frame, the compiled
    # one off the tables its prologue materialized and the locals it spills at the
    # exit, so the rate agrees with the JIT off and eager. The compiled face
    # has its own gauge in tests/impl/region-jit-error-unwind.lisp.
@@ -298,32 +291,30 @@
     (fn [j]
       (try
         (error (string "x" j))
-        (catch e nil))) 0]
+        (catch e nil)))]
    ["error-payload-helper"
     (fn [j]
       (try
         (begin
           (ep-raiser j)
           nil)
-        (catch e nil))) 0]
+        (catch e nil)))]
    ["error-payload-param"
     (fn [j]
       (try
         (ep-raise-param (string "x" j))
-        (catch e nil))) 0]
+        (catch e nil)))]
    ["error-payload-struct"
     (fn [j]
       (try
         (error {:error :e :message (string "m" j)})
-        (catch e nil))) 0]
+        (catch e nil)))]
    ["error-payload-native"
     (fn [j]
       (try
         (get j :k)
-        (catch e nil))) 0]
-   # The two fiber-crossing DELIVERIES, both CLOSED
-   # controls (undeclared, like `rest-array-copy`) so a regression to open trips
-   # the completeness gate loudly rather than being absorbed under F2. Each
+        (catch e nil)))]
+   # The two fiber-crossing DELIVERIES, both controls at 0. Each
    # gauges a mint's ARITY rather than its presence: withhold the mint and the
    # crossing over-frees, which is a soundness failure no leak gauge can see and
    # `--trace=guardfree` reports (tests/impl/region-primitive-resume-uaf.lisp,
@@ -339,10 +330,10 @@
    # `denied-discard` drives that shape under F2, and it never resumes the denied
    # fiber, so no rate here would see the delivery at all. Its soundness face is
    # the `w-denied` witness under guardfree.
-   ["primitive-resume-bind" (fn [j] (pr-bind j)) 0]
-   ["primitive-resume-tail" (fn [j] (pr-tail j)) 0]
-   ["primitive-resume-keep" (fn [j] (pr-keep j)) 0]
-   ["emit-resume-literal" (fn [j] (pr-literal j)) 0]
+   ["primitive-resume-bind" (fn [j] (pr-bind j))]
+   ["primitive-resume-tail" (fn [j] (pr-tail j))]
+   ["primitive-resume-keep" (fn [j] (pr-keep j))]
+   ["emit-resume-literal" (fn [j] (pr-literal j))]
    # `propagate-*` read the same mint across propagate DEPTH: the three must stay
    # together, because a surplus delivery reference strands one region per park
    # and only the depth gap tells that apart from the raise's own cost.
@@ -351,17 +342,16 @@
    # own reference to the payload it allocated is released by the abandoned
    # frame's release-table walk (the `error-payload*` row above), so there is nothing
    # left for a depth difference to hide behind.
-   ["propagate-none" (fn [j] (pg-none j)) 0]
-   ["propagate-one" (fn [j] (pg-one j)) 0]
-   ["propagate-three" (fn [j] (pg-three j)) 0]
-   # The captured-`def` env cell and its `let` twin, CLOSED controls for the env
-   # ROUTE. Undeclared, like `rest-array-copy`.
-   ["env-cell-def-capture" (fn [j] (ec-def-capture)) 0]
-   ["env-cell-let-twin" (fn [j] (ec-let-twin)) 0]
+   ["propagate-none" (fn [j] (pg-none j))] ["propagate-one" (fn [j] (pg-one j))]
+   ["propagate-three" (fn [j] (pg-three j))]
+   # The captured-`def` env cell and its `let` twin, controls at 0 for the env
+   # ROUTE.
+   ["env-cell-def-capture" (fn [j] (ec-def-capture))]
+   ["env-cell-let-twin" (fn [j] (ec-let-twin))]
    # The closure-as-module pair, CLOSED controls for the declined move. The
    # `Immediate` init is what splits the binding's two regions; the heap init is
    # the same module with both admitted together.
-   ["module-cell-read-window" (fn [j] (mod-cell-immediate)) 0]
-   ["module-cell-heap-init" (fn [j] (mod-cell-heap)) 0]])
+   ["module-cell-read-window" (fn [j] (mod-cell-immediate))]
+   ["module-cell-heap-init" (fn [j] (mod-cell-heap))]])
 
 (run-direct-loop suite-concurrent)

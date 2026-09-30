@@ -9,6 +9,7 @@
 ##   (r:read "unstamped files" :files 12)             — any number, judged
 ##   (r:delta "residue" (fn [] (send-one)) :on [r:objects r:regions] :n 30)
 ##   (r:rate "io-drop" probe-io-drop :on [r:objects] :epsilon 0.4)
+##   (r:drive "recur-struct" struct-recur)             — the same rate over (run-block b)
 ##   (r:report)                                        — fail once, naming every problem
 ##
 ## The guide is lib/ratchet.md. The estimator is lib/ratchet/estimator.lisp
@@ -156,11 +157,12 @@
         (assign g (+ g 1)))
       out))
 
-  (defn rate [subject probe &named @on @epsilon @block @min @max @stable]
-    "The adaptive per-op rate of (PROBE j) on each gauge in ON, measured to
-     EPSILON (each gauge's own by default) in blocks of BLOCK ops between MIN
-     and MAX blocks. STABLE measures at two block sizes and voids a rate the
-     block size moves."
+  (defn drive [subject run-block &named @on @epsilon @block @min @max @stable]
+    "The adaptive per-op rate of (RUN-BLOCK b), which performs b ops of the
+     caller's own shape, on each gauge in ON, measured to EPSILON (each
+     gauge's own by default) in blocks of BLOCK ops between MIN and MAX
+     blocks. STABLE measures at two block sizes and voids a rate the block
+     size moves."
     (default on [objects])
     (default block 100)
     (default min 6)
@@ -169,11 +171,16 @@
     (each g in on
       (prove! g))
     (let [epsilons (map (fn [g] (or epsilon (get g :epsilon))) on)
-          run-block (fn [b] (est:run-thunk-block probe b))
           rs (if stable
                (est:measure-stable run-block on epsilons block min max)
                (est:measure run-block on epsilons block min max))]
       (map (fn [rd] (settle! (with-subject rd subject))) rs)))
+
+  (defn rate [subject probe &named on epsilon block min max stable]
+    "The adaptive per-op rate of (PROBE j), a drive whose run-block calls
+     PROBE once per op with the op's index."
+    (drive subject (fn [b] (est:run-thunk-block probe b)) :on on
+           :epsilon epsilon :block block :min min :max max :stable stable))
 
   (defn best-of [rounds control subject]
     "The smallest elapsed each thunk reached over ROUNDS alternating rounds.
@@ -230,6 +237,8 @@
    :read read
    :delta delta
    :rate rate
+   :drive drive
+   :stmt-run est:stmt-run
    :ratio ratio
    :report report
    :judge led:judge

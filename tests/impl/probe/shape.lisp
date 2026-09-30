@@ -1,12 +1,12 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 13)
+# audited: 2026-09-30
 # The shapes the direct-loop rows drive: values, error payloads, parked primitives, propagate depth, env and module cells, branch arms.
 #
 # docs/impl/region/diagnostics.md
 # ── The folded leak suite ─────────────────────────────────────────────
-# One dashboard covering every leak class (each declared a root below), on the estimator. The
+# One dashboard covering every leak class, on the ratchet's estimator. The
 # shapes need different DRIVERS — one run-block per shape, all feeding the one
-# measure-core:
+# estimator through `r:rate` or `r:drive`:
 #   - direct-loop (the table below): a per-op thunk run b times;
 #   - tail-call rotation: the recursive call itself is the run-block;
 #   - fiber-internal yield: a fiber that runs b iterations then completes, drained
@@ -19,8 +19,8 @@
 #   - byte-gauge: the same drivers under arena/bytes;
 #   - value-survival: plain asserts (correctness, not a rate).
 #
-# Each pin is the rate the estimator measures today, exact (or a [lo hi] range)
-# and shrink-only: a change may lower it, never raise it.
+# Every rate is held to its row in tests/ledger/oracle.lisp, two-sided: a
+# reading past the pin either way fails until `elle test --repin` moves it.
 
 (defn make-struct [i]
   # `i` reaches the value position (:iter i), which disables call-site param

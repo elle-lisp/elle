@@ -1,99 +1,25 @@
-(elle/epoch 12)
-# audited: 2026-09-08
-# oracle.lisp — the single leak-state dashboard for the region memory system.
+(elle/epoch 13)
+# audited: 2026-09-30
+# The region leak dashboard: one per-op leak rate per probe, judged against tests/ledger/oracle.lisp.
+# docs/ratchet.md
+# docs/impl/region/diagnostics.md
 #
-# ── Why this exists ───────────────────────────────────────────────────
-# The former leak suite measured a per-iteration rate as a two-point INTEGER
-# slope `(big-small)/(nbig-nsmall)`. Integer
-# division FLOORS any sub-integer rate to 0 — a leak of 0.3 objects/op (one
-# object every ~3 ops) reports as "reclaimed". For a long-running server a
-# 0.3/op leak is still unbounded RSS, so the floor is a false negative exactly
-# where it matters most. It also forces a fixed, memory-hungry big scale
-# (n=10000) to average out noise, even when the signal is clean.
+# Every probe is a shape driven in a loop under a heap gauge — the object
+# count, the region count, the byte count or the physical-id counter, chosen
+# for the dimension its class leaks in — and read as a per-op rate by the
+# ratchet's estimator (lib/ratchet.md). A rate says how large a leak is and
+# nothing about soundness: the trustworthy UAF signal is `--trace=guardfree`
+# under the full stdlib (docs/impl/region/diagnostics.md).
 #
-# This oracle replaces the integer slope with a REAL-VALUED leak rate plus a
-# confidence interval, measured by an adaptive sequential estimator:
-#
-#   - Sample the heap gauge (arena/count — an Immediate primitive, so reading
-#     it allocates nothing and does not perturb the measurement) in BLOCKS of
-#     B ops. A block's per-op rate = net objects / B. Block-averaging
-#     decorrelates consecutive ops (region-id recycling correlates them) and
-#     shrinks the sample range.
-#   - Welford-update a running mean and variance over the block rates. The mean
-#     IS the leak rate; the variance drives the stopping rule.
-#   - Stop when the empirical-Bernstein half-width on the mean falls below a
-#     target. EB is variance-adaptive: a deterministic leak (every block rate
-#     identical → variance 0, observed range 0) converges at the floor in a
-#     few blocks, where the old method always paid 10000 ops; a noisy leak runs
-#     until its interval is tight. This is the speed/memory win AND the
-#     sub-integer sensitivity in one estimator.
-#
-# This is a MEASUREMENT INSTRUMENT, not the soundness oracle. The trustworthy
-# UAF signal is `--trace=guardfree` under the full stdlib (docs/impl/
-# region/diagnostics.md); a tight, confident rate here does not prove the
-# absence of a use-after-free, only the size of a leak.
-#
-# ── The gauge-live discriminator (non-negotiable) ─────────────────────
-# A measured rate of ~0 means "reclaimed" ONLY if the gauge actually moves. A
-# dead gauge (a sampling bug, a stubbed primitive) also reads ~0 and would
-# paint every leak green. So the oracle FIRST measures a known-live-growth
-# shape (a genuine unbounded retain) and asserts it reads OPEN. If the
-# discriminator is not OPEN, the gauge is dead and EVERY "closed" verdict in
-# the run is void — the suite fails loudly rather than lying. A second
-# self-test, B-invariance (see `measure-stable`), proves a reported rate is a
-# true per-op rate and not a per-block-boundary artifact; together they keep the
-# instrument honest about both whether it measures and what the number means.
-#
-# ── The dual-read rule — where a second dimension is representable ────
-# The object count cannot see a region entry that holds no object: a pages-less
-# owner node, or a region emptied of objects but pinned by an unbalanced count.
-# A probe family whose machinery can strand one is read on the object count AND
-# the region count in one drive (`measure-2`). The AUTHORITY for membership is
-# the `@dual-read` table, which the completeness gate enforces — an entry with
-# no region verdict recorded fails the run, so coverage cannot rot into
-# silence. Every other family is object-only: a strand that holds an object
-# already moves the object count, and none of their shapes reaches the
-# owner-node machinery. Each dimension is its own dashboard line under a
-# suffixed label (`label@regions`) with its own pin, declaration, and verdict —
-# a probe open on two dimensions is two defects, two verdicts from two
-# instruments.
-#
-# The estimator, the gauges, the ledger, and the `check` macro live in
-# lib/estimator.lisp, shared with the io dashboard (plumb.lisp) and spliced
-# here at compile time — each dashboard compiles its own copy, so ledger state
-# is fresh per process.
-(include-file "lib/estimator.lisp")
-
-# ── The probe families ────────────────────────────────────────────────
-# Each file below is spliced at compile time, exactly as the estimator is, so
-# the whole dashboard is still ONE program reporting in ONE place — the split
-# is a reading budget, not a change of shape (DOCUMENTATION.md § Documents).
-# Include ORDER is run order, and it is also definition order: a family's
-# shapes are defined in the file that drives them, and the ledger comes first
-# because `pin` classifies against it.
-
-# ── The over-free gate, opened here and closed after the last probe ───
-# `arena/over-frees` counts a direct release that ran twice — the bookkeeping
-# half of an over-free, and the half no rate can see, since a reference dropped
-# twice leaves the heap SMALLER (docs/impl/region/diagnostics.md). A debug build
-# aborts at the site on its own `debug_assert!`; this is what a RELEASE pass
-# reads, which is the pass a dashboard rate is ratcheted on.
-#
-# The counter is monotonic and starts at 0, so the assertion is 0 outright
-# rather than a delta: that covers the stdlib load ahead of this line as well as
-# every probe in every file below, with no change to any of them. A regression
-# bad enough to over-free tends to do so while the stdlib is being compiled,
-# which a delta between two reads taken after that point cannot see. This read
-# is kept anyway, to say how many of the violations the probes themselves caused.
-#
-# It needs no discriminator. The gauge-live discipline exists because a dead
-# gauge and a reclaimed shape both read ~0, and here 0 is the assertion rather
-# than the measurement — a counter frozen at 0 fails to report a violation
-# instead of painting one green, which is what the `--trace=guardfree` axis and
-# the debug assert are for.
-(def over-frees-before (arena/over-frees))
-
-(include-file "probe/ledger.lisp")
+# The ledger holds every pin. A rate that moves either way fails, a probe
+# with no row fails as unledgered, and a row with no probe fails as missing,
+# so a probe read on the region count beside the object count is held to
+# both by its two rows. Each family below is spliced at compile time, so the
+# dashboard is one program reporting in one place: the split is a reading
+# budget (DOCUMENTATION.md § Documents). Include order is run order and
+# definition order, and the driver comes first: it binds the instrument and
+# every row table runs through it.
+(include-file "probe/driver.lisp")
 (include-file "probe/gauge.lisp")
 (include-file "probe/shape.lisp")
 (include-file "probe/frame.lisp")
@@ -110,51 +36,11 @@
 (include-file "probe/branch.lisp")
 (include-file "probe/native.lisp")
 
-# The over-free gate closes here, over every probe above and the load before it.
-(def over-frees-after (arena/over-frees))
-(check (assert (= over-frees-after 0)
-               (string "over-free: " over-frees-after
-                       " direct double-release(s) this process, "
-                       (- over-frees-after over-frees-before)
-                       " of them across the probes — a release that ran twice, "
-                       "which no leak rate can see "
-                       "(docs/impl/region/diagnostics.md)")))
+# The double-release counter, read once after the last probe. It is monotonic
+# from process start, so its row at 0 covers the stdlib load ahead of every
+# probe as well as the probes, and a release that ran twice — which no rate
+# can see — fails here (docs/impl/region/diagnostics.md).
+(r:read "over-free" :releases (arena/over-frees))
 
-# ── The split headline — the number §1's protocol reads, printed by the tool ──
-# `open defects` is the burndown count; `by-design` is the fixed growth set; `roots` is
-# how many of the six declared roots still have an open probe (it falls to 0
-# when the last defect closes). UNCLASSIFIED is appended only when a probe leaked
-# without a declaration — a stale ledger, gated below so it can never pass silently.
-(println "── split ──")
-(def split-tally (stats))
-(println "open defects: " split-tally:defects " across " split-tally:roots
-         " roots; by-design: " split-tally:by-design
-         (if (= (length split-tally:unclassified) 0)
-           ""
-           (string "; UNCLASSIFIED: " (length split-tally:unclassified) " "
-                   split-tally:unclassified)))
-(check (assert (= (length split-tally:unclassified) 0)
-               (string "unclassified open probe(s): " split-tally:unclassified
-                       " — every open probe must be a declared root or by-design "
-                       "(the split ledger is stale)")))
-# The dual-read half of the same gate: the table is the coverage authority, so
-# an entry that recorded no region verdict this run — a renamed probe, a
-# deleted block, a row added without a probe — must fail loudly rather than
-# read as coverage the dashboard does not have.
-(def @dual-unread @[])
-(each l in (keys dual-read)
-  (unless (get dual-read-seen l) (push dual-unread l)))
-(check (assert (= (length dual-unread) 0)
-               (string "dual-read entries with no region verdict this run: "
-                       dual-unread
-                       " — the coverage table names probes the runner never "
-                       "read on the region dimension")))
-(check (assert (= split-tally:by-design 5)
-               (string "by-design tally " split-tally:by-design
-                       " ≠ 5 — the growth probes (the object-count, "
-                       "physical-id, region, and bytes live-growth "
-                       "discriminators, the sub-integer estimator self-test) "
-                       "must each read open")))
-
-(report)
+(r:report)
 (println "oracle: ok")
