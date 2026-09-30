@@ -244,10 +244,12 @@ holds a few hundred bytes. [impl/vm.md](impl/vm.md) owns the mechanism.
 ```
 
 `(vm/config-set :jit N)` sets the JIT threshold to the positive integer `N`,
-and `(vm/config-set :mlir N)` sets the MLIR tier's. Each refuses a build
-without that tier, and a value that is not a positive integer. Inside `elle
-test` alone, each also takes `:off` and `:eager` ([test-runner](test-runner.md)).
-Any other process refuses both with an `:argument-error`.
+and `(vm/config-set :mlir N)` sets the MLIR tier's. Each refuses a value that
+is not a positive integer, and a threshold for a tier this run has off. Inside
+`elle test` alone, each also takes `:off` and `:eager` ([test-runner](test-runner.md)).
+There a threshold needs only a build that carries the tier, so the runner can
+put back the setting it read. Any other process refuses `:off` and `:eager`
+with an `:argument-error`.
 
 ```lisp
 (let [[ok? err] (protect (vm/config-set :jit :off))]
