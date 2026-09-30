@@ -1,14 +1,15 @@
 # The runner's acceptance test
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 An Elle program that drives `elle test` as a subprocess and asserts on the
 session DB each run writes.
 
 [acceptance.lisp](acceptance.lisp) is the runner's contract, scenario by
-scenario: one `worker` row per file, the assertion payload a failure records,
-a gated skip and its reason, whole-file atomicity, the timeout, the captured
-output and the `--host` child ([test-runner](../../docs/test-runner.md)). Each
+scenario: the rows a file records per tier, the `diverge` row, the assertion
+payload a failure records, a gated skip and its reason, whole-file atomicity,
+the timeout, the captured output and the `--host` child
+([test-runner](../../docs/test-runner.md)). Each
 assertion's exact text is part of that contract, so change the design document
 before an assertion.
 

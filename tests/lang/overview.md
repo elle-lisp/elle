@@ -1,6 +1,6 @@
 # The language suite
 
-<!-- audited: 2026-09-26 -->
+<!-- audited: 2026-09-29 -->
 
 One self-contained Elle program per subject, each asserting what the language
 promises and exiting non-zero when an assertion fails.
@@ -49,8 +49,8 @@ in [src/epoch/rules.rs](../../src/epoch/rules.rs).
 
 ## Running
 
-`make smoke-lang` runs every file as its own process, `elle FILE`, through
-`elle test --isolate ''`, and records each verdict in the session store
+`make smoke-lang` runs every file through `elle test` and records each verdict
+in the session store
 ([docs/testing.md](../../docs/testing.md)). A new file is picked up by being
 here; there is nothing to register.
 
@@ -59,7 +59,7 @@ One file at a time, `elle tests/lang/NAME.lisp` runs it as a plain program.
 ## Invariants
 
 1. **A file is self-contained.** It asserts directly and runs on its own.
-2. **Exit 0 is pass, 1 is fail.** Every runner reads the exit code.
+2. **Exit 0 is pass, 1 is fail.**
 3. **A file is deterministic.** No clock, no randomness, no dependence on how
    fast a background thread happens to be.
 4. **A file tests what the language does**, never how this implementation does

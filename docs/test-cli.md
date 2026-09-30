@@ -104,8 +104,7 @@ agent would normally re-run *with special flags to obtain* (`--dump=lir`,
 ## CLI surface
 
 ```
-elle test [paths...]            # run each path once on this build's runtime, write DB
-                                # (no --tiers flag — the builds are the tier set)
+elle test [paths...]            # run each path, write DB
   -e 'FORM'                     # run an ad-hoc form; persist it in the index
   --promote ID [name]           # render ad-hoc syntax to <corpus>/<name>.lisp (flat; name suggested from analysis)
   --corpus DIR                  # durable corpus root to scan and promote into (default tests/)

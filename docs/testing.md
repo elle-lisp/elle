@@ -28,7 +28,7 @@ specification is [docs/test-runner.md](test-runner.md), with
 
 | Command | What it does |
 |---------|--------------|
-| `make smoke-lang` | The language suite, each file as its own `elle FILE` |
+| `make smoke-lang` | The language suite |
 | `make smoke-impl` | The implementation suite on the rig, then both suites under each rig profile |
 | `make smoke` | Both suites, the doctests, the embedding demo, and the surface gate |
 | `make test` | `make qa`, then `make smoke`, then the Rust unit and integration tests |
@@ -42,7 +42,7 @@ heap — all to stderr:
 
 ```
 elle test · run 7 of 7 · commit a1b2c3d (dirty)
-184 pass · 6 skip · 1 fail · 1 timeout
+184 pass · 6 skip · 1 fail · 0 diverge · 1 timeout
 2 problems (query the DB for full detail):
   fail     tests/lang/foo.lisp:12  [process]  expected 42, got 41
   timeout  tests/lang/subprocess.lisp  [process]  child exceeded the 60000 ms budget
@@ -60,8 +60,7 @@ You read results from the run itself — never by hand-writing SQLite.
 ## A build is an implementation
 
 A build carries one optimizing tier and no flag that chooses another
-([config](config.md) § Builds). So tier coverage is not a setting of a run: it
-is the set of builds that run the language suite. CI builds the default
+([config](config.md) § Builds). CI builds the default
 (JIT) build, a build with no JIT, a thread-pool I/O build, an MLIR build, a
 build with no features, and the default build on AArch64 and macOS, and each
 runs `make smoke-lang` ([ci](analysis/ci.md)). A file that passes on one build
@@ -93,9 +92,8 @@ so an agent issues SQL against the stored run instead of re-running with
 
 The unit is the **file**, compiled the way every real Elle program is — Source →
 Reader → … → Bytecode → VM, with whole-module analysis — not `read`+`eval`'d
-form-by-form. The runner runs each file **once**, under the runtime its build
-ships, and records one `worker` row: the tier the runtime picks for each
-function is the runtime's business, exactly as it is under `elle FILE`.
+form-by-form. The tiers a file runs on are [docs/test-runner.md](test-runner.md)
+§ Tiers.
 
 Test code is untrusted, so each file runs in a **worker thread** with its own VM,
 bounded by the budget its path earned — `--timeout MS` (default 60000), or
@@ -111,7 +109,7 @@ execution.
 `elle test --isolate 'FLAGS'` runs each path as `elle FLAGS PATH`, one child per
 path, recorded on the `process` tier. `--host PROGRAM` runs the child under
 another program instead of this `elle`, which is how the implementation suite
-runs on the rig. The gate targets run both suites this way: each file then
+runs on the rig. The implementation suite runs this way: each file then
 starts, runs as a whole program and exits, which is the only shape that covers
 program teardown, and a fault in one file kills one child rather than the run.
 
@@ -142,11 +140,12 @@ isolated child on the rig, under the wide budget that `WIDE_FAMILIES` names.
 | Status | Meaning | Gates? |
 |--------|---------|--------|
 | `pass` | the file ran to its end | no |
-| `skip` | gated out (`gate!`/`:gated`), or `(exit 0)` | no |
+| `skip` | gated out (`gate!`/`:gated`), tier-ineligible, or `(exit 0)` | no |
 | `fail` | an assertion or error | **yes** |
+| `diverge` | tiers returned different values (synthetic `tier='*'` row) | **yes** |
 | `timeout` | the file exceeded its budget | **yes** |
 
-The gate (exit code) is zero iff no form failed or timed out. `status`
+The gate (exit code) is zero iff no form failed, diverged, or timed out. `status`
 and `tier` are keyword-valued in the runner and stored as their bare name in the
 TEXT columns (`WHERE status = 'pass'` works as written).
 
