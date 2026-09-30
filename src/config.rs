@@ -254,6 +254,11 @@ pub struct Config {
 
     /// `--version`: print the banner and exit before any VM exists.
     pub version: bool,
+
+    /// This process runs `elle test`. No flag sets it. It is what lets the
+    /// runner's worker turn a tier off or make it eager through `vm/config-set`,
+    /// which every other program is refused (docs/test-runner.md).
+    pub test_runner: bool,
 }
 
 impl Default for Config {
@@ -282,6 +287,7 @@ impl Default for Config {
             unicode: None,
             help: false,
             version: false,
+            test_runner: false,
         }
     }
 }
