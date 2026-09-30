@@ -33,6 +33,7 @@
     "--import" [:import :value]
     "--query" [:query :value]
     "--summary" [:summary :flag]
+    "--repin" [:repin :flag]
     "-e" [:eval :append]
     "--promote" [:promote :pair]})
 
@@ -90,6 +91,7 @@
                 :import nil
                 :query nil
                 :summary false
+                :repin false
                 :paths []}))
 
 # `--isolate FLAGS` runs each path as its own child, `elle FLAGS PATH`, for a
@@ -261,6 +263,9 @@
 # Always render the run: the tally, plus every problem row with its reason — so
 # you read results here, not by hand-writing SQLite (use --query to drill in).
 (print-summary conn run-id)
+# `--repin` moves the ledgers after the run is recorded, so the rows keep the
+# verdicts the run earned against the ledger as it was (docs/test-cli.md).
+(when (get opts :repin) (repin-ledgers))
 (sqlite:close conn)
 # Gate exit: zero iff no form failed, no tier diverged, nothing timed out, and
 # every judged reading is ok. A skip is fine; a timeout (a test that never

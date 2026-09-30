@@ -20,6 +20,7 @@ const TEST_RUNNER_FRAGMENTS: &[&str] = &[
     include_str!("../test/exec.lisp"),
     include_str!("../test/record.lisp"),
     include_str!("../test/view.lisp"),
+    include_str!("../test/repin.lisp"),
     include_str!("../test/main.lisp"),
 ];
 
