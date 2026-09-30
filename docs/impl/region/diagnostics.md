@@ -1,6 +1,6 @@
 # Region diagnostics and validation
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 Implementation-facing: the instruments that tell correct from broken, and the
 test scaffolding that keeps the region rules honest.
@@ -40,17 +40,15 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   naming a region that is absent, or a counted one already at zero, is a release
   that ran twice — precisely what an over-eager relocation replica produces.
   `RegionStore::decref_reaches_zero` counts one there. The counter is monotonic
-  and starts at 0, so **0 is the claim** — not a delta. The dashboards read it
-  before their first probe and after their last, and assert the second read is
-  0: that covers every probe in both files with no change to any of them, and
-  the stdlib load ahead of them as well. The delta between the two reads says
-  how many of the violations the probes themselves caused, which is what the
-  failure message reports.
+  and starts at 0, so **0 is the claim** — not a delta. Each dashboard reads
+  it once, after its last probe, as a ratchet reading pinned at 0 in its
+  ledger ([ratchet](../../ratchet.md)): that covers every probe in the file
+  with no change to any of them, and the stdlib load ahead of them as well.
 
-  Asserting the delta instead would miss the everyday shape. A relocation
-  regression bad enough to over-free tends to over-free while the stdlib is
-  being compiled, which is before either read — so the delta is 0 and the run
-  passes while the process is already corrupt.
+  Reading a delta across the probes instead would miss the everyday shape. A
+  relocation regression bad enough to over-free tends to over-free while the
+  stdlib is being compiled, which is before any probe runs — so the delta is
+  0 and the run passes while the process is already corrupt.
 
   The counter and the `debug_assert!` beside it are for different builds. A
   debug run aborts at the violation, which is the louder report and names the
@@ -305,37 +303,41 @@ every variant is what makes the recorded-`outgoing`-vs-scan assertion at free a
 *complete* check, not a partial one — a content edge the scan can see but the
 recorder forgot is caught the moment that region frees.
 
-The **leak state** lives in one runnable dashboard,
-[oracle.lisp](../../../tests/impl/oracle.lisp). It runs
-one representative shape per residual class in a loop with a heap gauge sampled *by
-the program* — `arena/count`, `arena/region-count`, `arena/bytes` or
-`arena/region-ids`, chosen for the dimension the class leaks in — and prints a
-per-class **closed (bounded) / open (leaking)** verdict with a measured
-per-op rate. The former scattered per-pattern leak files are folded into it, so leak
-state is read in one place, not a scattered suite.
+The **leak state** lives in two dashboards, [oracle.lisp](../../../tests/impl/oracle.lisp)
+and [plumb.lisp](../../../tests/impl/plumb.lisp), each a producer on the ratchet
+([ratchet](../../ratchet.md)). Each runs one representative shape per residual class in
+a loop with a heap gauge sampled *by the program* — `arena/count`,
+`arena/region-count`, `arena/bytes` or `arena/region-ids`, chosen for the dimension
+the class leaks in — and prints one reading per shape with its measured per-op rate,
+judged against the row its ledger holds for it. The former scattered per-pattern leak
+files are folded into them, so leak state is read in one place, not a scattered suite.
 
 The only trustworthy measurement is steady-state **residue growth** across loop
 iterations: a reclaimed class is **bounded** — its `arena/count` slope is 0 — while a
 leaking class grows per iteration, slope k > 0 meaning k objects leaked per iteration.
-A built-in **discriminator** (a shape that legitimately retains every iteration) must
-itself read *open*: a near-zero rate is real reclamation only when the discriminator
-slopes up, proving the gauge is not dead. There is one per gauge, and the count is
-gated, because a discriminator answers for the gauge it was measured on and for no
-other: a module-level sink moves the object count and the physical-id counter on
-different events, so either can be dead while the other is live. The estimator is
-variance-adaptive (an
-empirical-Bernstein sequential bound) and block-size invariant, so a reported rate is a
-true per-op rate, not a block-boundary artifact — no two-scale warmup subtraction needed.
+The instrument drives a **live-growth** shape (one that legitimately retains every
+iteration) for each gauge ahead of that gauge's first reading, and it must climb: a
+near-zero rate is real reclamation only when the live-growth shape slopes up, proving
+the gauge is not dead, so a gauge that reads flat under it voids every reading on its
+axis. There is one per gauge, because a live-growth shape answers for the gauge it was
+measured on and for no other: a module-level sink moves the object count and the
+physical-id counter on different events, so either can be dead while the other is
+live. The estimator is variance-adaptive (an empirical-Bernstein sequential bound) and
+block-size invariant, so a reported rate is a true per-op rate, not a block-boundary
+artifact — no two-scale warmup subtraction needed.
 
-A verdict is **shrink-only**: a class moves open → closed (or its rate shrinks) as its
-mechanism lands, never the reverse, terminating at rate 0 (the boundedness assertion the
-class becomes once reclaimed). The growth remains a defect by Rule 8 until then; the
-oracle documents and tracks it without hiding any *other* regression behind a
-known-failing test, and the gate stays green. Every fix lands with a counterfactual that
-*fails before the fix* — for a leak class the oracle's probe is that test: the fix moves
-its verdict and the new rate is the post-fix pin. A probe is written from the rule it
-enforces, not the implementation's current output; its *magnitude* is necessarily
-measured, but its *shape* — slope-based, shrink-only — is the rule.
+A row is the last accepted reading and is **two-sided**: a rate past it the worse way
+is a `regression` and past it the better way is `stale`, and both fail until
+`elle test --repin` moves the row. So a class moves toward 0 as its mechanism lands,
+never back, and terminates at a pin of 0 (the boundedness assertion the class becomes
+once reclaimed). The growth remains a defect by Rule 8 until then; the ledger's
+`:class :defect` rows track it without hiding any *other* regression behind a
+known-failing test, and the gate stays green. Every fix lands with a counterfactual
+that *fails before the fix* — for a leak class the dashboard's probe is that test: the
+fix moves its reading past the row, and the moved row is the post-fix pin. A probe is
+written from the rule it enforces, not the implementation's current output; its
+*magnitude* is necessarily measured, but its *shape* — slope-based, one way — is the
+rule.
 
 UAF is a separate axis, gated by `--trace=guardfree` under the full stdlib (the only
 trustworthy UAF oracle — plain-VM green is not evidence), not by the slope verdict.
@@ -360,8 +362,9 @@ build, or under a rig sidecar that sets `mlir = "eager"` on an `mlir` build.
 
 Per-tier region-reclamation state, each with its pinning test:
 
-- **VM / JIT** — the region runtime proper; state is the oracle's closed/open
-  split ([oracle.lisp](../../../tests/impl/oracle.lisp)).
+- **VM / JIT** — the region runtime proper; state is the oracle's ledger
+  ([tests/ledger/oracle.lisp](../../../tests/ledger/oracle.lisp)), read on both
+  tiers.
 - **MLIR CPU / GPU (SPIR-V)** — **allocation-free by construction.** The
   eligibility gate (`is_gpu_eligible`, over `is_gpu_instruction` in
   [mod.rs](../../../src/lir/types/mod.rs))

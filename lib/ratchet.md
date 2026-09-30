@@ -81,6 +81,35 @@ gauges in one drive are two readings of the same operations, on two axes.
 `:stable true` measures at two block sizes and voids a rate the block size
 moves, which is a rate that is not a per-op rate at all.
 
+## A drive is a run-block of the caller's own
+
+`rate` runs `(probe j)` once per op. A shape whose ops are not a per-op thunk
+hands `drive` a run-block, `(fn [b])`, that performs `b` ops: a tail recursion
+that allocates once per call, a fiber drained after `b` yields, a loop that
+has to run as a discarded statement. The reading is the same per-op rate, with
+the same options. A run-block advances by intrinsics behind a guard, because a
+variadic `+` inside the window is work the gauge would measure.
+
+```lisp
+(defn drop-n [b]
+  (when (%not (%int? b)) (error :b))
+  (def @i 0)
+  (while (%lt i b)
+    {:x i}
+    (assign i (%add i 1))))
+(def driven (r:drive "driven loop" drop-n :block 50 :min 4 :max 10))
+(assert (= (get (get driven 0) :verdict) :ok) "a loop that drops its structs reads 0 objects/op")
+```
+
+`stmt-run` wraps a thunk into the run-block that calls it `b` times as a
+discarded statement, the while-loop shape a per-call strand needs to show; a
+thunk's own return convention would reclaim the strand on its way out.
+
+```lisp
+(def stmt (r:drive "statement drop" (r:stmt-run (fn [] {:y 1})) :block 50 :min 4 :max 10))
+(assert (= (get (get stmt 0) :verdict) :ok) "and so does a struct dropped as a statement")
+```
+
 ## The judge
 
 `judge` is a pure function of a reading and a row, and it is the one every
@@ -125,6 +154,8 @@ this producer that got no reading. A producer ends with it.
 | `(read subject axis value &named unit half)` | one reading, judged and printed |
 | `(delta subject body &named on n)` | a gauge's change per run of `body` over `n` runs, on each gauge in `on` |
 | `(rate subject probe &named on epsilon block min max stable)` | the adaptive per-op rate of `(probe j)`, on each gauge in `on` |
+| `(drive subject run-block &named on epsilon block min max stable)` | the same rate over `(run-block b)`, which performs `b` ops of the caller's own shape |
+| `(stmt-run thunk)` | the run-block that calls `thunk` `b` times as a discarded statement |
 | `(ratio subject measured control &named rounds)` | the best of `rounds` alternating timings of `measured` over the best of `control`, on the `:time` axis |
 | `(judge reading row)` | the verdict of one reading against one row, or `:unledgered` for no row |
 | `(judge-all readings rows)` | every reading in order, with a failed growth floor voiding its axis |

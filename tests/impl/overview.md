@@ -1,6 +1,6 @@
 # The implementation suite
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 Elle programs that check this implementation: its gauges, its tiers, its crashes
 and its mechanisms, each run on the rig.
@@ -49,7 +49,6 @@ The sidecar says what the file needs; the file's header comment says why.
 The suite runs the files at the top of this directory. The directories under it
 hold what those files read, and the suite runs none of them:
 
-- `lib/` holds the leak estimator the two dashboards import.
 - `probe/` holds the oracle's rows, one module per shape family, which
   [oracle.lisp](oracle.lisp) includes.
 - `tailexit/` holds the tail-exit ledgers, which
@@ -61,11 +60,12 @@ hold what those files read, and the suite runs none of them:
 ## The dashboards
 
 [oracle.lisp](oracle.lisp) measures the leak rate of each residual class, and
-[plumb.lisp](plumb.lisp) measures the I/O leak rates. Each loops a shape
-under a heap gauge and reports a verdict per class through the measurement
-channel ([test-store](../../docs/test-store.md)).
+[plumb.lisp](plumb.lisp) measures the I/O leak rates. Each drives a shape
+under the ratchet's gauges and prints one reading per subject, judged against
+the row its ledger under `tests/ledger` holds for it
+([ratchet](../../docs/ratchet.md)).
 [docs/impl/region/diagnostics.md](../../docs/impl/region/diagnostics.md) owns
-their instruments.
+the gauges they read.
 
 ## Running
 

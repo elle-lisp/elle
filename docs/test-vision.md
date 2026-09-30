@@ -70,7 +70,7 @@ macOS each released page scrubbed. A sidecar lives outside the source, so the
 file keeps its meaning under a plain `elle-rig FILE`.
 
 A completeness gate remains to build: it fails when a declared profile records
-no verdicts, the same shape as the oracle's `@dual-read` table.
+no verdicts, the same shape as the ledger's `missing` row.
 
 ### Budgets come from history
 
@@ -163,8 +163,9 @@ CI habit of reading failures out of logs.
    matrix and `elle_scripts.rs` are gone.
 3. Derived budgets.
 4. The coverage gate (elle-lisp/elle#1144), then the runtime-structure gauges
-   (elle-lisp/elle#1143, elle-lisp/elle#1135). The reading line and the
-   ledger's `missing` gate are in; the dashboards move onto the ledger next.
+   (elle-lisp/elle#1143, elle-lisp/elle#1135). The reading line, the
+   ledger's `missing` gate and the dashboards' ledgers are in; the residue
+   tests move next.
 5. Content-keyed results; ordering signals. The boot fingerprint and the
    per-form effect profile are in.
 6. Provable form slicing; parity rows (elle-lisp/elle#1142); golden

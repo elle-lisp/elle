@@ -8,7 +8,8 @@ judges, records and re-pins; nothing else carries a number.
 This document is the specification. The instrument, the ledger and the
 direct-run gate are built, as [the guide](../lib/ratchet.md) shows, and so is
 the runner's side: the rows, the `missing` gate, the summary and `--repin`.
-Every producer past the guide and the corpus fixture is proposed.
+The two leak dashboards are producers with ledgers of their own. Every
+producer past those is proposed.
 
 ## What a ratchet is
 
@@ -18,12 +19,13 @@ ceiling on the objects a request leaves behind. A canary pins the allocations a
 loop makes. Each pin is the reading the tree gave on the day somebody accepted
 it, and a change that moves the reading the wrong way fails.
 
-The tree holds the pattern in at least eleven places, each written by hand:
+Two producers are on the ratchet: the leak dashboards
+[oracle.lisp](../tests/impl/oracle.lisp) and
+[plumb.lisp](../tests/impl/plumb.lisp), over
+[tests/ledger/oracle.lisp](../tests/ledger/oracle.lisp) and
+[tests/ledger/plumb.lisp](../tests/ledger/plumb.lisp). The tree still holds
+the pattern by hand in at least nine places:
 
-- [oracle.lisp](../tests/impl/oracle.lisp) and
-  [plumb.lisp](../tests/impl/plumb.lisp), over
-  [estimator.lisp](../tests/impl/lib/estimator.lisp) and the classification in
-  [ledger.lisp](../tests/impl/probe/ledger.lisp).
 - [h2-stress-scoped.lisp](../tests/impl/h2-stress-scoped.lisp),
   [region-page-recycle.lisp](../tests/impl/region-page-recycle.lisp),
   [region-macro-id-recycle.lisp](../tests/impl/region-macro-id-recycle.lisp),
@@ -49,24 +51,19 @@ hand edit, so a fix that reclaims more than expected leaves a loose pin behind,
 and a later regression back to the old number passes.
 
 **Coverage is a convention.** Which subjects are read on which axes is decided
-by whoever writes the subject, and recorded nowhere but the source. The oracle
-gates one table of it, `@dual-read`, by hand. Issue elle-lisp/elle#1144 asks
-the question nothing can answer: which subject has no rate?
+by whoever writes the subject, and recorded nowhere but the source. Issue
+elle-lisp/elle#1144 asks the question nothing can answer: which subject has no
+rate?
 
 **Every copy rebuilds the same machinery.** The gauge-live discriminator, the
-failure-accumulating `check`, the by-design set, the split headline, the
-completeness gate and the measurement channel are each written again per
-dashboard. A residue test outside the dashboards writes a smaller copy with no
-channel at all, so its ceiling has no history.
+window, the ceiling and the failure message are each written again per test.
+A residue test writes the smallest copy, with no reading line at all, so its
+ceiling has no history.
 
-**The channel opens for an isolated child only.** A corpus file that runs in a
-worker thread prints its readings and records nothing, because the channel is
-an environment variable and a per-form value would race between workers.
-
-**The pin's own slack hides a leak.** `match-rate?` accepts a reading within
-half a unit of the pin, so a shape pinned at zero passes at 0.3 objects per
-operation. The oracle's header names that exact rate as the one an integer
-slope hid, and its pins hide it again.
+**A tolerance on the pin hides a leak.** A pin matched to within half a unit
+passes a shape pinned at zero at 0.3 objects per operation, which is the exact
+rate an integer slope hid. The tolerance a pin needs is the reading's own
+uncertainty, and nothing else.
 
 ## The design
 
@@ -74,7 +71,7 @@ A measurement is a fact. A bound is a claim. The two never live in one file.
 
 | Part | Where | What it owns |
 |------|-------|--------------|
-| The instrument | `lib/ratchet.lisp` and its submodules | gauges, the estimator, drives, the reading line, the judge, the re-pin's rewrite |
+| The instrument | `lib/ratchet.lisp` and its submodules | gauges, the estimator, the drives, the reading line, the judge, the re-pin's rewrite |
 | The reading | one line on stdout | subject, axis, value, unit, uncertainty |
 | The ledger | `tests/ledger/*.lisp`, committed | one row per (subject, axis): the bound, its kind, its class |
 | The runner | `src/test/ledger.lisp` and `src/test/repin.lisp` | reading every line back, the completeness gate, history, `--repin` |
@@ -145,7 +142,8 @@ The options:
 | Option | Meaning |
 |--------|---------|
 | `:class :growth` | the shape must grow by design; the row is a floor, and a floor that fails voids every other row on its axis from this producer |
-| `:class :defect` | an open leak, under the root `:root` names; the split headline counts these |
+| `:class :defect` | an open leak, under the root `:root` names; these rows are the burndown |
+| `:root :f1a` | the leak class the row answers to: the one an open defect is under, or the one a regression of a control would reopen |
 | `:better :higher` | a larger reading is the better side; the default is `:lower` |
 | `:slack N` | the reading may sit this far past the pin on either side before it is judged; the default is 0 |
 | `:note "…"` | one sentence for the reader, kept when the tool rewrites the row |
@@ -285,6 +283,8 @@ know their path, so both judge as they go.
 | `objects`, `regions`, `bytes`, `pages`, `ids` | the arena gauges, each with its axis and unit |
 | `(gauge axis unit read)` | a gauge of the caller's own: the operand-stack depth of elle-lisp/elle#1135 when it lands |
 | `(rate subject probe & opts)` | the adaptive per-op rate of `(probe j)`, reported on `:on` gauges (default `objects`), to `:epsilon`, over `:block` ops per block between `:min` and `:max` blocks; `:stable true` runs the B-invariance check |
+| `(drive subject run-block & opts)` | the same rate over a run-block of the caller's own, `(fn [b])` performing `b` ops: a tail recursion, a fiber drained after `b` yields, a loop that must be a discarded statement |
+| `(stmt-run thunk)` | the run-block that calls `thunk` `b` times as a discarded statement, the while-loop shape a per-call leak needs to show |
 | `(delta subject gauge body :n N)` | the gauge's change over `N` runs of `body`, per run, after one uncounted run |
 | `(ratio subject measured control)` | the smaller of several alternating timings of `measured` over the same of `control` |
 | `(read subject axis value & opts)` | any number from anywhere: a count a script parsed, a byte total `valgrind` printed |
@@ -299,10 +299,9 @@ commits, and the re-pin.
 axis, the instrument drives that gauge's own live-growth shape first and
 reports it as `<axis> gauge (live-growth)`. Its row is a growth floor, and a
 floor that fails voids the axis. No producer writes a discriminator, and none
-can forget one. The shapes are the ones the dashboards hold today. A
-module-level sink keeps every struct it is handed, so the object count, the
-region count and the byte count climb. A sink of pairs keeps the free list
-drained, so the id counter climbs.
+can forget one. A module-level sink keeps every struct it is handed, so the
+object count, the region count and the byte count climb. A sink of pairs
+keeps the free list drained, so the id counter climbs.
 
 `report` raises one `:failed-assertion` with every failing line in its
 message, so under the runner the producer's form fails with the same text the
@@ -311,16 +310,21 @@ ends with `report` and no other assertion.
 
 ## The producers
 
-**The dashboards.** `oracle.lisp` and `plumb.lisp` keep their probe families
-and lose everything else. That is the estimator include, the `check` macro,
-`pin`, `show`, the discriminators, the by-design set, `declare-root`,
-`@dual-read` and its gate, the split headline and the over-free gate's two
-assertions. A row table becomes `[label probe]`, and the rate each row pinned
-moves to the ledger with its class. The prose in `ledger.lisp` about which
-probes are controls and why is either a `:note` or already in the mechanism
-documents it cites. [Assessment](impl/assessment.md) reads the split
-headline from the ledger instead of the dashboard. The over-free counter is
-one `read` with a pin of 0.
+**The dashboards.** [oracle.lisp](../tests/impl/oracle.lisp) and
+[plumb.lisp](../tests/impl/plumb.lisp) are producers over
+[tests/ledger/oracle.lisp](../tests/ledger/oracle.lisp) and
+[tests/ledger/plumb.lisp](../tests/ledger/plumb.lisp). Each holds its probe
+families and nothing else: a row table is `[label probe]`, each family drives
+its rows through `rate` or `drive`, and the rate a row is held to is its
+ledger row. A control is a row with no class, and the root a regression of it
+would reopen rides the row as `:root`. Which probes read the region gauge
+beside the object count is the drive's `:on`, and the ledger's `:regions`
+rows hold it there: a drive that drops the second gauge leaves a `missing`
+row, and one that adds it an `unledgered` reading. The instrument's
+live-growth rows are the discriminators, the oracle's sub-integer self-test
+is a growth floor of its own, and the over-free counter is one `read` pinned
+at 0. [Assessment](impl/assessment.md) reads the burndown from the ledgers:
+the `:class :defect` rows, of which both hold none.
 
 **The residue tests.** Each corpus file with a window and a ceiling replaces
 its helper with `delta` and its ceiling with a ledger pin, and gains a history
@@ -346,22 +350,10 @@ costs minutes.
 `elle test --rust` exists ([test-cli](test-cli.md)). The line format is the
 whole contract, so that step adds a parser and no second channel.
 
-## What this deletes
-
-- The estimator's private copy under `tests/impl/lib/`.
-- The classification tables and their gate in `probe/ledger.lisp`.
-- The discriminator blocks in `probe/gauge.lisp` and `plumb.lisp`.
-- The `check` and `report` runner in every dashboard.
-- Every pinned literal in every producer, and `match-rate?` with its half a
-  unit of slack.
-- The environment-variable channel and the code around it in `store.lisp`.
-- The hand-written measurement summary in `view.lisp`, which the verdict
-  table replaces.
-
 ## Landing order
 
 Each phase lands as documentation, then a failing test, then code, and each
-is one pull request.
+is one pull request. The first four are in.
 
 1. **The library and the ledger.** `lib/ratchet.lisp` with `rate`, `delta`,
    `read`, `report`, the gauges, the judge and the row reader, and
@@ -371,8 +363,8 @@ is one pull request.
    stale.
 2. **The runner reads the line.** `src/test/ledger.lisp` parses stdout for
    every form and child, writes the rows, adds `missing`, prints the summary
-   and gates. The channel and the old verdicts go. The counter-factual: a
-   ledger row no producer answers fails the run.
+   and gates. The counter-factual: a ledger row no producer answers fails the
+   run.
 3. **`--repin`.** The counter-factual: a stale row is rewritten, a regression
    is refused, and the comment above the row survives.
 4. **The dashboards move.** Oracle and plumb over the library, their pins in
