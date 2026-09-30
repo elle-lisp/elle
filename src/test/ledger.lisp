@@ -42,6 +42,11 @@
                [run-id result-id (get row :subject) (get row :axis)
                 (get row :bound) (get row :kind) :missing]))
 
+# Every judged reading of the run, each with the file that printed it, kept as
+# it lands: --repin reads a reading's class and floor here, which the table
+# does not carry, and moves a pin to the worst of every tier's readings.
+(def @repin-queue @[])
+
 (defn unjudged [r]
   "READING with whatever verdict its printer gave it removed. A producer that
    judged itself against another ledger than this run's has no standing here."
@@ -60,7 +65,8 @@
     (if rows
       (begin
         (each r in (ledger:judge-all readings rows)
-          (insert-reading conn run-id result-id r))
+          (insert-reading conn run-id result-id r)
+          (push repin-queue (put r :file file)))
         (when (= status :pass)
           (each row in (ledger:unread rows readings)
             (insert-missing conn run-id result-id row))))
