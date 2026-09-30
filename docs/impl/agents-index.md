@@ -73,6 +73,10 @@ Where a directory has no `overview.md`, the parent lists the titles of the
 documents inside it. That is worse than a summary and better than a bare name,
 and it needs no judgment from the generator.
 
+A directory the generator writes no index for — no documents of its own, and no
+index already there — is named without a link. The entry says the directory
+exists; a link would promise a file that nothing writes.
+
 ## Depth is cheap
 
 Reading an index that points at five documents and then reading two of them

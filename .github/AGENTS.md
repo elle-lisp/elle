@@ -11,4 +11,4 @@ Up: [..](../AGENTS.md)
 
 ## Directories
 
-- [workflows/](workflows/AGENTS.md) — (empty)
+- workflows/ — (empty)

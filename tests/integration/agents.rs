@@ -333,6 +333,32 @@ fn a_directory_is_skipped_by_name_and_not_by_substring() {
 }
 
 #[test]
+fn a_subdirectory_with_no_index_is_named_not_linked() {
+    // The listing offers a subdirectory's index. One with no documents of its own
+    // gets none, and a link to it reads as success while pointing at nothing. A
+    // subdirectory that already has an index keeps its link, whoever wrote it.
+    let t = Tree::new("no-index");
+    t.write("README.md", "# Root\n\nThe root document.\n")
+        .write("docs/one.md", "# One\n\nThe first subject.\n")
+        .write("keys/AGENTS.md", "# keys\n\nHand-written knowledge.\n")
+        .write("vendor/README.txt", "A directory with no documents.\n");
+
+    let root = t.index(".");
+    assert!(
+        root.contains("[docs/](docs/AGENTS.md)"),
+        "a subdirectory the generator indexes is linked:\n{root}"
+    );
+    assert!(
+        root.contains("[keys/](keys/AGENTS.md)"),
+        "a subdirectory that already has an index is linked:\n{root}"
+    );
+    assert!(
+        root.contains("vendor/") && !root.contains("vendor/AGENTS.md"),
+        "a subdirectory that gets no index is named, not linked:\n{root}"
+    );
+}
+
+#[test]
 fn check_ignores_a_directory_the_generator_does_not_own() {
     // A gate that fails on every unconverted directory is red from the day it
     // is turned on, and it names a fix the generator refuses to perform.
