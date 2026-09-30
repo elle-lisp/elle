@@ -1,9 +1,11 @@
 # ratchet
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 Measure a shape, print one reading line per subject, and judge each reading
-against the committed ledger; `elle test` records and re-pins the same lines.
+against the committed ledger.
+
+`elle test` records and re-pins the same lines.
 
 [The design](../docs/ratchet.md) says why a bound never lives in a producer
 and what `elle test` adds. This guide is the producer's side, and it is a
