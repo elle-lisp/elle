@@ -1,13 +1,12 @@
 (elle/epoch 14)
-# audited: 2026-09-30
+# audited: 2026-10-03
 # I/O: the stream primitives, ev/spawn, ev/sleep and the async backend's primitives.
 # docs/io.md
 #
-# Scratch files live under the platform temp root: each temp-using section wraps
-# its file lifecycle in (with-temp-dir dir …), which binds a unique dir from
-# file/mktempdir (honors TMPDIR) and deletes the tree after — even on failure. No
-# hardcoded paths, no litter. Create+use+delete stay inside one thunk so the file
-# is self-contained per tier under `elle test`.
+# Each section that needs a file wraps the whole file lifecycle in
+# (with-temp-dir dir …). The macro binds a unique directory under the platform
+# temp root and deletes the tree afterwards, even on failure. So each section
+# stands alone on every tier `elle test` runs.
 
 
 # === Type predicates ===
@@ -131,6 +130,10 @@
 (assert (io-backend? (io/backend :async)) "io-backend? on async backend")
 
 # === io/submit returns int ===
+#
+# A request is good only while the fiber that raised it waits on it. Each
+# section below uses f after its submit. A submit that is f's last use runs
+# after f's release, and it raises :state-error.
 
 (with-temp-dir dir
                (let [fpath (path/join dir "submit")]
@@ -140,7 +143,9 @@
                         f (fiber/new (fn [] (port/read-all port)) 512)]
                    (fiber/resume f)
                    (assert (int? (io/submit backend (fiber/value f)))
-                           "io/submit returns int"))))
+                           "io/submit returns int")
+                   (assert (= (fiber/status f) :paused)
+                           "the submit leaves the fiber waiting on its request"))))
 
 # === io/reap returns an array ===
 
@@ -150,6 +155,21 @@
 
 (assert (array? (io/wait (io/backend :async) :timeout 0))
         "io/wait returns an array")
+
+# === io/submit on a value that is not a backend ===
+
+(with-temp-dir dir
+               (let [fpath (path/join dir "submit-no-backend")]
+                 (spit fpath "test")
+                 (let* [port (port/open fpath :read)
+                        f (fiber/new (fn [] (port/read-all port)) 512)]
+                   (fiber/resume f)
+                   (let [[ok? err] (protect (io/submit 42 (fiber/value f)))]
+                     (assert (not ok?) "io/submit on an integer errors")
+                     (assert (= (get err :error) :type-error)
+                             "io/submit names a type-error")
+                     (assert (= (fiber/status f) :paused)
+                             "the refused submit leaves the fiber waiting")))))
 
 # === io/submit + io/wait roundtrip ===
 
@@ -163,7 +183,10 @@
                    (let [id (io/submit backend (fiber/value f))]
                      (let [completions (io/wait backend)]
                        (assert (= (length completions) 1)
-                               "io/wait returns 1 completion"))))))
+                               "io/wait returns 1 completion")
+                       (assert (= (string (fiber/resume f
+                                  (get (get completions 0) :value))) "roundtrip")
+                               "the fiber resumed with the completion returns what it read"))))))
 
 # === Completion struct has :id ===
 
@@ -177,7 +200,8 @@
                    (let [id (io/submit backend (fiber/value f))]
                      (let [completions (io/wait backend)]
                        (assert (= id (get (get completions 0) :id))
-                               "completion :id matches submission id"))))))
+                               "completion :id matches submission id")
+                       (fiber/resume f (get (get completions 0) :value)))))))
 
 # === Completion struct has :error nil ===
 
@@ -191,7 +215,8 @@
                    (let [id (io/submit backend (fiber/value f))]
                      (let [completions (io/wait backend)]
                        (assert (nil? (get (get completions 0) :error))
-                               "completion :error is nil on success"))))))
+                               "completion :error is nil on success")
+                       (fiber/resume f (get (get completions 0) :value)))))))
 
 # === make-async-scheduler ===
 
@@ -343,3 +368,9 @@
 (let [[ok? err] (protect (ev/poll-fd 100000 :read 1e300))]
   (assert (and (not ok?) (= (get err :error) :argument-error))
           "ev/poll-fd refuses a timeout the clock cannot count"))
+
+# === port/write on a value that is not a port ===
+
+(let [[ok? err] (protect (port/write 42 "hello"))]
+  (assert (not ok?) "port/write on an integer errors")
+  (assert (= (get err :error) :type-error) "port/write names a type-error"))

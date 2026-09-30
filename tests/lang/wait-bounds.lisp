@@ -1,5 +1,5 @@
 (elle/epoch 14)
-# audited: 2026-09-30
+# audited: 2026-10-03
 ## io/wait, ev/step and ev/shutdown take :timeout and :deadline: no bound waits, :timeout 0 polls.
 ## docs/io/timeout.md
 ##
@@ -20,7 +20,11 @@
   "Submit a sleep of `seconds` to `backend` from a fiber of no scheduler."
   (let [f (fiber/new (fn [] (ev/sleep seconds)) 512)]
     (fiber/resume f)
-    (io/submit backend (fiber/value f))))
+    (io/submit backend (fiber/value f))
+    # A request is good only while its fiber waits on it. The status read keeps
+    # f alive through the submit; a submit after f's release raises :state-error.
+    (assert (= (fiber/status f) :paused)
+            "the submit leaves the fiber waiting on its request")))
 
 (defn with-own-loop [body]
   "Run `body` with a fresh scheduler of its own installed as the current one."
