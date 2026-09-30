@@ -242,17 +242,41 @@
                         "a negative :timeout is refused")
                 (assert (refused? (fn [] (port/read out 64 :timeout "soon")))
                         "a :timeout that is not a number is refused")
-                (assert (refused? (fn [] (port/read out 64 :timeout 1e300)))
-                        "a :timeout longer than the clock can count is refused")
                 (assert (refused? (fn [] (port/read out 64 :deadline "soon")))
                         "a :deadline that is not a number is refused")
                 (assert (refused? (fn [] (port/set-options out :timeout -1)))
                         "port/set-options refuses a negative :timeout")
                 (assert (refused? (fn [] (port/set-options out :timeout :soon)))
-                        "port/set-options refuses a :timeout that is not a number")
-                (assert (refused? (fn [] (port/set-options out :timeout 1e300)))
-                        "port/set-options refuses a :timeout the clock cannot count"))))
+                        "port/set-options refuses a :timeout that is not a number"))))
 
 (println "  8. bad bounds are refused")
+
+## ── 9. A bound further off than the clock can count bounds nothing ──
+##
+## 1e300 seconds is past what any clock counts. The call waits as long as it
+## takes, exactly as one that names no bound does: the late line arrives and
+## the read answers it. The trap: that duration does not fit a Rust Duration,
+## and the conversion that assumed it would took the whole process down.
+
+(with-peer late-line
+           (fn [conn]
+             (assert (= (port/read-line conn :timeout 1e300) "hello")
+                     "a :timeout beyond the clock waits for the line")))
+
+(with-peer late-line
+           (fn [conn]
+             (port/set-options conn :timeout 1e300)
+             (assert (= (port/read-line conn) "hello")
+                     "a port :timeout beyond the clock waits for the line")))
+
+(ev/run (fn []
+          (let [[tx rx] (chan)]
+            (ev/spawn (fn []
+                        (ev/sleep 0.2)
+                        (chan/send tx :late)))
+            (assert (= (chan/select @[rx] :timeout 1e300) [0 :late])
+                    "a select with a :timeout beyond the clock waits for the message"))))
+
+(println "  9. a bound beyond the clock waits as long as it takes")
 
 (println "port-deadline: all tests passed")

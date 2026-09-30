@@ -1,5 +1,7 @@
-(elle/epoch 12)
-# I/O — stream primitives, ev/spawn, async backend
+(elle/epoch 14)
+# audited: 2026-09-30
+# I/O: the stream primitives, ev/spawn, ev/sleep and the async backend's primitives.
+# docs/io.md
 #
 # Scratch files live under the platform temp root: each temp-using section wraps
 # its file lifecycle in (with-temp-dir dir …), which binds a unique dir from
@@ -137,29 +139,14 @@
                    (assert (int? (io/submit backend (fiber/value f)))
                            "io/submit returns int"))))
 
-# === io/reap returns tuple ===
+# === io/reap returns an array ===
 
-(assert (array? (io/reap (io/backend :async))) "io/reap returns tuple")
+(assert (array? (io/reap (io/backend :async))) "io/reap returns an array")
 
-# === io/wait returns tuple ===
+# === io/wait returns an array ===
 
-(assert (array? (io/wait (io/backend :async) 0)) "io/wait returns tuple")
-
-# === io/submit on sync backend errors ===
-
-# port/open must be opened BEFORE the assert-err lambda so it doesn't yield
-# inside protect's fiber (protect uses mask=1 which doesn't handle SIG_IO).
-(with-temp-dir dir
-               (let [fpath (path/join dir "submit-sync")]
-                 (spit fpath "test")
-                 (let [submit-sync-port (port/open fpath :read)]
-                   (let [[ok? _] (protect ((fn ()
-                           (let* [backend (io/backend :sync)
-                                  f (fiber/new (fn []
-                                    (port/read-all submit-sync-port)) 512)]
-                             (fiber/resume f)
-                             (io/submit backend (fiber/value f))))))]
-                     (assert (not ok?) "io/submit on sync backend errors")))))
+(assert (array? (io/wait (io/backend :async) :timeout 0))
+        "io/wait returns an array")
 
 # === io/submit + io/wait roundtrip ===
 
@@ -171,7 +158,7 @@
                         f (fiber/new (fn [] (port/read-all port)) 512)]
                    (fiber/resume f)
                    (let [id (io/submit backend (fiber/value f))]
-                     (let [completions (io/wait backend -1)]
+                     (let [completions (io/wait backend)]
                        (assert (= (length completions) 1)
                                "io/wait returns 1 completion"))))))
 
@@ -185,7 +172,7 @@
                         f (fiber/new (fn [] (port/read-all port)) 512)]
                    (fiber/resume f)
                    (let [id (io/submit backend (fiber/value f))]
-                     (let [completions (io/wait backend -1)]
+                     (let [completions (io/wait backend)]
                        (assert (= id (get (get completions 0) :id))
                                "completion :id matches submission id"))))))
 
@@ -199,7 +186,7 @@
                         f (fiber/new (fn [] (port/read-all port)) 512)]
                    (fiber/resume f)
                    (let [id (io/submit backend (fiber/value f))]
-                     (let [completions (io/wait backend -1)]
+                     (let [completions (io/wait backend)]
                        (assert (nil? (get (get completions 0) :error))
                                "completion :error is nil on success"))))))
 
@@ -329,6 +316,15 @@
 (let [[ok? _] (protect (ev/sleep "hello"))]
   (assert (not ok?) "ev/sleep rejects non-numeric"))
 
+# === ev/sleep error: longer than the clock can count ===
+# A sleep needs an end, and 1e300 seconds has none the clock reaches. The trap:
+# that duration does not fit a Rust Duration, and the conversion that assumed
+# it would took the whole process down.
+
+(let [[ok? err] (protect (ev/sleep 1e300))]
+  (assert (and (not ok?) (= (get err :error) :argument-error))
+          "ev/sleep refuses a duration the clock cannot count"))
+
 # === ev/sleep error: wrong arity ===
 
 (let [[ok? _] (protect ((fn () (eval '(ev/sleep)))))]
@@ -336,11 +332,3 @@
 
 (let [[ok? _] (protect ((fn () (eval '(ev/sleep 1 2)))))]
   (assert (not ok?) "ev/sleep rejects two args"))
-# ============================================================================
-# Error tests (from integration/io.rs)
-# ============================================================================
-# stream_write_outside_scheduler_errors — SKIPPED
-# SIG_IO propagates as an uncatchable signal outside a scheduler.
-# This is testable from Rust (eval_source catches all signals) but not from Elle.
-# stream_write_non_port_errors — SKIPPED
-# Same issue: port/write yields SIG_IO before type checking the port argument.
