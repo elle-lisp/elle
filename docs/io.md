@@ -1,6 +1,6 @@
 # I/O
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-30 -->
 
 All I/O in Elle is async — reads and writes yield to the scheduler. User
 code runs inside the async scheduler automatically.
@@ -231,9 +231,9 @@ each backend.
 
 ### Deadlines
 
-Port calls take a `:timeout`, and so do the calls that wait on a peer.
-[I/O deadlines](io/timeout.md) owns what each bound covers, and how a call
-waiting on a child, a signal or a filesystem event ends.
+Port calls take a `:timeout` and a `:deadline`, both in seconds, and so do the
+calls that wait on a peer. [I/O deadlines](io/timeout.md) owns what each bound
+covers, and how a call waiting on a child, a signal or a filesystem event ends.
 
 ### Streams from ports
 
@@ -291,7 +291,7 @@ All output functions are async — they yield to the scheduler.
 `subprocess/exec` spawns a child and answers a `subprocess` — the value its
 streams, pid and exit status are read from, and the value `subprocess/wait` and
 `subprocess/kill` take. Its stdio ports are ordinary ports, so everything above
-applies to them: the same reads and writes, the same `:timeout`, the same
+applies to them: the same reads and writes, the same bounds, the same
 cancellation.
 
 See [subprocess.md](subprocess.md) for the type, its reads, and what a kill
@@ -333,7 +333,7 @@ recursive delete (`file/delete-dir` only removes empty directories).
 
 ## See also
 
-- [io/timeout.md](io/timeout.md) — the `:timeout` bound, and how a waiting call ends
+- [io/timeout.md](io/timeout.md) — the `:timeout` and `:deadline` bounds, and how a waiting call ends
 - [subprocess.md](subprocess.md) — the subprocess type, its reads, kill and wait
 - [behaviors.md](behaviors.md) — supervised subprocesses, GenServer, actors
 - [concurrency.md](concurrency.md) — ev/spawn, ev/join, parallel I/O

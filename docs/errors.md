@@ -1,6 +1,6 @@
 # Error Handling
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-30 -->
 
 Errors in Elle are values signaled via fibers. By convention, error values
 are structs `{:error :keyword :message "string"}`, but `(error val)` accepts
@@ -216,7 +216,7 @@ the capture runs before any enclosing cleanup:
 (def order @[])
 
 (with-temp-dir dir
-  (def [ok? err] (protect (tcp/accept listener :timeout 20)))
+  (def [ok? err] (protect (tcp/accept listener :timeout 0.02)))
   (assert (not ok?) "nobody connects, so the accept fails")
   (file/write (path/join dir "note") "the directory is still here")
   (push order :body))

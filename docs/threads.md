@@ -1,6 +1,6 @@
 # Threads
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-30 -->
 
 OS threads for CPU-bound work. For I/O-bound concurrency, prefer
 `ev/spawn` / `ev/join` (see [concurrency.md](concurrency.md)).
@@ -138,7 +138,8 @@ worker doesn't need stdlib at runtime; `init_stdlib` per spawn is not free.
 ### join with a deadline
 
 `(sys/join handle)` waits indefinitely and returns the result;
-`(sys/join handle 5000)` waits at most 5000 ms.
+`(sys/join handle :timeout 5)` waits at most five seconds, and `:deadline`
+ends the wait at a `(clock/monotonic)` reading ([I/O deadlines](io/timeout.md)).
 
 `sys/join` (alias `os/join`) **cooperates with the scheduler**:
 it does not poll and it does not park the OS thread. While it waits, other
@@ -147,11 +148,10 @@ cross-thread wake path as `chan/select` — when the worker finishes it
 signals a completion channel, waking any parked joiner exactly once;
 `(doc sys/join)` describes the protocol.
 
-- With no `timeout-ms`, `sys/join` waits until the thread completes.
-- With `timeout-ms` (a non-negative integer of milliseconds), if the
-  thread has not finished by the deadline, `sys/join` raises a typed
-  timeout error — the struct `{:error :timeout :message ...}` — which
-  `protect` catches as `[false {:error :timeout ...}]`. The worker is
+- With no bound, `sys/join` waits until the thread completes.
+- With a bound, if the thread has not finished when it passes, `sys/join`
+  raises a typed timeout error — the struct `{:error :timeout :message ...}`
+  — which `protect` catches as `[false {:error :timeout ...}]`. The worker is
   **not** cancelled: there is no safe way to kill a running OS thread, so
   a timed-out worker is abandoned (it runs to completion on its own and
   its result is discarded). Each worker has its own VM and shares nothing,
@@ -167,8 +167,8 @@ return the same result without waiting.
   (let [@i 0]
     (while (%lt i 5000000) (assign i (%add i 1)))
     i))))
-(let [[ok? err] (protect (sys/join busy 1))]
-  (assert (not ok?) "the deadline passes first")
+(let [[ok? err] (protect (sys/join busy :timeout 0.001))]
+  (assert (not ok?) "the bound passes first")
   (assert (= (get err :error) :timeout)))
 (assert (= 5000000 (sys/join busy)) "a later join still gets the result")
 (assert (= 5000000 (sys/join busy)) "and so does every join after it")

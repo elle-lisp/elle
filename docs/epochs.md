@@ -1,6 +1,6 @@
 # Epochs
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-30 -->
 
 Epochs are Elle's mechanism for making breaking changes to the language while
 preserving backwards compatibility. Each epoch is a numbered version of the
@@ -57,8 +57,9 @@ string escape means.
 ## Migration rule types
 
 Each epoch bump defines a set of migration rules. The `MigrationRule` enum in
-`src/epoch/rules.rs` has seven variants: `Rename`, `Remove`, `Unwrap`,
-`Replace`, `FlattenBindings`, `FlattenClauses`, and `Desugar`.
+`src/epoch/rules.rs` has eight variants: `Rename`, `Remove`, `Unwrap`,
+`Replace`, `MillisToSeconds`, `FlattenBindings`, `FlattenClauses`, and
+`Desugar`.
 
 ### Rename
 
@@ -91,6 +92,38 @@ complete subtrees.
 
 If the arity does not match, the form is left unchanged — this allows a symbol
 to be used with different arities without triggering an unintended rewrite.
+
+### MillisToSeconds
+
+Rewrites a duration a call gave in milliseconds as a `:timeout` in seconds. The
+rule names the calls and where the duration sits:
+
+```rust
+MigrationRule::MillisToSeconds {
+    symbols: &["port/read", "port/write"],
+    arg: TimeArg::Keyword,
+}
+MigrationRule::MillisToSeconds {
+    symbols: &["sys/join", "os/join"],
+    arg: TimeArg::Last { arity: 2, negative_unbounded: false },
+}
+```
+
+`Keyword` rewrites the value after `:timeout`. `Last` matches a call with
+exactly `arity` arguments and replaces the last one with `:timeout` and its
+value, so `(sys/join h 500)` becomes `(sys/join h :timeout 0.5)`. The value is
+rewritten by its shape:
+
+| Milliseconds | Seconds |
+|---|---|
+| a literal, `500` or `5000` | the literal, `0.5` or `5` |
+| `nil` | `nil` after a keyword; no argument at all for `Last` |
+| a negative literal, when `negative_unbounded` | no argument at all |
+| any other expression `e` | `(if-let [ms e] (/ ms 1000.0) nil)` |
+
+A `negative_unbounded` rule wraps `e` so that a negative value becomes `nil`,
+since the call read a negative duration as no bound. A head that an older epoch
+renamed is matched by its new name as well as its old one.
 
 ### Remove
 
@@ -400,6 +433,27 @@ Up to epoch 12 the reader knows five escapes: `\n`, `\t`, `\r`, `\\` and
 The change is lexical, so a file that declares epoch 12 or earlier keeps its
 meaning. `elle rewrite` writes each escape whose meaning changed as the text
 epoch 12 read from it, so `"\x41"` becomes `"x41"`. A file with no
-declaration reads under epoch 13. When such a file holds an escape that only
-an older epoch reads, the read error names the declaration that restores the
-old reading.
+declaration reads under the current epoch. When such a file holds an escape
+that only an older epoch reads, the read error names the declaration that
+restores the old reading.
+
+### Epoch 14 — durations in seconds
+
+Every call that waits takes its bound as `:timeout` in seconds, beside a new
+`:deadline` ([I/O deadlines](io/timeout.md)). Up to epoch 13 the same calls
+took milliseconds, some as a keyword and some as a positional argument.
+
+| Epoch ≤ 13 | Epoch 14 |
+|------------|----------|
+| `(port/read p 64 :timeout 500)` | `(port/read p 64 :timeout 0.5)` |
+| `(sys/join h 5000)` | `(sys/join h :timeout 5)` |
+| `(chan/select rxs 50)` | `(chan/select rxs :timeout 0.05)` |
+| `(io/wait b -1)` | `(io/wait b)` |
+| `(ev/step)` | `(ev/step :timeout 0)` |
+
+The keyword form covers every port call, the accepts and connects,
+`udp/send-to`, `udp/recv-from` and `port/set-options`. The positional form
+covers `sys/join`, `os/join`, `chan/select`, `chan/wait-ready`, `io/wait`,
+`ev/step` and `ev/shutdown`. `(ev/step)` did not wait before, and a step with
+no bound now does, so the old spelling gains `:timeout 0`. `elle rewrite`
+applies the same rules, so a rewritten file reads its bounds in seconds.

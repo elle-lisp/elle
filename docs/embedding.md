@@ -1,6 +1,6 @@
 # Embedding
 
-<!-- audited: 2026-09-20 -->
+<!-- audited: 2026-09-30 -->
 
 Elle can be embedded as a scripting engine in Rust or C programs. The host
 creates a runtime, optionally registers custom primitives, compiles and
@@ -98,7 +98,7 @@ cooperative interleaving:
   ((get sched :spawn) f)
   (def @status :pending)
   (while (= status :pending)
-    (assign status ((get sched :step) 0)))
+    (assign status ((get sched :step) :timeout 0)))
   (assert (= status :done))
   (assert (= (fiber/value f) 6)))
 ```
@@ -114,21 +114,24 @@ The `ev/step` function wraps this for use inside an existing event loop:
     (ev/spawn (fn [] (+ 10 20 30)))
     (def @status :pending)
     (while (= status :pending)
-      (assign status (ev/step)))
+      (assign status (ev/step :timeout 0)))
     (assert (= status :done))))
 ```
 
 ## Step API reference
 
-- `(ev/step)` — non-blocking step (timeout 0ms), returns `:done` or `:pending`
-- `(ev/step timeout-ms)` — step with timeout, blocks up to `timeout-ms` for I/O
-- `((get sched :step) timeout-ms)` — direct scheduler step (no `*scheduler*` required)
+- `(ev/step :timeout 0)` — a step that does not wait, returns `:done` or `:pending`
+- `(ev/step :timeout s)` or `(ev/step :deadline t)` — a step that waits for I/O
+  up to the bound ([I/O deadlines](io/timeout.md))
+- `(ev/step)` — a step that waits for I/O as long as it takes
+- `((get sched :step) …)` — the same step on a scheduler, with the same bounds
+  (no `*scheduler*` required)
 
 The `:pump` entry is defined in terms of `:step`:
 
 ```lisp
-# pump = step with infinite timeout until done
+# pump = a step with no bound, until done
 (def @status :pending)
 (while (= status :pending)
-  (assign status (ev/step (- 0 1))))
+  (assign status (ev/step)))
 ```
