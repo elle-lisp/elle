@@ -1,6 +1,6 @@
 # Agent-First Test Runner
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 How a run executes: each file compiled, isolated, gated, run on every tier its
 build carries, and recorded honestly.
@@ -99,13 +99,13 @@ identically.
 
 ### Identity and names
 
-Each top-level form (the common case: the file's sole form) is referenced by
-`file#index@line:col` and deduped across runs by a hash of its **syntax**. The
-human label is scavenged from the form's syntax — the message string of its first
-`assert`, falling back to leading symbols — so the author writes nothing. Within
-a multi-form file the fault barrier is per top-level form; if a form holds several
-`assert`s, the first to fail aborts that form, attributed precisely because the
-caught `:failed-assertion` signal carries the message and span.
+Each form (a single-form file's one form, or a multi-form file as one
+whole-file form) is referenced by its file and index, and deduped across runs by
+a hash of its **syntax**. The human label is scavenged from the form's syntax —
+the message string of its first `assert`, falling back to leading symbols — so
+the author writes nothing. If a form holds several `assert`s, the first to fail
+aborts that form, attributed precisely because the caught `:failed-assertion`
+signal carries the message and span.
 
 ### Isolation: tests run in worker threads
 
@@ -122,12 +122,13 @@ instead of wedging the run. The deadline is a property of the path the form came
 from, not of the run — a path the caller named wide takes the wider budget, and
 every other path takes `--timeout` ([test-cli](test-cli.md)).
 
-**Unsendable captures fall back to in-process.** A worker receives the test
-thunk by deep-copying it across `os/spawn` (`SendBundle`). When the thunk
-captures a value that *cannot* serialize — an FFI handle (a `db:open`
-connection), a compiler artifact from `compile/*`, an arena value, a fiber, an
-open file/socket port — the spawn raises a serialization `:thread-error` and the
-form could never run in a worker at all. Rather than record a spurious fail, the
+**Unsendable values fall back to in-process.** A worker receives the test
+thunk by deep-copying it across `os/spawn` (`SendBundle`), and hands the form's
+value back the same way through `os/join`. A value that *cannot* serialize — an
+FFI handle (a `db:open` connection), a compiler artifact from `compile/*`, an
+arena value, a fiber, an open file/socket port — makes either crossing raise a
+serialization `:thread-error`: the spawn, when the thunk captures one, and the
+join, when the form's value is one. Rather than record a spurious fail, the
 runner detects that specific error and **re-runs the same form in-process** in
 the main VM (still under `protect` and `compile/run-on TIER`, with
 `*stdout*`/`*stderr*` rebound for capture). The trade is deliberate: an in-process form gets **no fault isolation
@@ -216,18 +217,17 @@ Compile-time elision is not built: no silent `when!` exists, and a gate always
 compiles its body. A language test never gates on a tier: every build runs it,
 and it must pass on every one ([spec](spec.md) § Two suites).
 
-**Gating shared setup gates the whole file.** Under the per-form barrier a
-file's `def`/`var` forms run *eagerly*, once, during the barrier-module compile
-to establish the shared environment — they are not per-form thunks. When an
-optional dependency is acquired there (an FFI module-load that `dlopen`s
-`libzmq.so`, a connection opened at top level), a `:gated` raised during that
-eager phase aborts the compile *before any test thunk is built*. The runner
-records this exactly parallel to a file-level compile error, but as a skip: a
-single file-level row (`form_index = -1`) with `status=skip, reason=REASON`
-(counted in `n_skip`; exit unaffected — a skip is not a failure). A genuine
-setup error (a real exception, a syntax error in an imported library) remains
-the file-level **fail**. So a file whose shared dependency is absent
-self-skips *with a reason*; a file whose setup is *broken* still fails loudly.
+**Gating shared setup gates the whole file.** A file with shared setup holds
+several forms, so it runs as one whole-file thunk (§ Multi-form files), and its
+`def`/`var` forms run inside that thunk in source order. When an optional
+dependency is acquired there (an FFI module-load that `dlopen`s `libzmq.so`, a
+connection opened at top level), a `:gated` raised there ends the thunk. The
+runner records the whole-file form (`form_index = 0`) as `status=skip,
+reason=REASON` under each JIT policy, counted in `n_skip`; the exit is
+unaffected, because a skip is not a failure. A genuine setup error (a real
+exception, a syntax error in an imported library) remains a **fail**. So a file
+whose shared dependency is absent self-skips *with a reason*; a file whose setup
+is *broken* still fails loudly.
 Idiomatically the dependency is acquired through a gate at its import site —
 attempt the load and re-raise a missing-library `:ffi-error` as `:gated` —
 never `(sys/exit 0)`, which under the runner would terminate the whole
@@ -326,10 +326,11 @@ automatic (identical artifacts across runs are one file), the database stays
 small and fast to query, and a huge artifact is just a file, not a row.
 
 **`--trace` is the exception to "capture everything."** Trace output is too large
-to retain for every form. It is captured **only for forms that fail**, written
-to the CAS (compressed) and referenced by hash — bounded to exactly the cases
-where you'd want it, never inlined. The smaller `--dump` artifacts are still
-captured for all forms, but to the CAS, not as BLOBs.
+to retain for every form, so the design captures it **only for forms that
+fail**, written to the CAS (compressed) and referenced by hash — bounded to
+exactly the cases where you'd want it, never inlined. The smaller `--dump`
+artifacts go to the CAS for every form, not as BLOBs. Neither is captured today
+(§ CAS asset capture).
 
 #### CAS asset capture
 
