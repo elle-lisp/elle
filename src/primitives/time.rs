@@ -4,6 +4,7 @@
 //! docs/io/timeout.md
 
 use crate::primitives::def::RegionEffect;
+use crate::primitives::kwarg::seconds;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -81,44 +82,19 @@ pub(crate) fn prim_clock_realtime(
     }
 }
 
-/// Sleeps for the specified number of seconds
+/// Sleeps for the specified number of seconds, refusing what
+/// [`seconds`] refuses.
 /// (time/sleep seconds)
 pub(crate) fn prim_sleep(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    if let Some(n) = args[0].as_int() {
-        if n < 0 {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "argument-error",
-                    "time/sleep: duration must be non-negative".to_string(),
-                ),
-            );
+    match seconds(&args[0], "time/sleep") {
+        Ok(duration) => {
+            std::thread::sleep(duration);
+            (SIG_OK, Value::NIL)
         }
-        std::thread::sleep(Duration::from_secs(n as u64));
-        (SIG_OK, Value::NIL)
-    } else if let Some(f) = args[0].as_float() {
-        if f < 0.0 || !f.is_finite() {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "argument-error",
-                    "time/sleep: duration must be a finite non-negative number".to_string(),
-                ),
-            );
-        }
-        std::thread::sleep(Duration::from_secs_f64(f));
-        (SIG_OK, Value::NIL)
-    } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                "time/sleep: argument must be a number".to_string(),
-            ),
-        )
+        Err((kind, msg)) => (SIG_ERROR, ctx.error(kind, msg)),
     }
 }
 
