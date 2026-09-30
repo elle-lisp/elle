@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-09-30
 // The generated index, specified in docs/impl/agents-index.md.
 //
 // scripts/agents builds each directory's AGENTS.md from the call-out sentence
@@ -242,6 +242,93 @@ fn the_generator_writes_where_it_already_owns_the_index() {
     assert!(
         second.contains("two.md"),
         "a generated index is rewritten in place:\n{second}"
+    );
+}
+
+#[test]
+fn a_submodule_is_not_entered_or_linked() {
+    // A submodule is a repository of its own, so an index written inside one
+    // cannot be committed from here: the run leaves that submodule dirty and
+    // names no way to discharge it. Its `.git` is a file rather than a
+    // directory, which is the only thing that tells it apart during a walk.
+    //
+    // Two halves, one claim. The walk must stop at it, or the file appears; and
+    // the listing must stop at it too, or the parent links an index that will
+    // never be written, which reads as success.
+    let t = Tree::new("submodule");
+    t.write("README.md", "# Root\n\nThe root document.\n")
+        .write("vendor/one.md", "# One\n\nThe first subject.\n")
+        .write("vendor/lib/README.md", "# Lib\n\nA vendored library.\n")
+        .write("vendor/lib/.git", "gitdir: ../../../.git/modules/vendor/lib\n");
+
+    let vendor = t.index("vendor");
+    assert!(
+        !vendor.contains("lib/AGENTS.md"),
+        "the parent links an index the walk will not write:\n{vendor}"
+    );
+
+    let out = Command::new(script())
+        .args(["--root", t.0.to_str().expect("utf-8 path")])
+        .output()
+        .expect("run scripts/agents");
+    assert!(
+        out.status.success(),
+        "scripts/agents failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !t.0.join("vendor/lib/AGENTS.md").exists(),
+        "the generator wrote an index inside a submodule"
+    );
+
+    // And the root is never treated as one: the checkout this generator runs in
+    // is a submodule of another repository, and its own index is the one every
+    // session reads first.
+    t.write(".git", "gitdir: /elsewhere/.git/modules/elle\n");
+    Command::new(script())
+        .args(["--root", t.0.to_str().expect("utf-8 path")])
+        .output()
+        .expect("run scripts/agents");
+    assert!(
+        t.0.join("AGENTS.md").exists(),
+        "a walk whose root is a submodule still indexes its root"
+    );
+}
+
+#[test]
+fn a_directory_is_skipped_by_name_and_not_by_substring() {
+    // `.github` is not `.git`. A pattern that matches the substring skips it
+    // while the listing still offers it, so the parent links an index the walk
+    // never writes — and a link to nothing is read as success.
+    //
+    // `.git` itself stays skipped, and both halves agree about that: the listing
+    // does not offer it either.
+    let t = Tree::new("skip-by-name");
+    t.write("README.md", "# Root\n\nThe root document.\n")
+        .write(".github/note.md", "# Note\n\nA document directly in .github.\n")
+        .write(".git/note.md", "# Note\n\nA document beside the object store.\n");
+
+    let root = t.index(".");
+    assert!(
+        root.contains(".github/AGENTS.md"),
+        "the listing offers `.github`, so the walk has to write it:\n{root}"
+    );
+    assert!(
+        !root.contains(".git/AGENTS.md"),
+        "the listing does not offer `.git`, so nothing may link it:\n{root}"
+    );
+
+    Command::new(script())
+        .args(["--root", t.0.to_str().expect("utf-8 path")])
+        .output()
+        .expect("run scripts/agents");
+    assert!(
+        t.0.join(".github/AGENTS.md").exists(),
+        "the listing and the walk must agree about `.github`"
+    );
+    assert!(
+        !t.0.join(".git/AGENTS.md").exists(),
+        "the walk skips `.git` itself, not only what is under it"
     );
 }
 

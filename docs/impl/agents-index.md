@@ -1,6 +1,6 @@
 # The generated index
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-30 -->
 
 Every directory's `AGENTS.md` is built from the call-out of each document
 beneath it, so the index cannot rot or be posted to.
@@ -87,6 +87,24 @@ charged to every session, forever.
 That is the reason to push a claim down rather than to delete it, and the
 reason an index must be free to maintain. Hierarchy only pays when navigation
 is generated.
+
+## A directory is skipped by name
+
+The walk does not descend into `.git`, `target` or `node_modules`. It names each
+of them exactly: a pattern that matches the substring skips every directory whose
+name merely begins with one — `.github` is not `.git` — while the listing still
+offers it, and a link to an index nothing writes is read as success.
+
+## A submodule is not entered
+
+A submodule is a repository of its own: its own history, its own remote, its own
+`AGENTS.md`. An index this generator wrote inside one could not be committed or
+pushed from here, so every run would leave that submodule dirty with no way to
+discharge it.
+
+What marks one during a walk is its `.git`: a file rather than a directory. The
+walk's own root can be a submodule — a `git worktree` of a checkout that is one —
+so the rule holds below the root and never at it.
 
 ## The index is committed
 
