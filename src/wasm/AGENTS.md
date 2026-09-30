@@ -86,7 +86,8 @@ WASM closure host-side via `handle_fiber_resume` (in resume.rs).
 | [liveness.rs](liveness.rs) | Which register slots are live at each suspend point. |
 | [outcome.rs](outcome.rs) | `CallOutcome`: what a call reports back to emitted code. |
 | [handle.rs](handle.rs) | `HandleTable`: maps u64 handles to `Rc<HeapObject>`. |
-| [host.rs](host.rs) | `ElleHost` state (handle table + primitives + suspension frames). |
+| [host.rs](host.rs) | `ElleHost` state (handle table + primitives) and primitive dispatch. |
+| [host/frames.rs](host/frames.rs) | The suspension frames a WASM closure saves when it yields, kept per fiber in the host. |
 | [host/io.rs](host/io.rs) | Top-level I/O with no scheduler to take it: the backend a request reaches, and the completion it reads its answer out of. |
 | [linker.rs](linker.rs) | Host function registration (`create_linker`); `linker/` holds the registrations and the data-op dispatch. |
 | [resume.rs](resume.rs) | Fiber resume chain (`drive_resume_chain`, `handle_fiber_resume`). |
