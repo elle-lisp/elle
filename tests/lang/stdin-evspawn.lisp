@@ -1,11 +1,12 @@
-(elle/epoch 12)
-## stdin + ev/spawn interaction
+(elle/epoch 13)
+# audited: 2026-09-30
+## port/read-line on stdin answers while a long-lived ev/spawn fiber is pending.
+## docs/io.md
 ##
-## Regression test: port/read-line on stdin must work when a long-lived
-## ev/spawn fiber is active.  Before the fix, the scheduler blocked in
-## wait_uring() forever because stdin completions arrive via StdinThread
-## (a channel), not io_uring, and the mixed-pending path only blocked on
-## io_uring.
+## Stdin completions arrive through the StdinThread's channel, not through
+## io_uring. The counter-factual: a scheduler that blocks in wait_uring alone
+## while a fiber is pending never sees them, and the child hangs until the
+## runner's deadline kills it.
 ##
 ## We test via subprocess so make test can run this without piping stdin.
 
@@ -23,14 +24,7 @@
 (def inner-path (path/join scratch "stdin-evspawn-inner.lisp"))
 (file/write inner-path inner-script)
 
-# Find the elle binary. The Makefile runs us from the project root as
-# ./target/{release,debug}/elle, so check both paths.
-(def elle-bin
-  (cond
-    (file/exists? "./target/release/elle") "./target/release/elle"
-    (file/exists? "./target/debug/elle") "./target/debug/elle"
-    true (error {:error :test-skip
-                 :message "cannot find elle binary in ./target/"})))
+(def elle-bin (elle/executable))
 
 # The inner-script path must be spliced into the shell string at runtime —
 # a literal inside the string would not see the scratch binding.

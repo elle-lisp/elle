@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-29
+# audited: 2026-09-30
 ## A stdin line longer than port/read-line's buffer is answered whole, and the next read still frames the stream.
 ## docs/io.md
 ##
@@ -65,12 +65,7 @@
    (println second-line)
    (sys/exit 0)")
 
-(def elle-bin
-  (cond
-    (file/exists? "./target/release/elle") "./target/release/elle"
-    (file/exists? "./target/debug/elle") "./target/debug/elle"
-    true (error {:error :test-skip
-                 :message "cannot find elle binary in ./target/"})))
+(def elle-bin (elle/executable))
 
 (def @scratch-path nil)
 (with-temp-dir scratch (assign scratch-path scratch)

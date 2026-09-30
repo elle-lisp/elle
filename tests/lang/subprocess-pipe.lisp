@@ -1,14 +1,10 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 13)
+# audited: 2026-09-30
 # An elle child's stdout pipe delivers every line and then closes, from one print or several.
 # docs/subprocess.md
 #
 
-(def elle
-  (or (get (sys/env) "ELLE")
-      (if (file-exists? "./target/release/elle")
-        "./target/release/elle"
-        "./target/debug/elle")))
+(def elle (elle/executable))
 
 # Test 1: echo (non-elle child, multiple lines)
 (eprintln "test 1: echo multi-line")

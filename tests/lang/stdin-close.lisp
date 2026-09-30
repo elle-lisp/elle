@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 13)
+# audited: 2026-09-30
 ## Closing *stdin* cancels a read in flight on it, and the program exits cleanly.
 ## docs/io.md
 ##
@@ -16,11 +16,7 @@
 ## parent's `subprocess/wait` hangs in turn, and the runner's deadline kills
 ## the run.
 
-(def elle
-  (or (get (sys/env) "ELLE")
-      (if (file-exists? "./target/release/elle")
-        "./target/release/elle"
-        "./target/debug/elle")))
+(def elle (elle/executable))
 
 # The scratch dir is already unique per process, so the child script
 # needs no pid suffix.
