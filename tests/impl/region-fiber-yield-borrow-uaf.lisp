@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-19
+(elle/epoch 13)
+# audited: 2026-09-29
 # A fiber body owns one reference of every value it yields
 # (docs/impl/region/park.md).
 #
@@ -125,6 +125,50 @@
     (fiber/bits inner)
     (length s)))
 
+# ── ends of a park that take the payload out of the signal slot ──────────────
+# The discharge stands in for the body's reference only while the park holds its
+# payload. An abort raises in place over the park and a squelch boundary discards
+# it, so after either the one release of that reference is the walk's, off the
+# frame's release table (docs/impl/region/unwind.md). Without it, each face below
+# strands one region per park, which the growth gauge at the end refuses. A
+# restart replays the continuation instead, and the release must run once there.
+
+# (k) an abort at the park, never restarted.
+(defn w-aborted (s)
+  (let [inner (fiber/new (fn ()
+                           (yield s)
+                           0) |:yield :error|)]
+    (fiber/resume inner)
+    (fiber/abort inner @[:stop])
+    (length s)))
+
+# (l) an abort at the park, then a restart that runs the continuation.
+(defn w-restarted (s)
+  (let [inner (fiber/new (fn ()
+                           (yield s)
+                           0) |:yield :error|)]
+    (fiber/resume inner)
+    (fiber/abort inner @[:stop])
+    (fiber/resume inner 5)
+    (length s)))
+
+# (m) a squelch boundary over the park.
+(defn w-squelched (s)
+  (let [g (squelch (fn ()
+                     (yield s)
+                     0) :yield)
+        inner (fiber/new (fn () (g)) |:error|)]
+    (fiber/resume inner)
+    (length s)))
+
+# (n) an abort that reaches the park through `protect`, whose thunk borrows `s`:
+# the shape a relay's refused io request takes.
+(defn w-protected (s)
+  (let [inner (fiber/new (fn () (protect (yield s))) |:yield :error|)]
+    (fiber/resume inner)
+    (fiber/abort inner @[:stop])
+    (length s)))
+
 # ── drive: a fresh subject per iteration; an over-free faults on the read ─────
 
 (defn drive [reps]
@@ -139,6 +183,10 @@
   (var h 0)
   (var k 0)
   (var l 0)
+  (var m 0)
+  (var n 0)
+  (var o 0)
+  (var p 0)
   (while (%lt i reps)
     (assign a (w-param (string "param" i)))
     (assign b (w-local i))
@@ -150,6 +198,10 @@
     (assign h (c-allocated (string "alloc" i)))
     (assign k (c-read (string "read" i)))
     (assign l (c-unresumed (string "cold" i)))
+    (assign m (w-aborted (string "aborted" i)))
+    (assign n (w-restarted (string "restarted" i)))
+    (assign o (w-squelched (string "squelched" i)))
+    (assign p (w-protected (string "protected" i)))
     # The witness (e) sink is a module-level container by design; read the stored
     # borrow back out — it must still be alive — then drain so the driver's own
     # retention stays flat.
@@ -157,7 +209,7 @@
             "stored borrow freed by the abandoned fiber's discharge")
     (assign sink @[])
     (assign i (%add i 1)))
-  (list a b c d e f g h k l))
+  (list a b c d e f g h k l m n o p))
 
 (let [r (drive 800)]
   (assert (> (get r 0) 0) "parameter borrow freed under the yielding frame")
@@ -169,7 +221,11 @@
   (assert (> (get r 6) 0) "control: completed fiber mis-read (harness broken)")
   (assert (> (get r 7) 0) "control: body-allocated yield mis-read")
   (assert (> (get r 8) 0) "control: read-only yield mis-read")
-  (assert (> (get r 9) 0) "control: never-resumed fiber mis-read"))
+  (assert (> (get r 9) 0) "control: never-resumed fiber mis-read")
+  (assert (> (get r 10) 0) "borrow freed after an abort at the park")
+  (assert (> (get r 11) 0) "borrow freed after a restart past an abort")
+  (assert (> (get r 12) 0) "borrow freed after a squelch boundary")
+  (assert (> (get r 13) 0) "borrow freed after an abort through protect"))
 
 # The module-level subject must survive every abandoned fiber that yielded it.
 (assert (%gt (length shared) 0)
@@ -184,7 +240,7 @@
   (let [growth (%sub (arena/region-count) before)]
     (assert (%lt growth 40)
             (string "yield-borrow accounting strands regions: live count grew by "
-                    growth " over 400 iterations of six abandoned parks each "
+                    growth " over 400 iterations of ten witnesses each "
                     "(expected flat)"))))
 
 (println "region-fiber-yield-borrow-uaf: ok")
