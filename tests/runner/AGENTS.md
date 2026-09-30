@@ -11,3 +11,4 @@ Up: [..](../AGENTS.md)
 ## Directories
 
 - [fixtures/](fixtures/AGENTS.md) — (empty)
+- [lib/](lib/AGENTS.md) — (empty)

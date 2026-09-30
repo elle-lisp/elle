@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 const EAGER: &str = "tests/impl/profiles/jit-eager.toml";
 const SCRUB: &str = "tests/impl/profiles/scrub.toml";
 const WASM_FULL: &str = "tests/impl/profiles/wasm-full.toml";
-const ACCEPTANCE: &str = "tests/runner/acceptance.lisp";
+const ACCEPTANCE: [&str; 2] = ["tests/runner/tiers.lisp", "tests/runner/acceptance.lisp"];
 
 /// One `elle test` batch pass: the files it deals out, and the command each
 /// batch runs.
@@ -116,8 +116,8 @@ fn smoke_lang_runs_every_language_file_with_no_flag() {
 }
 
 // The implementation suite runs on the rig, so each file's sidecar sets its
-// mode. The runner's acceptance test rides the same pass: it drives `elle test`
-// itself, and it needs the store the pass records into.
+// mode. The runner's acceptance tests ride the same pass: they drive `elle
+// test` themselves, and they need the store the pass records into.
 //
 // The counter-factual: run the implementation suite under `elle`, and every
 // sidecar goes unread. The guardfree files run with the oracle disarmed and
@@ -127,11 +127,11 @@ fn smoke_impl_runs_the_implementation_suite_on_the_rig() {
     let passes = passes("smoke-impl", &[]);
     let base = &passes[0];
     let mut want = implementation();
-    want.insert(ACCEPTANCE.to_string());
+    want.extend(ACCEPTANCE.map(str::to_string));
     assert_eq!(
         base.files, want,
         "the first pass of `make smoke-impl` is the implementation suite and \
-         the runner's acceptance test"
+         the runner's acceptance tests"
     );
     assert_eq!(
         base.isolate(),

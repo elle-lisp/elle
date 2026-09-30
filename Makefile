@@ -185,9 +185,10 @@ semver-check: elle  ## Verify every versioned library surface against its commit
 LANG_FILES := $(sort $(wildcard tests/lang/*.lisp))
 IMPL_FILES := $(sort $(wildcard tests/impl/*.lisp))
 
-# The runner's own acceptance test drives `elle test` itself and reads the store
-# the pass records into, so it rides the implementation suite's first pass.
-RUNNER_ACCEPTANCE := tests/runner/acceptance.lisp
+# The runner's own acceptance tests drive `elle test` themselves and read the
+# store the pass records into, so they ride the implementation suite's first
+# pass.
+RUNNER_ACCEPTANCE := tests/runner/tiers.lisp tests/runner/acceptance.lisp
 
 # The rig profiles (rig/overview.md). The eager profile runs both suites with
 # every function compiled on its first call. `IMPL_PROFILES` names more profiles
