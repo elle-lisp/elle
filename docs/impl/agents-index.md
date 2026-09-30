@@ -88,6 +88,13 @@ That is the reason to push a claim down rather than to delete it, and the
 reason an index must be free to maintain. Hierarchy only pays when navigation
 is generated.
 
+## A directory is skipped by name
+
+The walk does not descend into `.git`, `target` or `node_modules`. It names each
+of them exactly: a pattern that matches the substring skips every directory whose
+name merely begins with one — `.github` is not `.git` — while the listing still
+offers it, and a link to an index nothing writes is read as success.
+
 ## A submodule is not entered
 
 A submodule is a repository of its own: its own history, its own remote, its own

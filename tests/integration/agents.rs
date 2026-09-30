@@ -296,6 +296,43 @@ fn a_submodule_is_not_entered_or_linked() {
 }
 
 #[test]
+fn a_directory_is_skipped_by_name_and_not_by_substring() {
+    // `.github` is not `.git`. A pattern that matches the substring skips it
+    // while the listing still offers it, so the parent links an index the walk
+    // never writes — and a link to nothing is read as success.
+    //
+    // `.git` itself stays skipped, and both halves agree about that: the listing
+    // does not offer it either.
+    let t = Tree::new("skip-by-name");
+    t.write("README.md", "# Root\n\nThe root document.\n")
+        .write(".github/note.md", "# Note\n\nA document directly in .github.\n")
+        .write(".git/note.md", "# Note\n\nA document beside the object store.\n");
+
+    let root = t.index(".");
+    assert!(
+        root.contains(".github/AGENTS.md"),
+        "the listing offers `.github`, so the walk has to write it:\n{root}"
+    );
+    assert!(
+        !root.contains(".git/AGENTS.md"),
+        "the listing does not offer `.git`, so nothing may link it:\n{root}"
+    );
+
+    Command::new(script())
+        .args(["--root", t.0.to_str().expect("utf-8 path")])
+        .output()
+        .expect("run scripts/agents");
+    assert!(
+        t.0.join(".github/AGENTS.md").exists(),
+        "the listing and the walk must agree about `.github`"
+    );
+    assert!(
+        !t.0.join(".git/AGENTS.md").exists(),
+        "the walk skips `.git` itself, not only what is under it"
+    );
+}
+
+#[test]
 fn check_ignores_a_directory_the_generator_does_not_own() {
     // A gate that fails on every unconverted directory is red from the day it
     // is turned on, and it names a fix the generator refuses to perform.
