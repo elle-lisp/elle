@@ -24,5 +24,6 @@ Up: [..](../AGENTS.md)
 - [http/](http/AGENTS.md) — The submodules behind [http.lisp](../http.lisp): URLs, transports, the wire format, chunked bodies and server-sent events.
 - [http2/](http2/AGENTS.md) — The submodules behind [http2.lisp](../http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
 - [process/](process/AGENTS.md) — The submodules behind [process.lisp](../process.lisp): the scheduler in four parts, the primitives, and one file per behavior.
+- [ratchet/](ratchet/AGENTS.md) — (empty)
 - [rdf/](rdf/AGENTS.md) — (empty)
 - [semver/](semver/AGENTS.md) — (empty)
