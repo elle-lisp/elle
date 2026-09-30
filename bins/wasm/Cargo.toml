@@ -1,0 +1,50 @@
+[package]
+name = "elle-wasm"
+version = "2.0.0"
+edition = "2021"
+description = "The WASM build of elle and of the rig, as binaries beside the default build's (bins/overview.md)"
+license = "MIT"
+publish = false
+
+# A workspace of its own: its features reach no build of the root.
+[workspace]
+
+[[bin]]
+name = "elle-wasm"
+path = "../../src/main.rs"
+
+[[bin]]
+name = "elle-rig-wasm"
+path = "../../rig/src/main.rs"
+
+[dependencies]
+elle = { path = "../..", default-features = false }
+toml = "0.9"
+
+# The rig's features (rig/Cargo.toml), with this build's tier on.
+[features]
+default = ["jit", "ffi", "uring", "wasm"]
+jit = ["elle/jit"]
+ffi = ["elle/ffi"]
+uring = ["elle/uring"]
+mlir = ["elle/mlir"]
+wasm = ["elle/wasm"]
+
+# The root's profiles (Cargo.toml), so the variant is optimized as the default
+# build is.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+strip = "symbols"
+
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = "line-tables-only"
+
+[profile.bench]
+inherits = "release"

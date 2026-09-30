@@ -7,3 +7,8 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [overview.md](overview.md) — **The variant binaries** Two packages that build the WASM and MLIR builds as binaries of their own, each beside the rig of the same build.
+
+## Directories
+
+- [mlir/](mlir/AGENTS.md) — (empty)
+- [wasm/](wasm/AGENTS.md) — (empty)
