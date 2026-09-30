@@ -60,6 +60,17 @@
   (let [ms (*form-budget-ms*)]
     (if ms ms test-timeout-ms)))
 
+# What a result cost (docs/test-store.md § What gets captured). (clock/cpu) is
+# the calling thread's CPU time, so a delta read on the thread that ran the
+# form leaves out the JIT's compile thread, the I/O pool and any child.
+(defn cpu-us-since [t0]
+  "Microseconds of this thread's CPU time since T0, a (clock/cpu) reading."
+  (integer (* 1000000.0 (- (clock/cpu) t0))))
+
+(defn ms-since [t0]
+  "Milliseconds of wall time since T0, a (clock/monotonic) reading."
+  (integer (* 1000.0 (- (clock/monotonic) t0))))
+
 # Test code is untrusted: it can corrupt VM state, loop, or exhaust resources.
 # So each thunk runs in a worker with a VM of its own, under `protect`, and
 # `os/join` marshals back the structured [ok? payload] (docs/test-runner.md).
@@ -75,16 +86,18 @@
 # stderr] back through os/join.
 #
 # Run the tiered call with *stdout*/*stderr* rebound to temp files, returning
-# {:result [ok? payload] :stdout S :stderr S}. Assumes a scheduler is running
-# (port I/O yields): the worker supplies its own via ev/run; the in-process
-# fallback relies on the runner's top-level ev/run.
+# {:result [ok? payload] :stdout S :stderr S :cpu-us N}. Assumes a scheduler is
+# running (port I/O yields): the worker supplies its own via ev/run; the
+# in-process fallback relies on the runner's top-level ev/run.
 (defn capture-run [tier thunk out-path err-path]
   (let [op (port/open out-path :write)
         ep (port/open err-path :write)]
     (sys/trap-exit! true)
-    (let [v (parameterize ((*stdout* op)
+    (let [t0 (clock/cpu)
+          v (parameterize ((*stdout* op)
                            (*stderr* ep))
-              (protect (compile/run-on tier thunk)))]
+              (protect (compile/run-on tier thunk)))
+          cpu (cpu-us-since t0)]
       (sys/trap-exit! false)
       (port/close op)
       (port/close ep)
@@ -92,7 +105,7 @@
             se (slurp err-path)]
         (file/delete out-path)
         (file/delete err-path)
-        (struct :result v :stdout so :stderr se)))))
+        (struct :result v :stdout so :stderr se :cpu-us cpu)))))
 
 (defn last-output-line [text]
   "The last non-empty line of `text`, or nil when it has none. Long lines are
@@ -257,7 +270,8 @@
 # `(spawn thunk)` adds to that scheduler and `(join …)` waits for.
 # EVRUN/SPAWN/JOIN/OUT/ERR are passed so the caller supplies the SAME stdlib
 # instance the thunk uses (the worker's, or the main VM's for the in-process
-# fallback). Returns {:result [ok? value] :stdout :stderr}.
+# fallback). Returns {:result [ok? value] :stdout :stderr :cpu-us}. The fibers
+# the script spawns run on this thread's scheduler, so its CPU time counts them.
 (defn
   capture-pumped
   [evrun spawn join out-param err-param thunk out-path err-path]
@@ -265,9 +279,11 @@
            (let [op (port/open out-path :write)
                  ep (port/open err-path :write)]
              (sys/trap-exit! true)
-             (let [v (parameterize ((out-param op)
+             (let [t0 (clock/cpu)
+                   v (parameterize ((out-param op)
                                     (err-param ep))
-                       (protect (join (spawn thunk))))]
+                       (protect (join (spawn thunk))))
+                   cpu (cpu-us-since t0)]
                (sys/trap-exit! false)
                (port/close op)
                (port/close ep)
@@ -275,7 +291,7 @@
                      se (slurp err-path)]
                  (file/delete out-path)
                  (file/delete err-path)
-                 (struct :result v :stdout so :stderr se)))))))
+                 (struct :result v :stdout so :stderr se :cpu-us cpu)))))))
 
 # The setting that puts the JIT back where `(vm/config :jit)` read it: nil is
 # off, 0 is eager, and a count is the threshold (JitPolicy::reading in
@@ -357,12 +373,13 @@
     (let [[ok? b] (protect (port/read-all p))]
       (if ok? (string b) ""))))
 
-# Run one child to its end, or to the deadline. Returns
-# {:status INT-OR-NIL :stdout S :stderr S} — nil status means the budget ran
-# out and the child was killed. A deadline can land in the moment a wait has
-# already reaped the child, so the recorded status is consulted before the
-# timeout is believed; a reap is kept on the subprocess, never spent
-# (docs/subprocess.md).
+# Run one child to its end, or to the deadline. Returns {:status INT-OR-NIL
+# :stdout S :stderr S :wall-ms N :cpu-us N :max-rss-kb N} — nil status means
+# the budget ran out and the child was killed. The cost is spawn to reap, and
+# the child's total from subprocess/rusage (docs/test-store.md). A deadline
+# can land in the moment a wait has already reaped the child, so the recorded
+# status is consulted before the timeout is believed; a reap is kept on the
+# subprocess, never spent (docs/subprocess.md).
 #
 # The child is THIS binary unless `--host` names another, never whatever `elle` a
 # PATH lookup finds: a run has to say something about the build under test, and
@@ -370,7 +387,8 @@
 # a subcommand its head is the subcommand's own source name — so the binary
 # reports its own path.
 (defn run-child [argv budget-ms env]
-  (let [child (subprocess/exec (if host-program host-program (elle/executable))
+  (let [t0 (clock/monotonic)
+        child (subprocess/exec (if host-program host-program (elle/executable))
                                argv {:stdin :null :env env})
         out-f (ev/spawn (fn [] (drain (get child :stdout))))
         err-f (ev/spawn (fn [] (drain (get child :stderr))))
@@ -382,7 +400,12 @@
         (subprocess/kill child :sigkill)
         (protect (subprocess/wait child)))
       nil)
-    (struct :status status :stdout (ev/join out-f) :stderr (ev/join err-f))))
+    (let [wall (ms-since t0)
+          u (subprocess/rusage child)]
+      (struct :status status :stdout (ev/join out-f) :stderr (ev/join err-f)
+              :wall-ms wall
+              :cpu-us (if u (+ (get u :user-us) (get u :sys-us)) nil)
+              :max-rss-kb (if u (get u :max-rss-kb) nil)))))
 
 # What a terminating status says, rendered for a reader. A signalled child
 # answers its signal number negated (docs/subprocess.md), so the sign is what

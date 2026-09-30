@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-29
+# audited: 2026-09-30
 ## elle test — merging another store's runs into this one: the key that makes
 ## an import repeatable, the rows that follow a run, and the bytes copied by
 ## address.
@@ -25,7 +25,7 @@
 
 (def result-columns
   ["run_id" "form_hash" "tier" "status" "reason" "expected" "actual" "syntax"
-   "signal" "wall_ms" "cpu_us"])
+   "signal" "wall_ms" "cpu_us" "max_rss_kb"])
 
 (def asset-columns ["result_id" "kind" "hash" "size" "codec"])
 

@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-30
 //! One in-flight operation: the shapes it can take, the heap values it holds,
 //! and what it gives back when nobody will read its result.
 //!
@@ -102,14 +102,14 @@ pub(crate) enum PendingOp {
     /// Waiting for subprocess exit via IORING_OP_WAITID.
     ///
     /// SAFETY: `siginfo` is a heap-allocated `siginfo_t` (via Box::into_raw).
-    /// It must live until the CQE arrives. Released in completion processing.
+    /// It must live until the CQE arrives. Released in completion processing,
+    /// or by `retire`.
     ProcessWait {
         buffer_handle: BufferHandle,
         handle_val: Value,             // ProcessHandle — the child this wait names
         siginfo: *mut libc::siginfo_t, // kernel fills this when child exits
-        /// A clone of the handle's exit record. The status is kept here rather
-        /// than read out of `handle_val`, so a retire during backend teardown
-        /// records without dereferencing a value whose region may be gone.
+        /// A clone of the handle's exit record, which the ring's completion
+        /// reaps through without dereferencing `handle_val`.
         exit: crate::io::request::ExitRecord,
     },
     /// Open a file path. Creates a new port on completion.
@@ -369,10 +369,10 @@ impl PendingOp {
     /// open or an accept is the descriptor the operation obtained. Nobody will
     /// take it now, so it is closed here rather than leaked.
     ///
-    /// One thing is kept rather than given back: a process wait whose `waitid`
-    /// succeeded has already reaped the child (src/io/AGENTS.md § "A reap is
-    /// never wasted"). This is the ring's half, where the status arrives in the
-    /// `siginfo_t`; the pool's is in the worker, at the `waitpid` itself.
+    /// A process wait on the ring reaped nothing, since it asks with `WNOWAIT`,
+    /// so its `siginfo_t` is all there is to give back. The pool's wait reaps
+    /// in the worker, through the exit record (src/io/AGENTS.md § "A reap is
+    /// never wasted").
     pub(crate) fn retire(self, result_fd: i32, buffer_pool: &mut BufferPool) {
         if let Some(bh) = self.buffer_handle() {
             buffer_pool.release(bh);
@@ -404,14 +404,9 @@ impl PendingOp {
                 // SAFETY: as above — the port for this descriptor is never built.
                 unsafe { libc::close(result_fd) };
             }
-            PendingOp::ProcessWait { siginfo, exit, .. } if !siginfo.is_null() => {
+            PendingOp::ProcessWait { siginfo, .. } if !siginfo.is_null() => {
                 // SAFETY: allocated by `Box::into_raw` at submit; reclaimed once.
-                let si = unsafe { Box::from_raw(siginfo) };
-                if result_fd >= 0 {
-                    // SAFETY: a non-negative result is the kernel saying it
-                    // completed the `waitid` and filled this `siginfo_t`.
-                    exit.keep(unsafe { crate::io::request::exit_code_from_siginfo(&si) });
-                }
+                drop(unsafe { Box::from_raw(siginfo) });
             }
             _ => {}
         }

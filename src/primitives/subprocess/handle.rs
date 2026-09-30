@@ -1,6 +1,6 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-30
 //! The `subprocess` value: the one boundary that checks it, the reads that
-//! answer from it, and `wait`/`kill`/`pid`/`exit`.
+//! answer from it, and `wait`/`kill`/`pid`/`exit`/`rusage`.
 //!
 //! docs/subprocess.md
 
@@ -155,6 +155,32 @@ pub(super) fn prim_subprocess_exit(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (
         Ok(handle) => (SIG_OK, exit_status(handle)),
         Err(e) => e,
     }
+}
+
+/// What the child has cost: a live sample while it runs, the total its reap
+/// kept once it is reaped, or nil when neither is there (docs/subprocess.md).
+/// Reads the record and, before a reap, the OS; it never waits and never reaps.
+///
+/// (subprocess/rusage subprocess) → {:user-us :sys-us :max-rss-kb} | nil
+pub(super) fn prim_subprocess_rusage(
+    ctx: &mut NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let handle = match extract_subprocess(&args[0], "subprocess/rusage", ctx) {
+        Ok(h) => h,
+        Err(e) => return e,
+    };
+    let Some(usage) = handle.exit().usage(handle.pid()) else {
+        return (SIG_OK, Value::NIL);
+    };
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(TableKey::keyword("user-us"), Value::int(usage.user_us));
+    fields.insert(TableKey::keyword("sys-us"), Value::int(usage.sys_us));
+    fields.insert(
+        TableKey::keyword("max-rss-kb"),
+        Value::int(usage.max_rss_kb),
+    );
+    (SIG_OK, ctx.struct_from(fields))
 }
 
 /// (subprocess? value) → boolean. Never errors, matching `port?`.

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 //! The keyword vocabulary: every spelling the Rust runtime mints from a fixed
 //! string.
 //!
@@ -97,6 +97,10 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "tier",
     "value",
     "x",
+    // Usage keys (`subprocess/rusage`)
+    "max-rss-kb",
+    "sys-us",
+    "user-us",
     // File metadata keys (`file/stat`, `file/lstat`)
     "accessed",
     "blksize",

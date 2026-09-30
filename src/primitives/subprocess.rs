@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 //! The process primitives: `sys/*` over this process, and `subprocess/*` over a child.
 //!
 //! docs/subprocess.md
@@ -314,6 +314,15 @@ primitive! {
         category: "sys",
         example: "(subprocess/exit proc)",
         effect: RegionEffect::Immediate,
+    }
+    "subprocess/rusage" => prim_subprocess_rusage {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Return what a subprocess has cost as {:user-us :sys-us :max-rss-kb}: a live sample while it runs, the total its reap kept once reaped, or nil when neither is available. Never waits and never reaps.",
+        params: &["subprocess"],
+        category: "sys",
+        example: "(subprocess/rusage proc)",
+        effect: RegionEffect::Fresh,
     }
     "subprocess?" => prim_is_subprocess {
         ret: RetType::Bool,

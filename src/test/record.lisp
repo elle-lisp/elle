@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-29
+# audited: 2026-09-30
 ## elle test — turning an outcome into rows: the label a form is known by, what
 ## analysis finds in it, the status a payload classifies to, and one row per
 ## (form × tier).
@@ -160,21 +160,25 @@
                 (get row :touches) (get row :signal)]))
 
 # Insert one (form × tier) result row and return its rowid (so assets can
-# reference it).
-(defn insert-result [conn run-id h tier-str c]
+# reference it). COST carries what the run cost as :wall-ms, :cpu-us and
+# :max-rss-kb; one it lacks lands as NULL (docs/test-store.md).
+(defn insert-result [conn run-id h tier-str c cost]
   (sqlite:exec conn
-               "INSERT INTO result (run_id, form_hash, tier, status, reason, signal, syntax, expected, actual) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"
+               "INSERT INTO result (run_id, form_hash, tier, status, reason, signal, syntax, expected, actual, wall_ms, cpu_us, max_rss_kb) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"
                [run-id h tier-str (get c :status) (get c :reason) (get c :sig)
-                (get c :syn) (get c :exp) (get c :act)])
+                (get c :syn) (get c :exp) (get c :act) (get cost :wall-ms)
+                (get cost :cpu-us) (get cost :max-rss-kb)])
   (last-rowid conn))
 
 # Run a form on every active tier, inserting one row per tier and attaching the
 # file's captured `dumps` (a list of [kind addr size codec]) as assets to each.
-# `exec-fn` is (fn [tier-keyword out-path err-path] -> {:result :stdout :stderr});
-# the per-form path closes over a MAIN-compiled thunk (exec-thunk-capture), the
-# whole-file path closes over the file's syntax (exec-source-capture). Returns
-# [statuses pass-pairs]: the per-tier status strings, and [[tier-str value]...]
-# for the tiers that returned a value (divergence candidates).
+# `exec-fn` is (fn [tier-keyword out-path err-path] -> {:result :stdout :stderr
+# :cpu-us}), and its wall time is taken here, from handing the form over to
+# having its answer. The per-form path closes over a MAIN-compiled thunk
+# (exec-thunk-capture), the whole-file path over the file's syntax
+# (exec-source-capture). Returns [statuses pass-pairs]: the per-tier status
+# strings, and [[tier-str value]...] for the tiers that returned a value
+# (divergence candidates).
 (defn run-tiers [conn run-id h exec-fn tiers dumps statuses pass-pairs]
   (if (empty? tiers)
     [statuses pass-pairs]
@@ -182,10 +186,12 @@
           tk (get tp 0)
           ts (get tp 1)
           base (string scratch-dir "/" run-id "_" h "_" ts)
+          t0 (clock/monotonic)
           cap (exec-fn tk (string base ".out") (string base ".err"))
+          wall (ms-since t0)
           c (note-timeout-stacks (note-last-output (classify (get cap :result))
                                  cap))
-          rid (insert-result conn run-id h ts c)]
+          rid (insert-result conn run-id h ts c (put cap :wall-ms wall))]
       (insert-assets conn rid dumps)
       (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
       (run-tiers conn run-id h exec-fn (rest tiers) dumps
@@ -383,7 +389,7 @@
         # effect profile is a property of its source, and this process has the
         # compiler open already.
         (insert-form conn row)
-        (let [rid (insert-result conn run-id h :process c)]
+        (let [rid (insert-result conn run-id h :process c cap)]
           (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
           # A dashboard reports its verdicts through the channel named in the
           # child's environment; every other file writes nothing there.

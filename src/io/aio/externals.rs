@@ -1,4 +1,4 @@
-//! audited: 2026-09-29
+//! audited: 2026-09-30
 //! The submissions that name an OS object the request carries or creates: a
 //! watcher, a signal receiver, a file, a child, a background task.
 //!
@@ -220,9 +220,9 @@ impl AsyncBackend {
 
     /// Wait for a subprocess to exit.
     ///
-    /// The dispatch decides the `siginfo_t` the completion reads. io_uring's
+    /// The dispatch decides whether the entry carries a `siginfo_t`. io_uring's
     /// `IORING_OP_WAITID` needs one for the kernel to fill, while the pool
-    /// worker reaps with `waitpid(2)` and reports the code, so its entry holds
+    /// worker reaps with `wait4(2)` and reports the code, so its entry holds
     /// null.
     pub(super) fn submit_process_wait(&self, handle_val: &Value) -> Result<SubmissionId, String> {
         let handle = handle_val

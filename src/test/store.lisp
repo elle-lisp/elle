@@ -1,12 +1,13 @@
 (elle/epoch 13)
-# audited: 2026-09-29
+# audited: 2026-09-30
 ## elle test — the session store: where a run is kept, the schema it is kept
 ## in, what a run row says about the code it ran against, and the CAS.
 ## docs/test-store.md
 ##
-## A fragment of one module: src/main.rs concatenates the src/test files in
-## order and compiles the result as the `elle test` subcommand, so a run needs
-## no source tree. Bindings resolve across the whole concatenation.
+## A fragment of one module: src/program/subcommand.rs concatenates the
+## src/test files in order and compiles the result as the `elle test`
+## subcommand, so a run needs no source tree. Bindings resolve across the
+## whole concatenation.
 
 (def sqlite ((import "std/sqlite")))
 (def compress ((import "std/compress")))
@@ -32,7 +33,7 @@
         (if home (string home "/.local/state/elle") nil)) (env-dir "ELLE_CACHE")
       "target"))
 
-# ── schema (subset of docs/test-store.md the v1 runner populates) ─────
+# ── schema (the subset of docs/test-store.md the runner creates) ─────
 # ALTER a column into a table that predates it. On a fresh DB the CREATE
 # already carries the column, so the ALTER fails with "duplicate column
 # name" — that is the no-op path; protect swallows it.
@@ -62,7 +63,7 @@
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS form (hash TEXT PRIMARY KEY, origin TEXT, session TEXT, file TEXT, form_index INTEGER, line INTEGER, col INTEGER, label TEXT, src TEXT, caps TEXT, touches TEXT, signal TEXT)")
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS result (id INTEGER PRIMARY KEY, run_id INTEGER, form_hash TEXT, tier TEXT, status TEXT, reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT, wall_ms INTEGER, cpu_us INTEGER)")
+               "CREATE TABLE IF NOT EXISTS result (id INTEGER PRIMARY KEY, run_id INTEGER, form_hash TEXT, tier TEXT, status TEXT, reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT, wall_ms INTEGER, cpu_us INTEGER, max_rss_kb INTEGER)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS asset (result_id INTEGER, kind TEXT, hash TEXT, size INTEGER, codec TEXT)")
   (sqlite:exec conn
@@ -85,6 +86,8 @@
   # A run recorded before the code-state columns existed keeps NULL for each
   # of them: the run happened, and nothing recorded what it ran against.
   (ensure-code-columns conn run-code-columns)
+  # A result recorded before a child's peak was kept reads NULL for it.
+  (ensure-column conn "result" "max_rss_kb" "INTEGER")
   # What makes a run the same run in two stores, so an import of one artifact
   # lands it once (docs/test-store.md § The run key). SQLite holds every NULL
   # distinct under a unique index, so a run recorded before the key existed
@@ -163,8 +166,8 @@
 # session DB), content-addressed and zstd-compressed; the DB stores only the
 # hash/size/codec. Identical artifacts across forms, tiers, and runs dedup to
 # one file. `cas-addr` reuses the SAME builtin hash the runner uses for form
-# identity (64-bit, build-stable — all a disposable local cache needs; see the
-# docs' v1 boundaries for the cross-machine upgrade path).
+# identity (64-bit, build-stable — all a disposable local cache needs;
+# docs/test-runner.md § CAS asset capture holds the cross-machine upgrade path).
 (defn cas-addr [content]
   (string (hash content)))
 

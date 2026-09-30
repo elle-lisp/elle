@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 //! IoRequest — typed I/O request descriptors.
 //!
 //! Stream primitives build IoRequest values and yield them via SIG_IO.
@@ -25,9 +25,9 @@ pub use spawn::*;
 pub(crate) use buffer::{
     bytes_to_string_in_place, set_struct_field_in_place, truncate_buffer, writeable_buffer_ptr,
 };
-pub(crate) use process::{exit_code_from_siginfo, ExitRecord, ProcessHandle, Reap, SUBPROCESS};
 #[cfg(test)]
 pub(crate) use process::{reaped_child, zombie_child};
+pub(crate) use process::{ExitRecord, ProcessHandle, Reap, SUBPROCESS};
 
 /// Boxed closure type for `IoOp::Task`.
 pub type TaskClosure = Box<dyn FnOnce() -> (i32, Vec<u8>) + Send>;
