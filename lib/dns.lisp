@@ -25,7 +25,7 @@
 
 (def MAX-CNAME-DEPTH 8)
 (def DEFAULT-PORT 53)
-(def DEFAULT-TIMEOUT 3000)
+(def DEFAULT-TIMEOUT 3)
 (def DEFAULT-RETRIES 2)
 
 ## ── resolv.conf parsing ───────────────────────────────────────────────
@@ -80,11 +80,8 @@
          sock (udp/bind "0.0.0.0" 0)]
     (defer
       (port/close sock)
-      (udp/send-to sock packet server opts:port
-                   :timeout (if-let [ms timeout] (/ ms 1000.0) nil))
-      (let* [[ok? result] (protect (udp/recv-from sock 512
-                                   :timeout (if-let [ms timeout] (/ ms 1000.0)
-                                   nil)))]
+      (udp/send-to sock packet server opts:port :timeout timeout)
+      (let* [[ok? result] (protect (udp/recv-from sock 512 :timeout timeout))]
         (unless ok?
           (error {:error :dns-timeout
                   :reason :query-timeout

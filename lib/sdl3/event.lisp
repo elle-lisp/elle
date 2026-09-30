@@ -171,10 +171,26 @@
 
   # ── Waits ─────────────────────────────────────────────────────────────
 
+  # SDL_WaitEventTimeout counts its wait in a signed 32-bit millisecond count.
+  (def max-wait-ms 2147483647)
+
   (defn timeout-ms [seconds]
     "The whole milliseconds SDL waits for a wait of `seconds`, rounded up.
    Raises :type-error when seconds is not a number, and :argument-error when
    it is negative, not finite, or longer than 2147483.647 seconds."
-    seconds)
+    (unless (number? seconds)
+      (error {:error :type-error
+              :message (concat "sdl/wait-event-timeout: expected a number of "
+                               "seconds, got " (string seconds))}))
+    (unless (and (>= seconds 0) (<= seconds (/ max-wait-ms 1000.0)))
+      (error {:error :argument-error
+              :message (concat "sdl/wait-event-timeout: a wait of "
+                               (string seconds)
+                               " s is negative, not finite, or longer than "
+                               "SDL counts")}))
+    # The product can land a hair above the millisecond the caller wrote, so
+    # round to the nearest first, and step up only when that falls short.
+    (let [near (round (* seconds 1000))]
+      (if (< (/ near 1000.0) seconds) (+ near 1) near)))
 
   {:marshal-event marshal-event :timeout-ms timeout-ms})

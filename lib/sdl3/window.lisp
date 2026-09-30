@@ -232,12 +232,12 @@
     (check-bool (sdl-wait-event event-buf) "sdl/wait-event")
     (event:marshal-event event-buf))
 
-  (defn sdl/wait-event-timeout [timeout-ms]
+  (defn sdl/wait-event-timeout [seconds]
     "Wait up to a number of seconds for an event. Returns the event struct, or
    nil when none arrives in time. SDL counts the wait in whole milliseconds,
    so a wait between two of them rounds up. A wait that is negative, not
    finite, or longer than 2147483.647 seconds is an :argument-error."
-    (if (sdl-wait-event-timeout event-buf timeout-ms)
+    (if (sdl-wait-event-timeout event-buf (event:timeout-ms seconds))
       (event:marshal-event event-buf)
       nil))
 
