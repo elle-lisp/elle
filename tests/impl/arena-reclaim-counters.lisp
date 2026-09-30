@@ -27,9 +27,12 @@
   (each c in counters
     (c)))
 
-(def objects-before (arena/count))
+# The objects minted, not the objects live: a reading mints nothing, while an
+# unrelated value can free between two samples of the live count.
+(def minted-before (arena/total-allocs))
 (read-all)
-(assert (= (arena/count) objects-before) "reading every counter moves no object")
+(assert (= (arena/total-allocs) minted-before)
+        "reading every counter mints no object")
 
 # ── a push into a local container: one adoption, freed with its owner ──
 (defn keep-one []
