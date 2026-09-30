@@ -1,6 +1,6 @@
 # Region diagnostics and validation
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 Implementation-facing: the instruments that tell correct from broken, and the
 test scaffolding that keeps the region rules honest.
@@ -8,7 +8,7 @@ test scaffolding that keeps the region rules honest.
 Every instrument here belongs to this implementation. A gauge such as
 `arena/count` is an implementation extension, and a mode such as
 `--trace=guardfree` is a runtime setting; neither is a language claim
-([spec](../../spec.md) § Three categories of surface). So a test that reads a
+([spec](../../spec.md)). So a test that reads a
 gauge or needs a mode is an implementation test: it lives in
 [tests/impl](../../../tests/impl/overview.md), runs on the rig, and names its
 mode in a sidecar ([rig](../../../rig/overview.md)).
@@ -32,7 +32,7 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
 - **Edge-table equivalence oracle** (debug builds, always on): at each region free
   the recorded `outgoing` edge table is asserted multiset-equal to a one-time content
   scan (`find_region_cross_refs`) of the freed members
-  ([ownership.md](ownership.md) § The outgoing edge table). The production
+  ([ownership.md](ownership.md)). The production
   reclamation path walks the table (O(edges), no heap scan); the content scan survives
   only as this oracle, so a missed store-funnel edge (a silent leak) or a double-record
   (a UAF) detonates at the free site, naming the region and both edge sets, instead.
@@ -73,7 +73,7 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   a region to 0.
 - `--trace=scrub`: zero a released page's body — the spans the dying region
   wrote, sparing the header — before the pool caches it
-  ([model.md](model.md) § "Page recycling"). A read through a pointer that
+  ([model.md](model.md)). A read through a pointer that
   outlived its region then lands on an all-zero `HeapObject` slot, whose tag
   matches no live value, so `arena::deref` panics naming the deref site. The
   cheap member of the family: `guardfree` catches a stale read at any distance
@@ -116,24 +116,25 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   in-edge count is pinned from outside the region graph (an unbalanced
   Rust-side claim — a true leak root), and an SCC among the edges is a
   reference cycle per-region RC can never reclaim. It runs inside
-  `Runtime::teardown` ([runtime.rs](../../../src/runtime.rs)), after the root release and cascade, so
-  the file, REPL, and embedding paths all report through it. Composes with
+  `Runtime::teardown` ([runtime.rs](../../../src/runtime.rs)), after the root
+  release and cascade, so the file, REPL, and embedding paths all report
+  through it. Composes with
   `--trace=arena`: with both set each residue line carries its mint site.
 - `(arena/page-claims)`: the live count of pages this heap's `RegionStore` has
   claimed from its page pool, monotonic and never decremented on release. A
   delta across a fixed window is the *page* cost of a shape, the dimension
   `arena/count` and `arena/region-count` do not show: three regions holding one
   object each own three pages, so a shape can be leak-free by object count and
-  still claim a page per call ([model.md](model.md) § "Page recycling",
-  [regions/performance.md](../../regions/performance.md) § "A call into a
-  variadic stdlib operator allocates"). [region-page-recycle.lisp](../../../tests/impl/region-page-recycle.lisp)
+  still claim a page per call ([model.md](model.md),
+  [regions/performance.md](../../regions/performance.md)).
+  [region-page-recycle.lisp](../../../tests/impl/region-page-recycle.lisp)
   reads it. Immediate, so sampling it allocates nothing and does not perturb
   the measurement.
 - `(arena/region-ids)` and `(arena/region-table)`: the *id* dimension, which no
   other gauge can show. A minted id that never allocates holds no object, no
   page, and no reference count, so `arena/count`, `arena/bytes`,
   `arena/page-claims`, and `arena/region-count` all read flat while it strands
-  ([model.md](model.md) § "Physical id recycling"). Reach for `region-ids` to
+  ([model.md](model.md)). Reach for `region-ids` to
   *detect* the leak and `region-table` to size it:
   - `arena/region-ids` is `next_physical`, one past the largest id ever minted
     from scratch. A mint that finds an id on the free list leaves it alone, so a
@@ -160,11 +161,14 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   still-live value is a liveness bug: a `decref_point` fired while the value was still
   reachable. A *cascade* free of a still-referenced region is a missing incref on
   the referrer: an escape site from Rule 5 was not covered.
-- `arena.rs` tag/object mismatch = a UAF surfacing as a wrong-tag deref;
-  `regionstore/refcount.rs` phantom/double-free assert (`decref_reaches_zero`) =
-  a `DecrefRegion` for a region never allocated or already freed.
-- `--dump=stats`: prints exit-time statistics, including a **page-claim size
-  histogram** — one `[stats] page-claim size=<bytes> claims=<n> bytes=<n>` line
+- A tag/object mismatch in [arena.rs](../../../src/value/arena.rs) is a UAF
+  surfacing as a wrong-tag deref. The phantom/double-free assert in
+  `decref_reaches_zero`
+  ([refcount.rs](../../../src/value/fiberheap/regionstore/refcount.rs)) is a
+  `DecrefRegion` for a region never allocated or already freed.
+- `--dump=stats`: prints exit-time statistics: the reclamation counters summed
+  over the process (below), and a **page-claim size histogram** — one
+  `[stats] page-claim size=<bytes> claims=<n> bytes=<n>` line
   per size class (`size=0` = the oversized one-off bucket). It measures how often
   geometric page growth (the base page doubling up to 4 MiB) escalates past
   `base_page()` — the precondition for the only place region attribution can be
@@ -175,16 +179,119 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   aggregates into the one process-wide histogram (`elle test --dump=stats …`); sum the
   lines across batched runs for a suite-wide distribution. The size classes
   scale with the host page, so compare distributions across hosts by class, not
-  by byte count ([model.md](model.md) § "The base page is the OS page").
+  by byte count ([model.md](model.md)).
   Measured baseline on a 4 KiB-page host: ~99.9 % of claims are one base page;
   large pages come overwhelmingly from large *single* allocations (`alloc_data`
   right-sizing a buffer), not from the doubling ladder.
+
+## The reclamation counters
+
+The gauges above say how much a heap holds. These counters say how its regions
+end: freed when a count reaches zero, dropped with an owner, rescued, extracted,
+or still owned. They also say what each freed region held. Each is a primitive
+that answers one integer for the heap it runs on. Each is Immediate, so a call
+allocates nothing and cannot move the number it reports.
+
+Every counter but `arena/owned` starts at 0 when the heap is made and never goes
+down. A heap's teardown frees what is left without counting it, because a
+teardown is not a reclamation the program's code caused.
+
+| Primitive | What it counts |
+|-----------|----------------|
+| `arena/region-frees` | regions freed, by a count reaching zero, an owner's drop, or a group free |
+| `arena/page-frees` | the pages those regions held |
+| `arena/object-frees` | the objects those regions held |
+| `arena/one-page-frees` | the freed regions that held one page or none |
+| `arena/empty-frees` | the freed regions that held no object |
+| `arena/one-object-frees` | the freed regions that held one object |
+| `arena/few-object-frees` | the freed regions that held two to four objects |
+| `arena/many-object-frees` | the freed regions that held five objects or more |
+| `arena/adopts` | adoptions: a counted region made a member of an owner's subtree |
+| `arena/adopts-into-empty` | adoptions into an owner that held no object: an owner node, or a region nothing had allocated into |
+| `arena/owned-frees` | owned regions freed by their owner's drop |
+| `arena/owned-free-pages` | the pages those owned regions held |
+| `arena/owned-free-objects` | the objects those owned regions held |
+| `arena/owned-one-page-frees` | the owned regions freed while they held one page or none |
+| `arena/rescues` | owned regions the drop-time rescue returned to counted |
+| `arena/rescue-survivors` | regions that outlived their owner's drop through a rescue: each rescued region and the owned subtree it keeps |
+| `arena/extracts` | owned regions a moves-out removal (`%pop`) returned to counted |
+| `arena/reparents` | owned regions handed from one owner to another |
+| `arena/owned` | regions owned now; a reading, not a count |
+
+[ownership.md](ownership.md) owns adoption, the subtree drop, the rescue, the
+extraction and the transfer these count.
+
+**The forest counters close.** Every adoption ends in exactly one owned free,
+one rescue, or one extraction, or its region is still owned. So on any heap
+that has not been torn down:
+
+```text
+adopts = owned-frees + rescues + extracts + owned
+```
+
+A reparent moves a region between owners, and the region stays owned. The
+owned subtree of a rescued region stays owned too, under the rescued region, so
+`rescue-survivors` is not in the sum.
+
+A push into a local container is one adoption, and the container's release
+frees the adopted value with it:
+
+```lisp
+(defn keep-one []
+  (let [c (@array)]
+    (push c (array 1 2))
+    nil))
+
+(def adopts (arena/adopts))
+(def frees (arena/owned-frees))
+(def owned (arena/owned))
+(keep-one)
+(assert (= (arena/adopts) (+ adopts 1)) "the push adopts the value into the container")
+(assert (= (arena/owned-frees) (+ frees 1)) "the container's drop frees the value")
+(assert (= (arena/owned) owned) "and nothing is left owned")
+```
+
+**The size counters close too.** Every freed region lands in exactly one object
+bucket, so on any heap:
+
+```lisp
+(assert (= (arena/region-frees)
+           (+ (arena/empty-frees) (arena/one-object-frees)
+              (arena/few-object-frees) (arena/many-object-frees)))
+        "every freed region lands in exactly one object bucket")
+(assert (<= (arena/one-page-frees) (arena/region-frees))
+        "a one-page free is a region free")
+```
+
+The size counters are the headroom that [merging](merging.md) and adoption work
+against. Every region claims pages of its own, so a region freed holding one
+page and one object paid a page for that object. Merging and adoption both put
+more objects in fewer regions. For the same program, a change that does either
+shows as `region-frees`, `one-page-frees` and `page-frees` falling while
+`object-frees` holds.
+
+An owned region that dies with its owner would delay nothing if it lived in its
+owner's pages. So `owned-free-pages` bounds the pages such a colocation could
+save, and `adopts-into-empty` counts the adoptions whose owner has no page to
+share. The `elle test` runner reads every counter on its own heap and on the
+heaps its test code runs on ([test-gauges](../../test-gauges.md)).
+
+**`--dump=stats` reports every counter for the whole process.** Once any
+counter moves, the process prints them all at exit, summed over every heap it
+ran: the main heap and each worker thread's. Under `elle test`, that is the
+runner's heap and every test worker's. Each counter is one
+`[stats] reclaim <name>=<n>` line, in the table's order. The last line is
+`owned`: the adoptions that had not ended at exit,
+`adopts - owned-frees - rescues - extracts`. The fields are stable, so a
+batched suite run sums them across processes. Run any program under
+`--dump=stats` before a change and after it, and the report shows the change's
+win with no change to the program.
 
 ## Validation
 
 The free-cascade scan is pinned exhaustively
 (`exhaustive_scan_finds_cross_region_refs_in_every_variant`,
-regionpool/introspect.rs): one of each `HeapObject` variant is constructed
+[introspect/tests.rs](../../../src/value/fiberheap/regionpool/introspect/tests.rs)): one of each `HeapObject` variant is constructed
 with a cross-region `Value` in every channel it has (contents and `traits`
 alike) and the scan must report the edge; variants with no channel must
 report none. The construction is an exhaustive `match` — a new variant does
@@ -198,7 +305,8 @@ every variant is what makes the recorded-`outgoing`-vs-scan assertion at free a
 *complete* check, not a partial one — a content edge the scan can see but the
 recorder forgot is caught the moment that region frees.
 
-The **leak state** lives in one runnable dashboard, [oracle.lisp](../../../tests/impl/oracle.lisp). It runs
+The **leak state** lives in one runnable dashboard,
+[oracle.lisp](../../../tests/impl/oracle.lisp). It runs
 one representative shape per residual class in a loop with a heap gauge sampled *by
 the program* — `arena/count`, `arena/region-count`, `arena/bytes` or
 `arena/region-ids`, chosen for the dimension the class leaks in — and prints a
@@ -238,24 +346,25 @@ live reader still needs the oracle.
 
 ## The backend-tier gauge
 
-The arena gauges (`arena/count`, `arena/region-count`, `arena/bytes`,
-`arena/page-claims` — [arena.rs](../../../src/primitives/arena.rs)) are **host-side and
-tier-transparent**: a primitive call
-executes on the host against the driving instance's own heap on every tier — the
-VM and JIT natively, the WASM host through `call_primitive` with a `NativeCtx`
-built on `vm.heap_ptr` ([host.rs](../../../src/wasm/host.rs)), and the MLIR tier admits no calls at
-all (below). So a program that samples the gauge measures the same `RegionStore`
-no matter which tier executes it, and an interpreter oracle probe ports to a
-backend tier by running the same shape on a build that carries the tier: under
-`--wasm=full` or `--wasm=N` on a `wasm` build, or under a rig sidecar that sets
-`mlir = "eager"` on an `mlir` build.
+The arena gauges ([arena.rs](../../../src/primitives/arena.rs): `arena/count`,
+`arena/region-count`, `arena/bytes`, `arena/page-claims` and the reclamation
+counters) are **host-side and tier-transparent**. A primitive call executes on
+the host against the driving instance's own heap on every tier. The VM and JIT
+call it natively, and the WASM host calls it through `call_primitive` with a
+`NativeCtx` built on `vm.heap_ptr` ([host.rs](../../../src/wasm/host.rs)). The
+MLIR tier admits no calls at all (below). So a program that samples the gauge
+measures the same `RegionStore` no matter which tier executes it. An
+interpreter oracle probe ports to a backend tier by running the same shape on a
+build that carries the tier: under `--wasm=full` or `--wasm=N` on a `wasm`
+build, or under a rig sidecar that sets `mlir = "eager"` on an `mlir` build.
 
 Per-tier region-reclamation state, each with its pinning test:
 
 - **VM / JIT** — the region runtime proper; state is the oracle's closed/open
   split ([oracle.lisp](../../../tests/impl/oracle.lisp)).
 - **MLIR CPU / GPU (SPIR-V)** — **allocation-free by construction.** The
-  eligibility gate (`is_gpu_eligible`, [mod.rs](../../../src/lir/types/mod.rs) `is_gpu_instruction`)
+  eligibility gate (`is_gpu_eligible`, over `is_gpu_instruction` in
+  [mod.rs](../../../src/lir/types/mod.rs))
   whitelists numeric instructions only: every instruction that can put a heap
   value in a register is refused, and with it every region instruction except
   the two value-targeted RC ops (no-ops on unboxed scalars, so admitting them
@@ -265,23 +374,27 @@ Per-tier region-reclamation state, each with its pinning test:
   measured bounded by the gauge probe with the MLIR tier eager.
 - **WASM full-module (`--wasm=full`)** — **a program-duration over-keep,
   pinned shrink-only.** Every region instruction is a structural no-op in the
-  emitter ([dispatch.rs](../../../src/wasm/instruction/dispatch.rs)), and the host mints a fresh region
-  per boundary call (`rt_data_op` in [dataop.rs](../../../src/wasm/linker/dataop.rs),
-  `call_primitive`, the closure-env cell builders). A mint alone costs nothing —
-  region entries materialize lazily on first allocation
-  (regionstore/alloc.rs) — so the strand rate is per **allocating** boundary
+  emitter ([dispatch.rs](../../../src/wasm/instruction/dispatch.rs)), and the
+  host mints a fresh region per boundary call (`rt_data_op` in
+  [dataop.rs](../../../src/wasm/linker/dataop.rs), `call_primitive`, the
+  closure-env cell builders). A mint alone costs nothing — region entries
+  materialize lazily on first allocation
+  ([alloc.rs](../../../src/value/fiberheap/regionstore/alloc.rs)) — so the
+  strand rate is per **allocating** boundary
   call, not per host call: every heap allocation the run makes (data-op
   results, native results, call scaffolding such as variadic rest-lists and
   capture cells) lives until process teardown. The `HandleTable`
-  ([handle.rs](../../../src/wasm/handle.rs)) is the same over-keep on the host side: a handle is
+  ([handle.rs](../../../src/wasm/handle.rs)) is the same over-keep on the host
+  side: a handle is
   never removed during a run, so every heap value that crosses the boundary
   pins an entry for the store's lifetime. Pinned by the `wasm::tests` gauge
   pins (`wasm_full_*`); realizing region release on this tier shrinks them
   toward the VM's zero.
 - **WASM tiered (`--wasm=N`)** — the VM keeps region authority: all region
   bytecode runs interpreted, and only closures that pass the standalone
-  emission gate (src/wasm/emit.rs `standalone_emittable` — no tail calls, no
-  signal emission, no suspending calls, no module-less `MakeClosure`) move to
+  emission gate (`standalone_emittable` in
+  [emit.rs](../../../src/wasm/emit.rs): no tail calls, no signal emission, no
+  suspending calls, no module-less `MakeClosure`) move to
   WASM. A compiled leaf's internal allocations strand exactly as in
   full-module mode (same no-op emitter), bounded by the leaf's body size per
   call; the gate is pinned by `wasm::tests::standalone_emission_refuses_*`.
@@ -292,13 +405,14 @@ above so its growth is not mistaken for a gauge artifact.
 
 ## The squelch/abort discard
 
-Abandoning suspended work routes through one chokepoint, `VM::discard_suspended_frames`
-([core.rs](../../../src/vm/core.rs)), on every tier — the interpreter's `enforce_squelch`, `compile/run-on`'s
-squelch enforcement, and the JIT call paths. The chokepoint runs everything a discarded
-frame chain owed and nothing else ([owner.md](owner.md) § "A discard runs what the
-abandoned frames owed"): each frame's parked activation owner node, the releases its
-activation took over from its own frame-replacing tail calls, and the releases its two
-emitter-recorded tables name. What stays refused is the rest of the frame's
+Abandoning suspended work routes through one chokepoint,
+`VM::discard_suspended_frames` ([discard.rs](../../../src/vm/core/discard.rs)),
+on every tier — the interpreter's `enforce_squelch`, `compile/run-on`'s squelch
+enforcement, and the JIT call paths. The chokepoint runs everything a discarded
+frame chain owed and nothing else ([owner.md](owner.md)): each frame's parked
+activation owner node, the releases its activation took over from its own
+frame-replacing tail calls, and the releases its two emitter-recorded tables
+name. What stays refused is the rest of the frame's
 `activation_region_map` — a borrowed view of regions that may be shared with an outer,
 non-discarded frame or with the activation that catches the squelch, so a blanket
 per-slot release there over-frees (the historical squelch double-free — a non-unwinding
@@ -306,14 +420,17 @@ abort in scheduler-heavy programs). The three the chokepoint does run each carry
 own warrant: the node's members are exactly the regions adoption moved in, a deferred
 region is one the compiler named as this activation's, and a table entry carries a
 receipt that says the release did not run. The pin is two-sided:
-`runtime::tests::ownership::discard_frees_parked_activation_owner_node` and
-`…::discard_runs_the_abandoned_frames_release_tables` prove the set IS freed at the
-discard (bounded, generation bump), and the squelch files
-([region-squelch-unwind-uaf.lisp](../../../tests/impl/region-squelch-unwind-uaf.lisp), [region-squelch-nested.lisp](../../../tests/impl/region-squelch-nested.lisp),
-[region-loop-capture-squelch.lisp](../../../tests/impl/region-loop-capture-squelch.lisp), and the redis-driven [redis.lisp](../../../tests/lang/redis.lisp) scheduler shape
-when a live Redis is present) with the full stdlib proves the discard frees nothing
-more (panic-clean). The three `region-` files run on the rig under a guardfree
-sidecar; `redis.lisp` is a language test, so it runs with no mode. The rate the tables carry is gauged by
+`runtime::tests::ownership::fnode::discard::discard_frees_parked_activation_owner_node`
+and `…::discard_runs_the_abandoned_frames_release_tables` prove the set IS freed
+at the discard (bounded, generation bump). The squelch files prove the discard
+frees nothing more, panic-clean with the full stdlib:
+[region-squelch-unwind-uaf.lisp](../../../tests/impl/region-squelch-unwind-uaf.lisp),
+[region-squelch-nested.lisp](../../../tests/impl/region-squelch-nested.lisp),
+[region-loop-capture-squelch.lisp](../../../tests/impl/region-loop-capture-squelch.lisp),
+and the scheduler shape in [redis.lisp](../../../tests/lang/redis.lisp) when a
+live Redis is present. The three `region-` files run on the rig under a
+guardfree sidecar; `redis.lisp` is a language test, so it runs with no mode.
+The rate the tables carry is gauged by
 [region-squelch-unwind.lisp](../../../tests/impl/region-squelch-unwind.lisp).
 
 ## The terminal-fiber teardown
@@ -322,13 +439,14 @@ The discard chokepoint serves the LIVE fiber (a squelch/abort abandons its own p
 chain; the fiber runs on). A fiber that reaches a **terminal** state instead — completion,
 halt, `fiber/cancel`, `fiber/abort` of a not-yet-started fiber — releases everything it
 owns through `take_fiber_owned` / `release_fiber_owned`
-([owner.md](owner.md) § "Owner nodes" — "Fiber teardown frees everything
-the fiber owns"): every still-parked frame's activation owner node plus the fiber owner
-node, gathered under the fiber node (`reparent_owned_children`) so the teardown is one
-set-drop. An `:error` fiber is NOT torn down — it is resumable (restarts), so its parked
-state must survive the promotion. The pin is two-sided, exactly as the discard's:
-`runtime::tests::ownership::fiber_owner_node_*` prove the owned set IS freed at each
-terminal transition (generation bumps, bounded over repeated cycles), and
-[region-fiber-cancel.lisp](../../../tests/impl/region-fiber-cancel.lisp) — cancel of parked fibers and abort of new ones in
-a loop — under a guardfree sidecar with the full stdlib proves the teardown frees
-nothing a live frame counts on (panic-clean, bounded slope sampled by the program).
+([owner.md](owner.md)): every still-parked frame's activation owner node plus
+the fiber owner node, gathered under the fiber node (`reparent_owned_children`)
+so the teardown is one set-drop. An `:error` fiber is NOT torn down — it is
+resumable (restarts), so its parked state must survive the promotion. The pin
+is two-sided, exactly as the discard's. The
+`runtime::tests::ownership::fnode::fiber_owner_node_*` tests prove the owned set
+IS freed at each terminal transition (generation bumps, bounded over repeated
+cycles). [region-fiber-cancel.lisp](../../../tests/impl/region-fiber-cancel.lisp)
+cancels parked fibers and aborts new ones in a loop. Under a guardfree sidecar
+with the full stdlib, it proves the teardown frees nothing a live frame counts
+on (panic-clean, bounded slope sampled by the program).

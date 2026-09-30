@@ -75,16 +75,18 @@
 # stderr] back through os/join.
 #
 # Run the tiered call with *stdout*/*stderr* rebound to temp files, returning
-# {:result [ok? payload] :stdout S :stderr S}. Assumes a scheduler is running
-# (port I/O yields): the worker supplies its own via ev/run; the in-process
-# fallback relies on the runner's top-level ev/run.
+# {:result [ok? payload] :stdout S :stderr S :gauges READINGS}. READINGS are
+# the heap gauges read around the tiered call alone (gauges-around). Assumes a
+# scheduler is running (port I/O yields): the worker supplies its own via
+# ev/run; the in-process fallback relies on the runner's top-level ev/run.
 (defn capture-run [tier thunk out-path err-path]
   (let [op (port/open out-path :write)
         ep (port/open err-path :write)]
     (sys/trap-exit! true)
-    (let [v (parameterize ((*stdout* op)
-                           (*stderr* ep))
-              (protect (compile/run-on tier thunk)))]
+    (let [[v readings] (parameterize ((*stdout* op)
+                                      (*stderr* ep))
+                         (gauges-around (fn []
+                                          (protect (compile/run-on tier thunk)))))]
       (sys/trap-exit! false)
       (port/close op)
       (port/close ep)
@@ -92,7 +94,7 @@
             se (slurp err-path)]
         (file/delete out-path)
         (file/delete err-path)
-        (struct :result v :stdout so :stderr se)))))
+        (struct :result v :stdout so :stderr se :gauges readings)))))
 
 (defn last-output-line [text]
   "The last non-empty line of `text`, or nil when it has none. Long lines are
@@ -257,7 +259,8 @@
 # `(spawn thunk)` adds to that scheduler and `(join …)` waits for.
 # EVRUN/SPAWN/JOIN/OUT/ERR are passed so the caller supplies the SAME stdlib
 # instance the thunk uses (the worker's, or the main VM's for the in-process
-# fallback). Returns {:result [ok? value] :stdout :stderr}.
+# fallback). Returns {:result [ok? value] :stdout :stderr :gauges}, the gauges
+# bracketing the pumped run as capture-run's do.
 (defn
   capture-pumped
   [evrun spawn join out-param err-param thunk out-path err-path]
@@ -265,9 +268,10 @@
            (let [op (port/open out-path :write)
                  ep (port/open err-path :write)]
              (sys/trap-exit! true)
-             (let [v (parameterize ((out-param op)
-                                    (err-param ep))
-                       (protect (join (spawn thunk))))]
+             (let [[v readings] (parameterize ((out-param op)
+                                  (err-param ep))
+                                  (gauges-around (fn []
+                                    (protect (join (spawn thunk))))))]
                (sys/trap-exit! false)
                (port/close op)
                (port/close ep)
@@ -275,7 +279,7 @@
                      se (slurp err-path)]
                  (file/delete out-path)
                  (file/delete err-path)
-                 (struct :result v :stdout so :stderr se)))))))
+                 (struct :result v :stdout so :stderr se :gauges readings)))))))
 
 # The setting that puts the JIT back where `(vm/config :jit)` read it: nil is
 # off, 0 is eager, and a count is the threshold (JitPolicy::reading in

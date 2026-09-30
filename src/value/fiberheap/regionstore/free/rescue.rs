@@ -33,6 +33,7 @@ impl RegionStore {
         // Fixpoint over the shrinking dying set. `rescued` keeps the owner that
         // listed each member so the unlink below detaches exactly that edge.
         let mut rescued: Vec<(RuntimeRegion, RuntimeRegion)> = Vec::new();
+        let dying_before = dying.len();
         loop {
             let mut changed = false;
             for &(r, owner) in candidates {
@@ -75,6 +76,10 @@ impl RegionStore {
         if rescued.is_empty() {
             return;
         }
+        // Every region the fixpoint pruned survives the drop: each rescued one,
+        // and the owned subtree it keeps.
+        self.counters
+            .count_rescue(rescued.len() as u64, (dying_before - dying.len()) as u64);
         // Unlink every rescued member from its owner FIRST: an owner that is
         // itself rescued survives, and must not re-claim the member at its own
         // later drop — and the rebuilt-count subtree walks below must see the
