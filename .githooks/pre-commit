@@ -1,15 +1,23 @@
 #!/bin/sh
 # Pre-commit hook:
 #   1. Gate on the audit stamp: every staged file carries today's date.
-#   2. Auto-format staged .lisp files with `elle fmt` and re-stage.
-#   3. Auto-format staged .rs files with `cargo fmt` and re-stage.
-#   4. If staged .rs files exist, gate on clippy / rustdoc — the `make test`
+#   2. Rebuild the generated AGENTS.md indexes and stage what changed.
+#   3. Format staged .lisp files with `elle fmt` and stage them. `elle fmt`
+#      also migrates a file that declares an older epoch.
+#   4. Format staged .rs files with `cargo fmt` and stage them.
+#   5. If staged .rs files exist, gate on clippy / rustdoc — the `make test`
 #      checks that CAN'T be auto-fixed, scoped to Rust-touching commits so
 #      Lisp-only commits don't pay the Cargo cost.
 #
 # Formatting is fixed, never gated: an unformatted file is reformatted and
 # re-staged, not rejected. CI's `make fmt-check` is the hard format gate (CI
 # can't rewrite your tree); the local hook just keeps every commit clean.
+#
+# A partial commit, `git commit -- <paths>`, runs this hook against a temporary
+# index. `git add` here reaches only that index, so a staged fix would land in
+# HEAD and leave the real index holding the unfixed file, which the next commit
+# from the index would put back. In a partial commit the hook therefore leaves
+# its fixes on disk and refuses the commit, naming the files.
 
 # ── Audit stamp ─────────────────────────────────────────────────────
 # Touch a file, audit it (DOCUMENTATION.md). Read it whole, hold it to the
@@ -19,6 +27,37 @@ cd "$(git rev-parse --show-toplevel)" || exit 1
 if ! ./scripts/audit --staged; then
   exit 1
 fi
+
+# ── Partial commit ──────────────────────────────────────────────────
+# Git names the index it commits from in GIT_INDEX_FILE: the real index for a
+# plain commit, its lock file for `commit -a`, and a file of its own for a
+# partial commit. `--git-path index` answers GIT_INDEX_FILE when that is set,
+# so the real index is asked for with it unset.
+absolute() {
+  (cd "$(dirname "$1")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")")
+}
+partial=false
+if [ -n "$GIT_INDEX_FILE" ]; then
+  real_index=$(absolute "$(unset GIT_INDEX_FILE; git rev-parse --git-path index)")
+  commit_index=$(absolute "$GIT_INDEX_FILE")
+  if [ "$commit_index" != "$real_index" ] && [ "$commit_index" != "$real_index.lock" ]; then
+    partial=true
+  fi
+fi
+
+# Put the hook's change to one file into the commit, or, in a partial commit,
+# hold the file for the refusal below.
+refused=""
+stage() {
+  if git diff --quiet -- "$1"; then
+    return
+  fi
+  if $partial; then
+    refused="$refused $1"
+  else
+    git add "$1"
+  fi
+}
 
 # ── Generated indexes ───────────────────────────────────────────────
 # Rebuild every AGENTS.md the generator owns and re-stage what changed. Fixed,
@@ -30,7 +69,7 @@ fi
 # so this cannot eat module knowledge that has not been converted yet.
 ./scripts/agents >/dev/null 2>&1
 for f in $(git diff --name-only --diff-filter=ACM -- '*AGENTS.md'); do
-  git add "$f"
+  stage "$f"
 done
 
 # ── Lisp ────────────────────────────────────────────────────────────
@@ -45,23 +84,33 @@ else
 fi
 
 staged_lisp=$(git diff --cached --name-only --diff-filter=ACM -- '*.lisp')
-if [ -n "$staged_lisp" ]; then
-  for f in $staged_lisp; do
-    "$ELLE" fmt "$f" && git add "$f"
+for f in $staged_lisp; do
+  "$ELLE" fmt "$f" && stage "$f"
+done
+
+# ── Rust ────────────────────────────────────────────────────────────
+# `cargo fmt` formats the workspace; only the files this commit already
+# touched are staged, so staged content stays in sync.
+staged_rs=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')
+if [ -n "$staged_rs" ]; then
+  cargo fmt
+  for f in $staged_rs; do
+    [ -f "$f" ] && stage "$f"
   done
 fi
 
-# ── Rust ────────────────────────────────────────────────────────────
-staged_rs=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')
-if [ -n "$staged_rs" ]; then
-  # Auto-format and re-stage (mirrors the Lisp path above; never gates on
-  # formatting). `cargo fmt` formats the workspace; we re-stage only the files
-  # this commit already touched, so staged content stays in sync.
-  cargo fmt
-  for f in $staged_rs; do
-    [ -f "$f" ] && git add "$f"
+# ── Refusal ─────────────────────────────────────────────────────────
+if [ -n "$refused" ]; then
+  echo "pre-commit: this partial commit cannot take the hook's changes to:" >&2
+  for f in $refused; do
+    echo "  $f" >&2
   done
+  echo "The changes are on disk. Name each file in the commit, then run it again." >&2
+  exit 1
+fi
 
+# ── Rust gates ──────────────────────────────────────────────────────
+if [ -n "$staged_rs" ]; then
   if ! cargo clippy --workspace --all-targets --all-features -- -D warnings; then
     echo "pre-commit: clippy failed. Fix warnings and re-stage."
     exit 1
