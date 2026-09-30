@@ -1,11 +1,11 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-09-30
 # A non-tail recursion 10,000 deep completes, and can park, pause, raise and be
 # squelched at the bottom.
 #
 # Non-tail recursion waits in the fiber, not on the Rust stack
 # (docs/impl/vm.md). None of the recursive calls here is a
-# tail call. The file makes eleven recursions at about 8 µs a call in the
+# tail call. The file makes ten recursions at about 8 µs a call in the
 # interpreter, so this depth keeps it inside the per-file time budget.
 #
 # The compiled tier's hand-off to the interpreter on a low native stack is not
@@ -98,4 +98,3 @@
           "the squelch boundary raises signal-violation"))
 (assert (= (sum-to depth) 50005000)
         "recursion runs again after a squelch discarded 10,000 frames")
-
