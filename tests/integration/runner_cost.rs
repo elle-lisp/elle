@@ -169,12 +169,13 @@ fn a_timeout_records_its_wall_time_and_no_cpu_time() {
 
 /// A file that will not compile produced its row without running anything, so
 /// the row holds no cost at all. The counter-factual is a zero, which reads as
-/// a form that ran in no time.
+/// a form that ran in no time. The fixture reads and fails to compile: a file
+/// that does not read never reaches the file-level row.
 #[test]
 fn a_file_level_error_records_no_cost() {
     let dir = crate::common::ScratchDir::new("cost-file-error");
     let db = dir.join("s.db");
-    let out = run(&dir, &db, "(assert true \"unclosed\"\n", &[]);
+    let out = run(&dir, &db, "(assert (no-such-binding) \"unbound\")\n", &[]);
     assert!(
         !out.status.success(),
         "a file that does not compile must gate non-zero"
