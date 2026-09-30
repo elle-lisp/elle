@@ -1,6 +1,6 @@
 (elle/epoch 14)
 # audited: 2026-09-30
-## Decodes a 128-byte SDL_Event into a struct, reading each field at its byte offset.
+## Decodes an SDL_Event into a struct, and gives SDL a wait in seconds as whole milliseconds.
 ## lib/overview.md
 ##
 ## Loading this module needs no libSDL3: it reads memory through ffi/read.
@@ -169,4 +169,12 @@
           (marshal-window buf etype)
           {:type :unknown :raw-type etype :timestamp (read-u64 buf 8)}))))
 
-  {:marshal-event marshal-event})
+  # ── Waits ─────────────────────────────────────────────────────────────
+
+  (defn timeout-ms [seconds]
+    "The whole milliseconds SDL waits for a wait of `seconds`, rounded up.
+   Raises :type-error when seconds is not a number, and :argument-error when
+   it is negative, not finite, or longer than 2147483.647 seconds."
+    seconds)
+
+  {:marshal-event marshal-event :timeout-ms timeout-ms})
