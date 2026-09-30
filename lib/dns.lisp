@@ -187,7 +187,7 @@
    Options:
      :server  — nameserver IP (default: from /etc/resolv.conf)
      :port    — nameserver UDP port (default: 53)
-     :timeout — per-query timeout in ms (default: 3000)
+     :timeout — how long to wait for each answer, in seconds (default: 3)
      :retries — how many times to send each query (default: 2)"
   (let* [opts (query-options server port timeout retries)
          a-records (let [[ok? result] (protect (resolve-type opts name TYPE-A))]
@@ -203,7 +203,7 @@
    Options:
      :server  — nameserver IP (default: from /etc/resolv.conf)
      :port    — nameserver UDP port (default: 53)
-     :timeout — per-query timeout in ms (default: 3000)
+     :timeout — how long to wait for each answer, in seconds (default: 3)
      :retries — how many times to send each query (default: 2)"
   (query-with-retries (query-options server port timeout retries) name qtype))
 
