@@ -447,6 +447,7 @@ const PRODUCERS: &[&str] = &[
     "tests/impl/h2-stress-scoped.lisp",
     "tests/impl/region-page-recycle.lisp",
     "tests/impl/region-macro-id-recycle.lisp",
+    "tests/impl/region-collector-arg-move.lisp",
 ];
 
 #[test]
