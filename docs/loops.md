@@ -42,8 +42,9 @@ count                      # => 10
 ## each
 
 `(each name in coll body...)` binds `name` to each element of `coll` in
-turn and runs `body`. The `in` is optional. `each` returns `nil`, or the
-value a `break` carries.
+turn and runs `body`. The `in` is optional. `each` returns the value a
+`break` carries. Without a `break`, a loop over a fiber returns the value the
+fiber returns, and any other loop returns `nil`.
 
 ```lisp
 (var total 0)
@@ -79,8 +80,9 @@ The collection decides what an element is:
 the `:iter` protocol.
 
 `each` resumes a fiber once per pass. Every value the fiber yields is an
-element, `nil` and `false` included. The loop ends when the fiber completes,
-and the value the fiber returns is not an element. An error inside the fiber
+element, `nil` and `false` included. The loop ends when the fiber completes.
+The value the fiber returns is not an element; it is the value of the `each`.
+An error inside the fiber
 propagates out of `each`, also when the fiber's mask catches errors. A fiber
 that has already completed raises, as `fiber/resume` does.
 
@@ -88,7 +90,7 @@ that has already completed raises, as `fiber/resume` does.
 (def gen (fiber/new (fn [] (yield 1) (yield nil) (yield false) :done)
                     |:yield|))
 (def yielded @[])
-(each v in gen (push yielded v))
+(assert (= (each v in gen (push yielded v)) :done))
 (assert (= (freeze yielded) [1 nil false]))
 ```
 
