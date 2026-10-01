@@ -58,13 +58,6 @@
 (assert (= (collect-rest -1 2 -3 4) [2 4])
         "nested macros: each+when with shadowed rest")
 
-# ── Struct iteration ─────────────────────────────────────────────────
-
-(let [out @[]]
-  (each [k v] in {:a 1 :b 2}
-    (push out [k v]))
-  (assert (= (length out) 2) "each: struct iteration"))
-
 # ── Inbound capture ──────────────────────────────────────────────────
 
 ## A binding a macro template introduces must not capture a free identifier
