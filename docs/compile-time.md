@@ -1,6 +1,6 @@
 # Compile-Time Operations
 
-<!-- audited: 2026-09-26 -->
+<!-- audited: 2026-09-30 -->
 
 The forms that act at compile time, and the `compile/*` API that reads the
 compiler's model from running code.
@@ -156,7 +156,7 @@ an assertions-disabled build) is proposed alongside; its open questions are in
 `(elle/epoch)` with no arguments returns the current epoch number.
 
 ```lisp
-(assert (= (elle/epoch) 13))
+(assert (= (elle/epoch) 14))
 ```
 
 The reader reads the declaration before it lexes, because an epoch can change
@@ -256,8 +256,8 @@ supplied as data, and it is the consumer-migration half of `elle semver`
 tier: `:bytecode`, `:jit`, `:mlir-cpu` (built with MLIR) or `:wasm` (built with
 WASM). A tier that declines the closure raises `:tier-rejected`. It is an
 implementation extension, not part of the language: a program that picks a
-tier tests this implementation ([spec.md](spec.md) § Three categories of
-surface, [impl/differential.md](impl/differential.md)).
+tier tests this implementation ([spec.md](spec.md),
+[impl/differential.md](impl/differential.md)).
 
 ```lisp
 (assert (= (compile/run-on :bytecode (fn [a b] (+ a b)) 3 4) 7))
