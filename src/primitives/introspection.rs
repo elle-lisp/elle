@@ -1,7 +1,8 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 //! Introspection primitives: what a closure is, `doc`, `vm/query`, the signal registry, and `keyword`.
 //!
 //! docs/functions.md
+//! docs/analysis/debugging.md
 //! docs/impl/symbol.md
 
 use crate::primitives::def::RegionEffect;
@@ -19,7 +20,7 @@ pub(crate) fn prim_is_jit(
     (SIG_QUERY, ctx.pair(Value::keyword("jit?"), args[0]))
 }
 
-/// (silent? value) — true if closure is silent (does not suspend: no yield/debug/polymorphic)
+/// (silent? value) — true if closure's signal has no bits and is not polymorphic
 pub(crate) fn prim_is_silent(
     _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -167,11 +168,7 @@ pub(crate) fn prim_doc(
 /// naming the operation; `arg` is the operation-specific argument.
 /// The VM's dispatch_query handles the rest.
 ///
-/// Operations:
-/// - "call-count" closure → int
-/// - "doc" name → string
-/// - "global?" symbol → bool
-/// - "fiber/self" _ → fiber or nil
+/// `VM::dispatch_query` (src/vm/signal/query.rs) lists the operations.
 pub(crate) fn prim_vm_query(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -251,7 +248,7 @@ pub(crate) fn prim_closure_value_const_count(
 
 /// (jit/rejections) — list closures rejected from JIT compilation with reasons
 ///
-/// Returns a list of structs, each with :name, :reason, and :calls keys.
+/// Returns a list of structs, each with :name, :reason, :calls and :attempts keys.
 /// Sorted by call count ascending (coldest first).
 pub(crate) fn prim_jit_rejections(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -331,7 +328,7 @@ primitive! {
     "silent?" => prim_is_silent {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Returns true if closure is silent (does not suspend: no yield, debug, or polymorphic signal). False for non-closures.",
+        doc: "Returns true if closure's inferred signal has no bits and is not polymorphic. Any signal, :error included, makes it false. False for non-closures.",
         params: &["value"],
         category: "predicate",
         example: "(silent? (fn (x) x))",
@@ -419,7 +416,7 @@ primitive! {
     "vm/query" => prim_vm_query {
         signal: Signal::query_errors(),
         arity: Arity::Exact(2),
-        doc: "Query VM state (call-count, doc, global?, fiber/self)",
+        doc: "Query VM state by operation name, such as call-count, doc, global? or fiber/self.",
         params: &["op", "arg"],
         category: "meta",
         example: "(vm/query \"call-count\" some-fn)",
@@ -443,7 +440,7 @@ primitive! {
     }
     "jit/rejections" => prim_jit_rejections {
         signal: Signal::query_errors(),
-        doc: "List closures rejected from JIT compilation. Returns list of {:name :reason :calls} structs sorted by call count ascending.",
+        doc: "List closures rejected from JIT compilation. Returns list of {:name :reason :calls :attempts} structs sorted by call count ascending.",
         category: "meta",
         example: "(jit/rejections)",
         effect: RegionEffect::Fresh,
