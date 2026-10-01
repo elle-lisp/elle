@@ -1,5 +1,7 @@
 # Control Flow
 
+<!-- audited: 2026-09-30 -->
+
 Elle control flow forms are expressions — they return values. Only `nil` and
 `false` are falsy; everything else is truthy.
 
@@ -134,66 +136,9 @@ Creates a new lexical scope. Supports named early exit via `break`.
 
 `break` does NOT cross function boundaries — validated at compile time.
 
-## while
+## Loops
 
-Loops while the test is truthy. Returns `nil` unless you `break` with a value.
-
-```lisp
-(var i 0)
-(while (< i 5)
-  (assign i (+ i 1)))
-i                          # => 5
-
-# break :while returns a value
-(var k 0)
-(while (< k 100)
-  (assign k (+ k 1))
-  (when (= k 7) (break :while k)))  # => 7
-```
-
-## forever
-
-Sugar for `(while true ...)`. Use `break` to exit.
-
-```lisp
-(var n 1)
-(forever
-  (assign n (* n 2))
-  (when (> n 100) (break :while n)))  # => 128
-```
-
-## repeat
-
-Runs the body N times. Returns `nil`.
-
-```lisp
-(var count 0)
-(repeat 5 (assign count (+ count 1)))
-count                      # => 5
-```
-
-## each
-
-Iteration macro. `in` is optional sugar. Works on lists, arrays,
-strings, bytes, sets, structs, and fibers.
-
-```lisp
-(var total 0)
-(each x in [10 20 30]
-  (assign total (+ total x)))
-total                      # => 60
-
-# early exit via block + break
-(block :found
-  (each x [1 4 9 16 25]
-    (when (> x 10)
-      (break :found x)))
-  nil)                     # => 16
-
-# fibers: iterate over yielded values until the fiber completes
-(def fib (fiber/new (fn [] (yield 1) (yield 2) (yield 3)) |:yield|))
-(each n in fib (println n))  # prints 1 2 3
-```
+[loops.md](loops.md) covers `while`, `forever`, `repeat` and `each`.
 
 ---
 
