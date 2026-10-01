@@ -2,7 +2,23 @@
 
 <!-- audited: 2026-09-30 -->
 
-The primitives a program uses to inspect a closure and to time its own work.
+The primitives a program uses to print its values, inspect a closure, and time its own work.
+
+## Printing a value on its way through
+
+| Primitive | Does |
+|-----------|------|
+| `debug/print` | writes `[DEBUG] value` to stderr and answers the value |
+| `debug/trace` | writes `[TRACE] label: value` to stderr and answers the value; the label is a string or a symbol |
+| `debug/memory` | answers `(rss-bytes virtual-bytes)` for the process |
+
+Each print answers its argument, so it can wrap an expression without
+changing what the program computes.
+
+```lisp
+(assert (= (debug/print (+ 1 2)) 3) "debug/print answers its argument")
+(assert (= (debug/trace "sum" (+ 1 2)) 3) "debug/trace answers its value")
+```
 
 ## Inspecting a closure
 

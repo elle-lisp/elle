@@ -9,7 +9,7 @@ Up: [..](../AGENTS.md)
 - [README.md](README.md) — **Code Analysis and Semantic Understanding (more...)**
 - [agent-reasoning.md](agent-reasoning.md) — **Agent Reasoning in Elle** Elle is designed to be easily reasoned about by AI coding assistants.
 - [ci.md](ci.md) — **CI and Triage** CI structure, local workflow, and failure diagnosis.
-- [debugging.md](debugging.md) — **Debugging and introspection** The primitives a program uses to inspect a closure and to time its own work.
+- [debugging.md](debugging.md) — **Debugging and introspection** The primitives a program uses to print its values, inspect a closure, and time its own work.
 - [index.md](index.md) — **Analysis** Meta-analysis tools: testing, debugging, and semantic portraits.
 - [portrait.md](portrait.md) — **Portrait** A portrait reports what the compiler knows about code without running it: signals, captures, calls and lint advisories.
 - [testing.md](testing.md) — **Testing Strategy** Which *kind* of test to write, and where it belongs.
