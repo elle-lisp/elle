@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 //! syntax-case: code-generating pattern matching on syntax objects.
 //!
 //! docs/macros.md
@@ -169,7 +169,7 @@ impl Expander {
     ) -> Result<Syntax, String> {
         let arena = self.arena();
         if clauses.is_empty() {
-            // No clauses — unreachable in practice (arity check above requires >= 1)
+            // Past the last clause: the expanded code signals :match-error here.
             return Ok(make_no_match_error(&arena, *span));
         }
 
@@ -307,7 +307,7 @@ impl Expander {
 }
 
 // =============================================================================
-// Pattern parsing
+// Syntax builders
 // =============================================================================
 
 /// Make a symbol node stamped with `scope`.
@@ -405,7 +405,7 @@ fn make_no_match_error(arena: &SyntaxArena, span: Span) -> Syntax {
 }
 
 // Behavioral tests (correct return values, pattern matching) are in
-// tests/lang/macros.lisp. The Rust tests below cover expansion-time errors
+// tests/lang/syntax-case.lisp. The Rust tests below cover expansion-time errors
 // that cannot be caught from Elle code (they occur before any runtime code runs).
 
 #[cfg(test)]

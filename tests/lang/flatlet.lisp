@@ -1,12 +1,7 @@
-(elle/epoch 12)
-## Flat let bindings
-##
-## Exercises flat (Clojure-style) binding syntax for let, letrec,
-## if-let, and when-let. All binding pairs are laid out flat inside a
-## single bracket form: [name1 value1 name2 value2 ...].
-##
-## let is sequential (like Clojure): each binding sees previous ones.
-## let* is kept as an alias.
+(elle/epoch 14)
+# audited: 2026-09-30
+# let, letrec, if-let and when-let take flat binding pairs, and let binds them in order, as let* does.
+# docs/bindings.md
 
 ## ── single binding ──────────────────────────────────────────────────
 (assert (= (let [x 1]
@@ -60,4 +55,8 @@
              (let [y (+ x 1)]
                (+ x y))) 3) "flat nested let")
 
-(println "flatlet: all passed")
+## ── empty bindings ──────────────────────────────────────────────────
+(assert (= (let []
+             42) 42) "let with no bindings answers its body")
+(assert (= (let* []
+             42) 42) "let* with no bindings answers its body")

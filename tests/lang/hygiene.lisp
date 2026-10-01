@@ -1,13 +1,13 @@
-#!/usr/bin/env elle
-(elle/epoch 12)
+(elle/epoch 14)
+# audited: 2026-09-30
+# A macro template resolves its own names where the macro is defined, and datum->syntax is how a template binds a name for its caller.
+# docs/macros.md
 
-## Macro hygiene tests — counter-factual tests that verify template symbols
-## resolve to their definition-site bindings, not call-site shadows.
+# ── each: template names are not captured by the caller's ─────────────
 
-# ── each macro: template `rest` must resolve to the builtin ──────────
-
-## Counter-factual: without hygiene, `rest` in the `each` template would
-## resolve to the user's `& rest` parameter, causing "Cannot call" error.
+## The counter-factual: without hygiene, `rest` in the `each` template
+## resolves to the user's `& rest` parameter, and the call fails with
+## "Cannot call".
 (defn iterate-rest [& rest]
   (let [out @[]]
     (each item in rest
@@ -17,7 +17,7 @@
 (assert (= (iterate-rest 1 2 3) [1 2 3])
         "each: template rest not captured by user rest")
 
-## Same with `cur` — another name used internally by `each`
+## The same for `cur`, another name the `each` template binds.
 (defn iterate-cur [& cur]
   (let [out @[]]
     (each item in cur
@@ -27,7 +27,7 @@
 (assert (= (iterate-cur "a" "b") ["a" "b"])
         "each: template cur not captured by user cur")
 
-## Same with `seq`
+## The same for `seq`.
 (defn iterate-seq [& seq]
   (let [out @[]]
     (each item in seq
@@ -37,12 +37,15 @@
 (assert (= (iterate-seq :x :y) [:x :y])
         "each: template seq not captured by user seq")
 
-# ── when/unless: template symbols not captured ───────────────────────
-
-(let [empty? (fn [x] true)]
-  (def @reached false)
-  (when true (assign reached true))
-  (assert reached "when: template not captured by shadowed empty?"))
+## The `each` template calls `empty?` on a list. The counter-factual: a
+## call-site `empty?` that answers true would end the loop before its first
+## pass.
+(let [empty? (fn [x] true)
+      out @[]]
+  (each x in (list 1 2)
+    (push out x))
+  (assert (= (freeze out) [1 2])
+          "each: template empty? not captured by a call-site shadow"))
 
 # ── Nested macro expansion ───────────────────────────────────────────
 
@@ -62,15 +65,14 @@
     (push out [k v]))
   (assert (= (length out) 2) "each: struct iteration"))
 
-# ── Inbound capture (the intro-scope flip) ───────────────────────────
+# ── Inbound capture ──────────────────────────────────────────────────
 
-## A binding introduced by a macro template must not capture a free
-## identifier of the same name arriving through the macro's arguments
-## (src/syntax/expand/macro_expand.rs; docs/macros.md § Sets-of-Scopes).
-## These were RED counterfactuals until the flip landed: pre-flip, the
-## canonical case yielded 1998 by collapsing both `tmp` into one binding.
+## A binding a macro template introduces must not capture a free identifier
+## of the same name arriving through the macro's arguments
+## (src/syntax/expand/macro_expand.rs). The counter-factual: collapse both
+## `tmp` into one binding and the first case answers 1998.
 
-(defmacro hyg-m (expr)
+(defmacro hyg-m [expr]
   `(let [tmp 999]
      (+ tmp ,expr)))
 (def tmp 7)
@@ -78,40 +80,51 @@
         "macro-introduced binding must not capture an inbound identifier")
 
 ## The template's own reference still resolves to the template's binder.
-(defmacro hyg-self ()
+(defmacro hyg-self []
   `(let [tmp 5]
      (* tmp tmp)))
 (assert (= (hyg-self) 25) "template references resolve to template binders")
 
-## Nested expansion: each expansion gets its own intro scope, so two
-## template `tmp`s from different macros stay distinct from each other
-## AND from the caller's.
-(defmacro hyg-inner (e)
+## Each expansion has scopes of its own, so the `tmp` of two macros stay
+## distinct from each other and from the caller's.
+(defmacro hyg-inner [e]
   `(let [tmp 100]
      (+ tmp ,e)))
-(defmacro hyg-outer (e)
+(defmacro hyg-outer [e]
   `(let [tmp 10]
      (+ tmp (hyg-inner ,e))))
 (assert (= (hyg-outer tmp) 117)
         "nested expansions keep three same-named bindings distinct")
 
-## An identity macro returns its argument with use-site scopes intact
-## (the pre-stamp and the flip cancel exactly on argument material).
-(defmacro hyg-id (e)
+## An identity macro returns its argument with its use-site scopes intact.
+(defmacro hyg-id [e]
   e)
 (let [x 42]
   (assert (= (hyg-id x) 42) "identity macro preserves use-site resolution"))
 
+## A swap macro binds `tmp` and assigns through both arguments. The caller's
+## own `tmp` keeps its value, and the two arguments trade theirs.
+(defmacro swap! [a b]
+  `(let [tmp ,a]
+     (assign ,a ,b)
+     (assign ,b tmp)))
+
+(let [tmp 100
+      @x 1
+      @y 2]
+  (swap! x y)
+  (assert (= (list tmp x y) (list 100 2 1))
+          "swap trades its arguments and leaves the caller's tmp alone"))
+
 # ── Referential transparency ─────────────────────────────────────────
 
-## A free variable in a macro template resolves in the macro's
-## definition environment, not the call site (docs/macros.md § The
-## Hygiene Problem, point 2). A call-site local that shadows the name
-## lacks the template reference's intro scope, so it is invisible to
-## the reference — resolution falls through to the top-level binding.
+## A free variable in a macro template resolves in the macro's definition
+## environment, not at the call site (docs/macros.md). A call-site local that
+## shadows the name lacks the template reference's scope, so the reference
+## falls through to the top-level binding.
 (defn rt-helper [v]
   (* v 10))
-(defmacro rt-use (x)
+(defmacro rt-use [x]
   `(rt-helper ,x))
 
 (assert (= (rt-use 5) 50) "template reference works unshadowed")
@@ -121,4 +134,43 @@
   (assert (= (rt-use 5) 50)
           "a call-site shadow must not capture the template's reference"))
 
-(println "hygiene: all tests passed")
+# ── datum->syntax: binding a name for the caller ─────────────────────
+
+## An anaphoric if binds `it` with the scopes of its test argument, so the
+## caller's branches can name it.
+(defmacro aif [test then else]
+  `(let [,(datum->syntax test 'it) ,test]
+     (if ,(datum->syntax test 'it) ,then ,else)))
+
+(assert (= (aif 42 it 0) 42) "aif binds it to a truthy test")
+(assert (= (aif false 42 0) 0) "aif takes the else branch on a falsy test")
+(assert (= (aif (+ 1 2) (+ it 10) 0) 13) "aif binds it to a compound test")
+
+(let [it 999]
+  (assert (= (aif 42 it 0) 42)
+          "the it aif binds shadows a caller's it in its branches"))
+
+## The context may be an atom argument, which arrives as a plain value.
+(defmacro bind-as-x [val body]
+  `(let [,(datum->syntax val 'x) ,val]
+     ,body))
+
+(assert (= (bind-as-x 100 (+ x 1)) 101) "datum->syntax with an atom context")
+
+## The context may be a symbol argument, which arrives as a syntax object
+## whose scopes the new name copies.
+(defmacro bind-it [name val body]
+  `(let [,(datum->syntax name 'it) ,val]
+     ,body))
+
+(assert (= (bind-it x 42 (+ it 1)) 43) "datum->syntax with a symbol context")
+
+## The template's own `result` carries the caller's scopes and its own. The
+## binding datum->syntax makes carries the caller's alone, so the reference
+## sees it.
+(defmacro inject-list [ctx]
+  `(let [,(datum->syntax ctx 'result) (list 1 2 3)]
+     result))
+
+(assert (= (inject-list x) (list 1 2 3))
+        "a template reference sees the binding datum->syntax made")

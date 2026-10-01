@@ -1,9 +1,7 @@
-(elle/epoch 12)
-# Tests for named blocks with break
-#
-# Note: block expressions containing break must be bound to a var before
-# passing to assert-eq, due to the closure-return bug (same as match).
-
+(elle/epoch 14)
+# audited: 2026-09-30
+# A block answers its last form or the value a break gives it, and a break names the block it leaves.
+# docs/control.md
 
 # ============================================================================
 # Anonymous blocks
@@ -75,6 +73,16 @@
                   99))]
   (assert (= result 11) "break inner value used by outer"))
 
+(let [result (block :a
+               (block :b
+                 (block :c
+                   (break :b 10)
+                   1)
+                 2)
+               3)]
+  (assert (= result 3)
+          "break :b from inside :c leaves :c and :b, and :a runs on"))
+
 # ============================================================================
 # Break in control flow
 # ============================================================================
@@ -97,6 +105,11 @@
                      (if (= i 5) (break :done i) nil)
                      (assign i (+ i 1)))))]
     (assert (= result 5) "break in loop")))
+
+(defn clamp-negative [x]
+  (block (if (< x 0) (break 99) (+ x 1))))
+(assert (= (clamp-negative 5) 6) "a block in a function body runs to its end")
+(assert (= (clamp-negative -5) 99) "a break in a function body leaves its block")
 
 # ============================================================================
 # Scope isolation
@@ -194,26 +207,6 @@
       (assign outer (+ outer 1))))
   (assert (= total 6) "break in nested while inner"))
 
-# ============================================================================
-# Compile-time error tests (from integration/blocks.rs)
-# ============================================================================
-
-# break_outside_block_error
-(let [[ok? _] (protect ((fn () (eval '(break 42)))))]
-  (assert (not ok?) "break outside block is compile error"))
-
-# break_unknown_name_error
-(let [[ok? _] (protect ((fn ()
-                          (eval '(block :a
-                                   (break :b 42))))))]
-  (assert (not ok?) "break with unknown block name is compile error"))
-
-# break_across_fn_boundary_error
-(let [[ok? _] (protect ((fn ()
-                          (eval '(block :done
-                                   ((fn () (break :done 42))))))))]
-  (assert (not ok?) "break across function boundary is compile error"))
-
 (begin
   (def @sum 0)
   (def @i 0)
@@ -257,20 +250,17 @@
     (assert (= result 3) "break in each string")))
 
 # ============================================================================
-# Compile-time error tests (from integration/blocks.rs)
+# Compile-time errors
 # ============================================================================
 
-# break_outside_block_error
 (let [[ok? _] (protect ((fn () (eval '(break 42)))))]
   (assert (not ok?) "break outside block is compile error"))
 
-# break_unknown_name_error
 (let [[ok? _] (protect ((fn ()
                           (eval '(block :a
                                    (break :b 42))))))]
   (assert (not ok?) "break with unknown block name is compile error"))
 
-# break_across_fn_boundary_error
 (let [[ok? _] (protect ((fn ()
                           (eval '(block :done
                                    ((fn () (break :done 42))))))))]
