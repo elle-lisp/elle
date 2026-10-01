@@ -1,5 +1,5 @@
-(elle/epoch 12)
-## audited: 2026-09-20
+(elle/epoch 14)
+## audited: 2026-09-30
 ## Elle standard prelude: the macros every program is expanded against.
 ## docs/stdlib.md
 ##
@@ -171,7 +171,7 @@
 ## (gate! COND "reason" body...) runs BODY when COND is truthy; when COND is
 ## unmet it does NOT vanish silently — it emits a structured :gated signal
 ## carrying the REASON, which a harness catches and records as status=skip.
-## See docs/test-runner.md § Gating and docs/compile-time.md.
+## See docs/test-runner.md and docs/compile-time.md.
 ##
 ## COND is evaluated at RUNTIME: the canonical predicate is (backend? :tier),
 ## and the same test closure is compiled once then dispatched to every tier by
@@ -208,7 +208,7 @@
 ##
 ## The body may perform async I/O: an I/O request travels out to the
 ## scheduler through this fiber, and the completion's error comes back to
-## it as [false err]. See docs/errors.md § "Cleanup around async I/O".
+## it as [false err]. docs/errors.md holds the cleanup rules around async I/O.
 (defmacro protect (& body)
   `(let [f (fiber/new (fn () ,;body) 1)]
      (fiber/resume f nil)
@@ -290,12 +290,19 @@
 ## Dispatches on type-of: lists use first/rest, indexed types use get/length.
 ## (each x coll body...) or (each x in coll body...)
 ##
+## The fiber arm ends on the fiber's status, never on the value it yields, so
+## a nil or false yield is an element. A fiber whose mask catches errors stops
+## :paused holding the error, so the arm reads the error bit and propagates it,
+## as trait/elements does. The arm's value is the fiber's return value unless a
+## break left first.
+##
 ## The last arm walks an array by index, and three sources fill that array: a
 ## collection whose traits carry :iter, a set, and a struct's pairs. Anything
 ## else raises. The iterator is drained into the array rather than driven by a
-## callback so that `break` and `assign` in BODY still reach the enclosing
-## function; a closure per element would trap both. docs/traits.md holds the
-## dispatch this arm completes.
+## callback so that a `break` in BODY still reaches the loop; a closure per
+## element would trap it, since a break cannot cross a function boundary.
+## docs/loops.md holds what each element is, and docs/traits.md the dispatch
+## this arm completes.
 (defmacro each (var iter-or-in & forms)
   (let* [has-in (and (%not (empty? forms)) (%not (empty? (rest forms)))
                      (= (syntax->datum iter-or-in) 'in))
@@ -320,11 +327,14 @@
                (assign idx (%add idx 1))))
          :fiber
            (begin
-             (def @v (fiber/resume seq))
-             (while v
-               (let [,var v]
-                 ,;body)
-               (assign v (fiber/resume seq))))
+             (fiber/resume seq)
+             (let [broke (while (%not (= (fiber/status seq) :dead))
+                           (when (%not (%eq 0 (bit/and (fiber/bits seq) 1)))
+                             (fiber/propagate seq))
+                           (let [,var (fiber/value seq)]
+                             ,;body)
+                           (fiber/resume seq))]
+               (if (= (fiber/status seq) :dead) (fiber/value seq) broke)))
          _
            (let [items (if (trait/iterable? seq)
                          (trait/elements seq)
@@ -461,11 +471,10 @@
                (ffi/free ,name)
                ,inner)))))))
 
-## with-allocator - route heap allocations through a custom allocator
-## (with-allocator alloc body...) => installs alloc, runs body in defer, uninstalls
-## Values allocated within the body use the provided allocator.
-## When the form exits, all custom-allocated objects are freed.
-## Do not retain references to these objects beyond the form's dynamic extent.
+## with-allocator - install a custom allocator around BODY
+## (with-allocator alloc body...) installs ALLOC on the current fiber's heap,
+## runs BODY under defer, and uninstalls ALLOC even when BODY errors.
+## Uninstalling drops and frees every object ALLOC still tracks.
 (defmacro with-allocator (allocator & body)
   `(begin
      (allocator/install ,allocator)
