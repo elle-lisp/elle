@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-01
 // docs/impl/jit.md
 //! The background JIT worker: the thread Cranelift runs on, and the task and
 //! result that cross to it.
@@ -117,8 +117,7 @@ impl JitWorker {
 ///
 /// `display_name` backfills a nameless LIR (the common case — lowering
 /// names few functions) from the closure template, so the compile records
-/// a readable entry in the code-address registry
-/// (docs/impl/jit.md § "The code-address registry").
+/// a readable entry in the code-address registry (docs/impl/jit.md).
 pub(crate) fn prepare_task(
     lir: &LirFunction,
     bytecode_key: usize,
@@ -137,3 +136,6 @@ pub(crate) fn prepare_task(
 // `lir/lower/pattern/ctor.rs`), which the JIT translates via
 // `elle_jit_materialize_const` — so no raw `LirConst::String` reaches the
 // translator.
+
+#[cfg(test)]
+mod tests;
