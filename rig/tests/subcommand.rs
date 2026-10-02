@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-02
 // The rig answers elle's subcommands as elle does, so a program that runs its own executable runs under the rig.
 // rig/overview.md
 //
@@ -10,26 +10,34 @@
 mod common;
 
 use common::{rig, stderr, stdout, Scratch};
+use elle::epoch::CURRENT_EPOCH;
 
-/// A file `elle fmt` leaves as it is.
-const FORMATTED: &str = "(elle/epoch 13)\n(def x 1)\n";
+/// A file `elle fmt` leaves as it is. `fmt --check` also migrates a file that
+/// declares an older epoch, so the file declares the current one: a literal
+/// epoch turns this file into one fmt would rewrite on the next epoch bump.
+fn formatted() -> String {
+    format!("(elle/epoch {CURRENT_EPOCH})\n(def x 1)\n")
+}
 
 /// The same file, spaced the way `elle fmt` would rewrite.
-const UNFORMATTED: &str = "(elle/epoch 13)\n(def    x\n 1)\n";
+fn unformatted() -> String {
+    format!("(elle/epoch {CURRENT_EPOCH})\n(def    x\n 1)\n")
+}
 
 // Both outcomes, so a rig that answered every subcommand with success would
 // fail the second arm.
 #[test]
 fn fmt_checks_a_file_on_the_rig() {
     let dir = Scratch::new("fmt");
-    let good = dir.write("good.lisp", FORMATTED);
-    let bad = dir.write("bad.lisp", UNFORMATTED);
+    let good = dir.write("good.lisp", &formatted());
+    let bad = dir.write("bad.lisp", &unformatted());
     let (good, bad) = (good.to_str().unwrap(), bad.to_str().unwrap());
 
     let out = rig(&["fmt", "--check", good]);
     assert!(
         out.status.success(),
-        "`elle-rig fmt --check` rejected a formatted file: {}",
+        "`elle-rig fmt --check` rejected a formatted file: {}{}",
+        stdout(&out),
         stderr(&out)
     );
 
