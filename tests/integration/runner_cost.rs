@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-01
 // Each result records what it cost: wall and CPU time for a form in a worker,
 // and a child's total, peak memory included, under --isolate.
 //
@@ -81,7 +81,9 @@ fn a_script_records_its_wall_and_cpu_time_per_policy() {
     );
 }
 
-/// A script that computes shows CPU time on its thread.
+/// A script that computes shows CPU time on its thread. A debug build interprets
+/// each iteration of the loop in tens of microseconds, so a loop of millions
+/// outlives the runner's default 60 s budget there and gates the run red.
 #[test]
 fn a_busy_script_records_cpu_time() {
     let dir = crate::common::ScratchDir::new("cost-busy");
@@ -89,7 +91,7 @@ fn a_busy_script_records_cpu_time() {
     run_green(
         &dir,
         &db,
-        "(var i 0)\n(while (< i 2000000) (assign i (+ i 1)))\n(assert (= i 2000000) \"counted\")\n",
+        "(var i 0)\n(while (< i 20000) (assign i (+ i 1)))\n(assert (= i 20000) \"counted\")\n",
         &[],
     );
 
