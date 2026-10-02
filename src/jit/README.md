@@ -1,6 +1,6 @@
 # JIT Compilation
 
-<!-- audited: 2026-09-13 -->
+<!-- audited: 2026-10-01 -->
 
 The JIT subsystem compiles hot functions from LIR to native machine code using
 Cranelift.
@@ -8,7 +8,8 @@ Cranelift.
 ## How JIT Works
 
 1. **Selection**: The VM counts calls to each function. A function that crosses
-   the hotness threshold `--jit` sets is submitted for compilation.
+   the hotness threshold ([config.md](../../docs/config.md)) is submitted for
+   compilation.
 2. **Compilation**: `FunctionTranslator` walks the function's LIR and emits
    Cranelift IR, which Cranelift compiles to native code. This runs on the
    `elle-jit` worker thread, or on the VM thread under `--trace=syncjit`.

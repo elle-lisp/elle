@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-01 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -108,6 +108,28 @@ A tail call is counted by neither tier. It replaces the frame rather than
 building one — `tail_call_inner` in the interpreter, the tail-call sentinel in
 compiled code — so a function only ever reached in tail position stays
 interpreted.
+
+## The background worker
+
+Each VM compiles on an `elle-jit` thread of its own, which starts with the VM's
+first submission ([worker.rs](../../src/jit/worker.rs)). The interpreter keeps
+running a hot function while Cranelift compiles it, and the next call takes the
+code from the cache.
+
+**The queue ends with its VM.** When a VM drops its worker, the thread discards
+every task still queued and exits when the compile in progress returns. Only
+the VM that submitted a task can install its result, so a task that outlives
+that VM produces code that nothing calls.
+
+A process that runs many short VMs is where this matters. `elle test` starts a
+VM for each form and runs each whole file with the JIT eager, so every function
+the file calls goes into the queue. If the queue ran to its end, those threads
+would keep compiling for VMs that are gone, and take the processor from the
+forms still running.
+
+Cranelift cannot be interrupted inside a compile, so at most one task finishes
+after the VM drops its worker. The drop does not join the thread, so a VM that
+ends does not wait for that compile.
 
 ## How a call leaves compiled code
 
@@ -270,8 +292,9 @@ emission. These two helpers read them.
 [config.md](../config.md) owns the builds, the JIT threshold, and the policy the
 binary starts from. The JIT is the optimizing tier of the default build; a
 build with the `mlir` or `wasm` feature carries that tier instead and runs no
-JIT. No flag turns the JIT off or makes it eager: the rig does both, for one
-implementation test, through a sidecar ([rig](../../rig/overview.md)).
+JIT. No flag turns the JIT off or makes it eager. The rig does both through a
+sidecar or a profile ([rig](../../rig/overview.md)), and `elle test` runs each
+whole file with the JIT off and eager ([test-runner.md](../test-runner.md)).
 `--dump=stats` prints this tier's compiled and rejected counts on exit, with
 the call count behind each rejection.
 
@@ -282,6 +305,7 @@ the call count behind each rejection.
 | [src/jit/compiler.rs](../../src/jit/compiler.rs) | `JitCompiler`, module management |
 | [src/jit/translate.rs](../../src/jit/translate.rs) | `FunctionTranslator`, LIR → Cranelift IR |
 | [src/jit/code.rs](../../src/jit/code.rs) | The `JitCode` wrapper |
+| [src/jit/worker.rs](../../src/jit/worker.rs) | The background worker thread and its queue |
 | [src/jit/vtable.rs](../../src/jit/vtable.rs) | The runtime helper dispatch table |
 | [src/jit/dispatch.rs](../../src/jit/dispatch.rs) | JIT dispatch integration with the VM |
 

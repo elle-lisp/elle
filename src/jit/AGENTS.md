@@ -1,6 +1,6 @@
 # jit
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-01 -->
 
 JIT compilation for Elle using Cranelift.
 
@@ -25,7 +25,9 @@ JIT compilation runs on a dedicated background thread (`elle-jit`).
 When a function becomes hot (called as many times as the JIT threshold, 10
 by default), its LIR is cloned, stripped of non-Send fields
 (`syntax`, `doc`), and sent to the worker via `crossbeam_channel`. The
-interpreter continues running the function while Cranelift compiles it.
+interpreter continues running the function while Cranelift compiles it. Each VM
+owns its worker, and dropping the worker discards the tasks still in its queue
+([jit.md](../../docs/impl/jit.md)).
 
 The worker thread allocates no Elle values: string constants arrive
 pre-resolved as `ValueConst`, and symbols/keywords are immediates, so
@@ -331,7 +333,7 @@ No errors are silently swallowed.
 7. **Enabled by default via the `jit` Cargo feature.** A build with the `mlir`
    or `wasm` feature carries that tier instead and runs no JIT, and
    `--no-default-features --features ffi,uring` builds the interpreter alone
-   ([config.md](../../docs/config.md) § Builds).
+   ([config.md](../../docs/config.md)).
 
 8. **VM pointer for runtime calls.** The 4th parameter is `vm` to support
    function calls, fiber access, and yield side-exit helpers.
