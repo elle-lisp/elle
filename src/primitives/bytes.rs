@@ -1,4 +1,8 @@
-//! Bytes and @bytes primitives (binary data)
+// audited: 2026-09-29
+//! The bytes and @bytes primitives: construct binary data, render it as hex, and slice a sequence.
+//!
+//! docs/bytes.md
+
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::{RegionEffect, RetType};
 use crate::primitives::seq::seq_slice;
@@ -19,7 +23,7 @@ pub(crate) fn prim_bytes(
     // Single-argument coercion. `bytes` ALWAYS yields immutable: the
     // constructor's mutability is its contract, overriding the argument's (a
     // result that inherited the argument's mutability would make `(bytes @x)`
-    // mutable — inverting the name; pinned by tests/elle/bytes.lisp).
+    // mutable — inverting the name; pinned by tests/lang/bytes.lisp).
     if args.len() == 1 {
         // bytes → bytes (already immutable: share, no copy)
         if args[0].as_bytes().is_some() {
@@ -85,7 +89,7 @@ pub(crate) fn prim_bytes_mut(
     // Single-argument coercion. `@bytes` ALWAYS yields mutable: the
     // constructor's mutability overrides the argument's (a result that inherited
     // the argument's mutability would make `(@bytes x)` immutable — inverting the
-    // name; pinned by tests/elle/bytes.lisp).
+    // name; pinned by tests/lang/bytes.lisp).
     if args.len() == 1 {
         // @bytes → @bytes (already mutable: share, no copy)
         if args[0].as_bytes_mut().is_some() {
@@ -145,7 +149,7 @@ fn bytes_to_hex_string(b: &[u8]) -> String {
 /// Validate and collect byte values from an iterator of `Value`.
 ///
 /// Returns `Ok(Vec<u8>)` on success, or `Err((SignalBits, Value))` on the
-/// first invalid element. `idx` is the position label used in error messages.
+/// first invalid element, whose index the error names.
 fn collect_byte_values<I>(iter: I, ctx: &mut NativeCtx) -> Result<Vec<u8>, (SignalBits, Value)>
 where
     I: IntoIterator<Item = Value>,

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 // A run that did not finish reads as killed or as still running, never as green.
 //
 // docs/test-runner.md
@@ -11,6 +11,7 @@
 // Two batches sharing one session DB each warned that the other was killed, on
 // every batch, while both were healthy.
 
+use crate::common::query;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -73,17 +74,6 @@ impl Drop for LiveRun {
     }
 }
 
-/// The rendered rows of `sql` against `db`.
-fn query(db: &Path, sql: &str) -> String {
-    let out = Command::new(elle_binary())
-        .args(["test", "--query", sql])
-        .arg("--db")
-        .arg(db)
-        .output()
-        .expect("query the session DB");
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
 fn summary(db: &Path) -> String {
     let out = Command::new(elle_binary())
         .args(["test", "--summary"])
@@ -118,18 +108,11 @@ fn completed_run_stamps_finished_at_and_counters() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    let q = Command::new(elle_binary())
-        .args([
-            "test",
-            "--query",
-            "SELECT (finished_at IS NOT NULL) AS done, n_selected AS sel, \
-             (n_pass > 0) AS haspass FROM run WHERE id = (SELECT max(id) FROM run)",
-        ])
-        .arg("--db")
-        .arg(&db)
-        .output()
-        .expect("query run row");
-    let stdout = String::from_utf8_lossy(&q.stdout);
+    let stdout = query(
+        &db,
+        "SELECT (finished_at IS NOT NULL) AS done, n_selected AS sel, \
+         (n_pass > 0) AS haspass FROM run WHERE id = (SELECT max(id) FROM run)",
+    );
     assert!(
         stdout.contains(":done 1"),
         "completed run must stamp finished_at, got: {}",

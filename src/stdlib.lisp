@@ -1,4 +1,4 @@
-(elle/epoch 13)
+(elle/epoch 14)
 ## Elle standard library
 ##
 ## Loaded at startup after primitives are registered.
@@ -1803,7 +1803,7 @@
    record with no listener) falls back to a later one. Returns a connected
    stream port; if every address fails, the last error is raised. Keyword
    options are forwarded to tcp/connect-ip per attempt: :sndbuf :rcvbuf
-   :nodelay :keepalive :encoding :timeout.
+   :nodelay :keepalive :encoding :timeout :deadline.
 
    Each address but the last is attempted in a child fiber so its failure can be
    caught (ev/join-protected) and the next address tried; the last (or only) one
@@ -1827,7 +1827,7 @@
    which under the test runner would terminate the whole process mid-run.
    The probe socket is closed on success; any connect failure (refused,
    timeout, bad host) yields false."
-  (let [r (protect (tcp/connect host port :timeout 200))]
+  (let [r (protect (tcp/connect host port :timeout 0.2))]
     (if (get r 0)
       (begin
         (port/close (get r 1))
@@ -1893,13 +1893,48 @@
                          |:error :io :exec :wait :ffi :gpu :os-signal :fs|)]
     ((*spawn*) fiber)))
 
+## ── Bounds on a wait ────────────────────────────────────────────────
+##
+## The waits written here take `:timeout` in seconds and `:deadline`, a
+## (clock/monotonic) reading, as the primitives do (docs/io/timeout.md). They
+## refuse the same values, with the same error kinds.
+
+(defn check-bounds [who timeout deadline]
+  "Refuse a :timeout that is not a finite, non-negative number of seconds, or a
+   :deadline that is not a (clock/monotonic) reading. `who` names the caller."
+  (unless (or (nil? timeout) (number? timeout))
+    (error {:error :type-error
+            :message (string who " :timeout: expected a number of seconds")}))
+  (unless (or (nil? timeout) (and (finite? timeout) (>= timeout 0)))
+    (error {:error :argument-error
+            :message (string who
+                             " :timeout: seconds must be finite and non-negative")}))
+  (unless (or (nil? deadline) (number? deadline))
+    (error {:error :type-error
+            :message (string who
+                             " :deadline: expected a (clock/monotonic) reading")}))
+  (when (nan? deadline)
+    (error {:error :argument-error
+            :message (string who " :deadline: NaN is not a reading")})))
+
+(defn wait-until [who timeout deadline]
+  "The (clock/monotonic) reading a wait bounded by `timeout` and `deadline`
+   ends at: `timeout` seconds from now or `deadline`, whichever comes first.
+   nil when neither bounds the wait. Refuses a bad bound as check-bounds does."
+  (check-bounds who timeout deadline)
+  (let [by-timeout (when timeout (+ (clock/monotonic) timeout))]
+    (cond
+      (nil? by-timeout) deadline
+      (nil? deadline) by-timeout
+      true (min by-timeout deadline))))
+
 ## ── Async scheduler ─────────────────────────────────────────────────
 
 (defn make-async-scheduler ()
   "Create an async scheduler. Returns {:spawn fn :pump fn :shutdown fn}.
    :spawn — (fn [fiber]) registers fiber for async execution.
    :pump — (fn []) pumps event loop until all fibers complete.
-   :shutdown — (fn [timeout-ms]) signal shutdown; pump-fn executes it."
+   :shutdown — (fn [&named timeout deadline]) signal shutdown; pump-fn executes it."
   (let [backend (io/backend :async (*io-keepalive*))
         runnable @[]
         pending @{}  # id → fiber (I/O submissions)
@@ -1912,7 +1947,7 @@
         joined @||  # set of fibers whose result was observed
         entry-fibers @||  # set of the program's own fibers (see retire-fiber)
         scheduler-killed @||  # set of fibers we aborted at teardown (suppress their injected :shutdown)
-        shutdown-req @[nil]  # nil = running, integer = shutdown requested with timeout
+        shutdown-req @[nil]  # nil = running, else the [timeout deadline] ev/shutdown named
         park-queues @{}
         forwarded-pending @{}]
     (defn cleanup-select [waiter entry]
@@ -2239,9 +2274,9 @@
                      (fiber/resume fiber)
                      (handle-fiber-after-resume fiber)))))))
 
-    (defn process-completions [timeout-ms]
+    (defn process-completions [timeout deadline]
       "Wait for I/O completions and route fibers."
-      (let [completions (io/wait backend timeout-ms)
+      (let [completions (io/wait backend :timeout timeout :deadline deadline)
             @has-forwarded false]
         (each c in completions
           (let* [id (get c :id)
@@ -2282,8 +2317,8 @@
                 (fiber/resume parked nil)
                 (handle-fiber-after-resume parked)))))))
 
-    (defn do-shutdown [timeout-ms]
-      "Abort all pending fibers, pump for timeout-ms, cancel stragglers."
+    (defn do-shutdown [&named timeout deadline]
+      "Abort all pending fibers, pump until the bound passes, cancel stragglers."
 
       # Phase 1: abort all pending fibers (inject error, let defer run).
       # Record them as scheduler-killed so the unjoined-error tail does
@@ -2309,13 +2344,13 @@
               (when ok? (handle-fiber-after-resume fiber))))))
 
       # Phase 2: drain cancel CQEs and let aborted fibers unwind
-      (when (> timeout-ms 0)
-        (let [deadline (+ (clock/monotonic) (/ timeout-ms 1000.0))]
+      (let [until (wait-until "ev/shutdown" timeout deadline)]
+        (when until
           (while (and (> (+ (length runnable) (length pending)) 0)
-                      (< (clock/monotonic) deadline))
+                      (< (clock/monotonic) until))
             (drain-runnable)
             (when (> (length pending) 0)
-              (let [completions (io/wait backend 10)]
+              (let [completions (io/wait backend :deadline until)]
                 (each c in completions
                   (let* [id (get c :id)
                          fiber (get pending id)]
@@ -2336,19 +2371,21 @@
           (add scheduler-killed fiber)
           (protect (fiber/cancel fiber {:error :shutdown})))))
 
-    (defn step [timeout-ms]
-      "Execute one tick of the event loop. Returns :done or :pending."
+    (defn step [&named timeout deadline]
+      "Execute one tick of the event loop, waiting for I/O no longer than the
+       bound allows. Returns :done or :pending."
+      (check-bounds "ev/step" timeout deadline)
       (block :tick
         (drain-runnable)
         (when (and (= (length pending) 0) (= (length waiters) 0)
                    (= (length select-sets) 0) (= (length park-queues) 0)
                    (= (length forwarded-pending) 0))
           (break :tick :done))
-        (let [timeout (get shutdown-req 0)]
-          (unless (nil? timeout)
-            (do-shutdown timeout)
+        (let [req (get shutdown-req 0)]
+          (unless (nil? req)
+            (do-shutdown :timeout (get req 0) :deadline (get req 1))
             (break :tick :done)))
-        (process-completions timeout-ms)
+        (process-completions timeout deadline)
         :pending))
 
     (defn forget-fibers []
@@ -2426,7 +2463,7 @@
      # pump-fn: the event loop, and program-completion teardown. When called
      # with the program's fibers (its thunks), the loop ends as soon as THEY
      # have all completed.  Each iteration first drains runnable work without
-     # blocking (step 0); once the program's fibers are done it shuts
+     # blocking (step :timeout 0); once the program's fibers are done it shuts
      # the scheduler down — aborting every remaining fiber uniformly
      # (do-shutdown) rather than blocking forever on orphans that can
      # never complete on their own (a futex never woken, a reader on a
@@ -2453,13 +2490,13 @@
                (block :loop
                  (forever
                    # Drain all currently-runnable work without blocking on I/O.
-                   (when (= (step 0) :done) (break :loop nil))
+                   (when (= (step :timeout 0) :done) (break :loop nil))
                    # Program complete?  Tear down instead of waiting on orphans.
                    (when (and have-entry (all-done? entry))
-                     (do-shutdown 100)
+                     (do-shutdown :timeout 0.1)
                      (break :loop nil))
                    # Live program work remains — block for the next I/O event.
-                   (when (= (step (- 0 1)) :done) (break :loop nil)))))
+                   (when (= (step) :done) (break :loop nil)))))
              # Crash on unjoined errored fibers — never swallow errors silently.
              # scheduler-killed fibers are excluded: we injected their :shutdown
              # at teardown time, so re-raising would surface our own signal as a
@@ -2481,7 +2518,9 @@
                (forget-fibers)
                (when (not (nil? unjoined)) (fiber/propagate unjoined))))
      :shutdown  # shutdown-fn: signal shutdown
-      (fn (timeout-ms) (put shutdown-req 0 timeout-ms))
+      (fn [&named timeout deadline]
+        (check-bounds "ev/shutdown" timeout deadline)
+        (put shutdown-req 0 [timeout deadline]))
      # mark-joined-fn: mark one of the program's own fibers as observed, which
      # suppresses the unjoined-error crash, and exempt it from retirement,
      # because `:pump` reads its completion record to know the program
@@ -2493,16 +2532,17 @@
 
 (def *shutdown* (make-parameter nil))
 
-(defn ev/shutdown [& args]
-  "Shut down the current event loop. Optional timeout-ms (default 0) gives
-   fibers time to clean up before being hard-killed."
-  (let [timeout-ms (or (get args 0) 0)
-        shutdown-fn (*shutdown*)]
+(defn ev/shutdown [&named timeout deadline]
+  "Shut down the current event loop. Aborted fibers may unwind until the
+   :timeout (seconds) or :deadline (a clock/monotonic reading) passes, and
+   the loop cancels those still running then. With no bound they get no
+   time at all."
+  (let [shutdown-fn (*shutdown*)]
     (when (nil? shutdown-fn)
       (error {:error :state-error
               :reason :no-event-loop
               :message "not inside an event loop"}))
-    (shutdown-fn timeout-ms)))
+    (shutdown-fn :timeout timeout :deadline deadline)))
 
 (defn ev/report []
   "What the running scheduler is waiting for and still remembers:
@@ -2510,11 +2550,12 @@
    :parks}. See docs/scheduler.md."
   ((get (*scheduler*) :report)))
 
-(defn ev/step [& args]
-  "Step the current event loop once. timeout-ms defaults to 0 (non-blocking).
-   Returns :done when all fibers have completed, :pending otherwise."
-  (let [timeout (or (get args 0) 0)]
-    ((get (*scheduler*) :step) timeout)))
+(defn ev/step [&named timeout deadline]
+  "Step the current event loop once, waiting for I/O until the :timeout
+   (seconds) or :deadline (a clock/monotonic reading) passes. :timeout 0
+   does not wait; no bound waits as long as it takes. Returns :done when
+   all fibers have completed, :pending otherwise."
+  ((get (*scheduler*) :step) :timeout timeout :deadline deadline))
 
 (defn ev/with-scheduler [sched & thunks]
   "Run thunks under the given scheduler.
@@ -2733,64 +2774,64 @@
 
 ## ── Channel select ──────────────────────────────────────────────────
 
-(defn chan/select [rxs &opt timeout-ms]
-  "Wait for one receiver in rxs to have a message ready, or for
-   timeout-ms milliseconds to elapse.  Returns [index msg] when a
-   receiver has a value, [:timeout] on timeout, or [:disconnected] if
-   the first ready receiver was found disconnected.
+(defn chan/select [rxs &named timeout deadline]
+  "Wait for one receiver in rxs to have a message ready, or for the bound to
+   pass: :timeout in seconds, or :deadline, a (clock/monotonic) reading.
+   Returns [index msg] when a receiver has a value, [:timeout] once the bound
+   has passed, or [:disconnected] if the first ready receiver was found
+   disconnected. A bound that has already passed still answers a message
+   that is ready.
 
    Cooperatively yields to the scheduler: the OS thread is not parked,
    so any fiber producing on rxs (or an OS thread sending via sys/spawn
-   + chan/send) continues to run.  Without timeout-ms, waits forever.
+   + chan/send) continues to run.  Without a bound, waits forever.
 
    Builds on chan/try-select (non-blocking poll) and chan/wait-ready
-   (yielding park on a wake fd).  After each wake, re-parks with the
-   remaining timeout so a spurious wake — e.g. another fiber stole the
-   value via chan/recv between the send and our re-poll — does not
-   collapse the deadline.  Skips the eventfd allocation entirely if the
-   deadline is already exhausted on entry to a loop iteration."
-  (let [first (chan/try-select rxs)]
+   (yielding park on a wake fd).  Every park ends at the same deadline, so
+   a spurious wake — e.g. another fiber stole the value via chan/recv
+   between the send and our re-poll — re-parks without moving it.  The
+   answer is [:timeout] only once the clock has reached the deadline, so a
+   select never ends before its bound."
+  (let [until (wait-until "chan/select" timeout deadline)
+        first (chan/try-select rxs)]
     (match (get first 0)
       :empty
-        (let [deadline (when timeout-ms
-                         (+ (clock/monotonic) (/ timeout-ms 1000.0)))]
+        (begin
           (def @result nil)
           (forever
-            (let [remaining-ms (when deadline
-                                 (int (* (- deadline (clock/monotonic)) 1000)))]
-              (if (and remaining-ms (<= remaining-ms 0))  ## Deadline exhausted — skip the wake fd allocation.
-                (begin
-                  (assign result [:timeout])
-                  (break))
-                (let [wr (chan/wait-ready rxs remaining-ms)
-                      ## chan/wait-ready returns nil after parking,
-                      ## [:ready i v] if a value was found by the
-                      ## post-register re-check (no yield), or
-                      ## [:disconnected] if the re-check observed a
-                      ## disconnect.
-                      tag (when (array? wr) (get wr 0))]
-                  (match tag
-                    :ready
-                      (begin
-                        (assign result [(get wr 1) (get wr 2)])
-                        (break))
-                    :disconnected
-                      (begin
-                        (assign result [:disconnected])
-                        (break))
-                    _
-                      ## Woken or timed out at the scheduler — pick a
-                      ## ready receiver or loop again.
-                      (let [r (chan/try-select rxs)]
-                        (match (get r 0)
-                          :empty nil  ## spurious wake — re-park
-                          _ (begin
-                              (assign result r)
-                              (break)))))))))
+            (if (and until (>= (clock/monotonic) until))
+              (begin
+                (assign result [:timeout])
+                (break))
+              (let [wr (chan/wait-ready rxs :deadline until)
+                    ## chan/wait-ready returns nil after parking,
+                    ## [:ready i v] if a value was found by the
+                    ## post-register re-check (no yield), or
+                    ## [:disconnected] if the re-check observed a
+                    ## disconnect.
+                    tag (when (array? wr) (get wr 0))]
+                (match tag
+                  :ready
+                    (begin
+                      (assign result [(get wr 1) (get wr 2)])
+                      (break))
+                  :disconnected
+                    (begin
+                      (assign result [:disconnected])
+                      (break))
+                  _
+                    ## Woken or timed out at the scheduler — pick a
+                    ## ready receiver or loop again.
+                    (let [r (chan/try-select rxs)]
+                      (match (get r 0)
+                        :empty nil  ## spurious wake — re-park
+                        _ (begin
+                            (assign result r)
+                            (break))))))))
           result)
       _ first)))
 
-(defn sys/join [handle &opt timeout-ms]
+(defn sys/join [handle &named timeout deadline]
   "Wait for an OS thread (sys/spawn) to finish and return its result.
 
    Cooperates with the scheduler: it does not poll and it does not park
@@ -2798,30 +2839,32 @@
    signals a completion channel when it finishes, and sys/join parks on
    that channel via chan/select (the same cross-thread wake path).
 
-   With no timeout-ms, waits indefinitely.  With timeout-ms (a
-   non-negative integer of milliseconds), raises a typed timeout error —
-   {:error :timeout} — if the thread has not finished by the deadline.
+   With no bound, waits indefinitely.  With :timeout in seconds or
+   :deadline, a (clock/monotonic) reading, raises a typed timeout error —
+   {:error :timeout} — if the thread has not finished when the bound
+   passes, and never before.
    The worker is NOT cancelled (an OS thread cannot be safely killed): a
    timed-out worker is abandoned and runs to completion on its own, its
    result discarded.
 
    sys/join is idempotent: once a thread has completed, repeated joins
-   return the same result without waiting.  A worker that ended without
-   producing a result (an unwinding panic) surfaces as {:error
-   :thread-error}.  Alias: os/join.
+   return the same result without waiting, whatever the bound.  A worker
+   that ended without producing a result (an unwinding panic) surfaces as
+   {:error :thread-error}.  Alias: os/join.
 
    Implementation: thread-state peeks the result slot first ([:ready v] /
    [:failed msg]) and otherwise returns [:pending rx] — a receiver over
    the worker's completion channel.  The worker stores its result BEFORE
    signalling that channel, so once chan/select wakes, a re-poll sees the
    result; a wake with no stored result means the worker vanished."
-  (let [st (sys/thread-state handle)]
+  (let [until (wait-until "sys/join" timeout deadline)
+        st (sys/thread-state handle)]
     (match (get st 0)
       :ready (get st 1)
       :failed
         (error (struct :error :thread-error :message (get st 1)))
       :pending
-        (match (get (chan/select @[(get st 1)] timeout-ms) 0)
+        (match (get (chan/select @[(get st 1)] :deadline until) 0)
           :timeout (error (struct :error :timeout
                                   :message "join: deadline exceeded"))
           _

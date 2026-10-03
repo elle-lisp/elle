@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-30
 // src/io/AGENTS.md
 //! The socket operations a worker runs.
 //!
@@ -27,13 +27,12 @@
 //! so such a connect is refused at once on Linux and paces elsewhere. That is
 //! the price of pacing the common case.
 //!
-//! A connect that named a `:timeout` is bounded by it. One that named none
-//! waits until `io/cancel` or the sweep for a fiber that is gone ends the
-//! operation — the same ending an untimed connect to a listener that never
-//! accepts already has on every platform.
+//! A connect that named a `:timeout` or a `:deadline` is bounded by it. One
+//! that named neither waits until `io/cancel` or the sweep for a fiber that is
+//! gone ends the operation — the same ending an untimed connect to a listener
+//! that never accepts already has on every platform.
 
 use super::*;
-use std::time::Instant;
 
 /// Take one connection from a listener. Reports the new descriptor, and the
 /// peer's address encoded as `addr_len` (4 bytes, little-endian) followed by
@@ -313,7 +312,7 @@ fn connect_bounded(
     bound: &OpBound,
     refusal: &Refusal,
 ) -> i32 {
-    let deadline = bound.timeout().map(|t| Instant::now() + t);
+    let deadline = bound.end();
     loop {
         if unsafe { libc::connect(fd, sa, sa_len) } == 0 {
             return 0;

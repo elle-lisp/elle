@@ -1,8 +1,8 @@
-//! audited: 2026-09-29
+//! audited: 2026-09-30
 //! `AsyncBackend`: the state an in-flight operation is tracked through, and the
 //! platform that runs it.
 //!
-//! io_uring on Linux, the thread pool everywhere else.
+//! io_uring in a Linux build with the `uring` feature, the thread pool everywhere else.
 //!
 //! src/io/AGENTS.md
 //! docs/io.md
@@ -11,7 +11,7 @@ use crate::io::completion;
 use crate::io::pending::{OpKind, PendingOp, PendingTable, Taken};
 use crate::io::pool::BufferPool;
 use crate::io::request::{
-    ConnectAddr, IoOp, IoRequest, PortOp, ProcessHandle, SpawnRequest, TaskFn,
+    Bound, ConnectAddr, IoOp, IoRequest, PortOp, ProcessHandle, SpawnRequest, TaskFn,
 };
 use crate::io::threadpool::{
     Bounds, CompletionHub, PoolCompletion, PoolOp, RawCompletion, StdinOpKind, StdinThread,
@@ -41,7 +41,7 @@ struct AsyncBackendInner {
     unicode_generation: crate::segment::Generation,
     fd_states: HashMap<PortKey, FdState>,
     /// The operations in flight, and which of them no fiber will receive a
-    /// result for. See src/io/AGENTS.md § "I/O Cancellation".
+    /// result for (src/io/AGENTS.md).
     pending: PendingTable,
     completions: VecDeque<Completion>,
     next_id: u64,
@@ -49,7 +49,7 @@ struct AsyncBackendInner {
     // the io_uring ring down (closing its fd, which makes the kernel cancel and
     // finish in-flight ops) before the pool frees is a second line of defence
     // behind `quiesce_pending`, so a kernel write can never land in a freed
-    // pool slot. See `Drop for AsyncBackend` and docs/io.md "Backend teardown".
+    // pool slot. See `Drop for AsyncBackend` and docs/io.md.
     platform: PlatformBackend,
     buffer_pool: BufferPool,
     stdin_thread: Option<StdinThread>,
@@ -76,8 +76,8 @@ struct AsyncBackendInner {
 pub(crate) enum PlatformBackend {
     #[cfg(target_os = "linux")]
     Uring(Box<io_uring::IoUring>),
-    /// The pool platform (macOS, or a Linux `no-uring` build). There is no
-    /// separate pool object — all pool work runs through the shared
+    /// The pool platform (macOS, or Linux without the `uring` feature). There is
+    /// no separate pool object — all pool work runs through the shared
     /// `CompletionHub`; this variant only marks which `wait()` path the
     /// scheduler takes.
     ThreadPool,
@@ -105,8 +105,9 @@ impl std::fmt::Debug for AsyncBackend {
 impl AsyncBackend {
     /// Create a new async backend.
     ///
-    /// On Linux it tries io_uring first and takes the thread pool if the ring
-    /// will not open. Every other platform takes the pool outright.
+    /// A Linux build with the `uring` feature tries io_uring first, and takes the
+    /// thread pool if the ring will not open. Every other build takes the pool
+    /// outright.
     ///
     /// This takes the process-default Unicode generation and the default worker
     /// keepalive. A backend serving a VM with a generation of its own, or a
@@ -157,7 +158,7 @@ impl AsyncBackend {
     /// A backend on the thread-pool platform, whatever this host would pick.
     ///
     /// The pool is what every non-Linux build runs, and what a Linux host runs
-    /// when io_uring will not open or the build has the `no-uring` feature. Its
+    /// when io_uring will not open or the build has no `uring` feature. Its
     /// wait path is not the ring's, so a property that holds on one is no
     /// evidence about the other. A test that built the host's default backend
     /// would reach the ring on a Linux desktop and the pool on another machine,
@@ -227,13 +228,14 @@ impl AsyncBackend {
         Ok(())
     }
 
-    /// The ring, unless the build asked for the pool or the ring will not open.
+    /// The ring, unless the build leaves out the `uring` feature or the ring will
+    /// not open.
     ///
-    /// `cfg!` rather than `#[cfg]`, so a `no-uring` build still compiles and
+    /// `cfg!` rather than `#[cfg]`, so a build without `uring` still compiles and
     /// lints the ring arm it never takes, and a default build the pool arm.
     #[cfg(target_os = "linux")]
     fn create_platform_backend() -> PlatformBackend {
-        if cfg!(feature = "no-uring") {
+        if !cfg!(feature = "uring") {
             return PlatformBackend::ThreadPool;
         }
         match io_uring::IoUring::new(256) {
@@ -250,11 +252,10 @@ impl AsyncBackend {
     /// Bring this backend to rest: drain every in-flight io_uring operation, and
     /// stop and wait for every pool operation that may address a region, so no
     /// kernel or worker writes into memory the heap frees; then let go of every
-    /// region it still
-    /// holds — its filed entries' operands, and what its unreaped completions
-    /// built. Idempotent once nothing is pending and nothing is queued. Called
-    /// from `Drop` and from `FiberHeap::quiesce_io_backends`; see docs/io.md
-    /// "Backend teardown" and docs/impl/io-inflight.md.
+    /// region it still holds — its filed entries' operands, and what its unreaped
+    /// completions built. Idempotent once nothing is pending and nothing is queued.
+    /// Called from `Drop` and from `FiberHeap::quiesce_io_backends`; see docs/io.md
+    /// and docs/impl/io-inflight.md.
     pub(crate) fn quiesce(&self) {
         if let Ok(mut inner) = self.inner.try_borrow_mut() {
             inner.quiesce_pending();
@@ -331,8 +332,8 @@ impl crate::io::IoBackend for AsyncBackend {
         self.poll()
     }
 
-    fn wait(&self, timeout_ms: i64) -> Result<Vec<Completion>, String> {
-        self.wait(timeout_ms)
+    fn wait(&self, timeout: Option<Duration>) -> Result<Vec<Completion>, String> {
+        self.wait(timeout)
     }
 
     fn workers(&self) -> usize {
@@ -407,7 +408,7 @@ impl AsyncBackendInner {
                 Some(buf_handle),
                 // The stdin worker owns its own blocking read; nothing here
                 // resubmits through the ring, so there is no link to re-arm.
-                None,
+                Bound::NONE,
             ),
             self.submitter,
         );

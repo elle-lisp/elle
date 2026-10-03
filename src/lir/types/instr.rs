@@ -3,7 +3,8 @@
 //!
 //! One enum names every operation the lowerer can emit and every backend must
 //! answer for; the walks over it live in `consts` and `region`. Rust cannot
-//! split an enum, so this file is past the reading budget and carries no stamp.
+//! split an enum, so this file is past the reading budget and is exempt from the
+//! audit queue by name (docs/impl/audit.md).
 
 use super::*;
 
@@ -31,7 +32,7 @@ pub enum LirInstr {
     /// `decref_point`, and every escape is tracked by normal RC. The whole
     /// structure shares the one `region` (an immutable aggregate). The `template`
     /// itself stays immutable compile-time data
-    /// (docs/impl/region/model.md § "Constants lower as ordinary allocations").
+    /// (docs/impl/region/model.md).
     MaterializeConst {
         dst: Reg,
         template: crate::value::ConstTemplate,
@@ -74,7 +75,7 @@ pub enum LirInstr {
     /// a compiled-body parameter (`self_tag_payload`, which its self-tail-call
     /// optimization also matches against), and the WASM backend reads from a
     /// reserved linear-memory self slot the host installs at each closure entry
-    /// (`src/wasm/emit.rs` `SELF_SLOT`). The value it yields is the closure itself,
+    /// (`src/wasm/emit/abi.rs` `SELF_SLOT`). The value it yields is the closure itself,
     /// so invoking it recurses correctly (`src/runtime/tests/selfrec.rs`).
     LoadSelf { dst: Reg },
 
@@ -107,8 +108,8 @@ pub enum LirInstr {
         /// The call's result register. A native callee that completes normally
         /// does NOT replace the frame (a native pushes no bytecode frame), so
         /// the compiler's own post-`TailCall` owned-arg releases must run before
-        /// the trailing `Return` — the Inc4 native-tail trick (src/vm/call.rs
-        /// `tail_call_inner`; docs/impl/region/rules.md Rule 8). The JIT binds `dst` to
+        /// the trailing `Return` (src/vm/call/inner/tail.rs `tail_call_inner`;
+        /// docs/impl/region/rules.md Rule 8). The JIT binds `dst` to
         /// the native's result on that completion path so it can keep
         /// translating those releases instead of returning at the call. The
         /// stack-based interpreter ignores `dst`: a normally-completing native
@@ -130,12 +131,11 @@ pub enum LirInstr {
         /// the decref the dead trailing block skipped. False for a program-root
         /// callee (a top-level `defn`, no per-call decref) or a native/collection
         /// callee (no frame replacement). See `TailCallInfo` and
-        /// `tests/elle/region-tailcall-closure-callee-leak.lisp`.
+        /// `tests/impl/region-tailcall-closure-callee-leak.lisp`.
         defer_callee_release: bool,
         /// The static slot of a **closure-cycle merged arena** this letrec body
         /// tail-calls a NON-member out of — set by `lower_call` from
-        /// `RegionInfo::cycle_tail_release` (docs/impl/region/letrec.md § The letrec
-        /// closure-cycle merge). The merged arena's binding-scope `DecrefRegion`
+        /// `RegionInfo::cycle_tail_release` (docs/impl/region/letrec.md). The merged arena's binding-scope `DecrefRegion`
         /// is dead past this frame-replacing `TailCall`, so when the callee turns
         /// out to be a **closure** at runtime (a redefined operator, a foreign
         /// fn) the new activation resolves this slot through its region map and
@@ -160,8 +160,7 @@ pub enum LirInstr {
         /// replaced by a native — the fall-through block's own
         /// `DecrefValueRegion`. A native that leaves by a SIGNAL reaches
         /// neither, so the runtime consumes it there instead
-        /// (docs/impl/region/mechanism.md § "What the fall-through owes, a
-        /// signal exit owes too"). Empty for a call with no borrowed argument,
+        /// (docs/impl/region/signalexit.md). Empty for a call with no borrowed argument,
         /// which is the overwhelming majority.
         borrowed_arg_slots: Vec<u16>,
     },
@@ -313,8 +312,7 @@ pub enum LirInstr {
     /// the runtime takes it to reclaim the array once the callee holds its own
     /// reference to every argument. The array is the calling convention's own —
     /// no binding of the program names it, so no emitted release can
-    /// (docs/impl/region/mechanism.md § "A spliced call's arguments come out of
-    /// an array the convention owns").
+    /// (docs/impl/region/mechanism.md).
     CallArrayMut {
         dst: Reg,
         func: Reg,
@@ -346,7 +344,7 @@ pub enum LirInstr {
     /// `DecrefValueRegion`: a slot is usable only when the lowerer can name the
     /// region statically (the allocation is local to this function), which is
     /// exactly the precondition compile-time region coalescing harvests
-    /// (docs/impl/region/mechanism.md § "Compile-time region selection (coalescing)").
+    /// (docs/impl/region/mechanism.md).
     /// It touches no operand stack.
     IncrefRegion { region_id: StaticRegion },
 
@@ -402,18 +400,18 @@ pub enum LirInstr {
     /// region is a known slot, it substitutes the slot-resolved `IncrefRegion`
     /// for this value-resolved mint (one fewer runtime deref, stack-neutral);
     /// the substitution is guarded by `AssertRegionMatches`
-    /// (docs/impl/region/mechanism.md § "Compile-time region selection (coalescing)").
+    /// (docs/impl/region/mechanism.md).
     IncrefValueRegion { src: Reg },
 
     /// Link the region of `child` as an **Owned** member of the region of
     /// `parent`'s subtree — the runtime `AdoptRegion` of the ownership forest
-    /// (docs/impl/region/ownership.md § "Adoption and subtree drop"). Value-resolved,
+    /// (docs/impl/region/ownership.md). Value-resolved,
     /// like `IncrefValueRegion`/`DecrefValueRegion`: the handler reads both
     /// values, resolves their *runtime* regions (`result_region_of`), and calls
     /// `RegionStore::adopt_region`, which freezes the child's RC. No operand
     /// region slot — the regions an Owned subtree links are runtime facts
     /// (call-results / cross-activation allocations that can never be a static
-    /// slot; a tight static case MERGEs instead, § Merging). The handler pops
+    /// slot; a tight static case MERGEs instead, docs/impl/region/merging.md). The handler pops
     /// both values (loaded from their binding slots by the lowerer purely to
     /// drive the adopt).
     ///
@@ -421,8 +419,8 @@ pub enum LirInstr {
     /// (`handle_adopt_region`) and the JIT (`elle_jit_adopt_region`, a
     /// line-for-line mirror), so the same program adopts identically on either
     /// tier; on WASM the op is a structural no-op and on MLIR a region-op-carrying
-    /// function is GPU-ineligible, so prompt reclamation on those tiers awaits their
-    /// structural-arena handling (step 5).
+    /// function is GPU-ineligible, so neither tier reclaims an adopted region
+    /// promptly.
     AdoptRegion { parent: Reg, child: Reg },
 
     /// Link the region of `child` as an **Owned** member of the region of
@@ -431,7 +429,7 @@ pub enum LirInstr {
     /// it does **not** see through a `CaptureCell` wrapper, so it adopts the CELL's
     /// **own** region (the capture-cell↔closure containment the ownership forest
     /// needs to reclaim a local recursive/letrec closure clique as a unit —
-    /// docs/impl/region/adopt.md § "The capture adopt"). `AdoptRegion` would unwrap a
+    /// docs/impl/region/adopt.md). `AdoptRegion` would unwrap a
     /// cell operand to its content (a self-edge no-op for `cell ⊇ content`, and the
     /// content — skipping the cell — for `closure ⊇ cell`), so a cell's own region is
     /// otherwise unreachable by any ownership cut (only `DecrefCellRegion` names it).
@@ -462,14 +460,12 @@ pub enum LirInstr {
     ///
     /// Emitted by the ownership forest. Realized on the interpreter
     /// (`handle_free_region_group`) and the JIT (`elle_jit_free_region_group`),
-    /// like `AdoptRegion`; a structural no-op on WASM and GPU-ineligible on MLIR
-    /// (step 5).
+    /// like `AdoptRegion`; a structural no-op on WASM and GPU-ineligible on MLIR.
     FreeRegionGroup { members: Vec<Reg> },
 
     /// Adopt the region of `child` as an **Owned** member of the CURRENT
     /// ACTIVATION's owner node — the pages-less forest root realizing
-    /// owner = activation (docs/impl/region/owner.md § "Owner nodes — an
-    /// activation as a forest root"). Value-resolved like `AdoptRegion`
+    /// owner = activation (docs/impl/region/owner.md). Value-resolved like `AdoptRegion`
     /// (`result_region_of` unwraps a capture cell) but carrying NO parent
     /// operand and NO static slot: the parent is the executing activation's
     /// node, minted lazily at the first adopt and freed implicitly at the
@@ -488,7 +484,7 @@ pub enum LirInstr {
     /// summarized producer's consumer sites — `RegionInfo::transfer_adopt_regions`,
     /// where this replaces the result's `DecrefValueRegion`). The handlers are
     /// idempotent on an already-Owned child (a re-delivered region keeps its
-    /// first owner — docs/impl/region/owner.md § "Owner nodes").
+    /// first owner — docs/impl/region/owner.md).
     AdoptIntoActivation { child: Reg },
 
     /// Debug-only equivalence oracle for compile-time region coalescing: assert
@@ -515,8 +511,7 @@ pub enum LirInstr {
     /// release bytecode never contains it). The JIT and WASM tiers translate it
     /// to nothing; the GPU (MLIR/SPIR-V) tiers exclude any function carrying it
     /// via the `is_gpu_instruction` whitelist. JIT/WASM coalesced sites are
-    /// instead covered by the runner's cross-tier divergence detection and the
-    /// escape golden. It renders into no `[region_instrs]` golden line — it is
+    /// covered by the escape golden (`tests/impl/escape-golden.lisp`). It renders into no `[region_instrs]` golden line — it is
     /// scaffolding, not part of the semantic RC stream.
     AssertRegionMatches { region_id: StaticRegion, src: Reg },
 

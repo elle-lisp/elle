@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-30
 //! Fixtures the async-backend tests share: sockets a peer never answers,
 //! scratch paths, and the assertion that a cancelled operation retires.
 //!
@@ -13,6 +13,12 @@ use std::os::unix::io::RawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// One pass of a reaping loop: short, so the loop checks its condition often.
+const TICK: Option<Duration> = Some(Duration::from_millis(50));
+
+/// How long a test waits for an operation it expects to finish.
+const PATIENCE: Option<Duration> = Some(Duration::from_secs(5));
 
 /// A TCP listener socket for the accept tests.
 ///
@@ -142,7 +148,7 @@ fn assert_cancel_retires(backend: &AsyncBackend, id: SubmissionId, what: &str) {
     // that this terminates: an operation left in `pending` with no worker out
     // would leave `wait` returning nothing for as long as it is asked.
     for _ in 0..40 {
-        Completion::discard_all(backend.wait(50).unwrap());
+        Completion::discard_all(backend.wait(TICK).unwrap());
         if !backend.has_pending() && backend.workers() == 0 {
             break;
         }
@@ -247,6 +253,7 @@ fn fill_tcp_backlog(port: u16) -> Vec<libc::c_int> {
     }
     queued
 }
+
 // ── Descriptor helpers, shared by park.rs, gone.rs, descriptor.rs, bytes.rs ──
 
 /// A connected stream pair. The returned descriptors are the test's to close;

@@ -1,3 +1,8 @@
+// audited: 2026-09-30
+//! A pool worker's wait for a child: its exit code, its cancellation, and the status a reap keeps.
+//!
+//! src/io/AGENTS.md
+
 use super::super::*;
 use crate::io::request::{zombie_child, ExitRecord};
 
@@ -19,7 +24,7 @@ fn test_threadpool_process_wait_success() {
     assert_eq!(completions.len(), 1);
     assert_eq!(completions[0].id, 1);
     // ProcessWait encodes the exit code in data (LE i32), not result_code.
-    assert_eq!(completions[0].result_code, 0, "waitpid should succeed");
+    assert_eq!(completions[0].result_code, 0, "the wait should succeed");
     let exit_code = i32::from_le_bytes(completions[0].data[..4].try_into().unwrap());
     assert_eq!(exit_code, 0, "expected exit code 0 from `true`");
     // Reap from std::process::Child to avoid zombie
@@ -44,8 +49,8 @@ fn test_threadpool_process_wait_failure() {
     assert_eq!(completions.len(), 1);
     assert_eq!(completions[0].id, 2);
     // ProcessWait encodes the exit code in data (LE i32), not result_code.
-    // result_code=0 means waitpid succeeded; the process exit code is in data.
-    assert_eq!(completions[0].result_code, 0, "waitpid should succeed");
+    // result_code=0 means the wait succeeded; the process exit code is in data.
+    assert_eq!(completions[0].result_code, 0, "the wait should succeed");
     let exit_code = i32::from_le_bytes(completions[0].data[..4].try_into().unwrap());
     assert_ne!(exit_code, 0, "expected non-zero exit code from `false`");
     let _ = child.wait();
@@ -54,9 +59,10 @@ fn test_threadpool_process_wait_failure() {
 /// A wait on a child that has not exited must end when the operation is
 /// stopped, rather than when the child eventually exits.
 ///
-/// `waitpid(pid, .., 0)` holds the worker for the child's whole life, where
-/// neither `io/cancel` nor a deadline can reach it. `sleep 30` outlives every
-/// bound here, so a wait that ends promptly ended because it was stopped.
+/// A blocking `wait4(pid, .., 0, ..)` holds the worker for the child's whole
+/// life, where neither `io/cancel` nor a deadline can reach it. `sleep 30`
+/// outlives every bound here, so a wait that ends promptly ended because it
+/// was stopped.
 #[test]
 fn a_stopped_process_wait_ends_rather_than_waiting_for_the_child() {
     use std::time::{Duration, Instant};
@@ -71,7 +77,7 @@ fn a_stopped_process_wait_ends_rather_than_waiting_for_the_child() {
     let id = SubmissionId::from_raw(3);
     // No deadline, exactly as `submit_process_wait` builds it: the stop pipe is
     // the whole bound.
-    let bounds = pool.bounds(id, None);
+    let bounds = pool.bounds(id, crate::io::request::Bound::NONE);
     pool.submit(
         id,
         PoolOp::ProcessWait {
@@ -125,7 +131,7 @@ fn a_process_wait_reports_a_short_lived_child_without_delay() {
 
     let started = Instant::now();
     let id = SubmissionId::from_raw(4);
-    let bounds = pool.bounds(id, None);
+    let bounds = pool.bounds(id, crate::io::request::Bound::NONE);
     pool.submit(
         id,
         PoolOp::ProcessWait {
@@ -138,7 +144,7 @@ fn a_process_wait_reports_a_short_lived_child_without_delay() {
 
     let completions = pool.wait_pool(Some(5000)).unwrap();
     assert_eq!(completions.len(), 1);
-    assert_eq!(completions[0].result_code, 0, "waitpid should succeed");
+    assert_eq!(completions[0].result_code, 0, "the wait should succeed");
     let exit_code = i32::from_le_bytes(completions[0].data[..4].try_into().unwrap());
     assert_eq!(exit_code, 0);
     assert!(
@@ -154,7 +160,7 @@ fn a_process_wait_reports_a_short_lived_child_without_delay() {
 /// A wait that is stopped after it has already reaped the child keeps the
 /// status the reap took.
 ///
-/// The trap: `waitpid` CONSUMES what it reports. The worker asks the kernel
+/// The trap: a reap CONSUMES what it reports. The worker asks the kernel
 /// before it looks at the stop pipe, so a stop written while the child is
 /// reapable meets a worker that has already taken the status — and the
 /// completion carrying it is then discarded, because a cancelled submission
@@ -177,7 +183,7 @@ fn a_stopped_wait_that_reaped_the_child_keeps_its_status() {
     let exit = ExitRecord::new();
 
     let id = SubmissionId::from_raw(5);
-    let bounds = pool.bounds(id, None);
+    let bounds = pool.bounds(id, crate::io::request::Bound::NONE);
     // The stop is in the pipe before the worker exists, which is the far side
     // of the window the wait's pace can only narrow.
     pool.stop(id);
@@ -210,9 +216,9 @@ fn a_stopped_wait_that_reaped_the_child_keeps_its_status() {
 /// A second wait on a child somebody else reaped answers from the record
 /// rather than reporting `ECHILD`.
 ///
-/// The trap: two waits on one child is legal, and the loser's `waitpid` sees a
+/// The trap: two waits on one child is legal, and the loser's `wait4` sees a
 /// child that is gone. Reading the record after the syscall would not settle
-/// it — the winner writes the record after its own `waitpid` returns, so the
+/// it — the winner writes the record after its own `wait4` returns, so the
 /// loser can look in the gap and find nothing. The reap runs under the record's
 /// lock so there is no gap to look in.
 #[test]
@@ -249,7 +255,7 @@ fn a_wait_on_an_already_reaped_child_answers_from_the_record() {
     assert_eq!(completions.len(), 1);
     assert_eq!(
         completions[0].result_code, 0,
-        "a status this process is holding is an answer, not a failed waitpid",
+        "a status this process is holding is an answer, not a failed wait4",
     );
     let code = i32::from_le_bytes(completions[0].data[..4].try_into().unwrap());
     assert_eq!(code, 1, "both waits report the status `false` exited with");

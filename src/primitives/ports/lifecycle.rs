@@ -1,3 +1,9 @@
+// audited: 2026-09-30
+//! The port primitives that open and close a port, and the stdio ports and the predicates on them.
+//!
+//! docs/io.md
+//! docs/io/timeout.md
+
 use super::*;
 
 /// Map an Elle mode keyword name to POSIX open(2) flags and direction.
@@ -27,7 +33,7 @@ fn mode_to_flags(mode: &str) -> Option<(i32, Direction)> {
 ///
 /// Shared implementation for `port/open` and `port/open-bytes`.
 /// Yields `SIG_IO` with an `IoRequest` containing `IoOp::Open`.
-/// Argument validation (path type, mode keyword, timeout) happens here before yielding.
+/// Argument validation (path type, mode keyword, bounds) happens here before yielding.
 fn open_file(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -84,8 +90,8 @@ fn open_file(
         }
     };
 
-    let timeout = match extract_keyword_timeout(args, 2, prim_name, ctx) {
-        Ok(t) => t,
+    let bound = match extract_bound(args, 2, prim_name, ctx) {
+        Ok(b) => b,
         Err(e) => return e,
     };
 
@@ -95,7 +101,7 @@ fn open_file(
     );
     (
         SIG_IO,
-        IoRequest::with_timeout(
+        IoRequest::bounded(
             ctx,
             IoOp::Open {
                 path,
@@ -105,12 +111,12 @@ fn open_file(
                 encoding,
             },
             port_val,
-            timeout,
+            bound,
         ),
     )
 }
 
-/// (port/open path mode) → port
+/// (port/open path mode [:timeout s] [:deadline t]) → port
 ///
 /// Open a file with text (UTF-8) encoding.
 pub(super) fn prim_port_open(
@@ -120,7 +126,7 @@ pub(super) fn prim_port_open(
     open_file(ctx, args, Encoding::Text, "port/open")
 }
 
-/// (port/open-bytes path mode) → port
+/// (port/open-bytes path mode [:timeout s] [:deadline t]) → port
 ///
 /// Open a file with binary encoding.
 pub(super) fn prim_port_open_bytes(

@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-30
 //! The thread-pool backend: the operations a worker runs, and the one channel
 //! every worker reports through.
 //!
@@ -8,7 +8,7 @@
 use crate::io::grapheme_count_in_valid_prefix;
 use crate::io::landing::{Landing, Payload};
 use crate::io::pending::OpKind;
-use crate::io::request::SocketOptions;
+use crate::io::request::{Bound, SocketOptions};
 use crate::io::SubmissionId;
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;

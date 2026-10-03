@@ -1,4 +1,8 @@
-//! List manipulation primitives
+// audited: 2026-09-29
+//! The sequence primitives: `first`, `second`, `rest`, `list`, `length`, `empty?`, `->array` and `->list`.
+//!
+//! docs/traits.md
+
 mod advanced;
 
 use crate::primitives::collection::{coll_empty, coll_len, coll_to_vec};
@@ -14,7 +18,7 @@ pub(crate) fn prim_first(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    // Syntax (existing behavior, preserved)
+    // A syntax list or array answers from its items.
     if let Some(syntax) = args[0].as_syntax() {
         if let SyntaxKind::List(items) | SyntaxKind::Array(items) = &syntax.kind {
             if items.is_empty() {
@@ -54,7 +58,7 @@ pub(crate) fn prim_rest(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    // Syntax (existing behavior, preserved)
+    // A syntax list or array answers from its items.
     if let Some(syntax) = args[0].as_syntax() {
         if let SyntaxKind::List(items) | SyntaxKind::Array(items) = &syntax.kind {
             let arena = ctx.syntax_arena();
@@ -162,7 +166,7 @@ primitive! {
     "first" => prim_first {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Get the first element of a sequence (list, array, string). Returns nil for empty.",
+        doc: "Get the first element of a sequence (list, array, string). Signals :argument-error when it is empty.",
         params: &["sequence"],
         category: "list",
         example: "(first (list 1 2 3))",
@@ -171,14 +175,14 @@ primitive! {
         // stored — the built-in method reads, and a user closure stores only
         // through the runtime-counted funnel. `Opaque` answers both, which
         // matters here on the ESCAPE side rather than the clique's: `Mixed` would
-        // seed arg0 on escape's store facet (docs/impl/region/effects.md
-        // § `Opaque`; tests/elle/region-sequence-read-effect.lisp).
+        // seed arg0 on escape's store facet (docs/impl/region/effects.md;
+        // tests/impl/region-sequence-read-effect.lisp).
         effect: RegionEffect::Opaque,
     }
     "second" => prim_second {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Get the second element of a sequence. Returns nil if fewer than 2 elements.",
+        doc: "Get the second element of a sequence. Signals :argument-error when it has fewer than 2 elements.",
         params: &["sequence"],
         category: "list",
         example: "(second (list 1 2 3))",
@@ -225,7 +229,7 @@ primitive! {
         example: "(empty? (list))",
         effect: RegionEffect::Immediate,
     }
-    // append, concat, reverse — now implemented in Elle (src/core.lisp)
+    // `append`, `concat` and `reverse` are Elle functions in src/core.lisp.
     "->array" => prim_to_array {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
@@ -239,7 +243,7 @@ primitive! {
         effect: RegionEffect::Opaque,
         // Always yields an immutable array (returns arg0 only when it is already
         // one, else builds `ctx.array`), so a binding from it is statically
-        // `:array` for typeof-dispatch pruning (typeinfer/prune.rs).
+        // `:array` for typeof-dispatch pruning (src/hir/typeinfer/prune.rs).
         ret: RetType::Array,
     }
     "->list" => prim_to_list {

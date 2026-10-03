@@ -1,4 +1,4 @@
-//! audited: 2026-09-20
+//! audited: 2026-09-30
 //! Completion processing for async I/O: one arm per operation shape, each
 //! answering with a value it was handed or one it builds.
 //!
@@ -7,7 +7,7 @@
 
 use crate::io::pending::PendingOp;
 use crate::io::pool::{BufferHandle, BufferPool};
-use crate::io::request::PortOp;
+use crate::io::request::{PortOp, Reap};
 use crate::io::types::{FdState, PortKey};
 use crate::io::{Completion, SubmissionId};
 use crate::port::{Encoding, Port, PortKind};
@@ -37,6 +37,22 @@ fn set_tcp_nodelay(fd: &OwnedFd) {
 /// Convert an errno to a human-readable message via strerror.
 fn errno_message(errno: i32) -> String {
     std::io::Error::from_raw_os_error(errno).to_string()
+}
+
+/// A process wait whose `syscall` failed with `errno`.
+fn wait_failed(
+    id: SubmissionId,
+    birth: crate::io::Birthplace,
+    syscall: &str,
+    errno: i32,
+) -> Completion {
+    let msg = format!(
+        "subprocess/wait: {} failed: errno {} ({})",
+        syscall,
+        errno,
+        errno_message(errno)
+    );
+    Completion::failed(id, birth, "exec-error", msg)
 }
 
 /// True when this errno says the caller's `:timeout` elapsed rather than the
@@ -80,6 +96,12 @@ pub(super) fn process_raw_completion(
         PendingOp::ProcessWait { siginfo, exit, .. } => {
             // buffer_pool.release is already called at the top of process_raw_completion.
 
+            // The ring's `siginfo_t` is reclaimed here, once, whatever the
+            // answer: this arm is the single exit point for a cooked wait.
+            // SAFETY: allocated by `Box::into_raw` in submit_process_wait, and
+            // the CQE that brought us here fires once per SQE.
+            let filled = (!siginfo.is_null()).then(|| unsafe { Box::from_raw(*siginfo) });
+
             if result_code < 0 {
                 // A wait that finds no child answers from the record when this
                 // process is holding the status: two waits on one child are
@@ -87,61 +109,53 @@ pub(super) fn process_raw_completion(
                 // (src/io/AGENTS.md § "A reap is never wasted").
                 if -result_code == libc::ECHILD {
                     if let Some(code) = exit.status() {
-                        if !siginfo.is_null() {
-                            // SAFETY: as below — allocated at submit, reclaimed
-                            // once, and this arm is the single exit point.
-                            unsafe { drop(Box::from_raw(*siginfo)) };
-                        }
                         return Completion::ok(id, birth, Value::int(code as i64));
                     }
                 }
-                // Which syscall actually ran is what the `siginfo` allocation
-                // says: the kernel fills one for `IORING_OP_WAITID`, and the
-                // pool worker — which calls `waitpid(2)` itself — leaves it
-                // null. Naming the other one sends a reader looking for a call
-                // this platform never makes.
-                let syscall = if siginfo.is_null() {
-                    "waitpid"
-                } else {
-                    "waitid"
-                };
-                // On the uring path, reclaim siginfo before returning.
-                if !siginfo.is_null() {
-                    unsafe { drop(Box::from_raw(*siginfo)) };
-                }
-                let errno = -result_code;
-                let msg = format!(
-                    "subprocess/wait: {} failed: errno {} ({})",
-                    syscall,
-                    errno,
-                    errno_message(errno)
-                );
-                return Completion::failed(id, birth, "exec-error", msg);
+                // Name the call that failed: the ring's `IORING_OP_WAITID`, or
+                // the `wait4(2)` the pool worker makes itself. Naming the other
+                // one sends a reader looking for a call this platform never
+                // makes.
+                let syscall = if filled.is_some() { "waitid" } else { "wait4" };
+                return wait_failed(id, birth, syscall, -result_code);
             }
 
-            let exit_code: i32 = if siginfo.is_null() {
-                // Thread pool path: exit code is encoded as 4-byte LE int in
-                // data. The worker recorded it as it reaped, so this is a read
-                // of what the record already holds.
-                if data.len() >= 4 {
-                    i32::from_le_bytes(data[..4].try_into().unwrap())
-                } else {
-                    result_code
+            let exit_code: i32 = match filled {
+                // Thread pool path: the worker reaped through the record and
+                // sends the code as a 4-byte LE int in data.
+                None => {
+                    if data.len() >= 4 {
+                        i32::from_le_bytes(data[..4].try_into().unwrap())
+                    } else {
+                        result_code
+                    }
                 }
-            } else {
-                // io_uring path: exit status is in siginfo_t filled by the kernel.
-                // Reclaim the siginfo_t allocation.
-                // SAFETY: `siginfo` was allocated via Box::into_raw in submit_process_wait.
-                // This completion arm is the single exit point — the CQE fires exactly once
-                // per SQE. `result_code >= 0` is the kernel saying it filled the struct.
-                let si = unsafe { Box::from_raw(*siginfo) };
-                unsafe { crate::io::request::exit_code_from_siginfo(&si) }
+                // io_uring path: the ring asked with `WNOWAIT`, so the kernel
+                // said the child exited and left it to be reaped here, through
+                // the record, which keeps the usage with the status.
+                Some(si) => {
+                    // SAFETY: a non-negative result is the kernel saying it
+                    // filled this `siginfo_t`, and `si_pid` names the child.
+                    let pid = unsafe { si.si_pid() } as u32;
+                    match exit.reap(pid) {
+                        Reap::Exited(code) => code,
+                        Reap::Failed(errno) => return wait_failed(id, birth, "wait4", errno),
+                        // The kernel reported an exit, so the child is a
+                        // zombie until reaped; a running answer is a
+                        // contradiction, reported rather than hung on.
+                        Reap::Running => {
+                            return Completion::failed(
+                                id,
+                                birth,
+                                "exec-error",
+                                format!(
+                                    "subprocess/wait: waitid reported child {pid} exited, and wait4 finds it running"
+                                ),
+                            )
+                        }
+                    }
+                }
             };
-
-            // The child is reaped, so this status is the only one there will
-            // be. Keeping it is what lets a later wait on the same handle
-            // answer at all.
-            exit.keep(exit_code);
 
             Completion::ok(id, birth, Value::int(exit_code as i64))
         }

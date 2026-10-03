@@ -1,13 +1,13 @@
 # The mechanism
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 The RC-instruction machinery the [rules](rules.md) constrain: how each
 instruction names its region, and when a static slot may stand in. Two nets keep
 a mis-resolution from silently becoming a use-after-free.
 
 A region owns pages and carries one `u32` reference count. RC starts at **1** —
-the compiler's initial reference, i.e. the TT `letregion` owner. Cross-region
+the compiler's initial reference, that is, the TT `letregion` owner. Cross-region
 references raise it above 1.
 
 - `IncrefRegion` raises RC. The runtime also auto-increfs at two points: scanning
@@ -79,8 +79,8 @@ thing: an inline is a device for collecting edges, not a splice, and the two
 activations' namings must not mix.
 
 Pinned by `region::infer::tests::inline::*`, the leak face
-[region-inline-result-naming.lisp](../../../tests/elle/region-inline-result-naming.lisp), and the soundness complement
-[region-inline-result-naming-uaf.lisp](../../../tests/elle/region-inline-result-naming-uaf.lisp) — the caller holds exactly one release for the
+[region-inline-result-naming.lisp](../../../tests/impl/region-inline-result-naming.lisp), and the soundness complement
+[region-inline-result-naming-uaf.lisp](../../../tests/impl/region-inline-result-naming-uaf.lisp) — the caller holds exactly one release for the
 result, so everything the callee hands back that is not freshly its own must ride a
 counted edge.
 
@@ -127,9 +127,9 @@ argument as a moved operand instead strands one region per call for each source 
 splice read, and leaves the freed element still named by a source the frame never
 released.
 
-Pinned by [region-splice-args.lisp](../../../tests/elle/region-splice-args.lisp) — one bounded rate per callee kind and
+Pinned by [region-splice-args.lisp](../../../tests/impl/region-splice-args.lisp) — one bounded rate per callee kind and
 call position — and by the soundness complement
-[region-splice-args-uaf.lisp](../../../tests/elle/region-splice-args-uaf.lisp) under
+[region-splice-args-uaf.lisp](../../../tests/impl/region-splice-args-uaf.lisp) under
 `--trace=guardfree`, where the release the array's reclaim adds must not reach a value
 the callee still reads.
 
@@ -172,11 +172,11 @@ native whose in-body escape retain is already the caller's reference
 (`moves_out_release_sites`).
 
 The pinning tests are
-[region-native-tail-compound-leak.lisp](../../../tests/elle/region-native-tail-compound-leak.lisp) (the
+[region-native-tail-compound-leak.lisp](../../../tests/impl/region-native-tail-compound-leak.lisp) (the
 per-shape region-count deltas: bare, `let`-body, `begin`-nested, `if`-nested,
 over Fresh / Funnel / pass-through natives) and
-[region-native-tail-return-uaf.lisp](../../../tests/elle/region-native-tail-return-uaf.lisp) /
-[region-hof-tail-return-uaf.lisp](../../../tests/elle/region-hof-tail-return-uaf.lisp) (the soundness complement — the anonymous
+[region-native-tail-return-uaf.lisp](../../../tests/impl/region-native-tail-return-uaf.lisp) /
+[region-hof-tail-return-uaf.lisp](../../../tests/impl/region-hof-tail-return-uaf.lisp) (the soundness complement — the anonymous
 path must keep its retain).
 
 ## Where the rest of the argument lives
@@ -275,7 +275,9 @@ asserted*: the lowerer records each decision in the thread-local instrument
 coalesced mint's `IncrefRegion` is indistinguishable from a store-edge's, and an
 eliminated self-edge leaves no instruction), and
 [benches/regionrc.rs](../../../benches/regionrc.rs) reports the
-totals across the stdlib load and the [tests/elle](../../../tests/elle/) corpus.
+totals across the stdlib load and both Elle suites,
+[tests/lang](../../../tests/lang/overview.md) and
+[tests/impl](../../../tests/impl/overview.md).
 
 ## The dynamic boundary (stays value-resolved)
 
@@ -338,7 +340,7 @@ decref-dominance assertion (exactly one `DecrefRegion` per merged slot,
 `record_merged_slots`) together with `--trace=guardfree` over the builder corpus
 (an over-collapse surfaces as a UAF; a self-edge left in place grows the live
 region count). The pinning test is the canonical reference
-([region-merge-builder-loop.lisp](../../../tests/elle/region-merge-builder-loop.lisp)).
+([region-merge-builder-loop.lisp](../../../tests/impl/region-merge-builder-loop.lisp)).
 
 ## The equivalence oracle
 
@@ -355,7 +357,7 @@ trustworthy guardfree oracle, instead of a later heap corruption (the mirror of
 the native-effect declaration oracle, [effects.md](effects.md)). Release builds
 and the JIT/WASM tiers treat it as a no-op (the GPU tiers exclude any function
 carrying it via the `is_gpu_instruction` whitelist); their coalesced sites are
-covered instead by the runner's cross-tier divergence detection and the escape
-golden. The instruction renders into no `[region_instrs]` golden line — it is
+covered instead by the language suite each build runs, the rig profile that
+compiles every function on its first call, and the escape golden. The instruction renders into no `[region_instrs]` golden line — it is
 scaffolding, not part of the semantic RC stream.
 

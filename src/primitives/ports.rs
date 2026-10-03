@@ -1,10 +1,15 @@
-//! Port primitives — lifecycle management for file descriptors.
+// audited: 2026-09-30
+//! The port primitives: open, close, query and seek the port a file descriptor stands behind.
+//!
+//! docs/io.md
+//!
+//! tests/lang/prim-ports.lisp pins them.
 
 use crate::io::request::{IoOp, IoRequest};
 use crate::port::{Direction, Encoding, Port, PortKind};
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
-use crate::primitives::kwarg::extract_keyword_timeout;
+use crate::primitives::kwarg::{each_keyword, extract_bound, timeout_arg};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK};
 use crate::value::types::Arity;
@@ -41,10 +46,10 @@ primitive! {
     "port/open" => prim_port_open {
         signal: Signal::fs_io_yields_errors(),
         arity: Arity::AtLeast(2),
-        doc: "Open a file as a text (UTF-8) port. Accepts optional :timeout ms keyword.",
+        doc: "Open a file as a text (UTF-8) port. Takes :timeout in seconds and :deadline.",
         params: &["path", "mode"],
         category: "port",
-        example: "(port/open \"data.txt\" :read)\n(port/open \"fifo\" :read :timeout 5000)",
+        example: "(port/open \"data.txt\" :read)\n(port/open \"fifo\" :write :timeout 5)",
         // Fresh: the port is pre-minted in this call's ctx region (Port::new_unopened)
         // and the completion sets its fd in place, returning the same `*port_val`.
         effect: RegionEffect::Fresh,
@@ -52,10 +57,10 @@ primitive! {
     "port/open-bytes" => prim_port_open_bytes {
         signal: Signal::fs_io_yields_errors(),
         arity: Arity::AtLeast(2),
-        doc: "Open a file as a binary port. Accepts optional :timeout ms keyword.",
+        doc: "Open a file as a binary port. Takes :timeout in seconds and :deadline.",
         params: &["path", "mode"],
         category: "port",
-        example: "(port/open-bytes \"data.bin\" :read)\n(port/open-bytes \"fifo\" :read :timeout 5000)",
+        example: "(port/open-bytes \"data.bin\" :read)\n(port/open-bytes \"fifo\" :write :timeout 5)",
         // Fresh: same pre-minted-port-filled-in-place discipline as port/open.
         effect: RegionEffect::Fresh,
     }
@@ -92,10 +97,10 @@ primitive! {
     "port/set-options" => prim_port_set_options {
         signal: Signal::errors(),
         arity: Arity::AtLeast(1),
-        doc: "Set port options. Currently: :timeout ms (nil clears).",
+        doc: "Give the port a :timeout in seconds, which each call on it that names none takes. :timeout nil takes it away.",
         params: &["port"],
         category: "port",
-        example: "(port/set-options p :timeout 5000)",
+        example: "(port/set-options p :timeout 5)",
         effect: RegionEffect::Immediate,
     }
     "port/encoding" => prim_port_encoding {
@@ -141,5 +146,3 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
 }
-
-// Tests migrated to tests/elle/prim-ports.lisp

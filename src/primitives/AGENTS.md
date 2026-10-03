@@ -1,6 +1,6 @@
 # primitives
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-30 -->
 
 Built-in functions. Registered into the VM at startup.
 
@@ -221,7 +221,7 @@ named substitution modes: [format/](format/AGENTS.md).
 ## Subprocess Primitives
 
 `subprocess/exec`, `subprocess/wait`, `subprocess/kill`, `subprocess/pid`,
-`subprocess/exit` and `subprocess?`, with the `subprocess` value they all take
+`subprocess/exit`, `subprocess/rusage` and `subprocess?`, with the `subprocess` value they all take
 and the one boundary that checks it: [subprocess/](subprocess/AGENTS.md).
 
 **Pipe ports:** Ports a subprocess carries are created with `PortKind::Pipe` and `Encoding::Binary`. Subprocess output is an arbitrary byte stream; text decoding is the caller's responsibility via `(string bytes-val)` or `port/lines`.
@@ -232,40 +232,38 @@ and the one boundary that checks it: [subprocess/](subprocess/AGENTS.md).
 
 **TCP primitives:**
 - `tcp/listen addr port` — synchronous, returns listener port. Binds to address:port with `SO_REUSEADDR`, listens with backlog 128.
-- `tcp/accept listener` or `tcp/accept listener :timeout ms` — yields `SIG_IO`, accepts incoming connection, returns stream port.
-- `tcp/connect-ip ip port` or `tcp/connect-ip ip port :timeout ms` — yields `SIG_IO`, connects to a **parsed IP literal**:port, returns stream port. A hostname is rejected synchronously. `tcp/connect` (the hostname-accepting public API) is a stdlib wrapper that resolves via `sys/resolve` then calls this per address.
+- `tcp/accept listener` — yields `SIG_IO`, accepts incoming connection, returns stream port.
+- `tcp/connect-ip ip port` — yields `SIG_IO`, connects to a **parsed IP literal**:port, returns stream port. A hostname is rejected synchronously. `tcp/connect` (the hostname-accepting public API) is a stdlib wrapper that resolves via `sys/resolve` then calls this per address.
 - `tcp/shutdown port how` — yields `SIG_IO`, gracefully shuts down stream. `how` is keyword `:read`, `:write`, or `:read-write`.
 
 **UDP primitives:**
 - `udp/bind addr port` — synchronous, returns UDP socket port. Binds to address:port with `SO_REUSEADDR`.
-- `udp/send-to socket data addr port` or `udp/send-to socket data addr port :timeout ms` — yields `SIG_IO`, sends datagram, returns bytes sent.
-- `udp/recv-from socket count` or `udp/recv-from socket count :timeout ms` — yields `SIG_IO`, receives datagram, returns struct `{:data bytes :addr string :port int}`.
+- `udp/send-to socket data addr port` — yields `SIG_IO`, sends datagram, returns bytes sent.
+- `udp/recv-from socket count` — yields `SIG_IO`, receives datagram, returns struct `{:data bytes :addr string :port int}`.
 
 **Unix domain socket primitives:**
 - `unix/listen path` — synchronous, returns listener port. Creates Unix socket at path (or abstract socket if path starts with `@`). Unlinks existing file before bind.
-- `unix/accept listener` or `unix/accept listener :timeout ms` — yields `SIG_IO`, accepts incoming connection, returns stream port.
-- `unix/connect path` or `unix/connect path :timeout ms` — yields `SIG_IO`, connects to Unix socket at path, returns stream port.
+- `unix/accept listener` — yields `SIG_IO`, accepts incoming connection, returns stream port.
+- `unix/connect path` — yields `SIG_IO`, connects to Unix socket at path, returns stream port.
 - `unix/shutdown port how` — yields `SIG_IO`, gracefully shuts down stream. `how` is keyword `:read`, `:write`, or `:read-write`.
 
-**Timeout support:** All yielding network primitives accept optional `:timeout ms` keyword argument. Timeout is resolved at scheduler level: per-call timeout overrides port-level timeout (set via `port/set-options`).
+**Bounds:** every yielding network primitive takes `:timeout` and `:deadline`
+([I/O deadlines](../../docs/io/timeout.md)).
 
 ## Keyword Argument Helper
 
 **Location:** `src/primitives/kwarg.rs`
 
-**Function:** `extract_keyword_timeout(args: &[Value], start: usize, prim_name: &str) -> Result<Option<Duration>, (SignalBits, Value)>`
-
-Scans args starting at index `start` for keyword-value pairs. Currently recognizes `:timeout ms` where `ms` is a non-negative integer. Returns `Ok(None)` if `:timeout` is absent, `Ok(Some(duration))` if present, or `Err(...)` on bad keyword, missing value, or bad type.
-
-Used by network primitives and stream primitives to parse optional timeout arguments.
+The one parser of the bounds and the connect options, so every I/O primitive
+reads `:timeout` and `:deadline` alike.
 
 ## Port Options Primitive
 
 **Location:** `src/primitives/ports/query.rs`
 
-**Primitive:** `port/set-options port :timeout ms` (or `:timeout nil` to clear)
-
-Sets port-level options. Currently supports `:timeout ms` (non-negative integer in milliseconds, or nil to clear). Stored as `Cell<Option<u64>>` on Port struct. Unknown keywords signal error. Odd trailing args signal error.
+`port/set-options port :timeout s` gives the port a `:timeout` of its own, which
+every call on the port that names none takes; `:timeout nil` removes it
+([I/O deadlines](../../docs/io/timeout.md)).
 
 ## port/seek and port/tell Primitives
 
@@ -395,45 +393,28 @@ activation ends.
 
 ## Channel select wake protocol
 
-**Location:** `src/primitives/chan.rs` and `src/primitives/chan/prims.rs`, with the public wrapper in `stdlib.lisp`.
-
-`chan/select` cannot use crossbeam's blocking `Select::select_timeout`: that
-parks the OS thread the fiber scheduler runs on, starving any `ev/spawn`'d
-producer fiber that would have unblocked the select. Instead the chan
-primitives carry a per-channel waker layer on top of crossbeam:
-
-- Each channel's sender and receiver halves share an `Arc<WakeList>`
-  containing `(Mutex<Vec<RawFd>>, AtomicBool)`. The atomic is a fast-path
-  skip: if no fiber is selecting, `chan/send` does not even acquire the
-  mutex.
-- `chan/wait-ready` allocates a wake fd (`eventfd(2)` on Linux, `pipe2(2)`
-  on other Unix) and registers `poll_fd` in every candidate receiver's
-  `WakeList`. The fd is owned by a `ChanSelectGuard`; its `Drop`
-  deregisters, signals `wake_fd` (so any worker thread parked in
-  `poll(2)` returns before we close the fd), and closes the fd(s).
-- `chan/send` (and `chan/close{,recv}`), after a successful `try_send`,
-  loads the atomic; if non-zero, locks and `write(fd, &1u64)` to every
-  registered wake fd. Cross-thread sends from `sys/spawn` Just Work —
-  the write is thread-safe and the scheduler thread observes POLLIN via
-  the same `IORING_OP_POLL_ADD` (or thread-pool `poll(2)`) it uses for
-  `ev/poll-fd`.
+**Location:** [chan.rs](chan.rs), [chan/prims.rs](chan/prims.rs) and
+[chan/wake.rs](chan/wake.rs), with the public wrapper in [stdlib.lisp](../stdlib.lisp). The
+header of [chan/wake.rs](chan/wake.rs) says why a select parks on a wake fd
+rather than on crossbeam's blocking select. The doc comments on `WakeList` and
+`ChanSelectGuard` there say how each fd is registered, signalled and closed.
 
 Three primitives back the Lisp `chan/select`:
 
 - `chan/try-select rxs` — non-blocking `Select::try_select`. Returns
   `[i v]`, `[:empty]`, or `[:disconnected]`. Errors if any receiver was
   explicitly closed via `chan/close-recv`.
-- `chan/wait-ready rxs &opt timeout-ms` — yielding park. Allocates the
+- `chan/wait-ready rxs &named timeout deadline` — yielding park. Allocates the
   wake fd, registers, does a post-register `try_select` to close the
   cross-thread race between the wrapper's first `chan/try-select` and
   the register. Returns `[:ready i v]` (post-register fast hit, no
   yield), `[:disconnected]`, or returns `SIG_IO` carrying an
-  `IoOp::ChanSelectPark(ChanSelectGuardCell)`. The IoRequest's timeout
+  `IoOp::ChanSelectPark(ChanSelectGuardCell)`. The request's bound
   flows through to a linked `LinkTimeout` SQE on uring or to the
   thread-pool `poll(2)` timeout.
 - `chan/select` (Lisp wrapper in `stdlib.lisp`) — runs `chan/try-select`
-  for the fast path, then loops: compute the remaining deadline,
-  short-circuit if exhausted, call `chan/wait-ready`, match its result
+  for the fast path, then loops: answer `[:timeout]` once the clock has
+  reached the deadline, else call `chan/wait-ready` with it, match its result
   (`:ready` → return `[i v]`; `:disconnected` → return `[:disconnected]`;
   nil → `chan/try-select` and re-park on `:empty`).
 
@@ -445,16 +426,10 @@ which closes the fd and deregisters. No leak.
 `LinkTimeout` SQE for it, which is what carries `ev/poll-fd`'s timeout on
 uring.
 
-## Stream Primitive Timeout Support
+## Stream Primitive Bounds
 
 **Location:** `src/primitives/stream.rs`
 
-Every stream primitive takes an optional `:timeout ms` keyword argument:
-- `port/read-line port` or `port/read-line port :timeout ms`
-- `port/read port count` or `port/read port count :timeout ms`
-- `port/read-exact port count` or `port/read-exact port count :timeout ms`
-- `port/read-all port` or `port/read-all port :timeout ms`
-- `port/write port data` or `port/write port data :timeout ms`
-- `port/flush port` or `port/flush port :timeout ms`
-
-Each declares `AtLeast(N)` arity to admit the keyword arguments. Timeout is extracted via `extract_keyword_timeout` and passed to `IoRequest::with_timeout()`.
+Every stream primitive takes `:timeout` and `:deadline`
+([I/O deadlines](../../docs/io/timeout.md)), and declares `AtLeast(N)` arity to
+admit them.

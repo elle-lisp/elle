@@ -112,23 +112,29 @@ A generated file is exempt because nobody audits its content — its generator i
 the thing that gets audited. An `AGENTS.md` is exempt when it carries the
 marker [the generator](agents-index.md) writes, and queued when it does not.
 
-[The Makefile](../../Makefile) and [the standard library](../../src/stdlib.lisp)
-are exempt, and they are the only repository files exempted by name. Everything
-else in the queue is read whole by somebody: a document off an index, a source
-file off a call site. Nobody reads these two that way:
+[The Makefile](../../Makefile), [the standard library](../../src/stdlib.lisp)
+and [the LIR instruction enum](../../src/lir/types/instr.rs) are exempt, and
+they are the only repository files exempted by name. Everything else in the
+queue is read whole by somebody: a document off an index, a source file off a
+call site. Nobody reads these three that way:
 
 - `make help` is how a reader finds an action, and the `##` line beside a
   target is what they read.
 - `(doc name)` is how a reader finds a standard-library function, and the
   docstring is what they read.
+- A match arm or a grep is how a reader finds an LIR instruction, and that
+  variant's doc comment is what they read.
 
-A reading budget over hundreds of lines of recipe, or thousands of lines of
-definitions, measures a distance no reader travels.
+A reading budget over hundreds of lines of recipe, thousands of lines of
+definitions, or nearly ninety variants of one enum measures a distance no reader
+travels.
 
-Leaving either one queued also deadlocks it. The gate demands today's stamp on
-a staged file, and the policy forbids a stamp over a standing violation. Both
-files are past the 500-line cap. So every change to one of them fails the gate,
-and stamping it fails the budget check in `tests/integration/prose.rs` instead.
+Leaving any of them queued also deadlocks it. The gate demands today's stamp on
+a staged file, and the policy forbids a stamp over a standing violation. All
+three files are past the 500-line cap. So every change to one of them fails the
+gate, and stamping it fails the budget check in `tests/integration/prose.rs`
+instead. The enum cannot be split without nesting variants into a sub-enum,
+which rewrites every match over it ([src/lir/AGENTS.md](../../src/lir/AGENTS.md)).
 
 The exemption names the standard library's path, never its extension. Every
 other `.lisp` file stays queued: [the core](../../src/core.lisp), [the

@@ -1,14 +1,14 @@
-// audited: 2026-09-17
+// audited: 2026-09-30
 // A dashboard verdict is a row: what the measurement channel carries, what the
 // runner writes, and what a direct run still does not write.
 //
 // docs/test-store.md
 //
-// The counter-factual: the estimator printed every rate to stdout and asserted
-// on it, so a rate existed only as prose in a terminal. No query could ask what
-// it was three commits ago, and the coverage of a dashboard could be checked
-// against nothing. These read the rows that answer both.
+// The counter-factual: a rate printed only to stdout exists only as prose in a
+// terminal. No query can ask what it was three commits ago, and a dashboard's
+// coverage can be checked against nothing. These read the rows that answer both.
 
+use crate::common::query;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -23,7 +23,7 @@ fn repo_root() -> PathBuf {
 /// The miniature dashboard: one probe read on the object count and the region
 /// count, through the same estimator the leak dashboards use.
 fn dashboard() -> PathBuf {
-    repo_root().join("tests/elle/measure-channel.lisp")
+    repo_root().join("tests/impl/measure-channel.lisp")
 }
 
 /// Run the dashboard as an isolated child, which is what opens the channel.
@@ -38,16 +38,6 @@ fn isolate(db: &Path) -> std::process::Output {
         .env_remove("ELLE_TEST_MEASUREMENTS")
         .output()
         .expect("run elle test --isolate")
-}
-
-fn query(db: &Path, sql: &str) -> String {
-    let out = Command::new(elle_binary())
-        .args(["test", "--query", sql])
-        .arg("--db")
-        .arg(db)
-        .output()
-        .expect("query the session DB");
-    String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
 #[test]
@@ -140,8 +130,7 @@ fn the_summary_names_the_measurements() {
 
 /// The channel is a file the environment names, so a dashboard writes to it
 /// only when something opened it. Unset, the dashboard prints and records
-/// nothing — which is what keeps `elle tests/elle/oracle.lisp` reading as it
-/// always did.
+/// nothing, so a direct run of tests/impl/oracle.lisp only prints.
 #[test]
 fn the_channel_is_closed_unless_the_environment_opens_it() {
     let dir = crate::common::ScratchDir::new("measure-channel-env");
@@ -185,8 +174,8 @@ fn the_channel_is_closed_unless_the_environment_opens_it() {
         "and stdout still carries the same rendering"
     );
 
-    let written = std::fs::read_to_string(&sink)
-        .unwrap_or_else(|e| panic!("read {}: {e}", sink.display()));
+    let written =
+        std::fs::read_to_string(&sink).unwrap_or_else(|e| panic!("read {}: {e}", sink.display()));
     let lines: Vec<&str> = written.lines().filter(|l| !l.trim().is_empty()).collect();
     assert_eq!(
         lines.len(),

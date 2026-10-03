@@ -1,214 +1,116 @@
-# Elle Debugging Toolkit
+# Debugging and introspection
 
-## Contents
+<!-- audited: 2026-09-30 -->
 
-- [Overview](#overview)
-- [1. Introspection Primitives](#1-introspection-primitives)
-- [2. Time API](#2-time-api)
-- [3. Signal System](#3-signal-system)
+The primitives a program uses to print its values, inspect a closure, and time its own work.
 
-## Overview
+## Printing a value on its way through
 
-Elle provides a comprehensive debugging toolkit that lives *inside* the language.
-Debugging and benchmarking happen from Elle source — no recompilation, no
-throwaway instrumentation code.
+| Primitive | Does |
+|-----------|------|
+| `debug/print` | writes `[DEBUG] value` to stderr and answers the value |
+| `debug/trace` | writes `[TRACE] label: value` to stderr and answers the value; the label is a string or a symbol |
+| `debug/memory` | answers `(rss-bytes virtual-bytes)` for the process |
 
-## 1. Introspection Primitives
-
-These operate on **values**, not symbols. Pass a closure (or any value) and
-get information about it. All are `NativeFn`. Primitives that need VM access use the SIG_RESUME pattern.
-
-### 1.1 Compiler/runtime predicates
-
-| Primitive | Signature | Returns | Notes |
-|-----------|-----------|---------|-------|
-| `jit?` | `(jit? value)` | `true` or `false` | True if value is a closure with JIT-compiled native code |
-| `silent?` | `(silent? value)` | `true` or `false` | True if value is a closure that does not suspend (no yield/debug/polymorphic signal) |
-| `fiber?` | `(fiber? value)` | `true` or `false` | True if value is a fiber |
-| `mutates-params?` | `(mutates-params? value)` | `true` or `false` | True if value is a closure whose body mutates any of its own parameters (i.e., `capture_params_mask != 0`) |
-| `closure?` | `(closure? value)` | `true` or `false` | True if value is a closure (bytecode, not native/vm-aware) |
-
-Implementation: each is a simple predicate that examines the `Value` and,
-for closures, reads fields on the `Closure` struct.
-
-- `jit?` checks `closure.jit_code.is_some()`
-- `silent?` checks `!closure.signal.may_suspend()` (no yield/debug bits and propagates == 0)
-- `fiber?` checks `value.is_fiber()`
-- `mutates-params?` checks `closure.template.capture_params_mask != 0` (any capture-wrapped params)
-- `closure?` checks `value.as_closure().is_some()`
-- `global?` takes a symbol, always returns `false` (no runtime globals exist)
-
-Note: `capture_params_mask` tracks which *parameters* are mutated inside the
-closure body and need capture cell wrapping. It does **not** indicate whether
-the closure captures mutable bindings from an outer scope. Those are
-`CaptureCell` values in the closure's `env` vector — detecting them would
-require scanning `env`, which is a different (and more expensive) operation.
-
-### 1.2 Error signal tracking: `fn/errors?`
-
-| Primitive | Signature | Returns | Notes |
-|-----------|-----------|---------|-------|
-| `fn/errors?` | `(fn/errors? value)` | `true` or `false` | Returns `true` if the closure may signal an error, `false` if it is guaranteed not to. Returns `false` for non-closures. |
-
-This is a boolean query.
-
-### 1.3 Additional introspection
-
-| Primitive | Signature | Returns | Notes |
-|-----------|-----------|---------|-------|
-| `arity` | `(arity value)` | int, pair, or nil | For closures: exact arity as int, or `(min . max)` pair for range, or `(min . nil)` for variadic. Nil for non-closures. |
-| `captures` | `(captures value)` | int or nil | Number of captured variables, or nil for non-closures. |
-| `bytecode-size` | `(bytecode-size value)` | int or nil | Size of closure's bytecode in bytes. Nil for non-closures. |
-
-## 2. Time API
-
-Time values are plain floats (f64 seconds). No opaque types, no new heap
-variants. This means time values compose naturally with arithmetic: subtract
-two timestamps, multiply by 1000 for milliseconds, compare with `<`.
-
-Two namespaces separate concerns: `clock/` for point-in-time readings,
-`time/` for operations on durations and convenience wrappers.
-
-### 2.1 Clock primitives (Rust)
-
-| Primitive | Signature | Returns | Signal | Backing |
-|-----------|-----------|---------|--------|---------|
-| `clock/monotonic` | `(clock/monotonic)` | float | `Signal::silent()` | `std::time::Instant` relative to a process-global epoch |
-| `clock/realtime` | `(clock/realtime)` | float | `Signal::silent()` | `std::time::SystemTime::UNIX_EPOCH` |
-| `clock/cpu` | `(clock/cpu)` | float | `Signal::silent()` | `libc::clock_gettime(CLOCK_THREAD_CPUTIME_ID)` |
-
-`clock/monotonic` uses a `OnceLock<Instant>` initialized on first call.
-All readings are relative to this epoch, keeping values small and maximizing
-f64 precision for the deltas that matter.
-
-`clock/realtime` returns seconds since Unix epoch. Microsecond precision
-for decades — adequate for wall-clock timestamps.
-
-`clock/cpu` returns thread CPU time in seconds. This is a real syscall
-(not vDSO), so it's ~5x slower than `clock/monotonic` (~500ns vs ~80ns).
-Use it when you need to distinguish computation time from I/O wait.
-
-### 2.2 Time utilities (Elle)
-
-| Primitive | Signature | Returns | Signal | Implementation |
-|-----------|-----------|---------|--------|----------------|
-| `time/sleep` | `(time/sleep seconds)` | nil | `Signal::errors()` | `std::thread::sleep` (Rust primitive) |
-| `time/stopwatch` | `(time/stopwatch)` | fiber | yields | Elle: fiber over `clock/monotonic` |
-| `time/elapsed` | `(time/elapsed thunk)` | `(result seconds)` | polymorphic | Elle: wraps thunk with clock reads |
-
-`time/stopwatch` returns a fiber. Each `fiber/resume` yields the total
-seconds elapsed since the stopwatch was created:
+Each print answers its argument, so it can wrap an expression without
+changing what the program computes.
 
 ```lisp
-(var sw (time/stopwatch))
-(fiber/resume sw nil)   # => 0.000234
-# ... do work ...
-(fiber/resume sw nil)   # => 1.532100  (cumulative, not delta)
+(assert (= (debug/print (+ 1 2)) 3) "debug/print answers its argument")
+(assert (= (debug/trace "sum" (+ 1 2)) 3) "debug/trace answers its value")
 ```
 
-Implementation (in `src/primitives/time_def.rs`):
+## Inspecting a closure
+
+Each primitive below takes any value. A value that is not a closure answers
+`false`, or `nil` where the answer is a number. A native primitive such as
+`clock/monotonic` is not a closure.
+
+| Primitive | Answers |
+|-----------|---------|
+| `closure?` | `true` for a closure |
+| `fn/errors?` | `true` when the closure's inferred signal carries `:error` |
+| `silent?` | `true` when the inferred signal has no bits and is not polymorphic; `:error` alone makes it `false` |
+| `jit?` | `true` when the JIT has compiled the closure; always `false` in a build without the `jit` feature |
+| `fn/mutates-params?` | `true` when the body assigns one of its own parameters |
+| `fn/arity` | an int for an exact arity, `(min . max)` with `&opt`, `(min . nil)` with a rest parameter |
+| `fn/captures` | the number of values in the closure's environment |
+| `fn/bytecode-size` | the length of the closure's bytecode in bytes |
+| `call-count` | the calls the VM has counted for the closure |
+| `fiber?` | `true` for a fiber |
+| `global?` | always `false`: a program has no runtime globals |
+
+`mutates-params?`, `arity`, `captures` and `bytecode-size` are aliases of the
+`fn/` names. `(doc name)` gives each one's docstring.
 
 ```lisp
-# time/stopwatch is defined in stdlib as:
-(def my-stopwatch (fn ()
-  (fiber/new (fn ()
-    (let [start (clock/monotonic)]
-      (while true
-        (yield (- (clock/monotonic) start)))))
-    |:yield|)))
+(defn add [a b]
+  (+ a b))
+(assert (closure? add) "a defn is a closure")
+(assert (not (closure? clock/monotonic)) "a native primitive is not")
+(assert (fn/errors? add) "+ may signal :error, so add may too")
+(assert (not (silent? add)) "and an :error signal is enough to not be silent")
+(assert (silent? (fn [x] x)) "the identity has no signal at all")
+(defn reset [@x]
+  (assign x 0)
+  x)
+(assert (fn/mutates-params? reset) "reset assigns its own parameter")
+(assert (= (fn/arity add) 2))
+(assert (= (fn/arity (fn [a &opt b] a)) (pair 1 2)))
+(assert (= (fn/arity (fn [a & more] a)) (pair 1 nil)))
+(assert (nil? (fn/arity clock/monotonic)) "a native primitive has no answer")
+(def sum-of-two
+  (let [a 1
+        b 2]
+    (fn [] (+ a b))))
+(assert (= (fn/captures sum-of-two) 2) "sum-of-two captures a and b")
+(assert (> (fn/bytecode-size add) 0))
 ```
 
-`time/elapsed` takes a thunk and returns a pair of (result, elapsed-seconds):
+`fn/mutates-params?` reads the parameters the body assigns, which the compiler
+wraps in capture cells. It says nothing about an outer binding the closure
+captures and assigns.
+
+The compiler infers the signal that `fn/errors?` and `silent?` read.
+[Signal inference](../signals/inference.md) says how.
+
+## Timing
+
+A time value is a float in seconds. A float composes with arithmetic: `(- end
+start)` is a duration, and `(< a b)` orders two readings. An f64 holds a
+duration to the nanosecond for about 52 days, and a wall-clock reading to
+better than a microsecond.
+
+| Primitive | Answers |
+|-----------|---------|
+| `clock/monotonic` | seconds since this process first read the clock; it never goes back |
+| `clock/realtime` | seconds since the Unix epoch, by the wall clock, which can jump |
+| `clock/cpu` | the CPU time the calling thread has used, in seconds |
+| `time/elapsed` | `(result seconds)` for a thunk it calls |
+| `time/stopwatch` | a fiber whose every resume yields the seconds since the stopwatch was made |
+| `time/sleep` | `nil`, after blocking the thread for a number of seconds |
+
+A `:deadline` is a `clock/monotonic` reading ([I/O deadlines](../io/timeout.md)).
+
+Use `clock/cpu` to tell computation from waiting. On Linux it is a system call
+rather than a vDSO read, so each call costs several hundred nanoseconds more
+than `clock/monotonic`.
+
+`time/sleep` stops every fiber on the thread until it returns. `ev/sleep`
+yields to the scheduler instead ([concurrency](../concurrency.md)).
 
 ```lisp
-(var result (time/elapsed (fn () (+ 1 2))))
-(first result)          # => computation result
-(first (rest result))   # => elapsed seconds
+(let [(result seconds) (time/elapsed (fn [] (+ 1 2)))]
+  (assert (= result 3) "time/elapsed answers the thunk's result")
+  (assert (>= seconds 0) "and the seconds it took"))
+
+(def stopwatch (time/stopwatch))
+(def first-reading (fiber/resume stopwatch))
+(time/sleep 0.01)
+(def second-reading (fiber/resume stopwatch))
+(assert (>= second-reading 0.01) "a stopwatch reading is cumulative")
+(assert (> second-reading first-reading))
 ```
 
-For hot-path timing where fiber overhead matters, subtract two
-`clock/monotonic` readings directly.
-
-### 2.3 Why floats, not opaque types
-
-An earlier design proposed `HeapObject::Instant` and `HeapObject::Duration`
-variants. The float approach is simpler and better:
-
-- **No new heap types.** No changes to `HeapObject`, `HeapTag`, constructors,
-  accessors, display, `SendValue`, `PartialEq`, or `Debug`.
-
-- **Composable with arithmetic.** `(- end start)` gives elapsed seconds.
-  `(* elapsed 1000)` gives milliseconds. `(< a b)` compares timestamps.
-
-- **Adequate precision.** f64 gives ~nanosecond precision for durations up
-  to a few hours (stopwatch use case), and ~microsecond precision for epoch
-  timestamps spanning decades.
-
-- **Precedent.** Lua's `os.clock()`, Common Lisp's `get-internal-real-time`,
-  JavaScript's `performance.now()` — all return numbers, not opaque types.
-
-## 3. Signal System
-
-### 3.1 Design
-
-The `Signal` struct tracks which signals a function may emit via a `bits`
-field (bitmask of `SIG_ERROR`, `SIG_YIELD`, `SIG_DEBUG`, `SIG_FFI`) and
-which parameter indices propagate their callee's signals via a `propagates`
-bitmask. This handles error, yield, debug, and FFI signals uniformly.
-
-```rust
-pub struct Signal {
-    pub bits: SignalBits,    // which signals this function itself might emit
-    pub propagates: u32,     // bitmask of parameter indices whose signals flow through
-}
-```
-
-Constructors: `Signal::silent()`, `Signal::errors()`, `Signal::yields()`,
-`Signal::yields_errors()`, `Signal::ffi()`, `Signal::polymorphic(n)`,
-`Signal::polymorphic_errors(n)`.
-
-Predicates: `may_error()`, `may_yield()`, `may_suspend()`, `may_ffi()`,
-`is_polymorphic()`.
-
-### 3.2 Inference rules
-
-| Form | Signals |
-|------|--------|
-| `(error val)` | `true` — always signals `:error` |
-| `(emit bits val)` | `true` — always |
-| `(try body (catch e ...))` | `false` — catches all `:error` signals |
-| `(begin a b)` | a.signals ∨ b.signals |
-| `(if c t e)` | c.signals ∨ t.signals ∨ e.signals |
-| `(f args...)` | args.signals ∨ f.may_error |
-| literal | `false` |
-| primitive call | Uses the primitive's registered `may_error` flag (see §5) |
-
-### 3.3 Key principle: conservative and correct
-
-Every `error` or `emit` call with the `:error` bit is conservatively marked
-as "signals." The analyzer doesn't peek into the argument.
-
-`try`/`catch` clears the error signal because it catches `:error` unconditionally.
-
-This is genuinely useful: it tells you which functions are **guaranteed** to
-never signal an error. The set of non-error-signalling functions is exactly
-the set where every code path avoids `error`/`emit` and calls only
-non-error-signalling functions.
-
-### 3.4 Propagation during fixpoint iteration
-
-Error signals propagate exactly like yield signals during the cross-form
-fixpoint iteration in `compile_all`. Self-recursive functions start
-with `may_error = false` (optimistic) and iterate until stable.
-
-### 3.5 Runtime query
-
-`(fn/errors? value)` reads `closure.signal.may_error()` (checks `SIG_ERROR`
-in the signal's bits). Returns `true` if the closure may signal an error,
-`false` otherwise.
-
-## 4. Docgen Site
-
-`demos/docgen/generate.lisp` generates the documentation site. CI builds it as part of the docs job. Because it's written in Elle, any change to language semantics can break it.
-
-When the docs CI job fails, check `demos/docgen/generate.lisp` and `demos/docgen/lib/`. Common failure: using `nil?` instead of `empty?` for list termination (see nil vs empty list distinction in root AGENTS.md and `docs/oddities.md`).
+For timing a hot path, subtract two `clock/monotonic` readings. A stopwatch
+resumes a fiber on every reading.

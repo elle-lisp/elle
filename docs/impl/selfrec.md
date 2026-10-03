@@ -1,6 +1,6 @@
 # Self-recursion: the executing-closure mechanism (no cell)
 
-<!-- audited: 2026-09-19 -->
+<!-- audited: 2026-09-28 -->
 
 How a self-recursive closure refers to itself without a forward cell, and is reclaimed by ordinary region RC.
 
@@ -17,16 +17,16 @@ binding is **captured before its initializer runs**: the lambda is built before 
 binding's slot holds a value. The question is how that self-reference is resolved.
 
 The mechanism is: a same-binding self-reference is a first-class analyzer fact,
-`CaptureKind::Recursive` (`hir/binding.rs`), classified when a binding's initializer
-lambda references that same binding across the lambda boundary
-(`hir/analyze/scopes.rs`). It resolves to the **currently-executing closure**, never
+`CaptureKind::Recursive` ([src/hir/binding.rs](../../src/hir/binding.rs)), classified
+when a binding's initializer lambda references that same binding across the lambda
+boundary ([src/hir/analyze/scopes.rs](../../src/hir/analyze/scopes.rs)). It resolves to the **currently-executing closure**, never
 to a heap cell.
 
 ## Cell-free by construction
 
-A `Recursive` self-edge does **not** mark the binding captured
-(`hir/analyze/scopes.rs` skips `mark_captured` for it). A binding captured *only* by
-self-references therefore has `needs_capture() == false` (`hir/arena.rs`) — **no
+A `Recursive` self-edge does **not** mark the binding captured (the analyzer skips
+`mark_captured` for it). A binding captured *only* by self-references therefore has
+`needs_capture() == false` ([src/hir/arena.rs](../../src/hir/arena.rs)) — **no
 forward cell** is minted for it. This is the split that decides everything, made
 once, at `mark_captured`:
 
@@ -55,11 +55,11 @@ swap), snapshotted and restored exactly like `activation_region_map` — and acr
 and WASM fallbacks into the interpreter, the JIT tail-call resolutions, forced-tier
 dispatch (`compile/run-on`), the fiber's first resume, `arena/allocs`, macro-transformer
 calls, FFI callback trampolines, and spawned-worker bodies each hand the callee value
-through the one-shot entry register (vm.md lists the entrants). `LoadSelf` debug-asserts
+through the one-shot entry register ([vm.md](vm.md) lists the entrants). `LoadSelf` debug-asserts
 the register is populated, so an unthreaded entrant fails loudly.
 
-A `Recursive` reference lowers to `LoadSelf` in **every** position (`lir/lower/expr.rs`,
-via `current_self_binding`):
+A `Recursive` reference lowers to `LoadSelf` in **every** position
+([src/lir/lower/expr.rs](../../src/lir/lower/expr.rs), via `current_self_binding`):
 
 | position | meaning |
 |---|---|
@@ -127,7 +127,7 @@ argument and a sibling consumes it.
   frame-replacing tail call is not a release"). `lower_letrec` marks a cell-free
   self-recursive member `stranded_self_bindings` when the body tail-calls it, reading the
   body's tail callees rather than asking whether the body IS a tail call
-  (`lir/lower/binding/let.rs`).
+  ([src/lir/lower/binding/let.rs](../../src/lir/lower/binding/let.rs)).
 
   A body whose tail is a **branch** reaches the relocation the other way round: each arm
   leaves through its own callee, so the scope-end release is emitted at the merge and
@@ -162,12 +162,14 @@ and releases it by the cell's cascade — a lifetime that outlives any single ta
 activation. Stranding such a binding would make the deferred release decref its region a SECOND
 time, freeing it under the still-live cell (the scheduler's mutually recursive
 `handle-fiber-after-resume` group — each member self-recursive AND sibling-captured;
-`region-selfrec-captured-tail-release.lisp`, whose regression SIGSEGVs `process-io.lisp`).
+[region-selfrec-captured-tail-release.lisp](../../tests/impl/region-selfrec-captured-tail-release.lisp),
+whose regression SIGSEGVs [process-io.lisp](../../tests/lang/process-io.lisp)).
 So the cell owns the release for a captured member; the deferral owns it only for the
 cell-free case.
 
 In both stranded cases the runtime **deferred release** supplies it.
-`tail_callee_defers_release` (`lir/lower/control/call.rs`) returns true for every tail call to a
+`tail_callee_defers_release` ([src/lir/lower/control/call.rs](../../src/lir/lower/control/call.rs))
+returns true for every tail call to a
 `stranded_self_bindings` callee (§ "The deferral needs no escape gate"); the `TailCall` then
 carries the callee channel's `region_of(callee)`, `tail_call_inner` records it on the
 activation, and the activation decrefs each deferred region exactly once when it ends
@@ -239,7 +241,7 @@ at the crossing, so the receiver's hold is never the frame's.
 - a **sent** message — the other fiber-frontier seed, `chan/send`'s `Sends` declaration —
   takes the seam's runtime retain at the enqueue (`EscapeSite::ChanSend`) and is held
   until the receive builds the result carrying it
-  (`release_received_message`, `primitives/chan/prims.rs`);
+  (`release_received_message`, [src/primitives/chan/prims.rs](../../src/primitives/chan/prims.rs));
 - a **halted** payload takes the terminal park retain instead (`incref_signal_region`), the
   one signal `handle_emit` deliberately leaves unretained.
 
@@ -291,7 +293,8 @@ live scope-exit drop is reachable and would fire ahead of the mint.
   naming, the §hazard boundaries (survives yield/resume, tail-call frame replacement,
   identity to the base case), and the entry boundaries (the JIT→interpreter fallback and
   tail-call resolution, the forced bytecode tier, the fiber body's first resume, the
-  measured thunk) — with `tests/elle/recur-entry.lisp` as the cross-tier corpus peer.
+  measured thunk) — with [recur-entry.lisp](../../tests/impl/recur-entry.lisp) as the
+  cross-tier corpus peer.
 - `runtime::tests::ownership::self_recursive_loop_is_cell_free` — the cell-free mint gauge: a
   retained self-recursive `loop` pins ~2 objects/call, no per-call forward cell (the flip
   gate for a regression that reintroduces a cell).
@@ -302,8 +305,9 @@ live scope-exit drop is reachable and would fire ahead of the mint.
   replica is the channel rather than the deferral; both arms driven. The placement peer is
   `lir::lower::tests::release::frameexit::a_letrec_closure_under_a_branch_tail_is_replicated_into_every_arm`
   (with `…_no_arm_strands_keeps_its_release_by_id` as the decline), the leak rows are
-  `tests/elle/region-tail-frame-exit.lisp` § (d16b)–(d16d), and the soundness witness is that
-  file's `-uaf` peer § (e17).
+  [region-tail-frame-exit-letrec.lisp](../../tests/impl/region-tail-frame-exit-letrec.lisp) (rows h–h3),
+  and the soundness witness is
+  [its -uaf peer](../../tests/impl/region-tail-frame-exit-uaf.lisp) § (e17).
 - `…::self_recursive_define_with_arith_reclaims_per_call` — a `def` tail-loop recursing with
   heap-allocating arithmetic runs clean and bounded (the heap churn recycles a
   prematurely-freed page, turning the latent use-after-free loud).
@@ -320,15 +324,19 @@ live scope-exit drop is reachable and would fire ahead of the mint.
   faces of the dead scope-end drop.
 - `…::unused_define_init_reclaims_per_call` — the binder rule underneath the `def` rows: an
   unused `def`'s heap init is released, which it is only if the release lands after the
-  slot store (`region-unused-let-binding.lisp` is the `let` face).
-- `tests/elle/region-selfrec-return-release.lisp` — the soundness half of the same
-  admission under the UAF oracle: every returned handle is RE-ENTERED after the
-  deferred release, across allocation churn that recycles a prematurely freed page.
-- `tests/elle/region-tail-frame-exit.lisp` § the `def` binder — the four `def` bodies
-  of the placement table driven as leak rows, beside the `letrec` faces of the same
-  three.
-- `tests/elle/region-define-init-release{,-uaf}.lisp` — the binder rule the `def` rows
-  rest on, in both directions: an unread `def`'s init is released, and a `def`'s value
-  survives every way it leaves the `def`.
-- `tests/elle/oracle.lisp` — `recur-local-self` (leak rate 0), `recur-local-self-mint`
-  (0, a returned self-recursive closure reclaims) beside `recur-local-foreign-mint`.
+  slot store ([region-unused-let-binding.lisp](../../tests/impl/region-unused-let-binding.lisp)
+  is the `let` face).
+- [region-selfrec-return-release.lisp](../../tests/impl/region-selfrec-return-release.lisp)
+  — the soundness half of the same admission under the UAF oracle: every returned handle
+  is RE-ENTERED after the deferred release, across allocation churn that recycles a
+  prematurely freed page.
+- [region-tail-frame-exit-letrec.lisp](../../tests/impl/region-tail-frame-exit-letrec.lisp), the `def`
+  binder — the four `def` bodies of the placement table driven as leak rows, beside the
+  `letrec` faces of the same three.
+- [region-define-init-release.lisp](../../tests/impl/region-define-init-release.lisp) and
+  [its -uaf peer](../../tests/impl/region-define-init-release-uaf.lisp) — the binder rule
+  the `def` rows rest on, in both directions: an unread `def`'s init is released, and a
+  `def`'s value survives every way it leaves the `def`.
+- [the oracle](../../tests/impl/oracle.lisp) — `recur-local-self` (leak rate 0),
+  `recur-local-self-mint` (0, a returned self-recursive closure reclaims) beside
+  `recur-local-foreign-mint`.

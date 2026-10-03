@@ -144,7 +144,7 @@ Adding a spelling to one of those tables therefore fails
 `vocabulary_covers_accessor_mint_sites` until it is added to `VOCABULARY` too.
 What the three miss is a spelling that reaches the constructor through a local:
 `let kind = match … ; Value::keyword(kind)`. Those are pinned by
-[keyword-spelling.lisp](../../tests/elle/keyword-spelling.lisp), with the type
+[keyword-spelling.lisp](../../tests/lang/keyword-spelling.lisp), with the type
 names of three wrapped values: a compile handle and a channel's two ends.
 
 ## Reading a name, and not reading one

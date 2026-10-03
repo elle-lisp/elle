@@ -1,12 +1,12 @@
 # Escape analysis — the authoritative true-escape pass
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Escape analysis decides, once for every consumer, whether a value outlives the activation it was born in.
 
 Escape is **one** analysis, computed over the canonical (functionalized + ANF)
 HIR, and it is authoritative: every consumer that needs the answer reads it,
-rather than recomputing a proxy. It lives in [`src/hir/escape.rs`](../../src/hir/escape.rs) as `analyze_escape`,
+rather than recomputing a proxy. It lives in [src/hir/escape.rs](../../src/hir/escape.rs) as `analyze_escape`,
 producing an `EscapeInfo` fact-set.
 
 This is the keystone of the region forest: the property the forest classifies
@@ -123,7 +123,7 @@ The return facet is **interprocedural** for an *arg-returning* callee. A tail ca
 `(id y)` to a function that returns its parameter is region-transparent in that
 argument: the call yields whatever flowed into the arg, so `y` escapes when the
 call's result does. This mirrors the region solver's `try_inline_call`
-([walk.rs](../../src/hir/region/infer/walk.rs)), which re-walks an inlinable callee's body with its params
+([walk/inline.rs](../../src/hir/region/infer/walk/inline.rs)), which re-walks an inlinable callee's body with its params
 bound to the caller's arg regions.
 
 It is realized as an **arg-return summary** (`compute_arg_return`): per inlinable
@@ -135,7 +135,7 @@ lambda, **never** a top-level `Define` (the solver never inlines those, so a
 the call). The whole-program fixpoint can in principle propagate through a deeper
 arg-return chain than the solver's inline-depth-4 re-walk — a sound
 over-approximation (mark a true escape the solver misses), not observed in the
-corpus; bound the propagation depth if a real-corpus golden ever surfaces it.
+suites; bound the propagation depth if the escape golden ever surfaces it.
 
 ## Consumers
 
@@ -259,7 +259,7 @@ left to `is_captured`: it feeds NO escape facet (the capture facet is flow-true 
 transitive `lambda_captures` propagation from genuine frontier seeds), and it is
 module-private with no getter, so no consumer can read it as escape-authority — the
 escape-authority gap is closed by construction, not by promise. The `region-*.lisp`
-pins in [tests/elle](../../tests/elle/) are the canonical reference for what each of
+pins in [tests/impl](../../tests/impl/overview.md) are the canonical reference for what each of
 these decisions must preserve.
 
 ## Precision characteristics
@@ -282,7 +282,7 @@ unit test asserting escape's own spec.
    forest records `content ⊇ container` at the store (a `%array-push` funnel), so it
    would adopt the content into the container's Owned subtree and free it at the
    container's scope-exit subtree drop — under the escaped read reference (a
-   use-after-free; pinned by `region_container_read_escape_uaf`). A per-container
+   use-after-free; pinned by [region-container-read-escape-uaf.lisp](../../tests/impl/region-container-read-escape-uaf.lisp)). A per-container
    **stored-contents map** (built in `collect_flow` from the `push`/`put`/`add` store
    sites) plus a **read-result → container-contents flow edge** at each element-read
    makes an escaping read result pull the container's stored contents into its own
@@ -317,19 +317,19 @@ another analysis. Three layers:
   activation but is not returned; a value captured by a non-escaping closure does
   not escape; an emitted/sent value crosses the fiber frontier; an arg-returning
   callee propagates its arg's escape; a `def`-bound callee does not.
-- **The escape golden** ([`tests/elle/escape-golden.lisp`](../../tests/elle/escape-golden.lisp))
-  pins the normalized `escape` dump kind ([`src/dump/escape.rs`](../../src/dump/escape.rs),
+- **The escape golden** ([tests/impl/escape-golden.lisp](../../tests/impl/escape-golden.lisp))
+  pins the normalized `escape` dump kind ([src/dump/escape.rs](../../src/dump/escape.rs),
   reached from Elle via `compile/dumps` → `:escape`, and `--dump=escape` on the
-  CLI) of a bounded set of real corpus files, byte-for-byte. The dump is
+  CLI) of a bounded set of real test files, byte-for-byte. The dump is
   id-normalized so two compiles render identically; its `[return_frontier]` section
   records escape's verdict projected to regions and its `[region_instrs]` section the
   RC instructions that verdict drives. A change to escape or its consumers shows up
   as a snapshot diff to review (the emitted RC may *tighten* as escape's precision
-  lands; it must never coarsen or introduce a UAF/leak). The corpus is bounded
+  lands; it must never coarsen or introduce a UAF/leak). The set is bounded
   because `compile/dumps` compiles each source twice and leaks regions (it OOMs a
-  full make-smoke run — [test-runner.md](../test-runner.md)).
-- **The region suite and the probes in
-  [tests/elle/probe/](../../tests/elle/probe/)** prove the projection reclaims soundly: no UAF
+  pass over every file — [test-runner.md](../test-runner.md)).
+- **The `region-*.lisp` files and the probes in
+  [tests/impl/probe/](../../tests/impl/probe/)** prove the projection reclaims soundly: no UAF
   (`--trace=guardfree` under the full stdlib) and no leak regression (every closed
   leak class stays closed).
 

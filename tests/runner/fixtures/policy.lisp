@@ -1,13 +1,12 @@
-(elle/epoch 12)
-## Whole-file per-policy execution (process-whole / whole-file-policies).
+(elle/epoch 13)
+## audited: 2026-09-29
+## Fixture: a whole-file script observes the JIT policy the runner set for it.
+## docs/test-runner.md
 ##
-## A legacy multi-form file is run once under the :off JIT policy (recorded "vm")
-## and once under :eager (recorded "jit") — the smoke-vm + smoke-jit split folded
-## into one run. This fixture asserts the file actually OBSERVES that policy via
-## (vm/config :jit) — never the default :adaptive. It is the counter-factual for a
-## no-op policy set (e.g. the `(put (vm/config) :jit …)` rewrite silently not
-## firing): under that bug the file sees :adaptive and FAILS here on both tiers,
-## rather than running under the wrong policy behind a correct-looking label.
-(def pol (vm/config :jit))
-(assert (or (= pol :off) (= pol :eager))
-        (string "expected a per-policy run (:off or :eager), got " pol))
+## The runner runs a multi-form file with the JIT off, where `(vm/config :jit)`
+## reads nil, and with the JIT eager, where it reads 0. A runner that only
+## labelled its rows and set no policy leaves the build's threshold, 10, and
+## the file fails under both.
+(def threshold (vm/config :jit))
+(assert (or (nil? threshold) (= threshold 0))
+        (string "the runner set no JIT policy: (vm/config :jit) is " threshold))

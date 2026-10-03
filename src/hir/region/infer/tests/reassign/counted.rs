@@ -1,12 +1,13 @@
-// audited: 2026-09-22
-//! The counted-init route: what an aliased init costs the cell, and what the mutated-slot backstop keeps off a cell's slot.
+// audited: 2026-09-28
+//! The counted-init route: what an aliased init costs the cell, and what the
+//! mutated-slot backstop keeps off a cell's slot.
 //!
 //! docs/impl/region/bindings.md
 
 use super::*;
 
-/// Facet A of the captured-mutable read mis-coalesce
-/// (integration::file_scope::captures::test_mutable_var_mutation_visible_after_call):
+/// Facet A, the single-form file (its runtime face is
+/// `integration::file_scope::captures::test_mutable_var_mutation_visible_after_call`):
 /// a `(begin (var x …) …)` single-form file's `x` is a compiled Begin-pre-pass
 /// CaptureCell that is RE-STORED from inside a sibling closure, so the write site
 /// is in a lambda while the binding is not (`record_top_level_reassign` records
@@ -15,7 +16,7 @@ use super::*;
 /// region, which must be poisoned in `mutated_binding_value_regions` so
 /// `coalescible_region` refuses the static route (the return retain stays
 /// value-resolved instead of resolving the cell's slot against repointed
-/// content — the `AssertRegionMatches` mis-coalesce).
+/// content, which `AssertRegionMatches` catches).
 #[test]
 fn mutated_slot_backstop_poisons_restorable_begin_cell_regions() {
     let (hir, arena, info) = pipeline(
@@ -96,8 +97,7 @@ fn letrec_wrapper_read_of_restorable_cell_is_counted() {
 /// — the top-level model donates the producer's reference and drop-on-overwrite
 /// is that reference's ONLY release — so a whole-value read of it is exposed
 /// exactly as a read of the celled realization is, and takes the same counted
-/// reference (docs/impl/region/reads.md § "A whole-value read of a 1-slot
-/// container takes a counted reference").
+/// reference (docs/impl/region/reads.md).
 ///
 /// Keying the reader rule on the cell rather than on the re-store would leave
 /// this half uncounted, and the gate would then refuse the donation to protect
@@ -136,8 +136,7 @@ fn toplevel_uncelled_container_read_is_counted() {
 }
 
 /// A loop-carried fn-local cell with a HEAP init keeps the container model
-/// (docs/impl/region/bindings.md § "The gate", "A loop parameter's init source
-/// is not a second holder"). Functionalization gives the one source name two
+/// (docs/impl/region/bindings.md). Functionalization gives the one source name two
 /// bindings — the pre-loop version and the loop parameter its init forwards to —
 /// and both record the init region as a source, so a `sole_held` that counts
 /// bindings reads two holders where the program has one name and refuses the
@@ -200,8 +199,7 @@ fn reassign_gate_keeps_loop_carried_cell_with_heap_init() {
 }
 
 /// A GENUINE alias of the INIT costs the DONATION, not the model
-/// (docs/impl/region/bindings.md § "What the cell donates it must hold alone;
-/// what it counts it need not"). `xs` is a different source name bound to the
+/// (docs/impl/region/bindings.md). `xs` is a different source name bound to the
 /// same value, not the loop's own init-forwarding edge, so the pair really is
 /// two holders — and suppressing the init region, which is keyed by region,
 /// would cancel `xs`'s own decref and free the value under a read that
@@ -219,7 +217,7 @@ fn reassign_gate_keeps_loop_carried_cell_with_heap_init() {
 /// Refusing outright would cost the store-site pin as well, so each stored
 /// value's release would ride the cell binding's uses out past the loop — one
 /// release for a region that names a different runtime value every iteration
-/// (`tests/elle/region-cell-aliased-init.lisp`).
+/// (tests/impl/region-cell-aliased-init.lisp).
 #[test]
 fn reassign_gate_counts_an_aliased_init() {
     let (hir, _, info) = pipeline(

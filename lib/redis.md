@@ -1,6 +1,6 @@
 # redis
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Redis client speaking RESP2 over TCP, in one file of pure Elle with no plugin behind it.
 
@@ -80,5 +80,5 @@ The RESP codec tests itself and needs no server:
 The rest needs Redis on 127.0.0.1:6379:
 
 ```bash
-elle tests/elle/redis.lisp
+elle tests/lang/redis.lisp
 ```

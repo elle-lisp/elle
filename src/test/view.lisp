@@ -51,7 +51,7 @@
 # the row's host is this host, and `ps` shows an elle under the row's pid. The
 # name check keeps a pid the kernel has since handed to another program from
 # reading as the run. Anything else — another host, no pid, a pid that is gone
-# — is a kill (docs/test-runner.md § Run honesty).
+# — is a kill (docs/test-runner.md).
 (defn run-alive? [meta]
   (let [pid (get meta :pid)
         host (get meta :host)]
@@ -85,7 +85,7 @@
   (let [w (get meta :worktree)]
     (string " (pid " (get meta :pid) (if w (string ", worktree " w) "") ")")))
 
-# ── the measurements a run recorded (docs/test-store.md § Measurements) ──
+# ── the measurements a run recorded (docs/test-store.md) ──
 # A tally by verdict, then a line for each reading that is neither `closed` nor
 # `growth`. Those two are the expected answers — a reclaimed shape and a
 # declared growth probe — so listing them would bury the readings a reader acts
@@ -125,7 +125,7 @@
                   "  " (get m :axis) "  " (get m :value) " " (get m :unit)))))
   nil)
 
-# ── what the run cost the runner (docs/test-store.md § The runner's own gauges) ──
+# ── what the run cost the runner (docs/test-store.md) ──
 # A leak per compiled file used to reach us as an OOM kill and a batch size,
 # with nothing naming the file. These lines are that number: the run's totals,
 # then the files that grew the runner's heap most.
@@ -180,10 +180,10 @@
 
 # Tally line + the problem rows (only when there are any). Tallies are computed
 # live (count-status). A run without finished_at is either still running or was
-# KILLED mid-flight (OOM, signal — docs/test-runner.md § Run honesty), and is
-# labelled as whichever it is, because a partial all-pass result set must never
-# read as green. To stderr, so it never mingles with --query's stdout or a
-# test's captured output.
+# KILLED mid-flight (OOM, signal — docs/test-runner.md), and is labelled as
+# whichever it is, because a partial all-pass result set must never read as
+# green. To stderr, so it never mingles with --query's stdout or a test's
+# captured output.
 (defn print-summary [conn run-id]
   (let [meta (run-meta conn run-id)
         # The DB is a SESSION: it accumulates every run. Show which run this is of

@@ -1,7 +1,11 @@
-// audited: 2026-09-21
-//! Non-scoped mutating binding forms: `define` (local `def`) and `set`
-//! (`lower_assign`). Grouped for the shared capture-cell store/reload and the
-//! 1-slot-container drop-on-overwrite reference discipline.
+// audited: 2026-09-29
+//! The non-scoped mutating binding forms: `define` (a local `def`) and `set` (`lower_assign`).
+//!
+//! docs/impl/region/bindings.md
+//! docs/impl/selfrec.md
+//!
+//! They share the capture-cell store and reload, and the reference discipline of
+//! a 1-slot container that drops its content on overwrite.
 
 use super::*;
 
@@ -50,11 +54,13 @@ impl<'a> Lowerer<'a> {
         // routing the init's region through this slot makes its decref reload the
         // cell and (via `result_region_of`, which unwraps a capture cell) free
         // whatever the cell holds at the decref's RUNTIME firing point — a
-        // different, live value (the capture-cell reassign UAF;
-        // region-capture-cell-reassign-uaf.lisp, and with the write inside a
-        // closure region-capture-cell-closure-reassign-uaf.lisp). Skip the routing
-        // and drop the init's alloc reference off its register below. A captured
-        // binding never reassigned keeps the routing (stable cell content).
+        // different, live value. The pins are
+        // tests/impl/region-capture-cell-reassign-loop-uaf.lisp, and with the
+        // write inside a closure
+        // tests/impl/region-capture-cell-closure-reassign-uaf.lisp. Skip the
+        // routing and drop the init's alloc reference off its register below. A
+        // captured binding never reassigned keeps the routing (stable cell
+        // content).
         let captured_reassigned = self
             .region_info
             .captured_reassigned_bindings
@@ -78,10 +84,10 @@ impl<'a> Lowerer<'a> {
         // in dead code past the `TailCall`, exactly as the `letrec` scope-end drop is;
         // STRAND the binding (`stranded_self_bindings`) so a tail call to it defers the
         // region's release — the sole, once-only release on that path
-        // (docs/impl/selfrec.md § the placement table). Cell-free self-recursion only
-        // (see the `lower_letrec` twin): a sibling-captured (`needs_capture`)
-        // self-recursive binding is held by a cell, so its region is released by the
-        // cell's cascade — stranding it double-frees under the live cell.
+        // (docs/impl/selfrec.md). Cell-free self-recursion only (see the
+        // `lower_letrec` twin): a sibling-captured (`needs_capture`) self-recursive
+        // binding is held by a cell, so its region is released by the cell's
+        // cascade — stranding it double-frees under the live cell.
         if self.self_recursive_bindings.contains(&binding)
             && !self.arena.get(binding).needs_capture()
         {
@@ -192,7 +198,7 @@ impl<'a> Lowerer<'a> {
                 .is_some_and(|id| self.region_info.drop_on_overwrite_sites.contains(&id))
             {
                 // A reassigned, sole-held, top-level (file-letrec) mutable is a
-                // 1-slot mutable container (docs/impl/region/bindings.md Rule 5). The cell
+                // 1-slot mutable container (docs/impl/region/bindings.md). The cell
                 // owns its current content: increment the NEW value's region (the
                 // cell now holds a reference — the root pin), and decrement the
                 // displaced OLD value's region (the cell no longer holds it; its
@@ -216,21 +222,19 @@ impl<'a> Lowerer<'a> {
                 // reference to the cell; the drop-on-overwrite below is that
                 // reference's sole release, so an incref-on-store here would be
                 // unbalanced (born + store − overwrite = +1), holding every
-                // displaced prior to frame teardown (docs/impl/region/bindings.md
-                // "Reassigned mutable bindings are 1-slot containers"). These sites
-                // are marked `donated_overwrite_sites`. A FN-LOCAL container instead
+                // displaced prior to frame teardown (docs/impl/region/bindings.md).
+                // These sites are marked `donated_overwrite_sites`. A FN-LOCAL container instead
                 // KEEPS the assign-value decref (its scope-exit demise), so it must
                 // take its own counted reference here, balanced by drop-on-overwrite.
                 let donated = self
                     .current_hir_id
                     .is_some_and(|id| self.region_info.donated_overwrite_sites.contains(&id));
                 if !donated {
-                    // Transform 1 (docs/impl/region/mechanism.md § "Compile-time region
-                    // selection (coalescing)"): a fresh local allocation whose region
-                    // is a known slot pins slot-resolved (`IncrefRegion`, guarded by
-                    // the equivalence oracle), mirroring `lower_return`; otherwise
-                    // value-resolved — the dynamic boundary `coalescible_region`
-                    // enforces.
+                    // Compile-time region selection (docs/impl/region/mechanism.md): a
+                    // fresh local allocation whose region is a known slot pins
+                    // slot-resolved (`IncrefRegion`, guarded by the equivalence
+                    // oracle), mirroring `lower_return`; otherwise value-resolved —
+                    // the dynamic boundary `coalescible_region` enforces.
                     let coalesced = self.coalescible_region(value);
                     super::super::rcstats::record_reassign_store(coalesced.is_some());
                     match coalesced {

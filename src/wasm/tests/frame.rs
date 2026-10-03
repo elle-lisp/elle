@@ -1,11 +1,13 @@
-// audited: 2026-09-06
-// docs/impl/wasm.md
+// audited: 2026-09-29
 //! What a running closure's env and local slots must survive.
+//!
+//! docs/impl/wasm.md
 //!
 //! A closure's env and its local slots are linear memory the emitter addresses
 //! by offset, and a value in either can be overwritten by something the
 //! emission did elsewhere — a wide call's args region, or a region release's
-//! nil-stamp. Both shapes below returned a wrong answer rather than failing.
+//! nil-stamp. Each shape below returns a wrong answer, rather than failing, when
+//! its invariant breaks.
 
 use super::*;
 
@@ -16,11 +18,10 @@ fn wasm_full_wide_call_from_closure_preserves_env() {
     // clobber that closure's env, which the env-stack allocator lays out at
     // `env_stack_base`. A 250-key struct literal desugars to a 500-arg call to
     // the `struct` primitive; emitted from the body of `f`, its args region
-    // `[ARGS_BASE, ARGS_BASE + 500*16)` overruns a fixed 4096-byte env base and
-    // corrupts f's param `x` and the freshly-bound `big`. The env stack must
-    // begin above the module's widest call. `call-u16.lisp` is the top-level
-    // face (no live env below the args, so only the `nargs<=256` guard tripped);
-    // this is the in-closure face the fixed window silently corrupted.
+    // `[ARGS_BASE, ARGS_BASE + 500*16)` would overrun a fixed 4096-byte env base and
+    // corrupt f's param `x` and the freshly-bound `big`, so the env stack begins
+    // above the module's widest call. tests/lang/call-u16.lisp is the top-level
+    // face, with no live env below the args; this is the in-closure face.
     let pairs: String = (0..250)
         .map(|i| format!(":k{i} {i}"))
         .collect::<Vec<_>>()
@@ -47,7 +48,7 @@ fn wasm_full_reassigned_loop_counter_survives_inner_decref() {
     // terminates. `emit_decrefs_for` refuses the value-route + nil-stamp for a
     // reassigned-local binding's slot (`reassigned_local_slots`), so the counter
     // survives. 2 outer × 3 inner × `(get s 0)`=10 = 60. The full corpus face is
-    // `tests/elle/region-capture-cell-loop-uaf.lisp` under `--wasm=full`.
+    // `tests/impl/region-capture-cell-loop-uaf.lisp` under `--wasm=full`.
     let src = "\
 (defn nested []
   (def @oi 0)

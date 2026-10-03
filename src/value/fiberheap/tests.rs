@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-29
 //! What a `FiberHeap` promises about the physical region ids it hands out, and
 //! what it does with a value whose region is gone.
 //!
@@ -114,7 +114,7 @@ fn free_region_physical_frees_matching_slots() {
 #[test]
 #[should_panic(expected = "stale region")]
 fn region_of_panics_on_stale_value_in_debug() {
-    // The arena-level funnel (docs/impl/region/generations.md § "Region generations"):
+    // The arena-level funnel (docs/impl/region/generations.md):
     // every runtime RC decision reads a value's region through
     // arena::region_of, so the generation check there converts a stale-id
     // deref from a silent wrong read into a deterministic panic.
@@ -131,7 +131,7 @@ fn region_of_panics_on_stale_value_in_debug() {
 fn pass_through_borrow_detonates_at_region_of() {
     // The pass-through borrow's check is `region_of` itself — NOT a
     // recorded-generation handle like the cross-fiber param snapshot
-    // (docs/impl/region/generations.md § "Two borrow shapes"). The
+    // (docs/impl/region/generations.md). The
     // `%first`/`%rest`/`%get` intrinsics (`LirInstr::First`/`Rest`/`Get`) hand back
     // a value that aliases into the *source* collection's region with NO incref —
     // an uncounted borrow (unlike a *native* `first`/`rest`/`get`, whose result the
@@ -163,17 +163,15 @@ fn pass_through_borrow_detonates_at_region_of() {
     let _ = crate::value::arena::region_of(&heap, borrowed);
 }
 
-// The `ensure_raw` backstop (docs/impl/region/generations.md § "Region
-// generations"): a garbage region id must NOT drive the lazy region-table
-// resize. A corrupt page-header read (the diagnosed cause was a misidentified
-// page base — closed by the `region_of_ptr` ownership-validated walk and the
-// page-header magic — but a stale/foreign read could also reach here) can hand
-// back an id near `u32::MAX`. The backstop detonates at the incref, naming the
+// The `ensure_raw` backstop (docs/impl/region/generations.md): a garbage region
+// id must NOT drive the lazy region-table resize. A corrupt page-header read (a
+// stale or foreign pointer's masked page base) can hand back an id near
+// `u32::MAX`. The backstop detonates at the incref, naming the
 // hazard, in every build.
 //
 // Counter-factual: without it, `ensure_raw` resizes `regions` to ~u32::MAX
 // entries and the process aborts on a 584 GB allocation, far from the read that
-// produced the id. That is what `elle test tests/elle/oracle.lisp` reported.
+// produced the id.
 #[test]
 #[should_panic(expected = "physically implausible")]
 fn incref_on_implausible_region_id_detonates_not_resizes() {
@@ -195,21 +193,20 @@ fn region_zero_and_one_are_unrepresentable() {
     assert_eq!(RuntimeRegion::new(7).map(|r| r.get()), Some(7));
 }
 
-// A transient region (the per-compilation/per-expansion scratch region built
-// by `pipeline::compile::with_transient` and `expand_macro_call`) must mint its
+// A transient region (the per-compilation/per-expansion scratch region built by
+// `pipeline::compile::with_transient` and `expand_macro_call`) must mint its
 // physical region id from the per-heap `new_runtime_region` pool — the single
 // physical-region allocator that every runtime allocation uses — NOT from the
 // global `new_static_region()` counter. The two counters (`NEXT_STATIC_REGION` in
-// lir/lower vs `RegionStore::next_physical`) are independent yet both
-// index the same `RegionStore`, so a transient's `new_static_region()`
-// value can equal a LIVE runtime region's `new_runtime_region()` id. The
-// transient's `decref_region_if_present` then frees that live region — a
-// use-after-free that violates docs/impl/region/rules.md invariant #1 ("no
-// freeing while RC > 0"). A cached macro transformer closure lives in such a
-// runtime region; when a later macro expansion's transient collides with it,
-// the cached closure's region is freed and recycled, and the next lookup
-// derefs a non-closure. `demos/fib/fib.lisp` shows it as an intermittent
-// startup panic, `Macro 'error': transformer is not a closure`.
+// lir/lower vs `RegionStore::next_physical`) are independent yet both index the
+// same `RegionStore`, so a transient's `new_static_region()` value can equal a
+// LIVE runtime region's `new_runtime_region()` id. The transient's
+// `decref_region_if_present` then frees that live region — a use-after-free
+// (docs/impl/region/rules.md). A cached macro transformer closure lives in such a
+// runtime region; when a later macro expansion's transient collides with it, the
+// cached closure's region is freed and recycled, and the next lookup derefs a
+// non-closure. `demos/fib/fib.lisp` shows it as an intermittent startup panic,
+// `Macro 'error': transformer is not a closure`.
 //
 // Counter-factual: the test forces the EXACT collision, by making a live
 // region whose id equals the value the next `new_static_region()` returns. A
@@ -242,10 +239,9 @@ fn transient_does_not_free_a_live_region_sharing_its_id() {
     assert_eq!(
         heap.region_rc(colliding),
         1,
-        "a transient region freed a LIVE region sharing its id — the \
-         macro-transformer-cache UAF: a transient drew its id from the global \
-         new_static_region() counter, colliding with a live runtime region \
-         (docs/impl/region/rules.md invariant #1: no freeing while RC > 0)"
+        "a transient region freed a LIVE region sharing its id: a transient drew \
+         its id from the global new_static_region() counter, colliding with a \
+         live runtime region (docs/impl/region/rules.md)"
     );
 }
 
@@ -298,8 +294,8 @@ fn transient_region_id_comes_from_heap_pool_not_global_counter() {
     );
     heap.decref_region_if_present(recycled);
 
-    // Push the global counter well past the small per-heap id so a pre-fix
-    // transient (drawing from it) cannot coincidentally equal `recycled`.
+    // Push the global counter well past the small per-heap id so a transient
+    // drawing from it cannot coincidentally equal `recycled`.
     for _ in 0..8 {
         let _ = crate::lir::lower::new_static_region();
     }
@@ -318,16 +314,17 @@ fn transient_region_id_comes_from_heap_pool_not_global_counter() {
 
 // A closure built by SHARING another closure's environment has its env
 // RegionSlice *backing* in the SOURCE closure's region, not its own. The
-// canonical producers are `squelch` and `attune` (src/primitives/meta.rs),
-// which build `Closure { template, env: src.env, .. }` — the comment there
-// notes "RegionSlice copy is a (ptr, len) pair", i.e. the backing stays put.
+// canonical producers are `squelch` and `attune`
+// (src/primitives/meta/syntaxops.rs), which build `Closure { template, env:
+// src.env, .. }` — the comment there notes "RegionSlice copy is a (ptr, len)
+// pair", that is, the backing stays put.
 //
 // That is a Rule-5 cross-region escape: the new closure (in region B) holds a
 // reference into region A (the source's env backing). The alloc-time scan
 // (`find_object_cross_refs`, Closure arm) MUST incref A — otherwise A is freed
 // at its owning-scope decref while the new closure still reads its env. The
 // symptom is the protect+squelch+nested-yield hang: `populate_env` reads a
-// freed page on the first fiber resume (tests/elle/signals.lisp), because
+// freed page on the first fiber resume (tests/lang/signals.lisp), because
 // `safe = (squelch outer …)` shares `outer`'s env and `outer`'s region is
 // released at rc=1 right after the `def`.
 //

@@ -59,11 +59,23 @@ cargo build --release -p elle --features wasm
 
 The binary is at `target/debug/elle` or `target/release/elle`.
 
+A build carries one optimizing tier and one I/O backend, and the cargo
+features choose them: the default build runs the Cranelift JIT and, on Linux,
+io_uring. `--no-default-features --features ffi,uring` builds the interpreter
+alone. Leaving out `uring` routes I/O through the thread pool, the backend every
+other platform runs, so a defect that shows only on a Mac can be chased on a
+Linux box. [docs/config.md](docs/config.md) lists the features and the
+precedence among the tiers.
+
+The implementation test suite runs on a second executable, the rig
+([rig/overview.md](rig/overview.md)). `make elle-rig` builds it beside `elle`.
+
 ## Optional: WASM backend
 
 The WASM backend compiles Elle code to WebAssembly and runs it under Wasmtime.
-It was set aside during the memory rewrite: it frees no memory and fails
-about half of the test corpus ([docs/impl/wasm.md](docs/impl/wasm.md)).
+It was set aside during the memory rewrite: every region instruction is a
+no-op on it, so it frees no memory, and CI checks only that the feature
+compiles and the tier boots ([docs/impl/wasm.md](docs/impl/wasm.md)).
 Enable it with `--features wasm`:
 
 ```sh
@@ -103,16 +115,6 @@ export LIBCLANG_PATH=/usr/lib/llvm-22/lib
 cargo build --release -p elle --features mlir
 ```
 
-## Optional: the thread-pool I/O backend on Linux
-
-A Linux build runs its I/O on io_uring, and every other platform runs it on a
-thread pool. The `no-uring` feature builds a Linux binary that uses the thread
-pool, so a defect that shows only on a Mac can be chased on a Linux box:
-
-```sh
-cargo build --release -p elle --features no-uring
-```
-
 ## Plugins
 
 Plugins live in a [separate repository](https://github.com/elle-lisp/plugins),
@@ -136,13 +138,13 @@ plugins.
 | Command | Runtime | What it does |
 |---------|---------|-------------|
 | `cargo test -p elle --lib` | ~1.5 min | Rust unit tests |
-| `make smoke` | ~30 min, release | The Elle corpus under the VM and the JIT, the doctests and the embedding demos |
-| `make test` | smoke + ~5 min | QA, smoke, the corpus on the thread-pool backend, and the Rust unit and integration tests |
+| `make smoke` | ~30 min, release | The language suite, the implementation suite on the rig, the doctests and the embedding demos |
+| `make test` | smoke + ~5 min | QA, smoke, and the Rust unit and integration tests |
 
-Give the corpus the release binary; the debug default takes hours:
+Give the suites the release binaries; the debug default takes hours:
 
 ```sh
-make smoke-elle ELLE=./target/release/elle CARGO_PROFILE=--release
+make smoke ELLE=./target/release/elle ELLE_RIG=./target/release/elle-rig CARGO_PROFILE=--release
 ```
 
 [CONTRIBUTING.md](CONTRIBUTING.md) holds the full table.

@@ -1,6 +1,7 @@
-// audited: 2026-09-06
-// docs/impl/wasm.md
+// audited: 2026-09-29
 //! A collection applied as a function, dispatched host-side.
+//!
+//! docs/impl/wasm.md
 //!
 //! A struct/array/set/string/bytes applied as a function — `(struct :k)`,
 //! `(arr i)`, `(set x)` — is a callable collection: the interpreter routes it
@@ -11,8 +12,8 @@
 //! error. The async scheduler depends on it: `make-async-scheduler`'s
 //! `handle-wait` reads `(request :op)` off the struct a fiber emits with
 //! `(emit :wait request)`, so without the fallback no `ev/join` under
-//! `--wasm=full` ever resumes. The corpus twin is
-//! tests/elle/wasm-collection-call.lisp (VM/JIT divergence + the marker).
+//! `--wasm=full` ever resumes. tests/lang/wasm-collection-call.lisp makes the
+//! same claim as a language test.
 
 use super::*;
 

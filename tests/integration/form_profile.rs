@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-30
 // A form row says what the compiler found in the form: the signals it may
 // emit, the capabilities among them, and the bindings it calls.
 //
@@ -14,6 +14,7 @@
 // not answer. A test that accepted either would pass against a runner that
 // analyzed nothing at all.
 
+use crate::common::query;
 use std::path::Path;
 use std::process::Command;
 
@@ -51,7 +52,10 @@ fn run_fixtures(tag: &str) -> (std::path::PathBuf, crate::common::ScratchDir) {
     let mut cmd = Command::new(elle_binary());
     cmd.args(["test"]);
     for (name, body) in [
-        ("rich.lisp", RICH.replace('@', written.to_str().expect("utf-8 path"))),
+        (
+            "rich.lisp",
+            RICH.replace('@', written.to_str().expect("utf-8 path")),
+        ),
         ("pure.lisp", PURE.to_string()),
         ("shadow.lisp", SHADOW.to_string()),
     ] {
@@ -72,17 +76,6 @@ fn run_fixtures(tag: &str) -> (std::path::PathBuf, crate::common::ScratchDir) {
         String::from_utf8_lossy(&out.stderr)
     );
     (db, dir)
-}
-
-/// The rendered rows of `sql` against `db`.
-fn query(db: &Path, sql: &str) -> String {
-    let out = Command::new(elle_binary())
-        .args(["test", "--query", sql])
-        .arg("--db")
-        .arg(db)
-        .output()
-        .expect("query the session DB");
-    String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
 /// Ask whether one space-separated column of `file`'s form row holds `word`.
@@ -115,8 +108,6 @@ fn a_form_that_writes_a_file_records_the_capabilities_it_reaches() {
         );
     }
 
-    // `error` is a signal and never a capability. A form that raises is still
-    // a function of its own inputs; a form that opens a file is not.
     let rows = holds(&db, "rich.lisp", "caps", "error");
     assert!(
         rows.contains(":held 0"),
@@ -136,9 +127,6 @@ fn a_form_touches_what_it_calls_and_not_what_it_defines() {
         );
     }
 
-    // A name the form defines is not a binding it reaches out to. Keeping it
-    // would make every form touch its own helpers, and a selection by binding
-    // would answer with the forms that merely named one.
     let rows = holds(&db, "rich.lisp", "touches", "write-it");
     assert!(
         rows.contains(":held 0"),

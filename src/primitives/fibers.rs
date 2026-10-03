@@ -5,12 +5,15 @@
 //!
 //! Core fiber operations: creation, resumption, signaling, status, and
 //! value extraction. Introspection and management primitives (bits, mask,
-//! parent, child, propagate, cancel, fiber?) are in `fiber_introspect.rs`.
+//! parent, child, propagate, cancel, abort, refuse, caps) are in
+//! `fiber_introspect.rs`, and `fiber?` is in `introspection.rs`.
 //!
 //! Signal-bits resolution lives in `resolve`; fuel (instruction-budget) ops
 //! live in `fuel`. Both are re-exported so the `primitive!` table below — and
 //! external callers naming `crate::primitives::fibers::resolve_signal_bits` —
 //! resolve the handler paths unchanged.
+//!
+//! `tests/lang/prim-fibers.lisp` pins them.
 
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
@@ -109,8 +112,7 @@ pub(crate) fn prim_fiber_new(
             fiber.param_borrows = crate::vm::fiber::record_param_borrows(&flat, ctx.heap_mut());
         }
         fiber.param_frames = vec![flat];
-        // The seeded baseline is a counted holder (docs/impl/region/park.md
-        // § "A child's inherited parameter baseline is a counted holder").
+        // The seeded baseline is a counted holder (docs/impl/region/park.md).
         // Setting the flag BEFORE `ctx.fiber` is the whole retain here: the
         // allocation funnel scans the new object's content, and the Fiber
         // scan arm walks the baseline exactly when the flag is set — so the
@@ -334,5 +336,3 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
 }
-
-// Tests migrated to tests/elle/prim-fibers.lisp

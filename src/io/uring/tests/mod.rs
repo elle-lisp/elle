@@ -1,4 +1,4 @@
-//! audited: 2026-09-29
+//! audited: 2026-10-02
 //! The ring's own paths, driven without a backend: a signal read, the
 //! short-write resubmission, and the linked timeout.
 //!
@@ -10,10 +10,9 @@ use crate::io::sigfd::SignalReceiver;
 
 mod sockopt;
 
-/// End-to-end regression: a SIGUSR1 delivered to the process must
-/// surface as a CQE on the io_uring instance via the dedicated
-/// `submit_uring_sig_next` helper, with no threadpool worker
-/// involved on the elle side.
+/// A SIGUSR1 delivered to the process surfaces as a CQE on the io_uring instance via
+/// the dedicated `submit_uring_sig_next` helper, with no threadpool worker involved on
+/// the elle side.
 ///
 /// This is the production Linux path: `submit_sig_next` (in
 /// `src/io/aio/externals.rs`) on the `PlatformBackend::Uring` arm calls
@@ -44,7 +43,7 @@ fn sig_next_via_uring_returns_after_kill_to_self() {
         unsafe { libc::_exit(code) };
     }
 
-    // PARENT: bounded waitpid so an io_uring regression (CQE never
+    // PARENT: bounded waitpid so a broken ring path (CQE never
     // arrives, ring fd closed early, helper rewires onto something
     // that doesn't actually submit, etc.) surfaces as a hung child
     // panic rather than wedging the whole `cargo test` run.
@@ -161,17 +160,17 @@ fn sig_next_uring_child_logic() -> i32 {
     0
 }
 
-/// The full-write invariant at the drain loop (src/io/AGENTS.md § Full-Write
-/// Invariant). One write(2) transfers only what fits in the fd's send buffer,
-/// so `drain_cqes` must resubmit the unwritten tail — from the pooled buffer
-/// the submission copied the payload into — until nothing is left, and report
-/// the total across every resubmission rather than the last CQE's count.
+/// The full-write invariant at the drain loop (src/io/AGENTS.md). One write(2)
+/// transfers only what fits in the fd's send buffer, so `drain_cqes` must resubmit the
+/// unwritten tail — from the pooled buffer the submission copied the payload into —
+/// until nothing is left, and report the total across every resubmission rather than
+/// the last CQE's count.
 ///
 /// A 4 KiB send buffer cannot take a 512 KiB payload in one syscall, so a
 /// backend that completes on the first CQE fails both assertions: the reported
 /// count is short, and the peer's tally is short. Driving `drain_cqes` directly
 /// keeps the coverage at the resubmission mechanism; the end-to-end contract is
-/// `tests/elle/port-shortwrite.lisp`.
+/// `tests/lang/port-shortwrite.lisp`.
 #[test]
 fn short_write_resubmits_until_the_payload_is_gone() {
     use crate::io::pending::PendingOp;
@@ -187,8 +186,8 @@ fn short_write_resubmits_until_the_payload_is_gone() {
     let mut ring = match io_uring::IoUring::new(8) {
         Ok(ring) => ring,
         // No io_uring on this host kernel — nothing to cover here. The
-        // thread-pool half of the invariant is port-shortwrite.lisp, run on
-        // the pool by the Thread-Pool I/O job's `no-uring` build.
+        // thread-pool half of the invariant is pinned by the thread-pool
+        // backend's run of `tests/lang/port-shortwrite.lisp`.
         Err(_) => return,
     };
 
@@ -253,11 +252,11 @@ fn short_write_resubmits_until_the_payload_is_gone() {
             PortOp::Write { data },
             PortKey::Fd(write_fd, crate::port::PortId::fresh()),
             Value::NIL,
-            // The pipe below owns the descriptor for the whole test, so there
+            // The socket pair above owns the descriptor for the whole test, so there
             // is no port for a share to come from.
             None,
             Some(buf_handle),
-            None,
+            crate::io::request::Bound::NONE,
         ),
         crate::io::pending::Submitter::for_test(),
     );
@@ -265,7 +264,7 @@ fn short_write_resubmits_until_the_payload_is_gone() {
     let mut completions: VecDeque<Completion> = VecDeque::new();
     let mut eventfd_fired = false;
 
-    // Bounded so a regression that stops resubmitting fails here instead of
+    // Bounded so a drain that stops resubmitting fails here instead of
     // wedging the test run.
     let deadline = Instant::now() + Duration::from_secs(20);
     while completions.is_empty() {
@@ -320,6 +319,13 @@ fn short_write_resubmits_until_the_payload_is_gone() {
 /// the timer's `user_data` is what keeps its own completion from being
 /// mistaken for the operation's. Drop the flag and the poll waits forever;
 /// drop the tag and the caller sees two completions for one request.
+///
+/// The trap: the timer SQE points at its `Timespec`, and the kernel reads it
+/// during the submit. A timespec that goes out of scope before that submit
+/// reads as whatever the stack slot holds next, and the timer then never
+/// fires. Only some builds reuse the slot (a release build from rustc 1.99.0
+/// does), so the wait below is bounded: the poll ends at 50 ms, and a timer
+/// that fails to fire fails the test rather than hanging the run.
 #[test]
 fn a_linked_timeout_cancels_its_operation_and_reports_once() {
     use crate::io::uring::submit_linked;
@@ -353,14 +359,42 @@ fn a_linked_timeout_cancels_its_operation_and_reports_once() {
     unsafe { submit_linked(&mut ring, id, poll, Some(Duration::from_millis(50))) }
         .expect("submission failed");
 
-    ring.submit_and_wait(1).expect("wait failed");
+    // Wait for the operation's CQE under a 5 s bound of the wait's own. The
+    // timer's CQE may arrive first, so wait until the operation's appears.
+    let started = std::time::Instant::now();
+    let mut cqes: Vec<(u64, i32)> = Vec::new();
+    while !cqes.iter().any(|(data, _)| *data == id.as_u64()) {
+        let left = Duration::from_secs(5).saturating_sub(started.elapsed());
+        assert!(
+            !left.is_zero(),
+            "the operation's CQE did not arrive within 5 s: its 50 ms linked \
+             timeout never fired"
+        );
+        let ts = io_uring::types::Timespec::new()
+            .sec(left.as_secs())
+            .nsec(left.subsec_nanos());
+        let args = io_uring::types::SubmitArgs::new().timespec(&ts);
+        match ring.submitter().submit_with_args(1, &args) {
+            Ok(_) => {}
+            Err(e) if e.raw_os_error() == Some(libc::ETIME) => {}
+            Err(e) if e.raw_os_error() == Some(libc::EINTR) => {}
+            Err(e) => panic!("wait failed: {e}"),
+        }
+        cqes.extend(ring.completion().map(|c| (c.user_data(), c.result())));
+    }
+    // The timer's own CQE follows the cancellation; take it too, so a second
+    // completion for the operation would be counted below.
+    let ts = io_uring::types::Timespec::new().nsec(100_000_000);
+    let args = io_uring::types::SubmitArgs::new().timespec(&ts);
+    let _ = ring.submitter().submit_with_args(1, &args);
+    cqes.extend(ring.completion().map(|c| (c.user_data(), c.result())));
 
     let mut for_the_operation = 0;
     let mut result = None;
-    for cqe in ring.completion() {
-        if cqe.user_data() == id.as_u64() {
+    for (data, code) in cqes {
+        if data == id.as_u64() {
             for_the_operation += 1;
-            result = Some(cqe.result());
+            result = Some(code);
         }
     }
 

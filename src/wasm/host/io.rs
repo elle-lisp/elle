@@ -1,4 +1,4 @@
-//! audited: 2026-09-20
+// audited: 2026-09-30
 //! I/O a compiled module asks for at the top level, with no scheduler to take
 //! it: the backend it reaches and the answer it reads back.
 //!
@@ -17,7 +17,8 @@ impl ElleHost {
     ///
     /// When inside a fiber (fiber_id_stack is non-empty), propagate
     /// SIG_IO so the scheduler can drive I/O through the event loop.
-    /// Otherwise, execute I/O inline via the bound backend or SyncBackend.
+    /// Otherwise, execute I/O inline on the backend a parameter frame binds, or
+    /// else on the host's own lazily built one.
     pub fn maybe_execute_io(&mut self, bits: SignalBits, value: Value) -> (SignalBits, Value) {
         if bits.raw() & SIG_IO.raw() == 0 {
             return (bits, value);
@@ -40,7 +41,7 @@ impl ElleHost {
                     request,
                     crate::io::pending::Submitter::detached(self.heap_ptr()),
                 ) {
-                    if let Ok(completions) = async_be.0.wait(-1) {
+                    if let Ok(completions) = async_be.0.wait(None) {
                         if let Some(answer) = inline_answer(completions) {
                             return answer;
                         }
@@ -81,7 +82,7 @@ impl ElleHost {
             request,
             crate::io::pending::Submitter::detached(self.heap_ptr()),
         ) {
-            if let Ok(completions) = backend.0.wait(-1) {
+            if let Ok(completions) = backend.0.wait(None) {
                 if let Some(answer) = inline_answer(completions) {
                     return answer;
                 }

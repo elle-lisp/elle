@@ -1,6 +1,6 @@
 # Subprocesses
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-30 -->
 
 Elle spawns a child process as a `subprocess` value: one thing to read streams
 from, to signal, and to wait on.
@@ -196,6 +196,43 @@ however many times it is called and whatever became of the wait before it.
 
 `subprocess/wait` ends on cancellation but takes no `:timeout` of its own. See
 [io.md](io.md) for the calls that wait, and what ends each one.
+
+## What a child cost
+
+`subprocess/rusage` answers what the child has consumed, as a struct:
+
+| Key | Answers |
+|---|---|
+| `:user-us` | CPU time spent in user mode, in microseconds |
+| `:sys-us` | CPU time spent in the kernel on the child's behalf, in microseconds |
+| `:max-rss-kb` | the peak resident set so far, in KiB |
+
+While the child runs, the answer is a sample of the child alone, taken at the
+call. macOS keeps no peak for another process, so there a running child's
+`:max-rss-kb` is its resident set at the call. Once something has reaped the
+child, the answer is the total the kernel handed over with the exit status: the
+child and every descendant it waited for, with `:max-rss-kb` the largest peak
+among them. The subprocess keeps that total, so every later call answers the
+same struct.
+
+Before the reap the answer may be `nil`. A child that has exited has released
+what a sample reads, and a system with no way to sample another process has
+nothing to read.
+
+```lisp
+(def napper (subprocess/exec "sleep" ["30"]))
+(assert (> (get (subprocess/rusage napper) :max-rss-kb) 0)
+        "a running child answers a sample of itself")
+(subprocess/kill napper :sigkill)
+(subprocess/wait napper)
+
+(def hog (subprocess/exec "sh" ["-c" "x=$(head -c 20000000 /dev/zero | tr '\\0' a); echo ${#x}"]))
+(subprocess/wait hog)
+(let [u (subprocess/rusage hog)]
+  (assert (> (get u :max-rss-kb) 19000) "the total covers the 20 MB the shell held")
+  (assert (>= (get u :user-us) 0) "CPU time is a count of microseconds")
+  (assert (= u (subprocess/rusage hog)) "and every later call answers the same total"))
+```
 
 ## Options
 

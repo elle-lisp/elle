@@ -1,6 +1,6 @@
 # tls
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 TLS 1.2 and 1.3 client and server: the `elle-tls` plugin runs the state machine, and Elle code moves every byte.
 
@@ -26,7 +26,7 @@ A function that moves bytes yields, because it does I/O: `connect`,
 
 ## Data flow
 
-```
+```text
 connect: tcp/connect → tls/client-state → handshake loop → tls-conn
 accept:  tcp/accept  → tls/server-state → handshake loop → tls-conn
 
@@ -55,5 +55,5 @@ A `tls-conn` is transparent, and both fields are yours to read:
 ## Running tests
 
 ```bash
-elle tests/elle/tls.lisp
+elle tests/lang/tls.lisp
 ```

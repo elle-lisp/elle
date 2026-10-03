@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -54,6 +54,9 @@ mod time_elapsed {
 mod deps {
     include!("deps.rs");
 }
+mod bins {
+    include!("bins.rs");
+}
 mod argv_cli {
     include!("argv_cli.rs");
 }
@@ -87,9 +90,6 @@ mod sys_args {
 mod meta {
     include!("meta.rs");
 }
-mod elle_scripts {
-    include!("elle_scripts.rs");
-}
 mod dump_cli {
     include!("dump_cli.rs");
 }
@@ -98,9 +98,6 @@ mod trace_compile {
 }
 mod trace_cli {
     include!("trace_cli.rs");
-}
-mod flip_cli {
-    include!("flip_cli.rs");
 }
 mod tier_cli {
     include!("tier_cli.rs");
@@ -155,6 +152,12 @@ mod timeout_capture {
 }
 mod runner_gauges {
     include!("runner_gauges.rs");
+}
+mod runner_cost {
+    include!("runner_cost.rs");
+}
+mod runner_file_error {
+    include!("runner_file_error.rs");
 }
 mod form_profile {
     include!("form_profile.rs");
@@ -217,20 +220,26 @@ mod bytecode_doc {
 mod workflows {
     include!("workflows.rs");
 }
+mod crosscheck {
+    include!("crosscheck.rs");
+}
+mod change_filter {
+    include!("change_filter.rs");
+}
 mod plugins {
     include!("plugins.rs");
 }
 mod runner_budget {
     include!("runner_budget.rs");
 }
-mod dashboards {
-    include!("dashboards.rs");
-}
 mod corpus_targets {
     include!("corpus_targets.rs");
 }
-mod budget {
-    include!("budget.rs");
+mod suites {
+    include!("suites.rs");
+}
+mod variants {
+    include!("variants.rs");
 }
 mod capacity {
     include!("capacity.rs");
@@ -249,6 +258,9 @@ mod joined_comments {
 }
 mod test_setup {
     include!("test_setup.rs");
+}
+mod pre_commit {
+    include!("pre_commit.rs");
 }
 
 // `allocator.rs` is absent from the list above and does not compile. It calls

@@ -117,9 +117,9 @@ several):
 
 ## Disposition table (eager trap at startup)
 
-`elle::io::init_process_signals` runs from `main()` immediately after
-`elle::config::init` and before `VM::new` ([main.rs](../src/main.rs)). It installs
-process-wide POSIX traps before any worker thread spawns:
+`elle::io::init_process_signals` runs from `elle::program::run` once the command
+line is parsed and before the runtime is built ([program.rs](../src/program.rs)).
+It installs process-wide POSIX traps before any worker thread spawns:
 
 | Set | Signals | What we do |
 |-----|---------|------------|
@@ -247,17 +247,17 @@ mask, so `subprocess/kill … 15` hangs `subprocess/wait` forever.
 ## Backend dispatch
 
 Elle's async backend chooses how to wait on a `SignalReceiver`'s
-kernel fd based on platform and build features:
+kernel fd based on the platform and the build's `uring` feature:
 
-| Platform | Default | Thread pool (`no-uring` feature) |
-|----------|---------|--------------|
+| Platform | With `uring` | Without `uring` |
+|----------|--------------|-----------------|
 | Linux | `IORING_OP_READ` on the signalfd, via the dedicated `submit_uring_sig_next` SQE helper. The read is queued on the io_uring instance and the kernel completes a CQE when one or more `signalfd_siginfo` records become available. No worker thread is involved on the elle side. | The threadpool worker waits for the signalfd and for the operation's stop pipe together, then `read(2)`s the signalfd. Uses one OS thread per outstanding `os/sig-next`, given back when the read completes or is cancelled. |
 | macOS | n/a — io_uring is Linux-only | A threadpool worker waits for the kqueue and the stop pipe together, then calls `kevent()` with a zero timeout on a per-receiver kqueue registered with `EVFILT_SIGNAL`. The worker `pthread_sigmask`-unblocks the watched signals on itself for that read so the kernel can pick it as the delivery target, and blocks them again before it takes another operation (see "macOS: per-receive worker unblock + no-op handler" above). |
 
-The threadpool path on Linux is exercised only in a binary built with the
-`no-uring` feature, or when `io_uring_setup(2)` fails on the host kernel
-(extremely old / locked-down kernels). A default Linux build always rides
-the dedicated io_uring path.
+The threadpool path on Linux runs only in a build without the `uring`
+feature, or when `io_uring_setup(2)` fails on the host kernel (extremely old
+or locked-down kernels). The default Linux build rides the dedicated io_uring
+path.
 
 ## Documented limitations
 
@@ -322,7 +322,8 @@ survives and can be reused:
 
 - On the io_uring backend (Linux), the underlying read is cancelled
   with `IORING_OP_ASYNC_CANCEL`.
-- On the thread-pool backend (macOS, CI, older Linux), the worker waits
+- On the thread-pool backend (macOS, a Linux build without the `uring`
+  feature, older Linux), the worker waits
   for the descriptor and for the operation's stop pipe together, so
   cancelling writes one byte and the read ends with `ECANCELED`. The
   descriptor is untouched, which is what lets the receiver be reused —

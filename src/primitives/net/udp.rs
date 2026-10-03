@@ -1,3 +1,9 @@
+// audited: 2026-09-30
+//! The UDP primitives: bind, send a datagram, receive one, and resolve a hostname.
+//!
+//! docs/io.md
+//! docs/io/timeout.md
+
 use super::*;
 
 // ---------------------------------------------------------------------------
@@ -27,7 +33,7 @@ pub(super) fn prim_udp_bind(
     }
 }
 
-/// (udp/send-to socket data addr port [:timeout ms]) → bytes-sent
+/// (udp/send-to socket data addr port [:timeout s] [:deadline t]) → bytes-sent
 pub(super) fn prim_udp_send_to(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -45,13 +51,13 @@ pub(super) fn prim_udp_send_to(
         Ok(p) => p,
         Err(e) => return e,
     };
-    let timeout = match extract_keyword_timeout(args, 4, "udp/send-to", ctx) {
-        Ok(t) => t,
+    let bound = match extract_bound(args, 4, "udp/send-to", ctx) {
+        Ok(b) => b,
         Err(e) => return e,
     };
     (
         SIG_IO,
-        IoRequest::with_timeout(
+        IoRequest::bounded(
             ctx,
             PortOp::SendTo {
                 addr,
@@ -60,12 +66,12 @@ pub(super) fn prim_udp_send_to(
             }
             .into(),
             socket_val,
-            timeout,
+            bound,
         ),
     )
 }
 
-/// (udp/recv-from socket count [:timeout ms]) → {:data bytes :addr string :port int}
+/// (udp/recv-from socket count [:timeout s] [:deadline t]) → {:data bytes :addr string :port int}
 pub(super) fn prim_udp_recv_from(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -88,8 +94,8 @@ pub(super) fn prim_udp_recv_from(
         }
         None => return type_error!(ctx, args[1], "udp/recv-from", "integer for count"),
     };
-    let timeout = match extract_keyword_timeout(args, 2, "udp/recv-from", ctx) {
-        Ok(t) => t,
+    let bound = match extract_bound(args, 2, "udp/recv-from", ctx) {
+        Ok(b) => b,
         Err(e) => return e,
     };
     // Pre-allocate the result struct on THIS (the requesting) fiber's heap, the
@@ -97,8 +103,8 @@ pub(super) fn prim_udp_recv_from(
     // buffers in place (kernel writes the payload straight into `:data`) instead
     // of instantiating fresh values on the scheduler's heap — otherwise the
     // region-backed payload is freed before `fiber/resume` hands it back and the
-    // datagram arrives zeroed (the arena-lifetime bug). `:addr` is an LBytes
-    // buffer the completion fills then transmutes to a string in place.
+    // datagram arrives zeroed. `:addr` is an LBytes buffer the completion fills
+    // then transmutes to a string in place.
     let result = {
         use crate::value::heap::TableKey;
         let mut fields = std::collections::BTreeMap::new();
@@ -111,14 +117,15 @@ pub(super) fn prim_udp_recv_from(
     };
     (
         SIG_IO,
-        IoRequest::with_timeout(
+        IoRequest::bounded(
             ctx,
             PortOp::RecvFrom { count, result }.into(),
             socket_val,
-            timeout,
+            bound,
         ),
     )
 }
+
 /// (sys/resolve hostname) → array of IP address strings
 pub(super) fn prim_sys_resolve(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,

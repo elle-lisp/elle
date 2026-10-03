@@ -1,6 +1,6 @@
 # Per-arm compensation
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 The releases a branch adds one per arm, each funded by a retain on its own node.
 The head route takes an arm that never names the region, the tail route one that
@@ -32,7 +32,7 @@ The shape that demanded all three at once is the conditional accumulate — a
 loop that names each element, then stores it into an outer 1-slot container in
 one arm of a `when` — whose element release sat in the storing arm and leaked
 on every other path
-([region-cell-aliased-store.lisp](../../../tests/elle/region-cell-aliased-store.lisp)).
+([region-cell-aliased-store.lisp](../../../tests/impl/region-cell-aliased-store.lisp)).
 An aliased stored value takes the counted store of
 [the 1-slot container](bindings.md).
 
@@ -95,10 +95,10 @@ window](window.md)) — the single anchored release covers every path and neithe
 route fires, since neither finds a `decref_point` inside an arm any more.
 
 Pinned by
-[region-return-arm-escape-leak.lisp](../../../tests/elle/region-return-arm-escape-leak.lisp)
+[region-return-arm-escape-leak.lisp](../../../tests/impl/region-return-arm-escape-leak.lisp)
 (both faces: the non-returning arm is bounded, and the returned value survives its
 caller's use), and for the `Match` arm by
-[region-match-dead-arm-leak.lisp](../../../tests/elle/region-match-dead-arm-leak.lisp)
+[region-match-dead-arm-leak.lisp](../../../tests/impl/region-match-dead-arm-leak.lisp)
 (both faces again, plus the return-escaping value whose dead `Match` arm hands the caller
 nothing).
 
@@ -118,7 +118,7 @@ it at the resume ([generations.md](generations.md)). So an unfunded used
 sibling arm takes no per-arm release. [The branch-arm window](window.md) closes
 that shape instead: it anchors the region's single release where every arm
 reaches it. The `match-used-arm` probe in
-[the branch probes](../../../tests/elle/probe/branch.lisp) gauges it at zero.
+[the branch probes](../../../tests/impl/probe/branch.lisp) gauges it at zero.
 
 ### A compensating release of an env cell names the box, not the holder's slot
 
@@ -192,9 +192,9 @@ that candidate came from. Otherwise the arms stay mutually exclusive, so exactly
 release runs per path; no merge point and no nil-stamp is involved, which is what a
 cell release cannot supply.
 
-Pinned by [region-tail-frame-exit.lisp](../../../tests/elle/region-tail-frame-exit.lisp)
+Pinned by [region-tail-frame-exit-capture.lisp](../../../tests/impl/region-tail-frame-exit-capture.lisp)
 (the `arm-cell` / `arm-cell-ro` / `arm-cell-read` rows, both arms of each), the
-`env-cell-read-arm` probe in [the direct probes](../../../tests/elle/probe/direct.lisp)
+`env-cell-read-arm` probe in [the direct probes](../../../tests/impl/probe/direct.lisp)
 (the per-op rate), the analysis pins in
 [region::infer::tests::compensate](../../../src/hir/region/infer/tests/compensate.rs)
 (`a_falling_through_arm_compensates_the_env_cell_its_sibling_relocated`,
@@ -206,7 +206,7 @@ on every other region), the placement pins in
 (`a_falling_through_arm_head_releases_the_env_cell_its_sibling_relocated` and
 `a_reading_arm_tail_releases_the_env_cell_its_sibling_relocated`, beside the decline
 `escaping_holder_env_cell_release_stays_after_the_tail_call`), and
-[region-tail-frame-exit-uaf.lisp](../../../tests/elle/region-tail-frame-exit-uaf.lisp)
+[region-tail-frame-exit-uaf.lisp](../../../tests/impl/region-tail-frame-exit-uaf.lisp)
 (the soundness complement — a closure
 handed out through the compensated arm must still rewrite and read its cell, the
 content a reading arm returns must outlive the box, and the box must outlive the

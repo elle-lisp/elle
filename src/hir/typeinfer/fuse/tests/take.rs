@@ -1,15 +1,10 @@
-use super::*;
+// audited: 2026-09-28
+//! The `take-while` stage fuses to a guarded push, whose early exit ends the walk
+//! only where it is the innermost op. It declines over an undecidable emptiness.
+//!
+//! docs/impl/dissolution/stages.md
 
-/// Count the `and` nodes — the fused scaffold emits one only for the loop
-/// condition `(and (< i len) more)`, so it is the discriminator for where an early
-/// exit is read: the loop condition where the op that carries it is the chain's
-/// innermost, a gate stage otherwise (docs/impl/dissolution.md § "Which early exit
-/// may end the walk").
-fn count_ands(h: &Hir) -> usize {
-    let mut n = usize::from(matches!(h.kind, HirKind::And(_)));
-    h.for_each_child(|c| n += count_ands(c));
-    n
-}
+use super::*;
 
 /// A single `(take-while pred xs)` dissolves to a guarded push under an early-exit
 /// sentinel: the `take-while` dispatch is gone, no closure survives (neither the
@@ -232,8 +227,8 @@ fn user_shadowed_take_while_is_not_fused() {
 }
 
 /// A capturing predicate fuses: the splice is the call site, so `k` is in scope
-/// where the run's guard lands (docs/impl/dissolution.md § "Captures"). Fails while
-/// the gate refuses a capture: the `take-while` call and the closure both survive.
+/// where the run's guard lands (docs/impl/dissolution.md). A gate that refused a
+/// capture would leave the `take-while` call and the closure in place.
 #[test]
 fn capturing_take_while_predicate_fuses() {
     let (hir, arena, mut rt) = compile("(let [k 2] (take-while (fn [x] (> x k)) [3 4 1]))");

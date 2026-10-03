@@ -1,7 +1,9 @@
-// audited: 2026-09-20
-// src/io/AGENTS.md
+// audited: 2026-09-30
 //! The endings a pool operation reaches with nobody cancelling it: a close on
 //! the port beneath it, its own deadline, and a retirement.
+//!
+//! src/io/AGENTS.md
+//! docs/impl/io-inflight.md
 
 use super::*;
 
@@ -9,23 +11,23 @@ use super::*;
 ///
 /// `port/close` is the only unblocking mechanism a program has for an accept
 /// nobody cancels — an accept loop parked in a live process, closed by another
-/// process at teardown (tests/elle/process-accept-close.lisp is the scheduler
+/// process at teardown (tests/lang/process-accept-close.lisp is the scheduler
 /// shape). The close path may not lean on `shutdown(2)` for this: shutdown of
 /// a LISTENING socket is a Linux extension — macOS and the BSDs return
 /// ENOTCONN and wake nothing, and the accept's worker then polls the retired
 /// descriptor forever while the scheduler waits on a completion that never
 /// comes. The wake must come from the operation's stop pipe instead.
 ///
-/// Built on `new_thread_pool` for the reason the cancellation tests give: on a
-/// Linux dev box the default backend is the ring, and this property would go
-/// unchecked everywhere it can regress.
+/// Built on `new_thread_pool` for the reason the cancellation tests in
+/// netcancel.rs give: on a Linux dev box the default backend is the ring, and
+/// this property would go unchecked everywhere it can regress.
 #[test]
 fn closing_a_listener_ends_its_parked_pool_accept() {
     crate::value::arena::with_test_region(|| {
         let h = crate::primitives::ctx::TestHeap::new();
         use std::os::unix::io::FromRawFd;
 
-        // A BLOCKING listener, deliberately — see the cancellation test above.
+        // A BLOCKING listener, deliberately — see the cancellation tests in netcancel.rs.
         let listener_fd = unsafe {
             let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
             assert!(fd >= 0, "socket() failed");
@@ -64,16 +66,15 @@ fn closing_a_listener_ends_its_parked_pool_accept() {
         );
         let accept_id = backend
             .submit(
-                &IoRequest {
-                    op: PortOp::Accept {
+                &IoRequest::unbounded(
+                    PortOp::Accept {
                         options: Default::default(),
                         encoding: crate::port::Encoding::Binary,
                         accept_port: accept_port_val,
                     }
                     .into(),
-                    port: listener_port,
-                    timeout: None,
-                },
+                    listener_port,
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -94,18 +95,14 @@ fn closing_a_listener_ends_its_parked_pool_accept() {
         // parked accept must then complete too — as an error, within a bound.
         let close_id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::Close,
-                    port: listener_port,
-                    timeout: None,
-                },
+                &IoRequest::unbounded(IoOp::Close, listener_port),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
         let mut accept_completion = None;
         for _ in 0..40 {
-            for c in backend.wait(50).unwrap() {
+            for c in backend.wait(TICK).unwrap() {
                 if c.id == accept_id {
                     accept_completion = Some(c);
                 } else {
@@ -140,11 +137,11 @@ fn closing_a_listener_ends_its_parked_pool_accept() {
 
 /// A pool connect must stop at the caller's `:timeout`, and say so.
 ///
-/// The same full accept queue as the cancellation test above, waited on with a
-/// deadline instead of cancelled. Two things are pinned: the connect ends near
+/// The same full accept queue the cancellation tests in netcancel.rs use, waited on
+/// with a deadline instead of cancelled. Two things are pinned: the connect ends near
 /// its deadline rather than at the kernel's own, minutes later; and it reports
-/// `:timeout`, the kind `ev/timeout` and every caller that distinguishes a
-/// deadline from a broken connection matches on.
+/// `:timeout`, the kind `ev/timeout` and every caller that distinguishes a deadline
+/// from a broken connection matches on.
 #[test]
 fn a_pool_connect_reports_its_own_deadline_as_a_timeout() {
     crate::value::arena::with_test_region(|| {
@@ -166,8 +163,8 @@ fn a_pool_connect_reports_its_own_deadline_as_a_timeout() {
         let started = std::time::Instant::now();
         let connect_id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::Connect {
+                &IoRequest::unbounded(
+                    IoOp::Connect {
                         addr: crate::io::request::ConnectAddr::Tcp {
                             addr: "127.0.0.1".parse().unwrap(),
                             port: bound_port,
@@ -175,16 +172,18 @@ fn a_pool_connect_reports_its_own_deadline_as_a_timeout() {
                             encoding: crate::port::Encoding::Binary,
                         },
                     },
-                    port: connect_port,
-                    timeout: Some(std::time::Duration::from_millis(200)),
-                },
+                    connect_port,
+                )
+                .within(crate::io::request::Bound::per_op(
+                    std::time::Duration::from_millis(200),
+                )),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
         let mut completions = Vec::new();
         for _ in 0..40 {
-            completions.extend(backend.wait(200).unwrap());
+            completions.extend(backend.wait(Some(Duration::from_millis(200))).unwrap());
             if !completions.is_empty() {
                 break;
             }
@@ -281,16 +280,15 @@ fn a_retired_accept_closes_the_connection_it_took() {
 
             backend
                 .submit(
-                    &IoRequest {
-                        op: PortOp::Accept {
+                    &IoRequest::unbounded(
+                        PortOp::Accept {
                             options: Default::default(),
                             encoding: Encoding::Binary,
                             accept_port,
                         }
                         .into(),
-                        port: listener_port,
-                        timeout: None,
-                    },
+                        listener_port,
+                    ),
                     crate::io::pending::Submitter::detached(heap_ptr),
                 )
                 .unwrap();
@@ -307,7 +305,7 @@ fn a_retired_accept_closes_the_connection_it_took() {
             heap.decref_region(region);
 
             for _ in 0..40 {
-                Completion::discard_all(backend.wait(50).unwrap());
+                Completion::discard_all(backend.wait(TICK).unwrap());
                 if !backend.has_pending() && backend.workers() == 0 {
                     break;
                 }

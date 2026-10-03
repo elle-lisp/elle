@@ -1,6 +1,6 @@
 # The test runner store
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 Where `elle test` keeps a run, what every run and result records, and the
 queries that read them back.
@@ -95,32 +95,29 @@ repeating that import is a no-op as well.
 
 An agent rarely starts with a file; it probes: `elle test -e '(assert (= (foo)
 42))'`. That form runs like any other and is **persisted into the index as an
-ad-hoc form** — same syntax-hash identity, tagged `origin=:adhoc` and stamped
-with the session. For the rest of the session it is part of the suite: a plain
-`elle test` re-runs it, `--rerun-failed` includes it, every query sees it. It is
-*not* in git — it has no file.
+ad-hoc form** — same syntax-hash identity, with `origin` set to `:adhoc`. Every
+query sees it. It is *not* in git — it has no file, so no later run scans it
+again.
 
-When an ad-hoc test earns its keep, `elle test --promote <id> [file]` renders its
-syntax to text and appends it to a `.lisp` file. Now it is durable: in git,
-diffable, distributed, and re-derived as a durable form on the next scan. The
-motion from throwaway probe to permanent regression test is one command, and
-identity is preserved across it because both sides key on the same syntax hash.
+When an ad-hoc test earns its keep, `elle test --promote <hash> <name>` renders
+its syntax into `<corpus>/<name>.lisp`. Now it is durable: in git, diffable,
+distributed, and re-derived as a durable form on the next scan. The motion from
+throwaway probe to permanent regression test is one command, and identity is
+preserved across it because both sides key on the same syntax hash.
 
-Ad-hoc forms vanish when `--prune adhoc` clears them. Either way they are
-ephemeral by construction, while durable forms always re-derive from the
-corpus.
+An ad-hoc form stays in the index until `elle test --reset` removes the whole
+store. Durable forms always re-derive from the corpus.
 
 ### The durable corpus is a flat set, classified by query
 
-Tests are stored **one form per file** — file == test == syntax hash —
+The design stores tests **one form per file** — file == test == syntax hash —
 addressable, with their own blame and history, movable and promotable as atoms.
 There is **no directory hierarchy**, and filesystem order is treated as
 **semantically void**. This is the same argument made twice:
 
-- *Order* is not a property of an isolated test. The runner owns execution order
-  — by hash, by failure-recency, or randomized to surface hidden inter-test
-  coupling — and records the order it used, so an order-dependent failure
-  reproduces. Nothing about sequence belongs in a path.
+- *Order* is not a property of an isolated test. Execution order belongs to the
+  runner — by hash, by failure-recency, or randomized to surface hidden
+  inter-test coupling. Nothing about sequence belongs in a path.
 - *Category* is not single-valued either. A form that does `(chan/send …)`
   inside `(fiber/new …)` while catching a signal is a channel test *and* a fiber
   test *and* a signal test. A directory forces one bucket and discards the rest;
@@ -132,27 +129,31 @@ There is **no directory hierarchy**, and filesystem order is treated as
 What promotion assigns is therefore a **name**, not a **place**: `touches
 chan/send` + the derived label → `bounded-send-full.lisp`. A human *reads* the
 failing test, and that legibility is the one need the index can't derive away —
-order and hierarchy both can. Names are suggested from analysis and confirmed
-with context at promotion.
+order and hierarchy both can. `--promote` takes the name from its caller;
+suggesting one from analysis is design ([test-cli](test-cli.md)).
 
 Directories can be added later as a thin, non-authoritative reading-aid for
 humans browsing the repo without the index handy — they never become the source
-of classification, and the runner never depends on them.
+of classification, and the runner never depends on them. The split between
+`tests/lang/` and `tests/impl/` is not a category in this sense: it says which
+suite owns a claim and which program runs it ([spec](spec.md) § Two suites),
+which no analysis of the form can derive.
 
 The runner compiles any file regardless of how many forms it holds (via the
-multi-form compilation mode, [test-runner](test-runner.md)), so today's multi-form
-`tests/elle/*.lisp` keep working unchanged; exploding them into the
+multi-form compilation mode, [test-runner](test-runner.md)), so the multi-form
+files in both suites run unchanged; exploding them into the
 one-form-per-file shape is a mechanical codemod for when it's convenient, not a
 prerequisite.
 
 ## What gets captured
 
-Per **run** (one `elle test` invocation): wall time, peak RSS, user/sys CPU
-(`getrusage`), the `HEAD` commit, whether the working tree is dirty, a tree hash,
-the worktree the run ran in, the elle build version/profile/host, the runner's
-process id, the boot fingerprint (§ The boot fingerprint), the full
-`argv`, the tier set, and the working-tree files that differ from `HEAD` with
-their content hashes (the "hash of changed files").
+Per **run** (one `elle test` invocation): the `HEAD` commit, whether the working
+tree is dirty, a tree hash, the worktree the run ran in, the elle build
+version/profile/host, the runner's process id, the boot fingerprint (§ The boot
+fingerprint), the full `argv`, and where its results ran (`tiers`,
+[test-runner](test-runner.md)). The design adds wall time, peak RSS and
+user/sys CPU (`getrusage`), and the working-tree files that differ from `HEAD`
+with their content hashes; none of them is captured yet (§ Schema).
 
 The code-state columns are what makes a result belong to something. Without
 them a row says a form failed and cannot say against which commit, on which
@@ -170,9 +171,19 @@ sibling's. The runner reads them from `git` at insert:
 Outside a repository each of those is NULL, which is the honest answer: the run
 happened, and nothing names the code it ran against.
 
-Per **(form × tier)**: status, reason, expected/actual and predicate syntax
-(from the `assert` macro, [test-runner](test-runner.md)), the emitted signal on failure, wall time,
-and **CPU time** — the delta of `(clock/cpu)` read across the form's evaluation.
+Per **result**: status, reason, expected/actual and predicate syntax (from the
+`assert` macro, [test-runner](test-runner.md)), and the emitted signal on
+failure. A result's `tier` names where it ran ([test-runner](test-runner.md)).
+A result that a form or a child produced also records what it cost. For a form
+in a worker, `wall_ms` runs from handing the form over to having its answer,
+and `cpu_us` is the delta of `(clock/cpu)` on the thread that ran it. That
+thread's CPU leaves out the JIT's compile thread, the I/O pool and any child
+the form starts. For an `--isolate` child, `wall_ms` runs from spawn to reap,
+and `cpu_us` (user plus system) and `max_rss_kb` are its total from
+`subprocess/rusage` ([subprocess](subprocess.md)). A worker that never hands
+back its answer — a missed deadline, a panic — leaves `cpu_us` NULL. A
+file-level error or skip and a divergence row leave all three NULL, because
+nothing ran to produce them.
 
 > CPU delta, not fuel. Fuel (`SIG_FUEL`) is specific to the `std/process`
 > scheduler, is not consumed by Elle's default root scheduler, and essentially
@@ -181,19 +192,17 @@ and **CPU time** — the delta of `(clock/cpu)` read across the form's evaluatio
 > deterministic, so regression queries on it compare distributions/thresholds,
 > not exact equality; for that, prefer many runs (which we keep) over one.
 
-Per **asset**: for every (form × tier) the runner captures the full `--dump`
-artifact set (`ast, fhir, defuse, regions, escape, hir, lir, cfg, dfa, jit`),
-`--stats`, and stdout/stderr — written to the filesystem CAS
-([test-runner](test-runner.md)), deduped by hash, so identical artifacts across
-runs and tiers cost one file.
-`--trace` is captured **only for failing/diverging forms** (too large for the
-always-set), likewise to the CAS. History is **kept indefinitely**; pruning is
-explicit only (`elle test --prune`), except ad-hoc forms (§ Ad-hoc tests).
+Per **asset**: the runner captures each result's stdout and stderr into the
+filesystem CAS ([test-runner](test-runner.md)), deduped by hash, so identical
+output across runs costs one file. History is **kept indefinitely**: nothing
+prunes it, and `elle test --reset` removes the whole store.
 
-> **Temporarily**, the `--dump` artifact set is **not** captured
-> ([test-runner](test-runner.md) § CAS asset capture) — it OOMs the corpus run
-> and does not dedup. stdout/stderr are still captured per (form × tier);
-> `--dump` capture returns once the region leak it exposes is fixed.
+> The design also captures the full `--dump` artifact set (`ast, fhir, defuse,
+> regions, escape, hir, lir, cfg, dfa, jit`) and `--dump=stats` per result, and
+> `--trace` for failing forms only. None of them is captured
+> ([test-runner](test-runner.md) § CAS asset capture): the `--dump` pass OOMs
+> the corpus run and does not dedup, and it returns once the region leak it
+> exposes is fixed.
 
 ## The boot fingerprint
 
@@ -274,15 +283,15 @@ environment. The dashboard appends one JSON object per verdict:
 ```
 
 Unset, the channel is closed and the dashboard writes nothing — so a direct
-`elle tests/elle/oracle.lisp` run reads exactly as it read before, and the
-stdout rendering stays the human's copy. The runner names the file for each
+`elle-rig tests/impl/oracle.lisp` run prints its verdicts and records none, and
+the stdout rendering stays the human's copy. The runner names the file for each
 `--isolate` child ([test-runner](test-runner.md)), reads it once the child
 exits, and writes one `measurement` row per line against that child's result.
 The child process is what makes the variable safe to set: the environment is
 process-global, so a per-form value would race between workers sharing one.
 
 The axis is a property of the instrument rather than of the probe. A gauge in
-[estimator.lisp](../tests/elle/lib/estimator.lisp) names the dimension it reads
+[estimator.lisp](../tests/impl/lib/estimator.lisp) names the dimension it reads
 and the unit a rate on it carries, and every probe already hands the estimator
 its gauge — so no probe declares an axis and none can declare the wrong one.
 The subject is the probe's label with the `label@axis` display suffix removed,
@@ -297,7 +306,7 @@ neither `closed` nor `growth` — the two verdicts that are the expected answer:
 
 ```
 3 measurements · 1 open · 2 closed
-  open  tests/elle/oracle.lisp  reduce  objects  1.002 objects/op
+  open  tests/impl/oracle.lisp  reduce  objects  1.002 objects/op
 ```
 
 The rest is a query. The summary is a reading aid, and every number in it comes
@@ -334,7 +343,7 @@ holds, and the rows it writes.
 ### Why a table of its own
 
 A delta belongs to the window between two boundaries rather than to a
-(form × tier), so a `result` column would copy one number onto every row of the
+result, so a `result` column would copy one number onto every row of the
 file. A `measurement` row is the wrong home too: it carries a dashboard's
 verdict off the channel of an isolated child, and a per-file delta has no
 verdict to give.
@@ -346,8 +355,8 @@ regions:
 
 ```
 runner heap · objects +9021 · regions +28104 · pages +112
-  objects +4510  regions +14052  pages +56  tests/elle/a.lisp
-  objects +4511  regions +14052  pages +56  tests/elle/b.lisp
+  objects +4510  regions +14052  pages +56  tests/lang/a.lisp
+  objects +4511  regions +14052  pages +56  tests/lang/b.lisp
 ```
 
 The list is a reading aid. Which file, on which commit, in which run is a query
@@ -362,12 +371,14 @@ CREATE TABLE run (                  -- one row per `elle test` invocation
   finished_at TEXT,                 -- stamped at completion; NULL = killed, or still running
   git_commit TEXT, git_dirty INT, tree_hash TEXT, worktree TEXT,  -- the code state this run ran against
   boot_fingerprint INT,             -- the binary and the boot sources, hashed
-  elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, tiers TEXT,
+  elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT,
+  tiers TEXT,                       -- the probed tiers (vm,jit,…), or process
   pid INT,                          -- the runner's process on `host`; tells a live run from a killed one
   selection TEXT,                   -- the filter predicate; NULL = full run (the gate)
   n_selected INT,                   -- files + -e forms planned; written at insert
-  n_pass INT, n_fail INT, n_skip INT, n_diverge INT, n_timeout INT,  -- aggregated at completion only
-  wall_ms INT, max_rss_kb INT, cpu_user_ms INT, cpu_sys_ms INT);   -- resource usage (v1: deferred)
+  n_pass INT, n_fail INT, n_skip INT, n_timeout INT,  -- aggregated at completion only
+  n_diverge INT,                    -- forms whose tiers disagreed; aggregated at completion
+  wall_ms INT, max_rss_kb INT, cpu_user_ms INT, cpu_sys_ms INT);   -- resource usage; not created yet
 
 CREATE TABLE changed_file (         -- working tree vs HEAD at run time
   run_id INT REFERENCES run(id), path TEXT, status TEXT, blob_hash TEXT);
@@ -383,10 +394,12 @@ CREATE TABLE form (                 -- deduped across runs; the computer names i
 
 CREATE TABLE result (               -- one row per (form × tier × run)
   id INTEGER PRIMARY KEY, run_id INT REFERENCES run(id),
-  form_hash TEXT REFERENCES form(hash), tier TEXT,
-  status TEXT,                      -- pass|fail|skip|diverge|error
+  form_hash TEXT REFERENCES form(hash),
+  tier TEXT,                        -- vm|jit|wasm|mlir-cpu|process, or * for a divergence
+  status TEXT,                      -- pass|fail|skip|timeout|diverge
   reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT,
-  wall_ms INT, cpu_us INT);       -- cpu_us = (clock/cpu) delta across the form
+  wall_ms INT, cpu_us INT,          -- what it cost (§ What gets captured)
+  max_rss_kb INT);                  -- an --isolate child's peak resident set
 
 CREATE TABLE asset (                -- artifact attached to a result; bytes live in the CAS
   result_id INT REFERENCES result(id),
@@ -413,10 +426,10 @@ The runner writes this with `lib/sqlite.lisp` (FFI to libsqlite3). The DB holds
 only metadata and hashes; artifact bytes live in the on-disk CAS, so the file
 stays small and merge/diff concerns never arise (it is gitignored regardless).
 
-**v1 implemented subset ([store.lisp](../src/test/store.lisp) `ensure-schema`).**
-The runner creates
-`form`, `result`, `asset`, `measurement` and `gauge` with the columns above;
-`run`, `form` and `changed_file` are subsets:
+**What the runner creates ([store.lisp](../src/test/store.lisp) `ensure-schema`).**
+The runner creates `result`, `asset`, `measurement` and `gauge` with the
+columns above, and a session DB written before `result.max_rss_kb` existed
+gains it by `ALTER TABLE`. `run`, `form` and `changed_file` are subsets:
 
 - `run` carries every column above except the resource ones
   (`wall_ms`/`max_rss_kb`/`cpu_user_ms`/`cpu_sys_ms`), which are deferred. So a

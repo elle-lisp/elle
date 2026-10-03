@@ -1,6 +1,6 @@
 # GPU Compute
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 How a plain Elle closure becomes a dispatched compute kernel, across the
 MLIR backend and the Vulkan plugin.
@@ -190,24 +190,25 @@ site has to fall back to the CPU.
 `gpu:map` does not fall back on its own: if the closure is ineligible or the
 GPU is missing, the error propagates. A test gates itself out with a
 `:gated` error when a prerequisite is missing — see
-[gpu-map.lisp](../../tests/elle/gpu-map.lisp).
+[gpu-map.lisp](../../tests/impl/gpu-map.lisp).
 
 ## Files
 
-```text
-lib/gpu.lisp                     gpu:map, gpu:compile, gpu:run, buffer specs
-lib/spirv.lisp                   Hand-written SPIR-V DSL
-src/mlir/spirv.rs                Compiler-generated SPIR-V
-src/primitives/meta.rs           git / fn/git? / disgit
-src/primitives/introspection.rs  fn/gpu-eligible? / mlir/compile-spirv
-src/lir/types/func.rs            is_gpu_eligible / is_mlir_cpu_eligible
-src/lir/types/mod.rs             is_gpu_instruction
-plugins/vulkan/src/lib.rs        Plugin entry, primitive table, buffer specs
-plugins/vulkan/src/context.rs    VulkanState init + Drop
-plugins/vulkan/src/shader.rs     SPIR-V → VkComputePipeline
-plugins/vulkan/src/dispatch.rs   Buffer setup, command recording, fence export, readback
-plugins/vulkan/src/decode.rs     Result bytes → Elle array
-```
+| File | Holds |
+|------|-------|
+| [lib/gpu.lisp](../../lib/gpu.lisp) | `gpu:map`, `gpu:compile`, `gpu:run`, buffer specs |
+| [lib/spirv.lisp](../../lib/spirv.lisp) | The hand-written SPIR-V DSL |
+| [src/mlir/spirv.rs](../../src/mlir/spirv.rs) | Compiler-generated SPIR-V |
+| [src/primitives/meta.rs](../../src/primitives/meta.rs) | `git`, `fn/git?`, `disgit` |
+| [src/primitives/introspection.rs](../../src/primitives/introspection.rs) | `fn/gpu-eligible?`, `mlir/compile-spirv` |
+| [src/lir/types/func.rs](../../src/lir/types/func.rs) | `is_gpu_eligible`, `is_mlir_cpu_eligible` |
+| [src/lir/types/mod.rs](../../src/lir/types/mod.rs) | `is_gpu_instruction` |
+
+The Vulkan plugin lives in the `plugins` submodule, under `vulkan/src/`:
+`lib.rs` holds the entry, the primitive table and the buffer specs;
+`context.rs` the `VulkanState` init and `Drop`; `shader.rs` SPIR-V to
+`VkComputePipeline`; `dispatch.rs` buffer setup, command recording, fence export
+and readback; and `decode.rs` result bytes to an Elle array.
 
 ## Primitives
 
@@ -253,6 +254,6 @@ them turns nothing on:
 - [plugins.md](../plugins.md) — the plugin system, and the submodule the Vulkan
   plugin's own reference lives in
 - [lib/AGENTS.md](../../lib/AGENTS.md) — Elle library reference (lib/gpu, lib/spirv)
-- [gpu-map.lisp](../../tests/elle/gpu-map.lisp),
-  [gpu-select.lisp](../../tests/elle/gpu-select.lisp),
-  [spirv.lisp](../../tests/elle/spirv.lisp) — runnable examples
+- [gpu-map.lisp](../../tests/impl/gpu-map.lisp),
+  [gpu-select.lisp](../../tests/impl/gpu-select.lisp),
+  [spirv.lisp](../../tests/lang/spirv.lisp) — runnable examples

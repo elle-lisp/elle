@@ -1,5 +1,5 @@
-(elle/epoch 12)
-## audited: 2026-09-21
+(elle/epoch 13)
+## audited: 2026-09-28
 ## lib/semver/surface.lisp — extract a module's public surface
 ##
 ## Hybrid extraction: the module is analyzed AND loaded. Runtime
@@ -7,7 +7,7 @@
 ## sees through re-exports; static analysis supplies parameter names and
 ## is the whole answer when construction signals (mode :static).
 ## docs/versioning.md owns the record vocabulary;
-## tests/elle/semver-surface.lisp pins this module.
+## tests/lang/semver-surface.lisp pins this module.
 ##
 ## Usage:
 ##   (def surf ((import "std/semver/surface")))

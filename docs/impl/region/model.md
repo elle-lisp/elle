@@ -1,6 +1,6 @@
 # Region representation — id-spaces, per-execution model, layout
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-28 -->
 
 Implementation-facing. How the compiler and runtime represent regions: the two
 id-spaces, the per-activation physical-region model, the page layout, and how an
@@ -27,7 +27,7 @@ a static slot cannot be passed where a runtime region is expected — "never ind
 a static id into `RegionStore`" is a compile error. "No region active" / "this
 value has no region" is `Option<RuntimeRegion>` (`None`), never a sentinel `0`.
 
-Crucially, a region is **not** a uniform optional field hung on every
+A region is **not** a uniform optional field hung on every
 instruction (which would let an allocation exist with no region — the invalid
 state spelled `None`). It is a mandatory `region: StaticRegion` field on exactly
 the LIR instruction *variants* that allocate or route a per-call region, and
@@ -75,7 +75,7 @@ per cell** (`begin_cell_regions`), each released by its own `DecrefRegion` at
 its binding's last use. A spliced call's args array is the same obligation with
 a different resolution: it takes a managed slot of its own so the call's result
 mint cannot orphan it, and its drop is the call's own — the runtime takes that
-slot (mechanism.md § "A spliced call's arguments come out of an array the
+slot ([mechanism.md](mechanism.md) § "A spliced call's arguments come out of an array the
 convention owns").
 
 ## Constants lower as ordinary allocations, not promoted values
@@ -128,7 +128,7 @@ consumer-facing performance account is in
 
 ### The base page is the OS page
 
-`base_page()` (`pagepool.rs`) asks the OS for its page size once and caches the
+`base_page()` ([pagepool.rs](../../../src/value/fiberheap/pagepool.rs)) asks the OS for its page size once and caches the
 answer. Class 0 of the size-class ladder is that page, and every larger class is
 a power-of-two multiple of it, so a region page is always a whole number of OS
 pages. `--region-page-size` rejects anything below `base_page()`.
@@ -213,7 +213,7 @@ the page is unclaimed; scrub catches a stale *content* read, in release builds
 too, for one `memset` per freed page. A page on its way to `munmap` is never
 scrubbed — an unmapped address faults on its own.
 
-`tests/elle/region-page-recycle.lisp` measures what the claim path costs per
+[region-page-recycle.lisp](../../../tests/impl/region-page-recycle.lisp) measures what the claim path costs per
 call from Elle, through the `arena/page-claims` gauge; `pagepool::tests` pins
 the untouched-recycle contract and the scrub's spans.
 
@@ -278,10 +278,10 @@ rejects exactly that id and admits only a mint that nothing has touched since.
 
 `arena/region-ids` reads `next_physical` from Elle — the gauge that moves the
 moment an id fails to come back — and `arena/region-table` reads what the table
-costs. The bound is pinned by the `id-*` probes of `tests/elle/oracle.lisp`,
+costs. The bound is pinned by the `id-*` probes of [oracle.lisp](../../../tests/impl/oracle.lisp),
 which measure id issuance per call against a live-growth discriminator of their
 own: a loop of calls that allocate nothing issues no new id, and a materializing
-call's id comes back by its teardown. `tests/elle/region-macro-id-recycle.lisp`
+call's id comes back by its teardown. [region-macro-id-recycle.lisp](../../../tests/impl/region-macro-id-recycle.lisp)
 gauges the expansion site the same way, against the same discriminator.
 `regionstore::tests::recycle` pins the store-level contract, the duplicate the
 generation check refuses included, and `arena::tests::macroscope` pins what the
@@ -310,7 +310,7 @@ object to change only its metadata (`with-traits` is the canonical case) must
 *source's* region with no counted edge: the source's ordinary demise then frees
 the payload under the live clone (the with-traits UAF — a clone of `[1 2 3]`
 captured by a spawned closure read freed pages in the send serializer;
-tests/elle/region-withtraits-slice-uaf.lisp). It also falsifies the operation's
+[region-withtraits-slice-uaf.lisp](../../../tests/impl/region-withtraits-slice-uaf.lisp)). It also falsifies the operation's
 `Fresh` declaration, which claims the whole result lives in the call's own
 region. The one sanctioned alias is the closure-env share (`squelch`/`attune`),
 which pays for itself with an explicit backing edge in the free-cascade scan's

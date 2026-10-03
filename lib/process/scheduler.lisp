@@ -285,8 +285,8 @@
           # can DEPEND on one of them running. An h2 client sub-fiber
           # parked in `read` waits for the request its own process has
           # not finished sending, so a park here waits on work only the
-          # parked scheduler can do (tests/elle/process-io-park.lisp,
-          # tests/elle/h2-headers-in-process.lisp). The sleep suspends
+          # parked scheduler can do (tests/lang/process-io-park.lisp,
+          # tests/lang/h2-headers-in-process.lisp). The sleep suspends
           # long enough for the parent to pump, then returns whether a
           # completion arrived or not.
           (when (and (> (length io-pending) 0) (= (length io-completions) 0)

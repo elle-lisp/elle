@@ -1,5 +1,7 @@
-//! audited: 2026-09-23
+// audited: 2026-09-30
 //! What a hold retains while its operation is in flight, and when it lets go.
+//!
+//! docs/impl/io-inflight.md
 
 use super::*;
 
@@ -59,7 +61,7 @@ fn a_held_operand_survives_the_release_of_its_region() {
 /// The counter-factual: retain the operand's own region instead of its root,
 /// and the owner's release below frees the subtree — `region_generation`
 /// moves for the member, and the completion assembles from freed memory.
-/// `tests/elle/process-io.lisp` § 10 is the program that gets there: a
+/// Section 10 of tests/lang/process-io.lisp is the program that gets there: a
 /// connection accepted inside a process, adopted into the per-connection
 /// `ev/spawn`'s subtree, written to by a `handle-io-forward` submission.
 #[test]
@@ -112,10 +114,10 @@ fn an_owned_operand_is_held_through_its_reclamation_root() {
 /// flight makes that sweep a read of freed memory. The check that exists to
 /// notice a fiber is gone is the last place that may assume it is there.
 ///
-/// Counter-factual: with the fiber left out of `OperandHold::take`, the
-/// release below frees its region, and `tests/integration/fixtures/
-/// region-fiber-abort-io-protect-uaf.lisp` faults under `--trace=guardfree`
-/// — a fiber aborted mid-`ev/sleep` is exactly this shape.
+/// The counter-factual: with the fiber left out of `OperandHold::take`, the
+/// release below frees its region, and tests/impl/region-fiber-abort-io-protect-uaf.lisp
+/// faults under `--trace=guardfree` — a fiber aborted mid-`ev/sleep` is exactly
+/// this shape.
 #[test]
 fn a_held_fiber_survives_the_release_of_its_region() {
     let mut pool = BufferPool::new();
@@ -226,7 +228,7 @@ fn a_cancelled_entry_keeps_what_the_kernel_addresses() {
         Value::NIL,
         None,
         None,
-        None,
+        crate::io::request::Bound::NONE,
     );
     table.insert(id(1), read, Submitter::detached(heap));
     table.mark_cancelled(id(1));

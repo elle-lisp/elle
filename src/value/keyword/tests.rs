@@ -1,4 +1,4 @@
-//! audited: 2026-09-28
+//! audited: 2026-09-29
 //! Unit tests (`super` is the parent impl module).
 //!
 //! docs/impl/symbol.md
@@ -193,8 +193,7 @@ fn literal_argument(mut rest: &str, args_before: usize) -> Option<&str> {
 
 // Every fixed spelling the runtime mints must be in VOCABULARY, or the value
 // it names prints as #<keyword:hash> — and `json/serialize` refuses a struct
-// that carries it as a key (docs/impl/symbol.md § "A spelling the runtime
-// itself mints").
+// that carries it as a key (docs/impl/symbol.md).
 //
 // Counter-factual: remove "ok" from VOCABULARY and this fails on the
 // `Value::keyword("ok")` sites; remove "size" and it fails on `file/stat`'s
@@ -233,7 +232,7 @@ fn vocabulary_covers_literal_mint_sites() {
 // `FiberStatus::Alive`.
 #[test]
 fn vocabulary_covers_accessor_mint_sites() {
-    use crate::config::{JitPolicy, MlirPolicy, WasmPolicy};
+    use crate::config::WasmPolicy;
     use crate::io::watch::WatchEventKind;
     use crate::value::fiber::FiberStatus;
 
@@ -253,28 +252,14 @@ fn vocabulary_covers_accessor_mint_sites() {
         }
     }
 
-    // The tier policies `(vm/config)` reports.
-    for p in [
-        JitPolicy::Off,
-        JitPolicy::Eager,
-        JitPolicy::Adaptive { threshold: 1 },
-        JitPolicy::Custom,
-    ] {
-        spellings.push(("JitPolicy", p.keyword().to_string()));
-    }
+    // The one tier policy `(vm/config)` reports as a keyword: a wasm build's.
+    // The JIT and MLIR tiers report a threshold.
     for p in [
         WasmPolicy::Off,
         WasmPolicy::Full,
         WasmPolicy::Lazy { threshold: 1 },
     ] {
         spellings.push(("WasmPolicy", p.keyword().to_string()));
-    }
-    for p in [
-        MlirPolicy::Off,
-        MlirPolicy::Eager,
-        MlirPolicy::Adaptive { threshold: 1 },
-    ] {
-        spellings.push(("MlirPolicy", p.keyword().to_string()));
     }
 
     // The fiber status `fiber/status` hands back.

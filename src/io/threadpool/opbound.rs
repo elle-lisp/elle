@@ -1,12 +1,14 @@
-// audited: 2026-09-23
-// src/io/AGENTS.md
+// audited: 2026-09-30
 //! The per-operation bound a thread-pool worker runs its syscalls under.
 //!
+//! src/io/AGENTS.md
+//!
 //! Two types, one for each side of the handover. [`Bounds`] is what a
-//! submission declares: a deadline and a stop pipe. [`OpBound`] is what the
-//! worker runs under: it holds the descriptor non-blocking for the operation
-//! and turns the declared bounds into waits.
+//! submission declares: the caller's bound and a stop pipe. [`OpBound`] is
+//! what the worker runs under: it holds the descriptor non-blocking for the
+//! operation and turns the declared bounds into waits.
 
+use crate::io::request::Bound;
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::sync::{LazyLock, Mutex};
@@ -35,7 +37,7 @@ struct NonBlockShare {
 pub(super) enum Wake {
     /// The descriptor reported the events asked for. Retry the syscall.
     Ready,
-    /// The caller's `:timeout` elapsed.
+    /// The caller's bound passed: its `:timeout` or its `:deadline`.
     TimedOut,
     /// `io/cancel` asked this operation to stop.
     Stopped,
@@ -59,8 +61,8 @@ pub(in crate::io) struct StopPipe {
 /// long a wait may take, and the pipe that ends the operation early.
 ///
 /// Every submission passes one, so an operation that can park cannot be written
-/// without saying which of three kinds it is — bounded by the caller's
-/// `:timeout` and a stop pipe (`CompletionHub::bounds`), [`prompt`], or
+/// without saying which of three kinds it is — bounded by the caller's bound
+/// and a stop pipe (`CompletionHub::bounds`), [`prompt`], or
 /// [`uninterruptible`]. The bounds own the stop pipe's read end and close it
 /// with themselves, so a submission that never reaches a worker disposes of the
 /// pipe by being dropped.
@@ -68,19 +70,20 @@ pub(in crate::io) struct StopPipe {
 /// [`prompt`]: Bounds::prompt
 /// [`uninterruptible`]: Bounds::uninterruptible
 pub(in crate::io) struct Bounds {
-    /// How long one readiness wait may take. `None` waits indefinitely, which
-    /// is what a request that named no timeout asks for.
-    timeout: Option<Duration>,
+    /// How long each readiness wait may take: the caller's `:timeout`, cut
+    /// short by its `:deadline`. [`Bound::NONE`] waits indefinitely, which is
+    /// what a request that named neither asks for.
+    bound: Bound,
     /// The read end of this operation's stop pipe.
     stop: Option<RawFd>,
 }
 
 impl Bounds {
-    /// Bound an operation by the caller's `:timeout` and by `stop`, the read
-    /// end of its stop pipe. `CompletionHub::bounds` is what pairs the two — it
+    /// Bound an operation by the caller's `bound` and by `stop`, the read end
+    /// of its stop pipe. `CompletionHub::bounds` is what pairs the two — it
     /// keeps the write end, which is what lets `io/cancel` reach the worker.
-    pub(in crate::io) fn new(timeout: Option<Duration>, stop: Option<RawFd>) -> Bounds {
-        Bounds { timeout, stop }
+    pub(in crate::io) fn new(bound: Bound, stop: Option<RawFd>) -> Bounds {
+        Bounds { bound, stop }
     }
 
     /// For an operation whose syscalls return without waiting on anything
@@ -88,7 +91,7 @@ impl Bounds {
     /// no wait to bound, and nothing for a cancel to interrupt.
     pub(in crate::io) fn prompt() -> Bounds {
         Bounds {
-            timeout: None,
+            bound: Bound::NONE,
             stop: None,
         }
     }
@@ -99,7 +102,7 @@ impl Bounds {
     /// names the syscall that behaves this way.
     pub(in crate::io) fn uninterruptible() -> Bounds {
         Bounds {
-            timeout: None,
+            bound: Bound::NONE,
             stop: None,
         }
     }
@@ -143,8 +146,8 @@ pub(in crate::io) fn open_stop_pipe() -> Option<StopPipe> {
     })
 }
 
-/// Bounds one worker operation by the caller's `:timeout` and by
-/// cancellation, whatever kind of descriptor it runs on.
+/// Bounds one worker operation by the caller's bound and by cancellation,
+/// whatever kind of descriptor it runs on.
 ///
 /// The bound belongs to the operation rather than to the descriptor.
 /// `SO_RCVTIMEO`/`SO_SNDTIMEO` bound a socket and a pipe, a fifo and a tty
@@ -157,11 +160,12 @@ pub(in crate::io) fn open_stop_pipe() -> Option<StopPipe> {
 /// park again after a poll reports the descriptor ready, while a non-blocking
 /// one reports `EAGAIN` and hands the wait back here.
 ///
-/// Each wait carries the caller's whole duration rather than a share of one
+/// Each wait carries the caller's whole `:timeout` rather than a share of one
 /// deadline struck at the start. That is what makes `:timeout` bound each
-/// kernel operation instead of the whole call (docs/io.md): a peer that has
-/// stalled trips one wait, while a peer that keeps delivering resets the bound
-/// every time it does and the transfer finishes however long it takes.
+/// kernel operation instead of the whole call (docs/io/timeout.md): a peer that
+/// has stalled trips one wait, while a peer that keeps delivering resets the
+/// bound every time it does and the transfer finishes however long it takes.
+/// A `:deadline` is the bound struck once, and every wait ends by it too.
 pub(super) struct OpBound {
     fd: RawFd,
     /// What the submission declared, and the owner of the stop pipe's read end
@@ -179,7 +183,7 @@ impl OpBound {
     /// descriptor as it found it and blocks in the kernel.
     pub(super) fn new(fd: RawFd, bounds: Bounds) -> Self {
         let holding =
-            (bounds.timeout.is_some() || bounds.stop().is_some()) && acquire_nonblocking(fd);
+            (bounds.bound.is_bounded() || bounds.stop().is_some()) && acquire_nonblocking(fd);
         OpBound {
             fd,
             bounds,
@@ -210,13 +214,15 @@ impl OpBound {
         OpBound::watching(-1, bounds)
     }
 
-    /// How long one readiness wait under this bound may take.
-    pub(super) fn timeout(&self) -> Option<Duration> {
-        self.bounds.timeout
+    /// The instant an operation that starts now must end by, for a runner
+    /// that bounds the whole operation rather than each readiness wait: a
+    /// connect across its retries, an open, a child wait.
+    pub(super) fn end(&self) -> Option<Instant> {
+        self.bounds.bound.next_end(Instant::now())
     }
 
-    /// Wait until the descriptor reports `events`, the caller's timeout
-    /// elapses, or the operation is stopped.
+    /// Wait until the descriptor reports `events`, the caller's bound passes,
+    /// or the operation is stopped.
     ///
     /// A descriptor `poll(2)` rejects reports `Ready`: it cannot report
     /// readiness, so the syscall retries and names the failure itself.
@@ -229,18 +235,15 @@ impl OpBound {
     /// to come from the same `poll(2)` that observed it — asking the descriptor
     /// a second time would report whatever another reader left behind.
     pub(super) fn wait_revents(&self, events: libc::c_short) -> (Wake, libc::c_short) {
-        let deadline = self.bounds.timeout.map(|t| Instant::now() + t);
+        let deadline = self.bounds.bound.next_end(Instant::now());
         loop {
             let timeout_ms = match deadline {
                 None => -1,
+                // Round up, so a remainder under a millisecond sleeps rather
+                // than spins. A bound that has passed leaves zero, a poll that
+                // still answers what is ready (docs/io/timeout.md).
                 Some(at) => {
                     let left = at.saturating_duration_since(Instant::now());
-                    if left.is_zero() {
-                        return (Wake::TimedOut, 0);
-                    }
-                    // Round up: a remainder under a millisecond is still time
-                    // the caller granted, and rounding it away would report a
-                    // timeout the caller did not ask for.
                     let ms = left.as_micros().div_ceil(1000);
                     ms.min(libc::c_int::MAX as u128) as libc::c_int
                 }
@@ -269,7 +272,12 @@ impl OpBound {
                 return (Wake::Ready, pfds[0].revents);
             }
             if ret == 0 {
-                return (Wake::TimedOut, 0);
+                // The clock decides expiry, not the poll: its timeout counts
+                // whole milliseconds.
+                match deadline {
+                    Some(at) if Instant::now() < at => continue,
+                    _ => return (Wake::TimedOut, 0),
+                }
             }
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
             if errno == libc::EINTR {

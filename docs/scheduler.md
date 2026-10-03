@@ -9,9 +9,9 @@ No setup is required.
 ## Architecture
 
 On Linux, the scheduler is a single-threaded event loop backed by
-`io_uring`. On other platforms (macOS, CI), a threadpool-based
-backend provides the same interface using blocking I/O on
-background threads.
+`io_uring`. On other platforms, and in a build without the `uring`
+feature ([config.md](config.md) § Builds), a threadpool-based backend
+provides the same interface using blocking I/O on background threads.
 
 All I/O operations (port reads/writes, TCP, subprocess) yield to the
 scheduler, which submits them to the backend and resumes the fiber
@@ -77,7 +77,7 @@ Two invariants govern the queues:
   waiter keeps the loop running with nothing left to run.
 
 `ev/abort` and `ev/timeout` both terminate fibers that may be parked, so
-both rely on these invariants. [park-abort.lisp](../tests/elle/park-abort.lisp) pins them.
+both rely on these invariants. [park-abort.lisp](../tests/lang/park-abort.lisp) pins them.
 
 ## Join waiters and select sets
 
@@ -114,7 +114,7 @@ keyed by the waiting fiber itself, so it needs no second half.
 program reaches this through — a deadline around a protected join, where
 `f` outlives the deadline. `ev/timeout` selects over the body and a
 timer, so one such call puts fibers in both lists.
-[abort-wait-lists.lisp](../tests/elle/abort-wait-lists.lisp) pins them,
+[abort-wait-lists.lisp](../tests/impl/abort-wait-lists.lisp) pins them,
 and reads the counts back through `ev/report`'s `:joins` and `:selects`.
 
 ## Completion delivery
@@ -151,8 +151,8 @@ Two invariants govern delivery:
   and a descriptor for a fiber that can never read the result, and the
   loop keeps waiting on a completion nobody wants.
 
-[io-late-completion.lisp](../tests/elle/io-late-completion.lisp) pins both over a portless timer, and
-[io-stale-operation-ends.lisp](../tests/elle/io-stale-operation-ends.lisp) over a port operation whose
+[io-late-completion.lisp](../tests/lang/io-late-completion.lisp) pins both over a portless timer, and
+[io-stale-operation-ends.lisp](../tests/impl/io-stale-operation-ends.lisp) over a port operation whose
 operands are gone — the case where the entry holds values to read.
 
 ## Completion records
@@ -217,11 +217,11 @@ The program's own fibers — the thunks `ev/run` hands the loop — are the
 one exception to the first invariant. Their records are what tells the
 loop the program finished, so they last until the loop ends.
 
-[sched-completion-records.lisp](../tests/elle/sched-completion-records.lisp) pins the bound through
+[sched-completion-records.lisp](../tests/impl/sched-completion-records.lisp) pins the bound through
 `ev/report`'s `:records` / `:marks`, and that the pump leaves none of them
-behind; [ev-unjoined-error.lisp](../tests/elle/ev-unjoined-error.lisp) pins that retiring the records
+behind; [ev-unjoined-error.lisp](../tests/lang/ev-unjoined-error.lisp) pins that retiring the records
 still leaves an unjoined failure to crash the program.
-[plumb.lisp](../tests/elle/plumb.lisp) reads what an abort costs as a rate, and
+[plumb.lisp](../tests/impl/plumb.lisp) reads what an abort costs as a rate, and
 [region_process_teardown.rs](../tests/region_process_teardown.rs) pins what all of it is worth: a
 completed run leaves no live region at all.
 
@@ -271,7 +271,7 @@ The park keys are whatever the caller of `ev/futex-wait` passed —
 a count above one on a single key means several fibers wait on one
 channel.
 
-[sched-report.lisp](../tests/elle/sched-report.lisp) pins the shape.
+[sched-report.lisp](../tests/impl/sched-report.lisp) pins the shape.
 
 ## See also
 

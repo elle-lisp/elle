@@ -5,8 +5,9 @@
 //! docs/impl/differential.md
 //!
 //! One `impl VM` method per tier lives in its own submodule (`bytecode`,
-//! `jit`, `wasm`, `mlir`); the wasm and mlir tiers compile only under their
-//! features. Callers reach those inherent methods by method-call syntax, so
+//! `jit`, `wasm`, `mlir`); the jit, wasm and mlir tiers compile only under
+//! their features, and a build without one answers `:feature-disabled` here.
+//! Callers reach those inherent methods by method-call syntax, so
 //! nothing is re-exported. The shared `rejected` helper stays here, where the
 //! tier submodules see it as `super::rejected`.
 
@@ -15,9 +16,12 @@ use crate::value::{SignalBits, Value, SIG_ERROR};
 use super::core::VM;
 
 mod bytecode;
+#[cfg(feature = "jit")]
 mod jit;
 #[cfg(feature = "mlir")]
 mod mlir;
+#[cfg(test)]
+mod tests;
 #[cfg(feature = "wasm")]
 mod wasm;
 
@@ -91,9 +95,18 @@ impl VM {
             "bytecode" => self.on_tier("bytecode", |vm| {
                 vm.invoke_closure_bytecode(closure_val, &closure, &call_args)
             }),
+            #[cfg(feature = "jit")]
             "jit" => self.on_tier("jit", |vm| {
                 vm.invoke_closure_jit(closure_val, &closure, &call_args)
             }),
+            #[cfg(not(feature = "jit"))]
+            "jit" => crate::rich_error!(
+                ctx,
+                "tier-rejected",
+                "compile/run-on :jit requires --features jit",
+                tier = Value::keyword("jit"),
+                reason = Value::keyword("feature-disabled"),
+            ),
             #[cfg(feature = "wasm")]
             "wasm" => self.on_tier("wasm", |vm| {
                 vm.invoke_closure_wasm(closure_val, &closure, &call_args)
@@ -140,7 +153,9 @@ impl VM {
 }
 
 /// Build a structured `:tier-rejected` error, born in a fresh region of its own
-/// ([`VM::error_extra`]) — `vm` owns the heap that mints it.
+/// ([`VM::error_extra`]) — `vm` owns the heap that mints it. Only an optional
+/// tier refuses a closure, so a build with none of them has no caller.
+#[cfg(any(feature = "jit", feature = "wasm", feature = "mlir"))]
 fn rejected(vm: &mut VM, tier: &str, msg: impl Into<String>) -> Value {
     vm.error_extra(
         "tier-rejected",

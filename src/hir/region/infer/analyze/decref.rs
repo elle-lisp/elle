@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-28
 //! `decref_point` population: the ordered passes that decide, for each region,
 //! the program point its release is emitted at.
 //!
@@ -75,8 +75,7 @@ pub(super) fn populate_decref_points(
     // is one region per HirId). The base is the node itself: a rest name
     // nothing reads leaves the binding chain below with no use to extend a
     // release over, and a region with no `region_data` entry gets no release
-    // emitted at all (docs/impl/region/anchors.md § "A rest pattern's collection
-    // is built, not read out").
+    // emitted at all (docs/impl/region/anchors.md).
     //
     // The node, not its last use. A `Match` node's own last use is wherever the
     // match's VALUE goes, which is a different value from the collection an arm
@@ -121,7 +120,7 @@ pub(super) fn populate_decref_points(
     }
 
     // Where each fn-local 1-slot container's content drop lands
-    // (docs/impl/region/bindings.md § "Where the content drop lands").
+    // (docs/impl/region/bindings.md).
     place_content_drops(
         info,
         &CellPlacement {
@@ -147,8 +146,7 @@ pub(super) fn populate_decref_points(
     // downstream link's source regions include the upstream link's value regions
     // (the `Loop` init copies them), and its own last use sits past the loop that
     // stores them, so one release would cover N allocations
-    // (docs/impl/region/bindings.md § "A chain of forwarding edges hands one
-    // reference along, so the fold follows it whole"). An ANF producer temp is
+    // (docs/impl/region/bindings.md). An ANF producer temp is
     // not a cell binding and still extends normally, which is what keeps the
     // release after the allocation it names.
     let cell_value_regions: rustc_hash::FxHashSet<Region> = info
@@ -178,10 +176,10 @@ pub(super) fn populate_decref_points(
     // One pin per STORE, carrying that store's own value regions. A cell reached
     // from two mutually exclusive arms stores a different value at each site, so
     // pinning every value at the cell's last store puts the first arm's release on
-    // a path that arm does not reach (docs/impl/region/bindings.md § "The store
-    // site is the store that took THAT value"). Where one region really is stored
-    // at several sites, every one of them pins it and the pin rule's maximum picks
-    // the latest — the point after every store that took a reference of it.
+    // a path that arm does not reach (docs/impl/region/bindings.md). Where one
+    // region really is stored at several sites, every one of them pins it and the
+    // pin rule's maximum picks the latest — the point after every store that
+    // took a reference of it.
     let cell_store_pins: Vec<(HirId, Vec<Region>)> = info
         .cell_containers
         .values()
@@ -203,7 +201,7 @@ pub(super) fn populate_decref_points(
         // outside it) must outlive the loop: its capture-use's last_use sits
         // inside the body, but the region demise must be hoisted to the loop
         // node, else it fires per iteration and frees the binding mid-loop
-        // (pinned by tests/elle/region-loop-capture-squelch.lisp).
+        // (pinned by tests/impl/region-loop-capture-squelch.lisp).
         if let Some(&ext) = last_use_info.capture_loop_ext.get(b) {
             if max_use.is_none_or(|cur| ord(ext) > ord(cur)) {
                 max_use = Some(ext);
@@ -219,8 +217,7 @@ pub(super) fn populate_decref_points(
                 // happens to hold last. The cell's own counted reference covers
                 // the value from the store onward, so the producer's claim is
                 // dead AT the store and is pinned there below
-                // (docs/impl/region/bindings.md § "Reassigned mutable bindings
-                // are 1-slot containers").
+                // (docs/impl/region/bindings.md).
                 if !(names_a_cell && cell_value_regions.contains(&r)) {
                     info.region_data.pin_to(r, lu, porder);
                 }
@@ -259,7 +256,7 @@ pub(super) fn populate_decref_points(
     // region -1 (capture-incref +1, closure free-cascade -1, DecrefCellRegion -1)
     // — so the once-allocated box is freed at the end of iteration 1 and the next
     // iteration reads the recycled cell (pinned by
-    // tests/elle/region-capture-cell-loop-uaf.lisp). Hoist each
+    // tests/impl/region-capture-cell-loop-uaf.lisp). Hoist each
     // cell-release region's `decref_point` to the OUTERMOST enclosing While/Loop,
     // which the lowerer emits AFTER the loop (the proven post-loop emission point
     // the bound-outside `capture_loop_ext` extension already targets) — once per
@@ -273,8 +270,7 @@ pub(super) fn populate_decref_points(
     // the value-binding rule the `capture_loop_ext` "bound outside" guard
     // enforces: a value bound INSIDE a loop is re-allocated per iteration and its
     // release must stay per-iteration, but an env cell's allocation is
-    // loop-independent. See docs/impl/region/cells.md "Env cells in loops:
-    // release once per activation, not per iteration".
+    // loop-independent. See docs/impl/region/cells.md.
     if !info.cell_release_regions.is_empty() && !iter_scopes.is_empty() {
         // Snapshot the cell regions first — the loop mutates `region_data`.
         let cell_regions: Vec<Region> = info.cell_release_regions.iter().copied().collect();
@@ -303,9 +299,8 @@ pub(super) fn populate_decref_points(
     // retain, so the reader holds its own counted reference and extending the container
     // would be a pure over-keep. What that retain cannot survive is adoption freezing the
     // member's RC — handled where that decision is made, in the ownership cut
-    // (`counted_read_aliases`, region/adopt.md § "The lifetime obligation the root
-    // carries"). A moves-out REMOVE is excluded from both: it extracts its element
-    // instead of borrowing it.
+    // (`counted_read_aliases`, docs/impl/region/adopt.md). A moves-out REMOVE is excluded
+    // from both: it extracts its element instead of borrowing it.
     //
     // A value stored into a fn-local 1-slot container has a SECOND protector the
     // extension does not need to duplicate: the producer's claim is discharged at
@@ -314,8 +309,7 @@ pub(super) fn populate_decref_points(
     // reference at or after the borrow dies, the extension buys nothing and costs
     // a great deal: it drags the producer's release past a loop that stores a
     // fresh value every iteration, so one release covers N allocations
-    // (docs/impl/region/bindings.md § "A chain of forwarding edges hands one
-    // reference along, so the fold follows it whole"). Where the cell drops it
+    // (docs/impl/region/bindings.md). Where the cell drops it
     // EARLIER — the borrow flows on past the cell's own last access — the
     // producer's reference is the borrow's only protection and keeps the
     // extension.
@@ -341,8 +335,7 @@ pub(super) fn populate_decref_points(
     // before `lower_assign` increfs and stores it. The lowerer emits a node's
     // decrefs after the node, so at the assign the release lands behind both the
     // store's retain and the displaced prior's drop
-    // (docs/impl/region/bindings.md § "Reassigned mutable bindings are 1-slot
-    // containers").
+    // (docs/impl/region/bindings.md).
     for (lu, value_regions) in &cell_store_pins {
         info.region_data
             .pin_all_to(value_regions.iter().copied(), *lu, porder);
@@ -369,8 +362,7 @@ pub(super) fn populate_decref_points(
     // stored. Where the cell drops it EARLIER — the value reaches the return
     // through some other name, or through a tail branch the cell's own last
     // access precedes — the producer's reference is the return's only
-    // protection and the extension stands (docs/impl/region/bindings.md § "A
-    // `Return` is a reader of the cell's content").
+    // protection and the extension stands (docs/impl/region/bindings.md).
     for (return_id, regions) in return_sites {
         info.region_data.pin_all_to(
             regions.iter().copied().filter(|r| {
@@ -390,7 +382,7 @@ pub(super) fn populate_decref_points(
     // read frees the source under the extraction. Bites exactly when no
     // destructured binding is used afterwards — the `&named`-param
     // prologue with unused params (docs/impl/region/rules.md Rule 4;
-    // pinned by tests/elle/region-named-param-uaf.lisp).
+    // pinned by tests/impl/region-named-param-uaf.lisp).
     for (destructure_id, regions) in destructure_sites {
         info.region_data
             .pin_all_to(regions.iter().copied(), *destructure_id, porder);
@@ -405,7 +397,7 @@ pub(super) fn populate_decref_points(
     //  - `break` lowers to a jump to the block's exit label, so a release
     //    anchored anywhere inside the body is emitted into the break's
     //    unreachable fall-through and never runs at all — the value is held to
-    //    fiber teardown (the `break-value*` probes in tests/elle/probe/ measure
+    //    fiber teardown (the `break-value*` probes in tests/impl/probe/ measure
     //    it).
     //  - the block's own exit label is not late enough on its own: the block's
     //    value may flow straight into a consumer (`(f (block … (break v)))`),
@@ -416,8 +408,7 @@ pub(super) fn populate_decref_points(
     // after it — after the exit label for the block itself. A binding that names
     // the block's value extends further through the ordinary binding chain,
     // and every extension is a max, so the latest wins
-    // (docs/impl/region/anchors.md § "`break` transfers its value; it does not
-    // consume it"; tests/elle/region-break-transfer.lisp).
+    // (docs/impl/region/anchors.md; tests/impl/region-break-transfer.lisp).
     for (block_id, regions) in break_sites {
         let lu = last_use.get(block_id).copied().unwrap_or(*block_id);
         info.region_data

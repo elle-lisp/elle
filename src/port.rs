@@ -1,15 +1,17 @@
-//! audited: 2026-09-21
-//! Port type — Elle's abstraction for file descriptors.
+// audited: 2026-09-30
+//! The port: an OS file descriptor with its direction, encoding, kind, lifecycle and own `:timeout`.
 //!
-//! A port wraps an OS file descriptor with metadata (direction, encoding,
-//! kind) and lifecycle management. Ports are represented as ExternalObject
-//! values with type_name "port".
+//! docs/io.md
+//! docs/impl/io-descriptor.md
+//!
+//! Ports are represented as ExternalObject values with type_name "port".
 
 use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::os::unix::io::OwnedFd;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 /// The kind of underlying OS resource.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,7 +93,9 @@ pub(crate) struct Port {
     closed: Cell<bool>,
     /// Original path for file ports (display and error messages).
     path: Option<String>,
-    timeout: Cell<Option<u64>>, // milliseconds, set by port/set-options
+    /// The `:timeout` each call on this port takes when it names none, set by
+    /// `port/set-options` (docs/io/timeout.md).
+    timeout: Cell<Option<Duration>>,
 }
 
 impl Port {
@@ -232,8 +236,8 @@ impl Port {
     /// Create a pipe port from a subprocess stdio fd.
     ///
     /// `label` is displayed as the path: `"pid:1234:stdout"` etc.
-    /// Encoding is always Binary — subprocess output is an arbitrary byte
-    /// stream. Text decoding is the caller's responsibility.
+    /// A subprocess spawn passes Binary, because subprocess output is an
+    /// arbitrary byte stream. Text decoding is the caller's responsibility.
     pub fn new_pipe(fd: OwnedFd, direction: Direction, encoding: Encoding, label: String) -> Self {
         Self::build(Some(fd), PortKind::Pipe, direction, encoding, Some(label))
     }
@@ -260,7 +264,7 @@ impl Port {
     /// it was submitted, so it takes a share of its own and holds it for its
     /// whole lifetime: the number cannot be handed to a new port under a
     /// running worker, however the port itself goes away
-    /// (docs/impl/io-descriptor.md § "Descriptor retirement").
+    /// (docs/impl/io-descriptor.md).
     ///
     /// `None` for a port that owns no descriptor (stdio) or is already closed.
     pub(crate) fn fd_share(&self) -> Option<Rc<OwnedFd>> {
@@ -314,13 +318,14 @@ impl Port {
         self.path.as_deref()
     }
 
-    #[cfg(test)]
-    pub fn timeout_ms(&self) -> Option<u64> {
+    /// The port's own `:timeout`, or `None` when it has none.
+    pub fn timeout(&self) -> Option<Duration> {
         self.timeout.get()
     }
 
-    pub fn set_timeout_ms(&self, ms: Option<u64>) {
-        self.timeout.set(ms);
+    /// Give the port a `:timeout` of its own, or take it away with `None`.
+    pub fn set_timeout(&self, timeout: Option<Duration>) {
+        self.timeout.set(timeout);
     }
 
     /// Borrow the fd for I/O operations.

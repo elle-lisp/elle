@@ -69,7 +69,7 @@ pub(crate) fn prim_fiber_mask(
 /// `decref_point` (`docs/impl/region/rules.md` Rule 4), so dereferencing the cache
 /// after the parent is gone reads freed pages. Resolving through the weak handle
 /// keeps that pointer from being followed once the parent's region is reclaimed
-/// (`tests/elle/region-fiber-resume-leak.lisp`). The weak handle upgrades iff the
+/// (`tests/impl/region-fiber-resume-leak.lisp`). The weak handle upgrades iff the
 /// parent's `Fiber` state is still alive *somewhere* (a live region, the
 /// scheduler's tables, the VM); when it does, a fresh fiber `Value` is
 /// rebuilt from the upgraded handle (same `handle.id()`, so identity is
@@ -169,8 +169,7 @@ pub(crate) fn prim_fiber_cancel(
             // Cancel another fiber: the hard-kill teardown ends it `:dead`,
             // consumes the parked chain, and frees everything the fiber owned —
             // its parked frames' activation owner nodes and its fiber owner node
-            // (docs/impl/region/owner.md § "Owner nodes" — "Fiber teardown frees
-            // everything the fiber owns").
+            // (docs/impl/region/owner.md).
             crate::vm::fiber::kill_fiber(
                 ctx.heap_mut(),
                 handle,
@@ -262,7 +261,7 @@ primitive! {
         // was minted in, neither the call's own nor its argument's. Unbounded
         // result, no store. Mixed would seed the argument on escape's store facet,
         // costing every branch that reads a live-in fiber here its release window
-        // (docs/impl/region/effects.md § "A fiber-graph read is `Opaque`").
+        // (docs/impl/region/effects.md).
         effect: RegionEffect::Opaque,
     }
     "fiber/parent" => prim_fiber_parent {
@@ -292,8 +291,7 @@ primitive! {
         // what the declaration decides is escape's store facet on the argument,
         // and `Mixed` would cost every branch that names a live-in fiber here its
         // release window — `defer`'s success path first
-        // (docs/impl/region/effects.md § "The child-chain WIRING is `Opaque`
-        // too").
+        // (docs/impl/region/effects.md).
         effect: RegionEffect::Opaque,
     }
     "fiber/caps" => prim_fiber_caps {

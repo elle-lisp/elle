@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-09-30
 // A run row names the binary that produced it, so a verdict belongs to a
 // build and not merely to a commit.
 //
@@ -13,6 +13,7 @@
 // from the version string would agree across every build of one release, which
 // is exactly the case a cache must not reuse.
 
+use crate::common::query;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
@@ -41,26 +42,13 @@ fn run_once(dir: &crate::common::ScratchDir, name: &str, db: &Path) {
     );
 }
 
-/// The rendered rows of `sql` against `db`.
-fn query(db: &Path, sql: &str) -> String {
-    let out = Command::new(elle_binary())
-        .args(["test", "--query", sql])
-        .arg("--db")
-        .arg(db)
-        .output()
-        .expect("query the session DB");
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
 #[test]
 fn a_run_row_carries_the_fingerprint_of_the_binary_that_ran_it() {
     let dir = crate::common::ScratchDir::new("boot-fingerprint-row");
     let db = dir.join("s.db");
     run_once(&dir, "pass.lisp", &db);
 
-    // The column holds the hash as a number. Nothing displays a fingerprint,
-    // and what reads it compares, groups and joins it — a text column would
-    // cost twice the bytes and compare a character at a time.
+    // The column holds the hash as a number (docs/test-store.md).
     let rows = query(
         &db,
         "SELECT typeof(boot_fingerprint) AS kind, (boot_fingerprint IS NULL) AS none \

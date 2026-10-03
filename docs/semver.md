@@ -1,6 +1,6 @@
 # elle semver
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-27 -->
 
 `elle semver` computes and verifies the version bump a library's surface change requires.
 
@@ -80,7 +80,7 @@ A module that declares no `(elle/version ...)` is a tool error
 The written file records provenance: the `HEAD` commit when the module
 sits in a git repository (the form is omitted otherwise), the current
 UTC date, and the test glob that pins the release — `--tests GLOB`, or
-`tests/elle/<leaf>*.lisp` by default. `--tag` also creates the
+`tests/lang/<leaf>*.lisp` by default. `--tag` also creates the
 lightweight git tag `<leaf>/v<version>`, which later arbitration
 prefers over the recorded commit.
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-30
 //! Epoch migration rule definitions.
 //!
 //! docs/epochs.md
@@ -13,15 +13,16 @@ use crate::reader::escape::StringEscapes;
 use crate::reader::Token;
 use migrations::MIGRATIONS;
 use std::collections::HashMap;
+use std::fmt;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 13;
+pub const CURRENT_EPOCH: u64 = 14;
 
 /// The epoch-gated lexer rules (docs/impl/lexicon.md). The lexer consults
 /// a `Lexicon` instead of hard-coding these, so an epoch bump can change
-/// tokenization itself. Epochs 0 to 12 share one lexicon; epoch 13 reads
-/// string escapes by stricter rules.
+/// tokenization itself. Epochs 0 to 12 share one lexicon; from epoch 13 on a
+/// string reads its escapes by stricter rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lexicon {
     /// The character that starts a comment running to end of line.
@@ -234,8 +235,47 @@ pub enum MigrationRule {
     /// Only `elle rewrite` consumes it. The shorthand and the form read to
     /// the same tree, so an old file compiles without any tree rewrite —
     /// which is also the condition an epoch must check before declaring one
-    /// (docs/impl/lexicon.md § "Desugaring a reader shorthand").
+    /// (docs/impl/lexicon.md).
     Desugar { shorthand: Token<'static> },
+    /// Rewrite a duration a call gave in milliseconds as a `:timeout` in
+    /// seconds. `arg` says where each call in `symbols` took the duration;
+    /// `crate::epoch::seconds` says what each shape of it becomes.
+    MillisToSeconds {
+        symbols: &'static [&'static str],
+        arg: TimeArg,
+    },
+}
+
+/// Where a call named by [`MigrationRule::MillisToSeconds`] gave its duration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeArg {
+    /// The value after the `:timeout` keyword.
+    Keyword,
+    /// The last argument of a call with exactly `arity` arguments.
+    /// `negative_unbounded` when the call read a negative duration as no
+    /// bound.
+    Last {
+        arity: usize,
+        negative_unbounded: bool,
+    },
+}
+
+impl fmt::Display for TimeArg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TimeArg::Keyword => write!(f, ":timeout in milliseconds → seconds"),
+            TimeArg::Last {
+                arity,
+                negative_unbounded,
+            } => {
+                write!(f, "last of {arity} arguments → :timeout in seconds")?;
+                if *negative_unbounded {
+                    write!(f, ", a negative one → no bound")?;
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 /// Get all migrations for epochs in the range (from, to].
@@ -350,6 +390,30 @@ pub fn desugar_rules_in_range(from: u64, to: u64) -> Vec<Token<'static>> {
         for rule in migration.rules {
             if let MigrationRule::Desugar { shorthand } = rule {
                 result.push(shorthand.clone());
+            }
+        }
+    }
+    result
+}
+
+/// Where each call a `MillisToSeconds` rule in a range names took its
+/// duration, keyed by head symbol.
+///
+/// A head an epoch in the range renamed is keyed by its old name too. The
+/// migration sees a call before the rename reaches its head, so a file old
+/// enough to write `stream/read-line` still has its duration converted.
+pub fn millis_rules_in_range(from: u64, to: u64) -> HashMap<&'static str, TimeArg> {
+    let renames = collapsed_renames(from, to);
+    let mut result = HashMap::new();
+    for migration in migrations_in_range(from, to) {
+        for rule in migration.rules {
+            if let MigrationRule::MillisToSeconds { symbols, arg } = rule {
+                for sym in *symbols {
+                    result.insert(*sym, *arg);
+                    for (old, _) in renames.iter().filter(|(_, new)| *new == sym) {
+                        result.insert(*old, *arg);
+                    }
+                }
             }
         }
     }

@@ -1,6 +1,6 @@
 # subprocess
 
-<!-- audited: 2026-09-17 -->
+<!-- audited: 2026-09-30 -->
 
 Spawning OS child processes, and the `subprocess` value every later call takes.
 
@@ -12,7 +12,7 @@ Up: [..](../AGENTS.md)
 |------|----------|
 | `subprocess.rs` | The module root: `sys/exit`, `sys/trap-exit!`, `sys/halt`, `sys/args`, `sys/argv`, `sys/pid`, `sys/env`, and the primitive table for everything below |
 | `subprocess/exec.rs` | `subprocess/exec`, the options it parses and the sequence widening its args take |
-| `subprocess/handle.rs` | The `subprocess` value: its boundary check, its key set, and `wait`/`kill`/`pid`/`exit`/`subprocess?` |
+| `subprocess/handle.rs` | The `subprocess` value: its boundary check, its key set, and `wait`/`kill`/`pid`/`exit`/`rusage`/`subprocess?` |
 | `subprocess/tests.rs` | `subprocess/kill` against a recorded exit status, and the boundary every primitive refuses through |
 
 The type itself is `ProcessHandle` in `src/io/request/process.rs`, beside the
@@ -85,6 +85,9 @@ check. A primitive added here calls the extractor rather than reaching for
 
 - `subprocess/exit subprocess` — The recorded exit status, or `nil` while the
   child runs. Reads the record; reaps nothing and never yields.
+
+- `subprocess/rusage subprocess` — What the child has cost. Reaps nothing and
+  never yields; [subprocess](../../../docs/subprocess.md) gives the answers.
 
 - `subprocess? value` — True for a `subprocess`, false for anything else. Never
   errors, matching `port?`.

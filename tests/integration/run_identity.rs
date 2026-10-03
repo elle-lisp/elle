@@ -1,4 +1,4 @@
-// audited: 2026-09-17
+// audited: 2026-09-30
 // A `run` row names the code it ran against: commit, worktree, host, build.
 // So a result belongs to something, and a warning can say whose run it warns
 // about.
@@ -10,6 +10,7 @@
 // killed-run warning fires on a sibling checkout's live run with no way to
 // tell the reader that is what happened.
 
+use crate::common::query;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -48,17 +49,6 @@ fn run_in(cwd: &Path, fixture: &Path, db: &Path) -> std::process::Output {
         .env_remove("RUST_MIN_STACK")
         .output()
         .expect("run elle test")
-}
-
-/// The rendered rows of `sql` against `db`.
-fn query(db: &Path, sql: &str) -> String {
-    let out = Command::new(elle_binary())
-        .args(["test", "--query", sql])
-        .arg("--db")
-        .arg(db)
-        .output()
-        .expect("query the session DB");
-    String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
 #[test]

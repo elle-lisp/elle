@@ -1,4 +1,7 @@
+//! audited: 2026-09-30
 //! Waiting for a subprocess to exit.
+//!
+//! src/io/AGENTS.md
 
 use super::*;
 use crate::io::request::{ExitRecord, Reap};
@@ -15,11 +18,11 @@ const CHILD_MAX_PACE: Duration = Duration::from_millis(50);
 
 /// Reap `pid` and report its exit code, or `-errno`.
 ///
-/// `waitpid(pid, .., 0)` holds this worker for the child's whole life, where
-/// neither `io/cancel` nor the caller's deadline can reach it — a child that
-/// never exits would cost one OS thread for the life of the process, and the
-/// fiber that asked would never be resumed. `WNOHANG` asks instead, and the
-/// pause between asks watches the stop pipe throughout.
+/// A blocking `wait4(pid, .., 0, ..)` would hold this worker for the child's
+/// whole life, where neither `io/cancel` nor the caller's deadline can reach
+/// it — a child that never exits would cost one OS thread for the life of the
+/// process, and the fiber that asked would never be resumed. `WNOHANG` asks
+/// instead, and the pause between asks watches the stop pipe throughout.
 ///
 /// The ask goes through `exit`, which keeps whatever it produces. A stop is
 /// only visible at the pauses, so this worker can be cancelled after it has
@@ -30,7 +33,7 @@ const CHILD_MAX_PACE: Duration = Duration::from_millis(50);
 /// The exit code travels in `data` rather than in the result code, so a
 /// non-zero exit cannot be read as a negative errno.
 pub(super) fn process_wait(bound: OpBound, pid: u32, exit: ExitRecord) -> (i32, Vec<u8>) {
-    let deadline = bound.timeout().map(|t| std::time::Instant::now() + t);
+    let deadline = bound.end();
     let mut pace = CHILD_FIRST_PACE;
     loop {
         match exit.reap(pid) {

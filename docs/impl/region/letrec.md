@@ -1,6 +1,6 @@
 # The letrec closure-cycle merge
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
 
@@ -130,7 +130,7 @@ something else still reads the arena.
   outside the letrec node. That is not a reason to refuse; it is a reason the release
   cannot stay at the binding scope, and § "Drop site" below follows the value out to
   where its own release already sits. What the reading here decides is only whether the
-  mint is inside the body: an exit it does not recognise must read as outside, so a loop
+  mint is inside the body: an exit it does not recognize must read as outside, so a loop
   and a short-circuit `And`/`Or` fall out to a value that way, and a `Cond` with no else
   arm and a `Match` fall out on the path where no arm is taken — which is why this
   reading needs the arms EXHAUSTIVE where branch compensation, asking a different
@@ -313,10 +313,10 @@ region: a merge MEMBER callee is absent from `cycle_tail_release`, and
 `tail_callee_defers_release` refuses every `closure_cycle_members` region. Order
 between them is immaterial — each is a decref of a `Counted` region, so the cascade
 and the direct decref commute. Pinned by the `fwd-cell-sib` row of
-[region-tail-frame-exit.lisp](../../../tests/elle/region-tail-frame-exit.lisp), the
+[region-tail-frame-exit-letrec.lisp](../../../tests/impl/region-tail-frame-exit-letrec.lisp), the
 `tail-frame-exit-fwd-cell-sib` probe in
-[the branch probes](../../../tests/elle/probe/branch.lisp), and witness (s) of
-[region-tail-frame-exit-uaf.lisp](../../../tests/elle/region-tail-frame-exit-uaf.lisp)
+[the branch probes](../../../tests/impl/probe/branch.lisp), and witness (s) of
+[region-tail-frame-exit-uaf.lisp](../../../tests/impl/region-tail-frame-exit-uaf.lisp)
 on the soundness side.
 
 Both member and non-member releases run at the recursion's completion / the
@@ -405,8 +405,8 @@ returned *self*-recursive closure is refused by CELL-FREEDOM, not by the frontie
 that refusal must not be read as "returned ⇒ refused".
 
 At runtime the merge is pinned by the guardfree fixtures
-`region_native_tail_mutual_cycle_uaf` (every non-member tail kind, mixed, and
-per-loop-iteration reclamation) and `region_letrec_return_cycle_uaf` (a returned member
+[region-native-tail-mutual-cycle-uaf.lisp](../../../tests/impl/region-native-tail-mutual-cycle-uaf.lisp) (every non-member tail kind, mixed, and
+per-loop-iteration reclamation) and [region-letrec-return-cycle-uaf.lisp](../../../tests/impl/region-letrec-return-cycle-uaf.lisp) (a returned member
 re-entered after the deferral, across churn that recycles a freed page, and handles held
 live across later mint/free cycles), and by
 `runtime::tests::ownership::region_ownership_reclaims_mutual_recursion_closure_cycle`
@@ -433,7 +433,7 @@ gauges both drivers on the VM, and
 the CALLER compiled — the tier where the tail call into the member hands its
 deferral forward to the callee's activation ([relocate.md](relocate.md)). The `defn` run's own
 guardfree fixture is
-`region_defn_cycle_uaf`, which re-enters a member of a returned factory after the
+[region-defn-cycle-uaf.lisp](../../../tests/impl/region-defn-cycle-uaf.lisp), which re-enters a member of a returned factory after the
 arena's drop site has passed and drives the factory across churn that recycles a
 freed page.
 `region_ownership_reclaims_self_recursion_closure_cycle` pins the same bounded growth for a

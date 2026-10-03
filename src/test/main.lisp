@@ -27,6 +27,7 @@
     "--wide-timeout" [:wide-timeout :int]
     "--budget" [:budget :flag]
     "--isolate" [:isolate :value]
+    "--host" [:host :value]
     "--corpus" [:corpus :value]
     "--reset" [:reset :flag]
     "--import" [:import :value]
@@ -84,6 +85,7 @@
                 :budget false
                 :eval []
                 :isolate nil
+                :host nil
                 :promote nil
                 :import nil
                 :query nil
@@ -92,9 +94,20 @@
 
 # `--isolate FLAGS` runs each path as its own child, `elle FLAGS PATH`, for a
 # mode the process sets once and no worker thread can vary
-# (docs/test-runner.md § Isolation). The flag string may be empty; nil here is
-# the ordinary in-process run.
+# (docs/test-runner.md). The flag string may be empty; nil here is the ordinary
+# in-process run. `--host PROGRAM` names the program each child runs instead of
+# this binary; nil runs this one.
 (def isolate-flags (get opts :isolate))
+(def host-program (get opts :host))
+
+# A host names the program an isolated child runs, so it means nothing without
+# --isolate. Refuse it rather than run the selection in-process and leave the
+# host unread.
+(if (and host-program (not isolate-flags))
+  (begin
+    (eprintln "elle test: --host names the program each --isolate child runs, and there is no --isolate")
+    (os/exit 2))
+  nil)
 
 # An ad-hoc form has no file, and a child process is given a path. Refuse the
 # combination up front, rather than running part of the selection in-process
@@ -108,7 +121,7 @@
 # The child is this binary, so a box whose OS will not name the running
 # executable cannot have this mode. Say so here: the alternative is every path
 # failing on a spawn with no program, which reads as the corpus being broken.
-(if (and isolate-flags (= (elle/executable) nil))
+(if (and isolate-flags (not host-program) (= (elle/executable) nil))
   (begin
     (eprintln "elle test: --isolate needs the path of this binary, and the OS did not give one")
     (os/exit 2))
@@ -118,7 +131,7 @@
 # earns the wider one below. A test form whose worker does not finish within its
 # budget is recorded `timeout` (not fail/pass), and the run gates non-zero.
 # os/join yields to the scheduler while waiting (no polling); on the deadline it
-# raises {:error :timeout} and the runaway worker is abandoned (see § Isolation).
+# raises {:error :timeout} and the runaway worker is abandoned (docs/test-runner.md).
 (def test-timeout-ms (get opts :timeout))
 
 # A budget follows the FILE a form came from, not the run. Some corpus families
@@ -146,7 +159,7 @@
   nil)
 
 # `--db` names the store outright; otherwise it is the state directory, which
-# survives a reboot (docs/test-store.md § Run history is state).
+# survives a reboot (docs/test-store.md).
 (def db (or (get opts :db) (string (state-dir) "/elle-tests.db")))
 
 # The CAS lives beside the session DB: <db-dir>/cas/<hash>. Created up front so
@@ -214,7 +227,7 @@
 
 # What the runner's own heap reads before the first file. Every later reading
 # is taken at a file boundary and charged to the file that boundary closes
-# (docs/test-store.md § The runner's own gauges).
+# (docs/test-store.md).
 (def gauge-prev (gauge-baseline))
 
 # Run every file/eval for its side effect: each writes its result rows to the DB.
@@ -240,7 +253,7 @@
 
 # Counters and finished_at land in ONE statement: the completion stamp. A run
 # row without it was killed mid-flight and reads as truncated everywhere
-# (docs/test-runner.md § Run honesty).
+# (docs/test-runner.md).
 (sqlite:exec conn
              "UPDATE run SET n_pass = ?1, n_fail = ?2, n_skip = ?3, n_diverge = ?4, n_timeout = ?5, finished_at = datetime('now') WHERE id = ?6"
              [npass nfail nskip ndiverge ntimeout run-id])

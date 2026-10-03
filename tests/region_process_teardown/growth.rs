@@ -1,11 +1,16 @@
+// audited: 2026-09-29
+//! Per-compile region growth: what compiling the same source again in one runtime may add.
+//!
+//! docs/impl/region/rules.md
+//! docs/impl/region/diagnostics.md
+
 use super::*;
 
-/// Per-compile region GROWTH census — the corpus-OOM instrument. The runner
-/// keeps ONE long-lived VM across hundreds of files (`elle test FILE...`), so
-/// any region a compile allocates and never releases accumulates without bound
-/// and eventually SIGKILLs `make smoke` at ~45GB. A flat
-/// compiler reclaims each compile's scratch and this stays at zero growth; a
-/// per-compile leak shows linear growth in some tag class.
+/// Per-compile region GROWTH census. A VM that compiles many sources in one
+/// process keeps every region a compile allocates and never releases, so a
+/// per-compile leak grows without bound there. A flat compiler reclaims each
+/// compile's scratch and reads zero growth; a per-compile leak shows linear
+/// growth in some tag class.
 ///
 /// Compile the SAME source N times in one runtime (no teardown, no execute),
 /// and report the live-region histogram delta per tag class, normalized to
@@ -17,31 +22,28 @@ fn per_compile_region_growth() {
     // A ladder of source shapes, simplest first, to localize WHICH construct
     // leaks per compile (reader-only literal → macro call → fn/closure → let).
     let cases: &[(&str, &str)] = &[
-        // Non-macro shapes are flat — the per-compile leak is entirely macro
-        // expansion.
+        // Non-macro shapes: every one reads zero.
         ("int literal      ", "1"),
         ("primitive call   ", "(%add 1 1)"),
         ("string literal   ", "\"hello\""),
         ("list literal     ", "(list 1 2 3)"),
-        ("fn closure       ", "(fn [x] (%add x 1))"),
-        ("let binding      ", "(let [x 1] (%add x 1))"),
-        ("def + use        ", "(def y 5) (%add y 1)"),
-        // Prelude-macro expansions. Closure+ClosureTemplate growth is now 0 (the
-        // transformer is compiled once and shared, not re-compiled per compile);
-        // residual growth is the per-expansion primitive-allocation leak below.
+        ("fn closure       ", "(fn [x] (+ x 1))"),
+        ("let binding      ", "(let [x 1] (+ x 1))"),
+        ("def + use        ", "(def y 5) (+ y 1)"),
+        // Prelude-macro expansions read zero: the transformer is compiled once
+        // and shared across compiles.
         ("assert macro     ", "(assert (= (+ 1 1) 2) \"ok\")"),
         ("when macro       ", "(when (= 1 1) 2)"),
-        ("defn macro       ", "(defn f [x] (%add x 1))"),
-        // defmacro discriminators: a FILE-LOCAL macro's transformer is not shared
-        // with the master, so its compiled closure still leaks +1/compile (a
-        // separate, smaller class — only files that define AND use a macro).
-        // It is per-transformer-compile, not per-call: 1, 2, 3 calls all = +1.
+        ("defn macro       ", "(defn f [x] (+ x 1))"),
+        // A FILE-LOCAL macro's transformer is not shared with the master, so
+        // its compiled closure adds one Closure+ClosureTemplate region per
+        // compile. It is per transformer compile, not per call: one call and
+        // three calls both read +1.
         ("defmacro+1call   ", "(defmacro m [x] x) (m 5)"),
         ("defmacro+3calls  ", "(defmacro m [x] x) (m 1) (m 2) (m 3)"),
-        // The residual per-EXPANSION leak (scales with calls, not compiles):
-        // `string` called inside a transformer body leaks its LString result —
-        // a primitive routing its allocation outside the expansion's transient
-        // region.
+        // A primitive that allocates inside a transformer body (`string`
+        // here): its result is transformer scratch, so one expansion and two
+        // read the same, the +1 of the file-local transformer alone.
         (
             "xform string x1  ",
             "(defmacro m [x] (let [_ (string \"a\" \"b\")] `(%add ,x 1))) (m 5)",
@@ -56,10 +58,9 @@ fn per_compile_region_growth() {
     }
 }
 
-/// Minimal repro for the reclaim over-free: build a runtime (stdlib load runs
-/// thousands of macro expansions through the scope reclaim) then recompile,
-/// which reads the cached stdlib closures — a stale read here means reclaim
-/// freed a region still reachable from a cache.
+/// A runtime's stdlib load runs thousands of macro expansions through the scope
+/// reclaim, and a recompile then reads the cached stdlib closures. A stale read
+/// here means the reclaim freed a region a cache still reaches.
 #[test]
 fn macro_scope_reclaim_does_not_overfree_caches() {
     // Two full Runtime lifecycles on one thread: each instance builds its own
@@ -76,19 +77,17 @@ fn macro_scope_reclaim_does_not_overfree_caches() {
         let _ = rt.teardown();
     }
 }
-/// Regression gate for the per-compile macro-TRANSFORMER leak (the dominant
-/// share of the corpus-OOM growth). Each prelude macro's transformer must be
-/// compiled ONCE and shared across the per-compile `Expander` clones via an
-/// `Rc<RefCell<…>>` cell on the persistent compilation-cache master, so repeated
-/// compiles add NO `Closure`/`ClosureTemplate` regions. Recompiling the
-/// transformer into a fresh region per compile would orphan it when the clone
-/// drops (`Value` is `Copy`, no decref), accumulating regions on the runner's
-/// one long-lived VM until `make smoke` is SIGKILLed (it reached ~45GB).
+
+/// Each prelude macro's transformer must be compiled ONCE and shared across the
+/// per-compile `Expander` clones via an `Rc<RefCell<…>>` cell on the persistent
+/// compilation-cache master, so repeated compiles add NO
+/// `Closure`/`ClosureTemplate` regions. Recompiling the transformer into a fresh
+/// region per compile would orphan it when the clone drops (`Value` is `Copy`,
+/// no decref), accumulating regions in any VM that compiles many sources.
 ///
-/// The gate is the transformer class specifically (`Closure`/`ClosureTemplate`):
-/// `assert`'s expansion still grows other classes per call (`LString` from the
-/// `string` calls in its body), so a total-growth==0 gate would conflate the two.
-/// This one pins exactly what the cache fix guarantees.
+/// The gate reads the transformer class alone (`Closure`/`ClosureTemplate`), so
+/// growth in another class does not move it; `per_compile_region_growth` reads
+/// every class.
 ///
 /// Invariant pinned: repeated compiles of `(assert …)` add zero closure
 /// regions (a per-compile transformer recompile would add ≈2 each).
@@ -122,11 +121,7 @@ fn macro_transformer_is_not_recompiled_per_compile() {
     );
 }
 
-/// Counterfactual for the macro-expansion **Pair** leak — the dominant
-/// teardown-residue class (~10.8k Pair regions after a stdlib load; the largest
-/// remaining leak class).
-///
-/// SPEC: macro expansion is a COMPILE-TIME activity. A transformer builds its
+/// Macro expansion is a COMPILE-TIME activity. A transformer builds its
 /// quasiquote output as a transient tree of runtime `Value`s — nested `list` /
 /// `append` / `array` native calls (see `quasiquote_to_code`). `from_value`
 /// then deep-copies that tree into owned `Syntax`, after which every `Value`
@@ -137,13 +132,13 @@ fn macro_transformer_is_not_recompiled_per_compile() {
 /// that `macro_transformer_is_not_recompiled_per_compile` pins for the
 /// transformer closure, here for its construction output.
 ///
-/// Invariant pinned: repeated compiles of `(when …)` add zero Pair regions
-/// once the transformer's whole allocation scratch is reclaimed. `(when …)`
-/// lowers to `(list 'if test (append (list 'begin) body) nil)`; if each
-/// intermediate `list`/`append` result kept an unbalanced Rule-5 escape incref
-/// that no `decref_point` in the transformer body released (macro_expand.rs
-/// releases only the single root region), ~4 Pair regions would leak per
-/// compile.
+/// Invariant pinned: repeated compiles of `(when …)` add zero Pair regions once
+/// the transformer's whole allocation scratch is reclaimed. The counter-factual:
+/// `(when …)` lowers to `(list 'if test (append (list 'begin) body) nil)`; if
+/// each intermediate `list`/`append` result kept an unbalanced Rule-5 escape
+/// incref that no `decref_point` in the transformer body released
+/// (src/syntax/expand/macro_expand.rs releases only the single root region), ~4
+/// Pair regions would leak per compile.
 #[test]
 fn macro_expansion_output_pairs_are_reclaimed() {
     let mut rt = Runtime::new();
@@ -166,32 +161,6 @@ fn macro_expansion_output_pairs_are_reclaimed() {
         "macro expansion leaked {pair_growth} Pair regions over {n} compiles of \
          `{src}`: the transformer's quasiquote-construction intermediates \
          (list/append results) retain an unbalanced escape incref and are never \
-         reclaimed — the dominant teardown-residue class"
-    );
-}
-
-/// The end-state target, pinned but not yet reachable: zero regions survive a
-/// full run + teardown. The teardown scaffolding does not change when this
-/// greens — only the residue does.
-///
-/// `tests/elle/oracle.lisp` measures the same property as a per-op leak RATE on
-/// a running program, and is the gate that has to stay green. This one is the
-/// absolute end state: not one region left after the process tears down. Kept
-/// `#[ignore]`'d so `cargo test -- --ignored` reports the current residue as
-/// the remaining-work number without failing the suite.
-#[test]
-#[ignore = "standing oracle: reports the current teardown residue, target is zero"]
-fn process_teardown_frees_all_regions() {
-    let mut rt = Runtime::new();
-    {
-        let (vm, symbols, cctx) = rt.parts();
-        let result = compile_file("(+ 1 2)", symbols, cctx, "<teardown-target>").expect("compiles");
-        vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
-    }
-    let report = rt.teardown();
-    assert_eq!(
-        report.live_regions, 0,
-        "regions still live after teardown (residue = open leaks): {:?}",
-        report.regions
+         reclaimed"
     );
 }

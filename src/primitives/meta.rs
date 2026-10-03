@@ -1,6 +1,11 @@
-//! Meta-programming primitives (gensym, datum->syntax, syntax->datum,
-//! syntax-pair?, syntax-list?, syntax-symbol?, syntax-keyword?, syntax-nil?,
-//! syntax->list, syntax-first, syntax-rest, syntax-e, squelch, meta/origin)
+// audited: 2026-09-29
+//! Meta-programming primitives: gensym, the syntax-object operations, squelch and attune, meta/origin, and git.
+//!
+//! docs/macros.md
+//!
+//! `tests/lang/prim-meta.lisp`, `tests/lang/syntax-predicates.lisp` and
+//! `tests/lang/macros.lisp` pin them.
+
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
@@ -63,7 +68,7 @@ pub(crate) fn prim_gensym(
 /// `(datum->syntax context datum)` → syntax-object
 ///
 /// If `context` is a syntax object, its scope set and span are copied to the
-/// result. If `context` is a plain value (e.g., an atom that was passed through
+/// result. If `context` is a plain value (for example an atom that was passed through
 /// the hybrid wrapping as a Quote), empty scopes and a synthetic span are used.
 /// In both cases the result is marked `scope_exempt` so the expansion
 /// pipeline's intro scope stamping does not override the context's scopes.
@@ -406,8 +411,7 @@ primitive! {
         // Mixed: the SIG_QUERY return hands the closure to the VM's handler, which
         // caches the compiled SPIR-V on that closure's TEMPLATE — a retention that
         // outlives the call, is shared by every closure over the template, and is
-        // recorded by no seam. Real, uncounted store (docs/impl/region/effects.md
-        // § "A signal a handler stores for is a store").
+        // recorded by no seam. Real, uncounted store (docs/impl/region/effects.md).
         effect: RegionEffect::Mixed,
     }
     "fn/git?" => prim_fn_git {
@@ -430,8 +434,3 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
 }
-
-// Behavioral tests for the primitives in this module are in
-// tests/elle/syntax-predicates.lisp and tests/elle/macros.lisp.
-
-// Tests migrated to tests/elle/prim-meta.lisp

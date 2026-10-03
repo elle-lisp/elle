@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-29
 //! Host function registration for the Wasmtime linker, and the two call
 //! fallbacks both dispatch sites share.
 //!
@@ -29,7 +29,7 @@ pub use create::*;
 /// runtime — routinely reaches a closure the module never compiled. Executing it
 /// here via the VM makes the call transparent; without this the caller aborts
 /// with "bytecode closure in WASM backend". Pinned by
-/// `tests/elle/wasm-bytecode-closure-call.lisp`.
+/// `tests/lang/wasm-bytecode-closure-call.lisp`.
 pub(in crate::wasm) fn run_bytecode_closure(
     caller: &mut Caller<'_, ElleHost>,
     closure: &crate::value::Closure,
@@ -91,7 +91,7 @@ pub(in crate::wasm) fn run_bytecode_closure(
 /// `(request :op)` / `(request :fiber)` off the request struct a fiber emits via
 /// `(emit :wait request)`. Without this the call aborts with "cannot call
 /// struct" and no `ev/join`/`ev/scope`/futex wait ever resumes. Pinned by
-/// `tests/elle/wasm-collection-call.lisp` and the `wasm_full_calls_*` /
+/// `tests/lang/wasm-collection-call.lisp` and the `wasm_full_calls_*` /
 /// `wasm_full_scheduler_resumes_joined_fiber` unit tests.
 ///
 /// The full-module tier makes region instructions structural no-ops, so — like

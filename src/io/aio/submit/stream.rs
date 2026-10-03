@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-30
 //! The byte-stream submissions — the three buffered reads, `read-all`, write
 //! and flush — and where each one's bytes land.
 //!
@@ -62,7 +62,7 @@ impl AsyncBackend {
                         fd,
                         op,
                         lent.len(),
-                        request.timeout,
+                        request.bound.next_wait(),
                     );
                     if let Err(e) = submitted {
                         restore_remainder(state, lent);
@@ -81,7 +81,7 @@ impl AsyncBackend {
                         id,
                         fd,
                         op,
-                        request.timeout,
+                        request.bound.next_wait(),
                         buffer_pool,
                         Some(bh),
                     )?;
@@ -98,7 +98,7 @@ impl AsyncBackend {
                         id,
                         fd,
                         op,
-                        request.timeout,
+                        request.bound.next_wait(),
                         buffer_pool,
                         bh,
                     )?;
@@ -111,7 +111,7 @@ impl AsyncBackend {
                         id,
                         fd,
                         op,
-                        request.timeout,
+                        request.bound.next_wait(),
                         buffer_pool,
                         Some(bh),
                     )?;
@@ -138,7 +138,7 @@ impl AsyncBackend {
                 // process already handed the kernel.
                 let bounds = match op {
                     PortOp::Flush => Bounds::prompt(),
-                    _ => hub.bounds(id, request.timeout),
+                    _ => hub.bounds(id, request.bound),
                 };
                 let reach = bounds.can_stop();
                 let (pool_op, lent) = match op {
@@ -201,7 +201,7 @@ impl AsyncBackend {
                 request.port,
                 descriptor,
                 buf_handle,
-                request.timeout,
+                request.bound,
             )
             .lending(lent),
             submitter,

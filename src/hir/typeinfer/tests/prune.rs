@@ -1,8 +1,8 @@
-// audited: 2026-09-07
-// src/hir/AGENTS.md
-// docs/impl/hir.md
+// audited: 2026-09-28
 //! Type-directed dead-arm pruning: a `(match (type-of x) …)` over a statically
 //! known scrutinee keeps its live arm and loses the rest.
+//!
+//! docs/impl/typeinfer.md
 
 use super::compile_fhir;
 use crate::hir::pattern::{HirPattern, PatternLiteral};
@@ -39,15 +39,15 @@ fn has_keyword_arm(hir: &Hir, kw: &str) -> bool {
 // The pruning *mechanism* is pinned here on hand-written, primitive-only
 // `(match (type-of x) …)` forms (the bare test harness carries no stdlib, so the
 // `each` macro — which uses stdlib `pair?` — cannot compile here). The `each`
-// end-to-end shape is the oracle's `each-array` probe (tests/elle/oracle.lisp),
+// end-to-end shape is the `each-array` probe (tests/impl/probe/direct.lisp),
 // which runs under the full stdlib.
 
 /// Type-directed dead-arm pruning. A `(match (type-of a) …)` whose scrutinee `a`
 /// is a literal array has every off-array arm provably unreachable, so `prune.rs`
 /// removes them before region inference — otherwise `a` is referenced (and its
 /// release point computed) inside a dead arm, leaking its region (the
-/// `each`-over-collection over-keep the `each` macro otherwise hits per op, pinned
-/// end-to-end by the oracle's `each-array` probe). The
+/// `each`-over-collection over-keep the `each` macro otherwise hits per op, which
+/// the `each-array` probe measures end to end). The
 /// off-type arms (`:fiber`, `:set`, `:struct`) must be gone; the
 /// live `:array` arm kept.
 #[test]

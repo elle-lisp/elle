@@ -63,7 +63,7 @@ root it recorded, not of the region it started from.
 An operand really does arrive `Owned`. A connection accepted inside a process
 and handed to a per-connection `ev/spawn` is adopted into that activation's
 subtree, and `handle-io-forward` then submits a write on it for the child
-scheduler. [process-io.lisp](../../tests/elle/process-io.lisp) § 10 is that program, and the retain on
+scheduler. [process-io.lisp](../../tests/lang/process-io.lisp) § 10 is that program, and the retain on
 the port's own region there holds nothing at all.
 
 Retaining the root keeps the whole subtree for the operation's lifetime, which
@@ -133,7 +133,7 @@ already asked that operation to stop.
 Pinned by `a_cancelled_entry_lets_go_of_what_its_completion_reads` and, for
 the operand kept past the mark, `a_cancelled_entry_keeps_what_the_kernel_addresses`
 (both in [hold.rs](../../src/io/pending/tests/hold.rs)). Measured as a rate by the `ev-abort`
-and `ev-timeout` probes in [plumb.lisp](../../tests/elle/plumb.lisp).
+and `ev-timeout` probes in [plumb.lisp](../../tests/impl/plumb.lisp).
 
 ## A completion owns what it builds, and hands it over once
 
@@ -199,7 +199,7 @@ Pinned by `a_run_that_spawns_a_child_leaves_no_residue`,
 `a_run_that_captures_what_a_child_wrote_leaves_no_residue`
 ([census.rs](../../tests/region_process_teardown/census.rs)), and measured as a rate by the
 `subprocess-exec`, `port-read-all` and `subprocess-system` probes in
-[plumb.lisp](../../tests/elle/plumb.lisp) beside `io-yield ev/sleep`, whose answer is an immediate
+[plumb.lisp](../../tests/impl/plumb.lisp) beside `io-yield ev/sleep`, whose answer is an immediate
 the completion builds nothing for.
 
 ## An operation whose fiber is gone has no reader
@@ -245,9 +245,9 @@ how that reader lets go.
 
 Pinned by `a_completion_is_withheld_when_the_fiber_that_asked_is_gone`
 ([gone.rs](../../src/io/aio/tests/gone.rs)), which builds the state directly and asserts on the
-answer. No corpus file pins it end to end: the answer goes to a fiber that is
+answer. No Elle test pins it end to end: the answer goes to a fiber that is
 gone, so nothing in the program can observe it.
-[io-stale-operation-ends.lisp](../../tests/elle/io-stale-operation-ends.lisp) reaches the same state and asserts on
+[io-stale-operation-ends.lisp](../../tests/impl/io-stale-operation-ends.lisp) reaches the same state and asserts on
 what a program CAN see, which is the operation ending.
 
 ## Ending an operation whose fiber is gone
@@ -292,7 +292,7 @@ pipe").
 
 Pinned by `an_operation_that_parks_ends_when_the_fiber_that_asked_is_gone`
 ([gone.rs](../../src/io/aio/tests/gone.rs)), which gives the operation no peer at all, and end
-to end by [io-stale-operation-ends.lisp](../../tests/elle/io-stale-operation-ends.lisp).
+to end by [io-stale-operation-ends.lisp](../../tests/impl/io-stale-operation-ends.lisp).
 
 ## The stop pipe
 

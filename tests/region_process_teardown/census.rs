@@ -1,7 +1,8 @@
-// audited: 2026-09-21
-// The gates on the post-teardown residue: what one run may leave behind.
-// docs/impl/region/rules.md
-// docs/impl/image/boot.md
+// audited: 2026-09-29
+//! The gates on the post-teardown residue: what one run may leave behind.
+//!
+//! docs/impl/region/rules.md
+//! docs/impl/image/boot.md
 
 use super::*;
 use elle::compiler::stdlib_cache::StdlibCache;
@@ -10,7 +11,7 @@ use elle::primitives::module_init::StdlibSource;
 /// The sweep must be *observable* and *idempotent*. The residual live-region
 /// count is the standing oracle: it is the set of regions whose RC never reached
 /// zero — and falls to zero as those are fixed, with no change to the teardown
-/// itself. `tests/elle/oracle.lisp` measures the same residue as a per-op rate
+/// itself. `tests/impl/oracle.lisp` measures the same residue as a per-op rate
 /// on a running program; this counts what is left once the process is gone.
 #[test]
 fn process_teardown_is_observable_and_idempotent() {
@@ -44,10 +45,9 @@ fn process_teardown_is_observable_and_idempotent() {
 }
 
 /// Teardown leaves no reference the region graph cannot explain
-/// (docs/impl/region/rules.md § "Teardown — every region frees"). Every
-/// reference a surviving region carries comes from another survivor's contents;
-/// a remainder is a claim held outside the graph, and no release the region
-/// system reaches can ever balance it.
+/// (docs/impl/region/rules.md). Every reference a surviving region carries comes
+/// from another survivor's contents; a remainder is a claim held outside the
+/// graph, and no release the region system reaches can ever balance it.
 ///
 /// The counter-factual: the residue count alone cannot see this. A reference
 /// cycle keeps its members alive with every reference explained, so the count
@@ -147,23 +147,21 @@ fn an_image_boot_leaves_no_unexplained_references() {
     }
 }
 
-/// A completed run leaves NOTHING (docs/impl/region/rules.md § "Teardown — every
-/// region frees", property 2). Zero is the claim, not a target the count may
-/// approach: the sweep is RC-driven, so a survivor is a reference that never
-/// reached zero, and the number IS the remaining work.
+/// A completed run leaves NOTHING (docs/impl/region/rules.md). Zero is the claim, not a
+/// target the count may approach: the sweep is RC-driven, so a survivor is a reference
+/// that never reached zero, and the number IS the remaining work.
 ///
 /// The counter-factual is `teardown_leaves_no_unexplained_references` beside it,
 /// which this does not subsume in either direction. That one sees a claim held
 /// outside the region graph and is blind to a cycle — every reference in a cycle
 /// is explained by another survivor's contents, so it reads clean while the cycle
-/// stands. This one sees the cycle and cannot say what pins it. The residue of
-/// every program ever run was one 42-region cycle holding 100% of the rest, and
-/// nothing failed on it (elle-lisp/elle#1081).
+/// stands. This one sees the cycle and cannot say what pins it. A cycle in the
+/// scheduler wrapper can hold every other survivor while that gate reads clean.
 ///
 /// The run goes through `execute_scheduled`, the path every entry point takes, so
-/// the scheduler wrapper is inside the measurement — which is where that cycle
-/// lived. The stdlib is compiled rather than read from the disk cache, so every
-/// region in the residue was minted by this run.
+/// the scheduler wrapper is inside the measurement. The stdlib is compiled rather
+/// than read from the disk cache, so every region in the residue was minted by
+/// this run.
 #[test]
 fn teardown_leaves_no_residue() {
     for src in PROGRAMS {
@@ -180,10 +178,9 @@ fn teardown_leaves_no_residue() {
     }
 }
 
-/// How the host gives back the one owning reference a run hands it with the
-/// program value (docs/impl/region/rules.md § "The program value is the host's
-/// to release"). A host that does neither reads the residue of its own
-/// hand-off rather than the run's.
+/// How the host gives back the one owning reference a run hands it with the program
+/// value (docs/impl/region/rules.md). A host that does neither reads the residue of its
+/// own hand-off rather than the run's.
 #[derive(Clone, Copy)]
 enum HandOff {
     /// Register the value as a process root, so the sweep consumes it.
@@ -225,7 +222,7 @@ fn residue_after_teardown(mut rt: Runtime, src: &str, handoff: HandOff) -> usize
 /// A run that spawns a child leaves nothing either. The `subprocess` value is
 /// built when the spawn finishes rather than by the call that asked for it, so
 /// the region it lives in is one the completion owns and hands over
-/// (docs/impl/io-inflight.md § "A completion owns what it builds").
+/// (docs/impl/io-inflight.md).
 ///
 /// The counter-factual is `teardown_leaves_no_residue` beside it, which cannot
 /// see this at all: neither of its programs reaches the io backend, so no
@@ -258,10 +255,9 @@ fn a_run_that_spawns_a_child_leaves_no_residue() {
 ///
 /// Three holders keep an aborted fiber, and all three have to let go for this
 /// to read zero: the loop's completion record and its mark, both keyed by the
-/// fiber (docs/scheduler.md § "Completion records"); the runnable queue, which
-/// a completed fiber leaves on the same rule; and the cancelled operation's own
-/// entry, which retains the fiber it would have answered
-/// (docs/impl/io-inflight.md § "A cancelled operation reads nothing again").
+/// fiber (docs/scheduler.md); the runnable queue, which a completed fiber leaves
+/// on the same rule; and the cancelled operation's own entry, which retains the
+/// fiber it would have answered (docs/impl/io-inflight.md).
 ///
 /// The counter-factual is `teardown_leaves_no_residue` beside it, which reaches
 /// none of this: neither of its programs spawns a fiber, so no fiber is ever
@@ -290,17 +286,16 @@ fn a_run_that_times_out_leaves_no_residue() {
 /// A run that leaves a fiber sleeping leaves nothing either. The program ends
 /// while its spawned fiber is parked in `ev/sleep`, so `do-shutdown` cancels
 /// the operation and aborts the fiber — and everything the loop remembered
-/// must still come apart (elle-lisp/elle#1186).
+/// must still come apart.
 ///
 /// The counter-factual is `a_run_that_times_out_leaves_no_residue` beside it,
 /// whose abort travels through `handle-abort` on the program's own request.
-/// This one is the shutdown's abort, and what kept its residue was not the
-/// scheduler at all: `:pump`'s unjoined-error scan conditionally assigns each
-/// snapshot entry's fiber to a reassigned local, the shape whose stored
-/// value's release used to ride the binding chain out of the loop
-/// (docs/impl/region/bindings.md § "An aliased stored value takes the counted
-/// store") — stranding the snapshot, the fiber inside it, and everything the
-/// fiber's closure reaches: 108 regions for one sleeper.
+/// This one is the shutdown's abort, and its residue turns on the binding layer
+/// rather than the scheduler: `:pump`'s unjoined-error scan conditionally
+/// assigns each snapshot entry's fiber to a reassigned local
+/// (docs/impl/region/bindings.md). A stored value's release that rode the
+/// binding chain out of the loop would strand the snapshot, the fiber inside it,
+/// and everything the fiber's closure reaches.
 ///
 /// The timer sleeps 30 seconds so it cannot fire inside the test; two
 /// sleepers pin the per-fiber slope, not only the constant.
@@ -329,7 +324,7 @@ fn a_run_that_leaves_a_fiber_sleeping_leaves_no_residue() {
 /// `port/read` and `port/read-line` answer from a buffer the call pre-allocated
 /// and reach none of this, so a read alone is no evidence. `read-all` has no
 /// count to reserve against, so its answer is born when the stream ends — which
-/// is what makes it the discriminator for the same defect the spawn shows.
+/// is what makes it the discriminator for the hand-over the spawn case pins.
 #[test]
 fn a_run_that_reads_a_whole_file_leaves_no_residue() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -352,7 +347,7 @@ fn a_run_that_reads_a_whole_file_leaves_no_residue() {
 
 /// One call whose completions build more than one answer: `subprocess/system`
 /// spawns the child, reads both pipes to the end, and waits
-/// (docs/impl/io-inflight.md § "A completion owns what it builds").
+/// (docs/impl/io-inflight.md).
 ///
 /// It reaches what the two cases above do not. The `read-all` there reads a file
 /// its own call opened; this one reads a pipe, through a port a completion built
@@ -412,8 +407,7 @@ fn a_run_with_several_thunks_leaves_no_residue() {
 }
 
 /// A run whose program value is a HEAP value leaves nothing behind when the
-/// host releases that value instead of rooting it
-/// (docs/impl/region/rules.md § "The program value is the host's to release").
+/// host releases that value instead of rooting it (docs/impl/region/rules.md).
 ///
 /// The counter-factual is the registration every gate above makes. Those route
 /// the returned reference into the process-root registry, so the sweep consumes

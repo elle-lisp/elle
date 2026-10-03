@@ -1,5 +1,7 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-30
 //! The pool operations that park with no peer, and what ends them.
+//!
+//! docs/io/timeout.md
 //!
 //! Each of these waits for an event that may never arrive: a child that never
 //! exits, a descriptor nothing writes, a directory nothing touches, a fifo
@@ -10,7 +12,7 @@
 //!
 //! `assert_cancel_retires` (in `mod.rs`) is the shared assertion: the worker
 //! comes back and the `pending` entry goes, within a bounded number of waits.
-//! Its twins for the socket calls live in `net.rs`.
+//! Its twins for the socket calls live in `netcancel.rs`.
 //!
 //! `io_uring` runs most of these in the kernel, so the cancellation tests build
 //! a thread-pool backend explicitly rather than taking the platform default.
@@ -48,10 +50,10 @@ impl Drop for Fifo {
 
 /// A cancelled subprocess wait must END on the thread-pool backend.
 ///
-/// `subprocess/wait` on a child that never exits is the shape: `waitpid(pid,
-/// .., 0)` holds the worker for the child's whole life. `ev/timeout` around a
-/// wait is how a supervisor gives a stuck child a deadline, and the cancel it
-/// issues has to reach the worker.
+/// `subprocess/wait` on a child that never exits is the shape: a blocking
+/// `wait4(pid, .., 0, ..)` holds the worker for the child's whole life.
+/// `ev/timeout` around a wait is how a supervisor gives a stuck child a
+/// deadline, and the cancel it issues has to reach the worker.
 #[test]
 fn a_cancelled_pool_process_wait_ends_rather_than_being_abandoned() {
     crate::value::arena::with_test_region(|| {
@@ -68,11 +70,7 @@ fn a_cancelled_pool_process_wait_ends_rather_than_being_abandoned() {
         let backend = AsyncBackend::new_thread_pool().unwrap();
         let id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::ProcessWait,
-                    port: handle,
-                    timeout: None,
-                },
+                &IoRequest::unbounded(IoOp::ProcessWait, handle),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -91,7 +89,7 @@ fn a_cancelled_pool_process_wait_ends_rather_than_being_abandoned() {
 
 /// A cancelled readiness wait must END on the thread-pool backend.
 ///
-/// `ev/poll-fd` with no `:timeout` waits for as long as the descriptor stays
+/// `ev/poll-fd` with no timeout waits for as long as the descriptor stays
 /// quiet — `wayland/event-loop` and `glib-wait` park there on every iteration.
 /// Without a stop pipe the worker sits in `poll(2)` with `-1` and nothing but
 /// the descriptor itself can end it.
@@ -103,14 +101,13 @@ fn a_cancelled_pool_poll_fd_ends_rather_than_being_abandoned() {
         let backend = AsyncBackend::new_thread_pool().unwrap();
         let id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::PollFd {
+                &IoRequest::unbounded(
+                    IoOp::PollFd {
                         fd: pipe.read_fd,
                         events: libc::POLLIN as u32,
                     },
-                    port: Value::NIL,
-                    timeout: None,
-                },
+                    Value::NIL,
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -140,14 +137,13 @@ fn a_pool_poll_fd_does_not_touch_the_descriptor_it_watches() {
         let backend = AsyncBackend::new_thread_pool().unwrap();
         let id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::PollFd {
+                &IoRequest::unbounded(
+                    IoOp::PollFd {
                         fd: pipe.read_fd,
                         events: libc::POLLIN as u32,
                     },
-                    port: Value::NIL,
-                    timeout: None,
-                },
+                    Value::NIL,
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -169,8 +165,8 @@ fn a_pool_poll_fd_does_not_touch_the_descriptor_it_watches() {
 
 /// A cancelled filesystem watch must END on the thread-pool backend.
 ///
-/// A watcher on a directory nothing touches waits forever, and `fs/watch` names
-/// no deadline, so the stop pipe is the whole bound.
+/// A watcher on a directory nothing touches waits forever, and `watch-next`
+/// takes no bound, so the stop pipe is the whole bound.
 #[test]
 fn a_cancelled_pool_watch_next_ends_rather_than_being_abandoned() {
     crate::value::arena::with_test_region(|| {
@@ -185,11 +181,7 @@ fn a_cancelled_pool_watch_next_ends_rather_than_being_abandoned() {
         let backend = AsyncBackend::new_thread_pool().unwrap();
         let id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::WatchNext,
-                    port: watcher_val,
-                    timeout: None,
-                },
+                &IoRequest::unbounded(IoOp::WatchNext, watcher_val),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -222,8 +214,8 @@ fn a_cancelled_pool_open_of_a_fifo_ends_rather_than_being_abandoned() {
         );
         let id = backend
             .submit(
-                &IoRequest {
-                    op: IoOp::Open {
+                &IoRequest::unbounded(
+                    IoOp::Open {
                         path: fifo.0.clone(),
                         flags: libc::O_WRONLY | libc::O_CLOEXEC,
                         mode: 0o666,
@@ -231,8 +223,7 @@ fn a_cancelled_pool_open_of_a_fifo_ends_rather_than_being_abandoned() {
                         encoding: Encoding::Binary,
                     },
                     port,
-                    timeout: None,
-                },
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -283,11 +274,7 @@ fn a_cancelled_operation_delivers_no_completion_on_either_backend() {
             let id =
                 backend
                     .submit(
-                        &IoRequest {
-                            op: PortOp::ReadAll.into(),
-                            port,
-                            timeout: None,
-                        },
+                        &IoRequest::unbounded(PortOp::ReadAll.into(), port),
                         crate::io::pending::Submitter::detached(
                             crate::value::arena::leaked_test_heap(),
                         ),
@@ -303,7 +290,7 @@ fn a_cancelled_operation_delivers_no_completion_on_either_backend() {
             // must be retired by the cancelled operation's own completion.
             let mut delivered = Vec::new();
             for _ in 0..40 {
-                delivered.extend(backend.wait(50).unwrap().into_iter().map(|c| c.id));
+                delivered.extend(backend.wait(TICK).unwrap().into_iter().map(|c| c.id));
                 if !backend.has_pending() && backend.workers() == 0 {
                     break;
                 }
@@ -352,21 +339,23 @@ fn a_poll_fd_that_reaches_its_deadline_reports_no_events_on_either_backend() {
             let id =
                 backend
                     .submit(
-                        &IoRequest {
-                            op: IoOp::PollFd {
+                        &IoRequest::unbounded(
+                            IoOp::PollFd {
                                 fd: pipe.read_fd,
                                 events: libc::POLLIN as u32,
                             },
-                            port: Value::NIL,
-                            timeout: Some(Duration::from_millis(200)),
-                        },
+                            Value::NIL,
+                        )
+                        .within(crate::io::request::Bound::per_op(
+                            Duration::from_millis(200),
+                        )),
                         crate::io::pending::Submitter::detached(
                             crate::value::arena::leaked_test_heap(),
                         ),
                     )
                     .unwrap();
 
-            let mut completions = backend.wait(-1).unwrap();
+            let mut completions = backend.wait(None).unwrap();
             assert_eq!(completions.len(), 1, "{which}: one completion");
             let completion = completions.pop().unwrap();
             assert_eq!(completion.id, id, "{which}: the submitted id came back");

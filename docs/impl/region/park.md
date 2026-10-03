@@ -39,7 +39,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   post-`TailCall` ip through `elle_jit_yield_through_call`, as a compiled `Call` site parks
   at its resume ip ([jit.md](../jit.md)). Returning at the call instead strands every
   release in the block: an owned parameter's, a borrowed argument's retain, the result's.
-  Gauged and pinned guardfree by `tests/elle/region-jit-tail-suspend.lisp`.
+  Gauged by [region-jit-tail-suspend.lisp](../../../tests/impl/region-jit-tail-suspend.lisp); its
+  `-syncjit` and `-guardfree` wrappers run it compiled from each function's first call,
+  the second with guardfree armed.
 - **The parked signal's escape retain has a release on every path.** A suspending signal's
   payload is retained once as it escapes into `fiber.signal` (`EmitEscape` for
   `yield`/`emit`, `SuspendEscape` for a yielding io op or a capability denial). The resume
@@ -68,7 +70,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   The copy the release loads is parked in a local slot of its own, the operand stack being
   what survives a suspend. Unresolvable counts as borrowed: minting where the body already
   owns a reference strands one per abandoned park, a bounded leak, while missing one frees a
-  live value. Pinned by `tests/elle/region-fiber-yield-borrow-uaf.lisp`. A TERMINAL
+  live value. Pinned by [region-fiber-yield-borrow-uaf.lisp](../../../tests/impl/region-fiber-yield-borrow-uaf.lisp). A TERMINAL
   `:error` emit needs no compiler mint for the same invariant: its `EmitEscape` retain is
   the delivery reference exactly as above, and the body's own reference — where the raise
   chain holds one — is claimed through the frames' release tables instead of a blanket
@@ -113,7 +115,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   resume), and the `SuspendEscape`, consumed here. A resume that stands down because the
   resume value shares the region leaves the second with no consumer at all, and the region
   survives with its buffer and its request — one region and two objects per read, which a
-  socket reader pays per frame. `tests/elle/region-io-read-strand.lisp` bounds the rate
+  socket reader pays per frame. [region-io-read-strand.lisp](../../../tests/impl/region-io-read-strand.lisp) bounds the rate
   and pins the other side: the release drops the retain, not the buffer, which its held
   chunks read back after the reads that followed them.
 
@@ -124,8 +126,8 @@ symmetric with its unpark; the node and the deferred set a park moves are
   completion reads and decrefs when the entry is disposed. A `Fresh` op's completion
   buffer lives in the request's own region, so that retain is a count on the region for
   the operation's whole lifetime, and the install's release drops the suspend retain and
-  no more. `tests/elle/grpc.lisp`'s `with-server` teardown is the full-scheduler shape,
-  and the `region_fiber_abort_io_protect_uaf` fixture the minimal one.
+  no more. [grpc.lisp](../../../tests/lang/grpc.lisp)'s `with-server` teardown is the full-scheduler shape,
+  and the [region-fiber-abort-io-protect-uaf.lisp](../../../tests/impl/region-fiber-abort-io-protect-uaf.lisp) fixture the minimal one.
 
   **The record lives on the fiber that parked, and so does the release.** An install
   can reach a fiber that only passes a park on: the outer fiber of a `protect`ed body,
@@ -135,12 +137,15 @@ symmetric with its unpark; the node and the deferred set a park moves are
   `FiberResume` deliveries, or the abort's descent into the inner fiber. A fiber that
   relays with `(emit :io v)` builds a park of its own, and its record names no
   runtime-built payload. So one park owes one release, however many fibers stand
-  between it and the scheduler. Gauged by `tests/elle/region-denial-park.lisp` and
-  `tests/elle/region-io-park.lisp` per install, and by
-  `tests/elle/region-capability-denial-resume-leak.lisp` per denial position. Pinned
-  guardfree by `tests/elle/region-denial-park-uaf.lisp` and
-  `tests/elle/region-io-park-uaf.lisp`, whose `protect` witnesses pass a park on, and by
-  `tests/elle/region-io-relay-uaf.lisp`, whose relays raise the request again.
+  between it and the scheduler. Gauged by
+  [region-denial-park.lisp](../../../tests/impl/region-denial-park.lisp) and
+  [region-io-park.lisp](../../../tests/impl/region-io-park.lisp) per install, and by
+  [region-capability-denial-resume-leak.lisp](../../../tests/impl/region-capability-denial-resume-leak.lisp)
+  per denial position. Pinned guardfree by
+  [region-denial-park-uaf.lisp](../../../tests/impl/region-denial-park-uaf.lisp) and
+  [region-io-park-uaf.lisp](../../../tests/impl/region-io-park-uaf.lisp), whose `protect` witnesses pass
+  a park on, and by [region-io-relay-uaf.lisp](../../../tests/impl/region-io-relay-uaf.lisp), whose
+  relays raise the request again.
 - **A boundary ends a park with no reader and no install, so it owes both references.** A
   `squelch`/`attune` violation is the third way a park can end, and it is neither of the two
   the rules above are written for. No resumer reads the payload out of `fiber.signal`, so the
@@ -149,7 +154,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   reaching the fiber boundary by the one route out of the driving loop that a boundary cuts.
   And no install replaces the payload in the slot, so a payload the RUNTIME built keeps the
   reference its allocation left besides. The boundary therefore owes two decrefs where each
-  neighbouring seam owes one, and it reads the ledger to tell them apart: the `bodyless`
+  neighboring seam owes one, and it reads the ledger to tell them apart: the `bodyless`
   record for a runtime-built payload, then one further decref for the delivery, which a
   body-allocated payload owes exactly as a runtime-built one does. A body's OWN
   reference is the one thing the boundary does not owe — the abandoned frames' release tables
@@ -166,8 +171,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   run, and the park's references are released. The host's error then leaves by the
   ordinary error exit, which parks the fiber's own frame at the host's call, so a restart
   answers that call and never replays the refused code. Pinned by
-  `tests/elle/host-refusal.lisp` and `tests/elle/jit-run-on-refused-park.lisp`, and gauged
-  by `tests/elle/region-host-refusal.lisp`.
+  [host-refusal.lisp](../../../tests/lang/host-refusal.lisp) and
+  [jit-run-on-refused-park.lisp](../../../tests/impl/jit-run-on-refused-park.lisp), and gauged by
+  [region-host-refusal.lisp](../../../tests/impl/region-host-refusal.lisp).
 
   **Two records decide it, because neither answers on its own.** The **ledger** says the
   delivery retain has no reader — a fact only the site that took the retain knows, and one no
@@ -184,8 +190,8 @@ symmetric with its unpark; the node and the deferred set a park moves are
   `assert_consumed` net covers the resume funding alone — a payload-named record needs no
   route-completeness argument. Taking the record is the second receipt, so two boundaries over
   one park release one set of references. Gauged by
-  `tests/elle/region-boundary-park.lisp` and pinned guardfree by
-  `tests/elle/region-boundary-park-uaf.lisp`.
+  [region-boundary-park.lisp](../../../tests/impl/region-boundary-park.lisp) and pinned guardfree by
+  [region-boundary-park-uaf.lisp](../../../tests/impl/region-boundary-park-uaf.lisp).
 - **What yields is the emit OPERATION, not the `Emit` node.** A first argument the compiler
   cannot read as a keyword set falls through to the `emit` primitive
   ([../../signals/emit.md](../../signals/emit.md) § "Dynamic emit"), which parks the same way
@@ -228,10 +234,10 @@ symmetric with its unpark; the node and the deferred set a park moves are
   § "What the fall-through owes, a signal exit owes too"). A non-tail site's stash is the
   lowerer's own slot and no instruction names it — but the frame's release table is a table
   of exactly such slots, so the site records there instead, and the replay or the walk runs
-  the release whole. Pinned by `tests/elle/region-dynamic-emit-borrow-uaf.lisp`,
-  `tests/elle/region-dynamic-emit-terminal-uaf.lisp` and
-  `tests/elle/region-dynamic-emit-statement-uaf.lisp`, and gauged per op by the `emit-dyn-*`
-  probes in `tests/elle/oracle.lisp`.
+  the release whole. Pinned by [region-dynamic-emit-borrow-uaf.lisp](../../../tests/impl/region-dynamic-emit-borrow-uaf.lisp),
+  [region-dynamic-emit-terminal-uaf.lisp](../../../tests/impl/region-dynamic-emit-terminal-uaf.lisp) and
+  [region-dynamic-emit-statement-uaf.lisp](../../../tests/impl/region-dynamic-emit-statement-uaf.lisp), and gauged per op by the `emit-dyn-*`
+  probes in [oracle.lisp](../../../tests/impl/oracle.lisp).
 - **A delivery into a replayed frame carries one owning reference.** A parked
   `BytecodeFrame` re-enters at its suspending call's continuation, whose
   compiler-emitted result release consumes one owning reference of the value the
@@ -245,9 +251,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   ([effects.md](effects.md) § `Delivers`). Without a mint anywhere the replay
   consumes a reference the abort's caller still owns, and a fresh heap payload is
   freed under the caller's read (a constant payload has no region, which is what
-  kept the theft invisible). Pinned by `region_fiber_abort_io_protect_uaf`
-  (`tests/integration/fixtures/region-fiber-abort-io-protect-uaf.lisp`);
-  `tests/elle/grpc.lisp`'s `with-server` teardown is the full-scheduler witness.
+  kept the theft invisible). Pinned by
+  [region-fiber-abort-io-protect-uaf.lisp](../../../tests/impl/region-fiber-abort-io-protect-uaf.lisp);
+  [grpc.lisp](../../../tests/lang/grpc.lisp)'s `with-server` teardown is the full-scheduler witness.
   A **primitive** that suspends is the other frame with no `Return` to fund it, and
   it is the general case rather than an exit path: the resume value takes the place
   of the primitive's result, and the continuation past the call releases that result
@@ -262,7 +268,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   `do_fiber_resume_single` takes it with the parked signal (`take_resume_funding`),
   minting one `ResumeDelivery` retain on every route into the fiber. What needs no mint is an `Emit` park, whose resume
   block mints in bytecode (above). Pinned by
-  `tests/elle/region-primitive-resume-uaf.lisp`.
+  [region-primitive-resume-uaf.lisp](../../../tests/impl/region-primitive-resume-uaf.lisp).
 
   That mint answers for the DELIVERY, so a completion the scheduler BUILT still owes
   its own allocation a consumer, and that one is the completion's rather than any
@@ -298,10 +304,10 @@ symmetric with its unpark; the node and the deferred set a park moves are
   keeps that park's funding (`raise_in_park`): a primitive or denial park still
   owes the mint, and an emit park or a fuel pause does not. And a parent that a
   child's error passes is parked at its `fiber/resume` call, which is a `Call`
-  site. Pinned by `tests/elle/region-fiber-restart-uaf.lisp` under
-  `--trace=guardfree`, with the leak gauge in `tests/elle/region-fiber-restart.lisp`;
-  the tail denial of `:error`, first run and replay, by `tests/elle/caps.lisp`
-  and `value::fiber::delivery::tests`.
+  site. Pinned guardfree by [region-fiber-restart-uaf.lisp](../../../tests/impl/region-fiber-restart-uaf.lisp),
+  with the leak gauge in [region-fiber-restart.lisp](../../../tests/impl/region-fiber-restart.lisp); the
+  tail denial of `:error`, first run and replay, by [caps.lisp](../../../tests/lang/caps.lisp) and
+  `value::fiber::delivery::tests`.
 - **A propagated signal is a fresh park, and owes its own delivery reference.**
   `fiber/propagate` installs the child's parked payload as the propagating fiber's own
   `signal`. That fiber's resumer then reads the payload as its resume result and runs the
@@ -324,7 +330,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   the reference the consumer releases — only a BORROWED payload is unfunded. The WASM tier's
   `handle_fiber_propagate` is not this shape: it never installs into `fiber.signal`, and
   returns the child's `(bits, value)` to its caller, whose park runs through `install_signal`
-  instead. Pinned by `tests/elle/region-fiber-propagate-uaf.lisp`.
+  instead. Pinned by [region-fiber-propagate-uaf.lisp](../../../tests/impl/region-fiber-propagate-uaf.lisp).
 - **A resume value crosses counted, or not at all.** The delivery going *out* of a park
   is counted (above); the value coming *back* in is not, and by the same accounting must
   be. `VM::resume_suspended` pushes the resume value onto the parked frame's stack and
@@ -344,9 +350,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   the frame-held admission: with both directions counted, a fiber crossing is a counted
   second holder rather than an uncounted borrow, so the branch-arm window and the
   frame-exit release stop refusing it ([mechanism.md](mechanism.md) § "A fiber crossing is
-  a counted holder too"). Pinned by `tests/elle/region-fiber-frontier-window-uaf.lisp`,
-  with the leak face in `tests/elle/region-fiber-frontier-window.lisp`; the bound and
-  returned faces are `tests/elle/region-resume-value-operand.lisp`.
+  a counted holder too"). Pinned by [region-fiber-frontier-window-uaf.lisp](../../../tests/impl/region-fiber-frontier-window-uaf.lisp),
+  with the leak face in [region-fiber-frontier-window.lisp](../../../tests/impl/region-fiber-frontier-window.lisp); the bound and
+  returned faces are [region-resume-value-operand.lisp](../../../tests/impl/region-resume-value-operand.lisp).
 - **A child's inherited parameter baseline is a counted holder.** A new fiber snapshots
   its creator's dynamic-parameter bindings into one baseline frame — at creation
   (`prim_fiber_new`), or at the first-resume fallback for a fiber seeded by its resumer
@@ -366,15 +372,14 @@ symmetric with its unpark; the node and the deferred set a park moves are
   own later `parameterize` frames stay uncounted: their values are the parked
   activation's, released by its owed-release table. The generation-stamped borrow check
   ([generations.md](generations.md) § "Uncounted-borrow check") stays as the oracle that
-  the count holds. Pinned by `tests/elle/param-fiber-inherit.lisp` and the
-  `region_param_fiber_inherit_uaf` integration pin (debug builds panic at the resume
-  boundary when the count is missing).
+  the count holds. Pinned by [param-fiber-inherit.lisp](../../../tests/impl/param-fiber-inherit.lisp): a debug build panics at the
+  resume boundary when the count is missing.
 - **A park names its funding in the delivery ledger, and a consume seam takes it.** The
   three rules above each leave one funding fact on the fiber, written where the park is
   built and read where the park ends: the parked payload whose delivery the raise or
   injection minted, the parked payload with no body reference, and whether the resume
   value owes a mint at the delivery. One record carries all three — `Fiber::delivery`
-  (`src/value/fiber/delivery.rs`), whose fields are private to its module — so a park
+  ([delivery.rs](../../../src/value/fiber/delivery.rs)), whose fields are private to its module — so a park
   names its funding through a method or not at all. The park writes are
   `park_primitive(bits, payload)` (a suspending primitive whose payload the body owns: a
   dynamic `emit`), `park_request(bits, payload)` (an io op: a primitive park whose request
@@ -425,8 +430,8 @@ symmetric with its unpark; the node and the deferred set a park moves are
   (`release_displaced_terminal_signal`). Skipping it leaves the recorded table holding a
   dead edge (the free-time equivalence oracle detonates on the drift), and each re-park
   stacks another, so the free cascade over-releases the payload region
-  (`tests/elle/async-error-propagation.lisp` § 4 is the pinning corpus shape; the
-  `region-fiber-park-symmetry.lisp` restart face churns the mechanism).
+  ([async-error-propagation.lisp](../../../tests/lang/async-error-propagation.lisp) § 4 is the pinning shape; the
+  [region-fiber-park-symmetry.lisp](../../../tests/impl/region-fiber-park-symmetry.lisp) restart face churns the mechanism).
 
 A park moves the activation's dues into the suspended frame: a suspending exit — a
 yield, a suspending native, `fiber/resume`'s SIG_SWITCH handoff, a fuel pause, a capability

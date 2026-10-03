@@ -1,7 +1,9 @@
-// audited: 2026-09-23
-// src/io/AGENTS.md
+// audited: 2026-09-30
 //! A pool read counts the remainder its port is already holding, in bytes and
 //! in grapheme clusters.
+//!
+//! src/io/AGENTS.md
+//! docs/impl/io-bytes.md
 
 use super::*;
 
@@ -16,9 +18,8 @@ use super::*;
 /// The counter-factual: a runner that counts only what it read from the
 /// descriptor waits for the full count from a peer that has already said
 /// everything it has to say — and a redis `GET` of a value past one chunk
-/// hangs forever (`tests/elle/redis-short-read.lisp`, which is gated on a live
-/// Redis and so never runs on the macOS CI box, the only one that uses this
-/// backend).
+/// hangs forever (tests/lang/redis-short-read.lisp, which is gated on a live
+/// Redis).
 ///
 /// Built on `new_thread_pool` for the reason the rest of this family gives: the
 /// ring is the default on a Linux host, and this property would otherwise go
@@ -69,20 +70,19 @@ fn a_pool_read_exact_counts_the_remainder_the_port_already_holds() {
 
         let line_id = backend
             .submit(
-                &IoRequest {
-                    op: PortOp::ReadLine {
+                &IoRequest::unbounded(
+                    PortOp::ReadLine {
                         buffer: h.ctx().bytes(vec![0u8; 65536]),
                     }
                     .into(),
                     port,
-                    timeout: None,
-                },
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
         let mut line_done = false;
         for _ in 0..40 {
-            for c in backend.wait(50).unwrap() {
+            for c in backend.wait(TICK).unwrap() {
                 if c.id == line_id {
                     line_done = true;
                 }
@@ -96,15 +96,14 @@ fn a_pool_read_exact_counts_the_remainder_the_port_already_holds() {
         let count = body_len + 2;
         let exact_id = backend
             .submit(
-                &IoRequest {
-                    op: PortOp::ReadExact {
+                &IoRequest::unbounded(
+                    PortOp::ReadExact {
                         count,
                         buffer: h.ctx().bytes(vec![0u8; count]),
                     }
                     .into(),
                     port,
-                    timeout: None,
-                },
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
@@ -112,7 +111,7 @@ fn a_pool_read_exact_counts_the_remainder_the_port_already_holds() {
         // Bounded, because the property under test is that this terminates.
         let mut exact = None;
         for _ in 0..80 {
-            for c in backend.wait(50).unwrap() {
+            for c in backend.wait(TICK).unwrap() {
                 if c.id == exact_id {
                     exact = Some(c);
                 }
@@ -179,9 +178,10 @@ fn a_pool_text_read_exact_counts_the_remainder_in_clusters() {
             }
         });
 
-        // A pipe port, because the stream constructors fix the encoding at
-        // Binary and the encoding is the whole point here. What the runner
-        // reads is a descriptor either way; the counting unit is what differs.
+        // A pipe port, because the stream constructors build a port with the
+        // Binary encoding and the encoding is the whole point here. What the
+        // runner reads is a descriptor either way; the counting unit is what
+        // differs.
         let port = h.ctx().external(
             "port",
             Port::new_pipe(
@@ -195,20 +195,19 @@ fn a_pool_text_read_exact_counts_the_remainder_in_clusters() {
 
         let line_id = backend
             .submit(
-                &IoRequest {
-                    op: PortOp::ReadLine {
+                &IoRequest::unbounded(
+                    PortOp::ReadLine {
                         buffer: h.ctx().bytes(vec![0u8; 65536]),
                     }
                     .into(),
                     port,
-                    timeout: None,
-                },
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
         let mut line_done = false;
         for _ in 0..40 {
-            for c in backend.wait(50).unwrap() {
+            for c in backend.wait(TICK).unwrap() {
                 if c.id == line_id {
                     line_done = true;
                 }
@@ -223,22 +222,21 @@ fn a_pool_text_read_exact_counts_the_remainder_in_clusters() {
         // does — the clusters here are two, so the reservation is ample.
         let exact_id = backend
             .submit(
-                &IoRequest {
-                    op: PortOp::ReadExact {
+                &IoRequest::unbounded(
+                    PortOp::ReadExact {
                         count: clusters,
                         buffer: h.ctx().bytes(vec![0u8; clusters * 4]),
                     }
                     .into(),
                     port,
-                    timeout: None,
-                },
+                ),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
         let mut exact = None;
         for _ in 0..80 {
-            for c in backend.wait(50).unwrap() {
+            for c in backend.wait(TICK).unwrap() {
                 if c.id == exact_id {
                     exact = Some(c);
                 }

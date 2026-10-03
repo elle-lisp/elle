@@ -1,3 +1,9 @@
+// audited: 2026-09-29
+//! `string`: any value to a string, and several values concatenated into one.
+//!
+//! docs/strings.md
+//! docs/impl/symbol.md
+
 use super::*;
 
 /// Convert to string (variadic: 0 args → "", 1 arg → convert, N args → concatenate)
@@ -119,7 +125,7 @@ fn write_value_to_string(
     Ok(())
 }
 
-/// Single-value string conversion (original behavior).
+/// Single-value string conversion.
 fn prim_to_string_single(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     val: Value,
@@ -128,9 +134,9 @@ fn prim_to_string_single(
     // declared `RegionEffect::Fresh`, whose declaration oracle requires the result to
     // live in this call's region; passing `val` through (it lives in the caller's
     // region) would both trip that oracle and — since `Fresh` marks no argument
-    // escaping — is unnecessary. The copy keeps every `string` path fresh, which is
-    // what removes the per-heap-arg leak the old `Mixed` declaration caused
-    // (tests/elle/region-string-concat-leak.lisp).
+    // escaping — is unnecessary. The copy keeps every `string` path fresh; a `Mixed`
+    // declaration would leak one region per heap arg
+    // (tests/impl/region-string-concat-leak.lisp).
     if let Some(s) = val.with_string(|s| s.to_string()) {
         return (SIG_OK, ctx.string(s));
     }
@@ -311,8 +317,7 @@ fn prim_to_string_single(
     }
 
     // For other types, render Debug-style through the instance memo, so
-    // nested symbol and keyword spellings resolve (docs/impl/symbol.md
-    // § "Reading a name, and not reading one").
+    // nested symbol and keyword spellings resolve (docs/impl/symbol.md).
     let repr = {
         let symbols = unsafe { ctx.vm().symbols_ptr.as_ref() };
         format!("{}", val.debug_with(symbols))

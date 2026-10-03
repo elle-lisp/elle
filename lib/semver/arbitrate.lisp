@@ -1,9 +1,9 @@
-(elle/epoch 12)
-## audited: 2026-09-21
+(elle/epoch 13)
+## audited: 2026-09-28
 ## lib/semver/arbitrate.lisp — run the previous release's tests against
 ## the worktree code and answer pass, fail, or unavailable.
 ##
-## docs/semver.md owns the mechanics; tests/elle/semver-check.lisp pins
+## docs/semver.md owns the mechanics; tests/lang/semver-check.lisp pins
 ## them end to end.
 ##
 ## Usage:

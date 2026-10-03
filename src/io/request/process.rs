@@ -1,6 +1,6 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-30
 //! The `subprocess` a spawn answers with — its pid, its stdio ports and its
-//! exit record — and the record itself.
+//! exit record — and the record, with what the child cost.
 //!
 //! docs/subprocess.md
 
@@ -25,9 +25,9 @@ pub(crate) const SUBPROCESS: &str = "subprocess";
 pub(crate) struct ProcessHandle {
     pid: u32,
     /// The spawned child, kept so an unreaped one can be reaped on drop. The
-    /// exit status is NOT read back through it: a wait reaps with `waitpid(2)`
-    /// or `IORING_OP_WAITID` on the pid, which leaves this `Child` believing
-    /// the process is still running.
+    /// exit status is NOT read back through it: a wait reaps with `wait4(2)` on
+    /// the pid, which leaves this `Child` believing the process is still
+    /// running.
     child: RefCell<Child>,
     exit: ExitRecord,
     /// The child's stdio ports, or `Value::NIL` where the disposition asked for
@@ -106,20 +106,31 @@ impl Drop for ProcessHandle {
     }
 }
 
-/// Where a child's exit status is kept once somebody has reaped it.
+/// Where a child's exit status is kept once somebody has reaped it, with what
+/// the child cost.
 ///
 /// A reap consumes the status: the kernel hands it over once, and the child is
 /// then gone. So the status cannot travel only in the completion of the
 /// operation that took it — a wait a deadline cancelled reaps just as
 /// effectively as one that answers, and its completion reaches nobody. See
-/// src/io/AGENTS.md § "A reap is never wasted" for the argument.
+/// src/io/AGENTS.md § "A reap is never wasted" for the argument. The usage the
+/// kernel reports with the status is gone after the reap too, so it is kept
+/// beside it.
 ///
-/// Shared, and shared across threads: a pool worker takes the status on its own
-/// thread, while the ring's status is read off a `siginfo_t` on the scheduler's.
-/// The pending entry and the pool operation each hold a clone, so recording
-/// reaches no heap value and stays sound on a teardown drain.
+/// Shared, and shared across threads: a pool worker reaps on its own thread,
+/// and the ring's completion reaps on the scheduler's. The pending entry and
+/// the pool operation each hold a clone, so recording reaches no heap value and
+/// stays sound on a teardown drain.
 #[derive(Debug, Clone)]
-pub(crate) struct ExitRecord(Arc<Mutex<Option<i32>>>);
+pub(crate) struct ExitRecord(Arc<Mutex<Option<Exit>>>);
+
+/// What a reap left behind.
+#[derive(Debug, Clone, Copy)]
+struct Exit {
+    code: i32,
+    /// `None` only for a status a test planted without a reap.
+    usage: Option<Usage>,
+}
 
 /// What one ask of the kernel produced.
 pub(crate) enum Reap {
@@ -140,45 +151,52 @@ impl ExitRecord {
 
     /// The status this process is holding for the child, if any.
     pub(crate) fn status(&self) -> Option<i32> {
-        *self.held()
+        self.held().map(|exit| exit.code)
     }
 
-    /// Keep a status somebody else's reap produced — the kernel's `waitid`,
-    /// whose result arrives as a filled `siginfo_t` rather than through
-    /// [`reap`](Self::reap).
-    ///
-    /// The first status wins. A child is reaped once, so a second value under
-    /// the same record would be a second reading of one event rather than news.
+    /// Plant a status no reap produced: the state a finished wait leaves, for
+    /// a test that cannot make the kernel produce it on demand. The first
+    /// status wins, as it does for a reap.
+    #[cfg(test)]
     pub(crate) fn keep(&self, code: i32) {
         let mut held = self.held();
         if held.is_none() {
-            *held = Some(code);
+            *held = Some(Exit { code, usage: None });
         }
     }
 
-    /// Ask the kernel for `pid`'s status once, and keep whatever comes back.
+    /// Ask the kernel for `pid`'s status once, and keep whatever comes back,
+    /// with the usage it reports.
     ///
-    /// The record is held across the `waitpid` call, which is what makes the
-    /// ask and the record one step. Two waits on one child are legal, and the
-    /// loser's `waitpid` finds a child that is gone; a record consulted after
-    /// the syscall would leave the loser reading in the gap between the
-    /// winner's reap and the winner's write, and reporting `ECHILD` for a
-    /// status this process is holding.
+    /// The record is held across the `wait4` call, which is what makes the ask
+    /// and the record one step. Two waits on one child are legal, and the
+    /// loser's `wait4` finds a child that is gone; a record consulted after the
+    /// syscall would leave the loser reading in the gap between the winner's
+    /// reap and the winner's write, and reporting `ECHILD` for a status this
+    /// process is holding.
     ///
     /// `WNOHANG` rather than a blocking wait: the kernel reports no readiness
     /// for a child that has not exited, so the caller paces its asks with the
-    /// stop pipe visible between them (`src/io/threadpool/child.rs`).
+    /// stop pipe visible between them (`src/io/threadpool/child.rs`), or asks
+    /// only once the ring has said the child exited.
     pub(crate) fn reap(&self, pid: u32) -> Reap {
         let mut held = self.held();
-        if let Some(code) = *held {
-            return Reap::Exited(code);
+        if let Some(exit) = *held {
+            return Reap::Exited(exit.code);
         }
         loop {
             let mut status: libc::c_int = 0;
-            let ret = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WNOHANG) };
+            // SAFETY: an all-zero rusage is a valid value to hand the kernel.
+            let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
+            // SAFETY: both out-pointers are live and writable for the call.
+            let ret =
+                unsafe { libc::wait4(pid as libc::pid_t, &mut status, libc::WNOHANG, &mut ru) };
             if ret > 0 {
                 let code = exit_code_from_wait_status(status);
-                *held = Some(code);
+                *held = Some(Exit {
+                    code,
+                    usage: Some(Usage::from_rusage(&ru)),
+                });
                 return Reap::Exited(code);
             }
             if ret == 0 {
@@ -192,15 +210,29 @@ impl ExitRecord {
         }
     }
 
-    /// The status under the lock. A poisoned mutex still holds a readable
-    /// `Option<i32>` — a panic elsewhere cannot leave a half-written status —
-    /// so the guard is taken back rather than propagated.
-    fn held(&self) -> std::sync::MutexGuard<'_, Option<i32>> {
+    /// What the child has cost: the usage the reap kept, or a live sample of
+    /// `pid` while nothing has reaped it (docs/subprocess.md).
+    ///
+    /// The sample is taken under the record's lock. A reap needs the same
+    /// lock, so the pid cannot be reaped, handed back to the kernel and given
+    /// to another process between the check and the read.
+    pub(crate) fn usage(&self, pid: u32) -> Option<Usage> {
+        let held = self.held();
+        match *held {
+            Some(exit) => exit.usage,
+            None => Usage::sample(pid),
+        }
+    }
+
+    /// The exit under the lock. A poisoned mutex still holds a readable
+    /// value — a panic elsewhere cannot leave a half-written exit — so the
+    /// guard is taken back rather than propagated.
+    fn held(&self) -> std::sync::MutexGuard<'_, Option<Exit>> {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
-/// The exit code in a `waitpid(2)` status word. A signalled child reports the
+/// The exit code in a `wait4(2)` status word. A signalled child reports the
 /// signal number negated, which is what `subprocess/wait` answers with.
 pub(crate) fn exit_code_from_wait_status(status: libc::c_int) -> i32 {
     if libc::WIFEXITED(status) {
@@ -212,22 +244,110 @@ pub(crate) fn exit_code_from_wait_status(status: libc::c_int) -> i32 {
     }
 }
 
-/// The exit code in a `siginfo_t` the kernel filled for `IORING_OP_WAITID`.
-///
-/// The `si_code` values SIGCHLD carries: `CLD_EXITED` (1) puts an exit code in
-/// `si_status`, `CLD_KILLED` (2) and `CLD_DUMPED` (3) put a signal number
-/// there. Same convention as the status word above — a signal comes back
-/// negated.
-///
-/// # Safety
-/// `si` must be a `siginfo_t` the kernel filled: the accessor reads a union
-/// arm, and only a completed `waitid` says which arm is live.
-pub(crate) unsafe fn exit_code_from_siginfo(si: &libc::siginfo_t) -> i32 {
-    match si.si_code {
-        1 => si.si_status(),
-        2 | 3 => -si.si_status(),
-        _ => -1,
+/// What a child cost: CPU time in user mode and in the kernel, in
+/// microseconds, and the peak resident set in KiB.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Usage {
+    pub user_us: i64,
+    pub sys_us: i64,
+    pub max_rss_kb: i64,
+}
+
+impl Usage {
+    /// The usage a reap reported: the child and every descendant it waited
+    /// for. Linux counts `ru_maxrss` in KiB and macOS in bytes.
+    ///
+    /// `time_t`, `suseconds_t` and `c_long` differ in width across targets, so
+    /// a widening that is a no-op on one target is not on another.
+    #[allow(clippy::useless_conversion)]
+    fn from_rusage(ru: &libc::rusage) -> Usage {
+        let us = |tv: libc::timeval| i64::from(tv.tv_sec) * 1_000_000 + i64::from(tv.tv_usec);
+        let rss = i64::from(ru.ru_maxrss);
+        Usage {
+            user_us: us(ru.ru_utime),
+            sys_us: us(ru.ru_stime),
+            max_rss_kb: if cfg!(target_os = "macos") {
+                rss / 1024
+            } else {
+                rss
+            },
+        }
     }
+
+    /// A running child's usage so far, from `/proc`. `None` once the child has
+    /// exited: its memory is gone, and `status` no longer carries `VmHWM`.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    fn sample(pid: u32) -> Option<Usage> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+        // SAFETY: sysconf reads a constant and has no preconditions.
+        let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as i64;
+        if hz <= 0 {
+            return None;
+        }
+        // The command name is field 2, in parentheses, and may itself hold
+        // spaces and parentheses. The fields after the last `)` start at
+        // field 3, so utime and stime — fields 14 and 15 — are the 12th and
+        // 13th of them.
+        let mut fields = stat[stat.rfind(')')? + 1..].split_whitespace();
+        let utime: i64 = fields.nth(11)?.parse().ok()?;
+        let stime: i64 = fields.next()?.parse().ok()?;
+        let hwm = status
+            .lines()
+            .find_map(|l| l.strip_prefix("VmHWM:"))?
+            .split_whitespace()
+            .next()?
+            .parse()
+            .ok()?;
+        Some(Usage {
+            user_us: utime * 1_000_000 / hz,
+            sys_us: stime * 1_000_000 / hz,
+            max_rss_kb: hwm,
+        })
+    }
+
+    /// A running child's usage so far, from `proc_pid_rusage`. macOS keeps no
+    /// peak for another process, so the resident set is the one at the call.
+    #[cfg(target_os = "macos")]
+    fn sample(pid: u32) -> Option<Usage> {
+        // SAFETY: an all-zero rusage_info_v2 is a valid out-buffer.
+        let mut info: libc::rusage_info_v2 = unsafe { std::mem::zeroed() };
+        // SAFETY: `info` is the buffer RUSAGE_INFO_V2 names, live for the call.
+        let ret = unsafe {
+            libc::proc_pid_rusage(
+                pid as libc::c_int,
+                libc::RUSAGE_INFO_V2,
+                &mut info as *mut libc::rusage_info_v2 as *mut libc::rusage_info_t,
+            )
+        };
+        if ret != 0 {
+            return None;
+        }
+        Some(Usage {
+            user_us: (mach_ns(info.ri_user_time) / 1000) as i64,
+            sys_us: (mach_ns(info.ri_system_time) / 1000) as i64,
+            max_rss_kb: (info.ri_resident_size / 1024) as i64,
+        })
+    }
+
+    /// No way to read another process's usage here.
+    #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos")))]
+    fn sample(_pid: u32) -> Option<Usage> {
+        None
+    }
+}
+
+/// Mach absolute time in nanoseconds. `proc_pid_rusage` reports CPU time in
+/// Mach ticks, which are nanoseconds on Intel and are not on Apple silicon.
+#[cfg(target_os = "macos")]
+#[allow(deprecated)]
+fn mach_ns(ticks: u64) -> u64 {
+    let mut tb = libc::mach_timebase_info { numer: 0, denom: 0 };
+    // SAFETY: `tb` is a live, writable timebase struct.
+    if unsafe { libc::mach_timebase_info(&mut tb) } != 0 || tb.denom == 0 {
+        return ticks;
+    }
+    (ticks as u128 * tb.numer as u128 / tb.denom as u128) as u64
 }
 
 /// A child that has exited and has already been reaped.

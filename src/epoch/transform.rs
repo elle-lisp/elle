@@ -1,4 +1,7 @@
-//! Syntax tree migration transformer.
+// audited: 2026-09-30
+//! Syntax tree migration transformer: every rule in an epoch range, applied in one walk.
+//!
+//! docs/epochs.md
 //!
 //! Walks a syntax tree and applies epoch migration rules in a single pass.
 //! Renames are O(1) per symbol node (hash lookup). Replacements match call
@@ -9,13 +12,15 @@ use crate::syntax::{Span, Syntax, SyntaxArena, SyntaxKind};
 use std::collections::HashMap;
 
 use super::rules::{
-    collapsed_renames, flatten_clause_rules_in_range, flatten_rules_in_range, removals_in_range,
-    replace_rules_in_range, unwrap_rules_in_range,
+    collapsed_renames, flatten_clause_rules_in_range, flatten_rules_in_range,
+    millis_rules_in_range, removals_in_range, replace_rules_in_range, unwrap_rules_in_range,
+    TimeArg,
 };
+use super::seconds::{Millis, Seconds, SecondsLiteral, Written};
 
 /// Every rule the walk applies, collected for one epoch range.
 ///
-/// The six tables travel together through the whole recursion, and three of
+/// The seven tables travel together through the whole recursion, and three of
 /// them are `HashMap<&str, &str>` — passed positionally they could be swapped
 /// at a call site with no compile error, and a rename table read as removals
 /// would reject every migrated symbol. Naming the fields removes that. Build
@@ -29,6 +34,7 @@ pub(super) struct Rules<'a> {
     pub unwraps: HashMap<&'a str, &'a str>,
     pub flattens: Vec<&'a str>,
     pub flatten_clauses: Vec<(&'a str, usize)>,
+    pub millis: HashMap<&'a str, TimeArg>,
 }
 
 impl Rules<'static> {
@@ -41,6 +47,7 @@ impl Rules<'static> {
             unwraps: unwrap_rules_in_range(from_epoch, to_epoch),
             flattens: flatten_rules_in_range(from_epoch, to_epoch),
             flatten_clauses: flatten_clause_rules_in_range(from_epoch, to_epoch),
+            millis: millis_rules_in_range(from_epoch, to_epoch),
         }
     }
 }
@@ -64,6 +71,7 @@ impl Rules<'_> {
             && self.unwraps.is_empty()
             && self.flattens.is_empty()
             && self.flatten_clauses.is_empty()
+            && self.millis.is_empty()
     }
 }
 
@@ -93,10 +101,9 @@ pub fn migrate(
 ///
 /// Writing through the tree is legal here because the forms come straight
 /// from the reader and nobody else holds them: migration runs before
-/// expansion, which is where sharing begins (docs/impl/syntax.md § "Mutation,
-/// sharing, and the stamped copy"). A rewrite that changes a node's shape
-/// still allocates its new child slice in `arena` — a region slice is
-/// fixed-length once built.
+/// expansion, which is where sharing begins (docs/impl/syntax.md). A rewrite
+/// that changes a node's shape still allocates its new child slice in `arena`
+/// — a region slice is fixed-length once built.
 pub(super) fn rewrite_node(
     arena: &SyntaxArena,
     syntax: &mut Syntax,
@@ -109,6 +116,7 @@ pub(super) fn rewrite_node(
         unwraps,
         flattens,
         flatten_clauses,
+        millis,
     } = rules;
     let mut count = 0;
 
@@ -274,6 +282,18 @@ pub(super) fn rewrite_node(
         }
     }
 
+    // A duration rule is matched by the head as the source wrote it, before
+    // the recursion below renames that head, and applied after the recursion,
+    // so the value it converts is already migrated and is never visited again.
+    let duration = match &syntax.kind {
+        SyntaxKind::List(items) => items
+            .first()
+            .and_then(|s| s.as_symbol())
+            .and_then(|head| millis.get(head))
+            .copied(),
+        _ => None,
+    };
+
     match &mut syntax.kind {
         SyntaxKind::Symbol(name) => {
             if let Some(msg) = removals.get(name.as_str()) {
@@ -301,7 +321,80 @@ pub(super) fn rewrite_node(
         }
     }
 
+    if let Some(place) = duration {
+        count += to_seconds(arena, syntax, place)?;
+    }
+
     Ok(count)
+}
+
+/// Rewrite the millisecond duration the call `syntax` gave at `place` as a
+/// `:timeout` in seconds (docs/epochs.md). Returns the number of nodes
+/// rewritten: 0 when the call does not have the shape the rule names.
+fn to_seconds(arena: &SyntaxArena, syntax: &mut Syntax, place: TimeArg) -> Result<usize, String> {
+    let SyntaxKind::List(items) = &syntax.kind else {
+        return Ok(0);
+    };
+    let span = syntax.span;
+    let mut items = items.to_vec();
+    match place {
+        TimeArg::Keyword => {
+            let Some(at) = (1..items.len().saturating_sub(1))
+                .find(|&i| matches!(&items[i].kind, SyntaxKind::Keyword(k) if *k == "timeout"))
+            else {
+                return Ok(0);
+            };
+            let value = items[at + 1];
+            let Seconds::Write(written) = Seconds::of(millis_of(&value), place) else {
+                return Ok(0);
+            };
+            items[at + 1] = written_node(arena, written, value, span)?;
+        }
+        TimeArg::Last { arity, .. } => {
+            if items.len() != arity + 1 {
+                return Ok(0);
+            }
+            let value = items.pop().expect("a call of arity 1 or more");
+            match Seconds::of(millis_of(&value), place) {
+                Seconds::Keep => return Ok(0),
+                Seconds::Drop => {}
+                Seconds::Write(written) => {
+                    items.push(Syntax::keyword(arena, "timeout", value.span));
+                    items.push(written_node(arena, written, value, span)?);
+                }
+            }
+        }
+    }
+    syntax.kind = SyntaxKind::List(arena.nodes(&items));
+    Ok(1)
+}
+
+/// The shape of a duration argument, as the conversion tells shapes apart.
+fn millis_of(value: &Syntax) -> Millis {
+    match value.kind {
+        SyntaxKind::Int(n) => Millis::Int(n),
+        SyntaxKind::Float(x) => Millis::Float(x),
+        SyntaxKind::Nil => Millis::Nil,
+        _ => Millis::Expr,
+    }
+}
+
+/// The node a duration written in seconds becomes: a literal where `value`
+/// stood, or `value` wrapped to divide at run time. The wrap carries `span`,
+/// the call's, as a `Replace` template does.
+fn written_node(
+    arena: &SyntaxArena,
+    written: Written,
+    value: Syntax,
+    span: Span,
+) -> Result<Syntax, String> {
+    match written {
+        Written::Literal(SecondsLiteral::Int(n)) => Ok(Syntax::new(SyntaxKind::Int(n), value.span)),
+        Written::Literal(SecondsLiteral::Float(x)) => {
+            Ok(Syntax::new(SyntaxKind::Float(x), value.span))
+        }
+        Written::Wrap(template) => instantiate_template(arena, template, &[value], &span),
+    }
 }
 
 /// A `(begin body…)` form spanned at `span`.

@@ -1,6 +1,8 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 //! `compile/exports` — the module surface read statically off an analysis.
+//!
 //! docs/analysis/portrait.md
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::hir::{Binding, Hir, HirKind, VarargKind};
@@ -11,8 +13,8 @@ use crate::value::{TableKey, Value};
 /// `(compile/exports analysis)` → `{:constructor <record|nil> :exports {..}}`,
 /// or nil when the file's return expression is not an export struct.
 ///
-/// docs/analysis/portrait.md § "Module exports" is the specification; the
-/// record shape is pinned by tests/elle/compile-exports.lisp.
+/// docs/analysis/portrait.md is the specification; the record shape is pinned
+/// by tests/lang/compile-exports.lisp.
 pub(in crate::primitives::compile) fn prim_compile_exports(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],

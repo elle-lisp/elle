@@ -7,27 +7,21 @@ and states what a run may skip.
 
 ## Where we are
 
-Six products test this repository today:
+Five products test this repository today:
 
-- `elle test` runs the corpus and records every result in a SQLite session DB
-  ([test-store](test-store.md)).
-- [oracle.lisp](../tests/elle/oracle.lisp) and
-  [plumb.lisp](../tests/elle/plumb.lisp) measure leak rates. The Makefile runs
-  each one through `elle test --isolate` beside every corpus pass, under a
-  hand-set budget. Each verdict they report through the measurement channel
-  lands in the session DB ([test-store](test-store.md)), so a rate's history
-  is a query.
-- [escape-golden.lisp](../tests/elle/escape-golden.lisp) pins escape snapshots.
-- `tests/integration/elle_scripts.rs` runs the files that need a process-global
-  flag (`--trace=guardfree`), each as a cargo-driven subprocess.
-  `elle test --isolate` runs a file the same way and records the child's status,
-  signal and output ([test-runner](test-runner.md)); what these files still wait
-  on is a profile that selects them.
-- The Makefile runs four more corpus passes outside the runner: per-file vm,
-  per-file jit, the no-features build, and whole-file wasm — each with its own
-  skip and timeout lists. The mlir build and the `no-uring` build run the corpus
-  through the runner alone: the first adds the mlir-cpu tier, and the second
-  runs every I/O operation on the thread pool.
+- `elle test` runs both Elle suites and records every result in a SQLite
+  session DB ([test-store](test-store.md)). The gate targets run each
+  implementation file as its own child, `elle-rig FILE` ([testing](testing.md)).
+- [oracle.lisp](../tests/impl/oracle.lisp) and
+  [plumb.lisp](../tests/impl/plumb.lisp) measure leak rates. They are
+  implementation tests, so they run on the rig with the rest of the
+  implementation suite. Each verdict they report through the measurement
+  channel lands in the session DB ([test-store](test-store.md)), so a rate's
+  history is a query.
+- [escape-golden.lisp](../tests/impl/escape-golden.lisp) pins escape snapshots.
+- The Rust suite runs under `cargo test`, outside the session DB.
+- CI builds several implementations, and each runs the language suite
+  ([ci](analysis/ci.md)).
 
 The runner's thesis is "capture everything once; query forever", and the data
 now survives the run that produced it. The DB lives in the state directory, so
@@ -59,38 +53,36 @@ Dev boxes, CI, and fleet workers then append to one history.
 ### One scheduler
 
 `elle test` schedules everything. The oracle, plumb, the guardfree family, and
-the per-file passes become runs it owns, and their verdicts land in the same
-DB. The Makefile keeps `make smoke` as the entry point and loses the pass
-matrix, the skip lists, and the timeout variables.
+every suite pass are runs it owns, and their verdicts land in the same DB.
+The Makefile keeps `make smoke` as the entry point, and it names each suite's
+files and each rig profile rather than a matrix of passes.
 
-### Profiles replace the pass matrix
+### Builds and the rig replace the pass matrix
 
-A profile is data: a name, a flag set, an isolation choice, and a selection
-query. Profiles live in one file in the repository, and each run records the
-profile it ran under.
+A language test runs on the runtime a build ships, with no flag
+([spec](spec.md) § Two suites). So the language suite has no pass matrix: its
+matrix is the set of builds CI makes, and each build is one implementation.
 
-Isolation is the piece that unlocks the rest, and it is in: `--isolate FLAGS`
-runs each selected path as `elle FLAGS PATH`, so a guardfree SIGSEGV kills one
-child and lands as a recorded failure ([test-runner](test-runner.md)). What a
-profile adds is the selection — which files run under which flags — so that
-`elle_scripts.rs` and the per-file teardown passes (`smoke-vm`, `smoke-jit`)
-become profiles named process and jit.
+An implementation test that needs a mode names it in a sidecar beside the
+file, and the rig reads it ([rig](../rig/overview.md)). A profile is the same
+settings applied to every file of a pass. The implementation suite runs the
+language suite under two: every function compiled on its first call, and on
+macOS each released page scrubbed. A sidecar lives outside the source, so the
+file keeps its meaning under a plain `elle-rig FILE`.
 
-Profiles add coverage; the default profile still runs everything. A
-completeness gate fails when a declared profile records no verdicts, the same
-shape as the oracle's `@dual-read` table.
+A completeness gate remains to build: it fails when a declared profile records
+no verdicts, the same shape as the oracle's `@dual-read` table.
 
 ### Budgets come from history
 
 The Makefile already tells people to "read the budget from a timed run, never
 from a number written here". The runner has the timed runs, so it applies the
 rule itself: a form's budget is a multiple of its own recorded wall time, with
-a floor at the default for new forms. `WIDE_FILES`, `ORACLE_TIMEOUT`,
-`DOCTEST_TIMEOUT`, and `PLUGIN_TIMEOUT` are deleted. A file that asserts its
-own deadline keeps doing so in ordinary code; the harness budget is the
-backstop.
+a floor at the default for new forms. `WIDE_FAMILIES`, `WIDE_TIMEOUT_MS`,
+`DOCTEST_TIMEOUT`, and `PLUGIN_TIMEOUT` are deleted. A file that asserts its own deadline keeps doing
+so in ordinary code; the harness budget is the backstop.
 
-### The corpus stays plain Elle
+### The suites stay plain Elle
 
 The harness consumes values and signals, and never reads syntax. A test that
 needs a missing dependency raises an error with kind `:gated` and a reason;
@@ -101,7 +93,7 @@ it out by hand is served equally.
 
 The test for any proposed in-file form: it must have semantics under plain
 `elle`, with no harness present. A budget or mode declaration fails that test,
-so budgets are measured (above) and modes are profiles (above).
+so budgets are measured (above) and modes live in a sidecar (above).
 
 ### Only the fingerprint grants a skip
 
@@ -117,8 +109,8 @@ The fingerprint is in: every run records one ([test-store](test-store.md)).
 What is missing is the lookup that spends it.
 
 Under this key, a compiler change moves the fingerprint and every cached
-result misses, so the full corpus re-runs. A change to one corpus file misses
-only its closure. `--changed` becomes a cache lookup with no impact heuristic
+result misses, so both suites re-run. A change to one suite file misses only
+its closure. `--changed` becomes a cache lookup with no impact heuristic
 inside it.
 
 The rule for every derived signal: **derived impact may reorder work; only
@@ -139,8 +131,8 @@ The durable unit is one form. A legacy multi-form file slices into per-form
 results when whole-module analysis proves the expression forms independent:
 each form reads only bindings that no form mutates, and no port or process
 state threads between them. A sequential scenario stays one form. Slicing buys
-per-form failure sets, per-form divergence, per-form cache keys, and finer
-slices for expensive profiles.
+per-form failure sets, per-form cache keys, and finer slices for expensive
+profiles.
 
 ### Measurements join results
 
@@ -159,17 +151,16 @@ capture.
 
 ## What this deletes
 
-The Makefile pass matrix and its skip lists; every hand-set timeout variable;
-`CORPUS_BATCH` and the batch dealing; the `elle_scripts.rs` pin harness; and
-the CI habit of reading failures out of logs.
+Every hand-set timeout variable; `CORPUS_BATCH` and the batch dealing; and the
+CI habit of reading failures out of logs.
 
 ## Landing order
 
 1. Persistence: in. The state directory, the `run` identity columns, the CI
    artifact upload and `--import`.
-2. Profiles that select a flag set; fold in the guardfree family and the
-   per-file passes. Child-process isolation is in, and the oracle and plumb run
-   through it.
+2. Builds and the rig: in. The language suite runs on every build with no
+   flag; the guardfree family, the oracle and plumb run on the rig; the pass
+   matrix and `elle_scripts.rs` are gone.
 3. Derived budgets.
 4. The coverage gate (elle-lisp/elle#1144), then the runtime-structure gauges
    (elle-lisp/elle#1143, elle-lisp/elle#1135). The measurement channel is in.

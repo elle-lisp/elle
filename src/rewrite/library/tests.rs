@@ -1,7 +1,9 @@
-// audited: 2026-09-21
-// The fixpoint and merge semantics of library rules, pinned at the Rust
-// layer; tests/elle/compile-apply-rules.lisp pins the primitive above.
-// docs/analysis/portrait.md
+// audited: 2026-09-29
+//! The fixpoint and merge semantics of library rules, pinned at the Rust layer.
+//!
+//! docs/analysis/portrait.md
+//!
+//! tests/lang/compile-apply-rules.lisp pins the primitive built on them.
 
 use super::*;
 

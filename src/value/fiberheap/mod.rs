@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-09-29
 //! Per-instance heap ownership.
 //!
 //! docs/impl/region/model.md
@@ -32,9 +32,9 @@ pub(crate) use dropsafety::{holds_value_refs, needs_drop};
 
 use regionstore::RegionStore;
 
-/// Print the page-claim size histogram to stderr under `--stats` (a page-size
-/// analysis aid; see `pagepool::dump_page_hist`). Reached from the `--stats`
-/// exit path and registered as an at-exit dump for the `os/exit` test-runner path.
+/// Print the page-claim size histogram to stderr under `--dump=stats` (a page-size
+/// analysis aid; see `pagepool::dump_page_hist`). Reached from the `--dump=stats` exit
+/// path and registered as an at-exit dump for the `os/exit` test-runner path.
 pub fn dump_page_hist() {
     pagepool::dump_page_hist();
 }
@@ -94,10 +94,9 @@ pub struct FiberHeap {
     /// Regions held on behalf of this instance — resident roots the teardown
     /// sweep releases by RC (decref once) so their graph can be reclaimed.
     process_roots: Vec<RuntimeRegion>,
-    /// This instance's materialized code payloads, one per compile-time
-    /// blueprint (docs/impl/region/template.md § "Who owns the payload
-    /// region"). The cache holds each payload region's owning reference and
-    /// releases it when the last blueprint packed into it dies.
+    /// This instance's materialized code payloads, one per compile-time blueprint
+    /// (docs/impl/region/template.md). The cache holds each payload region's owning
+    /// reference and releases it when the last blueprint packed into it dies.
     pub(crate) template_payloads: crate::value::closure::cache::TemplatePayloads,
     /// This instance's authoritative trace bitfield (`--trace=` / runtime
     /// `(vm/config-set :trace …)`). The VM's `RuntimeConfig` and the region

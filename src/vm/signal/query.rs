@@ -41,10 +41,10 @@ impl VM {
     ///
     /// Every operation here READS its argument or copies it out; none retains it
     /// past the call. `vm/query` declares `RegionEffect::Opaque` on the strength of
-    /// that (docs/impl/region/effects.md § `Opaque`), so an operation added here
+    /// that (docs/impl/region/effects.md), so an operation added here
     /// that retains its argument must move the declaration back to `Mixed` — the
     /// arg clique is what covers an uncounted store, and `Opaque` withdraws it
-    /// (`tests/elle/region-query-clique-leak.lisp`).
+    /// (`tests/impl/region-query-clique-leak.lisp`).
     pub(crate) fn dispatch_query(
         &mut self,
         ctx: &mut crate::primitives::ctx::Alloc,
@@ -315,11 +315,10 @@ impl VM {
             }
             #[cfg(not(feature = "jit"))]
             "jit?" => (SIG_OK, Value::FALSE),
-            // The process-global JIT code-address registry, rendered as one
-            // `0x<addr> <name>` line per compiled function. Read beside a
-            // native thread photograph, whose JIT frames are otherwise
-            // unattributable `???` addresses (docs/impl/jit.md § "The
-            // code-address registry"). Empty string when nothing compiled.
+            // The process-global JIT code-address registry, rendered as one `0x<addr>
+            // <name>` line per compiled function. Read beside a native thread
+            // photograph, whose JIT frames are otherwise unattributable `???` addresses
+            // (docs/impl/jit.md). Empty string when nothing compiled.
             #[cfg(feature = "jit")]
             "jit/map" => (SIG_OK, ctx.string(crate::jit::registry::render())),
             #[cfg(not(feature = "jit"))]
@@ -331,7 +330,7 @@ impl VM {
             // LoadExtName call-target literal.
             // Nil for a malformed address, one outside every
             // registered block, or one whose pages are no longer resident
-            // (docs/impl/jit.md § "The code-address registry").
+            // (docs/impl/jit.md).
             #[cfg(feature = "jit")]
             "jit/peek" => {
                 let parsed = arg
@@ -440,7 +439,7 @@ impl VM {
             "compile/whole-module-syntax" => self.dispatch_whole_module_syntax(ctx, arg),
             "compile/dumps" => self.dispatch_compile_dumps(ctx, arg),
             "arena/allocs" => self.handle_arena_allocs(ctx, arg),
-            "vm/config-set" => (SIG_OK, self.handle_vm_config_set(ctx, arg)),
+            "vm/config-set" => self.handle_vm_config_set(ctx, arg),
             _ => (
                 SIG_ERROR,
                 ctx.error(

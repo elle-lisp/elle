@@ -1,9 +1,9 @@
 # Agent-First Test Runner
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
-How a run executes: each file compiled, isolated, gated, run on every tier,
-its output captured, and its end recorded honestly.
+How a run executes: each file compiled, isolated, gated, run on every tier its
+build carries, and recorded honestly.
 
 Why the runner exists and how to drive it is [test-cli](test-cli.md); where
 a run is stored and what each row says is [test-store](test-store.md). The
@@ -21,56 +21,53 @@ protect*.
 
 With **one form per file** ([test-store](test-store.md)), `file == test == unit`, so
 per-form granularity and file-path fidelity coincide for free: compile the file,
-run it, record one result (× tier). Isolation is inherent — separate files,
+run it, record one result per tier. Isolation is inherent — separate files,
 separate module compilations, fresh scope each — and there is no cross-file
 shared environment to manage; shared setup lives in imported modules, exactly as
 in real code.
 
 ### Multi-form files: wrapped as one whole-file form
 
-A file that still holds several top-level forms (legacy `tests/elle/*.lisp`, or a
-multi-form `-e`) is compiled as **one module** — preserving whole-module analysis
-and the file-compilation path — and **wrapped into a single whole-file thunk**:
-the file's forms become the body of one `(fn () form1 form2 … formN)`, which the
-runner runs once per tier as a single atomic test. This is `compile/whole-module
-SOURCE NAME`. A single-form file or `-e` snippet (the durable corpus shape,
-[test-store](test-store.md)) is left to the per-form path below — for one form
-the two are identical.
+A file that still holds several top-level forms (most of `tests/lang/*.lisp`, or
+a multi-form `-e`) is compiled as **one module** — preserving whole-module
+analysis and the file-compilation path — and **wrapped into a single whole-file
+thunk**: the file's forms become the body of one `(fn () form1 form2 … formN)`,
+which the runner runs as a single atomic test under each JIT policy
+(§ Tiers). This is
+`compile/whole-module SOURCE NAME`. A single-form file or `-e` snippet (the
+durable corpus shape, [test-store](test-store.md)) is left to the per-form path
+below — for one form the two are identical.
 
 **Why one form, not per-form.** A legacy file is an *imperative script*: it
 allocates, mutates, reads back, and frees, with `def`/`var` and side-effecting
 bare expressions interleaved in an order the program depends on. Running it as
-one thunk
-runs every form **in source order, once per tier, in isolation** — byte-for-byte
-what a direct `elle FILE` run does (which is what those files were written and
-verified against). Whole-module `analyze_file_letrec` still resolves bindings
-across the whole file (forward references in closure bodies included; a `fn` body
-is letrec-scoped exactly like a file's top level), so nothing about name
-resolution changes — only execution is no longer sliced.
+one thunk runs every form **in source order, once per policy, in isolation** —
+byte-for-byte what a direct `elle FILE` run does (which is what those files
+were written and verified against). Whole-module `analyze_file_letrec` still
+resolves bindings across the whole file (forward references in closure bodies
+included; a `fn` body is letrec-scoped exactly like a file's top level), so
+nothing about name resolution changes — only execution is no longer sliced.
 
-The earlier per-form **fault barrier** (below) hoisted every `def`/`var` to run
+The per-form **fault barrier** (below) hoists every `def`/`var` to run
 *eagerly* ahead of the bare-expression test forms. For an ordered script that
 **reorders** the program: a `(def v (read p))` runs before the `(write p …)` that
-a later bare expression performs, so `v` captures pre-write garbage; and a shared
-mutable resource (an FFI pointer freed by a bare `(free p)`) is run **once per
-tier** in the in-process fallback, so the second tier double-frees it. Both are
-artifacts of slicing, not bugs in the test — the file passes when run directly.
+a later bare expression performs, so `v` captures pre-write garbage. That is an
+artifact of slicing, not a bug in the test — the file passes when run directly.
 Wrapping the file as one thunk eliminates the entire class.
 
 **Atomicity is the trade.** As one form a legacy file is atomic: the **first**
 failing `assert` aborts the rest, exactly as a direct run does — there is no
-per-form non-abort isolation within a legacy file. That isolation was the thing
-causing the reordering above; it is deliberately gone for multi-form files. A
-**compile** error still fails the whole module (it always did). The durable
-corpus is one-form-per-file, where “atomic” and “per-form” coincide, so this only
-changes how legacy multi-form files report.
+per-form non-abort isolation within a legacy file. A **compile** error still
+fails the whole module. The durable corpus is one-form-per-file, where
+“atomic” and “per-form” coincide, so this only changes how legacy multi-form
+files report.
 
 The runner does **not** compile growing prefixes (form 1, forms 1–2, …): all
 forms are analyzed together, once, then wrapped.
 
-#### The per-form barrier (single-form path / historical)
+#### The per-form barrier (single-form path)
 
-`compile/barrier-module SOURCE NAME` is the per-form mode, now used only for
+`compile/barrier-module SOURCE NAME` is the per-form mode, used only for
 single-form files. It runs the real file front-end (read → epoch extract/migrate
 → file-scope macro-expansion), then, on the **expanded** top-level forms (so
 binding macros like `defn` have already become `def`), applies a transform handed
@@ -82,18 +79,20 @@ to `analyze_file_letrec`:
 
 `compile/whole-module` shares that front end and the same `[index thunk]` output
 shape, but its transform wraps **all** forms (def/var and expressions alike) into
-the body of one thunk at index 0 — so the runner's per-tier execution, the
-per-tier matrix (§ Tiers), and divergence detection compose unchanged; there is
-just one entry instead of N.
+the body of one thunk at index 0 — so the runner's execution path composes
+unchanged; there is just one entry instead of N.
 
-The catch-and-continue boundary lives **outside** the tiered closure (a worker
-fiber + `protect`): a fiber-based handler *inside* a closure handed to
-`compile/run-on` is rejected by the optimizing tiers (the JIT cannot create the
-handler closure). So a whole-file thunk that contains a `defn` (a `MakeClosure`)
-is `:ineligible` on JIT and recorded `skip` there — never silently dropped — and
-runs for real on the bytecode tier.
+The catch-and-continue boundary lives **outside** the tiered closure: a worker
+fiber and `protect` around the call. A fiber-based handler *inside* a closure
+handed to `compile/run-on` is rejected by the optimizing tiers, because the JIT
+cannot create the handler closure. A whole-file thunk does not go through
+`compile/run-on` at all: its `defn`s are `MakeClosure`s, which the JIT refuses,
+so the file would run on the bytecode tier alone. It runs under each JIT policy
+instead (§ Tiers).
 
-**Boundaries (intentional).** Under `compile/whole-module` a runtime fault is the
+**Boundaries (intentional).** A path the runner cannot read, and a file or `-e`
+form that does not parse or compile, each become one **file-level** failure,
+and the run goes on to the next path. Under `compile/whole-module` a runtime fault is the
 file's single result (atomic). Under the per-form `compile/barrier-module`, a
 `def` *initializer* that raises aborts the eager setup and is recorded as a single
 **file-level** failure; test-form runtime failures are caught per form. With the
@@ -102,13 +101,13 @@ identically.
 
 ### Identity and names
 
-Each top-level form (the common case: the file's sole form) is referenced by
-`file#index@line:col` and deduped across runs by a hash of its **syntax**. The
-human label is scavenged from the form's syntax — the message string of its first
-`assert`, falling back to leading symbols — so the author writes nothing. Within
-a multi-form file the fault barrier is per top-level form; if a form holds several
-`assert`s, the first to fail aborts that form, attributed precisely because the
-caught `:failed-assertion` signal carries the message and span.
+Each form (a single-form file's one form, or a multi-form file as one
+whole-file form) is referenced by its file and index, and deduped across runs by
+a hash of its **syntax**. The human label is scavenged from the form's syntax —
+the message string of its first `assert`, falling back to leading symbols — so
+the author writes nothing. If a form holds several `assert`s, the first to fail
+aborts that form, attributed precisely because the caught `:failed-assertion`
+signal carries the message and span.
 
 ### Isolation: tests run in worker threads
 
@@ -125,34 +124,42 @@ instead of wedging the run. The deadline is a property of the path the form came
 from, not of the run — a path the caller named wide takes the wider budget, and
 every other path takes `--timeout` ([test-cli](test-cli.md)).
 
-**Unsendable captures fall back to in-process.** A worker receives the test
-thunk by deep-copying it across `os/spawn` (`SendBundle`). When the thunk
-captures a value that *cannot* serialize — an FFI handle (a `db:open`
-connection), a compiler artifact from `compile/*`, an arena value, a fiber, an
-open file/socket port — the spawn raises a serialization `:thread-error` and the
-form could never run in a worker at all. Rather than record a spurious fail, the
+**Unsendable values fall back to in-process.** A worker receives the test
+thunk by deep-copying it across `os/spawn` (`SendBundle`), and hands the form's
+value back the same way through `os/join`. A value that *cannot* serialize — an
+FFI handle (a `db:open` connection), a compiler artifact from `compile/*`, an
+arena value, a fiber, an open file/socket port — makes either crossing raise a
+serialization `:thread-error`: the spawn, when the thunk captures one, and the
+join, when the form's value is one. Rather than record a spurious fail, the
 runner detects that specific error and **re-runs the same form in-process** in
 the main VM (still under `protect` and `compile/run-on TIER`, with
-`*stdout*`/`*stderr*` rebound for capture). The trade is deliberate: an
-in-process form gets **no fault isolation and no timeout** (a crash or hang there
-takes the runner with it), but these forms are *exactly* the ones a worker cannot
-host — running them unisolated beats not running them. Sendable forms keep the
-isolated, timeout-bounded worker path; only the unsendable ones degrade. (The
-durable fix is per-form self-contained setup — the connection opened *inside*
-each form, so it lives in the worker — which the corpus will migrate toward.)
+`*stdout*`/`*stderr*` rebound for capture). The trade is deliberate: an in-process form gets **no fault isolation
+and no timeout** (a crash or hang there takes the runner with it), but these
+forms are *exactly* the ones a worker cannot host — running them unisolated
+beats not running them. Sendable forms keep the isolated, timeout-bounded
+worker path; only the unsendable ones degrade.
 
 ### Isolation: a file can have its own process
 
 A worker thread isolates a fault and shares the process. That is enough for a
-form that raises, and not enough for a mode the process sets once:
-`--trace=guardfree` reports a use-after-free as a SIGSEGV, which takes the
-runner down along with every result it had not written yet. Those files live in
-[elle_scripts.rs](../tests/integration/elle_scripts.rs) today, and their
-verdicts reach no database.
+form that raises, and not enough for a file whose fault ends the process:
+`--trace=guardfree` reports a use-after-free as a SIGSEGV, which would take the
+runner down along with every result it had not written yet. It is also not the
+shape a user runs: a program that starts, runs and exits is the only one that
+covers program teardown.
 
 `--isolate FLAGS` runs each selected path as its own child — `elle FLAGS PATH`,
 one process per path — and records it on the `process` tier. The flag string is
-split on spaces and may be empty.
+split on spaces and may be empty. `--host PROGRAM` names the program each child
+runs instead of this `elle`: `elle test --host target/release/elle-rig
+--isolate ''` runs each path as `elle-rig PATH`, which reads the path's sidecar
+([rig](../rig/overview.md)). The implementation suite runs this way
+([testing](testing.md)).
+
+A child is one process and leaves one exit status, so an isolated run has no
+per-tier rows and no differential: the child runs on whatever its program and
+flags select. The language suite therefore runs in-process, where the runner
+controls the tier (§ Tiers).
 
 The child's exit status is the whole verdict, because it is the whole account a
 process leaves behind:
@@ -185,15 +192,16 @@ and `stderr` assets in the CAS whatever the status.
 
 A gated child exits 0, so its exit status alone would read as a vacuous pass —
 the coverage-hiding failure the loud gate exists to prevent. The binary prints
-`SKIP (gated): REASON` on that path ([main.rs](../src/main.rs)), and the runner
-reads that line, so a self-gated file under `--isolate` is counted the way it
-is counted everywhere else.
+`SKIP (gated): REASON` on that path ([program.rs](../src/program.rs)), and the
+runner reads that line, so a self-gated file under `--isolate` is counted the
+way it is counted everywhere else. The rig prints the same line, because it
+runs a file through the same library path.
 
 ## Gating: a test declares where it applies
 
-Backend- and platform-specific tests gate themselves rather than living in a
-`Makefile` grep. The mechanism is a prelude macro, `(gate! COND REASON BODY…)`:
-it runs `BODY` when `COND` is truthy, and otherwise raises
+Dependency-specific tests gate themselves rather than living in a `Makefile`
+grep. The mechanism is a prelude macro, `(gate! COND REASON BODY…)`: it runs
+`BODY` when `COND` is truthy, and otherwise raises
 `{:error :gated :reason REASON}`.
 
 ```lisp
@@ -203,83 +211,97 @@ it runs `BODY` when `COND` is truthy, and otherwise raises
   (assert (= err {:error :gated :reason "needs a GPU"}) "and names its reason"))
 ```
 
-`COND` is evaluated at run time. The canonical condition is
-`(backend? :jit)`: the runner compiles a test closure once and dispatches it to
-every tier through `compile/run-on`, so which tier is active is known only
-while the closure runs. The runner catches `:gated` and records
+`COND` is evaluated at run time: a library that loads, a service that answers,
+a device that exists. The runner catches `:gated` and records
 `status=skip, reason=REASON`. A direct `elle FILE` run prints
 `SKIP (gated): REASON` and exits 0, and `--isolate` reads that line back.
 Compile-time elision is not built: no silent `when!` exists, and a gate always
-compiles its body.
+compiles its body. A language test never gates on a tier: every build runs it,
+and it must pass on every one ([spec](spec.md) § Two suites).
 
-**Gating shared setup gates the whole file.** Under the per-form barrier a
-file's `def`/`var` forms run *eagerly*, once, during the barrier-module compile
-to establish the shared environment — they are not per-form thunks. When an
-optional dependency is acquired there (an FFI module-load that `dlopen`s
-`libzmq.so`, a connection opened at top level), a `:gated` raised during that
-eager phase aborts the compile *before any test thunk is built*. The runner
-records this exactly parallel to a file-level compile error, but as a skip: a
-single file-level row (`form_index = -1`) with `status=skip, reason=REASON`
-(counted in `n_skip`; exit unaffected — a skip is not a failure). A genuine
-setup error (a real exception, a syntax error in an imported library) remains
-the file-level **fail**. So a file whose shared dependency is absent
-self-skips *with a reason*; a file whose setup is *broken* still fails loudly.
+**Gating shared setup gates the whole file.** A file with shared setup holds
+several forms, so it runs as one whole-file thunk (§ Multi-form files), and its
+`def`/`var` forms run inside that thunk in source order. When an optional
+dependency is acquired there (an FFI module-load that `dlopen`s `libzmq.so`, a
+connection opened at top level), a `:gated` raised there ends the thunk. The
+runner records the whole-file form (`form_index = 0`) as `status=skip,
+reason=REASON` under each JIT policy, counted in `n_skip`; the exit is
+unaffected, because a skip is not a failure. A genuine setup error (a real
+exception, a syntax error in an imported library) remains a **fail**. So a file
+whose shared dependency is absent self-skips *with a reason*; a file whose setup
+is *broken* still fails loudly.
 Idiomatically the dependency is acquired through a gate at its import site —
 attempt the load and re-raise a missing-library `:ffi-error` as `:gated` —
 never `(sys/exit 0)`, which under the runner would terminate the whole
 process mid-run and silently drop every later form.
 
 **Why loud matters for tests.** A silently elided test looks like a form that
-ran zero assertions: a vacuous pass. That is the same coverage-hiding footgun
-as a tiers dial. The `:gated` error makes the skip *visible, reasoned, and
-counted* in the DB, so dropped coverage is never invisible.
+ran zero assertions: a vacuous pass. The `:gated` error makes the skip
+*visible, reasoned, and counted* in the DB, so dropped coverage is never
+invisible.
 
-`elle test` needs no skip list. The per-file smoke passes in the `Makefile`
-still carry `ELLE_SKIP_VM`, `ELLE_SKIP_FFI` and `WASM_SKIP`.
+`elle test` needs no skip list. The no-features build's pass in the `Makefile`
+still carries `ELLE_SKIP_FFI`, for the files that call an `ffi/` primitive the
+build does not compile.
 
 ## Tiers are intrinsic and exhaustive — never a dial
 
 Tier coverage is a *correctness* dimension, not a feature selector. **If we
-expose `--tiers vm,jit,…` as a knob, agents will turn it down** — run
-`--tiers vm`, see green, and declare victory while JIT/MLIR/WASM are broken.
-That defeats the "`origin/main` is always green across every tier" invariant
-([`AGENTS.md`](../AGENTS.md)). So there is no tier dial.
-
-Every selected form runs under **every** tier, full stop. The *only* way a form
-opts out of a tier is the loud gate `gate!` (§ Gating), recorded as `status=skip`
-with a reason — visible, per-form, and earned, not a blanket coverage cut. The
-per-tier flag soup (`--jit=off --mlir=off`, `--jit=eager`, …) and the
-per-backend `Makefile` smoke targets collapse into a single exhaustive run:
-`elle test`.
+expose `--tiers vm,jit,…` as a knob, agents will turn it down**: run `--tiers
+vm`, see green, and declare victory while the JIT is broken. So there is no tier
+dial. Every selected form runs under every tier the build carries. The only way
+a form opts out of a tier is the loud gate `gate!` (§ Gating), recorded as
+`status=skip` with a reason.
 
 Cross-tier disagreement is its own status. When a form produces different values
-(or different pass/fail) across tiers, the runner records `status=diverge` —
-differential testing lives in the same path and the same database, never in a
-separate harness ([differential](impl/differential.md)).
-
-**Concretely (v1 representation):**
+across tiers, the runner records `status=diverge`. Differential testing lives in
+the same path and the same database, never in a separate harness
+([differential](impl/differential.md)).
 
 - *Tier set.* The runner attempts every candidate tier (`:bytecode`, `:jit`,
-  `:wasm`, `:mlir-cpu`) but a build only carries the tiers its features were
-  compiled with. A tier whose feature is absent answers `compile/run-on` with
-  `:tier-rejected` / `reason :feature-disabled`; that tier is **dropped from the
-  run entirely** (no row), since a feature the binary lacks is not a coverage gap
-  of *this* build. The active tier set is probed once at startup and recorded in
-  `run.tiers`.
-- *Ineligible ≠ failed.* A tier that is present but **cannot run a particular
-  form** (no LIR, a yield/`io` the JIT can't host under `compile/run-on`, …)
-  answers `:tier-rejected` / `reason :ineligible`. That is recorded as a per-tier
-  `status=skip` with the rejection message as the reason — visible and counted,
-  never a silent drop and never a `fail`.
-- *Per-tier rows stay per-tier.* Each (form × tier) still gets its own row at its
-  own `pass`/`fail`/`skip` status, with `tier` ∈ {`vm`, `jit`, `wasm`,
-  `mlir-cpu`} (`:bytecode` is recorded as `vm`).
+  `:wasm`, `:mlir-cpu`), and a build carries only the tiers its features compile
+  in. A tier whose feature is absent answers `compile/run-on` with
+  `:tier-rejected` and reason `:feature-disabled`. That tier is **dropped from
+  the run entirely**, with no row, because a feature the binary lacks is not a
+  coverage gap of this build. The runner probes the tier set once at startup and
+  records it in `run.tiers`.
+- *Ineligible is not failed.* A tier that is present but **cannot run a
+  particular form** answers `:tier-rejected` with reason `:ineligible`. The
+  runner records a `skip` on that tier, with the rejection message as the
+  reason: visible and counted, never a silent drop and never a `fail`.
+- *Per-tier rows stay per-tier.* Each form and tier gets its own row at its own
+  status, with `tier` one of `vm`, `jit`, `wasm` and `mlir-cpu` (`:bytecode` is
+  recorded as `vm`).
 - *One synthetic diverge row.* Divergence is judged over the tiers that
-  **returned a value** (`status=pass`): if two or more produced *distinct* values,
-  the runner appends a single extra row with `tier='*'`, `status='diverge'`, and
-  `reason` rendering each tier's value (`vm=… jit=…`). The per-tier rows are left
-  untouched. A divergence makes the run's gate exit non-zero (it counts in
-  `run.n_diverge`), because "green on every tier" is violated.
+  **returned a value**. If two or more produced *distinct* values, the runner
+  appends one row with `tier='*'`, `status='diverge'`, and a `reason` that
+  renders each tier's value (`vm=… jit=…`). The per-tier rows are left
+  untouched. A divergence counts in `run.n_diverge` and makes the run's gate
+  exit non-zero.
+
+**A whole-file script runs under each JIT policy.** A multi-form file runs as a
+scheduled script (§ Multi-form files), which `compile/run-on` cannot host. So
+the runner varies the JIT policy the file runs under: `:off`, recorded `vm`, and
+`:eager`, which compiles every function on its first call, recorded `jit`. The
+`:eager` run happens only when the build carries the JIT. The worker sets the
+policy with `(vm/config-set :jit POLICY)` before it runs the file. Its VM is
+fresh, so the policy ends with the worker. A script's values are not compared,
+because its pids and timestamps differ from run to run by design. A script
+therefore disagrees across policies only by failing under one of them.
+
+**Only the runner sets a JIT policy.** `vm/config-set :jit` takes `:off` and
+`:eager` in a process that runs `elle test`, and refuses them everywhere else
+([config](config.md)). A user build has no tier dial; the runner has one because
+the differential is its job. The rig sets a tier per file through its sidecar
+([rig](../rig/overview.md)).
+
+**Where the differential runs.** Each build's language pass is one `elle test`
+over the language suite, in-process, so every language file meets every tier
+its build carries ([testing](testing.md)). The implementation suite runs each
+file as its own child on the rig, under the file's sidecar. A directed
+tier-parity test, one that pins a specific tier pair on a specific construct,
+is an implementation test. It lives in `tests/impl/` and calls `compile/run-on`
+itself ([differential](impl/differential.md)).
 
 ### Concurrent runs wait, they do not collide
 
@@ -302,16 +324,17 @@ because at that point the holder is wedged rather than slow.
 Storing artifact bytes as SQLite BLOBs is what makes the file balloon. Instead,
 artifacts go to a content-addressed store on disk — `<db-dir>/cas/<hash>`
 (compressed) — and the database stores only the hash, size, and codec. Dedup is
-automatic (identical artifacts across runs and tiers are one file), the database
-stays small and fast to query, and a huge artifact is just a file, not a row.
+automatic (identical artifacts across runs are one file), the database stays
+small and fast to query, and a huge artifact is just a file, not a row.
 
 **`--trace` is the exception to "capture everything."** Trace output is too large
-to retain for every form × tier. It is captured **only for forms that fail or
-diverge**, written to the CAS (compressed) and referenced by hash — bounded to
+to retain for every form, so the design captures it **only for forms that
+fail**, written to the CAS (compressed) and referenced by hash — bounded to
 exactly the cases where you'd want it, never inlined. The smaller `--dump`
-artifacts are still captured for all forms, but to the CAS, not as BLOBs.
+artifacts go to the CAS for every form, not as BLOBs. Neither is captured today
+(§ CAS asset capture).
 
-#### CAS asset capture (v1, implemented)
+#### CAS asset capture
 
 > **Status: `--dump` capture is OMITTED in the runner.** The
 > per-file `(compile/dumps …)` pass is the single largest contributor to the
@@ -321,40 +344,39 @@ artifacts are still captured for all forms, but to the CAS, not as BLOBs.
 > underlying per-compile region leak is root-caused and fixed, `capture-dumps`
 > is a no-op: no `compile/dumps` call, no dump `asset` rows, no CAS dump files.
 > stdout/stderr capture (below) is unaffected — it rides the per-form execution,
-> not the extra dump compile. Re-enabling is a one-line revert of `capture-dumps`.
+> not the extra dump compile.
 
-The v1 store is realized in [src/test](../src/test) plus one new compiler entry
+The store lives in [src/test](../src/test), and it reads one compiler entry
 point:
 
-- **In-process dumps.** A new primitive `(compile/dumps SRC NAME)` compiles a
+- **In-process dumps.** The primitive `(compile/dumps SRC NAME)` compiles a
   module **once** through the real file front-end and returns a struct
   `{:ast … :fhir … :defuse … :regions … :hir … :lir … :cfg … :dfa … :jit …
   :escape …}` of the rendered artifacts as strings — the same renderings
-  `elle --dump=KIND` prints, but returned in-process instead of printed-and-exit
-  (the addition the *Implementation note* below calls for). It compiles the
-  *unmodified* source (not the barrier-transformed module), so the dumps reflect
-  the file as it really compiles. Stages that error or yield nothing are omitted.
+  `elle --dump=KIND` prints, but returned in-process instead of printed-and-exit.
+  It compiles the *unmodified* source (not the barrier-transformed module), so
+  the dumps reflect the file as it really compiles. Stages that error or yield
+  nothing are omitted.
 - **The CAS.** `cas-put` content-addresses each artifact with the builtin `hash`
   (the same hash the runner uses for form identity), zstd-compresses the bytes
   (`std/compress`), and writes them to `<db-dir>/cas/<hash>` via a binary
   port — skipping the write when the file already exists (automatic dedup across
-  forms, tiers, and runs). It returns `[hash size codec]`; `size` is the
+  forms and runs). It returns `[hash size codec]`; `size` is the
   *uncompressed* length and `codec` is `"zstd"`, both recorded in the `asset`
   row. The address is over the uncompressed content, so the codec can change
   without moving the artifact.
 
-**v1 boundaries (intentional).** Dumps are **module-level** (one compile per
-file) and attached to every (form × tier) result of that file — for the durable
+**Boundaries (intentional).** Dumps are **module-level** (one compile per
+file) and attached to every result of that file — for the durable
 one-form-per-file corpus that is exact; for a legacy multi-form file each form's
 result points at the whole module's artifacts. `--trace` capture, the `stats`
 and `git`/SPIR-V dump kinds, and a cross-machine content hash are **deferred**:
 the builtin `hash` is 64-bit and only build-stable, which is all a disposable
-local cache needs (the optional CI tar-and-share is unchanged future
-work). Upgrading the address to a real digest is a one-function swap in
-`cas-put` once a sha256 primitive is in the core binary (the `elle-hash` plugin
-is not loaded by default).
+local cache needs. Upgrading the address to a real digest is a one-function
+swap in `cas-put` once a sha256 primitive is in the core binary (the
+`elle-hash` plugin is not loaded by default).
 
-- **stdout/stderr (implemented).** Captured per (form × tier). Two facts shaped
+- **stdout/stderr (implemented).** Captured per result. Two facts shaped
   the mechanism: an `os/spawn` worker gets a fresh VM and serializes the *whole*
   closure into the bundle, and it has **no scheduler** — so it can do no async
   I/O (a stream write, even `port/open`, yields into the void). Both are solved
@@ -362,26 +384,24 @@ is not loaded by default).
   `ev/run`, so the serializer drags `ev/run`'s entire closure graph into the
   bundle. Sendable parameters (below) are what buy that: `*stdout*`,
   `*stderr*`, and everything `ev/run` closes over now cross the boundary. The
-  worker runs the tiered call under that `ev/run` (a real scheduler), with
+  worker runs the call under that `ev/run` (a real scheduler), with
   `*stdout*`/`*stderr*` rebound by `parameterize` to temp files; it slurps and
   deletes them and marshals `[result stdout stderr]` back through `os/join`.
-  Non-empty output becomes `stdout`/`stderr` assets on that tier's result. (A
-  form that prints is I/O, so it is `:ineligible`→skip on the JIT tier, where a
-  yield cannot cross `compile/run-on` — the same documented per-tier rule.)
+  Non-empty output becomes `stdout`/`stderr` assets on the result.
 
   **A form that never returns keeps its output too.** The worker slurps and
-  marshals its temp files only when the tiered call comes back, and a form
-  killed by the join deadline never gets there — so `exec-thunk-capture` reads
-  the partial files itself and attaches them to the `timeout` result. This is
-  the case where the capture matters most: `timeout … join: deadline exceeded`
-  says only that a form ran out of budget, while its output says which call it
-  was in when the budget ran out. Reading the partial files also deletes them,
-  so an abandoned worker leaves nothing behind in the temp root.
+  marshals its temp files only when the call comes back, and a form killed by
+  the join deadline never gets there — so the runner reads the partial files
+  itself and attaches them to the `timeout` result. This is the case where the
+  capture matters most: `timeout … join: deadline exceeded` says only that a
+  form ran out of budget, while its output says which call it was in when the
+  budget ran out. Reading the partial files also deletes them, so an abandoned
+  worker leaves nothing behind in the temp root.
 
   The timeout's `reason` carries that last line, so the problem list reads:
 
   ```
-  timeout  tests/elle/port-write-timeout.lisp  [vm]  join: deadline exceeded ·
+  timeout  tests/lang/port-write-timeout.lisp  [vm]  join: deadline exceeded ·
       last output:     · 1: write it with :timeout 500
   ```
 
@@ -462,4 +482,3 @@ the worktree of the run they describe, and both summaries name the run's
 commit, so a tally read from a log says which code it describes.
 Pinned by [truncation.rs](../tests/integration/truncation.rs) and
 [run_identity.rs](../tests/integration/run_identity.rs).
-

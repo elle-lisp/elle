@@ -1,15 +1,17 @@
-//! audited: 2026-09-21
+//! audited: 2026-09-30
 //! I/O primitives: type predicates and backend operations.
 //!
 //! src/io/AGENTS.md
 //! docs/io.md
+//! docs/io/timeout.md
 
 use crate::io::aio::AsyncBackend;
 use crate::io::mock::MockBackend;
-use crate::io::request::IoRequest;
+use crate::io::request::{Bound, IoRequest};
 use crate::io::AnyBackend;
 use crate::io::SubmissionId;
 use crate::primitives::def::{RegionEffect, RetType};
+use crate::primitives::kwarg::{extract_bound, seconds};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK};
 use crate::value::types::Arity;
@@ -35,31 +37,6 @@ fn prim_is_io_backend(
         SIG_OK,
         Value::bool(args[0].external_type_name() == Some("io-backend")),
     )
-}
-
-/// A span of seconds an argument names, as an int or a float.
-///
-/// Three primitives take one — `ev/sleep`, `ev/poll-fd` and `io/backend` — and
-/// all three refuse the same values: not a number, negative, or infinite. The
-/// error names the caller and its kind, so a refusal reads as that primitive's.
-fn seconds(value: &Value, what: &str) -> Result<std::time::Duration, (&'static str, String)> {
-    let secs = if let Some(n) = value.as_int() {
-        n as f64
-    } else if let Some(f) = value.as_float() {
-        f
-    } else {
-        return Err((
-            "type-error",
-            format!("{}: expected a number of seconds", what),
-        ));
-    };
-    if secs < 0.0 || !secs.is_finite() {
-        return Err((
-            "argument-error",
-            format!("{}: seconds must be finite and non-negative", what),
-        ));
-    }
-    Ok(std::time::Duration::from_secs_f64(secs))
 }
 
 /// `(io/backend kind)` or `(io/backend kind keepalive)` → backend
@@ -127,10 +104,10 @@ fn io_submit_required_bits(args: &[Value]) -> SignalBits {
 /// Optional third arg: the fiber that issued the request, and the one its result
 /// is for. The backend asks that fiber what became of it before it assembles a
 /// completion, and ends an operation the fiber can no longer receive
-/// (docs/impl/io-inflight.md § "An operation whose fiber is gone has no reader"). A call
-/// that names no fiber is submitting for a reader that is not a fiber of this
-/// scheduler — `handle-io-forward` submits for a child scheduler's queue — and
-/// nothing about such a submission is ever withheld.
+/// (docs/impl/io-inflight.md). A call that names no fiber is submitting for a
+/// reader that is not a fiber of this scheduler — `handle-io-forward` submits
+/// for a child scheduler's queue — and nothing about such a submission is ever
+/// withheld.
 fn prim_io_submit(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -215,7 +192,10 @@ fn prim_io_reap(
     (SIG_OK, ctx.array(values))
 }
 
-/// (io/wait backend timeout-ms) → array-of-completion-structs
+/// (io/wait backend &named timeout deadline) → array-of-completion-structs
+///
+/// Waits until some completion arrives or the bound passes, and answers the
+/// completions so far. No bound waits as long as it takes; `:timeout 0` polls.
 fn prim_io_wait(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -232,8 +212,11 @@ fn prim_io_wait(
             )
         }
     };
-    let timeout_ms = prim_arg!(ctx, args, 1, as_int, "io/wait", "integer timeout");
-    match backend.0.wait(timeout_ms) {
+    let bound = match extract_bound(args, 1, "io/wait", ctx) {
+        Ok(b) => b,
+        Err(e) => return e,
+    };
+    match backend.0.wait(bound.next_wait()) {
         Ok(completions) => {
             let values: Vec<Value> = completions.into_iter().map(|c| c.into_value(ctx)).collect();
             (SIG_OK, ctx.array(values))
@@ -347,10 +330,10 @@ fn prim_ev_poll_fd(
         None
     };
 
-    match timeout {
-        Some(t) => (SIG_IO, IoRequest::poll_fd_with_timeout(ctx, fd, events, t)),
-        None => (SIG_IO, IoRequest::poll_fd(ctx, fd, events)),
-    }
+    (
+        SIG_IO,
+        IoRequest::poll_fd_within(ctx, fd, events, Bound::new(timeout, None)),
+    )
 }
 
 primitive! {
@@ -409,11 +392,11 @@ primitive! {
     }
     "io/wait" => prim_io_wait {
         signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Wait for async I/O completions. timeout-ms: negative=forever, 0=poll, positive=ms. Returns array of completion structs.",
-        params: &["backend", "timeout-ms"],
+        arity: Arity::AtLeast(1),
+        doc: "Wait for async I/O completions until one arrives or the :timeout or :deadline passes. No bound waits as long as it takes; :timeout 0 polls. Returns array of completion structs.",
+        params: &["backend"],
         category: "io",
-        example: "(io/wait backend 1000)",
+        example: "(io/wait backend :timeout 1)",
         // Fresh: builds a fresh array of completion structs in this call's ctx
         // region, exactly like its sibling io/reap. Synchronous (Signal::errors,
         // no yield), so this Fresh claim is oracle-CHECKED on every debug call.
@@ -435,7 +418,7 @@ primitive! {
     "ev/sleep" => prim_ev_sleep {
         signal: Signal::io_yields_errors(),
         arity: Arity::Exact(1),
-        doc: "Async sleep — yields to the scheduler for the specified duration in seconds",
+        doc: "Async sleep — yields to the scheduler for the specified duration in seconds. Refuses a duration that is negative, not finite, or longer than the clock can count.",
         params: &["seconds"],
         category: "scheduler",
         example: "(ev/sleep 0.5)",

@@ -1,4 +1,7 @@
-//! Shared types for I/O backends.
+// audited: 2026-09-29
+//! The types both I/O backends share: the key a port's state is kept under, and the remainder a read leaves.
+//!
+//! docs/impl/io-bytes.md
 
 use crate::port::{Port, PortId, PortKind};
 use std::collections::HashMap;
@@ -83,8 +86,8 @@ impl FdState {
 /// that owner may have gone without saying so, since a port dropped rather than
 /// `port/close`d closes its descriptor through `OwnedFd` with no backend in
 /// reach. At most one entry per live descriptor survives, and the newcomer never
-/// reads the previous owner's bytes (`tests/elle/io.lisp` § "a recycled
-/// descriptor number carries no remainder").
+/// reads the previous owner's bytes (`tests/lang/io.lisp`, the rows under "a
+/// recycled descriptor number carries no remainder").
 pub(crate) fn fd_state_mut<'a>(
     states: &'a mut HashMap<PortKey, FdState>,
     key: &PortKey,

@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-29
 //! The forms that jump: `while`, `loop`/`recur`, `break`, and the `cond` chain
 //! each level of which lowers to a two-armed branch.
 //!
@@ -193,8 +193,8 @@ impl<'a> Lowerer<'a> {
         // point instead. The point names the end of THIS block, so it is opened
         // before the jump and while the block's context is still on the stack
         // (docs/impl/region/replicate.md). Pinned by
-        // tests/elle/region-break-transfer.lisp, region-break-skip.lisp and
-        // region-break-loop-replica.lisp.
+        // tests/impl/region-break-transfer.lisp, tests/impl/region-break-skip.lisp
+        // and tests/impl/region-break-loop-replica.lisp.
         self.open_break_exit_hoist(*block_id, value, value_reg);
         self.terminate(Terminator::Jump(target_exit_label));
 

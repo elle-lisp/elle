@@ -1,6 +1,6 @@
 # Adoption and subtree drop (the ownership forest)
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Adoption links regions into a parent→child tree, so a whole subtree frees as a
 unit when its root frees.
@@ -59,7 +59,7 @@ not expressible the other way.
   suppression costs nothing — the `Owned` mode absorbs it.) A **store-adopted** member
   keeps its **own** compiler-emitted decref too (unlike a capture-adopted member, whose
   decref is suppressed); that decref is likewise a structural no-op **provided it fires
-  while the member is still `Owned`** — i.e. **before** the root's subtree drop. The
+  while the member is still `Owned`**, that is, **before** the root's subtree drop. The
   emit guarantees that ordering even when member and root share a `decref_point` node
   ([adopt.md](adopt.md)): the member's release is sorted ahead
   of the root's, so it lands on the frozen `Owned` region and no-ops, and the root's
@@ -205,9 +205,8 @@ uniqueness does not hold at the drop — however the external reference arose, a
 whichever adopt kind claimed the region — falls back to per-region RC instead of
 being freed under a live reference. It fires only when a live external edge exists
 at the drop; the externally-unique common case pays one empty-map check per
-member. Pinned by `regionstore::tests::rescue` and, end
-to end, by the guardfree fixture pin `region_capture_cell_member_cascade_uaf`
-([captures.rs](../../../tests/integration/elle_scripts/captures.rs)): a struct member
-stored into a module-level capture cell survives its parent's subtree drop and
-frees at the cell's release.
+member. Pinned by `regionstore::tests::rescue` and, end to end under guardfree, by
+[region-capture-cell-member-cascade-uaf.lisp](../../../tests/impl/region-capture-cell-member-cascade-uaf.lisp):
+a struct member stored into a module-level capture cell survives its parent's
+subtree drop and frees at the cell's release.
 

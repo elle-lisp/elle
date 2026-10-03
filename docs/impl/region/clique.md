@@ -1,6 +1,6 @@
 # What a region-effect declaration buys
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-09-28 -->
 
 What the solver derives from a declared `RegionEffect`.
 
@@ -26,7 +26,7 @@ emits no edge however many regions that argument carries, and a store of
 that argument into another one is covered by the edges to the *other*
 argument's regions. Pairing a flattened region list instead strands one
 region per call on a shape with no second argument at all
-(`region-native-effect-clique-leak.lisp` § "One argument, two source
+([region-native-effect-clique-leak.lisp](../../../tests/impl/region-native-effect-clique-leak.lisp) § "One argument, two source
 regions"); the declared-store path states the same rule as its `j == i`
 skip (`record_store_edges`).
 
@@ -56,7 +56,7 @@ Declarations shrink the clique to where it can be real:
   fail to fire where the channel's region is not nameable at the call site
   (an upvalue or module-level channel). The declaration still seeds the
   listed args as fiber-frontier crossings for escape.
-- `Mixed` / `Unknown` (a registered **native** whose store behaviour is
+- `Mixed` / `Unknown` (a registered **native** whose store behavior is
   uncounted-or-unexamined): the full mutual clique. A native can
   reach value/ internals and store an argument *uncounted* — invisible to
   both the funnel seam and the solver — so the clique is its only cover.
@@ -72,8 +72,8 @@ Declarations shrink the clique to where it can be real:
   redundancy: emitting one would leak one region per *alloc-region* heap
   argument per call (a literal's static slot IS populated, so its
   `IncrefRegion` is real and never balances), while a call-result argument is a
-  slot-based no-op (`region-userfn-clique-callresult-noleak.lisp`).
-  Pinned by `region-userfn-clique-noleak.lisp`.
+  slot-based no-op ([region-userfn-clique-callresult-noleak.lisp](../../../tests/impl/region-userfn-clique-callresult-noleak.lisp)).
+  Pinned by [region-userfn-clique-noleak.lisp](../../../tests/impl/region-userfn-clique-noleak.lisp).
 
 The result side is unchanged by declarations at runtime — the call-result
 placeholder and value-gated `DecrefValueRegion` release (Rule 2) remain the
@@ -97,7 +97,7 @@ runs; a suspending payload rides `fiber.signal` under the `SuspendEscape` /
 is read through the signal, never through the caller's result slot, which the
 handler stamps `nil`. There is no consumer for a retain on any of those, so
 taking one strands a region per call — the emitted value of every `fiber/emit`
-(`tests/elle/region-fiber-install-clique-leak.lisp`), or a
+([region-fiber-install-clique-leak.lisp](../../../tests/impl/region-fiber-install-clique-leak.lisp)), or a
 parked-then-discarded fiber's whole region graph (the `multi-resume` /
 `yield-discard` oracle probes). This is the same exemption the declaration oracle
 makes for a signal-carrying return, stated on the accounting side.
@@ -119,7 +119,7 @@ call:
   declarant path that runs no thunk supplies the reference itself (`import`'s
   plugin paths take an explicit `EscapeSite::NativeCallResult` retain).
   Consumed at dispatch only — no solver site reads it. Pinned by the
-  `import-result` probe in `tests/elle/oracle.lisp`.
+  `import-result` probe in [oracle.lisp](../../../tests/impl/oracle.lisp).
 
 A thunk-run value that is *embedded* in a fresh result rather than returned
 bare needs no flag but still owes the mint's consumption: the fresh container's
@@ -159,7 +159,7 @@ is correct. For a **call-result placeholder** the slot is never populated
 slot-based incref is a silent no-op — while the edge's balancing decref,
 the store target's free-time cascade, is real. If the store happens, the
 cascade steals a live reference: the call-result-arg clique UAF
-(tests/elle/region-native-clique-callresult-uaf.lisp).
+([region-native-clique-callresult-uaf.lisp](../../../tests/impl/region-native-clique-callresult-uaf.lisp)).
 
 The fix is split by who recorded the edge:
 
@@ -217,7 +217,7 @@ the walk recovers a containment edge; a `@string`/`@bytes` container copies
 bytes and retains nothing), and the **fiber-member refusal** — the result region
 of a call whose declared type is `Fiber` (`fiber/new`) is recorded in
 `RegionInfo::fiber_result_regions` and is never adoptable by any region-rooted
-cut (adopt.md § "The fiber member — refused at the class level"). A `RetType`
+cut ([adopt.md](adopt.md) § "The fiber member — refused at the class level"). A `RetType`
 claim must hold on **every** normally-completing path: a nullable result
 (`fiber/child`, which returns nil before any resume) declares `Unknown`, never
 the heap type, or the prune would cut a live `nil` dispatch arm.

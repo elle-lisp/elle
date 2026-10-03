@@ -1,15 +1,21 @@
+// audited: 2026-09-29
+//! The wholesale region free: tear down an owned subtree or a co-owned group, and cascade its Shared frontier.
+//!
+//! docs/impl/region/ownership.md
+//! docs/impl/region/owner.md
+
 use super::*;
 
 impl RegionStore {
     /// Free the entire **owned subtree** rooted at `id` — `id` plus every region
     /// transitively reachable through `owned_children` — as a unit (subtree drop,
-    /// docs/impl/region/ownership.md § "Adoption and subtree drop"). For a region with no
+    /// docs/impl/region/ownership.md). For a region with no
     /// owned children this is an ordinary single-region free; for an owner it frees
     /// the whole subtree, interior reference cycles included.
     ///
     /// **Phased, so the debug oracle never reads a freed sibling.** The production
     /// frontier comes from each member's recorded `outgoing` edge table
-    /// (docs/impl/region/ownership.md § "The outgoing edge table"), so reclamation derefs
+    /// (docs/impl/region/ownership.md), so reclamation derefs
     /// **no** heap page. In debug builds an equivalence oracle additionally scans member
     /// contents (`find_region_cross_refs` → `region_of_page_ptr`, which derefs each
     /// pointer's page) and asserts it matches the table; that scan must run while all
@@ -18,8 +24,7 @@ impl RegionStore {
     /// 0. **Collect and rescue** — walk the subtree read-only, then convert to
     ///    `Counted` any member still externally referenced per the recorded edge
     ///    tables, pruning it (with its own subtree) from the dying set
-    ///    (docs/impl/region/ownership.md § "The incoming edge table and the
-    ///    external-reference rescue"). Walking `owned_children` is Rust-side, so
+    ///    (docs/impl/region/ownership.md). Walking `owned_children` is Rust-side, so
     ///    collecting the subtree never derefs a heap page.
     /// 1. **Unindex** every still-dying member (take its entry out of `regions`, so
     ///    `valid_region` reports it absent) while its pages stay mapped — the
@@ -50,15 +55,16 @@ impl RegionStore {
         self.free_region_set(&[id], from_cascade)
     }
 
-    /// Free a **co-owned region group** as one unit — the runtime `FreeRegionGroup`.
-    /// An externally-unique mutual reference
-    /// cycle with no container parent has no owner among its members (each owns and is
-    /// owned by the others), so it is reclaimed symmetrically: every member is a root of
-    /// the same wholesale drop, freed at the group's collective last use regardless of its
-    /// reference count. Interior member↔member references resolve to unindexed siblings in
-    /// phase 2 and are dropped (the cycle reclaims with the group, which per-region RC
-    /// cannot do — region/rules.md Rule 8); genuinely-Shared frontier references cascade
-    /// once. Pinned by `free_region_group_reclaims_bare_cycle` (`regionstore::tests`).
+    /// Free a **co-owned region group** as one unit — the runtime `FreeRegionGroup`. An
+    /// externally-unique mutual reference cycle with no container parent has no owner
+    /// among its members (each owns and is owned by the others), so it is reclaimed
+    /// symmetrically: every member is a root of the same wholesale drop, freed at the
+    /// group's collective last use regardless of its reference count. Interior
+    /// member↔member references resolve to unindexed siblings in phase 2 and are dropped
+    /// (the cycle reclaims with the group, which per-region RC cannot do —
+    /// docs/impl/region/rules.md Rule 8); genuinely-Shared frontier references cascade
+    /// once. Pinned by `region_ownership_reclaims_bare_cycle_group`
+    /// (src/runtime/tests/ownership/subtree.rs).
     pub(crate) fn free_region_group(&mut self, members: &[RuntimeRegion]) -> usize {
         self.free_region_set(members, None)
     }
@@ -76,7 +82,7 @@ impl RegionStore {
     /// cross-region references — a long list, a deeply-nested structure, `(apply concat
     /// <thousands-of-chunks>)` — in O(1) native stack instead of one frame per link.
     /// Pinned by `deep_cascade_chain_does_not_overflow_stack` (`regionstore::tests`) and
-    /// `tests/elle/region-deep-chain.lisp`.
+    /// `tests/impl/region-deep-chain.lisp`.
     ///
     /// A cascaded free's set is a single Counted region that just hit rc 0, so re-tearing
     /// an already-unindexed root is a harmless no-op ([`Self::teardown_set`] phase 1 skips
@@ -132,12 +138,11 @@ impl RegionStore {
         // Phase 0 — collect the candidate dying set READ-ONLY (roots + transitive
         // owned_children; the entries stay indexed so the rescue below can walk
         // edges and owner chains), then RESCUE any member external uniqueness does
-        // not hold for at this drop (docs/impl/region/ownership.md § "The incoming
-        // edge table and the external-reference rescue"). The `dying` set guards a
-        // member reachable through two owner edges (defensive — the inference
-        // adopts each member once). Each stack entry carries the owner that listed
-        // it (`None` for a seeded root — a Counted region whose rc-0 free
-        // triggered this drop, or a co-owned group member), so the walk can
+        // not hold for at this drop (docs/impl/region/ownership.md). The `dying`
+        // set guards a member reachable through two owner edges (defensive — the
+        // inference adopts each member once). Each stack entry carries the owner
+        // that listed it (`None` for a seeded root — a Counted region whose rc-0
+        // free triggered this drop, or a co-owned group member), so the walk can
         // debug-assert the forest's forward/back edges agree: a region reached as
         // a child must record exactly that parent as its `Owned` owner.
         let mut candidates: Vec<(RuntimeRegion, Option<RuntimeRegion>)> = Vec::new();
@@ -161,7 +166,7 @@ impl RegionStore {
                     },
                     "owned-subtree edge inconsistency: region {r} reached as a child of \
                      {expected_owner:?}, but its reclaim mode does not record that owner \
-                     (docs/impl/region/ownership.md § 'The runtime: a reclamation typestate')",
+                     (docs/impl/region/ownership.md)",
                 );
                 for &c in &entry.owned_children {
                     stack.push((c, Some(r)));
@@ -189,7 +194,7 @@ impl RegionStore {
             return (0, Vec::new());
         }
         // Phase 2 — build the cascade frontier from each member's RECORDED `outgoing`
-        // edge table (docs/impl/region/ownership.md § "The outgoing edge table"), NOT a
+        // edge table (docs/impl/region/ownership.md), NOT a
         // content scan. A target unindexed in phase 1 (interior to the freed set) fails
         // `valid_region` and is dropped — reclaimed with the set, never cascaded; a
         // target outside is a genuinely-Shared frontier ref, pushed once per recorded
@@ -211,7 +216,7 @@ impl RegionStore {
             // A dying source's edges into live targets (rescued members included)
             // are retired from each target's `incoming` mirror right after the
             // frontier is built — the third maintenance site of the mirror
-            // (§ "The incoming edge table and the external-reference rescue").
+            // (docs/impl/region/ownership.md).
             let mut retire: Vec<(RuntimeRegion, RuntimeRegion, u32)> = Vec::new();
             let live_region = |rid: u32| -> bool {
                 let ridx = rid as usize;
@@ -254,21 +259,21 @@ impl RegionStore {
                     "outgoing-edge table drift freeing {roots:?}: recorded frontier \
                      {recorded:?} != content scan {scanned:?} — a missed store-funnel \
                      edge (a leak) or a double-record (a UAF) \
-                     (docs/impl/region/ownership.md § 'The outgoing edge table')",
+                     (docs/impl/region/ownership.md)",
                 );
             }
         }
-        // Phase 2b — the fiber discharge (docs/impl/region/owner.md § "The
-        // free-path fiber discharge"): a dying `Fiber` object whose
-        // fiber was never routed through a terminal transition (a dropped handle,
-        // a still-paused or `:error` fiber) still holds its parked chain's
-        // activation owner nodes, its own fiber node, and a parked non-terminal
-        // signal's park escape retain. Take that state out of each dying fiber
-        // and feed the regions to the same iterative cascade as the recorded
-        // frontier. Runs AFTER the equivalence oracle: these are not content
-        // edges (no record exists), so they must not participate in the
-        // recorded == scanned comparison. A borrowed (executing) fiber is
-        // skipped — its region cannot be dying while it runs.
+        // Phase 2b — the fiber discharge (docs/impl/region/owner.md): a dying
+        // `Fiber` object whose fiber was never routed through a terminal
+        // transition (a dropped handle, a still-paused or `:error` fiber) still
+        // holds its parked chain's activation owner nodes, its own fiber node,
+        // and a parked non-terminal signal's park escape retain. Take that state
+        // out of each dying fiber and feed the regions to the same iterative
+        // cascade as the recorded frontier. Runs AFTER the equivalence oracle:
+        // these are not content edges (no record exists), so they must not
+        // participate in the recorded == scanned comparison. A borrowed
+        // (executing) fiber is skipped — its region cannot be dying while it
+        // runs.
         {
             let page_size = self.pool.initial_page_size();
             let mut discharged: Vec<u32> = Vec::new();
@@ -281,8 +286,7 @@ impl RegionStore {
                         let parked = fib.take_parked_state();
                         discharged.extend(parked.dues.nodes.iter().map(|r| r.get()));
                         // The releases those activations took over from their own
-                        // frame-replacing tail calls (docs/impl/region/owner.md
-                        // § "A deferred tail-call release has the node's life").
+                        // frame-replacing tail calls (docs/impl/region/owner.md).
                         // The completion that would have run them is a
                         // continuation this fiber can never re-enter. Unlike the
                         // owed tables below, these name no value the payload could
@@ -293,14 +297,12 @@ impl RegionStore {
                         if let Some(node) = fib.fiber_owner_node.take() {
                             discharged.push(node.get());
                         }
-                        // The releases the parked frames still owed, off their
-                        // own value-route slots (docs/impl/region/mechanism.md
-                        // § "An abandoned frame runs the releases it still
-                        // owes"). A frame this fiber can never re-enter never
-                        // reaches the route that would have dropped them.
-                        // Resolved exactly as the parked signal below is, and
-                        // skipping the payload's own region: that value leaves
-                        // as the fiber's result.
+                        // The releases the parked frames still owed, off their own
+                        // value-route slots (docs/impl/region/mechanism.md). A frame
+                        // this fiber can never re-enter never reaches the route that
+                        // would have dropped them. Resolved exactly as the parked
+                        // signal below is, and skipping the payload's own region: that
+                        // value leaves as the fiber's result.
                         let protect = parked.protect.and_then(|v| {
                             v.as_heap_ptr().map(|ptr| unsafe {
                                 crate::value::fiberheap::regionpool::region_of_page_ptr(
@@ -391,122 +393,6 @@ impl RegionStore {
         // teardown; the caller cascades them iteratively.
         (freed, frontier)
     }
-
-    /// Enforce external uniqueness **at the drop**: prune from `dying` every
-    /// non-root member still referenced by a source that survives this drop,
-    /// converting it `Owned → Counted` with a count rebuilt from its recorded
-    /// incoming edges (docs/impl/region/ownership.md § "The incoming edge table
-    /// and the external-reference rescue"). The rescued member's own subtree
-    /// stays intact beneath it; every remaining referencer then releases it
-    /// through the ordinary cascade, and the last release frees it.
-    ///
-    /// Rescue iterates to a fixpoint: a rescued member survives the drop, so the
-    /// members *it* references become externally referenced and are rescued too —
-    /// tearing one down would strand the survivor's live edge into it.
-    ///
-    /// The rebuilt count admits every incoming edge except those from the
-    /// member's own surviving subtree: a dying source's share is consumed by its
-    /// frontier decrefs in this same drop, a surviving source's at its own
-    /// release, while an own-subtree back-edge releases only at the member's own
-    /// drop and counting it would self-sustain the count (the member would leak).
-    fn rescue_externally_referenced(
-        &mut self,
-        candidates: &[(RuntimeRegion, Option<RuntimeRegion>)],
-        dying: &mut std::collections::HashSet<u32>,
-    ) {
-        let is_live = |regions: &Vec<Option<RegionEntry>>, id: u32| -> bool {
-            (id as usize) < regions.len() && regions[id as usize].is_some()
-        };
-        // Fixpoint over the shrinking dying set. `rescued` keeps the owner that
-        // listed each member so the unlink below detaches exactly that edge.
-        let mut rescued: Vec<(RuntimeRegion, RuntimeRegion)> = Vec::new();
-        loop {
-            let mut changed = false;
-            for &(r, owner) in candidates {
-                // A seeded root is never rescued: it is Counted and reached its
-                // own demise (rc 0, or a co-owned group's collective last use).
-                let Some(owner) = owner else { continue };
-                if !dying.contains(&r.get()) {
-                    continue;
-                }
-                let Some(entry) = self.regions[r.get() as usize].as_ref() else {
-                    continue;
-                };
-                if entry.incoming.is_empty() {
-                    continue;
-                }
-                let externally_referenced = entry
-                    .incoming
-                    .keys()
-                    .any(|s| !dying.contains(&s.get()) && is_live(&self.regions, s.get()));
-                if !externally_referenced {
-                    continue;
-                }
-                // The member and its whole owned subtree survive this drop.
-                let mut stack = vec![r];
-                while let Some(m) = stack.pop() {
-                    if !dying.remove(&m.get()) {
-                        continue;
-                    }
-                    if let Some(e) = self.regions[m.get() as usize].as_ref() {
-                        stack.extend(e.owned_children.iter().copied());
-                    }
-                }
-                rescued.push((r, owner));
-                changed = true;
-            }
-            if !changed {
-                break;
-            }
-        }
-        if rescued.is_empty() {
-            return;
-        }
-        // Unlink every rescued member from its owner FIRST: an owner that is
-        // itself rescued survives, and must not re-claim the member at its own
-        // later drop — and the rebuilt-count subtree walks below must see the
-        // post-rescue forest (a rescued descendant is no longer "own subtree",
-        // so its back-edge is a real counted reference).
-        for &(r, owner) in &rescued {
-            if let Some(o) = self
-                .regions
-                .get_mut(owner.get() as usize)
-                .and_then(|s| s.as_mut())
-            {
-                o.owned_children.retain(|&c| c != r);
-            }
-        }
-        for &(r, _) in &rescued {
-            let mut subtree: std::collections::HashSet<u32> = std::collections::HashSet::new();
-            let mut stack = vec![r];
-            while let Some(m) = stack.pop() {
-                if !subtree.insert(m.get()) {
-                    continue;
-                }
-                if let Some(e) = self.regions[m.get() as usize].as_ref() {
-                    stack.extend(e.owned_children.iter().copied());
-                }
-            }
-            let entry = self.regions[r.get() as usize]
-                .as_ref()
-                .expect("a rescued member stays indexed through the rescue");
-            let rc: u32 = entry
-                .incoming
-                .iter()
-                .filter(|(s, _)| !subtree.contains(&s.get()))
-                .map(|(_, &n)| n)
-                .sum();
-            debug_assert!(
-                rc > 0,
-                "region {r} rescued with no admissible incoming reference — the \
-                 rescue trigger names a surviving source, so at least its edge \
-                 must be admitted (docs/impl/region/ownership.md § 'The incoming \
-                 edge table and the external-reference rescue')",
-            );
-            if crate::config::get().has_trace("rc") {
-                eprintln!("[trace:rc] rescue({r}) externally referenced → Counted({rc})");
-            }
-            self.regions[r.get() as usize].as_mut().unwrap().reclaim = Reclaim::Counted(rc);
-        }
-    }
 }
+
+mod rescue;

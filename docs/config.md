@@ -1,10 +1,39 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
-Elle exposes a runtime configuration system reachable from both CLI flags and
-Elle code. All debug/trace flags, JIT policies, and WASM policies are
-controlled through a single mutable config struct on the VM.
+What a build decides, what the `elle` command line sets, and what a running
+program reads and changes through `vm/config`.
+
+A build fixes the runtime a program runs on: which optimizing tier it carries,
+and which I/O backend. The command line sets what a user may reasonably
+change per run — tracing, dumps, paths and caches — and no flag chooses a
+tier. A running program reads the rest through `vm/config` and changes a few
+settings through `vm/config-set`.
+
+## Builds
+
+A build carries at most one optimizing tier, and the cargo features pick it:
+
+| Feature | Default | What it adds |
+|---------|---------|--------------|
+| `jit` | on | The Cranelift JIT, the tier of the default build |
+| `mlir` | off | The MLIR tier. It replaces the JIT: an `mlir` build runs no JIT |
+| `wasm` | off | The WebAssembly backend. It replaces both, and adds `--wasm=` |
+| `ffi` | on | C interop through libffi |
+| `uring` | on | io_uring on Linux. Without it, and on every other platform, I/O goes through the thread pool |
+
+The precedence is `wasm`, then `mlir`, then `jit`: a build with more than one
+of the three runs the first it carries. A tier compiles a function once the
+function has been called ten times; `vm/config` reads and sets that threshold
+(below).
+
+A build is one implementation of Elle, and every build must pass the language
+suite ([spec](spec.md)). There is therefore no flag that chooses a tier or a
+backend. A user who wants the interpreter alone builds without the `jit`
+feature. Two programs can switch a tier off or make it eager: the rig, for one
+implementation test ([rig](../rig/overview.md)), and `elle test`
+([test-runner](test-runner.md)). A user program cannot.
 
 ## CLI flags
 
@@ -23,14 +52,17 @@ So a shell glob does not run every match: the first match is the program
 and the rest are its arguments. The pinning test is
 [argv_cli.rs](../tests/integration/argv_cli.rs).
 
+A program name that starts with `--` is a flag `elle` does not know, and
+`elle` refuses it rather than looking for a file of that name.
+
 ### Where elle's flags stop
 
-`--` ends them. Elle reads every flag below wherever it appears before that
-separator, and hands the program every argument after it — the separator
-included — through `sys/args`.
+The program name ends them. Elle reads the flags below before the program name,
+and hands the program every argument after it through `sys/args`, a `--`
+included.
 
 ```bash
-elle --jit=off script.lisp -- --jit=off   # elle takes the first, the script the second
+elle --trace=call script.lisp -- --trace=call   # elle takes the first, the script the rest
 ```
 
 `--help` and `--version` obey the same boundary, so a script is free to carry
@@ -116,65 +148,30 @@ Old `--debug-*` flags are kept as aliases for backward compatibility:
 | `--debug-stack` | `--trace=call` |
 | `--debug-wasm` | `--trace=wasm` |
 
-### JIT policy
+### Statistics
 
-```bash
-elle --jit=off script.lisp          # disable JIT
-elle --jit=eager script.lisp        # compile on first call
-elle --jit=adaptive script.lisp     # compile after threshold (default)
-```
-
-Named policies replace opaque integers:
-
-| Policy | CLI | Old CLI | Behavior |
-|--------|-----|---------|----------|
-| Off | `--jit=off` | `--jit=0` | JIT disabled |
-| Eager | `--jit=eager` | `--jit=1` | Compile on first call |
-| Adaptive | `--jit=adaptive` | `--jit=11` | Compile after 10 calls (default) |
-
-Old integer syntax still works as aliases.
-
-The binary and the embedding library start from the same JIT policy. A host
-that wants the interpreter alone asks for it, the way the CLI does.
-
-### MLIR policy
-
-```bash
-elle --mlir=off script.lisp         # disable MLIR (default)
-elle --mlir=eager script.lisp       # compile on first eligible call
-elle --mlir=adaptive script.lisp    # compile after threshold
-```
-
-| Policy | CLI | Behavior |
-|--------|-----|----------|
-| Off | `--mlir=off` | MLIR disabled (default) |
-| Eager | `--mlir=eager` | Compile on first eligible call |
-| Adaptive | `--mlir=adaptive` | Compile after 10 calls |
-
-Integer syntax works too: `--mlir=N` sets threshold to N-1.
-
-The MLIR policy is independent of the JIT policy. When compiled with
-`--features mlir`, GPU-eligible functions are compiled through
-MLIR → LLVM for optimized native execution. The policy controls when
-this compilation happens. Functions not eligible for MLIR fall through
-to the Cranelift JIT regardless of the MLIR policy.
-
-`mlir` is not a default feature, so a stock build has no tier to start. The
-CLI therefore starts this one off, and `--mlir=` opts in.
+`--dump=stats` runs the program and prints statistics when it ends normally:
+the JIT's compiled and rejected functions, the page-claim histogram, and the
+regions the teardown left alive. The other `--dump=` keywords print a compiler
+artifact and exit without running the program; `stats` is the one that runs
+it.
 
 ### WASM policy
+
+A `wasm` build takes `--wasm=`; no other build accepts the flag.
 
 ```bash
 elle --wasm=off script.lisp         # disable WASM (default)
 elle --wasm=full script.lisp        # compile everything upfront
-elle --wasm=lazy script.lisp        # per-function lazy compilation
+elle --wasm=3 script.lisp           # compile each closure on its third call
+elle --wasm=lazy script.lisp        # the same, on the eleventh call
 ```
 
-| Policy | CLI | Old CLI | Behavior |
-|--------|-----|---------|----------|
-| Off | `--wasm=off` | `--wasm=0` | WASM disabled (default) |
-| Full | `--wasm=full` | `--wasm=full` | Full-module compilation |
-| Lazy | `--wasm=lazy` | `--wasm=N` | Per-function lazy compilation |
+| Policy | CLI | Behavior |
+|--------|-----|----------|
+| Off | `--wasm=off`, `--wasm=0` | WASM disabled (default) |
+| Full | `--wasm=full` | Full-module compilation |
+| Lazy | `--wasm=N`, `--wasm=lazy` | Each closure compiled from its Nth call; `lazy` is N = 11 |
 
 ### Boot image
 
@@ -201,10 +198,19 @@ milestones the default waits on.
 ```lisp
 (vm/config)                    # returns the full config struct
 (vm/config :trace)             # returns the current trace keyword set
-(vm/config :jit)               # returns the JIT policy keyword
-(vm/config :wasm)              # returns the WASM policy keyword
-(vm/config :mlir)              # returns the MLIR policy keyword
+(vm/config :jit)               # returns the JIT threshold, or nil
+(vm/config :mlir)              # returns the MLIR threshold, or nil
 (vm/config :max-depth)         # returns the non-tail call depth cap
+```
+
+`:jit` answers the number of calls after which the JIT compiles a function,
+or nil when this build carries no JIT or the JIT is off. `:mlir` answers the
+same for the MLIR tier. A `wasm` build answers `:wasm` with its policy
+keyword, and no other build knows the key.
+
+```lisp
+(let [jit (vm/config :jit)]
+  (assert (or (nil? jit) (> jit 0)) "a JIT threshold is a positive count"))
 ```
 
 ### The depth cap
@@ -230,38 +236,29 @@ holds a few hundred bytes. [impl/vm.md](impl/vm.md) owns the mechanism.
 ```lisp
 # Enable trace keywords (takes effect immediately)
 (vm/config-set :trace |:call :signal|)
-
-# Change JIT policy
-(vm/config-set :jit :eager)
-(vm/config-set :jit :off)
-(vm/config-set :jit :adaptive)
-
-# Change WASM policy
-(vm/config-set :wasm :full)
-(vm/config-set :wasm :off)
-
-# Change MLIR policy
-(vm/config-set :mlir :eager)
-(vm/config-set :mlir :off)
+(vm/config-set :trace ||)
 
 # Change the depth cap (a positive integer)
 (vm/config-set :max-depth 1000000)
+(vm/config-set :max-depth 10000000)
 ```
 
-### Custom JIT policy
-
-`vm/config-set` accepts a closure as the JIT policy and reports the policy
-as `:custom`. The VM does not call the closure yet
-([#1242](https://github.com/elle-lisp/elle/issues/1242)): a `:custom` policy
-compiles every function on its first call, as `:eager` does.
+`(vm/config-set :jit N)` sets the JIT threshold to the positive integer `N`,
+and `(vm/config-set :mlir N)` sets the MLIR tier's. Each refuses a value that
+is not a positive integer, and a threshold for a tier this run has off. Inside
+`elle test` alone, each also takes `:off` and `:eager` ([test-runner](test-runner.md)).
+There a threshold needs only a build that carries the tier, so the runner can
+put back the setting it read. Any other process refuses `:off` and `:eager`
+with an `:argument-error`.
 
 ```lisp
-(vm/config-set :jit (fn [info] :skip))
-(assert (= (vm/config :jit) :custom) "a closure policy reads back as :custom")
-(vm/config-set :jit :adaptive)
+(let [[ok? err] (protect (vm/config-set :jit :off))]
+  (assert (not ok?) "a program cannot turn the JIT off")
+  (assert (= (get err :error) :argument-error)))
+(let [[ok? err] (protect (vm/config-set :jit :later))]
+  (assert (not ok?) "a keyword other than :off or :eager is no policy")
+  (assert (= (get err :error) :type-error)))
 ```
-
-The issue records the contract the closure is meant to meet.
 
 ### Future feature flags
 
@@ -283,3 +280,7 @@ A write takes effect immediately — no restart needed.
 For hot paths (VM dispatch loop), trace keywords are mirrored in a shared
 atomic bitfield, the instance's `TraceCell`, to avoid set lookups on every
 instruction.
+
+An embedding host builds a `Config` itself, so the policies a user build does
+not expose are reachable from Rust: `JitPolicy::Off` and `JitPolicy::Eager`
+are what the rig sets for a sidecar that asks for them.

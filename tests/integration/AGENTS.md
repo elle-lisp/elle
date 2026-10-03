@@ -1,6 +1,6 @@
 # tests/integration
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 Full-pipeline integration tests: end-to-end behavior verification.
 
@@ -13,11 +13,12 @@ checking the result.
 Does NOT:
 - Test individual modules in isolation (that's unit tests)
 - Test invariants across random inputs (that's property tests)
-- Test Elle scripts (that's `tests/elle/`)
+- Test Elle programs (that's the [language suite](../lang/AGENTS.md) and the
+  [implementation suite](../impl/AGENTS.md))
 
 ## Finding a test
 
-`mod.rs` lists every file that runs, and each file opens with a call-out saying
+[mod.rs](mod.rs) lists every file that runs, and each file opens with a call-out saying
 what it covers. Read the two together; there is no third list here to consult,
 because a hand-kept copy of the directory goes stale the week somebody adds a
 file and it then sends readers to tests that no longer exist.
@@ -27,12 +28,12 @@ check the repository rather than the language:
 
 | Group | Files |
 |-------|-------|
-| The documents and their policy | `agents.rs`, `audit.rs`, `audit_report.rs`, `prose.rs`, `paths.rs`, `bytecode_doc.rs`, `doctest.rs`, `doctest_scope.rs`, `rustsource.rs`, `joined_comments.rs` |
-| CI and the corpus runner | `workflows.rs`, `run_artifacts.rs`, `plugins.rs`, `budget.rs`, `runner_budget.rs`, `dashboards.rs`, `corpus_targets.rs`, `capacity.rs`, `profiles.rs`, `truncation.rs`, `runner_exit_trap.rs`, `timeout_capture.rs`, `runner_gauges.rs`, `measurements.rs`, `isolation.rs`, `state_dir.rs`, `run_identity.rs`, `import.rs`, `form_profile.rs`, `boot_fingerprint.rs` |
-| CLI surfaces | `argv_cli.rs`, `dump_cli.rs`, `flip_cli.rs`, `tier_cli.rs`, `trace_cli.rs`, `version.rs`, `dispatch.rs`, `repl_exit_codes.rs` |
+| The documents and their policy | [agents.rs](agents.rs), [audit.rs](audit.rs), [audit_report.rs](audit_report.rs), [prose.rs](prose.rs), [paths.rs](paths.rs), [bytecode_doc.rs](bytecode_doc.rs), [doctest.rs](doctest.rs), [doctest_scope.rs](doctest_scope.rs), [rustsource.rs](rustsource.rs), [joined_comments.rs](joined_comments.rs) |
+| CI, the suites and the test runner | [workflows.rs](workflows.rs), [crosscheck.rs](crosscheck.rs), [change_filter.rs](change_filter.rs), [run_artifacts.rs](run_artifacts.rs), [suites.rs](suites.rs), [variants.rs](variants.rs), [bins.rs](bins.rs), [deps.rs](deps.rs), [corpus_targets.rs](corpus_targets.rs), [plugins.rs](plugins.rs), [runner_budget.rs](runner_budget.rs), [capacity.rs](capacity.rs), [profiles.rs](profiles.rs), [truncation.rs](truncation.rs), [runner_exit_trap.rs](runner_exit_trap.rs), [timeout_capture.rs](timeout_capture.rs), [runner_gauges.rs](runner_gauges.rs), [runner_cost.rs](runner_cost.rs), [runner_file_error.rs](runner_file_error.rs), [measurements.rs](measurements.rs), [isolation.rs](isolation.rs), [state_dir.rs](state_dir.rs), [run_identity.rs](run_identity.rs), [import.rs](import.rs), [form_profile.rs](form_profile.rs), [boot_fingerprint.rs](boot_fingerprint.rs) |
+| CLI surfaces | [argv_cli.rs](argv_cli.rs), [dump_cli.rs](dump_cli.rs), [tier_cli.rs](tier_cli.rs), [trace_cli.rs](trace_cli.rs), [version.rs](version.rs), [dispatch.rs](dispatch.rs), [repl_exit_codes.rs](repl_exit_codes.rs) |
 
-`allocator.rs` sits in the directory unregistered and does not compile; the
-comment at the foot of `mod.rs` says why.
+[allocator.rs](allocator.rs) sits in the directory unregistered and does not compile; the
+comment at the foot of [mod.rs](mod.rs) says why.
 
 ## Key patterns
 
@@ -95,8 +96,8 @@ let out = std::process::Command::new(env!("CARGO_BIN_EXE_elle"))
 
 ## Naming conventions
 
-- Test files: lowercase words joined with underscores (`signal_enforcement.rs`,
-  `trace_isolation.rs`). A file driving one CLI flag is named for it and ends
+- Test files: lowercase words joined with underscores ([signal_enforcement.rs](signal_enforcement.rs),
+  [trace_isolation.rs](trace_isolation.rs)). A file driving one CLI flag is named for it and ends
   `_cli.rs`.
 - Test functions: a sentence naming the claim the body proves
   (`a_hot_function_compiles_with_no_flag_at_all`). The older `test_` prefix
@@ -105,7 +106,7 @@ let out = std::process::Command::new(env!("CARGO_BIN_EXE_elle"))
 
 ## Registration
 
-A file here is not compiled until `mod.rs` names it, so an unregistered file is
+A file here is not compiled until [mod.rs](mod.rs) names it, so an unregistered file is
 a test suite that reports success having run nothing. Add it:
 
 ```rust
@@ -131,16 +132,16 @@ one crate.
    `is_err()` alone passes when the run fails for a reason the test never
    meant to cover.
 
-4. **Tests are deterministic.** The same source gives the same result. No
-   randomness, and no timing dependency outside `time_property.rs` and
-   `time_elapsed.rs`.
+4. **Tests are deterministic.** The same source gives the same result, with no
+   randomness. A test that reads a clock asserts a bound the code guarantees,
+   such as a sleep or a budget that must elapse, and never an exact duration.
 
 ## Common pitfalls
 
 - **`eval_source` in a property test.** It builds a fresh VM per case, which is
   slow. Use `eval_reuse` or `eval_reuse_bare`.
 - **A scratch path under `/tmp`.** Derive it from `std::env::temp_dir()` and
-  give it a unique name; `scratch.rs` fails the build over this.
+  give it a unique name; [scratch.rs](scratch.rs) fails the build over this.
 - **Racing the JIT worker.** Compilation runs on the `elle-jit` thread, so
   `(jit? f)` after a hot loop is a race. `--trace=syncjit` compiles on the VM
   thread and makes the answer deterministic.

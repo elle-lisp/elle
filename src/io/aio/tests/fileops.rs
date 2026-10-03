@@ -1,4 +1,4 @@
-//! audited: 2026-09-20
+//! audited: 2026-09-30
 //! Seek, tell, open and spawn through the backend: the submissions that answer
 //! immediately or create a value on completion.
 //!
@@ -13,14 +13,13 @@ fn test_async_seek_returns_immediate_completion() {
         let path = write_temp_file("hello world");
         let port = open_rw_port(&path);
 
-        let req = IoRequest {
-            op: IoOp::Seek {
+        let req = IoRequest::unbounded(
+            IoOp::Seek {
                 offset: 6,
                 whence: libc::SEEK_SET,
             },
             port,
-            timeout: None,
-        };
+        );
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
@@ -44,11 +43,7 @@ fn test_async_tell_returns_immediate_completion() {
         let path = write_temp_file("hello");
         let port = open_rw_port(&path);
 
-        let req = IoRequest {
-            op: IoOp::Tell,
-            port,
-            timeout: None,
-        };
+        let req = IoRequest::unbounded(IoOp::Tell, port);
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
@@ -71,14 +66,13 @@ fn test_async_seek_non_file_port_errors() {
         let backend = AsyncBackend::new().unwrap();
         let stdin_port = h.ctx().external("port", Port::stdin());
 
-        let req = IoRequest {
-            op: IoOp::Seek {
+        let req = IoRequest::unbounded(
+            IoOp::Seek {
                 offset: 0,
                 whence: libc::SEEK_SET,
             },
-            port: stdin_port,
-            timeout: None,
-        };
+            stdin_port,
+        );
         // stdin has PortKind::Stdin — seek must fail immediately
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
@@ -96,8 +90,8 @@ fn test_async_submit_spawn_echo() {
     crate::value::arena::with_test_region(|| {
         use crate::io::request::{SpawnRequest, StdioDisposition};
         let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::Spawn(SpawnRequest {
+        let req = IoRequest::unbounded(
+            IoOp::Spawn(SpawnRequest {
                 program: "/bin/echo".to_string(),
                 args: vec!["hello-async".to_string()],
                 env: None,
@@ -106,13 +100,12 @@ fn test_async_submit_spawn_echo() {
                 stdout: StdioDisposition::Pipe,
                 stderr: StdioDisposition::Null,
             }),
-            port: Value::NIL,
-            timeout: None,
-        };
+            Value::NIL,
+        );
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
-        let completions = backend.wait(-1).unwrap();
+        let completions = backend.wait(None).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         let val = completions[0].result.as_ref().expect("spawn failed");
@@ -143,21 +136,20 @@ fn test_async_open_regular_file_returns_port() {
             ),
         );
         let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::Open {
+        let req = IoRequest::unbounded(
+            IoOp::Open {
                 path: path.clone(),
                 flags: libc::O_RDONLY | libc::O_CLOEXEC,
                 mode: 0o666,
                 direction: Direction::Read,
                 encoding: Encoding::Text,
             },
-            port: port_val,
-            timeout: None,
-        };
+            port_val,
+        );
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
-        let completions = backend.wait(-1).unwrap();
+        let completions = backend.wait(None).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         assert!(
@@ -179,8 +171,7 @@ fn test_async_open_regular_file_returns_port() {
 }
 
 /// A backend dropped with an io_uring op still in flight leaves the kernel
-/// holding no write pointer into a buffer it is about to free
-/// (docs/io.md § "Backend teardown").
+/// holding no write pointer into a buffer it is about to free (docs/io.md).
 ///
 /// The trap: the hazard is the kernel's, not this process's, so it cannot be
 /// observed directly — a freed slot the kernel later writes shows up as
@@ -191,16 +182,16 @@ fn test_async_open_regular_file_returns_port() {
 ///
 /// Counter-factual: with `quiesce_pending` stubbed to a no-op, the cancel is
 /// never issued, the blocked read stays pending, and the final assertion
-/// fails — exactly the unfixed state.
+/// fails.
 #[test]
 #[cfg(target_os = "linux")]
 fn test_drop_with_inflight_read_cancels_and_drains() {
     use std::os::unix::io::FromRawFd;
     crate::value::arena::with_test_region(|| {
         let backend = AsyncBackend::new().unwrap();
-        // Only the io_uring path has the async kernel-write-into-buffer hazard;
-        // the thread-pool fallback can't reproduce it (and can't cancel a
-        // blocked worker read), so there is nothing to assert there.
+        // Only the io_uring path has the kernel-write-into-buffer hazard. The
+        // pool's teardown is pinned by
+        // `a_pool_teardown_waits_for_the_workers_that_address_a_region`.
         if !backend.is_uring() {
             return;
         }
@@ -226,11 +217,7 @@ fn test_drop_with_inflight_read_cancels_and_drains() {
             ),
         );
 
-        let req = IoRequest {
-            op: PortOp::ReadAll.into(),
-            port,
-            timeout: None,
-        };
+        let req = IoRequest::unbounded(PortOp::ReadAll.into(), port);
         backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
@@ -257,21 +244,20 @@ fn test_async_open_nonexistent_path_errors() {
     crate::value::arena::with_test_region(|| {
         let path = "/nonexistent/elle-test-async-open-dir/nofile";
         let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::Open {
+        let req = IoRequest::unbounded(
+            IoOp::Open {
                 path: path.to_string(),
                 flags: libc::O_RDONLY | libc::O_CLOEXEC,
                 mode: 0o666,
                 direction: crate::port::Direction::Read,
                 encoding: crate::port::Encoding::Text,
             },
-            port: Value::NIL,
-            timeout: None,
-        };
+            Value::NIL,
+        );
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
-        let completions = backend.wait(-1).unwrap();
+        let completions = backend.wait(None).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         assert!(
@@ -299,21 +285,23 @@ fn test_async_open_with_timeout_succeeds_on_regular_file() {
             ),
         );
         let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::Open {
+        let req = IoRequest::unbounded(
+            IoOp::Open {
                 path: path.clone(),
                 flags: libc::O_RDONLY | libc::O_CLOEXEC,
                 mode: 0o666,
                 direction: Direction::Read,
                 encoding: Encoding::Text,
             },
-            port: port_val,
-            timeout: Some(std::time::Duration::from_millis(5000)),
-        };
+            port_val,
+        )
+        .within(crate::io::request::Bound::per_op(
+            std::time::Duration::from_millis(5000),
+        ));
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
-        let completions = backend.wait(-1).unwrap();
+        let completions = backend.wait(None).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         // Regular file opens instantly — should succeed before the 5s timeout.

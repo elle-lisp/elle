@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-30
 //! `CompletionHub`: the channel every worker reports through, the stop pipes
 //! that end its operations, and its crew.
 //!
@@ -65,19 +65,19 @@ impl CompletionHub {
     }
 
     /// The bound for an operation that can wait for something that may never
-    /// happen: the caller's deadline, plus a fresh stop pipe. The read end goes
+    /// happen: the caller's bound, plus a fresh stop pipe. The read end goes
     /// to the worker inside the `Bounds`, which owns it for the operation's
     /// lifetime; the write end stays here until the completion is reaped.
     ///
     /// When the process is out of descriptors there is no stop pipe, and the
-    /// operation runs uncancellable — still bounded by the caller's `:timeout`,
-    /// which the same wait enforces.
-    pub(in crate::io) fn bounds(&mut self, id: SubmissionId, timeout: Option<Duration>) -> Bounds {
+    /// operation runs uncancellable — still bounded by the caller's `:timeout`
+    /// and `:deadline`, which the same wait enforces.
+    pub(in crate::io) fn bounds(&mut self, id: SubmissionId, bound: Bound) -> Bounds {
         let stop = super::opbound::open_stop_pipe().map(|pipe| {
             self.stops.insert(id.as_u64(), pipe.write_fd);
             pipe.read_fd
         });
-        Bounds::new(timeout, stop)
+        Bounds::new(bound, stop)
     }
 
     /// Ask an operation to stop. A second byte would say nothing the first has

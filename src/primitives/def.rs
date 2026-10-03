@@ -1,12 +1,13 @@
-//! audited: 2026-09-21
+// audited: 2026-09-29
 //! Primitive definition type for declarative registration.
+//!
+//! src/primitives/AGENTS.md
+//! docs/impl/region/effects.md
 //!
 //! Each primitive module exports a `static PRIMITIVES: &[PrimitiveDef]`
 //! table. `register_primitives` iterates all tables to register
 //! primitives with the VM and build the metadata maps. `Doc` and
 //! `PrimitiveMeta` live in `defmeta.rs`.
-//!
-//! src/primitives/AGENTS.md
 
 use crate::signals::Signal;
 use crate::value::types::{Arity, PrimFn};
@@ -31,9 +32,10 @@ pub enum RetType {
     Bool,
     String,
     /// Mutable string (`@string`). Sound only for a primitive that *always*
-    /// yields a mutable string (the `@string` constructor builds fresh; the
-    /// `bytes`/`@bytes` lesson: a coercion that inherits the argument's
-    /// mutability is NOT a clean `Mutable*`/immutable return type).
+    /// yields a mutable string (the `@string` constructor builds fresh). A
+    /// coercion that inherits the argument's mutability is NOT a clean
+    /// `Mutable*`/immutable return type, which is why `bytes` and `@bytes`
+    /// override their argument's.
     MutableString,
     Keyword,
     Bytes,
@@ -44,16 +46,14 @@ pub enum RetType {
     MutableStruct,
     Set,
     MutableSet,
-    /// A fiber, on every normally-completing path (`fiber/new`). Beside type
-    /// inference, the ownership forest reads this: a declared-`Fiber` call's
-    /// result region joins `RegionInfo::fiber_result_regions` and is never a
-    /// member of a region-rooted Owned subtree — a fiber acquires aliases by
-    /// merely running (the scheduler's parent/child chain, `fiber/child`-style
-    /// graph reads), so no structural obligation can bound its borrows
-    /// (docs/impl/region/adopt.md § "The fiber member — refused at the class
-    /// level"). A NULLABLE fiber result (`fiber/child` before any resume)
-    /// declares `Unknown` instead, or the type-dispatch prune would cut a live
-    /// nil arm.
+    /// A fiber, on every normally-completing path (`fiber/new`). Beside type inference,
+    /// the ownership forest reads this: a declared-`Fiber` call's result region joins
+    /// `RegionInfo::fiber_result_regions` and is never a member of a region-rooted
+    /// Owned subtree — a fiber acquires aliases by merely running (the scheduler's
+    /// parent/child chain, `fiber/child`-style graph reads), so no structural
+    /// obligation can bound its borrows (docs/impl/region/adopt.md). A NULLABLE fiber
+    /// result (`fiber/child` before any resume) declares `Unknown` instead, or the
+    /// type-dispatch prune would cut a live nil arm.
     Fiber,
     /// Returns its first argument (mutating pass-throughs).
     FirstArg,
@@ -61,7 +61,7 @@ pub enum RetType {
 
 /// Declared region behavior of a primitive — the native-call analogue of
 /// Rule 2's opaque-call exception and Rule 5's escape list
-/// (docs/impl/region/effects.md "Native region effects: declared, not guessed").
+/// (docs/impl/region/effects.md).
 ///
 /// The region solver keys the opaque-call arg clique on this:
 /// `Immediate`/`Fresh`/`PassThrough` calls record no may-store edges
@@ -87,7 +87,7 @@ pub enum RegionEffect {
     /// result MAY embed references to the arguments (`pair`, `list`,
     /// struct constructors) — those are alloc-scan counted (Rule 5), so
     /// an embedding constructor is `Fresh`, not `Stores`. (An immediate
-    /// result — e.g. a nil error-path return — is always permitted; the
+    /// result — for example a nil error-path return — is always permitted; the
     /// claim constrains the heap case. Same for the variants below.)
     Fresh,
     /// A heap result is one of the arguments or a value living in an
@@ -111,7 +111,7 @@ pub enum RegionEffect {
     /// reference — it is keyed on a region pair, and at a real call site the
     /// channel is typically an upvalue or module-level binding, so no pair
     /// exists and no incref would be emitted
-    /// (tests/elle/region-chan-send-owned-param-uaf.lisp). The *escape* of the
+    /// (tests/impl/region-chan-send-owned-param-uaf.lisp). The *escape* of the
     /// message is the escape analysis's fiber/send facet (`hir::escape`), the
     /// **send** half of the ownership forest's fiber-facet Shared seed. The
     /// distinction from `Stores` is the *frontier*: a `Stores` into a local
@@ -126,7 +126,7 @@ pub enum RegionEffect {
     /// struct, returns a mutable one). No solver edges — a compile-time
     /// clique incref would double-count the funnel's runtime incref
     /// against the container's single free-time cascade decref (the
-    /// `put`/`push` store probes in `tests/elle/oracle.lisp` pin the
+    /// `put`/`push` store probes in `tests/impl/oracle.lisp` pin the
     /// seam reclaiming). No result-side
     /// oracle constraint, exactly as `Mixed`.
     Funnel,
@@ -134,13 +134,13 @@ pub enum RegionEffect {
     /// or copied out — into a Rust `String`/`Vec`, the kernel, a fresh
     /// structure — never retained uncounted), but the result is non-fresh and
     /// non-pass-through: it lives in neither the call's own region nor an
-    /// argument's (e.g. a value minted on the scheduler heap and delivered by
+    /// argument's (for example a value minted on the scheduler heap and delivered by
     /// a fiber resume — `subprocess/exec`'s process struct). `Mixed` minus the
     /// store: NO arg clique (nothing is stored, so the clique would only leak)
     /// and no result-side oracle constraint (the result may live anywhere).
     /// The clique is keyed on the *store*, not the result shape, so a no-store
     /// opaque-result native is `Opaque`, never `Mixed`
-    /// (docs/impl/region/effects.md § Opaque).
+    /// (docs/impl/region/effects.md).
     Opaque,
     /// The listed (0-based) arguments are DELIVERED to another fiber — installed
     /// into that fiber's signal slot — and the result is unbounded. The fiber
@@ -169,7 +169,7 @@ pub enum RegionEffect {
     /// so `chan/send`'s seam retain IS the message's reference and the receive
     /// lowers it. A fiber's signal slot is a scanned field of a region-managed
     /// fiber object, so an outliving install is balanced by the fiber's
-    /// free-time signal scan (docs/impl/region/effects.md § `Delivers`).
+    /// free-time signal scan (docs/impl/region/effects.md).
     Delivers { args: &'static [usize] },
     /// Examined, and the native stores arguments *uncounted* (the property
     /// the arg clique exists to cover) — and/or returns a result that is
@@ -191,7 +191,7 @@ pub enum RegionEffect {
 /// means adding it here with a default; existing tables use
 /// `..PrimitiveDef::DEFAULT`.
 pub struct PrimitiveDef {
-    /// The Elle-facing name (e.g., "math/sin", "pair").
+    /// The Elle-facing name (for example "math/sin", "pair").
     pub name: &'static str,
     /// The Rust implementation.
     pub func: PrimFn,
@@ -204,7 +204,7 @@ pub struct PrimitiveDef {
     /// Parameter names for signature help.
     /// Empty slice for nullary or variadic-only functions.
     pub params: &'static [&'static str],
-    /// Module/category (e.g., "math", "string", "file").
+    /// Module/category (for example "math", "string", "file").
     /// Empty string for core (unprefixed) primitives.
     pub category: &'static str,
     /// Runnable example in Elle syntax. Picked up by elle-doc.
@@ -226,8 +226,8 @@ pub struct PrimitiveDef {
     /// (`find_object_cross_refs`) that counts the same embedding at allocation. Without
     /// it the ownership forest cannot see a captured value flow OUT through an escaping
     /// result and would fold it into the capturing closure's Owned subtree
-    /// (docs/impl/region/effects.md § "Native region effects"; region/adopt.md § "The
-    /// funnel adopt" — the side-field embed analog). Empty (the default) for a `Fresh`
+    /// (docs/impl/region/effects.md; docs/impl/region/adopt.md, the side-field
+    /// embed analog). Empty (the default) for a `Fresh`
     /// native that embeds none of its arguments (`popn`), which is exactly why `Fresh`
     /// alone cannot carry the fact. `with-traits` is the canonical declarant (`&[1]` —
     /// its `traits` side-field embeds the arg-1 table into the cloned result).
@@ -240,7 +240,7 @@ pub struct PrimitiveDef {
     /// the pass-through retain (the caller's owning reference), but it must be
     /// taken BEFORE the container releases its own — otherwise a sole-owned
     /// element's region is freed while the returned Value still points into it
-    /// (the free-before-retain UAF the `raw-pop` oracle probe pins). The native
+    /// (the `raw-pop` probe in tests/impl/probe/store.lisp pins it). The native
     /// body performs that retain itself (`arena::pop_with_decref`), so
     /// `dispatch_native_call` must SKIP its own `pass_through_retain` — applying it
     /// again double-counts (a per-op leak). Orthogonal to `effect` (`%pop` is
@@ -262,7 +262,7 @@ pub struct PrimitiveDef {
     /// `EscapeSite::NativeCallResult` retain in the body. The `moves_out`
     /// sibling states the same "body already supplied the reference" fact for
     /// container removal; this flag states it for thunk-run production
-    /// (docs/impl/region/effects.md § "Native region effects").
+    /// (docs/impl/region/effects.md).
     /// Consumed only at dispatch — no solver site reads it (a thunk-run result
     /// is a call result like any other on the compile side). False (the
     /// default) for every native whose result the dispatch retain must fund.
@@ -419,6 +419,3 @@ primitive!(
         arity: Arity::AtLeast(0),
     }
 );
-
-// `Doc` and `PrimitiveMeta` moved to `defmeta.rs`, re-exported above so the
-// `crate::primitives::def::` paths that name them resolve unchanged.

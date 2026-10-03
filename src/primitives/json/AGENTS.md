@@ -1,5 +1,7 @@
 # primitives/json
 
+<!-- audited: 2026-09-28 -->
+
 JSON parsing and serialization primitives.
 
 ## Responsibility
@@ -12,8 +14,8 @@ JSON parsing and serialization primitives.
 
 | Module | Purpose |
 |--------|---------|
-| `parser.rs` | Recursive descent JSON parser |
-| `serializer.rs` | JSON serialization (compact and pretty-printed) |
+| [parser.rs](parser.rs) | Recursive descent JSON parser |
+| [serializer.rs](serializer.rs) | JSON serialization (compact and pretty-printed) |
 
 ## Interface
 
@@ -25,8 +27,8 @@ JSON parsing and serialization primitives.
 | `JsonParser::new(input, ctx)` | Create parser for JSON string (string keys); allocates through `ctx` |
 | `JsonParser::new_with_opts(input, use_keyword_keys, ctx)` | Create parser with options; allocates through `ctx` |
 | `JsonParser::parse()` | Parse JSON → Elle value |
-| `serialize_value(value)` | Serialize value → JSON string |
-| `serialize_value_pretty(value, indent)` | Serialize value → pretty JSON string |
+| `serialize_value(value, symbols)` | Serialize value → JSON string, spelling keywords through `symbols` |
+| `serialize_value_pretty(value, symbols, indent_level)` | Serialize value → pretty JSON string |
 | `escape_json_string(s)` | Escape string for JSON output |
 
 ## Primitives
@@ -114,21 +116,20 @@ write as JSON objects; keywords write as JSON strings.
 
 6. **No external JSON library.** All parsing and serialization is hand-written to avoid dependencies.
 
-6. **All three primitives declare `Signal::errors()`.** The declaration matches the `SIG_ERROR` each returns, so effect inference propagates `:error` to callers and `try` reaches the failure at any call depth. `tests/elle/prim-json.lisp` pins this.
+7. **All three primitives declare `Signal::errors()`.** The declaration matches the `SIG_ERROR` each returns, so effect inference propagates `:error` to callers and `try` reaches the failure at any call depth. [prim-json.lisp](../../../tests/lang/prim-json.lisp) pins this.
 
-7. **A keyword writes as its spelling, or not at all.** A keyword IS a name
+8. **A keyword writes as its spelling, or not at all.** A keyword IS a name
    hash; the spelling comes from the calling instance's memo or from the static
-   vocabulary (`docs/impl/symbol.md`). Both serializers thread
+   vocabulary ([symbol.md](../../../docs/impl/symbol.md)). Both serializers thread
    `ctx.vm().symbols()` for exactly that lookup. There is no fallback: a
    rendering of the hash would parse back as a different name, so a spelling
    neither source carries is a `serde-error` naming the hash it could not
    spell. That error is the module's canary for a missed learning site or a
    missing vocabulary entry elsewhere in the runtime — the value is fine, the
-   name is missing. `tests/elle/keyword-spelling.lisp` pins the round trip for
+   name is missing. [keyword-spelling.lisp](../../../tests/lang/keyword-spelling.lisp) pins the round trip for
    the runtime's own keys.
 
 ## Dependents
 
-- `primitives/registration.rs` — registers JSON primitives
-- `primitives/module_init.rs` — initializes JSON module
+- [registration.rs](../registration.rs) — registers JSON primitives
 - Elle code — via `json/parse`, `json/serialize`, `json/pretty`

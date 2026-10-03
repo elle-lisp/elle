@@ -193,7 +193,7 @@ back to the operating system at once. So a long-running program's resident
 memory falls when its live data falls.
 
 This is where most of the current work goes. The project measures leaks with
-gauges ([tests/elle/oracle.lisp](tests/elle/oracle.lisp)) and closes them one
+gauges ([tests/impl/oracle.lisp](tests/impl/oracle.lisp)) and closes them one
 class at a time. Two costs remain visible today:
 
 - A region owns at least one 4 KiB page. A value that keeps a region of its own
@@ -274,8 +274,8 @@ the source file. See [docs/epochs.md](docs/epochs.md).
   ([docs/impl/gpu.md](docs/impl/gpu.md)).
 - **Environment images and fleet**, described under [Images](#images).
 - **WASM.** The WebAssembly backend was set aside during the memory rewrite.
-  Under `--wasm=full` it frees no memory and fails about half of the test
-  corpus ([docs/impl/wasm.md](docs/impl/wasm.md)).
+  Under `--wasm=full` it frees no memory and fails about half of the
+  language suite ([docs/impl/wasm.md](docs/impl/wasm.md)).
 
 ## Using Elle
 
@@ -308,7 +308,7 @@ git submodule update --init plugins mcp
 ```
 
 [CONTRIBUTING.md](CONTRIBUTING.md) describes how to work on Elle and which
-tests to run. The full corpus takes about 30 minutes on a release build.
+tests to run. The full `make smoke` takes about 30 minutes on a release build.
 
 ## License
 

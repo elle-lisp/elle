@@ -1,4 +1,4 @@
-//! audited: 2026-09-20
+//! audited: 2026-09-30
 //! Eventfd-bridge tests for the io_uring platform.
 //!
 //! src/io/AGENTS.md
@@ -9,40 +9,38 @@
 //! completion to wake that one wait, a pool worker must raise a bridge eventfd
 //! whose standing `POLL_ADD` produces a CQE. These tests pin that the bridge
 //! actually wakes the wait — without it, a hub completion is invisible to the
-//! ring and only surfaces on a later, separately-woken tick (or, pre-bridge,
-//! after a wakeup-rescue cap).
+//! ring and only surfaces on a later, separately-woken tick.
 
 use super::*;
 
 /// A `Task` (pure hub work, no ring CQE) submitted on the uring backend must
 /// wake the single `io_uring_enter` wait and be returned by one `wait()` call.
 ///
-/// The closure sleeps 250 ms — longer than the pre-bridge 100 ms wakeup-rescue
-/// cap — so a capped wait would return EMPTY (stranding the completion until a
-/// later tick) while the bridged wait blocks on the ring until the eventfd
-/// fires at ~250 ms and returns the completion.
+/// The closure sleeps 250 ms. The counter-factual is a wait capped at 100 ms
+/// to rescue a missed wakeup: it returns EMPTY and strands the completion
+/// until a later tick, while the bridged wait blocks on the ring until the
+/// eventfd fires at ~250 ms and returns the completion.
 ///
-/// `wait(5000)` uses a bounded timeout, not `-1`: a deaf bridge then surfaces
-/// as an empty return after 5 s rather than an infinite hang that would wedge
-/// the whole `cargo test` run.
+/// `wait(PATIENCE)` is bounded rather than `wait(None)`: a deaf bridge then
+/// surfaces as an empty return after 5 s rather than an infinite hang that
+/// would wedge the whole `cargo test` run.
 #[test]
-fn uring_pool_task_wakes_the_single_wait_past_old_cap() {
+fn a_pool_task_wakes_the_rings_single_wait() {
     crate::value::arena::with_test_region(|| {
         let backend = AsyncBackend::new().unwrap();
 
-        let req = IoRequest {
-            op: IoOp::Task(crate::io::request::TaskFn::new(Box::new(|| {
+        let req = IoRequest::unbounded(
+            IoOp::Task(crate::io::request::TaskFn::new(Box::new(|| {
                 std::thread::sleep(std::time::Duration::from_millis(250));
                 (0, Vec::new())
             }))),
-            port: crate::value::Value::NIL,
-            timeout: None,
-        };
+            crate::value::Value::NIL,
+        );
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
 
-        let completions = backend.wait(5000).unwrap();
+        let completions = backend.wait(PATIENCE).unwrap();
         assert_eq!(
             completions.len(),
             1,

@@ -1,135 +1,18 @@
+// audited: 2026-09-28
+//! Pins adopt-edge emission for combined subtrees: store, capture and deep nesting threaded through one owner assignment.
+//!
+//! docs/impl/region/adopt.md
+//!
+//! The structural pins exercise each emit mode in isolation (a flat or deep store
+//! star, a lone local capture). These probe the modes COMBINED in one
+//! externally-unique subtree, where `compute_adopt_edges`'s owner assignment must
+//! thread store edges and re-derived capture edges through the same `containers_of`
+//! graph. Each assertion is written from the spec ("Both feed owner assignment … each
+//! member adopted by its actual parent") — a member's owner is the root when it has a
+//! direct root edge, else its unique interior container, whether the edge is a store
+//! or a capture.
+
 use super::*;
-
-// ── ownership inference: a `Fresh` native's embed declaration ────────────────────
-//
-// A `Fresh` native whose result EMBEDS an argument declares which args it embeds
-// (`PrimitiveDef::embeds`, region/effects.md § "Native region effects"). The walk's
-// `Fresh` arm then records `result ⊇ arg` in `containment_edges` — the compile-time
-// analog of the runtime alloc-scan (`find_object_cross_refs`) that counts the same
-// embedding. Without it the forest cannot see a captured value flow OUT through an
-// escaping result, so it wrongly folds the value into the capturing closure's Owned
-// subtree. `with-traits` is the canonical embedder: it clones its arg-0 value with the
-// arg-1 struct attached as the `traits` side-field, so it embeds arg 1 (`embeds: &[1]`).
-
-/// The single region captured by the lambda whose `alloc_region` is `closure` — its
-/// sole capture's binding's sole source region. The embed-declaration probe's shape
-/// has exactly one capture (the trait table); panics otherwise.
-fn sole_captured_region(hir: &Hir, info: &RegionInfo, closure: Region) -> Region {
-    fn walk(h: &Hir, info: &RegionInfo, closure: Region, out: &mut Vec<Region>) {
-        if let HirKind::Lambda { captures, .. } = &h.kind {
-            if info.alloc_region.get(&h.id) == Some(&closure) {
-                for c in captures {
-                    if let Some(rs) = info.binding_source_regions.get(&c.binding) {
-                        out.extend(rs.iter().copied().filter(|&r| r != closure));
-                    }
-                }
-            }
-        }
-        h.for_each_child(|c| walk(c, info, closure, out));
-    }
-    let mut out = Vec::new();
-    walk(hir, info, closure, &mut out);
-    out.sort_by_key(|r| r.0);
-    out.dedup();
-    assert_eq!(
-        out.len(),
-        1,
-        "shape must have exactly one captured region; got {out:?}",
-    );
-    out[0]
-}
-
-#[test]
-fn with_traits_embed_refuses_adopt_of_captured_escaping_table() {
-    // Fixture shape (tests/integration/fixtures/region-traits-capture-adopt-uaf.lisp):
-    // a closure `make` CAPTURES a struct `shared-tbl` and, in its body, attaches it as a
-    // trait table with `with-traits`. The traited RESULT escapes `make` (returned from
-    // its body) with its `traits` side-field still referencing the captured table.
-    //
-    // `with-traits` is a `Fresh` NATIVE that embeds arg 1 (the table) into the fresh
-    // result's `traits` side-field — declared by `PrimitiveDef::embeds = &[1]`. The walk
-    // records the containment edge `result ⊇ table`, so external uniqueness sees the
-    // table referenced from OUTSIDE make's subtree (by the escaping result region) and
-    // REFUSES to fold it in: the table stays Shared (per-region RC), reclaimed under the
-    // live result's reference.
-    //
-    // Counterfactual (RED before the embed declaration): with no `result ⊇ table` edge
-    // the forest judged the captured table externally unique to `make`, capture-adopted
-    // it, and make's subtree drop freed it under the escaped result's `traits` field — a
-    // use-after-free (`UpdateCapture` under `--trace=guardfree`; the fixture's SIGSEGV).
-    let src = "(begin (let [shared-tbl {:type :my-type}] \
-                        (let [make (fn (data) (with-traits [data] shared-tbl))] \
-                          (make 1))) \
-                      nil)";
-    let (hir, info, edges) = adopt_edges(src);
-    let make_r = sole_closure_region(&hir, &info);
-    let tbl = sole_captured_region(&hir, &info, make_r);
-    // Precondition: `make` genuinely captures the table (so absent the embed edge the
-    // forest would fold it into make's Owned subtree — the counterfactual's premise).
-    assert!(
-        closure_captures_region(&hir, &info, tbl, make_r),
-        "precondition: the closure r{} must capture the table r{}",
-        make_r.0,
-        tbl.0,
-    );
-    // The invariant: the captured table, embedded into an escaping result, is adopted by
-    // NOBODY — it stays Shared (per-region RC). Asserted FIRST so the counterfactual
-    // fails here (the table IS capture-adopted before the fix), on the real defect.
-    let adopts: Vec<(Region, Region)> = edges
-        .store
-        .values()
-        .chain(edges.capture.values())
-        .flatten()
-        .copied()
-        .collect();
-    assert!(
-        !adopts.iter().any(|&(m, _)| m == tbl),
-        "the captured table r{} embedded into an escaping result must NOT be adopted \
-         (it stays Shared) — got adopts {:?}",
-        tbl.0,
-        adopts,
-    );
-    let (_, _, owned) = owned_subtrees_with_effects(src);
-    assert!(
-        !in_some_owned_subtree(&owned, tbl),
-        "the captured-and-embedded table r{} must be in no Owned subtree; owned={:?}",
-        tbl.0,
-        owned,
-    );
-    // The mechanism: the fix records the with-traits FRESH result ⊇ the table region.
-    let (_, embed_src, result) = info
-        .containment_edges
-        .iter()
-        .copied()
-        .find(|&(_, src, _)| src == tbl)
-        .unwrap_or_else(|| {
-            panic!(
-                "with-traits (Fresh, embeds arg 1) must record `result ⊇ table` for the \
-                 captured table r{}; containment={:?}",
-                tbl.0, info.containment_edges,
-            )
-        });
-    assert_eq!(embed_src, tbl, "the embed's contained member is the table");
-    assert_ne!(
-        result, tbl,
-        "the embed's container is the with-traits result"
-    );
-    assert!(
-        info.fresh_result_regions.contains(&result),
-        "the embed container r{} is the with-traits FRESH result",
-        result.0,
-    );
-}
-
-// ── ownership inference: combined store + capture + deep-nesting subtrees ───────
-//
-// The pins above exercise each emit mode in isolation (a flat/deep store star, a lone
-// local capture). These probe the modes COMBINED in one externally-unique subtree, where
-// `compute_adopt_edges`'s owner assignment must thread store edges and re-derived capture
-// edges through the same `containers_of` graph. Each assertion is written from the spec
-// ("Both feed owner assignment … each member adopted by its actual parent") — a member's
-// owner is the root when it has a direct root edge, else its unique interior container,
-// regardless of whether the edge is a store or a capture.
 
 /// All `%pair` site regions in `hir` (the seed shapes have one; the two-capture shape has
 /// two), in program order. A local generalization of [`sole_pair_region`] for the
@@ -307,7 +190,7 @@ fn adopt_edges_claims_two_captures_in_one_closure() {
 
 #[test]
 fn adopt_edges_refuses_nested_capture_on_lifetime_overextension() {
-    // Boundary pin + step-3 frontier (NOT a bug — a sound conservative refusal). A closure
+    // Boundary pin: a sound conservative refusal. A closure
     // capturing a CLOSURE capturing a value — `c1 ⊇ c2 ⊇ p`, all CAPTURE edges, the shape a
     // closure-web is built from. `compute_owned_subtrees` ADMITS {c1, c2, p} as externally
     // unique (nothing escapes), but `compute_adopt_edges` REFUSES it on the lifetime
@@ -324,10 +207,8 @@ fn adopt_edges_refuses_nested_capture_on_lifetime_overextension() {
     // freeing `p` under a still-live reference the analysis cannot rule out.
     //
     // At runtime `p` IS dead when `(c1)` returns (c1/c2/p all discarded together), so a
-    // tighter transitive-through-capture last-use would let the forest claim this — that
-    // improvement is part of the cross-fiber owner = activation cut (which claims the
-    // closure-web). When it lands, this pin flips and forces the author to
-    // confirm the adopt then emits. Until then the refusal is the correct boundary.
+    // tighter transitive-through-capture last-use would let the forest claim this. Such a
+    // last-use flips this pin, and its author must then confirm that the adopt emits.
     let src = "(begin (let [p (%pair 1 2)] \
                         (let [c2 (fn [] (%first p))] \
                           (let [c1 (fn [] (c2))] (c1)))) \
@@ -440,8 +321,8 @@ fn adopt_edges_capture_root_with_store_child() {
 
 #[test]
 fn adopt_edges_refuses_captured_store_member_on_lifetime() {
-    // Boundary pin + UAF regression (NOT a bug — a sound conservative refusal, the
-    // owner-aware lifetime obligation). A two-level subtree whose interior cycle back-edge
+    // Boundary pin: a sound conservative refusal by the owner-aware lifetime
+    // obligation. A two-level subtree whose interior cycle back-edge
     // is a CAPTURE: `root` holds `m` (store `root ⊇ m`), `m` holds a closure `c` (store
     // `m ⊇ c`), and `c` captures `m` back (capture `c ⊇ m`) — the m↔c reference cycle. The
     // subtree {root, m, c} is admitted as externally unique, and `m`'s owner is the root
@@ -453,13 +334,13 @@ fn adopt_edges_refuses_captured_store_member_on_lifetime() {
     // is NOT suppressed — it fires at that over-extended position, AFTER the root's decref.
     // `@array` regions are Fresh call-results released value-based, so the root's drop frees
     // `m`, and `m`'s own later decref-value then `result_region_of`s a freed page: a
-    // use-after-free (the original failure this pin guards — `region_ownership` SIGSEGV'd
-    // under guardfree, runtime test `region_ownership_capture_back_edge_cycle_runs_sound`).
+    // use-after-free (the runtime face is `region_ownership_capture_back_edge_cycle_reclaims`
+    // in src/runtime/tests/ownership/owner.rs).
     //
     // The owner-aware obligation bounds a store-adopted member by its STRUCTURAL
     // `decref_point` (where its live decref fires), not the tight last-use, so `m`'s
-    // over-extension refuses the subtree — no REGION root owns it (this refusal is
-    // permanent and correct). The m↔c SCC itself is claimed by the ACTIVATION cut
+    // over-extension refuses the subtree — no REGION root owns it, and none should. The
+    // m↔c SCC itself is claimed by the ACTIVATION cut
     // instead (`activation_adopts_capture_back_edge_scc`), whose owner-node release
     // post-dominates the whole activation. The `(c)` call is present so `c` is genuinely
     // used; it does not change the refusal.

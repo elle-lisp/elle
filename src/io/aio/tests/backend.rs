@@ -1,4 +1,4 @@
-//! audited: 2026-09-29
+//! audited: 2026-09-30
 //! The backend's own lifecycle: construction, one submission through to its
 //! completion, and what a backend nobody dropped lets go of.
 //!
@@ -13,19 +13,19 @@ fn test_async_backend_new() {
     assert!(backend.is_ok());
 }
 
-/// A Linux binary built with the `no-uring` feature takes the thread pool, the
-/// platform a Mac runs, whether or not the ring would open.
+/// A Linux binary built without the `uring` feature takes the thread pool, the
+/// backend a Mac runs, whether or not the ring would open.
 ///
 /// The counter-factual: a feature the backend never reads builds, passes every
-/// other test here, and leaves the Thread-Pool I/O job running the whole corpus
-/// on the ring it exists to avoid.
-#[cfg(all(target_os = "linux", feature = "no-uring"))]
+/// other test here, and leaves the Thread-Pool I/O job running both suites on
+/// the ring it exists to avoid.
+#[cfg(all(target_os = "linux", not(feature = "uring")))]
 #[test]
-fn a_no_uring_build_takes_the_thread_pool() {
+fn a_build_without_uring_takes_the_thread_pool() {
     let backend = AsyncBackend::new().expect("a backend");
     assert!(
         !backend.is_uring(),
-        "a no-uring build came up on io_uring, so its corpus run never reaches the pool"
+        "a build without uring came up on io_uring, so its suites never reach the pool"
     );
 }
 
@@ -64,16 +64,8 @@ fn test_submit_returns_monotonic_ids() {
         let path = write_temp_file("hello");
         let port = open_read_port(&path);
 
-        let req1 = IoRequest {
-            op: PortOp::ReadAll.into(),
-            port,
-            timeout: None,
-        };
-        let req2 = IoRequest {
-            op: PortOp::ReadAll.into(),
-            port,
-            timeout: None,
-        };
+        let req1 = IoRequest::unbounded(PortOp::ReadAll.into(), port);
+        let req2 = IoRequest::unbounded(PortOp::ReadAll.into(), port);
 
         let id1 = backend
             .submit(&req1, crate::io::pending::Submitter::for_test())
@@ -96,11 +88,7 @@ fn test_submit_closed_port_errors() {
         let port = port_val.as_external::<Port>().unwrap();
         port.close();
 
-        let req = IoRequest {
-            op: PortOp::ReadAll.into(),
-            port: port_val,
-            timeout: None,
-        };
+        let req = IoRequest::unbounded(PortOp::ReadAll.into(), port_val);
         let result = backend.submit(&req, crate::io::pending::Submitter::for_test());
         assert!(result.is_err());
 
@@ -122,16 +110,12 @@ fn test_submit_and_wait_read() {
         let path = write_temp_file("async read test");
         let port = open_read_port(&path);
 
-        let req = IoRequest {
-            op: PortOp::ReadAll.into(),
-            port,
-            timeout: None,
-        };
+        let req = IoRequest::unbounded(PortOp::ReadAll.into(), port);
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
 
-        let completions = backend.wait(-1).unwrap();
+        let completions = backend.wait(None).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         assert!(completions[0].result.is_ok());
@@ -149,19 +133,18 @@ fn test_submit_and_wait_write() {
         let path = temp_path("async-write");
         let port = open_write_port(&path);
 
-        let req = IoRequest {
-            op: PortOp::Write {
+        let req = IoRequest::unbounded(
+            PortOp::Write {
                 data: h.ctx().string("async write"),
             }
             .into(),
             port,
-            timeout: None,
-        };
+        );
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
 
-        let completions = backend.wait(-1).unwrap();
+        let completions = backend.wait(None).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
         assert!(completions[0].result.is_ok());
@@ -189,8 +172,7 @@ fn test_completion_into_value_success() {
         let v = c.into_value(&ctx);
         // The struct is born in the REAPING call's own region, so the array
         // `io/wait` collects it into and the struct share one region and one
-        // release (docs/impl/region/ctx.md § "A helper reached from inside a
-        // call allocates through THAT call's ctx").
+        // release (docs/impl/region/ctx.md).
         assert_eq!(
             crate::value::arena::region_of(h.heap(), v),
             Some(ctx.test_region()),
@@ -239,7 +221,7 @@ fn test_completion_into_value_error() {
 #[test]
 fn test_wait_timeout_zero_returns_empty() {
     let backend = AsyncBackend::new().unwrap();
-    let completions = backend.wait(0).unwrap();
+    let completions = backend.wait(Some(Duration::ZERO)).unwrap();
     assert!(completions.is_empty());
 }
 
@@ -273,13 +255,12 @@ fn a_stranded_backend_lets_go_before_its_heap_tears_down() {
     // is the only thing that can let the fiber's region go. The ring would reap
     // the sleep at the drain and hide the question.
     let backend = AsyncBackend::new_thread_pool().unwrap();
-    let req = IoRequest {
-        op: IoOp::Sleep {
+    let req = IoRequest::unbounded(
+        IoOp::Sleep {
             duration: std::time::Duration::from_secs(30),
         },
-        port: Value::NIL,
-        timeout: None,
-    };
+        Value::NIL,
+    );
     backend
         .submit(&req, crate::io::pending::Submitter::new(heap, fiber))
         .unwrap();

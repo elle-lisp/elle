@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-09-28
 //! Where the solver places a release around a loop: once per activation for a
 //! cell, once per iteration for what the body allocates.
 //!
@@ -7,17 +7,15 @@
 
 use super::*;
 
-/// Counter-factual for the Family E capture-cell UAF: a `(begin (def x
-/// v) (defn f [] x) ...)` form pre-allocates a `MakeCaptureCell` for
+/// A `(begin (def x v) (defn f [] x) ...)` form pre-allocates a `MakeCaptureCell` for
 /// `x` at the Begin's HirId, and a sibling top-level form re-uses the
 /// same binding (here, the final `x` reference at the file's top level).
 /// The cell's region must outlive every use of `x`, including the
-/// sibling form's. Without this, the cell is freed at the Begin's
-/// `decref_point` and the next top-level access reads through a dangling
-/// `CaptureCell` Value into a region that's been reclaimed — canonical
-/// UAF caught by `as_capture_cell` at `handle_update_capture` /
-/// `handle_unwrap_capture`. Minimal in-file reproducer matches
-/// `tests/elle/destructuring.lisp` forms 70 + 187.
+/// sibling form's. The counter-factual: the cell is freed at the Begin's
+/// `decref_point`, and the next top-level access reads through a dangling
+/// `CaptureCell` Value into a reclaimed region, which `as_capture_cell` catches
+/// at `handle_update_capture` / `handle_unwrap_capture`. tests/lang/destructuring.lisp
+/// runs this shape at top level.
 #[test]
 fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() {
     use crate::symbol::SymbolTable;
@@ -126,8 +124,7 @@ fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() 
     );
 }
 
-/// Counter-factual for the env-cell-in-loop UAF
-/// (tests/elle/region-capture-cell-loop-uaf.lisp). A
+/// The counter-factual for tests/impl/region-capture-cell-loop-uaf.lisp. A
 /// `@`-mutable captured local DEFINED INSIDE a loop and captured by a closure
 /// built in that loop is a `populate_env` env cell minted EXACTLY ONCE per
 /// activation (the box is not re-allocated per iteration; only its content is
@@ -154,9 +151,9 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
     // callable-array form `(s 0)`, NOT the cell itself: returning the cell would
     // put its region in the return frontier (escape's return facet), where the
     // ownership analysis would treat it as the closure's tail value and elide the
-    // per-iteration decref, masking the bug. Reading an element
+    // per-iteration decref, masking the fault. Reading an element
     // keeps the env cell's release live and in-loop — exactly the faulting
-    // shape (verified: this source UAFs under the plain VM before the fix).
+    // shape.
     let source = "(defn go [] \
                      (def @acc 0) (def @i 0) \
                      (while (%lt i 3) \
@@ -221,7 +218,7 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
     // loop, NEVER strictly inside a loop body (a proper descendant of a While).
     // Hoisted, decref_point IS the loop node (the post-loop emission point), so
     // it is allowed to equal a While; only a strict-descendant placement is the
-    // per-iteration bug. Compared via the structural order index, not HirId
+    // per-iteration release. Compared via the structural order index, not HirId
     // magnitude (which ANF makes meaningless — see compute_order).
     let dord = ord(cell_decref);
     let strictly_inside = whiles.iter().find(|&&w| {
@@ -239,8 +236,8 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
     );
 }
 
-/// Counter-factual for the unrecorded-binder hoist
-/// (tests/elle/region-match-bind-loop.lisp). A `match` arm's pattern binds a
+/// The counter-factual for the unrecorded-binder hoist
+/// (tests/impl/region-match-bind-loop.lisp). A `match` arm's pattern binds a
 /// projection out of the scrutinee by an UNCOUNTED read, so the projection
 /// resolves to the scrutinee's own region and the binding-chain extension carries
 /// the scrutinee's release out to wherever the projection is last used. Inside a
@@ -249,7 +246,7 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
 /// recorded scope node. A pattern that records no scope has none, absence reads as
 /// bound-outside, and the release is hoisted to the loop node: one release for N
 /// per-iteration scrutinees, N−1 held to fiber teardown
-/// (docs/impl/region/anchors.md § "Every binder records its scope").
+/// (docs/impl/region/anchors.md).
 ///
 /// Region-analysis invariant: the scrutinee's region is allocated in the loop
 /// body, so its `decref_point` must stay STRICTLY inside the loop's subtree —
@@ -345,8 +342,8 @@ fn match_pattern_binding_keeps_scrutinee_release_inside_the_loop() {
     );
 }
 
-/// Counter-factual for the loop-local-closure tail UAF
-/// (tests/elle/region-loop-local-closure-tail-uaf.lisp).
+/// The counter-factual for the loop-local closure's tail
+/// (tests/impl/region-loop-local-closure-tail-uaf.lisp).
 /// A closure created INSIDE a loop, called in place, whose body's tail is a
 /// fresh allocation, is INLINABLE — so `try_inline_call` re-walks its body at
 /// the call site (in the caller's discarding context) to discover edges. That
@@ -356,8 +353,7 @@ fn match_pattern_binding_keeps_scrutinee_release_inside_the_loop() {
 /// passes read escape's return frontier *projected through* `alloc_region`, so a
 /// clobbered entry makes the two disagree on which region the body's tail names —
 /// a stale region spared by one path while the other emits a decref on the
-/// clobbered one, so the closure frees the value it returns (the
-/// stale-region-deref UAF).
+/// clobbered one, so the closure frees the value it returns.
 ///
 /// Region-analysis invariant: the region the lowerer will emit for the closure
 /// body's tail allocation (`alloc_region[tail]`) MUST be the region the return
@@ -431,8 +427,9 @@ fn loop_local_closure_tail_alloc_region_matches_return_frontier() {
     // closure hands back). That is escape's judgment — `record_frontier_sites`
     // records the atomless tail aggregate — projected to its region by
     // `region::infer::escape`. If it were absent the closure would free its own
-    // tail-returned value (region-loop-local-closure-tail-uaf.lisp); the inlined
-    // re-walk must therefore leave `alloc_region` in sync with the projection.
+    // tail-returned value (tests/impl/region-loop-local-closure-tail-uaf.lisp); the
+    // inlined re-walk must therefore leave `alloc_region` in sync with the
+    // projection.
     let escape = crate::hir::analyze_escape(
         &hir,
         &arena,
@@ -447,7 +444,7 @@ fn loop_local_closure_tail_alloc_region_matches_return_frontier() {
         frontier.contains(&tail_region),
         "loop-local closure tail region r{} (alloc_region of the %pair body @{}, the \
          region the lowerer emits + releases) must be in the return frontier {:?} so the \
-         escape analysis stays in sync with it (region-loop-local-closure-tail-uaf.lisp)",
+         escape analysis stays in sync with it",
         tail_region.0,
         tail_id.0,
         frontier.iter().map(|r| r.0).collect::<Vec<_>>(),

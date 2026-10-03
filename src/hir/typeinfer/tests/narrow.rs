@@ -1,8 +1,8 @@
-// audited: 2026-09-07
-// src/hir/AGENTS.md
-// docs/impl/hir.md
+// audited: 2026-09-28
 //! What the inference proves about a binding: dispatch-arm narrowing, the
 //! let-aliased scrutinee, and the `or`/`and` operand join.
+//!
+//! docs/impl/typeinfer.md
 
 use super::{compile_result, inferred_types};
 use crate::hir::types::TypeInterner;
@@ -13,8 +13,8 @@ use crate::hir::types::TypeInterner;
 /// static guarantee it is even a container — and a lowered call-position
 /// intrinsic carries no runtime guard to catch a mismatch. Prove-or-reject:
 /// an unproven operand makes the silent lowering illegal, so it must be a
-/// compile error. Counter-factual:
-/// before the op-site consult this lowered silently (compiled clean).
+/// compile error. The counter-factual: without the op-site consult this lowers
+/// silently and compiles clean.
 #[test]
 fn silent_unproven_monomorphic_op_is_compile_error() {
     let err = compile_result("(defn f [c] (%push-array-mut c 3))")
@@ -31,8 +31,8 @@ fn silent_unproven_monomorphic_op_is_compile_error() {
 /// is the spec's motivating shape — the gate must admit it.
 ///
 /// Multi-arm routing-shape discharge (the real stdlib `push`/`put` shape, all
-/// six monomorphic ops) is covered behaviourally — compile *and* run, on every
-/// tier — by the corpus test `tests/elle/monoroute.lisp`, which exercises the
+/// six monomorphic ops) is covered behaviourally — compile *and* run — by
+/// tests/lang/monoroute.lisp, which exercises the
 /// actual stdlib routing rather than a transcribed copy of it.
 #[test]
 fn proven_monomorphic_op_compiles_under_match_narrowing() {
@@ -49,10 +49,9 @@ fn proven_monomorphic_op_compiles_under_match_narrowing() {
 /// `(f @[1])` caller), `meet(MUTABLE_ARRAY, ARRAY) = BOTTOM` — so a `meet`-based
 /// narrowing leaves the `:array → %push-array` arm's container unproven and the
 /// silent monomorphic op a compile error, *even though that arm only runs when
-/// `c` is an immutable array*. This is exactly the stdlib `push`/`put` shape
-/// (called all over with `@array`s), which made the whole stdlib fail
-/// to compile at `<stdlib>:477` — the regression this pins. Override discharges
-/// it; the arm narrows `c` to `ARRAY` regardless of the wider accumulated type.
+/// `c` is an immutable array*. This is the stdlib `push`/`put` shape, called all
+/// over with `@array`s, so the `meet` reading fails to compile the stdlib. Override
+/// discharges it; the arm narrows `c` to `ARRAY` regardless of the wider accumulated type.
 #[test]
 fn match_typeof_arm_narrows_authoritatively_over_a_called_param() {
     compile_result(
@@ -111,7 +110,7 @@ fn match_typeof_narrows_struct_arms() {
     );
 }
 
-/// String arms — exercises the new MutableString TyId.
+/// String arms, both mutabilities.
 #[test]
 fn match_typeof_narrows_string_arms() {
     assert!(
@@ -124,7 +123,7 @@ fn match_typeof_narrows_string_arms() {
     );
 }
 
-/// Bytes arms — exercises the new MutableBytes TyId.
+/// Bytes arms, both mutabilities.
 #[test]
 fn match_typeof_narrows_bytes_arms() {
     assert!(
@@ -137,8 +136,7 @@ fn match_typeof_narrows_bytes_arms() {
     );
 }
 
-/// Set arms — exercises the new Set/MutableSet TyIds (the previously-deferred
-/// "set has no TyId" row).
+/// Set arms, both mutabilities.
 #[test]
 fn match_typeof_narrows_set_arms() {
     assert!(
@@ -193,8 +191,8 @@ fn match_typeof_let_aliased_scrutinee_narrows() {
 /// The motivating shape end-to-end: a let-aliased `(type-of c)` dispatch must
 /// discharge the monomorphic `%push-array-mut` obligation in its `:@array` arm,
 /// just like the inline form (`proven_monomorphic_op_compiles_under_match_narrowing`).
-/// Counter-factual: before alias resolution this rejected — the arm proved
-/// nothing about `c`, so the silent op was an unprovable-operand compile error.
+/// The counter-factual: without alias resolution the arm proves nothing about `c`,
+/// so the silent op is an unprovable-operand compile error.
 #[test]
 fn let_aliased_typeof_match_discharges_monomorphic_op() {
     compile_result(
@@ -227,8 +225,8 @@ fn match_typeof_let_alias_declines_when_subject_reassigned() {
 /// `(or a b)` returns one of its operands (the first truthy, else the last), so
 /// its result type is the JOIN of the operand types — exactly as `if` joins its
 /// branches. When both operands are proven `Number`, the `or` is `Number` and can
-/// feed a silent `%add`. Counter-factual: while `or` typed to Top, this rejected
-/// with `operand 1 … not a proven number`. (`(or a b)` here uses two distinct
+/// feed a silent `%add`. The counter-factual: an `or` typed to Top rejects with
+/// `operand 1 … not a proven number`. (`(or a b)` here uses two distinct
 /// proven-int calls so no constant-fold/dedup can collapse the `or` first.)
 #[test]
 fn or_result_type_is_the_join_of_its_operands() {
@@ -242,7 +240,7 @@ fn or_result_type_is_the_join_of_its_operands() {
 
 /// `(and a b)` likewise returns one of its operands (the first falsy, else the
 /// last), so its type is the join of the operands. Two proven-`Number` operands
-/// make the `and` `Number`. Counter-factual: rejected while `and` typed to Top.
+/// make the `and` `Number`. The counter-factual: an `and` typed to Top rejects.
 #[test]
 fn and_result_type_is_the_join_of_its_operands() {
     compile_result(

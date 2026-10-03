@@ -1,10 +1,12 @@
 // audited: 2026-09-29
-// docs/impl/wasm.md
 //! Wasmtime host state and primitive dispatch: everything the compiled module
 //! reaches across the boundary for.
 //!
-//! `host/io.rs` carries the one part that is not dispatch: what a top-level
-//! primitive's I/O does when no scheduler is there to take it.
+//! docs/impl/wasm.md
+//!
+//! Two parts that are not dispatch live beside it: `host/frames.rs`, each
+//! fiber's suspension frames, and `host/io.rs`, what a top-level primitive's
+//! I/O does when no scheduler is there to take it.
 //!
 //! The host state (`ElleHost`) lives in the Wasmtime `Store` and holds the
 //! handle table heap objects are named by, the flattened primitive dispatch
@@ -23,7 +25,10 @@ use crate::value::Value;
 
 use super::handle::HandleTable;
 
+mod frames;
 mod io;
+
+pub use frames::WasmSuspensionFrame;
 
 /// A closure's dual-compiled blueprint, used by spawn for cross-thread
 /// execution. `rt_make_closure` builds a code object from it plus the shape the
@@ -49,44 +54,6 @@ pub struct PrecachedClosure {
 /// `emit::env_stack_base`. Each `call_wasm_closure` allocates a region starting
 /// from the store's `env_stack_ptr`.
 pub const ENV_STACK_BASE: usize = 4096;
-
-/// Saved state for a suspended WASM closure.
-///
-/// When a WASM closure yields (or a callee yields through it), the live
-/// registers and env snapshot are saved here. On resume, the env is
-/// restored to linear memory and the function is re-invoked with
-/// `ctx = resume_state`.
-pub struct WasmSuspensionFrame {
-    /// Table index of the WASM function to re-invoke.
-    pub wasm_func_idx: u32,
-    /// Resume state ID (passed as `ctx` parameter on re-entry).
-    pub resume_state: u32,
-    /// Saved registers at the yield/call point: (tag, payload) pairs.
-    pub saved_regs: Vec<(i64, i64)>,
-    /// Snapshot of the env region in linear memory. Copied because the
-    /// env stack allocator would reclaim the space on return.
-    pub env_snapshot: Vec<u8>,
-    /// Base address where env_snapshot was taken from (for restore).
-    pub env_base: usize,
-    /// Full signal bits at the yield point. Preserves SIG_IO and other
-    /// bits so the scheduler can detect I/O requests on the fiber.
-    pub signal_bits: u64,
-    /// The executing closure (`SELF_SLOT`) at the yield point — (tag, payload).
-    /// `rt_yield` snapshots it from linear memory; `resume_wasm_closure` writes it
-    /// back before re-invoking, so a `LoadSelf` after resume names the closure that
-    /// suspended (not whichever ran most recently on this store's shared memory).
-    pub self_tag: i64,
-    pub self_payload: i64,
-    /// A child fiber this frame must RE-DRIVE before resuming its own
-    /// continuation. Set when a `(fiber/resume child)` in this frame's body
-    /// suspended because `child` emitted a scheduler wait/io its narrow mask does
-    /// not cover: the resumer parks holding that wait and the scheduler drives it,
-    /// so on resume the scheduler's value must feed a re-drive of `child` — not
-    /// this frame's continuation — until `child` completes. The WASM analogue of
-    /// the VM's `SuspendedFrame::FiberResume` (src/vm/fiber/trampoline.rs). Pinned
-    /// by tests/elle/wasm-protect-suspend.lisp.
-    pub redrive_child: Option<Value>,
-}
 
 /// A fiber the host is driving, and the authority that fiber carries.
 ///
@@ -158,7 +125,8 @@ pub struct ElleHost {
     /// Populated from `EmitResult` so `rt_make_closure` can give a WASM closure
     /// a code object the bytecode VM can run after a spawn.
     pub closure_bytecodes: Vec<ClosureBytecode>,
-    /// Debug logging enabled (set once from `config.debug_wasm` at construction).
+    /// Debug logging enabled (set once from the `wasm` trace keyword at
+    /// construction).
     pub debug: bool,
     /// Lazily-initialized I/O backend for inline I/O execution.
     /// Created on first use, reused for subsequent I/O operations.
@@ -252,92 +220,6 @@ impl ElleHost {
         )
     }
 
-    /// Push a suspension frame for the current fiber (appends to back).
-    pub fn push_suspension_frame(&mut self, frame: WasmSuspensionFrame) {
-        let id = self.current_fiber_id();
-        self.suspension_frames
-            .entry(id)
-            .or_default()
-            .push_back(frame);
-    }
-
-    /// Pop the front suspension frame for the current fiber (innermost first).
-    pub fn pop_suspension_frame(&mut self) -> Option<WasmSuspensionFrame> {
-        let id = self.current_fiber_id();
-        let frames = self.suspension_frames.get_mut(&id)?;
-        let frame = frames.pop_front();
-        if frames.is_empty() {
-            self.suspension_frames.remove(&id);
-        }
-        frame
-    }
-
-    /// Get the front suspension frame for the current fiber (innermost).
-    pub fn first_suspension_frame(&self) -> Option<&WasmSuspensionFrame> {
-        let id = self.current_fiber_id();
-        self.suspension_frames.get(&id)?.front()
-    }
-
-    /// Get the front suspension frame for the current fiber (innermost, mutable).
-    pub fn first_suspension_frame_mut(&mut self) -> Option<&mut WasmSuspensionFrame> {
-        let id = self.current_fiber_id();
-        self.suspension_frames.get_mut(&id)?.front_mut()
-    }
-
-    /// The signal on the most recently pushed frame for the current fiber.
-    ///
-    /// `handle_wasm_result` classifies an `Emit` with this. An `Emit` terminator
-    /// carries whatever the emission raised — `(yield v)` and `(error …)` alike
-    /// route through `rt_yield` — so "the function returned a non-zero status"
-    /// does not by itself mean it parked. This is the back frame rather than the
-    /// front because the front may still be a stale outer frame from a previous
-    /// suspension until `drive_resume_chain` rotates.
-    pub fn back_suspension_frame_signal(&self) -> Option<crate::value::fiber::SignalBits> {
-        let id = self.current_fiber_id();
-        self.suspension_frames
-            .get(&id)?
-            .back()
-            .map(|f| crate::value::fiber::SignalBits::new(f.signal_bits))
-    }
-
-    /// Get the back suspension frame for the current fiber (most recently pushed).
-    /// Used by handle_wasm_result to update the frame that rt_yield just pushed.
-    pub fn back_suspension_frame_mut(&mut self) -> Option<&mut WasmSuspensionFrame> {
-        let id = self.current_fiber_id();
-        self.suspension_frames.get_mut(&id)?.back_mut()
-    }
-
-    /// The child fiber the current fiber's FRONT frame must re-drive before
-    /// resuming, if any (see `WasmSuspensionFrame::redrive_child`).
-    pub fn first_frame_redrive_child(&self) -> Option<Value> {
-        self.first_suspension_frame().and_then(|f| f.redrive_child)
-    }
-
-    /// Clear the FRONT frame's re-drive marker — called once the child has been
-    /// driven to completion, so the frame resumes its own continuation next.
-    pub fn clear_first_frame_redrive(&mut self) {
-        if let Some(frame) = self.first_suspension_frame_mut() {
-            frame.redrive_child = None;
-        }
-    }
-
-    /// Check if the current fiber has any suspension frames.
-    pub fn has_suspension_frames(&self) -> bool {
-        let id = self.current_fiber_id();
-        self.suspension_frames
-            .get(&id)
-            .is_some_and(|f| !f.is_empty())
-    }
-
-    /// Count suspension frames for the current fiber.
-    pub fn suspension_frame_count(&self) -> usize {
-        let id = self.current_fiber_id();
-        self.suspension_frames
-            .get(&id)
-            .map(|f| f.len())
-            .unwrap_or(0)
-    }
-
     /// Convert a Value to its WASM representation (tag, payload).
     /// Immediate values pass through directly. Heap values get a handle.
     pub fn value_to_wasm(&mut self, value: Value) -> (i64, i64) {
@@ -390,6 +272,27 @@ impl ElleHost {
         } else {
             (def.func)(&mut ctx, args)
         }
+    }
+
+    /// Settle the signal a native call returned, before the call's caller sees
+    /// it: answer a query on the driving VM, then run top-level I/O inline.
+    ///
+    /// A query (`SIG_QUERY`, raised by `vm/config`, the `compile/*` primitives
+    /// and the rest) asks the VM something only it can answer. The interpreter
+    /// and the JIT answer it through `VM::dispatch_query`, and so does this
+    /// tier; left unanswered, the query pair would unwind the program as an
+    /// error. Every host path that runs a native settles its result here.
+    pub fn settle_native_signal(&mut self, bits: SignalBits, value: Value) -> (SignalBits, Value) {
+        let (bits, value) = if bits.intersects(crate::value::fiber::SIG_QUERY) && !self.vm.is_null()
+        {
+            let vm = unsafe { &mut *self.vm };
+            let heap = unsafe { &mut *self.heap_ptr() };
+            let mut ctx = crate::primitives::ctx::Alloc::boundary(heap);
+            vm.dispatch_query(&mut ctx, value)
+        } else {
+            (bits, value)
+        };
+        self.maybe_execute_io(bits, value)
     }
 
     /// Resolve a parameter's current value by walking param_frames.
@@ -445,11 +348,9 @@ impl WasmEnvHost for ElleHost {
 /// fiber stays the top-level one throughout and answers only for top-level code
 /// (`ElleHost::calling_withheld`).
 ///
-/// The VM arrives as a parameter rather than off `ElleHost::vm`, because the
-/// tiered host owns its own `vm` pointer and leaves the `ElleHost` it wraps with
-/// a null one (`TieredHost`, src/wasm/lazy.rs). A caller that reached for the
-/// wrapped field would gate the full-module tier and silently skip the tiered
-/// one.
+/// The VM arrives as a parameter: the full-module host passes `ElleHost::vm`,
+/// and the tiered host passes its own `vm` (`TieredHost`, src/wasm/lazy.rs),
+/// which names the same driving VM as the `ElleHost` it wraps.
 ///
 /// The payload is the shared `{:error :capability-denied …}` struct, which the
 /// caller hands back as the call's own signal. Nothing retains it here: the

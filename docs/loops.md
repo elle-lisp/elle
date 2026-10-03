@@ -1,6 +1,6 @@
 # Loops
 
-<!-- audited: 2026-09-20 -->
+<!-- audited: 2026-09-30 -->
 
 Elle's loop forms are `while`, `forever`, `repeat`, and `each`. All
 support early exit via `break`. See [control.md](control.md) for the
@@ -41,22 +41,77 @@ count                      # => 10
 
 ## each
 
-Iteration macro. `in` is optional sugar.
+`(each name in coll body...)` binds `name` to each element of `coll` in
+turn and runs `body`. The `in` is optional. `each` returns the value a
+`break` carries. Without a `break`, a loop over a fiber returns the value the
+fiber returns, and any other loop returns `nil`.
 
 ```lisp
 (var total 0)
 (each x in [10 20 30]
   (assign total (+ total x)))
-total                      # => 60
+(assert (= total 60))
+(assert (nil? (each x [1 2 3] x)))
 ```
 
-Works on lists, arrays, strings, bytes, sets, structs and fibers. A
-value outside those iterates through the `:iter` method in its trait
-table — see [traits.md](traits.md).
+The collection decides what an element is:
+
+| Collection | Element |
+|------------|---------|
+| list, array, `@array` | each item, in order |
+| string, `@string` | each grapheme cluster, as a string |
+| bytes, `@bytes` | each byte, as an integer |
+| set, `@set` | each member, in no promised order |
+| struct, `@struct` | each `[key value]` array, in the order `pairs` gives |
+| fiber | each value the fiber yields |
+| a value whose traits carry `:iter` | each value its iterator yields |
+
+```lisp
+(def graphemes @[])
+(each g in "a👋🏽b" (push graphemes g))
+(assert (= (freeze graphemes) ["a" "👋🏽" "b"]))
+
+(def entries @[])
+(each [k v] in {:a 1 :b 2} (push entries [k v]))
+(assert (= (freeze entries) (->array (pairs {:a 1 :b 2}))))
+```
+
+[structs.md](structs.md) holds the key order, and [traits.md](traits.md)
+the `:iter` protocol.
+
+`each` resumes a fiber once per pass. Every value the fiber yields is an
+element, `nil` and `false` included. The loop ends when the fiber completes.
+The value the fiber returns is not an element; it is the value of the `each`.
+An error inside the fiber
+propagates out of `each`, also when the fiber's mask catches errors. A fiber
+that has already completed raises, as `fiber/resume` does.
+
+```lisp
+(def gen (fiber/new (fn [] (yield 1) (yield nil) (yield false) :done)
+                    |:yield|))
+(def yielded @[])
+(assert (= (each v in gen (push yielded v)) :done))
+(assert (= (freeze yielded) [1 nil false]))
+```
+
+Any other value raises a `:type-error`, and `nil` is no exception.
+
+```lisp
+(let [[ok? err] (protect (each x nil x))]
+  (assert (not ok?))
+  (assert (= (err :error) :type-error)))
+```
 
 ## Early exit
 
-Use `block` + `break` for search patterns:
+A `break` with no label leaves the `each`, and its value becomes the value
+of the `each`:
+
+```lisp
+(assert (= (each x [2 4 6 8 10] (when (> x 7) (break x))) 8))
+```
+
+Use `block` + `break` to leave a form around the `each`:
 
 ```lisp
 (block :found
@@ -80,5 +135,5 @@ Use `block` + `break` for search patterns:
 ## See also
 
 - [control.md](control.md) — full control flow reference
-- [arrays.md](arrays.md) — array iteration
-- [concurrency.md](concurrency.md) — fibers and lazy generators
+- [traits.md](traits.md) — the `:iter` protocol a custom collection carries
+- [signals/primitives.md](signals/primitives.md) — fibers as generators

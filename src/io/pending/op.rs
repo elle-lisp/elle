@@ -1,17 +1,16 @@
-//! audited: 2026-09-23
+//! audited: 2026-09-30
 //! One in-flight operation: the shapes it can take, the heap values it holds,
 //! and what it gives back when nobody will read its result.
 //!
 //! docs/impl/io-inflight.md
 
 use crate::io::pool::{BufferHandle, BufferPool};
-use crate::io::request::{ConnectAddr, PortOp};
+use crate::io::request::{Bound, ConnectAddr, PortOp};
 use crate::io::types::PortKey;
 use crate::port::PortKind;
 use crate::value::Value;
 use std::os::unix::io::{OwnedFd, RawFd};
 use std::rc::Rc;
-use std::time::Duration;
 
 /// What kind of operation a worker ran, reported beside the id so the entry
 /// that id resolves through can be checked against it
@@ -75,16 +74,16 @@ pub(crate) enum PendingOp {
         /// completion counts `filled + result_code`. Zero for ops that move
         /// no payload.
         filled: usize,
-        /// The request's timeout, carried so a resubmission can re-arm the
+        /// The request's bound, carried so a resubmission can re-arm the
         /// `LinkTimeout` that bounds it. A payload too large for one syscall
-        /// completes over several SQEs, and `:timeout` means "give up after
-        /// this long" for each of them rather than for the first alone.
-        /// `None` leaves the operation unbounded.
+        /// completes over several SQEs, and each of them waits no longer than
+        /// the bound allows when it is armed: its own `:timeout`, cut short by
+        /// the call's `:deadline` (docs/io/timeout.md).
         ///
         /// Only the io_uring backend re-arms a `LinkTimeout`; the thread pool
         /// bounds the op in the worker, so on that platform every submit site
         /// still fills this field and nothing reads it back.
-        timeout: Option<Duration>,
+        bound: Bound,
     },
     /// Connect to a remote address.
     Connect {
@@ -102,14 +101,14 @@ pub(crate) enum PendingOp {
     /// Waiting for subprocess exit via IORING_OP_WAITID.
     ///
     /// SAFETY: `siginfo` is a heap-allocated `siginfo_t` (via Box::into_raw).
-    /// It must live until the CQE arrives. Released in completion processing.
+    /// It must live until the CQE arrives. Released in completion processing,
+    /// or by `retire`.
     ProcessWait {
         buffer_handle: BufferHandle,
         handle_val: Value,             // ProcessHandle — the child this wait names
         siginfo: *mut libc::siginfo_t, // kernel fills this when child exits
-        /// A clone of the handle's exit record. The status is kept here rather
-        /// than read out of `handle_val`, so a retire during backend teardown
-        /// records without dereferencing a value whose region may be gone.
+        /// A clone of the handle's exit record, which the ring's completion
+        /// reaps through without dereferencing `handle_val`.
         exit: crate::io::request::ExitRecord,
     },
     /// Open a file path. Creates a new port on completion.
@@ -154,7 +153,7 @@ pub(crate) enum PendingOp {
 impl PendingOp {
     /// An operation on an existing port, filed with nothing transferred yet.
     ///
-    /// `timeout` is the request's own, carried so a resubmission re-arms the
+    /// `bound` is the request's own, carried so a resubmission re-arms the
     /// bound the first submission had.
     pub(crate) fn port(
         op: PortOp,
@@ -162,7 +161,7 @@ impl PendingOp {
         port: Value,
         descriptor: Option<Rc<OwnedFd>>,
         buffer_handle: Option<BufferHandle>,
-        timeout: Option<Duration>,
+        bound: Bound,
     ) -> PendingOp {
         PendingOp::Port {
             op,
@@ -173,7 +172,7 @@ impl PendingOp {
             listener_kind: None,
             lent: Vec::new(),
             filled: 0,
-            timeout,
+            bound,
         }
     }
 
@@ -341,16 +340,16 @@ impl PendingOp {
         }
     }
 
-    /// The request's timeout, for a backend re-arming the bound on a
-    /// resubmission. `None` for ops that carry no deadline.
+    /// The request's bound, for a backend re-arming it on a resubmission.
+    /// No bound for ops that carry none.
     ///
     /// Only `io::uring::drain` calls this, so the allow is narrowed to the
     /// platforms that compile that module out rather than blanket `dead_code`.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    pub(in crate::io) fn timeout(&self) -> Option<Duration> {
+    pub(in crate::io) fn bound(&self) -> Bound {
         match self {
-            PendingOp::Port { timeout, .. } => *timeout,
-            _ => None,
+            PendingOp::Port { bound, .. } => *bound,
+            _ => Bound::NONE,
         }
     }
 
@@ -369,10 +368,10 @@ impl PendingOp {
     /// open or an accept is the descriptor the operation obtained. Nobody will
     /// take it now, so it is closed here rather than leaked.
     ///
-    /// One thing is kept rather than given back: a process wait whose `waitid`
-    /// succeeded has already reaped the child (src/io/AGENTS.md § "A reap is
-    /// never wasted"). This is the ring's half, where the status arrives in the
-    /// `siginfo_t`; the pool's is in the worker, at the `waitpid` itself.
+    /// A process wait on the ring reaped nothing, since it asks with `WNOWAIT`,
+    /// so its `siginfo_t` is all there is to give back. The pool's wait reaps
+    /// in the worker, through the exit record (src/io/AGENTS.md § "A reap is
+    /// never wasted").
     pub(crate) fn retire(self, result_fd: i32, buffer_pool: &mut BufferPool) {
         if let Some(bh) = self.buffer_handle() {
             buffer_pool.release(bh);
@@ -404,14 +403,9 @@ impl PendingOp {
                 // SAFETY: as above — the port for this descriptor is never built.
                 unsafe { libc::close(result_fd) };
             }
-            PendingOp::ProcessWait { siginfo, exit, .. } if !siginfo.is_null() => {
+            PendingOp::ProcessWait { siginfo, .. } if !siginfo.is_null() => {
                 // SAFETY: allocated by `Box::into_raw` at submit; reclaimed once.
-                let si = unsafe { Box::from_raw(siginfo) };
-                if result_fd >= 0 {
-                    // SAFETY: a non-negative result is the kernel saying it
-                    // completed the `waitid` and filled this `siginfo_t`.
-                    exit.keep(unsafe { crate::io::request::exit_code_from_siginfo(&si) });
-                }
+                drop(unsafe { Box::from_raw(siginfo) });
             }
             _ => {}
         }

@@ -1,6 +1,6 @@
 # Elle Quickstart
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-26 -->
 
 Elle is a Lisp with lexical scope, closures, and a signal system.
 
@@ -30,11 +30,11 @@ echo '(+ 1 2)' | elle     # one-liner
 elle                       # REPL
 ```
 
-The whole test corpus takes about 30 minutes on a release build. Give
-`make smoke-elle` the release binary; the debug default takes hours:
+The two test suites take about 30 minutes on a release build. Give `make
+smoke` the release binaries; the debug default takes hours:
 
 ```bash
-make smoke-elle ELLE=./target/release/elle CARGO_PROFILE=--release
+make smoke ELLE=./target/release/elle ELLE_RIG=./target/release/elle-rig CARGO_PROFILE=--release
 ```
 
 ## Language topics
@@ -82,7 +82,7 @@ make smoke-elle ELLE=./target/release/elle CARGO_PROFILE=--release
 | [scheduler](docs/scheduler.md) | Async scheduler, io_uring |
 | [debugger](docs/debugger.md) | Design, not yet built: breakpoints, stepping, frame inspection, record/replay |
 | [embedding](docs/embedding.md) | Using Elle as a library |
-| [regions](docs/regions.md) | Region-based memory: per-region RC, `IncrefRegion`/`DecrefRegion`, merging |
+| [regions](docs/regions.md) | Region-based memory: per-region reference counting, the ownership forest, merging |
 | [processes](docs/processes.md) | Erlang-style processes: mailboxes, links, monitors |
 | [process scheduler](docs/process-scheduler.md) | Sub-fibers, forwarded I/O and nested schedulers inside processes |
 | [behaviors](docs/behaviors.md) | GenServer, Actor, Task, EventManager |
@@ -116,6 +116,6 @@ make smoke-elle ELLE=./target/release/elle CARGO_PROFILE=--release
 | [plugins](docs/plugins.md) | Rust plugins and `std/` modules |
 | [stdlib](docs/stdlib.md) | Standard library and prelude |
 | [intrinsics](docs/intrinsics.md) | %-intrinsics (silent bytecode ops) |
-| [testing](docs/analysis/testing.md) | Test patterns, make smoke/test |
+| [testing](docs/analysis/testing.md) | Which suite a test belongs in, and which kind of test |
 | [debugging](docs/analysis/debugging.md) | Debugging and introspection |
 | [cookbook](docs/cookbook/index.md) | Recipes for cross-cutting changes |

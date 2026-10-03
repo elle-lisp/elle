@@ -1,7 +1,11 @@
-//! JSON parsing and serialization primitives
+// audited: 2026-09-29
+//! The JSON primitives: `json/parse`, `json/serialize` and `json/pretty`.
 //!
-//! Provides hand-written recursive descent JSON parser and serializer.
-//! No external JSON libraries - all implemented directly.
+//! docs/cookbook/primitives.md
+//! docs/impl/symbol.md
+//!
+//! The parser is a hand-written recursive descent, and the serializer is
+//! hand-written too; neither uses a JSON library.
 
 mod parser;
 mod serializer;
@@ -103,7 +107,7 @@ pub(crate) fn prim_json_serialize_pretty(
 // serializers on a value JSON cannot represent — so all three declare
 // `Signal::errors()`. Effect inference copies that declaration into every
 // caller, which is what keeps the error catchable by `try` at any call depth.
-// `tests/elle/prim-json.lisp` pins the declaration.
+// `tests/lang/prim-json.lisp` pins the declaration.
 primitive! {
     "json/parse" => prim_json_parse {
         signal: Signal::errors(),
@@ -136,5 +140,3 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
 }
-
-// Tests migrated to tests/elle/prim-json.lisp

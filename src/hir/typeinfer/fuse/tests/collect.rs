@@ -1,10 +1,16 @@
+// audited: 2026-09-28
+//! `map` and `filter` fuse alone and in any mix over a proven immutable array,
+//! and a callee or base the gate cannot prove stays a plain call.
+//!
+//! docs/impl/dissolution.md
+//! docs/impl/dissolution/stages.md
+
 use super::*;
 
-/// The gauge (docs/impl/dissolution.md § "The gauge"): `(map f xs)` over a
-/// proven immutable array with an inline lambda `f` dissolves — the `map`
-/// dispatch is gone, no closure survives, and `f`'s body op (`*`) runs inline
-/// in the loop. Fails before fusion lands: the `map` call and the `(fn [x] …)`
-/// closure are both present.
+/// `(map f xs)` over a proven immutable array with an inline lambda `f`
+/// dissolves — the `map` dispatch is gone, no closure survives, and `f`'s body
+/// op (`*`) runs inline in the loop. Without fusion the `map` call and the
+/// `(fn [x] …)` closure are both present.
 #[test]
 fn single_map_dissolves_the_closure_and_dispatch() {
     let (hir, arena, mut rt) = compile("(map (fn [x] (* x 2)) [1 2 3])");
@@ -36,8 +42,8 @@ fn single_map_dissolves_the_closure_and_dispatch() {
 
 /// A composition `(map g (map f xs))` fuses to a SINGLE loop: no `map`, both
 /// transform ops (`*` and `+`) inline, and — the intermediate collection is
-/// gone — exactly one accumulator. Fails before fusion: two `map` calls, two
-/// closures, and (were only the single case built) two accumulators.
+/// gone — exactly one accumulator. Fusing each `map` on its own would pass every
+/// other assertion and leave two accumulators.
 #[test]
 fn composed_maps_fuse_to_one_loop() {
     let (hir, arena, mut rt) = compile("(map (fn [y] (+ y 1)) (map (fn [x] (* x 2)) [1 2 3]))");
@@ -59,7 +65,7 @@ fn composed_maps_fuse_to_one_loop() {
 }
 
 /// Safety: a user redefinition of `map` shadows the stdlib binding with a
-/// non-primitive one, so it is never rewritten (`fusable_map_parts` gates on
+/// non-primitive one, so it is never rewritten (`fusable_hof_parts` gates on
 /// `is_primitive`). The user's `map` call survives.
 #[test]
 fn user_shadowed_map_is_not_fused() {
@@ -71,23 +77,16 @@ fn user_shadowed_map_is_not_fused() {
     );
 }
 
-/// Parity invariant the fusion recognition relies on: the canonical HOF
-/// exports defined in **core.lisp** (`fold`/`reduce`) resolve at a call site to
-/// an `is_primitive` binding, exactly as the **stdlib.lisp** exports
-/// (`map`/`filter`) do. Core exports are bound twice — as a full primitive by
-/// `bind_primitives` (from `meta`) and as the canonical override by
-/// `bind_compile_time_env` (the core-env, which wins name resolution and
-/// carries the correct value). The override must also be marked `is_primitive`
-/// (`analyze::bind_compile_time_env`, `is_primitive = true` for the core env),
-/// or a core HOF is invisible to every pass that keys on the flag — loop
-/// fusion here, dispatch monomorphization. A user redefinition still shadows
-/// with a non-primitive binding (the safety complement).
+/// The canonical HOF exports defined in **core.lisp** (`fold`/`reduce`) resolve
+/// at a call site to an `is_primitive` binding, exactly as the **stdlib.lisp**
+/// exports (`map`/`filter`) do. A core export is bound twice, and the override
+/// `bind_compile_time_env` makes wins name resolution; were that override not
+/// marked `is_primitive`, every pass that keys on the flag would miss a core HOF.
+/// A user redefinition still shadows with a non-primitive binding.
 ///
-/// The probes fold over an UNPROVEN collection (a function parameter, not a
-/// literal array) precisely so the `fold`/`reduce` call *survives* — a call
-/// over a proven immutable array now dissolves (that is exactly what this parity
-/// enables), leaving no callee to inspect. Declining on the unproven base keeps
-/// the call while still resolving its binding.
+/// The trap: the probes fold over an UNPROVEN collection (a function parameter)
+/// so that the `fold`/`reduce` call survives. Over a proven array the call
+/// dissolves and leaves no callee to inspect.
 #[test]
 fn core_lisp_hof_exports_are_primitive_like_stdlib() {
     // The binding a `(name …)` call resolves to (the winning shadow).
@@ -124,8 +123,8 @@ fn core_lisp_hof_exports_are_primitive_like_stdlib() {
 }
 
 /// A capturing lambda literal fuses: the splice IS the call site, so `k` is in
-/// scope where the body lands (docs/impl/dissolution.md § "Captures"). Fails while
-/// the gate refuses a capture: the `map` call and the closure both survive.
+/// scope where the body lands (docs/impl/dissolution.md). A gate that refused a
+/// capture would leave the `map` call and the closure both in place.
 #[test]
 fn capturing_lambda_fuses() {
     let (hir, arena, mut rt) = compile("(let [k 10] (map (fn [x] (+ x k)) [1 2 3]))");
@@ -155,11 +154,10 @@ fn map_over_unproven_collection_is_not_fused() {
 }
 
 /// A single `filter` dissolves to the guarded-push index-walk: the `filter`
-/// dispatch is gone, no closure survives, the predicate op (`>` — deliberately
-/// absent from the loop scaffold, which uses only `<`/`+`) runs inline, and the
-/// loop body is an `if` (the conditional push) over one frozen accumulator.
-/// Fails before filter fusion lands: the `filter` call and the `(fn …)` closure
-/// are both present and there is no synthesized `if`.
+/// dispatch is gone, no closure survives, the predicate op runs inline, and the
+/// loop body is an `if` (the conditional push) over one frozen accumulator. The
+/// predicate is `>` because the loop scaffold compares with `<` alone, so a `>`
+/// callee can only have come from the spliced body.
 #[test]
 fn single_filter_dissolves_to_guarded_push() {
     let (hir, arena, mut rt) = compile("(filter (fn [x] (> x 2)) [1 2 3 4])");
@@ -190,11 +188,10 @@ fn single_filter_dissolves_to_guarded_push() {
 
 /// A `filter`-of-`filter` fuses to a SINGLE loop with the guards nested: no
 /// `filter`, both predicate ops (`even?` and `integer?`) inline, one
-/// accumulator, and two `if`s (one per predicate). The predicates must be
-/// reorder-safe for a length-2 composition to fuse (the reordering gate — a
-/// variadic comparison like `>` routes through `apply` and is NOT reorder-safe,
-/// so it fuses as a single filter but declines composition; `even?`/`integer?`
-/// carry only `SIG_ERROR`). Fails before fusion: two `filter` calls, two closures.
+/// accumulator, and two `if`s (one per predicate). The trap: a length-2
+/// composition fuses only over reorder-safe predicates. A variadic `>` routes
+/// through `apply` and is not reorder-safe, so this pin uses `even?`/`integer?`,
+/// which carry only `SIG_ERROR`.
 #[test]
 fn composed_filters_fuse_to_one_loop() {
     let (hir, arena, mut rt) =
@@ -240,9 +237,8 @@ fn filter_over_var_bound_immutable_array_fuses() {
 /// non-reorder-safe predicate declines the whole composition, and the chain
 /// falls back to fusing only its inner reorder-safe run — the `filter` fuses on
 /// the pre-order recursion and the outer `map` stays a plain call over the fused
-/// loop. (The fused loop lands beside `map`'s surviving lambda `f`; `lower_call`'s
-/// argument spill keeps that sound — `call-arg-across-loop.lisp`.) The
-/// reorder-safe mixed case fusing into ONE loop is pinned below.
+/// loop, beside `map`'s surviving lambda `f` (tests/impl/call-arg-across-loop.lisp
+/// pins that argument order at runtime).
 #[test]
 fn mixed_chain_with_non_reorder_safe_stage_fuses_inner_only() {
     let (hir, arena, mut rt) =
@@ -268,8 +264,8 @@ fn mixed_chain_with_non_reorder_safe_stage_fuses_inner_only() {
 /// inline, there is exactly ONE accumulator (the intermediate survivor array
 /// between the `filter` and the `map` is gone), and one guard `if` (the filter
 /// stage). `even?` carries only `SIG_ERROR` and `*` is silent, so both are
-/// reorder-safe and the length-2 composition fuses. Fails before mixed fusion:
-/// the outer `map` survives as a plain call over the inner-fused filter.
+/// reorder-safe and the length-2 composition fuses. Fusing only the inner run
+/// would leave the outer `map` a plain call over the fused filter.
 #[test]
 fn mixed_map_of_filter_reorder_safe_fuses_to_one_loop() {
     let (hir, arena, mut rt) =
@@ -298,8 +294,8 @@ fn mixed_map_of_filter_reorder_safe_fuses_to_one_loop() {
 /// A reorder-safe MIXED `(filter q (map g xs))` fuses to a SINGLE loop with the
 /// map stage transforming first and the guard testing the transformed value: no
 /// `map`/`filter` dispatch, both ops (`*` and `even?`) inline, one accumulator
-/// (no intermediate mapped array), one guard `if`. Fails before mixed fusion:
-/// the outer `filter` survives as a plain call over the inner-fused map.
+/// (no intermediate mapped array), one guard `if`. Fusing only the inner run
+/// would leave the outer `filter` a plain call over the fused map.
 #[test]
 fn mixed_filter_of_map_reorder_safe_fuses_to_one_loop() {
     let (hir, arena, mut rt) =
@@ -359,8 +355,8 @@ fn mixed_three_stage_tower_fuses_to_one_loop() {
 }
 
 /// A capturing predicate fuses, as a capturing transform does — the guard stage is
-/// spliced where the `filter` call stood, so `k` is in scope. Fails while the gate
-/// refuses a capture: the `filter` call and the closure both survive.
+/// spliced where the `filter` call stood, so `k` is in scope. A gate that refused
+/// a capture would leave the `filter` call and the closure both in place.
 #[test]
 fn capturing_predicate_fuses() {
     let (hir, arena, mut rt) = compile("(let [k 2] (filter (fn [x] (> x k)) [1 2 3 4]))");
@@ -376,8 +372,8 @@ fn capturing_predicate_fuses() {
 /// the base need not be written as a literal at the call site. The proof is
 /// the same binding→keyword map dead-arm pruning builds (`prune::classify_init`),
 /// so `(let [xs [1 2 3]] (map f xs))` dissolves exactly as `(map f [1 2 3])`
-/// does. Fails before the Var-base widening lands: the `map` call and closure
-/// both survive because the base is a `Var`, not a literal `array` call.
+/// does. A base proof that read only literals would leave the `map` call and
+/// closure in place, the base being a `Var` rather than an `array` call.
 #[test]
 fn map_over_var_bound_immutable_array_fuses() {
     let (hir, arena, mut rt) = compile("(let [xs [1 2 3]] (map (fn [x] (* x 2)) xs))");
@@ -405,107 +401,4 @@ fn map_over_aliased_var_immutable_array_fuses() {
         "an aliased Var over an immutable array must fuse; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
-}
-
-/// The mutable-array arm (docs/impl/dissolution.md § "The mutable-array arm"):
-/// a single `map` over a proven **mutable** `@array` base fuses, but its result
-/// is left **unfrozen** — mirroring the stdlib arm `(if (mutable? coll) acc
-/// (freeze acc))`. The `map` dispatch and the closure are gone, the transform
-/// op inlines, and — the discriminator against the immutable arm — there is NO
-/// `freeze` call: the mutable accumulator IS the result. (The base `@[ … ]` and
-/// the accumulator are two `@array` calls; neither is frozen.)
-#[test]
-fn single_map_over_mutable_array_fuses_unfrozen() {
-    let (hir, arena, mut rt) = compile("(map (fn [x] (* x 2)) @[1 2 3])");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        !cs.iter().any(|n| n == "map"),
-        "a mutable `@array` base must fuse; callees were {cs:?}",
-    );
-    assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
-    assert!(
-        cs.iter().any(|n| n == "*"),
-        "the transform op must inline; callees were {cs:?}",
-    );
-    assert!(
-        !cs.iter().any(|n| n == "freeze"),
-        "a mutable-array map returns the accumulator UNFROZEN; callees were {cs:?}",
-    );
-}
-
-/// The mutable arm reaches a `Var`-bound `@array` too (the alias proof resolves
-/// the base to the `@array` keyword): `(let [xs @[ … ]] (map f xs))` fuses to
-/// the unfrozen index-walk loop, exactly as the call-site literal does.
-#[test]
-fn map_over_var_bound_mutable_array_fuses_unfrozen() {
-    let (hir, arena, mut rt) = compile("(let [xs @[1 2 3]] (map (fn [x] (* x 2)) xs))");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        !cs.iter().any(|n| n == "map"),
-        "a Var-bound mutable `@array` base must fuse; callees were {cs:?}",
-    );
-    assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
-    assert!(
-        !cs.iter().any(|n| n == "freeze"),
-        "the mutable result is unfrozen; callees were {cs:?}",
-    );
-}
-
-/// A single `filter` over a mutable `@array` fuses to the guarded-push loop
-/// with an **unfrozen** result (the surviving-element accumulator is itself
-/// mutable), mirroring the stdlib arm. The `filter` dispatch and closure are
-/// gone, the predicate inlines under an `if`, and no `freeze` runs.
-#[test]
-fn single_filter_over_mutable_array_fuses_unfrozen() {
-    let (hir, arena, mut rt) = compile("(filter (fn [x] (> x 2)) @[1 2 3 4])");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        !cs.iter().any(|n| n == "filter"),
-        "a mutable `@array` base must fuse; callees were {cs:?}",
-    );
-    assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
-    assert!(count_ifs(&hir) >= 1, "the guarded push must be present");
-    assert!(
-        !cs.iter().any(|n| n == "freeze"),
-        "a mutable-array filter returns the accumulator UNFROZEN; callees were {cs:?}",
-    );
-}
-
-/// Safety: a `fold` over a mutable `@array` base is NOT fused. `fold` first
-/// snapshots its input (`(->array coll)` copies a mutable array) and walks the
-/// copy; a fused fold would walk the LIVE base, so a mutating combinator would
-/// diverge from the stdlib fold. The `fold` call survives.
-#[test]
-fn fold_over_mutable_array_is_not_fused() {
-    let (hir, arena, mut rt) = compile("(fold (fn [a x] (+ a x)) 0 @[1 2 3])");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        cs.iter().any(|n| n == "fold"),
-        "a fold over a mutable base must not fuse; callees were {cs:?}",
-    );
-    assert!(count_lambdas(&hir) >= 1, "the fold closure must survive");
-}
-
-/// Safety: a COMPOSITION over a mutable `@array` base does not fuse into one
-/// loop — the fused loop would interleave the ops against the LIVE base, where
-/// a later op's lambda mutating the base could change an earlier op's reads
-/// (the staged stdlib ops each run to completion over a fresh array first). The
-/// outer op declines; the pre-order recursion still fuses the innermost single
-/// `map` (sound in isolation — its result a fresh mutable array the outer op
-/// then walks), so exactly one `map` and one closure — the outer — survive, and
-/// the inner transform inlines.
-#[test]
-fn composition_over_mutable_array_fuses_inner_only() {
-    let (hir, arena, mut rt) = compile("(map (fn [y] (+ y 1)) (map (fn [x] (* x 2)) @[1 2 3]))");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "map"),
-        1,
-        "only the outer `map` survives a mutable-base composition; callees were {cs:?}",
-    );
-    assert_eq!(count_lambdas(&hir), 1, "only the outer closure survives");
-    assert!(
-        cs.iter().any(|n| n == "*"),
-        "the inner transform still inlines on the recursion; callees were {cs:?}",
-    );
 }

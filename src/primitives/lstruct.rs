@@ -1,14 +1,14 @@
-//! audited: 2026-09-17
-//! The keyed reads over a struct, a `@struct` and a subprocess, plus the
-//! `@struct` constructor.
+// audited: 2026-09-29
+//! The keyed reads over a struct, a `@struct` and a subprocess, plus the `@struct` constructor.
+//!
+//! docs/structs.md
 //!
 //! Those reads are `keys`, `values`, `has?`, and the body behind `del`.
 //!
 //! `get` is registered here and implemented in src/primitives/access.rs, where
 //! the indexed collections share its arms. `del` reaches this file's body
 //! through the `%del` intrinsics; `put` is a stdlib closure and no primitive.
-//!
-//! docs/structs.md
+
 use crate::primitives::def::RegionEffect;
 use crate::primitives::def::RetType;
 use crate::signals::Signal;
@@ -73,8 +73,8 @@ primitive! {
         // nor `Fresh` holds on every path) while the store side is bounded (the
         // built-in method reads and returns a bool; a user closure stores only
         // through the runtime-counted funnel). Unbounded result + no store is
-        // exactly `Opaque` — no arg clique (docs/impl/region/effects.md § Opaque;
-        // tests/elle/region-has-clique-leak.lisp).
+        // exactly `Opaque` — no arg clique (docs/impl/region/effects.md;
+        // tests/impl/region-has-clique-leak.lisp).
         effect: RegionEffect::Opaque,
     }
 }
@@ -220,8 +220,7 @@ pub(crate) fn prim_has_key(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    // A pre-check, as the other non-traited shapes take (docs/traits.md § Edge
-    // cases). An external carries no trait table, so dispatch would refuse a
+    // A pre-check, as the other non-traited shapes take (docs/traits.md). An external carries no trait table, so dispatch would refuse a
     // subprocess before reaching a method — and the answer here is a key-set
     // membership test, which no `with-traits` override is meant to replace.
     if let Some(handle) = args[0].as_external::<ProcessHandle>() {

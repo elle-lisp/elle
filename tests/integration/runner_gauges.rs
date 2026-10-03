@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-09-30
 // The runner reads three gauges of its own heap between files, so a per-file
 // leak is a file name and a number rather than an OOM kill.
 //
@@ -6,14 +6,13 @@
 //
 // The counter-factual these guard: a runner that samples nothing still passes
 // every corpus test, because a leak in the harness is invisible to the harness.
-// The `compile/dumps` leak of ~28000 regions per file lived behind a green
-// suite until the machine ran out of memory.
 //
 // The trap in the chain test: two samples per file — one before, one after —
 // would leave the rows written between them charged to nobody, and the gap is
 // exactly where the runner's own work lives. One reading per boundary is what
 // makes the readings chain, and the chain is what the assertion reads.
 
+use crate::common::query;
 use std::process::Command;
 
 fn elle_binary() -> &'static str {
@@ -52,17 +51,6 @@ fn run_corpus(tag: &str) -> (String, std::path::PathBuf, crate::common::ScratchD
         String::from_utf8_lossy(&out.stderr)
     );
     (String::from_utf8_lossy(&out.stderr).into_owned(), db, dir)
-}
-
-/// Query `db` and return the rendered rows.
-fn query(db: &std::path::Path, sql: &str) -> String {
-    let out = Command::new(elle_binary())
-        .args(["test", "--query", sql])
-        .arg("--db")
-        .arg(db)
-        .output()
-        .expect("query the session DB");
-    String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
 /// Every file the run processed is charged on every gauge, once.

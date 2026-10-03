@@ -1,6 +1,8 @@
-// audited: 2026-09-06
-// src/lir/AGENTS.md
-//! LIR type definitions
+// audited: 2026-09-29
+//! The LIR's types: a module, its functions' blocks and registers, and the operations and constants they hold.
+//!
+//! src/lir/AGENTS.md
+//! docs/impl/lir.md
 
 use crate::hir::region::StaticRegion;
 use crate::signals::Signal;
@@ -23,12 +25,12 @@ pub use regs::*;
 /// function (registered as a primitive via `CompileCtx::register_stdlib_exports`)
 /// from inside a closure that is sent across a `sys/spawn` boundary.
 /// Exposed to Elle via the `lir/closure-value-const-count` primitive
-/// and printed by `--stats`.
+/// and printed by `--dump=stats`.
 static CLOSURE_VALUE_CONST_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 /// Returns the lifetime count of closure-valued `ValueConst` instructions
-/// serialized across `sys/spawn` boundaries. Reported by `--stats` and
-/// exposed as an Elle primitive for regression tests.
+/// serialized across `sys/spawn` boundaries. Reported by `--dump=stats` and
+/// exposed as an Elle primitive for tests.
 pub fn closure_value_const_count() -> usize {
     CLOSURE_VALUE_CONST_COUNT.load(Ordering::Relaxed)
 }
@@ -200,8 +202,7 @@ pub enum Terminator {
     },
     /// Emit a signal with compile-time signal bits and a runtime value.
     /// Execution resumes at resume_label with the resume value on the stack.
-    /// Replaces the old `Yield` terminator; `(yield val)` becomes
-    /// `Emit { signal: SIG_YIELD, ... }`.
+    /// `(yield val)` becomes `Emit { signal: SIG_YIELD, ... }`.
     Emit {
         signal: crate::value::fiber::SignalBits,
         value: Reg,

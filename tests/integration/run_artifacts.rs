@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-09-29
 // A CI job that records runs publishes the store it recorded them in, so a red
 // job is read with a query rather than out of its log.
 //
@@ -10,13 +10,12 @@
 // with both — leaving the scrollback the runner exists to replace. Nothing went
 // red, because a store nobody uploads is invisible to every other check.
 //
-// The trap is which jobs these are. A corpus pass that runs one process per
-// file (`smoke-vm`, `smoke-jit`, `smoke-nouring`) records nothing: only the
-// targets that reach `elle test` do, and their recipes say so by calling
-// `RUN_CORPUS`. So the list is read out of the Makefile rather than written
-// here, and a test below pins the assumption that makes reading it sound.
+// The trap is which jobs these are. A target records runs when its recipe
+// reaches `elle test`, and a recipe says so by calling `RUN_SUITE`. So the list
+// is read out of the Makefile rather than written here, and a test below pins
+// the assumption that makes reading it sound.
 
-use crate::common::{workflow_files, workflow_jobs};
+use crate::common::{runs_target, workflow_files, workflow_jobs};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn makefile() -> String {
@@ -65,16 +64,17 @@ fn recording_targets(makefile: &str) -> BTreeSet<String> {
     let rules = rules(makefile);
     let mut found: BTreeSet<String> = rules
         .iter()
-        .filter(|(_, (_, recipe))| recipe.contains("$(RUN_CORPUS)"))
+        .filter(|(_, (_, recipe))| recipe.contains("$(call RUN_SUITE"))
         .map(|(name, _)| name.clone())
         .collect();
     assert!(
         !found.is_empty(),
-        "no makefile recipe calls RUN_CORPUS; the parse is broken, not the Makefile"
+        "no makefile recipe calls RUN_SUITE; the parse is broken, not the Makefile"
     );
 
     // A target that depends on a recording one records too, however deep the
-    // chain: `smoke` reaches the runner only through `smoke-elle`.
+    // chain: `smoke` reaches the runner only through `smoke-lang` and
+    // `smoke-impl`.
     loop {
         let grown: BTreeSet<String> = rules
             .iter()
@@ -89,16 +89,6 @@ fn recording_targets(makefile: &str) -> BTreeSet<String> {
     }
 }
 
-/// Does this job run `make TARGET`? The name has to end where the match does:
-/// `make smoke-vm` is not a run of `make smoke`.
-fn runs_target(body: &str, target: &str) -> bool {
-    body.split(&format!("make {target}")).skip(1).any(|rest| {
-        !rest
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    })
-}
 
 /// The steps of one job, split at the `- ` that opens each.
 fn steps(body: &str) -> Vec<String> {
@@ -218,25 +208,35 @@ fn no_two_jobs_upload_under_one_artifact_name() {
 }
 
 /// What makes the list above readable out of the Makefile: a recipe reaches
-/// the runner through `RUN_CORPUS` and nowhere else. A target invoking
+/// the runner through `RUN_SUITE` and nowhere else. A target invoking
 /// `$(ELLE) test` directly would record runs that no job is asked to upload,
 /// and every check here would pass over it.
+///
+/// `RUN_SUITE` runs `$(SUITE_ELLE) test`, the binary of the build a target
+/// runs its suites on. A direct call names that variable or one of the
+/// binaries it can name, so the scan reads for all of them.
 #[test]
-fn only_run_corpus_drives_the_runner() {
+fn only_run_suite_drives_the_runner() {
     let makefile = makefile();
     assert!(
-        makefile.contains("$(ELLE) test"),
+        makefile.contains("$(SUITE_ELLE) test"),
         "no recipe invokes the runner; this test is reading for the wrong string"
     );
 
+    let runners = [
+        "$(SUITE_ELLE) test",
+        "$(ELLE) test",
+        "$(ELLE_WASM) test",
+        "$(ELLE_MLIR) test",
+    ];
     let direct: Vec<String> = rules(&makefile)
         .into_iter()
-        .filter(|(_, (_, recipe))| recipe.contains("$(ELLE) test"))
+        .filter(|(_, (_, recipe))| runners.iter().any(|runner| recipe.contains(runner)))
         .map(|(name, _)| name)
         .collect();
     assert!(
         direct.is_empty(),
-        "these targets run the runner outside RUN_CORPUS, so the jobs that run \
+        "these targets run the runner outside RUN_SUITE, so the jobs that run \
          them record runs nothing uploads: {direct:?}"
     );
 }

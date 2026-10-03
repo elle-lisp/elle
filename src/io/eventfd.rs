@@ -1,4 +1,7 @@
-//! Bridge eventfd helpers (Linux).
+// audited: 2026-09-30
+//! The eventfd that lets an off-ring worker wake the io_uring wait (Linux).
+//!
+//! src/io/AGENTS.md
 //!
 //! An eventfd is the wake primitive that lets an off-ring worker raise an edge
 //! the io_uring wait observes. The scheduler arms a standing
@@ -13,9 +16,9 @@
 //! counter to N and a single `drain` resets it — so a burst of completions
 //! costs at most one spurious wake.
 //!
-//! This is the same primitive `chan::make_wake_fd`/`wake_fd_signal` use to wake
-//! the scheduler from a `chan/send`; both route their Linux eventfd syscalls
-//! through here so there is one definition of each operation.
+//! This is the same primitive `chan::wake::make_wake_fd`/`wake_fd_signal` use
+//! to wake the scheduler from a `chan/send`; both route their Linux eventfd
+//! syscalls through here so there is one definition of each operation.
 
 use std::os::unix::io::RawFd;
 

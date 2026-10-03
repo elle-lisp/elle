@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-28
 // docs/impl/hir.md
 //! Arena-backed binding storage for the compilation pipeline.
 //!
@@ -36,9 +36,9 @@ pub struct BindingInner {
     /// Whether this binding has been mutated via assign
     pub is_mutated: bool,
     /// Whether this binding is captured by a nested closure. **Module-private**:
-    /// the lexical-capture proxy has NO escape authority (escape.md "Lexical
-    /// capture is demoted to a structural hint"), so no consumer may name it for an
-    /// escape or reachability decision. Written through `mark_captured`; read by a
+    /// the lexical-capture proxy has NO escape authority (docs/impl/escape.md), so
+    /// no consumer may name it for an escape or reachability decision. Written
+    /// through `mark_captured`; read by a
     /// SINGLE consumer — `needs_capture()`, for cell layout. Escape's capture facet
     /// is flow-true (transitive `lambda_captures` propagation from genuine frontier
     /// seeds, never this proxy), and the region solver's reachability questions read
@@ -55,9 +55,8 @@ pub struct BindingInner {
     /// Whether this prebound binding's initializer has not yet been
     /// analyzed (letrec*/fn-body Pass 2 clears it after each initializer).
     /// A direct value read while pending at the SAME function depth is a
-    /// use-before-init compile error (docs/bindings.md "Use before
-    /// initialization is an error"); a read through a lambda (deeper
-    /// `fn_depth`) is the legal deferred forward reference.
+    /// use-before-init compile error (docs/bindings.md); a read through a lambda
+    /// (deeper `fn_depth`) is the legal deferred forward reference.
     pub init_pending: bool,
     /// The analyzer's `fn_depth` at the prebind site, compared against the
     /// reference's depth by the use-before-init check above.
@@ -82,16 +81,16 @@ pub struct BindingInner {
     /// It lives on the BINDING, not on the lambda node, because a rewrite may
     /// dissolve the function while keeping its parameter: HOF loop fusion splices
     /// a kernel body into a loop, retyping the parameter as a `let`-bound local
-    /// (`typeinfer/fuse.rs`, docs/impl/dissolution.md § "Raw `%`-intrinsic
-    /// bodies"). Carried on the binding, the declared floor survives that splice,
-    /// so the spliced intrinsic proves exactly as it did inside the function.
+    /// (`typeinfer/fuse.rs`, docs/impl/dissolution/inline.md). Carried on the
+    /// binding, the declared floor survives that splice, so the spliced intrinsic
+    /// proves exactly as it did inside the function.
     pub declared_numeric: bool,
     /// Whether this binding's compile-time constant value is a NATIVE function —
     /// the lowerer reads such a binding as a `LoadConst` of that native, never as a
     /// global lookup. Written from the VALUE at the two sites that bind one
     /// (`bind_primitives`, `bind_compile_time_env`), so a primitive-scope name whose
-    /// constant is a CLOSURE — core.lisp binds a bytecode `+` over the native — is
-    /// false here while `is_primitive` is true of both. Read through
+    /// constant is a CLOSURE — src/stdlib.lisp binds a closure `+` over the
+    /// native — is false here while `is_primitive` is true of both. Read through
     /// [`may_replace_frame`](Self::may_replace_frame).
     pub is_native_fn: bool,
     /// Whether this binding is a MODULE-SCOPE (file-letrec) name — a direct
@@ -162,8 +161,8 @@ impl BindingInner {
     /// This is the RE-STORE predicate: a whole-value read of such a cell needs a
     /// counted reference because the next re-store (`capture_store_with_rebind`)
     /// decrefs the displaced prior (`RegionInfo::counted_cell_read_sites`,
-    /// regions.rs). It is NOT the forest's "capture is a borrow" predicate — that
-    /// is the broader [`needs_capture`](Self::needs_capture), which folds in the
+    /// src/hir/region/info.rs). It is NOT the forest's "capture is a borrow"
+    /// predicate — that is the broader [`needs_capture`](Self::needs_capture), which folds in the
     /// prebound letrec cell too (a capture of ANY cell-materialized binding is a
     /// borrow through a separately-owned env cell, never a containment the closure
     /// owns; `region::infer::ownership::capture::capture_containment_edges`). The letrec
@@ -209,10 +208,9 @@ impl BindingInner {
     /// captures), and inside a lambda body for the recursive-closure shape —
     /// immutable, never mutated, lambda-initialized — so the cell is a
     /// static-slot allocation the closure-cycle merge can collapse with its SCC
-    /// (docs/impl/region/letrec.md § The letrec closure-cycle merge). Any other
-    /// in-lambda captured binding keeps the runtime `populate_env`
-    /// env-cell route (`StoreCapture`; docs/impl/region/cells.md "Env cells
-    /// in loops").
+    /// (docs/impl/region/letrec.md). Any other in-lambda captured binding keeps
+    /// the runtime `populate_env` env-cell route (`StoreCapture`;
+    /// docs/impl/region/cells.md).
     ///
     /// The question is the binding's, not the binder form's: a `letrec` and a
     /// run of local `defn`s in a `begin` express the same mutual recursion and
@@ -263,7 +261,7 @@ impl BindingArena {
     }
 
     /// Allocate a synthetic binding with no source-level identity.
-    /// Used by compiler passes that need temporaries (e.g., phi-insertion
+    /// Used by compiler passes that need temporaries (for example, phi-insertion
     /// condition bindings). The name is set to `SymbolId::SYNTHETIC`.
     pub fn gensym(&mut self) -> Binding {
         let b = self.alloc(SymbolId::SYNTHETIC, BindingScope::Local);

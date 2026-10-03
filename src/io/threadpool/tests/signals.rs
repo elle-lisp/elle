@@ -1,3 +1,8 @@
+// audited: 2026-09-30
+//! The signal reads on the thread pool: the mask they leave, the signal they return, the close that drains.
+//!
+//! docs/posix-signals.md
+
 use super::super::*;
 
 /// The macOS signal read leaves the thread's mask as it found it.
@@ -47,7 +52,10 @@ fn the_macos_signal_read_blocks_again_what_it_unblocked() {
 /// it waits for, so the deadline is only there to make a regression a failed
 /// assertion rather than a child that hangs until the parent's own timeout.
 fn watch_bounds() -> Bounds {
-    Bounds::new(Some(std::time::Duration::from_secs(5)), None)
+    Bounds::new(
+        crate::io::request::Bound::per_op(std::time::Duration::from_secs(5)),
+        None,
+    )
 }
 
 /// Outcome of running a forked child to completion (or killing it on timeout).
@@ -140,9 +148,7 @@ fn forked_child_must_succeed(child_logic: fn() -> i32, what: &str) {
     panic!("{what}: all {ATTEMPTS} attempts failed (last: {last})");
 }
 
-/// Regression test for the macOS `EVFILT_SIGNAL` hang that prevented
-/// tests/elle/posix.lisp from passing on macOS, and a counter-factual
-/// guard for the Linux signalfd EAGAIN fix from commit f7aed410.
+/// A signal read on the pool returns the signal the process sends itself.
 ///
 /// Forks a child process so we get a clean thread topology that
 /// mirrors production: only the main thread plus our intentionally-
@@ -164,11 +170,15 @@ fn forked_child_must_succeed(child_logic: fn() -> i32, what: &str) {
 ///
 /// Child exits 0 on success, a small positive code on failure.
 ///
-/// On macOS this gates the fix: kqueue's `EVFILT_SIGNAL` fires from
-/// the in-kernel delivery path, so if every thread in the process
-/// blocks the signal the kernel parks it on the process pending list
-/// and the knote is never activated. Without the fix the child hangs
-/// past the parent's wait timeout (waitpid loop bounded at 10 s).
+/// The trap on macOS: kqueue's `EVFILT_SIGNAL` fires from the in-kernel
+/// delivery path, so if every thread in the process blocks the signal the
+/// kernel parks it on the process pending list and the knote is never
+/// activated. A worker that does not unblock the signal for its read hangs
+/// the child past the parent's 8 s wait.
+///
+/// The counter-factual on Linux: a worker that reads the non-blocking
+/// signalfd without polling it for readiness first reads `EAGAIN` before the
+/// signal arrives, and the child exits 17.
 #[test]
 fn sig_read_returns_after_kill_to_self() {
     forked_child_must_succeed(sig_read_child_logic, "sig_read");
@@ -220,7 +230,7 @@ fn sig_read_child_logic() -> i32 {
     }
 
     // Let the worker enter the blocking syscall first — matches the
-    // (ev/sleep 0.05) preamble in tests/elle/posix.lisp test #1.
+    // (ev/sleep 0.05) preamble in tests/lang/posix.lisp test #1.
     std::thread::sleep(Duration::from_millis(50));
 
     if unsafe { libc::kill(libc::getpid(), libc::SIGUSR1) } != 0 {
@@ -249,23 +259,22 @@ fn sig_read_child_logic() -> i32 {
     0
 }
 
-/// Regression test for the macOS test 5 failure mode: after the
-/// kqueue worker reports the event for a `kill(getpid(), SIGUSR1)`,
-/// macOS leaves an instance of the signal in the process pending
-/// queue (EVFILT_SIGNAL counts kill() generations on the knote but
-/// does not consume from the pending queue, and the worker's brief
-/// SIG_UNBLOCK + no-op handler delivery only drains at most one
-/// instance). Before the `rollback`-time drain
-/// (src/io/sigfd.rs::drain_pending_blocked) `os/sig-close` would
-/// restore the SIGUSR1 default disposition (Term) and then
-/// `pthread_sigmask(SIG_UNBLOCK, …)`, firing the pending Term on
-/// the closing thread and killing the process mid-close — exactly
-/// the silent death observed at `test 5: pre-close` in
-/// tests/elle/posix.lisp on macOS CI.
+/// Closing a receiver with a signal still pending leaves the process alive.
 ///
-/// This test reproduces the shape (two kills, one read, close)
-/// inside a forked child and asserts the child exits 0 rather
-/// than dying from signal 10/SIGUSR1.
+/// The trap on macOS: after the kqueue worker reports the event for a
+/// `kill(getpid(), SIGUSR1)`, macOS leaves an instance of the signal in the
+/// process pending queue. `EVFILT_SIGNAL` counts `kill()` generations on the
+/// knote but does not consume from the pending queue, and the worker's brief
+/// unblock and no-op handler drain at most one instance.
+///
+/// The counter-factual: without the drain in `rollback`
+/// (`crate::io::sigfd::drain_pending_blocked`), `os/sig-close` restores the
+/// SIGUSR1 default disposition (Term) and then unblocks the signal. The
+/// pending Term fires on the closing thread and kills the process mid-close,
+/// as `tests/lang/posix.lisp` test 5 would at `test 5: pre-close`.
+///
+/// This test runs that shape (two kills, one read, close) in a forked child
+/// and asserts the child exits 0 rather than dying from SIGUSR1.
 #[test]
 fn close_drains_pending_after_two_kills() {
     forked_child_must_succeed(close_drain_child_logic, "close_drains_pending");
@@ -345,7 +354,7 @@ fn close_drain_child_logic() -> i32 {
     // from SignalReceiver::new). On close, without the drain in
     // rollback the pthread_sigmask SIG_UNBLOCK fires the
     // about-to-be-restored SIGUSR1 default (Term) and the child
-    // dies from signal 10 — observable as WIFSIGNALED=true,
+    // dies from SIGUSR1 — observable as WIFSIGNALED=true,
     // WTERMSIG=SIGUSR1 in the parent.
     if unsafe { libc::kill(libc::getpid(), libc::SIGUSR1) } != 0 {
         return 28;
@@ -353,8 +362,7 @@ fn close_drain_child_logic() -> i32 {
     // Brief sleep so the kill is definitely queued before close.
     std::thread::sleep(Duration::from_millis(10));
 
-    // The smoking-gun call. With the drain it returns; without it
-    // the process dies here.
+    // With the drain this returns; without it the process dies here.
     r.close();
     std::thread::sleep(Duration::from_millis(10));
     0
@@ -374,7 +382,8 @@ fn a_stopped_sig_read_ends_rather_than_waiting_for_a_signal() {
     forked_child_must_succeed(stopped_sig_read_child_logic, "stopped_sig_read");
 }
 
-/// Body of the forked child for `a_stopped_sig_read_ends_rather_than_waiting`.
+/// Body of the forked child for
+/// `a_stopped_sig_read_ends_rather_than_waiting_for_a_signal`.
 /// Returns a small positive exit code identifying which step failed, or 0.
 fn stopped_sig_read_child_logic() -> i32 {
     use crate::io::sigfd::SignalReceiver;
@@ -396,7 +405,7 @@ fn stopped_sig_read_child_logic() -> i32 {
     let id = SubmissionId::from_raw(1);
     // No deadline, exactly as `submit_sig_next` builds it: the stop pipe is the
     // whole bound, so this measures the stop and nothing else.
-    let bounds = pool.bounds(id, None);
+    let bounds = pool.bounds(id, crate::io::request::Bound::NONE);
     #[cfg(any(target_os = "linux", target_os = "android"))]
     let submit = pool.submit(
         id,

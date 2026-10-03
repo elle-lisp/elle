@@ -1,4 +1,7 @@
-//! Opening a file.
+// audited: 2026-09-30
+//! Opening a file on a pool worker, in a way the caller's bound and a cancel can both end.
+//!
+//! src/io/AGENTS.md
 
 use super::*;
 
@@ -25,7 +28,7 @@ const OPEN_RETRY_PACE: Duration = Duration::from_millis(10);
 /// its line — a serial port with no carrier — which then reports at once rather
 /// than parking a worker for as long as the line stays down.
 pub(super) fn open(bound: OpBound, path: &std::ffi::CStr, flags: i32, mode: u32) -> (i32, Vec<u8>) {
-    let deadline = bound.timeout().map(|t| std::time::Instant::now() + t);
+    let deadline = bound.end();
     loop {
         let fd = unsafe {
             libc::openat(

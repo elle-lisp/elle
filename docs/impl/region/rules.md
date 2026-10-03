@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-09-20 -->
+<!-- audited: 2026-09-28 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -47,7 +47,7 @@ is a correctness defect, not a tuning knob.
 
 2. **Every region corresponds to a real allocation** (the dual of Rule 1). A
    region the solver hands out must have an instruction that raises its RC, or
-   its `DecrefRegion` underflows or aliases a neighbour. The test is operational
+   its `DecrefRegion` underflows or aliases a neighbor. The test is operational
    — *does the lowerer emit an RC-raising instruction at this HirId?* — not
    syntactic. Exceptions, named here:
    - *Opaque `Call`/`Eval`*: the result is allocated in Rust (or a callee's
@@ -63,7 +63,7 @@ is a correctness defect, not a tuning knob.
          node itself and no slot exists (ANF's propagating-tail wrap keys the
          slot on the outer `Let`, not the tail `Call`): release the
          freshly-lowered result register directly. Skipping the release here
-         leaks one object per iteration in loops (tests/elle/arena-count.lisp).
+         leaks one object per iteration in loops ([arena-count.lisp](../../../tests/impl/arena-count.lisp)).
      A branch-union region whose `decref_point` lands on a call node is NOT
      that call's own result region (`alloc_region[hir] ≠ r`) and keeps the
      slot path.
@@ -87,15 +87,15 @@ is a correctness defect, not a tuning knob.
    `&named`-param prologue UAF: with every destructured binding unused,
    the collected keyword struct's only use was the prologue's Var, and the
    lowerer freed it before `StructGetOrNil` read the fields —
-   tests/elle/region-named-param-uaf.lisp). Its dual is a *transferring node*:
+   [region-named-param-uaf.lisp](../../../tests/impl/region-named-param-uaf.lisp)). Its dual is a *transferring node*:
    a `Break` is **not** a use of its operand's regions — the value becomes the
    enclosing block's value, and control leaves the body before any release
    placed inside it runs, so the release is anchored where the *block's* value
-   is consumed ([mechanism.md](mechanism.md) § "`break` transfers its value").
+   is consumed ([anchors.md](anchors.md) § "`break` transfers its value").
    When the target block is the function's **tail**, that anchor is the last
    point before the frame is handed back, so the broken value is also the
    *returned* value and takes the return mint — including through an enclosing
-   `Loop`/`While`, which a `break` jumps past ([mechanism.md](mechanism.md) § "A break out of a
+   `Loop`/`While`, which a `break` jumps past ([anchors.md](anchors.md) § "A break out of a
    TAIL block carries the return mint"). The jump moves the anchor of every
    *other* region in the same window too: a release the break passes over is
    emitted into unreachable code, so a `decref_point` at or after a break site
@@ -103,7 +103,7 @@ is a correctness defect, not a tuning knob.
    nested loop or lambda, where the release must keep running once per iteration
    / once per activation, and except where a frame-replacing exit in the body
    means the block's own exit label is not a point every path reaches
-   ([mechanism.md](mechanism.md) § "A release the break jumps over is not a release").
+   ([anchors.md](anchors.md) § "A release the break jumps over is not a release").
    A third class is a *borrowing node*: an **uncounted** container element read —
    the `%get`/`%first`/`%rest` opcodes — hands back a value that still lives
    **inside the container** (its own region for a pair's car, an interior member's
@@ -112,7 +112,7 @@ is a correctness defect, not a tuning knob.
    RESULT is, and its regions extend to where that result is last used, not to the
    read. Anchored at the read, the container's free-time cascade drops the element's
    last count and the reader derefs a freed page
-   (`region_container_read_borrow_uaf`). The **native** `get`/`first`/`rest` call is
+   ([region-container-read-borrow-uaf.lisp](../../../tests/impl/region-container-read-borrow-uaf.lisp)). The **native** `get`/`first`/`rest` call is
    not this class: its dispatch takes the Rule 5 pass-through retain, so the reader
    holds its own reference and the container is free to die — what that retain
    cannot survive is adoption freezing the element's RC, which the ownership cut
@@ -185,7 +185,7 @@ is a correctness defect, not a tuning knob.
      containers (`@array`, `@struct`, `@set`, box, capture cell) are visible
      only inside `value/` (`as_*_cell`, conversions.rs), so the only way code
      elsewhere can store into one is through the tracked funnels in
-     `value/arena.rs` (`push_with_incref` and friends) — an uncounted
+     `value/arena/mutate.rs` (`push_with_incref` and friends) — an uncounted
      container store is a compile error, not a review item. Read access goes
      through borrow-guard/copy-out accessors that cannot mutate.
      Membership-neutral mutation (in-place sort/reverse/shuffle — no value
@@ -208,13 +208,13 @@ is a correctness defect, not a tuning knob.
      **arguments only**: a
      release landing there for anything the call does not name has no such
      story and is carried back ahead of the `TailCall`
-     ([mechanism.md](mechanism.md) § "A release past a frame-replacing tail
+     ([relocate.md](relocate.md) § "A release past a frame-replacing tail
      call is not a release"). Two borrow
      routes: a captured upvalue (owned by the closure env's capture-incref)
      and a compile-time-constant heap value (`immutable_values` — a stdlib
      export closure, a `begin-for-syntax` value — owned by the env that
      seeded it; never captured, so the frame holds no reference at all).
-     `tail_arg_is_borrowed`, src/lir/lower/control.rs.
+     `tail_arg_is_borrowed`, [control.rs](../../../src/lir/lower/control.rs).
      The move is **one reference per occurrence, not one per call**. The frame
      holds a single reference to a region, while the callee's owned-param
      releases fire once per parameter, so an argument list naming the same
@@ -225,7 +225,7 @@ is a correctness defect, not a tuning knob.
      borrowed argument is. Repetition is read over the arguments'
      value-producing leaves and the regions they may name, not over syntax,
      because two distinct bindings can name one region
-     (`region-tail-repeated-arg-uaf.lisp`);
+     ([region-tail-repeated-arg-uaf.lisp](../../../tests/impl/region-tail-repeated-arg-uaf.lisp));
    - *reassigned mutable binding cell* — a reassigned binding is a 1-slot
      mutable container (see
      [bindings.md](bindings.md)): the store increfs the new
@@ -248,7 +248,7 @@ is a correctness defect, not a tuning knob.
      (`EscapeSite::IoSubmit`); the backend's pending table is external to the
      region system in the same way a channel buffer is, so this retain is the
      operand's reference while the operation is in flight, and disposing of the
-     entry decrefs it (`OperandHold`, docs/impl/io-inflight.md § "A submitted operation
+     entry decrefs it (`OperandHold`, [io-inflight.md](../io-inflight.md) § "A submitted operation
      holds the values its completion reads");
    - *retained process root* — a value a host keeps reading past the run that
      produced it, registered as a process root while the host holds no owning
@@ -271,7 +271,7 @@ is a correctness defect, not a tuning knob.
    empty per-activation stack; the prologue's bare-NIL pushes land at the slot
    indices). A frame-replacing tail call reuses the caller's operand stack, so
    the trampoline truncates it to the frame base before installing the callee
-   (`trampoline_loop`, src/vm/execute.rs): the caller's locals are dead there —
+   (`trampoline_loop`, [execute.rs](../../../src/vm/execute.rs)): the caller's locals are dead there —
    every owned value was released at its last use or moved into the callee —
    and any slot left un-truncated would surface as the callee's stale read,
    turning a scope-end release into an over-free of a region the frame owns no
@@ -332,7 +332,7 @@ process exits — they are resident *roots*, not eternal.
 One contract drives every entry path — running a file, graceful REPL exit, the
 embedding API, and the lint path (one runtime per call; the resident LSP VM is
 the deliberate exception, one long-lived runtime for the server's life). All run
-through a single `Runtime` (`src/runtime.rs`): `Runtime::new` installs the heap,
+through a single `Runtime` ([runtime.rs](../../../src/runtime.rs)): `Runtime::new` installs the heap,
 registers primitives, and optionally loads the stdlib, recording the
 process-resident roots in the process-root registry; `Runtime`'s `Drop` (or an
 explicit `Runtime::teardown`) runs the sweep. One teardown routine, so the paths
@@ -349,10 +349,10 @@ Three non-negotiable properties:
    succeeds only when the accounting is correct.
 
 2. **Observable, and zero.** The sweep reports the live region census afterward
-   (`Runtime::teardown` returns it; `--stats` prints it), and **zero** is the
-   claim `tests/region_process_teardown` gates — not a target the number is
+   (`Runtime::teardown` returns it; `--dump=stats` prints it), and **zero** is the
+   claim [region_process_teardown/](../../../tests/region_process_teardown) gates — not a target the number is
    allowed to approach. A residue is the standing list of open leaks: the number
-   *is* the remaining work, not a tuning knob. `tests/elle/oracle.lisp` measures
+   *is* the remaining work, not a tuning knob. [oracle.lisp](../../../tests/impl/oracle.lisp) measures
    the same property as a per-op leak rate while a program runs; this counts what
    survives the process, which is the axis that sees a leak whose rate is one per
    PROGRAM rather than one per op.
@@ -367,7 +367,7 @@ Three non-negotiable properties:
    RC minus that in-degree, the quantity the macro scope balances below — is a
    claim held outside the region graph, so no release the region system can
    reach ever frees it. Zero regions carrying one is the claim, and
-   `tests/region_process_teardown` gates it.
+   [region_process_teardown/](../../../tests/region_process_teardown) gates it.
 
    The residue count and this one measure different defects. A reference cycle
    keeps its members alive with every reference explained, so the residue stays

@@ -1,4 +1,4 @@
-//! audited: 2026-09-29
+//! audited: 2026-09-30
 //! The submissions that name an OS object the request carries or creates: a
 //! watcher, a signal receiver, a file, a child, a background task.
 //!
@@ -31,7 +31,7 @@ impl AsyncBackend {
                     // A watcher on a directory nothing touches waits forever,
                     // so the read carries a stop pipe. `fs/watch` names no
                     // deadline, so the stop is the whole bound.
-                    let bounds = d.hub.bounds(d.id, None);
+                    let bounds = d.hub.bounds(d.id, Bound::NONE);
                     d.hub.submit(d.id, PoolOp::WatchRead { fd }, bounds)
                 }
             },
@@ -67,8 +67,9 @@ impl AsyncBackend {
                     PlatformBackend::Uring(ring) => {
                         // One `IORING_OP_READ` on the signalfd, completing
                         // through the kernel's poll pipeline with no worker
-                        // thread of ours. On Linux the arm below is reached only
-                        // in a `no-uring` build, or when the ring will not open.
+                        // thread of ours. The arm below is reached only in a
+                        // build without the `uring` feature, or where the ring
+                        // would not open.
                         crate::io::uring::submit_uring_sig_next(
                             ring,
                             d.id,
@@ -85,13 +86,13 @@ impl AsyncBackend {
                         // at all must not open a pipe it will never hand over.
                         #[cfg(any(target_os = "linux", target_os = "android"))]
                         {
-                            let bounds = d.hub.bounds(d.id, None);
+                            let bounds = d.hub.bounds(d.id, Bound::NONE);
                             d.hub
                                 .submit(d.id, PoolOp::SigfdRead { fd, trace }, bounds)?;
                         }
                         #[cfg(target_os = "macos")]
                         {
-                            let bounds = d.hub.bounds(d.id, None);
+                            let bounds = d.hub.bounds(d.id, Bound::NONE);
                             d.hub.submit(
                                 d.id,
                                 PoolOp::KqSigRead {
@@ -141,7 +142,7 @@ impl AsyncBackend {
         path: &str,
         flags: i32,
         mode: u32,
-        timeout: Option<Duration>,
+        bound: Bound,
         port: Value,
     ) -> Result<SubmissionId, String> {
         let c_path = std::ffi::CString::new(path)
@@ -150,7 +151,7 @@ impl AsyncBackend {
         self.submit_op(
             0,
             |d| {
-                let bounds = d.hub.bounds(d.id, timeout);
+                let bounds = d.hub.bounds(d.id, bound);
                 d.hub.submit(
                     d.id,
                     PoolOp::Open {
@@ -219,9 +220,9 @@ impl AsyncBackend {
 
     /// Wait for a subprocess to exit.
     ///
-    /// The dispatch decides the `siginfo_t` the completion reads. io_uring's
+    /// The dispatch decides whether the entry carries a `siginfo_t`. io_uring's
     /// `IORING_OP_WAITID` needs one for the kernel to fill, while the pool
-    /// worker reaps with `waitpid(2)` and reports the code, so its entry holds
+    /// worker reaps with `wait4(2)` and reports the code, so its entry holds
     /// null.
     pub(super) fn submit_process_wait(&self, handle_val: &Value) -> Result<SubmissionId, String> {
         let handle = handle_val
@@ -230,9 +231,8 @@ impl AsyncBackend {
 
         // Fast path: this process is already holding the child's status, so
         // there is nothing left to reap. Push an immediate completion and file
-        // no pending entry. See src/io/AGENTS.md § "A reap is never wasted" —
-        // the status is here whether the wait that took it was read or
-        // cancelled.
+        // no pending entry (src/io/AGENTS.md): the status is here whether the
+        // wait that took it was read or cancelled.
         if let Some(code) = handle.exit().status() {
             let mut inner = self.inner.borrow_mut();
             let id = inner.mint_id();
@@ -274,7 +274,7 @@ impl AsyncBackend {
                     // A child that never exits waits forever, so the wait
                     // carries a stop pipe. `subprocess/wait` names no deadline,
                     // so the stop is the whole bound.
-                    let bounds = d.hub.bounds(d.id, None);
+                    let bounds = d.hub.bounds(d.id, Bound::NONE);
                     d.hub.submit(
                         d.id,
                         PoolOp::ProcessWait {

@@ -1,3 +1,9 @@
+//! audited: 2026-09-30
+//! The io_uring submissions that take one SQE each: a timer, a poll, a child's
+//! exit, a cancel, a signal read and a watch read.
+//!
+//! src/io/AGENTS.md
+
 use super::*;
 
 /// Submit a standalone Timeout SQE for ev/sleep.
@@ -61,6 +67,10 @@ pub(crate) fn arm_eventfd_poll(ring: &mut io_uring::IoUring, eventfd: RawFd) -> 
 /// The kernel fills `infop` when the child exits. The `siginfo_t` must
 /// remain valid until the CQE arrives — the caller stores it in PendingOp.
 ///
+/// `WNOWAIT` leaves the child unreaped: the opcode has no `rusage` to fill, so
+/// the completion reaps through the exit record, whose `wait4` reports what
+/// the child cost (src/io/AGENTS.md § "A reap is never wasted").
+///
 /// Requires Linux kernel 6.7+. If the opcode is unsupported, the CQE
 /// returns result = -EINVAL (22).
 ///
@@ -76,10 +86,14 @@ pub(crate) fn submit_uring_process_wait(
 ) -> Result<(), String> {
     use io_uring::opcode;
 
-    let entry = opcode::WaitId::new(libc::P_PID, pid as libc::id_t, libc::WEXITED)
-        .infop(siginfo_ptr as *const libc::siginfo_t)
-        .build()
-        .user_data(id.as_u64());
+    let entry = opcode::WaitId::new(
+        libc::P_PID,
+        pid as libc::id_t,
+        libc::WEXITED | libc::WNOWAIT,
+    )
+    .infop(siginfo_ptr as *const libc::siginfo_t)
+    .build()
+    .user_data(id.as_u64());
 
     // SAFETY: `entry` references `siginfo_ptr` which is kept alive by the
     // caller for the lifetime of the pending op. The SQE is submitted
@@ -117,14 +131,14 @@ pub(crate) fn submit_uring_cancel(
 /// pipeline, so a CQE fires as soon as the kernel queues a
 /// `signalfd_siginfo` record without ever parking an elle-side
 /// thread. This is the production path used by `submit_sig_next`
-/// (`src/io/aio.rs`) on the `PlatformBackend::Uring` arm.
+/// (`src/io/aio/externals.rs`) on the `PlatformBackend::Uring` arm.
 ///
 /// `signalfd(2)` writes one fixed-size `signalfd_siginfo` (128 bytes
 /// on every Linux ABI we target) per queued signal. We size the read
 /// for eight entries — enough to batch a `kill -USR1` burst without
 /// re-submitting, while keeping per-watcher buffer cost bounded. The
 /// CQE returns the byte count, which `SignalReceiver::parse_events`
-/// (`src/io/sigfd.rs`) carves back into `SigEvent`s.
+/// (`src/io/sigfd/linux.rs`) carves back into `SigEvent`s.
 ///
 /// `buf_handle` is the buffer pool slot already allocated by the
 /// caller (so the buffer survives until the CQE arrives even if the

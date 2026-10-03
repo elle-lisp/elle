@@ -1,5 +1,7 @@
 # tests/property
 
+<!-- audited: 2026-09-28 -->
+
 Property-based tests: invariants that must hold across all inputs.
 
 ## Responsibility
@@ -9,13 +11,15 @@ Test invariants that must hold for *all* valid inputs using proptest. Cover:
 - Mathematical laws (commutativity, associativity, identity, inverse)
 - Type discrimination (exactly one type predicate is true for any Value)
 - Determinism (same source always produces same result)
-- Signal inference soundness (pure expressions never inferred as yielding)
+- Signal algebra (combine is commutative, associative and idempotent)
+- Value ordering (`Eq`, `Hash` and `Ord` agree)
 - Bug regression across input ranges (not just the single case that triggered it)
 
 Does NOT:
 - Test specific examples (that's integration tests)
 - Test individual modules in isolation (that's unit tests)
-- Test Elle scripts (that's `tests/elle/`)
+- Test Elle programs (that's the [language suite](../lang/AGENTS.md) and the
+  [implementation suite](../impl/AGENTS.md))
 
 ## Key patterns
 
@@ -91,7 +95,7 @@ cargo test                     # use per-test defaults (CI thorough)
 
 ## Strategies
 
-Public strategies in `strategies.rs`:
+Public strategies in [strategies.rs](strategies.rs):
 
 | Strategy | Generates | Use for |
 |----------|-----------|---------|
@@ -104,9 +108,8 @@ Public strategies in `strategies.rs`:
 | `arb_typed_value()` | (TypeDesc, Value) pair where value matches type | FFI type/value pair testing |
 | `arb_struct_and_values()` | (StructDesc, Value::array) pair | FFI struct marshalling testing |
 
-Some property test files define local strategies for their domain:
-- `reader.rs` defines `arb_source()` for generating valid Elle source code
-- `strings.rs` defines `arb_unicode_string()`
+[reader.rs](reader.rs) defines a local strategy for its domain, `arb_source()`,
+which generates valid Elle source code.
 
 ### Writing new generators
 
@@ -122,23 +125,22 @@ Tests are organized by domain in separate files:
 
 | File | Coverage |
 |------|----------|
-| `strategies.rs` | Shared proptest strategies |
-| `fibers.rs` | Fiber operations and properties |
-| `nanboxing.rs` | Value encoding roundtrips |
-| `reader.rs` | Reader parse/display roundtrips |
-| `signals.rs` | Signal inference soundness |
-| `strings.rs` | String operations and properties |
-| `ffi.rs` | FFI type marshalling |
-| `path.rs` | Path operations |
+| [strategies.rs](strategies.rs) | Shared proptest strategies |
+| [nanboxing.rs](nanboxing.rs), [nanboxing/](nanboxing/) | Value encoding roundtrips |
+| [reader.rs](reader.rs) | Reader parse/display roundtrips |
+| [signals.rs](signals.rs) | Signal combine laws and predicates |
+| [ordering.rs](ordering.rs) | `Eq`, `Hash` and `Ord` consistency for `Value` |
+| [ffi.rs](ffi.rs), [ffi/](ffi/) | FFI type marshalling |
 
 ## Structure
 
 Property test files follow a consistent structure:
 
 1. Module-level comment explaining what invariants are tested
-2. Any local helper functions (e.g., `infer_signal()` in `signals.rs`, `syntax_eq()` in `reader.rs`)
+2. Any local helper functions (for example, `syntax_eq()` in [reader.rs](reader.rs))
 3. `proptest!` blocks grouped by invariant category, separated by section headers (`// =========================================================================`)
 4. Non-property `#[test]` functions at the bottom for constant/edge cases that don't need generation
+
 ## Invariants
 
 1. **Tests are deterministic.** Same input always produces same output. No randomness or timing dependencies.

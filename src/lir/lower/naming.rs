@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-09-29
 //! How a release names what it frees: the address space a value slot belongs
 //! to, and the process-global counter that mints a static region id.
 //!
@@ -36,7 +36,7 @@ pub fn new_static_region() -> StaticRegion {
 /// Nothing about the number says which, so a bare `u16` in `region_to_slot` lets
 /// an env index be read back as a stack slot — naming whichever local happens to
 /// sit at that index and releasing it under its holder
-/// (`tests/elle/region-def-in-lambda-capture.lisp`). Carrying the space with the
+/// (`tests/impl/region-def-in-lambda-capture.lisp`). Carrying the space with the
 /// index makes that unrepresentable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ValueSlot {

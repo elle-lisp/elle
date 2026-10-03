@@ -1,18 +1,20 @@
-//! audited: 2026-09-23
+// audited: 2026-09-30
 //! Stream primitives — yield SIG_IO with IoRequest descriptors.
+//!
+//! docs/io.md
+//! docs/impl/io-inflight.md
+//! docs/io/timeout.md
 //!
 //! These primitives do not perform I/O themselves. They build an
 //! IoRequest and return (SIG_IO, request), which suspends
 //! the fiber. The scheduler catches SIG_IO and dispatches to a backend.
-//!
-//! docs/io.md
-//! docs/impl/io-inflight.md
+//! tests/lang/prim-stream.lisp pins them.
 
 use crate::io::request::{IoRequest, PortOp};
 use crate::port::Port;
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
-use crate::primitives::kwarg::extract_keyword_timeout;
+use crate::primitives::kwarg::extract_bound;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK};
 use crate::value::types::Arity;
@@ -36,7 +38,7 @@ fn extract_port_value(
     Ok(*value)
 }
 
-/// (port/read-line port [:timeout ms]) → bytes | nil
+/// (port/read-line port [:timeout s] [:deadline t]) → string | nil
 fn prim_stream_read_line(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -45,14 +47,14 @@ fn prim_stream_read_line(
         Ok(p) => p,
         Err(e) => return e,
     };
-    let timeout = match extract_keyword_timeout(args, 1, "port/read-line", ctx) {
-        Ok(t) => t,
+    let bound = match extract_bound(args, 1, "port/read-line", ctx) {
+        Ok(b) => b,
         Err(e) => return e,
     };
     let buffer = ctx.zeroed_bytes(READ_LINE_BUF_SIZE);
     (
         SIG_IO,
-        IoRequest::with_timeout(ctx, PortOp::ReadLine { buffer }.into(), port, timeout),
+        IoRequest::bounded(ctx, PortOp::ReadLine { buffer }.into(), port, bound),
     )
 }
 
@@ -61,7 +63,7 @@ fn prim_stream_read_line(
 /// receives a partial result and can re-issue the read.
 const READ_LINE_BUF_SIZE: usize = 65536;
 
-/// (port/read port n [:timeout ms]) → string | bytes | nil
+/// (port/read port n [:timeout s] [:deadline t]) → string | bytes | nil
 /// Text ports return a string of up to n characters; binary ports return bytes.
 fn prim_stream_read(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -85,18 +87,18 @@ fn prim_stream_read(
         }
         None => return type_error!(ctx, args[1], "port/read", "integer for count"),
     };
-    let timeout = match extract_keyword_timeout(args, 2, "port/read", ctx) {
-        Ok(t) => t,
+    let bound = match extract_bound(args, 2, "port/read", ctx) {
+        Ok(b) => b,
         Err(e) => return e,
     };
     let buffer = ctx.zeroed_bytes(count);
     (
         SIG_IO,
-        IoRequest::with_timeout(ctx, PortOp::Read { count, buffer }.into(), port, timeout),
+        IoRequest::bounded(ctx, PortOp::Read { count, buffer }.into(), port, bound),
     )
 }
 
-/// (port/read-exact port n [:timeout ms]) → bytes | nil
+/// (port/read-exact port n [:timeout s] [:deadline t]) → string | bytes | nil
 fn prim_stream_read_exact(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -119,8 +121,8 @@ fn prim_stream_read_exact(
         }
         None => return type_error!(ctx, args[1], "port/read-exact", "integer for count"),
     };
-    let timeout = match extract_keyword_timeout(args, 2, "port/read-exact", ctx) {
-        Ok(t) => t,
+    let bound = match extract_bound(args, 2, "port/read-exact", ctx) {
+        Ok(b) => b,
         Err(e) => return e,
     };
     // `count` is the number of *units* to read: bytes on a binary port,
@@ -145,16 +147,11 @@ fn prim_stream_read_exact(
     let buffer = ctx.zeroed_bytes(buf_len);
     (
         SIG_IO,
-        IoRequest::with_timeout(
-            ctx,
-            PortOp::ReadExact { count, buffer }.into(),
-            port,
-            timeout,
-        ),
+        IoRequest::bounded(ctx, PortOp::ReadExact { count, buffer }.into(), port, bound),
     )
 }
 
-/// (port/read-all port [:timeout ms]) → string | bytes
+/// (port/read-all port [:timeout s] [:deadline t]) → string | bytes
 fn prim_stream_read_all(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -163,23 +160,27 @@ fn prim_stream_read_all(
         Ok(p) => p,
         Err(e) => return e,
     };
-    let timeout = match extract_keyword_timeout(args, 1, "port/read-all", ctx) {
-        Ok(t) => t,
+    let bound = match extract_bound(args, 1, "port/read-all", ctx) {
+        Ok(b) => b,
         Err(e) => return e,
     };
     (
         SIG_IO,
-        IoRequest::with_timeout(ctx, PortOp::ReadAll.into(), port, timeout),
+        IoRequest::bounded(ctx, PortOp::ReadAll.into(), port, bound),
     )
 }
 
-/// (port/write port data [:timeout ms]) → int
+/// (port/write port data [:timeout s] [:deadline t]) → int
 fn prim_stream_write(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
     let port = match extract_port_value(&args[0], "port/write", ctx) {
         Ok(p) => p,
+        Err(e) => return e,
+    };
+    let bound = match extract_bound(args, 2, "port/write", ctx) {
+        Ok(b) => b,
         Err(e) => return e,
     };
     // Short-circuit empty writes to avoid unnecessary I/O.
@@ -191,17 +192,13 @@ fn prim_stream_write(
     if is_empty {
         return (SIG_OK, Value::int(0));
     }
-    let timeout = match extract_keyword_timeout(args, 2, "port/write", ctx) {
-        Ok(t) => t,
-        Err(e) => return e,
-    };
     (
         SIG_IO,
-        IoRequest::with_timeout(ctx, PortOp::Write { data }.into(), port, timeout),
+        IoRequest::bounded(ctx, PortOp::Write { data }.into(), port, bound),
     )
 }
 
-/// (port/flush port [:timeout ms]) → nil
+/// (port/flush port [:timeout s] [:deadline t]) → nil
 fn prim_stream_flush(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -210,13 +207,13 @@ fn prim_stream_flush(
         Ok(p) => p,
         Err(e) => return e,
     };
-    let timeout = match extract_keyword_timeout(args, 1, "port/flush", ctx) {
-        Ok(t) => t,
+    let bound = match extract_bound(args, 1, "port/flush", ctx) {
+        Ok(b) => b,
         Err(e) => return e,
     };
     (
         SIG_IO,
-        IoRequest::with_timeout(ctx, PortOp::Flush.into(), port, timeout),
+        IoRequest::bounded(ctx, PortOp::Flush.into(), port, bound),
     )
 }
 
@@ -224,28 +221,30 @@ primitive! {
     "port/read-line" => prim_stream_read_line {
         signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(1),
-        doc: "Read one line from port. Returns bytes or nil (EOF).",
+        doc: "Read one line from port. Returns a string, or nil at EOF.",
         params: &["port"],
         category: "port",
         example: "(port/read-line (port/open \"file.txt\" :read))",
         aliases: &["port/read-line"],
         // Fresh: resumes with the read buffer pre-minted in this call's ctx
         // region (filled in place, `bytes_to_string_in_place` keeps it in-region)
-        // or nil at EOF. Yields → oracle-exempt; guarded by the io-pass solver
-        // test + region-io-effect-pass.lisp.
+        // or nil at EOF. Yields → oracle-exempt; guarded by
+        // `io_yield_pass_tightenings_drop_the_mixed_hard_edge` and
+        // tests/impl/region-io-effect-pass.lisp.
         effect: RegionEffect::Fresh,
     }
     "port/read" => prim_stream_read {
         signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(2),
-        doc: "Read up to n bytes from port. Returns bytes or nil (EOF).",
+        doc: "Read up to n units from port: characters on a text port, bytes on a binary one. Returns nil at EOF.",
         params: &["port", "n"],
         category: "port",
         example: "(port/read (port/open \"file.txt\" :read) 1024)",
         aliases: &["stream/read"],
         // Fresh: resumes with the read buffer pre-minted in this call's ctx
         // region (filled in place) or nil at EOF; the `count==0` SIG_OK path
-        // returns fresh empty bytes (oracle-checked). See region-io-effect-pass.lisp.
+        // returns fresh empty bytes (oracle-checked). See
+        // tests/impl/region-io-effect-pass.lisp.
         effect: RegionEffect::Fresh,
     }
     "port/read-exact" => prim_stream_read_exact {
@@ -293,9 +292,10 @@ primitive! {
         // short-circuit returns `Value::int(0)` directly; the io completion
         // returns `Value::int(result_code)`), so the result is always an
         // immediate. `Immediate` records no may-store edges — `port/write`
-        // takes two heap args (port + data) but stores neither, so the `Mixed`
-        // arg clique only leaked the data region per call. Pinned by
-        // region-port-write-effect.lisp (resumed value) and effects.rs
+        // takes two heap args (port + data) but stores neither, so a `Mixed` arg
+        // clique would leak the data region per call. Pinned by
+        // tests/impl/region-port-write-effect.lisp (resumed value) and
+        // src/hir/region/infer/tests/declared.rs
         // `port_write_declares_immediate_no_arg_clique` (no clique). The result
         // side is oracle-checked on the `SIG_OK` empty-write path; the yield
         // path is oracle-exempt.
@@ -313,5 +313,3 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
 }
-
-// Tests migrated to tests/elle/prim-stream.lisp

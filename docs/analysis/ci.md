@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -16,18 +16,19 @@ renamed heading breaks the site generator.
 | Detect Changes | ubuntu | Sets `source` from the changed paths | — |
 | QA | ubuntu | `cargo fmt`, clippy, the macOS cross-check, rustdoc | — |
 | Documentation Build | ubuntu | `make docs` and the Elle doc site, minus the publish | — |
-| VM+JIT Tests | ubuntu | `doctest`, `smoke-elle`, `smoke-vm`, `smoke-jit` | — |
-| Boot Image Tests | ubuntu | `smoke-boot-image` — the corpus booted from an image | — |
+| Default Build Tests | ubuntu | `doctest`, `smoke-lang`, `smoke-impl` — the default build and its rig | — |
+| No-JIT Build Tests | ubuntu | `smoke-nojit` — the language suite on the interpreter alone | — |
+| Boot Image Tests | ubuntu | `smoke-boot-image` — the language suite booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, then property tests | 16 |
-| Thread-Pool I/O Tests | ubuntu | `smoke-nouring` — the corpus through `elle test`, on a `no-uring` build | — |
-| MLIR Tests | ubuntu | `smoke-mlir` — the corpus through `elle test`, with the mlir-cpu tier | — |
+| Thread-Pool I/O Tests | ubuntu | `smoke-pool` — both suites on a build without `uring` and its rig | — |
+| MLIR Tests | ubuntu | `doctest`, `smoke-mlir` — the language suite on the MLIR build, the implementation suite on its rig | — |
 | WASM Build | ubuntu | `check-wasm` — the feature compiles, the tier boots | — |
 | Plugin Tests | ubuntu | Builds the `plugins/` submodule, asserts its artifacts, runs its corpus | — |
-| AArch64 Smoke | ubuntu-arm | `make smoke` | — |
+| AArch64 Smoke | ubuntu-arm | Each pass of `make smoke`, one step each | — |
 | AArch64 Rust Tests | ubuntu-arm | Integration tests, then property tests | 8 |
-| AArch64 No-Features | ubuntu-arm | `smoke-noffi` | — |
+| AArch64 No-Features | ubuntu-arm | `smoke-noffi` — the language suite on a build with no features, under the default build's runner | — |
 | Android Cross-Check | ubuntu | `cargo check` for `aarch64-linux-android` | — |
-| macOS Smoke | macos | clippy, then `make smoke` under `--trace=scrub` | — |
+| macOS Smoke | macos | clippy, then each pass of `make smoke`, one step each, with the scrub profile | — |
 | macOS Rust Tests | macos | Integration tests, then property tests | 8 |
 | All Checks Passed | ubuntu | The one status check branch protection requires | — |
 
@@ -35,10 +36,37 @@ The merge queue (`merge-queue.yml`) runs `make smoke` alone, with
 `PROPTEST_CASES=1`. The weekly schedule (`weekly.yml`) runs the whole workspace
 suite on beta and nightly at 128 cases, plus a dependency audit.
 
+### Each build is an implementation
+
+The corpus jobs differ in the build they make, not in flags they pass. A build
+carries one optimizing tier and one I/O backend ([config](../config.md)
+§ Builds), and every build runs the language suite with no flag
+([spec](../spec.md) § A build is an implementation). So the job list above is
+the implementation matrix: the default build, a build with no JIT, a
+thread-pool build, an MLIR build, a build with no features, and the default
+build on AArch64 and macOS. A language test that passes on one and fails on
+another has found a defect in the build that fails.
+
+The build with no features cannot host the runner: the runner's store reaches
+SQLite and zstd through FFI. So `smoke-noffi` runs `elle test` on the default
+build and each file's child on the no-features binary, `ELLE_NOFFI`, through
+`--host`. Each child is still the build under test, run with no flag, and
+`AArch64 No-Features` builds both binaries.
+
+The implementation suite runs where the default build runs: `Default Build
+Tests`, `AArch64 Smoke` and `macOS Smoke` each build the rig beside `elle`, and
+each runs `smoke-lang` and `smoke-impl`. `Thread-Pool I/O Tests` runs the
+implementation suite on the pool build's rig too, because some resources of this
+implementation exist only on the pool: a file that counts worker threads reads
+zero on io_uring and gates itself there. `MLIR Tests` runs it on the MLIR
+build's rig, the one rig that carries the MLIR tier.
+`tests/integration/workflows.rs` is the standing check that every
+implementation keeps its job.
+
 ### Why each platform has two test jobs
 
 The corpus and the Rust suite share no work. The corpus drives the release
-binary through `elle test` and through one process per file; the Rust suite
+binary through `elle test`; the Rust suite
 builds separate test binaries under the dev profile. A job that runs both pays
 the sum of two build trees and two run times, in series, and the pull request
 waits for whichever platform does that.
@@ -49,6 +77,11 @@ slower of the pair instead of the sum. The split doubles the runner minutes the
 platform spends and roughly halves the wall clock, which is the trade the merge
 gate cares about.
 
+A Smoke job runs each pass of `make smoke` as a step of its own, not `make
+smoke` itself, so a failed step names the pass that failed. Each pass runs
+once. A `make smoke` step after the job's `doctest` step would run the doctests
+twice.
+
 Each job caches under its own key — set explicitly with
 `Swatinem/rust-cache`'s `shared-key` where a job wants a stable one, and taken
 from the per-job default otherwise. The pair builds different profiles, so one
@@ -57,32 +90,33 @@ runs.
 
 ### What each job builds
 
-Every job that drives the Makefile builds `--release` and runs
-`target/release/elle`, on every platform. The Makefile picks that under
+Every job that drives the Makefile builds `--release` and runs its binaries
+from `target/release`, on every platform: `elle` and `elle-rig`, or a variant's
+own ([bins](../../bins/overview.md)). The Makefile picks that under
 `ifdef GITHUB_ACTIONS`, which is set on all GitHub runners, so the macOS and
 AArch64 Smoke jobs are release runs exactly as the x86_64 ones are. The Rust
 Tests jobs build the dev profile, also on every platform, because `cargo test`
 does. No platform is quietly gated at a weaker optimization level.
 
-Three jobs change the release profile they build. `VM+JIT Tests`, `Thread-Pool
+Three jobs change the release profile they build. `Default Build Tests`, `Thread-Pool
 I/O Tests` and `macOS Smoke` set `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS`,
 which is what compiles the region checks in. Those checks are
 `#[cfg(debug_assertions)]`, so a corpus job without the flag drives the whole
 corpus blind to every one of them.
 
-`Thread-Pool I/O Tests` also builds with the `no-uring` feature. That binary
+`Thread-Pool I/O Tests` also builds without the `uring` feature. That binary
 runs every I/O operation on the thread pool, the backend every non-Linux build
 runs, so a pool-only defect fails on a Linux runner before it reaches the Mac.
 
 The rule is one such job per I/O backend. `Thread-Pool I/O Tests` covers the
-pool and `VM+JIT Tests` covers io_uring, so finding a region defect never
+pool and `Default Build Tests` covers io_uring, so finding a region defect never
 depends on the macOS runner — the slowest box in the workflow, and the one
 whose failures read as flaky timeouts (§ "Runner capacity").
 `tests/integration/workflows.rs` is the standing check that both backends keep
 a job.
 
-`macOS Smoke` sets `--trace=scrub` beside the flag, because the panic that
-reads a scrubbed page needs both (docs/impl/region/diagnostics.md). Its binary
+`macOS Smoke` runs the rig's scrub profile beside the flag, because the panic that
+reads a scrubbed page needs both ([diagnostics](../impl/region/diagnostics.md)). Its binary
 is a release build that also runs the debug-only checks, on the smallest runner
 in the workflow. Read a macOS corpus timing against that, not against a Linux
 one.
@@ -100,12 +134,12 @@ arrives after the push rather than before it. The Android job has run since
 #752, and the local target arrived later covering macOS alone — so an
 Android-only break compiled everywhere a developer could look.
 
-`tests/integration/workflows.rs` is the standing check that every target a job
+`tests/integration/crosscheck.rs` is the standing check that every target a job
 cross-compiles is a target `make crosscheck` compiles too.
 
 ### Runner capacity
 
-The corpus passes run one process per file, `parallel -j $(JOBS)`. On CI the
+The suites run in `$(JOBS)` batches side by side. On CI the
 Makefile reads that count from the runner — `nproc`, or `getconf
 _NPROCESSORS_ONLN` where `nproc` is absent, which is every macOS runner. It does
 not write a number down.
@@ -117,7 +151,7 @@ over-subscribes the other.
 
 Over-subscription does not fail the corpus, it stretches it. Every file still
 passes its assertions, and the ones nearest the per-file budget get killed on
-the way out. That failure is exit 124 with no output, which reads as a flaky
+the way out. That failure is a `timeout` row that names the budget, which reads as a flaky
 runner rather than as a job count that never fit. `JOBS` remains an override
 for a job that needs a different number.
 
@@ -129,16 +163,19 @@ tracks the runner.
 
 ### Corpus batch size
 
-`elle test` runs the corpus in batches of `CORPUS_BATCH` files, one process per
-batch. Each process keeps the compiled module and the region heap of every file
-in its batch until it exits. The batch size therefore bounds the peak memory of
-one process.
+The suite targets deal each suite into batches of `CORPUS_BATCH` files, one
+`elle test` process per batch, and run `$(JOBS)` batches side by side. A
+language pass runs its files inside the runner process, so there a batch bounds
+the heap one runner holds. An implementation pass runs each file as its own
+child, so there a batch bounds only how many files one runner records.
 
-The default is 25 files. `macOS Smoke` and `AArch64 Smoke` use 10. A 25-file
-batch stalled on macOS: [region-eval-return-leak](../../tests/elle/region-eval-return-leak.lisp)
-hit its deadline with `join: deadline exceeded`, and the same run passed on
-Linux and AArch64. The smaller batch then shortened the macOS job's wall clock
-a great deal.
+The default is 25 files. `macOS Smoke` and `AArch64 Smoke` use 10. That choice
+was measured when a batch ran all its files inside the runner process: a
+25-file batch stalled on macOS, where
+[region-eval-return-leak](../../tests/impl/region-eval-return-leak.lisp) hit
+its deadline with `join: deadline exceeded`, and the same run passed on Linux
+and AArch64. The smaller batch shortened the macOS job's wall clock a great
+deal. Measure again before you change it.
 
 AArch64 Smoke takes the same batch to shorten its wall clock too. It never
 stalled, and this document records no measurement of the effect there. Read the
@@ -319,7 +356,7 @@ make qa
 make smoke
 
 # One corpus file
-./target/release/elle tests/elle/core.lisp
+./target/release/elle tests/lang/core.lisp
 
 # Property tests, reduced
 PROPTEST_CASES=8 cargo test --test lib property::
@@ -335,7 +372,8 @@ make test
 | Failure | Symptom | Likely cause | Fix |
 |---------|---------|--------------|-----|
 | **Documentation site** | `Documentation Build` fails on `./target/release/elle demos/docgen/generate.lisp` | Using `nil?` to check end-of-list. Lists terminate with `EMPTY_LIST`, not `NIL`. | Use `empty?` for list termination checks. Check `demos/docgen/generate.lisp` and `demos/docgen/lib/`. |
-| **Elle scripts fail** | `VM+JIT Tests` fails on a corpus pass | Runtime error in `tests/elle/*.lisp`. | Run `./target/release/elle tests/elle/failing.lisp` locally. Check the assertion message. |
+| **Language suite fails** | A corpus job fails `smoke-lang` | A language test answers differently on that build. | Run `./target/release/elle tests/lang/failing.lisp` on the same build. Check the assertion message; a file that passes on one build and fails on another has found a defect in the build that fails. |
+| **Implementation suite fails** | `Default Build Tests` fails `smoke-impl` | An implementation test on the rig, or the language suite under a rig profile. | Run `./target/release/elle-rig tests/impl/failing.lisp`; the file's sidecar sets its mode. For a profile failure, pass the same `--profile`. |
 | **Boot from an image fails** | `Boot Image Tests` fails and every other corpus job passes | The corpus file answers differently under a hydrated boot, or the image no longer hydrates. | Run `make smoke-boot-image` locally. Read the hydration proof first: a target that fails there never reached the corpus. |
 | **Property tests fail** | `Rust Tests` fails with a shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check `proptest-regressions/` files. |
 | **Integration tests fail** | `Rust Tests` fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |

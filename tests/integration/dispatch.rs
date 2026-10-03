@@ -1,4 +1,5 @@
-// CLI dispatch tests for lint and lsp subcommands
+// audited: 2026-09-30
+// The elle binary dispatches its subcommands and its top level: lint, rewrite, --help, and a gated file.
 
 use std::process::Command;
 
@@ -38,7 +39,7 @@ fn test_lint_good_file_exits_zero() {
 
 #[test]
 fn test_lint_naming_file_exits_zero() {
-    // Kebab-case naming lint was removed — naming-bad.lisp now produces
+    // The linter checks no naming convention, so naming-bad.lisp produces
     // zero diagnostics and exits 0.
     let output = Command::new(get_elle_binary())
         .args(["lint", "tests/fixtures/naming-bad.lisp"])
@@ -124,8 +125,8 @@ fn test_toplevel_unmet_gate_exits_zero_with_skip() {
     // A loud (gate! …) whose condition is unmet emits an uncaught :gated signal
     // at the top level. Run directly (not under the test runner), this must be a
     // clean SKIP — exit 0 with the reason on stderr — so gate! is a universal
-    // skip mechanism. (Replaces the dangerous (sys/exit 0) idiom in service/FFI
-    // tests.) Counter-factual: before the runtime handles :gated specially, an
+    // skip mechanism, which service and FFI tests use in place of (sys/exit 0).
+    // Counter-factual: before the runtime handles :gated specially, an
     // uncaught :gated exited non-zero like any other error.
     let output = Command::new(get_elle_binary())
         .arg("tests/fixtures/gated-toplevel.lisp")
@@ -178,4 +179,22 @@ fn test_rewrite_help() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("elle rewrite"));
+}
+
+#[test]
+fn rewrite_list_rules_names_the_calls_whose_durations_moved_to_seconds() {
+    // Epoch 14 rewrites a millisecond bound as `:timeout` in seconds. A rule
+    // the listing leaves out is a rewrite nobody reading it knows about.
+    let output = Command::new(get_elle_binary())
+        .args(["rewrite", "--list-rules"])
+        .output()
+        .expect("Failed to execute");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for call in ["sys/join", "chan/select", "io/wait", "ev/step", "udp/recv-from"] {
+        assert!(
+            stdout.contains(call),
+            "--list-rules must name {call}, got: {stdout}"
+        );
+    }
 }

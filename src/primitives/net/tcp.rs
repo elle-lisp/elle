@@ -1,3 +1,9 @@
+// audited: 2026-09-30
+//! The TCP primitives: listen, accept, connect by IP literal, shutdown, and the IP-literal predicate.
+//!
+//! docs/io.md
+//! docs/io/timeout.md
+
 use super::*;
 
 // ---------------------------------------------------------------------------
@@ -28,7 +34,7 @@ pub(super) fn prim_tcp_listen(
 }
 
 /// (tcp/accept listener [:sndbuf n] [:rcvbuf n] [:nodelay bool] [:keepalive bool]
-///                       [:encoding :text|:binary] [:timeout ms]) → stream-port
+///                       [:encoding :text|:binary] [:timeout s] [:deadline t]) → stream-port
 ///
 /// `:encoding` controls the resulting stream port's mode.  Default is
 /// `:binary` (POSIX-style: a TCP connection is a byte stream).  Pass
@@ -59,7 +65,7 @@ pub(super) fn prim_tcp_accept(
     );
     (
         SIG_IO,
-        IoRequest::with_timeout(
+        IoRequest::bounded(
             ctx,
             PortOp::Accept {
                 options: kwargs.options,
@@ -68,13 +74,13 @@ pub(super) fn prim_tcp_accept(
             }
             .into(),
             port_val,
-            kwargs.timeout,
+            kwargs.bound,
         ),
     )
 }
 
 /// (tcp/connect-ip ip port [:sndbuf n] [:rcvbuf n] [:nodelay bool] [:keepalive bool]
-///                          [:encoding :text|:binary] [:timeout ms]) → stream-port
+///                          [:encoding :text|:binary] [:timeout s] [:deadline t]) → stream-port
 ///
 /// The IP-only connect primitive: `ip` must parse as an IPv4 or IPv6 literal
 /// (e.g. `"127.0.0.1"`, `"::1"`). A hostname is rejected synchronously — name
@@ -126,7 +132,7 @@ pub(super) fn prim_tcp_connect_ip(
     );
     (
         SIG_IO,
-        IoRequest::with_timeout(
+        IoRequest::bounded(
             ctx,
             IoOp::Connect {
                 addr: ConnectAddr::Tcp {
@@ -137,7 +143,7 @@ pub(super) fn prim_tcp_connect_ip(
                 },
             },
             port_val,
-            kwargs.timeout,
+            kwargs.bound,
         ),
     )
 }

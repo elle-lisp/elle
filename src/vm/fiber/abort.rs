@@ -1,9 +1,10 @@
-// audited: 2026-09-28
-//! `fiber/abort`: raise an error at a fiber's suspension point, and hand its
-//! outcome to the parent as a resume's would be. Call- and tail-position
-//! handlers (see the `super` module doc).
+// audited: 2026-09-29
+//! `fiber/abort`: raise an error at a fiber's suspension point, and hand its outcome to the parent as a resume's would be.
 //!
 //! docs/signals/primitives.md
+//! docs/impl/region/park.md
+//!
+//! Call- and tail-position handlers (see the `super` module doc).
 
 use std::rc::Rc;
 
@@ -21,10 +22,9 @@ impl VM {
     /// where the fiber raised an error of its own instead. So a slot of this
     /// frame that holds the payload owes a release like any other, and the
     /// record is what stops the abandoned-frame walk exempting it
-    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
-    /// still owes"). A materialized literal handed straight to `fiber/abort` is
+    /// (docs/impl/region/mechanism.md). A materialized literal handed straight to `fiber/abort` is
     /// the shape that reaches this — it lives in a frame slot and in nothing
-    /// else (the `abort-discard` probe in `tests/elle/probe/concurrent.lisp`).
+    /// else (the `abort-discard` probe in `tests/impl/probe/concurrent.lisp`).
     pub(in crate::vm::fiber) fn park_propagating_abort(&mut self, bits: SignalBits, value: Value) {
         self.fiber.signal = Some((bits, value));
         if bits.intersects(SIG_ERROR) {

@@ -68,12 +68,13 @@ eligible() {
     esac
     if vendored "$(dirname "$1")"; then return 1; fi
     # Every file queued here is read whole by somebody. A makefile is read
-    # through `make help`, one `##` line at a time, and the standard library
-    # through `(doc name)`, one docstring at a time, so neither is queued.
-    # The standard library is named by path so every other Lisp file stays.
-    # See docs/impl/audit.md § "What carries a stamp".
+    # through `make help`, one `##` line at a time, the standard library
+    # through `(doc name)`, one docstring at a time, and the LIR instruction
+    # enum one variant at a time, from a match arm. None of the three is
+    # queued. Each is named by path so every file beside it stays. See
+    # docs/impl/audit.md.
     case "$1" in
-        src/stdlib.lisp) return 1 ;;
+        src/stdlib.lisp | src/lir/types/instr.rs) return 1 ;;
         scripts/* | *.rs | *.lisp | *.md) return 0 ;;
         *) return 1 ;;
     esac

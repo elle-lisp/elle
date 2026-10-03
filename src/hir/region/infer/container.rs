@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-30
 //! What the walk records about a reassigned binding: the 1-slot-container
 //! class it falls in, where its binder stores, and who reads it whole.
 //!
@@ -28,16 +28,14 @@ impl RegionInference {
         // MODULE-SCOPE classification, not the raw `in_lambda` flag: a file-letrec
         // (top-level `def`/`var`) binding is program-extent even when the
         // file-letrec runs inside the synthetic `%file-body` whole-module thunk
-        // (`compile/whole-module`, where `in_lambda` is spuriously true — the thunk
-        // wrapper). Its value's true demise is the file-letrec scope-region
-        // teardown, identical to a direct `elle FILE` run, so it must be classified
-        // top-level there too. Without this an `elle test` whole-file run routed a
-        // reassigned top-level mutable to `local_reassigns`, which keeps the
-        // assign-value decrefs; the file-letrec lifts each statement into a dead
-        // `__file_expr_N` wrapper whose slot-routed decref then freed the
-        // just-stored value while the cell still held it — the
-        // `(assign x (pair … x))` UAF (region-toplevel-reassign-thunk-uaf.lisp; the
-        // advanced.lisp match-in-loop crash under `elle test`).
+        // (`compile/whole-module`, where `in_lambda` is true only because of the
+        // thunk wrapper). Its value's demise is the file-letrec scope-region
+        // teardown, as in a direct `elle FILE` run. Classified fn-local instead, a
+        // reassigned top-level mutable keeps its assign-value decrefs, and the dead
+        // `__file_expr_N` wrapper the file-letrec lifts each statement into frees
+        // the just-stored value while the cell still holds it
+        // (region-toplevel-reassign-thunk-uaf.lisp and
+        // region-toplevel-mutable-reassign.lisp pin this).
         let module_scope = !self.in_lambda() || self.arena().get(b).is_file_scope;
         // Capture-cell bindings are excluded from BOTH container maps: their RC is
         // owned by `handle_update_capture`, not the 1-slot-container model. They are
@@ -98,8 +96,7 @@ impl RegionInference {
     /// a COUNTED reference of its own instead of aliasing the container's value
     /// uncounted. The container releases what it held at every re-store, so an
     /// uncounted alias is freed under the reader by the next overwrite
-    /// (docs/impl/region/reads.md § "A whole-value read of a 1-slot container
-    /// takes a counted reference").
+    /// (docs/impl/region/reads.md).
     ///
     /// Realised as Rule 5's "new reference" pass-through: mint a placeholder
     /// region at the read node (it lands in `call_result_regions`, so the reader
@@ -112,8 +109,7 @@ impl RegionInference {
     /// regions the reading arms contributed are withdrawn, and an arm that
     /// allocates keeps its own — those regions are the only thing extending that
     /// value's last use out to the binder's retain. One `IncrefValueRegion` names
-    /// whichever value arrived, so both halves balance (docs/impl/region/reads.md
-    /// § "A branch is a read of whichever arms read").
+    /// whichever value arrived, so both halves balance (docs/impl/region/reads.md).
     ///
     /// The source test is `is_one_slot_container`, which reads the re-store fact
     /// without the realization: a captured cell whose update opcode decrefs the
@@ -163,10 +159,10 @@ impl RegionInference {
     /// replaces with the placeholder.
     ///
     /// A **branch** is descended arm by arm, each arm being one path
-    /// (docs/impl/region/reads.md § "A branch is a read of whichever arms
-    /// read"). The reader's obligation is about the value it ends up holding, and
-    /// one `IncrefValueRegion` at the binder names the runtime value — so it
-    /// covers whichever arm ran, over one container or several. An arm that is
+    /// (docs/impl/region/reads.md). The reader's obligation is about the value
+    /// it ends up holding, and one `IncrefValueRegion` at the binder names the
+    /// runtime value — so it covers whichever arm ran, over one container or
+    /// several. An arm that is
     /// *not* a read contributes nothing to `out` and so keeps its own regions in
     /// the reader's set, which is what an allocating arm needs: those regions are
     /// the only thing extending its value's last use out to the retain. A `Cond`
@@ -180,11 +176,10 @@ impl RegionInference {
     /// name, so `(let [x (if c x x)] …)` is the SSA phi carrying `x`'s content
     /// forward past a conditional `assign`, and every later read of the name
     /// resolves to it. A version hands the one reference along exactly as a loop
-    /// parameter's init edge does (docs/impl/region/bindings.md § "A loop
-    /// parameter's init source is not a second holder"); counting it would claim a
-    /// second reference for a single holding. So a version arm reads nothing here
-    /// and keeps its regions, as any other non-reading arm does. A user rebinding
-    /// that shadows the container reads as a version too.
+    /// parameter's init edge does (docs/impl/region/bindings.md); counting it
+    /// would claim a second reference for a single holding. So a version arm reads
+    /// nothing here and keeps its regions, as any other non-reading arm does. A
+    /// user rebinding that shadows the container reads as a version too.
     fn whole_container_read_regions(
         &self,
         h: &Hir,

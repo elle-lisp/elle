@@ -1,4 +1,7 @@
+// audited: 2026-09-30
 //! syntax-case: code-generating pattern matching on syntax objects.
+//!
+//! docs/macros.md
 //!
 //! `syntax-case` is recognized by the Expander and transformed into a
 //! chain of `let`/`if` forms using the syntax predicates. The scrutinee
@@ -38,9 +41,9 @@ type PatternResult = Result<(Option<Syntax>, Vec<PatternBinding>), String>;
 /// `synthetic` is recorded at the creation site: compiler-generated gensyms
 /// are scope-stamped for hygiene, while user pattern variables keep empty
 /// scopes so body references resolve. It must be carried as data — deriving
-/// it from the NAME (the old `starts_with("__sc")` check) misclassified any
-/// user identifier that happened to share the gensym prefix (`__scanner`),
-/// stamping it and breaking the user's own references to it.
+/// it from the NAME (a `starts_with("__sc")` check) would misclassify any user
+/// identifier that happened to share the gensym prefix (`__scanner`), stamping
+/// it and breaking the user's own references to it.
 struct PatternBinding {
     name: String,
     synthetic: bool,
@@ -166,7 +169,7 @@ impl Expander {
     ) -> Result<Syntax, String> {
         let arena = self.arena();
         if clauses.is_empty() {
-            // No clauses — unreachable in practice (arity check above requires >= 1)
+            // Past the last clause: the expanded code signals :match-error here.
             return Ok(make_no_match_error(&arena, *span));
         }
 
@@ -304,7 +307,7 @@ impl Expander {
 }
 
 // =============================================================================
-// Pattern parsing
+// Syntax builders
 // =============================================================================
 
 /// Make a symbol node stamped with `scope`.
@@ -402,7 +405,7 @@ fn make_no_match_error(arena: &SyntaxArena, span: Span) -> Syntax {
 }
 
 // Behavioral tests (correct return values, pattern matching) are in
-// tests/elle/macros.lisp. The Rust tests below cover expansion-time errors
+// tests/lang/syntax-case.lisp. The Rust tests below cover expansion-time errors
 // that cannot be caught from Elle code (they occur before any runtime code runs).
 
 #[cfg(test)]

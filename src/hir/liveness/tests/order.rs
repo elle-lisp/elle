@@ -1,5 +1,16 @@
+// audited: 2026-09-28
+//! Pins `compute_order`, the structural execution order every liveness decision compares, and the `BitSet` it runs on.
+//!
+//! docs/impl/region/anchors.md
+
 use super::*;
 
+/// An execution-order index ranks by STRUCTURE, not by `HirId` magnitude. ANF
+/// appends synthetic `let` bindings with fresh, high ids even when they sit
+/// inside a loop body, so a binding bound INSIDE a loop can carry an id LARGER
+/// than the loop. The counter-factual: a `compute_order` that returns `HirId.0`
+/// reads such a binding as bound outside, extends its region's `decref_point`
+/// to the loop, and emits a phantom `DecrefRegion` on an empty iterator.
 #[test]
 fn compute_order_ranks_by_structure_not_hirid_magnitude() {
     use crate::syntax::Span;
@@ -58,9 +69,8 @@ fn compute_order_indexes_parameterize_key() {
     // key. If it skips the key, the key's subtree gets no execution-order index,
     // so a binding whose LAST read sits in a parameterize key is invisible to
     // decref placement: its slot is reclaimed at an EARLIER read (e.g. a
-    // fiber-captured use) and the parameterize then reads the nil'd slot. That
-    // is the `capture.rs:47` "Expected capture cell, got nil" panic pinned by
-    // tests/elle/parameters.lisp ("Creation snapshot is independent of
+    // fiber-captured use) and the parameterize then reads the nil'd slot
+    // (tests/lang/parameters.lisp, "Creation snapshot is independent of
     // resumer's bindings").
     use crate::syntax::Span;
     let sp = Span::synthetic();
@@ -139,8 +149,6 @@ fn test_bitset_iter() {
 
 // ── compute_order vs lower_call evaluation order ─────────────────
 
-/// Parse → expand → analyze → functionalize → ANF, returning the HIR.
-
 #[test]
 fn compute_order_call_func_follows_args() {
     // `lower_call` evaluates a call's ARGUMENTS first and its FUNC
@@ -150,8 +158,7 @@ fn compute_order_call_func_follows_args() {
     // or a binding whose last read sits in func position is released at
     // the arg-position read — the value-based release plus nil
     // slot-stamp lands after the first (arg) read and the later (func)
-    // read sees nil (tests/elle/region-call-func-position-reread.lisp;
-    // the compress.lisp `(z:unzstd (z:zstd ""))` failure).
+    // read sees nil (tests/impl/region-call-func-position-reread.lisp).
     let hir = hir_of(
         "(let [z ((fn [] (def f (fn [x] 1)) (def g (fn [x] 2)) {:f f :g g}))]
            ((get z :g) ((get z :f) \"\")))",

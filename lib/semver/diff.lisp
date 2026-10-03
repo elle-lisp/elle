@@ -1,11 +1,11 @@
-(elle/epoch 12)
-## audited: 2026-09-21
+(elle/epoch 13)
+## audited: 2026-09-28
 ## lib/semver/diff.lisp — classify surface changes and verify a claim
 ##
 ## The floor table in docs/versioning.md is the authority; each change
 ## carries its own floor and the release floor is the maximum. The
 ## verdict compares a claimed version against the floor with std/semver.
-## tests/elle/semver-diff.lisp pins every table row.
+## tests/lang/semver-diff.lisp pins every table row.
 ##
 ## Usage:
 ##   (def sdiff ((import "std/semver/diff")))

@@ -14,9 +14,9 @@ Up: [..](../AGENTS.md)
 - [coming-from.md](coming-from.md) — **Coming from Other Languages** Quick orientation for programmers arriving from specific languages.
 - [compile-time.md](compile-time.md) — **Compile-Time Operations** The forms that act at compile time, and the `compile/*` API that reads the compiler's model from running code.
 - [concurrency.md](concurrency.md) — **Concurrency** User code runs inside the async scheduler automatically.
-- [config.md](config.md) — **Runtime Configuration (`vm/config`)** Elle exposes a runtime configuration system reachable from both CLI flags and Elle code.
+- [config.md](config.md) — **Runtime Configuration (`vm/config`)** What a build decides, what the `elle` command line sets, and what a running program reads and changes through `vm/config`.
 - [control.md](control.md) — **Control Flow** Elle control flow forms are expressions — they return values.
-- [debugger.md](debugger.md) — **Debugger** A design for a debugger that pauses a program, shows its state as structured values, and resumes it; none of its six phases is built yet.
+- [debugger.md](debugger.md) — **Debugger** A design for a debugger that pauses a program, shows its state as structured values, and resumes it.
 - [destructuring-advanced.md](destructuring-advanced.md) — **Destructuring — Advanced** Advanced destructuring patterns: rest, wildcard in depth, nesting, and match integration.
 - [destructuring.md](destructuring.md) — **Destructuring** Destructuring unpacks collections into bindings.
 - [embedding.md](embedding.md) — **Embedding** Elle can be embedded as a scripting engine in Rust or C programs.
@@ -39,7 +39,7 @@ Up: [..](../AGENTS.md)
 - [named-args.md](named-args.md) — **Named Arguments** Elle supports optional positional parameters, named keyword parameters, and collected keyword arguments.
 - [parameters.md](parameters.md) — **Dynamic Parameters** Dynamic parameters are fiber-local variables with scoped rebinding.
 - [philosophy.md](philosophy.md) — **Design Philosophy** Why Elle infers signals instead of asking for them, and the gap that leaves between what the compiler knows and what a reader sees.
-- [pipeline.md](pipeline.md) — **Compilation Pipeline** Compilation entry points.
+- [pipeline.md](pipeline.md) — **Compilation Pipeline** Compilation entry points: source reaches bytecode through the reader, expander, analyzer, lowerer and emitter.
 - [plugins.md](plugins.md) — **Plugins** Elle ships with Rust plugins and pure Elle standard library modules.
 - [posix-signals.md](posix-signals.md) — **POSIX signals** Elle programs can send POSIX signals to other processes and observe signals delivered to themselves.
 - [process-scheduler.md](process-scheduler.md) — **Process scheduler** How a process scheduler runs sub-fibers, forwards its I/O to the scheduler it runs in, and nests.
@@ -49,6 +49,7 @@ Up: [..](../AGENTS.md)
 - [scheduler.md](scheduler.md) — **Scheduler** The async scheduler is the only supported execution backend, and user code runs inside it automatically.
 - [semver.md](semver.md) — **elle semver** `elle semver` computes and verifies the version bump a library's surface change requires.
 - [sets.md](sets.md) — **Sets** Sets are unordered collections of unique values.
+- [spec.md](spec.md) — **The language specification** What the specification of Elle holds, what it leaves to an implementation, and how a test says which of the two it checks.
 - [stdlib.md](stdlib.md) — **Standard Library** Elle's standard library has four layers: Rust primitives, core operators, prelude macros, and stdlib functions.
 - [strings.md](strings.md) — **Strings** Strings are immutable sequences of grapheme clusters.
 - [structs.md](structs.md) — **Structs** Structs are key-value maps with keyword keys.
@@ -56,10 +57,10 @@ Up: [..](../AGENTS.md)
 - [supervisor.md](supervisor.md) — **Supervisors** A supervisor starts child processes, restarts each one by its policy, and gives up when they crash too often.
 - [syntax.md](syntax.md) — **Syntax** The literals and reader-level constructs of Elle source, from numbers and string escapes to quoting and collections.
 - [test-cli.md](test-cli.md) — **Driving the test runner** Why `elle test` exists, the command line it offers, what it refuses to offer, and what is still design.
-- [test-runner.md](test-runner.md) — **Agent-First Test Runner** How a run executes: each file compiled, isolated, gated, run on every tier, its output captured, and its end recorded honestly.
+- [test-runner.md](test-runner.md) — **Agent-First Test Runner** How a run executes: each file compiled, isolated, gated, run on every tier its build carries, and recorded honestly.
 - [test-store.md](test-store.md) — **The test runner store** Where `elle test` keeps a run, what every run and result records, and the queries that read them back.
 - [test-vision.md](test-vision.md) — **One test system** The plan that folds every test product into `elle test`, keeps the results, and states what a run may skip.
-- [testing.md](testing.md) — **Testing** Elle has two test systems:
+- [testing.md](testing.md) — **Testing** The two test suites, what each one claims, the builds that run them, and how a run is read.
 - [threads.md](threads.md) — **Threads** OS threads for CPU-bound work.
 - [traits.md](traits.md) — **Traits** Every heap-allocated value carries a `traits` field — a pointer to a trait table (struct or @struct).
 - [types.md](types.md) — **Types** Elle values are 16-byte tagged unions.
@@ -68,8 +69,10 @@ Up: [..](../AGENTS.md)
 
 ## Directories
 
-- [analysis/](analysis/AGENTS.md) — Code Analysis and Semantic Understanding, Agent Reasoning in Elle, CI and Triage, Elle Debugging Toolkit, Analysis, Portrait, Test Scripts, Testing Strategy
+- [analysis/](analysis/AGENTS.md) — Code Analysis and Semantic Understanding, Agent Reasoning in Elle, CI and Triage, Debugging and introspection, Analysis, Portrait, Testing Strategy
 - [cookbook/](cookbook/AGENTS.md) — Adding a New Bytecode Instruction, Adding a New Heap Type, Cookbook, Adding a New Lint Rule, Adding a New Plugin, Adding a New Prelude Macro, Adding a New Primitive Function, Adding a New Special Form
+- [debugger/](debugger/AGENTS.md) — Debugger: what a paused fiber shows, Debugger: how a fiber comes to pause, Debugger: recording and replay
 - [impl/](impl/AGENTS.md) — The generated index, The ANF lift, The region roadmap, The audit queue, Bytecode, Differential Tier Testing, Dissolution — HOF loop fusion, Escape analysis — the authoritative true-escape pass, Fleet — adhoc distributed execution over images, GPU Compute, HIR — High-level IR, Images — regions hydrated at load, Where a stream operation's bytes live, Descriptors and workers, An operation in flight, JIT, Lexicon: epoch-aware lexing, LIR — Low-level IR, The region memory model, MLIR Backend, Reader, Self-recursion: the executing-closure mechanism (no cell), SPIR-V Backend, Standard Library Disk Cache, Symbols and keywords — identity is the name hash, Syntax — a region-native immutable tree, Type inference: the ascent, and what a call proves, Values, VM, WASM Backend
+- [io/](io/AGENTS.md) — I/O deadlines
 - [regions/](regions/AGENTS.md) — Value lifetime, constants, and teardown — the guarantees, Region performance — merging and the cost model, Region semantics — the model you write against
 - [signals/](signals/AGENTS.md) — Authority, Capability enforcement, Signal Design, emit, Fiber Architecture, Signals, Signal Inference, Signals and JIT, Fiber Primitives, Signal Protocol, Signal Questions, Signal Recovery

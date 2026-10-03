@@ -1,14 +1,15 @@
 # jit
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-01 -->
 
 JIT compilation for Elle using Cranelift.
 
 ## Responsibility
 
-Compile `LirFunction` to native code. A function's signal decides
-nothing about admission (see [signals/AGENTS.md](../signals/AGENTS.md) for signal definitions);
-what it decides is the code around a call. Yielding functions use side-exit:
+Compile `LirFunction` to native code for the host, x86_64 or AArch64. A
+function's signal decides nothing about admission (see
+[signals/AGENTS.md](../signals/AGENTS.md) for signal definitions); what it
+decides is the code around a call. Yielding functions use side-exit:
 JIT code calls a runtime helper that builds a `SuspendedFrame` and returns
 `YIELD_SENTINEL` to the interpreter.
 
@@ -21,10 +22,12 @@ LirFunction -> JitCompiler -> Cranelift IR -> Native code -> JitCode
 ### Background compilation
 
 JIT compilation runs on a dedicated background thread (`elle-jit`).
-When a function becomes hot (called as many times as the `--jit` threshold,
-10 under `--jit=adaptive`), its LIR is cloned, stripped of non-Send fields
+When a function becomes hot (called as many times as the JIT threshold, 10
+by default), its LIR is cloned, stripped of non-Send fields
 (`syntax`, `doc`), and sent to the worker via `crossbeam_channel`. The
-interpreter continues running the function while Cranelift compiles it.
+interpreter continues running the function while Cranelift compiles it. Each VM
+owns its worker, and dropping the worker discards the tasks still in its queue
+([jit.md](../../docs/impl/jit.md)).
 
 The worker thread allocates no Elle values: string constants arrive
 pre-resolved as `ValueConst`, and symbols/keywords are immediates, so
@@ -43,7 +46,7 @@ function waits in `jit_pending`. All three maps key by raw bytecode address,
 sound only because every entry pins the allocation it is keyed by
 ([jit.md](../../docs/impl/jit.md)).
 
-Diagnostics (`jit/rejections`, `--stats`) call `drain_jit_pending()`
+Diagnostics (`jit/rejections`, `--dump=stats`) call `drain_jit_pending()`
 to block until all pending compilations finish before reporting.
 
 **`--trace=syncjit`** disables the worker entirely: `submit_jit_task`
@@ -102,15 +105,16 @@ The JIT supports closures with captures, data structures, lboxes, function
 calls, self-tail-call optimization, JIT-to-JIT calling, and `ValueConst`.
 
 Supported instructions:
-- **Constants**: `Const` (Int, Float, Bool, Nil, EmptyList, Symbol, Keyword), `ValueConst`
-- **Arithmetic**: `BinOp` (inline integer fast path, extern fallback), `UnaryOp` (Not fully inlined, Neg/BitNot inline integer fast path)
-- **Comparison**: `Compare` (inline integer fast path, extern fallback)
-- **Variables**: `LoadLocal`, `StoreLocal` (via `local_slot_to_var`), `LoadCapture`, `LoadCaptureRaw`
-- **Data structures**: `List`, `First`, `Rest`, `MakeArrayMut`, `IsPair`
+- **Constants**: `Const` (Int, Float, Bool, Nil, EmptyList, Symbol, Keyword), `ValueConst`, `MaterializeConst`
+- **Arithmetic**: `BinOp` (inline integer fast path, extern fallback), `UnaryOp` (Not fully inlined, Neg/BitNot inline integer fast path), `Convert`
+- **Comparison**: `Compare` (inline integer fast path, extern fallback), `Identical`
+- **Variables**: `LoadLocal`, `StoreLocal`, `StoreLocalRefcounted` (via `local_slot_to_var`), `LoadCapture`, `LoadCaptureRaw`, `LoadSelf`
+- **Data structures**: `List`, `MakeArrayMut`, `First`, `Rest` and their destructuring and or-nil forms, the `ArrayMut*` and struct ops, and the type predicates (`IsPair`, `IsArray`, …)
+- **Regions**: the `Incref*`, `Decref*` and `Adopt*` accounting the interpreter runs
 - **LBoxes**: `MakeCaptureCell`, `LoadCaptureCell`, `StoreCaptureCell`, `StoreCapture`
 - **Globals**: Read as depth-0 upvalues via `LoadCapture`/`LoadCaptureRaw`, or baked as a `ValueConst` immediate where the binding is immutable. The LIR carries no global-load instruction, so nothing names a global by symbol at this tier
-- **Function calls**: `Call`, `TailCall` (self-calls become native loops; non-self calls use `elle_jit_tail_call` trampoline)
-- **Terminators**: `Return`, `Jump`, `Branch`, `Emit`, `Unreachable`
+- **Function calls**: `Call`, `SuspendingCall`, `CallArrayMut`, `TailCall`, `TailCallArrayMut` (self-calls become native loops; non-self calls use `elle_jit_tail_call` trampoline)
+- **Terminators**: `Return`, `Jump`, `Branch`, `Emit` (below), `Unreachable`
 
 Unsupported (returns JitError::UnsupportedInstruction):
 - `MakeClosure` — rare in hot loops, deferred
@@ -118,8 +122,7 @@ Unsupported (returns JitError::UnsupportedInstruction):
 
 Supported in yielding functions (via side-exit):
 - `LoadResumeValue` — emitted as dead code (unreachable in JIT, resume goes through interpreter)
-- `Emit` — emitted as side-exit: spill registers, call `elle_jit_yield`, return `YIELD_SENTINEL`
-
+- `Emit` of a yield — emitted as side-exit: spill registers, call `elle_jit_yield`, return `YIELD_SENTINEL`
 ## Runtime Helpers
 
 All operations go through `extern "C"` runtime helpers for safety.
@@ -327,7 +330,10 @@ No errors are silently swallowed.
 6. **Module lifetime.** `JitCode` keeps the `JITModule` alive via `Arc` so the
    native code isn't freed while still in use.
 
-7. **Enabled by default via `jit` Cargo feature.** Disable with `--no-default-features`.
+7. **Enabled by default via the `jit` Cargo feature.** A build with the `mlir`
+   or `wasm` feature carries that tier instead and runs no JIT, and
+   `--no-default-features --features ffi,uring` builds the interpreter alone
+   ([config.md](../../docs/config.md)).
 
 8. **VM pointer for runtime calls.** The 4th parameter is `vm` to support
    function calls, fiber access, and yield side-exit helpers.
@@ -348,11 +354,10 @@ No errors are silently swallowed.
      `SuspendedFrame` and setting `fiber.signal` and `fiber.suspended`. The
      JIT caller must not modify these fields.
 
-13. **Variadic functions with `VarargTag::List` are JIT-supported.** The JIT
-     entry block emits a Cranelift cons-building loop that iterates over
-     `args[fixed..nargs]` in reverse, calling `elle_jit_cons` to build the
-     rest-arg list. `capture_params_mask` is checked for the rest param slot.
-     Functions with `VarargTag::Struct` or `VarargTag::StrictStruct` are
+13. **Variadic functions with `VarargKind::List` are JIT-supported.** The JIT
+     entry block calls `elle_jit_collect_rest_list`, which builds the rest-arg
+     list from `args[fixed..nargs]`. `capture_params_mask` is checked for the rest param slot.
+     Functions with `VarargKind::Struct` or `VarargKind::StrictStruct` are
      still rejected (they require fiber access for keyword error reporting)
      and fall back to the interpreter.
 
@@ -409,7 +414,7 @@ run of them belongs in the rebuilt frame.
 ### Yield Point Recording
 
 During bytecode emission, when a `Terminator::Emit` is encountered:
-1. The emitter records the bytecode position after the Emit opcode as `resume_ip`
+1. The emitter records the bytecode position after the `Emit` opcode as `resume_ip`
 2. The emitter captures the current operand stack state as `stack_regs`
 3. A `YieldPointInfo` is pushed to `Emitter.yield_points`
 

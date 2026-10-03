@@ -1,6 +1,6 @@
 # The ANF lift
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 Which values the ANF lift names with a synthetic binding, and why each name lands on the node it does.
 
@@ -39,10 +39,11 @@ the parent decides whether to wrap based on the child's position.
 **Consumer positions (wrap allocating children):** `Call.func` and
 `Call.args[*].expr`; `Intrinsic.args[*]`; `Emit.value`; `Recur.args[*]`;
 `Eval.{expr, env}`; `Parameterize.bindings[*].{key, value}`;
-`If.{cond, then, else}`; `Cond` clauses (cond and body); `Match.value` and arm
-bodies; every `Begin` expression and every `Block.body` expression;
-`And`/`Or` elements; `Break.value`; `SetCell.{cell, value}`; `Assign.value`;
-`Destructure.value`; `While.{cond, body}`. A non-last `Begin` or `Block`
+`If.{cond, then, else}`; `Cond` clauses (cond and body); `Match.value`, arm
+guards and arm bodies; every `Begin` expression and every `Block.body`
+expression; `And`/`Or` elements; `Break.value`; `SetCell.{cell, value}`;
+`Assign.value`; `Destructure.value`; `While.{cond, body}`; `Return.value`,
+which no tree holds yet when the pass runs. A non-last `Begin` or `Block`
 position discards its value, and the binding's slot is what `emit_decrefs_for`
 uses to release the call result region there.
 
@@ -96,8 +97,9 @@ tail call stays where it is, unnamed. `wrap_tail_returns` then marks the name's
 body as the returned value, which gives the canonical `(let [t e] (return t))`.
 
 Pinned by `hir::anf::tests::tails` and by
-[region-eval-return-leak.lisp](../../tests/elle/region-eval-return-leak.lisp),
-which the guardfree oracle also runs.
+[region-eval-return-leak.lisp](../../tests/impl/region-eval-return-leak.lisp),
+which also runs under `--trace=guardfree` so that a release placed too early
+faults.
 
 ## A resume value is named like a call result
 
@@ -120,7 +122,7 @@ the mint whether or not its value is returned, because its binding's release
 runs either way.
 
 Pinned by `hir::anf::tests::positions` and by
-[region-resume-value-operand.lisp](../../tests/elle/region-resume-value-operand.lisp).
+[region-resume-value-operand.lisp](../../tests/impl/region-resume-value-operand.lisp).
 
 ## Idempotence
 

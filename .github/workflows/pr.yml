@@ -31,7 +31,7 @@ jobs:
           CHANGED=$(git diff --name-only "$BASE" HEAD)
           echo "Changed files:"
           echo "$CHANGED"
-          if echo "$CHANGED" | grep -qE '\.(rs|lisp)$|^Cargo\.|^Makefile$|^\.cargo/'; then
+          if echo "$CHANGED" | grep -qE '\.(rs|lisp)$|(^|/)Cargo\.|^Makefile$|^\.cargo/'; then
             SOURCE=true
           else
             SOURCE=false
@@ -129,21 +129,21 @@ jobs:
       - name: Generate Elle documentation site
         run: ./target/release/elle demos/docgen/generate.lisp
 
-  tests:
-    name: VM+JIT Tests
+  # The default build and its rig: the language suite as a user runs it, then
+  # the implementation suite on the rig and both suites under the eager profile
+  # (docs/testing.md).
+  default:
+    name: Default Build Tests
     needs: changes
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     env:
       # The io_uring half of the region-check coverage. Every Makefile job builds
       # --release, and the region checks are #[cfg(debug_assertions)], so without
-      # this the corpus runs with them compiled out. This job is the backend
-      # `create_platform_backend` picks on Linux; `nouring` below is the pool.
-      # See docs/analysis/ci.md § "What each job builds".
+      # this the suites run with them compiled out. This job is the backend a
+      # Linux build takes; `pool` below is the thread pool (docs/analysis/ci.md).
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
-      # `smoke-elle` records every form's verdict here; the per-file passes
-      # record nothing (docs/analysis/ci.md § "A corpus job's results leave the
-      # runner").
+      # Both suites record every file's verdict here (docs/analysis/ci.md).
       ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
@@ -156,29 +156,63 @@ jobs:
           sudo systemctl start redis-server
       - name: make elle
         run: make elle
+      - name: make elle-rig
+        run: make elle-rig
       - name: make doctest
         run: make doctest
-      - name: make smoke-elle
-        run: make smoke-elle
-      - name: make smoke-vm
-        run: make smoke-vm
-      - name: make smoke-jit
-        run: make smoke-jit
+      - name: make smoke-lang
+        run: make smoke-lang
+      - name: make smoke-impl
+        run: make smoke-impl
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: session-tests
+          name: session-default
           path: |
             target/elle-state/elle-tests.db
             target/elle-state/cas
           retention-days: 14
 
-  # The corpus booted from an image rather than from core.lisp, prelude.lisp
-  # and stdlib.lisp. `--boot-image=` is off by default (docs/impl/image/boot.md
-  # names the two milestones the default waits on), so no other job hydrates
-  # one and a break in hydration passes every gate in this workflow. See
-  # docs/analysis/ci.md § "The boot-image job".
+  # The interpreter alone. Every other build compiles hot functions, so a defect
+  # only the interpreter shows would reach main green without this job.
+  nojit:
+    name: No-JIT Build Tests
+    needs: changes
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    env:
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: nojit
+      - name: Install Redis
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
+          sudo systemctl start redis-server
+      - name: make elle-nojit
+        run: make elle-nojit
+      - name: make smoke-nojit
+        run: make smoke-nojit
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-nojit
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
+
+  # The language suite booted from an image rather than from core.lisp,
+  # prelude.lisp and stdlib.lisp. `--boot-image=` is off by default
+  # (docs/impl/image/boot.md names the two milestones the default waits on), so
+  # no other job hydrates one and a break in hydration passes every gate in this
+  # workflow (docs/analysis/ci.md).
   boot-image:
     name: Boot Image Tests
     needs: changes
@@ -186,12 +220,11 @@ jobs:
     if: needs.changes.outputs.source == 'true'
     env:
       # A hydrated region is a region, and the region checks are
-      # #[cfg(debug_assertions)] — without this the corpus drives the image's
+      # #[cfg(debug_assertions)] — without this the suite drives the image's
       # pages with every one of them compiled out.
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
       # Where this job's session DB and CAS are written, so the upload step can
-      # name them (docs/analysis/ci.md § "A corpus job's results leave the
-      # runner").
+      # name them (docs/analysis/ci.md).
       ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
@@ -216,47 +249,49 @@ jobs:
             target/elle-state/cas
           retention-days: 14
 
-  # The corpus against the thread-pool I/O backend, through `elle test` on a
-  # binary built with the `no-uring` feature. Every other Linux job runs
+  # Both suites against the thread-pool I/O backend, on a build without the
+  # `uring` feature and on that build's rig. Every other Linux job runs
   # io_uring, and every non-Linux build runs the pool, so without this job the
   # pool's only sampler is the macOS one below: one run per PR, on the slowest
   # runner, against defects that hang rather than fail. Redis is installed for
-  # the same reason it is in `tests` — `redis-short-read.lisp` gates itself on a
-  # live server, and it is a pool-only hang, so a job without Redis would skip
+  # the same reason it is in `default` — `redis-short-read.lisp` gates itself on
+  # a live server, and it is a pool-only hang, so a job without Redis would skip
   # the very file that proves the point.
-  nouring:
+  pool:
     name: Thread-Pool I/O Tests
     needs: changes
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     env:
       # The thread-pool half of the region-check coverage, for the same reason
-      # `tests` above carries the io_uring half: the checks are compiled out of
+      # `default` above carries the io_uring half: the checks are compiled out of
       # a release build without it. This job is the only Linux one that drives
-      # the pool, so a pool-only region defect has no other Linux detector.
-      # See docs/analysis/ci.md § "What each job builds".
+      # the pool, so a pool-only region defect has no other Linux detector
+      # (docs/analysis/ci.md).
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
-      # The one record of how the corpus behaves on the pool from a Linux
-      # runner (docs/analysis/ci.md § "A corpus job's results leave the runner").
+      # The one record of how the suites behave on the pool from a Linux runner
+      # (docs/analysis/ci.md).
       ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pool
       - name: Install Redis
         run: |
           sudo apt-get update
           sudo apt-get install -y redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
           sudo systemctl start redis-server
-      - name: make elle-nouring
-        run: make elle-nouring
-      - name: make smoke-nouring
-        run: make smoke-nouring
+      - name: make elle-pool
+        run: make elle-pool
+      - name: make smoke-pool
+        run: make smoke-pool
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: session-nouring
+          name: session-pool
           path: |
             target/elle-state/elle-tests.db
             target/elle-state/cas
@@ -276,6 +311,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run integration tests
         run: cargo test --test '*' -- --skip property
+      # `--test '*'` runs the root package's tests alone; the rig is a workspace
+      # crate with tests of its own (rig/overview.md).
+      - name: Run the rig's tests
+        run: cargo test -p elle-rig
       - name: Run property tests
         run: "cargo test --test lib property::"
 
@@ -306,7 +345,7 @@ jobs:
       - name: make elle-mlir
         run: make elle-mlir
       - name: make doctest
-        run: make doctest
+        run: make doctest ELLE=./target/release/elle-mlir
       - name: make smoke-mlir
         run: make smoke-mlir
       - name: Upload the session store
@@ -331,10 +370,9 @@ jobs:
         with:
           shared-key: wasm
       # The wasm tier carries no production workloads (docs/impl/wasm.md,
-      # memory.md § "The backend-realization frontier"), so its corpus does not
-      # gate PRs. What must stay green anyway: the feature compiles, and the
-      # full-module tier boots. Restore `make smoke-wasm` here (plus the GNU
-      # parallel install it needs) when the tier is brought back up.
+      # docs/impl/memory.md), so its suites do not gate PRs. What must stay
+      # green anyway: the feature compiles, and the full-module tier boots.
+      # Restore `make smoke-wasm` here when the tier is brought back up.
       - name: make check-wasm
         run: make check-wasm
 
@@ -405,18 +443,18 @@ jobs:
       - name: make smoke-plugins
         run: make smoke-plugins
 
-  # The corpus half of the AArch64 tier. Its Rust half is `aarch64-tests`
+  # The suites half of the AArch64 tier. Its Rust half is `aarch64-tests`
   # below, running at the same time on its own runner — the two share no build
   # and no run, so serializing them made this platform cost the sum. See
-  # docs/analysis/ci.md § "Why each platform has two test jobs".
+  # docs/analysis/ci.md.
   aarch64:
     name: AArch64 Smoke
     needs: changes
     runs-on: ubuntu-24.04-arm
     if: needs.changes.outputs.source == 'true'
     env:
-      # The one AArch64 corpus run, so its store is the only record of how the
-      # corpus behaves on this architecture.
+      # The one AArch64 run of both suites, so its store is the only record of
+      # how they behave on this architecture.
       ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
@@ -432,8 +470,14 @@ jobs:
         run: make elle
       - name: make doctest
         run: make doctest
-      - name: make smoke
-        run: make smoke
+      - name: make smoke-lang
+        run: make smoke-lang
+      - name: make smoke-impl
+        run: make smoke-impl
+      - name: make embedding
+        run: make embedding
+      - name: make semver-check
+        run: make semver-check
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
@@ -465,6 +509,10 @@ jobs:
           shared-key: aarch64-tests
       - name: Run integration tests
         run: cargo test --test '*' -- --skip property
+      # `--test '*'` runs the root package's tests alone; the rig is a workspace
+      # crate with tests of its own (rig/overview.md).
+      - name: Run the rig's tests
+        run: cargo test -p elle-rig
       - name: Run property tests
         run: "cargo test --test lib property::"
 
@@ -473,6 +521,10 @@ jobs:
     needs: changes
     runs-on: ubuntu-24.04-arm
     if: needs.changes.outputs.source == 'true'
+    env:
+      # The runner is the default build (docs/analysis/ci.md), so this job
+      # records runs like every other suite job.
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -487,6 +539,15 @@ jobs:
         run: make elle-noffi
       - name: make smoke-noffi
         run: make smoke-noffi
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-aarch64-noffi
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
 
   android:
     name: Android Cross-Check
@@ -510,10 +571,10 @@ jobs:
       - name: Cross-check Android
         run: cargo check --target aarch64-linux-android --no-default-features -p elle
 
-  # The corpus half of the macOS tier. Its Rust half is `macos-tests` below,
+  # The suites half of the macOS tier. Its Rust half is `macos-tests` below,
   # running at the same time on its own runner. This is the slowest platform in
   # the workflow, so it is the one the split buys the most from — see
-  # docs/analysis/ci.md § "Why each platform has two test jobs".
+  # docs/analysis/ci.md.
   macos:
     name: macOS Smoke
     needs: changes
@@ -523,18 +584,18 @@ jobs:
       # The release profile strips the symbol table (Cargo.toml: strip =
       # "symbols"), which turns the timeout photograph (src/test.lisp
       # photograph-threads → /usr/bin/sample) into unreadable `???` frames.
-      # Keep the symbol table on this runner: it is the box where the corpus
-      # wedges, and the photograph is the only evidence a timeout leaves.
+      # Keep the symbol table on this runner: it is the box where the suites
+      # wedge, and the photograph is the only evidence a timeout leaves.
       CARGO_PROFILE_RELEASE_STRIP: debuginfo
-      # The other half of `--trace=scrub` below. The scrub's `memset` runs in
+      # The other half of the scrub profile below. The scrub's `memset` runs in
       # any build, but the panic that READS the zeros — the `arena::deref`
       # tag/object mismatch that names the deref site and attributes the free —
       # is `#[cfg(debug_assertions)]`. Without this, the release binary scrubs
       # and says nothing: a stale read faults near its site instead of naming
-      # it. See docs/impl/region/diagnostics.md § `--trace=scrub`.
+      # it (docs/impl/region/diagnostics.md).
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
-      # This is the runner the corpus wedges on, and the one nobody can log in
-      # to. Its store carries what each form printed before it stalled, so the
+      # This is the runner the suites wedge on, and the one nobody can log in
+      # to. Its store carries what each file printed before it stalled, so the
       # upload below is how that evidence leaves the box.
       ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
@@ -560,14 +621,20 @@ jobs:
         run: make elle
       - name: make doctest
         run: make doctest
-      # --trace=scrub: this runner is where the corpus corrupts (stale reads
-      # surfacing as wrong-typed values, wedges, and segfaults, on the pool
-      # backend only this box exercises). Scrub zeroes each released page, so
-      # the first stale read panics at the deref naming its site instead of
+      - name: make smoke-lang
+        run: make smoke-lang
+      # The scrub profile runs the language suite on the rig with each released
+      # page zeroed: this runner is where stale reads surface as wrong-typed
+      # values, wedges and segfaults, on the pool backend a Mac runs. Scrub makes
+      # the first stale read panic at the deref naming its site instead of
       # failing minutes later somewhere unrelated. One memset per freed page.
       # The panic itself needs CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS, set above.
-      - name: make smoke
-        run: make smoke ELLE_TEST_FLAGS=--trace=scrub
+      - name: make smoke-impl, the language suite also under the scrub profile
+        run: make smoke-impl IMPL_PROFILES=tests/impl/profiles/scrub.toml
+      - name: make embedding
+        run: make embedding
+      - name: make semver-check
+        run: make semver-check
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
@@ -627,6 +694,10 @@ jobs:
         run: brew install zstd
       - name: Run integration tests
         run: cargo test --test '*' -- --skip property
+      # `--test '*'` runs the root package's tests alone; the rig is a workspace
+      # crate with tests of its own (rig/overview.md).
+      - name: Run the rig's tests
+        run: cargo test -p elle-rig
       - name: Run property tests
         run: "cargo test --test lib property::"
       # Same argument as the `macos` job's copy: a test whose elle subprocess
@@ -652,7 +723,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, docs, tests-combined, tests, boot-image, nouring, wasm, mlir, plugins, aarch64, aarch64-tests, aarch64-noffi, android, macos, macos-tests]
+    needs: [changes, qa, docs, tests-combined, default, nojit, boot-image, pool, wasm, mlir, plugins, aarch64, aarch64-tests, aarch64-noffi, android, macos, macos-tests]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -662,22 +733,25 @@ jobs:
       - name: Check combined tests
         if: needs.tests-combined.result == 'failure'
         run: exit 1
-      - name: Check tests
-        if: needs.tests.result == 'failure'
+      - name: Check the default build
+        if: needs.default.result == 'failure'
+        run: exit 1
+      - name: Check the build with no JIT
+        if: needs.nojit.result == 'failure'
         run: exit 1
       # The only job that boots from an image. A failure here is hydration or
-      # the corpus answering differently under it, and either blocks.
+      # the language suite answering differently under it, and either blocks.
       - name: Check boot image
         if: needs.boot-image.result == 'failure'
         run: exit 1
       - name: Check thread-pool I/O tests
-        if: needs.nouring.result == 'failure'
+        if: needs.pool.result == 'failure'
         run: exit 1
       - name: Check MLIR
         if: needs.mlir.result == 'failure'
         run: exit 1
       # The wasm job is a build-and-boot gate (`make check-wasm`), not the
-      # corpus: the tier carries no production workloads, so corpus coverage
+      # suites: the tier carries no production workloads, so suite coverage
       # on it does not gate PRs. A failure here means the wasm feature no
       # longer compiles or the tier no longer boots — that blocks.
       - name: Check WASM

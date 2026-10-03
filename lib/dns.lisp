@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 14)
+# audited: 2026-09-30
 ## A DNS client (RFC 1035) in pure Elle: nameservers, queries with retries, and CNAME chains.
 ## lib/overview.md
 ##
@@ -24,7 +24,8 @@
 (def parse-response wire:parse-response)
 
 (def MAX-CNAME-DEPTH 8)
-(def DEFAULT-TIMEOUT 3000)
+(def DEFAULT-PORT 53)
+(def DEFAULT-TIMEOUT 3)
 (def DEFAULT-RETRIES 2)
 
 ## ── resolv.conf parsing ───────────────────────────────────────────────
@@ -54,22 +55,32 @@
 (def @next-txid 1)
 
 (defn gen-txid []
-  "Generate a monotonically increasing 16-bit transaction ID."
+  "Return the next 16-bit transaction ID: they count up and wrap after 0xffff."
   (let [id next-txid]
     (assign next-txid (bit/and (+ id 1) 0xffff))
     id))
 
 ## ── DNS query execution ───────────────────────────────────────────────
 
-(defn do-query [server name qtype timeout]
+(defn query-options [server port timeout retries]
+  "Where and how to send each query: the options a caller named, and the
+   default for each it left nil."
+  {:server (or server (first (read-nameservers)))
+   :port (or port DEFAULT-PORT)
+   :timeout (or timeout DEFAULT-TIMEOUT)
+   :retries (or retries DEFAULT-RETRIES)})
+
+(defn do-query [opts name qtype]
   "Send a single DNS query and return the parsed response.
    Signals :dns-timeout on timeout, :dns-error on protocol errors."
-  (let* [txid (gen-txid)
+  (let* [server opts:server
+         timeout opts:timeout
+         txid (gen-txid)
          packet (build-query txid name qtype)
          sock (udp/bind "0.0.0.0" 0)]
     (defer
       (port/close sock)
-      (udp/send-to sock packet server 53 :timeout timeout)
+      (udp/send-to sock packet server opts:port :timeout timeout)
       (let* [[ok? result] (protect (udp/recv-from sock 512 :timeout timeout))]
         (unless ok?
           (error {:error :dns-timeout
@@ -104,12 +115,13 @@
                                        name)})))
           resp)))))
 
-(defn query-with-retries [server name qtype timeout retries]
+(defn query-with-retries [opts name qtype]
   "Query with retries. Returns parsed response or signals error."
+  (def retries opts:retries)
   (def @last-err nil)
   (def @attempt 0)
   (while (< attempt retries)
-    (let [[ok? result] (protect (do-query server name qtype timeout))]
+    (let [[ok? result] (protect (do-query opts name qtype))]
       (if ok?
         (break result)
         (begin
@@ -125,7 +137,7 @@
 
 ## ── High-level resolver ───────────────────────────────────────────────
 
-(defn resolve-type [name qtype server timeout retries]
+(defn resolve-type [opts name qtype]
   "Resolve a name to records of a specific type, following CNAMEs."
   (def @current-name name)
   (def @depth 0)
@@ -138,7 +150,7 @@
               :depth depth
               :limit MAX-CNAME-DEPTH
               :message (concat "CNAME chain too deep for " name)}))
-    (let* [resp (query-with-retries server current-name qtype timeout retries)
+    (let* [resp (query-with-retries opts current-name qtype)
            answers resp:answers
            # Collect direct answers of the requested type
            direct (filter (fn [r]
@@ -166,35 +178,31 @@
           (break nil)))))
   (freeze all-records))
 
-(defn resolve [name &named server timeout retries]
+(defn resolve [name &named server port timeout retries]
   "Resolve a domain name. Returns its record structs, the A records before
    the AAAA records. A query that fails contributes no records.
    Options:
      :server  — nameserver IP (default: from /etc/resolv.conf)
-     :timeout — per-query timeout in ms (default: 3000)
-     :retries — retry count per query (default: 2)"
-  (let* [srv (or server (first (read-nameservers)))
-         tmo (or timeout DEFAULT-TIMEOUT)
-         ret (or retries DEFAULT-RETRIES)
-         a-records (let [[ok? result] (protect (resolve-type name TYPE-A srv tmo
-                         ret))]
+     :port    — nameserver UDP port (default: 53)
+     :timeout — how long to wait for each answer, in seconds (default: 3)
+     :retries — how many times to send each query (default: 2)"
+  (let* [opts (query-options server port timeout retries)
+         a-records (let [[ok? result] (protect (resolve-type opts name TYPE-A))]
                      (if ok? result ()))
-         aaaa-records (let [[ok? result] (protect (resolve-type name TYPE-AAAA
-                            srv tmo ret))]
+         aaaa-records (let [[ok? result] (protect (resolve-type opts name
+                            TYPE-AAAA))]
                         (if ok? result ()))]
     (concat a-records aaaa-records)))
 
-(defn query [name qtype &named server timeout retries]
+(defn query [name qtype &named server port timeout retries]
   "Low-level: send a single DNS query and return the full parsed response.
    qtype is an integer (1=A, 28=AAAA, 5=CNAME, etc.).
    Options:
      :server  — nameserver IP (default: from /etc/resolv.conf)
-     :timeout — per-query timeout in ms (default: 3000)
-     :retries — retry count per query (default: 2)"
-  (let* [srv (or server (first (read-nameservers)))
-         tmo (or timeout DEFAULT-TIMEOUT)
-         ret (or retries DEFAULT-RETRIES)]
-    (query-with-retries srv name qtype tmo ret)))
+     :port    — nameserver UDP port (default: 53)
+     :timeout — how long to wait for each answer, in seconds (default: 3)
+     :retries — how many times to send each query (default: 2)"
+  (query-with-retries (query-options server port timeout retries) name qtype))
 
 ## ── Internal tests (pure, no network) ─────────────────────────────────
 

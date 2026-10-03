@@ -10,11 +10,6 @@ use std::sync::{Arc, OnceLock};
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
-/// Legacy: flip instructions are always no-ops. Kept for API compat.
-pub fn flip_enabled() -> bool {
-    false
-}
-
 /// Default cache directory.
 ///
 /// Resolution order:
@@ -40,7 +35,7 @@ static DEFAULTS: OnceLock<Config> = OnceLock::new();
 ///
 /// The read does NOT install those defaults. A `get_or_init` here would let
 /// any incidental early read — a scratch heap sizing its page pool, a page
-/// claim asking whether `--stats` is on — decide the whole process's
+/// claim asking whether `--dump=stats` is on — decide the whole process's
 /// configuration and silently discard every flag the user passed. Startup
 /// order then becomes a standing hazard: it held while nothing allocated
 /// before `init`, and broke the moment something did (the pre-VM `unicode!`
@@ -159,9 +154,9 @@ impl Default for RuntimeConfig {
         RuntimeConfig {
             trace: HashSet::new(),
             trace_cell: Arc::new(AtomicU32::new(0)),
-            jit: JitPolicy::Adaptive { threshold: 10 },
+            jit: JitPolicy::build_default(),
             wasm: WasmPolicy::Off,
-            mlir: MlirPolicy::Adaptive { threshold: 10 },
+            mlir: MlirPolicy::build_default(),
             debug_bytecode: false,
             stats: false,
             max_depth: DEFAULT_MAX_DEPTH,
@@ -171,25 +166,9 @@ impl Default for RuntimeConfig {
 
 // ── Config (static) ───────────────────────────────────────────────
 
-/// All runtime configuration for Elle.
-///
-/// ## `--jit=N`
-///
-/// Controls JIT compilation threshold:
-/// - `0` — JIT disabled
-/// - `N` — JIT enabled, compile after N-1 calls
-///   (so `--jit=1` compiles on first call, `--jit=11` compiles after 10)
-///
-/// Default: 11 (threshold 10).
-///
-/// ## `--wasm=N`
-///
-/// Controls WASM tiered compilation:
-/// - `0` or omitted — WASM disabled
-/// - `N` — tiered WASM enabled, compile after N-1 calls
-/// - `full` — full-module WASM backend (compile everything upfront)
-///
-/// Default: 0 (disabled).
+/// All runtime configuration for Elle: what the build decides, and what the
+/// command line sets (docs/config.md). The tier policies start where the build
+/// puts them; only the rig and an embedding host set them otherwise.
 #[derive(Debug, Clone)]
 pub struct Config {
     /// JIT compilation policy.
@@ -244,16 +223,6 @@ pub struct Config {
     /// O(live_regs * suspend_points). On by default.
     pub wasm_sparse_spill: bool,
 
-    /// Enable the A-normal form lift pass (`src/hir/anf.rs`). Default: on.
-    ///
-    /// `--anf=off` short-circuits `anf_lift` to a no-op, so region inference
-    /// receives the HIR exactly as `functionalize` produced it, with its
-    /// allocating values unnamed.
-    ///
-    /// The flag exists so the pass can be switched off under a test that
-    /// passes with it and fails without it.
-    pub anf: bool,
-
     /// Compiler stages to dump (from `--dump=kw1,kw2,...`). Valid keywords
     /// are listed in `DUMP_KEYWORDS`. When non-empty, the compiler runs up
     /// to each requested stage, prints its artifact, and exits without
@@ -279,17 +248,27 @@ pub struct Config {
     /// hosts override per-instance via `Runtime::with_unicode`; worker VMs
     /// inherit their parent's generation explicitly.
     pub unicode: Option<crate::segment::Generation>,
+
+    /// `--help`: print the usage and exit before any VM exists.
+    pub help: bool,
+
+    /// `--version`: print the banner and exit before any VM exists.
+    pub version: bool,
+
+    /// This process runs `elle test`. No flag sets it. It is what lets the
+    /// runner's worker turn a tier off or make it eager through `vm/config-set`,
+    /// which every other program is refused (docs/test-runner.md).
+    pub test_runner: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
-            // `Config::parse` starts from this and overrides `mlir` alone, so
-            // the JIT policy here is also the one `elle` runs with
-            // (docs/config.md).
-            jit: JitPolicy::Adaptive { threshold: 10 },
+            // `Config::parse` starts from this, so the tier policies here are
+            // also the ones `elle` runs with (docs/config.md).
+            jit: JitPolicy::build_default(),
             stats: false,
-            mlir: MlirPolicy::Adaptive { threshold: 10 },
+            mlir: MlirPolicy::build_default(),
             wasm: WasmPolicy::Off,
             no_stdlib: false,
             cache: default_cache_dir(),
@@ -301,12 +280,14 @@ impl Default for Config {
             wasm_lir: false,
             wasm_chunk: false,
             wasm_sparse_spill: true,
-            anf: true,
             dump: HashSet::new(),
             trace_keywords: Vec::new(),
             region_page_size: crate::value::fiberheap::pagepool::base_page(),
             page_pool_max: 4 * 1024 * 1024,
             unicode: None,
+            help: false,
+            version: false,
+            test_runner: false,
         }
     }
 }

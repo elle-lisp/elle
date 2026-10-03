@@ -1,6 +1,6 @@
 # Native region effects: declared, not guessed
 
-<!-- audited: 2026-09-19 -->
+<!-- audited: 2026-09-28 -->
 
 How each primitive declares its region behavior, and what each `RegionEffect`
 variant claims.
@@ -62,7 +62,7 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   call site the channel is typically a module-level binding read as an
   upvalue, so no pair exists and no incref is emitted — the message then
   rides the buffer on the sender's own references and is freed before the
-  receive (`tests/elle/region-chan-send-owned-param-uaf.lisp`). The buffer
+  receive ([region-chan-send-owned-param-uaf.lisp](../../../tests/impl/region-chan-send-owned-param-uaf.lisp)). The buffer
   is **external** to the region system — no free-time cascade balances
   anything stored in it — so the seam retain IS the message's reference. The
   message is a genuinely-Shared (no-bounded-dominator) region, and its
@@ -73,8 +73,8 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   (`release_received_message`, guarded by `value_in_region_store` so a
   cross-thread message on a foreign heap is left to that heap's accounting).
   Without the receive-side release the send-site incref never balances — one
-  leaked region per send/recv cycle (`tests/elle/region-chan-send-recv.lisp`,
-  and the `chan-send-recv` probe in `tests/elle/oracle.lisp`). The
+  leaked region per send/recv cycle ([region-chan-send-recv.lisp](../../../tests/impl/region-chan-send-recv.lisp),
+  and the `chan-send-recv` probe in [oracle.lisp](../../../tests/impl/oracle.lisp)). The
   fiber-frontier *escape* of the message is the escape analysis's fiber/send
   facet (`hir::escape`)
   — the **send** half of the ownership forest's fiber-facet Shared seed. The
@@ -93,7 +93,7 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   would double-count the funnel's runtime incref against the container's
   single free-time cascade decref — one leaked region per stored value
   per call, which is exactly why `Funnel` emits no clique edge (the
-  `put`/`push` store probes in `tests/elle/oracle.lisp` pin the seam
+  `put`/`push` store probes in [oracle.lisp](../../../tests/impl/oracle.lisp) pin the seam
   reclaiming). No
   result-side oracle constraint (either freshness is legal), exactly as
   `Mixed`. It exists so a funnel-storing op is not forced into
@@ -124,7 +124,7 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   case below makes). Two properties, two answers: unbounded result, no store —
   `Opaque`. Declaring `Mixed` there buys nothing and costs one never-balancing
   `IncrefRegion` per heap-argument pair per call
-  (`tests/elle/region-has-clique-leak.lisp`).
+  ([region-has-clique-leak.lisp](../../../tests/impl/region-has-clique-leak.lisp)).
 
   The sequence reads and conversions are the same shape and take the same
   declaration: `first`, `second`, `rest`, `->array` and `->list` each resolve
@@ -139,7 +139,7 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   `frame_held_regions` — the branch-arm release window among them. A
   declaration is therefore a claim about escape as much as about edges, and the
   strongest true one is what a read-only dispatcher owes
-  (`tests/elle/region-sequence-read-effect.lisp`).
+  ([region-sequence-read-effect.lisp](../../../tests/impl/region-sequence-read-effect.lisp)).
 
   **A native that re-enters the VM is `Opaque` on the store side.** `vm/query`
   selects an operation by a runtime string; `compile/run-on` dispatches a
@@ -152,14 +152,14 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   `Opaque` — and the obligation it carries is on the dispatch, not the primitive:
   an operation added behind one of these gateways that RETAINS an argument past
   the call invalidates the declaration and must move it back to `Mixed`
-  (`tests/elle/region-query-clique-leak.lisp`). `import` is the declarant whose
+  ([region-query-clique-leak.lisp](../../../tests/impl/region-query-clique-leak.lisp)). `import` is the declarant whose
   result side is furthest from its own region: the module value comes back through
   the thunk's return convention already carrying the caller's reference
   (`result_minted`, below), or — for a plugin already loaded — out of the plugin
   cache, minted by an earlier call. The specifier is resolved through a Rust
   `String` and never retained, so the store side is empty
   (`import_declares_opaque_no_hard_edge`, `import_does_not_seed_the_store_facet`;
-  the soundness face is `tests/elle/region-fiber-child-effect-uaf.lisp`).
+  the soundness face is [region-fiber-child-effect-uaf.lisp](../../../tests/impl/region-fiber-child-effect-uaf.lisp)).
 
   **A fiber-graph read is `Opaque`.** `fiber/child` hands back the cached
   child-fiber `Value` its argument carries. The cache is written by the resume
@@ -169,7 +169,7 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   `Opaque`, and its argument is not a store-facet escape seed. What a `Mixed`
   declaration costs a read like this is that seed: a fiber named in one arm of a
   branch and read in another loses the branch-arm release window and strands per
-  call (`tests/elle/region-fiber-child-effect.lisp`).
+  call ([region-fiber-child-effect.lisp](../../../tests/impl/region-fiber-child-effect.lisp)).
 
   **The child-chain WIRING is `Opaque` too — that write holds nothing.**
   `fiber/propagate` returns `SIG_PROPAGATE` carrying its fiber argument, and
@@ -196,7 +196,7 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   facet on the propagate argument leaves the branch's only release in the arm the
   success path never takes. Every evaluation then strands the fiber value and its
   body closure, and a loop whose body is wrapped in `defer` grows without bound
-  (the `defer-while` and `defer-error` probes in `tests/elle/oracle.lisp`).
+  (the `defer-while` and `defer-error` probes in [oracle.lisp](../../../tests/impl/oracle.lisp)).
 - **`Delivers { args }`** — the listed (0-based) arguments are handed to
   **another fiber** by installing them in its signal slot, and the result is
   unbounded. The fiber value installers are the declarants: `fiber/resume`'s
@@ -217,7 +217,7 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
     [park.md](park.md) § "A resume value crosses counted, or not at all"). A
     compile-time incref at the install would double-count the first against its
     single cascade decref and duplicate the second, which is exactly the arg-clique
-    leak (`tests/elle/region-fiber-install-clique-leak.lisp`).
+    leak ([region-fiber-install-clique-leak.lisp](../../../tests/impl/region-fiber-install-clique-leak.lisp)).
   - **The argument side is also `Sends`'s answer — a frontier crossing.** The
     value goes to a fiber this activation does not bound, so escape seeds each
     listed argument on its **fiber** facet (`hir::escape`), never the store
@@ -272,9 +272,9 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   releases it still owes"). A literal materialized straight into the
   `fiber/abort` argument lives in a frame slot and nowhere else, so without the
   record its release stays owed forever (the `abort-discard` probe in
-  `tests/elle/oracle.lisp`).
+  [oracle.lisp](../../../tests/impl/oracle.lisp)).
 
-  `tests/elle/region-fiber-abort-delivery-uaf.lisp` carries a face per route: the
+  [region-fiber-abort-delivery-uaf.lisp](../../../tests/impl/region-fiber-abort-delivery-uaf.lisp) carries a face per route: the
   under-mint faults there under `--trace=guardfree`, and the over-mint shows as
   region growth, since a spare reference never faults.
 - **`Mixed`** — examined, and the native stores arguments *uncounted*

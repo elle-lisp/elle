@@ -1,4 +1,4 @@
-//! audited: 2026-09-29
+//! audited: 2026-09-30
 //! `AsyncBackend::submit` — the one entry point, and how it routes a request to
 //! a portless path, an immediate answer, or a backend.
 //!
@@ -32,7 +32,7 @@ impl AsyncBackend {
 
         // Portless operations — handle before port extraction.
         if let IoOp::Connect { ref addr } = request.op {
-            return self.submit_connect(addr, request.timeout, request.port);
+            return self.submit_connect(addr, request.bound, request.port);
         }
         if let IoOp::Sleep { duration } = request.op {
             return self.submit_sleep(duration);
@@ -72,7 +72,7 @@ impl AsyncBackend {
             ..
         } = request.op
         {
-            return self.submit_open(path, flags, mode, request.timeout, request.port);
+            return self.submit_open(path, flags, mode, request.bound, request.port);
         }
 
         // Task: run closure on thread pool.
@@ -82,7 +82,7 @@ impl AsyncBackend {
 
         // PollFd: poll a raw fd for readiness.
         if let IoOp::PollFd { fd, events } = request.op {
-            return self.submit_poll_fd(fd, events, request.timeout);
+            return self.submit_poll_fd(fd, events, request.bound);
         }
 
         // ChanSelectPark: poll a chan/wait-ready eventfd until any
@@ -94,7 +94,7 @@ impl AsyncBackend {
             let guard = guard_cell
                 .take()
                 .ok_or_else(|| "io/submit: ChanSelectPark guard already consumed".to_string())?;
-            return self.submit_chan_select_park(guard, request.timeout);
+            return self.submit_chan_select_park(guard, request.bound);
         }
 
         let port = request

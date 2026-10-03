@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-01 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -86,9 +86,9 @@ because the operands are integers.
 
 ## Function selection
 
-Functions become JIT candidates based on a hotness threshold, which `--jit`
-sets. The VM increments a counter on each call; when it crosses the threshold,
-the function is compiled.
+Functions become JIT candidates based on a hotness threshold, ten calls by
+default, which `(vm/config-set :jit N)` changes. The VM increments a counter on
+each call; when it crosses the threshold, the function is compiled.
 
 **A non-tail call is counted by whichever tier makes it.** The interpreter
 counts in `try_jit_call`; compiled code counts in `elle_jit_call`, on the arm
@@ -102,12 +102,34 @@ the interpreter, so a callee called from nowhere else never becomes hot. The
 worker's latency masks that, because the caller keeps running interpreted while
 Cranelift works. `--trace=syncjit` installs on the first call and leaves no such
 window, so it is where the two policies are held to the same answer
-([jit-compiled-caller-promotes-callee.lisp](../../tests/elle/jit-compiled-caller-promotes-callee.lisp)).
+([jit-compiled-caller-promotes-callee.lisp](../../tests/impl/jit-compiled-caller-promotes-callee.lisp)).
 
 A tail call is counted by neither tier. It replaces the frame rather than
 building one — `tail_call_inner` in the interpreter, the tail-call sentinel in
 compiled code — so a function only ever reached in tail position stays
 interpreted.
+
+## The background worker
+
+Each VM compiles on an `elle-jit` thread of its own, which starts with the VM's
+first submission ([worker.rs](../../src/jit/worker.rs)). The interpreter keeps
+running a hot function while Cranelift compiles it, and the next call takes the
+code from the cache.
+
+**The queue ends with its VM.** When a VM drops its worker, the thread discards
+every task still queued and exits when the compile in progress returns. Only
+the VM that submitted a task can install its result, so a task that outlives
+that VM produces code that nothing calls.
+
+A process that runs many short VMs is where this matters. `elle test` starts a
+VM for each form and runs each whole file with the JIT eager, so every function
+the file calls goes into the queue. If the queue ran to its end, those threads
+would keep compiling for VMs that are gone, and take the processor from the
+forms still running.
+
+Cranelift cannot be interrupted inside a compile, so at most one task finishes
+after the VM drops its worker. The drop does not join the thread, so a VM that
+ends does not wait for that compile.
 
 ## How a call leaves compiled code
 
@@ -134,8 +156,8 @@ recursion grows the thread's stack. When less than 512 KiB of that stack
 remains, the helper runs the callee in the interpreter instead. The
 interpreter keeps every deeper call on fiber frames and enters no compiled
 code while the stack stays low ([vm.md](vm.md)). A recursion 100,000 deep
-therefore completes under `--jit=eager`, with the frames past the watermark
-interpreted.
+therefore completes with the JIT eager, as a rig sidecar sets it, with the
+frames past the watermark interpreted.
 
 ## Rejection tracking
 
@@ -152,10 +174,10 @@ function's bytecode pointer (see "Cache identity" for why that key is sound),
 so a re-submission could only ever reproduce the identical rejection — it is
 pure wasted work.
 
-Eager JIT is where this invariant pays. With `--jit=eager` the hotness
+Eager JIT is where this invariant pays. With the JIT eager the hotness
 threshold is 0, so *every* call is "hot"; absent the negative cache, each call
 to an un-jit'able function re-submits it to the background worker. A single
-un-jit'able function called in a hot loop (e.g. stdlib `-`/`/`, which build a
+un-jit'able function called in a hot loop (for example stdlib `-`/`/`, which build a
 rest-arg closure → `MakeClosure` rejection) then saturates the JIT worker
 thread, re-compiling the same function thousands of times and burning CPU that
 dwarfs the program's real work. The `jit/rejections` report exposes a per-
@@ -209,8 +231,8 @@ that gap. Every successful compile, on every thread, records
 `(entry address, label)` in one process-global table
 ([registry.rs](../../src/jit/registry.rs)).
 The label is the function's declared name when one exists, else its
-smallest-offset source location (`ClosureTemplate::display_label`) — lowering
-names almost nothing, so the location is what actually identifies a function
+smallest-offset source location (`ClosureTemplate::display_label`). Lowering
+names only a lambda a `def` or `let` binds, so the location is what identifies the rest
 to a reader. The table only grows; entries are never removed,
 because a stack captured at any time may reference code whose `JitCode` has
 since been dropped.
@@ -265,21 +287,27 @@ fall-through block starts, so the resume runs the releases the frame still owed
 call's and each tail call's, with the operand stack at that point, during LIR
 emission. These two helpers read them.
 
-## CLI flags
+## Configuration
 
-[config.md](../config.md) owns the `--jit` policy table and the policy the
-binary starts from. `--stats` prints this tier's compiled and rejected counts
-on exit, with the call count behind each rejection.
+[config.md](../config.md) owns the builds, the JIT threshold, and the policy the
+binary starts from. The JIT is the optimizing tier of the default build; a
+build with the `mlir` or `wasm` feature carries that tier instead and runs no
+JIT. No flag turns the JIT off or makes it eager. The rig does both through a
+sidecar or a profile ([rig](../../rig/overview.md)), and `elle test` runs each
+whole file with the JIT off and eager ([test-runner.md](../test-runner.md)).
+`--dump=stats` prints this tier's compiled and rejected counts on exit, with
+the call count behind each rejection.
 
 ## Files
 
-```text
-src/jit/compiler.rs    JitCompiler, module management
-src/jit/translate.rs   FunctionTranslator, LIR → Cranelift IR
-src/jit/code.rs        JitCode wrapper
-src/jit/vtable.rs      Runtime helper dispatch table
-src/jit/dispatch.rs    JIT dispatch integration with VM
-```
+| File | Holds |
+|------|-------|
+| [src/jit/compiler.rs](../../src/jit/compiler.rs) | `JitCompiler`, module management |
+| [src/jit/translate.rs](../../src/jit/translate.rs) | `FunctionTranslator`, LIR → Cranelift IR |
+| [src/jit/code.rs](../../src/jit/code.rs) | The `JitCode` wrapper |
+| [src/jit/worker.rs](../../src/jit/worker.rs) | The background worker thread and its queue |
+| [src/jit/vtable.rs](../../src/jit/vtable.rs) | The runtime helper dispatch table |
+| [src/jit/dispatch.rs](../../src/jit/dispatch.rs) | JIT dispatch integration with the VM |
 
 ---
 
@@ -288,7 +316,7 @@ src/jit/dispatch.rs    JIT dispatch integration with VM
 - [impl/lir.md](lir.md) — LIR that the JIT translates
 - [impl/vm.md](vm.md) — VM fallback and dispatch
 - [impl/bytecode.md](bytecode.md) — bytecode alternative
-- [impl/mlir.md](mlir.md) — MLIR tier-2 path consulted before Cranelift
+- [impl/mlir.md](mlir.md) — MLIR, the tier an `mlir` build carries instead of this one
 - [impl/wasm.md](wasm.md) — WebAssembly backend
 - [impl/gpu.md](gpu.md) — GPU compute via SPIR-V + Vulkan
 - [impl/differential.md](differential.md) — cross-tier agreement testing

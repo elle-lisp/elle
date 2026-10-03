@@ -140,7 +140,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 - [ffi/callback.rs](../ffi/callback.rs) - runs a closure a C function calls back
 - `runtime/` - owns the VM and its heap
 - [repl.rs](../repl.rs) - REPL session: form-by-form compilation with def persistence across inputs
-- [main.rs](../main.rs) - file execution
+- [program.rs](../program.rs) - file, stdin and `-e` execution for `elle` and the rig
 
 ## Invariants
 

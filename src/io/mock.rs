@@ -1,5 +1,7 @@
-//! audited: 2026-09-18
+//! audited: 2026-09-30
 //! Mock I/O backend for testing and benchmarking.
+//!
+//! src/io/AGENTS.md
 //!
 //! Fulfills `IoRequest`s from in-memory state. No OS resources needed.
 //! Completions resolve after a configurable latency (zero by default).
@@ -297,7 +299,7 @@ impl crate::io::IoBackend for MockBackend {
         ready
     }
 
-    fn wait(&self, timeout_ms: i64) -> Result<Vec<Completion>, String> {
+    fn wait(&self, timeout: Option<Duration>) -> Result<Vec<Completion>, String> {
         // Fast path: check for already-ready completions
         let ready = self.poll();
         if !ready.is_empty() {
@@ -313,11 +315,10 @@ impl crate::io::IoBackend for MockBackend {
         drop(inner);
 
         let now = Instant::now();
-        let wait_until = if timeout_ms < 0 {
-            earliest // wait forever → wait until earliest
-        } else {
-            let timeout_deadline = now + Duration::from_millis(timeout_ms as u64);
-            earliest.min(timeout_deadline)
+        let wait_until = match timeout {
+            // No bound waits until the earliest completion is due.
+            None => earliest,
+            Some(t) => now.checked_add(t).map_or(earliest, |end| earliest.min(end)),
         };
 
         if wait_until > now {

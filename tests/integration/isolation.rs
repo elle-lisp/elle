@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 // A file can have its own process: what a child's exit status becomes in the
 // store, and that the run goes on after one of them dies.
 //
@@ -6,10 +6,10 @@
 //
 // The counter-factual: worker threads share one process, so the first file
 // that dies on a signal takes the runner down and every result it had not
-// written yet goes with it. That is why the process-global files live in
-// elle_scripts.rs, where their verdicts reach no database at all. Each test
-// below reads a row that could not exist under the shared-process runner.
+// written yet goes with it. Each test below reads a row that could not exist
+// under the shared-process runner.
 
+use crate::common::query;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -35,17 +35,6 @@ fn isolate(db: &Path, flags: &str, timeout_ms: u64, paths: &[PathBuf]) -> std::p
         .env_remove("RUST_MIN_STACK")
         .output()
         .expect("run elle test --isolate")
-}
-
-/// The rendered rows of `sql` against `db`.
-fn query(db: &Path, sql: &str) -> String {
-    let out = Command::new(elle_binary())
-        .args(["test", "--query", sql])
-        .arg("--db")
-        .arg(db)
-        .output()
-        .expect("query the session DB");
-    String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
 /// Every result of the latest run, with the file it belongs to.
@@ -126,11 +115,7 @@ fn an_aborting_file_is_recorded_and_the_run_completes() {
 fn a_nonzero_exit_is_a_fail_naming_the_code() {
     let dir = crate::common::ScratchDir::new("isolate-exit");
     let db = dir.join("s.db");
-    let path = fixture(
-        &dir,
-        "exits.lisp",
-        "(elle/epoch 12)\n(os/exit 3)\n",
-    );
+    let path = fixture(&dir, "exits.lisp", "(elle/epoch 12)\n(os/exit 3)\n");
 
     let out = isolate(&db, "", 30000, &[path]);
     assert!(!out.status.success(), "a non-zero child gates the run");
@@ -188,8 +173,8 @@ fn a_child_over_its_budget_is_a_timeout() {
     // The trap: the budget has to clear the child's own startup, not just beat
     // its sleep. A debug binary loads its stdlib in ~0.3 s idle and several
     // times that on a box running the rest of this suite, so a 1.5 s budget
-    // killed the child before it reached its `println` and the output
-    // assertion below failed on an empty asset. Ten seconds is thirty times
+    // kills the child before it reaches its `println`, and the output
+    // assertion below fails on an empty asset. Ten seconds is thirty times
     // the idle cost and a twelfth of the sleep, so both ends have room.
     let out = isolate(&db, "", 10000, &[path]);
     assert!(!out.status.success(), "a timeout gates the run non-zero");
@@ -243,25 +228,83 @@ fn a_gated_child_is_a_skip_carrying_its_reason() {
     );
 }
 
-/// The flags reach the child. Without this the mode the path exists for —
-/// `--trace=guardfree`, for one — would be dropped silently and every
-/// file would run under the default configuration, green and meaningless.
+/// The flags reach the child. Without this the mode the path exists for would
+/// be dropped silently, and every file would run under the default
+/// configuration, green and meaningless. `--unicode=` is a flag every build
+/// keeps, and the child reads it back.
 #[test]
 fn the_flags_reach_the_child() {
     let dir = crate::common::ScratchDir::new("isolate-flags");
     let db = dir.join("s.db");
     let path = fixture(
         &dir,
-        "policy.lisp",
-        "(elle/epoch 12)\n\
-         (assert (= (vm/config :jit) :off) \"the child must run under the flags it was given\")\n",
+        "generation.lisp",
+        "(elle/epoch 13)\n\
+         (assert (= (vm/config :unicode) [16 0 0]) \"the child must run under the flags it was given\")\n",
     );
 
-    let out = isolate(&db, "--jit=off", 30000, &[path]);
+    let out = isolate(&db, "--unicode=16.0", 30000, &[path]);
     assert!(
         out.status.success(),
-        "the child must see --jit=off; stderr:\n{}\nresults:\n{}",
+        "the child must see --unicode=16.0; stderr:\n{}\nresults:\n{}",
         String::from_utf8_lossy(&out.stderr),
         results(&db)
+    );
+}
+
+/// `--host PROGRAM` runs each child as `PROGRAM FLAGS PATH` instead of this
+/// `elle`, which is how the implementation suite reaches the rig.
+///
+/// The host here is a shell script that records its argv and exits 0. The file
+/// exits 7 when anything runs it, so a runner that ignored `--host` and ran
+/// `elle` records a fail, and one that ran the host with the wrong argv leaves
+/// a record that says so.
+#[cfg(unix)]
+#[test]
+fn the_host_runs_each_child_with_the_flags_and_the_path() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = crate::common::ScratchDir::new("isolate-host");
+    let db = dir.join("s.db");
+    let record = dir.join("argv.txt");
+    let host = fixture(
+        &dir,
+        "host.sh",
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nexit 0\n",
+            record.display()
+        ),
+    );
+    std::fs::set_permissions(&host, std::fs::Permissions::from_mode(0o755))
+        .expect("make the host executable");
+    let path = fixture(&dir, "exits.lisp", "(elle/epoch 13)\n(os/exit 7)\n");
+
+    let out = Command::new(elle_binary())
+        .arg("test")
+        .arg("--host")
+        .arg(&host)
+        .args(["--isolate", "--unicode=16.0"])
+        .args(["--timeout", "30000"])
+        .arg("--db")
+        .arg(&db)
+        .arg(&path)
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .expect("run elle test --host");
+    assert!(
+        out.status.success(),
+        "the host exits 0, so the file passes; stderr:\n{}\nresults:\n{}",
+        String::from_utf8_lossy(&out.stderr),
+        results(&db)
+    );
+
+    let argv = std::fs::read_to_string(&record).expect("the host ran and wrote its argv");
+    let expected = format!("--unicode=16.0\n{}\n", path.display());
+    assert_eq!(argv, expected, "the host gets the flags, then the path");
+
+    let rows = results(&db);
+    assert!(
+        rows.contains(":tier \"process\"") && rows.contains(":status \"pass\""),
+        "a hosted child is a process row like any other, got:\n{rows}"
     );
 }

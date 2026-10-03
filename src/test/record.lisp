@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-28
+# audited: 2026-09-30
 ## elle test — turning an outcome into rows: the label a form is known by, what
 ## analysis finds in it, the status a payload classifies to, and one row per
 ## (form × tier).
@@ -32,7 +32,8 @@
 
 # ── classify one tier's [ok? payload] into a row ─────────────────────
 # pass  — the closure returned a value (held in :value for divergence checking).
-# skip  — a loud gate fired (:gated) or the tier rejected this form (:ineligible).
+# skip  — a loud gate fired (:gated), the form trapped (exit 0), or the tier
+#         rejected this form (:ineligible).
 # fail  — any other error; capture the assert payload (:syntax/:actual/:expected).
 (defn classify [r]
   (let [ok (get r 0)
@@ -159,21 +160,25 @@
                 (get row :touches) (get row :signal)]))
 
 # Insert one (form × tier) result row and return its rowid (so assets can
-# reference it).
-(defn insert-result [conn run-id h tier-str c]
+# reference it). COST carries what the run cost as :wall-ms, :cpu-us and
+# :max-rss-kb; one it lacks lands as NULL (docs/test-store.md).
+(defn insert-result [conn run-id h tier-str c cost]
   (sqlite:exec conn
-               "INSERT INTO result (run_id, form_hash, tier, status, reason, signal, syntax, expected, actual) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"
+               "INSERT INTO result (run_id, form_hash, tier, status, reason, signal, syntax, expected, actual, wall_ms, cpu_us, max_rss_kb) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"
                [run-id h tier-str (get c :status) (get c :reason) (get c :sig)
-                (get c :syn) (get c :exp) (get c :act)])
+                (get c :syn) (get c :exp) (get c :act) (get cost :wall-ms)
+                (get cost :cpu-us) (get cost :max-rss-kb)])
   (last-rowid conn))
 
 # Run a form on every active tier, inserting one row per tier and attaching the
 # file's captured `dumps` (a list of [kind addr size codec]) as assets to each.
-# `exec-fn` is (fn [tier-keyword out-path err-path] -> {:result :stdout :stderr});
-# the per-form path closes over a MAIN-compiled thunk (exec-thunk-capture), the
-# whole-file path closes over the file's syntax (exec-source-capture). Returns
-# [statuses pass-pairs]: the per-tier status strings, and [[tier-str value]...]
-# for the tiers that returned a value (divergence candidates).
+# `exec-fn` is (fn [tier-keyword out-path err-path] -> {:result :stdout :stderr
+# :cpu-us}), and its wall time is taken here, from handing the form over to
+# having its answer. The per-form path closes over a MAIN-compiled thunk
+# (exec-thunk-capture), the whole-file path over the file's syntax
+# (exec-source-capture). Returns [statuses pass-pairs]: the per-tier status
+# strings, and [[tier-str value]...] for the tiers that returned a value
+# (divergence candidates).
 (defn run-tiers [conn run-id h exec-fn tiers dumps statuses pass-pairs]
   (if (empty? tiers)
     [statuses pass-pairs]
@@ -181,10 +186,12 @@
           tk (get tp 0)
           ts (get tp 1)
           base (string scratch-dir "/" run-id "_" h "_" ts)
+          t0 (clock/monotonic)
           cap (exec-fn tk (string base ".out") (string base ".err"))
+          wall (ms-since t0)
           c (note-timeout-stacks (note-last-output (classify (get cap :result))
                                  cap))
-          rid (insert-result conn run-id h ts c)]
+          rid (insert-result conn run-id h ts c (put cap :wall-ms wall))]
       (insert-assets conn rid dumps)
       (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
       (run-tiers conn run-id h exec-fn (rest tiers) dumps
@@ -244,7 +251,7 @@
 # entry idx → forms[idx] supplies each test form's label/hash/src. def/var
 # setup forms produce no entry (they ran eagerly during the compile pass).
 # `profile` is the file's, which for the one-form-per-file corpus shape is the
-# form's own (docs/test-store.md § What analysis says about a form).
+# form's own (docs/test-store.md).
 (defn process-entries [conn run-id origin file forms profile entries dumps acc]
   (if (empty? entries)
     acc
@@ -280,7 +287,7 @@
 # site. The compile aborts before any test thunk is built, so there are no
 # per-form results to record; we mirror record-file-error but as a SKIP (the
 # dependency is absent, not broken). One file-level row (form_index -1), counted
-# in n_skip, leaves the gate exit at 0. See docs/test-runner.md § Gating.
+# in n_skip, leaves the gate exit at 0. See docs/test-runner.md.
 (defn record-file-gated [conn run-id origin file payload dumps profile]
   (let [reason (field-str payload :reason)
         row (file-row "file-gated" origin file "file-level gated"
@@ -316,7 +323,7 @@
 # hoists def/var eagerly ahead of the bare-expression test forms) reorders such a
 # script (read-before-write) and re-runs shared mutations per tier; one thunk
 # eliminates that. The file is its own form: src = the file, label = the first
-# assert message anywhere in it. See docs/test-runner.md § Multi-form files.
+# assert message anywhere in it. See docs/test-runner.md.
 # Compile ONCE in the main VM to detect a compile error or a top-level :gated
 # (dispatch-compiled records the file-level error/skip row) — but DON'T run that
 # thunk. For execution we ship the file's parsed SYNTAX to a worker that
@@ -339,29 +346,34 @@
 # Compile SRC and run its test forms per tier. A single-form file/snippet (the
 # durable corpus shape) uses the per-form barrier (compile/barrier-module); a
 # legacy MULTI-form file is wrapped as one whole-file thunk (process-whole). A
-# compile/setup error becomes one file-level failure.
+# read, compile or setup error becomes one file-level failure.
 (defn process-source [conn run-id origin file name src]
-  (let [forms (test-forms src)
-        dumps (capture-dumps src name)
-        profile (form-profile src name)]
-    (if (> (length forms) 1)
-      (process-whole conn run-id origin file name src forms profile dumps)
-      (dispatch-compiled conn run-id origin file
-                         (protect (compile/barrier-module src name)) dumps
-                         profile
-                         (fn [entries]
-                           (process-entries conn run-id origin file forms
-                           profile entries dumps []))))))
+  (let [[read-ok? forms] (protect (test-forms src))]
+    (if (not read-ok?)
+      (record-file-error conn run-id origin file forms [] no-profile)
+      (let [dumps (capture-dumps src name)
+            profile (form-profile src name)]
+        (if (> (length forms) 1)
+          (process-whole conn run-id origin file name src forms profile dumps)
+          (dispatch-compiled conn run-id origin file
+                             (protect (compile/barrier-module src name)) dumps
+                             profile
+                             (fn [entries]
+                               (process-entries conn run-id origin file forms
+                               profile entries dumps []))))))))
 
 (defn process-file [conn run-id file]
-  (process-source conn run-id file file file (slurp file)))
+  (let [[read-ok? src] (protect (slurp file))]
+    (if read-ok?
+      (process-source conn run-id file file file src)
+      (record-file-error conn run-id file file src [] no-profile))))
 
 # Run FILE as its own process under FLAGS and record what the child left
 # behind. The file is the unit here — a process cannot be given one form of it
 # — and it is identified by the hash of its source, the same identity the
 # whole-file path uses. So an isolated result and an in-process one are two
 # tiers of one form rather than two forms that never meet in a query.
-# See docs/test-runner.md § Isolation.
+# See docs/test-runner.md.
 (defn process-file-isolated [conn run-id file flags]
   (let [[read-ok? src] (protect (slurp file))]
     (if (not read-ok?)
@@ -382,7 +394,7 @@
         # effect profile is a property of its source, and this process has the
         # compiler open already.
         (insert-form conn row)
-        (let [rid (insert-result conn run-id h :process c)]
+        (let [rid (insert-result conn run-id h :process c cap)]
           (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
           # A dashboard reports its verdicts through the channel named in the
           # child's environment; every other file writes nothing there.

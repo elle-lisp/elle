@@ -1,6 +1,6 @@
 # Reassigned mutable bindings are 1-slot containers
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-09-28 -->
 
 Implementation-facing: how the solver and lowerer handle a binding that is
 reassigned over its lifetime. This specializes Rule 5's mutable-container
@@ -38,7 +38,7 @@ agree with which of the value's ordinary decrefs are suppressed:
   bound-result shape) — which the suppression above never reaches. So the
   placeholder release fires regardless and consumes the callee's one returned
   reference; donating on top of it leaves the cell pointing at a freed value
-  (`region-reassign-callresult-store.lisp`, `region-hof-tail-return-uaf.lisp`).
+  ([region-reassign-callresult-store.lisp](../../../tests/impl/region-reassign-callresult-store.lisp), [region-hof-tail-return-uaf.lisp](../../../tests/impl/region-hof-tail-return-uaf.lisp)).
 - **Fn-local (the cell takes a COUNTED reference).** A fn-local cell's scope
   *exits*, so its final content has no teardown to fall back on and the cell
   needs a release of its own — which means a reference of its own. The compiler
@@ -72,7 +72,7 @@ agree with which of the value's ordinary decrefs are suppressed:
   are the ordinary shape: the first arm's value is pinned in the second arm, so
   an iteration that takes the first arm again displaces the previous value from
   its own ANF slot before the pin ever runs, stranding one region per repeat
-  (`tests/elle/region-cell-arm-store.lisp`). Where one region really is stored at
+  ([region-cell-arm-store.lisp](../../../tests/impl/region-cell-arm-store.lisp)). Where one region really is stored at
   several sites, the pin is the latest of *those* sites — it must sit after every
   store that takes a reference of it, which pinning each store in turn computes,
   the pin rule being a maximum.
@@ -122,7 +122,7 @@ inside the same lambda the writes do, which the cell's own scope node need not (
 `(var u nil)` at a function's head has the `Lambda` for a scope node, whose
 releases the lowerer runs in the ENCLOSING function). The shape that needs it is
 a dispatch storing from each arm, with nothing reading the cell afterward
-(`tests/elle/region-cell-arm-demise.lisp`).
+([region-cell-arm-demise.lisp](../../../tests/impl/region-cell-arm-demise.lisp)).
 
 The **hoist** takes the seed to the node of every enclosing branch arm and loop
 that does not also enclose the BINDER, iterated outward: a read can sit in an arm
@@ -139,7 +139,7 @@ value — the emitter brings the operand stack's top instead, which is the
 displaced prior (`nil` on the first overwrite). The retain then pins nothing and
 the stored value dies at its producer release. Same retain-while-on-top
 discipline as `lower_call`'s borrowed-arg retain; pinned by
-`region-reassign-callresult-store.lisp`.
+[region-reassign-callresult-store.lisp](../../../tests/impl/region-reassign-callresult-store.lisp).
 
 **A value a 1-slot container holds is a runtime fact.** Which region the content
 lives in is decided per store, so every mint of that content that is not adjacent
@@ -153,7 +153,7 @@ dynamic classes it already refuses. Left coalescible, the mint resolves an
 emptied slot and the equivalence oracle detonates — the loud face of a
 mis-coalesce, and what that oracle is for
 (`coalescible_refuses_a_cell_stored_value`,
-`tests/elle/region-pair-heap-content-uaf.lisp`).
+[region-pair-heap-content-uaf.lisp](../../../tests/impl/region-pair-heap-content-uaf.lisp)).
 
 **The gate.** The model is gated exactly where it claims a reference UNCOUNTED —
 and nowhere else. The sole-held question ("no other *read, user* binding may
@@ -196,7 +196,7 @@ The everyday name a store reads is a collection walk's element: `each` binds one
 through `p` where a hand-written `while` stores the read directly. Each binding
 of `p` faces one store, so the pin is exact
 (`reassign_gate_counts_a_feeder_as_no_holder`,
-`tests/elle/region-cell-feeder.lisp`).
+[region-cell-feeder.lisp](../../../tests/impl/region-cell-feeder.lisp)).
 
 Refusing the idiom costs more than promptness. On the baseline the cell holds no
 reference at all, so each stored value is protected only by its producer's —
@@ -261,8 +261,8 @@ such store, so it keeps donate-or-refuse. The reference is the test:
 `reassign_gate_counts_an_aliased_init`,
 `reassign_gate_counts_an_aliased_assign_value`,
 `reassign_gate_counts_an_aliased_forwarding_link`, and
-`tests/elle/region-cell-aliased-store.lisp` for the measured shape, with
-`region-cell-aliased-store-uaf.lisp` pinning the alias's reads under guardfree.
+[region-cell-aliased-store.lisp](../../../tests/impl/region-cell-aliased-store.lisp) for the measured shape, with
+[region-cell-aliased-store-uaf.lisp](../../../tests/impl/region-cell-aliased-store-uaf.lisp) pinning the alias's reads under guardfree.
 
 **What a read of the container takes is [reads.md](reads.md).** A whole-value
 read borrows a reference the next overwrite kills, so the reader takes a counted
@@ -342,7 +342,7 @@ chain — and an alias of the fold's init moves the whole chain to the counted-i
 route. The reference is the test:
 `reassign_gate_keeps_loop_carried_cell_forwarded_from_a_cell`,
 `reassign_gate_counts_an_aliased_forwarding_link`, and
-`tests/elle/region-cell-forward-chain.lisp` for the measured shape.
+[region-cell-forward-chain.lisp](../../../tests/impl/region-cell-forward-chain.lisp) for the measured shape.
 
 Module scope never reaches this edge: a top-level reassigned mutable compiles to
 a capture cell, and functionalization does not promote a capture cell to a loop
@@ -379,8 +379,8 @@ whatever the slot holds at the read (a later, live value) and frees *it*, not
 the init. That is the no-alias corruption UAF: two file-letrec cells `rc`/`rd`
 interleave-reassigned, and reading `rd` returns `rc`'s last value because the
 init-region decref, routed through the cell slot, freed a live region
-(region-mutable-reassign-flow facet 3; region-mutable-reassign-branch;
-region-toplevel-mutable-reassign). So `analyze_regions_with` records the init
+([region-mutable-reassign-flow.lisp](../../../tests/impl/region-mutable-reassign-flow.lisp) facet 3;
+[region-mutable-reassign-branch.lisp](../../../tests/impl/region-mutable-reassign-branch.lisp); [region-toplevel-mutable-reassign.lisp](../../../tests/impl/region-toplevel-mutable-reassign.lisp)). So `analyze_regions_with` records the init
 and assign-value regions of every top-level reassigned binding in
 `RegionInfo::mutated_binding_value_regions` UNCONDITIONALLY (before the gate),
 and `emit_decrefs_for` SKIPS the value-routed release for any region there: an
@@ -390,7 +390,7 @@ succeeds these are already in `suppressed_decref_regions` and never reach the
 route. Fn-local reassigns are deliberately NOT recorded: their final value's
 release *is* a legitimate scope-exit slot route (no teardown root frees it), and
 the scope-based solver shares regions, so skipping there leaks an aliased value
-(region-tailcall-arg-transfer). Counted cell reads ([reads.md](reads.md)) keep
+([region-tailcall-arg-transfer.lisp](../../../tests/impl/region-tailcall-arg-transfer.lisp)). Counted cell reads ([reads.md](reads.md)) keep
 a read from claiming the init region; the backstop is the
 correct-by-construction floor they build on.
 
@@ -405,7 +405,7 @@ takes the **same container model** an unreturned one takes, and being returned
 decides nothing about it. Each channel is exactly one release, and a scheduler
 park is what makes a second one fatal rather than latent — a park rebuilds the
 value at rc 1, so the extra decref frees it before the caller reads
-(`tests/elle/region-reassign-return-park-uaf.lisp`).
+([region-reassign-return-park-uaf.lisp](../../../tests/impl/region-reassign-return-park-uaf.lisp)).
 
 The order is what makes the pair exact, and the lowerer supplies it. The mint is
 emitted before the `Return` node's own releases (`lower_return`), and the cell's
@@ -414,7 +414,7 @@ the sequence at the tail is mint, then content drop: the caller leaves holding
 the reference the mint created and the cell's is gone. A loop-carried cell's
 displaced priors take drop-on-overwrite as an unreturned cell's do, which keeps
 the accounting per-value rather than per-binding; without it every value but the
-last is stranded, one region per trip (`tests/elle/region-loop-acc-return.lisp`).
+last is stranded, one region per trip ([region-loop-acc-return.lisp](../../../tests/impl/region-loop-acc-return.lisp)).
 
 What the returned binding does still suppress is the binding's OWN regions
 (`binding_regs \ kept`). When the binding is assigned ONCE its binding region and
@@ -426,8 +426,8 @@ same runtime value at the tail. Leaving both unsuppressed emits a value-route
 decref for EACH at the `Return` — two releases of one reference, the second
 freeing the caller's minted reference before the caller reads it (the
 loop-reassigned-return double-free,
-`tests/integration/fixtures/region-capture-cell-string-accum-uaf.lisp`, guardfree
-pin `region_capture_cell_string_accum_uaf`).
+[region-capture-cell-string-accum-uaf.lisp](../../../tests/impl/region-capture-cell-string-accum-uaf.lisp), under
+guardfree).
 
 **A `Return` is a reader of the cell's content.** A stored value's producer
 release is pinned to its store site because the cell's counted reference takes
@@ -448,8 +448,8 @@ where it drops EARLIER the producer's reference is the return's only protection
 and the extension stands, which costs the store-site pin and leaves the
 over-keep — the safe direction to be wrong in. The reference is the test:
 `reassign_return_does_not_extend_a_cell_stored_value` for the hold-back, and
-`tests/elle/region-loop-acc-return.lisp` (guardfree pin
-`region_loop_acc_return_uaf`) for the measured shape.
+[region-loop-acc-return.lisp](../../../tests/impl/region-loop-acc-return.lisp) (under
+guardfree) for the measured shape.
 
 One obligation binds the fallback for a NON-sole returned binding (left at the
 unsuppressed baseline): **a mutated slot is not a release route.** A
@@ -460,7 +460,7 @@ construction. With no untainted route the release is skipped — an over-keep,
 never a mis-free.
 
 **Returns mint one owning reference (borrowed captured upvalues).** Every
-`Return` (and the native-tail post-block in `src/lir/lower/control.rs`) emits an
+`Return` (and the native-tail post-block in [control.rs](../../../src/lir/lower/control.rs)) emits an
 `IncrefValueRegion` that hands the caller exactly one owning reference, which the
 caller balances with a `DecrefValueRegion` at the result binding's decref_point.
 That single convention is what makes a returned **borrowed captured upvalue**
@@ -469,18 +469,18 @@ cascade-released when the closure region dies), so this activation has no claim
 of its own to hand out. The mint supplies the caller's reference *without*
 touching the env's: the caller's `DecrefValueRegion` drains the mint, not the
 captured value's rc, so the env keeps holding the upvalue and the next read is
-safe (`lib/http.lisp`'s `require-compress`;
-`tests/elle/region-captured-return-move-uaf.lisp`). Symmetrically, a
+safe ([http.lisp](../../../lib/http.lisp)'s `require-compress`;
+[region-captured-return-move-uaf.lisp](../../../tests/impl/region-captured-return-move-uaf.lisp)). Symmetrically, a
 freshly-allocated callee result survives its own decref_point because the mint is
 emitted *before* it.
 
 The mint is unconditional, so an escaping-closure return and a same-activation
 return take the same path; minting one that could have moved costs a +1 the
 caller's decref reclaims. Whether a closure escapes is the escape analysis's
-answer (`EscapeInfo`/`src/hir/escape.rs`), read by the consumers that need it
+answer (`EscapeInfo`, [escape.rs](../../../src/hir/escape.rs)), read by the consumers that need it
 (`tail_callee_defers_release`, the reassign gate's return facet), never by the
 return-mint path. The tail-call-arg twin (`tail_arg_is_borrowed`,
-`src/lir/lower/control.rs`) needs no escape test either — its mint is balanced
+[control.rs](../../../src/lir/lower/control.rs)) needs no escape test either — its mint is balanced
 by the callee's owned-param release, which always fires.
 
 **How a captured binding realizes its cell is [cells.md](cells.md).** A captured

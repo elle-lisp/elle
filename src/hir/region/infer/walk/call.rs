@@ -1,3 +1,10 @@
+// audited: 2026-09-28
+//! The region walk at a call: the call-result region, the callee inline, and the edges
+//! and sites the callee's declared effect records.
+//!
+//! docs/impl/region/effects.md
+//! docs/impl/region/rules.md
+
 use super::*;
 use crate::hir::region::infer::walk::inline::Inlined;
 use crate::hir::region::EMIT_PAYLOAD_ARG;
@@ -17,8 +24,7 @@ impl RegionInference {
         // arrives at the enclosing branch's merge label; a tail call to a native
         // pushes no frame and falls through to it. The branch-arm release window
         // needs that distinction to know whether its anchor is a point every arm
-        // reaches (docs/impl/region/mechanism.md § "A release inside one arm is
-        // not a release on the other arms"). Recorded before the inline attempt
+        // reaches (docs/impl/region/window.md). Recorded before the inline attempt
         // below, which returns early for a known lambda callee — itself a
         // frame-replacing one.
         if *is_tail && !self.is_native_callee(func) {
@@ -32,9 +38,8 @@ impl RegionInference {
         // its payload argument's regions are recorded against this call exactly as
         // the `Emit` arm records them against the node. What reads them is the
         // borrowed-payload pass, which asks whether the emitting body releases the
-        // payload anywhere (docs/impl/region/owner.md § "What yields is the emit
-        // OPERATION, not the `Emit` node"). The signal is arg0 and the payload arg1,
-        // the primitive's fixed arity.
+        // payload anywhere (docs/impl/region/park.md). The signal is arg0 and the
+        // payload arg1, the primitive's fixed arity.
         if self.is_emit_native(func) {
             if let Some(payload) = arg_regions.get(EMIT_PAYLOAD_ARG) {
                 self.emit_payload_regions.insert(hir.id, payload.clone());
@@ -51,11 +56,11 @@ impl RegionInference {
         // binding's decref_point, decreffing the *runtime* region of
         // the returned value. That reference was handed to us by
         // the callee's `IncrefValueRegion` (see `HirKind::Return`
-        // / `src/hir/retain.rs`). No arg-embedding edge: the old
-        // `arg → call_r` pin emitted an `IncrefRegion(arg)` that
-        // never balanced (the phantom `call_r` never cascaded) —
-        // the call-result leak. Arg lifetimes are now carried by
-        // the callee retaining whatever it actually returns.
+        // / src/hir/return_incref.rs). No arg-embedding edge: an
+        // `arg → call_r` pin would emit an `IncrefRegion(arg)` that
+        // never balances (the phantom `call_r` never cascades). Arg
+        // lifetimes are carried by the callee retaining whatever it
+        // returns.
         self.call_result_regions.insert(call_r);
 
         // A mutable *retaining* container's fresh result (`@array`/
@@ -81,9 +86,8 @@ impl RegionInference {
         // parent/child chain, the `fiber/child`/`fiber/parent` graph reads), so
         // it is never a member of any region-rooted ownership cut —
         // `ownership::inputs::not_ownable` refuses this class and the region
-        // reclaims on the RC baseline (docs/impl/region/adopt.md § "The fiber
-        // member — refused at the class level"). Keyed on RetType, not effect,
-        // so the class holds however the mint is declared.
+        // reclaims on the RC baseline (docs/impl/region/adopt.md). Keyed on
+        // RetType, not effect, so the class holds however the mint is declared.
         if matches!(
             self.call_rettype(func),
             Some(crate::primitives::def::RetType::Fiber)
@@ -103,8 +107,7 @@ impl RegionInference {
         // for an opaque callee. Otherwise the caller becomes a nominal holder of a
         // region it never allocates, and the `decref_point` machinery places that
         // region's one release by the caller's uses of it
-        // (docs/impl/region/mechanism.md § "A call's result is named by the call's
-        // own region"). The argument-side half of the same rule is
+        // (docs/impl/region/mechanism.md). The argument-side half of the same rule is
         // `inline_bound_regions`.
         match self.try_inline_call(func, &arg_regions, hir.id) {
             // The body-derived answer to the question `call_returns_immediate`
@@ -115,13 +118,12 @@ impl RegionInference {
         }
 
         // Opaque fallback, keyed on the callee's declared
-        // RegionEffect (docs/impl/region/effects.md "Native region effects"):
+        // RegionEffect (docs/impl/region/effects.md):
         // - Immediate/Fresh/PassThrough store no argument — no
         //   may-store edges. An edge here becomes a compile-time
         //   IncrefRegion balanced only by the target's free-time
         //   cascade IF the store actually happens; for a
-        //   never-storing native it never balances (the arg-clique
-        //   leak class; region-native-effect-clique-leak.lisp).
+        //   never-storing native it never balances (tests/impl/region-native-effect-clique-leak.lisp).
         // - Stores{args}: a directed edge from each listed
         //   argument's regions to each OTHER heap argument's
         //   regions (the possible in-argument targets). Stores
@@ -137,8 +139,8 @@ impl RegionInference {
                 // A Fresh result is freshly allocated in the call's own
                 // region — genuinely caller-owned, so it is an Owned
                 // candidate for the forest even though it is a call-result
-                // placeholder for baseline release (region/effects.md
-                // § Fresh; `RegionInfo::fresh_result_regions`). Recording
+                // placeholder for baseline release (docs/impl/region/effects.md;
+                // `RegionInfo::fresh_result_regions`). Recording
                 // this is the only effect on the walk; release is unchanged
                 // (value-gated `DecrefValueRegion`, as for any call-result),
                 // and no may-store edge is added (a Fresh native stores no
@@ -158,8 +160,8 @@ impl RegionInference {
                 // result's still-live reference. The edge feeds only
                 // `region::infer::ownership` (`containment_edges`), never an
                 // `IncrefRegion` (the alloc-scan counts the embedding at runtime)
-                // — behavior-preserving, exactly like the funnel-recovered
-                // containment below.
+                // — it changes no release, exactly like the funnel-recovered
+                // containment.
                 for &i in self.call_embeds(func) {
                     if let Some(embedded_regions) = arg_regions.get(i) {
                         for &v in embedded_regions {
@@ -170,137 +172,7 @@ impl RegionInference {
                     }
                 }
             }
-            Some(RegionEffect::Funnel) => {
-                // The store is runtime-counted, so NO may-store edge — a
-                // compile-time `IncrefRegion` would double-count against the
-                // container's single free-time cascade decref. But the
-                // ownership inference needs the *containment* the funnel
-                // builds (for subtree membership), which is otherwise lost on
-                // this path. Recover it structurally (no incref) when the
-                // container argument — arg0, the funnel convention — is a
-                // mutable retaining container: `container ⊇ each other heap
-                // arg`. A `@string`/`@bytes` container is absent from
-                // `mutable_container_regions` (non-container RetType), so its
-                // byte-copying store correctly records nothing. The edge feeds
-                // only `region::infer::ownership` (`containment_edges`), never the
-                // lowerer — behavior-preserving.
-                if let Some(container_regions) = arg_regions.first() {
-                    let containers: Vec<Region> = container_regions
-                        .iter()
-                        .copied()
-                        .filter(|c| self.mutable_container_regions.contains(c))
-                        .collect();
-                    for vs in arg_regions.iter().skip(1) {
-                        for &v in vs {
-                            for &c in &containers {
-                                if v != c {
-                                    self.containment_edges.push((hir.id, v, c));
-                                }
-                            }
-                        }
-                    }
-                    // A value-RETAINING store funnel (`%put`/`%array-push`/`%add`)
-                    // increfs the stored value at runtime whether or not arg0's
-                    // container type is statically recognized. Record the stored value —
-                    // the LAST arg (the value; the key, if any, sits between container
-                    // and value) — site-keyed for `region::infer::compensate`'s per-arm decref
-                    // safety gate, even when no `containment_edge` is built (a parameter
-                    // container, the `put`/`set` dispatch case). A per-arm decref there
-                    // releases only the wrapper's stranded owned reference; the
-                    // container's retain keeps the value's RC ≥ 1.
-                    if self.is_retaining_store(func) {
-                        if let Some(value_regions) = arg_regions.last() {
-                            let stored: Vec<Region> = value_regions
-                                .iter()
-                                .copied()
-                                .filter(|&v| !container_regions.contains(&v))
-                                .collect();
-                            if !stored.is_empty() {
-                                self.funnel_store_sites.insert(hir.id, stored);
-                            }
-                        }
-                    }
-                    // A BYTE-COPY store funnel (`%string-push`/`%string-push-mut`/
-                    // `%bytes-push`) COPIES the value's bytes into the container and
-                    // touches NEITHER its incref NOR its decref. So a dispatch wrapper's
-                    // `val` param — used across arms, freed in one — strands on the
-                    // sibling arms exactly as a retaining store's does, and the per-arm
-                    // release is `val`'s TRUE last use (not a redundant strand, and not
-                    // the `%del` double-free: `%del` decrefs in-body and is excluded).
-                    // Recorded separately (`funnel_bytecopy_value_sites`) so the
-                    // compensation's guard documents the distinct invariant.
-                    if self.is_bytecopy_store(func) {
-                        if let Some(value_regions) = arg_regions.last() {
-                            let stored: Vec<Region> = value_regions
-                                .iter()
-                                .copied()
-                                .filter(|&v| !container_regions.contains(&v))
-                                .collect();
-                            if !stored.is_empty() {
-                                self.funnel_bytecopy_value_sites.insert(hir.id, stored);
-                            }
-                        }
-                    }
-                    // A MONOMORPHIC store/remove funnel (`%put-*`/`%add-set*`/
-                    // `%push-array*`/`%del-*`, either mutability) is the target of a
-                    // dispatch wrapper's `(match (type-of coll) …)` arm, and `coll` is
-                    // used in EVERY arm (the scrutinee + each arm's funnel call) while
-                    // its single `decref_point` sits in ONE arm — so the owned-param
-                    // reference the wrapper holds to the container leaks on every OTHER
-                    // arm's path. Record the container (arg0) site-keyed so
-                    // `region::infer::compensate` places the balancing per-arm release. This
-                    // is sound for both container flavours:
-                    //   - a `-mut` funnel RETURNS the container pass-through, so the
-                    //     container is return-escaping; the funnel's `pass_through_retain`
-                    //     leaves the returned value's RC ≥ 1, so releasing the owned-param
-                    //     reference can never drop the live result to zero (the
-                    //     return-frontier exclusion is lifted for it in `compensate`);
-                    //   - an IMMUTABLE funnel returns a FRESH copy, so the container is
-                    //     genuinely dead in the arm — the ordinary owned-param release
-                    //     the branch structure otherwise strands.
-                    // Keyed on a recognized monomorphic container RetType (NOT the
-                    // polymorphic `FirstArg`, whose container mutability is unproven).
-                    use crate::primitives::def::RetType;
-                    let rettype = self.call_rettype(func);
-                    if matches!(
-                        rettype,
-                        Some(
-                            RetType::Struct
-                                | RetType::MutableStruct
-                                | RetType::Array
-                                | RetType::MutableArray
-                                | RetType::Set
-                                | RetType::MutableSet
-                                | RetType::MutableString
-                        )
-                    ) {
-                        self.funnel_container_sites
-                            .insert(hir.id, container_regions.to_vec());
-                    }
-                    // The `-mut` PASS-THROUGH subset: the funnel returns the container
-                    // (arg0) ITSELF, so the container IS the result and the caller
-                    // already owns a reference to it. Recorded separately so the
-                    // lowerer's ReturnValue suppression fires ONLY here (via
-                    // `container_release_sites`, gated on this in `compensate`): an
-                    // IMMUTABLE funnel returns a FRESH copy whose ReturnValue retain is
-                    // the caller's move/reassign reference — suppressing it over-frees a
-                    // result stored into a reassigned slot (the container is still
-                    // compensated by `funnel_container_sites`, so its owned-param leak
-                    // still closes; only the redundant-retain drop is withheld).
-                    if matches!(
-                        rettype,
-                        Some(
-                            RetType::MutableStruct
-                                | RetType::MutableArray
-                                | RetType::MutableSet
-                                | RetType::MutableString
-                        )
-                    ) {
-                        self.funnel_passthrough_sites
-                            .insert(hir.id, container_regions.to_vec());
-                    }
-                }
-            }
+            Some(RegionEffect::Funnel) => self.record_funnel_store(hir.id, func, &arg_regions),
             Some(RegionEffect::Delivers { .. }) => {
                 // A fiber value installer (`fiber/resume`'s resume value,
                 // `fiber/abort`/`fiber/cancel`'s payload, `fiber/emit`'s emitted
@@ -311,11 +183,11 @@ impl RegionInference {
                 // so NO may-store edge, exactly as for `Funnel`. A compile-time
                 // incref would double-count the first against its single free-time
                 // cascade decref and never balance the second
-                // (region-fiber-install-clique-leak.lisp). The frontier crossing the
-                // declaration also carries is escape's to record (its fiber facet,
-                // `hir::escape`), not a solver-recorded source set — the same split
-                // `Sends` makes. The result is unbounded, so it falls through to the
-                // alias recording below (`result_may_alias_args`).
+                // (tests/impl/region-fiber-install-clique-leak.lisp). The frontier
+                // crossing the declaration also carries is escape's to record (its
+                // fiber facet, `hir::escape`), not a solver-recorded source set —
+                // the same split `Sends` makes. The result is unbounded, so it falls
+                // through to the alias recording below (`result_may_alias_args`).
             }
             Some(RegionEffect::Immediate | RegionEffect::PassThrough | RegionEffect::Opaque) => {
                 // `Opaque` stores no argument (every arg is copied out —
@@ -327,7 +199,7 @@ impl RegionInference {
                 // value-released call-result region below
                 // (`call_returns_immediate` is false for Opaque). This is
                 // the variant that keeps the clique keyed on the *store*,
-                // not the result shape (docs/impl/region/effects.md § Opaque).
+                // not the result shape (docs/impl/region/effects.md).
             }
             Some(RegionEffect::Stores { args: stored }) => {
                 // A declared native's uncounted store is real: its edges are
@@ -348,7 +220,7 @@ impl RegionInference {
                 // it cannot — at a real call site the channel is typically an
                 // upvalue or module-level binding, so no pair exists and the
                 // message would ride the buffer on the sender's own references
-                // (tests/elle/region-chan-send-owned-param-uaf.lisp). The
+                // (tests/impl/region-chan-send-owned-param-uaf.lisp). The
                 // fiber-frontier escape of the message is escape's judgment
                 // (`analyze_escape`'s fiber/send facet, projected by
                 // `region::infer::escape`), not a solver-recorded source set.
@@ -360,15 +232,15 @@ impl RegionInference {
                 // invisible to the funnel seam and the solver — so the
                 // full mutual clique is its only cover. Its edges are
                 // HARD (the lowerer increfs a call-result source by
-                // value; docs/impl/region/effects.md "Hard edges").
+                // value; docs/impl/region/effects.md).
                 self.hard_edge_sites.insert(hir.id);
                 // Pairs of ARGUMENTS, never one argument's own regions: those
                 // are alternatives for the single value the call receives — a
                 // branch's arms, a pattern alias into a scrutinee — so no store
                 // can carry one into the other, and an edge between them is an
-                // `IncrefRegion` no cascade balances (region/effects.md § "What
-                // the solver derives"). The declared-store path states the same
-                // rule as its `j == i` skip.
+                // `IncrefRegion` no cascade balances
+                // (docs/impl/region/effects.md). The declared-store path states
+                // the same rule as its `j == i` skip.
                 for (i, src_rs) in arg_regions.iter().enumerate() {
                     for dst_rs in arg_regions.iter().skip(i + 1) {
                         for (&src, &dst) in src_rs
@@ -394,13 +266,11 @@ impl RegionInference {
                 // already counted at its site, and a caller-side
                 // clique incref is pure redundancy that leaks one
                 // region per alloc-region heap argument per call
-                // (pinned by region-userfn-clique-noleak.lisp). Unlike a
+                // (pinned by tests/impl/region-userfn-clique-noleak.lisp). Unlike a
                 // Mixed/Unknown native, a user fn cannot perform an
                 // UNCOUNTED store, so there is nothing for the clique
-                // to cover. (Call-result sources were already a
-                // slot-based no-op here; this drops the alloc-region
-                // leak that remained — docs/impl/region/effects.md
-                // "What the solver derives", the user-functions case.)
+                // to cover (docs/impl/region/effects.md, the
+                // user-functions case).
             }
         }
 
@@ -419,15 +289,14 @@ impl RegionInference {
         {
             if matches!(self.call_effect(func), Some(RegionEffect::Funnel)) {
                 // A `Funnel` says the result is arg0 in place or a fresh copy of it
-                // (region/effects.md § `Funnel`) — the CONTAINER either way, never an
+                // (docs/impl/region/effects.md) — the CONTAINER either way, never an
                 // element interior to it. So the result is not a new region for the
                 // lifetime obligation to bound: on the in-place path it resolves to arg0
                 // and holds arg0's own counted pass-through reference, and where arg0 is
                 // itself an adopted member its decref lands on the frozen region and
-                // no-ops (region/adopt.md § "The lifetime obligation the root carries",
-                // the emit-order paragraph). What it still carries is REACHABILITY — a
-                // read out of the funnel's result is a read out of arg0 — so record the
-                // identity with the container alone.
+                // no-ops (docs/impl/region/adopt.md). What it still carries is
+                // REACHABILITY — a read out of the funnel's result is a read out of arg0
+                // — so record the identity with the container alone.
                 if let Some(container_regions) = arg_regions.first() {
                     for &v in container_regions {
                         if v != call_r {
@@ -442,9 +311,9 @@ impl RegionInference {
                 // `call_r` — a placeholder relating to no member statically — can name a
                 // frozen member. Adoption leaves the result's pass-through retain inert,
                 // exactly as for a container read, so the root's drop must bound this
-                // release too (`region_call_result_alias_uaf`). Reached only on the
-                // opaque path: an INLINED callee returned above with the regions its body
-                // really yields, which need no alias edge at all.
+                // release too (tests/impl/region-call-result-alias-uaf.lisp). Reached
+                // only on the opaque path: an INLINED callee returned above with the
+                // regions its body really yields, which need no alias edge at all.
                 for vs in &arg_regions {
                     for &v in vs {
                         if v != call_r {
@@ -464,9 +333,9 @@ impl RegionInference {
         // it inert. Record `(alias, container)` so the ownership cut refuses to claim a
         // member this alias may still name, and so the lowerer orders the alias's
         // page-reading release ahead of the container's where they share a point
-        // (region/adopt.md § "The lifetime obligation the root carries";
-        // `region_container_read_borrow_uaf`). A moves-out REMOVE extracts its element
-        // rather than borrowing it and is excluded (`is_container_read_borrow`).
+        // (docs/impl/region/adopt.md; tests/impl/region-container-read-borrow-uaf.lisp).
+        // A moves-out REMOVE extracts its element rather than borrowing it and is
+        // excluded (`is_container_read_borrow`).
         if self.is_container_read_borrow(func) {
             if let Some(container_regions) = arg_regions.first() {
                 for &container in container_regions {
@@ -477,18 +346,18 @@ impl RegionInference {
             }
         }
 
-        // A moves-out ∩ PassThrough native (`%pop`/`%pop-array*`) removes a
-        // pre-existing heap element from a container and escape-retains it IN-BODY
+        // A moves-out ∩ PassThrough native (`%pop`/`%pop-array*`) removes a pre-existing
+        // heap element from a container and escape-retains it IN-BODY
         // (`arena::pop_with_decref` increfs before releasing the container), and
-        // `dispatch_native_call` skips its own pass-through retain (`def.moves_out`).
-        // So in TAIL position the lowerer's extra ReturnValue `IncrefValueRegion`
-        // double-counts against that in-body retain and frees the element under a
-        // live reference (`region_pop_tail_moves_out_uaf`). Record the site so the
-        // lowerer drops that redundant retain — the moves-out analogue of
+        // `dispatch_native_call` skips its own pass-through retain (`def.moves_out`). So
+        // in TAIL position the lowerer's extra ReturnValue `IncrefValueRegion`
+        // double-counts against that in-body retain and frees the element under a live
+        // reference (tests/impl/region-pop-tail-moves-out-uaf.lisp). Record the site so
+        // the lowerer drops that redundant retain — the moves-out analogue of
         // `container_release_sites`. Gated to `PassThrough` (`call_moves_out_passthrough`)
-        // so a moves-out native with a FRESH result (`@string` grapheme / `@bytes`
-        // int pop, `Funnel`/`Immediate`) is EXCLUDED: its result is born rc=1 with no
-        // in-body retain and NEEDS the tail retain to survive the caller's read.
+        // so a moves-out native with a FRESH result (`@string` grapheme / `@bytes` int
+        // pop, `Funnel`/`Immediate`) is EXCLUDED: its result is born rc=1 with no in-body
+        // retain and NEEDS the tail retain to survive the caller's read.
         if self.call_moves_out_passthrough(func) {
             self.moves_out_release_sites.insert(hir.id);
         }
@@ -497,16 +366,16 @@ impl RegionInference {
         // from a `pop` wrapper's `(match (type-of coll) …)` arm, and `coll` (the
         // container, arg0) is used in EVERY arm — scrutinee + each arm's funnel call —
         // while its single `decref_point` sits in ONE arm, so the owned-param reference
-        // the wrapper holds strands on every OTHER arm's path (the F1b container strand
-        // `add`/`del` have). Record arg0 as a container site so `region::infer::compensate`
-        // places the balancing per-arm release. Recorded into `funnel_container_sites`
-        // ONLY — NOT `funnel_passthrough_sites`: `pop` returns the ELEMENT, not the
-        // container, so the container is genuinely DEAD in the arm (the immutable-funnel
-        // treatment — a per-arm owned-param release, and NO tail-retain suppression on
-        // the container's account; the element's own redundant tail retain is handled
-        // separately by `moves_out_release_sites`). Keyed off the moves-out fact, not a
-        // container RetType (pop's RetType is the element), so it covers the PassThrough
-        // `%pop` arm and the fresh-result `%pop-string`/`%pop-bytes` arms alike.
+        // the wrapper holds strands on every OTHER arm's path, as `add`/`del`'s does.
+        // Record arg0 as a container site so `region::infer::compensate` places the
+        // balancing per-arm release. Recorded into `funnel_container_sites` ONLY — NOT
+        // `funnel_passthrough_sites`: `pop` returns the ELEMENT, not the container, so
+        // the container is genuinely DEAD in the arm (the immutable-funnel treatment — a
+        // per-arm owned-param release, and NO tail-retain suppression on the container's
+        // account; the element's own redundant tail retain is handled separately by
+        // `moves_out_release_sites`). Keyed off the moves-out fact, not a container
+        // RetType (pop's RetType is the element), so it covers the PassThrough `%pop`
+        // arm and the fresh-result `%pop-string`/`%pop-bytes` arms alike.
         if self.call_moves_out(func) {
             if let Some(container_regions) = arg_regions.first() {
                 if !container_regions.is_empty() {

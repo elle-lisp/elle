@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-29
 //! Region releases: what the lowerer emits at each region's `decref_point`, routed by the region's class.
 //!
 //! docs/impl/region/mechanism.md
@@ -62,9 +62,9 @@ impl<'a> Lowerer<'a> {
             self.with_tail_exit_hoist(r, |s| s.emit_decref_for_region(r, hir_id, result_reg));
         }
         self.emit_cell_content_drops(hir_id);
-        // The ownership forest's co-owned-cycle cut: at the group's drop
-        // site — the latest member `decref_point`, i.e. this node — free the whole member
-        // set as one unit, replacing the members' individual decrefs (skipped above).
+        // The ownership forest's co-owned-cycle cut: at the group's drop site — the
+        // latest member `decref_point`, that is this node — free the whole member set
+        // as one unit, replacing the members' individual decrefs (skipped above).
         // `owned_region_groups` is empty when no co-owned cycle is present, so this is
         // then inert.
         if let Some(members) = self.region_info.owned_region_groups.get(&hir_id).cloned() {
@@ -132,7 +132,7 @@ impl<'a> Lowerer<'a> {
                     // slot no longer holds the value whose region we mean to
                     // release — it holds whatever was last assigned. Loading it
                     // and decref'ing would free THAT live value
-                    // (tests/elle/region-mutable-reassign-flow.lisp pins it).
+                    // (tests/impl/region-mutable-reassign-flow.lisp pins it).
                     // With no untainted route the release is skipped: an
                     // over-keep, never a mis-free. (When the suppression gate
                     // succeeds these regions are already in
@@ -165,12 +165,12 @@ impl<'a> Lowerer<'a> {
                     // (`(assign acc (f acc))`) is an ANF temp with its OWN let slot,
                     // and its scope-exit `DecrefValueRegion` routes through THAT
                     // slot — not the reassigned binding's — so it still fires
-                    // (pinned by `tests/elle/region-tailcall-arg-transfer.lisp` and
-                    // the `region-mutable-reassign-*` suite under `--wasm=full`).
+                    // (pinned by `tests/impl/region-tailcall-arg-transfer.lisp` and
+                    // the `tests/impl/region-mutable-reassign-*.lisp` files).
                     // Excludes captured cells (env slots, released via
                     // `DecrefCellRegion`), which `reassigned_local_slots` never
                     // records. Pinned by
-                    // `tests/elle/region-capture-cell-loop-uaf.lisp`.
+                    // `tests/impl/region-capture-cell-loop-uaf.lisp`.
                     if self.reassigned_local_slots.contains(&slot)
                         && !self.region_info.cell_release_regions.contains(&r)
                     {
@@ -242,14 +242,14 @@ impl<'a> Lowerer<'a> {
                     // walk), so every arm region is released here by loading its
                     // own result slot. In a loop, an arm taken on a prior
                     // iteration left a still-live heap value in its slot (the
-                    // value escaped — e.g. `put` into a table that outlives the
-                    // loop); on an iteration that takes a DIFFERENT arm, this
+                    // value escaped — for example `put` into a table that outlives
+                    // the loop); on an iteration that takes a DIFFERENT arm, this
                     // decref would reload that stale slot and over-free the
-                    // escaped value (tests/elle/region-branch-result-loop-uaf.lisp
-                    // pins it). Stamping
-                    // nil makes the non-taken-arm release a no-op (region_of(nil)
-                    // is None) while the taken arm rewrites its slot first, so the
-                    // live value is still released exactly once.
+                    // escaped value (tests/impl/region-branch-result-loop-uaf.lisp
+                    // pins it). Stamping nil makes the non-taken-arm release a
+                    // no-op (region_of(nil) is None) while the taken arm rewrites
+                    // its slot first, so the live value is still released exactly
+                    // once.
                     //
                     // An ENV-celled value is not stamped: the write that would
                     // clear it is `StoreCapture`, whose funnel
@@ -417,13 +417,12 @@ impl<'a> Lowerer<'a> {
             );
         }
         // Record the slot for the abandoned-frame walk (docs/impl/region/unwind.md).
-        // The slot-resolved
-        // route's receipt is the activation map itself: the alloc mints the mapping
-        // and this instruction TAKES it (`take_runtime_region_for_drop_slot`), so a
-        // slot still mapped when the frame is abandoned is a release that did not
-        // run. Only a slot this function actually emits for is recorded, so the map's
-        // other entries — a caller's leftovers past a frame-replacing tail call —
-        // stay out of the walk.
+        // The slot-resolved route's receipt is the activation map itself: the alloc
+        // mints the mapping and this instruction TAKES it
+        // (`take_runtime_region_for_drop_slot`), so a slot still mapped when the
+        // frame is abandoned is a release that did not run. Only a slot this function
+        // actually emits for is recorded, so the map's other entries — a caller's
+        // leftovers past a frame-replacing tail call — stay out of the walk.
         if !self.current_func.frame_release_regions.contains(&region_id) {
             self.current_func.frame_release_regions.push(region_id);
         }

@@ -1,13 +1,13 @@
 # The branch-arm release window
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-28 -->
 
 Where a branch puts the ONE release of a region several arms use. The anchor is
 the merge every path reaches, not the arm that happens to name it last.
 
 ## A release inside one arm is not a release on the other arms
 
-Compensation above *adds* a release per arm, and each addition needs a count
+[Compensation](compensate.md) *adds* a release per arm, and each addition needs a count
 argument. There is a weaker question the same structure answers with a
 **placement** argument alone: where should the region's ONE release live?
 
@@ -25,8 +25,8 @@ itself when nothing does — whose decrefs the lowerer emits after the merge
 label. So a `decref_point` that lands inside an arm is **re-anchored** there.
 One release per execution, on every path; the only thing that changed is that
 the region now lives to the end of the branch instead of to the end of one arm.
-This is the break window's argument — a release moved *later* can only over-keep
-— and it neither relaxes nor replaces the per-arm guard above: there is still
+This is [the break window](anchors.md)'s argument — a release moved *later* can only over-keep
+— and it neither relaxes nor replaces the per-arm guard ([compensate.md](compensate.md)): there is still
 exactly one release, now sitting after every arm's last use instead of after one
 arm's. What it does need, and the break window does not, is a reason to believe
 the release still has only this frame's reference to drop; the next section is
@@ -94,17 +94,17 @@ of level *k* and in no arm of any other level. One inside test *k* is in the
 whose paths skip that test.
 
 The rows are `cond-later-test`, `cond-else-path`, `cond-dispatch`, `or-short` and
-`and-short` in [tests/elle/region-branch-arm-window.lisp](../../../tests/elle/region-branch-arm-window.lisp), beside the
+`and-short` in [tests/impl/region-branch-arm-window.lisp](../../../tests/impl/region-branch-arm-window.lisp), beside the
 `ctl-cond-last-test` / `ctl-or-full` controls that drive the path which does
 evaluate the position holding the release; the `w-cond`, `w-cond-store` and
-`w-or-short` soundness rows in [tests/elle/region-branch-arm-window-uaf.lisp](../../../tests/elle/region-branch-arm-window-uaf.lisp);
+`w-or-short` soundness rows in [tests/impl/region-branch-arm-window-uaf.lisp](../../../tests/impl/region-branch-arm-window-uaf.lisp);
 the unit pins
 `region::infer::tests::compensate::a_cond_clause_test_is_a_conditional_position`,
 `a_cond_body_is_an_arm_like_any_other`, `a_short_circuit_tail_is_an_arm` and
 `an_and_tail_is_an_arm_too`; and the `distinct`, `pipeline`, `wrap-map` and
-`push-accum` probes of the [tests/elle/oracle.lisp](../../../tests/elle/oracle.lisp) dashboard as the
-production gauges, defined in [tests/elle/probe/direct.lisp](../../../tests/elle/probe/direct.lisp) and
-[tests/elle/probe/container.lisp](../../../tests/elle/probe/container.lisp).
+`push-accum` probes of the [tests/impl/oracle.lisp](../../../tests/impl/oracle.lisp) dashboard as the
+production gauges, defined in [tests/impl/probe/direct.lisp](../../../tests/impl/probe/direct.lisp) and
+[tests/impl/probe/container.lisp](../../../tests/impl/probe/container.lisp).
 
 ### The admission: this frame must be the region's only holder
 
@@ -128,7 +128,7 @@ the window is admitted for a region whose every holder binding is free of the
 containment facets, whose own release route is unmutated, and which is absent from
 the fiber frontier's atomless site half (which no binding names). A region with no
 holder binding at all offers nothing to judge and is refused too. Everything else
-keeps its in-arm release and the per-arm compensation routes above, which carry a
+keeps its in-arm release and the per-arm compensation routes, which carry a
 count argument instead — so the two mechanisms partition the obligation rather
 than overlapping on it.
 
@@ -216,7 +216,7 @@ reference it owns. That is why the admission reads the containment facets
 (`EscapeInfo::binding_escapes_by_containment`) rather than everything beyond
 return. The two halves stand or fall together: withdraw the resume value's mint and
 a body that parks again holding it reads the resumer's freed reference, which is
-what [tests/elle/region-fiber-frontier-window-uaf.lisp](../../../tests/elle/region-fiber-frontier-window-uaf.lisp) drives. The fiber frontier's **atomless
+what [tests/impl/region-fiber-frontier-window-uaf.lisp](../../../tests/impl/region-fiber-frontier-window-uaf.lisp) drives. The fiber frontier's **atomless
 site half** still refuses — a value emitted or sent with no binding to name it is
 judged by no holder here at all, so it keeps the conservative baseline the same way
 a region with no holder binding does.
@@ -277,7 +277,7 @@ rather than over-frees. The references are the tests:
 `a_reassigned_destructured_name_refuses_nothing` for the pattern name,
 `a_reassigned_parameter_has_no_route_but_its_box` for the parameter,
 `a_reassigned_allocating_binder_refuses_its_own_release` for the refusal the reading
-keeps, and [tests/elle/region-destructured-cursor.lisp](../../../tests/elle/region-destructured-cursor.lisp) for the measured shape.
+keeps, and [tests/impl/region-destructured-cursor.lisp](../../../tests/impl/region-destructured-cursor.lisp) for the measured shape.
 
 An **env cell**'s release is a different instruction against a different object.
 `LoadCaptureRaw` + `DecrefCellRegion` names the cell **box**, and the box is
@@ -332,7 +332,7 @@ live-in region a loop nested in one arm READS. The loop-node extension ([the
 binder's scope](anchors.md)) anchors every such read at the loop node, so the
 closed interval would place the branch's only release under the arm holding that
 loop. The rows are `arm-loop-read` and `arm-loop-read-local` in
-[tests/elle/region-branch-arm-window.lisp](../../../tests/elle/region-branch-arm-window.lisp), beside the `bound-loop` boundary
+[tests/impl/region-branch-arm-window.lisp](../../../tests/impl/region-branch-arm-window.lisp), beside the `bound-loop` boundary
 whose value is born in the loop body and whose release must stay there.
 
 The region must also be **live-in** to the branch, so a value born inside an arm
@@ -350,7 +350,7 @@ sites is outside the branch. A region with none — an owned parameter's
 placeholder, whose slot the lambda prologue records — has only its holder
 definitions to offer, and every one of their sites must be outside. The rows that
 separate the two are `arm-alias-inside` and `bound-loop` in
-[tests/elle/region-branch-arm-window.lisp](../../../tests/elle/region-branch-arm-window.lisp); the born-in-an-arm soundness face is
+[tests/impl/region-branch-arm-window.lisp](../../../tests/impl/region-branch-arm-window.lisp); the born-in-an-arm soundness face is
 `w-born-in-arm` in the UAF file.
 
 Regions whose release belongs to another mechanism are excluded as in
@@ -428,11 +428,13 @@ compensation used to reach at its head, got nothing. This is `self_cancelling_ru
 restriction read one step earlier, at the admission it builds on, and it is the
 same value-route line compensation's `tail` route already draws.
 
-Pinned by [tests/elle/region-branch-arm-window.lisp](../../../tests/elle/region-branch-arm-window.lisp) (the reclamation, with all
-three boundaries, the `If` face, the captured-holder face, the frame-replacing-arm
-faces and the returned-parameter faces driven as rows), the `param-used-arm` /
+Pinned by [tests/impl/region-branch-arm-window.lisp](../../../tests/impl/region-branch-arm-window.lisp) (the reclamation, with the
+loop and lambda boundaries, the `If` face and the captured-holder face driven as
+rows) and [tests/impl/region-branch-arm-tailcall.lisp](../../../tests/impl/region-branch-arm-tailcall.lisp)
+(the tail-callee boundary, the frame-replacing-arm faces and the
+returned-parameter faces), the `param-used-arm` /
 `param-used-arm-if` / `branch-arm-tailcall-sibling` / `branch-arm-return-captured`
-probes in [tests/elle/probe/branch.lisp](../../../tests/elle/probe/branch.lisp), run by the oracle dashboard (the per-op
+probes in [tests/impl/probe/branch.lisp](../../../tests/impl/probe/branch.lisp), run by the oracle dashboard (the per-op
 rates), the placement pins in `lir::lower::tests::release`
 (`fallthrough_arm_releases_though_a_sibling_tail_call_exits`,
 `tail_call_argument_release_stays_the_ownership_move`,
@@ -447,7 +449,7 @@ the return-facet admission
 (`region::infer::tests::compensate::a_capturing_frame_exit_anchors_a_returned_param`,
 `a_returned_param_anchors_where_no_arm_leaves_the_frame`,
 `a_frame_exit_the_callee_cannot_reach_anchors_a_returned_param`),
-and [tests/elle/region-branch-arm-window-uaf.lisp](../../../tests/elle/region-branch-arm-window-uaf.lisp) (the
+and [tests/impl/region-branch-arm-window-uaf.lisp](../../../tests/impl/region-branch-arm-window-uaf.lisp) (the
 soundness complement — a value read, stored, returned, carried across a yield,
 reached through a closure's environment, or moved into a sibling arm's tail callee
 after the branch must survive the moved release).

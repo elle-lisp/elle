@@ -1,6 +1,6 @@
 # Reads of a 1-slot container
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-09-28 -->
 
 What a whole-value read of a reassigned binding's container takes, and which binder forms must emit the retain.
 
@@ -39,7 +39,7 @@ route by construction where the init region has none. The reference is the test:
 `reassign_gate_counts_a_read_of_an_uncelled_cell` for the admission,
 `reassign_gate_counts_an_aliased_init` for the alias that is *not* such a read and
 so keeps the counted-init route, and
-`tests/elle/region-cell-alias-after.lisp` for the measured shape.
+[region-cell-alias-after.lisp](../../../tests/impl/region-cell-alias-after.lisp) for the measured shape.
 
 An **element** read (`first`/`get`/destructuring) is not a whole-value read and
 needs no counting: an element's region is independently counted by its parent's
@@ -109,7 +109,7 @@ branch whose allocating arm keeps its regions,
 `reassign_gate_counts_a_begin_wrapped_read` for the statement wrapper,
 `reassign_gate_declines_a_branch_reading_no_container` for the decline,
 `reassign_gate_counts_a_phi_carried_returned_value` for the phi that must stay
-uncounted, and `tests/elle/region-cell-alias-branch.lisp` for the measured
+uncounted, and [region-cell-alias-branch.lisp](../../../tests/impl/region-cell-alias-branch.lisp) for the measured
 shape.
 
 **Every binder form that records the read must emit the retain.** The analysis
@@ -126,4 +126,4 @@ file-letrec binder that carries a module-scope reader is covered exactly as a
 fn-local `let` is. `Define` records no read site at all, so a `def`-bound reader
 stays a holder of the container's init region and the container keeps the
 counted-init route. The reference is the test:
-`region_container_read_toplevel_uaf` for the module-scope binder.
+[region-container-read-toplevel-uaf.lisp](../../../tests/impl/region-container-read-toplevel-uaf.lisp) for the module-scope binder.

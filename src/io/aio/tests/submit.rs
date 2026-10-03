@@ -1,4 +1,4 @@
-//! audited: 2026-09-20
+//! audited: 2026-09-30
 //! The submission frame — what every operation the backend issues shares.
 //!
 //! A submission mints an id, hands the operation to io_uring or to a
@@ -40,7 +40,7 @@ fn submit_pending(backend: &AsyncBackend, req: &IoRequest, label: &str) -> Submi
 /// it consumed the pending entry the submission filed.
 fn expect_completion(backend: &AsyncBackend, id: SubmissionId, label: &str) -> Completion {
     let mut completions = backend
-        .wait(-1)
+        .wait(None)
         .unwrap_or_else(|e| panic!("{label}: wait failed: {e}"));
     assert_eq!(
         completions.len(),
@@ -63,13 +63,12 @@ fn expect_completion(backend: &AsyncBackend, id: SubmissionId, label: &str) -> C
 fn a_sleep_completes_under_the_id_it_was_submitted_with() {
     crate::value::arena::with_test_region(|| {
         let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::Sleep {
+        let req = IoRequest::unbounded(
+            IoOp::Sleep {
                 duration: Duration::from_millis(1),
             },
-            port: Value::NIL,
-            timeout: None,
-        };
+            Value::NIL,
+        );
         let id = submit_pending(&backend, &req, "sleep");
         expect_completion(&backend, id, "sleep").discard();
     });
@@ -81,13 +80,12 @@ fn a_resolve_completes_under_the_id_it_was_submitted_with() {
         let backend = AsyncBackend::new().unwrap();
         // getaddrinfo(3) has no io_uring form, so this dispatches to the
         // thread pool on every platform.
-        let req = IoRequest {
-            op: IoOp::Resolve {
+        let req = IoRequest::unbounded(
+            IoOp::Resolve {
                 hostname: "localhost".to_string(),
             },
-            port: Value::NIL,
-            timeout: None,
-        };
+            Value::NIL,
+        );
         let id = submit_pending(&backend, &req, "resolve");
         expect_completion(&backend, id, "resolve").discard();
     });
@@ -98,11 +96,10 @@ fn a_task_completes_under_the_id_it_was_submitted_with() {
     crate::value::arena::with_test_region(|| {
         let backend = AsyncBackend::new().unwrap();
         // An arbitrary closure has no io_uring form either.
-        let req = IoRequest {
-            op: IoOp::Task(TaskFn::new(Box::new(|| (0, b"done".to_vec())))),
-            port: Value::NIL,
-            timeout: None,
-        };
+        let req = IoRequest::unbounded(
+            IoOp::Task(TaskFn::new(Box::new(|| (0, b"done".to_vec())))),
+            Value::NIL,
+        );
         let id = submit_pending(&backend, &req, "task");
         expect_completion(&backend, id, "task").discard();
     });
@@ -113,14 +110,13 @@ fn a_readiness_poll_completes_under_the_id_it_was_submitted_with() {
     crate::value::arena::with_test_region(|| {
         let backend = AsyncBackend::new().unwrap();
         // stderr accepts writes, so POLLOUT is ready the moment it is armed.
-        let req = IoRequest {
-            op: IoOp::PollFd {
+        let req = IoRequest::unbounded(
+            IoOp::PollFd {
                 fd: 2,
                 events: libc::POLLOUT as u32,
             },
-            port: Value::NIL,
-            timeout: None,
-        };
+            Value::NIL,
+        );
         let id = submit_pending(&backend, &req, "poll-fd");
         expect_completion(&backend, id, "poll-fd").discard();
     });
@@ -143,8 +139,8 @@ fn an_open_completes_under_the_id_it_was_submitted_with() {
                 path.clone(),
             ),
         );
-        let req = IoRequest {
-            op: IoOp::Open {
+        let req = IoRequest::unbounded(
+            IoOp::Open {
                 path: path.clone(),
                 flags: libc::O_RDONLY,
                 mode: 0o666,
@@ -152,8 +148,7 @@ fn an_open_completes_under_the_id_it_was_submitted_with() {
                 encoding: Encoding::Text,
             },
             port,
-            timeout: None,
-        };
+        );
         let id = submit_pending(&backend, &req, "open");
         let completion = expect_completion(&backend, id, "open");
         assert!(completion.result.is_ok(), "open: the file opened");
@@ -178,11 +173,7 @@ fn a_watch_read_completes_under_the_id_it_was_submitted_with() {
         // return and the test never waits on the filesystem.
         std::fs::write(std::path::Path::new(&dir).join("a.txt"), b"x").unwrap();
 
-        let req = IoRequest {
-            op: IoOp::WatchNext,
-            port: h.ctx().external("fs-watcher", watcher),
-            timeout: None,
-        };
+        let req = IoRequest::unbounded(IoOp::WatchNext, h.ctx().external("fs-watcher", watcher));
         let id = submit_pending(&backend, &req, "watch-next");
         expect_completion(&backend, id, "watch-next").discard();
 
@@ -194,8 +185,8 @@ fn a_watch_read_completes_under_the_id_it_was_submitted_with() {
 fn a_spawn_completes_inside_the_submit_call() {
     crate::value::arena::with_test_region(|| {
         let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::Spawn(SpawnRequest {
+        let req = IoRequest::unbounded(
+            IoOp::Spawn(SpawnRequest {
                 program: "true".to_string(),
                 args: Vec::new(),
                 env: None,
@@ -204,9 +195,8 @@ fn a_spawn_completes_inside_the_submit_call() {
                 stdout: StdioDisposition::Null,
                 stderr: StdioDisposition::Null,
             }),
-            port: Value::NIL,
-            timeout: None,
-        };
+            Value::NIL,
+        );
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
@@ -234,10 +224,10 @@ fn a_spawn_completes_inside_the_submit_call() {
 fn a_process_wait_completes_under_the_id_it_was_submitted_with() {
     crate::value::arena::with_test_region(|| {
         let backend = AsyncBackend::new().unwrap();
-        // `sleep` rather than `true`: a child that has already exited takes the
-        // cached-exit-code path, which files no pending entry at all.
-        let spawn = IoRequest {
-            op: IoOp::Spawn(SpawnRequest {
+        // `sleep` rather than `true`: a child whose status is already held takes
+        // the path that answers from the record and files no pending entry.
+        let spawn = IoRequest::unbounded(
+            IoOp::Spawn(SpawnRequest {
                 program: "sleep".to_string(),
                 args: vec!["0.2".to_string()],
                 env: None,
@@ -246,9 +236,8 @@ fn a_process_wait_completes_under_the_id_it_was_submitted_with() {
                 stdout: StdioDisposition::Null,
                 stderr: StdioDisposition::Null,
             }),
-            port: Value::NIL,
-            timeout: None,
-        };
+            Value::NIL,
+        );
         backend
             .submit(&spawn, crate::io::pending::Submitter::for_test())
             .unwrap();
@@ -259,11 +248,7 @@ fn a_process_wait_completes_under_the_id_it_was_submitted_with() {
         let spawn = backend.poll().pop().unwrap();
         let spawned = *spawn.result.as_ref().expect("the child spawned");
 
-        let req = IoRequest {
-            op: IoOp::ProcessWait,
-            port: spawned,
-            timeout: None,
-        };
+        let req = IoRequest::unbounded(IoOp::ProcessWait, spawned);
         let id = submit_pending(&backend, &req, "process-wait");
         expect_completion(&backend, id, "process-wait").discard();
         spawn.discard();

@@ -1,8 +1,7 @@
-// audited: 2026-09-19
-// That the abandoned-frame release tables name exactly the routes the emitter
-// wrote, and nothing it declined.
-//
-// docs/impl/region/mechanism.md
+// audited: 2026-09-29
+//! That the abandoned-frame release tables name exactly the routes the emitter wrote, and nothing it declined.
+//!
+//! docs/impl/region/unwind.md
 
 use super::*;
 
@@ -94,8 +93,7 @@ fn frame_release_tables_name_exactly_the_routes_emitted() {
 fn a_splice_args_array_is_owed_by_the_frame_until_the_call_takes_it() {
     // The second contributor to the region table: a spliced call's args array has
     // no binding, so no `DecrefRegion` names it and the call reclaims it at
-    // runtime instead (docs/impl/region/mechanism.md § "A spliced call's arguments
-    // come out of an array the convention owns"). Between the array's
+    // runtime instead (docs/impl/region/mechanism.md). Between the array's
     // construction and the call the frame still owes that release — an
     // `ArrayMutExtend` over a non-sequence raises exactly there — so the slot is
     // in the table, and the call's own take is what keeps it from running twice.
@@ -122,11 +120,11 @@ fn a_splice_args_array_is_owed_by_the_frame_until_the_call_takes_it() {
 #[test]
 fn a_spliced_call_allocates_its_args_array_outside_the_call_region() {
     // A static region slot names ONE allocation execution between drops
-    // (docs/impl/region/model.md § "The per-execution region model"). The args
-    // array and the call are two, so sharing the call's slot orphans the array's
-    // physical region the moment the call maps its own mint over it — the leak
-    // `tests/elle/region-splice-args.lisp` gauges. Counterfactual: with one slot
-    // for both, this assertion reads them equal.
+    // (docs/impl/region/model.md). The args array and the call are two, so
+    // sharing the call's slot orphans the array's physical region the moment the
+    // call maps its own mint over it — the leak `tests/impl/region-splice-args.lisp`
+    // gauges. Counterfactual: with one slot for both, this assertion reads them
+    // equal.
     let module = compile_to_lir("(fn (xs) (g ;xs))");
     let func = std::iter::once(&module.entry)
         .chain(module.closures.iter())
@@ -166,11 +164,10 @@ fn a_spliced_call_allocates_its_args_array_outside_the_call_region() {
 
 #[test]
 fn a_reassigned_binding_records_no_value_route() {
-    // A reassigned binding's slot is not a release route at all — its occupant
-    // at the release point is whatever was stored last — so `emit_decref_for_region`
-    // skips it (docs/impl/region/bindings.md § "a mutated slot is not a release
-    // route"). The table is written where the route is EMITTED, so the skip
-    // carries into it and the walk can never load that slot.
+    // A reassigned binding's slot is not a release route at all — its occupant at
+    // the release point is whatever was stored last — so `emit_decref_for_region`
+    // skips it (docs/impl/region/bindings.md). The table is written where the route
+    // is EMITTED, so the skip carries into it and the walk can never load that slot.
     let module = compile_to_lir("(begin (var x (string \"a\")) (assign x (string \"b\")) x)");
     // The shape has a reassigned binding holding heap values, so there IS a
     // release to skip; without this the equality below could hold vacuously.

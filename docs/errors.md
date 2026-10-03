@@ -1,6 +1,6 @@
 # Error Handling
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-09-30 -->
 
 Errors in Elle are values signaled via fibers. By convention, error values
 are structs `{:error :keyword :message "string"}`, but `(error val)` accepts
@@ -205,7 +205,8 @@ The destructor runs even on error.
 
 ## Cleanup around async I/O
 
-The four forms hold their order when the body waits on the scheduler.
+`try`, `protect`, `defer` and `with` hold their order when the body waits on
+the scheduler.
 `protect` and `try` capture an error from an async call — a timed-out
 `tcp/accept`, a `port/open` on a fifo nobody reads — and the code after
 the capture runs before any enclosing cleanup:
@@ -215,7 +216,7 @@ the capture runs before any enclosing cleanup:
 (def order @[])
 
 (with-temp-dir dir
-  (def [ok? err] (protect (tcp/accept listener :timeout 20)))
+  (def [ok? err] (protect (tcp/accept listener :timeout 0.02)))
   (assert (not ok?) "nobody connects, so the accept fails")
   (file/write (path/join dir "note") "the directory is still here")
   (push order :body))
@@ -227,7 +228,7 @@ the capture runs before any enclosing cleanup:
 `with-temp-dir` deletes the directory when the body ends, not when the
 body's own error handling ends. The same holds for `with`, for a `defer`
 inside a `defer`, and for a body that does more I/O after the capture.
-[tests/elle/unwind-suspend.lisp](../tests/elle/unwind-suspend.lisp) pins the
+[tests/lang/unwind-suspend.lisp](../tests/lang/unwind-suspend.lisp) pins the
 order for each shape.
 
 ## Error propagation

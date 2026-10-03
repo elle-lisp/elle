@@ -1,15 +1,14 @@
-#![allow(clippy::result_large_err)]
-
-//! # Elle - A High-Performance Lisp Interpreter
+// audited: 2026-09-29
+//! The Elle library: the compiler pipeline, the VM and its runtime, and the entry points an embedder or a binary drives.
 //!
-//! Elle is a bytecode-compiled Lisp interpreter written in Rust with a register-based VM.
+//! docs/embedding.md
 //!
 //! ## Quick Start
 //!
 //! The recommended embedding entry point is [`Runtime`](runtime::Runtime): it
 //! installs the contexts, registers primitives, loads the stdlib, and — on drop
-//! — runs the principled, RC-driven process-teardown sweep (docs/impl/region/rules.md
-//! § "Teardown — every region frees"), the same lifecycle `elle foo.lisp` and the REPL use.
+//! — runs the RC-driven process-teardown sweep (docs/impl/region/rules.md),
+//! the same lifecycle `elle foo.lisp` and the REPL use through [`program`].
 //!
 //! ```
 //! use elle::pipeline::eval;
@@ -55,18 +54,12 @@
 //!
 //! ## Architecture
 //!
-//! Elle compiles Lisp code through several stages:
-//!
-//! 1. **Reader** - Parse S-expressions from text
-//! 2. **Compiler** - Convert AST to bytecode
-//! 3. **VM** - Execute bytecode with a stack-based interpreter
-//!
-//! ## Performance
-//!
-//! - Bytecode compilation eliminates tree-walking overhead
-//! - Register-based VM for efficient instruction dispatch
-//! - Symbol interning for O(1) symbol comparison
-//! - SmallVec optimization to avoid heap allocation
+//! Source → Reader → Syntax → Expander → Analyzer → HIR → Lowerer → LIR →
+//! Emitter → Bytecode → VM. The VM is stack-based for operands and
+//! register-addressed for locals; the JIT, MLIR and WebAssembly tiers compile
+//! from the LIR (AGENTS.md).
+
+#![allow(clippy::result_large_err)]
 
 // No custom global allocator. Arena pages use mmap directly (bypassing
 // the global allocator entirely), and the remaining allocations (tracking
@@ -109,6 +102,7 @@ pub mod plugin;
 #[allow(improper_ctypes_definitions)]
 pub mod plugin_api;
 pub mod port;
+pub mod program;
 // `#[macro_use]`: the `type-error` macros of `primitives::arg` also serve the
 // VM opcode handlers, and `vm` is declared after this.
 #[macro_use]

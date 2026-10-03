@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-21
+(elle/epoch 13)
+# audited: 2026-09-29
 ## elle semver — argv, dispatch, report rendering, and the exit contract.
 ## docs/semver.md
 
@@ -435,7 +435,7 @@
         spath (surface-path (t :path))]
     (guard-release t s claimed spath)
     (let [glob (or (get opts :tests)
-                   (string "tests/elle/" (path/filename (t :module)) "*.lisp"))
+                   (string "tests/lang/" (path/filename (t :module)) "*.lisp"))
           commit (head-commit)
           @rec (merge s {:tests glob})]
       (when commit

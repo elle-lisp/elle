@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-09-30
 //! The frame every submission shares, and the operations that name no OS object
 //! of their own.
 //!
@@ -47,21 +47,20 @@ impl Dispatch<'_> {
     /// Arm a readiness wait on `fd` for `events`: a `POLL_ADD` on the ring, or
     /// a worker blocking in `poll(2)` on the pool. `ev/poll-fd` and the
     /// `chan/wait-ready` park differ only in what their pending entry keeps.
-    pub(super) fn poll_fd(
-        &mut self,
-        fd: RawFd,
-        events: u32,
-        timeout: Option<Duration>,
-    ) -> Result<(), String> {
+    pub(super) fn poll_fd(&mut self, fd: RawFd, events: u32, bound: Bound) -> Result<(), String> {
         match &mut *self.platform {
             #[cfg(target_os = "linux")]
-            PlatformBackend::Uring(ring) => {
-                crate::io::uring::submit_uring_poll_add(ring, self.id, fd, events, timeout)
-            }
+            PlatformBackend::Uring(ring) => crate::io::uring::submit_uring_poll_add(
+                ring,
+                self.id,
+                fd,
+                events,
+                bound.next_wait(),
+            ),
             PlatformBackend::ThreadPool => {
                 // The wait is open-ended when no timeout was named, and a park
                 // `ev/timeout` cannot reach outlives the fiber that wanted it.
-                let bounds = self.hub.bounds(self.id, timeout);
+                let bounds = self.hub.bounds(self.id, bound);
                 self.hub
                     .submit(self.id, PoolOp::PollFd { fd, events }, bounds)
             }
@@ -126,7 +125,7 @@ impl AsyncBackend {
     pub(super) fn submit_connect(
         &self,
         addr: &ConnectAddr,
-        timeout: Option<Duration>,
+        bound: Bound,
         port: Value,
     ) -> Result<SubmissionId, String> {
         self.submit_op(
@@ -142,7 +141,7 @@ impl AsyncBackend {
                         ring,
                         d.id,
                         addr,
-                        timeout,
+                        bound.next_wait(),
                         d.buffer_pool,
                         d.buffer,
                     )
@@ -153,7 +152,7 @@ impl AsyncBackend {
                     // dropped handshake, a listener whose backlog is full — so
                     // it carries the caller's deadline and a stop pipe, like
                     // every other open-ended pool operation.
-                    let bounds = d.hub.bounds(d.id, timeout);
+                    let bounds = d.hub.bounds(d.id, bound);
                     let pool_op = match addr {
                         ConnectAddr::Tcp {
                             addr: ip,
@@ -196,7 +195,7 @@ impl AsyncBackend {
                     // wait for. `ev/timeout` cancels its timer on every call
                     // the body wins, and a timer that ran on to its full
                     // duration would hold a worker for that long.
-                    let bounds = d.hub.bounds(d.id, Some(duration));
+                    let bounds = d.hub.bounds(d.id, Bound::per_op(duration));
                     d.hub.submit(d.id, PoolOp::Sleep, bounds)
                 }
             },
@@ -215,12 +214,12 @@ impl AsyncBackend {
     pub(super) fn submit_chan_select_park(
         &self,
         guard: crate::primitives::chan::ChanSelectGuard,
-        timeout: Option<Duration>,
+        bound: Bound,
     ) -> Result<SubmissionId, String> {
         let fd = guard.poll_fd();
         self.submit_op(
             0,
-            |d| d.poll_fd(fd, libc::POLLIN as u32, timeout),
+            |d| d.poll_fd(fd, libc::POLLIN as u32, bound),
             |buffer, ()| PendingOp::ChanSelectPark {
                 buffer_handle: buffer,
                 guard,
@@ -233,11 +232,11 @@ impl AsyncBackend {
         &self,
         fd: RawFd,
         events: u32,
-        timeout: Option<Duration>,
+        bound: Bound,
     ) -> Result<SubmissionId, String> {
         self.submit_op(
             0,
-            |d| d.poll_fd(fd, events, timeout),
+            |d| d.poll_fd(fd, events, bound),
             |buffer, ()| PendingOp::PollFd {
                 buffer_handle: buffer,
             },
