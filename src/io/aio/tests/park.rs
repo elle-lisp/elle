@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-03
 //! The pool operations that park with no peer, and what ends them.
 //!
 //! docs/io/timeout.md
@@ -90,9 +90,8 @@ fn a_cancelled_pool_process_wait_ends_rather_than_being_abandoned() {
 /// A cancelled readiness wait must END on the thread-pool backend.
 ///
 /// `ev/poll-fd` with no timeout waits for as long as the descriptor stays
-/// quiet — `wayland/event-loop` and `glib-wait` park there on every iteration.
-/// Without a stop pipe the worker sits in `poll(2)` with `-1` and nothing but
-/// the descriptor itself can end it.
+/// quiet. Without a stop pipe the worker sits in `poll(2)` with `-1`, and
+/// nothing but the descriptor itself can end it.
 #[test]
 fn a_cancelled_pool_poll_fd_ends_rather_than_being_abandoned() {
     crate::value::arena::with_test_region(|| {

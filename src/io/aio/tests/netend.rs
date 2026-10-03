@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-03
 //! The endings a pool operation reaches with nobody cancelling it: a close on
 //! the port beneath it, its own deadline, and a retirement.
 //!
@@ -140,8 +140,8 @@ fn closing_a_listener_ends_its_parked_pool_accept() {
 /// The same full accept queue the cancellation tests in netcancel.rs use, waited on
 /// with a deadline instead of cancelled. Two things are pinned: the connect ends near
 /// its deadline rather than at the kernel's own, minutes later; and it reports
-/// `:timeout`, the kind `ev/timeout` and every caller that distinguishes a deadline
-/// from a broken connection matches on.
+/// `:timeout`, the kind a caller that distinguishes a deadline from a broken
+/// connection matches on.
 #[test]
 fn a_pool_connect_reports_its_own_deadline_as_a_timeout() {
     crate::value::arena::with_test_region(|| {
@@ -211,7 +211,7 @@ fn a_pool_connect_reports_its_own_deadline_as_a_timeout() {
             crate::value::sorted_struct_get(fields, &TableKey::keyword("error")).copied(),
             Some(crate::value::Value::keyword("timeout")),
             "a connect that ran out its deadline must report :timeout, not a \
-             generic :io-error — `ev/timeout` and `timed-out?` match on the kind",
+             generic :io-error — a caller tells a deadline apart by the kind",
         );
         Completion::discard_all(completions);
 
