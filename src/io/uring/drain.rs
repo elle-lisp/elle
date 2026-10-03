@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-02
 //! The single CQE drain: each completion resolved through its entry, then
 //! retired, resubmitted, or cooked into a `Completion`.
 //!
@@ -12,16 +12,15 @@ use super::*;
 /// a linked timeout SQE, so the bound applies to this operation as it did to
 /// the first.
 ///
-/// Returns the `Timespec` the kernel reads when it processes the SQE. It must
-/// stay alive until `ring.submit()` hands the queue over, so the caller holds
-/// it — a resubmit loop pushes many SQEs before one submit.
-#[must_use = "the timespec must outlive the ring.submit() that consumes the SQE"]
+/// Returns the timer, whose timespec the kernel reads when `ring.submit()`
+/// hands the queue over, so the caller holds it until then — a resubmit loop
+/// pushes many SQEs before one submit.
 fn push_resubmit(
     ring: &mut io_uring::IoUring,
     id: SubmissionId,
     entry: io_uring::squeue::Entry,
     timeout: Option<Duration>,
-) -> Option<Box<io_uring::types::Timespec>> {
+) -> Option<LinkTimer> {
     let entry = if timeout.is_some() {
         entry.flags(io_uring::squeue::Flags::IO_LINK)
     } else {
@@ -30,19 +29,11 @@ fn push_resubmit(
     unsafe {
         let _ = ring.submission().push(&entry);
     }
-    let dur = timeout?;
-    let ts = Box::new(
-        io_uring::types::Timespec::new()
-            .sec(dur.as_secs())
-            .nsec(dur.subsec_nanos()),
-    );
-    let timeout_sqe = io_uring::opcode::LinkTimeout::new(&*ts)
-        .build()
-        .user_data(id.as_u64() | TIMEOUT_USER_DATA_TAG);
+    let timer = LinkTimer::new(timeout?);
     unsafe {
-        let _ = ring.submission().push(&timeout_sqe);
+        let _ = ring.submission().push(&timer.entry(id));
     }
-    Some(ts)
+    Some(timer)
 }
 
 /// Drain all available CQEs from the completion ring.
@@ -155,10 +146,8 @@ pub(crate) fn drain_cqes(
         }
     }
 
-    // A re-armed `LinkTimeout` hands the kernel a pointer to its `Timespec`,
-    // which must stay put until the `ring.submit()` below consumes the SQE.
-    // The boxes live here so every resubmission's timespec outlives that call.
-    let mut link_timeouts: Vec<Box<io_uring::types::Timespec>> = Vec::new();
+    // Every re-armed timer lives here until the `ring.submit()` below reads it.
+    let mut link_timeouts: Vec<LinkTimer> = Vec::new();
     for (id, sqe, op) in again {
         // Bound this operation the way the original submission was bounded. An
         // operation that needs several SQEs — a read to its newline, its count

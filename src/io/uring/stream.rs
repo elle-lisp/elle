@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-10-02
 //! Building the SQEs a port operation submits: the byte-stream reads and
 //! writes, and the socket operations with builders of their own.
 //!
@@ -263,16 +263,12 @@ pub(crate) fn submit_uring_connect(
     // between here and the submit leaks the descriptor.
     let sock_fd = sock_fd.into_raw_fd();
 
-    if let Some(dur) = timeout {
-        let ts = io_uring::types::Timespec::new()
-            .sec(dur.as_secs())
-            .nsec(dur.subsec_nanos());
-        let timeout_sqe = opcode::LinkTimeout::new(&ts)
-            .build()
-            .user_data(id.as_u64() | TIMEOUT_USER_DATA_TAG);
+    // Held to the end of the function: `ring.submit()` below is what reads it.
+    let timer = timeout.map(LinkTimer::new);
+    if let Some(timer) = &timer {
         unsafe {
             ring.submission()
-                .push(&timeout_sqe)
+                .push(&timer.entry(id))
                 .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
         }
     }
