@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-02
 //! The ring's own paths, driven without a backend: a signal read, the
 //! short-write resubmission, and the linked timeout.
 //!
@@ -319,6 +319,13 @@ fn short_write_resubmits_until_the_payload_is_gone() {
 /// the timer's `user_data` is what keeps its own completion from being
 /// mistaken for the operation's. Drop the flag and the poll waits forever;
 /// drop the tag and the caller sees two completions for one request.
+///
+/// The trap: the timer SQE points at its `Timespec`, and the kernel reads it
+/// during the submit. A timespec that goes out of scope before that submit
+/// reads as whatever the stack slot holds next, and the timer then never
+/// fires. Only some builds reuse the slot (a release build from rustc 1.99.0
+/// does), so the wait below is bounded: the poll ends at 50 ms, and a timer
+/// that fails to fire fails the test rather than hanging the run.
 #[test]
 fn a_linked_timeout_cancels_its_operation_and_reports_once() {
     use crate::io::uring::submit_linked;
@@ -352,14 +359,42 @@ fn a_linked_timeout_cancels_its_operation_and_reports_once() {
     unsafe { submit_linked(&mut ring, id, poll, Some(Duration::from_millis(50))) }
         .expect("submission failed");
 
-    ring.submit_and_wait(1).expect("wait failed");
+    // Wait for the operation's CQE under a 5 s bound of the wait's own. The
+    // timer's CQE may arrive first, so wait until the operation's appears.
+    let started = std::time::Instant::now();
+    let mut cqes: Vec<(u64, i32)> = Vec::new();
+    while !cqes.iter().any(|(data, _)| *data == id.as_u64()) {
+        let left = Duration::from_secs(5).saturating_sub(started.elapsed());
+        assert!(
+            !left.is_zero(),
+            "the operation's CQE did not arrive within 5 s: its 50 ms linked \
+             timeout never fired"
+        );
+        let ts = io_uring::types::Timespec::new()
+            .sec(left.as_secs())
+            .nsec(left.subsec_nanos());
+        let args = io_uring::types::SubmitArgs::new().timespec(&ts);
+        match ring.submitter().submit_with_args(1, &args) {
+            Ok(_) => {}
+            Err(e) if e.raw_os_error() == Some(libc::ETIME) => {}
+            Err(e) if e.raw_os_error() == Some(libc::EINTR) => {}
+            Err(e) => panic!("wait failed: {e}"),
+        }
+        cqes.extend(ring.completion().map(|c| (c.user_data(), c.result())));
+    }
+    // The timer's own CQE follows the cancellation; take it too, so a second
+    // completion for the operation would be counted below.
+    let ts = io_uring::types::Timespec::new().nsec(100_000_000);
+    let args = io_uring::types::SubmitArgs::new().timespec(&ts);
+    let _ = ring.submitter().submit_with_args(1, &args);
+    cqes.extend(ring.completion().map(|c| (c.user_data(), c.result())));
 
     let mut for_the_operation = 0;
     let mut result = None;
-    for cqe in ring.completion() {
-        if cqe.user_data() == id.as_u64() {
+    for (data, code) in cqes {
+        if data == id.as_u64() {
             for_the_operation += 1;
-            result = Some(cqe.result());
+            result = Some(code);
         }
     }
 
