@@ -272,9 +272,7 @@ impl<'a> Lowerer<'a> {
                         // a transfer adopt) has no entry, and neither does the
                         // env route, whose slot carries no nil stamp to say the
                         // release already ran.
-                        if !self.current_func.frame_release_slots.contains(&slot) {
-                            self.current_func.frame_release_slots.push(slot);
-                        }
+                        self.record_value_route(slot);
                     }
                     if crate::config::get().has_trace("rc") {
                         // The hir_id here is the `decref_point` HirId — where

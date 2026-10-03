@@ -1,6 +1,6 @@
 # Fiber Architecture
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 Fibers are Elle's unified control-flow mechanism.
 
@@ -41,8 +41,11 @@ is currently executing on the VM" representable as `None`.
 - `try_with()`/`try_with_mut()` — the same, answering `None` for an
   executing fiber
 
-`WeakFiberHandle` wraps `Weak<RefCell<Option<Fiber>>>` for parent
-back-pointers, avoiding Rc cycles.
+`WeakFiberHandle` wraps `Weak<RefCell<Option<Fiber>>>`, and names a fiber
+without keeping it alive. A parent back-pointer holds one, which avoids an Rc
+cycle. An io request's stamp holds one too, so the request can ask whether its
+fiber still waits on it ([park.md](../impl/region/park.md)).
+`ptr_eq()` says whether two weak handles name the same fiber.
 
 ### FiberStatus
 
@@ -134,9 +137,8 @@ and `handle_primitive_signal` for a suspending primitive in call position.
 A signal that leaves no frame of its own — a suspend in tail position, a
 fuel pause, an error — has its frame parked by the driver it returns to. As
 a suspending signal leaves each callee, its paused caller parks a frame
-behind it. A
-fuel pause parks with `push_resume_value` false, so the paused instruction
-runs again with the stack as it was.
+behind it. A fuel pause parks with `push_resume_value` false, so the paused
+instruction runs again with the stack as it was.
 
 ### Frame ordering
 

@@ -1,6 +1,6 @@
 # I/O Module
 
-<!-- audited: 2026-10-02 -->
+<!-- audited: 2026-10-03 -->
 
 ## Purpose
 
@@ -29,7 +29,7 @@ to a backend for execution.
 | [completion.rs](completion.rs) | `process_raw_completion` — converts raw CQE/thread results to `Completion` |
 | [frame.rs](frame.rs) | Where a read's answer ends in the bytes it owns, and how a port's remainder joins it |
 | [landing.rs](landing.rs) | Where a stream operation's bytes land: the remainder a read borrows, a write's payload by address, and what a pool worker is handed of both. See [where a stream operation's bytes live](../../docs/impl/io-bytes.md). |
-| [watch.rs](watch.rs) | `FsWatcher` — inotify (Linux) or kqueue (macOS), for `fs/watch` |
+| [watch.rs](watch.rs) | `FsWatcher` — inotify (Linux) or kqueue (macOS), for `watch` and `watch-next` |
 | [mock.rs](mock.rs) | An in-memory backend for tests and benchmarks, with configurable latency |
 | [sigfd.rs](sigfd.rs) | `SignalReceiver` — POSIX signalfd (Linux) or kqueue+EVFILT_SIGNAL (macOS) external for `os/sig-watch`; also the worker-thread mask helper `mask_all_signals_on_this_thread` |
 | [sigmap.rs](sigmap.rs) | Shared keyword↔signum mapping; `resolve(value, ctx)` parses a `:sigterm`/integer Value to libc signum |
@@ -109,7 +109,7 @@ port, or nil) and `exit()` (the record the waiters read and clone) read it
 back. `Display` prints `#<subprocess 12345>`, and `Drop` calls `try_wait()` on a
 child nothing has reaped, to reap zombies.
 
-The ports are heap `Value`s an external holds, which no alloc-time scan and no free-time cascade enumerates ([region rules](../../docs/impl/region/rules.md), Rule 5). They need no count because `spawn_to_subprocess` builds them and the handle at one `Birthplace`, so they share a region and are freed together or not at all.
+The handle is an opaque external, so no alloc-time scan and no free-time cascade enumerates the ports it holds ([region rules](../../docs/impl/region/rules.md), Rule 5). They need no count because `spawn_to_subprocess` builds them and the handle at one `Birthplace`, so they share a region and are freed together or not at all.
 
 ### ExitRecord
 
@@ -172,7 +172,7 @@ Typed thread-pool submission and completion:
 
 ### ConnectAddr
 
-Enum: `Tcp { addr, port }` or `Unix { path }`. `Tcp.addr` is a **parsed
+Enum: `Tcp { addr, port, options, encoding }` or `Unix { path, options, encoding }`. `Tcp.addr` is a **parsed
 `std::net::IpAddr`** — connect is IP-only at the backend. The `tcp/connect-ip`
 primitive parses the IP and builds this; hostname resolution is the stdlib
 `tcp/connect` wrapper's job (`sys/resolve` → `tcp/connect-ip` per address), so
@@ -180,9 +180,9 @@ the backend never runs a blocking getaddrinfo fallback.
 
 ### IoRequest
 
-Struct: `{ op: IoOp, port: Value, bound: Bound }`. The `Bound` holds the call's
+Struct: `{ op: IoOp, port: Value, bound: Bound, parker }`, an opaque external. The `Bound` holds the call's
 `:timeout` for each kernel operation and its `:deadline` for the whole call
-([I/O deadlines](../../docs/io/timeout.md)).
+([I/O deadlines](../../docs/io/timeout.md)). The request counts neither its `port` nor the value its `PortOp` names: both belong to the parked frames of the fiber whose op built it. The park stamps `parker` with that fiber, and `io/submit` refuses the request with `state-error` once the fiber no longer waits on it ([what a park retains](../../docs/impl/region/park.md)).
 
 ### Completion
 
@@ -458,7 +458,7 @@ The ports and the handle are built at the completion's `Birthplace` — one regi
 
 ## Invariants
 
-1. `IoRequest` values are only created by stream and network primitives.
+1. `IoRequest` values are only created by primitives.
 2. Backends are only created by `io/backend`.
 3. The backend validates port direction and open status before I/O.
 4. Stdio ports use `std::io::stdin()/stdout()/stderr()` handles directly.

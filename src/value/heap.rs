@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-09-29
 //! Heap-allocated value types for the tagged-union value system.
 //!
 //! docs/impl/values.md
@@ -292,8 +292,9 @@ pub enum HeapObject {
         traits: Value,
     },
 
-    /// Opaque external object from a plugin.
-    /// Holds an arbitrary Rust value with a type name for Elle-side identity.
+    /// External object from a plugin or the runtime: an arbitrary Rust value
+    /// with a type name for Elle-side identity. The region scan cannot see
+    /// into its payload.
     External { obj: ExternalObject, traits: Value },
 
     /// Dynamic parameter (Racket-style). Each parameter has a unique id
@@ -344,8 +345,8 @@ pub enum HeapObject {
 /// scheduler in the meantime. `sys/thread-state` peeks `result` first (a
 /// finished thread needs no wait) and otherwise hands back a fresh
 /// `chan/receiver` over `done_rx` for the caller to select on. These are
-/// plain `Send` fields (like `result`) — not heap `Value`s — so they need
-/// no GC tracing.
+/// plain `Send` fields (like `result`) — not heap `Value`s — so they carry
+/// no region edge.
 #[derive(Clone)]
 pub struct ThreadHandle {
     /// The result of the spawned thread execution, wrapped in `SendBundle` for Send.
@@ -388,19 +389,23 @@ impl PartialEq for ThreadHandle {
     }
 }
 
-/// Opaque external object for plugin-provided types.
+/// External object for a plugin-provided or runtime type.
 /// Holds a type name (for Elle-side identity) and an arbitrary Rust value.
 pub struct ExternalObject {
     pub type_name: &'static str,
     pub data: Rc<dyn Any>,
 }
 
+impl ExternalObject {
+    /// An external over `data`. The region scan cannot see into its payload.
+    pub fn opaque(type_name: &'static str, data: Rc<dyn Any>) -> Self {
+        ExternalObject { type_name, data }
+    }
+}
+
 impl Clone for ExternalObject {
     fn clone(&self) -> Self {
-        ExternalObject {
-            type_name: self.type_name,
-            data: self.data.clone(),
-        }
+        ExternalObject::opaque(self.type_name, self.data.clone())
     }
 }
 

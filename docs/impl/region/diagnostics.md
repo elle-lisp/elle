@@ -1,6 +1,6 @@
 # Region diagnostics and validation
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 Implementation-facing: the instruments that tell correct from broken, and the
 test scaffolding that keeps the region rules honest.
@@ -190,9 +190,9 @@ alike) and the scan must report the edge; variants with no channel must
 report none. The construction is an exhaustive `match` — a new variant does
 not compile without a scan decision, and a wrong decision fails the pin, not
 review (Rule 7's "complete and symmetric" made mechanical). Known boundary:
-an `External`'s `Rc<dyn Any>` payload is opaque by construction — a plugin
-that stores region `Value`s inside it hides them from the scan; `External`
-participates only through its `traits` edge. This same scan is, in debug builds,
+an `External`'s `Rc<dyn Any>` payload is opaque by construction. A payload that
+stores region `Value`s hides them from the scan, and the `External` takes part
+only through its `traits` edge. This same scan is, in debug builds,
 the **edge-table equivalence oracle**'s reference (above): its exhaustiveness over
 every variant is what makes the recorded-`outgoing`-vs-scan assertion at free a
 *complete* check, not a partial one — a content edge the scan can see but the
@@ -266,7 +266,7 @@ Per-tier region-reclamation state, each with its pinning test:
 - **WASM full-module (`--wasm=full`)** — **a program-duration over-keep,
   pinned shrink-only.** Every region instruction is a structural no-op in the
   emitter ([dispatch.rs](../../../src/wasm/instruction/dispatch.rs)), and the host mints a fresh region
-  per boundary call (`rt_data_op` in [dataop.rs](../../../src/wasm/linker/dataop.rs),
+  per boundary call (`dispatch_data_op` in [dataop.rs](../../../src/wasm/linker/dataop.rs),
   `call_primitive`, the closure-env cell builders). A mint alone costs nothing —
   region entries materialize lazily on first allocation
   (regionstore/alloc.rs) — so the strand rate is per **allocating** boundary
@@ -293,7 +293,7 @@ above so its growth is not mistaken for a gauge artifact.
 ## The squelch/abort discard
 
 Abandoning suspended work routes through one chokepoint, `VM::discard_suspended_frames`
-([core.rs](../../../src/vm/core.rs)), on every tier — the interpreter's `enforce_squelch`, `compile/run-on`'s
+([discard.rs](../../../src/vm/core/discard.rs)), on every tier — the interpreter's `enforce_squelch`, `compile/run-on`'s
 squelch enforcement, and the JIT call paths. The chokepoint runs everything a discarded
 frame chain owed and nothing else ([owner.md](owner.md) § "A discard runs what the
 abandoned frames owed"): each frame's parked activation owner node, the releases its

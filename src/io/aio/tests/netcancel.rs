@@ -1,5 +1,4 @@
-// audited: 2026-09-30
-// src/io/AGENTS.md
+// audited: 2026-10-03
 //! A cancelled pool operation ends rather than being abandoned — one test for
 //! each operation that can wait on a peer who never comes.
 //!
@@ -7,6 +6,8 @@
 //! Linux host with io_uring the default backend is the ring, so these
 //! properties would go unchecked on every dev box while only CI and the
 //! non-Linux builds ran the code they are about.
+//!
+//! src/io/AGENTS.md
 
 use super::*;
 
@@ -82,9 +83,9 @@ fn a_cancelled_pool_accept_ends_rather_than_being_abandoned() {
 /// A cancelled datagram receive must END on the thread-pool backend.
 ///
 /// The accept test's twin on the other open-ended socket operation: a socket
-/// nobody sends to waits exactly as long as a listener nobody calls. `ev/timeout`
-/// around a `udp/recv-from` is the caller that meets it — `lib/dns.lisp` sends a
-/// query and waits for a reply that a lossy network need never deliver.
+/// nobody sends to waits exactly as long as a listener nobody calls. A
+/// `udp/recv-from` inside `ev/timeout` meets it when a lossy network never
+/// delivers the reply.
 ///
 /// The socket is deliberately BLOCKING, for the reason the accept test gives:
 /// a non-blocking one returns EAGAIN at once and the operation ends whatever
@@ -121,11 +122,11 @@ fn a_cancelled_pool_recvfrom_ends_rather_than_being_abandoned() {
         );
 
         let backend = AsyncBackend::new_thread_pool().unwrap();
+        // The pool worker receives into its own buffer, so the destination
+        // struct a fiber would pass is not needed here.
         let recv_id = backend
             .submit(
                 &IoRequest::unbounded(
-                    // The pool worker receives into its own buffer, so the
-                    // destination struct a fiber would pass is not needed here.
                     PortOp::RecvFrom {
                         count: 64,
                         result: Value::NIL,
@@ -205,15 +206,12 @@ fn a_cancelled_pool_write_ends_rather_than_being_abandoned() {
 
         let backend = AsyncBackend::new_thread_pool().unwrap();
         let data = h.ctx().bytes(vec![b'x'; 4 << 20]);
+        // No `:timeout`: the deadline is the ending this test must not be able
+        // to reach for. Cancellation is the only one left, and it is the one
+        // under test.
         let write_id = backend
             .submit(
-                &IoRequest::unbounded(
-                    // No `:timeout`: the deadline is the ending this test must
-                    // not be able to reach for. Cancellation is the only one
-                    // left, and it is the one under test.
-                    PortOp::Write { data }.into(),
-                    port,
-                ),
+                &IoRequest::unbounded(PortOp::Write { data }.into(), port),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();

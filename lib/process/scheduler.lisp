@@ -18,11 +18,12 @@
 # The clock advances this many ticks per second the scheduler waits on I/O.
 (def io-ticks-per-second 1000.0)
 
-(defn sleep-request [seconds]
-  "The I/O request that (ev/sleep seconds) yields, taken without yielding it."
+(defn sleeper [seconds]
+  "A fiber parked in (ev/sleep seconds). Its value is the sleep's I/O request,
+   which stays good only while the fiber stays parked on it."
   (let [f (fiber/new (fn [] (ev/sleep seconds)) |:io|)]
     (fiber/resume f)
-    (fiber/value f)))
+    f))
 
 (defn make-scheduler [&named fuel]
   "A process scheduler whose processes run :fuel instructions a turn (1000 by
@@ -184,11 +185,13 @@
 
     (defn arm-alarm [due]
       "Forward a sleep that ends when the clock reaches tick due, and return
-       its id. Raises when the parent refuses it."
+       its id. Raises when the parent refuses it. The alarm's entry keeps the
+       sleeper until the alarm completes or is cancelled."
       (let* [seconds (/ (max 0 (- due (core:now))) io-ticks-per-second)
-             id (waits:forward-io (sleep-request seconds))]
+             f (sleeper seconds)
+             id (waits:forward-io (fiber/value f))]
         (when (and (array? id) (= (first id) :error)) (error (get id 1)))
-        (put io-pending id @{:alarm true})
+        (put io-pending id @{:alarm true :sleeper f})
         id))
 
     (defn completed? [id]

@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -183,7 +183,7 @@ is a correctness defect, not a tuning knob.
      value's region; `pop`/`del`/`remove` decref it. This entry is **statically
      complete**: the raw `RefCell` accessors for the `Value`-bearing mutable
      containers (`@array`, `@struct`, `@set`, box, capture cell) are visible
-     only inside `value/` (`as_*_cell`, conversions.rs), so the only way code
+     only inside `value/` (`as_*_raw`, conversions.rs), so the only way code
      elsewhere can store into one is through the tracked funnels in
      `value/arena/mutate.rs` (`push_with_incref` and friends) — an uncounted
      container store is a compile error, not a review item. Read access goes
@@ -194,7 +194,10 @@ is a correctness defect, not a tuning knob.
      named: `HeapObject`'s fields are still `pub` for construction and the
      deep-copy machinery (a direct field match could bypass the seam — don't;
      the accessor channel is the one closed here), and an `External`'s
-     `Rc<dyn Any>` payload is opaque to both scan and seam;
+     `Rc<dyn Any>` payload is opaque to both scan and seam. An `IoRequest`
+     names values in other regions through that channel and counts none of
+     them: it is spent only while the park that raised it stands
+     ([what a park retains](park.md));
    - *native call result pass-through* — `first`/`rest`/`get` and friends return a
      value from another region; the call increfs it (a "new reference" in the
      CPython-C-API sense), and the caller's `DecrefValueRegion` consumes it;

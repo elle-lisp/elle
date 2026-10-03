@@ -229,24 +229,18 @@ impl PendingOp {
     /// (docs/impl/io-inflight.md § "A submitted operation holds the values its
     /// completion reads").
     ///
-    /// The trap: both matches are exhaustive on purpose. A variant that gains a
-    /// value field and does not name it here goes unretained, and its region can
-    /// then be freed under the completion that reads it. An unused slot reads
-    /// `Value::NIL`, which carries no region and retains nothing.
+    /// The trap: this match and `PortOp::operand` are exhaustive on purpose. A
+    /// variant that gains a value field and does not name it goes unretained,
+    /// and its region can then be freed under the completion that reads it. The
+    /// request that asked for the operation declares its values through the
+    /// same `PortOp::operand`. An unused slot reads `Value::NIL`, which carries
+    /// no region and retains nothing.
     pub(crate) fn operands(&self) -> [Value; MAX_OPERANDS] {
         let mut out = [Value::NIL; MAX_OPERANDS];
         match self {
             PendingOp::Port { op, port, .. } => {
                 out[0] = *port;
-                out[1] = match op {
-                    PortOp::ReadLine { buffer }
-                    | PortOp::Read { buffer, .. }
-                    | PortOp::ReadExact { buffer, .. } => *buffer,
-                    PortOp::Write { data } | PortOp::SendTo { data, .. } => *data,
-                    PortOp::Accept { accept_port, .. } => *accept_port,
-                    PortOp::RecvFrom { result, .. } => *result,
-                    PortOp::ReadAll | PortOp::Flush | PortOp::Shutdown { .. } => Value::NIL,
-                };
+                out[1] = op.operand();
             }
             PendingOp::Connect { port, .. } | PendingOp::Open { port, .. } => out[0] = *port,
             PendingOp::ProcessWait { handle_val, .. } => out[0] = *handle_val,

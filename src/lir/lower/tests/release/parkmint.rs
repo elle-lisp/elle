@@ -1,8 +1,9 @@
-// audited: 2026-09-19
-// The reference a park mints for a payload the emitting body borrows, and the
-// receipt the non-tail dynamic emit's release carries.
-//
-// docs/impl/region/park.md
+// audited: 2026-09-30
+//! The reference a park mints for a payload the emitting body borrows, and the
+//! receipt each site's release of it carries.
+//!
+//! docs/impl/region/park.md
+//! docs/impl/region/unwind.md
 
 use super::*;
 
@@ -202,6 +203,74 @@ fn a_non_tail_dynamic_emit_payload_release_carries_its_receipt() {
             func.frame_release_slots.contains(&slot),
             "slot {slot} carries a stamped value route but is absent from \
              frame_release_slots, so an abandoned frame never runs it",
+        );
+    }
+}
+
+#[test]
+fn a_borrowed_emit_payload_release_carries_its_receipt() {
+    // The literal `Emit` twin of the dynamic site's receipt above
+    // (docs/impl/region/unwind.md § "An abandoned frame runs the releases it
+    // still owes"). The release is first in the resume block, and it must stamp
+    // the slot it read and appear in the frame's release table.
+    //
+    // Counterfactual — with the pair alone, a park that an abort raises in place
+    // over, or that a squelch boundary discards, loses the payload from the signal
+    // slot the discharge would have released, and nothing else names the slot: one
+    // region per park, which `tests/impl/region-fiber-yield-borrow-uaf.lisp`
+    // gauges.
+    let module = compile_to_lir("(fn () (let [x (string \"a\")] (fn () (emit :yield x))))");
+    let (func, released): (&LirFunction, Vec<(u16, bool)>) =
+        std::iter::once(&module.entry)
+            .chain(module.closures.iter())
+            .find_map(|f| {
+                let resume_label = f.blocks.iter().find_map(|b| match b.terminator.terminator {
+                    crate::lir::Terminator::Emit { resume_label, .. } => Some(resume_label),
+                    _ => None,
+                })?;
+                let resume = f.blocks.iter().find(|b| b.label == resume_label)?;
+                let instrs: Vec<&LirInstr> = resume.instructions.iter().map(|i| &i.instr).collect();
+                Some((
+                    f,
+                    (0..instrs.len())
+                        .filter_map(|i| {
+                            let (
+                                LirInstr::LoadLocal { dst, slot },
+                                LirInstr::DecrefValueRegion { src },
+                            ) = (instrs.get(i)?, instrs.get(i + 1)?)
+                            else {
+                                return None;
+                            };
+                            if dst != src {
+                                return None;
+                            }
+                            // The stamp is `StoreLocal slot <nil>`, and
+                            // materializing the nil takes an instruction of its
+                            // own, so look past it.
+                            let stamped = instrs[i + 2..].iter().take(2).any(
+                                |n| matches!(n, LirInstr::StoreLocal { slot: back, .. } if back == slot),
+                            );
+                            Some((*slot, stamped))
+                        })
+                        .collect(),
+                ))
+            })
+            .expect("a function terminating in Emit");
+    assert!(
+        !released.is_empty(),
+        "the resume block must carry the payload release for this to be about",
+    );
+    for (slot, stamped) in released {
+        assert!(
+            stamped,
+            "the payload release at slot {slot} must stamp the slot it read, or the \
+             walk runs it a second time after a restart's replay",
+        );
+        assert!(
+            func.frame_release_slots.contains(&slot),
+            "slot {slot} carries the park's payload release but is absent from \
+             frame_release_slots, so a park an abort or a squelch boundary ends \
+             never runs it",
         );
     }
 }

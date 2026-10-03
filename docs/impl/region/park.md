@@ -68,7 +68,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   `decref_point` inside the emitting lambda), and `lower_emit` mints one there, an
   `IncrefValueRegion` before the suspend and a `DecrefValueRegion` first in the continuation.
   The copy the release loads is parked in a local slot of its own, the operand stack being
-  what survives a suspend. Unresolvable counts as borrowed: minting where the body already
+  what survives a suspend. The release stamps that slot nil, and the frame's release table
+  names it, so the walk runs it for a park an abort or a squelch boundary ends
+  ([unwind.md](unwind.md)). Unresolvable counts as borrowed: minting where the body already
   owns a reference strands one per abandoned park, a bounded leak, while missing one frees a
   live value. Pinned by [region-fiber-yield-borrow-uaf.lisp](../../../tests/impl/region-fiber-yield-borrow-uaf.lisp). A TERMINAL
   `:error` emit needs no compiler mint for the same invariant: its `EmitEscape` retain is
@@ -121,8 +123,8 @@ symmetric with its unpark; the node and the deferred set a park moves are
 
   **An in-flight request needs no waiting on.** An abort reaches a fiber whose request
   the scheduler already submitted, where the release must not free a buffer the kernel
-  is still writing into. It cannot, because the submitted operand is one of Rule 8's
-  escape sites ([rules.md](rules.md) Rule 8): the pending entry increfs every value its
+  is still writing into. It cannot, because the submitted operand is one of Rule 5's
+  escape sites ([rules.md](rules.md) Rule 5): the pending entry increfs every value its
   completion reads and decrefs when the entry is disposed. A `Fresh` op's completion
   buffer lives in the request's own region, so that retain is a count on the region for
   the operation's whole lifetime, and the install's release drops the suspend retain and
@@ -146,6 +148,30 @@ symmetric with its unpark; the node and the deferred set a park moves are
   [region-io-park-uaf.lisp](../../../tests/impl/region-io-park-uaf.lisp), whose `protect` witnesses pass
   a park on, and by [region-io-relay-uaf.lisp](../../../tests/impl/region-io-relay-uaf.lisp), whose
   relays raise the request again.
+
+  **A request is good only while the park that raised it stands.** An `IoRequest`
+  names its port and the buffer, payload, accept port or result struct its operation
+  fills or sends, and it holds no count on any of them. They are values of the
+  parked frames of the fiber whose io op built the request. Those frames keep them
+  while they stay parked. Once the park ends, the frames release them at their own
+  last uses: a resume runs the continuation past the call, and a fiber released
+  while parked is discharged. A relay that keeps the request past that point keeps
+  a request whose values may already be freed. Counting them from the request would
+  hold every one past the release its frame owns, on every request, for a shape
+  almost no program takes. So the park stamps the request with the fiber that parked
+  on it (`park_suspending_primitive`). A host that hands a thunk's park on as its own
+  call's park (`VM::abandon_hosted_park`) parks the same request again on the same
+  fiber, so one fiber may stamp a request twice, and a second fiber never does.
+  `io/submit` accepts the request only while
+  that fiber still holds it as its parked signal with its frames suspended. Every
+  route out of a park changes one of those two, so the check needs no record of its
+  own. A stale request raises `state-error` before the submit reads any value it
+  names, and the scheduler's abort hands the error to the fiber that raised it. The
+  WASM tier parks no request through that site and reclaims no region while it runs,
+  so an unstamped request is not checked. Pinned guardfree by
+  [region-io-relay-uaf.lisp](../../../tests/impl/region-io-relay-uaf.lisp), whose stale relays raise a request after
+  the child is released, after the request leaves the function that held the child,
+  and after the child is resumed past it.
 - **A boundary ends a park with no reader and no install, so it owes both references.** A
   `squelch`/`attune` violation is the third way a park can end, and it is neither of the two
   the rules above are written for. No resumer reads the payload out of `fiber.signal`, so the

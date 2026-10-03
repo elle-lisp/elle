@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-29
 //! The release routes a region's demise can take: a value off its slot, an env cell's box, a 1-slot container's content, a co-owned group.
 //!
 //! docs/impl/region/replicate.md
@@ -23,6 +23,24 @@ impl<'a> Lowerer<'a> {
         if let Ok(nil_reg) = self.emit_const(crate::lir::LirConst::Nil) {
             self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
         }
+    }
+
+    /// Name `slot` in the frame's release table, so the abandoned-frame walk runs
+    /// the release a frame never reached (docs/impl/region/unwind.md). Record only
+    /// a route that stamps its slot `nil` as it releases: the stamp is what tells
+    /// the walk that the release already ran.
+    pub(in crate::lir::lower) fn record_value_route(&mut self, slot: u16) {
+        if !self.current_func.frame_release_slots.contains(&slot) {
+            self.current_func.frame_release_slots.push(slot);
+        }
+    }
+
+    /// [`Self::emit_slot_value_release`], recorded by [`Self::record_value_route`]:
+    /// a park's release of the payload retain it took, which a frame nobody
+    /// resumes reaches only through the table.
+    pub(in crate::lir::lower) fn emit_recorded_slot_value_release(&mut self, slot: u16) {
+        self.emit_slot_value_release(slot);
+        self.record_value_route(slot);
     }
 
     /// Release a captured env cell (an `@x` lbox / captured-local cell) at

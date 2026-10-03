@@ -126,6 +126,12 @@ While a timer is pending, it also forwards a sleep that ends when the earliest
 timer falls due, so the wait ends no later than that. The clock counts the
 wait, as [processes.md](processes.md) describes.
 
+The scheduler raises that sleep in a fiber of its own, which parks in
+`ev/sleep`. A request is good only while the fiber that raised it waits on it
+([capabilities.md](signals/capabilities.md)). So the scheduler keeps the
+fiber in the alarm's entry in `io-pending` until the alarm completes or is
+cancelled.
+
 ## Nested schedulers
 
 Schedulers nest. A process can call `process:start` itself, and the outer

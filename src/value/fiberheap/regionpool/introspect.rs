@@ -351,6 +351,8 @@ impl RegionPool {
                     check(v);
                 }
             }
+            // An `External`'s payload is opaque to the scan
+            // (docs/impl/region/rules.md Rule 5).
             HeapObject::ThreadHandle { .. }
             | HeapObject::Syntax { .. }
             | HeapObject::FFISignature(_, _)

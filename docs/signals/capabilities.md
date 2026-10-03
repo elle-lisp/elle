@@ -53,6 +53,22 @@ you service the request — with `io/submit` against a backend, or by
 re-raising it so your own scheduler handles it — and resume the child with
 the result. A mask you do not intend to service should not name the bit.
 
+The request is good only while the child waits on it. Service it before you
+resume the child or let it go. A request raised after that raises
+`:state-error` at the raise, and its operation never runs:
+
+```lisp
+(let [f (fiber/new (fn [] (port/write (port/stdout) "never written\n") :written) |:io|)
+      req (fiber/resume f)]
+  (fiber/resume f 0)                        # answer the write without running it
+  (let [[ok? err] (protect (emit :io req))]
+    (assert (not ok?))
+    (assert (= (get err :error) :state-error))))
+```
+
+The refusal keeps a caught request from reading values its fiber already
+released ([what a park retains](../impl/region/park.md)).
+
 ## Deniable capabilities
 
 Every signal bit is a capability bit. A fiber's `:deny` set is tested

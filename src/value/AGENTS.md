@@ -1,6 +1,6 @@
 # value
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-29 -->
 
 Runtime value representation using a tagged union.
 
@@ -26,7 +26,7 @@ Runtime value representation using a tagged union.
 | `fiber/parked.rs` | `ParkedDues`, `ParkedState` and `Fiber::take_parked_state` — what a fiber that can never run again strands: the releases its parked frames still owe, and the retain its parked signal took ([what a park retains](../../docs/impl/region/park.md)) |
 | `error.rs` | `rich_error!` macro plus `error_val_in()`, `error_val_extra_in()`, `match_fail_error_in()`, and `format_error()` for region-coherent error structs (docs/impl/region/errors.md) |
 | `ffi.rs` | `LibHandle` for C interop |
-| `fiberheap/` | `FiberHeap` over a `RegionStore` (physical region allocator; each region owns its pages via a `PagePool`) plus a custom-allocator stack and object-limit tracking. Submodules: `regionstore`, `regionpool`, `pagepool`, `freelog`. One heap per VM, shared by all of that VM's fibers. |
+| `fiberheap/` | `FiberHeap` over a `RegionStore` (physical region allocator; each region owns its pages via a `PagePool`) plus a custom-allocator stack and object-limit tracking. Submodules: `regionstore`, `regionpool`, `pagepool`, `freelog`, `census`, `region`, `custom`, `dropsafety`. One heap per VM, shared by all of that VM's fibers. |
 | `arena.rs` | Heap-explicit allocation funnel over `FiberHeap`: every entry point takes `heap: &mut FiberHeap` — `alloc`, `alloc_in_region`, `deref`, `region_of`, region RC (`incref_region`/`decref_region`), and the tracked mutable-store funnels (`push_with_incref`, `struct_put_with_rebind`, `capture_store_with_rebind`, …). |
 | `heap.rs` | `HeapObject` enum, `HeapTag`, `Pair`, `ThreadHandle`, `LSet`, `LSetMut` (re-exports `Closure`, `Arity`, `NativeFn`, `TableKey`) |
 | `send/` | `SendValue`/`SendBundle` wrappers for thread-safe transfer |
@@ -40,8 +40,8 @@ Runtime value representation using a tagged union.
 | `Value` | `repr/mod.rs` | 16-byte tagged-union value (Copy) |
 | `Closure` | `closure.rs` | `TemplateRef` + env (`RegionSlice<Value>`) + `squelch_mask`. Per-function code lives on the region-resident `ClosureTemplate` behind that seam. |
 | `Fiber` | `fiber.rs` | Independent execution context with stack, paused callers, signal mask |
-| `FiberHandle` | `fiber.rs` | `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
-| `WeakFiberHandle` | `fiber.rs` | Weak reference for parent back-pointers (avoids Rc cycles) |
+| `FiberHandle` | `fiber/handle.rs` | Newtype over `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
+| `WeakFiberHandle` | `fiber/handle.rs` | Weak reference for parent back-pointers (avoids Rc cycles) |
 | `FiberHeap` | `fiberheap/` | The VM's single heap over a `RegionStore` (region-based, RC-driven reclamation) plus a custom-allocator stack; reclamation is `FreeRegion(ρ)` when a region's RC reaches 0. Despite the name it is NOT per-fiber — all fibers share it and isolation is per-region (`value/fiber.rs`) |
 | `Parameter` | `heap.rs` | Dynamic parameter with id and default value, looked up at runtime |
 | `LSet` | `heap.rs` | Immutable set (`RegionSlice<Value>`, region-inline), no `RefCell` |
@@ -224,7 +224,7 @@ The field is **invisible to structural equality, ordering, and hashing**:
 | `Fiber` | fiber — FiberHandle (Rc) cloned on `with-traits` |
 | `Syntax` | syntax object — the inline node is `Copy`, so `with-traits` copies it |
 | `ManagedPointer` | managed FFI pointer — Cell<Option<usize>> cloned on `with-traits` |
-| `External` | opaque plugin object — Rc<dyn Any> cloned on `with-traits` |
+| `External` | opaque plugin or runtime object — Rc<dyn Any> cloned on `with-traits`; the region scan never sees into its payload |
 | `Parameter` | dynamic parameter |
 | `ThreadHandle` | thread handle — Arc<Mutex<...>> cloned on `with-traits` |
 
