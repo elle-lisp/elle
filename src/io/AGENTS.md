@@ -1,6 +1,6 @@
 # I/O Module
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-02 -->
 
 ## Purpose
 
@@ -212,6 +212,7 @@ output is canonically shortened.
 ## Timeout Handling
 
 **io_uring:** a `LinkTimeout` SQE follows the operation SQE with the `IO_LINK` flag, so the kernel cancels the operation when the timeout fires first. The operation's CQE then carries `result = -ECANCELED` (errno 125). The timeout's own CQE carries a high-bit tag (`id | (1 << 63)`) and completion processing skips it.
+The SQE holds only a pointer to its `Timespec`, and the kernel reads it during the `io_uring_enter` that submits the SQE. So the timespec lives until that submit returns, in `submit_linked` and in `push_resubmit` alike.
 
 **Thread pool:** `OpBound` ([opbound.rs](threadpool/opbound.rs)) takes the descriptor
 non-blocking and waits in `poll(2)` for readiness, for the caller's bound, or
