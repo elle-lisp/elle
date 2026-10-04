@@ -1,15 +1,16 @@
 # CI and Triage
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-04 -->
 
 CI structure, local workflow, and failure diagnosis.
 
 ## CI structure
 
-`.github/workflows/pr.yml` runs on every pull request. `Detect Changes` reads
-the diff and sets `source`, which gates every job below it except
-`Documentation Build` — that one runs on a Markdown-only PR too, because a
-renamed heading breaks the site generator.
+[pr.yml](../../.github/workflows/pr.yml) runs on every pull request. `Detect
+Changes` reads the diff and sets `source`, which gates every job below it except
+two. `Documentation Build` runs on a Markdown-only PR too, because a renamed
+heading breaks the site generator. `Plugin Tests` reads `plugins`, which is also
+set when the diff moves only the submodule pointer.
 
 | Job | Runner | What | Proptest cases |
 |-----|--------|------|----------------|
@@ -32,8 +33,9 @@ renamed heading breaks the site generator.
 | macOS Rust Tests | macos | Integration tests, then property tests | 8 |
 | All Checks Passed | ubuntu | The one status check branch protection requires | — |
 
-The merge queue (`merge-queue.yml`) runs `make smoke` alone, with
-`PROPTEST_CASES=1`. The weekly schedule (`weekly.yml`) runs the whole workspace
+The merge queue ([merge-queue.yml](../../.github/workflows/merge-queue.yml))
+runs `make smoke` alone, with `PROPTEST_CASES=1`. The weekly schedule
+([weekly.yml](../../.github/workflows/weekly.yml)) runs the whole workspace
 suite on beta and nightly at 128 cases, plus a dependency audit.
 
 ### Each build is an implementation
@@ -60,8 +62,8 @@ implementation suite on the pool build's rig too, because some resources of this
 implementation exist only on the pool: a file that counts worker threads reads
 zero on io_uring and gates itself there. `MLIR Tests` runs it on the MLIR
 build's rig, the one rig that carries the MLIR tier.
-`tests/integration/workflows.rs` is the standing check that every
-implementation keeps its job.
+[workflows.rs](../../tests/integration/workflows.rs) is the standing check that
+every implementation keeps its job.
 
 ### Why each platform has two test jobs
 
@@ -98,9 +100,10 @@ AArch64 Smoke jobs are release runs exactly as the x86_64 ones are. The Rust
 Tests jobs build the dev profile, also on every platform, because `cargo test`
 does. No platform is quietly gated at a weaker optimization level.
 
-Three jobs change the release profile they build. `Default Build Tests`, `Thread-Pool
-I/O Tests` and `macOS Smoke` set `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS`,
-which is what compiles the region checks in. Those checks are
+Four jobs change the release profile they build. `Default Build Tests`, `Boot
+Image Tests`, `Thread-Pool I/O Tests` and `macOS Smoke` set
+`CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS`, which is what compiles the region
+checks in. Those checks are
 `#[cfg(debug_assertions)]`, so a corpus job without the flag drives the whole
 corpus blind to every one of them.
 
@@ -112,14 +115,30 @@ The rule is one such job per I/O backend. `Thread-Pool I/O Tests` covers the
 pool and `Default Build Tests` covers io_uring, so finding a region defect never
 depends on the macOS runner — the slowest box in the workflow, and the one
 whose failures read as flaky timeouts (§ "Runner capacity").
-`tests/integration/workflows.rs` is the standing check that both backends keep
-a job.
+[workflows.rs](../../tests/integration/workflows.rs) is the standing check that
+both backends keep a job.
 
 `macOS Smoke` runs the rig's scrub profile beside the flag, because the panic that
 reads a scrubbed page needs both ([diagnostics](../impl/region/diagnostics.md)). Its binary
 is a release build that also runs the debug-only checks, on the smallest runner
 in the workflow. Read a macOS corpus timing against that, not against a Linux
 one.
+
+### Every job that runs `cargo test` installs rustfmt and clippy
+
+The Rust suite runs the real pre-commit hook in a scratch repository
+([pre_commit.rs](../../tests/integration/pre_commit.rs)). On a staged `.rs`
+file the hook calls `rustfmt`, then `cargo clippy`. So every job that runs
+`cargo test` names both in its toolchain step's `components`.
+
+A toolchain the runner image does not carry arrives in rustup's minimal
+profile, which holds neither tool. The weekly beta and nightly jobs are of that
+kind. Stable jobs find both tools in the image, and naming them takes that
+dependency away. On nightly, the toolchain action takes the newest build that
+carries every named component.
+
+[toolchains.rs](../../tests/integration/toolchains.rs) is the standing check
+that every such job, in every workflow, names both.
 
 ### The cross-checks mirror a local target
 
@@ -134,8 +153,9 @@ arrives after the push rather than before it. The Android job has run since
 #752, and the local target arrived later covering macOS alone — so an
 Android-only break compiled everywhere a developer could look.
 
-`tests/integration/crosscheck.rs` is the standing check that every target a job
-cross-compiles is a target `make crosscheck` compiles too.
+[crosscheck.rs](../../tests/integration/crosscheck.rs) is the standing check
+that every target a job cross-compiles is a target `make crosscheck` compiles
+too.
 
 ### Runner capacity
 
@@ -158,8 +178,8 @@ for a job that needs a different number.
 Outside CI the default stays the constant 16. A development box is not sized by
 the runner, and its owner can pass `JOBS=`.
 
-`tests/integration/capacity.rs` is the standing check that the CI count still
-tracks the runner.
+[capacity.rs](../../tests/integration/capacity.rs) is the standing check that
+the CI count still tracks the runner.
 
 ### Corpus batch size
 
@@ -285,8 +305,8 @@ file could assert.
 That leaves one thing for a test to hold. `make plugins-all` compiles the
 members of `plugins/Cargo.toml`'s workspace, so a plugin directory missing from
 that list is compiled by nothing and asserted by nothing, and the job stays
-green over it. `tests/integration/plugins.rs` pins every plugin directory to a
-workspace member.
+green over it. [plugins.rs](../../tests/integration/plugins.rs) pins every
+plugin directory to a workspace member.
 
 ### The boot-image job
 
@@ -330,16 +350,17 @@ elle test --query "SELECT f.file, r.tier, r.reason FROM result r
 
 The imported run keeps the commit, the worktree, the host and the build it ran
 under, so it answers beside every local run rather than in a database of its
-own. `tests/integration/run_artifacts.rs` is the standing check that every job
-recording a run uploads its store.
+own. [run_artifacts.rs](../../tests/integration/run_artifacts.rs) is the
+standing check that every job recording a run uploads its store.
 
 ### Adding a job
 
 `All Checks Passed` is the only status check branch protection requires
-(`.github/BRANCH_PROTECTION.md`). A new job that is missing from that job's
-`needs` list runs, reports, and cannot block a merge. Add the job to `needs`
-and give it a check step. `tests/integration/workflows.rs` fails when either
-is missing.
+([BRANCH_PROTECTION.md](../../.github/BRANCH_PROTECTION.md)). A new job that
+is missing from that job's `needs` list runs, reports, and cannot block a
+merge. Add the job to `needs` and give it a check step.
+[workflows.rs](../../tests/integration/workflows.rs) fails when either is
+missing.
 
 
 ## Local development workflow
@@ -371,7 +392,7 @@ make test
 
 | Failure | Symptom | Likely cause | Fix |
 |---------|---------|--------------|-----|
-| **Documentation site** | `Documentation Build` fails on `./target/release/elle demos/docgen/generate.lisp` | Using `nil?` to check end-of-list. Lists terminate with `EMPTY_LIST`, not `NIL`. | Use `empty?` for list termination checks. Check `demos/docgen/generate.lisp` and `demos/docgen/lib/`. |
+| **Documentation site** | `Documentation Build` fails on `./target/release/elle demos/docgen/generate.lisp` | Using `nil?` to check end-of-list. Lists terminate with `EMPTY_LIST`, not `NIL`. | Use `empty?` for list termination checks. Check [generate.lisp](../../demos/docgen/generate.lisp) and [lib](../../demos/docgen/lib). |
 | **Language suite fails** | A corpus job fails `smoke-lang` | A language test answers differently on that build. | Run `./target/release/elle tests/lang/failing.lisp` on the same build. Check the assertion message; a file that passes on one build and fails on another has found a defect in the build that fails. |
 | **Implementation suite fails** | `Default Build Tests` fails `smoke-impl` | An implementation test on the rig, or the language suite under a rig profile. | Run `./target/release/elle-rig tests/impl/failing.lisp`; the file's sidecar sets its mode. For a profile failure, pass the same `--profile`. |
 | **Boot from an image fails** | `Boot Image Tests` fails and every other corpus job passes | The corpus file answers differently under a hydrated boot, or the image no longer hydrates. | Run `make smoke-boot-image` locally. Read the hydration proof first: a target that fails there never reached the corpus. |
