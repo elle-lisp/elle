@@ -136,7 +136,7 @@ Directories can be added later as a thin, non-authoritative reading-aid for
 humans browsing the repo without the index handy — they never become the source
 of classification, and the runner never depends on them. The split between
 `tests/lang/` and `tests/impl/` is not a category in this sense: it says which
-suite owns a claim and which program runs it ([spec](spec.md) § Two suites),
+suite owns a claim and which program runs it ([spec](spec.md)),
 which no analysis of the form can derive.
 
 The runner compiles any file regardless of how many forms it holds (via the
@@ -220,7 +220,7 @@ change the compiler, and the rebuilt binary hashes differently; every result
 recorded under the old value belongs to the build that produced it.
 
 Only the binary can report this, so it arrives as `(elle/boot-fingerprint)`,
-beside the version and the profile ([test-cli](test-cli.md) § Substrate). On a
+beside the version and the profile ([test-cli](test-cli.md)). On a
 box whose OS will not name the running executable the column is NULL: the run
 happened, and nothing identified what ran it.
 
@@ -312,55 +312,12 @@ neither `closed` nor `growth` — the two verdicts that are the expected answer:
 The rest is a query. The summary is a reading aid, and every number in it comes
 out of the table.
 
-## The runner's own gauges
+## The heap gauges
 
-The runner is the longest-running Elle program in this repository, and for most
-of its life it measured nothing about itself. A leak of about 28000 regions per
-compiled file reached us as an OOM kill of `make smoke`, and the answer was a
-batch size rather than a number naming the file.
-
-So the runner reads three gauges of its own heap — `arena/count` for objects,
-`arena/region-count` for regions, and `arena/page-claims` for pages — and
-records what each file cost it. All three are Immediate primitives
-([diagnostics](impl/region/diagnostics.md)), so a reading allocates nothing and
-cannot move the number it reports.
-
-### One reading per file boundary
-
-The runner takes a baseline before the first file, then one reading after each
-file, and charges the difference to that file. One reading per boundary is what
-makes the accounting close. The rows written for one file fall inside the next
-file's window, so every object the runner allocates is charged to exactly one
-file. Read back, the chain is exact: a file's `reading` plus the next file's
-`delta` is the next file's `reading`.
-
-A reading covers the runner's own heap and nothing else. Every worker thread
-has its own VM and its own heap, and an `--isolate` child is a whole separate
-process, so what the test code allocates never reaches these numbers. What
-reaches them is what the runner does per file: the compile, the syntax it
-holds, and the rows it writes.
-
-### Why a table of its own
-
-A delta belongs to the window between two boundaries rather than to a
-result, so a `result` column would copy one number onto every row of the
-file. A `measurement` row is the wrong home too: it carries a dashboard's
-verdict off the channel of an isolated child, and a per-file delta has no
-verdict to give.
-
-### The summary names the top growers
-
-Every run ends with the totals and the files that grew the heap most, ranked by
-regions:
-
-```
-runner heap · objects +9021 · regions +28104 · pages +112
-  objects +4510  regions +14052  pages +56  tests/lang/a.lisp
-  objects +4511  regions +14052  pages +56  tests/lang/b.lisp
-```
-
-The list is a reading aid. Which file, on which commit, in which run is a query
-over `gauge`.
+The runner records what each file cost its own heap and the heaps its test code
+ran on, one `gauge` row per file, gauge and heap. [test-gauges](test-gauges.md)
+owns the gauges, the two heaps, and the summary block that names the top
+growers.
 
 ## Schema
 
@@ -413,13 +370,14 @@ CREATE TABLE measurement (          -- one dashboard verdict, reported through t
   value REAL, unit TEXT,            -- the rate, and what one unit of it is
   verdict TEXT);                    -- closed|open|growth|inconclusive|contaminated
 
-CREATE TABLE gauge (                -- what one file cost the runner's own heap
+CREATE TABLE gauge (                -- what one file cost one heap, on one gauge
   id INTEGER PRIMARY KEY,           -- insertion order, which is boundary order
   run_id INT REFERENCES run(id),
-  file TEXT,                        -- the file this boundary's window is charged to
-  kind TEXT,                        -- objects|regions|pages
-  delta INT,                        -- the change since the previous boundary
-  reading INT);                     -- the gauge at this boundary
+  file TEXT,                        -- the file the change is charged to
+  heap TEXT,                        -- runner|test; NULL in an older store = runner
+  kind TEXT,                        -- the gauge: objects|regions|pages|adopts|… (test-gauges.md)
+  delta INT,                        -- runner: the change since the previous boundary; test: the sum over the file's runs
+  reading INT);                     -- runner: the gauge at this boundary; test: NULL
 ```
 
 The runner writes this with `lib/sqlite.lisp` (FFI to libsqlite3). The DB holds
@@ -436,7 +394,8 @@ gains it by `ALTER TABLE`. `run`, `form` and `changed_file` are subsets:
   resource query is design-only until they land; a `SELECT` of a deferred
   column errors with `no such column`. A session DB written before the
   code-state, fingerprint, key or pid columns existed gains them by `ALTER TABLE`,
-  with NULL for every run recorded until then.
+  with NULL for every run recorded until then. `gauge` gains `heap` the same
+  way.
 - `form` is written without `line`, `col` and `session`: a form's location and
   an ad-hoc form's session id are deferred, and each reads NULL. The three
   analysis columns are written at scan time (§ What analysis says about a
@@ -472,10 +431,6 @@ WHERE cur.run_id = ? AND base.run_id = ? AND cur.cpu_us > base.cpu_us * 2;
 SELECT run.git_commit AS sha, m.value AS rate, m.unit AS unit, m.verdict AS verdict
 FROM measurement m JOIN run ON run.id = m.run_id
 WHERE m.subject = 'io-drop' AND m.axis = 'regions' ORDER BY m.run_id;
-
--- Which files cost the runner the most heap, across every run recorded.
-SELECT file, sum(delta) AS regions FROM gauge
-WHERE kind = 'regions' GROUP BY file ORDER BY regions DESC LIMIT 10;
 
 -- The forms a cache may replay: analyzed, and proved to reach no capability.
 SELECT file, label FROM form WHERE caps = '' ORDER BY file;

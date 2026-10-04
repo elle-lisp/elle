@@ -173,8 +173,8 @@
 # Run a form on every active tier, inserting one row per tier and attaching the
 # file's captured `dumps` (a list of [kind addr size codec]) as assets to each.
 # `exec-fn` is (fn [tier-keyword out-path err-path] -> {:result :stdout :stderr
-# :cpu-us}), and its wall time is taken here, from handing the form over to
-# having its answer. The per-form path closes over a MAIN-compiled thunk
+# :cpu-us :gauges}), and its wall time is taken here, from handing the form over
+# to having its answer. The per-form path closes over a MAIN-compiled thunk
 # (exec-thunk-capture), the whole-file path over the file's syntax
 # (exec-source-capture). Returns [statuses pass-pairs]: the per-tier status
 # strings, and [[tier-str value]...] for the tiers that returned a value
@@ -194,6 +194,8 @@
           rid (insert-result conn run-id h ts c (put cap :wall-ms wall))]
       (insert-assets conn rid dumps)
       (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
+      # A run that missed its deadline hands back no readings, and adds none.
+      (when (get cap :gauges) (add-test-gauges (get cap :gauges)))
       (run-tiers conn run-id h exec-fn (rest tiers) dumps
                  (concat statuses [(get c :status)])
                  (if (get c :ok)

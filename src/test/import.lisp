@@ -32,7 +32,7 @@
 (def measurement-columns
   ["run_id" "result_id" "subject" "axis" "value" "unit" "verdict"])
 
-(def gauge-columns ["run_id" "file" "kind" "delta" "reading"])
+(def gauge-columns ["run_id" "file" "heap" "kind" "delta" "reading"])
 
 (def changed-columns ["run_id" "path" "status" "blob_hash"])
 

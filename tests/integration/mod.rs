@@ -159,6 +159,9 @@ mod runner_cost {
 mod runner_file_error {
     include!("runner_file_error.rs");
 }
+mod reclaim_report {
+    include!("reclaim_report.rs");
+}
 mod form_profile {
     include!("form_profile.rs");
 }

@@ -1,6 +1,9 @@
-// audited: 2026-09-21
+// audited: 2026-09-29
 //! Primitive registration: the canonical table list, the name and id indexes
 //! over it, and the startup pass that installs every def into a VM.
+//!
+//! docs/cookbook/primitives.md
+
 use crate::symbol::SymbolTable;
 use crate::value::Value;
 use crate::vm::VM;
@@ -22,6 +25,7 @@ use super::{
 pub(crate) static ALL_TABLES: &[&[PrimitiveDef]] = &[
     allocator::PRIMITIVES,
     arena::PRIMITIVES,
+    arena::reclaim::PRIMITIVES,
     arithmetic::PRIMITIVES,
     array::PRIMITIVES,
     bitwise::PRIMITIVES,
@@ -117,7 +121,7 @@ pub(crate) fn def_by_name(name: &str) -> Option<&'static PrimitiveDef> {
 /// instance memo: a compiler pass holding a primitive binding's `SymbolId` can
 /// recover the name it was written with, wherever it runs and with no table in
 /// scope. That is what keeps type inference, narrowing and fusion off the
-/// display path (docs/impl/symbol.md § "Reading a name, and not reading one").
+/// display path (docs/impl/symbol.md).
 ///
 /// `static_vocabulary_is_collision_free` asserts the spellings are distinct, so
 /// a build whose own names collide fails before this index can hide one.

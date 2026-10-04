@@ -151,6 +151,40 @@ fn an_imported_run_joins_local_history() {
     );
 }
 
+/// A gauge row says which heap it measured, and the import keeps that. Without
+/// the column, a test-heap sum lands as a runner-heap delta and breaks the
+/// runner heap's chain in the store that received it.
+#[test]
+fn an_imported_gauge_row_keeps_its_heap() {
+    let dir = crate::common::ScratchDir::new("import-heap");
+    let far = store(dir.path(), "far");
+    let near = store(dir.path(), "near");
+    let out = record(&far, &fixture(dir.path(), "measured.lisp"));
+    assert!(
+        out.status.success(),
+        "the recorded run should gate green; stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let done = import(&near, &far);
+    assert!(
+        done.status.success(),
+        "the import should succeed; stderr:\n{}",
+        String::from_utf8_lossy(&done.stderr)
+    );
+
+    let by_heap = "SELECT heap AS heap, count(*) AS n FROM gauge GROUP BY heap ORDER BY heap";
+    let far_rows = query(&far, by_heap);
+    assert!(
+        far_rows.contains(":heap \"test\""),
+        "precondition: the recorded run wrote test-heap rows, got:\n{far_rows}"
+    );
+    assert_eq!(
+        query(&near, by_heap),
+        far_rows,
+        "the imported rows must keep the heap each one measured"
+    );
+}
+
 #[test]
 fn importing_the_same_store_twice_changes_nothing() {
     let dir = crate::common::ScratchDir::new("import-twice");

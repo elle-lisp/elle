@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-09-29
 //! Heap arena and memory management primitives — the gauges a program samples
 //! its own heap with, and the leak localisers it dumps.
 //!
@@ -9,6 +9,8 @@ use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::types::Arity;
 use crate::value::Value;
+
+pub(crate) mod reclaim;
 
 /// (arena/count) — return current heap object count.
 pub(crate) fn prim_arena_count(
@@ -90,7 +92,7 @@ pub(crate) fn prim_arena_bytes(
 /// The page dimension the object and region gauges do not show: regions never
 /// share pages, so a shape can hold its object count flat and still claim a
 /// page per call. A delta across a fixed window is that shape's page cost
-/// (docs/impl/region/model.md § "Page recycling").
+/// (docs/impl/region/model.md).
 pub(crate) fn prim_arena_page_claims(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     _args: &[Value],
@@ -186,9 +188,9 @@ pub(crate) fn prim_arena_over_frees(
 ///
 /// The *id* dimension the object, byte, and page gauges cannot show: a minted id
 /// that never allocates holds no object, no page, and no reference count, yet
-/// never returns to the free list (docs/impl/region/model.md § "Physical id
-/// recycling"). A mint that recycles leaves this alone, so a delta across a fixed
-/// window of a steady-state loop must be zero.
+/// never returns to the free list (docs/impl/region/model.md). A mint that
+/// recycles leaves this alone, so a delta across a fixed window of a
+/// steady-state loop must be zero.
 pub(crate) fn prim_arena_region_ids(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     _args: &[Value],
