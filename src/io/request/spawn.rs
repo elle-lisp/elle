@@ -1,4 +1,4 @@
-//! audited: 2026-09-18
+//! audited: 2026-09-29
 //! Spawning a child: the command it builds, the signal slate it hands the
 //! child, and the subprocess it answers with.
 //!
@@ -112,11 +112,11 @@ impl SpawnRequest {
     /// resumes with, or `Err(error_val)` when the spawn itself fails.
     ///
     /// The ports and the handle are built at ONE `Birthplace`, so they share a
-    /// region. That is what lets the handle hold the ports without a count: an
-    /// external's payload is opaque to both the alloc-time scan and the
-    /// free-time cascade (docs/impl/region/rules.md Rule 5), and co-regional
-    /// values are freed together or not at all. The region is the completion's
-    /// to hand over (docs/impl/io-inflight.md).
+    /// region. That is what lets the handle hold the ports without a count: the
+    /// handle is an opaque external, whose payload the alloc-time scan and the
+    /// free-time cascade cannot see (docs/impl/region/rules.md Rule 5), and
+    /// co-regional values are freed together or not at all. The region is the
+    /// completion's to hand over (docs/impl/io-inflight.md).
     pub(crate) fn spawn_to_subprocess(
         &self,
         birth: &mut crate::io::Birthplace,

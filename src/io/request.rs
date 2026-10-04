@@ -258,17 +258,42 @@ impl From<PortOp> for IoOp {
     }
 }
 
+impl PortOp {
+    /// The heap value this operation names besides its port: the buffer a
+    /// read fills, the payload a write sends, the port an accept fills, or the
+    /// struct a `recv-from` stamps. `Value::NIL` for an operation that names
+    /// none.
+    pub(crate) fn operand(&self) -> Value {
+        match self {
+            PortOp::ReadLine { buffer }
+            | PortOp::Read { buffer, .. }
+            | PortOp::ReadExact { buffer, .. } => *buffer,
+            PortOp::Write { data } | PortOp::SendTo { data, .. } => *data,
+            PortOp::Accept { accept_port, .. } => *accept_port,
+            PortOp::RecvFrom { result, .. } => *result,
+            PortOp::ReadAll | PortOp::Flush | PortOp::Shutdown { .. } => Value::NIL,
+        }
+    }
+}
+
 /// A typed I/O request. Wrapped as ExternalObject with type_name "io-request".
 ///
 /// The port is stored as `Value` (not `&Port`) because:
 /// - The `Value` holds the `Rc` to the `ExternalObject` containing the `Port`
 /// - The backend extracts `&Port` via `value.as_external::<Port>()`
+///
+/// The request counts neither its port nor the value its `PortOp` names. Both
+/// belong to the parked frames of the fiber whose op built it, so the request
+/// may be spent only while that park stands (docs/impl/region/park.md).
 #[derive(Debug)]
 pub struct IoRequest {
     pub op: IoOp,
     pub port: Value,
     /// How long the operation may wait (docs/io/timeout.md).
     pub bound: Bound,
+    /// The fiber whose park raised this request, once a park has stamped it.
+    /// Private, so a request is built only through `unbounded`.
+    parker: std::cell::OnceCell<crate::value::WeakFiberHandle>,
 }
 
 impl IoRequest {
@@ -278,6 +303,7 @@ impl IoRequest {
             op,
             port,
             bound: Bound::NONE,
+            parker: std::cell::OnceCell::new(),
         }
     }
 
@@ -298,7 +324,7 @@ impl IoRequest {
     /// Create an IoRequest that waits no longer than `bound` allows, born in
     /// `ctx`'s region. A request on a port with a `:timeout` of its own takes
     /// that timeout for each operation when `bound` names none
-    /// (docs/io/timeout.md).
+    /// (docs/io/timeout.md). Every other constructor builds its request here.
     #[allow(clippy::new_ret_no_self)]
     pub fn bounded(
         ctx: &crate::primitives::ctx::Alloc,
@@ -370,6 +396,38 @@ impl IoRequest {
         bound: Bound,
     ) -> Value {
         Self::bounded(ctx, IoOp::PollFd { fd, events }, Value::NIL, bound)
+    }
+
+    /// Record the fiber whose park raised this request. Only the fiber whose op
+    /// built the request stamps it. A relay parks on the request as one of its
+    /// own arguments and stamps nothing. A host that hands a thunk's park on as
+    /// its own call's park stamps it again, from the same fiber.
+    pub(crate) fn stamp_parker(&self, parker: crate::value::WeakFiberHandle) {
+        if let Err(parker) = self.parker.set(parker) {
+            debug_assert!(
+                self.parker.get().is_some_and(|first| first.ptr_eq(&parker)),
+                "an io request is stamped by the one fiber whose op built it"
+            );
+        }
+    }
+
+    /// Whether the park that raised `request`, this request's own value,
+    /// still stands: its fiber is paused with `request` in its signal slot and
+    /// its frames suspended. An unstamped request answers true.
+    pub(crate) fn park_stands(&self, request: Value) -> bool {
+        let Some(parker) = self.parker.get() else {
+            return true;
+        };
+        let Some(fiber) = parker.upgrade() else {
+            return false;
+        };
+        fiber
+            .try_with(|f| {
+                f.status == crate::value::fiber::FiberStatus::Paused
+                    && f.suspended.is_some()
+                    && f.signal.is_some_and(|(_, v)| v.bit_identical(request))
+            })
+            .unwrap_or(false)
     }
 }
 

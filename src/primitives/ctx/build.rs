@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-29
 //! The ergonomic `ctx.*` allocation surface: one constructor per heap type,
 //! each born on the ctx's heap in the ctx's own region.
 //! docs/impl/region/ctx.md
@@ -119,8 +119,9 @@ impl<'h> Alloc<'h> {
         crate::value::build::match_fail(self.heap(), val, self.region)
     }
 
-    /// Allocate an external (plugin-provided) object into the call's region.
-    /// Hand-written rather than macro-generated because of the generic `T`.
+    /// Allocate an opaque external (plugin-provided) object into the call's
+    /// region. Hand-written rather than macro-generated because of the generic
+    /// `T`.
     #[inline]
     pub fn external<T: std::any::Any + 'static>(&self, type_name: &'static str, data: T) -> Value {
         crate::value::build::external(self.heap(), type_name, data, self.region)

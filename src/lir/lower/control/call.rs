@@ -297,15 +297,7 @@ impl<'a> Lowerer<'a> {
         // records the slot too and is unaffected: its parked payload is what
         // the walk protects, so the walk passes the slot over.
         for &slot in &borrowed_arg_slots {
-            let v = self.fresh_reg();
-            self.emit(LirInstr::LoadLocal { dst: v, slot });
-            self.emit(LirInstr::DecrefValueRegion { src: v });
-            if let Ok(nil_reg) = self.emit_const(crate::lir::LirConst::Nil) {
-                self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
-            }
-            if !self.current_func.frame_release_slots.contains(&slot) {
-                self.current_func.frame_release_slots.push(slot);
-            }
+            self.emit_recorded_slot_value_release(slot);
         }
         // After ANF (`src/hir/anf.rs`), every consumer position
         // for a Call has a synthetic `Let` binding owning the

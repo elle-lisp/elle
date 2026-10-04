@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-09-29
 //! Region-and-heap-explicit value construction, one constructor per heap type.
 //!
 //! The single source of `HeapObject` construction, shared by the `NativeCtx`
@@ -341,7 +341,8 @@ pub(crate) fn managed_pointer(heap: &mut FiberHeap, addr: usize, region: Runtime
     )
 }
 
-/// Allocate an external (plugin-provided) object into `region` on `heap`.
+/// Allocate an opaque external (plugin-provided) object into `region` on
+/// `heap`. The region scan cannot see into its payload.
 #[inline]
 pub(crate) fn external<T: Any + 'static>(
     heap: &mut FiberHeap,
@@ -351,10 +352,7 @@ pub(crate) fn external<T: Any + 'static>(
 ) -> Value {
     heap.alloc_in_region(
         HeapObject::External {
-            obj: ExternalObject {
-                type_name,
-                data: Rc::new(data),
-            },
+            obj: ExternalObject::opaque(type_name, Rc::new(data)),
             traits: Value::NIL,
         },
         region,

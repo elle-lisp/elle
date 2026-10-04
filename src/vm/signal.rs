@@ -76,6 +76,10 @@ impl VM {
     /// ARGUMENTS, which the body owns; a release there frees the child's
     /// request under the child. The identity test tells them apart, as it does
     /// for a raised payload ([`Self::mint_raised_argument_delivery`]).
+    ///
+    /// A built request is also stamped with the fiber parking on it, because
+    /// it is good only while this park stands (docs/impl/region/park.md). The
+    /// root fiber has no handle to stamp, and its host refuses a park anyway.
     pub(crate) fn park_suspending_primitive(
         &mut self,
         bits: SignalBits,
@@ -84,9 +88,11 @@ impl VM {
     ) {
         let built = payload
             .as_external::<crate::io::request::IoRequest>()
-            .is_some()
-            && !args.iter().any(|a| a.bit_identical(payload));
-        if built {
+            .filter(|_| !args.iter().any(|a| a.bit_identical(payload)));
+        if let Some(request) = built {
+            if let Some(handle) = &self.current_fiber_handle {
+                request.stamp_parker(handle.downgrade());
+            }
             self.fiber.delivery.park_request(bits, payload);
         } else {
             self.fiber.delivery.park_primitive(bits, payload);

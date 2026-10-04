@@ -39,17 +39,22 @@ rather than a new one:
   cell release naming the box, and a transfer adopt each record nothing. The walk can
   only run a release the frame genuinely had.
 
-**One other site records, on the same three facts.** A dynamic `emit` off tail
-position takes a retain at its payload argument and releases it in the
-continuation past the call ([owner.md](owner.md)). That release is a value route
+**Two other sites record, on the same three facts.** Each retains a payload its
+body releases nowhere and releases it in the continuation past the suspend
+([park.md](park.md)): a suspending `Emit` of a borrowed payload, and a dynamic
+`emit` off tail position, at its payload argument. Each release is a value route
 in every respect the walk reads: a slot the site allocates for itself, writes
-once before the call and reads once after it, and clears as it releases. What
-records it is the **terminal** raise. There the catcher consumes the delivery
-and this retain answers to the continuation alone — which a fiber nobody
-restarts never runs, so the table is the only route to it. A suspending raise
-records the slot too and is unaffected: its parked payload is what the walk
-protects, so the walk passes the slot over and the discharge answers for the
-retain instead.
+once before the suspend and reads once after it, and clears as it releases.
+
+The record serves the parks whose continuation never runs and whose payload the
+walk does not protect. A **terminal** dynamic `emit` nobody restarts is one: the
+catcher consumes the delivery the raise minted, so the retain answers to the
+continuation alone. A `fiber/abort` or `fiber/refuse` that raises in place over a
+suspending park, left unrestarted, is another: the injected error displaces the
+payload the discharge would have released. A squelch boundary is the third,
+because what it discards exempts nothing (below). While a suspending park
+stands, its payload is what the walk protects, so the walk passes the slot over
+and the discharge answers for the retain instead.
 
 **Two routes, two receipts.** The slot-resolved release (`DecrefRegion`) is named the
 same way, by the static region slot it carries, and its receipt is the activation map
@@ -84,7 +89,7 @@ walk may release, and the two raise paths differ:
   and a walk whose live signal payload matches it (`mint_names`) skips nothing.
 - A **dynamic `emit`** reads like the `Emit` case with the mint moved to the exit: the
   raise is an ordinary native call, so the signal exit mints the delivery of a payload
-  the call received as an argument and records it there ([owner.md](owner.md)). What the walk then reclaims is the
+  the call received as an argument and records it there ([park.md](park.md)). What the walk then reclaims is the
   frame's own reference to the payload — in TAIL position wherever the body allocated it,
   and off tail position the site's own payload retain, which the table names for exactly
   this reason.
@@ -224,17 +229,21 @@ the caller's binding live across a compiled callee's exit),
 the frame stack, and the payload exemption reads the same) and
 `jit::dispatch::tests::release_abandoned_frame_runs_both_routes_off_the_compiled_exits_buffers`
 (the two tables reach the runtime as separate buffers of different widths),
-`lir::lower::tests::release::emission::{frame_release_tables_name_exactly_the_routes_emitted,
-a_reassigned_binding_records_no_value_route,
-a_non_tail_dynamic_emit_payload_release_carries_its_receipt}` (the tables are
-the emit sites, so a route the emitter declined has no entry and the one other
-site that records carries both halves of a value route's receipt), with
-[region-dynamic-emit-statement-uaf.lisp](../../../tests/impl/region-dynamic-emit-statement-uaf.lisp) as that site's guardfree
-complement, and [region-error-unwind-uaf.lisp](../../../tests/impl/region-error-unwind-uaf.lisp) (the soundness
-complement — the payload the raising native builds while the frame holds its
-argument, a value the frame stored into a container that outlives it, a parked
-frame the restarts system replays, and a catching frame's own values, all under
-`--trace=guardfree`). The squelch face carries the same pair —
+`lir::lower::tests::release::frametables::{frame_release_tables_name_exactly_the_routes_emitted,
+a_reassigned_binding_records_no_value_route}` (the tables are the emit sites, so
+a route the emitter declined has no entry),
+`lir::lower::tests::release::parkmint::{a_non_tail_dynamic_emit_payload_release_carries_its_receipt,
+a_borrowed_emit_payload_release_carries_its_receipt}` (each of the two other
+sites that record carries both halves of a value route's receipt), with
+[region-dynamic-emit-statement-uaf.lisp](../../../tests/impl/region-dynamic-emit-statement-uaf.lisp) as the dynamic site's
+guardfree complement and [region-fiber-yield-borrow-uaf.lisp](../../../tests/impl/region-fiber-yield-borrow-uaf.lisp) as the
+`Emit` site's (a borrowed yield's body reference, released once where an abort
+or a squelch boundary ends the park and once where a restart replays it), and
+[region-error-unwind-uaf.lisp](../../../tests/impl/region-error-unwind-uaf.lisp) (the soundness complement — the payload
+the raising native builds while the frame holds its argument, a value the frame
+stored into a container that outlives it, a parked frame the restarts system
+replays, and a catching frame's own values, all under `--trace=guardfree`).
+The squelch face carries the same pair —
 [region-squelch-unwind.lisp](../../../tests/impl/region-squelch-unwind.lisp) (the leak gauge: a pending value in the
 emitting frame, two of them, an enclosing frame's, and the same under an
 `attune` boundary, each bounded beside a violation that has nothing pending) and

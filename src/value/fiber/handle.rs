@@ -1,5 +1,7 @@
-//! Fiber handles: take/put ownership (`FiberHandle`) and the weak
-//! parent back-pointer (`WeakFiberHandle`) that avoids Rc cycles.
+// audited: 2026-09-29
+//! Fiber handles: take/put ownership, and a weak handle that names a fiber without keeping it.
+//!
+//! docs/signals/fibers.md
 
 use super::Fiber;
 use std::cell::RefCell;
@@ -97,8 +99,8 @@ impl std::fmt::Debug for FiberHandle {
     }
 }
 
-/// A weak reference to a FiberHandle, used for parent back-pointers
-/// to avoid Rc cycles.
+/// A weak reference to a FiberHandle: a parent back-pointer, which must not
+/// form an Rc cycle, or an io request's stamp, which must not keep its fiber.
 #[derive(Clone)]
 pub struct WeakFiberHandle(Weak<RefCell<Option<Fiber>>>);
 
@@ -107,6 +109,11 @@ impl WeakFiberHandle {
     /// fiber has been dropped.
     pub fn upgrade(&self) -> Option<FiberHandle> {
         self.0.upgrade().map(FiberHandle)
+    }
+
+    /// Whether `self` and `other` name the same fiber, dropped or not.
+    pub fn ptr_eq(&self, other: &WeakFiberHandle) -> bool {
+        self.0.ptr_eq(&other.0)
     }
 }
 
