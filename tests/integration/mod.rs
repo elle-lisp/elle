@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-04
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -264,6 +264,9 @@ mod test_setup {
 }
 mod pre_commit {
     include!("pre_commit.rs");
+}
+mod toolchains {
+    include!("toolchains.rs");
 }
 
 // `allocator.rs` is absent from the list above and does not compile. It calls

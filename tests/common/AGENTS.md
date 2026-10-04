@@ -1,6 +1,6 @@
 # tests/common
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-04 -->
 
 Shared test helpers for the Elle test suite.
 
@@ -113,10 +113,10 @@ This is safe because:
 
 | File | Content |
 |------|---------|
-| [mod.rs](mod.rs) | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, `paint_stack`, and `ScratchDir`; it re-exports the readers of `repo.rs`, `passes.rs` and `workflows.rs` |
+| [mod.rs](mod.rs) | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, `paint_stack`, and `ScratchDir`; it re-exports the readers of `repo.rs`, `passes.rs`, `workflows.rs` and `store.rs` |
 | [repo.rs](repo.rs) | the Makefile readers (`make_var`, `make_dry_run`, `make_dry_run_with`, `make_expand`, `makefile`) and the suite readers (`repo_root`, `suite`, `suite_files`, `declared_deadline`, `wide_patterns`) |
 | [passes.rs](passes.rs) | the suite passes a target runs (`Pass`, `passes`), the two suites as sets (`lang_files`, `impl_files`), and `assert_plain_language_pass`, for `suites.rs` and `variants.rs` |
-| [workflows.rs](workflows.rs) | the workflow readers (`workflow_files`, `workflow_jobs`, `runs_target`) |
+| [workflows.rs](workflows.rs) | the workflow readers (`workflow_files`, `workflow_jobs`, `job_steps`, `runs_target`) |
 | [documents.rs](documents.rs) | the documents `make doctest` runs (`doctest_documents`) and the documents it must run (`covered_documents`), for `doctest.rs` and `doctest_scope.rs` |
 | [store.rs](store.rs) | the session-store readers (`query`, `scalar`), for the tests that drive `elle test` and read back what it recorded |
 
@@ -154,10 +154,12 @@ hardcoded `/tmp`; `tests/integration/scratch.rs` fails the build over it.
 **`workflow_files()`** answers every file under `.github/workflows`, and
 **`workflow_jobs(text)`** splits one into (name, body) pairs with the comment
 lines dropped — a job that discusses a command it does not run must not read as
-a job that runs it. **`runs_target(body, target)`** asks whether a job runs one
+a job that runs it. **`job_steps(body)`** splits a job into its steps, at the
+`- ` that opens each. **`runs_target(body, target)`** asks whether a job runs one
 make target, and not a longer one it prefixes. `workflows.rs` asks what the gate
-waits for and `run_artifacts.rs` asks what a suite job leaves behind, so the
-reading lives here rather than twice.
+waits for, `run_artifacts.rs` asks what a suite job leaves behind, and
+`toolchains.rs` asks what a job's toolchain carries. So the reading lives here
+rather than in each of them.
 
 ### Reading a session store
 
