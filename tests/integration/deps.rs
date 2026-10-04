@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-04
 // Every committed lockfile holds one Cranelift, one regalloc2 and a wasmtime
 // past its advisory, and each variant's holds the root's.
 //
@@ -95,9 +95,9 @@ fn the_graph_holds_one_regalloc2() {
 }
 
 /// The oldest `wasmtime` that carries the fix for its newest published
-/// advisory (RUSTSEC-2026-0316). When `cargo audit` names a newer fix, raise
-/// this in the same change as the pin in Cargo.toml.
-const WASMTIME_FLOOR: (u64, u64, u64) = (49, 0, 1);
+/// advisories (RUSTSEC-2026-0325, -0326 and -0327). When `cargo audit` names a
+/// newer fix, raise this in the same change as the pin in Cargo.toml.
+const WASMTIME_FLOOR: (u64, u64, u64) = (49, 0, 2);
 
 fn parse_semver(version: &str) -> (u64, u64, u64) {
     let mut parts = version.split(['.', '-', '+']).map(|part| {
@@ -114,7 +114,7 @@ fn parse_semver(version: &str) -> (u64, u64, u64) {
 
 #[test]
 fn wasmtime_resolves_at_or_above_the_advisory_floor() {
-    // A manifest range such as `wasmtime = "49"` admits every 49.x, so the
+    // A manifest range admits every release at or above its floor, so the
     // lock decides which one builds. A `cargo update` that goes backwards, or
     // a lock that never moved, leaves the advisory open, and nothing but the
     // audit job sees it. This test fails on the developer's machine first.
@@ -132,8 +132,10 @@ fn wasmtime_resolves_at_or_above_the_advisory_floor() {
             assert!(
                 parse_semver(version) >= WASMTIME_FLOOR,
                 "{path}: wasmtime {version} is below {major}.{minor}.{patch}, the release \
-                 that fixed its newest advisory. Raise the pin in Cargo.toml and run \
-                 `cargo update -p wasmtime` in the lockfile's package."
+                 that fixed its newest advisory. Raise the pin in Cargo.toml, then run \
+                 `cargo update -p wasmtime -p cranelift-codegen -p cranelift-jit` in the \
+                 lockfile's package. Each wasmtime release requires the Cranelift of its \
+                 own release, so the three move together even across a patch release."
             );
         }
     }
