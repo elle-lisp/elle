@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-04
 //! The `elle test` passes a suite target runs, read off `make --dry-run`.
 //!
 //! docs/testing.md
@@ -35,8 +35,9 @@ impl Pass {
         rest.split_whitespace().next()
     }
 
-    /// The binary each batch runs `test` on: the runner, and for a pass with
-    /// no `--isolate`, the build every file runs on.
+    /// The binary each batch runs `test` on: the runner, and the build every
+    /// file runs on, in-process or, under `--isolate` with no `--host`, as
+    /// each child.
     pub fn runner(&self) -> &str {
         let (head, _) = self
             .command
@@ -80,6 +81,25 @@ pub fn lang_files() -> BTreeSet<String> {
 #[allow(dead_code)]
 pub fn impl_files() -> BTreeSet<String> {
     suite("tests/impl").into_iter().collect()
+}
+
+/// Assert that `pass` runs as `RIG test`, so each child is the rig the
+/// variable `rig` names and the run has that rig's build: no `--host` names
+/// another program (docs/ratchet.md).
+#[allow(dead_code)]
+pub fn assert_rig_runs(pass: &Pass, rig: &str, what: &str) {
+    assert_eq!(
+        pass.runner(),
+        make_expand(rig),
+        "{what} runs under a runner that is not the rig {rig}:\n  {}",
+        pass.command
+    );
+    assert_eq!(
+        pass.host(),
+        None,
+        "{what} names a --host, so the run has no build:\n  {}",
+        pass.command
+    );
 }
 
 /// Assert that `pass` runs the language suite through the runner of the build

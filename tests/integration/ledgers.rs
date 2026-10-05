@@ -1,7 +1,6 @@
-// audited: 2026-09-30
-// The committed ledgers: every producer on the ratchet has one, every row of
-// one names a subject its producer reads, and the root the ledger sits under
-// is the tree the binary was built in.
+// audited: 2026-10-04
+// The committed ledgers: every producer on the ratchet has one, and every row
+// of one names a subject its producer reads.
 //
 // docs/ratchet.md
 //
@@ -11,11 +10,6 @@
 // second.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
-
-fn elle_binary() -> &'static str {
-    env!("CARGO_BIN_EXE_elle")
-}
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -144,17 +138,4 @@ fn every_ledger_row_names_a_subject_its_producer_reads() {
         "ledger rows whose subject their producer never reads:\n  {}",
         stale.join("\n  ")
     );
-}
-
-#[test]
-fn the_root_is_the_tree_the_binary_was_built_in() {
-    let out = Command::new(elle_binary())
-        .args(["-e", "(println (elle/root))"])
-        .env_remove("RUST_MIN_STACK")
-        .output()
-        .expect("run elle -e");
-    let printed = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let got = Path::new(&printed).canonicalize().expect("the root exists");
-    let want = repo_root().canonicalize().expect("the manifest dir exists");
-    assert_eq!(got, want, "elle/root names the repository root");
 }

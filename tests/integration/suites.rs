@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-04
 // The default build's suite targets: which files each pass runs, on which
 // program, under which flags.
 //
@@ -11,7 +11,8 @@
 // verdict per file, and still gates green, so the recipe is checked here.
 
 use crate::common::{
-    assert_plain_language_pass, impl_files, lang_files, make_expand, makefile, passes, Pass,
+    assert_plain_language_pass, assert_rig_runs, impl_files, lang_files, make_expand, makefile,
+    passes, Pass,
 };
 use std::collections::BTreeSet;
 
@@ -33,12 +34,15 @@ fn smoke_lang_runs_every_language_file_with_no_flag() {
 }
 
 // The implementation suite runs on the rig, so each file's sidecar sets its
-// mode. The runner's acceptance tests ride the same pass: they drive `elle
-// test` themselves, and they need the store the pass records into.
+// mode, and the runner is the rig itself, so the run has the rig's build and
+// its readings are judged (docs/ratchet.md). The runner's acceptance tests
+// ride the same pass: they drive `elle test` themselves, and they need the
+// store the pass records into.
 //
 // The counter-factual: run the implementation suite under `elle`, and every
 // sidecar goes unread. The guardfree files run with the oracle disarmed and
-// pass.
+// pass. Run it under `elle test --host elle-rig`, and the run has no build, so
+// every reading goes unrecorded and every ledger row unjudged.
 #[test]
 fn smoke_impl_runs_the_implementation_suite_on_the_rig() {
     let passes = passes("smoke-impl", &[]);
@@ -55,11 +59,7 @@ fn smoke_impl_runs_the_implementation_suite_on_the_rig() {
         Some(""),
         "each sidecar alone sets its file's mode"
     );
-    assert_eq!(
-        base.host(),
-        Some(make_expand("ELLE_RIG").as_str()),
-        "the implementation suite runs on the rig"
-    );
+    assert_rig_runs(base, "ELLE_RIG", "the implementation suite");
 }
 
 // The eager profile runs both suites with every function compiled on its first
@@ -75,11 +75,7 @@ fn smoke_impl_runs_both_suites_under_the_eager_profile() {
     assert_eq!(eager.len(), 1, "one pass runs the eager profile");
     let want: BTreeSet<String> = lang_files().union(&impl_files()).cloned().collect();
     assert_eq!(eager[0].files, want, "the eager profile runs both suites");
-    assert_eq!(
-        eager[0].host(),
-        Some(make_expand("ELLE_RIG").as_str()),
-        "a profile is a rig setting"
-    );
+    assert_rig_runs(eager[0], "ELLE_RIG", "the eager profile, a rig setting,");
 }
 
 // `IMPL_PROFILES` names further profiles for the language suite. The macOS job
@@ -98,7 +94,7 @@ fn a_named_profile_runs_the_language_suite_on_the_rig() {
         lang_files(),
         "a named profile runs the language suite"
     );
-    assert_eq!(scrub[0].host(), Some(make_expand("ELLE_RIG").as_str()));
+    assert_rig_runs(scrub[0], "ELLE_RIG", "a named profile");
 }
 
 // A profile a pass names and nothing holds reads as no file at all: the rig

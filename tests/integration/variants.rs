@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-04
 // Each variant build's target: the binaries it builds, their features, and the
 // suite passes it runs on them.
 //
@@ -12,7 +12,8 @@
 // checked here.
 
 use crate::common::{
-    assert_plain_language_pass, impl_files, lang_files, make_dry_run, make_expand, passes, Pass,
+    assert_plain_language_pass, assert_rig_runs, impl_files, lang_files, make_dry_run, make_expand,
+    passes, Pass,
 };
 use std::collections::BTreeSet;
 
@@ -130,9 +131,13 @@ fn each_variant_runs_the_language_suite_on_its_own_build() {
 #[test]
 fn smoke_mlir_runs_the_implementation_suite_on_the_mlir_rig() {
     let passes = passes("smoke-mlir", &[]);
-    let rig: Vec<&Pass> = passes.iter().filter(|p| p.host().is_some()).collect();
+    let rig: Vec<&Pass> = passes.iter().filter(|p| p.isolate().is_some()).collect();
     assert_eq!(rig.len(), 1, "one MLIR pass runs on the rig");
-    assert_eq!(rig[0].host(), Some(make_expand("ELLE_RIG_MLIR").as_str()));
+    assert_rig_runs(
+        rig[0],
+        "ELLE_RIG_MLIR",
+        "the MLIR build's implementation suite",
+    );
     assert_eq!(rig[0].files, impl_files());
     assert_eq!(
         rig[0].isolate(),
@@ -221,8 +226,9 @@ fn smoke_noffi_runs_the_language_suite_without_the_ffi_files() {
 #[test]
 fn smoke_pool_runs_the_implementation_suite_on_the_pool_rig() {
     let passes = passes("smoke-pool", &[]);
-    let rig: Vec<&Pass> = passes.iter().filter(|p| p.host().is_some()).collect();
+    let rig: Vec<&Pass> = passes.iter().filter(|p| p.isolate().is_some()).collect();
     assert_eq!(rig.len(), 1, "one pool pass runs on the rig");
+    assert_rig_runs(rig[0], "ELLE_RIG", "the pool build's implementation suite");
     assert_eq!(rig[0].files, impl_files());
     assert_eq!(rig[0].isolate(), Some(""));
 }

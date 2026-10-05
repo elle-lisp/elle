@@ -217,6 +217,9 @@ fn only_run_suite_drives_the_runner() {
         "$(ELLE) test",
         "$(ELLE_WASM) test",
         "$(ELLE_MLIR) test",
+        "$(ELLE_RIG) test",
+        "$(ELLE_RIG_MLIR) test",
+        "$(ELLE_RIG_WASM) test",
     ];
     let direct: Vec<String> = rules(&makefile)
         .into_iter()
