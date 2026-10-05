@@ -1,6 +1,6 @@
 # hir
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-04 -->
 
 High-level Intermediate Representation: the analyzed program, with bindings
 resolved, captures computed and signals inferred, and the passes over it.
@@ -127,8 +127,9 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 
 11. **Binding forms destructure strictly.** `def`, `var`, `let`, `letrec`,
     required parameters and `&keys` patterns signal `:type-error` on a
-    missing element, a missing key, or a wrong type. `&opt` and `&named`
-    parameters bind `nil` instead.
+    missing element, a missing key, or a wrong type, so a strict
+    `Destructure` carries `:error` and adds it to the enclosing function's
+    signal. `&opt` and `&named` parameters bind `nil` instead.
 
 12. **Binding forms build `HirPattern::Struct` for `{}` and `@{}`.** The
     lowerer reads entries with `StructGetDestructure` (strict) or
@@ -148,10 +149,12 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 
 14. **`Eval` compiles and executes a datum at runtime.**
     `HirKind::Eval { expr: Box<Hir>, env: Box<Hir> }` is produced for
-    `(eval expr)` or `(eval expr env)`. The node's signal is `Yields`. The
-    enclosing function's inferred signal does not include it (#1243). Not in
-    tail position. The VM handler reaches the symbol table through the
-    driving VM's `symbols_ptr` and caches the Expander on the VM.
+    `(eval expr)` or `(eval expr env)`. The node's signal is `:error`, and
+    the enclosing function's inferred signal includes it: the VM handler
+    holds no park of the code it runs, so a yield, an I/O request or a halt
+    inside it comes back as an `:eval-error`. Not in tail position. The VM
+    handler reaches the symbol table through the driving VM's `symbols_ptr`
+    and caches the Expander on the VM.
 
 15. **A docstring is a leading string literal.** `HirKind::Lambda` has a
     `doc: Option<Rc<str>>` field. The analyzer takes a leading string literal
@@ -165,7 +168,11 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     and `param_bounds: Vec<ParamBound>` from `(silence param)`. A call to a
     bounded parameter adds the bound's bits, not a polymorphic dependency.
     The function checks the argument against the bound on entry
-    (`CheckSignalBound`). `squelch` is a runtime primitive.
+    (`CheckSignalBound`), and that check may raise, so a lambda with a bound
+    carries `:error`. `(muffle spec)` lands on the lambda as `muffle:
+    SignalBits`, the mask every closure made from it enforces at its
+    boundary; `inferred_signals` is already the signal after the muffle.
+    `squelch` is a runtime primitive.
     [docs/signals/inference.md](../../docs/signals/inference.md) owns the
     forms.
 
@@ -192,8 +199,9 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     `HirKind::Parameterize { bindings: Vec<(Hir, Hir)>, body: Box<Hir> }`
     is produced for `(parameterize ((p1 v1) (p2 v2) ...) body ...)`. The
     analyzer does not check that each parameter expression is a parameter;
-    the VM checks at run time. The lowerer evaluates each pair, emits
-    `PushParamFrame` with them, lowers the body, then emits `PopParamFrame`.
+    the VM checks at run time, so the node carries `:error`. The lowerer
+    evaluates each pair, emits `PushParamFrame` with them, lowers the body,
+    then emits `PopParamFrame`.
 
 21. **Files compile to a single synthetic letrec.** `analyze_file_letrec`
     turns a file's top-level forms into one `HirKind::Letrec`: `def` is an

@@ -1,6 +1,6 @@
 # Compile-Time Operations
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-04 -->
 
 The forms that act at compile time, and the `compile/*` API that reads the
 compiler's model from running code.
@@ -84,9 +84,9 @@ Signals are inferred at compile time and flow up from callee to caller (see
 | Form | Effect |
 |---|---|
 | `(silence)` | this function's ceiling is silent: no signal at all, `:error` included |
-| `(silence f)` | a closure passed for parameter `f` must be silent |
+| `(silence f)` | the value passed for parameter `f` must be silent, checked at entry; the check may raise, so the function carries `:error` |
 | `(attune! :io)`, `(attune! \|:io :yield\|)` | the most this function may emit |
-| `(muffle :error)` | remove these signals from the inferred signal; nothing stops them at run time |
+| `(muffle :yield)` | squelch the function over these signals when a closure is made from it: the inferred signal loses them and gains `:error` |
 | `(emit :io)`, `(emit :yield value)` | emit a signal; the keyword is recorded at compile time, the value is emitted at run time |
 | `(yield value)` | a macro for `(emit :yield value)` |
 

@@ -1,6 +1,6 @@
 # Design Philosophy
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-04 -->
 
 Why Elle infers signals instead of asking for them, and the gap that leaves
 between what the compiler knows and what a reader sees.
@@ -40,8 +40,9 @@ most callbacks, at every `map`, every `ev/spawn` and every handler. Elle
 charges the annotation to the minority case instead: the code that must not
 suspend.
 
-`(silence f)` bounds the parameter `f`. The function is then silent with
-respect to `f`, and a closure that may signal fails a check at entry:
+`(silence f)` bounds the parameter `f`. The function then takes no signal
+from `f`, and a closure that may signal fails a check at entry. The check may
+raise, so the function carries `:error` and nothing else:
 
 ```lisp
 (defn apply-silent [f x]

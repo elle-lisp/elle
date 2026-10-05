@@ -1,6 +1,6 @@
 # hir/analyze
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-04 -->
 
 Syntax to HIR analysis: binding resolution, capture computation, signal inference, and linting.
 
@@ -27,7 +27,8 @@ file covers how the analyzer produces it.
 |------|---------|
 | `Analyzer` | Main struct that transforms Syntax → HIR |
 | `BlockContext` | Active block for `break` targeting (block_id, name, fn_depth) |
-| `SignalSources` | Separates a lambda body's signal sources into parameter calls, direct `emit` bits, and bits from non-parameter callees |
+| `SignalSources` | Separates a lambda body's signal sources into parameter calls, direct `emit` bits, and bits from non-parameter callees. `add_inherent_bits` is how a form that may raise reports itself |
+| `keyword_collectors` | The bindings whose lambda collects `&keys` or `&named`; a call to one may raise at the call |
 | `ParamBound` | Struct: `{ binding, signal }` — a parameter bound |
 | `current_param_bounds` | Maps `Binding` → `Signal` for parameters bounded by `(silence p)` in the lambda being analyzed |
 | `current_declared_ceiling` | `Option<Signal>`: the function-level ceiling set by `(silence)` or `(attune! …)` |
@@ -133,7 +134,20 @@ This prevents accidental capture in macros while allowing intentional capture vi
    compile errors. The name must be a declared parameter. For a duplicate
    bound on the same parameter, the last one wins. `analyze_lambda` reads the
    accumulators after analyzing the body and checks the ceiling there. No
-   call site is checked at compile time; the bound is checked on entry.
+   call site is checked at compile time; the bound is checked on entry, and
+   that check may raise, so a lambda with a bound carries `:error`.
+
+5. **A construct that can raise carries `:error`, on its node and in the
+   enclosing function's sources.** The list is in
+   [docs/signals/inference.md](../../../docs/signals/inference.md), "What
+   raises". Each site reports through `add_inherent_bits`; a strict
+   `Destructure` is built by `destructure`, which reports for it.
+
+6. **`muffle` is a squelch at closure creation.** `analyze_lambda` narrows
+   the inferred signal with `Signal::squelch` over the muffle bits, checks
+   the ceiling against the narrowed signal, and records the bits on the
+   lambda for the boundary. `:error` and `:halt` pass every boundary, so
+   `analyze_muffle` rejects them.
 
 ## When to modify
 
@@ -158,7 +172,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 - **Conflating nil and empty list**: Use `HirKind::EmptyList` for `()`, not `HirKind::Nil`
 - **Not propagating signals**: When combining sub-expressions, use
   `signal.combine()` to merge signals upward. A node's signal alone does not
-  reach the enclosing function: add the bits to `current_signal_sources`
-  too, as `analyze_match` does (#1243).
+  reach the enclosing function: report the bits through `add_inherent_bits`
+  too, as `analyze_match` and `analyze_eval` do.
 - **Breaking scope hygiene**: When creating synthetic bindings, use the correct scope set from the original Syntax node
 - **Forgetting to include bounded parameter bits in inferred_signals**: When a parameter has a `silence` bound, its bits must be included in the lambda's `inferred_signals`, not tracked as polymorphic.
