@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-05 -->
 
 The two test suites, what each one claims, the builds that run them, and how a
 run is read.
@@ -53,7 +53,9 @@ test heap · objects +3 · regions +2 · pages +610 · region-frees +598 · adop
 ```
 
 The commit line names the code the tally describes. A run outside a
-repository prints the run number alone. The `runner heap` and `test heap`
+repository prints the run number alone. A run under `elle-rig test` ends the
+line with its build, `· build jit-uring-linux-x86_64`, the build its readings
+were judged as ([docs/ratchet.md](ratchet.md)). The `runner heap` and `test heap`
 blocks are the run's account of what each file cost, on every gauge
 ([docs/test-gauges.md](test-gauges.md)).
 
