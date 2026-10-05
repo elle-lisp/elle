@@ -1,10 +1,11 @@
-// audited: 2026-09-29
-//! The CI workflow files, and the jobs in them.
+// audited: 2026-10-04
+//! The CI workflow files, the jobs in them, and the steps in a job.
 //!
 //! docs/analysis/ci.md
 //!
-//! `workflows.rs` asks what the pull-request gate waits for, and
-//! `run_artifacts.rs` asks what each suite job leaves behind. Both need the
+//! `workflows.rs` asks what the pull-request gate waits for,
+//! `run_artifacts.rs` asks what each suite job leaves behind, and
+//! `toolchains.rs` asks what each job's toolchain carries. All three need the
 //! same reading — a workflow file split into jobs — and a second copy of it is a
 //! second answer to "what is a job".
 
@@ -86,6 +87,22 @@ pub fn workflow_jobs(text: &str) -> Vec<(String, String)> {
         }
     }
     out.extend(current);
+    out
+}
+
+/// The steps of one job, split at the `- ` that opens each.
+#[allow(dead_code)]
+pub fn job_steps(body: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in body.lines() {
+        if line.starts_with("      - ") {
+            out.push(String::new());
+        }
+        if let Some(step) = out.last_mut() {
+            step.push_str(line);
+            step.push('\n');
+        }
+    }
     out
 }
 

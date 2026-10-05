@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-04
 // A CI job that records runs publishes the store it recorded them in, so a red
 // job is read with a query rather than out of its log.
 //
@@ -15,7 +15,7 @@
 // is read out of the Makefile rather than written here, and a test below pins
 // the assumption that makes reading it sound.
 
-use crate::common::{runs_target, workflow_files, workflow_jobs};
+use crate::common::{job_steps, runs_target, workflow_files, workflow_jobs};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn makefile() -> String {
@@ -89,25 +89,9 @@ fn recording_targets(makefile: &str) -> BTreeSet<String> {
     }
 }
 
-
-/// The steps of one job, split at the `- ` that opens each.
-fn steps(body: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for line in body.lines() {
-        if line.starts_with("      - ") {
-            out.push(String::new());
-        }
-        if let Some(step) = out.last_mut() {
-            step.push_str(line);
-            step.push('\n');
-        }
-    }
-    out
-}
-
 /// The step that uploads an artifact, if the job has one.
 fn upload_step(body: &str) -> Option<String> {
-    steps(body)
+    job_steps(body)
         .into_iter()
         .find(|step| step.contains("actions/upload-artifact"))
 }
@@ -150,7 +134,9 @@ fn every_job_that_records_a_run_uploads_its_store() {
         jobs.len() > 2,
         "found {} jobs recording runs; the parse is broken, not the workflows: {:?}",
         jobs.len(),
-        jobs.iter().map(|(w, j, _)| format!("{w}:{j}")).collect::<Vec<_>>()
+        jobs.iter()
+            .map(|(w, j, _)| format!("{w}:{j}"))
+            .collect::<Vec<_>>()
     );
 
     for (path, name, body) in jobs {
@@ -204,7 +190,10 @@ fn no_two_jobs_upload_under_one_artifact_name() {
             panic!("{path} jobs `{other}` and `{name}` both upload `{artifact}`");
         }
     }
-    assert!(found > 0, "no recording job uploads anything; the sweep proved nothing");
+    assert!(
+        found > 0,
+        "no recording job uploads anything; the sweep proved nothing"
+    );
 }
 
 /// What makes the list above readable out of the Makefile: a recipe reaches
