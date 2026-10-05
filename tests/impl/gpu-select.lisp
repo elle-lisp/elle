@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 14)
+# audited: 2026-10-04
 # ── gpu-select: git + disgit + N-ary gpu:map ──────────────────────────
 #
 # Tests the full pipeline:
@@ -37,7 +38,6 @@
 
 (defn select [flag a b]
   (silence)
-  (muffle :error)
   (if flag a b))
 
 (assert (not (fn/git? select)) "select is not GIT'd initially")
@@ -68,7 +68,6 @@
 
 (defn gpu-truthy [x]
   (silence)
-  (muffle :error)
   (if x 1 0))
 
 (git gpu-truthy)
@@ -84,7 +83,6 @@
 
 (defn gpu-add [a b]
   (silence)
-  (muffle :error)
   (numeric!)
   (%add a b))
 

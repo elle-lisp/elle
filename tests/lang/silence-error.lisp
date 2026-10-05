@@ -1,9 +1,11 @@
-(elle/epoch 12)
+(elle/epoch 14)
+# audited: 2026-10-04
 # ── silence: compile-time enforcement ─────────────────────────────────
 #
 # (silence) enforces at compile time that the body's inferred signal
 # fits within the declared ceiling.  Any excess bits are a compile error.
-# Runtime enforcement (vm/call.rs) stays as defense-in-depth.
+# At run time the boundary of a silent function is a squelch over every
+# signal, so a defect in inference raises :signal-violation there.
 
 # ── Should compile: silence with pure control flow ───────────────────
 
