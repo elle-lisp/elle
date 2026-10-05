@@ -1,5 +1,5 @@
 (elle/epoch 14)
-# audited: 2026-10-04
+# audited: 2026-10-05
 ## Signal System Tests
 ##
 ## Tests for the signal declaration, silence, and signals introspection
@@ -27,12 +27,18 @@
 (let [[ok? _] (protect ((fn () (eval '(signal :error)))))]
   (assert (not ok?) "signal declaration of builtin errors"))
 
-# duplicate signal declaration errors
-(let [[ok? _] (protect ((fn ()
-                          (eval '(begin
-                                   (signal :dup_c2d)
-                                   (signal :dup_c2d))))))]
-  (assert (not ok?) "duplicate signal declaration errors"))
+# A second declaration answers the bit the first one took, in one compile and
+# across compiles, so two libraries that name a signal share it.
+# Counter-factual: a second declaration in one compile was an error.
+(let [[ok? _] (protect (compile/whole-module "(signal :dup_c2d) (signal :dup_c2d)"
+                       "<dup>"))]
+  (assert ok? "a duplicate declaration in one compile compiles"))
+(signal :dup_c2d)
+(def dup-bit (get (signals) :dup_c2d))
+(assert (>= dup-bit 32) "a duplicate declaration names a user signal")
+(eval '(signal :dup_c2d))
+(assert (= dup-bit (get (signals) :dup_c2d))
+        "a declaration in another compile shares the bit")
 
 # ============================================================================
 # silence runtime checks — passing cases
@@ -134,7 +140,7 @@
   (assert (= result-sq-pass 42) "squelch runtime: non-squelched signal passes"))
 
 # squelch runtime: calling squelch on a non-closure (primitive) is a type error
-# (The new squelch primitive requires a closure; use the primitive directly for non-closures)
+# squelch requires a closure; call a primitive directly instead.
 (begin
   (def [ok-prim? _] (protect (squelch length :yield)))
   (assert (not ok-prim?) "squelch runtime: non-closure produces type error"))
@@ -169,8 +175,7 @@
           "squelch runtime: rejection is :signal-violation"))
 
 # squelch runtime: multiple forbidden keywords — closure emitting any one is rejected
-# Note: :error alone does not appear in the static signal type (error signals don't suspend),
-# so we test with a yielding closure to verify the multi-keyword check fires on :yield.
+# :error passes every boundary, so the yield is the bit the check fires on.
 (begin  # A closure that yields — :yield is in the forbidden set — use let for non-tail position
   (def [ok-sq-multi? err-sq-multi]
     (protect (let [r ((squelch (fn () (yield 42)) |:yield :error|))]
@@ -180,8 +185,7 @@
   (assert (= (get err-sq-multi :error) :signal-violation)
           "squelch runtime: multi-keyword rejection is :signal-violation"))
 
-# squelch function-level floor: the old (squelch :yield) preamble syntax is removed.
-# A pure function (no yield) works fine — squelch is no longer needed at function level.
+# A pure function needs no squelch at all.
 (begin
   (def add1-sq (fn (x) (+ x 1)))
   (assert (= (add1-sq 5) 6)
@@ -219,7 +223,7 @@
   (assert (= (get err-sq-wins :error) :signal-violation)
           "squelch catches :yield: rejection is :signal-violation"))
 
-# squelch outside lambda is now a valid primitive call (not a special form).
+# squelch is a primitive, so it works outside a lambda.
 # (squelch some-closure :yield) returns a new closure.
 (begin
   (def some-fn (fn () (yield 1)))
@@ -227,7 +231,7 @@
   (assert (closure? squelched-fn) "squelch outside lambda: returns a closure"))
 
 # ============================================================================
-# squelch primitive construction tests (Chunk 2)
+# squelch primitive construction
 # ============================================================================
 
 # squelch returns a closure
@@ -255,7 +259,7 @@
         "squelch returns different allocation from original")
 
 # ============================================================================
-# squelch runtime enforcement tests (Chunk 3)
+# squelch runtime enforcement
 # ============================================================================
 
 # squelch catches yield at boundary — use let for non-tail position
@@ -305,7 +309,7 @@
           "squelch composable runtime: rejection is :signal-violation"))
 
 # ============================================================================
-# squelch tail-position enforcement (issue-583)
+# squelch tail-position enforcement
 # ============================================================================
 
 # squelch enforcement fires when a squelched closure is called in tail position

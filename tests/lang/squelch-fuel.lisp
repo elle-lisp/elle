@@ -1,13 +1,14 @@
-(elle/epoch 12)
+(elle/epoch 14)
+# audited: 2026-10-05
 # squelch-fuel: a fuel pause passes through squelch and attune boundaries.
 #
 # :fuel is not program behavior. The VM injects it at the interpreter's
 # charge sites to meter a fiber, and the metering parent owns the pause:
 # lib/process.lisp preemption and the debugger's step engine both deliver
-# it under arbitrary user code. So the enforcement chokepoints exempt the
-# pause bits (`signals::squelched_bits`, src/signals/mod.rs) and a boundary
-# that names :fuel is inert — metering is the parent's action, not the
-# closure's behavior, so the boundary has nothing to enforce. The pause
+# it under arbitrary user code. So the enforcement chokepoints pass a signal
+# that carries :fuel whole (`signals::squelched_bits`, src/signals/mod.rs),
+# and a boundary that names :fuel is inert — metering is the parent's action,
+# not the closure's behavior, so the boundary has nothing to enforce. The pause
 # propagates to the metering parent as plain :fuel with a nil payload, and
 # a refueled resume runs the body to completion.
 #
@@ -93,5 +94,30 @@
                (catch e (get e :error)))]
   (assert (= caught :signal-violation)
           "S4: the same boundary still converts the squelched :yield"))
+
+# S5: a pause that carries a second bit passes whole. A dynamic breakpoint
+# pauses with |:debug :fuel|, and a boundary that names :debug must let it
+# through as it lets plain :fuel through. Counter-factual: the boundary
+# subtracted :fuel and converted the :debug that rode with it, so the fiber
+# died with a signal-violation where it should have paused.
+(let [f (fiber/new (fn []
+                     ((squelch (fn []
+                                 (emit |:debug :fuel|)
+                                 5) :debug))) |:debug :fuel :error|)]
+  (fiber/resume f)
+  (assert (= (fiber/status f) :paused)
+          "S5: the pause passes a squelch of the bit it carries")
+  (assert (= (fiber/value f) nil) "S5: the pause arrives as itself"))
+
+(let [f (fiber/new (fn []
+                     ((attune |:error|
+                              (fn []
+                                (emit |:debug :fuel|)
+                                5)))) |:debug :fuel :error|)]
+  (fiber/resume f)
+  (assert (= (fiber/status f) :paused)
+          "S5: the pause passes an allow-mask that omits both of its bits")
+  (assert (= (fiber/value f) nil)
+          "S5: and arrives as itself, not as a violation"))
 
 (println "squelch-fuel: ok")

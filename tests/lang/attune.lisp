@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 14)
+# audited: 2026-10-05
 # attune: positive signal permit (dual of squelch)
 
 # ── Permitted signals pass through ────────────────────────────────
@@ -60,3 +61,29 @@
     (catch e e)))
 (assert (get failed :error))
 (println "attune!-rejects-excess: ok")
+
+# ── attune! checks and does not replace ───────────────────────────
+# The function's signal stays the inferred one, so a caller sees what the
+# body does. Counter-factual: the signal became the ceiling, so a body that
+# only raises reported a yield it never raises.
+(def attuned-sig
+  (compile/signal (compile/analyze "(defn f [x] (attune! |:yield :error|) (+ x 1))")
+                  :f))
+(assert (= |:error| (get attuned-sig :bits))
+        "the signal is what the body raises")
+(assert (empty? (get attuned-sig :propagates)))
+
+(def quiet-sig
+  (compile/signal (compile/analyze "(defn f [] (attune! :error) 1)") :f))
+(assert (get quiet-sig :silent)
+        "a ceiling with room to spare leaves the body silent")
+(println "attune!-checks-only: ok")
+
+# ── A bad spec names attune! ──────────────────────────────────────
+# Counter-factual: the message began with emit:, a form the program never wrote.
+(def [bad-ok? bad-err]
+  (protect (compile/whole-module "(defn f [] (attune! :nosuch) 1)" "<attune>")))
+(assert (not bad-ok?))
+(assert (string/contains? (get bad-err :message)
+                          "attune!: unknown signal keyword :nosuch"))
+(println "attune!-bad-spec: ok")

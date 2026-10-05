@@ -1,5 +1,5 @@
 (elle/epoch 14)
-# audited: 2026-10-04
+# audited: 2026-10-05
 # Every construct that can raise carries :error in its inferred signal, so a
 # function that infers silent cannot raise, and a raise nothing catches
 # reports as an ordinary error. Counter-factual: each construct below
@@ -31,12 +31,63 @@
 (assert (= |:error| (bits-of "(defn f [m] m:k)" :f)) "qualified access is a get")
 (assert (= |:error| (bits-of "(defn f [m] m:a:b)" :f)) "nested qualified access")
 
-# ── A spliced call ───────────────────────────────────────────────────
+# ── A call whose argument count was not checked ──────────────────────
 
 (assert (= |:error| (bits-of "(defn g [a] a) (defn f [xs] (g ;xs))" :f))
         "a spliced call checks its count at run time")
 (assert (= || (bits-of "(defn g [a] a) (defn f [x] (g x))" :f))
         "a plain call to a silent function stays silent")
+
+# Counter-factual: a call to a parameter added nothing, so `(call identity)`
+# inferred silent and raised :arity-error.
+(assert (= |:error| (bits-of "(defn call [f] (f))" :call))
+        "a call to a parameter may raise")
+(def [param-ok? param-err]
+  (protect (eval '(begin
+                    (defn call [f]
+                      (f))
+                    (defn g []
+                      (silence)
+                      (call identity))))))
+(assert (not param-ok?) "a silent function cannot pass identity to call")
+
+# Counter-factual: q took p's signal and no arity, so a call to it inferred
+# silent.
+(assert (= |:error|
+           (bits-of "(defn p [] 1) (def q (squelch p :yield)) (defn f [] (q))"
+                    :f)) "a squelch binding's arity is not known")
+
+# A stdlib function's arity is known, so a call with the right count adds
+# nothing and a call with the wrong count does not compile. Counter-factual:
+# the stdlib exports carried no arity, and (identity 1 2) raised at run time
+# from a function that inferred silent.
+(assert (= || (bits-of "(defn f [x] (identity x))" :f))
+        "a call to identity with one argument is checked")
+(def [arity-ok? arity-err]
+  (protect (compile/whole-module "(defn g [] (identity 1 2))" "<arity>")))
+(assert (not arity-ok?) "a wrong count to a stdlib function does not compile")
+(assert (string/contains? (get arity-err :message)
+                          "arity error: identity expects 1 argument, got 2"))
+
+# ── A call to a polymorphic function ─────────────────────────────────
+#
+# Counter-factual: passing a parameter on to a polymorphic callee recorded
+# the parameter and dropped the callee's own bits, so twice inferred `||`
+# while call yields.
+
+(assert (= |:yield :error|
+           (bits-of "(defn call [f x] (yield x) (f x)) (defn twice [k] (call k 1))"
+                    :twice)) "twice keeps what call raises itself")
+
+# ── A collection literal with a splice ───────────────────────────────
+#
+# Counter-factual: `[1 ;x]` inferred `||`, and `(f 5)` raised :type-error.
+
+(assert (= |:error| (bits-of "(defn f [x] [1 ;x])" :f))
+        "an array literal checks its spliced value")
+(assert (= |:error| (bits-of "(defn f [x] @[;x 1])" :f)) "so does a mutable one")
+(assert (= || (bits-of "(defn f [x] [1 x])" :f))
+        "a literal without a splice adds nothing")
 
 # ── A call to a function with a keyword collector ────────────────────
 
@@ -149,5 +200,22 @@
 (assert (= :signal-violation (get native-err :error)))
 (assert (string/contains? (get native-err :message)
                           "length may emit {:error} but parameter is restricted to {}"))
+
+# ── A polymorphic closure passed for a bounded parameter ─────────────
+#
+# A closure that passes on its arguments' signals has bits that are only a
+# lower bound, so the check rejects it whatever its bits say. Counter-factual:
+# the check read the bits alone, and the reported excess was the :error the
+# call raises rather than the polymorphism the bound cannot see through.
+
+(defn call-it [k]
+  (k))
+(def [poly-ok? poly-err]
+  (protect (let [r (aps call-it 42)]
+             r)))
+(assert (not poly-ok?) "a polymorphic closure fails the bound")
+(assert (= :signal-violation (get poly-err :error)))
+(assert (string/contains? (get poly-err :message)
+                          "closure passes on the signal of its arguments"))
 
 (println "all raise-inference tests passed")

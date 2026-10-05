@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-05
 //! Unit tests for `Signal`: combination, squelch, the named constructors, and the capability bits.
 //!
 //! docs/signals/design.md
@@ -362,13 +362,15 @@ fn squelched_bits_exempts_the_pause_bits() {
 }
 
 #[test]
-fn squelched_bits_subtracts_the_pause_rather_than_exempting_the_signal() {
-    // A pause riding with a squelched user bit still violates the boundary,
-    // and the violation names the user bit alone.
-    assert_eq!(
-        squelched_bits(SIG_FUEL.union(SIG_YIELD), SIG_FUEL.union(SIG_YIELD)),
-        SIG_YIELD
-    );
+fn squelched_bits_passes_a_signal_that_carries_the_pause_whole() {
+    // A dynamic breakpoint pauses with :debug|:fuel. The VM raised it, not
+    // the code under the boundary, so a mask that names :debug must not
+    // convert it. Subtracting :fuel alone would leave :debug to violate.
+    assert!(squelched_bits(SIG_FUEL.union(SIG_DEBUG), SIG_DEBUG).is_empty());
+    assert!(squelched_bits(SIG_FUEL.union(SIG_YIELD), SIG_FUEL.union(SIG_YIELD)).is_empty());
+    assert!(squelched_bits(SIG_FUEL.union(SIG_DEBUG), SignalBits::ALL).is_empty());
+    // Plain :debug is the code's own emit, and stays enforceable.
+    assert_eq!(squelched_bits(SIG_DEBUG, SIG_DEBUG), SIG_DEBUG);
 }
 
 // ── Filesystem capability ───────────────────────────────────────────
