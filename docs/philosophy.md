@@ -1,6 +1,6 @@
 # Design Philosophy
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-05 -->
 
 Why Elle infers signals instead of asking for them, and the gap that leaves
 between what the compiler knows and what a reader sees.
@@ -10,7 +10,8 @@ between what the compiler knows and what a reader sees.
 The compiler infers a signal for every function. A function whose body cannot
 signal is silent with no annotation. A function that uses generic arithmetic
 may raise `:error`, because `+` rejects a non-number. A function that calls a
-parameter takes its signal from the argument: it is polymorphic.
+parameter takes its signal from the argument: it is polymorphic. The call
+itself may raise too, since nothing checked the argument count.
 
 ```lisp
 (def a (compile/analyze "
@@ -22,6 +23,7 @@ parameter takes its signal from the argument: it is polymorphic.
 (assert (= |:error| (get (compile/signal a :add) :bits)) "add may raise :error")
 (assert (= |0| (get (compile/signal a :call) :propagates))
         "call takes its signal from parameter 0")
+(assert (= |:error| (get (compile/signal a :call) :bits)) "and may raise")
 ```
 
 The signal decides the calling convention. A call whose callee may yield, do
@@ -76,7 +78,7 @@ rejects a `(silence)` body that may signal.
 ```
 
 A function that may fail but must not suspend declares `(attune! :error)`,
-which sets the ceiling to `:error` alone. See
+and the compiler checks that the body emits nothing else. See
 [signals/inference.md](signals/inference.md) for every declaration form.
 
 ## The gap is visibility
@@ -102,7 +104,7 @@ query. See [Agent Reasoning in Elle](analysis/agent-reasoning.md).
 ## Reasoning about a call
 
 - A function that calls a parameter is polymorphic, unless it bounds that
-  parameter with `(silence f)`.
+  parameter with `(silence f)`, and it may raise `:error`.
 - A function that does I/O, or uses fibers through `ev/spawn` or `ev/join`,
   may yield.
 - A function's signal is at least the union of its callees' signals.

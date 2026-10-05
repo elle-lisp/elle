@@ -1,6 +1,6 @@
 # Signal Protocol
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-05 -->
 
 How a signal is encoded, carried, caught and reported: the bits, the payload, propagation, I/O requests and the registry.
 
@@ -141,8 +141,10 @@ the whole condition, so `:yield` gets no report of its own.
 ### I/O and the Scheduler
 
 I/O signals use the `:io` bit (bit 9). Every port, socket and file primitive
-that reaches the scheduler has the signal `Signal::io_yields_errors()`, which
-is `:io` and `:error`. `may_io()` asks whether a signal includes `:io`.
+that reaches the scheduler carries `:io` and `:error`, the signal
+`Signal::io_yields_errors()` names. One that also needs a capability adds its
+bit: `port/open` adds `:fs`, and a subprocess primitive adds `:exec`.
+`may_io()` asks whether a signal includes `:io`.
 
 ### Stream Primitives and I/O Requests
 
@@ -215,22 +217,32 @@ propagate, query, terminal and the fiber-switch trampoline. Bit 6 is unused.
 
 ### User-Defined Signals
 
-User-defined signals are registered via the `(signal :keyword)` special
-form and allocated bits 32–63 sequentially. Up to 32 user signals are
-supported. Registration happens at analysis time.
+The `(signal :keyword)` special form declares a user signal at analysis time.
+The registry gives each new keyword the next free bit from 32 to 63, and it
+answers the bit it already gave when the keyword is declared again. So two
+libraries that declare the same keyword share one signal, and a file that
+declares a signal twice compiles.
+
+The registry is one per process, and it never releases a bit. A process
+therefore has a budget of 32 user signals, whatever loaded them, and a
+declaration past the budget is a compile error. Name a library's signals under
+the library's name, as in `:http/timeout`, so that two libraries share a
+signal only when they mean to. A built-in keyword cannot be declared.
 
 ```lisp
-(signal :heartbeat)
-(signal :rate-limit)
-# :heartbeat gets bit 32, :rate-limit gets bit 33
+(signal :http/timeout)
+(def timeout-bit (get (signals) :http/timeout))
+(assert (>= timeout-bit 32) "a user signal takes a bit from 32 up")
 
-# Expression position — returns the keyword
+(signal :http/timeout)
+(assert (= timeout-bit (get (signals) :http/timeout)) "a second declaration shares the bit")
+
 (def my-signal (signal :custom))
-my-signal  # => :custom
-```
+(assert (= my-signal :custom) "in expression position the form is the keyword")
 
-Duplicate registration is a compile-time error. Built-in signal keywords
-cannot be re-registered.
+(let [[ok? err] (protect (compile/whole-module "(signal :error)" "<doc>"))]
+  (assert (not ok?) "a built-in keyword cannot be declared"))
+```
 
 ---
 

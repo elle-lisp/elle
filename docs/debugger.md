@@ -109,8 +109,8 @@ inert `nil` (detached). Denial gates the primitive only: a bare
 capability-checked. Denial is a policy statement about `debug/break`,
 not an information barrier.
 
-**Transparent to signal hygiene.** Three enforcement points must
-exempt tooling pauses:
+**Transparent to signal hygiene.** Three enforcement points must let a
+tooling pause through:
 
 - Squelch/attune enforcement asks one predicate,
   `signals::squelched_bits` ([src/signals/mod.rs](../src/signals/mod.rs)), at all ten sites:
@@ -119,32 +119,32 @@ exempt tooling pauses:
   [src/vm/run_on/jit.rs](../src/vm/run_on/jit.rs) and two in [src/jit/calls/callops.rs](../src/jit/calls/callops.rs). One
   predicate is what keeps the exemptions from drifting apart between
   tiers. It exempts `:error` and `:halt` by intersection, `:switch` by
-  exact equality, and subtracts the pause bits (`SIG_PAUSE`). A
-  boundary that instead converts a tooling pause into a
-  signal-violation discards the suspended frames and leaves the fiber
-  paused-but-resumable over the wreckage — resume re-executes the
-  interrupted instruction against a torn-down stack.
+  exact equality, and any signal that carries the pause bit `:fuel`
+  (`SIG_PAUSE`) whole. A dynamic breakpoint's `:debug|:fuel` therefore
+  passes every boundary, a squelch of `:debug` included, while
+  compiled-in `debug/break` raises plain `:debug`, which is the code's
+  own emit and stays enforceable. A boundary that instead converts a
+  tooling pause into a signal-violation discards the suspended frames
+  and leaves the fiber paused-but-resumable over the wreckage — resume
+  re-executes the interrupted instruction against a torn-down stack.
   [tests/lang/squelch-fuel.lisp](../tests/lang/squelch-fuel.lisp) pins
-  the rule for `:fuel`, one case per charge-site shape. `:debug` joins `SIG_PAUSE`
-  with the debug pause itself; the constant is the single place to add
-  it. `(squelch f :fuel)` is inert — metering is the parent's action,
-  not the closure's behavior, so the boundary has nothing to enforce.
-- The silence enforcement ([src/vm/execute/nested.rs](../src/vm/execute/nested.rs)) kills the process
-  with `std::process::abort` when a statically-silent closure
-  produces any signal. It has no exemption list today; it gains one:
-  pause bits within `:debug|:fuel` pass. It is the interpreter's
-  check alone — no JIT, WASM, or MLIR equivalent exists — and one
-  site suffices: a flagged fiber runs interpreted, so a dynamic pause
-  can only surface there. Compiled-in `debug/break` does not need the
-  exemption — inference marks its callers non-silent.
+  the rule for `:fuel`, one case per charge-site shape, and for a pause
+  that carries a second bit. `(squelch f :fuel)` is inert — metering is
+  the parent's action, not the closure's behavior, so the boundary has
+  nothing to enforce.
+- The boundary of an inferred-silent function is the same predicate
+  over every signal (`Closure::boundary_mask`,
+  [src/value/closure.rs](../src/value/closure.rs)), so a pause passes it
+  as it passes a squelch, and it needs no exemption of its own.
 - `CheckSignalBound` — the `(silence param)` parameter bound — is a
   bind-time check on closure values, not a runtime signal filter.
   Binding a closure to a bounded parameter compares the closure's
   static `signal.bits` against the bound and errors on any excess
   ([src/vm/dispatch/interp/signals.rs](../src/vm/dispatch/interp/signals.rs); the JIT mirrors it; the WASM
-  tier currently drops the instruction). The check subtracts `:debug`
-  from the excess, so a closure that contains `debug/break` still
-  binds to a silence-bounded parameter. Without that, adding a
+  tier currently drops the instruction). Phase 2 makes the check
+  subtract `:debug` from the excess, so a closure that contains
+  `debug/break` still binds to a silence-bounded parameter. Without
+  that, adding a
   breakpoint to a function passed as a silenced argument turns a
   running program into a bind-time signal violation.
 
@@ -225,8 +225,8 @@ Compiled-in `debug/break` does not need the flag to *pause*: the JIT
 compiles suspending functions and side-exits into interpreter-shaped
 frames at the suspension, so the pause is inspectable and resume runs
 interpreted. It does need the flag for stepping and dynamic
-breakpoints, which native code never checks. MLIR refuses functions
-with non-error signals, so a `debug/break` caller is MLIR-ineligible
+breakpoints, which native code never checks. MLIR refuses a function
+that calls anything, so a `debug/break` caller is MLIR-ineligible
 already. Fibers without the flag are unaffected; their JIT'd frames
 remain opaque to inspection while running, as today.
 
@@ -238,7 +238,7 @@ before its implementation.
 | Phase | Contents | Status |
 |-------|----------|--------|
 | 1 | name plumbing (HIR → `LirHead::name` → the template name), `local_names` with three-shape places and parameter entries, the `Bytecode` local count, `fiber/frames`, `fiber/trace`, `fiber/disasm`, `Fresh` region rule, disasm exhaustiveness | name plumbing built; the rest not started |
-| 2 | `debug/break`, attached flag, hygiene exemptions (`:debug` joins `SIG_PAUSE`; silence; silence bounds), denial semantics, JIT side-exit inspectability | not started |
+| 2 | `debug/break`, attached flag, hygiene exemptions (silence bounds), denial semantics, JIT side-exit inspectability | not started |
 | 3 | fiber debug + skip-once fields, owning-key breakpoint table, `debug/break-at`, composed-bit pauses, per-instruction fuel, always-park re-execute frames, tier gate, error-path frame preservation | not started |
 | 4 | `lib/debug.lisp` driver, snapshot/outcome schemas | not started |
 | 5 | identity order (allocation-sequence ordering for reference-identity values), `PrimitiveDef.replay` classes + registry exhaustiveness test, deterministic tier promotion under recording, record/replay mode flag, thread/callback refusal, log schema, `debug:replay`, `debug:bisect` | not started |
@@ -272,7 +272,8 @@ before its implementation.
    [tests/lang/squelch-fuel.lisp](../tests/lang/squelch-fuel.lisp)); a `debug/break-at`
    line pause resolves to that line's first instruction; resume past
    a breakpoint does not re-trigger it (skip-once); a dynamic break
-   inside an inferred-silent function pauses instead of aborting; the
+   inside an inferred-silent function pauses instead of raising a
+   violation; the
    same closure called from a non-flagged fiber takes the JIT path;
    an error under the debug flag exposes every activation's frame.
 4. End-to-end Elle tests: `debug:until` over a loop,

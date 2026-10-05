@@ -1,6 +1,6 @@
 # Compile-Time Operations
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-05 -->
 
 The forms that act at compile time, and the `compile/*` API that reads the
 compiler's model from running code.
@@ -26,8 +26,8 @@ topic docs; this catalog is the map. Its examples run as one program under
 | `defmacro`, quasiquote, `macro?`, `expand-macro` | macro expansion (reader → analyzer) | expands to code |
 | `(elle/epoch N)` | before lexing, then the migration pass before expansion | no (consumed) |
 | `(unicode! …)` | analysis | no (declaration → `nil`; 0-arg query folds to the version array) |
-| `silence`, `muffle`, `attune!` | signal inference | no (shapes the inferred signal) |
-| `silent!`, `numeric!`, `immutable!` | post-inference checks | no (evaluate to `nil`) |
+| `silence`, `muffle` | signal inference | no (shapes the inferred signal) |
+| `silent!`, `attune!`, `numeric!`, `immutable!` | post-inference checks | no (evaluate to `nil`) |
 | `gate!` | macro expansion; the test runs at run time | yes (a runtime guard that raises `:gated`) |
 | `when!` / `unless!` *(proposed)* | analysis | no (the excluded body is not compiled) |
 | `emit` (signal keyword), `yield` | signal recorded at compile time | value emitted at runtime |
@@ -85,7 +85,7 @@ Signals are inferred at compile time and flow up from callee to caller (see
 |---|---|
 | `(silence)` | this function's ceiling is silent: no signal at all, `:error` included |
 | `(silence f)` | the value passed for parameter `f` must be silent, checked at entry; the check may raise, so the function carries `:error` |
-| `(attune! :io)`, `(attune! \|:io :yield\|)` | the most this function may emit |
+| `(attune! :io)`, `(attune! \|:io :yield\|)` | check that this function emits at most these; its signal stays the inferred one |
 | `(muffle :yield)` | squelch the function over these signals when a closure is made from it: the inferred signal loses them and gains `:error` |
 | `(emit :io)`, `(emit :yield value)` | emit a signal; the keyword is recorded at compile time, the value is emitted at run time |
 | `(yield value)` | a macro for `(emit :yield value)` |
@@ -103,6 +103,8 @@ exact two-argument shape of `squelch`.
 (assert (compiles? "(defn pick [b x y] (silence) (if b x y))"))
 (assert (not (compiles? "(defn loud [] (silence) (emit :yield 1))")))
 (assert (not (compiles? "(defn add [x y] (attune! :yield) (error :no))")))
+(assert (= |:error| (get (compile/signal (compile/analyze "(defn add [x y] (attune! |:yield :error|) (+ x y))") :add) :bits))
+        "attune! checks the signal and leaves it as inferred")
 ```
 
 ## Compile-time assertions

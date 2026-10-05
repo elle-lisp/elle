@@ -1,6 +1,6 @@
 # signals
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-05 -->
 
 Signal system for tracking which signals a function may emit. Includes the global signal registry for mapping signal keywords to bit positions.
 
@@ -28,8 +28,8 @@ Signal system for tracking which signals a function may emit. Includes the globa
 | `Signal::halts()` | May halt (SIG_HALT) |
 | `Signal::polymorphic(n)` | Signal depends on parameter n |
 | `Signal::polymorphic_errors(n)` | Polymorphic + may error |
-| `squelched_bits(bits, mask)` | The bits a boundary carrying `mask` converts into a violation when `bits` leave it; every enforcement site on every tier asks it |
-| `bound::violation(value, allowed)` | The message a `(silence p)` bound raises for `value`, judged by a closure's effective signal or a native's declared one |
+| `squelched_bits(bits, mask)` | The bits a boundary carrying `mask` converts into a violation when `bits` leave it; every enforcement site on every tier asks it. A signal that carries `:error`, `:halt` or the pause bit `:fuel` passes whole |
+| `bound::violation(value, allowed)` | The message a `(silence p)` bound raises for `value`, judged by a closure's effective signal or a native's declared one. A closure that passes on its arguments' signals fails, since its bits are a lower bound |
 
 
 ## Predicates
@@ -84,7 +84,7 @@ route the call somewhere.
 
 ### User-Defined Signals
 
-User signals are allocated bits 32–63 (up to 32 user signals per process). Bits 18–31 are reserved for future runtime signals. The registry is append-only — once a keyword is registered, its bit position is fixed for the lifetime of the process.
+User signals are allocated bits 32–63 (up to 32 user signals per process). Bits 18–31 are reserved for future runtime signals. The registry is append-only — once a keyword is registered, its bit position is fixed for the lifetime of the process. Declaring a keyword that is already a user signal answers its bit, in one compile and across compiles, so every declaration of a keyword names one signal.
 
 ### Registry Interface
 
@@ -106,7 +106,7 @@ Every lambda has a signal-related field:
     - An unbounded parameter that is called contributes its position to `propagates`, not a bit
     - `:error` from every construct that checks something at run time ([docs/signals/inference.md](../../docs/signals/inference.md), "What raises")
 
-The programmer-supplied ceiling constraint from `(silence)` is a separate concept — the `silence` form provides a total-silence bound that the compiler checks `inferred_signals` against. When a `silence` bound is present, the compiler checks `inferred_signals.bits == 0`. If the check fails, compile-time error. Signal keywords are not accepted by `silence`.
+A ceiling is a separate concept. `(silence)` declares the empty ceiling and `(attune! spec)` declares `spec`; the compiler checks `inferred_signals` against it, and an excess is a compile error. The ceiling never replaces `inferred_signals`, so a caller sees what the body does. Signal keywords are not accepted by `silence`.
 
 ### Parameter Bounds
 
@@ -121,7 +121,7 @@ The analyzer performs interprocedural signal tracking:
 1. **signal_env**: Maps `Binding` → `Signal` for locally-defined functions
 2. **primitive_signals**: Maps `SymbolId` → `Signal` for primitive functions
 3. **current_param_bounds**: Maps `Binding` → `Signal` for parameters with declared bounds (during lambda analysis)
-4. **current_declared_ceiling**: `Option<Signal>`, the function-level ceiling `(silence)` or `(attune! …)` declared (during lambda analysis)
+4. **current_declared_ceiling**: `Option<Signal>`, the function-level ceiling `(silence)` or `(attune! …)` declared (during lambda analysis), checked and never substituted
 
 When analyzing a call:
 - Direct fn calls: use the fn body's signal

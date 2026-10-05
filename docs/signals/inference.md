@@ -1,6 +1,6 @@
 # Signal Inference
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-05 -->
 
 How the compiler infers each function's signal, and the forms that bound,
 narrow or check it.
@@ -31,7 +31,8 @@ The analyzer accumulates both from the body:
 2. A call to a function whose signal is known: a primitive, a binding in this
    file, or a squelched closure (see below).
 3. A call to a parameter: that parameter's position joins `:propagates`,
-   unless `(silence p)` bounds the parameter.
+   unless `(silence p)` bounds the parameter. The call itself may raise, so
+   it carries `:error` (see below).
 4. A call to anything else, such as a mutable binding or a computed callee:
    every bit a user program can raise.
 5. A construct that checks something at run time, and raises `:error` when
@@ -43,6 +44,12 @@ The analyzer accumulates both from the body:
 
 (def sig (signal-of "(defn call [f x] (f x))" :call))
 (assert (= |0| (get sig :propagates)) "call passes on parameter 0's signal")
+(assert (= |:error| (get sig :bits)) "the call to f may raise")
+
+(def sig (signal-of "(defn call [f x] (yield x) (f x))
+(defn twice [k] (call k 1))" :twice))
+(assert (= |0| (get sig :propagates)) "twice passes on k's signal through call")
+(assert (= |:yield :error| (get sig :bits)) "and keeps what call raises itself")
 
 (def sig (signal-of "(def @h nil) (defn via [x] (h x))" :via))
 (assert (contains? (get sig :bits) :io) "an unknown callee may do anything")
@@ -63,8 +70,14 @@ constructs carry `:error`:
   required parameter pattern, and a `&keys` pattern. An `&opt` or `&named`
   pattern binds `nil` instead of raising, so it adds nothing.
 - Qualified access, `m:k`, which is a `get`.
-- A spliced call, `(f ;xs)`: the argument count is checked at run time, and
-  the spliced value must be a sequence.
+- A call whose argument count the compiler did not check: a spliced call
+  `(f ;xs)`, and a call to a callee whose arity the compiler does not know,
+  such as a parameter or a binding of `squelch`. The spliced value must also
+  be a sequence. A primitive, a stdlib function and a function defined in
+  the file have a known arity, so a call to one with the right count adds
+  nothing, and a call with the wrong count is a compile error.
+- A collection literal with a splice, `[1 ;xs]`: the spliced value must be
+  a sequence.
 - A call to a function with a `&keys` or `&named` collector: the keyword
   arguments are checked at the call.
 - `parameterize`, whose bindings must name parameters.
@@ -82,11 +95,18 @@ constructs carry `:error`:
 (assert (= |:error| (bits-of "(defn f [x] (def [a b] x) a)" :f)))
 (assert (= |:error| (bits-of "(defn f [m] m:k)" :f)))
 (assert (= |:error| (bits-of "(defn g [a] a) (defn f [xs] (g ;xs))" :f)))
+(assert (= |:error| (bits-of "(defn p [] 1) (def q (squelch p :yield))
+(defn f [] (q))" :f)) "q's arity is not known")
+(assert (= || (bits-of "(defn f [x] (identity x))" :f)) "identity's arity is")
+(assert (= |:error| (bits-of "(defn f [x] [1 ;x])" :f)))
 (assert (= |:error| (bits-of "(defn g [&named a] a) (defn f [] (g :a 1))" :f)))
 (assert (= |:error| (bits-of "(defn f [p] (parameterize ((p 1)) 2))" :f)))
 (assert (= |:error| (bits-of "(defn f [] (eval '(+ 1 2)))" :f)))
 (assert (= |:error| (bits-of "(defn f [x] b[x])" :f)))
 (assert (= || (bits-of "(defn f [v] {:a v})" :f)) "a literal key cannot fail")
+
+(assert (string/contains? (compile-error '(fn [] (identity 1 2)))
+                          "arity error: identity expects 1 argument, got 2"))
 ```
 
 ## Declarations inside a function
@@ -143,10 +163,10 @@ forms may appear, one per parameter. A name that is not a parameter is a
 compile error.
 
 ```lisp
-(def sig (signal-of "(defn map-silent [f xs] (silence f) (map f xs))"
-                    :map-silent))
+(def sig (signal-of "(defn twice-silent [f x] (silence f) (f (f x)))"
+                    :twice-silent))
 (assert (= |:error| (get sig :bits)) "the entry check may raise")
-(assert (empty? (get sig :propagates)) "map-silent takes no signal from f")
+(assert (empty? (get sig :propagates)) "twice-silent takes no signal from f")
 
 (assert (string/contains? (compile-error '(fn [x] (silence z) x))
                           "'z' is not a parameter of this function"))
@@ -156,7 +176,9 @@ The compiler does not check the argument at the call site. At entry, a
 closure is checked by its inferred signal and a native function by its
 declared signal; any other value passes, and calling it raises inside the
 function, which the `:error` covers. A value whose signal is not empty fails
-the check with `:signal-violation`:
+the check with `:signal-violation`. So does a closure that passes on the
+signal of its arguments: its bits are only a lower bound, so the check cannot
+show that it fits.
 
 ```lisp
 (defn apply-silent [f x]
@@ -177,6 +199,11 @@ the check with `:signal-violation`:
 (def [ok? err] (protect (apply-silent length [1 2])))
 (assert (string/contains? (get err :message)
                           "length may emit {:error} but parameter is restricted to {}"))
+
+(defn call-it [k] (k))
+(def [ok? err] (protect (apply-silent call-it 42)))
+(assert (string/contains? (get err :message)
+                          "closure passes on the signal of its arguments"))
 ```
 
 A violation nothing catches reports as any uncaught error does, at the call
@@ -184,9 +211,12 @@ that passed the value.
 
 ### `(attune! spec)`
 
-`(attune! spec)` sets the ceiling to `spec` instead of the empty set.
-`(silence)` is the ceiling with nothing in it. A function that may fail but
-must not suspend declares `(attune! :error)`.
+`(attune! spec)` checks that the inferred signal fits `spec`: a body that may
+emit a signal outside `spec` is a compile error. It checks and does not
+replace, so the function's signal stays the inferred one, and a caller sees
+what the body does rather than what the declaration admits. `(silence)` is
+the same check with nothing in `spec`. A function that may fail but must not
+suspend declares `(attune! :error)`.
 
 ```lisp
 (defn add [x y]
@@ -203,6 +233,12 @@ must not suspend declares `(attune! :error)`.
 (assert (string/contains?
           (compile-error '(fn [] (attune! :yield) (println "oops")))
           "function restricted to {:yield} but body may emit {:error"))
+
+(def sig (signal-of "(defn f [x] (attune! |:yield :error|) (+ x 1))" :f))
+(assert (= |:error| (get sig :bits)) "the body raises, and does not yield")
+
+(assert (string/contains? (compile-error '(fn [] (attune! :nosuch) 1))
+                          "attune!: unknown signal keyword :nosuch"))
 ```
 
 ### `(muffle spec)`
@@ -320,13 +356,20 @@ also fires when the squelched closure is called in tail position.
 
 Three classes of signal cross every boundary untouched. `:error` and `:halt`
 pass whole, so squelching `:error` does nothing. The VM's `:switch`
-trampoline passes, and the pause bits such as `:fuel` are subtracted from the
-mask. [signals/mod.rs](../../src/signals/mod.rs) holds the one predicate,
+trampoline passes. A signal that carries `:fuel` is a pause the VM injects
+under whatever code is running, such as a fuel stop or a dynamic breakpoint's
+`|:debug :fuel|`, and it passes whole too.
+[signals/mod.rs](../../src/signals/mod.rs) holds the one predicate,
 `squelched_bits`, that every tier asks.
 
 ```lisp
 (def [ok? err] (protect ((squelch (fn [] (error {:error :mine})) :error))))
 (assert (= :mine (get err :error)) "squelch never blocks :error")
+
+(def paused (fiber/new (fn [] ((squelch (fn [] (emit |:debug :fuel|) 5) :debug)))
+                       |:debug :fuel :error|))
+(fiber/resume paused)
+(assert (= :paused (fiber/status paused)) "the pause passes a squelch of :debug")
 ```
 
 ### Narrowing at compile time
