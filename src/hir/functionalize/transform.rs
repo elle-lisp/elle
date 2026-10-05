@@ -1,3 +1,9 @@
+// audited: 2026-10-04
+//! The functionalize walk: one arm per HIR kind, renaming through the SSA map
+//! and inserting cell operations.
+//!
+//! docs/impl/hir.md
+
 use super::*;
 
 impl<'a> FnCtx<'a> {
@@ -66,6 +72,7 @@ impl<'a> FnCtx<'a> {
                 num_locals,
                 inferred_signals,
                 param_bounds,
+                muffle,
                 doc,
                 origin,
                 assert_numeric,
@@ -98,6 +105,7 @@ impl<'a> FnCtx<'a> {
                         num_locals: *num_locals,
                         inferred_signals: *inferred_signals,
                         param_bounds: param_bounds.clone(),
+                        muffle: *muffle,
                         doc: doc.clone(),
                         origin: *origin,
                         assert_numeric: *assert_numeric,
@@ -107,49 +115,13 @@ impl<'a> FnCtx<'a> {
                 )
             }
 
-            // If: an SSA rename created inside a branch may escape only when a
-            // phi guarded by the same condition is emitted at the merge, and
-            // transform_begin_at is the only place that emits one. Every If
-            // that reaches this arm is one it will NOT emit a phi for: the
-            // begin path intercepts an If with unpreserved branch assigns and
-            // routes it through transform_if_with_phi, which never dispatches
-            // here. So a rename escaping this arm would reach code the branch
-            // does not dominate. Keep those assigns as runtime slot mutations
-            // instead, exactly as the Cond arm below does for the same reason.
-            //
-            // The cond is transformed BEFORE the save: it always executes, so a
-            // rename from an assign inside it must propagate outward.
+            // The branch forms: an SSA rename made inside an arm must not
+            // escape to code the arm does not dominate (branches.rs).
             HirKind::If {
                 cond,
                 then_branch,
                 else_branch,
-            } => {
-                let new_cond = self.transform(cond);
-                let saved = self.renames.clone();
-                let saved_preserved = self.assign_preserved.clone();
-                for branch in [then_branch, else_branch] {
-                    let mut branch_assigns = BTreeSet::new();
-                    self.collect_assigned_bindings(branch, &mut branch_assigns);
-                    for b in &branch_assigns {
-                        let resolved = self.resolve(*b);
-                        self.assign_preserved.insert(resolved);
-                    }
-                }
-                let new_then = self.transform(then_branch);
-                self.renames = saved.clone();
-                let new_else = self.transform(else_branch);
-                self.renames = saved;
-                self.assign_preserved = saved_preserved;
-                Hir::new(
-                    HirKind::If {
-                        cond: Box::new(new_cond),
-                        then_branch: Box::new(new_then),
-                        else_branch: Box::new(new_else),
-                    },
-                    span,
-                    signal,
-                )
-            }
+            } => self.transform_if(cond, then_branch, else_branch, span, signal),
 
             HirKind::Let { bindings, body } => {
                 let new_bindings: Vec<_> = bindings
@@ -316,85 +288,9 @@ impl<'a> FnCtx<'a> {
             HirKind::Cond {
                 clauses,
                 else_branch,
-            } => {
-                let saved = self.renames.clone();
-                let saved_preserved = self.assign_preserved.clone();
-                // When a Cond appears directly in a Begin, transform_begin_at
-                // handles phi-insertion. This handler covers the non-Begin
-                // case (e.g. cond as a let init or function arg), where
-                // assigns must stay as runtime slot mutations.
-                for (_, body) in clauses {
-                    let mut branch_assigns = BTreeSet::new();
-                    self.collect_assigned_bindings(body, &mut branch_assigns);
-                    for b in &branch_assigns {
-                        let resolved = self.resolve(*b);
-                        self.assign_preserved.insert(resolved);
-                    }
-                }
-                if let Some(e) = else_branch {
-                    let mut branch_assigns = BTreeSet::new();
-                    self.collect_assigned_bindings(e, &mut branch_assigns);
-                    for b in &branch_assigns {
-                        let resolved = self.resolve(*b);
-                        self.assign_preserved.insert(resolved);
-                    }
-                }
-                let new_clauses: Vec<_> = clauses
-                    .iter()
-                    .map(|(c, b)| {
-                        self.renames = saved.clone();
-                        (self.transform(c), self.transform(b))
-                    })
-                    .collect();
-                self.renames = saved.clone();
-                let new_else = else_branch.as_ref().map(|e| Box::new(self.transform(e)));
-                self.renames = saved;
-                self.assign_preserved = saved_preserved;
-                Hir::new(
-                    HirKind::Cond {
-                        clauses: new_clauses,
-                        else_branch: new_else,
-                    },
-                    span,
-                    signal,
-                )
-            }
+            } => self.transform_cond(clauses, else_branch.as_deref(), span, signal),
 
-            HirKind::Match { value, arms } => {
-                let new_value = self.transform(value);
-                let saved = self.renames.clone();
-                let saved_preserved = self.assign_preserved.clone();
-                // Non-Begin case: assign_preserved (Begin case uses phi-insertion).
-                for (_, _, body) in arms {
-                    let mut branch_assigns = BTreeSet::new();
-                    self.collect_assigned_bindings(body, &mut branch_assigns);
-                    for b in &branch_assigns {
-                        let resolved = self.resolve(*b);
-                        self.assign_preserved.insert(resolved);
-                    }
-                }
-                let new_arms: Vec<_> = arms
-                    .iter()
-                    .map(|(pat, guard, body)| {
-                        self.renames = saved.clone();
-                        (
-                            pat.clone(),
-                            guard.as_ref().map(|g| self.transform(g)),
-                            self.transform(body),
-                        )
-                    })
-                    .collect();
-                self.renames = saved;
-                self.assign_preserved = saved_preserved;
-                Hir::new(
-                    HirKind::Match {
-                        value: Box::new(new_value),
-                        arms: new_arms,
-                    },
-                    span,
-                    signal,
-                )
-            }
+            HirKind::Match { value, arms } => self.transform_match(value, arms, span, signal),
 
             HirKind::Destructure {
                 pattern,
@@ -522,42 +418,5 @@ impl<'a> FnCtx<'a> {
             | HirKind::QuoteConst(_)
             | HirKind::Error => hir.clone(),
         }
-    }
-
-    /// Transform the operands of a short-circuiting `and`/`or`.
-    ///
-    /// Only the first operand always executes; each later one is conditional on
-    /// the ones before it. Neither form has a phi-insertion path —
-    /// `transform_begin_at` handles Assign, If, Cond, Match and While, and never
-    /// And or Or — so a fresh SSA version forked inside a later operand would
-    /// escape to code that did not evaluate it. Keep those assigns as runtime
-    /// slot mutations, as the If and Cond arms do.
-    ///
-    /// The first operand is transformed before the save: it always runs, so a
-    /// rename from an assign inside it must propagate outward.
-    fn transform_short_circuit(&mut self, exprs: &[Hir]) -> Vec<Hir> {
-        let mut out: Vec<Hir> = Vec::with_capacity(exprs.len());
-        if exprs.is_empty() {
-            return out;
-        }
-        out.push(self.transform(&exprs[0]));
-
-        let saved = self.renames.clone();
-        let saved_preserved = self.assign_preserved.clone();
-        for e in &exprs[1..] {
-            let mut operand_assigns = BTreeSet::new();
-            self.collect_assigned_bindings(e, &mut operand_assigns);
-            for b in &operand_assigns {
-                let resolved = self.resolve(*b);
-                self.assign_preserved.insert(resolved);
-            }
-        }
-        for e in &exprs[1..] {
-            self.renames = saved.clone();
-            out.push(self.transform(e));
-        }
-        self.renames = saved;
-        self.assign_preserved = saved_preserved;
-        out
     }
 }

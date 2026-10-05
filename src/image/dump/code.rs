@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-04
 //! The code-object half of the compacting copy: a payload, and the child code
 //! objects its `MakeClosure` instructions index.
 //!
@@ -40,6 +40,10 @@ pub(super) fn copy_payload(
         )));
     }
     super::portable_signals(t.signal().bits, &format!("closure {}", t.display_label()))?;
+    super::portable_signals(
+        t.muffle(),
+        &format!("the muffle of closure {}", t.display_label()),
+    )?;
     let key = t.payload_backing() as usize;
     if let Some(&copy) = walk.payloads.get(&key) {
         return Ok(copy);

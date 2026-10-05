@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-04
 //! `ClosureTemplate` — the region-resident header of a code object.
 //!
 //! Two words: a `RegionSlice` naming the shared payload, and an optional `Rc`
@@ -160,6 +160,13 @@ impl ClosureTemplate {
     #[inline]
     pub fn signal(&self) -> Signal {
         self.payload().signal()
+    }
+
+    /// The squelch mask the body's `(muffle spec)` declared, which every
+    /// closure of this code object enforces at its boundary.
+    #[inline]
+    pub fn muffle(&self) -> crate::value::fiber::SignalBits {
+        self.payload().muffle()
     }
 
     #[inline]

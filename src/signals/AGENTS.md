@@ -28,6 +28,8 @@ Signal system for tracking which signals a function may emit. Includes the globa
 | `Signal::halts()` | May halt (SIG_HALT) |
 | `Signal::polymorphic(n)` | Signal depends on parameter n |
 | `Signal::polymorphic_errors(n)` | Polymorphic + may error |
+| `squelched_bits(bits, mask)` | The bits a boundary carrying `mask` converts into a violation when `bits` leave it; every enforcement site on every tier asks it |
+| `bound::violation(value, allowed)` | The message a `(silence p)` bound raises for `value`, judged by a closure's effective signal or a native's declared one |
 
 
 ## Predicates

@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-04
 //! Cache the compiled standard library on disk, so a later process
 //! deserializes it instead of running the front end again.
 //! docs/impl/stdlib-cache.md
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Version tag: bump when the serialized layout changes in an incompatible way.
-const FORMAT_VERSION: u32 = 6;
+const FORMAT_VERSION: u32 = 7;
 
 /// Bytes of payload hash a cache file carries ahead of its `StoredBytecode`.
 const PAYLOAD_HASH_BYTES: usize = 8;
@@ -334,6 +334,7 @@ pub fn load_bytecode(
             frame_release_slots: rc.frame_release_slots.clone(),
             frame_release_regions: rc.frame_release_regions.clone(),
             signal: rc.signal,
+            muffle: rc.muffle,
             ..crate::value::TemplateProto::new(rc.bytecode.clone(), rc.arity, rc.constants.clone())
         }
     });

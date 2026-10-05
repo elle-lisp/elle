@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-04
 //! Deserializing a `SendBundle`: every received value is rebuilt on the
 //! receiving heap, in the call's region.
 
@@ -125,6 +125,7 @@ pub(in crate::value::send) fn template_from_sendable(
         num_captures: sc.num_captures,
         num_params: sc.num_params,
         signal: sc.signal,
+        muffle: sc.muffle,
         capture_params_mask: sc.capture_params_mask,
         capture_locals_mask: sc.capture_locals_mask,
         location_map: sc.location_map,
@@ -406,6 +407,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
                 num_captures: sc.num_captures,
                 num_params: sc.num_params,
                 signal: sc.signal,
+                muffle: sc.muffle,
                 capture_params_mask: sc.capture_params_mask,
                 capture_locals_mask: sc.capture_locals_mask,
                 location_map: sc.location_map,

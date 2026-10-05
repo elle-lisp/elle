@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-04
 // docs/threads.md
 // docs/impl/image/sealing.md
 //! Serializing a code object a `MakeClosure` indexes into a `SendableClosure`.
@@ -59,6 +59,7 @@ fn sendable_from_header(
         vararg_kind: t.vararg_kind(),
         name: t.name().map(str::to_string),
         squelch_mask: SignalBits::EMPTY,
+        muffle: t.muffle(),
         env: Vec::new(),
         lir_function: None,
         lir_value_pool: Vec::new(),
@@ -119,6 +120,7 @@ pub(in crate::value::send) fn sendable_from_template(
         vararg_kind: t.vararg_kind.clone(),
         name: t.name.clone(),
         squelch_mask: SignalBits::EMPTY,
+        muffle: t.muffle,
         env: Vec::new(),
         lir_function,
         lir_value_pool,

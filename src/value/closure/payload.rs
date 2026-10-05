@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-04
 // docs/impl/region/template.md
 // docs/impl/image/sealing.md
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
@@ -12,6 +12,7 @@ use crate::hir::region::StaticRegion;
 use crate::reader::SourceLoc;
 use crate::signals::Signal;
 use crate::syntax::Span;
+use crate::value::fiber::SignalBits;
 use crate::value::region_slice::RegionSlice;
 use crate::value::types::Arity;
 use crate::value::Value;
@@ -93,6 +94,10 @@ pub struct CodePayload {
     pub(crate) has_origin: bool,
     pub(crate) arity: Arity,
     pub(crate) signal: Signal,
+    /// The squelch mask every closure of this code object enforces at its
+    /// boundary, from the body's `(muffle spec)`; `signal` is the signal
+    /// after it.
+    pub(crate) muffle: SignalBits,
     pub(crate) capture_params_mask: u64,
     pub(crate) num_locals: u32,
     pub(crate) num_captures: u32,
@@ -283,6 +288,7 @@ impl CodePayload {
             has_origin: false,
             arity: Arity::Exact(0),
             signal: Signal::silent(),
+            muffle: SignalBits::EMPTY,
             capture_params_mask: 0,
             num_locals: 0,
             num_captures: 0,
@@ -357,6 +363,10 @@ impl CodePayload {
 
     pub fn signal(&self) -> Signal {
         self.signal
+    }
+
+    pub fn muffle(&self) -> SignalBits {
+        self.muffle
     }
 
     pub fn capture_params_mask(&self) -> u64 {

@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-04
 //! Syntax to HIR analysis
 //!
 //! docs/impl/hir.md
@@ -21,6 +21,7 @@ mod binding;
 mod call;
 mod destructure;
 mod env;
+mod facts;
 mod fileletrec;
 mod letrec;
 pub use fileletrec::classify_form;
@@ -212,6 +213,10 @@ pub struct Analyzer<'a> {
     /// initialized with a lambda. A user shadow is a new binding, so it
     /// carries its own arity or none — never the primitive's.
     arity_env: HashMap<Binding, Arity>,
+    /// The bindings initialized with a lambda that collects `&keys` or
+    /// `&named`. A call to one checks its keyword arguments at the call, so
+    /// the call carries `:error` (docs/signals/inference.md, "What raises").
+    keyword_collectors: HashSet<Binding>,
 
     /// Signal projections for bindings initialized from imported modules.
     /// Maps a binding to a keyword→signal projection so that qualified
@@ -333,6 +338,7 @@ impl<'a> Analyzer<'a> {
             signal_env: HashMap::new(),
             primitive_signals,
             arity_env: HashMap::new(),
+            keyword_collectors: HashSet::new(),
 
             projection_env: HashMap::new(),
             last_squelch_signal: None,

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-04
 // docs/impl/jit.md
 // docs/impl/region/owner.md
 //! The helpers a compiled call site enters: dispatch by callee kind, and the
@@ -89,7 +89,7 @@ pub extern "C" fn elle_jit_call(
             return JitValue::nil();
         }
 
-        let closure_squelch_mask = closure.squelch_mask;
+        let boundary_mask = closure.boundary_mask();
 
         // JIT-to-JIT fast path: check if callee has JIT code.
         //
@@ -167,9 +167,9 @@ pub extern "C" fn elle_jit_call(
             // Check for suspending signal from callee (SIG_YIELD, SIG_SWITCH, user-defined)
             if let Some((sig, _)) = vm.fiber.signal {
                 if !sig.is_empty() && !sig.intersects(SIG_ERROR) && !sig.intersects(SIG_HALT) {
-                    // Squelch enforcement on the JIT-to-JIT path, through the
+                    // Boundary enforcement on the JIT-to-JIT path, through the
                     // predicate the interpreter's `enforce_squelch` asks.
-                    let squelched = crate::signals::squelched_bits(sig, closure_squelch_mask);
+                    let squelched = crate::signals::squelched_bits(sig, boundary_mask);
                     if !squelched.is_empty() {
                         // `squelch_violation` is the discard chokepoint — it runs
                         // what each parked frame owed before handing back the error
@@ -214,7 +214,7 @@ pub extern "C" fn elle_jit_call(
             .map(|i| unsafe { *args_ptr.add(i) })
             .collect();
 
-        let closure_squelch_mask = closure.squelch_mask;
+        let boundary_mask = closure.boundary_mask();
         // Non-tail call: the callee owns each non-captured fixed param and
         // releases it value-based at its `decref_point`. `build_closure_env`
         // (own_params=true) hands the callee one `CallArgument` owning reference
@@ -238,10 +238,10 @@ pub extern "C" fn elle_jit_call(
         let result = vm.execute_bytecode_saving_stack(&closure.template.code(), &new_env);
         vm.fiber.call_depth -= 1;
 
-        // Squelch enforcement: if the closure has a squelch mask and the callee
-        // returned a suspending signal that matches, convert to signal-violation.
+        // Boundary enforcement: a suspending signal the closure's boundary mask
+        // names becomes a signal-violation.
         let bits = result.bits;
-        let squelched = crate::signals::squelched_bits(bits, closure_squelch_mask);
+        let squelched = crate::signals::squelched_bits(bits, boundary_mask);
         if !squelched.is_empty() {
             // The squelch discard chokepoint (see the JIT-to-JIT arm above).
             let err = vm.squelch_violation(squelched, vm.fiber.signal, depth);

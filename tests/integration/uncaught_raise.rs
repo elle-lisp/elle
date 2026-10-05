@@ -1,6 +1,6 @@
 // audited: 2026-10-04
-// An uncaught raise reports as an ordinary error whatever the raising
-// function's inferred signal: exit 1 and a runtime error line, never an abort.
+// An uncaught raise reports as an ordinary error whatever the raiser's
+// inferred signal: exit 1, never an abort.
 //
 // docs/signals/inference.md
 

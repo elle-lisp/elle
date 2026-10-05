@@ -1,17 +1,16 @@
+// audited: 2026-10-04
 //! Closure construction: capture collection, `MakeClosure`, and the
-//! capture-adopt region accounting that links captured value regions into the
-//! new closure's Owned subtree.
+//! capture-adopt accounting into the closure's Owned subtree.
+//!
+//! docs/impl/region/adopt.md
 
 use crate::hir::{CaptureInfo, ParamBound};
 use crate::lir::lower::*;
 use crate::value::Arity;
 
 impl<'a> Lowerer<'a> {
-    /// Lower a lambda expression (creates closure with captures).
-    ///
-    /// `pub(in crate::lir::lower)` preserves the original `pub(super)` reach:
-    /// `super` was `lir::lower` when this lived one level up; the caller
-    /// (`lower_expr`) still resolves it from that module.
+    /// Lower a lambda expression (creates closure with captures). Reached from
+    /// `lower_expr` in the parent module.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::lir::lower) fn lower_lambda_expr(
         &mut self,
@@ -24,6 +23,7 @@ impl<'a> Lowerer<'a> {
         num_locals: u16,
         inferred_signal: &crate::signals::Signal,
         param_bounds: &[ParamBound],
+        muffle: crate::value::fiber::SignalBits,
         doc: Option<std::rc::Rc<str>>,
         origin: Option<crate::syntax::Span>,
         assert_numeric: bool,
@@ -143,6 +143,7 @@ impl<'a> Lowerer<'a> {
             num_locals,
             *inferred_signal,
             param_bounds,
+            muffle,
             doc,
             origin,
         )?;

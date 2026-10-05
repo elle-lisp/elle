@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-04
 //! Array-call, closure-construction, tail-call, and env-building JIT entry points.
 //!
 //! docs/impl/jit.md
@@ -398,7 +398,7 @@ fn jit_tail_call_inner(
             code: closure.template.code(),
             env: new_env,
             closure: func,
-            squelch_mask: closure.squelch_mask,
+            squelch_mask: closure.boundary_mask(),
         });
         // Hand both stranded releases to the activation that runs the callee. This
         // activation is the compiled caller's, and it pops its own dues slot on the

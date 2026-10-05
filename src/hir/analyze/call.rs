@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-04
 //! Call analysis: the compile-time arity check, and the signal each call raises
 //! across function boundaries.
 //!
@@ -40,6 +40,15 @@ impl<'a> Analyzer<'a> {
                     ));
                 }
             }
+        }
+
+        // What the call checks at run time, and raises on: the count and the
+        // spliced value's shape when an argument is spliced, and the keyword
+        // arguments when the callee collects `&keys` or `&named`. A known
+        // callee with neither is checked above, so its call cannot fail.
+        if has_splice || self.callee_collects_keywords(&func) {
+            self.add_inherent_bits(crate::value::SIG_ERROR);
+            signal = signal.combine(Signal::errors());
         }
 
         // Interprocedural signal tracking: what signal does CALLING this function have?

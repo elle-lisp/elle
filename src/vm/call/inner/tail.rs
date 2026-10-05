@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-04
 //! VM::tail_call_inner — shared TailCall/TailCallArrayMut dispatch.
 //!
 //! docs/impl/vm.md
@@ -372,7 +372,7 @@ impl VM {
                 code: closure.template.code(),
                 env: new_env_rc,
                 closure: func,
-                squelch_mask: closure.squelch_mask,
+                squelch_mask: closure.boundary_mask(),
             });
 
             self.fiber.signal = Some((SIG_OK, Value::NIL));

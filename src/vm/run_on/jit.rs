@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-04
 //! `compile/run-on :jit` — force Cranelift JIT execution, in a build with the
 //! `jit` feature.
 //!
@@ -163,7 +163,7 @@ impl VM {
             // signal is back in place by here — so this asks the shared
             // predicate directly instead of going through `enforce_squelch`.
             let yield_bits = post_signal.map_or(crate::value::SIG_YIELD, |(bits, _)| bits);
-            let squelched = crate::signals::squelched_bits(yield_bits, closure.squelch_mask);
+            let squelched = crate::signals::squelched_bits(yield_bits, closure.boundary_mask());
             if !squelched.is_empty() {
                 // …and the park it ends is `post_signal` for the same reason:
                 // `fiber.signal` holds the caller's by here.
@@ -194,7 +194,7 @@ impl VM {
             // Squelch enforcement for a signal the sentinel did not report —
             // same predicate, same reason for not routing through
             // `enforce_squelch`.
-            let squelched = crate::signals::squelched_bits(bits, closure.squelch_mask);
+            let squelched = crate::signals::squelched_bits(bits, closure.boundary_mask());
             if !squelched.is_empty() {
                 return (
                     SIG_ERROR,

@@ -1,3 +1,4 @@
+// audited: 2026-10-04
 //! Expression lowering - the main `lower_expr` dispatch
 
 use super::*;
@@ -61,6 +62,7 @@ impl<'a> Lowerer<'a> {
                 num_locals,
                 inferred_signals,
                 param_bounds,
+                muffle,
                 doc,
                 origin,
                 assert_numeric,
@@ -74,6 +76,7 @@ impl<'a> Lowerer<'a> {
                 *num_locals,
                 inferred_signals,
                 param_bounds,
+                *muffle,
                 doc.clone(),
                 *origin,
                 *assert_numeric,

@@ -1,3 +1,9 @@
+// audited: 2026-10-04
+//! The `environment`, `parameterize` and `cond` forms, and the qualified
+//! symbol `a:b` as nested `get` calls.
+//!
+//! docs/signals/inference.md
+
 use super::*;
 
 impl<'a> Analyzer<'a> {
@@ -139,6 +145,10 @@ impl<'a> Analyzer<'a> {
         let body = self.analyze_body(&items[2..], span)?;
         signal = signal.combine(body.signal);
 
+        // The VM checks at run time that each binding names a parameter.
+        self.add_inherent_bits(crate::value::SIG_ERROR);
+        signal = signal.combine(Signal::errors());
+
         Ok(Hir::new(
             HirKind::Parameterize {
                 bindings,
@@ -221,8 +231,10 @@ impl<'a> Analyzer<'a> {
 
         // Each subsequent segment: wrap in (get result :segment)
         // Constructs Call nodes directly (not via analyze_call) because
-        // get is a pure primitive with known arity Range(2,3).
+        // get is a primitive with known arity Range(2,3). It may raise, as a
+        // direct `(get m :k)` may, so each step carries :error.
         let get_binding = self.resolve_primitive("get");
+        self.add_inherent_bits(crate::value::SIG_ERROR);
         for segment in &segments[1..] {
             let get_func = Hir::silent(HirKind::Var(get_binding), *span);
             let key = Hir::silent(HirKind::Keyword(segment.to_string()), *span);
@@ -236,6 +248,7 @@ impl<'a> Analyzer<'a> {
             } else {
                 result.signal
             };
+            let call_signal = call_signal.combine(Signal::errors());
             result = Hir::new(
                 HirKind::Call {
                     func: Box::new(get_func),

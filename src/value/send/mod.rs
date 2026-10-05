@@ -1,3 +1,4 @@
+// audited: 2026-10-04
 //! SendValue wrapper for thread-safe value transmission
 //!
 //! This module provides SendValue, a wrapper around Value that implements Send
@@ -55,6 +56,9 @@ pub struct SendableClosure {
     pub vararg_kind: VarargKind,
     pub name: Option<String>,
     pub squelch_mask: SignalBits,
+    /// The code object's muffle mask (`ClosureTemplate::muffle`), enforced at
+    /// every boundary of every closure made from it.
+    pub muffle: SignalBits,
     pub env: Vec<SendValue>,
     /// LIR function for JIT compilation in spawned threads.
     /// Stripped of doc/syntax (not sendable), but retains all JIT-relevant fields.

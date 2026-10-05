@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-04
 //! Where a closure call meets the JIT: the hotness counter, the code cache, and the trampolines back into the interpreter.
 //!
 //! docs/impl/jit.md
@@ -304,7 +304,7 @@ impl VM {
                 .map(|(b, _)| *b)
                 .unwrap_or(SIG_YIELD);
 
-            if self.enforce_squelch(sig, closure.squelch_mask, depth) {
+            if self.enforce_squelch(sig, closure.boundary_mask(), depth) {
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
@@ -355,7 +355,8 @@ impl VM {
                     let mut frames = self.fiber.suspended.take().unwrap_or_default();
                     self.park_suspended_callee_frame(&mut frames, eb, exec_result);
                     self.fiber.suspended = Some(frames);
-                    if self.enforce_squelch(eb, tail.squelch_mask | closure.squelch_mask, depth) {
+                    if self.enforce_squelch(eb, tail.squelch_mask | closure.boundary_mask(), depth)
+                    {
                         self.fiber.stack.push(Value::NIL);
                         return None;
                     }

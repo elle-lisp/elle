@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-04
 // docs/threads.md
 //! Serializing a live closure instance into the bundle's intern table.
 //!
@@ -50,6 +50,7 @@ pub(super) fn send_closure(
         vararg_kind: closure_rc.template.vararg_kind(),
         name: None,
         squelch_mask: SignalBits::EMPTY,
+        muffle: SignalBits::EMPTY,
         env: Vec::new(),
         lir_function: None,
         lir_value_pool: Vec::new(),
@@ -124,6 +125,7 @@ pub(super) fn send_closure(
         vararg_kind: closure_rc.template.vararg_kind(),
         name: closure_rc.template.name().map(str::to_string),
         squelch_mask: closure_rc.squelch_mask,
+        muffle: closure_rc.template.muffle(),
         env,
         lir_function,
         lir_value_pool,

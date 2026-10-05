@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-04
 //! `compile/run-on :bytecode` — force pure interpreter execution.
 //!
 //! docs/impl/differential.md
@@ -32,7 +32,7 @@ impl VM {
         let saved_jit = self.runtime_config.jit.clone();
         self.runtime_config.jit = crate::config::JitPolicy::Off;
 
-        let squelch_mask = closure.squelch_mask;
+        let squelch_mask = closure.boundary_mask();
 
         // Hand the target its executing-closure register via the one-shot — a
         // forced-tier entry runs a closure body like any other entrant.

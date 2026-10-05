@@ -1,9 +1,12 @@
+// audited: 2026-10-04
 //! SSA conversion: eliminate Assign, convert While to Loop/Recur,
 //! explicit cell ops for CaptureCell bindings.
 //!
+//! docs/impl/hir.md
+//!
 //! Transforms imperative HIR (with While/Assign) into functional HIR
 //! (with Loop/Recur, let-chains, and explicit cell operations). This is
-//! the foundation for region inference, type inference, and signal inference.
+//! the foundation for region inference and type inference.
 //!
 //! The transform handles three patterns:
 //!
@@ -73,6 +76,7 @@ struct FnCtx<'a> {
     assign_preserved: BTreeSet<Binding>,
 }
 
+mod branches;
 mod transform;
 
 mod phi;

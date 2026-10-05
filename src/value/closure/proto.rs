@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-04
 // docs/impl/region/template.md
 //! `TemplateProto` — a code object's compile-time blueprint.
 //!
@@ -15,6 +15,7 @@ use crate::hir::region::{RuntimeRegion, StaticRegion};
 use crate::hir::VarargKind;
 use crate::signals::Signal;
 use crate::value::arena::{alloc_in_region, alloc_region_slice_in_region};
+use crate::value::fiber::SignalBits;
 use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::HeapObject;
 use crate::value::region_slice::RegionSlice;
@@ -44,6 +45,10 @@ pub struct TemplateProto {
     pub num_params: usize,
     /// Signal of the closure body.
     pub signal: Signal,
+    /// The signals the body's `(muffle spec)` declared: the squelch mask
+    /// every closure made from this blueprint enforces at its boundary.
+    /// `signal` is already the signal after the muffle.
+    pub muffle: SignalBits,
     /// Bit i set means parameter i is mutated and needs a cell.
     pub capture_params_mask: u64,
     /// Which locally-defined variables need a cell. Unbounded in width, so an
@@ -117,6 +122,7 @@ impl TemplateProto {
             num_captures: 0,
             num_params: 0,
             signal: Signal::silent(),
+            muffle: SignalBits::EMPTY,
             capture_params_mask: 0,
             capture_locals_mask: CaptureMask::empty(),
             location_map: LocationMap::new(),
@@ -162,6 +168,7 @@ impl TemplateProto {
             num_captures,
             num_params: func.num_params,
             signal: func.signal,
+            muffle: func.muffle,
             capture_params_mask: func.capture_params_mask,
             capture_locals_mask: func.capture_locals_mask.clone(),
             location_map: bytecode.location_map,
@@ -205,6 +212,7 @@ impl TemplateProto {
             num_captures: meta.num_captures,
             num_params: meta.num_params,
             signal: meta.signal,
+            muffle: code.muffle,
             capture_params_mask: meta.capture_params_mask,
             capture_locals_mask: meta.capture_locals_mask,
             wasm_func_idx: Some(meta.wasm_func_idx),
@@ -334,6 +342,7 @@ pub(super) fn materialize_payload(
         has_origin: proto.origin.is_some(),
         arity: proto.arity,
         signal: proto.signal,
+        muffle: proto.muffle,
         capture_params_mask: proto.capture_params_mask,
         num_locals: proto.num_locals as u32,
         num_captures: proto.num_captures as u32,

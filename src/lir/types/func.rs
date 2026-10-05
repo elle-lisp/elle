@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-04
 //! A lowered function — its blocks, registers and constants — with the
 //! metadata the emitter records for the JIT and the region system.
 //!
@@ -41,6 +41,10 @@ pub struct LirFunction {
     pub capture_locals_mask: crate::value::CaptureMask,
     /// Signal of this function (Silent, Yields, or Polymorphic)
     pub signal: Signal,
+    /// The signals `(muffle spec)` declared: the squelch mask every closure
+    /// made from this function enforces at its boundary. `signal` is already
+    /// the signal after the muffle.
+    pub muffle: crate::value::fiber::SignalBits,
     /// Optional docstring from the source lambda. Plain `Rc<str>` compile-time
     /// data, never a heap `Value` — materialized as a fresh ordinary
     /// (reclaimable) allocation on `(doc f)`.
@@ -158,6 +162,7 @@ impl LirFunction {
             capture_params_mask: 0,
             capture_locals_mask: crate::value::CaptureMask::empty(),
             signal: Signal::silent(),
+            muffle: crate::value::fiber::SignalBits::EMPTY,
             doc: None,
             origin: None,
             vararg_kind: crate::hir::VarargKind::List,

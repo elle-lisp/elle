@@ -1,3 +1,4 @@
+// audited: 2026-10-04
 //! File-scope letrec compilation for top-level forms.
 
 use super::*;
@@ -120,17 +121,9 @@ impl<'a> Analyzer<'a> {
             self.arena.get_mut(binding).is_immutable = true;
         }
 
-        // Seed signal_env and arity_env for lambda forms so self-recursive
-        // calls don't default to Yields during analysis.
-        if Self::is_lambda_syntax(value_syntax) {
-            self.signal_env.insert(binding, Signal::silent());
-            if let Some(list) = value_syntax.as_list() {
-                if let Some(params_syn) = list.get(1).and_then(|s| s.as_list_or_tuple()) {
-                    self.arity_env
-                        .insert(binding, Self::arity_from_syntax_params(params_syn));
-                }
-            }
-        }
+        // A call that precedes the lambda reads the seed, not the
+        // unknown-callee fallback.
+        self.seed_lambda_facts(binding, value_syntax);
 
         PreBound::Simple {
             binding,
@@ -183,17 +176,6 @@ impl<'a> Analyzer<'a> {
             immutable,
             leaf_bindings,
             deferred_leaves,
-        }
-    }
-
-    /// Check if a syntax node is a lambda form: `(fn ...)`.
-    fn is_lambda_syntax(syntax: &Syntax) -> bool {
-        if let Some(list) = syntax.as_list() {
-            list.first()
-                .and_then(|s| s.as_symbol())
-                .is_some_and(|s| s == "fn")
-        } else {
-            false
         }
     }
 

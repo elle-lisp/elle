@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-04
 //! Lambda body compilation: state save/restore, environment layout, and
 //! lowering the body into its own `LirFunction`.
 
@@ -23,6 +23,7 @@ impl<'a> Lowerer<'a> {
         _num_locals: u16,
         inferred_signal: crate::signals::Signal,
         param_bounds: &[ParamBound],
+        muffle: crate::value::fiber::SignalBits,
         doc: Option<std::rc::Rc<str>>,
         origin: Option<crate::syntax::Span>,
     ) -> Result<LirFunction, String> {
@@ -276,8 +277,9 @@ impl<'a> Lowerer<'a> {
 
         self.current_func.entry = Label(0);
         self.current_func.num_regs = self.next_reg;
-        // Propagate inferred signal to LIR function
+        // Propagate inferred signal and the muffle mask to the LIR function
         self.current_func.signal = inferred_signal;
+        self.current_func.muffle = muffle;
 
         self.current_function_binding = None;
         self.current_function_params = None;

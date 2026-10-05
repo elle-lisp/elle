@@ -1,3 +1,4 @@
+// audited: 2026-10-04
 //! Lambda analysis: (fn (params...) body...)
 
 use super::*;
@@ -233,22 +234,16 @@ impl<'a> Analyzer<'a> {
         let body = if param_destructures.is_empty() {
             body
         } else {
-            let body_signal = body.signal;
-            let mut exprs: Vec<Hir> = param_destructures
-                .into_iter()
-                .map(|(pattern, tmp, strict)| {
-                    Hir::silent(
-                        HirKind::Destructure {
-                            pattern,
-                            strict,
-                            value: Box::new(Hir::silent(HirKind::Var(tmp), span)),
-                        },
-                        span,
-                    )
-                })
-                .collect();
+            let mut signal = body.signal;
+            let mut exprs: Vec<Hir> = Vec::with_capacity(param_destructures.len() + 1);
+            for (pattern, tmp, strict) in param_destructures {
+                let destr =
+                    self.destructure(pattern, Hir::silent(HirKind::Var(tmp), span), strict, span);
+                signal = signal.combine(destr.signal);
+                exprs.push(destr);
+            }
             exprs.push(body);
-            Hir::new(HirKind::Begin(exprs), span, body_signal)
+            Hir::new(HirKind::Begin(exprs), span, signal)
         };
 
         let num_locals = self.current_local_count();
@@ -257,6 +252,11 @@ impl<'a> Analyzer<'a> {
         // Must happen before draining current_param_bounds, since
         // compute_inferred_signal reads them for bounded params.
         let mut inferred_signals = self.compute_inferred_signal(&body, &params);
+
+        // A parameter bound is checked at entry, and the check may raise.
+        if !self.current_param_bounds.is_empty() {
+            inferred_signals = inferred_signals.combine(Signal::errors());
+        }
 
         // Check silent! assertion (before ceiling/muffle adjustments)
         if self.current_silence_assert && (inferred_signals != Signal::silent()) {
@@ -301,17 +301,21 @@ impl<'a> Analyzer<'a> {
             .map(|(binding, signal)| ParamBound { binding, signal })
             .collect();
         let declared_ceiling = self.current_declared_ceiling.take();
-        let muffle_bits = std::mem::replace(
+        let muffle = std::mem::replace(
             &mut self.current_muffle_bits,
             crate::value::fiber::SignalBits::EMPTY,
         );
 
-        // When (silence) is declared, verify the body's inferred signal
-        // fits within the ceiling.  Muffled bits expand the ceiling —
-        // they are allowed in the body but excluded from the external signal.
+        // A muffle is a squelch of the function itself, applied when a closure
+        // is made from it: the boundary turns a muffled signal into an error,
+        // so the signal a caller sees loses the muffled bits and gains :error,
+        // exactly as a squelched closure's does.
+        inferred_signals = inferred_signals.squelch(muffle);
+
+        // A declared ceiling is checked against what leaves the function,
+        // which is the signal after the muffle.
         if let Some(ceiling) = &declared_ceiling {
-            let effective_ceiling = ceiling.bits | muffle_bits;
-            let excess = inferred_signals.bits.subtract(effective_ceiling);
+            let excess = inferred_signals.bits.subtract(ceiling.bits);
             if !excess.is_empty() {
                 return Err(format!(
                     "{}: function restricted to {} but body may emit {}",
@@ -327,10 +331,6 @@ impl<'a> Analyzer<'a> {
                 ));
             }
             inferred_signals = *ceiling;
-        } else if !muffle_bits.is_empty() {
-            // No silence, but muffle is active: subtract muffled bits
-            // from the inferred signal.
-            inferred_signals.bits = inferred_signals.bits.subtract(muffle_bits);
         }
 
         self.pop_scope();
@@ -389,6 +389,7 @@ impl<'a> Analyzer<'a> {
                 num_locals,
                 inferred_signals,
                 param_bounds,
+                muffle,
                 doc,
                 origin,
                 assert_numeric,
