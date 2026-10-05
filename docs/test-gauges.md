@@ -1,6 +1,6 @@
 # The test runner's heap gauges
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-05 -->
 
 What each file of an `elle test` run cost the runner's own heap, and the heaps its test code ran on.
 
@@ -114,13 +114,54 @@ The runner's window for that file contains them too.
 So a file with no `test` rows was not measured, and a `test` row that reads 0
 was measured and did not move.
 
+## A file's charge, for the ratchet
+
+`elle test --charge PATHS` runs each path in-process twice. It reads the
+runner heap around the second run alone, from the moment that run starts until
+its results are recorded. Each file then has three readings for the producer
+`elle test`, with the path as the subject: `objects`, `regions` and `pages`
+([ratchet](ratchet.md)). The first two are what the run left live, and `pages`
+counts every page it claimed, freed or kept. The `gauge` rows still chain over
+both runs.
+
+The second run is the reading because a window over a file's first run holds
+work that is not the file's own, and its size follows what ran before:
+
+- A cache the runtime fills on first use is charged to the first file that
+  needs it. The first file of a batch pays 23 objects more than a later run of
+  itself, and a file run after another that needed the same entry pays 2
+  objects and a region less.
+- A window that opens at the previous boundary holds the gauge rows written
+  for the previous file.
+- A store that already holds a file's output skips the CAS write a fresh store
+  makes, and CI starts every job with a fresh store.
+
+The second run starts after its own first run filled the caches and the CAS,
+and its window opens after every earlier recording. Its charge is the same
+whatever ran before it, on a fresh store or a warm one, and on a loaded box.
+A cost the file pays once per runtime, such as a cache entry keyed by the
+file, falls in the first run, so the reading does not show it.
+
+The readings are recorded against the last result of the file's second run.
+A row of the file's that the run did not read is `missing`. `--charge` refuses
+`--isolate`, whose child would leave the runner nothing but the spawn to
+charge, and `-e`, whose form has no file to name.
+
+`make smoke-impl` runs `--charge` on the rig, in a pass of its own, over the
+language suite and the implementation files with no sidecar. A file with a
+sidecar needs a mode that an in-process run cannot give it. The pass leaves
+out the producers, which have their own pass, and
+[config.lisp](../tests/impl/config.lisp), which asserts that a program cannot
+change the JIT policy the in-process runner sets.
+
 ## Why a table of its own
 
 A delta belongs to a file rather than to a result. A `result` column
 would copy one runner number onto every row of the file, and a test-heap sum
 covers every tier of every form at once. A `measurement` row is the wrong home
-too: it carries a reading a producer printed and the verdict it earned, and a
-per-file delta has neither a producer nor a row to be judged by.
+too: it carries a reading and the verdict it earned, and a chained delta
+follows what ran before the file, so no row could judge it. A file's charge is
+the reading that can be judged.
 
 ## The summary names the top growers
 

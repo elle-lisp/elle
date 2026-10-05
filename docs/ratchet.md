@@ -89,10 +89,13 @@ mechanism `SKIP (gated):` uses today ([test-runner](test-runner.md)).
 
 ### The ledger
 
-The ledger is a directory of Elle data files, `tests/ledger/`, one file per
-producer, each under the reading budget. A file opens with the epoch
-declaration every Elle file carries, then the producer it answers for as
-`(producer "tests/impl/plumb.lisp")`, then one row per line:
+The ledger is a directory of Elle data files, `tests/ledger/`, each under the
+reading budget. A file opens with the epoch declaration every Elle file
+carries, then the producer it answers for as
+`(producer "tests/impl/plumb.lisp")`, then one row per line. A producer whose
+rows outgrow the budget spreads them over several files that name it, and the
+runner reads them as one ledger. A (subject, axis) row of one build appears in
+one file only.
 
 ```text
 ["objects gauge (live-growth)" :objects :floor 0.5 :class :growth]
@@ -266,21 +269,20 @@ build whose ledger holds no row of its own has every reading adopted, which is
 how a build joins the ratchet. A reading adopted on a build other than the
 reference build is adopted as a `:build` row. A producer with no ledger file
 gets one by hand, never from the tool. The rewrite is in
-[repin.lisp](../lib/ratchet/repin.lisp): it scans the ledger's text for the
-row's brackets, replaces the bound's token, and appends an adopted row after
-the last one.
+[repin.lisp](../lib/ratchet/repin.lisp): it scans the text of the file that
+holds the row for the row's brackets and replaces the bound's token. It
+appends an adopted row after the last row of the producer's file that sorts
+last by name.
 
 A `run` row records the build's key, or NULL for a run with none, so a
 reading's history groups by the build that read it ([test-store](test-store.md)).
 The runner imports the ledger module for the row reader, the judge and the line
 reader, and the re-pin module for the rewrite.
 
-The runner is also a producer. It reads its own three gauges at every file
-boundary today and pins none of them. At the end of a run it reports, for the
-producer `elle test`, the largest delta any one file charged on each gauge.
-The ledger pins the three. A compiler change that raises every file's compile
-cost moves the maximum, which is the regression this exists to catch, and the
-per-file rows in `gauge` keep saying which file.
+The runner is also a producer. Under `--charge` it reads what each file's
+second run charged its own heap, three readings per file for the producer
+`elle test`, with the file's path as the subject
+([test-gauges](test-gauges.md)).
 
 ### The instrument
 
@@ -315,8 +317,6 @@ nothing else does: each reads a number no test reads today. A test that
 already measures joins the ratchet by importing the instrument and committing
 its ledger, and needs no paragraph here; what it reads is that test's header,
 and why its rows are what they are is its ledger's comments.
-
-**The runner**, as above.
 
 **Rust tests** can print the same line, and nothing collects it until
 `elle test --rust` exists ([test-cli](test-cli.md)). The line format is the

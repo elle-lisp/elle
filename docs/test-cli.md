@@ -1,6 +1,6 @@
 # Driving the test runner
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-05 -->
 
 Why `elle test` exists, the command line it offers, what it refuses to
 offer, and what is still design.
@@ -22,7 +22,7 @@ How a run executes is [test-runner](test-runner.md); where it is stored is
 > against the ledger of the run's build ([ratchet](ratchet.md)), `--repin`, the merge of another
 > store's runs, and the
 > `--query`/`--summary`/`--reset`/`--promote`/`-e`/`--timeout`/`--wide`/
-> `--wide-timeout`/`--budget`/`--corpus`/`--db`/`--isolate`/`--host`/`--import`
+> `--wide-timeout`/`--budget`/`--corpus`/`--db`/`--isolate`/`--host`/`--import`/`--charge`
 > flags.
 > Still design (not built): semantic selection
 > (`--touches`/`--caps`/`--impacted-by`/`--changed`/`--rerun-failed`/`-k`),
@@ -129,6 +129,7 @@ elle test [paths...]            # run each path, write DB
   --wide-timeout MS             # the budget a wide path's forms get (default: --timeout)
   --budget                      # print each named path's budget in ms, then exit; no run
   --repin                       # after the run, move the ledger to what it read (see below)
+  --charge                      # run each path in-process twice; read the second run's charge on the runner heap
   --prune POLICY                # explicit history pruning (e.g. --prune adhoc)
   -N                            # stop after N failures (-1 = fail-fast); default: run to completion
 ```
@@ -195,6 +196,13 @@ nothing to move, and `--repin` refuses it before it runs anything. The run's
 rows keep the verdicts they earned, so the store says what the ledger looked
 like before the move, and the exit code is the run's gate as it was. The tool
 prints each row it moved.
+
+### A file's charge
+
+`--charge` runs each path in-process twice and reads what the second run cost
+the runner's own heap, as three readings per file for the producer `elle test`
+([test-gauges](test-gauges.md) says why the second run). It refuses
+`--isolate` and `-e`.
 
 ### Execution and completion
 
