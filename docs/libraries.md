@@ -1,6 +1,6 @@
 # Libraries
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-04 -->
 
 Elle ships with libraries in `lib/`. All follow the closure-as-module
 pattern and are imported via `(import "std/<name>")`.
@@ -42,7 +42,7 @@ pattern and are imported via `(import "std/<name>")`.
 |--------|--------|-------------|
 | telemetry | `(import "std/telemetry")` | OpenTelemetry metrics (OTLP/HTTP JSON export) |
 | resource | `(import "std/resource")` | Deterministic resource consumption measurement |
-| ratchet | `((import "std/ratchet"))` | Measure a shape and judge the reading against the committed ledger. See [ratchet.md](../lib/ratchet.md) |
+| ratchet | `((import "std/ratchet"))` | Measure a shape and print a reading line for the runner to judge against the committed ledger. See [ratchet.md](../lib/ratchet.md) |
 
 ## GPU and Graphics
 
