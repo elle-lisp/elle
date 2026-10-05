@@ -1,3 +1,4 @@
+// audited: 2026-10-04
 //! The `letrec` binding form analyzer.
 
 use super::*;
@@ -131,8 +132,9 @@ impl<'a> Analyzer<'a> {
         // instructions. This matches analyze_file_letrec's optimistic
         // seeding strategy.
         for entry in &entries {
-            if let LetrecEntry::Simple(binding, _) = entry {
+            if let LetrecEntry::Simple(binding, value_syntax) = entry {
                 self.signal_env.insert(*binding, Signal::silent());
+                self.seed_lambda_facts(*binding, value_syntax);
             }
         }
 
@@ -153,21 +155,7 @@ impl<'a> Analyzer<'a> {
                     // may now read this binding's value.
                     self.arena.get_mut(*binding).init_pending = false;
                     // Track signal and arity for interprocedural analysis
-                    if let HirKind::Lambda {
-                        params: lambda_params,
-                        num_required,
-                        rest_param,
-                        inferred_signals,
-                        ..
-                    } = &value.kind
-                    {
-                        self.signal_env.insert(*binding, *inferred_signals);
-                        let arity = Arity::for_lambda(
-                            rest_param.is_some(),
-                            *num_required,
-                            lambda_params.len(),
-                        );
-                        self.arity_env.insert(*binding, arity);
+                    if self.record_lambda_facts(*binding, &value) {
                         lambda_entries.push((bindings.len(), *binding, value_syntax));
                     }
                     self.apply_transient_binding_state(*binding);
@@ -285,19 +273,13 @@ impl<'a> Analyzer<'a> {
         let final_body = if destructures.is_empty() {
             body
         } else {
-            let mut exprs: Vec<Hir> = destructures
-                .into_iter()
-                .map(|(pattern, tmp)| {
-                    Hir::silent(
-                        HirKind::Destructure {
-                            pattern,
-                            value: Box::new(Hir::silent(HirKind::Var(tmp), span)),
-                            strict: true,
-                        },
-                        span,
-                    )
-                })
-                .collect();
+            let mut exprs: Vec<Hir> = Vec::with_capacity(destructures.len() + 1);
+            for (pattern, tmp) in destructures {
+                let destr =
+                    self.destructure(pattern, Hir::silent(HirKind::Var(tmp), span), true, span);
+                signal = signal.combine(destr.signal);
+                exprs.push(destr);
+            }
             exprs.push(body);
             Hir::new(HirKind::Begin(exprs), span, signal)
         };

@@ -158,6 +158,11 @@ impl<'a> LirView<'a> {
         self.head.signal
     }
 
+    /// The squelch mask `(muffle spec)` declared.
+    pub fn muffle(&self) -> crate::value::fiber::SignalBits {
+        self.head.muffle
+    }
+
     /// How the rest parameter collects. Allocates for a `&named` key set.
     pub fn vararg_kind(&self) -> crate::hir::VarargKind {
         self.head.vararg.kind()
@@ -301,6 +306,7 @@ impl<'a> LirView<'a> {
             capture_params_mask: self.capture_params_mask(),
             capture_locals: self.head.capture_locals.to_vec(),
             signal: self.signal(),
+            muffle: self.muffle(),
             vararg_kind: self.vararg_kind(),
             rest_list_layout: self.rest_list_layout(),
             region_table: self.region_table().to_vec(),

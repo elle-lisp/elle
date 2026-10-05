@@ -124,6 +124,7 @@ pub(in crate::value::send) fn parts_from_sendable(
         num_captures: sc.num_captures,
         num_params: sc.num_params,
         signal: sc.signal,
+        muffle: sc.muffle,
         capture_params_mask: sc.capture_params_mask,
         capture_locals_mask: sc.capture_locals_mask,
         location_map: sc.location_map,

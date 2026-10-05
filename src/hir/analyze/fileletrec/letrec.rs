@@ -1,3 +1,9 @@
+// audited: 2026-10-04
+//! The three passes over a file's top-level forms: pre-bind every name,
+//! analyze each initializer, and run the signal fixpoint over the lambdas.
+//!
+//! docs/pipeline.md
+
 use super::*;
 
 impl<'a> Analyzer<'a> {
@@ -127,21 +133,7 @@ impl<'a> Analyzer<'a> {
                     signal = signal.combine(value.signal);
 
                     let bindings_idx = bindings.len();
-                    if let HirKind::Lambda {
-                        params: lambda_params,
-                        num_required,
-                        rest_param,
-                        inferred_signals,
-                        ..
-                    } = &value.kind
-                    {
-                        self.signal_env.insert(*binding, *inferred_signals);
-                        let arity = Arity::for_lambda(
-                            rest_param.is_some(),
-                            *num_required,
-                            lambda_params.len(),
-                        );
-                        self.arity_env.insert(*binding, arity);
+                    if self.record_lambda_facts(*binding, &value) {
                         lambda_entries.push((bindings_idx, *binding, *value_syntax));
                     }
                     self.apply_transient_binding_state(*binding);
@@ -181,14 +173,9 @@ impl<'a> Analyzer<'a> {
                     let tmp = self.bind("__destructure_tmp", &[], BindingScope::Local);
                     bindings.push((tmp, value));
 
-                    let destructure_hir = Hir::silent(
-                        HirKind::Destructure {
-                            pattern,
-                            value: Box::new(Hir::silent(HirKind::Var(tmp), span)),
-                            strict: true,
-                        },
-                        span,
-                    );
+                    let destructure_hir =
+                        self.destructure(pattern, Hir::silent(HirKind::Var(tmp), span), true, span);
+                    signal = signal.combine(destructure_hir.signal);
                     let destr_gensym = format!("__file_destr_{}", gensym_counter);
                     gensym_counter += 1;
                     let destr_binding = self.bind(&destr_gensym, &[], BindingScope::Local);

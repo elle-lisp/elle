@@ -28,6 +28,7 @@ impl<'a> Lowerer<'a> {
         _num_locals: u16,
         inferred_signal: crate::signals::Signal,
         param_bounds: &[ParamBound],
+        muffle: crate::value::fiber::SignalBits,
         doc: Option<std::rc::Rc<str>>,
         origin: Option<crate::syntax::Span>,
     ) -> Result<LirOwned, String> {
@@ -286,8 +287,9 @@ impl<'a> Lowerer<'a> {
         let head = self.head();
         head.entry = Label(0);
         head.num_regs = num_regs;
-        // Propagate inferred signal to LIR function
+        // Propagate inferred signal and the muffle mask to the LIR function
         head.signal = inferred_signal;
+        head.muffle = muffle;
 
         self.current_function_binding = None;
         self.current_function_params = None;

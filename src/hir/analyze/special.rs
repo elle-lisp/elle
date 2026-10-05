@@ -1,3 +1,4 @@
+// audited: 2026-10-04
 //! Special forms: yield, match, silence
 
 use super::*;
@@ -128,18 +129,17 @@ impl<'a> Analyzer<'a> {
 
     /// Analyze a `(muffle signal-spec)` form.
     ///
-    /// muffle is a declaration, not an expression. It must appear inside
-    /// a lambda body. It absorbs specific signal bits from the body's
-    /// inferred signal — they are allowed in the body but excluded from
-    /// the function's external signal.
+    /// muffle is a declaration, not an expression. It must appear inside a
+    /// lambda body. It accumulates the bits `analyze_lambda` squelches the
+    /// function over: the inferred signal loses them and gains `:error`, and
+    /// every closure made from the lambda enforces them at its boundary.
     ///
-    /// When used with `(silence)`, muffled bits expand the ceiling:
-    /// `(silence) (muffle :error)` allows `:error` in the body.
-    /// Without `(silence)`, muffled bits are subtracted from the inferred signal.
+    /// `:error` and `:halt` pass every boundary, so a spec naming either is
+    /// rejected here rather than silently kept.
     ///
     /// Forms:
-    /// - `(muffle :keyword)` — absorb a single signal
-    /// - `(muffle |:kw1 :kw2|)` — absorb a set of signals
+    /// - `(muffle :keyword)` — squelch a single signal
+    /// - `(muffle |:kw1 :kw2|)` — squelch a set of signals
     pub(crate) fn analyze_muffle(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if self.fn_depth == 0 {
             return Err(format!(
@@ -157,6 +157,14 @@ impl<'a> Analyzer<'a> {
         }
 
         let bits = self.resolve_static_signal(&args[0])?;
+        let escapes = bits.intersection(crate::signals::SIG_ERROR.union(crate::signals::SIG_HALT));
+        if !escapes.is_empty() {
+            return Err(format!(
+                "{}: muffle: {} passes every boundary and cannot be muffled",
+                span,
+                crate::signals::registry::format_bits(escapes)
+            ));
+        }
         self.current_muffle_bits |= bits;
 
         Ok(Hir::silent(HirKind::Nil, span))
@@ -186,8 +194,7 @@ impl<'a> Analyzer<'a> {
         };
 
         // Track direct signal emission — inherent to this function.
-        self.current_signal_sources.direct_bits =
-            self.current_signal_sources.direct_bits.union(signal_bits);
+        self.add_inherent_bits(signal_bits);
 
         let signal = Signal {
             bits: signal_bits,
@@ -311,10 +318,7 @@ impl<'a> Analyzer<'a> {
             .any(|(p, g, _)| g.is_none() && p.is_irrefutable());
         if !total {
             signal = signal.combine(Signal::errors());
-            self.current_signal_sources.direct_bits = self
-                .current_signal_sources
-                .direct_bits
-                .union(crate::value::SIG_ERROR);
+            self.add_inherent_bits(crate::value::SIG_ERROR);
         }
 
         // Reachability check: an arm no value can reach is a compile-time error

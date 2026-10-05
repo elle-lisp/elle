@@ -54,6 +54,7 @@ pub(super) fn freeze(work: &mut Work) -> Result<LirOwned, String> {
         capture_params_mask: head.capture_params_mask,
         capture_locals: head.capture_locals_mask.words().to_vec(),
         signal: head.signal,
+        muffle: head.muffle,
         vararg_kind: head.vararg_kind.clone(),
         rest_list_layout: head.rest_list_layout,
         region_table: std::mem::take(&mut head.region_table),

@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-04
 //! Signal type for tracking which signals a function may emit.
 //!
 //! docs/signals/protocol.md
@@ -20,11 +20,12 @@
 //! different phases. The `propagates` field has no runtime analogue. Do not
 //! attempt to unify them.
 
+pub mod bound;
 pub mod dispatch;
+mod display;
 pub mod registry;
 
 use crate::value::fiber::SignalBits;
-use std::fmt;
 
 // ---------------------------------------------------------------------------
 // Signal constants — canonical definitions
@@ -457,43 +458,6 @@ impl Signal {
 impl Signal {
     pub const SILENT: Signal = Signal::silent();
     pub const YIELDS: Signal = Signal::yields();
-}
-
-impl fmt::Display for Signal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.propagates != 0 {
-            let indices: Vec<_> = self.propagated_params().map(|i| i.to_string()).collect();
-            write!(f, "polymorphic({})", indices.join(","))?;
-        } else if self.bits.intersects(SIG_YIELD) {
-            write!(f, "yields")?;
-        } else if self.bits.intersects(SIG_IO) {
-            // An async primitive raises `:io` and no longer claims `:yield`, so
-            // without this arm every port and socket signal would print as
-            // "silent" — the one word it is not.
-            write!(f, "io")?;
-        } else {
-            write!(f, "silent")?;
-        }
-
-        // Append capability flags
-        let mut flags = Vec::new();
-        if self.bits.intersects(SIG_ERROR) {
-            flags.push("errors");
-        }
-        if self.bits.intersects(SIG_HALT) {
-            flags.push("halts");
-        }
-        if self.bits.intersects(SIG_FFI) {
-            flags.push("ffi");
-        }
-        if self.bits.intersects(SIG_DEBUG) {
-            flags.push("debug");
-        }
-        if !flags.is_empty() {
-            write!(f, "+{}", flags.join("+"))?;
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]

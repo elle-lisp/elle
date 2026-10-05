@@ -98,6 +98,13 @@ impl ClosureTemplate {
         self.payload().signal()
     }
 
+    /// The squelch mask the body's `(muffle spec)` declared, which every
+    /// closure of this code object enforces at its boundary.
+    #[inline]
+    pub fn muffle(&self) -> crate::value::fiber::SignalBits {
+        self.payload().muffle()
+    }
+
     #[inline]
     pub fn num_locals(&self) -> usize {
         self.payload().num_locals()

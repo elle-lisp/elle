@@ -23,10 +23,10 @@
 (assert (= || (bits-of "(defn f [x] (muffle :yield) x)" :f))
         "a muffle of a signal the body never raises changes nothing")
 (assert (= |:error|
-           (bits-of "(defn f [] (muffle |:yield :io|) (println 1) (yield 1) 2)"
+           (bits-of "(defn f [] (muffle |:yield :io|) (emit :io 1) (yield 1) 2)"
                     :f)) "a set muffles each member")
 (assert (= |:io :error|
-           (bits-of "(defn f [] (muffle :yield) (println 1) (yield 1) 2)" :f))
+           (bits-of "(defn f [] (muffle :yield) (emit :io 1) (yield 1) 2)" :f))
         "a signal outside the spec still leaves")
 
 # ── The boundary ─────────────────────────────────────────────────────
@@ -90,7 +90,7 @@
                           "{:error} passes every boundary and cannot be muffled")
         ":error cannot be muffled")
 (assert (string/contains? (compile-error '(fn [x]
-                            (muffle |:yield :halt|)
+                            (muffle :halt)
                             x))
                           "{:halt} passes every boundary and cannot be muffled")
         ":halt cannot be muffled")

@@ -42,6 +42,7 @@ impl<'a> LirView<'a> {
         field!(num_local_params);
         field!(capture_params_mask);
         field!(signal);
+        field!(muffle);
         field!(vararg_kind);
         field!(rest_list_layout);
         field!(region_table);

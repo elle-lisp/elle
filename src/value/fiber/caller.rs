@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-04
 //! A caller paused in its fiber while its interpreted callee runs on the same
 //! dispatch loop, and what completing the call needs.
 //!
@@ -14,15 +14,11 @@ use std::rc::Rc;
 /// value may be freed at its last use while its body is still running.
 #[derive(Debug, Clone, Copy)]
 pub struct CallSite {
-    /// The callee's squelch mask. A suspending signal it names becomes a
-    /// `signal-violation` error at this call.
+    /// The callee's boundary mask (`Closure::boundary_mask`): its squelch,
+    /// its function's muffle, and every signal when the function is silent.
+    /// A suspending signal the mask names becomes a `signal-violation` error
+    /// at this call.
     pub squelch_mask: SignalBits,
-    /// The callee's signal is silent, declared or inferred, so any signal
-    /// leaving it breaks that claim, and the call aborts the process with a
-    /// diagnostic.
-    pub silent: bool,
-    /// The callee's name, for the silence diagnostic.
-    pub name: Option<&'static str>,
 }
 
 /// How many `parameterize` frames a fiber held at an entry: a call, a host

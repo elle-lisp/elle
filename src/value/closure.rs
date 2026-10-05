@@ -8,6 +8,10 @@
 //! (only when the closure could actually emit them). Use `effective_signal()`
 //! externally; `template.signal()` is the underlying code's signal.
 //!
+//! What a call boundary enforces is `boundary_mask()`: the instance's squelch,
+//! the function's muffle, and every signal when the function is silent
+//! (docs/signals/inference.md § "The boundary of a silent function").
+//!
 //! A code object is two things — a region-resident [`CodePayload`] in its
 //! compile unit's code region, and the [`ClosureTemplate`] header a closure
 //! references. docs/impl/region/template.md owns that argument.
@@ -152,6 +156,23 @@ impl Closure {
     /// enforcement happens at the call boundary, not inside the JIT'd code).
     pub fn signal(&self) -> Signal {
         self.effective_signal()
+    }
+
+    /// The mask a call boundary converts into a `signal-violation`: the
+    /// instance's squelch, the function's muffle, and every signal when the
+    /// function's inferred signal is silent. Inference is sound, so the last
+    /// part fires only on a compiler defect, where it replaces an abort with
+    /// an error. A polymorphic function's bits are a lower bound, so it adds
+    /// nothing. `signals::squelched_bits` lets `:error` and `:halt` through
+    /// whatever the mask says.
+    pub fn boundary_mask(&self) -> SignalBits {
+        let signal = self.template.signal();
+        let silent = signal.bits.is_empty() && signal.propagates == 0;
+        let mut mask = self.squelch_mask.union(self.template.muffle());
+        if silent {
+            mask = mask.union(crate::signals::CAP_MASK);
+        }
+        mask
     }
 
     /// Calculate the total environment capacity needed for a call.

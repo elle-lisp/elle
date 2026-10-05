@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-04
 //! Interpreted non-tail calls on one dispatch loop: a caller pauses in the
 //! fiber while its callee runs, and resumes when the callee ends.
 //!
@@ -177,37 +177,11 @@ impl VM {
         self.fiber.call_depth -= 1;
         let bits = result.bits;
 
-        // Silence enforcement: if the callee's signal is silent, declared or
-        // inferred, and the body produced ANY signal, that claim was wrong.
-        // Abort with a clear diagnostic.
-        if site.silent
-            && self
-                .fiber
-                .signal
-                .as_ref()
-                .is_some_and(|(b, _)| !b.is_empty())
-        {
-            let (sig_bits, sig_val) = self.fiber.signal.take().unwrap();
-            let name = site.name.unwrap_or("<anonymous>");
-            eprintln!("panic: silence violation in '{}'", name);
-            eprintln!(
-                "  A function whose signal is silent, declared or inferred, signaled at runtime."
-            );
-            eprintln!(
-                "  signal: {}",
-                crate::signals::registry::format_bits(sig_bits)
-            );
-            eprintln!("  value:  {}", sig_val);
-            if let Some(loc) = self.error_loc.as_ref() {
-                eprintln!("  at {}", loc);
-            }
-            std::process::abort();
-        }
-
-        // Squelch enforcement: a suspending signal the callee's squelch mask
-        // names becomes a signal-violation error. SIG_ERROR (already an error)
-        // and SIG_HALT (terminal) pass. `enforce_squelch` discards the suspended
-        // frames: the call is converted to an error, not suspended.
+        // Boundary enforcement: a suspending signal the callee's boundary mask
+        // names — its squelch, its muffle, or anything at all when its signal
+        // is silent — becomes a signal-violation error. SIG_ERROR (already an
+        // error) and SIG_HALT (terminal) pass. `enforce_squelch` discards the
+        // suspended frames: the call is converted to an error, not suspended.
         //
         // A fiber body is exempt: it runs outside any call, so its first resume
         // enforces no squelch.

@@ -311,16 +311,13 @@ impl VM {
             // (docs/impl/vm.md § "Non-tail calls"). What completing the call
             // needs to know about the callee is read here, while `func` is
             // certainly live.
-            let signal = closure.template.signal();
             self.pending_call = Some(crate::vm::core::PendingCall {
                 code: closure.template.code(),
                 env: new_env_rc,
                 closure: func,
                 call_ip: instr_ip,
                 site: crate::value::fiber::CallSite {
-                    squelch_mask: closure.squelch_mask,
-                    silent: signal.bits.is_empty() && signal.propagates == 0,
-                    name: closure.template.name(),
+                    squelch_mask: closure.boundary_mask(),
                 },
             });
             return Some(SIG_OK);

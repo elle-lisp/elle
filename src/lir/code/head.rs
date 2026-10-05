@@ -17,6 +17,7 @@ use crate::signals::Signal;
 use crate::syntax::files::{self, FileId};
 use crate::syntax::Span;
 use crate::value::closure::{RestListLayout, StrKeys, VarargTag};
+use crate::value::fiber::SignalBits;
 use crate::value::region_slice::RegionSlice;
 use crate::value::Arity;
 
@@ -29,6 +30,7 @@ pub(crate) struct PayloadHeader<'a> {
     pub(crate) origin: Option<Span>,
     pub(crate) arity: Arity,
     pub(crate) signal: Signal,
+    pub(crate) muffle: SignalBits,
     pub(crate) num_locals: u16,
     pub(crate) num_params: u32,
     pub(crate) capture_params_mask: u64,
@@ -125,6 +127,7 @@ pub(crate) struct Head<'a> {
     pub(crate) capture_params_mask: u64,
     pub(crate) capture_locals: &'a [u64],
     pub(crate) signal: Signal,
+    pub(crate) muffle: SignalBits,
     pub(crate) vararg: Vararg<'a>,
     pub(crate) rest_list_layout: RestListLayout,
     pub(crate) region_table: &'a [StaticRegion],
@@ -150,6 +153,7 @@ impl<'a> Head<'a> {
             capture_params_mask: code.capture_params_mask,
             capture_locals: &code.capture_locals,
             signal: code.signal,
+            muffle: code.muffle,
             vararg: Vararg::Kind(&code.vararg_kind),
             rest_list_layout: code.rest_list_layout,
             region_table: &code.region_table,
@@ -175,6 +179,7 @@ impl<'a> Head<'a> {
             capture_params_mask: payload.capture_params_mask,
             capture_locals: payload.capture_locals,
             signal: payload.signal,
+            muffle: payload.muffle,
             vararg: Vararg::Tagged(payload.vararg, payload.strict_keys),
             rest_list_layout: payload.rest_list_layout,
             region_table: payload.region_table,

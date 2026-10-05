@@ -8,6 +8,7 @@ use crate::hir::VarargKind;
 use crate::lir::{ClosureId, Label};
 use crate::signals::Signal;
 use crate::syntax::Span;
+use crate::value::fiber::SignalBits;
 use crate::value::{Arity, CaptureMask, RestListLayout};
 
 /// What a function carries beside its blocks. Every reader of the frozen
@@ -33,6 +34,10 @@ pub struct LirHead {
     /// is never celled.
     pub capture_locals_mask: CaptureMask,
     pub signal: Signal,
+    /// The signals `(muffle spec)` declared: the squelch mask every closure
+    /// made from this function enforces at its boundary. `signal` is already
+    /// the signal after the muffle.
+    pub muffle: SignalBits,
     /// The source lambda's docstring: compile-time data, materialized as a
     /// fresh value only when `(doc f)` asks.
     pub doc: Option<std::rc::Rc<str>>,
@@ -77,6 +82,7 @@ impl LirHead {
             capture_params_mask: 0,
             capture_locals_mask: CaptureMask::empty(),
             signal: Signal::silent(),
+            muffle: SignalBits::EMPTY,
             doc: None,
             origin: None,
             vararg_kind: VarargKind::List,

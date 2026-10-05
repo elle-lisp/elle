@@ -60,6 +60,9 @@ pub struct SendableClosure {
     pub rest_list_layout: crate::value::RestListLayout,
     pub name: Option<String>,
     pub squelch_mask: SignalBits,
+    /// The code object's muffle mask (`ClosureTemplate::muffle`), enforced at
+    /// every boundary of every closure made from it.
+    pub muffle: SignalBits,
     pub env: Vec<SendValue>,
     /// The frozen LIR the receiving side's JIT, WASM and MLIR tiers compile
     /// from. Plain data, so it crosses verbatim.

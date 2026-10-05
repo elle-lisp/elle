@@ -28,6 +28,7 @@ impl<'a> Lowerer<'a> {
         num_locals: u16,
         inferred_signal: &crate::signals::Signal,
         param_bounds: &[ParamBound],
+        muffle: crate::value::fiber::SignalBits,
         doc: Option<std::rc::Rc<str>>,
         origin: Option<crate::syntax::Span>,
         assert_numeric: bool,
@@ -159,6 +160,7 @@ impl<'a> Lowerer<'a> {
             num_locals,
             *inferred_signal,
             param_bounds,
+            muffle,
             doc,
             origin,
         )?;

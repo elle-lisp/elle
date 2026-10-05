@@ -1,11 +1,13 @@
-//! Runtime dispatch helpers for JIT-compiled code
+// audited: 2026-10-04
+//! Runtime dispatch helpers for JIT-compiled code: array mutation, parameter
+//! frames, the signal bound, and re-exports.
 //!
-//! These functions handle complex operations that interact with heap types
-//! or require VM access: data structures, cells, globals, and function calls.
+//! docs/impl/jit.md
 //!
-//! Data structure/cell helpers are in `data.rs`; yield helpers in `suspend.rs`;
-//! function call dispatch in `calls.rs`.
-//! Re-exported here so `compiler.rs` / `vtable.rs` can reference them as `dispatch::*`.
+//! Data structure and cell helpers are in `data.rs`, yield helpers in
+//! `suspend.rs`, struct access in `structops.rs`, region accounting in
+//! `region.rs` and function call dispatch in `calls.rs`. All are re-exported
+//! here so `compiler.rs` and `vtable.rs` reference them as `dispatch::*`.
 
 use crate::jit::value::JitValue;
 use crate::value::fiber::SignalBits;
@@ -166,11 +168,13 @@ pub extern "C" fn elle_jit_push_param_frame(
 }
 
 // =============================================================================
-// Struct Access Helpers
+// Signal Bound Check
 // =============================================================================
 
-/// Check that a closure's signal bits are a subset of allowed_bits.
-/// Signals error if not. Non-closure values pass silently.
+/// Check that the value's signal bits are a subset of allowed_bits, as the
+/// interpreter's `CheckSignalBound` does: `signals::bound::violation` judges a
+/// closure by its effective signal and a native by its declared one, and lets
+/// any other value pass. Signals error on a violation.
 #[no_mangle]
 pub extern "C" fn elle_jit_check_signal_bound(
     src_tag: u64,
@@ -183,28 +187,12 @@ pub extern "C" fn elle_jit_check_signal_bound(
         payload: src_payload,
     };
     let allowed = SignalBits::from_i64(allowed_bits as i64);
-    if let Some(closure) = val.as_closure() {
-        let signal_bits = closure.signal().bits;
-        let excess = signal_bits.subtract(allowed);
-        if !excess.is_empty() {
-            let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
-            let excess_str = crate::signals::registry::format_bits(excess);
-            let allowed_str = crate::signals::registry::format_bits(allowed);
-            vm_ref.set_error(
-                "signal-violation",
-                format!(
-                    "restrict: closure may emit {} but parameter is restricted to {}",
-                    excess_str, allowed_str
-                ),
-            );
-        }
+    if let Some(message) = crate::signals::bound::violation(val, allowed) {
+        let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
+        vm_ref.set_error("signal-violation", message);
     }
     JitValue::nil()
 }
-
-// =============================================================================
-// Region (scope) helpers for JIT
-// =============================================================================
 
 #[cfg(test)]
 mod tests;

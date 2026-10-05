@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-04
 // Which HIR nodes `Hir::allocates` counts, and so which ones the ANF lift names.
 //
 // docs/impl/anf.md
@@ -80,6 +80,7 @@ fn lambda_allocates() {
             num_locals: 0,
             inferred_signals: crate::signals::Signal::silent(),
             param_bounds: vec![],
+            muffle: crate::value::fiber::SignalBits::EMPTY,
             doc: None,
             origin: None,
             assert_numeric: false,

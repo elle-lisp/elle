@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-04
 //! The HIR node — its kind, the span and signal it carries, and the identity
 //! every analysis side table keys on.
 //!
@@ -162,6 +162,10 @@ pub enum HirKind {
         /// These bounds feed into inferred_signals computation and into runtime checking
         /// (`CheckSignalBound` for silence).
         param_bounds: Vec<ParamBound>,
+        /// The signals `(muffle spec)` declared: the squelch mask every closure
+        /// made from this lambda enforces at its boundary. `inferred_signals`
+        /// is already the signal after the muffle.
+        muffle: crate::value::fiber::SignalBits,
         /// Optional docstring extracted from the lambda body. Plain compile-time
         /// string data (`Rc<str>`), NOT a heap `Value`. It rides the closure
         /// template (held alive by RC with it) and is materialized as a fresh

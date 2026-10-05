@@ -47,6 +47,9 @@ pub struct LirCode {
     pub(crate) capture_params_mask: u64,
     pub(crate) capture_locals: Vec<u64>,
     pub(crate) signal: Signal,
+    /// The squelch mask `(muffle spec)` declared, which every closure of the
+    /// function enforces at its boundary.
+    pub(crate) muffle: crate::value::fiber::SignalBits,
     pub(crate) vararg_kind: crate::hir::VarargKind,
     pub(crate) rest_list_layout: crate::value::RestListLayout,
     pub(crate) region_table: Vec<StaticRegion>,

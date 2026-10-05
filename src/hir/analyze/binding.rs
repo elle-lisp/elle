@@ -1,3 +1,4 @@
+// audited: 2026-10-04
 //! Binding forms: let, letrec, define, set
 
 use super::*;
@@ -75,19 +76,7 @@ impl<'a> Analyzer<'a> {
             if self.immutable_by_default && !is_mutable {
                 self.arena.get_mut(binding).is_immutable = true;
             }
-            if let HirKind::Lambda {
-                params: lambda_params,
-                num_required,
-                rest_param,
-                inferred_signals,
-                ..
-            } = &value.kind
-            {
-                self.signal_env.insert(binding, *inferred_signals);
-                let arity =
-                    Arity::for_lambda(rest_param.is_some(), *num_required, lambda_params.len());
-                self.arity_env.insert(binding, arity);
-            }
+            self.record_lambda_facts(binding, &value);
             self.apply_transient_binding_state(binding);
             let_bindings.push((binding, value));
         } else if Self::is_destructure_pattern(name_syn) {
@@ -115,14 +104,8 @@ impl<'a> Analyzer<'a> {
 
         // Wrap with destructure if needed
         let final_body = if let Some((pattern, tmp)) = destructure {
-            let destr = Hir::silent(
-                HirKind::Destructure {
-                    pattern,
-                    value: Box::new(Hir::silent(HirKind::Var(tmp), span)),
-                    strict: true,
-                },
-                span,
-            );
+            let destr = self.destructure(pattern, Hir::silent(HirKind::Var(tmp), span), true, span);
+            signal = signal.combine(destr.signal);
             Hir::new(HirKind::Begin(vec![destr, inner]), span, signal)
         } else {
             inner
@@ -170,16 +153,7 @@ impl<'a> Analyzer<'a> {
             for leaf in &pattern.bindings().bindings {
                 self.arena.get_mut(*leaf).init_pending = false;
             }
-            let signal = value.signal;
-            return Ok(Hir::new(
-                HirKind::Destructure {
-                    pattern,
-                    value: Box::new(value),
-                    strict: true,
-                },
-                span,
-                signal,
-            ));
+            return Ok(self.destructure(pattern, value, true, span));
         }
 
         let raw_name = items[1]
@@ -189,15 +163,6 @@ impl<'a> Analyzer<'a> {
 
         // Check if we're inside a function scope
         let in_function = self.scopes.iter().any(|s| s.is_function);
-
-        // Check if the value is a lambda form
-        let is_lambda_form = if let Some(list) = items[2].as_list() {
-            list.first()
-                .and_then(|s| s.as_symbol())
-                .is_some_and(|s| s == "fn")
-        } else {
-            false
-        };
 
         if in_function {
             // Inside a function, creates a local binding
@@ -212,18 +177,9 @@ impl<'a> Analyzer<'a> {
                 self.arena.get_mut(binding).is_immutable = true;
             }
 
-            // Seed signal_env and arity_env for lambda forms so self-recursive calls
-            // don't default to Yields during analysis
-            if is_lambda_form {
-                self.signal_env.insert(binding, Signal::silent());
-                // Pre-seed arity from syntax (count params in the lambda form)
-                if let Some(list) = items[2].as_list() {
-                    if let Some(params_syn) = list.get(1).and_then(|s| s.as_list_or_tuple()) {
-                        self.arity_env
-                            .insert(binding, Self::arity_from_syntax_params(params_syn));
-                    }
-                }
-            }
+            // A self-recursive call inside the lambda reads the seed, not the
+            // unknown-callee fallback.
+            self.seed_lambda_facts(binding, &items[2]);
 
             // Now analyze the value (which can reference the binding). The
             // self-recursion context lets a self-edge inside the lambda classify
@@ -235,20 +191,7 @@ impl<'a> Analyzer<'a> {
             // read this binding's value (letrec* left-to-right init).
             self.arena.get_mut(binding).init_pending = false;
 
-            // Update signal_env and arity_env with the actual inferred values
-            if let HirKind::Lambda {
-                params: lambda_params,
-                num_required,
-                rest_param,
-                inferred_signals,
-                ..
-            } = &value.kind
-            {
-                self.signal_env.insert(binding, *inferred_signals);
-                let arity =
-                    Arity::for_lambda(rest_param.is_some(), *num_required, lambda_params.len());
-                self.arity_env.insert(binding, arity);
-            }
+            self.record_lambda_facts(binding, &value);
             self.apply_transient_binding_state(binding);
 
             let value_signal = value.signal;
@@ -278,37 +221,15 @@ impl<'a> Analyzer<'a> {
                 self.arena.get_mut(binding).is_immutable = true;
             }
 
-            // Seed signal_env and arity_env for lambda forms so self-recursive calls
-            // don't default to Yields during analysis
-            if is_lambda_form {
-                self.signal_env.insert(binding, Signal::silent());
-                // Pre-seed arity from syntax (count params in the lambda form)
-                if let Some(list) = items[2].as_list() {
-                    if let Some(params_syn) = list.get(1).and_then(|s| s.as_list_or_tuple()) {
-                        let arity = Self::arity_from_syntax_params(params_syn);
-                        self.arity_env.insert(binding, arity);
-                    }
-                }
-            }
+            // A self-recursive call inside the lambda reads the seed, not the
+            // unknown-callee fallback.
+            self.seed_lambda_facts(binding, &items[2]);
 
             // Now analyze the value, with the self-recursion context set so a
             // self-edge inside the lambda classifies `CaptureKind::Recursive`.
             let value = self.analyze_initializer(binding, &items[2])?;
 
-            // Update signal_env and arity_env with the actual inferred values
-            if let HirKind::Lambda {
-                params: lambda_params,
-                num_required,
-                rest_param,
-                inferred_signals,
-                ..
-            } = &value.kind
-            {
-                self.signal_env.insert(binding, *inferred_signals);
-                let arity =
-                    Arity::for_lambda(rest_param.is_some(), *num_required, lambda_params.len());
-                self.arity_env.insert(binding, arity);
-            }
+            self.record_lambda_facts(binding, &value);
             self.apply_transient_binding_state(binding);
 
             let value_signal = value.signal;

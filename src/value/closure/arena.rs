@@ -7,6 +7,7 @@ use crate::error::LocationMap;
 use crate::hir::region::{RuntimeRegion, StaticRegion};
 use crate::hir::VarargKind;
 use crate::signals::Signal;
+use crate::value::fiber::SignalBits;
 use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::HeapObject;
 use crate::value::region_slice::RegionSlice;
@@ -109,6 +110,9 @@ pub struct PayloadParts {
     pub(crate) num_captures: usize,
     pub(crate) num_params: usize,
     pub(crate) signal: Signal,
+    /// The squelch mask every closure of this code object enforces at its
+    /// boundary, from the body's `(muffle spec)`.
+    pub(crate) muffle: SignalBits,
     pub(crate) capture_params_mask: u64,
     pub(crate) capture_locals_mask: CaptureMask,
     pub(crate) location_map: LocationMap,
@@ -143,6 +147,7 @@ impl PayloadParts {
             num_captures: 0,
             num_params: 0,
             signal: Signal::silent(),
+            muffle: SignalBits::EMPTY,
             capture_params_mask: 0,
             capture_locals_mask: CaptureMask::empty(),
             location_map: LocationMap::new(),
@@ -197,6 +202,7 @@ impl PayloadParts {
             num_captures,
             num_params: func.num_params(),
             signal: func.signal(),
+            muffle: func.muffle(),
             capture_params_mask: func.capture_params_mask(),
             capture_locals_mask: CaptureMask::from_words(
                 func.capture_locals_mask().words().to_vec(),
@@ -243,6 +249,7 @@ impl PayloadParts {
         match code {
             None => shape(PayloadParts::new(Vec::new(), meta.arity, Vec::new())),
             Some(code) => shape(PayloadParts {
+                muffle: code.muffle(),
                 location_map: code.location_map(),
                 merged_slots: code.merged_slots().as_slice().to_vec(),
                 frame_release_slots: code.frame_release_slots().to_vec(),
@@ -266,6 +273,7 @@ impl PayloadParts {
             num_captures: t.num_captures(),
             num_params: t.num_params(),
             signal: t.signal(),
+            muffle: t.muffle(),
             capture_params_mask: t.capture_params_mask(),
             capture_locals_mask: t.owned_capture_locals_mask(),
             location_map: t.location_map(),
@@ -402,6 +410,7 @@ impl PayloadParts {
             has_lir: self.lir.is_some(),
             arity: self.arity,
             signal: self.signal,
+            muffle: self.muffle,
             capture_params_mask: self.capture_params_mask,
             num_locals: self.num_locals as u32,
             num_captures: self.num_captures as u32,

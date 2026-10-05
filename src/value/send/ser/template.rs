@@ -90,6 +90,7 @@ pub(in crate::value::send) fn code_fields(
         rest_list_layout: t.rest_list_layout(),
         name: t.name().map(str::to_string),
         squelch_mask,
+        muffle: t.muffle(),
         env,
         lir: None,
         lir_values: Vec::new(),

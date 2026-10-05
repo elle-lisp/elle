@@ -1,3 +1,4 @@
+// audited: 2026-10-04
 //! Core form analysis: analyze_expr and control flow forms
 
 use super::*;
@@ -406,7 +407,12 @@ impl<'a> Analyzer<'a> {
         } else {
             Hir::silent(HirKind::Nil, span)
         };
-        let signal = Signal::yields().combine(expr.signal).combine(env.signal);
+        // eval runs the datum on the calling fiber and holds no park of that
+        // code, so the one signal it raises is :error: a compile failure, a
+        // raise inside the datum, or a yield, an I/O request or a halt the
+        // handler refused.
+        self.add_inherent_bits(crate::value::SIG_ERROR);
+        let signal = Signal::errors().combine(expr.signal).combine(env.signal);
         Ok(Hir::new(
             HirKind::Eval {
                 expr: Box::new(expr),
