@@ -1,4 +1,4 @@
-(elle/epoch 14)
+(elle/epoch 15)
 # audited: 2026-10-05
 # attune: positive signal permit (dual of squelch)
 
@@ -24,7 +24,7 @@
 # ── attune composes with squelch ──────────────────────────────────
 (def multi (fn [] (yield 1)))
 (def step1 (attune |:yield :error| multi))
-(def step2 (squelch step1 :yield))
+(def step2 (squelch :yield step1))
 # step2: attune allows only yield+error, then squelch removes yield
 # net effect: only error is possible
 (try
@@ -87,3 +87,15 @@
 (assert (string/contains? (get bad-err :message)
                           "attune!: unknown signal keyword :nosuch"))
 (println "attune!-bad-spec: ok")
+
+# ── squelch takes its spec first, as attune does ──────────────────
+# Counter-factual: squelch took the closure first, so the two runtime
+# boundaries put the one argument they share in different places.
+(def [order-ok? order-err] (protect (squelch (fn [] 1) :yield)))
+(assert (not order-ok?) "a closure in the spec position is refused")
+(assert (= (get order-err :message)
+           "squelch: second argument must be a closure, got keyword"))
+(def [spec-ok? spec-err] (protect ((squelch :yield (fn [] (yield 1))))))
+(assert (= (get spec-err :error) :signal-violation)
+        "the spec-first squelch blocks the yield")
+(println "squelch-spec-first: ok")

@@ -1,24 +1,31 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-05
 # A fiber's fuel budget pauses it at backward jumps and calls, and a refuel resumes it where it stopped.
-# docs/concurrency.md
+# docs/runtime.md
 #
 ## Covers: backward-jump exhaustion, call exhaustion,
 ## refuel-and-resume, unlimited fibers, zero fuel, signal masks, remaining-fuel
-## reads, clear-fuel, and nested-fiber independence.
+## reads, clear-fuel, nested-fiber independence, and a silent function the
+## meter never pauses.
+##
+## Every metered loop below uses generic arithmetic, which may raise, so none
+## of them is silent. The interpreter charges no fuel while a silent function
+## runs (scenario 13).
 
 # ============================================================================
 # Scenario 1: Backward jump exhausts fuel
 # ============================================================================
 #
-# A tight counting loop. Each iteration performs one backward Jump.
+# A tight counting loop. Each iteration performs one backward jump, and the
+# calls to < and +.
 # With fuel=5 the fiber completes at most 5 iterations then pauses.
 # The fiber mask |:fuel| ensures the signal is caught by the fiber itself
 # so we can observe :paused status directly without a wrapper.
 
 (let [f (fiber/new (fn []
-                     (letrec [loop (fn (n) (if (%lt n 100) (loop (%add n 1)) n))]
-                       (loop 0))) |:fuel|)]
+                     (def @n 0)
+                     (while (< n 100) (assign n (+ n 1)))
+                     n) |:fuel|)]
   (fiber/set-fuel f 5)
   (fiber/resume f)
   (assert (= (fiber/status f) :paused)
@@ -40,7 +47,7 @@
 
 (let [f (fiber/new (fn []
                      (defn count-calls [n]
-                       (if (= n 0) "done" (count-calls (%sub n 1))))
+                       (if (= n 0) "done" (count-calls (- n 1))))
                      (count-calls 100)) |:fuel|)]
   (fiber/set-fuel f 3)
   (fiber/resume f)
@@ -55,9 +62,7 @@
 
 (let [f (fiber/new (fn []
                      (letrec [loop (fn (n acc)
-                                     (if (%lt n 10)
-                                       (loop (%add n 1) (%add acc n))
-                                       acc))]
+                                     (if (< n 10) (loop (+ n 1) (+ acc n)) acc))]
                        (loop 0 0))) |:fuel|)]
   (fiber/set-fuel f 3)
   (fiber/resume f)
@@ -76,9 +81,7 @@
 
 (let [f (fiber/new (fn []
                      (letrec [loop (fn (n acc)
-                                     (if (%lt n 100)
-                                       (loop (%add n 1) (%add acc n))
-                                       acc))]
+                                     (if (< n 100) (loop (+ n 1) (+ acc n)) acc))]
                        (loop 0 0))) 0)]
   (fiber/resume f)
   (assert (= (fiber/status f) :dead) "unlimited: fiber completes")
@@ -92,7 +95,7 @@
 # An infinite loop with fuel=0 pauses before executing a single iteration.
 
 (let [f (fiber/new (fn []
-                     (letrec [loop (fn (n) (loop (%add n 1)))]
+                     (letrec [loop (fn (n) (loop (+ n 1)))]
                        (loop 0))) |:fuel|)]
   (fiber/set-fuel f 0)
   (fiber/resume f)
@@ -106,8 +109,8 @@
 # payload (nil) to the parent and the fiber becomes :paused.
 
 (let [f (fiber/new (fn []
-                     (letrec [loop (fn () (loop))]
-                       (loop))) |:fuel|)]
+                     (letrec [loop (fn (n) (loop (+ n 1)))]
+                       (loop 0))) |:fuel|)]
   (fiber/set-fuel f 2)
   (let [result (fiber/resume f)]
     (assert (= (fiber/status f) :paused) "mask-catch: fiber is paused")
@@ -126,8 +129,8 @@
 #   outer.status = :paused, inner.status = :paused
 
 (let [inner (fiber/new (fn []
-                         (letrec [loop (fn () (loop))]
-                           (loop))) 0)]
+                         (letrec [loop (fn (n) (loop (+ n 1)))]
+                           (loop 0))) 0)]
   (fiber/set-fuel inner 2)
   (let [outer (fiber/new (fn [] (fiber/resume inner)) |:fuel|)]
     (fiber/resume outer)
@@ -144,7 +147,7 @@
 # (before decrement), so the stored value at exhaustion is 0.
 
 (let [f (fiber/new (fn []
-                     (letrec [loop (fn (n) (loop (%add n 1)))]
+                     (letrec [loop (fn (n) (loop (+ n 1)))]
                        (loop 0))) |:fuel|)]
   (fiber/set-fuel f 10)
   (assert (= (fiber/fuel f) 10) "fuel-read: reads 10 before resume")
@@ -160,9 +163,7 @@
 
 (let [f (fiber/new (fn []
                      (letrec [loop (fn (n acc)
-                                     (if (%lt n 50)
-                                       (loop (%add n 1) (%add acc n))
-                                       acc))]
+                                     (if (< n 50) (loop (+ n 1) (+ acc n)) acc))]
                        (loop 0 0))) |:fuel|)]
   (fiber/set-fuel f 5)
   (fiber/resume f)
@@ -181,7 +182,7 @@
 # fuel does not affect outer's fuel — outer continues and completes normally.
 
 (let [inner (fiber/new (fn []
-                         (letrec [loop (fn (n) (loop (%add n 1)))]
+                         (letrec [loop (fn (n) (loop (+ n 1)))]
                            (loop 0))) |:fuel|)]
   (let [outer (fiber/new (fn []
                            (fiber/set-fuel inner 3)
@@ -208,9 +209,7 @@
 
 (let [f (fiber/new (fn []
                      (letrec [loop (fn (n acc)
-                                     (if (%lt n 10)
-                                       (loop (%add n 1) (%add acc n))
-                                       acc))]
+                                     (if (< n 10) (loop (+ n 1) (+ acc n)) acc))]
                        (loop 0 0))) |:fuel|)]
   (var steps 0)
   (fiber/set-fuel f 1)
@@ -223,3 +222,40 @@
   (assert (= (fiber/status f) :dead) "step: the stepped fiber completes")
   (assert (= (fiber/value f) 45) "step: stepping does not change the result")
   (assert (< 5 steps) "step: the run paused at many charge sites"))
+
+# ============================================================================
+# Scenario 13: The meter never pauses a silent function
+# ============================================================================
+#
+# A silent function is a proof that nothing stops the fiber, and the native
+# tiers run one with no way to park it, so the interpreter charges no fuel
+# while one runs (docs/signals/inference.md). Counter-factual: the interpreter
+# charged the silent loop's backward jumps, and the meter paused the fiber
+# inside it.
+
+(defn silent-spin [n]
+  (numeric!)
+  (def @i 0)
+  (while (%lt i n) (assign i (%add i 1)))
+  i)
+(assert (get (compile/signal (compile/analyze "(defn silent-spin [n]
+  (numeric!) (def @i 0) (while (%lt i n) (assign i (%add i 1))) i)")
+                             :silent-spin) :silent) "silent: the loop is silent")
+
+(let [f (fiber/new (fn [] (silent-spin 1000)) |:fuel :error|)]
+  (fiber/set-fuel f 5)
+  (fiber/resume f)
+  (assert (= (fiber/status f) :dead) "silent: the meter never pauses the loop")
+  (assert (= (fiber/value f) 1000) "silent: and the loop runs to its end"))
+
+# The same loop with generic arithmetic may raise, so it is metered.
+(defn noisy-spin [n]
+  (def @i 0)
+  (while (< i n) (assign i (+ i 1)))
+  i)
+(let [f (fiber/new (fn [] (noisy-spin 1000)) |:fuel :error|)]
+  (fiber/set-fuel f 5)
+  (fiber/resume f)
+  (assert (= (fiber/status f) :paused) "silent: the loop that may raise pauses")
+  (fiber/clear-fuel f)
+  (assert (= (fiber/resume f) 1000) "silent: and finishes once the meter lifts"))

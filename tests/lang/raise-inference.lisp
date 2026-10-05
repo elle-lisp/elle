@@ -1,10 +1,10 @@
-(elle/epoch 14)
+(elle/epoch 15)
 # audited: 2026-10-05
 # Every construct that can raise carries :error in its inferred signal, so a
 # function that infers silent cannot raise, and a raise nothing catches
 # reports as an ordinary error. Counter-factual: each construct below
 # inferred `||`, and an uncaught raise from such a function aborted the
-# process as a silence violation before `protect` could answer.
+# process before `protect` could answer.
 
 (defn bits-of [src name]
   (get (compile/signal (compile/analyze src) name) :bits))
@@ -47,14 +47,14 @@
                     (defn call [f]
                       (f))
                     (defn g []
-                      (silence)
+                      (silent!)
                       (call identity))))))
 (assert (not param-ok?) "a silent function cannot pass identity to call")
 
 # Counter-factual: q took p's signal and no arity, so a call to it inferred
 # silent.
 (assert (= |:error|
-           (bits-of "(defn p [] 1) (def q (squelch p :yield)) (defn f [] (q))"
+           (bits-of "(defn p [] 1) (def q (squelch :yield p)) (defn f [] (q))"
                     :f)) "a squelch binding's arity is not known")
 
 # A stdlib function's arity is known, so a call with the right count adds
@@ -116,23 +116,51 @@
 
 (def [silent-ok? silent-err]
   (protect (eval '(defn g []
-                   (silence)
+                   (silent!)
                    (eval '(+ 1 2))))))
 (assert (not silent-ok?) "a silent function cannot call eval")
 (assert (string/contains? (get silent-err :message) "body may emit {:error}"))
 
-(def [assert-ok? _]
-  (protect (eval '(defn g []
-                   (silent!)
-                   (eval '(+ 1 2))))))
-(assert (not assert-ok?) "silent! rejects eval")
+# ── A bound ──────────────────────────────────────────────────────────
 
-# ── A silence bound ──────────────────────────────────────────────────
-
-(assert (= |:error| (bits-of "(defn f [g x] (silence g) (g x))" :f))
+(assert (= |:error| (bits-of "(defn f [g x] (bound g ||) (g x))" :f))
         "the entry check may raise")
-(assert (= |:error| (bits-of "(defn f [g x] (silence g) x)" :f))
+(assert (= |:error| (bits-of "(defn f [g x] (bound g ||) x)" :f))
         "the check runs whether or not the parameter is called")
+
+# A bound wider than silence contributes its bits to a call of the
+# parameter, and the parameter stops passing its signal on. Counter-factual:
+# bound took no spec, and a callback that may yield had to stay polymorphic.
+(def each-yield
+  (compile/signal (compile/analyze "(defn f [g x] (bound g :yield) (g x))") :f))
+(assert (= |:yield :error| (get each-yield :bits)) "a call to g adds :yield")
+(assert (empty? (get each-yield :propagates)) "and f takes no signal from g")
+
+(defn bound-error [form]
+  "The message eval reports when form does not compile."
+  (let [[ok? err] (protect (eval form))]
+    (assert (not ok?) "the form compiles")
+    (get err :message)))
+
+(assert (string/contains? (bound-error '(bound g ||))
+                          "bound must appear inside a function body"))
+(assert (string/contains? (bound-error '(fn [x]
+                                          (bound z ||)
+                                          x))
+                          "bound: 'z' is not a parameter of this function"))
+(assert (string/contains? (bound-error '(fn [f]
+                                          (bound f ||)
+                                          (bound f :yield)
+                                          f))
+                          "bound: parameter f is already bounded"))
+(assert (string/contains? (bound-error '(fn [f]
+                                          (bound f :nosuch)
+                                          f))
+                          "bound: unknown signal keyword :nosuch"))
+(assert (string/contains? (bound-error '(fn [f]
+                                          (bound f)
+                                          f))
+                          "bound requires a parameter name and a signal spec"))
 
 # ── Literals that check their elements at run time ───────────────────
 
@@ -165,10 +193,10 @@
 (assert (= :type-error (get err :error)) "as the destructuring error it is")
 
 (defn aps [h x]
-  (silence h)
+  (bound h ||)
   (h x))
 (defn call-aps []
-  (def r (aps + 42))
+  (def r (aps (get @[+] 0) 42))
   r)
 (def [bound-ok? bound-err] (protect (call-aps)))
 (assert (not bound-ok?) "a bound violation reaches protect")
@@ -193,13 +221,14 @@
 # raised :io out of a function whose signal held no :io.
 
 (assert (= false (aps callable? 42)) "a silent native passes the bound")
+(assert (= false (aps (get @[callable?] 0) 42)) "and passes the entry check")
 (def [native-ok? native-err]
-  (protect (let [r (aps length [1 2])]
+  (protect (let [r (aps (get @[length] 0) [1 2])]
              r)))
 (assert (not native-ok?) "a native that may raise fails the bound")
 (assert (= :signal-violation (get native-err :error)))
 (assert (string/contains? (get native-err :message)
-                          "length may emit {:error} but parameter is restricted to {}"))
+                          "bound: length may emit {:error} but parameter is bounded to {}"))
 
 # ── A polymorphic closure passed for a bounded parameter ─────────────
 #
@@ -211,11 +240,80 @@
 (defn call-it [k]
   (k))
 (def [poly-ok? poly-err]
-  (protect (let [r (aps call-it 42)]
+  (protect (let [r (aps (get @[call-it] 0) 42)]
              r)))
 (assert (not poly-ok?) "a polymorphic closure fails the bound")
 (assert (= :signal-violation (get poly-err :error)))
 (assert (string/contains? (get poly-err :message)
-                          "closure passes on the signal of its arguments"))
+                          "bound: closure passes on the signal of its arguments but parameter is bounded to {}"))
+
+# ── A bound checked at the call ──────────────────────────────────────
+#
+# Where the compiler knows the argument's signal, it checks the bound at the
+# call, and a violation does not compile. Counter-factual: every argument
+# waited for the entry check, so a program that passes a yielding lambda to
+# a silence-bounded parameter compiled and failed when it ran.
+
+(assert (string/contains? (bound-error '(begin
+                                          (defn aps [h x]
+                                            (bound h ||)
+                                            (h x))
+                                          (aps (fn [x] (yield x)) 1)))
+                          "may emit {:yield} but parameter h is bounded to {}")
+        "a lambda literal is checked at the call")
+(assert (string/contains? (bound-error '(begin
+                                          (defn aps [h x]
+                                            (bound h ||)
+                                            (h x))
+                                          (aps + 42)))
+                          "but parameter h is bounded to {}")
+        "a stdlib function's signal is known")
+(assert (string/contains? (bound-error '(begin
+                                          (defn aps [h x]
+                                            (bound h ||)
+                                            (h x))
+                                          (aps length [1 2])))
+                          "may emit {:error} but parameter h is bounded to {}")
+        "a primitive's signal is known")
+(assert (string/contains? (bound-error '(begin
+                                          (defn aps [h x]
+                                            (bound h ||)
+                                            (h x))
+                                          (defn loud [x]
+                                            (yield x))
+                                          (aps loud 1)))
+                          "may emit {:yield} but parameter h is bounded to {}")
+        "a binding's inferred signal is known")
+(assert (string/contains? (bound-error '(begin
+                                          (defn aps [h x]
+                                            (bound h ||)
+                                            (h x))
+                                          (defn call-it [k]
+                                            (k))
+                                          (aps call-it 1)))
+                          "passes on the signal of its arguments but parameter h is bounded to {}")
+        "a polymorphic binding cannot fit the bound")
+(assert (string/contains? (bound-error '(begin
+                                          (defn each-yield [h x]
+                                            (bound h :yield)
+                                            (h x))
+                                          (each-yield (fn [x]
+                                            (port/write (port/stdout) x)) 1)))
+                          "may emit {:error :io} but parameter h is bounded to {:yield}")
+        "the excess is what the bound does not admit")
+
+# An argument that fits compiles, and so does one whose signal is unknown.
+(def fits
+  (eval '(begin
+           (defn each-yield [h x]
+             (bound h :yield)
+             (h x))
+           (defn opaque-yield []
+             (get @[(fn [x] (yield x))] 0))
+           [(fiber/new (fn [] (each-yield (fn [x] (yield x)) 1)) |:yield|)
+            (fiber/new (fn [] (each-yield (opaque-yield) 2)) |:yield|)])))
+(assert (= 1 (fiber/resume (get fits 0))) "a lambda that fits the bound runs")
+(assert (= 2 (fiber/resume (get fits 1)))
+        "an unknown argument waits for the entry")
 
 (println "all raise-inference tests passed")

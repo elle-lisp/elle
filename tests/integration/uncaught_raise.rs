@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 // An uncaught raise reports as an ordinary error whatever the raiser's
 // inferred signal: exit 1, never an abort.
 //
@@ -50,8 +50,8 @@ fn a_raise_from_a_function_that_once_inferred_silent_is_an_ordinary_error() {
 #[test]
 fn a_bound_violation_nothing_catches_is_an_ordinary_error() {
     reports_an_ordinary_error(
-        "(defn aps [f x] (silence f) (f x)) (defn g [] (def r (aps + 42)) r) (g)",
-        "restrict: closure may emit {:error} but parameter is restricted to {}",
+        "(defn aps [f x] (bound f ||) (f x)) (defn g [] (def r (aps (get @[+] 0) 42)) r) (g)",
+        "bound: closure may emit {:error} but parameter is bounded to {}",
     );
 }
 

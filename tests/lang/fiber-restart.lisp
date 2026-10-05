@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-05
 # A restart answers the call that raised, for every raise site, and continues past a raise that has no result.
 # docs/signals/primitives.md
 #
@@ -176,14 +176,16 @@
 # A raise with no result position has nothing to answer: a restart continues
 # after it, and the restart value goes nowhere. The counter-factual is a
 # restart that pushes its value anyway, which lands on the operand stack as a
-# stray that a later instruction consumes in place of its own operand.
+# stray that a later instruction consumes in place of its own operand. The
+# yielding closure sits in an array, so the compiler cannot see its signal
+# and leaves the bound to the entry check.
 
 (defn apply-silent [f x]
-  (silence f)
+  (bound f ||)
   (list :got (f x)))
-(let [f (fiber/new (fn [] (apply-silent (fn [x] (yield x)) 41)) |:error :yield|)]
-  (assert (= :signal-violation (get (fiber/resume f) :error))
-          "a silence bound raises")
+(def hidden-yield (get @[(fn [x] (yield x))] 0))
+(let [f (fiber/new (fn [] (apply-silent hidden-yield 41)) |:error :yield|)]
+  (assert (= :signal-violation (get (fiber/resume f) :error)) "a bound raises")
   (assert (= 41 (fiber/resume f :ignored))
           "the restart continues past the check")
   (assert (= (list :got 7) (fiber/resume f 7)) "and the body runs on"))

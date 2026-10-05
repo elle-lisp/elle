@@ -456,3 +456,47 @@ fn fs_keyword_resolves_to_the_declared_bit() {
     assert_eq!(registry.lookup("fs"), Some(SIG_FS.trailing_zeros()));
     assert_eq!(registry.to_signal_bits("fs"), Some(SIG_FS));
 }
+
+// ── breaks_proof: what leaves a silent function ─────────────────────
+//
+// A silent function is a proof that nothing stops the fiber, so every
+// signal that leaves one breaks it, except a halt, which is a resource
+// fault, and a signal already carrying :terminal, which is an inner broken
+// proof on its way out. src/vm/call/proof_tests.rs pins the report end to
+// end.
+
+#[test]
+fn nothing_leaving_breaks_no_proof() {
+    assert!(!breaks_proof(SignalBits::EMPTY));
+}
+
+#[test]
+fn any_raise_breaks_the_proof_error_included() {
+    // Counter-factual: the silent boundary was a squelch over every signal,
+    // which exempts :error, the half of the proof every caller relies on.
+    assert!(breaks_proof(SIG_ERROR));
+    assert!(breaks_proof(SIG_YIELD));
+    assert!(breaks_proof(SIG_IO.union(SIG_ERROR)));
+    assert!(breaks_proof(SignalBits::from_bit(40)), "a user signal");
+}
+
+#[test]
+fn a_pause_breaks_the_proof() {
+    // The interpreter charges no fuel inside a silent function, so a pause
+    // that leaves one came from code the proof says cannot stop.
+    assert!(breaks_proof(SIG_FUEL));
+    assert!(breaks_proof(SIG_FUEL.union(SIG_DEBUG)));
+}
+
+#[test]
+fn a_halt_and_a_terminal_signal_pass() {
+    assert!(
+        !breaks_proof(SIG_HALT),
+        "a resource fault is not a broken proof"
+    );
+    assert!(!breaks_proof(SIG_HALT.union(SIG_ERROR)));
+    assert!(
+        !breaks_proof(SIG_ERROR.union(SIG_TERMINAL)),
+        "an inner broken proof passes whole"
+    );
+}

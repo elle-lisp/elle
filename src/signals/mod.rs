@@ -144,6 +144,14 @@ pub fn squelched_bits(bits: SignalBits, mask: SignalBits) -> SignalBits {
     bits.intersection(mask)
 }
 
+/// Whether `bits` leaving a silent function break its proof
+/// (docs/signals/inference.md). A stub until the boundary asks it.
+#[inline]
+pub fn breaks_proof(bits: SignalBits) -> bool {
+    let _ = bits;
+    false
+}
+
 /// Capability mask: all signals that user code can produce.
 ///
 /// Defined as the complement of VM-internal bits within the 64-bit signal

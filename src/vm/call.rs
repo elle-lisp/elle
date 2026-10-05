@@ -175,9 +175,8 @@ impl VM {
         let deferred_release_slot = StaticRegion::new(self.read_u32(bytecode, ip));
         // The borrowed-argument stash slots. Decoded unconditionally so `ip`
         // stays aligned; a SIGNAL exit consumes their retains
-        // (docs/impl/region/mechanism.md § "What the fall-through owes, a signal
-        // exit owes too") and the normal fall-through ignores them — it runs the
-        // block's own `DecrefValueRegion`s.
+        // (docs/impl/region/signalexit.md), and the normal fall-through ignores
+        // them — it runs the block's own `DecrefValueRegion`s.
         let borrowed_count = self.read_u8(bytecode, ip) as usize;
         let mut borrowed_arg_slots = Vec::with_capacity(borrowed_count);
         for _ in 0..borrowed_count {
@@ -400,5 +399,7 @@ impl VM {
 mod collection;
 pub(crate) use collection::call_collection;
 
+#[cfg(test)]
+mod proof_tests;
 #[cfg(test)]
 mod tests;

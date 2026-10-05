@@ -1,11 +1,11 @@
-(elle/epoch 14)
+(elle/epoch 15)
 # audited: 2026-10-05
 # squelch-fuel: a fuel pause passes through squelch and attune boundaries.
 #
 # :fuel is not program behavior. The VM injects it at the interpreter's
 # charge sites to meter a fiber, and the metering parent owns the pause:
 # lib/process.lisp preemption and the debugger's step engine both deliver
-# it under arbitrary user code. So the enforcement chokepoints pass a signal
+# it under any code that is not silent. So the enforcement chokepoints pass a signal
 # that carries :fuel whole (`signals::squelched_bits`, src/signals/mod.rs),
 # and a boundary that names :fuel is inert — metering is the parent's action,
 # not the closure's behavior, so the boundary has nothing to enforce. The pause
@@ -19,10 +19,15 @@
 # hence one case each: a TailCall site (S1) and a backward jump (S2). The
 # interpreter and the JIT call paths share one predicate, so the assertions
 # hold identically under either tier.
+#
+# The loopers use generic arithmetic, which may raise, so neither is silent.
+# The interpreter charges no fuel while a silent function runs
+# (tests/lang/fuel.lisp), so a silent looper would finish before the meter
+# could pause it.
 
 (def tail-looper
   (fn []
-    (letrec [loop (fn (n acc) (if (%lt n 10) (loop (%add n 1) (%add acc n)) acc))]
+    (letrec [loop (fn (n acc) (if (< n 10) (loop (+ n 1) (+ acc n)) acc))]
       (loop 0 0))))
 
 (def jump-looper
@@ -35,7 +40,7 @@
     acc))
 
 # S1: squelch :fuel around tail-call charge sites.
-(let [f (fiber/new (fn [] ((squelch tail-looper :fuel))) |:fuel :error|)]
+(let [f (fiber/new (fn [] ((squelch :fuel tail-looper))) |:fuel :error|)]
   (fiber/set-fuel f 3)
   (fiber/resume f)
   (assert (= (fiber/status f) :paused) "S1: the fiber pauses at the meter")
@@ -47,7 +52,7 @@
   (assert (= (fiber/value f) 45) "S1: the boundary did not perturb the result"))
 
 # S2: squelch :fuel around backward-jump charge sites.
-(let [f (fiber/new (fn [] ((squelch jump-looper :fuel))) |:fuel :error|)]
+(let [f (fiber/new (fn [] ((squelch :fuel jump-looper))) |:fuel :error|)]
   (fiber/set-fuel f 3)
   (fiber/resume f)
   (assert (= (fiber/status f) :paused) "S2: the fiber pauses at the meter")
@@ -77,7 +82,7 @@
     (yield 1)
     7))
 
-(let [f (fiber/new (fn [] ((squelch tail-looper |:fuel :yield|)))
+(let [f (fiber/new (fn [] ((squelch |:fuel :yield| tail-looper)))
                    |:fuel :yield :error|)]
   (fiber/set-fuel f 3)
   (fiber/resume f)
@@ -90,7 +95,7 @@
   (assert (= (fiber/value f) 45) "S4: the boundary did not perturb the result"))
 
 (let [caught (try
-               ((squelch yielder |:fuel :yield|))
+               ((squelch |:fuel :yield| yielder))
                (catch e (get e :error)))]
   (assert (= caught :signal-violation)
           "S4: the same boundary still converts the squelched :yield"))
@@ -101,9 +106,9 @@
 # subtracted :fuel and converted the :debug that rode with it, so the fiber
 # died with a signal-violation where it should have paused.
 (let [f (fiber/new (fn []
-                     ((squelch (fn []
-                                 (emit |:debug :fuel|)
-                                 5) :debug))) |:debug :fuel :error|)]
+                     ((squelch :debug (fn []
+                                        (emit |:debug :fuel|)
+                                        5)))) |:debug :fuel :error|)]
   (fiber/resume f)
   (assert (= (fiber/status f) :paused)
           "S5: the pause passes a squelch of the bit it carries")
