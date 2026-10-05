@@ -192,6 +192,13 @@ semver-check: elle  ## Verify every versioned library surface against its commit
 LANG_FILES := $(sort $(wildcard tests/lang/*.lisp))
 IMPL_FILES := $(sort $(wildcard tests/impl/*.lisp))
 
+# The producers, the files a ledger's `(producer "…")` header names, run
+# in-process on the rig in a pass of their own, and the isolated passes run the
+# rest (docs/test-runner.md). Read off the ledgers, so the ledger directory
+# stays the one list.
+PRODUCER_FILES      := $(sort $(shell sed -n 's/^(producer "\(.*\)")$$/\1/p' tests/ledger/*.lisp))
+ISOLATED_IMPL_FILES := $(filter-out $(PRODUCER_FILES),$(IMPL_FILES))
+
 # The runner's own acceptance tests drive `elle test` themselves and read the
 # store the pass records into, so they ride the implementation suite's first
 # pass.
@@ -328,9 +335,11 @@ smoke-lang: elle  ## The language suite on this build
 
 smoke-impl: elle elle-rig  ## The implementation suite on the rig, then both suites under each rig profile
 	@echo "=== the implementation suite, on the rig ==="
-	$(call RUN_SUITE,$(IMPL_FILES) $(RUNNER_ACCEPTANCE),--isolate '',$(ELLE_RIG))
+	$(call RUN_SUITE,$(ISOLATED_IMPL_FILES) $(RUNNER_ACCEPTANCE),--isolate '',$(ELLE_RIG))
 	@echo "=== both suites, every function compiled on its first call ==="
-	$(call RUN_SUITE,$(LANG_FILES) $(IMPL_FILES),--isolate '--profile $(EAGER_PROFILE)',$(ELLE_RIG))
+	$(call RUN_SUITE,$(LANG_FILES) $(ISOLATED_IMPL_FILES),--isolate '--profile $(EAGER_PROFILE)',$(ELLE_RIG))
+	@echo "=== the producers, in-process on the rig ==="
+	$(call RUN_SUITE,$(PRODUCER_FILES),,$(ELLE_RIG))
 	$(foreach profile,$(IMPL_PROFILES),$(call RUN_LANG_PROFILE,$(profile)))
 
 # The language suite booted from an image instead of from core.lisp,
@@ -395,7 +404,9 @@ smoke-pool: elle-pool  ## Both suites on the thread-pool I/O backend (what every
 	@echo "=== the language suite, thread-pool I/O ==="
 	$(call RUN_SUITE,$(LANG_FILES),)
 	@echo "=== the implementation suite, on the thread-pool build's rig ==="
-	$(call RUN_SUITE,$(IMPL_FILES),--isolate '',$(ELLE_RIG))
+	$(call RUN_SUITE,$(ISOLATED_IMPL_FILES),--isolate '',$(ELLE_RIG))
+	@echo "=== the producers, in-process on the thread-pool build's rig ==="
+	$(call RUN_SUITE,$(PRODUCER_FILES),,$(ELLE_RIG))
 
 elle-mlir:  ## Build elle-mlir and elle-rig-mlir, the MLIR build (for smoke-mlir)
 	@echo "=== build elle and its rig with MLIR ==="
@@ -408,7 +419,9 @@ smoke-mlir: elle-mlir  ## Both suites on the MLIR build
 	@echo "=== the language suite, MLIR build ==="
 	$(call RUN_SUITE,$(LANG_FILES),)
 	@echo "=== the implementation suite, on the MLIR build's rig ==="
-	$(call RUN_SUITE,$(IMPL_FILES),--isolate '',$(ELLE_RIG_MLIR))
+	$(call RUN_SUITE,$(ISOLATED_IMPL_FILES),--isolate '',$(ELLE_RIG_MLIR))
+	@echo "=== the producers, in-process on the MLIR build's rig ==="
+	$(call RUN_SUITE,$(PRODUCER_FILES),,$(ELLE_RIG_MLIR))
 
 # The no-features binary is copied beside the build, and the default build then
 # rebuilt in its place, so the runner is always a build that has FFI.
