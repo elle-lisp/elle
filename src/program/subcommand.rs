@@ -163,3 +163,33 @@ impl Test {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TEST_RUNNER_FRAGMENTS;
+
+    /// The `(elle/epoch N)` a fragment opens with.
+    fn epoch_line(fragment: &str) -> &str {
+        fragment
+            .lines()
+            .find(|l| l.starts_with("(elle/epoch"))
+            .unwrap_or("no epoch declaration")
+    }
+
+    /// The trap: the module compiles under the epoch of its first fragment,
+    /// and the rest drop their declaration. `elle fmt` migrates only the files
+    /// a commit stages, so a commit that migrated some fragments compiled the
+    /// others under rules they were never migrated to, and every runner test
+    /// failed far from the cause.
+    #[test]
+    fn every_fragment_declares_the_epoch_the_module_compiles_under() {
+        let first = epoch_line(TEST_RUNNER_FRAGMENTS[0]);
+        for (i, fragment) in TEST_RUNNER_FRAGMENTS.iter().enumerate() {
+            assert_eq!(
+                epoch_line(fragment),
+                first,
+                "runner fragment {i} declares another epoch than the first"
+            );
+        }
+    }
+}
