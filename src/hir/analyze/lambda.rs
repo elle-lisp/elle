@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 //! Lambda analysis: (fn (params...) body...)
 
 use super::*;
@@ -313,7 +313,9 @@ impl<'a> Analyzer<'a> {
         inferred_signals = inferred_signals.squelch(muffle);
 
         // A declared ceiling is checked against what leaves the function,
-        // which is the signal after the muffle.
+        // which is the signal after the muffle. It checks and does not
+        // replace: a caller sees what the body does, not what the
+        // declaration admits.
         if let Some(ceiling) = &declared_ceiling {
             let excess = inferred_signals.bits.subtract(ceiling.bits);
             if !excess.is_empty() {
@@ -326,11 +328,11 @@ impl<'a> Analyzer<'a> {
             }
             if ceiling.propagates == 0 && inferred_signals.propagates != 0 {
                 return Err(format!(
-                    "{}: function restricted to silent but body is polymorphic",
+                    "{}: function restricted to {} but body passes on the signal of its parameters",
                     span,
+                    registry::format_bits(ceiling.bits),
                 ));
             }
-            inferred_signals = *ceiling;
         }
 
         self.pop_scope();

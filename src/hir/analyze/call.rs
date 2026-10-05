@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 //! Call analysis: the compile-time arity check, and the signal each call raises
 //! across function boundaries.
 //!
@@ -42,11 +42,14 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // What the call checks at run time, and raises on: the count and the
-        // spliced value's shape when an argument is spliced, and the keyword
-        // arguments when the callee collects `&keys` or `&named`. A known
-        // callee with neither is checked above, so its call cannot fail.
-        if has_splice || self.callee_collects_keywords(&func) {
+        // What the call checks at run time, and raises on: the count when no
+        // arity checked it above, which a splice or an unknown callee leaves
+        // open, the spliced value's shape, and the keyword arguments when the
+        // callee collects `&keys` or `&named`. A callee whose arity is known
+        // and which collects no keywords is checked above, so its call cannot
+        // fail.
+        let count_checked = !has_splice && self.get_callee_arity(&func).is_some();
+        if !count_checked || self.callee_collects_keywords(&func) {
             self.add_inherent_bits(crate::value::SIG_ERROR);
             signal = signal.combine(Signal::errors());
         }
@@ -330,23 +333,32 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Case 2: Call to a polymorphic function with parameters as the polymorphic arguments
+        // Case 2: Call to a polymorphic function with parameters as the
+        // polymorphic arguments. Each such parameter joins the sources; the
+        // callee's own bits, and the signal of every other propagated
+        // argument, are inherent to this function all the same.
         if raw_signal.is_polymorphic() {
             let mut found_param = false;
+            let mut inherent = raw_signal.bits;
             for param_idx in raw_signal.propagated_params() {
-                if param_idx < args.len() {
-                    if let HirKind::Var(arg_binding) = &args[param_idx].kind {
-                        if matches!(self.arena.get(*arg_binding).scope, BindingScope::Parameter)
-                            && self.current_lambda_params.contains(arg_binding)
-                        {
-                            // The polymorphic signal depends on a parameter
-                            self.current_signal_sources.param_calls.insert(*arg_binding);
-                            found_param = true;
-                        }
+                let Some(arg) = args.get(param_idx) else {
+                    inherent = inherent.union(Signal::unknown().bits);
+                    continue;
+                };
+                if let HirKind::Var(arg_binding) = &arg.kind {
+                    if matches!(self.arena.get(*arg_binding).scope, BindingScope::Parameter)
+                        && self.current_lambda_params.contains(arg_binding)
+                    {
+                        self.current_signal_sources.param_calls.insert(*arg_binding);
+                        found_param = true;
+                        continue;
                     }
                 }
+                inherent = inherent.union(self.resolve_arg_signal(arg).bits);
             }
             if found_param {
+                self.current_signal_sources.non_param_bits =
+                    self.current_signal_sources.non_param_bits.union(inherent);
                 return;
             }
         }

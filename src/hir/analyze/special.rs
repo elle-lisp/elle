@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 //! Special forms: yield, match, silence
 
 use super::*;
@@ -90,10 +90,10 @@ impl<'a> Analyzer<'a> {
 
     /// Analyze an `(attune! signal-spec)` form.
     ///
-    /// attune! is a compile-time preamble declaration. It sets the function's
-    /// signal ceiling to the specified bits — the function may emit at most
-    /// these signals. Generalizes `(silence)`: `(silence)` is `(attune!)` with
-    /// no signals permitted.
+    /// attune! is a compile-time declaration. It records a ceiling that
+    /// `analyze_lambda` checks the inferred signal against; the function's
+    /// signal stays the inferred one. Generalizes `(silence)`, which is the
+    /// ceiling with no signals permitted.
     ///
     /// Forms:
     /// - `(attune! :keyword)` — ceiling = single signal
@@ -118,7 +118,7 @@ impl<'a> Analyzer<'a> {
             ));
         }
 
-        let bits = self.resolve_static_signal(&args[0])?;
+        let bits = self.resolve_static_signal("attune!", &args[0])?;
         self.current_declared_ceiling = Some(Signal {
             bits,
             propagates: 0,
@@ -156,7 +156,7 @@ impl<'a> Analyzer<'a> {
             ));
         }
 
-        let bits = self.resolve_static_signal(&args[0])?;
+        let bits = self.resolve_static_signal("muffle", &args[0])?;
         let escapes = bits.intersection(crate::signals::SIG_ERROR.union(crate::signals::SIG_HALT));
         if !escapes.is_empty() {
             return Err(format!(
@@ -185,7 +185,7 @@ impl<'a> Analyzer<'a> {
         }
 
         // Extract signal bits from the first argument (must be literal keyword or set)
-        let signal_bits = self.resolve_static_signal(&items[1])?;
+        let signal_bits = self.resolve_static_signal("emit", &items[1])?;
 
         let value = if items.len() == 3 {
             self.analyze_expr(&items[2])?
@@ -217,52 +217,40 @@ impl<'a> Analyzer<'a> {
     /// - A literal keyword: `:yield` → SIG_YIELD
     /// - A literal set of keywords: `|:yield :io|` → SIG_YIELD | SIG_IO
     ///
-    /// Rejects non-literal arguments at compile time.
+    /// Rejects non-literal arguments at compile time. `form` is the form the
+    /// spec belongs to, and every message names it.
     fn resolve_static_signal(
         &self,
+        form: &str,
         syntax: &Syntax,
     ) -> Result<crate::value::fiber::SignalBits, String> {
         use crate::syntax::SyntaxKind;
         use crate::value::fiber::SignalBits;
 
+        let resolve = |name: &str, span: &Span| {
+            crate::signals::registry::with_registry(|r| r.to_signal_bits(name))
+                .ok_or_else(|| format!("{}: {}: unknown signal keyword :{}", span, form, name))
+        };
         match &syntax.kind {
-            SyntaxKind::Keyword(name) => {
-                let registry = crate::signals::registry::global_registry().lock().unwrap();
-                match registry.to_signal_bits(name) {
-                    Some(bits) => Ok(bits),
-                    None => Err(format!(
-                        "{}: emit: unknown signal keyword :{}",
-                        syntax.span, name
-                    )),
-                }
-            }
+            SyntaxKind::Keyword(name) => resolve(name, &syntax.span),
             SyntaxKind::Set(elements) => {
-                let registry = crate::signals::registry::global_registry().lock().unwrap();
                 let mut bits = SignalBits::EMPTY;
                 for elem in elements {
-                    match &elem.kind {
-                        SyntaxKind::Keyword(name) => match registry.to_signal_bits(name) {
-                            Some(b) => bits |= b,
-                            None => {
-                                return Err(format!(
-                                    "{}: emit: unknown signal keyword :{}",
-                                    elem.span, name
-                                ))
-                            }
-                        },
-                        _ => {
-                            return Err(format!(
-                                "{}: emit: set elements must be keywords",
-                                elem.span
-                            ))
-                        }
-                    }
+                    let SyntaxKind::Keyword(name) = &elem.kind else {
+                        return Err(format!(
+                            "{}: {}: set elements must be keywords",
+                            elem.span, form
+                        ));
+                    };
+                    bits |= resolve(name, &elem.span)?;
                 }
                 Ok(bits)
             }
             _ => Err(format!(
-                "{}: emit: first argument must be a signal keyword or keyword set, got {:?}",
-                syntax.span, syntax.kind
+                "{}: {}: expected a signal keyword or keyword set, got {}",
+                syntax.span,
+                form,
+                syntax.kind_label()
             )),
         }
     }

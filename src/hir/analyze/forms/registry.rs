@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 //! The special-form registry: the single source of truth for the names the
 //! analyzer treats as special forms.
 //!
@@ -367,7 +367,7 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
     SpecialForm {
         name: "attune!",
         handler: Some(sf_attune_assert),
-        doc: "Declare, inside a function body, the most the function may emit: a body whose inferred signal exceeds the given signals is a compile error.",
+        doc: "Declare, inside a function body, the most the function may emit: a body whose inferred signal exceeds the given signals is a compile error. The check leaves the function's signal as inferred.",
         params: &[":signal or |signals|"],
         arity: Arity::Exact(1),
         example: "(defn add [x y] (attune! :error) (+ x y))",
@@ -412,7 +412,7 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
     SpecialForm {
         name: "signal",
         handler: Some(sf_signal),
-        doc: "Declare a user signal at file scope. Produces the keyword value.",
+        doc: "Declare a user signal at file scope. Produces the keyword value. A keyword that is already a user signal keeps its bit, so every declaration of it names one signal; a built-in keyword cannot be declared.",
         params: &[":keyword"],
         arity: Arity::Exact(1),
         example: "(signal :saturated)",

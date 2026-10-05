@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 //! Signal type for tracking which signals a function may emit.
 //!
 //! docs/signals/protocol.md
@@ -114,8 +114,9 @@ const VM_INTERNAL: SignalBits = SIG_RESUME
 /// the metering parent (`lib/process.lisp` preemption, a stepping debugger)
 /// owns the resume.
 ///
-/// A pause is the VM's action, not the paused code's behavior, so it is
-/// exempt from squelch/attune enforcement — see [`squelched_bits`].
+/// A pause is the VM's action, not the paused code's behavior, so a signal
+/// that carries it passes squelch/attune enforcement whole, whatever else it
+/// carries — see [`squelched_bits`].
 pub const SIG_PAUSE: SignalBits = SIG_FUEL;
 
 /// The bits a `squelch`/`attune` boundary converts into a `signal-violation`
@@ -130,16 +131,17 @@ pub const SIG_PAUSE: SignalBits = SIG_FUEL;
 ///
 /// - `:error` and `:halt` are the escapes every boundary lets out, so a signal
 ///   carrying either passes whole.
+/// - A signal carrying a pause bit is the VM's pause, raised under whatever
+///   code was running, so it passes whole too: a dynamic breakpoint's
+///   `|:debug :fuel|` must reach the debugger through a squelch of `:debug`.
 /// - `:switch`, matched exactly, is the VM's fiber-switch trampoline. The exact
 ///   match keeps a user signal that merely rides alongside enforceable.
-/// - The pause bits pass by subtraction rather than exempting the whole signal,
-///   so a compound `|:fuel :log|` still violates a squelch of `:log`.
 #[inline]
 pub fn squelched_bits(bits: SignalBits, mask: SignalBits) -> SignalBits {
-    if bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT) || bits == SIG_SWITCH {
+    if bits.intersects(SIG_ERROR.union(SIG_HALT).union(SIG_PAUSE)) || bits == SIG_SWITCH {
         return SignalBits::EMPTY;
     }
-    bits.intersection(mask).subtract(SIG_PAUSE)
+    bits.intersection(mask)
 }
 
 /// Capability mask: all signals that user code can produce.
@@ -408,14 +410,17 @@ impl Signal {
         self.bits.intersects(SIG_YIELD)
     }
 
-    /// Can this function PARK — suspend its frame into a continuation only a
-    /// resume revives? The static face of [`dispatch::is_suspending`], asked
-    /// of an inferred signal whose bits are a UNION of possible raises: any
-    /// bit outside the two unwinding exits (`:error`, `:halt`) can park, so a
-    /// compound like `:io`+`:error` answers true where the runtime predicate
-    /// classifies one concrete raise at a time. `SIG_FFI` marks a foreign
-    /// call, not a raise, and never parks. A polymorphic signal may park
-    /// through its argument, so it answers true.
+    /// Can this function park on the suspend route — the route
+    /// [`dispatch::is_suspending`] answers at run time, of which this is the
+    /// static face? It is asked of an inferred signal whose bits are a UNION
+    /// of possible raises: any bit outside `:error` and `:halt` can take that
+    /// route, so a compound like `:io`+`:error` answers true where the runtime
+    /// predicate classifies one concrete raise at a time. An error and a halt
+    /// leave by exits of their own. The error exit parks the frame as well
+    /// (docs/impl/region/park.md), but it is not the route this predicate
+    /// asks about. `SIG_FFI` marks a foreign call, not a raise, and never
+    /// parks. A polymorphic signal may park through its argument, so it
+    /// answers true.
     pub const fn may_park(&self) -> bool {
         let non_park = SIG_ERROR.union(SIG_HALT).union(SIG_FFI);
         self.propagates != 0 || !self.bits.subtract(non_park).is_empty()

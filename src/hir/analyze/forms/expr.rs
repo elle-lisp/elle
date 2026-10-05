@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 //! Expression dispatch: literals, variables, the collection literals, and the
 //! turn to a special form or a call.
 //!
@@ -53,10 +53,10 @@ impl<'a> Analyzer<'a> {
     /// into.
     ///
     /// The call's signal is the combination of its items', plus `:error`
-    /// where the constructor checks an element at run time: a byte must be
-    /// an integer from 0 to 255, and a struct key must be immutable. An
-    /// element the literal spells out is checked here instead, so a literal
-    /// of literals stays silent.
+    /// where the constructor checks an element at run time: a spliced value
+    /// must be a sequence, a byte must be an integer from 0 to 255, and a
+    /// struct key must be immutable. An element the literal spells out is
+    /// checked here instead, so a literal of literals stays silent.
     pub(crate) fn analyze_collection_literal(
         &mut self,
         prim: &str,
@@ -77,14 +77,12 @@ impl<'a> Analyzer<'a> {
             signal = signal.combine(hir.signal);
             args.push(CallArg { expr: hir, spliced });
         }
-        let checked_at_run_time = match prim {
-            "bytes" | "@bytes" => !args.iter().all(|a| !a.spliced && is_byte_literal(&a.expr)),
-            "struct" | "@struct" => !args
-                .iter()
-                .step_by(2)
-                .all(|a| !a.spliced && is_key_literal(&a.expr)),
-            _ => false,
-        };
+        let checked_at_run_time = args.iter().any(|a| a.spliced)
+            || match prim {
+                "bytes" | "@bytes" => !args.iter().all(|a| is_byte_literal(&a.expr)),
+                "struct" | "@struct" => !args.iter().step_by(2).all(|a| is_key_literal(&a.expr)),
+                _ => false,
+            };
         if checked_at_run_time {
             self.add_inherent_bits(crate::value::SIG_ERROR);
             signal = signal.combine(Signal::errors());

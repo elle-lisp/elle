@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 //! Syntax to HIR analysis
 //!
 //! docs/impl/hir.md
@@ -283,12 +283,6 @@ pub struct Analyzer<'a> {
     /// its version. Wired from the CompileCtx by the pipeline; analyzers
     /// with no VM behind them (LSP, lint) keep the process default.
     unicode_generation: crate::segment::Generation,
-    /// User signals declared in THIS compilation (`(signal :kw)`). Used to
-    /// reject duplicate declarations within one compile while allowing the same
-    /// signal to be re-declared by a SEPARATE compile — the process-global signal
-    /// registry persists across compiles, so the test runner recompiling a file
-    /// once per tier would otherwise collide ("already registered").
-    signals_declared: HashSet<String>,
     /// The owning instance's compile context, for resolving `(import "literal")`
     /// signal projections during analysis (`get_or_compile_projection`). Set by
     /// the file frontend via [`set_compile_ctx`](Analyzer::set_compile_ctx); the
@@ -360,7 +354,6 @@ impl<'a> Analyzer<'a> {
             current_immutability_asserts: HashSet::new(),
             immutable_by_default: true,
             unicode_generation: crate::config::get().unicode_generation(),
-            signals_declared: HashSet::new(),
             import_ctx: None,
         };
         // Initialize with a global scope so top-level bindings can be registered
@@ -376,18 +369,15 @@ impl<'a> Analyzer<'a> {
         self.import_ctx = Some(cctx as *mut _);
     }
 
-    /// Declare a user signal `(signal :kw)`. Rejects a duplicate declaration
-    /// WITHIN this compilation, but re-declaring a user signal across SEPARATE
-    /// compilations reuses its registry bit (idempotent) — re-declaring a builtin
-    /// still errors. `span` prefixes the error message.
+    /// Declare a user signal `(signal :kw)`. A keyword that is already a user
+    /// signal keeps its bit, whichever compile declared it first, so every
+    /// declaration of a keyword names one signal; a builtin keyword is an
+    /// error. `span` prefixes the error message.
     pub(crate) fn declare_signal(
         &mut self,
         keyword: &str,
         span: &crate::syntax::Span,
     ) -> Result<(), String> {
-        if !self.signals_declared.insert(keyword.to_string()) {
-            return Err(format!("{}: Signal '{}' already registered", span, keyword));
-        }
         let mut reg = crate::signals::registry::global_registry()
             .lock()
             .unwrap_or_else(|e| e.into_inner());

@@ -255,6 +255,21 @@ impl<'a> LirView<'a> {
         self.parts.nodes.iter().any(|n| n.op == op as u8)
     }
 
+    /// Why the JIT refuses this function, or `None` when it admits it. The
+    /// signal plays no part (docs/signals/jit.md). A `&keys` or `&named`
+    /// collector needs the fiber to report a bad keyword, and the JIT entry
+    /// block has no fiber pointer. A `MakeClosure` has no lowering: a
+    /// closure's code object is a payload in a code region, and the worker
+    /// has no heap to write one into (docs/impl/jit.md).
+    pub fn jit_refusal(&self) -> Option<&'static str> {
+        if matches!(self.arity(), Arity::AtLeast(_))
+            && !matches!(self.head.vararg.kind(), crate::hir::VarargKind::List)
+        {
+            return Some("variadic function with struct/named varargs");
+        }
+        self.has_op(Op::MakeClosure).then_some("MakeClosure")
+    }
+
     // ── records ────────────────────────────────────────────────────────
     //
     // For the code module's own copies and rewrites, and for the tests that

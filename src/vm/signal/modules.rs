@@ -43,9 +43,10 @@ impl VM {
         // In the runner this compile is the gating/error DETECTION pass — the file
         // is actually executed from a worker via compile/whole-module-syntax, which
         // shares the process-global signal registry. Keep detection registry-neutral
-        // so a top-level `(signal :kw)` declaration here doesn't collide with the
-        // worker's execution compile ("already registered"). The returned thunk is
-        // not run from this compile, so dropping the registration is safe.
+        // so a top-level `(signal :kw)` declaration here spends none of the 32 user
+        // bits; the worker's execution compile registers what the file declares.
+        // The returned thunk is not run from this compile, so dropping the
+        // registration is safe.
         let snapshot = crate::signals::registry::snapshot_registry();
         let result =
             self.dispatch_test_module(ctx, arg, "compile/whole-module", |src, syms, cctx, name| {
