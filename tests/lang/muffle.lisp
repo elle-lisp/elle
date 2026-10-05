@@ -1,67 +1,101 @@
-(elle/epoch 12)
-# ── muffle: compile-time signal absorption ────────────────────────────
-#
-# (muffle :signal) absorbs specific signals from the body, allowing
-# (silence) functions to contain operations that declare those signals.
-# Runtime enforcement (vm/call.rs abort) catches the case where the
-# muffled signal actually fires.
+(elle/epoch 14)
+# audited: 2026-10-04
+# (muffle spec) is squelch applied to the function itself when a closure is
+# made from it: the inferred signal loses spec and gains :error, and the
+# boundary turns a muffled signal into :signal-violation. Counter-factual:
+# muffle removed bits from the inferred signal and enforced nothing, so a
+# muffled function lied to its callers, and `(silence) (muffle :error)` made
+# a function that raises read as silent.
 
-# ── muffle :error allows arithmetic in silent functions ──────────────
+(defn bits-of [src name]
+  (get (compile/signal (compile/analyze src) name) :bits))
 
-(defn fast-add [x y]
-  (silence)
-  (muffle :error)
-  (+ x y))
+(defn compile-error [form]
+  "The message eval reports when form does not compile."
+  (let [[ok? err] (protect (eval form))]
+    (assert (not ok?) "the form compiles")
+    (get err :message)))
 
-(assert (= (fast-add 3 7) 10) "muffled add works")
+# ── The inferred signal ──────────────────────────────────────────────
 
-(defn fast-abs [x]
-  (silence)
-  (muffle :error)
-  (when (%not (number? x))
-    (error {:error :type-error :message "fast-abs: number required"}))
-  (if (%gt x 0) x (%sub 0 x)))
+(assert (= |:error| (bits-of "(defn f [] (muffle :yield) (yield 1) 2)" :f))
+        "a muffled yield comes back as :error")
+(assert (= || (bits-of "(defn f [x] (muffle :yield) x)" :f))
+        "a muffle of a signal the body never raises changes nothing")
+(assert (= |:error|
+           (bits-of "(defn f [] (muffle |:yield :io|) (println 1) (yield 1) 2)"
+                    :f)) "a set muffles each member")
+(assert (= |:io :error|
+           (bits-of "(defn f [] (muffle :yield) (println 1) (yield 1) 2)" :f))
+        "a signal outside the spec still leaves")
 
-(assert (= (fast-abs -7) 7) "muffled abs works")
-(assert (= (fast-abs 5) 5) "muffled abs positive")
+# ── The boundary ─────────────────────────────────────────────────────
 
-# ── muffle with set literal ──────────────────────────────────────────
+(defn muffled []
+  (muffle :yield)
+  (yield 1)
+  2)
 
-(defn fast-square [x]
-  (silence)
-  (muffle |:error|)
-  (* x x))
+(def [ok? err]
+  (protect (let [r (muffled)]
+             r)))
+(assert (not ok?) "a muffled yield does not leave the function")
+(assert (= :signal-violation (get err :error)))
+(assert (= "squelch: signal {:yield} caught at boundary" (get err :message)))
 
-(assert (= (fast-square 5) 25) "muffled set literal works")
+(def [tail-ok? tail-err] (protect (muffled)))
+(assert (not tail-ok?) "the boundary holds in tail position")
+(assert (= :signal-violation (get tail-err :error)))
 
-# ── muffle without silence: absorbs from inferred signal ─────────────
+(defn quiet [x]
+  (muffle :yield)
+  x)
+(assert (= 3 (quiet 3)) "a muffle that catches nothing costs nothing")
 
-(defn add-quiet [x y]
-  (muffle :error)
-  (+ x y))
+(defn muffled-io []
+  (muffle :io)
+  (println "never printed")
+  2)
+(def [io-ok? io-err]
+  (protect (let [r (muffled-io)]
+             r)))
+(assert (not io-ok?) "a muffled I/O request does not reach the scheduler")
+(assert (= :signal-violation (get io-err :error)))
 
-(assert (= (add-quiet 3 7) 10) "muffle without silence works")
+# ── Beside a ceiling ─────────────────────────────────────────────────
 
-# ── silence alone still rejects unmuffled signals ────────────────────
+(defn bounded []
+  (attune! :error)
+  (muffle :yield)
+  (yield 1)
+  2)
+(def [bounded-ok? bounded-err]
+  (protect (let [r (bounded)]
+             r)))
+(assert (not bounded-ok?) "attune! :error admits the muffled form")
+(assert (= :signal-violation (get bounded-err :error)))
 
-(def [ok? _]
-  (protect (eval '(defn bad [x y]
-                   (silence)
-                   (+ x y)))))
-(assert (not ok?) "silence without muffle still rejects arithmetic")
+(assert (string/contains? (compile-error '(fn []
+                            (silence)
+                            (muffle :yield)
+                            (yield 1)))
+                          "function restricted to {} but body may emit {:error}")
+        "silence rejects a muffled body: the violation it raises is a raise")
 
-# ── muffle doesn't help with unmuffled signals ───────────────────────
+# ── What cannot be muffled ───────────────────────────────────────────
 
-(def [ok2? _]
-  (protect (eval '(defn bad2 []
-                   (silence)
-                   (muffle :error)
-                   (yield 1)))))
-(assert (not ok2?) "muffle :error doesn't help with :yield")
-
-# ── muffle outside function is an error ──────────────────────────────
-
-(def [ok3? _] (protect (eval '(muffle :error))))
-(assert (not ok3?) "muffle outside function is an error")
+(assert (string/contains? (compile-error '(fn [x]
+                            (muffle :error)
+                            (+ x 1)))
+                          "{:error} passes every boundary and cannot be muffled")
+        ":error cannot be muffled")
+(assert (string/contains? (compile-error '(fn [x]
+                            (muffle |:yield :halt|)
+                            x))
+                          "{:halt} passes every boundary and cannot be muffled")
+        ":halt cannot be muffled")
+(assert (string/contains? (compile-error '(muffle :yield))
+                          "muffle must appear inside a function body")
+        "muffle outside a function is an error")
 
 (println "all muffle tests passed")

@@ -271,6 +271,9 @@ mod test_setup {
 mod pre_commit {
     include!("pre_commit.rs");
 }
+mod uncaught_raise {
+    include!("uncaught_raise.rs");
+}
 mod toolchains {
     include!("toolchains.rs");
 }

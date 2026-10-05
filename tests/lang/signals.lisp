@@ -1,10 +1,10 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 14)
+# audited: 2026-10-04
 ## Signal System Tests
 ##
 ## Tests for the signal declaration, silence, and signals introspection
-## features. Migrated from tests/integration/signal_enforcement.rs
-## (language behaviour tests that evaluate Elle source and check values).
+## features: language behaviour tests that evaluate Elle source and check
+## values.
 
 
 # ============================================================================
@@ -47,14 +47,15 @@
   (assert (= (apply-inert (fn [x y] x) 43 1) 43)
           "silence runtime: silent function passes"))
 
-# silence with non-closure (primitive) passes at runtime
+# silence with a silent native passes at runtime. A native is checked by its
+# declared signal, so `length`, which may raise, fails the bound instead.
 (begin
   (def apply-inert2
     (fn (f x)
       (silence f)
       (f x)))
-  (assert (= (apply-inert2 length [1 2 3]) 3)
-          "silence runtime: non-closure passes"))
+  (assert (nil? (apply-inert2 meta/origin 42))
+          "silence runtime: a silent native passes"))
 
 # squelch with keyword passes for silent closure (open-world: silent closure has no :rt_c5a)
 # Direct invocation: (squelch f :rt_c5a) returns a squelched closure; calling it with
@@ -87,8 +88,8 @@
         "silence runtime: yielding closure is signal-violation")
 
 # squelch with :yield fails for yielding closure (blacklist: :yield is forbidden)
-# Called directly in tail position — squelch enforcement now fires in the
-# tail-call trampoline loop (accumulated_squelch_mask), not just in call_inner.
+# Called directly in tail position: the activation enforces the squelch of
+# every tail call that replaced its body when it ends.
 (signal :rt_c5b2)
 (def [ok5? err5] (protect ((squelch (fn () (yield 1)) :yield))))
 (assert (not ok5?)
@@ -157,7 +158,8 @@
 # ============================================================================
 
 # squelch runtime: a closure emitting the squelched signal is rejected with :signal-violation
-# Use let to force non-tail position so squelch enforcement fires in call_inner.
+# Use let to force non-tail position so the squelch is enforced where the
+# call completes.
 (begin
   (def [ok-sq? err-sq]
     (protect (let [r ((squelch (fn () (yield 1)) :yield))]
