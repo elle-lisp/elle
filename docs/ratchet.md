@@ -318,11 +318,6 @@ and why its rows are what they are is its ledger's comments.
 
 **The runner**, as above.
 
-**The audit queue.** A producer, `tests/ratchet/audit.lisp`, runs
-`scripts/audit` and reads two counts: the files with no stamp, and the files
-stamped before the policy. Both are pins with `:better :lower`. The ratchet
-the policy describes in prose becomes a row that fails when the count rises.
-
 **valgrind.** A producer, `tests/ratchet/valgrind.lisp`, gates itself on the
 binary being present, runs a fixed set of programs under `memcheck`, parses
 the leak summary, and reads the definitely-lost bytes and the error count per

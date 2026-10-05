@@ -1,6 +1,6 @@
 # Tests
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-05 -->
 
 Where each kind of test lives, the helpers they share, and how to add one.
 
@@ -20,11 +20,16 @@ tests/
 ├── impl/               # The implementation suite's Elle half, run on the rig
 ├── runner/             # The `elle test` runner's own acceptance tests and fixtures
 ├── ledger/             # The ratchet's bounds: one data file per producer (docs/ratchet.md)
+├── ratchet/            # Producers that drive a tool outside Elle and read its counts
+├── golden/             # The snapshots impl/escape-golden.lisp compares against
+├── http2/              # HTTP/2 files no suite runs; `elle tests/http2/all.lisp` runs them
 ├── modules/            # Modules the integration tests import
 ├── property/           # Property-based tests (proptest)
 ├── integration/        # Full-pipeline and repository tests
 ├── unittests/          # Rust APIs tested directly
 ├── io_copies/          # The measuring helper `io_copies.rs` uses
+├── image_boot/         # The modules of image_boot.rs; so too region_process_teardown/, wasm_smoke/
+├── README.md           # The suites and the command that runs each
 └── *.rs                # One standalone binary each — see below
 ```
 
