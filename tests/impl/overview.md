@@ -1,6 +1,6 @@
 # The implementation suite
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-04 -->
 
 Elle programs that check this implementation: its gauges, its tiers, its crashes
 and its mechanisms, each run on the rig.
@@ -61,16 +61,17 @@ hold what those files read, and the suite runs none of them:
 
 [oracle.lisp](oracle.lisp) measures the leak rate of each residual class, and
 [plumb.lisp](plumb.lisp) measures the I/O leak rates. Each drives a shape
-under the ratchet's gauges and prints one reading per subject, judged against
-the row its ledger under `tests/ledger` holds for it
-([ratchet](../../docs/ratchet.md)).
+under the ratchet's gauges and prints one reading per subject, which the
+runner judges against the row its ledger under `tests/ledger` holds for the
+run's build ([ratchet](../../docs/ratchet.md)).
 [docs/impl/region/diagnostics.md](../../docs/impl/region/diagnostics.md) owns
 the gauges they read.
 
 ## Running
 
-`make smoke-impl` runs every file here as its own child of `elle test --host
-elle-rig`, so each verdict lands in the session store. It then runs the
+`make smoke-impl` runs every file here as its own child of `elle-rig test
+--isolate ''`, so each verdict lands in the session store, and each reading is
+judged as the rig's build. It then runs the
 suites once more under each profile the pass names. `make smoke-pool` runs the
 files here again on the thread-pool build's rig, `make smoke-mlir` on the MLIR
 build's rig, and `make smoke-wasm` on the `wasm` build's rig. A file that reads

@@ -1,15 +1,15 @@
 # The ratchet
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-04 -->
 
-One library measures, one committed ledger holds every bound, and `elle test`
+One library measures, one committed ledger holds every bound, and the runner
 judges, records and re-pins; nothing else carries a number.
 
-This document is the specification. The instrument, the ledger and the
-direct-run gate are built, as [the guide](../lib/ratchet.md) shows, and so is
-the runner's side: the rows, the `missing` gate, the summary and `--repin`.
-A producer is on the ratchet when `tests/ledger` holds a file for it. The
-producers under § The producers are proposed.
+This document is the specification. The instrument and the ledger are built,
+as [the guide](../lib/ratchet.md) shows, and so is the runner's side: the
+judge, the rows, the `missing` gate, the summary and `--repin`. A producer is
+on the ratchet when `tests/ledger` holds a file for it. The producers under
+§ The producers are proposed.
 
 ## What a ratchet is
 
@@ -51,17 +51,17 @@ A measurement is a fact. A bound is a claim. The two never live in one file.
 
 | Part | Where | What it owns |
 |------|-------|--------------|
-| The instrument | `lib/ratchet.lisp` and its submodules | gauges, the estimator, the drives, the reading line, the judge, the re-pin's rewrite |
+| The instrument | `lib/ratchet.lisp` and `lib/ratchet/estimator.lisp` | gauges, the estimator, the drives, the reading line |
 | The reading | one line on stdout | subject, axis, value, unit, uncertainty |
-| The ledger | `tests/ledger/*.lisp`, committed | one row per (subject, axis): the bound, its kind, its class |
-| The runner | `src/test/ledger.lisp` and `src/test/repin.lisp` | reading every line back, the completeness gate, history, `--repin` |
+| The ledger | `tests/ledger/*.lisp`, committed | one row per (subject, axis) and build: the bound, its kind, its class |
+| The ledger module | `lib/ratchet/ledger.lisp` and `lib/ratchet/repin.lisp` | the row reader, the judge, the line reader, the re-pin's rewrite |
+| The runner | `src/test/ledger.lisp` and `src/test/repin.lisp` | reading every line back, judging it, the completeness gate, history, `--repin` |
 
-A producer imports the instrument, drives its shapes, and calls `report`. The
-instrument judges each reading against the ledger as it lands, prints it, and
-fails once at the end naming every reading that is not `ok`. Under `elle test`
-the same lines become rows, the runner judges them again against the same
-ledger, adds the rows no producer answered, and offers to move the ledger to
-what was read.
+A producer imports the instrument, drives its shapes, and prints one line per
+reading. It judges nothing. Under `elle-rig test` the runner reads the lines
+back, judges each against the rows of its own build, adds the rows no producer
+answered, records every reading, and offers to move the ledger to what was
+read.
 
 ### The reading line
 
@@ -69,14 +69,15 @@ Every reading is one line on stdout, opened by the word `measure` and carrying
 one JSON object:
 
 ```text
-measure {"subject":"io-drop","axis":"objects","value":0.0,"half":0.04,"unit":"objects/op","bound":0,"verdict":"ok"}
+measure {"subject":"io-drop","axis":"objects","value":0.0,"half":0.04,"unit":"objects/op"}
 ```
 
 `subject` names the shape, `axis` the dimension, `value` the reading and
 `unit` what one unit of it is. `half` is the half-width of the reading's
 interval: what the estimator reports for a rate, and 0 for an exact count. The
-instrument adds `bound` and `verdict` when it has judged the line; a producer
-that only prints leaves them out and the runner judges.
+instrument adds `void` to a reading it refuses, `class` and `floor` to a
+live-growth reading, and `alt-value` to a rate it read at two block sizes. A
+line never carries a bound, a kind or a verdict: those are the runner's.
 
 The line is the rendering. There is no second, prettier copy for a human, so a
 direct run and a captured asset show the same text. Stdout is the channel
@@ -129,23 +130,12 @@ The options:
 | `:note "…"` | one sentence for the reader, kept when the tool rewrites the row |
 | `:build "…"` | the build the row belongs to; a row without one belongs to the reference build |
 
-A row belongs to a build. The reference build is the default build on Linux
-x86_64, the one the `Default Build Tests` job runs, and a row with no `:build`
-belongs to it. A pin is two-sided on the build it belongs to and one-sided on
-every other build: there a reading past it the worse way is a regression and
-a reading past it the better way is `ok`. So a build that reclaims more than
-the reference build passes, exactly as it passed the ceilings the ratchet
-replaced, and the pin stays tight where it was read. A build that reads worse
-than the reference build gets a row of its own with `:build`, and that row is
-two-sided there. On its build, a `:build` row replaces the row with none; on
-every other build it is no row at all.
-
-A build's key names its tier, its I/O backend, its operating system and its
-architecture, as `(elle/build)` reports them: `jit-uring-linux-x86_64` is the
-reference build, and `mlir-uring-linux-x86_64` and `jit-pool-macos-aarch64`
-are two others. The rig's profiles and a file's sidecar change how a build
-runs a file and never which build it is, so the eager pass of the
-implementation suite judges against the same rows as the plain pass.
+A row belongs to exactly one build. The reference build is the default build
+on Linux x86_64, the one the `Default Build Tests` job runs, and its key is
+`jit-uring-linux-x86_64`. A row with no `:build` belongs to it, and a `:build`
+naming that key means the same. A reading is judged against the rows of its
+own build alone, and every pin is two-sided there. A row of another build is
+no row at all.
 
 A row with no class is a control: a shape the tree reclaims, pinned at what it
 reads. The slack is for a subject the machine makes noisy, a wall-clock ratio
@@ -159,6 +149,16 @@ bound's token inside the row's brackets and touches nothing else, so a comment
 survives every re-pin, and so does the wrapping `elle fmt` gives a long row.
 `elle fmt` formats a ledger file like any other.
 
+### The build
+
+The rig names the build, and computes its key from its own features:
+`(elle/build)` answers the tier, the I/O backend, the operating system and the
+architecture, joined by `-` ([rig](../rig/overview.md)). No primitive of a user
+build names it. So `mlir-uring-linux-x86_64` and `jit-pool-macos-aarch64` are
+two builds beside the reference build. A profile or a sidecar changes how a
+build runs a file and never which build it is, so the eager pass of the
+implementation suite judges against the same rows as the plain pass.
+
 ### The judge
 
 Every reading meets its row, and the outcome is one of six verdicts:
@@ -167,7 +167,7 @@ Every reading meets its row, and the outcome is one of six verdicts:
 |---------|---------|-------|
 | `ok` | the reading is within its bound | no |
 | `regression` | the reading moved the worse way | yes |
-| `stale` | the reading moved the better way past the slack, on the row's own build; re-pin it | yes |
+| `stale` | the reading moved the better way past the slack; re-pin it | yes |
 | `unledgered` | a reading with no row; adopt it or delete the measurement | yes |
 | `missing` | a row whose producer ran and reported nothing | yes |
 | `void` | the instrument's own check failed, so the reading says nothing | yes |
@@ -178,9 +178,7 @@ and stale when `v + h < p - s`. The sides swap under `:better :higher`. A
 floor fails when `v + h` is below it and a ceiling when `v - h` is above it. So a rate
 measured to a wide epsilon passes a pin it straddles, and only a rate measured
 tightly enough to clear the pin can fail it. What the instrument can see is
-what the gate can hold. The stale side is judged on the row's own build only:
-away from it a pin is a ceiling under `:better :lower` and a floor under
-`:better :higher`, and a reading past it the better way is `ok`.
+what the gate can hold.
 
 A void reading is one the instrument refuses to stand behind. That is a rate
 whose B-invariance check found it block-dependent, a growth row that read
@@ -196,8 +194,23 @@ reading, until somebody moves the ledger.
 
 ### The runner
 
-`elle test` reads every `measure` line out of every captured stdout, judges
-it, and writes one `measurement` row per reading:
+The runner reads every `measure` line out of every captured stdout. What it
+does with a reading turns on the run's build, which is the runner's own: the
+key `(elle/build)` answers under `elle-rig test`, and none under `elle test`.
+A child of `--isolate` with no `--host` runs `(elle/executable)`, the same
+rig, so the key holds for every child. A run with `--host` runs its children
+on another program, and has no build.
+
+| The run | Its readings |
+|---------|--------------|
+| no build: `elle test`, or any run with `--host` | neither recorded nor judged: no `missing` row, no gate, and `--repin` refuses |
+| a build, and no ledger file names the producer | recorded with no verdict: no `missing` row, no gate |
+| a build, and the producer's ledger holds no row of that build | recorded with no verdict, and `--repin` adopts every one as a row of that build |
+| a build, and the ledger holds rows of that build | judged against those rows and recorded, and a row nobody read is `missing` |
+
+The ledger directory is `tests/ledger` under the working directory, and a
+producer's path is matched relative to the working directory, as the runner
+takes every path. A judged or unjudged reading is one `measurement` row:
 
 ```sql
 CREATE TABLE measurement (
@@ -209,16 +222,12 @@ CREATE TABLE measurement (
   verdict TEXT);                         -- ok|regression|stale|unledgered|missing|void
 ```
 
-After each result lands as a `pass` it walks that file's ledger. A row the
-result printed no reading for becomes a `missing` row against it. A producer
-that gated itself out has skipped, not failed to report, and its rows are
-left alone. A run with a selection can only hold the producers it ran, so the
-full gate is a `selection IS NULL` run, as it is for every other verdict.
-
-A producer with no ledger file is recorded and not judged: its rows carry no
-verdict, and the gate ignores them. That is how a dashboard keeps its history
-in the table before its ledger exists, and the first row written for it is
-what starts the gate.
+After each result lands as a `pass` the runner walks the rows its build holds
+in that file's ledger. A row the result printed no reading for becomes a
+`missing` row against it. A producer that gated itself out has skipped, not
+failed to report, and its rows are left alone. A run with a selection can only
+hold the producers it ran, so the full gate is a `selection IS NULL` run, as
+it is for every other verdict.
 
 The summary counts readings by verdict and lists every one that is not `ok`:
 
@@ -231,34 +240,34 @@ The summary counts readings by verdict and lists every one that is not `ok`:
 
 The listing reads in the tally's order and names the tier, because a form
 runs once per tier and each run's reading is a row of its own. The gate fails
-on any verdict but `ok`, exactly as it fails on a form.
+on any verdict but `ok`, exactly as it fails on a form. A run with no build
+whose results printed a reading says, in one line, that it recorded and judged
+none of them, so a green run does not read as a passed gate.
 
-`elle test --repin PATHS` runs the selection, then moves the ledger to what it
-read: every `stale` row takes the new reading, and every `unledgered` reading
-becomes a row. It refuses a `regression`. A bound moves the worse way by a hand
-edit, which the pull request's diff then shows beside the change that needed
-it. The tool prints each row it moved. A reading it re-pins is written to three
-significant figures for a rate and as the integer it is for a count.
+`elle-rig test --repin PATHS` runs the selection, then moves the ledger to what
+it read: every `stale` row takes the new reading, and every `unledgered`
+reading becomes a row. It refuses a `regression`. A bound moves the worse way
+by a hand edit, which the pull request's diff then shows beside the change that
+needed it. The tool prints each row it moved. A reading it re-pins is written
+to three significant figures for a rate and as the integer it is for a count.
 
 A subject read on several tiers moves to the worst of its readings, so the
-new pin holds on every tier. A `stale` row is one the running build owns, so
-the tool moves the running build's rows and no other build's. An `unledgered`
-reading of a growth class, which is the instrument's own live-growth row, is
-adopted as a growth floor at the floor the instrument named; every other
-`unledgered` reading is adopted as a pin at its value. A reading adopted on a
-build other than the reference build is adopted as a `:build` row, so a
-foreign reading never pins the reference build. The rewrite is the
-instrument's, in [repin.lisp](../lib/ratchet/repin.lisp): it scans the
-ledger's text for the row's brackets, replaces the bound's token, and appends
-an adopted row after the last one.
+new pin holds on every tier. The tool moves rows of the run's build alone. An
+`unledgered` reading of a growth class, which is the instrument's own
+live-growth row, is adopted as a growth floor at the floor the instrument
+named; every other `unledgered` reading is adopted as a pin at its value. A
+build whose ledger holds no row of its own has every reading adopted, which is
+how a build joins the ratchet. A reading adopted on a build other than the
+reference build is adopted as a `:build` row. A producer with no ledger file
+gets one by hand, never from the tool. The rewrite is in
+[repin.lisp](../lib/ratchet/repin.lisp): it scans the ledger's text for the
+row's brackets, replaces the bound's token, and appends an adopted row after
+the last one.
 
-A `run` row records the build's key, so a reading's history groups by the
-build that read it ([test-store](test-store.md)).
-
-The `ELLE_TEST_MEASUREMENTS` channel, `measurement-sink`, `measurement-env`
-and the `closed`/`open`/`growth` verdict vocabulary are deleted. The runner
-imports the instrument for the judge, the row reader and the re-pin, so the
-runner and a direct run judge with one function.
+A `run` row records the build's key, or NULL for a run with none, so a
+reading's history groups by the build that read it ([test-store](test-store.md)).
+The runner imports the ledger module for the row reader, the judge and the line
+reader, and the re-pin module for the rewrite.
 
 The runner is also a producer. It reads its own three gauges at every file
 boundary today and pins none of them. At the end of a run it reports, for the
@@ -270,19 +279,9 @@ per-file rows in `gauge` keep saying which file.
 ### The instrument
 
 `(import "std/ratchet")` answers a closure; calling it makes one instrument
-with its own readings and its own copy of the ledger, resolved for the running
-program. The producer is the path the program was started with, the first
-element of `(sys/argv)`, which is the same path the runner records for the
-form. The ledger directory is `tests/ledger` under `(elle/root)`, the module
-resolution root `std/` already resolves against, and `ELLE_LEDGER` names
-another one. The build is what `(elle/build)` reports, and a test that wants
-the instrument to judge as another build hands it one:
-`((import "std/ratchet") :build "mlir-uring-linux-x86_64")`.
-
-A form the runner runs in a worker thread was started with no path, so it has
-no producer. The instrument then prints every reading without a bound or a
-verdict, and the runner judges them. A direct run and an isolated child both
-know their path, so both judge as they go.
+with its own readings. The instrument measures and prints. It reads no ledger,
+and it needs neither its producer's path nor its build. A direct run of a
+producer prints the same lines the runner reads, and judges none of them.
 
 | Export | What it does |
 |--------|--------------|
@@ -294,25 +293,14 @@ know their path, so both judge as they go.
 | `(delta subject gauge body :n N)` | the gauge's change over `N` runs of `body`, per run, after one uncounted run |
 | `(ratio subject measured control)` | the smaller of several alternating timings of `measured` over the same of `control` |
 | `(read subject axis value & opts)` | any number from anywhere: a count a script parsed, a byte total `valgrind` printed |
-| `(report)` | fail once, naming every reading that is not `ok` and every row of this producer that got no reading |
-
-Every reading judges itself as it lands and prints its line, so a direct run
-of a producer is the whole gate for that producer, with no runner present. The
-runner adds what one process cannot: rows across producers, history across
-commits, and the re-pin.
 
 **The instrument proves each gauge live.** The first time a producer reads an
 axis, the instrument drives that gauge's own live-growth shape first and
-reports it as `<axis> gauge (live-growth)`. Its row is a growth floor, and a
-floor that fails voids the axis. No producer writes a discriminator, and none
-can forget one. A module-level sink keeps every struct it is handed, so the
-object count, the region count and the byte count climb. A sink of pairs
-keeps the free list drained, so the id counter climbs.
-
-`report` raises one `:failed-assertion` with every failing line in its
-message, so under the runner the producer's form fails with the same text the
-`measurement` rows carry. A producer with nothing to say beyond its readings
-ends with `report` and no other assertion.
+reports it as `<axis> gauge (live-growth)`. Its row is a growth floor, and the
+runner voids the axis when that floor fails. No producer writes a
+discriminator, and none can forget one. A module-level sink keeps every struct
+it is handed, so the object count, the region count and the byte count climb.
+A sink of pairs keeps the free list drained, so the id counter climbs.
 
 ## The producers
 
@@ -346,11 +334,9 @@ Each phase lands as documentation, then a failing test, then code, and each
 is one pull request. The first four are in.
 
 1. **The library and the ledger.** `lib/ratchet.lisp` with `rate`, `delta`,
-   `read`, `report`, the gauges, the judge and the row reader, and
-   `(elle/root)`; `tests/ledger/` with a ledger for [the guide](../lib/ratchet.md),
-   which is the library's own fixture. The counter-factual: a reading past its
-   pin fails a direct run, and a reading past it the better way fails as
-   stale.
+   `read` and the gauges, the judge and the row reader, and `tests/ledger/`.
+   The counter-factual: the judge, as a pure function, calls a reading past
+   its pin a regression and one past it the better way stale.
 2. **The runner reads the line.** `src/test/ledger.lisp` parses stdout for
    every form and child, writes the rows, adds `missing`, prints the summary
    and gates. The counter-factual: a ledger row no producer answers fails the
@@ -373,16 +359,23 @@ is one pull request. The first four are in.
 
 - A stale pin fails the gate. The alternative is a warning, which is what a
   comment saying shrink-only is today.
-- A pin is two-sided on the build it belongs to and one-sided elsewhere. One
-  alternative judges every build two-sided against a row of its own, so a
-  better reading on any build fails until that build has a row, and a macOS
-  row can only be written from an imported CI store. The other lets a stale
-  reading pass everywhere, which is the loose pin the copies had.
+- The runner is the only judge, and the instrument measures and prints. One
+  judge is one code path, and the producer's path and the ledger lookup stay
+  out of programs. A direct run's verdict is not a requirement. The instrument
+  could judge every verdict but `stale` without knowing its build, so the
+  reason is economy.
+- A row belongs to exactly one build, and every pin is two-sided there. A
+  build is an implementation, and one implementation's footprint says nothing
+  about another's: a build may trade a leak in one area for a gain in another.
+  Nothing is one-sided anywhere.
+- A run with no build records and judges nothing. A reading is judged against
+  its build's rows, and a run with no build has none to judge against.
+- The main runtime offers no primitive that names the build; `(elle/build)`
+  exists in `elle-rig` alone. Test infrastructure adds no runtime surface for
+  its own convenience. A program can still infer parts of its build:
+  `(vm/config :jit)` answers the tier, and `uname` the platform.
 - Readings travel on stdout. The alternative keeps the environment-variable
   file, which no worker thread and no foreign producer can use.
 - The bound lives in the ledger, never in the producer. The alternative keeps
   numbers in source and adds a tool that edits source, which the rewrite engine
   can do; it leaves coverage a convention and the raise unenforced.
-- The instrument judges in-process, so a direct run of one producer is that
-  producer's whole gate. The alternative makes `elle test` the only judge,
-  which takes the verdict away from the command a developer iterates with.

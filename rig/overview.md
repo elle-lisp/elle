@@ -1,6 +1,6 @@
 # The rig
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-04 -->
 
 `elle-rig` hosts the same compiler and runtime as `elle`, and configures them
 in ways a user build cannot.
@@ -29,7 +29,9 @@ The rig takes every flag `elle` takes, then the rig's own two:
   without running it.
 
 The first argument that is not a flag names the program, and every argument
-after it belongs to the program, exactly as under `elle`.
+after it belongs to the program, exactly as under `elle`. The rig runs a file,
+the `-e` expressions or stdin, and has no REPL: given none of them, it refuses
+and runs nothing.
 
 The printed configuration is itself a sidecar the same build accepts, so a
 failing file's configuration reproduces its run. It has one line per setting:
@@ -49,6 +51,31 @@ The rig also answers `elle`'s subcommands — `elle-rig test`, `elle-rig semver`
 `elle-rig fmt` — through the same library code `elle` calls. A program that runs
 `(elle/executable)` with a subcommand, as the semver tool's tests do, therefore
 runs under the rig unchanged. A subcommand reads no sidecar and no profile.
+
+## The build
+
+The rig builds its own runtimes: the one a program runs on, and the one
+`elle-rig test` runs the test runner on. It registers `(elle/build)` as a
+primitive of each, and the primitive answers the build's key as a string:
+
+| Part | Values | Read from |
+|------|--------|-----------|
+| tier | `wasm`, `mlir`, `jit`, `interp` | the first of the rig's tier features in that order, else `interp` |
+| I/O backend | `uring`, `pool` | `uring` on Linux with the rig's `uring` feature, else `pool` |
+| operating system | `linux`, `macos`, … | `std::env::consts::OS` |
+| architecture | `x86_64`, `aarch64`, … | `std::env::consts::ARCH` |
+
+The parts are joined by `-`, so the default build on Linux x86_64 answers
+`jit-uring-linux-x86_64`. Each rig feature turns on the `elle` feature of the
+same name, and every recipe that builds a rig builds it with the features of
+the `elle` beside it, so the rig's features are its build's. `elle` has no such
+primitive. A run gets a build by running as `elle-rig test`, and the ratchet
+judges a reading against the rows of that build alone
+([ratchet](../docs/ratchet.md)).
+
+```sh
+elle-rig -e '(println (elle/build))'
+```
 
 ## The sidecar
 
@@ -98,21 +125,21 @@ keywords join the sidecar's.
 
 ## How the suite drives it
 
-`elle test --host PROGRAM` runs each file as its own child under `PROGRAM`
-instead of this `elle` ([test-runner](../docs/test-runner.md)), so every
-verdict lands in the session store. The `Makefile` target `smoke-impl` runs the
-implementation suite through `elle test --host target/release/elle-rig`, then
-one pass per profile. The target `smoke-wasm` runs the implementation suite on
-`elle-rig-wasm`, the rig of the `wasm` build, under each file's sidecar. It then
-runs both suites there under `wasm-full.toml`, less the files `WASM_SKIP`
-names. The target `smoke-mlir` runs the implementation suite on
-`elle-rig-mlir`, the rig of the MLIR build.
+`elle-rig test --isolate FLAGS` runs each file as its own child, and the child
+is `(elle/executable)`: this rig, run as `elle-rig FLAGS PATH`
+([test-runner](../docs/test-runner.md)). So every verdict lands in the session
+store, and the run has the rig's build. The `Makefile` target `smoke-impl` runs
+the implementation suite that way, then one pass per profile; `smoke-pool` and
+`smoke-mlir` do the same on the rig of their own build. The target `smoke-wasm`
+runs the implementation suite as `elle-wasm test --host elle-rig-wasm`, under
+each file's sidecar, and then runs both suites there under `wasm-full.toml`,
+less the files `WASM_SKIP` names. A run with `--host` has no build.
 
 ## Building it
 
 `make elle-rig` builds the rig beside `elle`, against the same features.
 `cargo build --release -p elle-rig` does the same by hand. `make elle-wasm` and
 `make elle-mlir` build a variant and its rig as binaries of their own
-([bins](../bins/overview.md)). The rig carries no code of its own beyond
-reading the sidecar: the run path and the subcommands it drives are the
-library's `elle::program`, which `elle` drives too.
+([bins](../bins/overview.md)). The rig reads the sidecar, names the build, and
+builds the runtime; the library's `elle::program` drives that runtime, as it
+drives the one `elle` builds.

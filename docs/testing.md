@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-04 -->
 
 The two test suites, what each one claims, the builds that run them, and how a
 run is read.
@@ -111,11 +111,12 @@ execution.
 ### A file as its own process
 
 `elle test --isolate 'FLAGS'` runs each path as `elle FLAGS PATH`, one child per
-path, recorded on the `process` tier. `--host PROGRAM` runs the child under
-another program instead of this `elle`, which is how the implementation suite
-runs on the rig. The implementation suite runs this way: each file then
-starts, runs as a whole program and exits, which is the only shape that covers
-program teardown, and a fault in one file kills one child rather than the run.
+path, recorded on the `process` tier. The child is the runner's own executable,
+so `elle-rig test --isolate ''` runs each path on the rig, which is how the
+implementation suite runs. Each file then starts, runs as a whole program and
+exits, which is the only shape that covers program teardown, and a fault in
+one file kills one child rather than the run. `--host PROGRAM` runs each child
+under another program instead.
 
 A child that dies on a signal is a `fail` naming the signal and the run
 continues; an exit code is a `fail` naming the code; a child over its budget
@@ -124,17 +125,17 @@ way ([docs/test-runner.md](test-runner.md)).
 
 ```sh
 elle test --isolate '' tests/lang/closures.lisp
-elle test --host target/release/elle-rig --isolate '' tests/impl/oracle.lisp
+target/release/elle-rig test --isolate '' tests/impl/oracle.lisp
 ```
 
 A file that measures something prints one `measure` line per reading
-([docs/ratchet.md](ratchet.md)). The runner reads those lines out of every
-captured stdout — a form on each tier, an isolated child — judges each
-against the file's ledger, and lands one `measurement` row per reading. So a
-leak rate's history across commits is a query rather than scrollback
-([docs/test-store.md](test-store.md)). Run the same file
-directly and it prints the same lines, judges them itself, and records
-nothing.
+([docs/ratchet.md](ratchet.md)). Under `elle-rig test` the runner reads those
+lines out of every captured stdout — a form on each tier, an isolated child —
+judges each against the rows the rig's build holds in the file's ledger, and
+lands one `measurement` row per reading. So a leak rate's history across
+commits is a query rather than scrollback ([docs/test-store.md](test-store.md)).
+A run under `elle test` has no build, and records and judges none of them. Run
+the same file directly and it prints the same lines and judges nothing.
 
 That is how the two dashboards, [oracle.lisp](../tests/impl/oracle.lisp) and
 [plumb.lisp](../tests/impl/plumb.lisp), land their rates. They belong to the

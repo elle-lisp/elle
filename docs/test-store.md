@@ -1,6 +1,6 @@
 # The test runner store
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-04 -->
 
 Where `elle test` keeps a run, what every run and result records, and the
 queries that read them back.
@@ -149,9 +149,9 @@ prerequisite.
 
 Per **run** (one `elle test` invocation): the `HEAD` commit, whether the working
 tree is dirty, a tree hash, the worktree the run ran in, the elle build
-version/profile/host, the build's key (`build`, the tier, I/O backend,
-operating system and architecture `(elle/build)` names, which is what a
-ledger row belongs to, [ratchet](ratchet.md)), the runner's process id, the
+version/profile/host, the build's key (`build`: what the rig's `(elle/build)`
+answers when the runner runs as `elle-rig test`, and NULL otherwise; a ledger
+row belongs to one build, [ratchet](ratchet.md)), the runner's process id, the
 boot fingerprint (§ The boot fingerprint), the full `argv`, and where its
 results ran (`tiers`, [test-runner](test-runner.md)). The design adds wall time, peak RSS and
 user/sys CPU (`getrusage`), and the working-tree files that differ from `HEAD`
@@ -285,9 +285,12 @@ process land the same way. Nothing is set in an environment, and a direct
 `elle-rig tests/impl/oracle.lisp` run prints the same lines and records
 nothing.
 
-Each reading is judged against the ledger row for the file that printed it,
-by the same judge the producer uses in a direct run. It is written as one
-`measurement` row carrying the row's bound and kind and the verdict:
+A run with no build writes no `measurement` row: there are no rows to judge a
+reading against, so it is neither recorded nor judged. A run with a build
+judges each reading against the row that build holds in the ledger of the file
+that printed it, with the judge of [the ledger module](../lib/ratchet/ledger.lisp).
+It is written as one `measurement` row carrying the row's bound and kind and
+the verdict:
 
 | Verdict | Meaning |
 |---------|---------|
@@ -297,15 +300,16 @@ by the same judge the producer uses in a direct run. It is written as one
 | `unledgered` | the producer has a ledger and this reading has no row in it |
 | `missing` | a row of the producer's ledger that this result printed no reading for |
 | `void` | the instrument refused the reading: a dead gauge, or a rate the block size moved |
-| NULL | the producer has no ledger, so the reading is recorded and not judged |
+| NULL | the producer has no ledger, or none of its rows belongs to the run's build, so the reading is recorded and not judged |
 
 The gate fails on any verdict but `ok` and NULL. A NULL says the producer is
-not ratcheted yet, which is how a dashboard keeps its history in the table
-before its ledger exists. The moment a ledger file names the producer, every
-reading it prints must have a row, and every row must get a reading.
+not ratcheted on this build yet, which is how a build keeps its history in the
+table before its rows exist. Once the ledger holds a row of the build, every
+reading the producer prints there must have a row, and every row of that
+build must get a reading.
 
-A `missing` row is written after a result lands as `pass`, one per ledger
-row that result printed no reading for, against that result. A result that
+A `missing` row is written after a result lands as `pass`, one per row of the
+run's build that result printed no reading for, against that result. A result that
 failed already says so, and a gated one skipped rather than fell silent, so
 neither is asked for its rows.
 
@@ -339,7 +343,7 @@ CREATE TABLE run (                  -- one row per `elle test` invocation
   git_commit TEXT, git_dirty INT, tree_hash TEXT, worktree TEXT,  -- the code state this run ran against
   boot_fingerprint INT,             -- the binary and the boot sources, hashed
   elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT,
-  build TEXT,                       -- the build's key: tier-backend-os-arch (ratchet.md)
+  build TEXT,                       -- the build's key, tier-backend-os-arch, or NULL (ratchet.md)
   tiers TEXT,                       -- the probed tiers (vm,jit,…), or process
   pid INT,                          -- the runner's process on `host`; tells a live run from a killed one
   selection TEXT,                   -- the filter predicate; NULL = full run (the gate)

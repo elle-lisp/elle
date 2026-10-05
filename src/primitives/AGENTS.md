@@ -1,6 +1,6 @@
 # primitives
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-04 -->
 
 Built-in functions. Registered into the VM at startup.
 
@@ -136,7 +136,7 @@ name)` answers for either spelling.
 | [meta.rs](meta.rs) | `meta/gensym`, `meta/datum->syntax`, `meta/syntax->datum`, the `meta/syntax-*` predicates, `meta/origin`, `squelch`, `attune`, `git`, `fn/git?`, `disgit` |
 | [modules.rs](modules.rs) | `import` |
 | [net.rs](net.rs) | `tcp/listen`, `tcp/accept`, `tcp/connect-ip`, `tcp/shutdown`, `udp/bind`, `udp/send-to`, `udp/recv-from`, `sys/resolve`, `sys/ip?` (`tcp/connect` is a stdlib wrapper over `tcp/connect-ip`) |
-| [package.rs](package.rs) | `elle/version`, `elle/epoch`, `elle/build-profile`, `elle/executable`, `elle/root`, `elle/boot-fingerprint`, `elle/build`, `elle/info` |
+| [package.rs](package.rs) | `elle/version`, `elle/epoch`, `elle/build-profile`, `elle/executable`, `elle/boot-fingerprint`, `elle/info` |
 | [parameters.rs](parameters.rs) | `parameter` |
 | [path.rs](path.rs) | `path/join`, `path/parent`, `path/filename`, `path/stem`, `path/extension`, `path/with-extension`, `path/normalize`, `path/absolute`, `path/canonicalize`, `path/relative`, `path/components`, `path/absolute?`, `path/relative?`, `path/cwd`, `path/exists?`, `path/file?`, `path/dir?` |
 | [ports.rs](ports.rs) | `port/open`, `port/open-bytes`, `port/close`, `port/stdin`, `port/stdout`, `port/stderr`, `port?`, `port/open?`, `port/set-options`, `port/encoding`, `port/path`, `port/seek`, `port/tell` |

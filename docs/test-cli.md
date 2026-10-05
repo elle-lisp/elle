@@ -1,6 +1,6 @@
 # Driving the test runner
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-04 -->
 
 Why `elle test` exists, the command line it offers, what it refuses to
 offer, and what is still design.
@@ -19,7 +19,7 @@ How a run executes is [test-runner](test-runner.md); where it is stored is
 > stdout/stderr, each result's wall time and CPU time (and an isolated child's peak
 > resident set), run honesty (a killed run reads `DID NOT COMPLETE`), `:gated`
 > skips, child-process isolation, the readings every form prints judged
-> against the ledger ([ratchet](ratchet.md)), `--repin`, the merge of another
+> against the ledger of the run's build ([ratchet](ratchet.md)), `--repin`, the merge of another
 > store's runs, and the
 > `--query`/`--summary`/`--reset`/`--promote`/`-e`/`--timeout`/`--wide`/
 > `--wide-timeout`/`--budget`/`--corpus`/`--db`/`--isolate`/`--host`/`--import`
@@ -175,15 +175,26 @@ The import records no run of its own and runs no test, so it exits zero on a
 store whose runs failed. What those runs say is then a query, exactly as for a
 run recorded here.
 
+### The run's build
+
+A reading is judged against the rows of one build, and the run's build is the
+runner's own: the key the rig's `(elle/build)` answers
+([rig](../rig/overview.md)). So `elle-rig test` has a build, and every child
+of its `--isolate` is the same rig. A run under `elle test`, and any run with
+`--host`, has none: it records no reading and judges none
+([ratchet](ratchet.md)). The ledgers are `tests/ledger` under the working
+directory, and a producer's path is matched as the command line gave it.
+
 ### Moving the ledger
 
 `--repin` runs the selection as usual, then edits the ledgers under
 `tests/ledger` to what the run read ([ratchet](ratchet.md)). A `stale` row
 takes its new reading, and an `unledgered` reading becomes a row. A
-`regression` is refused and left for a hand edit. The run's rows keep the
-verdicts they earned, so the store says what the ledger looked like before
-the move, and the exit code is the run's gate as it was. The tool prints
-each row it moved.
+`regression` is refused and left for a hand edit. A run with no build has
+nothing to move, and `--repin` refuses it before it runs anything. The run's
+rows keep the verdicts they earned, so the store says what the ledger looked
+like before the move, and the exit code is the run's gate as it was. The tool
+prints each row it moved.
 
 ### Execution and completion
 
