@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-04
 //! The I/O subsystem's root: the backend trait, a completion and the region it builds
 //! its answer in.
 //!
@@ -17,6 +17,8 @@ pub(crate) mod completion;
 #[cfg(target_os = "linux")]
 pub(crate) mod eventfd;
 pub(crate) mod frame;
+#[cfg(test)]
+pub(crate) mod isolate;
 pub(crate) mod landing;
 pub(crate) mod mock;
 pub(crate) mod pending;

@@ -117,6 +117,9 @@ mod version {
 mod scratch {
     include!("scratch.rs");
 }
+mod forks {
+    include!("forks.rs");
+}
 mod truncation {
     include!("truncation.rs");
 }

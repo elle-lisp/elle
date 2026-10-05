@@ -114,7 +114,7 @@ This is safe because:
 | File | Content |
 |------|---------|
 | [mod.rs](mod.rs) | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, `paint_stack`, and `ScratchDir`; it re-exports the readers of `repo.rs`, `passes.rs`, `workflows.rs` and `store.rs` |
-| [repo.rs](repo.rs) | the Makefile readers (`make_var`, `make_dry_run`, `make_dry_run_with`, `make_expand`, `makefile`) and the suite readers (`repo_root`, `suite`, `suite_files`, `declared_deadline`, `wide_patterns`) |
+| [repo.rs](repo.rs) | the Makefile readers (`make_var`, `make_dry_run`, `make_dry_run_with`, `make_expand`, `makefile`), the suite readers (`repo_root`, `suite`, `suite_files`, `declared_deadline`, `wide_patterns`), and `source_files`, the tree walk a policy sweep reads |
 | [passes.rs](passes.rs) | the suite passes a target runs (`Pass`, `passes`), the two suites as sets (`lang_files`, `impl_files`), and `assert_plain_language_pass`, for `suites.rs` and `variants.rs` |
 | [workflows.rs](workflows.rs) | the workflow readers (`workflow_files`, `workflow_jobs`, `job_steps`, `runs_target`) |
 | [documents.rs](documents.rs) | the documents `make doctest` runs (`doctest_documents`) and the documents it must run (`covered_documents`), for `doctest.rs` and `doctest_scope.rs` |
@@ -140,6 +140,11 @@ that cannot proceed without the value.
 **`wide_patterns()`** the families the Makefile gives a wider budget. Several
 test files ask those questions, and a second copy of a reader is a second
 answer.
+
+**`source_files(dirs, extensions)`** answers every file of those extensions
+below the named directories, past `target` and `.git`. The policy sweeps read
+the tree through it ([scratch.rs](../integration/scratch.rs),
+[forks.rs](../integration/forks.rs)).
 
 **`paint_stack(pattern, depth)`** fills stack frames with a byte pattern, so a
 determinism test can prove an artifact carries none of what a construction
