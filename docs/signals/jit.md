@@ -1,6 +1,6 @@
 # Signals and JIT
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-04 -->
 
 A function's signal decides nothing about whether the JIT compiles it. It
 decides the checks around each call and how a yield leaves compiled code.
@@ -44,9 +44,11 @@ switches a native stack.
 ## Bounds and squelch
 
 A `(silence p)` bound is checked at function entry in compiled code as in the
-interpreter; see [inference.md](inference.md). A squelched closure is checked
-on the JIT's call, tail-call and sentinel paths. Every one of them asks the
-same predicate, `signals::squelched_bits`, that the interpreter asks.
+interpreter; see [inference.md](inference.md). A closure's boundary mask is
+checked on the JIT's call, tail-call and sentinel paths. The mask is the
+closure's squelch, its function's muffle, and every signal when the function
+is silent. Every one of those paths asks the same predicate,
+`signals::squelched_bits`, that the interpreter asks.
 
 ## See also
 
