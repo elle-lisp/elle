@@ -369,7 +369,8 @@ under whatever code is running, such as a fuel stop or a dynamic breakpoint's
 (def paused (fiber/new (fn [] ((squelch (fn [] (emit |:debug :fuel|) 5) :debug)))
                        |:debug :fuel :error|))
 (fiber/resume paused)
-(assert (= :paused (fiber/status paused)) "the pause passes a squelch of :debug")
+(assert (= :paused (fiber/status paused)))
+(assert (nil? (fiber/value paused)) "the pause passes a squelch of :debug as itself")
 ```
 
 ### Narrowing at compile time
