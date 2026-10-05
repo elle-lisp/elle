@@ -1,6 +1,7 @@
 (elle/epoch 13)
-# audited: 2026-09-28
-## tests/http2/flow.lisp — h2 flow control, GOAWAY, and protocol tests
+# audited: 2026-10-05
+# h2 flow control, GOAWAY and protocol behavior, each against a raw frame server.
+# lib/http2.md
 
 (def frame ((import "std/http2/frame")))
 (def stream ((import "std/http2/stream") :frame frame))
@@ -114,7 +115,7 @@
                 "many-streams: no stream leak"))))
   (println "  PASS: 40 sequential streams"))
 
-## ── New tests ──────────────────────────────────────────────────────────
+## ── GOAWAY, concurrent streams, SETTINGS ───────────────────────────────
 
 (defn test-goaway-from-raw-server []
   "Raw server sends GOAWAY; client should see goaway-recvd? set."
@@ -260,4 +261,3 @@
 (test-concurrent-requests)
 (test-settings-window-adjustment-e2e)
 (println "all h2 flow control tests passed")
-(sys/exit 0)

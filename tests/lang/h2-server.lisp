@@ -1,6 +1,7 @@
 (elle/epoch 13)
-# audited: 2026-09-28
-## tests/http2/server.lisp — comprehensive HTTP/2 server behavior tests
+# audited: 2026-10-05
+# The h2 server: requests, headers, flow control, errors, CONTINUATION and lifecycle.
+# lib/http2.md
 
 (def http2 ((import "std/http2")))
 
@@ -214,7 +215,7 @@
                    (assert (= resp:status 200) "status 200")
                    true))))
 
-## ── Group 7: LOW defects ──────────────────────────────────────────────────
+## ── Group 7: a closed session ─────────────────────────────────────────────
 
 (defn test-goaway-refuses-new-streams []  # After server closes, client should refuse new streams
   (with-server (fn [req] {:status 200 :body "ok"})
@@ -289,4 +290,3 @@
 (println "results: " pass-count "/" test-count " passed, " fail-count " failed")
 (when (> fail-count 0) (println "failures: " (freeze failures)))
 (assert (= fail-count 0) "all h2 server tests must pass")
-(sys/exit 0)

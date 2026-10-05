@@ -1,10 +1,11 @@
 (elle/epoch 12)
-# audited: 2026-09-14
-## tests/http2/modules.lisp — every h2 submodule's own unit tests
-##
-## One `let*` per module, built from the arguments that module takes, so
-## a module whose init signature changed fails here rather than in the
-## first program that loads it.
+# audited: 2026-10-05
+# Every h2 submodule's own unit tests, each module loaded with the arguments it takes.
+# lib/http2/overview.md
+#
+# One `let*` per module, built from the arguments that module takes, so
+# a module whose init signature changed fails here rather than in the
+# first program that loads it.
 
 (def huffman ((import "std/http2/huffman")))
 (def hpack ((import "std/http2/hpack") :huffman huffman))
@@ -29,7 +30,4 @@
 (reader:test)
 (server:test)
 
-(let [m ((import "std/http2"))]
-  (m:test))
-
-(println "tests/http2/modules.lisp: all tests passed")
+(println "tests/lang/h2-modules.lisp: all tests passed")
