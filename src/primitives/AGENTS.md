@@ -219,7 +219,7 @@ named substitution modes: [format/](format/AGENTS.md).
   `filter_map` to skip non-UTF-8 entries. Returns empty struct `{}` if no
   env vars. With an optional string argument `(sys/env "NAME")`, looks up a
   single variable and returns its value as a string, or `nil` if not set.
-  Signal: `Signal::silent()`. Arity: `Range(0, 1)`.
+  Signal: `Signal::errors()`, for a name that is not a string. Arity: `Range(0, 1)`.
 
 ## Subprocess Primitives
 

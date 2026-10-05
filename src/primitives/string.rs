@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-05
 //! The string primitives: case, search, split, replace, trim, join, repeat, and the @string constructor.
 //!
 //! docs/strings.md
@@ -401,6 +401,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "string/size-of" => prim_string_size_of {
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return the UTF-8 byte length of a string.",
         params: &["s"],

@@ -1,4 +1,8 @@
-//! Struct operations primitives (immutable hash maps)
+// audited: 2026-10-05
+//! The struct primitives: the immutable constructor, freeze, deep-freeze and thaw, and pairs.
+//!
+//! docs/structs.md
+
 use crate::primitives::def::RegionEffect;
 use crate::primitives::def::RetType;
 use crate::signals::Signal;
@@ -45,6 +49,7 @@ primitive! {
         effect: RegionEffect::Funnel,
     }
     "pairs" => prim_pairs {
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Iterate over struct key-value pairs as [key value] arrays.",
         params: &["struct"],
@@ -305,7 +310,7 @@ pub(crate) fn prim_thaw(
 }
 
 /// Convert a struct to a list of [key value] pairs
-/// (pairs {:a 1 :b 2}) -> ((:a 1) (:b 2))
+/// (pairs {:a 1 :b 2}) -> ([:a 1] [:b 2])
 pub(crate) fn prim_pairs(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -320,7 +325,7 @@ pub(crate) fn prim_pairs(
             // `to_value` is the single source of truth for TableKey → Value.
             // A stored key IS its value, so this allocates nothing and the
             // pair below takes an ordinary cross-region reference to the
-            // struct's own key (docs/impl/values.md § "Struct keys").
+            // struct's own key (docs/impl/values.md).
             let key_val = key.to_value();
             let pair = ctx.array(vec![key_val, *value]);
             result = ctx.pair(pair, result);
