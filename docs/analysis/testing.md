@@ -1,6 +1,6 @@
 # Testing Strategy
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-04 -->
 
 Which *kind* of test to write, and where it belongs.
 
@@ -20,7 +20,8 @@ Which *kind* of test to write, and where it belongs.
 | 1 | `make qa` | rustfmt, clippy, the macOS and Android cross-checks, rustdoc, and the Rust doctests |
 | 2 | `make smoke` | The language suite, the implementation suite on the rig, the doctests, the embedding demo and the surface gate |
 | 3 | `cargo test --workspace --lib --all-features` | The unit tests, inline beside the code they test |
-| 4 | `cargo test --test '*'` | The integration tests and the standalone test binaries |
+| 4 | `cargo test --test '*' -- --skip property` | The integration tests and the standalone test binaries |
+| 5 | `cargo test -p elle-rig` | The rig's own tests |
 
 `qa` takes about two minutes and `smoke` about thirty, so a formatting or
 clippy failure stops the gate before the suites start.
@@ -37,7 +38,7 @@ Integration tests are slower because they require Rust-level setup (VM
 construction, symbol table initialization, error message inspection).
 
 Property tests are the slowest, because each one runs many generated cases.
-`make test` passes `--skip property` at tier 5 and leaves them to CI, which
+`make test` passes `--skip property` at step 4 and leaves them to CI, which
 sets its own case count per job. Run them by hand with `cargo test property::`.
 
 
@@ -156,6 +157,7 @@ generation genuinely adds value. Otherwise, write Elle files.
 | Compile-time rejection that needs a Rust type | [tests/integration/](../../tests/integration/) | An error field, a span, or a runtime Elle cannot build |
 | Invariants across generated inputs | [tests/property/](../../tests/property/) | Property-based tests with proptest |
 | Reads or perturbs process-global state | A file of its own directly under [tests/](../../tests/) | A process-wide counter, an rlimit, a signal disposition, a re-exec, or a fault the harness must survive |
+| Private items, and a process of its own | Inline `#[cfg(test)]`, with the body run by `crate::io::isolate::run` | A signal sent to the whole process, a fault, a change to descriptor 0 |
 
 For Rust integration tests that don't call stdlib functions (map, filter,
 fold, etc.), prefer `eval_source_bare` over `eval_source` — it skips stdlib
@@ -187,6 +189,34 @@ and cannot see from the assertion.
 
 A test that merely runs slowly does not qualify. The cost is a whole extra
 link of the crate per file, so the reason must be the shared process itself.
+
+### An inline test that needs a process runs its body in a fresh one
+
+An inline test cannot move to a binary of its own, because it reaches private
+items. Some still need a process to themselves. A signal sent with
+`kill(getpid(), …)` reaches any thread that leaves it unblocked, and libtest's
+threads leave it unblocked.
+
+Such a test passes its body to `crate::io::isolate::run`. Do not call
+`libc::fork` from a test. A fork copies every lock in the process as it stood at
+that instant, and a lock that another thread held stays held in the child. That
+thread does not exist in the child, so a child that takes the lock waits
+forever.
+
+The test cannot know which locks those are. The standard library's SIGSEGV
+handler takes a lock that every thread takes when it starts and when it ends,
+and libtest starts a thread for every test. The crate's own statics hold more,
+and a sibling test may hold any of them at the instant of the fork.
+
+`run` starts the test binary again, on the calling test alone. In that copy,
+libtest's main thread waits and no other test runs, so no thread holds a lock.
+The test's thread forks there, and the body runs as the only thread of its
+process. The copy reports what the body did on its stdout. A copy that reports
+nothing ran no test of that name, and `run` fails the test.
+
+The test's own code before the call runs twice, once in each process. So call
+`run` first. [forks.rs](../../tests/integration/forks.rs) is the standing check
+that no other file calls `libc::fork`.
 
 
 ## A `#[should_panic]` test names the profile it runs in
