@@ -318,13 +318,6 @@ and why its rows are what they are is its ledger's comments.
 
 **The runner**, as above.
 
-**valgrind.** A producer, `tests/ratchet/valgrind.lisp`, gates itself on the
-binary being present, runs a fixed set of programs under `memcheck`, parses
-the leak summary, and reads the definitely-lost bytes and the error count per
-program. Each is a pin at 0 or at what the tree leaks today. The producer runs
-as an isolated child under its own budget, because a run under `memcheck`
-costs minutes.
-
 **Rust tests** can print the same line, and nothing collects it until
 `elle test --rust` exists ([test-cli](test-cli.md)). The line format is the
 whole contract, so that step adds a parser and no second channel.
