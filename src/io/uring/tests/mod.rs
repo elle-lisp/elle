@@ -1,10 +1,11 @@
-//! audited: 2026-10-02
+// audited: 2026-10-04
 //! The ring's own paths, driven without a backend: a signal read, the
 //! short-write resubmission, and the linked timeout.
 //!
 //! src/io/AGENTS.md
 
 use super::*;
+use crate::io::isolate::{run, Outcome};
 use crate::io::pool::BufferPool;
 use crate::io::sigfd::SignalReceiver;
 
@@ -23,66 +24,31 @@ mod sockopt;
 /// signal reads through another path, or through the thread pool,
 /// fails here.
 ///
-/// Forks so the child has a clean thread topology: post-fork there
-/// is one thread, SIGUSR1 is blocked on it (via
-/// `SignalReceiver::new`), and the kernel parks the kill() on the
-/// process pending queue where signalfd can read it. In the cargo
-/// test runner without the fork, peer threads with SIGUSR1
-/// unmasked would absorb the kill before our io_uring read sees
-/// it. Child exits 0 on success, small positive code on failure.
+/// The body runs through `run`, as the only thread of its process: SIGUSR1 is
+/// blocked on it (via `SignalReceiver::new`), and the kernel parks the kill()
+/// on the process pending queue where signalfd can read it. In the test
+/// process, peer threads with SIGUSR1 unmasked would absorb the kill before
+/// the io_uring read sees it. The body exits 0 on success, a small positive
+/// code on failure.
 #[test]
 fn sig_next_via_uring_returns_after_kill_to_self() {
-    use std::time::{Duration, Instant};
-
-    let pid = unsafe { libc::fork() };
-    if pid < 0 {
-        panic!("fork failed: {}", std::io::Error::last_os_error());
-    }
-    if pid == 0 {
-        let code = sig_next_uring_child_logic();
-        unsafe { libc::_exit(code) };
-    }
-
-    // PARENT: bounded waitpid so a broken ring path (CQE never
-    // arrives, ring fd closed early, helper rewires onto something
-    // that doesn't actually submit, etc.) surfaces as a hung child
-    // panic rather than wedging the whole `cargo test` run.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let mut status: libc::c_int = 0;
-    loop {
-        let wret = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
-        if wret == pid {
-            break;
-        }
-        if wret < 0 {
-            let errno = std::io::Error::last_os_error();
-            panic!("waitpid({}): {}", pid, errno);
-        }
-        if Instant::now() >= deadline {
-            unsafe { libc::kill(pid, libc::SIGKILL) };
-            let _ = unsafe { libc::waitpid(pid, &mut status, 0) };
-            panic!("sig_next via uring child hung past 10s");
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-
-    if libc::WIFSIGNALED(status) {
-        panic!(
-            "sig_next via uring child died from signal {}",
-            libc::WTERMSIG(status)
-        );
-    }
-    let code = libc::WEXITSTATUS(status);
+    // Bounded, so a broken ring path (CQE never arrives, ring fd closed early,
+    // helper rewired onto something that doesn't actually submit) surfaces as
+    // a hung body rather than wedging the whole `cargo test` run.
+    let report = run(
+        std::time::Duration::from_secs(10),
+        sig_next_uring_child_logic,
+    );
     assert_eq!(
-        code, 0,
-        "sig_next via uring child failed with code {} (see codes in sig_next_uring_child_logic)",
-        code
+        report.end,
+        Outcome::Exited(0),
+        "sig_next via uring failed (see codes in sig_next_uring_child_logic)"
     );
 }
 
-/// Body of the forked child for the io_uring sig-next test.
+/// The isolated body of the io_uring sig-next test.
 /// Returns small positive codes identifying the failing step so
-/// the parent's panic message points at the broken kernel call.
+/// the test's assertion message points at the broken kernel call.
 fn sig_next_uring_child_logic() -> i32 {
     let r = match SignalReceiver::new(
         vec![libc::SIGUSR1],

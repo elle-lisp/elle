@@ -1,4 +1,10 @@
+// audited: 2026-10-04
+//! The stdin thread ends on shutdown, idle or blocked inside a read of descriptor 0.
+//!
+//! src/io/AGENTS.md
+
 use super::super::*;
+use crate::io::isolate::{run, Outcome};
 
 /// Shutdown signal must wake the stdin thread when it is sitting in
 /// `request_rx.recv()` waiting for the next request (no read in
@@ -26,57 +32,24 @@ fn stdin_thread_shutdown_while_idle_joins() {
 }
 
 /// Shutdown signal must wake the stdin thread when it is parked
-/// inside `libc::read(0, …)` waiting for input. We fork so we can
-/// `dup2` a pipe onto fd 0 in the child without disturbing the
-/// cargo test runner (peer tests share fd 0). The child holds the
-/// write end open so the read truly blocks (no EOF). After a 100 ms
-/// settle, the child calls `shutdown()` and expects an error
-/// completion within 2 s.
+/// inside `libc::read(0, …)` waiting for input. The body runs through
+/// `run`, in a process of its own, so it can `dup2` a pipe onto fd 0
+/// without disturbing the test process (peer tests share fd 0). The
+/// body holds the write end open so the read truly blocks (no EOF).
+/// After a 100 ms settle, the body calls `shutdown()` and expects an
+/// error completion within 2 s.
 ///
 /// Counter-factual: the legacy
 /// `std::io::stdin().lock().read_line(…)` auto-retries on EINTR
 /// and has no shutdown path; a signal or pipe-write cannot wake
-/// it. The forked child would hang past the 5 s parent timeout
-/// and panic.
+/// it. The body would hang past `run`'s 5 s deadline.
 #[test]
 fn stdin_thread_shutdown_cancels_inflight_read() {
-    use std::time::{Duration, Instant};
-    let pid = unsafe { libc::fork() };
-    if pid < 0 {
-        panic!("fork: {}", std::io::Error::last_os_error());
-    }
-    if pid == 0 {
-        unsafe { libc::_exit(stdin_close_child_logic()) };
-    }
-
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let mut status: libc::c_int = 0;
-    loop {
-        let wret = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
-        if wret == pid {
-            break;
-        }
-        if wret < 0 {
-            panic!("waitpid: {}", std::io::Error::last_os_error());
-        }
-        if Instant::now() >= deadline {
-            unsafe { libc::kill(pid, libc::SIGKILL) };
-            let _ = unsafe { libc::waitpid(pid, &mut status, 0) };
-            panic!("stdin close child hung past 5s");
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    assert!(
-        !libc::WIFSIGNALED(status),
-        "child died from signal {}",
-        libc::WTERMSIG(status),
-    );
-    assert!(libc::WIFEXITED(status));
+    let report = run(std::time::Duration::from_secs(5), stdin_close_child_logic);
     assert_eq!(
-        libc::WEXITSTATUS(status),
-        0,
-        "child exited with {} (see codes 51-58 in stdin_close_child_logic)",
-        libc::WEXITSTATUS(status)
+        report.end,
+        Outcome::Exited(0),
+        "see codes 51-58 in stdin_close_child_logic"
     );
 }
 
@@ -108,7 +81,7 @@ fn stdin_close_child_logic() -> i32 {
 
     st.shutdown();
 
-    // The worker now reports through the shared hub channel as a
+    // The worker reports through the shared hub channel as a
     // RawCompletion::Stdin; here that channel is the test-local `rx`.
     match rx.recv_timeout(Duration::from_secs(2)) {
         Ok(RawCompletion::Stdin(c)) => {
