@@ -44,7 +44,7 @@
 # commit column answers to `sha` here.
 (defn run-meta [conn run-id]
   (get (sqlite:query conn
-                     "SELECT (finished_at IS NULL) AS trunc, n_selected AS sel, git_commit AS sha, git_dirty AS dirty, worktree AS worktree, host AS host, pid AS pid FROM run WHERE id = ?1"
+                     "SELECT (finished_at IS NULL) AS trunc, n_selected AS sel, git_commit AS sha, git_dirty AS dirty, worktree AS worktree, host AS host, pid AS pid, build AS build FROM run WHERE id = ?1"
                      [run-id]) 0))
 
 # An unfinished row is a run still in flight when its process is still alive:
@@ -74,6 +74,12 @@
     (if short
       (string " · commit " short (if (= (get meta :dirty) 1) " (dirty)" ""))
       "")))
+
+# The build the run's readings were judged as, which a run has only under the
+# rig (docs/ratchet.md); a run with none says nothing here.
+(defn build-note [meta]
+  (let [b (get meta :build)]
+    (if b (string " · build " b) "")))
 
 # One session DB serves every checkout on the box, so a warning about an
 # unfinished run has to say whose run it found.
@@ -260,7 +266,8 @@
                     done " of " sel
                     " selected files; the tally below is partial, not green")))
       nil)
-    (eprintln "elle test · run " run-id " of " nruns (commit-note meta))
+    (eprintln "elle test · run " run-id " of " nruns (commit-note meta)
+              (build-note meta))
     (eprintln np " pass · " ns " skip · " nf " fail · " nd " diverge · " nt
               " timeout")
     (if (> bad 0)

@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 14)
+# audited: 2026-10-05
 ## elle test — merging another store's runs into this one: the key that makes
 ## an import repeatable, the rows that follow a run, and the bytes copied by
 ## address.

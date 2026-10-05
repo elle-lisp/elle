@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 14)
+# audited: 2026-10-05
 ## elle test — turning an outcome into rows: the label a form is known by, what
 ## analysis finds in it, the status a payload classifies to, and one row per
 ## (form × tier).

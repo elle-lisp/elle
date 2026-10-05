@@ -340,7 +340,7 @@ pub fn run_source(
             // file as a child and has nothing but its exit status to judge by,
             // and exit 0 alone would record a gated file as a vacuous pass. The
             // runner matches this prefix on the child's stderr to recover the
-            // skip and its reason (src/test/exec.lisp `gated-marker`), so the
+            // skip and its reason (src/test/child.lisp `gated-marker`), so the
             // text is a contract between the two.
             if let Some(reason) = vm.take_gated_exit_reason() {
                 eprintln!("SKIP (gated): {}", reason);

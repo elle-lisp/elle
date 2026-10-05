@@ -19,6 +19,7 @@ const TEST_RUNNER_FRAGMENTS: &[&str] = &[
     include_str!("../test/ledger.lisp"),
     include_str!("../test/import.lisp"),
     include_str!("../test/exec.lisp"),
+    include_str!("../test/child.lisp"),
     include_str!("../test/record.lisp"),
     include_str!("../test/view.lisp"),
     include_str!("../test/repin.lisp"),
@@ -92,7 +93,8 @@ pub(super) fn split_own_flags(
 ///
 /// Each fragment is a whole Elle file — formatted, stamped, and read on its
 /// own — so each carries the epoch declaration a file needs. A module declares
-/// its epoch once, so every fragment past the first drops the line here.
+/// its epoch once, so every fragment past the first drops the line here, and
+/// every fragment has to declare the first one's.
 fn test_runner_source() -> String {
     let mut src = String::new();
     for (i, fragment) in TEST_RUNNER_FRAGMENTS.iter().enumerate() {
