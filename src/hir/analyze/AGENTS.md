@@ -139,9 +139,9 @@ This prevents accidental capture in macros while allowing intentional capture vi
    bound on the same parameter, the last one wins. `analyze_lambda` reads the
    accumulators after analyzing the body and checks the ceiling there; the
    ceiling, from `(silence)` or `(attune! spec)`, never replaces the inferred
-   signal. No
-   call site is checked at compile time; the bound is checked on entry, and
-   that check may raise, so a lambda with a bound carries `:error`.
+   signal. No call site is checked at compile time; the bound is checked on
+   entry, and that check may raise, so a lambda with a bound carries
+   `:error`.
 
 5. **A construct that can raise carries `:error`, on its node and in the
    enclosing function's sources.** The list is in

@@ -35,6 +35,21 @@
 (assert (string/contains? (get d :lir) "closure[0]")
         "lir must include the defn's closure")
 
+# The jit artifact gives the JIT's own answer: it compiles a polymorphic
+# function and refuses one that makes a closure (docs/signals/jit.md).
+# Counter-factual: the dump judged by the signal, so it reported `call`
+# ineligible and `mk` eligible, the reverse of what the JIT does.
+(def jd
+  (get (compile/dumps "(defn call [f x] (f x)) (defn mk [x] (fn [] x)) (call mk 1)"
+                      "<dumps-jit>") :jit))
+(def jit-lines (string/split jd "\n"))
+(defn jit-line [name]
+  (first (filter (fn [l] (string/contains? l (string " " name ":"))) jit-lines)))
+(assert (string/contains? (jit-line "call") "eligible=true")
+        (string "a polymorphic function is eligible, got: " (jit-line "call")))
+(assert (string/contains? (jit-line "mk") "eligible=false")
+        (string "a function that makes a closure is not, got: " (jit-line "mk")))
+
 # A non-string / absent argument is a typed error, not a panic.
 (let [r (protect (compile/dumps 42 "<dumps-test>"))]
   (assert (not (get r 0)) "non-string source must signal, not return")
