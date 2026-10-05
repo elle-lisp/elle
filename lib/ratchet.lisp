@@ -109,10 +109,13 @@
     (body)
     (def reads (map (fn [g] (get g :read)) on))
     (def count (length on))
-    # Mutable, so a `put` inside the window stores in place (see the
-    # estimator's window).
-    (def befores (thaw (map (fn [g] 0) on)))
-    (def afters (thaw (map (fn [g] 0) on)))
+    # Mutable arrays the compiler can type, as the estimator's window builds
+    # them, so a `put` inside the window claims nothing.
+    (def befores @[])
+    (def afters @[])
+    (each g in on
+      (push befores 0)
+      (push afters 0))
     (def @i 0)
     (while (%lt i count)
       (put befores i ((get reads i)))

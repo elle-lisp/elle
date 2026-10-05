@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 14)
+# audited: 2026-10-05
 ## lib/ratchet/estimator.lisp — the adaptive per-op rate: an anytime-valid
 ## empirical-Bernstein estimator over blocks, read on any number of gauges in
 ## one drive.
@@ -98,10 +98,14 @@
     # Everything a window needs, made ahead of it: the readers, resolved
     # once, and the two arrays the readings land in.
     (def reads (map (fn [g] (get g :read)) gauges))
-    # Mutable arrays, so a `put` inside the window stores in place; on an
-    # immutable array it would answer a copy and drop the reading.
-    (def befores (thaw (map (fn [g] 0) gauges)))
-    (def afters (thaw (map (fn [g] 0) gauges)))
+    # Mutable arrays the compiler can type, so a `put` inside the window is a
+    # store in place. On an array of unknown type it is the general call,
+    # which claims a page between the two readings.
+    (def befores @[])
+    (def afters @[])
+    (each g in gauges
+      (push befores 0)
+      (push afters 0))
     (def @states @[])
     (def @k 0)
     (while (< k n)
