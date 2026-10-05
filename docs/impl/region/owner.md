@@ -1,6 +1,6 @@
 # Owner nodes — an activation as a forest root
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-05 -->
 
 The pages-less region that realizes an activation or a fiber as a forest root, the two cuts that fill it, and what frees it.
 
@@ -254,10 +254,11 @@ happens to be consumed.
 **What an abandoned frame owes, it owes the deferred set too.** The exit no resume can
 reach runs the set rather than parking it: an **error** exit whose frame the entrant does
 not park — the same `walk_abandoned` question the release table's walk asks
-([unwind.md](unwind.md)). A **squelch** boundary is that exit rather than a second one: it
-turns the signal into an error the abandoned activation never catches, and the trampoline
-writes the two as one arm ([unwind.md](unwind.md)). The exit stands exactly where the clean break stands: nothing replays
-the frame, so the decref the activation took over is at its last chance to run.
+([unwind.md](unwind.md)). A call **boundary** that refuses the signal — a squelch, or the
+proof of a silent function — is that exit rather than a second one: it turns the signal into
+an error the abandoned activation never catches, and the trampoline writes the two as one
+arm ([unwind.md](unwind.md)). The exit stands exactly where the clean break stands: nothing
+replays the frame, so the decref the activation took over is at its last chance to run.
 
 The signal's payload needs no exemption here, unlike the release table's own routes. A
 deferred region is a per-call closure region or a merged arena; a raise's payload is either a
@@ -270,10 +271,12 @@ env's counted edge is the value's last holder once the frame-exit relocation has
 binding's own release ahead of the `TailCall`. Releasing the closure region cascades that
 edge away — and the value survives on the raise's mint, which is a reference no frame holds.
 
-**A discard runs what the abandoned frames owed (squelch/abort).** Abandoning suspended
-work — a squelch/attune signal-violation, an abort — flows through one chokepoint,
-`VM::discard_suspended_frames` (reached from `enforce_squelch` on every tier: the
-interpreter trampoline, `compile/run-on`, and the JIT call paths). The discarded frames'
+**A discard runs what the abandoned frames owed (a boundary, a refusing host).**
+Abandoning suspended work while the fiber runs on — a call boundary's refusal (a
+squelch/attune signal-violation, a broken proof), a host's refused park — flows through one
+chokepoint, `VM::discard_suspended_frames`. A boundary reaches it from
+`VM::boundary_violation` on every tier: the interpreter trampoline, `compile/run-on`, and
+the JIT call paths. A host reaches it from `VM::refuse_hosted_park`. The discarded frames'
 continuations will never run, so every release that lived in one is at its last chance
 here, and the chokepoint runs the whole set a frame chain can owe — the same set
 `Fiber::take_parked_state` hands the terminal teardown and the free-path discharge, read

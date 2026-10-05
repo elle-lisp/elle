@@ -69,18 +69,6 @@ maintains a stack of parameter frames on the fiber. When a parameter is called,
 the VM searches from the top of the stack downward for a binding, falling back
 to the parameter's default value if no binding is found.
 
-## Allocation region instructions
-
-`RegionEnter` and `RegionExit` are scope boundary markers for the allocator.
-They have no operands (single opcode byte each). In the VM, they push/pop
-scope marks on the current FiberHeap (no-op for the root fiber). The lowerer
-conditionally emits them based on escape analysis — currently maximally
-conservative, so no region instructions are emitted. Function bodies never
-get region instructions.
-
-`break` emits compensating `RegionExit` instructions for each region entered
-between the break site and the target block (`region_depth` tracking).
-
 ## Struct rest instruction
 
 `StructRest` collects all keys from a struct NOT in an excluded set into a new

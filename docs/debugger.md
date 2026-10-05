@@ -113,12 +113,12 @@ not an information barrier.
 tooling pause through:
 
 - Squelch/attune enforcement asks one predicate,
-  `signals::squelched_bits` ([src/signals/mod.rs](../src/signals/mod.rs)), at every site:
-  the interpreter's `enforce_squelch` ([src/vm/core/discard.rs](../src/vm/core/discard.rs)) serves most,
-  and the rest are inlined in the JIT paths, in
-  [src/vm/run_on/jit.rs](../src/vm/run_on/jit.rs) and [src/jit/calls/callops.rs](../src/jit/calls/callops.rs). One
-  predicate is what keeps the exemptions from drifting apart between
-  tiers. It exempts `:error` and `:halt` by intersection, `:switch` by
+  `signals::squelched_bits` ([src/signals/mod.rs](../src/signals/mod.rs)), from one
+  method: every tier's call, tail-call and sentinel site reaches it through
+  `VM::boundary_violation` ([src/vm/core/discard.rs](../src/vm/core/discard.rs)),
+  directly or through `VM::enforce_boundary`. One predicate keeps the
+  exemptions from drifting apart between tiers. It exempts `:error` and
+  `:halt` by intersection, `:switch` by
   exact equality, and any signal that carries the pause bit `:fuel`
   (`SIG_PAUSE`) whole. A dynamic breakpoint's `:debug|:fuel` therefore
   passes every boundary, a squelch of `:debug` included, while

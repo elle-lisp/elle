@@ -1,9 +1,9 @@
 # An abandoned frame runs the releases it still owes
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-05 -->
 
 The two tables naming what an abandoned frame still owed, and the exits that walk
-them. An error, a squelch boundary, a discard and a compiled unwind share one walk.
+them. An error, a call boundary, a discard and a compiled unwind share one walk.
 
 [What a signal exit owes](signalexit.md) places one release in the block a signal
 exit skips. That block is not the only thing skipped. An **error** leaves through
@@ -51,7 +51,7 @@ walk does not protect. A **terminal** dynamic `emit` nobody restarts is one: the
 catcher consumes the delivery the raise minted, so the retain answers to the
 continuation alone. A `fiber/abort` or `fiber/refuse` that raises in place over a
 suspending park, left unrestarted, is another: the injected error displaces the
-payload the discharge would have released. A squelch boundary is the third,
+payload the discharge would have released. A call boundary is the third,
 because what it discards exempts nothing (below). While a suspending park
 stands, its payload is what the walk protects, so the walk passes the slot over
 and the discharge answers for the retain instead.
@@ -119,9 +119,10 @@ own discharge reads the same two tables off each parked `BytecodeFrame`, its sav
 locals and its saved activation map standing in for the live ones
 ([owner.md](owner.md)).
 
-**A squelch boundary abandons frames the same way, so it runs the same walk.** A
-`squelch`/`attune` boundary raises a `signal-violation` the activation it breaks out of
-never catches (`VM::enforce_squelch`), so that activation reaches none of its remaining
+**A call boundary abandons frames the same way, so it runs the same walk.** A
+`squelch`/`attune` boundary raises a `signal-violation`, and a silent function's proof
+raises a `broken-proof`, that the activation it breaks out of never catches
+(`VM::enforce_boundary`). So that activation reaches none of its remaining
 instructions either. At a call, the boundary belongs to the caller, and the callee's
 activation has closed before the caller asks: the caller leaves by the error exit like
 any other.
@@ -147,13 +148,13 @@ Either way, the activation's dues are released at the exit, owner node included.
 The boundary abandons a whole chain rather than one frame. Every frame parked between
 the emitting site and the boundary is discarded at one chokepoint,
 `VM::discard_suspended_frames`, which each enforcement site reaches through
-`squelch_violation`. So the discard reads each discarded `BytecodeFrame`'s two tables
+`VM::boundary_violation`. So the discard reads each discarded `BytecodeFrame`'s two tables
 off its own `Code` — the reading `Fiber::take_parked_state` already makes for a fiber
 that can never run again, with the frame's saved locals and saved activation map
 standing in for the live ones ([owner.md](owner.md)).
 
-The fiber **survives** a squelch, and that is what the reading has to answer for: an
-outer, non-discarded frame and the activation that catches the violation both run on.
+The fiber **survives** a boundary, and that is what the reading has to answer for: an
+outer, non-discarded frame and the activation the boundary's error reaches both run on.
 The tables answer it, and the fiber's survival never enters the argument. A discarded
 frame's saved stack and its map were taken and cloned at that frame's own park, and the
 activation they came from returned before the boundary was reached, so no live frame
@@ -164,10 +165,10 @@ untouched for the opposite reason: a blanket release of it has no receipt at all
 the regions it names may be an outer frame's.
 
 **What the boundary raises exempts nothing, and neither does what it displaces.** The
-`signal-violation` is built by `escaping_error` in a fresh region of its own and records
+boundary's error is built by `escaping_error` in a fresh region of its own and records
 no delivery mint, so no frame's reference funds its delivery and every release the
 tables name runs. The signal the boundary displaces is not the exemption's subject
-either: a squelched park's payload is delivered to nobody, and the park's own escape
+either: a refused park's payload is delivered to nobody, and the park's own escape
 retain holds it independently of any frame, so a frame's reference to it is that
 frame's to release like any other. That retain is then the boundary's own to release,
 along with whatever a displacing install would have owed — the park having ended with
@@ -238,7 +239,7 @@ sites that record carries both halves of a value route's receipt), with
 [region-dynamic-emit-statement-uaf.lisp](../../../tests/impl/region-dynamic-emit-statement-uaf.lisp) as the dynamic site's
 guardfree complement and [region-fiber-yield-borrow-uaf.lisp](../../../tests/impl/region-fiber-yield-borrow-uaf.lisp) as the
 `Emit` site's (a borrowed yield's body reference, released once where an abort
-or a squelch boundary ends the park and once where a restart replays it), and
+or a call boundary ends the park and once where a restart replays it), and
 [region-error-unwind-uaf.lisp](../../../tests/impl/region-error-unwind-uaf.lisp) (the soundness complement — the payload
 the raising native builds while the frame holds its argument, a value the frame
 stored into a container that outlives it, a parked frame the restarts system

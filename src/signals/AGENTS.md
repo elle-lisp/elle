@@ -40,6 +40,7 @@ Each predicate asks a specific question. No vague "is_inert".
 
 | Predicate | Meaning |
 |-----------|---------|
+| `is_silent()` | Inferred silent? (no bit, and not polymorphic) — the proof a silent function's boundary checks |
 | `may_suspend()` | Can suspend execution? (any bit, or polymorphic) |
 | `may_park()` | Can park a frame? (any bit outside `:error`/`:halt`/`:ffi`, or polymorphic) — the static face of `dispatch::is_suspending` |
 | `may_yield()` | Can yield? (SIG_YIELD) |

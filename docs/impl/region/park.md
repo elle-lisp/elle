@@ -1,6 +1,6 @@
 # What a park retains, and who releases it
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-05 -->
 
 The references a suspended fiber's park leaves standing, and the one seam that consumes each.
 
@@ -69,7 +69,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   `IncrefValueRegion` before the suspend and a `DecrefValueRegion` first in the continuation.
   The copy the release loads is parked in a local slot of its own, the operand stack being
   what survives a suspend. The release stamps that slot nil, and the frame's release table
-  names it, so the walk runs it for a park an abort or a squelch boundary ends
+  names it, so the walk runs it for a park an abort or a call boundary ends
   ([unwind.md](unwind.md)). Unresolvable counts as borrowed: minting where the body already
   owns a reference strands one per abandoned park, a bounded leak, while missing one frees a
   live value. Pinned by [region-fiber-yield-borrow-uaf.lisp](../../../tests/impl/region-fiber-yield-borrow-uaf.lisp). A TERMINAL
@@ -78,8 +78,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   chain holds one — is claimed through the frames' release tables instead of a blanket
   discharge, because the raise records its minted delivery in the ledger
   (`Fiber::delivery`, `record_mint`) and the abandoned-frame walk and the parked frame's
-  discharge stop exempting the payload's region where the record matches ([mechanism.md](mechanism.md) § "An abandoned frame runs
-  the releases it still owes"). A halt takes neither the retain nor the record — a halted
+  discharge stop exempting the payload's region where the record matches ([unwind.md](unwind.md)). A halt takes neither the retain nor the record — a halted
   fiber is promoted to `:dead` and never resumed, so its delivery has no consumer.
 - **A payload the RUNTIME built is released by the install that displaces it.** The second
   of the two references above — the body's own, released by the continuation past the
@@ -173,9 +172,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   the child is released, after the request leaves the function that held the child,
   and after the child is resumed past it.
 - **A boundary ends a park with no reader and no install, so it owes both references.** A
-  `squelch`/`attune` violation is the third way a park can end, and it is neither of the two
-  the rules above are written for. No resumer reads the payload out of `fiber.signal`, so the
-  **delivery** reference — the escape retain the park took — has no consumer at all, where a
+  boundary's refusal — a `squelch`/`attune` violation or a broken proof — is the third
+  way a park can end, and it is neither of the two the rules above are written for. No
+  resumer reads the payload out of `fiber.signal`, so the **delivery** reference — the escape retain the park took — has no consumer at all, where a
   fiber torn down while parked did have one: its park crossed to a resumer first, the signal
   reaching the fiber boundary by the one route out of the driving loop that a boundary cuts.
   And no install replaces the payload in the slot, so a payload the RUNTIME built keeps the
@@ -185,13 +184,12 @@ symmetric with its unpark; the node and the deferred set a park moves are
   body-allocated payload owes exactly as a runtime-built one does. A body's OWN
   reference is the one thing the boundary does not owe — the abandoned frames' release tables
   name it, and the payload is exempted from those tables only where a fiber's result carries
-  it out ([mechanism.md](mechanism.md) § "A squelch boundary abandons frames the same way, so
-  it runs the same walk").
+  it out ([unwind.md](unwind.md)).
 
   **A host that refuses a park ends it the same way.** `eval`, `import`, the
   `compile/*-module` setup runs, `compile/run-on :jit` and the root driver run code on the
   current fiber, and none can hold a suspension of it, so each answers one with an error at
-  its own call. The refused park has no reader and no install, as at a squelch boundary, and
+  its own call. The refused park has no reader and no install, as at a call boundary, and
   the frames it parked never run again. So the host ends it through the same chokepoint
   (`VM::refuse_hosted_park`, over `discard_suspended_frames`): the frames' owed releases
   run, and the park's references are released. The host's error then leaves by the
@@ -206,7 +204,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   reading of a signal slot recovers, so that site writes the payload beside the retain
   (`park_primitive` / `park_request` / `park_denial` / `park_emit`, next to the
   `bodyless` record). The **enforcement site** says which park this exit ends, and it
-  must: two sites reach `squelch_violation` through `invoke_closure_jit`, which restores
+  must: two sites reach `boundary_violation` through `invoke_closure_jit`, which restores
   the CALLER's signal before asking the boundary's question and holds the parked one in a
   local, so a chokepoint reading the slot releases a live caller's value there. Comparing the two bit-wise is what makes the
   release safe without a claim about every route out of a park: a record left over from a park
@@ -220,7 +218,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   [region-boundary-park-uaf.lisp](../../../tests/impl/region-boundary-park-uaf.lisp).
 - **What yields is the emit OPERATION, not the `Emit` node.** A first argument the compiler
   cannot read as a keyword set falls through to the `emit` primitive
-  ([../../signals/emit.md](../../signals/emit.md) § "Dynamic emit"), which parks the same way
+  ([emit.md](../../signals/emit.md)), which parks the same way
   and owes the same body reference — so the question above is asked of the operation. The
   walk records the payload argument's regions against a call whose callee is the emit
   primitive exactly as its `Emit` arm records them against the node
@@ -229,8 +227,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   What supplies the reference differs by position, because a call already mints one for an
   argument the frame does not own. In **tail** position that borrowed-argument retain IS the
   body reference: it is taken before the `TailCall` and released by the post-`TailCall`
-  block, which the resume replays ([mechanism.md](mechanism.md) § "What the fall-through
-  owes, a signal exit owes too"). In **non-tail** position no such retain exists, so
+  block, which the resume replays ([signalexit.md](signalexit.md)). In **non-tail** position no such retain exists, so
   `lower_call` takes one at the payload argument — the same `IncrefValueRegion`, private
   stash slot, and `DecrefValueRegion` shape `lower_emit` uses, the resume landing at the
   instruction after the call.
@@ -242,7 +239,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   result, and the resumer's release of that result consumes a reference of its own; and an
   `:error` fiber is resumable, so the continuation runs as well — at a restart's replay, or
   at the walk that stands in for a replay no resume will bring
-  ([mechanism.md](mechanism.md) § "An abandoned frame runs the releases it still owes"). One
+  ([unwind.md](unwind.md)). One
   retain, two consumers. So the raise mints the DELIVERY at its signal exit, in either
   position and for the reason `handle_emit` mints it on the literal path, and records it
   (`Fiber::delivery`, `record_mint`) so the frames' owed releases stop standing in for a
@@ -256,8 +253,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   Which route carries the continuation's release on a TERMINAL raise is what differs by
   position, and the difference is what the signal exit can NAME. A tail call carries its
   stash slots on the `TailCall` itself, so the exit consumes the retain there and nil-stamps
-  the slot, and the replay reloads an immediate and no-ops ([mechanism.md](mechanism.md)
-  § "What the fall-through owes, a signal exit owes too"). A non-tail site's stash is the
+  the slot, and the replay reloads an immediate and no-ops ([signalexit.md](signalexit.md)). A non-tail site's stash is the
   lowerer's own slot and no instruction names it — but the frame's release table is a table
   of exactly such slots, so the site records there instead, and the replay or the walk runs
   the release whole. Pinned by [region-dynamic-emit-borrow-uaf.lisp](../../../tests/impl/region-dynamic-emit-borrow-uaf.lisp),
@@ -274,7 +270,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   that runs no `Return`, and the reference the replay of its caller's frames
   consumes is the one `fiber/abort`'s injection minted for the payload. That
   replay is one of the four consumers the single mint answers for
-  ([effects.md](effects.md) § `Delivers`). Without a mint anywhere the replay
+  ([effects.md](effects.md), `Delivers`). Without a mint anywhere the replay
   consumes a reference the abort's caller still owns, and a fresh heap payload is
   freed under the caller's read (a constant payload has no region, which is what
   kept the theft invisible). Pinned by
@@ -310,8 +306,8 @@ symmetric with its unpark; the node and the deferred set a park moves are
   raise, so the dispatch loop's error exit carries its site (`RaiseSite`) out to the
   fiber boundary, and the boundary records it in the ledger (`park_error`). An
   `Emit` raise (`(error v)`) owes nothing, because its continuation funds its own
-  release of the resume value, as for any emit park (§ "A resume value crosses
-  counted, or not at all", below). A raise with no result position (`NoResult`),
+  release of the resume value, as for any emit park (the rule on a resume value,
+  below). A raise with no result position (`NoResult`),
   an instruction that produces no value, parks without taking the resume value,
   so it owes nothing either ([vm.md](../vm.md)). Every other raise is a `Call`
   site — a primitive, an instruction, a callee, the object limit's refusal —
@@ -320,7 +316,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   primitive. A capability denial of `:error` parks under `SIG_ERROR` as well,
   and in tail position the driver builds its frame, as for any tail suspend.
   It stays a denial park: `park_denial` recorded its funding, so the error park
-  finds that record for the same payload and leaves it standing. A squelch
+  finds that record for the same payload and leaves it standing. A call
   boundary that refuses a tail call ends the activation the call replaced, so its
   park (`TailRefused`) holds no frame of that activation, only the frames outside
   it. The resume value answers the outer frame's call, or becomes a fiber body's
@@ -375,8 +371,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   `RegionInfo::unfunded_resume_values` names the bound sites. What this buys beyond soundness is
   the frame-held admission: with both directions counted, a fiber crossing is a counted
   second holder rather than an uncounted borrow, so the branch-arm window and the
-  frame-exit release stop refusing it ([mechanism.md](mechanism.md) § "A fiber crossing is
-  a counted holder too"). Pinned by [region-fiber-frontier-window-uaf.lisp](../../../tests/impl/region-fiber-frontier-window-uaf.lisp),
+  frame-exit release stop refusing it ([window.md](window.md)). Pinned by [region-fiber-frontier-window-uaf.lisp](../../../tests/impl/region-fiber-frontier-window-uaf.lisp),
   with the leak face in [region-fiber-frontier-window.lisp](../../../tests/impl/region-fiber-frontier-window.lisp); the bound and
   returned faces are [region-resume-value-operand.lisp](../../../tests/impl/region-resume-value-operand.lisp).
 - **A child's inherited parameter baseline is a counted holder.** A new fiber snapshots
@@ -397,7 +392,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   the one symmetric release — the same shape as the terminal-signal park). The fiber's
   own later `parameterize` frames stay uncounted: their values are the parked
   activation's, released by its owed-release table. The generation-stamped borrow check
-  ([generations.md](generations.md) § "Uncounted-borrow check") stays as the oracle that
+  ([generations.md](generations.md)) stays as the oracle that
   the count holds. Pinned by [param-fiber-inherit.lisp](../../../tests/impl/param-fiber-inherit.lisp): a debug build panics at the
   resume boundary when the count is missing.
 - **A park names its funding in the delivery ledger, and a consume seam takes it.** The
@@ -428,7 +423,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   delivering it (the unfunded flag survives a displace, because the funnel that consumes
   it has not run yet); and `discharge()`, where the park is over with no delivery to
   fund: `take_parked_state` consuming the park of a fiber that can never run again,
-  `kill_fiber` ending any park a cancel finds, the squelch discard chokepoint
+  `kill_fiber` ending any park a cancel finds, the discard chokepoint
   (`discard_suspended_frames`), which a host that refuses a park crosses as well, and
   `VM::abandon_hosted_park`, where a host hands a thunk's suspension on as its own call's
   park (`arena/allocs`, `compile/run-on :bytecode`) and the thunk's park ends. After a
@@ -456,7 +451,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   (`release_displaced_terminal_signal`). Skipping it leaves the recorded table holding a
   dead edge (the free-time equivalence oracle detonates on the drift), and each re-park
   stacks another, so the free cascade over-releases the payload region
-  ([async-error-propagation.lisp](../../../tests/lang/async-error-propagation.lisp) § 4 is the pinning shape; the
+  ([async-error-propagation.lisp](../../../tests/lang/async-error-propagation.lisp)'s closed-port case is the pinning shape; the
   [region-fiber-park-symmetry.lisp](../../../tests/impl/region-fiber-park-symmetry.lisp) restart face churns the mechanism).
 
 A park moves the activation's dues into the suspended frame: a suspending exit — a
