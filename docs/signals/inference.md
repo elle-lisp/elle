@@ -31,8 +31,8 @@ The analyzer accumulates both from the body:
 2. A call to a function whose signal is known: a primitive, a binding in this
    file, or a squelched closure (see below).
 3. A call to a parameter: that parameter's position joins `:propagates`,
-   unless `(silence p)` bounds the parameter. The call itself may raise, so
-   it carries `:error` (see below).
+   unless `(bound p spec)` bounds the parameter, which contributes `spec`
+   instead. The call itself may raise, so it carries `:error` (see below).
 4. A call to anything else, such as a mutable binding or a computed callee:
    every bit a user program can raise.
 5. A construct that checks something at run time, and raises `:error` when
@@ -63,7 +63,7 @@ call whose callee may yield, do I/O or wait keeps a continuation frame.
 
 Every signal is a possible raise, so a construct that can raise carries
 `:error`. A function whose inferred signal is empty therefore cannot raise,
-and that is what makes `silent` a promise rather than a guess. These
+and that is what makes a silent function a proof rather than a guess. These
 constructs carry `:error`:
 
 - Strict destructuring: the patterns of `def`, `var`, `let` and `letrec`, a
@@ -84,7 +84,7 @@ constructs carry `:error`:
 - `eval`, whose signal is exactly `:error`. It runs the datum on the calling
   fiber and holds no park of that code, so a yield, an I/O request or a halt
   inside it comes back as an `:eval-error`.
-- A `(silence p)` bound, whose entry check may raise.
+- A `(bound p spec)` bound, whose entry check may raise.
 - A `b[..]` literal unless every element is an integer literal from 0 to 255,
   and a `{..}` or `@{..}` literal unless every key is a literal: a mutable key
   is rejected at run time.
@@ -95,7 +95,7 @@ constructs carry `:error`:
 (assert (= |:error| (bits-of "(defn f [x] (def [a b] x) a)" :f)))
 (assert (= |:error| (bits-of "(defn f [m] m:k)" :f)))
 (assert (= |:error| (bits-of "(defn g [a] a) (defn f [xs] (g ;xs))" :f)))
-(assert (= |:error| (bits-of "(defn p [] 1) (def q (squelch p :yield))
+(assert (= |:error| (bits-of "(defn p [] 1) (def q (squelch :yield p))
 (defn f [] (q))" :f)) "q's arity is not known")
 (assert (= || (bits-of "(defn f [x] (identity x))" :f)) "identity's arity is")
 (assert (= |:error| (bits-of "(defn f [x] [1 ;x])" :f)))
@@ -111,112 +111,36 @@ constructs carry `:error`:
 
 ## Declarations inside a function
 
-Seven forms declare something about the function they appear in. Each is
-legal anywhere inside a function body and applies to the innermost enclosing
+Five forms declare something about the function they appear in. Each is legal
+anywhere inside a function body and applies to the innermost enclosing
 function. Each evaluates to `nil`. Outside every function, each is a compile
 error.
 
 | Form | Declares |
 |------|----------|
-| `(silence)` | The function emits nothing, `:error` included |
-| `(silence p)` | Parameter `p` must be silent |
 | `(attune! spec)` | The function emits at most `spec` |
-| `(muffle spec)` | Squelch the function over `spec` when a closure is made from it |
-| `(silent!)` | Assert that the inferred signal is empty |
-| `(numeric!)` | Assert that the function is GPU-eligible |
-| `(immutable! x)` | Assert that binding `x` is never assigned |
+| `(silent!)` | The function emits nothing: `(attune! \|\|)` |
+| `(bound p spec)` | The argument for parameter `p` emits at most `spec` |
+| `(numeric!)` | The function is GPU-eligible |
+| `(immutable! x)` | Binding `x` is never assigned |
 
-`spec` is a signal keyword or a literal set of them.
-
-```lisp
-(assert (string/contains? (compile-error '(silence))
-                          "silence must appear inside a function body"))
-```
-
-### `(silence)`
-
-`(silence)` sets the function's ceiling to the empty set. A body that may emit
-anything, `:error` included, is a compile error. Generic arithmetic may raise
-`:error` on a non-number, so `(silence)` rejects it.
+`spec` is a signal keyword or a literal set of them. The empty set, `||`, is a
+spec.
 
 ```lisp
-(defn select [flag a b]
-  (silence)
-  (if flag a b))
-(assert (= 1 (select true 1 2)))
-
-(assert (string/contains?
-          (compile-error '(fn [x y] (silence) (+ x y)))
-          "function restricted to {} but body may emit {:error}"))
-
-(assert (string/contains? (compile-error '(fn [x] (silence :yield) x))
-                          "silence takes no signal keywords"))
+(assert (string/contains? (compile-error '(silent!))
+                          "silent! must appear inside a function body"))
 ```
-
-### `(silence p)`
-
-`(silence p)` bounds one parameter. The function no longer takes that
-parameter's signal from the argument, so a higher-order function stops being
-polymorphic. The bound is checked at function entry, and the check may raise,
-so the function carries `:error` and nothing else. Several `(silence p)`
-forms may appear, one per parameter. A name that is not a parameter is a
-compile error.
-
-```lisp
-(def sig (signal-of "(defn twice-silent [f x] (silence f) (f (f x)))"
-                    :twice-silent))
-(assert (= |:error| (get sig :bits)) "the entry check may raise")
-(assert (empty? (get sig :propagates)) "twice-silent takes no signal from f")
-
-(assert (string/contains? (compile-error '(fn [x] (silence z) x))
-                          "'z' is not a parameter of this function"))
-```
-
-The compiler does not check the argument at the call site. At entry, a
-closure is checked by its inferred signal and a native function by its
-declared signal; any other value passes, and calling it raises inside the
-function, which the `:error` covers. A value whose signal is not empty fails
-the check with `:signal-violation`. So does a closure that passes on the
-signal of its arguments: its bits are only a lower bound, so the check cannot
-show that it fits.
-
-```lisp
-(defn apply-silent [f x]
-  (silence f)
-  (f x))
-
-(assert (= 42 (apply-silent (fn [x] x) 42)))
-(assert (= false (apply-silent callable? 42)) "a silent native passes")
-
-(def [ok? err] (protect (apply-silent (fn [x] (yield x)) 42)))
-(assert (= :signal-violation (get err :error)))
-(assert (string/contains? (get err :message)
-                          "closure may emit {:yield} but parameter is restricted to {}"))
-
-(def [ok? err] (protect (apply-silent + 42)))
-(assert (not ok?) "+ may raise :error, so it is not silent")
-
-(def [ok? err] (protect (apply-silent length [1 2])))
-(assert (string/contains? (get err :message)
-                          "length may emit {:error} but parameter is restricted to {}"))
-
-(defn call-it [k] (k))
-(def [ok? err] (protect (apply-silent call-it 42)))
-(assert (string/contains? (get err :message)
-                          "closure passes on the signal of its arguments"))
-```
-
-A violation nothing catches reports as any uncaught error does, at the call
-that passed the value.
 
 ### `(attune! spec)`
 
-`(attune! spec)` checks that the inferred signal fits `spec`: a body that may
-emit a signal outside `spec` is a compile error. It checks and does not
-replace, so the function's signal stays the inferred one, and a caller sees
-what the body does rather than what the declaration admits. `(silence)` is
-the same check with nothing in `spec`. A function that may fail but must not
-suspend declares `(attune! :error)`.
+`(attune! spec)` is the function's ceiling. It checks that the inferred signal
+fits `spec`, and a body that may emit a signal outside `spec` is a compile
+error. It checks and does not replace, so the function's signal stays the
+inferred one, and a caller sees what the body does rather than what the
+declaration admits. A body may declare more than one ceiling, and it must fit
+each. A function that may fail but must not suspend declares
+`(attune! :error)`.
 
 ```lisp
 (defn add [x y]
@@ -241,57 +165,111 @@ suspend declares `(attune! :error)`.
                           "attune!: unknown signal keyword :nosuch"))
 ```
 
-### `(muffle spec)`
+### `(silent!)`
 
-`(muffle spec)` is `squelch` applied to the function itself, when a closure is
-made from it. The inferred signal loses the bits of `spec` that the body may
-raise and gains `:error` in their place, exactly as a squelch narrows a
-closure. At run time the function's boundary turns a muffled signal into a
-`:signal-violation` error, on every tier a squelch boundary covers.
-
-```lisp
-(def sig (signal-of "(defn f [] (muffle :yield) (yield 1) 2)" :f))
-(assert (= |:error| (get sig :bits)) "the muffled yield comes back as an error")
-
-(def sig (signal-of "(defn f [x] (muffle :yield) x)" :f))
-(assert (get sig :silent) "a muffle of a signal the body never raises changes nothing")
-
-(defn muffled [] (muffle :yield) (yield 1) 2)
-(def [ok? err] (protect (muffled)))
-(assert (= :signal-violation (get err :error)))
-(assert (= "squelch: signal {:yield} caught at boundary" (get err :message)))
-```
-
-`:error` and `:halt` pass every boundary, so neither can be muffled; the form
-is a compile error. A ceiling is checked against the signal after the muffle,
-so `(silence)` rejects a muffled body: the violation it raises is a raise.
-`(attune! :error)` admits it.
+`(silent!)` is `(attune! ||)`, and it is the one spelling of an empty ceiling.
+A body that may emit anything, `:error` included, is a compile error. Generic
+arithmetic may raise `:error` on a non-number, so `(silent!)` rejects it. A
+body that passes on the signal of a parameter is rejected too.
 
 ```lisp
-(assert (string/contains? (compile-error '(fn [x] (muffle :error) (+ x 1)))
-                          "{:error} passes every boundary and cannot be muffled"))
+(defn select [flag a b]
+  (silent!)
+  (if flag a b))
+(assert (= 1 (select true 1 2)))
 
 (assert (string/contains?
-          (compile-error '(fn [] (silence) (muffle :yield) (yield 1)))
+          (compile-error '(fn [x y] (silent!) (+ x y)))
           "function restricted to {} but body may emit {:error}"))
 
-(defn bounded [] (attune! :error) (muffle :yield) (yield 1) 2)
-(assert (= :signal-violation (get (get (protect (bounded)) 1) :error)))
+(assert (string/contains?
+          (compile-error '(fn [x y] (attune! ||) (+ x y)))
+          "function restricted to {} but body may emit {:error}")
+        "(attune! ||) is the same ceiling")
+(assert (string/contains? (compile-error '(fn [x] (silent! x) x))
+                          "silent! takes no arguments"))
 ```
 
-### Assertions
+### `(bound p spec)`
 
-`(silent!)` asserts that the inferred signal is empty. The check runs before a
-ceiling or a muffle applies, so it states what the body does, not what the
-function declares.
+`(bound p spec)` bounds one parameter: the argument passed for `p` must emit
+at most `spec`. The function no longer takes that parameter's signal from the
+argument, so a higher-order function stops being polymorphic, and a call to
+`p` contributes `spec`. `(bound p ||)` asks for a silent argument. The bound
+is checked at function entry, and the check may raise, so the function
+carries `:error`. Several `bound` forms may appear, one per parameter. A name
+that is not a parameter is a compile error, and so is a second bound on one
+parameter.
 
 ```lisp
-(defn tight [x] (silent!) (if x 1 2))
-(assert (= 1 (tight true)))
+(def sig (signal-of "(defn twice-silent [f x] (bound f ||) (f (f x)))"
+                    :twice-silent))
+(assert (= |:error| (get sig :bits)) "the entry check and the calls may raise")
+(assert (empty? (get sig :propagates)) "twice-silent takes no signal from f")
 
-(assert (string/contains? (compile-error '(fn [x] (silent!) (+ x 1)))
-                          "silent! assertion failed: function may emit {:error}"))
+(def sig (signal-of "(defn each-yield [f x] (bound f :yield) (f x))" :each-yield))
+(assert (= |:yield :error| (get sig :bits)) "a call to f contributes the bound")
+
+(assert (string/contains? (compile-error '(fn [x] (bound z ||) x))
+                          "bound: 'z' is not a parameter of this function"))
+(assert (string/contains? (compile-error '(fn [f] (bound f ||) (bound f :yield) f))
+                          "bound: parameter f is already bounded"))
 ```
+
+At entry, a closure is checked by its effective signal and a native function
+by its declared signal. Any other value passes, and calling it raises inside
+the function, which the `:error` covers. A value whose signal exceeds `spec`
+fails the check with `:signal-violation`. So does a closure that passes on
+the signal of its arguments: its bits are only a lower bound, so the check
+cannot show that it fits.
+
+```lisp
+(defn apply-silent [f x]
+  (bound f ||)
+  (f x))
+
+(assert (= 42 (apply-silent (fn [x] x) 42)))
+(assert (= false (apply-silent callable? 42)) "a silent native passes")
+
+(def opaque @[(fn [x] (yield x))])
+(def [ok? err] (protect (apply-silent (get opaque 0) 42)))
+(assert (= :signal-violation (get err :error)))
+(assert (string/contains? (get err :message)
+                          "bound: closure may emit {:yield} but parameter is bounded to {}"))
+
+(def [ok? err] (protect (apply-silent (get @[length] 0) [1 2])))
+(assert (string/contains? (get err :message)
+                          "bound: length may emit {:error} but parameter is bounded to {}"))
+```
+
+When the compiler knows the argument's signal at the call, it checks the bound
+there, and a violation is a compile error. It knows the signal of a lambda
+literal, of a primitive, and of a binding whose signal it inferred. The entry
+check stays for every other argument, such as the values read out of an array
+above.
+
+```lisp
+(assert (string/contains?
+          (compile-error '(begin (defn apply-silent [f x] (bound f ||) (f x))
+                                 (apply-silent (fn [x] (yield x)) 42)))
+          "may emit {:yield} but parameter f is bounded to {}"))
+
+(assert (string/contains?
+          (compile-error '(begin (defn apply-silent [f x] (bound f ||) (f x))
+                                 (apply-silent length [1 2])))
+          "may emit {:error} but parameter f is bounded to {}"))
+
+(assert (string/contains?
+          (compile-error '(begin (defn apply-silent [f x] (bound f ||) (f x))
+                                 (defn call-it [k] (k))
+                                 (apply-silent call-it 42)))
+          "passes on the signal of its arguments but parameter f is bounded to {}"))
+```
+
+A violation nothing catches reports as any uncaught error does, at the call
+that passed the value.
+
+### Assertions
 
 `(numeric!)` asserts that the function is GPU-eligible. The lowered body may
 hold only numeric instructions and control flow: no call, no closure, no
@@ -321,52 +299,59 @@ so a non-number gives an unchecked result.
 
 ## Runtime transforms: `squelch` and `attune`
 
-`squelch` and `attune` are primitives, not declarations. Each returns a new
+`squelch` and `attune` are primitives, not declarations. They are the
+boundary a caller puts around a closure it did not write. Each returns a new
 closure that shares the original's bytecode and environment. When the new
 closure returns a signal its mask covers, the boundary turns that signal into
 a `:signal-violation` error.
 
-- `(squelch f mask)` blocks the signals in `mask` and lets the rest through.
-  `mask` is a keyword, a set, an array or list of keywords, or an integer.
-- `(attune mask f)` takes the mask first. It lets through only the signals in
-  `mask` and blocks the rest.
+Both take the spec first. `spec` is a keyword, a set, an array or list of
+keywords, or an integer.
+
+- `(squelch spec f)` blocks the signals in `spec` and lets the rest through.
+- `(attune spec f)` lets through only the signals in `spec` and blocks the
+  rest. `(squelch spec f)` is therefore `(attune (complement spec) f)`.
 
 ```lisp
 (defn producer [] (yield 1))
 
-(def [ok? err] (protect ((squelch producer :yield))))
+(def [ok? err] (protect ((squelch :yield producer))))
 (assert (= :signal-violation (get err :error)))
 (assert (= "squelch: signal {:yield} caught at boundary" (get err :message)))
 
 (def [ok? err] (protect ((attune |:yield :error| (fn [] (println "hi"))))))
 (assert (= "squelch: signal {:io} caught at boundary" (get err :message)))
+
+(def [ok? err] (protect (squelch producer :yield)))
+(assert (= "squelch: second argument must be a closure, got keyword"
+           (get err :message)))
 ```
 
 Layers compose: a squelch of a squelched closure blocks both masks. The check
 also fires when the squelched closure is called in tail position.
 
 ```lisp
-(def quiet (squelch (squelch (fn [] (println "hi")) :yield) :io))
+(def quiet (squelch :io (squelch :yield (fn [] (println "hi")))))
 (assert (= :signal-violation (get (get (protect (quiet)) 1) :error)))
 
-(def blocked (squelch producer :yield))
+(def blocked (squelch :yield producer))
 (defn tail-call [] (blocked))
 (assert (= :signal-violation (get (get (protect (tail-call)) 1) :error)))
 ```
 
-Three classes of signal cross every boundary untouched. `:error` and `:halt`
-pass whole, so squelching `:error` does nothing. The VM's `:switch`
-trampoline passes. A signal that carries `:fuel` is a pause the VM injects
-under whatever code is running, such as a fuel stop or a dynamic breakpoint's
-`|:debug :fuel|`, and it passes whole too.
+Three classes of signal cross a `squelch` or `attune` boundary untouched.
+`:error` and `:halt` pass whole, so squelching `:error` does nothing. The VM's
+`:switch` trampoline passes. A signal that carries `:fuel` is a pause the VM
+injects under code that is not silent, such as a fuel stop or a dynamic
+breakpoint's `|:debug :fuel|`, and it passes whole too.
 [signals/mod.rs](../../src/signals/mod.rs) holds the one predicate,
 `squelched_bits`, that every tier asks.
 
 ```lisp
-(def [ok? err] (protect ((squelch (fn [] (error {:error :mine})) :error))))
+(def [ok? err] (protect ((squelch :error (fn [] (error {:error :mine}))))))
 (assert (= :mine (get err :error)) "squelch never blocks :error")
 
-(def paused (fiber/new (fn [] ((squelch (fn [] (emit |:debug :fuel|) 5) :debug)))
+(def paused (fiber/new (fn [] ((squelch :debug (fn [] (emit |:debug :fuel|) 5))))
                        |:debug :fuel :error|))
 (fiber/resume paused)
 (assert (= :paused (fiber/status paused)))
@@ -375,14 +360,14 @@ under whatever code is running, such as a fuel stop or a dynamic breakpoint's
 
 ### Narrowing at compile time
 
-When a `def` or `let` binds `(squelch f mask)` or `(attune mask f)` with a
-literal mask, the analyzer computes the new closure's signal. It removes the
+When a `def` or `let` binds `(squelch spec f)` or `(attune spec f)` with a
+literal spec, the analyzer computes the new closure's signal. It removes the
 blocked bits, and adds `:error` when it removed any. A caller of the binding
 then sees the narrower signal.
 
 ```lisp
 (def sig (signal-of "(defn p [] (yield 1))
-(def safe (squelch p :yield))
+(def safe (squelch :yield p))
 (defn use [] (safe))" :use))
 (assert (= |:error| (get sig :bits)))
 ```
@@ -392,18 +377,45 @@ So a squelch never turns a closure that signals into a silent one.
 
 ## The boundary of a silent function
 
-A function whose inferred signal is empty is enforced at its boundary as a
-closure squelched over every signal. Inference is sound, so the boundary
-fires only on a defect in the compiler, and then it raises
-`:signal-violation` where the abort it replaces killed the process. `:error`
-and `:halt` pass this boundary as they pass every other, so a raise that
-nothing catches reports as an ordinary uncaught error whatever the function's
-inferred signal.
+A function whose inferred signal is empty is a proof that nothing stops the
+fiber while it runs. Backends depend on that proof. The MLIR and SPIR-V tiers
+compile a silent function to code with no signal path at all, and the JIT
+records no resume point inside one ([jit.md](jit.md)). Every tier therefore
+keeps the same two rules.
 
-The mask a closure's boundary enforces is therefore three things: the mask
-`squelch` or `attune` gave it, the function's `muffle`, and every signal when
-the function is silent. One method on the closure answers it, and every
-enforcement site in the interpreter and the JIT asks that method.
+The interpreter charges no fuel while a silent function runs, as no native
+tier does. A meter therefore pauses a fiber at a charge site outside the
+silent function, never inside it.
+
+```lisp
+(defn spin [n] (numeric!) (def @i 0) (while (%lt i n) (assign i (%add i 1))) i)
+(assert (get (signal-of "(defn spin [n] (numeric!) (def @i 0)
+  (while (%lt i n) (assign i (%add i 1))) i)" :spin) :silent))
+
+(def metered (fiber/new (fn [] (spin 1000)) |:fuel|))
+(fiber/set-fuel metered 5)
+(fiber/resume metered)
+(assert (= :dead (fiber/status metered)) "the meter never paused the silent loop")
+(assert (= 1000 (fiber/value metered)))
+```
+
+A signal that leaves a silent function is a broken proof: a defect in the
+compiler, not in the program. It raises the terminal error
+`{:error :broken-proof}`, whose bits are `:error` and `:terminal` together.
+The message names the function and the signal it raised. `:error` gets no
+exemption, because a caller depends on a silent function not raising. No mask
+catches a terminal signal, so `protect`, `try` and `defer` never see it. It
+ends the program with its report, and each fiber it passes stops where it
+stood, so the chain stays inspectable.
+
+Two signals pass a silent function's boundary as themselves. A halt passes,
+because the depth cap halts a deep recursion: that is a resource fault, not a
+broken proof. A signal that already carries `:terminal` passes whole, so the
+report names the innermost function whose proof broke.
+
+Elle code cannot build a broken proof, because inference is sound.
+[proof_tests.rs](../../src/vm/call/proof_tests.rs) forges a silent code
+object that yields, and pins the report.
 
 ## Across files: signal projection
 
@@ -415,7 +427,7 @@ gives no projection.
 
 An importing file that binds `((import "literal"))` looks the projection up.
 Today the projected signal never reaches a call through `module:field`, so a
-call into another file is treated as unknown (#1232). A `(silence)` function
+call into another file is treated as unknown (#1232). A `(silent!)` function
 cannot call into another module until that is fixed.
 
 ## See also

@@ -1,6 +1,6 @@
 # Runtime Signals
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-05 -->
 
 The runtime uses fiber signals for internal coordination. These are
 distinct from user-level error handling.
@@ -25,16 +25,21 @@ switch     13    VM-internal fiber switch trampoline; no keyword
 ## Fuel budgets
 
 Fuel limits instruction execution on a fiber. When fuel runs out,
-the fiber pauses with a `:fuel` signal.
+the fiber pauses with a `:fuel` signal. The interpreter charges fuel at
+backward jumps and calls, but not while a silent function runs, and no
+native tier charges any: a silent function is a proof that nothing stops the
+fiber ([signals/inference.md](signals/inference.md)).
 
 ```lisp
-(def f (fiber/new (fn [] (while true (yield :tick))) |:fuel :yield|))
+(def f (fiber/new (fn [] (def @n 0) (while (< n 100000) (assign n (+ n 1))) n) |:fuel|))
 (fiber/set-fuel f 1000)    # instruction budget
-(fiber/resume f nil)       # runs until fuel exhausted
-(fiber/fuel f)             # => 0 (exhausted)
+(fiber/resume f nil)       # runs until the fuel runs out
+(assert (= :paused (fiber/status f)))
+(assert (= 0 (fiber/fuel f)))
 (fiber/set-fuel f 10000)   # refuel
-(fiber/resume f nil)       # resume execution
-(fiber/clear-fuel f)       # remove budget, unlimited execution
+(fiber/resume f nil)       # runs on, and pauses again
+(fiber/clear-fuel f)       # remove the budget
+(assert (= 100000 (fiber/resume f nil)) "with no budget the loop finishes")
 ```
 
 ## SIG_QUERY

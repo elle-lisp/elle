@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-05 -->
 
 A Lisp whose compiler infers what each function does and where each value dies,
 and runs on those facts.
@@ -79,15 +79,17 @@ yields:
 (assert (= (fiber/value gen) 2))
 ```
 
-`(silence)` declares a ceiling, and the compiler enforces it. A function that
-promises silence cannot call an argument that might yield, unless it bounds
-that argument too:
+`(silent!)` declares a ceiling, and the compiler enforces it. A silent
+function cannot call an argument, because the argument might signal. It can
+bound the argument instead, but the bound is checked when the function is
+called, and that check may raise:
 
 ```lisp
-(def refused (protect (eval '(defn tight [f x] (silence) (f x)))))
+(def refused (protect (eval '(defn tight [f x] (silent!) (f x)))))
 (assert (not (first refused)))                 # a compile error
 
-(def bounded (protect (eval '(defn tight [f x] (silence f) (f x)))))
+(def bounded
+  (protect (eval '(defn tight [f x] (attune! :error) (bound f ||) (f x)))))
 (assert (first bounded))                       # f is bounded, so it compiles
 ```
 

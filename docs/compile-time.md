@@ -26,7 +26,7 @@ topic docs; this catalog is the map. Its examples run as one program under
 | `defmacro`, quasiquote, `macro?`, `expand-macro` | macro expansion (reader → analyzer) | expands to code |
 | `(elle/epoch N)` | before lexing, then the migration pass before expansion | no (consumed) |
 | `(unicode! …)` | analysis | no (declaration → `nil`; 0-arg query folds to the version array) |
-| `silence`, `muffle` | signal inference | no (shapes the inferred signal) |
+| `bound` | signal inference, and a check at the call where the argument's signal is known | yes (the entry check) |
 | `silent!`, `attune!`, `numeric!`, `immutable!` | post-inference checks | no (evaluate to `nil`) |
 | `gate!` | macro expansion; the test runs at run time | yes (a runtime guard that raises `:gated`) |
 | `when!` / `unless!` *(proposed)* | analysis | no (the excluded body is not compiled) |
@@ -83,25 +83,24 @@ Signals are inferred at compile time and flow up from callee to caller (see
 
 | Form | Effect |
 |---|---|
-| `(silence)` | this function's ceiling is silent: no signal at all, `:error` included |
-| `(silence f)` | the value passed for parameter `f` must be silent, checked at entry; the check may raise, so the function carries `:error` |
+| `(silent!)` | this function's ceiling is silent: no signal at all, `:error` included; the same as `(attune! \|\|)` |
+| `(bound f spec)` | the value passed for parameter `f` emits at most `spec`, checked at the call where the compiler knows the value's signal and at entry otherwise; the entry check may raise, so the function carries `:error` |
 | `(attune! :io)`, `(attune! \|:io :yield\|)` | check that this function emits at most these; its signal stays the inferred one |
-| `(muffle :yield)` | squelch the function over these signals when a closure is made from it: the inferred signal loses them and gains `:error` |
 | `(emit :io)`, `(emit :yield value)` | emit a signal; the keyword is recorded at compile time, the value is emitted at run time |
 | `(yield value)` | a macro for `(emit :yield value)` |
 
-`silence`, `muffle`, `attune!`, and `emit` are **special forms** analyzed during
+`bound`, `silent!`, `attune!`, and `emit` are **special forms** analyzed during
 signal inference. `squelch` and the runtime `attune` are **runtime wrappers** that
 intercept a closure's signals after the fact while also narrowing the inferred
 signal at compile time — see [signals/](signals/) for the full model and the
-exact two-argument shape of `squelch`.
+spec-first argument order `squelch` and `attune` share.
 
 ```lisp
 (defn compiles? [src]
   (first (protect (compile/whole-module src "<doc>"))))
 
-(assert (compiles? "(defn pick [b x y] (silence) (if b x y))"))
-(assert (not (compiles? "(defn loud [] (silence) (emit :yield 1))")))
+(assert (compiles? "(defn pick [b x y] (silent!) (if b x y))"))
+(assert (not (compiles? "(defn loud [] (silent!) (emit :yield 1))")))
 (assert (not (compiles? "(defn add [x y] (attune! :yield) (error :no))")))
 (assert (= |:error| (get (compile/signal (compile/analyze "(defn add [x y] (attune! |:yield :error|) (+ x y))") :add) :bits))
         "attune! checks the signal and leaves it as inferred")
@@ -114,7 +113,6 @@ verifies, failing compilation if violated:
 
 | Form | Asserts |
 |---|---|
-| `(silent!)` | this function emits no signals |
 | `(numeric!)` | every parameter is a number, and the body is GPU-eligible: no call, no closure, no heap value, no emit |
 | `(immutable! name)` | the binding `name` is never assigned |
 
@@ -158,7 +156,7 @@ an assertions-disabled build) is proposed alongside; its open questions are in
 `(elle/epoch)` with no arguments returns the current epoch number.
 
 ```lisp
-(assert (= (elle/epoch) 14))
+(assert (= (elle/epoch) 15))
 ```
 
 The reader reads the declaration before it lexes, because an epoch can change
@@ -290,7 +288,7 @@ the compile-time forms above:
 - [macros.md](macros.md) — macro system, hygiene, `datum->syntax`
 - [intrinsics.md](intrinsics.md) — the `%`-intrinsic reference
 - [epochs.md](epochs.md) — epoch declaration and migration rules
-- [signals/](signals/) — signal inference, `silence`/`squelch`, capabilities
+- [signals/](signals/) — signal inference, `silent!`, `bound`, `squelch`, capabilities
 - [analysis/portrait.md](analysis/portrait.md) — the `compile/*` API in depth
 - [analysis/agent-reasoning.md](analysis/agent-reasoning.md) — how agents query the model
 - [test-runner.md](test-runner.md) — how the runner records a `gate!` skip

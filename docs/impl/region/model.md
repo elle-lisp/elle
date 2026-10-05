@@ -1,6 +1,6 @@
 # Region representation — id-spaces, per-execution model, layout
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-05 -->
 
 Implementation-facing. How the compiler and runtime represent regions: the two
 id-spaces, the per-activation physical-region model, the page layout, and how an
@@ -75,8 +75,7 @@ per cell** (`begin_cell_regions`), each released by its own `DecrefRegion` at
 its binding's last use. A spliced call's args array is the same obligation with
 a different resolution: it takes a managed slot of its own so the call's result
 mint cannot orphan it, and its drop is the call's own — the runtime takes that
-slot ([mechanism.md](mechanism.md) § "A spliced call's arguments come out of an array the
-convention owns").
+slot ([mechanism.md](mechanism.md)).
 
 ## Constants lower as ordinary allocations, not promoted values
 
@@ -229,7 +228,7 @@ A physical region id has three states, and every id must reach `free` again.
   sizes `regions` and `generations` to the id, so **the table is as long as the
   largest id ever made live**, whatever the count of live regions is. (Static
   slot ids reach `ensure_raw` too and size the table the same way; they come
-  from the compiler's own bounded counter — see § "Two id-spaces".)
+  from the compiler's own bounded counter, as the first section says.)
 - **Free.** A teardown returns the id's pages, bumps its generation, and pushes
   the id onto `free_physical`, where the next mint finds it.
 
@@ -299,9 +298,9 @@ lifetime. Freeing the object's region frees its inline payload with it.
 The consequence to keep in mind: a closure's captured environment dies with the
 closure's region. A prematurely-freed closure region surfaces as a *torn
 captured-env read* in `populate_env`, not as an RC underflow — there was never a
-separate region to underflow. When `(squelch f …)` shares `f`'s env, the new
-closure's env is copied inline into the new closure's region, so that region now
-owns the captures.
+separate region to underflow. `(squelch spec f)` and `(attune spec f)` build
+a closure whose env slice aliases `f`'s, and the closure's allocation counts a
+reference to the region that backs that slice (see the last paragraph).
 
 The corollary for **metadata-only clones**: an operation that rebuilds a heap
 object to change only its metadata (`with-traits` is the canonical case) must

@@ -1,6 +1,6 @@
 # Signals and JIT
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-05 -->
 
 A function's signal decides nothing about whether the JIT compiles it. It
 decides the checks around each call and how a yield leaves compiled code.
@@ -41,14 +41,20 @@ bytecode offset, and the function returns a sentinel. When the fiber resumes,
 the interpreter continues from that frame. The compiled code never saves or
 switches a native stack.
 
-## Bounds and squelch
+## Bounds and boundaries
 
-A `(silence p)` bound is checked at function entry in compiled code as in the
-interpreter; see [inference.md](inference.md). A closure's boundary mask is
-checked on the JIT's call, tail-call and sentinel paths. The mask is the
-closure's squelch, its function's muffle, and every signal when the function
-is silent. Every one of those paths asks the same predicate,
-`signals::squelched_bits`, that the interpreter asks.
+A `(bound p spec)` bound is checked at function entry in compiled code as in
+the interpreter; see [inference.md](inference.md). A closure's squelch mask is
+checked on the JIT's call, tail-call and sentinel paths, and every one of those
+paths asks the same predicate, `signals::squelched_bits`, that the interpreter
+asks.
+
+The same paths check the boundary of a silent function. A silent function is
+a proof that nothing stops the fiber, so a signal that leaves one raises the
+terminal `:broken-proof` error on every tier. A halt, and a signal that
+already carries `:terminal`, pass it as themselves
+([inference.md](inference.md)). Compiled code charges no fuel, and the
+interpreter charges none inside a silent function, so no tier pauses one.
 
 ## See also
 

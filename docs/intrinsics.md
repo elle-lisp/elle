@@ -1,6 +1,6 @@
 # Intrinsics
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-05 -->
 
 Intrinsics are silent bytecode operations prefixed with `%`. A `%`-intrinsic
 in **call position** is a compile-time type-checked request for the fast
@@ -18,8 +18,8 @@ Use intrinsics when:
   wrappers would inflate arena counts or slow execution.
 - Writing code that must be **GPU-eligible** (`%`-intrinsics lower to
   SPIR-V/MLIR; stdlib wrappers do not).
-- Writing code inside **silence/muffle** contexts where the stdlib
-  wrappers' `:error` signal would cause a signal violation.
+- Writing a **`(silent!)`** function, whose ceiling rejects the `:error` the
+  stdlib wrappers may raise.
 - Writing **allocation-sensitive tests** (arena/resource measurements)
   where stdlib call overhead must be excluded.
 

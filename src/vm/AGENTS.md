@@ -67,7 +67,8 @@ it act on each one:
 - `SIG_PROPAGATE`: `fiber/propagate` re-signals caught signal.
 - `SIG_ABORT`: Inject an error at the target fiber's suspension point.
 - `SIG_QUERY`: Primitive reads VM state (arena stats, introspection).
-- `SIG_FUEL`: The instruction budget ran out.
+- `SIG_FUEL`: The instruction budget ran out. The loop charges no fuel while a
+  silent function runs ([inference.md](../../docs/signals/inference.md)).
 - `SIG_HALT`: Graceful VM termination. Non-resumable.
 
 `execute_code`, which `execute` calls, is the translation boundary. It
@@ -95,7 +96,8 @@ call, emit and closure handlers, and the signal handlers they call take the
 - `execute_bytecode_from_ip` / `execute_bytecode_saving_stack` take a `&Code`
 - `TailCallInfo` carries the tail callee's `Code`, env `Rc`, the callee closure
   value (installed as `fiber.current_closure` on the frame replacement), and its
-  squelch mask — tail calls clone the `Rc`s (cheap), not the `Vec`s (expensive).
+  boundary, its squelch mask and whether its function is silent — tail calls
+  clone the `Rc`s (cheap), not the `Vec`s (expensive).
   The releases the call strands are NOT carried here: `tail_call_inner` records
   them on the activation's own `ActivationDues`, which outlives whoever consumes
   the pending call ([owner.md](../../docs/impl/region/owner.md))
@@ -339,7 +341,8 @@ child. The baseline is a counted holder of every heap value in it
 **Abandonment**: code that stops running pops no frame it pushed, so whatever
 abandons it truncates the stack. Each call, host and boundary records the depth
 at its entry as a `ParamDepth`. A caller whose callee raised truncates to it,
-and so does the discard chokepoint where a `squelch` boundary or a refusing
+and so does the discard chokepoint where a `squelch` boundary, a broken proof
+or a refusing
 host ends a park (`discard_suspended_frames`).
 
 ## Truthiness

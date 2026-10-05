@@ -109,14 +109,14 @@ inert `nil` (detached). Denial gates the primitive only: a bare
 capability-checked. Denial is a policy statement about `debug/break`,
 not an information barrier.
 
-**Transparent to signal hygiene.** Three enforcement points must let a
+**Transparent to signal hygiene.** Two enforcement points must let a
 tooling pause through:
 
 - Squelch/attune enforcement asks one predicate,
-  `signals::squelched_bits` ([src/signals/mod.rs](../src/signals/mod.rs)), at all ten sites:
-  the interpreter's `enforce_squelch` ([src/vm/core/discard.rs](../src/vm/core/discard.rs)) serves six,
-  and four more are inlined in the JIT paths — two in
-  [src/vm/run_on/jit.rs](../src/vm/run_on/jit.rs) and two in [src/jit/calls/callops.rs](../src/jit/calls/callops.rs). One
+  `signals::squelched_bits` ([src/signals/mod.rs](../src/signals/mod.rs)), at every site:
+  the interpreter's `enforce_squelch` ([src/vm/core/discard.rs](../src/vm/core/discard.rs)) serves most,
+  and the rest are inlined in the JIT paths, in
+  [src/vm/run_on/jit.rs](../src/vm/run_on/jit.rs) and [src/jit/calls/callops.rs](../src/jit/calls/callops.rs). One
   predicate is what keeps the exemptions from drifting apart between
   tiers. It exempts `:error` and `:halt` by intersection, `:switch` by
   exact equality, and any signal that carries the pause bit `:fuel`
@@ -129,24 +129,27 @@ tooling pause through:
   re-executes the interrupted instruction against a torn-down stack.
   [tests/lang/squelch-fuel.lisp](../tests/lang/squelch-fuel.lisp) pins
   the rule for `:fuel`, one case per charge-site shape, and for a pause
-  that carries a second bit. `(squelch f :fuel)` is inert — metering is
+  that carries a second bit. `(squelch :fuel f)` is inert — metering is
   the parent's action, not the closure's behavior, so the boundary has
   nothing to enforce.
-- The boundary of an inferred-silent function is the same predicate
-  over every signal (`Closure::boundary_mask`,
-  [src/value/closure.rs](../src/value/closure.rs)), so a pause passes it
-  as it passes a squelch, and it needs no exemption of its own.
-- `CheckSignalBound` — the `(silence param)` parameter bound — is a
+- `CheckSignalBound` — the `(bound param spec)` parameter bound — is a
   bind-time check on closure values, not a runtime signal filter.
   Binding a closure to a bounded parameter compares the closure's
   static `signal.bits` against the bound and errors on any excess
   ([src/vm/dispatch/interp/signals.rs](../src/vm/dispatch/interp/signals.rs); the JIT mirrors it; the WASM
   tier currently drops the instruction). Phase 2 makes the check
   subtract `:debug` from the excess, so a closure that contains
-  `debug/break` still binds to a silence-bounded parameter. Without
+  `debug/break` still binds to a bounded parameter. Without
   that, adding a
-  breakpoint to a function passed as a silenced argument turns a
+  breakpoint to a function passed as a bounded argument turns a
   running program into a bind-time signal violation.
+
+No tooling pause arises inside an inferred-silent function. A silent function
+is a proof that nothing stops the fiber, and the native tiers run one with no
+way to park it. So the interpreter charges no fuel and checks no breakpoint
+while a silent function runs, and a signal that leaves one is a broken proof
+([signals/inference.md](signals/inference.md)). A step passes over a silent
+call whole, and a breakpoint armed inside one never fires.
 
 Rationale: `:debug` is a tooling channel, not program behavior. Mask
 routing still applies — only a fiber whose mask names `:debug`
@@ -238,7 +241,7 @@ before its implementation.
 | Phase | Contents | Status |
 |-------|----------|--------|
 | 1 | name plumbing (HIR → `LirHead::name` → the template name), `local_names` with three-shape places and parameter entries, the `Bytecode` local count, `fiber/frames`, `fiber/trace`, `fiber/disasm`, `Fresh` region rule, disasm exhaustiveness | name plumbing built; the rest not started |
-| 2 | `debug/break`, attached flag, hygiene exemptions (silence bounds), denial semantics, JIT side-exit inspectability | not started |
+| 2 | `debug/break`, attached flag, hygiene exemptions (parameter bounds), denial semantics, JIT side-exit inspectability | not started |
 | 3 | fiber debug + skip-once fields, owning-key breakpoint table, `debug/break-at`, composed-bit pauses, per-instruction fuel, always-park re-execute frames, tier gate, error-path frame preservation | not started |
 | 4 | `lib/debug.lisp` driver, snapshot/outcome schemas | not started |
 | 5 | identity order (allocation-sequence ordering for reference-identity values), `PrimitiveDef.replay` classes + registry exhaustiveness test, deterministic tier promotion under recording, record/replay mode flag, thread/callback refusal, log schema, `debug:replay`, `debug:bisect` | not started |
@@ -261,7 +264,7 @@ before its implementation.
    resume value becomes `debug/break`'s result; no debugger → `nil`,
    no suspension; `:deny |:debug|` produces a capability denial;
    break inside `squelch` preserves the continuation; a
-   `(silence param)` bind accepts a closure containing `debug/break`;
+   `(bound param ||)` bind accepts a closure containing `debug/break`;
    a function containing `debug/break` reports `(silent? f)` false; a
    break inside a JIT-compiled function pauses with inspectable
    frames.
@@ -271,9 +274,9 @@ before its implementation.
    inside a `squelch` boundary passes through (extends the pinned
    [tests/lang/squelch-fuel.lisp](../tests/lang/squelch-fuel.lisp)); a `debug/break-at`
    line pause resolves to that line's first instruction; resume past
-   a breakpoint does not re-trigger it (skip-once); a dynamic break
-   inside an inferred-silent function pauses instead of raising a
-   violation; the
+   a breakpoint does not re-trigger it (skip-once); a dynamic breakpoint
+   armed inside an inferred-silent function never fires, and a step passes
+   over a silent call whole; the
    same closure called from a non-flagged fiber takes the JIT path;
    an error under the debug flag exposes every activation's frame.
 4. End-to-end Elle tests: `debug:until` over a loop,

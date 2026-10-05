@@ -40,9 +40,9 @@ counted reference to the code region every payload of the unit lives in
 
 ```rust
 pub struct AnalyzeResult {
-    pub hir: Hir,
+    pub hir: Hir,              // tail calls already marked
     pub arena: BindingArena,
-    pub errors: Vec<LError>,
+    pub errors: Vec<LError>,   // non-fatal analysis errors
 }
 ```
 
@@ -185,14 +185,17 @@ argument. In practice convergence takes 1–3 iterations.
 Because the seed is optimistic, a loop that stops early reports signals that
 are too *low* — it under-approximates. That is the dangerous direction: a
 function that can raise `:error` but is inferred silent will pass a
-compile-time `(silence)` check and fail at runtime instead. The runtime
-enforcement in `attune`/`silence` is the backstop, not the guarantee.
+compile-time `(silent!)` check and raise at runtime instead. That raise leaves
+a silent function, so its boundary reports it as the terminal `:broken-proof`
+error ([signals/inference.md](signals/inference.md)). The boundary is the
+backstop, not the guarantee.
 
 ### Scope
 
 Convergence is per-file. Mutual recursion across a file boundary does not
 converge, because each import is a separate compilation — see
-[signals/inference.md](signals/inference.md) for why that is a design choice and what `squelch` does about it.
+[signals/inference.md](signals/inference.md) for the projection that carries a
+signal across a file boundary.
 
 
 ## Compilation phases (single-form)
@@ -203,8 +206,9 @@ Every compilation path follows the same phases:
 2. **Expand**: `expander.expand(syntax, symbols, macro_vm)` → expanded `Syntax`
 3. **Analyze**: `Analyzer::new_with_primitives(...)` →
    `analyzer.analyze(&expanded)` → `AnalysisResult { hir, .. }`
-4. **Regularize**: `crate::hir::regularize(&mut hir, ...)` marks tail calls,
-   functionalizes, lifts to ANF and infers types, in place
+4. **Regularize**: `crate::hir::regularize(&mut hir, ...)` prunes dead
+   `(type-of x)` arms, marks tail calls, functionalizes, lifts to ANF and
+   infers types, in place
 5. **Regions**: `analyze_regions_with(&hir, ...)` → `RegionInfo`
 6. **Lower**: `Lowerer::new(&arena).with_heap(heap)...lower(&hir)` →
    `FrozenModule`, built in a working region on the compile's heap that
@@ -250,7 +254,8 @@ own VM.
 Single-form functions
 (`compile`, `eval`, `analyze`) don't benefit from cross-form signal inference —
 a file compiled via `compile` instead of `compile_file` will treat all
-cross-form calls as `Polymorphic`. The REPL compiles each form individually
+cross-form calls as unknown: such a call may emit any signal a user program
+can raise. The REPL compiles each form individually
 via `compile_file_repl` and registers def bindings in the compilation cache
 (`register_repl_binding`) so they are visible to subsequent compilations.
 However, cross-form signal inference within a single REPL input is limited

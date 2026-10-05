@@ -1,6 +1,6 @@
 # The language specification
 
-<!-- audited: 2026-09-26 -->
+<!-- audited: 2026-10-05 -->
 
 What the specification of Elle holds, what it leaves to an implementation, and
 how a test says which of the two it checks.
@@ -61,7 +61,7 @@ disagreement is a defect in the build that disagrees
 
 | Category | Documented | Portable | Example |
 |---|---|---|---|
-| Language | in the specification | yes | `fiber/new`, `%add`, `(silence)` |
+| Language | in the specification | yes | `fiber/new`, `%add`, `(silent!)` |
 | Implementation extension | by the implementation | no | `jit?`, `fn/bytecode-size`, `compile/run-on`, `arena/count` |
 | Implementation test surface | no | no | a rig sidecar that turns the JIT off |
 
@@ -84,7 +84,7 @@ nothing in a user build accepts it.
 | Code | A validated IR with region semantics and binary compatibility rules | Each implementation's own |
 
 **A program observes the core through source only.** Acceptance depends on
-inference: an unproven `%`-intrinsic and a loud `(silence)` body are compile
+inference: an unproven `%`-intrinsic and a loud `(silent!)` body are compile
 errors. So the specification defines the inference over the core, and no
 language test reads an implementation's HIR.
 

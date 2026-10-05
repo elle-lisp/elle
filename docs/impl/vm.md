@@ -60,7 +60,7 @@ pops that placeholder. A fiber stopped on an error therefore parks with
 nothing in the raising call's result position, and a restart pushes the
 resume value there.
 
-Two instructions produce no value: a `silence` bound on a parameter
+Two instructions produce no value: a `bound` on a parameter
 (`CheckSignalBound`) and a `parameterize` of a value that is not a parameter
 (`PushParamFrame`). They raise without a placeholder, the fiber parks without
 taking a resume value, and a restart continues after the raise.
@@ -82,13 +82,13 @@ ledger ([park.md](region/park.md)).
 ## Fiber integration
 
 - **Emit** (`Instruction::Emit` with a signal bits operand — see
-  [impl/bytecode.md](bytecode.md) § "Signal-bits operands") — saves
+  [impl/bytecode.md](bytecode.md)) — saves
   the current frame as a `SuspendedFrame`, returns control to the parent
   fiber or scheduler
 - **Signal emission** — checks the fiber's signal mask to decide
   whether to propagate or catch
-- **Fuel** — decrements a counter at each backward jump and each call; when
-  zero, emits the `:fuel` signal
+- **Fuel** — decrements a counter at each backward jump and each call outside
+  a silent function; when zero, emits the `:fuel` signal
 
 ## Where a reported error's location comes from
 
@@ -198,7 +198,8 @@ deep recursion that started compiled continues interpreted
 
 `Fiber::call_depth` counts the non-tail closure calls in progress, on every
 tier. A call past `(vm/config :max-depth)` — 10,000,000 by default — halts
-with `:stack-overflow`. A halt passes every signal mask, so `protect` does not
+with `:stack-overflow`. A halt passes every signal mask and the boundary of a
+silent function, so `protect` does not
 catch it. The cap stops a runaway recursion before it takes the machine's
 memory: each paused caller costs a few hundred bytes
 ([config.md](../config.md)).

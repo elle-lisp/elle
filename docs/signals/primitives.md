@@ -1,6 +1,6 @@
 # Fiber Primitives
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-05 -->
 
 User-facing fiber operations and patterns.
 
@@ -165,7 +165,7 @@ restart of the parent answers that call.
 (assert (= (fiber/resume escaped 41) (list :got 42)))
 ```
 
-A raise with no result has nothing to answer. A `silence` bound on a
+A raise with no result has nothing to answer. A `bound` on a
 parameter and a `parameterize` of a value that is not a parameter each raise
 where no call result is waiting. A restart continues after the raise, and the
 recovery value goes nowhere. A `parameterize` that raised binds nothing, so
@@ -205,7 +205,7 @@ code made, with its frames, so the code around the call runs on with its own:
 ```lisp
 (defn bound-yield [] (parameterize ((depth 9)) (yield 1) :inner))
 (def squelched
-  (fiber/new (fn [] (list :got ((squelch bound-yield :yield)) (depth)))
+  (fiber/new (fn [] (list :got ((squelch :yield bound-yield)) (depth)))
              |:yield :error|))
 (assert (= (get (fiber/resume squelched) :error) :signal-violation))
 (assert (= (fiber/resume squelched 41) (list :got 41 0)))   # the 9 is gone
@@ -224,13 +224,13 @@ value becomes the fiber's result. Both hold whether or not the fiber suspended
 before the refusal:
 
 ```lisp
-(defn relay [] (yield 0) ((squelch bound-yield :yield)))
+(defn relay [] (yield 0) ((squelch :yield bound-yield)))
 (def relayed (fiber/new (fn [] (list :got (relay) (depth))) |:yield :error|))
 (assert (= (fiber/resume relayed) 0))
 (assert (= (get (fiber/resume relayed) :error) :signal-violation))
 (assert (= (fiber/resume relayed 41) (list :got 41 0)))   # 41 answers relay
 
-(def ended (fiber/new (fn [] ((squelch bound-yield :yield))) |:yield :error|))
+(def ended (fiber/new (fn [] ((squelch :yield bound-yield))) |:yield :error|))
 (assert (= (get (fiber/resume ended) :error) :signal-violation))
 (assert (= (fiber/resume ended 41) 41))                   # the body's result
 (assert (= (fiber/status ended) :dead))

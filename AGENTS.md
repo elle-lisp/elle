@@ -137,8 +137,10 @@ Elle's foundational runtime feature. Two directions:
 compile-time signal (`Silent`, `Yields`, `Polymorphic`) inferred by the
 analyzer. When a function calls `(emit :yield val)`, the signal propagates
 up through the call chain. The compiler uses this to decide calling
-convention (direct call vs suspending call). `silence` declares a ceiling;
-`squelch` wraps at runtime and narrows the signal at compile time.
+convention (direct call vs suspending call). `attune!` and `silent!`
+declare a ceiling, and `bound` bounds a parameter. `squelch` and `attune` wrap
+a closure at run time and narrow its signal at compile time. A signal that
+leaves a silent function is a broken proof, and raises a terminal error.
 
 **Capabilities flow down** — from parent fiber to child. When creating a
 fiber with `(fiber/new body mask :deny |:io :ffi|)`, the parent withholds
@@ -149,7 +151,7 @@ mediate.
 
 | Concept | Direction | Time | Mechanism |
 |---------|-----------|------|-----------|
-| Signals | up | compile + run | `emit`, `silence`, `squelch` |
+| Signals | up | compile + run | `emit`, `silent!`, `bound`, `squelch` |
 | Capabilities | down | run | `:deny` on `fiber/new`, `CAP_MASK` |
 
 Full documentation: [`docs/signals/`](docs/signals/).
@@ -239,7 +241,8 @@ These must remain true. Violating them breaks the system:
 
 3. **Signals up, capabilities down.** Signals (`Silent`, `Yields`,
    `Polymorphic`) are inferred at compile time, propagating from callees to
-   callers. `silence` constrains inference; it doesn't replace it.
+   callers. A ceiling such as `silent!` checks inference; it does not
+   replace it.
    Capabilities are enforced at runtime: a parent fiber uses `:deny` to
    withhold capabilities from a child; denied operations become signals the
    parent can catch. See [`docs/signals/`](docs/signals/) for signal

@@ -5,7 +5,7 @@
 How a signal is encoded, carried, caught and reported: the bits, the payload, propagation, I/O requests and the registry.
 
 [inference.md](inference.md) owns what the compiler infers about signals and
-the forms that bound it (`silence`, `muffle`, `squelch`).
+the forms that bound it (`attune!`, `silent!`, `bound`, `squelch`, `attune`).
 [fibers.md](fibers.md) owns the fiber that carries a signal.
 
 ## Signal Types
@@ -120,7 +120,9 @@ independently for non-unwinding recovery ([recovery.md](recovery.md)).
 
 The root of the program is where propagation stops. `:error` and `:halt`
 have answers there: the error prints with the location of the form that
-raised it, and the halt ends the program with its value. Every other
+raised it, and the halt ends the program with its value. A broken proof is
+an error that carries `:terminal` as well, so no mask catches it on the way
+and it prints as an error does ([inference.md](inference.md)). Every other
 signal reaches the root with no handler left to run, so the program stops
 and reports which signal went unhandled:
 

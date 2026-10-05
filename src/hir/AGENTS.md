@@ -163,17 +163,16 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     payload, where `ClosureTemplate::doc()` reads it for `(doc name)` and LSP
     hover.
 
-16. **Signal bounds come from `silence`, anywhere in a function body.** Each
-    form applies to the innermost enclosing function. `HirKind::Lambda`
-    carries `inferred_signals`, the signals a call to the lambda may emit,
-    and `param_bounds: Vec<ParamBound>` from `(silence param)`. A call to a
-    bounded parameter adds the bound's bits, not a polymorphic dependency.
-    The function checks the argument against the bound on entry
-    (`CheckSignalBound`), and that check may raise, so a lambda with a bound
-    carries `:error`. `(muffle spec)` lands on the lambda as `muffle:
-    SignalBits`, the mask every closure made from it enforces at its
-    boundary; `inferred_signals` is already the signal after the muffle.
-    `squelch` is a runtime primitive.
+16. **Signal declarations apply to the innermost enclosing function.**
+    `(attune! spec)` and `(silent!)` are ceilings, checked against
+    `inferred_signals`, the signals a call to the lambda may emit; they never
+    replace it. `(bound param spec)` lands on the lambda in `param_bounds:
+    Vec<ParamBound>`. A call to a bounded parameter adds the bound's bits, not
+    a polymorphic dependency. The function checks the argument against the
+    bound on entry (`CheckSignalBound`), and that check may raise, so a lambda
+    with a bound carries `:error`. A call whose argument has a known signal is
+    checked against the callee's bounds at compile time. `squelch` and
+    `attune` are runtime primitives.
     [docs/signals/inference.md](../../docs/signals/inference.md) owns the
     forms.
 
@@ -228,7 +227,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     `regularize`, before `functionalize`, so the region solver never sees the
     deleted call. A silent callee is not enough: silence means no signal
     bits, and `%push-array-mut` is silent and mutates. See
-    [docs/impl/hir.md](../../docs/impl/hir.md) § "Dead binding elimination".
+    [docs/impl/hir.md](../../docs/impl/hir.md).
 
 25. **A body that leaves its unit travels as an `HirFragment`.** A `Binding`
     is an index into one arena, so an HIR body alone is meaningless
@@ -236,5 +235,4 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     own table — a `BindingInner` per binding the body introduces, a
     `SymbolId` per free global — and `graft` re-hosts it in any arena.
     Nothing may hoist selected `BindingInner` fields beside a body instead.
-    See [docs/impl/hir.md](../../docs/impl/hir.md) § "A fragment is closed
-    over its bindings".
+    See [docs/impl/hir.md](../../docs/impl/hir.md).

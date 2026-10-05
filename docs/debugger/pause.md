@@ -1,6 +1,6 @@
 # Debugger: how a fiber comes to pause
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-05 -->
 
 Breakpoints compiled into a program or armed in a running one, and stepping by
 fuel.
@@ -44,7 +44,8 @@ exists only in macro-generated code has no entries; the returned ip
 array is empty and the driver reports it.
 
 **The check.** When a fiber's debug flag is set, the dispatch loop
-consults the table before executing each instruction, beside the
+consults the table before executing each instruction outside a silent
+function, beside the
 loop's existing unconditional per-instruction work — the fiber-signal
 check and the allocation-error take ([src/vm/dispatch/interp.rs](../../src/vm/dispatch/interp.rs)).
 The locals-integrity assertion nearby exists only in debug builds and
@@ -101,9 +102,11 @@ synthesizes the outcome.
 
 Today fuel is charged at seven interpreter sites: backward `Jump`,
 the four call opcodes, and the two array-call opcodes
-([src/vm/dispatch/interp/opcodes.rs](../../src/vm/dispatch/interp/opcodes.rs)). Conditional jumps never
+([src/vm/dispatch/interp/opcodes.rs](../../src/vm/dispatch/interp/opcodes.rs)). None charges while a silent
+function runs, conditional jumps never
 charge, and no native tier charges at all. When a fiber's debug flag
-is set, the loop charges fuel on **every** instruction, at the same
+is set, the loop charges fuel on **every** instruction outside a silent
+function, at the same
 loop-top site as the breakpoint check. Instruction-granular stepping
 is then `(fiber/set-fuel f n)`, an existing primitive, followed by
 `(fiber/resume f nil)`, which runs exactly `n` instructions and pauses

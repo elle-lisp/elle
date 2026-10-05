@@ -42,38 +42,40 @@ most callbacks, at every `map`, every `ev/spawn` and every handler. Elle
 charges the annotation to the minority case instead: the code that must not
 suspend.
 
-`(silence f)` bounds the parameter `f`. The function then takes no signal
-from `f`, and a closure that may signal fails a check at entry. The check may
+`(bound f ||)` bounds the parameter `f` to silence. The function then takes
+no signal from `f`, and a closure that may signal fails a check at entry, or a
+compile error where the compiler knows the argument's signal. The check may
 raise, so the function carries `:error` and nothing else:
 
 ```lisp
 (defn apply-silent [f x]
-  (silence f)
+  (bound f ||)
   (f x))
 
 (assert (= 42 (apply-silent (fn [x] x) 42)) "a silent closure passes")
 
-(def [ok? err] (protect (apply-silent (fn [x] (yield x)) 42)))
+(def opaque @[(fn [x] (yield x))])
+(def [ok? err] (protect (apply-silent (get opaque 0) 42)))
 (assert (not ok?) "a yielding closure fails the entry check")
 (assert (= :signal-violation (get err :error)))
 ```
 
-## Silence means no signal at all
+## Silent means no signal at all
 
-`(silence)` with no argument declares that the function emits nothing,
-`:error` included. It fits a body that cannot fail: branching, locals, and
-the `%` intrinsics on values already known to be numbers. The compiler
-rejects a `(silence)` body that may signal.
+`(silent!)` declares that the function emits nothing, `:error` included. It
+fits a body that cannot fail: branching, locals, and the `%` intrinsics on
+values already known to be numbers. The compiler rejects a `(silent!)` body
+that may signal.
 
 ```lisp
 (defn select [flag a b]
-  (silence)
+  (silent!)
   (if flag a b))
 
 (assert (= 1 (select true 1 2)))
 
-(def [ok? err] (protect (eval '(fn [x y] (silence) (+ x y)))))
-(assert (not ok?) "generic + may raise :error, so (silence) rejects it")
+(def [ok? err] (protect (eval '(fn [x y] (silent!) (+ x y)))))
+(assert (not ok?) "generic + may raise :error, so (silent!) rejects it")
 (assert (string/contains? (get err :message) "body may emit {:error}"))
 ```
 
@@ -104,13 +106,13 @@ query. See [Agent Reasoning in Elle](analysis/agent-reasoning.md).
 ## Reasoning about a call
 
 - A function that calls a parameter is polymorphic, unless it bounds that
-  parameter with `(silence f)`, and it may raise `:error`.
-- A function that does I/O, or uses fibers through `ev/spawn` or `ev/join`,
-  may yield.
+  parameter with `(bound f spec)`, and it may raise `:error`.
+- A function that does I/O, or waits on a fiber through `ev/join`, may
+  suspend.
 - A function's signal is at least the union of its callees' signals.
 - Generic arithmetic, `get` and `assert` may raise `:error`.
 
-Declare `(silence)` where the contract matters to callers, or where a hot path
+Declare `(silent!)` where the contract matters to callers, or where a hot path
 must not suspend. It is a contract, not a default.
 
 ## See also

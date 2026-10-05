@@ -12,7 +12,9 @@ Signal system for tracking which signals a function may emit. Includes the globa
 2. Maintain the global signal registry mapping signal keywords to bit positions
 3. Track which signals a function might emit (error, yield, debug, ffi, io, halt, user-defined)
 4. Track which parameter indices propagate their callee's signals
-5. Support signal bounds on functions and parameters via `silence` declarations
+5. Support signal bounds on functions and parameters via the `attune!`,
+   `silent!` and `bound` declarations, and say which signals break a silent
+   function's proof
 
 ## Interface
 
@@ -28,9 +30,9 @@ Signal system for tracking which signals a function may emit. Includes the globa
 | `Signal::halts()` | May halt (SIG_HALT) |
 | `Signal::polymorphic(n)` | Signal depends on parameter n |
 | `Signal::polymorphic_errors(n)` | Polymorphic + may error |
-| `squelched_bits(bits, mask)` | The bits a boundary carrying `mask` converts into a violation when `bits` leave it; every enforcement site on every tier asks it. A signal that carries `:error`, `:halt` or the pause bit `:fuel` passes whole |
-| `bound::violation(value, allowed)` | The message a `(silence p)` bound raises for `value`, judged by a closure's effective signal or a native's declared one. A closure that passes on its arguments' signals fails, since its bits are a lower bound |
-
+| `squelched_bits(bits, mask)` | The bits a `squelch` or `attune` boundary carrying `mask` converts into a violation when `bits` leave it; every such site on every tier asks it. A signal that carries `:error`, `:halt` or the pause bit `:fuel` passes whole |
+| `breaks_proof(bits)` | Whether `bits` leaving a silent function break its proof: any signal but a halt or one that carries `:terminal`. Every tier asks it at a silent callee's boundary, and a true answer raises the terminal `:broken-proof` error |
+| `bound::violation(value, allowed)` | The message a `(bound p spec)` bound raises for `value`, judged by a closure's effective signal or a native's declared one. A closure that passes on its arguments' signals fails, since its bits are a lower bound |
 
 ## Predicates
 
@@ -102,17 +104,17 @@ Every lambda has a signal-related field:
 1. **`inferred_signals: Signal`** (always present, never Optional) — The minimum guaranteed set of signals the lambda may produce, accumulated from:
     - Direct signal emissions in the body
     - Signals of internal calls to statically-known functions
-    - Signals contributed by silence-bounded parameters (their bound's bits are included)
+    - Signals contributed by bounded parameters (their bound's bits are included)
     - An unbounded parameter that is called contributes its position to `propagates`, not a bit
     - `:error` from every construct that checks something at run time ([docs/signals/inference.md](../../docs/signals/inference.md), "What raises")
 
-A ceiling is a separate concept. `(silence)` declares the empty ceiling and `(attune! spec)` declares `spec`; the compiler checks `inferred_signals` against it, and an excess is a compile error. The ceiling never replaces `inferred_signals`, so a caller sees what the body does. Signal keywords are not accepted by `silence`.
+A ceiling is a separate concept. `(attune! spec)` declares `spec`, and `(silent!)` declares the empty ceiling `||`; the compiler checks `inferred_signals` against it, and an excess is a compile error. The ceiling never replaces `inferred_signals`, so a caller sees what the body does.
 
 ### Parameter Bounds
 
 Parameter bounds are stored as `param_bounds: Vec<ParamBound>` on the Lambda node, where `ParamBound = { binding, signal }`.
 
-- **Silence bounds:** When a parameter has a `silence` bound, it is no longer polymorphic — its signal contribution to the lambda is the bound's bits, not a polymorphic reference. The entry check may raise, so the lambda carries `:error`.
+- **Bounds:** When a parameter has a `bound`, it is no longer polymorphic — its signal contribution to the lambda is the bound's bits, not a polymorphic reference. The entry check may raise, so the lambda carries `:error`. A call whose argument has a known signal is checked against the bound at compile time.
 
 ## Interprocedural Signal Tracking
 
@@ -121,13 +123,13 @@ The analyzer performs interprocedural signal tracking:
 1. **signal_env**: Maps `Binding` → `Signal` for locally-defined functions
 2. **primitive_signals**: Maps `SymbolId` → `Signal` for primitive functions
 3. **current_param_bounds**: Maps `Binding` → `Signal` for parameters with declared bounds (during lambda analysis)
-4. **current_declared_ceiling**: `Option<Signal>`, the function-level ceiling `(silence)` or `(attune! …)` declared (during lambda analysis), checked and never substituted
+4. **current_declared_ceiling**: `Option<Signal>`, the function-level ceiling `(silent!)` or `(attune! …)` declared (during lambda analysis), checked and never substituted
 
 When analyzing a call:
 - Direct fn calls: use the fn body's signal
 - Variable calls: look up in `signal_env` (local) or `primitive_signals` (global)
 - Polymorphic signals: resolve by examining the argument's signal via `propagated_params()` iterator over the `propagates` bitmask
-- Silence-bounded parameters: their signal contribution is the bound's bits, not polymorphic
+- Bounded parameters: their signal contribution is the bound's bits, not polymorphic
 
 ### Limitations
 
@@ -158,8 +160,9 @@ Used across the pipeline and the runtime:
 - `value/closure.rs` — a code object's payload stores its `Signal`
 - `pipeline/` — builds primitive signals map, passes to Analyzer
 - `jit/` — compiles a function whatever its signal; its call helpers ask `squelched_bits` at every boundary
-- `vm/call/` — a closure's boundary mask at every call: its squelch, its muffle, and every signal when it is silent
+- `vm/call/` — a closure's squelch mask at every call, and `breaks_proof` when the callee is silent
 - `primitives/stream.rs`, `primitives/net.rs` — the scheduler round trip, `Signal::io_yields_errors()`
+
 ## Invariants
 
 1. **Signal::silent() is the lattice bottom, and the seed of a fixpoint.** A
