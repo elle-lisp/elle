@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# audited: 2026-09-29
+# audited: 2026-10-05
 # Names the files whose stale documentation costs the most, and gates a commit
 # on the files it stages carrying today's stamp.
 # docs/impl/audit.md
@@ -15,6 +15,8 @@ usage:
   scripts/audit --all            every file, costliest first
   scripts/audit --stale DAYS     every file stamped longer ago than DAYS
   scripts/audit --policy         every file stamped before the policy itself
+  scripts/audit --counts         how many files carry no stamp, and how many
+                                 carry one older than the policy's
   scripts/audit --staged [PATH…] fail when a file carries no stamp for today
   scripts/audit --root DIR       treat DIR as the repository root
   scripts/audit --help           this text
@@ -40,7 +42,7 @@ while [ $# -gt 0 ]; do
         --root) root=$(cd "$2" && pwd); shift 2 ;;
         --help | -h) usage; exit 0 ;;
         --next | --stale) mode="$1"; arg="${2:-}"; shift 2 ;;
-        --all | --policy | --staged) mode="$1"; shift ;;
+        --all | --policy | --counts | --staged) mode="$1"; shift ;;
         --*) usage >&2; exit 2 ;;
         *) paths+=("$1"); shift ;;
     esac
@@ -131,9 +133,18 @@ days_since() {
         }'
 }
 
-# Every file that carries a stamp, relative to the root.
+# Every file that may carry a stamp, relative to the root: the files git tracks
+# when the root is the top of a work tree, and every file under it otherwise.
+#
+# Only the top counts. A fixture tree below some other repository's top is
+# untracked there, so asking git would answer an empty list.
 candidates() {
     cd "$root"
+    local cdup
+    if cdup=$(git rev-parse --show-cdup 2>/dev/null) && [ -z "$cdup" ]; then
+        git -c core.quotePath=false ls-files -- '*.rs' '*.lisp' '*.md' 'scripts/*'
+        return
+    fi
     find . -type f \
         \( -name '*.rs' -o -name '*.lisp' -o -name '*.md' \) \
         -not -path './.git/*' -not -path './target/*' \
@@ -166,6 +177,15 @@ ranked() {
 
 show() { awk -F'\t' '{ printf "%-12s %s\n", $2, $3 }'; }
 
+# The policy carries a stamp like any other document. A file stamped before it
+# has never met the current rules, however recently somebody read it.
+policy_floor() {
+    local floor
+    floor=$(stamp_of "$root/DOCUMENTATION.md")
+    [ -n "$floor" ] || { echo "DOCUMENTATION.md carries no stamp" >&2; exit 1; }
+    printf '%s\n' "$floor"
+}
+
 case "$mode" in
     --staged)
         today=$(date +%F)
@@ -191,12 +211,29 @@ case "$mode" in
         fi
         ;;
     --policy)
-        # The policy carries a stamp like any other document. A file stamped
-        # before it has never met the current rules, however recently somebody
-        # read it, so this is the count a policy change has not yet reached.
-        floor=$(stamp_of "$root/DOCUMENTATION.md")
-        [ -n "$floor" ] || { echo "DOCUMENTATION.md carries no stamp" >&2; exit 1; }
+        # This is the set a policy change has not yet reached.
+        floor=$(policy_floor)
         ranked | awk -F'\t' -v floor="$floor" '$2 == "never" || $2 < floor' | show
+        ;;
+    --counts)
+        # The two counts the ratchet pins. No file is in both, and neither
+        # needs the ranking, whose cost per file is most of a walk.
+        floor=$(policy_floor)
+        cd "$root"
+        unstamped=0
+        before=0
+        while read -r f; do
+            [ -n "$f" ] || continue
+            eligible "$f" || continue
+            [ -f "$f" ] || continue
+            stamp=$(stamp_of "$f")
+            if [ -z "$stamp" ]; then
+                unstamped=$((unstamped + 1))
+            elif [[ "$stamp" < "$floor" ]]; then
+                before=$((before + 1))
+            fi
+        done < <(candidates | sort -u)
+        printf 'unstamped %d\nbefore-policy %d\n' "$unstamped" "$before"
         ;;
     --all) ranked | show ;;
     # awk, not head: a reader that exits early kills the writer with SIGPIPE,
