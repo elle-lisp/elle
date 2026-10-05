@@ -1,6 +1,6 @@
 # http2
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-05 -->
 
 The submodules behind [http2.lisp](../http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
 
@@ -109,7 +109,10 @@ Invariants 4 and 9, run against the session module:
 
 ## Running tests
 
+Each submodule's own tests run from
+[h2-modules.lisp](../../tests/lang/h2-modules.lisp), and
+[the module's document](../http2.md) names the rest.
+
 ```bash
-elle tests/http2/modules.lisp
-elle tests/http2/all.lisp
+elle tests/lang/h2-modules.lisp
 ```

@@ -22,7 +22,6 @@ tests/
 ├── ledger/             # The ratchet's bounds: one data file per producer (docs/ratchet.md)
 ├── ratchet/            # Producers that drive a tool outside Elle and read its counts
 ├── golden/             # The snapshots impl/escape-golden.lisp compares against
-├── http2/              # HTTP/2 files no suite runs; `elle tests/http2/all.lisp` runs them
 ├── modules/            # Modules the integration tests import
 ├── property/           # Property-based tests (proptest)
 ├── integration/        # Full-pipeline and repository tests
