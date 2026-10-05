@@ -1,6 +1,6 @@
 // audited: 2026-10-05
 //! A signal that leaves a silent function is a broken proof: the terminal
-//! `:broken-proof` error, whatever the signal and wherever the call sits.
+//! `:broken-proof` error, whatever the signal and the call.
 //!
 //! docs/signals/inference.md
 //!

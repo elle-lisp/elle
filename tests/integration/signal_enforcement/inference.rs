@@ -1,8 +1,9 @@
-use super::*;
+// audited: 2026-10-05
+// Signal inference through parameters, and the letrec fixpoint's convergence.
+// docs/signals/inference.md
+// docs/pipeline.md
 
-// ============================================================================
-// 11. AUTOMATIC POLYMORPHIC EFFECT INFERENCE TESTS
-// ============================================================================
+use super::*;
 
 #[test]
 fn test_polymorphic_inference_single_param() {
@@ -20,11 +21,12 @@ fn test_polymorphic_inference_single_param() {
             inferred_signals, ..
         } = &value.kind
         {
-            // Purely polymorphic on param 0 — no inherent error from parameter calls
+            // Polymorphic on param 0, and the call to `f` may raise: the
+            // compiler cannot check the count of a call to a parameter.
             assert_eq!(
                 *inferred_signals,
-                Signal::polymorphic(0),
-                "apply-fn should have Polymorphic(0) signal"
+                Signal::polymorphic_errors(0),
+                "apply-fn should have Polymorphic(0) signal, plus errors"
             );
         } else {
             panic!("Expected Lambda");
@@ -63,8 +65,8 @@ fn test_polymorphic_inference_resolves_yields() {
     .unwrap();
     assert_eq!(
         result.hir.signal,
-        Signal::yields(),
-        "Calling polymorphic function with yielding arg should be Yields"
+        Signal::yields_errors(),
+        "Calling polymorphic function with yielding arg should be Yields+Errors"
     );
 }
 
@@ -84,10 +86,8 @@ fn test_polymorphic_inference_my_map() {
 // with the same body converges to. The seed is optimistic (`Signal::silent()`),
 // so a loop that stops before the cycle settles under-approximates — and an
 // under-approximated signal is the direction that costs a guarantee: a function
-// that can raise `:error` but reads as silent satisfies a compile-time
-// `(silence)` check and aborts at runtime instead. `docs/pipeline.md`
-// § The fixpoint loop states the rule; `silence_survives_a_mutual_cycle` below
-// pins the consequence end to end.
+// that can raise `:error` but reads as silent satisfies a `(silent!)` ceiling
+// and breaks its proof at run time instead. docs/pipeline.md states the rule.
 #[test]
 fn test_mutual_recursion_signal_converges() {
     let (mut symbols, mut vm) = setup();
@@ -171,7 +171,7 @@ fn test_three_way_mutual_recursion_converges() {
 
 /// Convergence must not invent signals either. A mutual cycle whose members all
 /// stay silent has to remain silent — an over-approximation would reject
-/// correct `(silence)` code, which is the opposite failure and just as wrong.
+/// correct `(silent!)` code, which is the opposite failure and just as wrong.
 #[test]
 fn test_silent_mutual_recursion_stays_silent() {
     let (mut symbols, mut vm) = setup();
@@ -206,7 +206,8 @@ fn test_polymorphic_inference_non_recursive_map() {
 #[test]
 fn test_polymorphic_inference_direct_yield_prevents() {
     // A function that both calls a parameter AND yields directly:
-    // inherent SIG_YIELD from (yield 99), polymorphic on param 0 from (f x).
+    // inherent SIG_YIELD from (yield 99), polymorphic on param 0 and SIG_ERROR
+    // from (f x).
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(def bad (fn (f x) (begin (yield 99) (f x))))",
@@ -224,10 +225,10 @@ fn test_polymorphic_inference_direct_yield_prevents() {
             assert_eq!(
                 *inferred_signals,
                 Signal {
-                    bits: SIG_YIELD,
+                    bits: SIG_YIELD.union(SIG_ERROR),
                     propagates: 1,
                 },
-                "Function with direct yield + param call should be Yields + Polymorphic(0)"
+                "Function with direct yield + param call should be Yields + Errors + Polymorphic(0)"
             );
         } else {
             panic!("Expected Lambda");
@@ -253,11 +254,11 @@ fn test_polymorphic_inference_two_params() {
             inferred_signals, ..
         } = &value.kind
         {
-            // Purely polymorphic on params 0 and 1 — no inherent error
+            // Polymorphic on params 0 and 1, and each call to one may raise
             assert_eq!(
                 *inferred_signals,
                 Signal {
-                    bits: SIG_OK,
+                    bits: SIG_ERROR,
                     propagates: 0b11,
                 },
                 "Function calling two params should propagate params 0 and 1"
@@ -317,8 +318,8 @@ fn test_polymorphic_inference_second_param() {
         {
             assert_eq!(
                 *inferred_signals,
-                Signal::polymorphic(1),
-                "apply-second should have Polymorphic(1) signal"
+                Signal::polymorphic_errors(1),
+                "apply-second should have Polymorphic(1) signal, plus errors"
             );
         } else {
             panic!("Expected Lambda");
@@ -331,7 +332,8 @@ fn test_polymorphic_inference_second_param() {
 #[test]
 fn test_polymorphic_inference_with_known_yielding_call() {
     // Function that calls a parameter AND a known yielding function.
-    // Inherent SIG_YIELD from calling gen, polymorphic on param 0 from (f x).
+    // Inherent SIG_YIELD from calling gen, polymorphic on param 0 and
+    // SIG_ERROR from (f x).
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (def gen (fn () (yield 1))) (def bad (fn (f x) (begin (gen) (f x)))))",
@@ -352,10 +354,10 @@ fn test_polymorphic_inference_with_known_yielding_call() {
                 assert_eq!(
                     *inferred_signals,
                     Signal {
-                        bits: SIG_YIELD,
+                        bits: SIG_YIELD.union(SIG_ERROR),
                         propagates: 1,
                     },
-                    "Function with known yielding call + param call should be Yields + Polymorphic(0)"
+                    "Function with known yielding call + param call should be Yields + Errors + Polymorphic(0)"
                 );
             } else {
                 panic!("Expected Lambda in Define");

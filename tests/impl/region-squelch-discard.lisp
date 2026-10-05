@@ -1,24 +1,22 @@
-(elle/epoch 12)
-# ── The squelch/abort discard chokepoint, exercised in a loop ──
+(elle/epoch 15)
+# audited: 2026-10-05
+# ── The boundary discard chokepoint, exercised in a loop ──
 #
-# A squelch/attune signal-violation routes through `enforce_squelch` ->
-# `VM::discard_suspended_frames` (src/vm/core.rs): the frames parked between
-# the signal site and the squelch boundary are abandoned, and the chokepoint
-# subtree-drops each frame's parked activation owner node — and releases
-# NOTHING else (docs/impl/region/diagnostics.md § "The squelch/abort
-# discard"). The frames' `activation_region_map` regions may be shared with
-# an outer, non-discarded frame or with the activation that catches the
-# violation, so a discard that over-releases them frees live state: the
-# catch handler's next read, or a later scheduler pump, touches a freed
-# page. Looping the abort makes an over-release deterministic — the shared
-# regions' counts drain within a few iterations — and `--trace=guardfree`
-# (full stdlib) is the oracle that turns the stale read into a fault.
+# A squelch/attune signal-violation reaches `VM::discard_suspended_frames`
+# (src/vm/core/discard.rs) through `VM::boundary_violation`: the frames parked
+# between the signal site and the boundary are abandoned, and the chokepoint
+# runs what each frame still owed and releases nothing else
+# (docs/impl/region/diagnostics.md). The frames' `activation_region_map`
+# regions may be shared with an outer, non-discarded frame or with the
+# activation that catches the violation, so a discard that over-releases them
+# frees live state: the catch handler's next read, or a later scheduler pump,
+# touches a freed page. Looping the abort makes an over-release deterministic,
+# because the shared regions' counts drain within a few iterations, and a
+# debug build's generation check panics on a stale read of a freed region.
 #
-# GREEN by design: this file pins that the discard frees nothing a live
-# frame still counts on. (That the discard DOES free the parked owner node
-# is pinned Rust-side by `runtime::tests::ownership::
-# discard_frees_parked_activation_owner_node` — no production lowering
-# emits `AdoptIntoActivation`, so no Elle program can build a node yet.)
+# This file pins that the discard frees nothing a live frame still counts on.
+# That the discard does free what the parked frames owed is pinned Rust-side,
+# in `runtime::tests::ownership::fnode::discard`.
 
 # ── S1: an IO-blocked attune, looped ──
 # `println`'s SIG_IO violates the |:error| allow mask, so every call aborts
@@ -44,7 +42,7 @@
 # io park — the other frame shape the chokepoint sees).
 (def yielder (fn [] (yield 7)))
 (def wrapper (fn [] (yielder)))
-(def squelched (squelch wrapper :yield))
+(def squelched (squelch :yield wrapper))
 (var j 0)
 (while (< j 20)
   (let [[ok? err] (protect (squelched))]

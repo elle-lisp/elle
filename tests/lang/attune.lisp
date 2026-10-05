@@ -79,13 +79,10 @@
         "a ceiling with room to spare leaves the body silent")
 (println "attune!-checks-only: ok")
 
-# ── A bad spec names attune! ──────────────────────────────────────
-# Counter-factual: the message began with emit:, a form the program never wrote.
-(def [bad-ok? bad-err]
+# ── A bad spec does not compile ───────────────────────────────────
+(def [bad-ok? _]
   (protect (compile/whole-module "(defn f [] (attune! :nosuch) 1)" "<attune>")))
-(assert (not bad-ok?))
-(assert (string/contains? (get bad-err :message)
-                          "attune!: unknown signal keyword :nosuch"))
+(assert (not bad-ok?) "attune! names no signal")
 (println "attune!-bad-spec: ok")
 
 # ── squelch takes its spec first, as attune does ──────────────────
@@ -93,8 +90,8 @@
 # boundaries put the one argument they share in different places.
 (def [order-ok? order-err] (protect (squelch (fn [] 1) :yield)))
 (assert (not order-ok?) "a closure in the spec position is refused")
-(assert (= (get order-err :message)
-           "squelch: second argument must be a closure, got keyword"))
+(assert (= (get order-err :error) :type-error)
+        "as an argument of the wrong type")
 (def [spec-ok? spec-err] (protect ((squelch :yield (fn [] (yield 1))))))
 (assert (= (get spec-err :error) :signal-violation)
         "the spec-first squelch blocks the yield")

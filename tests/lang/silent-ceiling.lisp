@@ -22,25 +22,36 @@
 (assert (= (always 42) 42) "always returns its argument")
 
 # ── Compile-time rejection: arithmetic emits {:error} ────────────────
+#
+# The same body without the ceiling compiles, so the refusal is the
+# ceiling's.
 
-(def [ok? err]
-  (protect (eval '(defn bad-add [x y]
-                   (silent!)
-                   (+ x y)))))
-(assert (not ok?) "silent! rejects arithmetic at compile time")
-(assert (string/contains? (get err :message)
-                          "function restricted to {} but body may emit {:error}")
-        "the message is the ceiling's")
+(defn compiles? [src]
+  "Whether src compiles. Nothing in it runs, so a refusal is the compiler's."
+  (first (protect (compile/whole-module src "<ceiling>"))))
 
-# The same ceiling spelled as attune! gives the same message: one concept,
-# one check. Counter-factual: silent! kept a check and a message of its own.
-(def [ok-a? err-a]
+(assert (compiles? "(defn add [x y] (+ x y))") "the body alone compiles")
+(assert (not (compiles? "(defn bad-add [x y] (silent!) (+ x y))"))
+        "silent! rejects arithmetic at compile time")
+
+# The same ceiling spelled as attune! accepts and refuses the same bodies:
+# one concept, one check. Counter-factual: silent! kept a check of its own.
+(assert (not (compiles? "(defn bad-add [x y] (attune! ||) (+ x y))"))
+        "(attune! ||) rejects arithmetic at compile time")
+(assert (compiles? "(defn always [x] (attune! ||) x)")
+        "(attune! ||) accepts what silent! accepts")
+
+# A ceiling built as data reads the same: a quoted set literal reaches eval
+# as a list, and the analyzer takes it as the set it spells.
+(def [quoted-ok? _]
   (protect (eval '(defn bad-add [x y]
                    (attune! ||)
                    (+ x y)))))
-(assert (not ok-a?) "(attune! ||) rejects arithmetic at compile time")
-(assert (= (get err :message) (get err-a :message))
-        "silent! and (attune! ||) are one ceiling")
+(assert (not quoted-ok?) "a quoted (attune! ||) rejects arithmetic")
+(assert (first (protect (eval '(defn always [x]
+                                (attune! ||)
+                                x))))
+        "a quoted (attune! ||) accepts a silent body")
 
 # ── Compile-time rejection: yield ────────────────────────────────────
 
@@ -60,7 +71,7 @@
 
 # ── Compile-time rejection: a parameter's signal passed on ───────────
 
-(def [ok6? err6]
+(def [ok6? _]
   (protect (eval '(defn bad-call [f]
                    (silent!)
                    (f)))))
@@ -71,13 +82,10 @@
 # Counter-factual: the last ceiling replaced the first, so a body that
 # raises compiled under (silent!) followed by (attune! :error).
 
-(def [ok7? err7]
-  (protect (eval '(defn two-ceilings [x y]
-                   (silent!)
-                   (attune! :error)
-                   (+ x y)))))
-(assert (not ok7?) "the earlier, tighter ceiling still applies")
-(assert (string/contains? (get err7 :message) "body may emit {:error}"))
+(assert (compiles? "(defn one-ceiling [x y] (attune! :error) (+ x y))")
+        "the looser ceiling alone admits the body")
+(assert (not (compiles? "(defn two-ceilings [x y] (silent!) (attune! :error) (+ x y))"))
+        "the earlier, tighter ceiling still applies")
 
 # ── Compile-time rejection: a signal reached through a mutual cycle ──
 #
@@ -86,11 +94,9 @@
 # binding in a letrec optimistically, so the cycle is only correct once the
 # fixpoint has run: a loop that stops early reports `foo` as silent, this
 # `(silent!)` compiles, and the program raises a broken proof at runtime
-# instead. The self-recursive shape above already compiles to a rejection,
-# so a pass here with a failure there would mean the cycle, not the
-# enforcement, is broken.
+# instead.
 
-(def [ok4? err4]
+(def [ok4? _]
   (protect (eval '(defn bad-mutual []
                    (silent!)
                    (letrec [foo (fn (n) (if (%eq n 0) 0 (bar (%sub n 1))))
@@ -98,8 +104,6 @@
                                   (if (%eq n 0) (first (list)) (foo (%sub n 1))))]
                      (foo 3))))))
 (assert (not ok4?) "silent! rejects a signal reached through a mutual cycle")
-(assert (string/contains? (get err4 :message) "may emit")
-        "mutual-cycle rejection mentions excess signal")
 
 # The same cycle with no raiser in it must still compile — convergence must not
 # inflate a silent cycle into a signalling one.

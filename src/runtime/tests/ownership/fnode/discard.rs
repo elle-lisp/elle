@@ -1,17 +1,17 @@
 // audited: 2026-10-06
 //! What a discard frees: the parked activations' owner nodes, and the releases their abandoned frames still owed.
 //!
-//! docs/impl/region/mechanism.md
+//! docs/impl/region/owner.md
+//! docs/impl/region/unwind.md
 
 use super::*;
 
-/// A DISCARD, by a squelch boundary or a refusing host, frees the parked owner
-/// node (docs/impl/region/owner.md § "A discard runs what the abandoned frames
-/// owed"). The hand-emitted body adopts a fresh-region member into the
-/// activation's node and yields; instead of resuming, the park is abandoned
-/// through the one discard chokepoint (`VM::discard_suspended_frames`, the
-/// path `enforce_squelch` takes on a signal-violation). The discarded frame's
-/// continuation never runs, so the completion release never fires — the
+/// A DISCARD, by a call boundary or a refusing host, frees the parked owner
+/// node (docs/impl/region/owner.md). The hand-emitted body adopts a
+/// fresh-region member into the activation's node and yields; instead of
+/// resuming, the park is abandoned through the one discard chokepoint
+/// (`VM::discard_suspended_frames`, the path `VM::boundary_violation` takes on
+/// a refusal). The discarded frame's continuation never runs, so the completion release never fires — the
 /// chokepoint must run it at the discard: node + member freed (generation
 /// bump), live region count bounded across repeated park-discard cycles, and
 /// a second discard is a no-op. The counterfactual is the discard itself: a
@@ -113,10 +113,9 @@ fn discard_frees_parked_activation_owner_node() {
 }
 
 /// A DISCARD also runs the releases each abandoned frame still owed, off the
-/// two tables its own `Code` records
-/// (docs/impl/region/owner.md § "A discard runs what the abandoned frames
-/// owed"). The frame is hand-built so both routes are present and each has a
-/// neighbour the emitter did NOT record: slot 1 is a value route and slot 0 is
+/// two tables its own `Code` records (docs/impl/region/unwind.md). The frame is
+/// hand-built so both routes are present and each has a neighbour the emitter
+/// did NOT record: slot 1 is a value route and slot 0 is
 /// not, static region slot 9 is a slot route and slot 8 is not. The discard must
 /// release exactly the two the tables name — running the untabled ones would
 /// free a region whose release the frame's own machinery still answers for,
@@ -245,9 +244,8 @@ fn discard_runs_the_abandoned_frames_release_tables() {
     // A body-allocated park: its payload sits in the frame's value-route slot,
     // so the table drops the body's reference and the chokepoint drops the
     // delivery retain the boundary left with no reader
-    // (docs/impl/region/park.md § "A boundary ends a park with no reader and
-    // no install"). The exit's own payload is a different value here — the
-    // boundary's `signal-violation`, which never shares the park's region.
+    // (docs/impl/region/park.md). The exit's own payload is a different value
+    // here — the boundary's own error, which never shares the park's region.
     {
         let (parked, parked_rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
         let (violation, _) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());

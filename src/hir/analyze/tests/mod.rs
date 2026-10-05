@@ -10,6 +10,7 @@ use crate::syntax::{thread_arena, SeqCtor, Span, Syntax, SyntaxArena, SyntaxKind
 mod basics;
 mod bindings;
 mod environment;
+mod messages;
 
 fn make_span() -> Span {
     Span::new(0, 0, 1, 1)
