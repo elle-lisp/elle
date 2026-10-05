@@ -1,11 +1,10 @@
-// audited: 2026-09-29
+// audited: 2026-10-05
 //! Primitive registration: the canonical table list, the name and id indexes
 //! over it, and the startup pass that installs every def into a VM.
 //!
 //! docs/cookbook/primitives.md
 
 use crate::symbol::SymbolTable;
-use crate::value::Value;
 use crate::vm::VM;
 
 use super::def::{Doc, PrimitiveDef, PrimitiveMeta};
@@ -260,39 +259,10 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveM
 
     for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
         for def in *table {
-            let sym_id = symbols.intern(def.name);
-            let native_val = Value::native_fn(def);
-            meta.signals.insert(sym_id, def.signal);
-            meta.arities.insert(sym_id, def.arity);
-            meta.functions.insert(sym_id, native_val);
-            meta.effects.insert(sym_id, def.effect);
-            meta.ret_types.insert(sym_id, def.ret);
-            meta.embeds.insert(sym_id, def.embeds);
-            meta.moves_out.insert(sym_id, def.moves_out);
-
-            let doc = Doc {
-                name: def.name,
-                doc: def.doc,
-                params: def.params,
-                arity: def.arity,
-                signal: def.signal,
-                category: def.category,
-                example: def.example,
-                aliases: def.aliases,
-            };
-            vm.docs.insert(def.name.to_string(), doc.clone());
-
-            for alias in def.aliases {
-                let alias_id = symbols.intern(alias);
-                let alias_val = Value::native_fn(def);
-                meta.signals.insert(alias_id, def.signal);
-                meta.arities.insert(alias_id, def.arity);
-                meta.functions.insert(alias_id, alias_val);
-                meta.effects.insert(alias_id, def.effect);
-                meta.ret_types.insert(alias_id, def.ret);
-                meta.embeds.insert(alias_id, def.embeds);
-                meta.moves_out.insert(alias_id, def.moves_out);
-                vm.docs.insert((*alias).to_string(), doc.clone());
+            let doc = Doc::of(def);
+            for name in std::iter::once(&def.name).chain(def.aliases) {
+                meta.insert_def(symbols.intern(name), def);
+                vm.docs.insert((*name).to_string(), doc.clone());
             }
         }
     }
@@ -312,24 +282,8 @@ pub fn build_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
 
     for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
         for def in *table {
-            let sym_id = symbols.intern(def.name);
-            meta.signals.insert(sym_id, def.signal);
-            meta.arities.insert(sym_id, def.arity);
-            meta.functions.insert(sym_id, Value::native_fn(def));
-            meta.effects.insert(sym_id, def.effect);
-            meta.ret_types.insert(sym_id, def.ret);
-            meta.embeds.insert(sym_id, def.embeds);
-            meta.moves_out.insert(sym_id, def.moves_out);
-
-            for alias in def.aliases {
-                let alias_id = symbols.intern(alias);
-                meta.signals.insert(alias_id, def.signal);
-                meta.arities.insert(alias_id, def.arity);
-                meta.functions.insert(alias_id, Value::native_fn(def));
-                meta.effects.insert(alias_id, def.effect);
-                meta.ret_types.insert(alias_id, def.ret);
-                meta.embeds.insert(alias_id, def.embeds);
-                meta.moves_out.insert(alias_id, def.moves_out);
+            for name in std::iter::once(&def.name).chain(def.aliases) {
+                meta.insert_def(symbols.intern(name), def);
             }
         }
     }

@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 14)
+# audited: 2026-10-05
 ## elle test — --repin: after the run, move each ledger to what the run read,
 ## adopt what it had no row for, and refuse what regressed.
 ## docs/ratchet.md
@@ -8,11 +8,12 @@
 
 (def repin ((import "std/ratchet/repin")))
 
-# The build an adopted row names: none on the reference build, whose rows
-# carry no :build, and the running build anywhere else, so a foreign reading
-# never pins the reference build (docs/ratchet.md § The runner).
-(def adopting-build
-  (if (= running-build ledger:reference-build) nil running-build))
+# --repin moves the rows of the run's build, so a run with no build has none
+# to move. Refuse it before anything runs, rather than run the selection and
+# leave the ledger as it was (docs/test-cli.md).
+(defn refuse-repin-without-build []
+  (eprintln "elle test: no build, so --repin has nothing to move: run it under elle-rig test")
+  (os/exit 2))
 
 (defn worst-of [readings better]
   "The reading a pin moves to when several tiers read one subject: the one
@@ -82,7 +83,7 @@
 
 (defn repin-file [file queued]
   "Move FILE's ledger to what QUEUED read, and write it back when it moved."
-  (let [l (get ledgers (ledger:producer-of [file] (elle/root)))
+  (let [l (get ledgers (ledger:producer-of file))
         rows (get l :rows)
         before (slurp (get l :file))
         @text before]

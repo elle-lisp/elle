@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-05
 //! The process runtime: one lifecycle for compile/evaluate, shared by every
 //! entry path (`elle foo.lisp`, the REPL, and the embedding API).
 //!
@@ -232,6 +232,17 @@ impl Runtime {
     /// method calls cannot provide.
     pub fn parts(&mut self) -> (&mut VM, &mut SymbolTable, &mut CompileCtx) {
         self.core.parts()
+    }
+
+    /// Register a host primitive on this instance: compiled code and `eval`
+    /// resolve it as a built-in, and `doc` answers for it (docs/embedding.md).
+    pub fn register_primitive(&mut self, def: &'static crate::primitives::def::PrimitiveDef) {
+        let doc = crate::primitives::def::Doc::of(def);
+        let (vm, symbols, cctx) = self.parts();
+        cctx.register_primitive(symbols, def);
+        for name in std::iter::once(&def.name).chain(def.aliases) {
+            vm.docs.insert((*name).to_string(), doc.clone());
+        }
     }
 
     /// The compile context and this instance's heap as disjoint borrows — the

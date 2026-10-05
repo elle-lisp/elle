@@ -1,37 +1,28 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 14)
+# audited: 2026-10-05
 ## elle test — the readings a result printed: read out of its captured stdout,
-## judged against the file's ledger, recorded, and the rows nobody answered.
+## judged against the rows the run's build holds in the file's ledger,
+## recorded, and the rows nobody answered.
 ## docs/ratchet.md
 ##
-## A fragment of one module (see store.lisp).
+## A fragment of one module (see store.lisp). `run-build` and `ledgers` are
+## main.lisp's.
 
-# The judge, the row reader and the line reader are the instrument's own, so
-# the runner and a direct run of a producer reach one verdict from one function.
+# The judge, the row reader and the line reader are the ledger module's: the
+# runner is the one judge (docs/ratchet.md).
 (def ledger ((import "std/ratchet/ledger")))
 
-# The build this runner is, which every child of an --isolate run shares: the
-# rows are as it sees them, and a run row records it (docs/ratchet.md).
-(def running-build (ledger:running-build))
-
-# Every ledger in the directory, keyed by producer, loaded once: a ledger is a
-# committed file and a run reads it, never writes it. ELLE_LEDGER names another
-# directory, which is how a test hands the runner a ledger of its own.
-(def ledgers
-  (let [dir (ledger:ledger-dir (elle/root))]
-    (if (and dir (file/exists? dir)) (ledger:load-dir dir running-build) @{})))
-
 (defn rows-for [file]
-  "The ledger rows of FILE keyed by `row-key`, or nil when no ledger names it.
-   FILE is matched as the command line gave it, relative to the root when it
-   sits under the root — the same path a direct run judges as. An ad-hoc form
-   has no file and so no ledger."
-  (let [p (ledger:producer-of [file] (elle/root))
-        l (if p (get ledgers p) nil)]
+  "FILE's rows of the run's build, keyed by `row-key`: an empty table when
+   FILE's ledger holds none of them, and nil when no ledger names FILE. FILE
+   is matched as the command line gave it, relative to the working directory
+   when it is an absolute path under it. An ad-hoc form has no file and so no
+   ledger."
+  (let [l (get ledgers (ledger:producer-of file))]
     (if l (get l :rows) nil)))
 
 (defn insert-reading [conn run-id result-id r]
-  "One reading as a row. A reading that met no ledger carries NULL for the
+  "One reading as a row. A reading that met no row carries NULL for the
    bound, the kind and the verdict: recorded, and not judged."
   (sqlite:exec conn
                "INSERT INTO measurement (run_id, result_id, subject, axis, value, half, unit, bound, kind, verdict) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
@@ -46,36 +37,45 @@
                [run-id result-id (get row :subject) (get row :axis)
                 (get row :bound) (get row :kind) :missing]))
 
-# Every judged reading of the run, each with the file that printed it, kept as
-# it lands: --repin reads a reading's class and floor here, which the table
-# does not carry, and moves a pin to the worst of every tier's readings.
+# Every reading --repin may act on, each with the file that printed it, kept
+# as it lands: a reading's class and floor are here and not in the table, and
+# a pin moves to the worst of every tier's readings.
 (def @repin-queue @[])
 
-(defn unjudged [r]
-  "READING with whatever verdict its printer gave it removed. A producer that
-   judged itself against another ledger than this run's has no standing here."
-  (put (put (put r :bound nil) :kind nil) :verdict nil))
+# How many readings a run with no build left unrecorded, for the summary's
+# one line saying so (view.lisp).
+(def @unrecorded-readings 0)
 
 # A judged reading carries its row's bound and kind and the verdict it earned;
 # an unjudged one carries the reading alone. A missing row is written only
 # against a pass: a failed result already says so, and a gated one skipped
 # rather than fell silent (docs/test-store.md § Measurements).
 (defn record-readings [conn run-id result-id file text status]
-  "Every reading TEXT carries, as rows against RESULT-ID, judged against
-   FILE's ledger when it has one. When STATUS is :pass and the ledger holds a
-   row no reading answered, that row is recorded missing."
-  (let [readings (ledger:readings-in (if text text ""))
-        rows (rows-for file)]
-    (if rows
-      (begin
-        (each r in (ledger:judge-all readings rows)
-          (insert-reading conn run-id result-id r)
-          (push repin-queue (put r :file file)))
-        (when (= status :pass)
-          (each row in (ledger:unread rows readings)
-            (insert-missing conn run-id result-id row))))
-      (each r in readings
-        (insert-reading conn run-id result-id (unjudged r)))))
+  "Every reading TEXT carries, as the run's build decides. With no build,
+   none is recorded. With a build and no ledger naming FILE, each is recorded
+   unjudged. With a ledger holding none of the build's rows, each is recorded
+   unjudged and queued for adoption. With rows of the build, each is judged,
+   recorded and queued, and when STATUS is :pass a row no reading answered is
+   recorded missing."
+  (let [readings (ledger:readings-in (if text text ""))]
+    (if (nil? run-build)
+      (assign unrecorded-readings (+ unrecorded-readings (length readings)))
+      (let [rows (rows-for file)]
+        (cond
+          (nil? rows) (each r in readings
+                        (insert-reading conn run-id result-id r))
+          (empty? (keys rows))
+            (each r in readings
+              (insert-reading conn run-id result-id r)
+              (push repin-queue (put r :file file)))
+          true
+            (begin
+              (each r in (ledger:judge-all readings rows)
+                (insert-reading conn run-id result-id r)
+                (push repin-queue (put r :file file)))
+              (when (= status :pass)
+                (each row in (ledger:unread rows readings)
+                  (insert-missing conn run-id result-id row))))))))
   nil)
 
 (defn count-gating-readings [conn run-id]

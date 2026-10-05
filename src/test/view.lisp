@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 14)
+# audited: 2026-10-05
 ## elle test — reading a run back: the tally, the problem list, the warning
 ## about a predecessor that never finished, and raw SQL.
 ## docs/test-store.md
@@ -88,7 +88,7 @@
 # ── the readings a run recorded (docs/test-store.md § Measurements) ──
 # A tally by verdict, then a line for each reading that is neither `ok` nor
 # unjudged. Those two are the expected answers — a reading within its bound,
-# and one from a producer with no ledger yet — so listing them would bury the
+# and one with no row of the run's build yet — so listing them would bury the
 # readings a reader acts on under a few hundred that say nothing happened. The
 # rest is a query.
 
@@ -154,7 +154,13 @@
                                        "AND m.verdict IS NOT NULL AND m.verdict != 'ok' "
                                        "ORDER BY " (verdict-rank-sql)
                                        ", f.file, r.tier, m.subject") [run-id])
-        (eprintln "  " (render-measurement m)))))
+        (eprintln "  " (render-measurement m))))
+    # A run with no build left its readings unrecorded, so a green run that
+    # printed some must not read as a passed gate (docs/ratchet.md).
+    (when (and (= total 0) (> unrecorded-readings 0))
+      (eprintln unrecorded-readings " reading"
+                (if (= unrecorded-readings 1) "" "s")
+                " printed · no build, so none recorded or judged: run under elle-rig test")))
   nil)
 
 # ── what the run cost each heap (docs/test-gauges.md) ─────────────────

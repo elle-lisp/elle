@@ -1,11 +1,12 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 14)
+# audited: 2026-10-05
 ## lib/ratchet/repin.lisp — moving a ledger to what a run read: one bound token
 ## replaced inside its row's brackets, and one row appended per adopted reading.
 ## docs/ratchet.md
 ##
-## Loaded by the runner for `elle test --repin`. The rewrite is over the file's
-## text, so a comment above a row and the wrapping `elle fmt` gave it survive.
+## Loaded by the runner for `elle-rig test --repin`. The rewrite is over the
+## file's text, so a comment above a row and the wrapping `elle fmt` gave it
+## survive.
 
 (fn [& opts]
   (def led ((import "std/ratchet/ledger")))

@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 14)
+# audited: 2026-10-05
 # The region leak dashboard: one per-op leak rate per probe, judged against tests/ledger/oracle.lisp.
 # docs/ratchet.md
 # docs/impl/region/diagnostics.md
@@ -42,5 +42,4 @@
 # can see — fails here (docs/impl/region/diagnostics.md).
 (r:read "over-free" :releases (arena/over-frees))
 
-(r:report)
 (println "oracle: ok")

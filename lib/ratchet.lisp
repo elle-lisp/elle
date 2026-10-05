@@ -1,21 +1,20 @@
-(elle/epoch 13)
-# audited: 2026-09-30
-## lib/ratchet.lisp — measure a shape, print one reading line per subject, and
-## judge each reading against the committed ledger.
+(elle/epoch 14)
+# audited: 2026-10-05
+## lib/ratchet.lisp — measure a shape and print one reading line per subject,
+## for the runner to judge against the committed ledger.
 ## docs/ratchet.md
 ##
 ## Loaded via: (def r ((import "std/ratchet")))
 ## Usage:
-##   (r:read "unstamped files" :files 12)             — any number, judged
+##   (r:read "unstamped files" :files 12)             — any number, printed
 ##   (r:delta "residue" (fn [] (send-one)) :on [r:objects r:regions] :n 30)
 ##   (r:rate "io-drop" probe-io-drop :on [r:objects] :epsilon 0.4)
 ##   (r:drive "recur-struct" struct-recur)             — the same rate over (run-block b)
-##   (r:report)                                        — fail once, naming every problem
 ##
-## The guide is lib/ratchet.md. The estimator is lib/ratchet/estimator.lisp
-## and the rows, the judge and the line are lib/ratchet/ledger.lisp.
+## The guide is lib/ratchet.md. The estimator is lib/ratchet/estimator.lisp,
+## and the line is lib/ratchet/ledger.lisp's.
 
-(fn [& opts]
+(fn []
   (def est ((import "std/ratchet/estimator")))
   (def led ((import "std/ratchet/ledger")))
 
@@ -63,40 +62,24 @@
            :disc (fn [j] (push ids-sink (pair j j)))))
 
   # ── this instrument ───────────────────────────────────────────────
-  # The producer is the path this program was started with; a program with
-  # none — a form in a worker thread, an -e snippet — prints and judges
-  # nothing. The rows are that producer's, from the ledger directory, and nil
-  # when no ledger file names the producer: such a program prints and judges
-  # nothing too, and the first row written for it is what starts the gate.
-  # The rows are as the running build sees them, or as the build a test
-  # names with `:build` sees them (docs/ratchet.md).
-  (def root (elle/root))
-  (def producer (led:producer-of (sys/argv) root))
-  (def ledger-dir (led:ledger-dir root))
-  (def build (or (get (struct ;opts) :build) (led:running-build)))
-  (def rows
-    (if (and producer ledger-dir (file/exists? ledger-dir))
-      (let [l (get (led:load-dir ledger-dir build) producer)]
-        (if l (get l :rows) nil))
-      nil))
+  # The instrument measures and prints. It reads no ledger and needs neither
+  # its producer nor its build: the runner judges every line it prints
+  # (docs/ratchet.md).
   (def @readings @[])
-  (def @void-axes @{})
   (def @proven @{})
 
   (defn settle! [reading]
-    "Judge one reading when there is a ledger to judge it by, print its line,
-     and keep it for the report."
-    (let [r (if rows (led:judge-with rows void-axes reading) reading)]
-      (println (led:render-reading r))
-      (push readings r)
-      r))
+    "Print one reading's line, keep it, and answer it."
+    (println (led:render-reading reading))
+    (push readings reading)
+    reading)
 
   (defn with-subject [reading subject]
     (put reading :subject subject))
 
   (defn prove! [g]
     "Drive the gauge's own live-growth shape ahead of its first reading, and
-     report it as `<axis> gauge (live-growth)` against its floor."
+     report it as `<axis> gauge (live-growth)`, naming its class and floor."
     (let [axis (get g :axis)]
       (when (and (get g :disc) (not (get proven axis)))
         (put proven axis true)
@@ -208,29 +191,6 @@
     (let [[c m] (best-of rounds control measured)]
       (settle! {:subject subject :axis :time :value (/ m c) :half 0 :unit "x"})))
 
-  # ── the report ────────────────────────────────────────────────────
-  (defn describe [r]
-    (string (string (get r :verdict)) "  " (get r :subject) "  "
-            (string (get r :axis)) "  " (get r :value) " ±" (get r :half) " "
-            (get r :unit) "  " (led:describe-bound (get r :kind) (get r :bound))
-            (if (get r :why) (string "  " (get r :why)) "")))
-
-  (defn report []
-    "Fail once, naming every reading that is not ok and every row left
-     unread. A program with no ledger has nothing to judge, and returns."
-    (when rows
-      (let [bad (filter (fn [r] (not= (get r :verdict) :ok)) readings)
-            missing (led:unread rows readings)
-            lines (concat (map describe bad)
-                          (map (fn [row]
-                                 (string "missing  " (get row :subject) "  "
-                                 (string (get row :axis)))) missing))
-            msg (string "ratchet: " (length bad) " reading(s) not ok, "
-                        (length missing) " row(s) unread, for " producer ":\n  "
-                        (string/join lines "\n  "))]
-        (assert (and (empty? bad) (empty? missing)) msg)))
-    nil)
-
   {:objects objects
    :regions regions
    :bytes bytes-gauge
@@ -243,16 +203,4 @@
    :drive drive
    :stmt-run est:stmt-run
    :ratio ratio
-   :report report
-   :judge led:judge
-   :judge-all led:judge-all
-   :parse-row led:parse-row
-   :row-key led:row-key
-   :readings-in led:readings-in
-   :render-reading led:render-reading
-   :load-dir led:load-dir
-   :ledger-dir led:ledger-dir
-   :producer producer
-   :build build
-   :rows rows
    :readings readings})

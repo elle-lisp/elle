@@ -282,11 +282,12 @@ DEAL_CORPUS := LC_ALL=C awk 'BEGIN { for (i = 0; i < 256; i++) ord[sprintf("%c",
 # One suite pass: the files, dealt into batches, `$(JOBS)` runner processes side
 # by side. A language pass runs its files inside the runner
 # (docs/test-runner.md). A pass whose runner flags carry `--isolate FLAGS` runs
-# each file as its own child — `elle FLAGS PATH`, or `PROGRAM FLAGS PATH` under
-# `--host` — so it starts, runs as a whole program and exits, and a fault kills
-# one child rather than the run. Every verdict lands in the session DB, the
-# runner's default in the state directory (docs/testing.md). Concurrent runners
-# share it: a connection waits on a busy database rather than raising.
+# each file as its own child — the runner itself, as `RUNNER FLAGS PATH`, or
+# `PROGRAM FLAGS PATH` under `--host` — so it starts, runs as a whole program
+# and exits, and a fault kills one child rather than the run. Every verdict
+# lands in the session DB, the runner's default in the state directory
+# (docs/testing.md). Concurrent runners share it: a connection waits on a busy
+# database rather than raising.
 #
 # `xargs` runs every batch, and a batch that fails a file (exit 1–125) or dies
 # on a signal drives a non-zero exit, so the gate fails loud. Every recipe
@@ -298,11 +299,16 @@ DEAL_CORPUS := LC_ALL=C awk 'BEGIN { for (i = 0; i < 256; i++) ord[sprintf("%c",
 #
 # The runner is the build the target runs its suites on: `elle`, or a variant's
 # own binary where its target sets `SUITE_ELLE`. A target-specific `ELLE` would
-# lose to an `ELLE=` on the command line, which is what every CI job passes.
+# lose to an `ELLE=` on the command line, which is what every CI job passes. A
+# pass that names a rig as its third argument runs as that rig's `test`
+# instead, so the run has the rig's build and its readings are judged
+# (docs/ratchet.md). `SUITE_ELLE` reads the argument because it expands inside
+# the `$(call)`.
 #
-# $(1) the files   $(2) the runner's flags, such as `--host PROGRAM --isolate
-# 'FLAGS'`. No argument may contain a comma: `$(call)` splits on them.
-SUITE_ELLE = $(ELLE)
+# $(1) the files   $(2) the runner's flags, such as `--isolate 'FLAGS'`
+# $(3) the rig the pass runs on, or nothing for the target's own build. No
+# argument may contain a comma: `$(call)` splits on them.
+SUITE_ELLE = $(or $(3),$(ELLE))
 
 define RUN_SUITE
 	@printf '%s\n' $(1) | $(DEAL_CORPUS) | xargs -P $(JOBS) -n $(CORPUS_BATCH) $(SUITE_ELLE) test $(2) $(WIDE_FLAGS) || { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md)"; exit 1; }
@@ -312,7 +318,7 @@ endef
 # each expansion's line, so a `foreach` over profiles makes one pass each.
 define RUN_LANG_PROFILE
 	@echo "=== the language suite, under $(1) ==="
-	$(call RUN_SUITE,$(LANG_FILES),--host $(ELLE_RIG) --isolate '--profile $(1)')
+	$(call RUN_SUITE,$(LANG_FILES),--isolate '--profile $(1)',$(ELLE_RIG))
 
 endef
 
@@ -322,9 +328,9 @@ smoke-lang: elle  ## The language suite on this build
 
 smoke-impl: elle elle-rig  ## The implementation suite on the rig, then both suites under each rig profile
 	@echo "=== the implementation suite, on the rig ==="
-	$(call RUN_SUITE,$(IMPL_FILES) $(RUNNER_ACCEPTANCE),--host $(ELLE_RIG) --isolate '')
+	$(call RUN_SUITE,$(IMPL_FILES) $(RUNNER_ACCEPTANCE),--isolate '',$(ELLE_RIG))
 	@echo "=== both suites, every function compiled on its first call ==="
-	$(call RUN_SUITE,$(LANG_FILES) $(IMPL_FILES),--host $(ELLE_RIG) --isolate '--profile $(EAGER_PROFILE)')
+	$(call RUN_SUITE,$(LANG_FILES) $(IMPL_FILES),--isolate '--profile $(EAGER_PROFILE)',$(ELLE_RIG))
 	$(foreach profile,$(IMPL_PROFILES),$(call RUN_LANG_PROFILE,$(profile)))
 
 # The language suite booted from an image instead of from core.lisp,
@@ -389,7 +395,7 @@ smoke-pool: elle-pool  ## Both suites on the thread-pool I/O backend (what every
 	@echo "=== the language suite, thread-pool I/O ==="
 	$(call RUN_SUITE,$(LANG_FILES),)
 	@echo "=== the implementation suite, on the thread-pool build's rig ==="
-	$(call RUN_SUITE,$(IMPL_FILES),--host $(ELLE_RIG) --isolate '')
+	$(call RUN_SUITE,$(IMPL_FILES),--isolate '',$(ELLE_RIG))
 
 elle-mlir:  ## Build elle-mlir and elle-rig-mlir, the MLIR build (for smoke-mlir)
 	@echo "=== build elle and its rig with MLIR ==="
@@ -397,12 +403,12 @@ elle-mlir:  ## Build elle-mlir and elle-rig-mlir, the MLIR build (for smoke-mlir
 
 # The MLIR build's rig is the one rig that carries the MLIR tier, so the
 # implementation suite's MLIR files run there.
-smoke-mlir: SUITE_ELLE = $(ELLE_MLIR)
+smoke-mlir: SUITE_ELLE = $(or $(3),$(ELLE_MLIR))
 smoke-mlir: elle-mlir  ## Both suites on the MLIR build
 	@echo "=== the language suite, MLIR build ==="
 	$(call RUN_SUITE,$(LANG_FILES),)
 	@echo "=== the implementation suite, on the MLIR build's rig ==="
-	$(call RUN_SUITE,$(IMPL_FILES),--host $(ELLE_RIG_MLIR) --isolate '')
+	$(call RUN_SUITE,$(IMPL_FILES),--isolate '',$(ELLE_RIG_MLIR))
 
 # The no-features binary is copied beside the build, and the default build then
 # rebuilt in its place, so the runner is always a build that has FFI.
@@ -439,7 +445,7 @@ check-wasm: elle-wasm  ## Build the WASM backend and boot one module through it
 # files run. Both suites then run on the rig with each file compiled whole to
 # one module.
 smoke-wasm: JOBS = $(WASM_JOBS)
-smoke-wasm: SUITE_ELLE = $(ELLE_WASM)
+smoke-wasm: SUITE_ELLE = $(or $(3),$(ELLE_WASM))
 smoke-wasm: elle-wasm  ## Both suites on the WASM build
 	@echo "=== the language suite, WASM build ==="
 	$(call RUN_SUITE,$(LANG_FILES),)

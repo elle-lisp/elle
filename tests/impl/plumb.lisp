@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 14)
+# audited: 2026-10-05
 # The I/O leak dashboard: a leak rate for every probe whose drive reaches the I/O backend.
 # docs/ratchet.md
 # docs/impl/region/diagnostics.md
@@ -140,5 +140,4 @@
 # probes are not under the oracle's reading (docs/impl/region/diagnostics.md).
 (r:read "over-free" :releases (arena/over-frees))
 
-(r:report)
 (println "plumb: ok")

@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 14)
+# audited: 2026-10-05
 ## elle test — the session store: where a run is kept, the schema it is kept
 ## in, what a run row says about the code it ran against, and the CAS.
 ## docs/test-store.md
@@ -142,9 +142,10 @@
 
 # The code state and the machine this run ran on. Outside a repository the git
 # fields are nil, which lands as SQL NULL: the run happened, and nothing names
-# the code it ran against. The host and the build are facts about the box and
-# the binary, so they are recorded either way, and so is the pid: with the
-# host, it is what tells a run still in flight from a killed one (view.lisp).
+# the code it ran against. The host is a fact about the box, so it is recorded
+# either way, and so is the pid: with the host, it is what tells a run still in
+# flight from a killed one (view.lisp). The build is the runner's own, and nil
+# outside the rig (main.lisp).
 #
 # The boot fingerprint is the binary itself, hashed (docs/test-store.md § The
 # boot fingerprint): a commit says which sources a run was meant to test, and
@@ -159,7 +160,7 @@
             :worktree (capture-cmd "git rev-parse --show-toplevel 2>/dev/null")
             :boot (elle/boot-fingerprint) :host host :version (elle/version)
             :profile (elle/build-profile) :argv argv :key (run-key host argv)
-            :pid (sys/pid) :build running-build)))
+            :pid (sys/pid) :build run-build)))
 
 # What names this run in any store that holds it (docs/test-store.md § The run
 # key). The machine, the process and the instant are what separate two runs
@@ -194,29 +195,9 @@
         (port/close p)))
     [addr size "zstd"]))
 
-# --dump capture is OMITTED for now (docs/test-runner.md § CAS asset capture
-# status note): the per-file (compile/dumps …) pass is the single largest
-# contributor to the corpus region leak that OOMs `make smoke` (~28k regions/
-# file), and the dumps are not byte-deterministic across compiles (absolute
-# @-HirIds from a process-global counter), so they would not even CAS-dedup.
-# Until that leak is root-caused and fixed, capture nothing: no compile/dumps
-# call, no dump asset rows, no CAS dump files. Re-enabling is reverting this to
-# the compile/dumps body below. stdout/stderr capture is a separate path
-# (capture-stdio, on the per-form execution) and is unaffected.
-#
-# The original (re-enable here once the leak is fixed):
-#   (let [out (protect (compile/dumps src name))]
-#     (if (get out 0)
-#       (let [d (get out 1)]
-#         (filter (fn [x] (not (= x nil)))
-#                 (map (fn [k]
-#                        (let [text (get d k)]
-#                          (if (and (not (= text nil)) (> (length text) 0))
-#                            (concat [(string k)] (cas-put text))
-#                            nil)))
-#                      [:ast :fhir :defuse :regions :hir :lir :cfg :dfa :jit
-#                       :escape])))
-#       [])))
+# --dump capture is off (docs/test-runner.md § CAS asset capture): no
+# compile/dumps call, no dump asset rows, no CAS dump files. stdout/stderr
+# capture is a separate path, capture-stdio, on the per-form execution.
 (defn capture-dumps [src name]
   [])
 

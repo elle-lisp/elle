@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 14)
+# audited: 2026-10-05
 ## elle test — the command line, the store it opens, and the run it drives.
 ## docs/test-cli.md
 ##
@@ -211,6 +211,32 @@
   nil)
 
 (warn-if-truncated conn)
+
+# The run's build is the runner's own: the key the rig's `elle/build` answers,
+# read through `eval` because a user build has no such primitive and the
+# runner compiles under both. Every child of --isolate is this executable, so
+# the key holds for them; a child under --host is another program, and the
+# run has no build (docs/ratchet.md § The runner).
+(def run-build
+  (if host-program
+    nil
+    (let [[ok? key] (protect (eval '(elle/build)))]
+      (if ok? key nil))))
+
+# Every ledger under tests/ledger in the working directory, as the run's build
+# sees it, keyed by producer; loaded once, because a run reads a ledger and
+# only --repin writes one. A run with no build loads none.
+(def ledgers
+  (if (and run-build (file/exists? "tests/ledger"))
+    (ledger:load-dir "tests/ledger" run-build)
+    @{}))
+
+# The build an adopted row names: none on the reference build, whose rows
+# carry no :build, and the run's build anywhere else, so a reading never pins
+# another build (docs/ratchet.md § The runner).
+(def adopting-build (if (= run-build ledger:reference-build) nil run-build))
+
+(when (and (get opts :repin) (nil? run-build)) (refuse-repin-without-build))
 
 # n_selected, the code state and the pid land at insert (everything else about
 # the row is written at completion), so an unfinished run's row still says how

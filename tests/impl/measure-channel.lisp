@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 14)
+# audited: 2026-10-05
 # measure-channel.lisp — one probe read on two gauges through the ratchet, so
 # the reading line has a producer small enough to drive from a test.
 #
@@ -16,5 +16,4 @@
 (def @sink @[])
 (r:rate "channel-keep" (fn [j] (push sink {:k j})) :on [r:objects r:regions]
         :block 100 :min 4 :max 30)
-(r:report)
 (println "measure-channel: ok")

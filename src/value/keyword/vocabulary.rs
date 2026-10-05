@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-05
 //! The keyword vocabulary: every spelling the Rust runtime mints from a fixed
 //! string.
 //!
@@ -317,14 +317,6 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "mlir/compile-spirv",
     "vm",
     "wasm",
-    // The build key `(elle/build)` answers: the tier a build carries, its I/O
-    // backend, and the platform (`tier` and `io` appear above)
-    "interp",
-    "uring",
-    "pool",
-    "os",
-    "arch",
-    "build",
     // Arena / memory gauges
     "arena/allocs",
     "arena/stats",

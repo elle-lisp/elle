@@ -1,7 +1,6 @@
-// audited: 2026-09-30
-//! What this build of Elle is: version, epoch, cargo profile, the binary's
-//! fingerprint, the tier, backend and platform it runs on, and the root it
-//! resolves modules against.
+// audited: 2026-10-05
+//! What this build of Elle is: its version, its epoch, the cargo profile it
+//! was compiled under, and the fingerprint of the binary itself.
 //!
 //! docs/test-store.md
 
@@ -143,24 +142,6 @@ fn fill(image: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
     Ok(have)
 }
 
-/// The root `std/` imports resolve against, or nil when nothing names one.
-///
-/// A program that keeps a file beside the tree — the ratchet's ledger under
-/// `tests/ledger` — has to find the tree, and the resolver already knows it:
-/// `--home`, `ELLE_HOME`, or the checkout the binary was built in.
-pub(crate) fn prim_root(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    _args: &[Value],
-) -> (SignalBits, Value) {
-    match crate::primitives::modules::elle_root() {
-        Some(path) => {
-            let owned = path.to_string_lossy().into_owned();
-            (SIG_OK, ctx.string(&owned))
-        }
-        None => (SIG_OK, Value::NIL),
-    }
-}
-
 /// The boot fingerprint of this binary, or nil where the OS will not name it.
 ///
 /// The hash itself, as an integer: what reads a fingerprint compares, groups
@@ -174,51 +155,6 @@ pub(crate) fn prim_boot_fingerprint(
         Some(print) => (SIG_OK, Value::int(print as i64)),
         None => (SIG_OK, Value::NIL),
     }
-}
-
-/// The tier this build carries, by the precedence docs/config.md gives the
-/// features: the WebAssembly backend, then the MLIR tier, then the JIT, and
-/// the interpreter alone where a build has none.
-fn build_tier() -> &'static str {
-    if cfg!(feature = "wasm") {
-        "wasm"
-    } else if cfg!(feature = "mlir") {
-        "mlir"
-    } else if cfg!(feature = "jit") {
-        "jit"
-    } else {
-        "interp"
-    }
-}
-
-/// The I/O backend this build runs: io_uring where the feature is on and the
-/// platform is Linux, and the thread pool everywhere else.
-fn build_io() -> &'static str {
-    if cfg!(all(feature = "uring", target_os = "linux")) {
-        "uring"
-    } else {
-        "pool"
-    }
-}
-
-/// The build a program runs on, as a struct: the tier, the I/O backend, the
-/// operating system and the architecture. A ledger row belongs to a build,
-/// and this is how the ratchet learns which one is running
-/// (docs/ratchet.md).
-pub(crate) fn prim_build(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    _args: &[Value],
-) -> (SignalBits, Value) {
-    use crate::value::heap::TableKey;
-    use std::collections::BTreeMap;
-    let os = ctx.string(std::env::consts::OS);
-    let arch = ctx.string(std::env::consts::ARCH);
-    let mut fields = BTreeMap::new();
-    fields.insert(TableKey::keyword("tier"), Value::keyword(build_tier()));
-    fields.insert(TableKey::keyword("io"), Value::keyword(build_io()));
-    fields.insert(TableKey::keyword("os"), os);
-    fields.insert(TableKey::keyword("arch"), arch);
-    (SIG_OK, ctx.struct_from(fields))
 }
 
 /// Get package information
@@ -263,12 +199,6 @@ primitive! {
         example: "(elle/executable)",
         effect: RegionEffect::Fresh,
     }
-    "elle/root" => prim_root {
-        doc: "Return the module resolution root — `--home`, `ELLE_HOME`, or the tree the binary was built in — or nil when none is found. `std/` imports and the ratchet's ledger resolve against it.",
-        category: "elle",
-        example: "(elle/root)",
-        effect: RegionEffect::Fresh,
-    }
     "elle/boot-fingerprint" => prim_boot_fingerprint {
         doc: "Return this binary's boot fingerprint — a 64-bit hash over the running executable, which carries the sources it boots from — or nil when the OS will not name it.",
         category: "elle",
@@ -276,12 +206,6 @@ primitive! {
         // The hash is an integer and nil is an immediate, so the result never
         // reaches the heap (docs/impl/region/effects.md).
         effect: RegionEffect::Immediate,
-    }
-    "elle/build" => prim_build {
-        doc: "Return the build this program runs on as {:tier :io :os :arch}: the tier the build carries (:jit, :mlir, :wasm or :interp), its I/O backend (:uring or :pool), and the platform's operating system and architecture. A ledger row belongs to a build (docs/ratchet.md).",
-        category: "elle",
-        example: "(get (elle/build) :tier)",
-        effect: RegionEffect::Fresh,
     }
     "elle/info" => prim_package_info {
         doc: "Get package information (name, version, description)",

@@ -1,14 +1,16 @@
-// audited: 2026-09-29
+// audited: 2026-10-05
 //! What `elle` and the rig share: the run path of one `Runtime`, from a file, `-e`, stdin or the REPL, and the subcommands.
 //!
 //! docs/config.md
 //! rig/overview.md
 //!
-//! Both executables parse their own command line and hand the resulting
-//! `Config` and the program's arguments to [`run`]. Everything from there —
-//! the Unicode prescan, the runtime, the gated-exit line, the error report,
-//! the statistics and the teardown — is this module's, so a program that runs
-//! under `elle` runs under the rig unchanged.
+//! Both executables parse their own command line. `elle` hands the resulting
+//! `Config` and the program's arguments to [`run`]; the rig takes the same two
+//! steps itself, [`Program::prepare`] and [`Program::drive`], and builds the
+//! runtime between them, so it can register a primitive of its own. The
+//! Unicode prescan, the gated-exit line, the error report, the statistics and
+//! the teardown are this module's, so a program that runs under `elle` runs
+//! under the rig unchanged.
 
 use crate::config::Config;
 use crate::pipeline::{compile_file, CompileCtx};
@@ -23,167 +25,209 @@ mod image;
 mod semver;
 mod subcommand;
 use errors::{format_error_json, format_runtime_error, parse_compilation_error};
-pub use subcommand::subcommand;
+pub use subcommand::{subcommand, Test};
 
 /// Run a program as `elle` does, and answer the process exit code.
 ///
-/// `remaining_args` is what `Config::parse` handed back: the `-e` expressions
-/// as `--eval:EXPR` entries, then the program name and its arguments. With no
-/// source at all this starts the REPL. `config` is installed as the process
-/// configuration here, once the main source has had its say about the Unicode
-/// generation.
-pub fn run(mut config: Config, remaining_args: Vec<String>) -> i32 {
-    // Trap POSIX signals at startup, before any thread spawn. This
-    // installs sigaction handlers for TERM/INT/QUIT/HUP (clean exit),
-    // TSTP/TTIN/TTOU (raise SIGSTOP), CONT (consume), SIGPIPE (ignore),
-    // and pthread_sigmask-blocks the absorb-set (USR1/USR2/CHLD/URG/
-    // WINCH/ALRM) on the main thread. See `init_process_signals` in
-    // src/io/sigfd.rs and docs/posix-signals.md for the full table.
-    //
-    // Must run before the runtime is built: the JIT worker spawned later
-    // inherits whatever mask the main thread holds at its spawn time.
-    crate::io::init_process_signals();
-
-    let mut had_errors = false;
-    let mut files: Vec<String> = Vec::new();
-    let mut eval_exprs: Vec<String> = Vec::new();
-    let mut read_stdin = false;
-    let mut source_arg = String::new();
-    let mut user_args: Vec<String> = Vec::new();
-
-    // Separate the eval expressions from the program name. This runs before
-    // the runtime is built so the main source can select the Unicode
-    // generation.
-    for (i, arg) in remaining_args.iter().enumerate() {
-        if let Some(expr) = arg.strip_prefix("--eval:") {
-            eval_exprs.push(expr.to_string());
-        } else if arg == "-" && files.is_empty() && eval_exprs.is_empty() {
-            read_stdin = true;
-            source_arg = "-".to_string();
-            user_args = remaining_args[i + 1..].to_vec();
-            break;
-        } else if arg == "--" {
-            user_args = remaining_args[i + 1..].to_vec();
-            break;
-        } else if files.is_empty() && eval_exprs.is_empty() {
-            source_arg = arg.clone();
-            files.push(arg.clone());
-            // Everything after the program name is the program's.
-            user_args = remaining_args[i + 1..].to_vec();
-            break;
-        }
-    }
-    if !eval_exprs.is_empty() && files.is_empty() && !read_stdin {
-        source_arg = "<eval>".to_string();
-    }
-
-    // Resolve the Unicode generation before any VM exists: the main file
-    // (or the -e expressions) may declare it, and the CLI flag may select
-    // it; the surfaces must agree. Stdin and the REPL select via the flag
-    // only. A source that fails to parse here is ignored — the compiler
-    // reports the parse error properly later. Literate .md sources are
-    // not scanned (their code lives inside markdown).
-    let scanned_source = if let Some(f) = files.first() {
-        if f.ends_with(".md") {
-            None
-        } else {
-            std::fs::read_to_string(f).ok().map(|src| (src, f.clone()))
-        }
-    } else if !eval_exprs.is_empty() {
-        Some((eval_exprs.join("\n"), "<eval>".to_string()))
-    } else {
-        None
+/// The two steps the rig takes apart: [`Program::prepare`] before any
+/// runtime exists, then [`Program::drive`] over the runtime [`runtime`]
+/// builds. With no source at all this starts the REPL.
+pub fn run(config: Config, remaining_args: Vec<String>) -> i32 {
+    let program = match Program::prepare(config, remaining_args) {
+        Ok(program) => program,
+        Err(code) => return code,
     };
-    if let Some((src, name)) = scanned_source {
-        if let Ok(Some(request)) = crate::segment::scan_unicode_request(&src, &name) {
-            let declared = match crate::segment::Generation::from_request(&request) {
-                Ok(gen) => gen,
-                Err(e) => {
-                    eprintln!("elle: {}: {}", name, e);
-                    return 1;
-                }
-            };
-            match config.unicode {
-                Some(flagged) if flagged != declared => {
-                    eprintln!(
-                        "elle: --unicode={} conflicts with the {} declaration in {}",
-                        flagged.version_string(),
-                        declared.version_string(),
-                        name
-                    );
-                    return 1;
-                }
-                _ => config.unicode = Some(declared),
-            }
-        }
-    }
-    crate::config::init(config);
+    let mut rt = runtime();
+    program.drive(&mut rt)
+}
 
-    // One runtime drives every entry path (file / eval / stdin / REPL); its
-    // Drop (or the explicit `teardown` below) runs the principled, RC-driven
-    // teardown sweep (docs/impl/region/rules.md). The VM reads the resolved
-    // Unicode generation from the global config.
-    let mut rt = if crate::config::get().no_stdlib {
+/// The runtime the installed configuration asks for: the stdlib loaded, or
+/// none under `--no-stdlib`.
+pub fn runtime() -> Runtime {
+    if crate::config::get().no_stdlib {
         Runtime::without_stdlib()
     } else {
         Runtime::new()
-    };
-    rt.vm().source_arg = source_arg;
-    rt.vm().user_args = user_args;
+    }
+}
 
-    if read_stdin {
-        let (vm, symbols, cctx) = rt.parts();
-        if run_stdin(vm, symbols, cctx).is_err() {
-            had_errors = true;
+/// The source a command line names: a file, the `-e` expressions, stdin, or
+/// none, and the arguments that belong to the program.
+pub struct Program {
+    files: Vec<String>,
+    eval_exprs: Vec<String>,
+    read_stdin: bool,
+    source_arg: String,
+    user_args: Vec<String>,
+}
+
+impl Program {
+    /// Read the program out of `remaining_args`, what `Config::parse` handed
+    /// back: the `-e` expressions as `--eval:EXPR` entries, then the program
+    /// name and its arguments. Then install `config` as the process
+    /// configuration, once the main source has had its say about the Unicode
+    /// generation. `Err` carries the exit code of a refused run.
+    pub fn prepare(mut config: Config, remaining_args: Vec<String>) -> Result<Program, i32> {
+        // Trap POSIX signals at startup, before any thread spawn. This
+        // installs sigaction handlers for TERM/INT/QUIT/HUP (clean exit),
+        // TSTP/TTIN/TTOU (raise SIGSTOP), CONT (consume), SIGPIPE (ignore),
+        // and pthread_sigmask-blocks the absorb-set (USR1/USR2/CHLD/URG/
+        // WINCH/ALRM) on the main thread. See `init_process_signals` in
+        // src/io/sigfd.rs and docs/posix-signals.md for the full table.
+        //
+        // Must run before the runtime is built: the JIT worker spawned later
+        // inherits whatever mask the main thread holds at its spawn time.
+        crate::io::init_process_signals();
+
+        let mut program = Program {
+            files: Vec::new(),
+            eval_exprs: Vec::new(),
+            read_stdin: false,
+            source_arg: String::new(),
+            user_args: Vec::new(),
+        };
+
+        // Separate the eval expressions from the program name. This runs
+        // before the runtime is built so the main source can select the
+        // Unicode generation.
+        for (i, arg) in remaining_args.iter().enumerate() {
+            if let Some(expr) = arg.strip_prefix("--eval:") {
+                program.eval_exprs.push(expr.to_string());
+            } else if arg == "-" && program.files.is_empty() && program.eval_exprs.is_empty() {
+                program.read_stdin = true;
+                program.source_arg = "-".to_string();
+                program.user_args = remaining_args[i + 1..].to_vec();
+                break;
+            } else if arg == "--" {
+                program.user_args = remaining_args[i + 1..].to_vec();
+                break;
+            } else if program.files.is_empty() && program.eval_exprs.is_empty() {
+                program.source_arg = arg.clone();
+                program.files.push(arg.clone());
+                // Everything after the program name is the program's.
+                program.user_args = remaining_args[i + 1..].to_vec();
+                break;
+            }
         }
-    } else if !eval_exprs.is_empty() {
-        for expr in &eval_exprs {
+        if !program.eval_exprs.is_empty() && program.files.is_empty() && !program.read_stdin {
+            program.source_arg = "<eval>".to_string();
+        }
+
+        // Resolve the Unicode generation before any VM exists: the main file
+        // (or the -e expressions) may declare it, and the CLI flag may select
+        // it; the surfaces must agree. Stdin and the REPL select via the flag
+        // only. A source that fails to parse here is ignored — the compiler
+        // reports the parse error properly later. Literate .md sources are
+        // not scanned (their code lives inside markdown).
+        let scanned_source = if let Some(f) = program.files.first() {
+            if f.ends_with(".md") {
+                None
+            } else {
+                std::fs::read_to_string(f).ok().map(|src| (src, f.clone()))
+            }
+        } else if !program.eval_exprs.is_empty() {
+            Some((program.eval_exprs.join("\n"), "<eval>".to_string()))
+        } else {
+            None
+        };
+        if let Some((src, name)) = scanned_source {
+            if let Ok(Some(request)) = crate::segment::scan_unicode_request(&src, &name) {
+                let declared = match crate::segment::Generation::from_request(&request) {
+                    Ok(gen) => gen,
+                    Err(e) => {
+                        eprintln!("elle: {}: {}", name, e);
+                        return Err(1);
+                    }
+                };
+                match config.unicode {
+                    Some(flagged) if flagged != declared => {
+                        eprintln!(
+                            "elle: --unicode={} conflicts with the {} declaration in {}",
+                            flagged.version_string(),
+                            declared.version_string(),
+                            name
+                        );
+                        return Err(1);
+                    }
+                    _ => config.unicode = Some(declared),
+                }
+            }
+        }
+        crate::config::init(config);
+        Ok(program)
+    }
+
+    /// Whether the command line named no source, so `elle` starts its REPL.
+    pub fn is_repl(&self) -> bool {
+        !self.read_stdin && self.files.is_empty() && self.eval_exprs.is_empty()
+    }
+
+    /// Run the program on `rt`, then tear `rt` down, and answer the process
+    /// exit code. `rt` is the caller's, built after [`Program::prepare`]
+    /// installed the configuration, so the VM reads the resolved Unicode
+    /// generation; its teardown is the principled, RC-driven sweep
+    /// (docs/impl/region/rules.md).
+    pub fn drive(self, rt: &mut Runtime) -> i32 {
+        let mut had_errors = false;
+        let repl = self.is_repl();
+        rt.vm().source_arg = self.source_arg;
+        rt.vm().user_args = self.user_args;
+
+        if self.read_stdin {
             let (vm, symbols, cctx) = rt.parts();
-            if run_source(expr, "<eval>", vm, symbols, cctx).is_err() {
+            if run_stdin(vm, symbols, cctx).is_err() {
+                had_errors = true;
+            }
+        } else if !self.eval_exprs.is_empty() {
+            for expr in &self.eval_exprs {
+                let (vm, symbols, cctx) = rt.parts();
+                if run_source(expr, "<eval>", vm, symbols, cctx).is_err() {
+                    had_errors = true;
+                }
+            }
+        } else if !self.files.is_empty() {
+            for filename in &self.files {
+                let (vm, symbols, cctx) = rt.parts();
+                if run_file(filename, vm, symbols, cctx).is_err() {
+                    had_errors = true;
+                }
+            }
+        } else {
+            let (vm, symbols, cctx) = rt.parts();
+            if run_repl(vm, symbols, cctx) {
                 had_errors = true;
             }
         }
-    } else if !files.is_empty() {
-        for filename in &files {
-            let (vm, symbols, cctx) = rt.parts();
-            if run_file(filename, vm, symbols, cctx).is_err() {
-                had_errors = true;
+
+        let stats = crate::config::get().stats;
+        if stats {
+            #[cfg(feature = "jit")]
+            print_jit_stats(rt.vm());
+            let cvc = crate::lir::closure_value_const_count();
+            if cvc > 0 {
+                eprintln!("[stats] closure-valued ValueConsts serialized: {}", cvc);
             }
         }
-    } else {
-        let (vm, symbols, cctx) = rt.parts();
-        if run_repl(vm, symbols, cctx) {
-            had_errors = true;
+
+        // Graceful exit on every path: run the principled teardown sweep
+        // explicitly (so it happens before any `process::exit`, which would
+        // skip `rt`'s Drop) and surface its observable result under
+        // `--dump=stats`.
+        let report = rt.teardown();
+        if stats {
+            eprintln!(
+                "[stats] live regions after teardown: {} \
+                 (0 = clean; residue names open leaks)",
+                report.live_regions
+            );
         }
-    }
 
-    let stats = crate::config::get().stats;
-    if stats {
-        #[cfg(feature = "jit")]
-        print_jit_stats(rt.vm());
-        let cvc = crate::lir::closure_value_const_count();
-        if cvc > 0 {
-            eprintln!("[stats] closure-valued ValueConsts serialized: {}", cvc);
+        if repl {
+            println!();
         }
-    }
 
-    // Graceful exit on every path: run the principled teardown sweep explicitly
-    // (so it happens before any `process::exit`, which would skip `rt`'s Drop)
-    // and surface its observable result under `--dump=stats`.
-    let report = rt.teardown();
-    if stats {
-        eprintln!(
-            "[stats] live regions after teardown: {} \
-             (0 = clean; residue names open leaks)",
-            report.live_regions
-        );
+        i32::from(had_errors)
     }
-
-    if !read_stdin && files.is_empty() && eval_exprs.is_empty() {
-        println!();
-    }
-
-    i32::from(had_errors)
 }
 
 /// Run the program on stdin.
