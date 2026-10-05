@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 // Under `elle-rig test` a run has the rig's build, and each reading is judged against that build's rows.
 // docs/ratchet.md
 // docs/test-store.md
@@ -216,6 +216,30 @@ fn the_run_row_records_the_build() {
         build.contains(&format!(":build \"{}\"", key())),
         "the run row carries the rig's key {}, got:\n{build}",
         key()
+    );
+}
+
+#[test]
+fn the_summary_names_the_build() {
+    // The tally says which readings were judged; the run line says as which
+    // build, so a log read away from the store still says it.
+    let b = Bench::new("summary", &[own("[\"answer\" :count 42")], PRODUCER);
+    let out = b.run(&[]);
+    let want = format!("· build {}", key());
+    assert!(
+        stderr(&out).contains(&want),
+        "the post-run summary names the build:\n{}",
+        stderr(&out)
+    );
+    let again = Command::new(rig_binary())
+        .args(["test", "--summary", "--db"])
+        .arg(b.db())
+        .output()
+        .expect("re-print the summary");
+    assert!(
+        stderr(&again).contains(&want),
+        "and so does --summary:\n{}",
+        stderr(&again)
     );
 }
 
