@@ -1,13 +1,14 @@
-// audited: 2026-09-29
-//! What the Makefile and the two Elle suites say, read the way a pass reads them.
+// audited: 2026-10-04
+//! What the Makefile, the two Elle suites and the tree's source files say, read the way a pass reads them.
 //!
 //! tests/AGENTS.md
 //! docs/testing.md
 //!
-//! Several test files ask the same questions of the two Elle suites and the
-//! Makefile: which files a suite holds, which of them declare a deadline of
-//! their own, what a variable expands to, and what a target will run. The
-//! readers live here because a second copy of them is a second answer.
+//! Several test files ask the same questions of the two Elle suites, the
+//! Makefile and the source tree: which files a suite holds, which of them
+//! declare a deadline of their own, what a variable expands to, what a target
+//! will run, and which files a policy sweep reads. The readers live here
+//! because a second copy of them is a second answer.
 
 /// One Makefile variable's value, as `make` itself expands it, or `None` if
 /// `make` could not be run.
@@ -81,6 +82,40 @@ pub fn make_dry_run_with(target: &str, vars: &[&str]) -> Option<String> {
 #[allow(dead_code)]
 pub fn repo_root() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+/// Every file below the repo-relative `dirs` whose extension is one of
+/// `extensions`, skipping each `target` and `.git` directory on the way.
+///
+/// A directory that does not read contributes nothing: a sweep names the trees
+/// that may hold an offender, and not every checkout has all of them.
+#[allow(dead_code)]
+pub fn source_files(dirs: &[&str], extensions: &[&str]) -> Vec<std::path::PathBuf> {
+    fn walk(dir: &std::path::Path, extensions: &[&str], out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if entry.file_name() != "target" && entry.file_name() != ".git" {
+                    walk(&path, extensions, out);
+                }
+            } else if path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| extensions.contains(&e))
+            {
+                out.push(path);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for dir in dirs {
+        walk(&repo_root().join(dir), extensions, &mut out);
+    }
+    out.sort();
+    out
 }
 
 /// The Makefile's text.

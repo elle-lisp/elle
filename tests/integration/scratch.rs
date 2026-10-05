@@ -1,50 +1,20 @@
-// Scratch-file policy enforcement.
+// audited: 2026-10-04
+// No `.rs` or `.lisp` file in the tree names a hardcoded /tmp path.
+//
+// tests/AGENTS.md
 //
 // Temp paths must derive from the platform temp root — std::env::temp_dir()
 // in Rust, file/mktempdir / with-temp-dir in Elle — never a hardcoded /tmp
-// (shared, size-limited, and not where TMPDIR points). This test sweeps every
-// .rs and .lisp file in the tree for a quoted /tmp path so a new offender
-// fails CI instead of shipping. See tests/AGENTS.md § Scratch files.
+// (shared, size-limited, and not where TMPDIR points). A sweep is the only
+// thing that sees a new offender before it ships.
 
-use std::path::{Path, PathBuf};
-
-fn scan(dir: &Path, needle: &str, offenders: &mut Vec<String>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if path.is_dir() {
-            if name == "target" || name == ".git" {
-                continue;
-            }
-            scan(&path, needle, offenders);
-        } else if matches!(
-            path.extension().and_then(|e| e.to_str()),
-            Some("rs") | Some("lisp")
-        ) {
-            let Ok(text) = std::fs::read_to_string(&path) else {
-                continue;
-            };
-            for (i, line) in text.lines().enumerate() {
-                if line.contains(needle) {
-                    offenders.push(format!("{}:{}: {}", path.display(), i + 1, line.trim()));
-                }
-            }
-        }
-    }
-}
+use crate::common::{repo_root, source_files};
 
 #[test]
 fn no_hardcoded_tmp_paths() {
     // Assembled from parts so this file never matches itself.
     let needle = format!("\"/{}", "tmp");
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let mut offenders = Vec::new();
-    for dir in [
+    let dirs = [
         "src",
         "lib",
         "tests",
@@ -52,8 +22,18 @@ fn no_hardcoded_tmp_paths() {
         "demos",
         "benches",
         "elle-plugin",
-    ] {
-        scan(&root.join(dir), &needle, &mut offenders);
+    ];
+    let mut offenders = Vec::new();
+    for path in source_files(&dirs, &["rs", "lisp"]) {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for (i, line) in text.lines().enumerate() {
+            if line.contains(&needle) {
+                let shown = path.strip_prefix(repo_root()).unwrap_or(&path);
+                offenders.push(format!("{}:{}: {}", shown.display(), i + 1, line.trim()));
+            }
+        }
     }
     assert!(
         offenders.is_empty(),

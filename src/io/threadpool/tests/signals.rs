@@ -1,9 +1,10 @@
-// audited: 2026-09-30
+// audited: 2026-10-04
 //! The signal reads on the thread pool: the mask they leave, the signal they return, the close that drains.
 //!
 //! docs/posix-signals.md
 
 use super::super::*;
+use crate::io::isolate::{run, Outcome};
 
 /// The macOS signal read leaves the thread's mask as it found it.
 ///
@@ -48,9 +49,9 @@ fn the_macos_signal_read_blocks_again_what_it_unblocked() {
     unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, &previous, std::ptr::null_mut()) };
 }
 
-/// Bounds for a signal read in a forked child. Every case here sends the signal
+/// Bounds for a signal read in an isolated body. Every case here sends the signal
 /// it waits for, so the deadline is only there to make a regression a failed
-/// assertion rather than a child that hangs until the parent's own timeout.
+/// assertion rather than a body that hangs until `run`'s own deadline.
 fn watch_bounds() -> Bounds {
     Bounds::new(
         crate::io::request::Bound::per_op(std::time::Duration::from_secs(5)),
@@ -58,106 +59,31 @@ fn watch_bounds() -> Bounds {
     )
 }
 
-/// Outcome of running a forked child to completion (or killing it on timeout).
-enum ForkOutcome {
-    /// Child called `_exit(code)`.
-    Exited(i32),
-    /// Child was terminated by signal `signum` (e.g. an undrained pending
-    /// SIGUSR1 firing its default `Term` disposition).
-    Signaled(i32),
-    /// Child did not reap within the timeout and was `SIGKILL`ed.
-    Hung,
-}
-
-/// Fork, run `child_logic` in the child (which must `_exit` its return code),
-/// and reap the child in the parent with a bounded `waitpid` poll.
+/// Run `body` as the only thread of its own process, and fail the test unless
+/// it exits 0. `what` names the body in the failure.
 ///
-/// The child is forked from the **multithreaded cargo-test harness** and then
-/// does non-async-signal-safe work (allocations in `SignalReceiver::new` /
-/// `CompletionHub`, a threadpool worker spawn). POSIX permits only
-/// async-signal-safe calls between `fork` and `exec` in a multithreaded
-/// process, so a peer harness thread that happens to hold the allocator lock at
-/// the fork instant can wedge the child's first `malloc` (surfacing as `Hung`)
-/// or make it fail transiently. That is a fork/harness artifact, not a product
-/// defect — callers retry and fail only when *every* attempt fails, which still
-/// catches a real regression (broken code fails all attempts). Forking is
-/// nonetheless required: it yields the single-thread topology a process-directed
-/// SIGUSR1 needs (a peer thread with the signal unmasked would otherwise absorb
-/// or be killed by the `kill`).
-fn run_forked(child_logic: fn() -> i32, timeout: std::time::Duration) -> ForkOutcome {
-    use std::time::Instant;
-
-    let pid = unsafe { libc::fork() };
-    if pid < 0 {
-        panic!("fork failed: {}", std::io::Error::last_os_error());
-    }
-    if pid == 0 {
-        // CHILD: run the logic and _exit. `_exit` skips atexit/destructors —
-        // Rust drop glue across the fork boundary is unsupported in general.
-        let code = child_logic();
-        unsafe { libc::_exit(code) };
-    }
-
-    // PARENT: bounded waitpid so a regression surfaces fast instead of wedging
-    // the runner.
-    let deadline = Instant::now() + timeout;
-    let mut status: libc::c_int = 0;
-    loop {
-        let wret = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
-        if wret == pid {
-            return if libc::WIFSIGNALED(status) {
-                ForkOutcome::Signaled(libc::WTERMSIG(status))
-            } else {
-                ForkOutcome::Exited(libc::WEXITSTATUS(status))
-            };
-        }
-        if wret < 0 {
-            panic!("waitpid({}): {}", pid, std::io::Error::last_os_error());
-        }
-        if Instant::now() >= deadline {
-            unsafe { libc::kill(pid, libc::SIGKILL) };
-            let _ = unsafe { libc::waitpid(pid, &mut status, 0) };
-            return ForkOutcome::Hung;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-}
-
-/// Run `child_logic` in a forked child up to `ATTEMPTS` times, returning once an
-/// attempt exits 0. Only when *every* attempt fails does this return the last
-/// failure description — so a genuine regression (which fails deterministically)
-/// still fails the test, while a transient fork/harness race (see `run_forked`)
-/// is absorbed by a retry.
-fn forked_child_must_succeed(child_logic: fn() -> i32, what: &str) {
-    const ATTEMPTS: usize = 3;
-    // Per-attempt bound; a real hang regression pays ATTEMPTS × this at most.
-    let timeout = std::time::Duration::from_secs(8);
-    let mut last = String::new();
-    for attempt in 1..=ATTEMPTS {
-        match run_forked(child_logic, timeout) {
-            ForkOutcome::Exited(0) => return,
-            ForkOutcome::Exited(code) => {
-                last = format!("attempt {attempt}: {what} child failed with code {code}")
-            }
-            ForkOutcome::Signaled(sig) => {
-                last = format!("attempt {attempt}: {what} child died from signal {sig}")
-            }
-            ForkOutcome::Hung => last = format!("attempt {attempt}: {what} child hung past 8s"),
-        }
-    }
-    panic!("{what}: all {ATTEMPTS} attempts failed (last: {last})");
+/// A process-directed `kill(getpid(), SIGUSR1)` reaches any thread that leaves
+/// the signal unblocked. The body's process holds only the body's thread and
+/// the pool worker it starts, both with the signal blocked, as production does.
+fn body_must_succeed(body: fn() -> i32, what: &str) {
+    let report = run(std::time::Duration::from_secs(8), body);
+    assert_eq!(
+        report.end,
+        Outcome::Exited(0),
+        "{what}: the body failed; an exit code names the step in its body"
+    );
 }
 
 /// A signal read on the pool returns the signal the process sends itself.
 ///
-/// Forks a child process so we get a clean thread topology that
+/// The body runs in a process of its own, for a clean thread topology that
 /// mirrors production: only the main thread plus our intentionally-
 /// spawned threadpool worker, all with the watched signal masked.
 /// In the cargo test runner this isn't true — peer test threads have
 /// SIGUSR1 unmasked and would absorb the `kill()` before our
 /// signalfd/kqueue worker reads it.
 ///
-/// Child flow:
+/// Body flow:
 ///   1. Open a `SignalReceiver` for SIGUSR1 (blocks it on this
 ///      thread; the threadpool worker spawned in step 2 inherits the
 ///      mask).
@@ -168,26 +94,26 @@ fn forked_child_must_succeed(child_logic: fn() -> i32, what: &str) {
 ///   4. Wait up to 5 s for a completion; assert it parses to a
 ///      single SIGUSR1 event.
 ///
-/// Child exits 0 on success, a small positive code on failure.
+/// The body exits 0 on success, a small positive code on failure.
 ///
 /// The trap on macOS: kqueue's `EVFILT_SIGNAL` fires from the in-kernel
 /// delivery path, so if every thread in the process blocks the signal the
 /// kernel parks it on the process pending list and the knote is never
 /// activated. A worker that does not unblock the signal for its read hangs
-/// the child past the parent's 8 s wait.
+/// the body past `run`'s 8 s deadline.
 ///
 /// The counter-factual on Linux: a worker that reads the non-blocking
 /// signalfd without polling it for readiness first reads `EAGAIN` before the
-/// signal arrives, and the child exits 17.
+/// signal arrives, and the body exits 17.
 #[test]
 fn sig_read_returns_after_kill_to_self() {
-    forked_child_must_succeed(sig_read_child_logic, "sig_read");
+    body_must_succeed(sig_read_child_logic, "sig_read");
 }
 
-/// Body of the forked child for `sig_read_returns_after_kill_to_self`.
+/// The isolated body of `sig_read_returns_after_kill_to_self`.
 /// Returns a small positive exit code identifying which step failed,
-/// or 0 on success. Kept narrow on purpose: no allocations between
-/// fork and the kernel calls beyond what `SignalReceiver` and
+/// or 0 on success. Kept narrow on purpose: no allocations before
+/// the kernel calls beyond what `SignalReceiver` and
 /// `CompletionHub` already do.
 fn sig_read_child_logic() -> i32 {
     use crate::io::sigfd::SignalReceiver;
@@ -273,14 +199,14 @@ fn sig_read_child_logic() -> i32 {
 /// pending Term fires on the closing thread and kills the process mid-close,
 /// as `tests/lang/posix.lisp` test 5 would at `test 5: pre-close`.
 ///
-/// This test runs that shape (two kills, one read, close) in a forked child
-/// and asserts the child exits 0 rather than dying from SIGUSR1.
+/// This test runs that shape (two kills, one read, close) in an isolated body
+/// and asserts the body exits 0 rather than dying from SIGUSR1.
 #[test]
 fn close_drains_pending_after_two_kills() {
-    forked_child_must_succeed(close_drain_child_logic, "close_drains_pending");
+    body_must_succeed(close_drain_child_logic, "close_drains_pending");
 }
 
-/// Body of the forked child for `close_drains_pending_after_two_kills`.
+/// The isolated body of `close_drains_pending_after_two_kills`.
 /// Reads ONE signal via sig-next (proving the watcher works), then
 /// raises SIGUSR1 AGAIN with no reader pending so the signal sits in
 /// the kernel queue at close time. The drain in rollback must
@@ -353,9 +279,9 @@ fn close_drain_child_logic() -> i32 {
     // process pending queue (SIGUSR1 still blocked on this thread
     // from SignalReceiver::new). On close, without the drain in
     // rollback the pthread_sigmask SIG_UNBLOCK fires the
-    // about-to-be-restored SIGUSR1 default (Term) and the child
-    // dies from SIGUSR1 — observable as WIFSIGNALED=true,
-    // WTERMSIG=SIGUSR1 in the parent.
+    // about-to-be-restored SIGUSR1 default (Term) and the body
+    // dies from SIGUSR1 — observable as `Outcome::Signaled(SIGUSR1)`
+    // in the report `run` returns.
     if unsafe { libc::kill(libc::getpid(), libc::SIGUSR1) } != 0 {
         return 28;
     }
@@ -375,14 +301,14 @@ fn close_drain_child_logic() -> i32 {
 /// issues on every call the body wins — is the only thing that ends it, and it
 /// can only reach a worker that watches its stop pipe alongside the descriptor.
 ///
-/// Forked for the reason the tests above are: `SignalReceiver::new` changes
+/// Isolated for the reason the tests above are: `SignalReceiver::new` changes
 /// process-wide signal disposition, which peer test threads share.
 #[test]
 fn a_stopped_sig_read_ends_rather_than_waiting_for_a_signal() {
-    forked_child_must_succeed(stopped_sig_read_child_logic, "stopped_sig_read");
+    body_must_succeed(stopped_sig_read_child_logic, "stopped_sig_read");
 }
 
-/// Body of the forked child for
+/// The isolated body of
 /// `a_stopped_sig_read_ends_rather_than_waiting_for_a_signal`.
 /// Returns a small positive exit code identifying which step failed, or 0.
 fn stopped_sig_read_child_logic() -> i32 {
