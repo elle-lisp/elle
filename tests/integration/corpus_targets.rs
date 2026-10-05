@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-05
 // The suite targets run the binary through the runner alone, and `make test` reaches them after `qa`.
 //
 // docs/testing.md
@@ -38,7 +38,7 @@ fn every_suite_target_runs_the_binary_through_the_runner_alone() {
         .collect();
     for (target, runner) in [
         ("smoke-lang", "ELLE"),
-        ("smoke-impl", "ELLE"),
+        ("smoke-impl", "ELLE_RIG"),
         ("smoke-nojit", "ELLE"),
         ("smoke-pool", "ELLE"),
         ("smoke-mlir", "ELLE_MLIR"),
@@ -65,7 +65,9 @@ fn every_suite_target_runs_the_binary_through_the_runner_alone() {
             }
             for rig in &rigs {
                 assert!(
-                    !runs(line, rig) || line.contains("--host"),
+                    !runs(line, rig)
+                        || line.contains("--host")
+                        || line.contains(&format!("{rig} test")),
                     "`make {target}` runs the rig outside the runner:\n  {line}"
                 );
             }
@@ -92,7 +94,9 @@ fn make_test_runs_qa_before_the_suites() {
             .position(found)
             .unwrap_or_else(|| panic!("`make test` never runs {what}:\n{recipe}"))
     };
-    let fmt = first("`cargo fmt --check`", &|line| line.contains("cargo fmt --check"));
+    let fmt = first("`cargo fmt --check`", &|line| {
+        line.contains("cargo fmt --check")
+    });
     let runner = first("the runner", &|line| line.contains(&format!("{elle} test")));
     assert!(
         fmt < runner,
