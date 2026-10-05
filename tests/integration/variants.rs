@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 // Each variant build's target: the binaries it builds, their features, and the
 // suite passes it runs on them.
 //
@@ -12,8 +12,8 @@
 // checked here.
 
 use crate::common::{
-    assert_plain_language_pass, assert_rig_runs, impl_files, lang_files, make_dry_run, make_expand,
-    passes, Pass,
+    assert_plain_language_pass, assert_producer_pass, assert_rig_runs, impl_files,
+    isolated_impl_files, lang_files, make_dry_run, make_expand, passes, Pass,
 };
 use std::collections::BTreeSet;
 
@@ -138,7 +138,8 @@ fn smoke_mlir_runs_the_implementation_suite_on_the_mlir_rig() {
         "ELLE_RIG_MLIR",
         "the MLIR build's implementation suite",
     );
-    assert_eq!(rig[0].files, impl_files());
+    assert_eq!(rig[0].files, isolated_impl_files());
+    assert_producer_pass("smoke-mlir", &passes, "ELLE_RIG_MLIR");
     assert_eq!(
         rig[0].isolate(),
         Some(""),
@@ -229,7 +230,8 @@ fn smoke_pool_runs_the_implementation_suite_on_the_pool_rig() {
     let rig: Vec<&Pass> = passes.iter().filter(|p| p.isolate().is_some()).collect();
     assert_eq!(rig.len(), 1, "one pool pass runs on the rig");
     assert_rig_runs(rig[0], "ELLE_RIG", "the pool build's implementation suite");
-    assert_eq!(rig[0].files, impl_files());
+    assert_eq!(rig[0].files, isolated_impl_files());
+    assert_producer_pass("smoke-pool", &passes, "ELLE_RIG");
     assert_eq!(rig[0].isolate(), Some(""));
 }
 

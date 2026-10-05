@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 //! The `elle test` passes a suite target runs, read off `make --dry-run`.
 //!
 //! docs/testing.md
@@ -81,6 +81,60 @@ pub fn lang_files() -> BTreeSet<String> {
 #[allow(dead_code)]
 pub fn impl_files() -> BTreeSet<String> {
     suite("tests/impl").into_iter().collect()
+}
+
+/// Every file a ledger under `tests/ledger` names in its `(producer "…")`
+/// header: the producers, which run in a pass of their own.
+#[allow(dead_code)]
+pub fn producer_files() -> BTreeSet<String> {
+    let dir = super::repo_root().join("tests/ledger");
+    let mut out = BTreeSet::new();
+    for entry in std::fs::read_dir(&dir).expect("tests/ledger exists") {
+        let text = std::fs::read_to_string(entry.expect("a directory entry").path())
+            .expect("read a ledger");
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("(producer \"") {
+                out.insert(rest.trim_end_matches("\")").to_string());
+            }
+        }
+    }
+    assert!(!out.is_empty(), "tests/ledger names no producer");
+    out
+}
+
+/// The implementation suite less the producers: what an isolated pass runs.
+#[allow(dead_code)]
+pub fn isolated_impl_files() -> BTreeSet<String> {
+    impl_files()
+        .difference(&producer_files())
+        .cloned()
+        .collect()
+}
+
+/// Assert that `target` runs every producer in-process on the rig `rig`, in a
+/// pass of their own, and none of them in an isolated pass (docs/test-runner.md).
+#[allow(dead_code)]
+pub fn assert_producer_pass(target: &str, passes: &[Pass], rig: &str) {
+    let producers = producer_files();
+    let own: Vec<&Pass> = passes.iter().filter(|p| p.files == producers).collect();
+    assert_eq!(
+        own.len(),
+        1,
+        "`make {target}` runs the producers in one pass of their own"
+    );
+    assert_eq!(
+        own[0].isolate(),
+        None,
+        "`make {target}` isolates the producers, so no reading is read under both JIT policies"
+    );
+    assert_rig_runs(own[0], rig, &format!("`make {target}`'s producer pass"));
+    for pass in passes.iter().filter(|p| p.isolate().is_some()) {
+        let twice: Vec<&String> = pass.files.intersection(&producers).collect();
+        assert!(
+            twice.is_empty(),
+            "`make {target}` runs producers in an isolated pass too: {twice:?}"
+        );
+    }
 }
 
 /// Assert that `pass` runs as `RIG test`, so each child is the rig the

@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 // The default build's suite targets: which files each pass runs, on which
 // program, under which flags.
 //
@@ -11,8 +11,8 @@
 // verdict per file, and still gates green, so the recipe is checked here.
 
 use crate::common::{
-    assert_plain_language_pass, assert_rig_runs, impl_files, lang_files, make_expand, makefile,
-    passes, Pass,
+    assert_plain_language_pass, assert_producer_pass, assert_rig_runs, isolated_impl_files,
+    lang_files, make_expand, makefile, passes, Pass,
 };
 use std::collections::BTreeSet;
 
@@ -47,7 +47,7 @@ fn smoke_lang_runs_every_language_file_with_no_flag() {
 fn smoke_impl_runs_the_implementation_suite_on_the_rig() {
     let passes = passes("smoke-impl", &[]);
     let base = &passes[0];
-    let mut want = impl_files();
+    let mut want = isolated_impl_files();
     want.extend(ACCEPTANCE.map(str::to_string));
     assert_eq!(
         base.files, want,
@@ -73,9 +73,24 @@ fn smoke_impl_runs_both_suites_under_the_eager_profile() {
         .filter(|p| p.isolate() == Some(format!("--profile {EAGER}").as_str()))
         .collect();
     assert_eq!(eager.len(), 1, "one pass runs the eager profile");
-    let want: BTreeSet<String> = lang_files().union(&impl_files()).cloned().collect();
+    let want: BTreeSet<String> = lang_files()
+        .union(&isolated_impl_files())
+        .cloned()
+        .collect();
     assert_eq!(eager[0].files, want, "the eager profile runs both suites");
     assert_rig_runs(eager[0], "ELLE_RIG", "the eager profile, a rig setting,");
+}
+
+// The producers run in-process on the rig, in a pass of their own, so each
+// reading comes from both JIT policies (docs/test-runner.md).
+//
+// The counter-factual: an isolated producer runs once, under whatever its
+// child's policy is, so a reading that moves under the eager JIT is read only
+// in a second pass, and a producer that runs in both kinds of pass is read
+// twice under one policy.
+#[test]
+fn smoke_impl_runs_the_producers_in_process_in_a_pass_of_their_own() {
+    assert_producer_pass("smoke-impl", &passes("smoke-impl", &[]), "ELLE_RIG");
 }
 
 // `IMPL_PROFILES` names further profiles for the language suite. The macOS job
