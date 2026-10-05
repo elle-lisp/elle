@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 // The committed ledgers: every producer on the ratchet has one, and every row
 // of one names a subject its producer reads.
 //
@@ -86,8 +86,9 @@ fn producer_source(path: &Path) -> String {
     out
 }
 
-/// Every corpus file on the ratchet: the leak dashboards, and each residue
-/// test that moved its window and its ceiling into a ledger.
+/// Every producer on the ratchet: the leak dashboards, each residue test that
+/// moved its window and its ceiling into a ledger, and the audit queue's
+/// counts.
 const PRODUCERS: &[&str] = &[
     "tests/impl/oracle.lisp",
     "tests/impl/plumb.lisp",
@@ -96,6 +97,7 @@ const PRODUCERS: &[&str] = &[
     "tests/impl/region-macro-id-recycle.lisp",
     "tests/impl/region-collector-arg-move.lisp",
     "tests/impl/resource.lisp",
+    "tests/ratchet/audit.lisp",
 ];
 
 #[test]
