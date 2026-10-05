@@ -87,8 +87,8 @@ fn producer_source(path: &Path) -> String {
 }
 
 /// Every producer on the ratchet: the leak dashboards, each residue test that
-/// moved its window and its ceiling into a ledger, and the audit queue's
-/// counts.
+/// moved its window and its ceiling into a ledger, and the tool producers
+/// under `tests/ratchet`.
 const PRODUCERS: &[&str] = &[
     "tests/impl/oracle.lisp",
     "tests/impl/plumb.lisp",
@@ -98,6 +98,7 @@ const PRODUCERS: &[&str] = &[
     "tests/impl/region-collector-arg-move.lisp",
     "tests/impl/resource.lisp",
     "tests/ratchet/audit.lisp",
+    "tests/ratchet/valgrind.lisp",
 ];
 
 #[test]
