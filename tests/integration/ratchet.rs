@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 // The instrument measures and prints: one line per reading, carrying the
 // reading alone, whatever ledger sits beside the program.
 //
@@ -197,4 +197,48 @@ fn a_drive_reads_the_rate_of_a_run_block_of_the_callers_own() {
     for line in lines(&out) {
         assert_unjudged(&line);
     }
+}
+
+/// The value a `measure` line carries for `subject`.
+fn value_of(out: &Output, subject: &str) -> String {
+    let key = format!("\"subject\":\"{subject}\"");
+    let line = lines(out)
+        .into_iter()
+        .find(|l| l.contains(&key))
+        .unwrap_or_else(|| panic!("no reading for {subject}:\n{}", text(out)));
+    let (_, rest) = line
+        .split_once("\"value\":")
+        .unwrap_or_else(|| panic!("a line with no value:\n{line}"));
+    rest.split([',', '}']).next().unwrap_or("").to_string()
+}
+
+#[test]
+fn the_window_claims_no_page_of_its_own() {
+    // The trap: the page-claim gauge counts a page whether or not it is freed,
+    // so anything the instrument itself allocates between its two readings is
+    // charged to the probe. A store into an array the compiler could not type
+    // went through the general `put` call, and every block read one page more
+    // than its ops claimed: 1/400 per op at a block of 400.
+    let b = Bench::new(
+        "window",
+        "",
+        &format!(
+            "{IMPORT}(r:rate \"nothing\" (fn [j] nil) :on [r:pages] :block 400 :min 6)\n\
+             (r:delta \"nothing, delta\" (fn [] nil) :on [r:pages] :n 400)\n"
+        ),
+    );
+    let out = b.run();
+    assert!(out.status.success(), "the producer runs:\n{}", text(&out));
+    assert_eq!(
+        value_of(&out, "nothing"),
+        "0.0",
+        "a rate over a probe that does nothing claims no page:\n{}",
+        text(&out)
+    );
+    assert_eq!(
+        value_of(&out, "nothing, delta"),
+        "0.0",
+        "and nor does a delta over a body that does nothing:\n{}",
+        text(&out)
+    );
 }
