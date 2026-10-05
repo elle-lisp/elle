@@ -1,6 +1,6 @@
 # The ratchet
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-05 -->
 
 One library measures, one committed ledger holds every bound, and the runner
 judges, records and re-pins; nothing else carries a number.
@@ -210,7 +210,13 @@ on another program, and has no build.
 
 The ledger directory is `tests/ledger` under the working directory, and a
 producer's path is matched relative to the working directory, as the runner
-takes every path. A judged or unjudged reading is one `measurement` row:
+takes every path.
+
+A producer runs in-process on the rig, in a pass of its own, under both JIT
+policies, and has no sidecar ([test-runner](test-runner.md)). The runner wraps
+a file of several forms as one whole-file form, so a producer's top-level
+definitions are locals of one function. A probe is written for that shape: it
+reads the same as a local as it does at the top level of a direct run. A judged or unjudged reading is one `measurement` row:
 
 ```sql
 CREATE TABLE measurement (

@@ -1,6 +1,6 @@
 # Agent-First Test Runner
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-05 -->
 
 How a run executes: each file compiled, isolated, gated, run on every tier its
 build carries, and recorded honestly.
@@ -298,7 +298,13 @@ the differential is its job. The rig sets a tier per file through its sidecar
 **Where the differential runs.** Each build's language pass is one `elle test`
 over the language suite, in-process, so every language file meets every tier
 its build carries ([testing](testing.md)). The implementation suite runs each
-file as its own child on the rig, under the file's sidecar. A directed
+file as its own child on the rig, under the file's sidecar, except the
+producers, the files `tests/ledger` names ([ratchet](ratchet.md)). They run
+in-process under `elle-rig test`, in a pass of their own, so each producer's
+readings come from both JIT policies. The rest of the suite stays isolated for
+three reasons. `--trace=guardfree` reports a use-after-free as a SIGSEGV that
+would end the runner. A sidecar configures a process, and a worker shares the
+runner's. And only a process of its own covers program teardown. A directed
 tier-parity test, one that pins a specific tier pair on a specific construct,
 is an implementation test. It lives in `tests/impl/` and calls `compile/run-on`
 itself ([differential](impl/differential.md)).

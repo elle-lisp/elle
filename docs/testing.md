@@ -140,9 +140,10 @@ A run under `elle test` has no build, and records and judges none of them. Run
 the same file directly and it prints the same lines and judges nothing.
 
 That is how the two dashboards, [oracle.lisp](../tests/impl/oracle.lisp) and
-[plumb.lisp](../tests/impl/plumb.lisp), land their rates. They belong to the
-implementation suite, so every pass over that suite runs each one as an
-isolated child on the rig, under the wide budget that `WIDE_FAMILIES` names.
+[plumb.lisp](../tests/impl/plumb.lisp), land their rates. Every file a ledger
+names runs in-process under `elle-rig test`, in a pass of its own beside the
+isolated passes, under the wide budget that `WIDE_FAMILIES` names
+([docs/test-runner.md](test-runner.md) says why the rest stays isolated).
 
 ### Statuses
 
