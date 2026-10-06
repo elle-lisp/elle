@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 //! Source location tracking: where a form came from, in bytes a region can
 //! hold.
 //!
@@ -60,6 +60,21 @@ impl Span {
     /// one whose token had no known origin.
     pub fn file(&self) -> Option<&'static str> {
         files::name(self.file)
+    }
+
+    /// The file this span came from as an absolute, normalized path: the file a
+    /// form was written in, which `import-file`, `meta/location` and `include`
+    /// resolve against (docs/modules.md).
+    ///
+    /// `None` for code with no file: a synthetic span, such as a datum `eval`
+    /// compiles, and a source named `<…>`, such as stdin, `-e` and the REPL. A
+    /// relative source name resolves against the working directory.
+    pub fn source_path(&self) -> Option<String> {
+        let file = self.file()?;
+        if file.starts_with('<') {
+            return None;
+        }
+        crate::path::absolute(file).ok()
     }
 
     /// The interned id of this span's file — the form the packed
