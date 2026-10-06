@@ -12,6 +12,9 @@
 //! Rust computes it again as a check. `--expect` checks the `# expect` lines
 //! in the analyzed files against the model.
 
+mod by_ascent;
+mod by_crepe;
+mod by_datafrog;
 mod datalog;
 mod extract;
 mod fixpoint;
@@ -144,6 +147,34 @@ fn main() {
     let native_time = t.elapsed();
     let native_agrees = native.bits == solution.bits && native.dep == solution.dep;
 
+    // Each in-process engine runs five times and reports its fastest run.
+    type Engine = fn(&Model, &link::Lowered) -> datalog::Solution;
+    let engines: [(&str, Engine); 4] = [
+        ("worklist", fixpoint::solve),
+        ("ascent", by_ascent::solve),
+        ("crepe", by_crepe::solve),
+        ("datafrog", by_datafrog::solve),
+    ];
+    let engine_runs: Vec<report::EngineRun> = engines
+        .iter()
+        .map(|&(name, solve)| {
+            let mut best = std::time::Duration::MAX;
+            let mut model_out = datalog::Solution::default();
+            for _ in 0..5 {
+                let t = Instant::now();
+                model_out = solve(&model, &lowered);
+                best = best.min(t.elapsed());
+            }
+            report::EngineRun {
+                name,
+                time: best,
+                same_as_worklist: model_out.bits == native.bits && model_out.dep == native.dep,
+                same_as_z3: model_out.bits == solution.bits && model_out.dep == solution.dep,
+                same_viol_as_z3: name == "worklist" || model_out.viol == solution.viol,
+            }
+        })
+        .collect();
+
     let deterministic = if determinism {
         let again =
             datalog::solve(&datalog::program(&model, &lowered, true)).expect("second solve");
@@ -173,6 +204,7 @@ fn main() {
             deterministic,
             native_time,
             native_agrees,
+            engines: &engine_runs,
             expect,
         },
     );
